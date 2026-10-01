@@ -622,6 +622,33 @@ export function createChangeProxy<
     }
   }
 
+  // Whether a value equals the original's own value for a field.
+  function isOriginalValue(prop: string | symbol, value: unknown): boolean {
+    const original = changeTracker.originalObject
+    return (
+      Object.hasOwn(original, prop) &&
+      draftValuesEqual(value, original[prop as keyof T])
+    )
+  }
+
+  // Records a write the draft now holds. Assignment and defineProperty share
+  // it so they report the same change.
+  function recordWrite(prop: string | symbol, reverted: boolean) {
+    if (!reverted) {
+      changeTracker.assigned_.set(prop.toString(), true)
+      markChanged(changeTracker)
+      return
+    }
+    changeTracker.assigned_.delete(prop.toString())
+    if (checkIfReverted(changeTracker)) {
+      changeTracker.modified = false
+      changeTracker.assigned_ = new Map()
+      if (parent) checkParentStatus(parent.tracker)
+    } else {
+      changeTracker.modified = true
+    }
+  }
+
   // Create a proxy for the target object
   function createObjectProxy<TObj extends object>(obj: TObj): TObj {
     // If we've already created a proxy for this object, return it
@@ -759,7 +786,12 @@ export function createChangeProxy<
         return value
       },
 
-      set(_sobj, prop, value) {
+      set(ptarget, prop, value) {
+        // An accessor the callback defined behaves as on a plain object; a
+        // getter without a setter rejects even a write of its own value.
+        if (Reflect.getOwnPropertyDescriptor(ptarget, prop)?.get) {
+          return Reflect.set(ptarget, prop, value)
+        }
         const currentValue = changeTracker.copy_[prop as keyof T]
 
         // Only track the change if the value is actually different
@@ -767,46 +799,12 @@ export function createChangeProxy<
           !Object.hasOwn(changeTracker.copy_, prop) ||
           !draftValuesEqual(currentValue, value)
         ) {
-          // Check if the new value is equal to the original value
-          // Important: Use the originalObject to get the true original value
-          const originalValue = changeTracker.originalObject[prop as keyof T]
-          const isRevertToOriginal =
-            Object.hasOwn(changeTracker.originalObject, prop) &&
-            draftValuesEqual(value, originalValue)
-
-          if (isRevertToOriginal) {
-            // If the value is reverted to its original state, remove it from changes
-            changeTracker.assigned_.delete(prop.toString())
-
-            // Make sure the copy is updated with the original value
-            changeTracker.copy_[prop as keyof T] = deepClone(originalValue)
-
-            // Check if all properties in this object have been reverted
-            const allReverted = checkIfReverted(changeTracker)
-
-            if (allReverted) {
-              // If all have been reverted, clear tracking
-              changeTracker.modified = false
-              changeTracker.assigned_ = new Map()
-
-              // If we're a nested object, check if the parent needs updating
-              if (parent) {
-                checkParentStatus(parent.tracker)
-              }
-            } else {
-              // Some properties are still changed
-              changeTracker.modified = true
-            }
-          } else {
-            // Set the value on the copy
-            changeTracker.copy_[prop as keyof T] = value
-
-            // Track that this property was assigned - store using the actual property (symbol or string)
-            changeTracker.assigned_.set(prop.toString(), true)
-
-            // Mark this object and its ancestors as modified
-            markChanged(changeTracker)
-          }
+          const reverted = isOriginalValue(prop, value)
+          // A revert restores a copy so the draft never aliases the row.
+          changeTracker.copy_[prop as keyof T] = reverted
+            ? deepClone(changeTracker.originalObject[prop as keyof T])
+            : value
+          recordWrite(prop, reverted)
         }
 
         return true
@@ -816,10 +814,9 @@ export function createChangeProxy<
         // Forward the defineProperty to the target to maintain Proxy invariants
         // This allows Object.seal() and Object.freeze() to work on the proxy
         const result = Reflect.defineProperty(ptarget, prop, descriptor)
-        if (result && `value` in descriptor) {
-          changeTracker.copy_[prop as keyof T] = deepClone(descriptor.value)
-          changeTracker.assigned_.set(prop.toString(), true)
-          markChanged(changeTracker)
+        // Accessors count by the value they read, as assignment would.
+        if (result) {
+          recordWrite(prop, isOriginalValue(prop, Reflect.get(ptarget, prop)))
         }
         return result
       },
@@ -844,10 +841,13 @@ export function createChangeProxy<
 
         if (Object.hasOwn(dobj, prop)) {
           // Check if the property exists in the original object
-          const hadPropertyInOriginal = Object.hasOwn(
-            changeTracker.originalObject,
-            prop,
-          )
+          // A hidden original field is not row data, so as with a plain
+          // delete of it, removing it is not a change.
+          const hadPropertyInOriginal =
+            Object.prototype.propertyIsEnumerable.call(
+              changeTracker.originalObject,
+              prop,
+            )
 
           // Forward the delete to the target using Reflect
           // This respects Object.seal/preventExtensions constraints
@@ -1053,9 +1053,16 @@ export function withFlatChangeTracking<T extends object>(
     for (const key in draft) {
       const value = (draft as Record<string, unknown>)[key]
       const before = original[key]
+      // Only a hidden field can hold an object; compare it as the proxy does.
       if (
         !Object.hasOwn(original, key) ||
-        !(value === before || Object.is(value, before))
+        !(
+          value === before ||
+          Object.is(value, before) ||
+          (typeof before === `object` &&
+            before !== null &&
+            draftValuesEqual(value, before))
+        )
       ) {
         defineDataProperty(changes, key, value)
       }

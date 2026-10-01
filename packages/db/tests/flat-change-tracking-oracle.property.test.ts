@@ -20,22 +20,26 @@
  *
  * Model: `expectedChanges` folds every row's operations, in callback order,
  * over plain copies of the rows. It keeps enumerable fields whose final value
- * differs under `===` or `Object.is` from the row's own field, plus deleted
- * enumerable fields. A copy holds no non-enumerable field, so reading one
- * gives `undefined`, deleting one does nothing, and writing one is a change
- * unless it writes the row's value. A stored draft is the model's copy, read
+ * differs under `===` or `Object.is` from the row's own field, or, for the
+ * object a non-enumerable field holds, by contents; plus deleted enumerable
+ * fields. A copy holds no non-enumerable field, so reading one gives
+ * `undefined`, deleting one does nothing, and writing one is a change unless
+ * it writes the row's value. Defining a field acts as assigning it: an
+ * enumerable accessor reports the value it reads. A stored draft is the model's copy, read
  * when the callback returns. It does not import either tracker. When the
- * callback throws, both trackers must rethrow the same error and leave the
- * rows unchanged.
+ * callback throws, or a plain object rejects one of its operations, both
+ * trackers must throw the same error and leave the rows unchanged.
  *
  * History grammar: one to three rows with fields `a`, `b`, and `c` drawn from
  * `0`, `-0`, `1`, `NaN`, `''`, `'x'`, `true`, `false`, `null`, `undefined`, a
  * function, or missing, with a plain or null prototype, optionally frozen,
- * and optionally with a non-enumerable field `h` holding a domain value. Each
+ * and optionally with a non-enumerable field `h` holding a domain value or an
+ * object. Each
  * row gets up to six operations: assign a field (`a` to `d`, or `h`) a value
  * from that domain or a fresh object, assign `d` `undefined`, set a field
  * back to its original value, delete a field, read it, define it with
- * `Object.defineProperty` as an enumerable or non-enumerable data property,
+ * `Object.defineProperty` as an enumerable or non-enumerable data or accessor
+ * property,
  * or store a row's draft in it. A weighted run changes a field, adds `d` as
  * `undefined`, and reverts the field. Histories call the tracker with an
  * array or with a single row, and may throw after any operation.
@@ -63,11 +67,6 @@
  * Known omissions: nested objects, arrays, Dates, Maps, Sets, class
  * instances, and symbol keys are outside this owner; the proxy oracles and
  * contracts own them, and this file checks only that they fall back.
- * The trackers disagree on four shapes, which the grammar excludes and
- * `openDivergences` records as open decisions: an accessor defined in the
- * callback, a field defined with the row's own value, a deep-equal write to a
- * non-enumerable object field, and a non-enumerable field written and then
- * deleted. Each marker fails once the trackers agree.
  */
 import { fc, test as fcTest } from '@fast-check/vitest'
 import { describe, expect, it } from 'vitest'
@@ -109,6 +108,12 @@ type Operation =
   | { kind: `delete`; field: string }
   | { kind: `read`; field: string }
   | { kind: `define`; field: string; value: unknown; enumerable: boolean }
+  | {
+      kind: `define-getter`
+      field: string
+      value: unknown
+      enumerable: boolean
+    }
   | { kind: `store-draft`; field: string; row: number }
 type RowShape = {
   fields: Array<unknown>
@@ -132,6 +137,27 @@ function sameValue(a: unknown, b: unknown): boolean {
   return a === b || Object.is(a, b)
 }
 
+// Only a non-enumerable field holds an object, always `{ nested: 1 }`; an
+// equal object written over it is not a change.
+function sameContents(a: unknown, b: unknown): boolean {
+  if (sameValue(a, b)) return true
+  if (
+    a === null ||
+    b === null ||
+    typeof a !== `object` ||
+    typeof b !== `object`
+  )
+    return false
+  const keys = Object.keys(a)
+  return (
+    keys.length === Object.keys(b).length &&
+    keys.every(
+      (key) =>
+        Object.hasOwn(b, key) && sameValue((a as Row)[key], (b as Row)[key]),
+    )
+  )
+}
+
 function expectedChanges(
   originals: Array<Row>,
   operations: Array<Array<Operation>>,
@@ -148,7 +174,7 @@ function expectedChanges(
     for (const key of Object.keys(draft)) {
       if (
         !Object.hasOwn(original, key) ||
-        !sameValue(draft[key], original[key])
+        !sameContents(draft[key], original[key])
       ) {
         changes[key] = draft[key]
       }
@@ -182,6 +208,15 @@ function applyOperation(
         configurable: true,
       })
       break
+    case `define-getter`: {
+      const value = domainValue(operation.value)
+      Object.defineProperty(draft, operation.field, {
+        get: () => value,
+        enumerable: operation.enumerable,
+        configurable: true,
+      })
+      break
+    }
     case `store-draft`:
       draft[operation.field] = drafts[operation.row % drafts.length]
       break
@@ -265,6 +300,12 @@ const operationArbitrary: fc.Arbitrary<Operation> = fc.oneof(
     enumerable: fc.boolean(),
   }),
   fc.record({
+    kind: fc.constant(`define-getter` as const),
+    field: fieldArbitrary,
+    value: valueArbitrary,
+    enumerable: fc.boolean(),
+  }),
+  fc.record({
     kind: fc.constant(`store-draft` as const),
     field: fieldArbitrary,
     row: fc.nat({ max: 2 }),
@@ -299,7 +340,7 @@ const rowArbitrary: fc.Arbitrary<RowShape> = fc.record({
   frozen: fc.boolean(),
   hidden: fc.oneof(
     { weight: 2, arbitrary: fc.constant(MISSING) },
-    fc.constantFrom(...values),
+    fc.constantFrom(...values, FRESH_OBJECT),
   ),
 })
 const historyArbitrary: fc.Arbitrary<History> = fc
@@ -315,39 +356,6 @@ const historyArbitrary: fc.Arbitrary<History> = fc
       ),
     }),
   )
-  .filter((history) => !isExcluded(history))
-
-// Excluded, each recorded in `openDivergences`: the proxy reports a field
-// defined with the row's own value as changed, though it skips the same
-// write through assignment, and reports a non-enumerable field written and
-// then deleted as a deletion, though a plain delete reports nothing.
-function isExcluded(history: History): boolean {
-  return history.rows.some((shape, index) => {
-    const original = buildRow(shape)
-    const operations = history.operations[index]!
-    const definesOriginalValue = operations.some(
-      (operation) =>
-        operation.kind === `define` &&
-        Object.hasOwn(original, operation.field) &&
-        sameValue(operation.value, original[operation.field]),
-    )
-    const firstHiddenWrite = operations.findIndex(
-      (operation) =>
-        operation.field === `h` &&
-        operation.kind !== `delete` &&
-        operation.kind !== `read`,
-    )
-    const deletesWrittenHidden =
-      shape.hidden !== MISSING &&
-      firstHiddenWrite >= 0 &&
-      operations
-        .slice(firstHiddenWrite)
-        .some(
-          (operation) => operation.kind === `delete` && operation.field === `h`,
-        )
-    return definesOriginalValue || deletesWrittenHidden
-  })
-}
 
 const plainRow = (rowFields: Array<unknown>, nullPrototype = false) => ({
   fields: rowFields,
@@ -358,15 +366,17 @@ const plainRow = (rowFields: Array<unknown>, nullPrototype = false) => ({
 
 const firstDraft = (draft: Array<Row> | Row) =>
   Array.isArray(draft) ? draft[0]! : draft
-const openDivergences: ReadonlyArray<{
+// Each witness pins a shape the trackers once disagreed on to the change
+// set both must now report: defining a field acts as assigning it, and a
+// non-enumerable field is not row data unless the callback writes it.
+const descriptorLaws: ReadonlyArray<{
   name: string
   shape: RowShape
   callback: (draft: Array<Row> | Row) => void
+  expected: Row
 }> = [
   {
-    // The flat tracker reports the getter's value; the proxy records only
-    // data descriptors, as on `main`.
-    name: `the callback defines an accessor`,
+    name: `an enumerable accessor defined in the callback reports its value`,
     shape: plainRow([1, MISSING, MISSING]),
     callback: (draft) => {
       Object.defineProperty(firstDraft(draft), `g`, {
@@ -375,10 +385,10 @@ const openDivergences: ReadonlyArray<{
         configurable: true,
       })
     },
+    expected: { g: 7 },
   },
   {
-    // The proxy, as on `main`, reports the field; the flat tracker does not.
-    name: `the callback defines a field with its own value`,
+    name: `defining a field with its own value is not a change`,
     shape: plainRow([1, MISSING, MISSING]),
     callback: (draft) => {
       Object.defineProperty(firstDraft(draft), `a`, {
@@ -388,30 +398,57 @@ const openDivergences: ReadonlyArray<{
         configurable: true,
       })
     },
+    expected: {},
   },
   {
-    // The flat check skips non-enumerable fields, so this row takes the flat
-    // path, which compares by identity; the proxy compares deeply.
-    name: `a non-enumerable object field gets a deep-equal object`,
+    name: `an equal object written to a non-enumerable object field is not a change`,
     shape: { ...plainRow([1, MISSING, MISSING]), hidden: FRESH_OBJECT },
     callback: (draft) => {
       firstDraft(draft).h = { nested: 1 }
     },
+    expected: {},
   },
   {
-    // The proxy reports a deletion; the flat tracker, whose copy never held
-    // the field, reports nothing.
-    name: `a non-enumerable field is written and then deleted`,
+    name: `a non-enumerable field written and then deleted is not a change`,
     shape: { ...plainRow([1, MISSING, MISSING]), hidden: `x` },
     callback: (draft) => {
       firstDraft(draft).h = `y`
       delete firstDraft(draft).h
     },
+    expected: {},
   },
 ]
 
 // Each history isolates one place a plausible flat diff goes wrong.
 const pinnedHistories: ReadonlyArray<{ name: string; history: History }> = [
+  {
+    name: `a changed field defined back to its own value is not a change`,
+    history: {
+      rows: [plainRow([1, `x`, MISSING])],
+      operations: [
+        [
+          { kind: `set`, field: `a`, value: 0 },
+          { kind: `define`, field: `a`, value: 1, enumerable: true },
+        ],
+      ],
+      single: true,
+      throwAfter: undefined,
+    },
+  },
+  {
+    name: `assigning a getter-only field its own value throws`,
+    history: {
+      rows: [plainRow([1, MISSING, MISSING])],
+      operations: [
+        [
+          { kind: `define-getter`, field: `a`, value: 2, enumerable: true },
+          { kind: `set`, field: `a`, value: 2 },
+        ],
+      ],
+      single: false,
+      throwAfter: undefined,
+    },
+  },
   {
     name: `NaN written over NaN is not a change`,
     history: {
@@ -550,12 +587,31 @@ function runHistory(history: History): void {
         ? [withChangeTracking(proxyRows[0]!, run(proxyRows))]
         : withArrayChangeTracking(proxyRows, run(proxyRows)),
   }
+  // A plain object rejects some callbacks itself, such as assigning a field
+  // the callback gave only a getter; the trackers must reject them too.
+  let model: Array<Row> | undefined
+  let modelRejects = false
+  try {
+    model = expectedChanges(originals, history.operations)
+  } catch (error) {
+    if (!(error instanceof TypeError)) throw error
+    modelRejects = true
+  }
   const throws =
-    history.throwAfter !== undefined &&
-    history.throwAfter <= history.operations.flat().length
+    modelRejects ||
+    (history.throwAfter !== undefined &&
+      history.throwAfter <= history.operations.flat().length)
   if (throws) {
-    expect(track.flat, `flat rethrows`).toThrow(CallbackError)
-    expect(track.proxy, `proxy rethrows`).toThrow(CallbackError)
+    const errors = [track.flat, track.proxy].map((tracker) => {
+      try {
+        tracker()
+      } catch (error) {
+        return (error as Error).constructor
+      }
+      return undefined
+    })
+    expect(errors[0], `flat rethrows`).toBeOneOf([CallbackError, TypeError])
+    expect(errors[1], `proxy throws the same error`).toBe(errors[0])
     for (const rows of [flatRows, proxyRows]) {
       expect(rows.map(rowState), `rows unchanged`).toStrictEqual(
         originals.map(rowState),
@@ -566,7 +622,6 @@ function runHistory(history: History): void {
   const flat = track.flat()
   expect(flat, `flat rows take the flat path`).toBeDefined()
   const proxy = track.proxy()
-  const model = expectedChanges(originals, history.operations)
   expect(normalize(flat), `flat vs model`).toStrictEqual(normalize(model))
   expect(normalize(proxy), `proxy vs model`).toStrictEqual(normalize(model))
 }
@@ -605,13 +660,16 @@ describe(`flat change tracking oracle`, () => {
       expect(changes).toStrictEqual({ a: { nested: 1 } })
     })
 
-    // Open decisions, not laws: the trackers disagree on these shapes, so
-    // the grammar excludes them. Each marker fails once the two agree.
-    for (const { name, shape, callback } of openDivergences) {
-      it.fails(`agrees with the draft proxy when ${name}`, () => {
+    for (const { name, shape, callback, expected } of descriptorLaws) {
+      it(`reports the same change set when ${name}`, () => {
         expect(
           withFlatChangeTracking([buildRow(shape)], callback, false),
-        ).toStrictEqual([withChangeTracking(buildRow(shape), callback)])
+          `flat`,
+        ).toStrictEqual([expected])
+        expect(
+          withChangeTracking(buildRow(shape), callback),
+          `proxy`,
+        ).toStrictEqual(expected)
       })
     }
 
