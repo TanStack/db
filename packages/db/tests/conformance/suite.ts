@@ -316,6 +316,10 @@ export function runSuite(rawDriver: LiveQueryDriver) {
           query(`a`)(q).where(({ items }: any) => ops.eq(items.age, 35)),
         )
         for (const h of [teamA, teamB, olderA]) await h.flush()
+        // Pooling shares one subscription between the two team queries.
+        expect(source.collection.subscriberCount).toBe(
+          driver.features?.pooledEqFilters ? 2 : 3,
+        )
         const ids = (h: typeof teamA) =>
           (h.current().data as Array<{ id: string }>).map((row) => row.id)
         expect([ids(teamA), ids(teamB), ids(olderA)]).toEqual([

@@ -20,29 +20,44 @@
  * the partition. Order, row values, and status come from a second
  * formulation: a live-query Collection compiled for the same query.
  *
- * History grammar: rows have a field `f` from strings, numbers and their
- * look-alikes, `true`, a Date equal to 1, `NaN`, `-0`, `0`, `null`, and a
- * missing value, and a field `g` of `x` or `y`. Up to three peer queries use
- * `eq(f, literal)`, optionally with `eq(g, literal)`. Steps commit sync
- * transactions of one or two inserts, updates, or deletes; apply one
- * optimistic insert, update, or delete and then confirm or roll it back;
- * mount or unmount a peer; or clean up the source and restart it.
+ * History grammar: rows have ids 0 through 3, a field `f` from strings,
+ * numbers and their look-alikes, `true`, a Date equal to 1, `NaN`, `-0`,
+ * `0`, `null`, and a missing value, and a field `g` of `x` or `y`. Up to
+ * three peer queries use `eq(f, literal)`, optionally with `eq(g, literal)`.
+ * Values are weighted toward `a`, and toward the normalized values against
+ * numeric literals, so groups hold rows that stay, move, and normalize.
+ * Steps commit sync transactions of one or two inserts, updates, or deletes,
+ * where an update may keep `f` so the row stays in its group; apply one
+ * optimistic insert, update, or delete and then confirm or roll it back,
+ * optionally after cleaning up and restarting the source while it is
+ * pending; mount or unmount a peer; or clean up the source and restart it,
+ * optionally (re)mounting a peer on the cleaned-up source first.
  *
  * Production driver: `createPooledLiveQuery` builds each peer's view from the
  * query builder's IR, and `createLiveQueryObserver` observes it in wholesale
- * and granular mode, as the framework adapters do.
+ * and granular mode, as the framework adapters do. The view subscribes
+ * before its live-query Collection preloads, so a peer mounted after cleanup
+ * is the one that restarts the source.
  *
  * Refinement check: after every step, each mounted peer's wholesale snapshot
- * equals its live-query Collection's keys in order, row values, and status;
- * both observers' key sets equal the model. A peer mounted when its source
- * starts cleanup is terminal like its live query: status `error` with the
- * rows it had, through the restart and later writes. A peer mounted after
- * the restart follows the restarted source.
+ * equals its live-query Collection's keys in order, row values, and status,
+ * and its rows' fields equal the model's. The granular changes delivered since
+ * the last checkpoint equal those of a granular observer of the live-query
+ * Collection, by type, key, value, and previous value; folded in order, they
+ * never insert a held key, update or delete an unheld one, or carry a stale
+ * previous value, and they leave the model's rows. A peer mounted when its
+ * source starts cleanup is terminal like its live query: status `error` with
+ * the rows it had, pending optimistic rows included, through the restart and
+ * later writes. A peer mounted after cleanup follows the restarted source.
  *
  * Calibration: a partition that ignored the previous value, kept group rows
  * in arrival order, or compared literals without normalization fails the
- * pinned histories and both campaigns. A view that kept reporting the
- * source's status after cleanup fails the cleanup history.
+ * pinned histories and campaigns. A view that kept reporting the source's
+ * status after cleanup fails the cleanup histories. An update delivered as a
+ * delete and insert, with a stale previous value, or with the previous row as
+ * its value fails the in-group update history and both campaigns; so do a
+ * partition born terminal on a cleaned-up source and a freeze that drops
+ * pending optimistic rows.
  *
  * Known omissions: on-demand and persisted sources, `DbClient` hydration,
  * Suspense, `select`, and every other clause keep the live-query Collection
@@ -78,13 +93,21 @@ type Row = { id: string; f?: unknown; g: string }
 type Peer = { f: string | number | boolean; g?: string }
 type Step =
   | { kind: `sync`; ops: Array<Op> }
-  | { kind: `optimistic`; op: Op; confirm: boolean }
+  | {
+      kind: `optimistic`
+      op: Op
+      confirm: boolean
+      // Clean up and restart the source before settling the write.
+      cleanupFirst?: boolean
+    }
   | { kind: `mount`; peer: number }
   | { kind: `unmount`; peer: number }
-  | { kind: `cleanup-restart` }
+  // `mount` (re)mounts that peer after cleanup, before the restart.
+  | { kind: `cleanup-restart`; mount?: number }
 type Op =
   | { type: `insert`; id: number; f: FieldValue; g: string }
-  | { type: `update`; id: number; f: FieldValue; g: string }
+  // `keepF` keeps the row's current `f`, so the row stays in its group.
+  | { type: `update`; id: number; f: FieldValue; g: string; keepF?: boolean }
   | { type: `delete`; id: number }
 type History = {
   rows: Array<{ f: FieldValue; g: string }>
@@ -136,6 +159,14 @@ function expectedKeys(
     .sort()
 }
 
+// The model's matching rows, described by id and fields.
+function expectedRows(
+  rows: ReadonlyMap<string, Row>,
+  peer: Peer,
+): Array<string> {
+  return expectedKeys(rows, peer).map((key) => describeFields(rows.get(key)!))
+}
+
 // Collection change detection treats 0 and -0, and NaN and NaN, as equal.
 function sameValueZero(a: unknown, b: unknown): boolean {
   return a === b || (Number.isNaN(a) && Number.isNaN(b))
@@ -149,28 +180,45 @@ function sourceRow(id: string, f: FieldValue, g: string): Row {
 // History grammar
 // ---------------------------------------------------------------------------
 
-const fieldArbitrary = fc.constantFrom(...fieldValues)
+// Most rows and peers share `a`, so groups hold rows that stay or move;
+// the normalized values have their own weight against numeric literals.
+const fieldArbitrary = fc.oneof(
+  { weight: 2, arbitrary: fc.constant<FieldValue>(`a`) },
+  fc.constantFrom<FieldValue>(DATE_ONE, Number.NaN, -0),
+  fc.constantFrom(...fieldValues),
+)
 const gArbitrary = fc.constantFrom(`x`, `y`)
 const opArbitrary: fc.Arbitrary<Op> = fc.oneof(
   fc.record({
     type: fc.constant(`insert` as const),
-    id: fc.nat({ max: 5 }),
+    id: fc.nat({ max: 3 }),
     f: fieldArbitrary,
     g: gArbitrary,
   }),
   {
     weight: 2,
-    arbitrary: fc.record({
-      type: fc.constant(`update` as const),
-      id: fc.nat({ max: 5 }),
-      f: fieldArbitrary,
-      g: gArbitrary,
-    }),
+    arbitrary: fc.record(
+      {
+        type: fc.constant(`update` as const),
+        id: fc.nat({ max: 3 }),
+        f: fieldArbitrary,
+        g: gArbitrary,
+        keepF: fc.boolean(),
+      },
+      { requiredKeys: [`type`, `id`, `f`, `g`] },
+    ),
   },
-  fc.record({ type: fc.constant(`delete` as const), id: fc.nat({ max: 5 }) }),
+  fc.record({ type: fc.constant(`delete` as const), id: fc.nat({ max: 3 }) }),
 )
 const peerArbitrary: fc.Arbitrary<Peer> = fc.record(
-  { f: fc.constantFrom(...literals), g: gArbitrary },
+  {
+    f: fc.oneof(
+      { weight: 2, arbitrary: fc.constant<Peer[`f`]>(`a`) },
+      fc.constantFrom<Peer[`f`]>(1, Number.NaN, 0),
+      fc.constantFrom(...literals),
+    ),
+    g: gArbitrary,
+  },
   { requiredKeys: [`f`] },
 )
 const historyArbitrary: fc.Arbitrary<History> = fc.record({
@@ -187,11 +235,15 @@ const historyArbitrary: fc.Arbitrary<History> = fc.record({
           ops: fc.array(opArbitrary, { minLength: 1, maxLength: 2 }),
         }),
       },
-      fc.record({
-        kind: fc.constant(`optimistic` as const),
-        op: opArbitrary,
-        confirm: fc.boolean(),
-      }),
+      fc.record(
+        {
+          kind: fc.constant(`optimistic` as const),
+          op: opArbitrary,
+          confirm: fc.boolean(),
+          cleanupFirst: fc.boolean(),
+        },
+        { requiredKeys: [`kind`, `op`, `confirm`] },
+      ),
       fc.record({
         kind: fc.constant(`mount` as const),
         peer: fc.nat({ max: 2 }),
@@ -200,7 +252,13 @@ const historyArbitrary: fc.Arbitrary<History> = fc.record({
         kind: fc.constant(`unmount` as const),
         peer: fc.nat({ max: 2 }),
       }),
-      fc.constant({ kind: `cleanup-restart` as const }),
+      fc.record(
+        {
+          kind: fc.constant(`cleanup-restart` as const),
+          mount: fc.nat({ max: 2 }),
+        },
+        { requiredKeys: [`kind`] },
+      ),
     ),
     { maxLength: 8 },
   ),
@@ -263,6 +321,42 @@ const pinnedHistories: ReadonlyArray<{ name: string; history: History }> = [
     },
   },
   {
+    name: `peers clean up with a pending write and one mounts before the restart`,
+    history: {
+      rows: [{ f: `a`, g: `x` }],
+      peers: [{ f: `a` }, { f: `a`, g: `y` }],
+      steps: [
+        {
+          kind: `optimistic`,
+          op: { type: `insert`, id: 2, f: `a`, g: `y` },
+          confirm: false,
+          cleanupFirst: true,
+        },
+        { kind: `sync`, ops: [{ type: `insert`, id: 3, f: `a`, g: `y` }] },
+        { kind: `cleanup-restart`, mount: 1 },
+        { kind: `sync`, ops: [{ type: `update`, id: 3, f: `a`, g: `x` }] },
+      ],
+    },
+  },
+  {
+    name: `a row updated within its group reaches peers as one update`,
+    history: {
+      rows: [
+        { f: 1, g: `x` },
+        { f: `b`, g: `x` },
+      ],
+      peers: [{ f: 1 }, { f: 1, g: `y` }],
+      steps: [
+        { kind: `sync`, ops: [{ type: `update`, id: 0, f: DATE_ONE, g: `y` }] },
+        {
+          kind: `optimistic`,
+          op: { type: `update`, id: 0, f: 1, g: `y` },
+          confirm: true,
+        },
+      ],
+    },
+  },
+  {
     name: `a remounted peer reads a group that changed while it was away`,
     history: {
       rows: [{ f: 0, g: `x` }],
@@ -298,9 +392,49 @@ function peerQuery(source: any, peer: Peer) {
       )
 }
 
-function describeRow(row: Record<string, unknown>) {
+// A row's id and fields, which the model also knows.
+function describeFields(row: Record<string, unknown>) {
   const f = row.f instanceof Date ? `Date(${row.f.getTime()})` : String(row.f)
-  return `${String(row.id)}:${typeof row.f}:${f}:${String(row.g)}:${String(row.$synced)}`
+  return `${String(row.id)}:${typeof row.f}:${f}:${String(row.g)}`
+}
+
+function describeRow(row: Record<string, unknown>) {
+  return `${describeFields(row)}:${String(row.$synced)}`
+}
+
+type Change = ChangeMessage<Record<string, unknown>, string | number>
+
+function describeChange(change: Change) {
+  const previous = change.previousValue
+  return `${change.type}:${String(change.key)}:${describeRow(change.value)}:${previous ? describeRow(previous) : `-`}`
+}
+
+// Applies a granular batch to the rows a consumer has folded so far,
+// recording each change that contradicts them.
+function foldChanges(
+  rows: Map<string | number, Record<string, unknown>>,
+  changes: Array<Change>,
+  violations: Array<string>,
+) {
+  for (const change of changes) {
+    const held = rows.get(change.key)
+    if (change.type === `insert`) {
+      if (held) violations.push(`insert of held ${describeChange(change)}`)
+      rows.set(change.key, change.value)
+    } else if (!held) {
+      violations.push(`${change.type} of unheld ${describeChange(change)}`)
+    } else if (change.type === `delete`) {
+      rows.delete(change.key)
+    } else {
+      if (
+        !change.previousValue ||
+        describeFields(change.previousValue) !== describeFields(held)
+      ) {
+        violations.push(`stale previousValue in ${describeChange(change)}`)
+      }
+      rows.set(change.key, change.value)
+    }
+  }
 }
 
 async function runHistory(history: History): Promise<void> {
@@ -320,55 +454,69 @@ async function runHistory(history: History): Promise<void> {
   const references: Array<ReturnType<typeof createLiveQueryCollection>> = []
   type Mounted = {
     reference: ReturnType<typeof createLiveQueryCollection>
-    // The model keys when the source started cleanup, if it has since.
+    // The model rows when the source started cleanup, if it has since.
     frozen: Array<string> | undefined
     view: { collection?: unknown }
     layout: { keys: string; revision: number } | undefined
     wholesale: ReturnType<typeof createLiveQueryObserver<any, any>>
-    granular: ReturnType<typeof createLiveQueryObserver<any, any>>
-    granularKeys: Set<string | number>
+    // Rows folded from the pooled granular stream, and contradictions.
+    granularRows: Map<string | number, Record<string, unknown>>
+    violations: Array<string>
+    // Granular changes since the last checkpoint, pooled and reference.
+    pooledChanges: Array<string>
+    referenceChanges: Array<string>
     unsubscribe: () => void
   }
   const mounted = new Map<number, Mounted>()
   const mount = async (index: number) => {
     const peer = history.peers[index]
     if (!peer || mounted.has(index)) return
-    const reference = createLiveQueryCollection(peerQuery(source, peer))
-    references.push(reference)
-    await reference.preload()
+    // The pooled view subscribes first, so after cleanup it is the one that
+    // restarts the source.
     const view = createPooledLiveQuery(peerQuery(source, peer)(new Query()))
     expect(view, `peer ${index} is poolable`).toBeDefined()
     const wholesale = createLiveQueryObserver(view as any, {
       mode: `wholesale`,
     })
     const granular = createLiveQueryObserver(view as any)
-    const granularKeys = new Set<string | number>()
-    const offWholesale = wholesale.subscribe(() => {})
-    const offGranular = granular.subscribe((changes) => {
-      for (const change of (changes ?? []) as Array<ChangeMessage<any, any>>) {
-        if (change.type === `delete`) granularKeys.delete(change.key)
-        else granularKeys.add(change.key)
-      }
-    })
-    mounted.set(index, {
-      reference,
+    const entry: Mounted = {
+      reference: createLiveQueryCollection(peerQuery(source, peer)),
       frozen: undefined,
       view: view as unknown as Mounted[`view`],
       layout: undefined,
       wholesale,
-      granular,
-      granularKeys,
-      unsubscribe: () => {
-        offWholesale()
-        offGranular()
-        wholesale.dispose()
-        granular.dispose()
-      },
+      granularRows: new Map(),
+      violations: [],
+      pooledChanges: [],
+      referenceChanges: [],
+      unsubscribe: () => {},
+    }
+    references.push(entry.reference)
+    const offWholesale = wholesale.subscribe(() => {})
+    const offGranular = granular.subscribe((changes) => {
+      const batch = (changes ?? []) as Array<Change>
+      foldChanges(entry.granularRows, batch, entry.violations)
+      entry.pooledChanges.push(...batch.map(describeChange))
     })
+    await entry.reference.preload()
+    const referenceGranular = createLiveQueryObserver(entry.reference as any)
+    const offReference = referenceGranular.subscribe((changes) => {
+      const batch = (changes ?? []) as Array<Change>
+      entry.referenceChanges.push(...batch.map(describeChange))
+    })
+    entry.unsubscribe = () => {
+      offWholesale()
+      offGranular()
+      offReference()
+      wholesale.dispose()
+      granular.dispose()
+      referenceGranular.dispose()
+    }
+    mounted.set(index, entry)
   }
   const check = (checkpoint: string) => {
     for (const [index, entry] of mounted) {
-      const { view, wholesale, granularKeys } = entry
+      const { view, wholesale } = entry
       const peer = history.peers[index]!
       const snapshot = wholesale.getSnapshot()
       const reference = entry.reference
@@ -378,14 +526,23 @@ async function runHistory(history: History): Promise<void> {
         `${label} rows`,
       ).toEqual(reference.toArray.map((row) => describeRow(row)))
       expect(snapshot.status, `${label} status`).toBe(reference.status)
-      const model = entry.frozen ?? expectedKeys(rows, peer)
+      const model = entry.frozen ?? expectedRows(rows, peer)
       expect(
-        [...snapshot.state!.keys()].map(String).sort(),
+        [...snapshot.state!.values()].map(describeFields).sort(),
         `${label} model`,
       ).toEqual(model)
-      expect([...granularKeys].map(String).sort(), `${label} granular`).toEqual(
-        model,
+      // The granular stream delivers each change once, with the type and
+      // values the live-query Collection's stream has, and folds to the model.
+      expect(entry.violations, `${label} granular contradictions`).toEqual([])
+      expect(
+        [...entry.granularRows.values()].map(describeFields).sort(),
+        `${label} granular`,
+      ).toEqual(model)
+      expect(entry.pooledChanges.sort(), `${label} granular changes`).toEqual(
+        entry.referenceChanges.sort(),
       )
+      entry.pooledChanges.length = 0
+      entry.referenceChanges.length = 0
       // A change in the ordered keys always advances the layout revision.
       const keys = JSON.stringify([...snapshot.state!.keys()])
       if (entry.layout && entry.layout.keys !== keys) {
@@ -397,6 +554,12 @@ async function runHistory(history: History): Promise<void> {
       // Observing a pooled view never builds its live-query Collection.
       expect(view.collection, `${label} materialized`).toBeUndefined()
     }
+  }
+  // Resolves `keepF` against the model's current row.
+  const resolveOp = (op: Op): Op => {
+    const row = rows.get(id(op.id))
+    if (op.type !== `update` || !op.keepF || !row) return op
+    return { ...op, f: `f` in row ? (row.f as FieldValue) : MISSING }
   }
   const applyOp = (op: Op): boolean => {
     const key = id(op.id)
@@ -423,6 +586,30 @@ async function runHistory(history: History): Promise<void> {
     )
   }
 
+  const unmount = (index: number) => {
+    mounted.get(index)?.unsubscribe()
+    mounted.delete(index)
+  }
+  // Every mounted peer freezes with the rows it had, pending writes included.
+  // `beforeRestart` runs once the source is cleaned up.
+  const cleanupAndRestart = async (
+    checkpoint: string,
+    beforeRestart: () => Promise<void>,
+  ) => {
+    for (const [index, entry] of mounted) {
+      entry.frozen ??= expectedRows(rows, history.peers[index]!)
+    }
+    await source.cleanup()
+    check(`${checkpoint} cleaned up`)
+    // The mock source re-syncs its initial rows when it restarts.
+    rows.clear()
+    history.rows.forEach((row, rowIndex) =>
+      rows.set(id(rowIndex), sourceRow(id(rowIndex), row.f, row.g)),
+    )
+    await beforeRestart()
+    await source.preload()
+  }
+
   await withOracleCleanup(async () => {
     for (const index of history.peers.keys()) await mount(index)
     check(`after mount`)
@@ -430,22 +617,17 @@ async function runHistory(history: History): Promise<void> {
       const checkpoint = `after step ${n} (${step.kind})`
       if (step.kind === `mount`) await mount(step.peer)
       else if (step.kind === `cleanup-restart`) {
-        for (const [index, entry] of mounted) {
-          entry.frozen ??= expectedKeys(rows, history.peers[index]!)
-        }
-        await source.cleanup()
-        check(`${checkpoint} cleaned up`)
-        // The mock source re-syncs its initial rows when it restarts.
-        rows.clear()
-        history.rows.forEach((row, rowIndex) =>
-          rows.set(id(rowIndex), sourceRow(id(rowIndex), row.f, row.g)),
-        )
-        await source.preload()
+        const between = step.mount
+        await cleanupAndRestart(checkpoint, async () => {
+          // A peer mounted on the cleaned-up source restarts it.
+          if (between === undefined) return
+          unmount(between)
+          await mount(between)
+        })
       } else if (step.kind === `unmount`) {
-        mounted.get(step.peer)?.unsubscribe()
-        mounted.delete(step.peer)
+        unmount(step.peer)
       } else if (step.kind === `sync`) {
-        const accepted = step.ops.filter((op) => {
+        const accepted = step.ops.map(resolveOp).filter((op) => {
           const before = new Map(rows)
           if (applyOp(op)) return true
           rows.clear()
@@ -457,7 +639,8 @@ async function runHistory(history: History): Promise<void> {
         for (const op of accepted) write(op)
         source.utils.commit()
       } else {
-        const { op, confirm } = step
+        const { confirm, cleanupFirst } = step
+        const op = resolveOp(step.op)
         const key = id(op.id)
         const before = new Map(rows)
         const previous = rows.get(key)
@@ -484,7 +667,22 @@ async function runHistory(history: History): Promise<void> {
               : source.delete(key)
         const persisted = transaction.isPersisted.promise.catch(() => undefined)
         check(`${checkpoint} pending`)
-        if (confirm) {
+        if (cleanupFirst) {
+          // The write settles after cleanup, before the restart. The mock
+          // server keeps no data, so either outcome leaves the initial rows.
+          await cleanupAndRestart(checkpoint, async () => {
+            if (confirm) {
+              source.utils.resolveSync()
+              await persisted
+              return
+            }
+            await withExpectedRejection(`rolled back`, async () => {
+              source.utils.rejectSync(new Error(`rolled back`))
+              await persisted
+              await flushPromises()
+            })
+          })
+        } else if (confirm) {
           source.utils.begin()
           write(op)
           source.utils.commit()
