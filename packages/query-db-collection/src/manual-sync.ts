@@ -16,9 +16,10 @@ const activeBatchContexts = new WeakMap<
   SyncContext<any, any>,
   {
     operations: Array<SyncOperation<any, any, any>>
-    isActive: boolean
+    completion: Promise<void>
   }
 >()
+const writeCompletionPromises = new WeakSet<object>()
 
 // Types for sync operations
 export type SyncOperation<
@@ -149,7 +150,7 @@ export function performWriteOperations<
     | SyncOperation<TRow, TKey, TInsertInput>
     | Array<SyncOperation<TRow, TKey, TInsertInput>>,
   ctx: SyncContext<TRow, TKey>,
-): void {
+): Promise<void> {
   const normalized = normalizeOperations(operations, ctx)
   validateOperations(normalized, ctx)
 
@@ -218,7 +219,7 @@ export function performWriteOperations<
     }
   }
 
-  ctx.commit()
+  const applied = ctx.commit()
 
   // Update query cache after successful commit
   if (ctx.updateCacheData) {
@@ -232,6 +233,10 @@ export function performWriteOperations<
       Array.from(ctx.collection._state.syncedData.values()),
     )
   }
+
+  const completion = Promise.resolve(applied).then(() => undefined)
+  void completion.catch(() => undefined)
+  return completion
 }
 
 // Factory function to create write utils
@@ -248,75 +253,33 @@ export function createWriteUtils<
     return context
   }
 
+  function write(operation: SyncOperation<TRow, TKey, TInsertInput>) {
+    const ctx = ensureContext()
+    const batchContext = activeBatchContexts.get(ctx)
+    if (batchContext) {
+      batchContext.operations.push(operation)
+      return batchContext.completion
+    }
+    const completion = performWriteOperations(operation, ctx)
+    writeCompletionPromises.add(completion)
+    return completion
+  }
+
   return {
     writeInsert(data: TInsertInput | Array<TInsertInput>) {
-      const operation: SyncOperation<TRow, TKey, TInsertInput> = {
-        type: `insert`,
-        data,
-      }
-
-      const ctx = ensureContext()
-      const batchContext = activeBatchContexts.get(ctx)
-
-      // If we're in a batch, just add to the batch operations
-      if (batchContext?.isActive) {
-        batchContext.operations.push(operation)
-        return
-      }
-
-      // Otherwise, perform the operation immediately
-      performWriteOperations(operation, ctx)
+      return write({ type: `insert`, data })
     },
 
     writeUpdate(data: Partial<TRow> | Array<Partial<TRow>>) {
-      const operation: SyncOperation<TRow, TKey, TInsertInput> = {
-        type: `update`,
-        data,
-      }
-
-      const ctx = ensureContext()
-      const batchContext = activeBatchContexts.get(ctx)
-
-      if (batchContext?.isActive) {
-        batchContext.operations.push(operation)
-        return
-      }
-
-      performWriteOperations(operation, ctx)
+      return write({ type: `update`, data })
     },
 
     writeDelete(key: TKey | Array<TKey>) {
-      const operation: SyncOperation<TRow, TKey, TInsertInput> = {
-        type: `delete`,
-        key,
-      }
-
-      const ctx = ensureContext()
-      const batchContext = activeBatchContexts.get(ctx)
-
-      if (batchContext?.isActive) {
-        batchContext.operations.push(operation)
-        return
-      }
-
-      performWriteOperations(operation, ctx)
+      return write({ type: `delete`, key })
     },
 
     writeUpsert(data: Partial<TRow> | Array<Partial<TRow>>) {
-      const operation: SyncOperation<TRow, TKey, TInsertInput> = {
-        type: `upsert`,
-        data,
-      }
-
-      const ctx = ensureContext()
-      const batchContext = activeBatchContexts.get(ctx)
-
-      if (batchContext?.isActive) {
-        batchContext.operations.push(operation)
-        return
-      }
-
-      performWriteOperations(operation, ctx)
+      return write({ type: `upsert`, data })
     },
 
     writeBatch(callback: () => void) {
@@ -324,46 +287,64 @@ export function createWriteUtils<
 
       // Check if we're already in a batch (nested batch)
       const existingBatch = activeBatchContexts.get(ctx)
-      if (existingBatch?.isActive) {
+      if (existingBatch) {
         throw new Error(
           `Cannot nest writeBatch calls. Complete the current batch before starting a new one.`,
         )
       }
 
+      let resolveBatch!: (completion: Promise<void>) => void
+      let rejectBatch!: (reason: unknown) => void
+      const completion = new Promise<void>((resolve, reject) => {
+        resolveBatch = resolve
+        rejectBatch = reject
+      })
+      writeCompletionPromises.add(completion)
+      void completion.catch(() => undefined)
+
       // Set up the batch context for this specific collection
       const batchContext = {
         operations: [] as Array<SyncOperation<TRow, TKey, TInsertInput>>,
-        isActive: true,
+        completion,
       }
       activeBatchContexts.set(ctx, batchContext)
 
       try {
         // Execute the callback - any write operations will be collected
-        const result = callback()
+        const result: unknown = callback()
 
-        // Check if callback returns a promise (async function)
+        // A direct write in another collection may be returned incidentally.
         if (
-          // @ts-expect-error - Runtime check for async callback, callback is typed as () => void but user might pass async
-          // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
-          result &&
+          result !== null &&
           typeof result === `object` &&
           `then` in result &&
-          // @ts-expect-error - Runtime check for async callback, callback is typed as () => void but user might pass async
-          typeof result.then === `function`
+          typeof result.then === `function` &&
+          !writeCompletionPromises.has(result)
         ) {
+          // Rejecting the batch can also reject an async callback awaiting it.
+          void Promise.resolve(result).catch(() => undefined)
           throw new Error(
             `writeBatch does not support async callbacks. The callback must be synchronous.`,
           )
         }
 
-        // Perform all collected operations
-        if (batchContext.operations.length > 0) {
-          performWriteOperations(batchContext.operations, ctx)
-        }
-      } finally {
-        // Always clear the batch context
-        batchContext.isActive = false
+        // A subscriber called during commit starts a separate write or batch.
         activeBatchContexts.delete(ctx)
+
+        // Perform all collected operations
+        resolveBatch(
+          batchContext.operations.length > 0
+            ? performWriteOperations(batchContext.operations, ctx)
+            : Promise.resolve(),
+        )
+        return completion
+      } catch (error) {
+        rejectBatch(error)
+        throw error
+      } finally {
+        if (activeBatchContexts.get(ctx) === batchContext) {
+          activeBatchContexts.delete(ctx)
+        }
       }
     },
   }
