@@ -29,7 +29,7 @@ Query function that defines what data to fetch
 
 ### Returns
 
-Accessor that returns data with Loading boundary support, with state and status information as properties
+Accessor that returns data with Loading boundary support, with state and collection as properties
 
 ### Examples
 
@@ -66,25 +66,19 @@ const personIssues = useLiveQuery((q) =>
 ```
 
 ```ts
-// Handle loading and error states
+// Handle loading and error states with boundaries
 const todosQuery = useLiveQuery((q) =>
   q.from({ todos: todoCollection })
 )
 
 return (
-  <Switch>
-    <Match when={todosQuery.isLoading}>
-      <div>Loading...</div>
-    </Match>
-    <Match when={todosQuery.isError}>
-      <div>Error: {todosQuery.status}</div>
-    </Match>
-    <Match when={todosQuery.isReady}>
+  <Errored catch={(err) => <div>Error: {err.message}</div>}>
+    <Loading fallback={<div>Loading...</div>}>
       <For each={todosQuery()}>
         {(todo) => <li key={todo.id}>{todo.text}</li>}
       </For>
-    </Match>
-  </Switch>
+    </Loading>
+  </Errored>
 )
 ```
 
@@ -129,7 +123,7 @@ Query function that defines what data to fetch
 
 ### Returns
 
-Accessor that returns data with Loading boundary support, with state and status information as properties
+Accessor that returns data with Loading boundary support, with state and collection as properties
 
 ### Examples
 
@@ -166,25 +160,19 @@ const personIssues = useLiveQuery((q) =>
 ```
 
 ```ts
-// Handle loading and error states
+// Handle loading and error states with boundaries
 const todosQuery = useLiveQuery((q) =>
   q.from({ todos: todoCollection })
 )
 
 return (
-  <Switch>
-    <Match when={todosQuery.isLoading}>
-      <div>Loading...</div>
-    </Match>
-    <Match when={todosQuery.isError}>
-      <div>Error: {todosQuery.status}</div>
-    </Match>
-    <Match when={todosQuery.isReady}>
+  <Errored catch={(err) => <div>Error: {err.message}</div>}>
+    <Loading fallback={<div>Loading...</div>}>
       <For each={todosQuery()}>
         {(todo) => <li key={todo.id}>{todo.text}</li>}
       </For>
-    </Match>
-  </Switch>
+    </Loading>
+  </Errored>
 )
 ```
 
@@ -229,7 +217,7 @@ Configuration object with query and options
 
 ### Returns
 
-Accessor that returns data with Loading boundary support, with state and status information as properties
+Accessor that returns data with Loading boundary support, with state and collection as properties
 
 ### Examples
 
@@ -306,7 +294,7 @@ Pre-created live query collection to subscribe to
 
 ### Returns
 
-Accessor that returns data with Loading boundary support, with state and status information as properties
+Accessor that returns data with Loading boundary support, with state and collection as properties
 
 ### Examples
 
@@ -376,7 +364,7 @@ Create a live query using a query function
 
 ### Returns
 
-Accessor that returns data with Loading boundary support, with state and status information as properties
+Accessor that returns data with Loading boundary support, with state and collection as properties
 
 ### Examples
 
@@ -413,25 +401,19 @@ const personIssues = useLiveQuery((q) =>
 ```
 
 ```ts
-// Handle loading and error states
+// Handle loading and error states with boundaries
 const todosQuery = useLiveQuery((q) =>
   q.from({ todos: todoCollection })
 )
 
 return (
-  <Switch>
-    <Match when={todosQuery.isLoading}>
-      <div>Loading...</div>
-    </Match>
-    <Match when={todosQuery.isError}>
-      <div>Error: {todosQuery.status}</div>
-    </Match>
-    <Match when={todosQuery.isReady}>
+  <Errored catch={(err) => <div>Error: {err.message}</div>}>
+    <Loading fallback={<div>Loading...</div>}>
       <For each={todosQuery()}>
         {(todo) => <li key={todo.id}>{todo.text}</li>}
       </For>
-    </Match>
-  </Switch>
+    </Loading>
+  </Errored>
 )
 ```
 

@@ -46,16 +46,17 @@ and `latest` helpers for finer control. The accessor surface is now just
 Reading the accessor result (`query()`) while the collection is not yet ready
 now throws `NotReadyError` (caught by `<Loading>`). Previously, data reads
 during loading or revalidation returned stale or empty arrays synchronously.
-Consumers must wrap data reads in a `<Loading>` boundary or check
-`query.isReady` / `query.status` before reading.
+Consumers must wrap data reads in a `<Loading>` boundary, or use Solid v2's
+`isPending(() => query())` / `latest(() => query())` helpers for
+revalidation-aware reads without a boundary.
 
 ### Wholesale observer mode
 
-`useLiveQuery` now subscribes to the `LiveQueryObserver` in **wholesale** mode instead of granular. The observer delivers wake-up notifies; Solid's keyed `reconcile(rows, '$key')` handles the per-field diff that preserves fine-grained row reactivity.
+`useLiveQuery` now subscribes to the `LiveQueryObserver` in **wholesale** mode instead of granular. The observer delivers wake-up notifies into a snapshot signal; a keyed `createProjection` (key `'$key'`) handles the per-field diff that preserves fine-grained row reactivity.
 
 On-demand collections that relied on the granular adapter's `includeInitialState: true` behavior must ensure initial data is loaded explicitly — matching the React adapter's wholesale policy.
 
-The manual delta-patching layer (~160 lines: `rowIndex`, `syncRows`, `patchArrayChanges`, `patchSingleResultChanges`, `patchStoreRow`, `syncDataFromCollection`) has been removed. `useLiveQuery` adapter source went from 698 to 537 lines.
+The manual delta-patching layer (`rowIndex`, `syncRows`, `patchArrayChanges`, `patchSingleResultChanges`, `patchStoreRow`, `syncDataFromCollection`) has been removed. The adapter is now a snapshot signal plus fully derived state (status memo, keyed projection, synced state map).
 
 ## New features
 
@@ -63,8 +64,8 @@ The manual delta-patching layer (~160 lines: `rowIndex`, `syncRows`, `patchArray
 
 The v2 migration unlocks Solid's built-in async helpers on the accessor result:
 
-- `isPending(query)` — returns `true` while an unrevealed value change is in flight (e.g. during revalidation when a new collection is loading).
-- `latest(query)` — returns the last resolved value, skipping the `<Loading>` boundary during revalidation (useful for stale-while-revalidate UIs).
+- `isPending(() => query())` — returns `true` while a value change is in flight (e.g. during revalidation when a new collection is loading).
+- `latest(() => query())` — returns the last resolved value, skipping the `<Loading>` boundary during revalidation (useful for stale-while-revalidate UIs).
 
 ```tsx
 import { isPending, latest } from 'solid-js'
@@ -73,12 +74,12 @@ import { useLiveQuery } from '@tanstack/solid-db'
 const query = useLiveQuery((q) => q.from({ todos: todosCollection }))
 
 // Show a spinner refetching indicator during revalidation:
-<Show when={isPending(query)}>
+<Show when={isPending(() => query())}>
   <Spinner />
 </Show>
 
 // Render stale data immediately during revalidation (no Loading flash):
-<For each={latest(query)}>{(todo) => <li>{todo.text}</li>}</For>
+<For each={latest(() => query())}>{(todo) => <li>{todo.text}</li>}</For>
 ```
 
 These work because `useLiveQuery` now uses async `createMemo` whose previous
