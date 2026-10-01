@@ -76,6 +76,11 @@ import type { QueryCollectionUtils } from '../src/query.js'
  * result generations or the diff-free application signal requested by #1828.
  * Transport failure and cache replacement remain owned by the existing Query
  * lifecycle histories in this file.
+ * Direct write receipts have a separate boundary: a Query Collection write
+ * settles when its sync commit applies. The controlled persisted-owner history
+ * below holds that commit after the initial fetch, then checks the returned
+ * promise and stored row before and after release. It does not model native
+ * SQLite failure or overlapping on-demand revalidation.
  */
 
 type ResultSettlementOperationState =
@@ -1306,6 +1311,7 @@ function createPersistedOwnershipFixture(
   id: string,
   storage: ReturnType<typeof createOwnershipStorage>,
   serverRows: Array<Item>,
+  syncMode: `eager` | `on-demand` = `on-demand`,
 ) {
   const queryClient = createQueryClient()
   const providerRows = structuredClone(serverRows)
@@ -1327,7 +1333,7 @@ function createPersistedOwnershipFixture(
         queryKey: [id],
         queryFn,
         getKey: (item) => item.id,
-        syncMode: `on-demand`,
+        syncMode,
         persistedGcTime: Number.POSITIVE_INFINITY,
         startSync: true,
       }),
@@ -1351,6 +1357,15 @@ function storedItems(
   return [...storage.snapshot().rows.values()].sort((a, b) =>
     a.id.localeCompare(b.id),
   )
+}
+
+// The direct-write receipt follows the applied commit, regardless of whether
+// the Query Collection already exposes the new row in memory.
+function expectedDirectWriteReceipt(applied: boolean) {
+  return {
+    receipt: applied ? `fulfilled` : `pending`,
+    storedName: applied ? `Updated` : shared.name,
+  }
 }
 
 type ColdOwnershipObservation = { stored: Array<Item>; visible: Array<Item> }
@@ -5915,6 +5930,38 @@ describe(`query collection ownership lifecycle`, () => {
     expect(
       persistedOwners(collection._state.syncedMetadata, orphaned.id),
     ).toEqual([])
+  })
+
+  it(`settles a direct write only after its persisted commit applies`, async () => {
+    const id = `persisted-direct-write-receipt`
+    const storage = createOwnershipStorage(undefined, 2)
+    const { collection } = createPersistedOwnershipFixture(
+      id,
+      storage,
+      [shared],
+      `eager`,
+    )
+    await collection.stateWhenReady()
+
+    let receipt: `pending` | `fulfilled` | `rejected` = `pending`
+    const write = collection.utils.writeUpdate({ ...shared, name: `Updated` })
+    void write.then(
+      () => (receipt = `fulfilled`),
+      () => (receipt = `rejected`),
+    )
+    const observe = () => ({
+      receipt,
+      storedName: storage.snapshot().rows.get(shared.id)?.name,
+    })
+
+    await storage.entered
+    await Promise.resolve()
+    expect(observe()).toEqual(expectedDirectWriteReceipt(false))
+
+    storage.release()
+    await write
+    expect(observe()).toEqual(expectedDirectWriteReceipt(true))
+    expect(collection.get(shared.id)?.name).toBe(`Updated`)
   })
 
   it(`retains post-publication ownership through durable persistence`, async () => {
