@@ -2495,6 +2495,18 @@ describe(`stored functions behave like native values`, () => {
       (row) => row.obj.bump() === row.obj,
     ],
     [
+      `a detached stored method has no this`,
+      (row) => {
+        const { bump } = row.obj
+        try {
+          bump()
+          return `returned`
+        } catch (error) {
+          return (error as Error).constructor.name
+        }
+      },
+    ],
+    [
       `an inherited constructor`,
       (row) => [
         row.constructor === Object,
