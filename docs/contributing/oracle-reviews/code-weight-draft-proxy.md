@@ -1,6 +1,6 @@
 # Code weight: simplify the draft proxy and share its equality walker
 
-Reviewed executable revision: `0ce101acf` (base `18abceee4`, the fetched
+Reviewed executable revision: `7e5dfee25` (base `18abceee4`, the fetched
 `origin/main` at review time). This record follows in a documentation-only
 commit.
 
@@ -23,6 +23,8 @@ commit.
   second review.
 - `0ce101acf` fixes two more lost-write classes from CodeRabbit review:
   accessor definitions and typed-array mutator methods.
+- `7e5dfee25` fixes three bugs that code review found in the earlier fixes:
+  class write-backs, writes after `Object.freeze`, and `subarray` reads.
 
 ## Change
 
@@ -203,6 +205,7 @@ commit before.
 | `815432ebd` | Two URLs, or two instances whose state is in private fields, were equal, so a draft dropped a write that replaced one. | Revert oracle: URL values and a private-field class, with a write-twice property. `utils.property`: class and identity law. | both campaigns | +312 / +79 |
 | `b825e6483` | `38d8ba78f` defined a clone, so a non-configurable object value broke the Proxy invariants and threw. `get` would also have wrapped it. | `defineProperty` law: a new key with only an object value, with identity where the invariants require it. | throws on `main` too | +9 / +5 (module only) |
 | `0ce101acf` | Defining a getter over a field reported no change. `fill`, `set`, `sort`, `reverse`, `copyWithin`, and writes through `subarray` on a typed-array draft changed the private copy without a change. | `proxy.test.ts`: every method of `TypedArray.prototype` against a native typed array, and two getter definitions. | 6 of 31 methods, 2 of 2 getters | +70 / +25 (module only) |
+| `7e5dfee25` | The class rule made writing back the row's own class instance a change, because draft snapshots hold class instances as plain objects. After `Object.freeze(draft)`, a nested write was lost. A `subarray` read counted as a change. | Revert oracle: a keyed class instance in original rows. `proxy.test.ts`: rows after freeze, seal, or a fixed key against native rows, and the typed-array law with and without a write. | 7 oracle cases and 3 pinned cases on `ca0a2170c` | about +160 / — (proxy and utils modules) |
 | `a49ae90e3` | None. A detached stored method must throw, as on a native row. | `proxy.test.ts` stored-function law. | passes | 0 |
 
 Design decisions for these fixes:
@@ -215,8 +218,12 @@ Design decisions for these fixes:
   for speed. `31b2a6bd4` removed that list. Running the element methods on the
   copy and then replacing elements with drafts was faster but cost 167 more
   gzip bytes.
-- **Classes and keyless objects.** In both modes, an object of another class
-  differs, and plain and null-prototype objects from any realm are one class.
+- **Classes and keyless objects.** In both modes, instances of two different
+  classes differ. A plain or null-prototype object from any realm compares by
+  keys with any class, because draft snapshots and plain JSON hold class
+  instances as plain objects. (`815432ebd` first made a plain object differ
+  from a class instance; `7e5dfee25` reverted that after review found that
+  writing back the row's own instance became a change.)
   A class instance without enumerable keys equals only itself. URLs compare
   by `href`, because a draft copies a URL by its `href`; by identity, an
   untouched URL would differ from its own snapshot.
@@ -234,9 +241,11 @@ Limits that remain:
 - A built-in method called through `this` on a nested Map or Set draft, such
   as `Map.prototype.get.call(this.m, key)`, throws, because the receiver is a
   Proxy. This is a Proxy limit.
-- A `subarray` call on a typed-array draft counts as a change even when no
-  write follows, so the row may publish an equal value. Tracking later writes
-  through the shared buffer would need a second proxy.
+- Reading an object under a frozen or fixed key of a draft counts that key as
+  changed, because the Proxy invariants require the raw copy. The row may
+  publish an equal value.
+- Writing back a keyless class instance of the original row counts as a
+  change, because the snapshot holds it as an empty plain object.
 - `DataView` setters on a draft are not tracked. No owner generates a
   `DataView`.
 
@@ -309,6 +318,13 @@ Mutants of each new form fail the owners:
 | Y1 (on `0ce101acf`): typed-array mutators untracked | assertion failure (6/574) |
 | Y2 (on `0ce101acf`): `subarray` untracked | assertion failure (1/574) |
 | Y3 (on `0ce101acf`): typed-array `set` untracked | assertion failure (1/574) |
+| R1 (on `7e5dfee25`): a plain object differs from a class | assertion failure (10/611) |
+| R2 (on `7e5dfee25`): no class check | assertion failure (2/611) |
+| R3 (on `7e5dfee25`): the keyless rule needs `a` on the class side | assertion failure (4/611) |
+| F1 (on `7e5dfee25`): a frozen-key object read is not a change | assertion failure (2/611) |
+| F2 (on `7e5dfee25`): a frozen-key primitive read is a change | assertion failure (1/611) |
+| S1 (on `7e5dfee25`): `subarray` returns a plain view | assertion failure (2/611) |
+| S2 (on `7e5dfee25`): `subarray` marks a change on call | assertion failure (1/611) |
 
 The I and A3 to A5 mutants in the previous section apply to code that
 `31b2a6bd4` removed.
@@ -445,10 +461,10 @@ before it.
 
 ## Verification
 
-On `0ce101acf`, which includes `origin/main` at `3463cf8ad`, with the built
+On `7e5dfee25`, which includes `origin/main` at `3463cf8ad`, with the built
 `dist`:
 
-- `packages/db` Vitest, typecheck off: 198 files, 7,785 tests.
+- `packages/db` Vitest, typecheck off: 198 files, 7,822 tests.
 - `packages/db` `tsc --noEmit`: no errors.
 - `pnpm check:mangle`: 368 names.
 - `pnpm test:minified-db`: error names, index metadata, query rows, and live

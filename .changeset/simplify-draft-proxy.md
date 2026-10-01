@@ -15,7 +15,7 @@ This change also fixes draft writes that were lost or wrong:
 
 `deepEquals` and draft change detection also have new rules:
 
-- An object of another class is not equal. Plain and null-prototype objects are one class.
+- Instances of two different classes are not equal. A plain or null-prototype object compares by keys with any class.
 - A class instance without enumerable keys, such as a `File` or an object whose state is in private fields, equals only itself. Before, two such instances were always equal, so a draft dropped a write that replaced one.
 - URLs compare by `href`.
 - In draft change detection only, a typed array of another class is a change.
