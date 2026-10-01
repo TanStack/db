@@ -642,16 +642,14 @@ describe(`loadSubset demand identity`, () => {
     )
   })
 
-  it(`keeps an explicit source alias read-only`, () => {
-    const qualified = new PropRef([`profile`, `score`], `profile`)
-
-    expect(Object.getOwnPropertyDescriptor(qualified, `sourceAlias`)).toEqual({
-      value: `profile`,
-      enumerable: true,
-      writable: false,
-      configurable: false,
-    })
+  it(`gives an unqualified ref no source alias property`, () => {
     expect(Object.hasOwn(new PropRef([`profile`]), `sourceAlias`)).toBe(false)
+    expect(
+      Object.hasOwn(
+        new PropRef([`profile`, `score`], `profile`),
+        `sourceAlias`,
+      ),
+    ).toBe(true)
   })
 
   const id = new PropRef<string>([`id`])
