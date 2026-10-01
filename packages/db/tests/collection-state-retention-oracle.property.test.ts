@@ -185,9 +185,7 @@ function expectRetainedState(
   model: ReadonlyMap<number, RetainedRow>,
 ): void {
   const expectedRows = [...model.entries()].sort(([a], [b]) => a - b)
-  const retainedRows = [...collection._state.syncedData.entries()].sort(
-    ([a], [b]) => a - b,
-  )
+  const retainedRows = [...collection.base.entries()].sort(([a], [b]) => a - b)
 
   expect(retainedRows).toEqual(expectedRows)
   expect(

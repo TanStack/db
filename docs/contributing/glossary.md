@@ -37,6 +37,7 @@ production queues, caches, or semantic helpers merely to share their names.
 | truncate replay | An authoritative source replacement after a truncate, inside the current sync run. The Collection subscription remains active; any dependent live-query graph remains active behind its publication barrier. | Restart, reload, retry, or repair. |
 | source snapshot | The source rows established by one snapshot operation within its declared predicate and window. It proves full-source state only when the provider says that scope is authoritative and exhausted. | Public snapshot or proof of full-source coverage. |
 | public snapshot | The last coherent set of rows exposed to reads, events, and downstream queries. | Private replacement or source snapshot. |
+| exposed authoritative base | The applied source rows available before a Collection adds optimistic mutations. Committed sync writes queued for reconciliation are not part of this base. `collection.base` reads it without starting sync. | Visible Collection state or a pending sync queue. |
 | private replacement | Source or graph state withheld while an authoritative replay or repair is incomplete. | Public snapshot. |
 | publication | The boundary that makes one coherent result observable to reads, events, and downstream queries. | Provider return, request settlement, or sync commit by itself. |
 | atomic publication | One publication boundary at which state, events, and consumers observe the same result without an intermediate public state. | Any individual `commit()` call or source snapshot. |

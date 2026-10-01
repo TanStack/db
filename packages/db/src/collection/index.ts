@@ -14,6 +14,7 @@ import { CollectionSyncManager } from './sync'
 import { CollectionIndexesManager } from './indexes'
 import { CollectionMutationsManager } from './mutations'
 import { CollectionEventsManager } from './events.js'
+import type { SortedMap } from '../SortedMap.js'
 import type { PublicationDeferral } from './changes'
 import type { CollectionSubscription } from './subscription'
 import type {
@@ -46,6 +47,17 @@ import type { WithVirtualProps } from '../virtual-props.js'
 import type { TransactionScope } from '../transactions.js'
 
 export type { CollectionIndexMetadata } from './events.js'
+
+export type CollectionBase<TKey extends string | number, TOutput> = Pick<
+  SortedMap<TKey, TOutput>,
+  | 'size'
+  | 'get'
+  | 'has'
+  | 'keys'
+  | 'values'
+  | 'entries'
+  | typeof Symbol.iterator
+>
 
 const collectionSyncConfigFactory: unique symbol = Symbol.for(
   `@tanstack/db.collectionSyncConfig.factory`,
@@ -635,6 +647,15 @@ export class CollectionImpl<
    */
   public preload(): Promise<void> {
     return this._sync.preload()
+  }
+
+  /**
+   * The exposed authoritative base rows, before optimistic writes are applied.
+   * Queued sync writes are excluded. Reading does not start sync.
+   * Do not mutate the backing map or its rows: that bypasses publication.
+   */
+  public get base(): CollectionBase<TKey, TOutput> {
+    return this._state.syncedData
   }
 
   /**
