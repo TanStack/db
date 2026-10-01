@@ -588,6 +588,8 @@ export function createChangeProxy<
     for (const [prop, assigned] of state.assigned_) {
       // Property was deleted, so it's different from original
       if (!assigned) return false
+      // A field the original lacks was added, even when it holds undefined.
+      if (!Object.hasOwn(state.originalObject, prop)) return false
       const currentValue = (state.copy_ as any)[prop]
       const originalValue = (state.originalObject as any)[prop]
 
