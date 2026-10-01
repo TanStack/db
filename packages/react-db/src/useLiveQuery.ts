@@ -917,6 +917,7 @@ function useLiveQueryImpl(
     (!inputIsCollection && (clientRef.current !== dbClient || identityChanged))
 
   const resumeDeferredCollections = () => {
+    if (deferredCollectionsRef.current.size === 0) return
     for (const collection of deferredCollectionsRef.current) {
       collection._resumeSyncStart()
     }
@@ -1031,10 +1032,9 @@ function useLiveQueryImpl(
 
   // Stable subscribe bound to the current observer; the observer owns the
   // subscription, ready-race, and disposal.
-
   if (!subscribeRef.current || needsNewCollection) {
     subscribeRef.current = (onStoreChange: () => void) => {
-      const unsubscribe = observer.subscribe(() => onStoreChange())
+      const unsubscribe = observer.subscribe(onStoreChange)
       resumeDeferredCollections()
       return unsubscribe
     }
