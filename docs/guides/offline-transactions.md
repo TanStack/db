@@ -96,8 +96,8 @@ The executor sends a stable `idempotencyKey` with each attempt. A server can rec
 or fails. Successful settlement means the configured `mutationFn` returned and
 the storage adapter acknowledged outbox deletion. It proves server confirmation
 only if that function waits for a server acknowledgement, read-back, or sync
-observation. If deletion fails, the promise remains pending while the executor
-retries. A server must honor the supplied idempotency key because a crash before
+observation. If deletion fails, the promise rejects with the storage error.
+A server must honor the supplied idempotency key because a crash before
 the executor records provider completion can replay the request.
 
 Do not await `isPersisted.promise` before you show an offline page. A pending mutation can keep that promise open until connectivity returns. Use it to update submission status or report a final error.
