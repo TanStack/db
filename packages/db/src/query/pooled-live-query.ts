@@ -189,7 +189,14 @@ class Partition {
       this.subscription = undefined
       this.stopStatusEvents?.()
       this.stopStatusEvents = undefined
-      this.groups.clear()
+      // Views outlive a release and may subscribe again, so they keep their
+      // groups for the next subscription to refill.
+      for (const group of this.groups.values()) {
+        group.rows.clear()
+        group.revision++
+        group.layoutRevision++
+        group.entries = undefined
+      }
       this.onEmpty()
     }, delay)
   }

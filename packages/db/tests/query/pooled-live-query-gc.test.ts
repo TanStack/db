@@ -13,8 +13,9 @@ import { mockSyncCollectionOptions } from '../utils.js'
  * the live-query Collection it stands in for. After the last subscriber
  * leaves, that is exactly `gcTime`; a `gcTime` of 0 or `Infinity` never
  * releases; and a query built but never subscribed waits at least the
- * Collection lifecycle's 50 ms floor. Views of one partition with different
- * `gcTime`s release with the longest.
+ * Collection lifecycle's 50 ms floor. Views of one partition with different `gcTime`s release with the longest.
+ * A view that subscribes again after its partition released, as a hidden
+ * React Activity does, follows the source like its restarted Collection.
  *
  * Each case runs the same timeline against a pooled query and a live-query
  * Collection on separate sources and compares when each source loses its
@@ -88,6 +89,47 @@ describe(`pooled live query gcTime`, () => {
       })
     }
   }
+
+  it(`follows its source again when resubscribed after its partition released`, async () => {
+    const run = async (
+      build: (source: ReturnType<typeof makeSource>) => any,
+    ) => {
+      const source = makeSource()
+      const observer = createLiveQueryObserver(build(source), {
+        mode: `wholesale`,
+      })
+      observer.subscribe(() => {})()
+      await vi.advanceTimersByTimeAsync(50)
+      // Hidden past gcTime, as under a hidden React Activity, then shown.
+      source.utils.begin()
+      source.utils.write({ type: `insert`, value: { id: `b`, g: `x` } })
+      source.utils.write({ type: `delete`, value: { id: `a`, g: `x` } })
+      source.utils.commit()
+      const stop = observer.subscribe(() => {})
+      await vi.advanceTimersByTimeAsync(1)
+      source.utils.begin()
+      source.utils.write({ type: `insert`, value: { id: `c`, g: `x` } })
+      source.utils.commit()
+      await vi.advanceTimersByTimeAsync(1)
+      const keys = [...observer.getSnapshot().state!.keys()]
+      stop()
+      return keys
+    }
+    const compiledKeys = await run((source) =>
+      createLiveQueryCollection({
+        query: query(source),
+        startSync: true,
+        gcTime: 1,
+      }),
+    )
+    expect(compiledKeys).toEqual([`b`, `c`])
+    expect(
+      await run(
+        (source) =>
+          createPooledLiveQuery(query(source)(new Query()), { gcTime: 1 })!,
+      ),
+    ).toEqual(compiledKeys)
+  })
 
   it.each([[[5, 120]], [[120, 5]]])(
     `releases with the longest gcTime among a partition's views (%j)`,
