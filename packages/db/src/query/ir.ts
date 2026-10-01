@@ -425,15 +425,16 @@ export function followRef(
     // is it part of the select clause?
     if (query.select) {
       const selectedField = query.select[field]
-      if (selectedField && selectedField.type === `ref`) {
-        return followRef(query, selectedField, collection)
+      if (selectedField) {
+        // A computed projection has no source field that can satisfy a
+        // source-level lookup or ordered acquisition.
+        return selectedField.type === `ref`
+          ? followRef(query, selectedField, collection)
+          : undefined
       }
     }
 
-    // Either this field is not part of the select clause
-    // and thus it must be part of the collection itself
-    // or it is part of the select but is not a reference
-    // so we can stop here and don't have to follow it
+    // Without a projection for this field, it belongs to the source row.
     return { collection, path: [field] }
   }
 

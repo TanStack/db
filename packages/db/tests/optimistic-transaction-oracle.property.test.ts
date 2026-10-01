@@ -20,14 +20,24 @@ import type { ChangeMessage, SyncConfig } from '../src/types.js'
  * A transaction may author insert, update, and delete operations in any order.
  * Same-key operations collapse to one net request, but the request must retain
  * every authored field and the correct original and modified snapshots.
- * Mixed-key transactions publish one complete cut; observers must not see a
- * prefix of the transaction.
+ * Each synchronous authored operation may publish its complete draft prefix.
+ * The later mixed-key sync acknowledgement publishes one complete cut, so
+ * observers must not see a partial acknowledgement.
  *
  * Small finite matrices cover operation order, optimistic visibility, and
  * resolve, reject, or rollback. Generated payloads vary values and strings.
- * The independent history model judges rows and outcomes, while this driver
- * also inspects the real mutation payload and callback batches. Deliberate
- * corruptions calibrate each observation.
+ * Declarative before/proposed row maps represent expected public snapshots,
+ * not Collection caches. The same-key truth table supplies net requests.
+ * Shared history helpers judge callback event semantics and promise outcomes.
+ * The driver inspects the real mutation
+ * payload and callback batches. Deliberate corruptions calibrate observations.
+ *
+ * Authority: the public manual transaction and Collection mutation contracts
+ * in docs/guides/mutations.md, with optimistic snapshot and settlement laws
+ * owned by optimistic-history-oracle.ts. This driver checks one Collection,
+ * one manual transaction, and controlled sync acknowledgements.
+ * It does not establish provider acknowledgement timing, cross-Collection
+ * transactions, or arbitrary overlapping same-key histories.
  */
 
 type Row = { id: number; value: number; note: string }
@@ -55,6 +65,14 @@ const orders: Array<Array<Operation>> = [
   [`delete`, `insert`, `update`],
   [`delete`, `update`, `insert`],
 ]
+// Mixed-key grammar: exactly one insert of key 3, update of existing key 2,
+// and delete of existing key 1, in all six orders. The fixed matrix crosses
+// optimistic visibility and the three handler outcomes; generation varies
+// value (1..100) and note (0..10 chars). Removing order loses payload-order
+// checks; removing visibility loses the draft cut; removing outcome loses a
+// settlement branch; removing either field variation hides truncated payloads.
+// Repeated operations are checked in the same-key lane below. Deleting an
+// absent key is excluded from this mixed-key grammar.
 
 const sameKeySequences = [
   `insert-update`,
@@ -62,6 +80,13 @@ const sameKeySequences = [
   `update-update`,
   `update-delete`,
 ] as const
+// The bounded history grammar is two authored operations on one numeric key:
+// insert/update followed by update/delete. Each of the four sequences and both
+// handler outcomes runs in the fixed matrix. The generated campaign varies
+// the changed number (1..50) and nonempty note (1..8 chars). Sequence is needed
+// to distinguish cancellation from a delivered net request; outcome separates
+// payload correctness from later rollback; value and note expose dropped fields.
+// An update of an absent key or an insert on an occupied key is invalid here.
 type SameKeyScenario = {
   sequence: (typeof sameKeySequences)[number]
   value: number
@@ -214,22 +239,27 @@ describe(`Same-key transaction laws`, () => {
         await runSameKey({ sequence, success, value: 7, note: `last` })
     },
   )
-  it(`varies merged request fields`, async () => {
-    await fc.assert(
-      fc.asyncProperty(
-        fc.record({
-          sequence: fc.constantFrom(...sameKeySequences),
-          success: fc.boolean(),
-          value: fc.integer({ min: 1, max: 50 }),
-          note: fc
-            .string({ minLength: 1, maxLength: 8 })
-            .map((s) => `new:${s}`),
-        }),
-        (scenario) => runSameKey(scenario),
-      ),
-      oraclePropertyOptions(40, `collection-state.same-key`),
-    )
-  })
+  it.each([505201, undefined])(
+    `varies merged request fields, seed=%s`,
+    async (seed) => {
+      await fc.assert(
+        fc.asyncProperty(
+          fc.record({
+            sequence: fc.constantFrom(...sameKeySequences),
+            success: fc.boolean(),
+            value: fc.integer({ min: 1, max: 50 }),
+            note: fc
+              .string({ minLength: 1, maxLength: 8 })
+              .map((s) => `new:${s}`),
+          }),
+          (scenario) => runSameKey(scenario),
+        ),
+        seed === undefined
+          ? oraclePropertyOptions(40, `collection-state.same-key`)
+          : { numRuns: oracleRuns(40), seed },
+      )
+    },
+  )
   it.each([`dropped-field`, `canceled-persistence`] as const)(
     `rejects %s`,
     async (fault) => {
@@ -302,42 +332,49 @@ async function runDeleteInsertReplacement(
   })
   const settlement = transaction.isPersisted.promise.catch(() => undefined)
 
-  try {
-    await collection.preload()
-    transaction.mutate(() => {
-      if (author) {
-        author(collection)
-        return
-      }
-      for (const [index, replacement] of replacements.entries()) {
-        collection.delete(1, {
-          metadata: { operation: `delete`, index },
-        })
-        collection.insert(replacement, {
-          metadata: { operation: `insert`, index },
-        })
-      }
-    })
+  return withHistoryCleanup(
+    async () => {
+      await collection.preload()
+      transaction.mutate(() => {
+        if (author) {
+          author(collection)
+          return
+        }
+        for (const [index, replacement] of replacements.entries()) {
+          collection.delete(1, {
+            metadata: { operation: `delete`, index },
+          })
+          collection.insert(replacement, {
+            metadata: { operation: `insert`, index },
+          })
+        }
+      })
 
-    await transaction.commit()
-    expect(request, `net delete then insert request`).toStrictEqual(
-      expected === undefined ? [] : [expected],
-    )
-    expect(calls, `persistence runs only for a net mutation`).toBe(
-      expected === undefined ? 0 : 1,
-    )
-    expect(
-      [...collection.values()].map(userRow),
-      `manual settlement releases the optimistic replacement`,
-    ).toStrictEqual([original])
-    return request
-  } finally {
-    if (transaction.state === `pending` || transaction.state === `persisting`) {
-      transaction.rollback()
-    }
-    await settlement
-    await collection.cleanup()
-  }
+      await transaction.commit()
+      expect(request, `net delete then insert request`).toStrictEqual(
+        expected === undefined ? [] : [expected],
+      )
+      expect(calls, `persistence runs only for a net mutation`).toBe(
+        expected === undefined ? 0 : 1,
+      )
+      expect(
+        [...collection.values()].map(userRow),
+        `manual settlement releases the optimistic replacement`,
+      ).toStrictEqual([original])
+      return request
+    },
+    () => [
+      () => {
+        if (
+          transaction.state === `pending` ||
+          transaction.state === `persisting`
+        )
+          transaction.rollback()
+      },
+      () => settlement,
+      () => collection.cleanup(),
+    ],
+  )
 }
 
 describe(`Delete then insert transaction laws`, () => {
@@ -577,35 +614,47 @@ describe(`Delete then insert transaction laws`, () => {
       () => undefined,
     )
 
-    try {
-      await collection.preload()
-      overlay.mutate(() =>
-        collection.update(1, (draft) => {
-          draft.value = 1
-        }),
-      )
-      const overlayCommit = overlay.commit().catch(() => undefined)
-      await Promise.resolve()
+    await withHistoryCleanup(
+      async () => {
+        await collection.preload()
+        overlay.mutate(() =>
+          collection.update(1, (draft) => {
+            draft.value = 1
+          }),
+        )
+        const overlayCommit = overlay.commit().catch(() => undefined)
+        await Promise.resolve()
 
-      replacement.mutate(() => {
-        collection.delete([1, 1])
-        collection.insert(overlaid)
-      })
-      await replacement.commit()
+        replacement.mutate(() => {
+          collection.delete([1, 1])
+          collection.insert(overlaid)
+        })
+        await replacement.commit()
 
-      expect(deliveries, `replacement persistence delivery count`).toBe(1)
-      expect(delivered, `replacement server payload`).toStrictEqual(overlaid)
+        expect(deliveries, `replacement persistence delivery count`).toBe(1)
+        expect(delivered, `replacement server payload`).toStrictEqual(overlaid)
 
-      rejectOverlay(new Error(`earlier overlay failed`))
-      await overlayCommit
-    } finally {
-      if (overlay.state === `pending` || overlay.state === `persisting`)
-        overlay.rollback()
-      if (replacement.state === `pending` || replacement.state === `persisting`)
-        replacement.rollback()
-      await Promise.all([overlaySettlement, replacementSettlement])
-      await collection.cleanup()
-    }
+        rejectOverlay(new Error(`earlier overlay failed`))
+        await overlayCommit
+      },
+      () => [
+        () => {
+          if (overlay.state === `pending` || overlay.state === `persisting`)
+            overlay.rollback()
+        },
+        () => {
+          if (
+            replacement.state === `pending` ||
+            replacement.state === `persisting`
+          )
+            replacement.rollback()
+        },
+        () => rejectOverlay(new Error(`overlay test cleanup`)),
+        () => overlaySettlement,
+        () => replacementSettlement,
+        () => collection.cleanup(),
+      ],
+    )
   })
 
   it(`delivers a replacement equal only to another pending insert`, async () => {
@@ -645,37 +694,49 @@ describe(`Delete then insert transaction laws`, () => {
       () => undefined,
     )
 
-    try {
-      await collection.preload()
-      pendingInsert.mutate(() => collection.insert(inserted))
-      const insertCommit = pendingInsert.commit().catch(() => undefined)
-      await Promise.resolve()
+    await withHistoryCleanup(
+      async () => {
+        await collection.preload()
+        pendingInsert.mutate(() => collection.insert(inserted))
+        const insertCommit = pendingInsert.commit().catch(() => undefined)
+        await Promise.resolve()
 
-      replacement.mutate(() => {
-        collection.delete(1)
-        collection.insert(inserted)
-      })
-      await replacement.commit()
+        replacement.mutate(() => {
+          collection.delete(1)
+          collection.insert(inserted)
+        })
+        await replacement.commit()
 
-      expect(deliveries, `replacement persistence delivery count`).toBe(1)
-      expect(delivered, `replacement server mutation`).toStrictEqual({
-        type: `insert`,
-        modified: inserted,
-      })
+        expect(deliveries, `replacement persistence delivery count`).toBe(1)
+        expect(delivered, `replacement server mutation`).toStrictEqual({
+          type: `insert`,
+          modified: inserted,
+        })
 
-      rejectInsert(new Error(`earlier insert failed`))
-      await insertCommit
-    } finally {
-      if (
-        pendingInsert.state === `pending` ||
-        pendingInsert.state === `persisting`
-      )
-        pendingInsert.rollback()
-      if (replacement.state === `pending` || replacement.state === `persisting`)
-        replacement.rollback()
-      await Promise.all([insertSettlement, replacementSettlement])
-      await collection.cleanup()
-    }
+        rejectInsert(new Error(`earlier insert failed`))
+        await insertCommit
+      },
+      () => [
+        () => {
+          if (
+            pendingInsert.state === `pending` ||
+            pendingInsert.state === `persisting`
+          )
+            pendingInsert.rollback()
+        },
+        () => {
+          if (
+            replacement.state === `pending` ||
+            replacement.state === `persisting`
+          )
+            replacement.rollback()
+        },
+        () => rejectInsert(new Error(`insert test cleanup`)),
+        () => insertSettlement,
+        () => replacementSettlement,
+        () => collection.cleanup(),
+      ],
+    )
   })
 })
 
@@ -735,9 +796,11 @@ async function runTransaction(scenario: Scenario, fault?: ObservationFault) {
         changes: object
       }>
     | undefined
+  let mutationCalls = 0
   const tx = createTransaction<Row>({
     autoCommit: false,
     mutationFn: ({ transaction }) => {
+      mutationCalls++
       payload = transaction.mutations.map((mutation) => ({
         type: mutation.type,
         key: mutation.key,
@@ -880,6 +943,7 @@ async function runTransaction(scenario: Scenario, fault?: ObservationFault) {
       const pendingRows = scenario.optimistic ? proposed : base
       check(pendingRows, `complete mutation scope`)
       committed = observeHistoryPromise(tx.commit())
+      expect(mutationCalls, `whole mutation persistence delivery count`).toBe(1)
       expect(payload, `actual mutation function entered`).toBeDefined()
       if (fault === `payload`)
         payload![0]!.modified.note = `wrong transmitted value`
@@ -918,6 +982,9 @@ async function runTransaction(scenario: Scenario, fault?: ObservationFault) {
         gate.resolve()
       }
       await Promise.all([persisted.settled, committed.settled])
+      expect(mutationCalls, `settled mutation persistence delivery count`).toBe(
+        1,
+      )
       expectHistoryOutcome(
         persisted.read(),
         scenario.outcome === `resolve`

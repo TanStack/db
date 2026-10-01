@@ -94,6 +94,17 @@ function setDataProperty(
     })
 }
 
+function assertOutboxPhase(
+  phase: unknown,
+): asserts phase is `deletion-pending` | `rejection-pending` | undefined {
+  if (
+    phase !== undefined &&
+    phase !== `deletion-pending` &&
+    phase !== `rejection-pending`
+  )
+    throw new Error(`Unsupported transaction outbox phase`)
+}
+
 export class TransactionSerializer {
   private collections: Record<string, Collection<any, any, any, any, any>>
   private collectionIdToKey: Map<string, string>
@@ -110,6 +121,7 @@ export class TransactionSerializer {
   }
 
   serialize(transaction: OfflineTransaction): string {
+    assertOutboxPhase(transaction.outboxPhase)
     const serialized: SerializedOfflineTransaction = {
       ...transaction,
       valueEncoding: 3,
@@ -127,9 +139,11 @@ export class TransactionSerializer {
     // marker-shaped user objects; the encoding tag is not application metadata.
     const {
       valueEncoding,
+      outboxPhase,
       ...parsed
-    }: Omit<SerializedOfflineTransaction, `valueEncoding`> & {
+    }: Omit<SerializedOfflineTransaction, `valueEncoding` | `outboxPhase`> & {
       valueEncoding?: unknown
+      outboxPhase?: unknown
     } = JSON.parse(data)
     if (
       valueEncoding !== undefined &&
@@ -140,6 +154,7 @@ export class TransactionSerializer {
         `Unsupported transaction value encoding: ${valueEncoding}`,
       )
     }
+    assertOutboxPhase(outboxPhase)
 
     const createdAt = new Date(parsed.createdAt)
     if (isNaN(createdAt.getTime())) {
@@ -150,6 +165,7 @@ export class TransactionSerializer {
 
     return {
       ...parsed,
+      ...(outboxPhase === undefined ? {} : { outboxPhase }),
       createdAt,
       metadata:
         valueEncoding === 3

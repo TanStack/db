@@ -2,9 +2,12 @@ import { expect, it, vi } from 'vitest'
 import { atOracleCheckpoint, cleanupOfflineOracle } from './oracle-lifecycle'
 
 /**
- * Calibration for offline-oracle ownership. These cases hold or fail cleanup
- * stages to prove deadlines do not claim cancellation, later releases still
- * run, and secondary cleanup errors cannot hide the scenario's primary error.
+ * The offline oracle harness must retain the scenario's primary failure while
+ * reporting cleanup failures separately. A checkpoint timeout records a missed
+ * observation; it does not cancel the underlying operation. The fixed histories
+ * below call the shared harness directly, hold or fail cleanup stages, and check
+ * the reported error and release attempts after cleanup settles. They calibrate
+ * test ownership, not offline transaction or provider behavior.
  */
 
 it(`retains a cleanup error as secondary and still releases later resources`, async () => {
@@ -50,9 +53,54 @@ it(`bounds a lost completion checkpoint and attempts every cleanup stage`, async
     })
     await cleanup
     expect(warning).toHaveBeenCalledOnce()
+    expect(warning).toHaveBeenCalledWith(
+      `Offline oracle cleanup failed after the primary failure:`,
+      [
+        expect.objectContaining({
+          message: `Offline oracle checkpoint timed out: cleanup stage 0`,
+        }),
+      ],
+    )
   } finally {
     warning.mockRestore()
     vi.useRealTimers()
+  }
+})
+
+it(`keeps the scenario failure when cleanup also fails`, async () => {
+  const primary = new Error(`scenario failed`)
+  const firstCleanupFailure = new Error(`first cleanup failed`)
+  const secondCleanupFailure = new Error(`second cleanup failed`)
+  const warning = vi.spyOn(console, `warn`).mockImplementation(() => {})
+  const release = vi.fn()
+  try {
+    const scenario = async () => {
+      try {
+        throw primary
+      } finally {
+        await cleanupOfflineOracle(
+          [
+            () => {
+              throw firstCleanupFailure
+            },
+            () => {
+              throw secondCleanupFailure
+            },
+            release,
+          ],
+          true,
+        )
+      }
+    }
+
+    await expect(scenario()).rejects.toBe(primary)
+    expect(release).toHaveBeenCalledOnce()
+    expect(warning).toHaveBeenCalledWith(
+      `Offline oracle cleanup failed after the primary failure:`,
+      [firstCleanupFailure, secondCleanupFailure],
+    )
+  } finally {
+    warning.mockRestore()
   }
 })
 

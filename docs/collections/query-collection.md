@@ -409,6 +409,12 @@ Derived projections, such as `select: (response) => response.edges.map((edge) =>
 
 The `meta` option allows you to pass additional metadata to your query function. By default, Query Collections automatically include `loadSubsetOptions` in the meta object, which contains filtering, sorting, and pagination options for on-demand queries.
 
+`loadSubsetOptions` is request-scoped. Query functions can read it through
+`ctx.meta`, but it is excluded when Query metadata is serialized for SSR.
+Hydrated Query metadata therefore does not contain the server request options;
+new on-demand requests supply their own options. Other enumerable `meta`
+properties retain TanStack Query's normal dehydration behavior.
+
 Treat `ctx.meta.loadSubsetOptions` and its nested request data as read-only.
 Do not edit expression nodes, ordering options, Dates, byte arrays, or membership
 arrays. Build separate API parameters instead. Core retains request data without

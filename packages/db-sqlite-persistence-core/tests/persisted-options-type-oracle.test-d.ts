@@ -80,6 +80,12 @@ describe(`persisted collection option type oracle`, () => {
     syncedCollection.insert({ id: `row`, rank: `1` } satisfies RowInput)
     const syncedOutput: RowOutput | undefined = syncedCollection.get(`row`)
     void syncedOutput
+
+    // @ts-expect-error transformed output values are not valid schema input
+    syncedCollection.insert({ id: `row`, rank: 1, label: `output` })
+
+    // @ts-expect-error getKey inferred string keys from the schema output
+    syncedCollection.get(1)
   })
 
   it(`keeps schema input and output roles distinct`, () => {

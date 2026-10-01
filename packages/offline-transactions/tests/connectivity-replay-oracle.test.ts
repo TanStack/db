@@ -96,6 +96,8 @@ it.each([`visibilitychange`, `explicit retry`] as const)(
       await atOracleCheckpoint(persistedPromise, `outbox write persisted`)
       const outboxBefore = await env.executor.peekOutbox()
       expect(outboxBefore.map(({ id }) => id)).toEqual([transactionId])
+      // Reach the queued-work boundary before judging hidden eligibility.
+      expect(env.executor.getPendingCount()).toBe(1)
       expect({
         providerCalls: env.mutationCalls.length,
         outboxEntries: outboxBefore.length,

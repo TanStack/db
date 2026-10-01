@@ -1,26 +1,36 @@
 import { fc, test as fcTest } from '@fast-check/vitest'
-import { expect, it } from 'vitest'
+import { describe, expect, it } from 'vitest'
 import { createCollection } from '../src/collection/index.js'
 import { createDeferred } from '../src/deferred.js'
 import { SyncTransactionAbortedError } from '../src/errors.js'
 import { createLiveQueryCollection } from '../src/query/index.js'
 import { createTransaction } from '../src/transactions.js'
-import { oraclePropertyOptions } from './oracle-config.js'
+import {
+  oraclePropertyOptions,
+  oracleRuns,
+  readOracleRunConfig,
+} from './oracle-config.js'
+import { withHistoryCleanup } from './optimistic-history-oracle.js'
 import type { Collection } from '../src/collection/index.js'
 import type { ChangeMessage, SyncConfig } from '../src/types.js'
 
 /**
- * One transaction publishes one coherent row/metadata world.
+ * A metadata-only sync transaction can retire optimistic work. Its resulting
+ * Collection publication must expose one coherent row/metadata world through
+ * subscribeChanges. The established Collection sync metadata and change
+ * subscription contracts supply this law.
  *
- * The model keeps rows and metadata as independent maps, applies an ordered
- * transaction to private copies, and either commits both or aborts both.
- * Multiple writes to one key collapse to one published change. Structured
- * metadata is cloned once per model/driver world so aliases inside a world are
- * preserved without letting production mutate the reference expectation.
+ * The model keeps rows and metadata as independent maps. Each round confirms
+ * one optimistic row update, then commits or aborts its ordered metadata
+ * writes. Repeated metadata writes use the last value; each row publication
+ * has one keyed change message. Structured metadata is cloned once per world.
+ * Aliases remain within each world, while production cannot rewrite the model.
  *
- * The driver observes direct collection state, live-query rows, metadata,
- * exact change batches, and cancellation. Agreement at all of those cuts rules
- * out torn publication that a final row comparison could hide.
+ * The driver observes direct Collection state, live-query rows, metadata,
+ * exact change batches, callback-time row/metadata cuts, and cancellation.
+ * The bounded grammar uses three existing numeric row keys, one to eight
+ * rounds, structured metadata values, and two queued metadata owners. It does
+ * not judge absent source rows, collection metadata, or other provider hosts.
  */
 
 type PublicationRow = {
@@ -62,9 +72,15 @@ type PublicationHarness = {
   rows: Collection<PublicationRow, number>
   liveRows: ReadablePublicationCollection
   batches: Array<Array<ChangeMessage<PublicationRow, string | number>>>
+  cuts: Array<{
+    rows: Array<PublicationRow>
+    metadata: Map<number, unknown>
+  }>
   unsubscribe: () => void
   getSync: () => SyncActions
 }
+
+type PublicationCut = PublicationHarness[`cuts`][number]
 
 type PublishedPublicationRow = PublicationRow & {
   $collectionId: string
@@ -73,6 +89,15 @@ type PublishedPublicationRow = PublicationRow & {
   $synced: boolean
 }
 
+// Grammar controls: the fixed same-key and cancellation witnesses below are
+// reconstructed by these bounded choices. Removing outcome loses abort;
+// removing extra writes loses same-key overwrite and cross-key overlap;
+// removing either cancellation order loses older/newer ownership; removing
+// initial presence loses absent-base and stored-undefined histories. The value
+// choices distinguish falsy, nullish, NaN, scalar, and structured metadata.
+// Keys outside 0..2, zero row deltas, empty cancellation owners, and metadata
+// operations without a sync transaction are excluded. Larger key spaces and
+// longer histories are range extensions, not claims of this bounded grammar.
 const metadataValueArbitrary = fc.oneof(
   fc.constant(undefined),
   fc.constant(null),
@@ -136,6 +161,10 @@ const metadataCancellationArbitrary = fc.record({
   }),
 })
 
+const metadataOnlyProperty = `collection-publication.metadata-only`
+const metadataCancellationProperty = `collection-publication.metadata-cancellation`
+const requestedReplayProperty = readOracleRunConfig().replayProperty
+
 async function createPublicationHarness(): Promise<PublicationHarness> {
   let sync!: SyncActions
   const rows = createCollection<PublicationRow, number>({
@@ -161,13 +190,23 @@ async function createPublicationHarness(): Promise<PublicationHarness> {
 
   const batches: Array<Array<ChangeMessage<PublicationRow, string | number>>> =
     []
+  const cuts: PublicationHarness[`cuts`] = []
   const subscription = rows.subscribeChanges((changes) => {
     batches.push(changes)
+    cuts.push({
+      rows: [...rows.values()]
+        .map(({ id, position }) => ({ id, position }))
+        .sort((a, b) => a.id - b.id),
+      metadata: structuredClone(
+        new Map([0, 1, 2].map((key) => [key, sync.metadata!.row.get(key)])),
+      ),
+    })
   })
   return {
     rows,
     liveRows,
     batches,
+    cuts,
     unsubscribe: () => subscription.unsubscribe(),
     getSync: () => sync,
   }
@@ -248,10 +287,13 @@ async function applyRound(
   model: Map<number, PublicationRow>,
   metadataModel: Map<number, unknown>,
   writeMetadata: MetadataDriver,
+  corruptCut?: (cuts: Array<PublicationCut>) => void,
 ): Promise<void> {
   const previous = model.get(round.key)!
   const next = { ...previous, position: previous.position + round.delta }
   const batchCountBefore = harness.batches.length
+  const cutCountBefore = harness.cuts.length
+  const metadataBefore = observableMetadata(metadataModel, [0, 1, 2])
   const keyWasPreviouslyPublished = harness.batches.some((batch) =>
     batch.some((change) => change.key === round.key),
   )
@@ -302,6 +344,7 @@ async function applyRound(
     }
   }
   await Promise.resolve()
+  corruptCut?.(harness.cuts.slice(cutCountBefore))
   const virtualRow = (
     row: PublicationRow,
     synced: boolean,
@@ -340,6 +383,14 @@ async function applyRound(
       },
     ],
   ])
+  const expectedRows = [...model.values()].sort((a, b) => a.id - b.id)
+  expect(harness.cuts.slice(cutCountBefore)).toEqual([
+    { rows: expectedRows, metadata: metadataBefore },
+    {
+      rows: expectedRows,
+      metadata: observableMetadata(metadataModel, [0, 1, 2]),
+    },
+  ])
   expectUniqueBatchKeys(harness.batches)
   expectPublishedRows(harness, model)
   expect(readMetadata(harness, [0, 1, 2])).toEqual(
@@ -353,6 +404,7 @@ async function applyRound(
 async function runPublicationHistory(
   rounds: ReadonlyArray<PublicationRound>,
   writeMetadata: MetadataDriver = unchangedMetadata,
+  corruptCut?: (cuts: Array<PublicationCut>) => void,
 ): Promise<void> {
   const worlds = metadataWorlds(rounds)
   const harness = await createPublicationHarness()
@@ -360,21 +412,26 @@ async function runPublicationHistory(
     [0, 1, 2].map((id) => [id, { id, position: id }] as const),
   )
   const metadataModel = new Map<number, unknown>()
-  try {
-    for (const [index, round] of worlds.driver.entries()) {
-      await applyRound(
-        harness,
-        round,
-        worlds.model[index]!,
-        model,
-        metadataModel,
-        writeMetadata,
-      )
-    }
-  } finally {
-    harness.unsubscribe()
-    await Promise.all([harness.liveRows.cleanup(), harness.rows.cleanup()])
-  }
+  await withHistoryCleanup(
+    async () => {
+      for (const [index, round] of worlds.driver.entries()) {
+        await applyRound(
+          harness,
+          round,
+          worlds.model[index]!,
+          model,
+          metadataModel,
+          writeMetadata,
+          corruptCut,
+        )
+      }
+    },
+    () => [
+      () => harness.unsubscribe(),
+      () => harness.liveRows.cleanup(),
+      () => harness.rows.cleanup(),
+    ],
+  )
 }
 
 async function expectMetadataCancellationOwnership(
@@ -392,110 +449,124 @@ async function expectMetadataCancellationOwnership(
     initialMetadataState,
   })
   const harness = await createPublicationHarness()
-  const initialMetadata = new Map<number, unknown>()
-  for (const [key, state] of worlds.model.initialMetadataState.entries()) {
-    if (state.present) initialMetadata.set(key, state.value)
-  }
-  const initialSync = harness.getSync()
-  initialSync.begin()
-  for (const [key, state] of worlds.driver.initialMetadataState.entries()) {
-    if (state.present) {
-      initialSync.metadata!.row.set(key, writeMetadata(state.value))
-    }
-  }
-  initialSync.commit()
-  await Promise.resolve()
-
-  const persistence = createDeferred<void>()
-  const heldTransaction = createTransaction({
-    mutationFn: () => persistence.promise,
-  })
-  heldTransaction.mutate(() => {
-    harness.rows.insert({ id: 99, position: 99 })
-  })
-  expect(heldTransaction.state).toBe(`persisting`)
-
-  const stageMetadata = (
-    keys: ReadonlyArray<number>,
-    operation: MetadataOperation,
-    signal?: AbortSignal,
-  ) => {
-    const sync = harness.getSync()
-    sync.begin()
-    for (const key of keys) {
-      if (operation.type === `set`) {
-        sync.metadata!.row.set(key, writeMetadata(operation.value))
-      } else {
-        sync.metadata!.row.delete(key)
+  await withHistoryCleanup(
+    async () => {
+      const initialMetadata = new Map<number, unknown>()
+      for (const [key, state] of worlds.model.initialMetadataState.entries()) {
+        if (state.present) initialMetadata.set(key, state.value)
       }
-    }
-    const receipt = sync.commit(signal)
-    if (receipt === true) {
-      throw new Error(`Persisting optimistic work did not hold metadata sync`)
-    }
-    void receipt.catch(() => undefined)
-    return receipt
-  }
+      const initialSync = harness.getSync()
+      initialSync.begin()
+      for (const [key, state] of worlds.driver.initialMetadataState.entries()) {
+        if (state.present) {
+          initialSync.metadata!.row.set(key, writeMetadata(state.value))
+        }
+      }
+      initialSync.commit()
+      await Promise.resolve()
 
-  const canceledController = new AbortController()
-  const first = canceledFirst
-    ? stageMetadata(
-        canceledKeys,
-        worlds.driver.canceledOperation,
-        canceledController.signal,
+      const persistence = createDeferred<void>()
+      const heldTransaction = createTransaction({
+        mutationFn: () => persistence.promise,
+      })
+      heldTransaction.mutate(() => {
+        harness.rows.insert({ id: 99, position: 99 })
+      })
+      expect(heldTransaction.state).toBe(`persisting`)
+
+      const stageMetadata = (
+        keys: ReadonlyArray<number>,
+        operation: MetadataOperation,
+        signal?: AbortSignal,
+      ) => {
+        const sync = harness.getSync()
+        sync.begin()
+        for (const key of keys) {
+          if (operation.type === `set`) {
+            sync.metadata!.row.set(key, writeMetadata(operation.value))
+          } else {
+            sync.metadata!.row.delete(key)
+          }
+        }
+        const receipt = sync.commit(signal)
+        if (receipt === true) {
+          throw new Error(
+            `Persisting optimistic work did not hold metadata sync`,
+          )
+        }
+        void receipt.catch(() => undefined)
+        return receipt
+      }
+
+      const canceledController = new AbortController()
+      const first = canceledFirst
+        ? stageMetadata(
+            canceledKeys,
+            worlds.driver.canceledOperation,
+            canceledController.signal,
+          )
+        : stageMetadata(retainedKeys, worlds.driver.retainedOperation)
+      const second = canceledFirst
+        ? stageMetadata(retainedKeys, worlds.driver.retainedOperation)
+        : stageMetadata(
+            canceledKeys,
+            worlds.driver.canceledOperation,
+            canceledController.signal,
+          )
+      const canceled = canceledFirst ? first : second
+      const retained = canceledFirst ? second : first
+      const expectedMetadata = new Map(initialMetadata)
+      for (const key of retainedKeys) {
+        if (worlds.model.retainedOperation.type === `set`) {
+          expectedMetadata.set(key, worlds.model.retainedOperation.value)
+        } else {
+          expectedMetadata.delete(key)
+        }
+      }
+
+      await withHistoryCleanup(
+        async () => {
+          const batchCountBefore = harness.batches.length
+          const cutCountBefore = harness.cuts.length
+          const rowsBefore = [...harness.rows.values()]
+
+          canceledController.abort()
+
+          await expect(canceled).rejects.toBeInstanceOf(
+            SyncTransactionAbortedError,
+          )
+          expect(harness.batches).toHaveLength(batchCountBefore)
+          expect(harness.cuts).toHaveLength(cutCountBefore)
+          expect([...harness.rows.values()]).toEqual(rowsBefore)
+          expect(readMetadata(harness, [0, 1, 2])).toEqual(
+            observableMetadata(expectedMetadata, [0, 1, 2]),
+          )
+
+          persistence.resolve()
+          await heldTransaction.isPersisted.promise
+          await expect(retained).resolves.toBeUndefined()
+          expect(readMetadata(harness, [0, 1, 2])).toEqual(
+            observableMetadata(expectedMetadata, [0, 1, 2]),
+          )
+          expectPublishedRows(
+            harness,
+            new Map([0, 1, 2].map((id) => [id, { id, position: id }] as const)),
+          )
+        },
+        () => [
+          () => persistence.resolve(),
+          () => heldTransaction.isPersisted.promise.catch(() => undefined),
+          () => canceled.catch(() => undefined),
+          () => retained.catch(() => undefined),
+        ],
       )
-    : stageMetadata(retainedKeys, worlds.driver.retainedOperation)
-  const second = canceledFirst
-    ? stageMetadata(retainedKeys, worlds.driver.retainedOperation)
-    : stageMetadata(
-        canceledKeys,
-        worlds.driver.canceledOperation,
-        canceledController.signal,
-      )
-  const canceled = canceledFirst ? first : second
-  const retained = canceledFirst ? second : first
-  const expectedMetadata = new Map(initialMetadata)
-  for (const key of retainedKeys) {
-    if (worlds.model.retainedOperation.type === `set`) {
-      expectedMetadata.set(key, worlds.model.retainedOperation.value)
-    } else {
-      expectedMetadata.delete(key)
-    }
-  }
-
-  try {
-    const batchCountBefore = harness.batches.length
-    const rowsBefore = [...harness.rows.values()]
-
-    canceledController.abort()
-
-    await expect(canceled).rejects.toBeInstanceOf(SyncTransactionAbortedError)
-    expect(harness.batches).toHaveLength(batchCountBefore)
-    expect([...harness.rows.values()]).toEqual(rowsBefore)
-    expect(readMetadata(harness, [0, 1, 2])).toEqual(
-      observableMetadata(expectedMetadata, [0, 1, 2]),
-    )
-
-    persistence.resolve()
-    await heldTransaction.isPersisted.promise
-    await expect(retained).resolves.toBeUndefined()
-    expect(readMetadata(harness, [0, 1, 2])).toEqual(
-      observableMetadata(expectedMetadata, [0, 1, 2]),
-    )
-    expectPublishedRows(
-      harness,
-      new Map([0, 1, 2].map((id) => [id, { id, position: id }] as const)),
-    )
-  } finally {
-    persistence.resolve()
-    await heldTransaction.isPersisted.promise.catch(() => undefined)
-    await Promise.all([
-      canceled.catch(() => undefined),
-      retained.catch(() => undefined),
-    ])
-    harness.unsubscribe()
-    await Promise.all([harness.liveRows.cleanup(), harness.rows.cleanup()])
-  }
+    },
+    () => [
+      () => harness.unsubscribe(),
+      () => harness.liveRows.cleanup(),
+      () => harness.rows.cleanup(),
+    ],
+  )
 }
 
 it(`keeps metadata aliases within each independent input world`, () => {
@@ -544,6 +615,23 @@ it(`detects driver mutation of committed metadata without rewriting its authorit
     rounds.map((round) => ({ ...round, outcome: `abort` })),
     mutateDriverMetadata,
   )
+})
+
+it(`rejects a torn callback-time metadata cut even when settled metadata is correct`, async () => {
+  const rounds: Array<PublicationRound> = [
+    {
+      key: 1,
+      delta: 1,
+      metadata: [{ key: 1, type: `set`, value: false }],
+      outcome: `commit`,
+    },
+  ]
+  await expect(
+    runPublicationHistory(rounds, unchangedMetadata, (cuts) => {
+      cuts[1]!.metadata.set(1, undefined)
+    }),
+  ).rejects.toMatchObject({ name: `AssertionError` })
+  await runPublicationHistory(rounds)
 })
 
 it.each(
@@ -630,6 +718,30 @@ it(`publishes one event per key when metadata-only sync retires optimistic work`
   ])
 })
 
+it(`applies the last committed metadata write and discards aborted writes`, async () => {
+  await runPublicationHistory([
+    {
+      key: 1,
+      delta: 2,
+      metadata: [
+        { key: 1, type: `set`, value: `superseded` },
+        { key: 0, type: `set`, value: Number.NaN },
+        { key: 1, type: `set`, value: false },
+      ],
+      outcome: `commit`,
+    },
+    {
+      key: 1,
+      delta: -1,
+      metadata: [
+        { key: 1, type: `delete` },
+        { key: 2, type: `set`, value: `canceled` },
+      ],
+      outcome: `abort`,
+    },
+  ])
+})
+
 it(`releases only canceled metadata keys while another sync remains pending`, async () => {
   await expectMetadataCancellationOwnership(
     [0, 1],
@@ -671,33 +783,73 @@ it(`settles an older metadata owner after canceling the newer owner`, async () =
   )
 })
 
-fcTest.prop(
-  [fc.array(publicationRoundArbitrary, { minLength: 1, maxLength: 8 })],
-  oraclePropertyOptions(50, `collection-publication.metadata-only`),
-)(
-  `keeps metadata-only optimistic settlement a valid keyed diff across histories`,
-  runPublicationHistory,
-)
+const publicationHistoryArbitrary = fc.array(publicationRoundArbitrary, {
+  minLength: 1,
+  maxLength: 8,
+})
 
-fcTest.prop(
-  [metadataCancellationArbitrary],
-  oraclePropertyOptions(50, `collection-publication.metadata-cancellation`),
-)(
-  `keeps metadata suppression owned by the remaining pending transactions`,
-  ({
+type MetadataCancellationHistory =
+  typeof metadataCancellationArbitrary extends fc.Arbitrary<infer THistory>
+    ? THistory
+    : never
+
+const runCancellationHistory = ({
+  canceledKeys,
+  retainedKeys,
+  canceledOperation,
+  retainedOperation,
+  canceledFirst,
+  initialMetadata,
+}: MetadataCancellationHistory) =>
+  expectMetadataCancellationOwnership(
     canceledKeys,
     retainedKeys,
     canceledOperation,
     retainedOperation,
     canceledFirst,
     initialMetadata,
-  }) =>
-    expectMetadataCancellationOwnership(
-      canceledKeys,
-      retainedKeys,
-      canceledOperation,
-      retainedOperation,
-      canceledFirst,
-      initialMetadata,
-    ),
-)
+  )
+
+describe(`generated metadata publication histories`, () => {
+  if (requestedReplayProperty === undefined) {
+    fcTest.prop([publicationHistoryArbitrary], {
+      numRuns: oracleRuns(50),
+      seed: 1_805_001,
+    })(
+      `keeps metadata-only optimistic settlement a valid keyed diff (fixed)`,
+      runPublicationHistory,
+    )
+    fcTest.prop(
+      [publicationHistoryArbitrary],
+      oraclePropertyOptions(50, metadataOnlyProperty),
+    )(
+      `keeps metadata-only optimistic settlement a valid keyed diff (random)`,
+      runPublicationHistory,
+    )
+
+    fcTest.prop([metadataCancellationArbitrary], {
+      numRuns: oracleRuns(50),
+      seed: 1_805_002,
+    })(
+      `keeps metadata suppression owned by pending transactions (fixed)`,
+      runCancellationHistory,
+    )
+    fcTest.prop(
+      [metadataCancellationArbitrary],
+      oraclePropertyOptions(50, metadataCancellationProperty),
+    )(
+      `keeps metadata suppression owned by pending transactions (random)`,
+      runCancellationHistory,
+    )
+  } else if (requestedReplayProperty === metadataOnlyProperty) {
+    fcTest.prop(
+      [publicationHistoryArbitrary],
+      oraclePropertyOptions(50, metadataOnlyProperty),
+    )(`replays metadata-only optimistic settlement`, runPublicationHistory)
+  } else if (requestedReplayProperty === metadataCancellationProperty) {
+    fcTest.prop(
+      [metadataCancellationArbitrary],
+      oraclePropertyOptions(50, metadataCancellationProperty),
+    )(`replays metadata cancellation ownership`, runCancellationHistory)
+  }
+})

@@ -71,8 +71,7 @@ export class MultiSet<T> {
    * - Keyed: every record is a `[key, value]` pair with a string or number
    *   key. Keys and primitive values compare by value, and object values by
    *   reference. A value that is an array of length 2 is a join tuple, and
-   *   its two elements compare by the same rule. The keyed identity text
-   *   has known collisions: https://github.com/TanStack/db/issues/1948
+   *   its two elements compare by the same rule.
    * - Unkeyed, one primitive type: every record is a string, or every record
    *   is a number. Records compare as `Map` keys do, and a `-0` record is
    *   returned as `0`.
@@ -95,13 +94,20 @@ export class MultiSet<T> {
           (typeof data[0] === `string` || typeof data[0] === `number`),
       )
     ) {
+      const referenceIds = new Map<object | symbol, number>()
       return consolidateBy(inner, (data) => {
         const [key, value] = data as [string | number, unknown]
-        const valueId =
-          Array.isArray(value) && value.length === 2
-            ? `${getStringId(value[0])}|${getStringId(value[1])}`
-            : getStringId(value)
-        return key + `|` + valueId
+        // Length prefixes keep user text from crossing component boundaries.
+        let valueId: string
+        if (Array.isArray(value) && value.length === 2) {
+          const firstId = getStringId(value[0], referenceIds)
+          const secondId = getStringId(value[1], referenceIds)
+          valueId = `tuple_${firstId.length}:${firstId}${secondId}`
+        } else {
+          valueId = `leaf_${getStringId(value, referenceIds)}`
+        }
+        const keyId = getStringId(key, referenceIds)
+        return `${keyId.length}:${keyId}${valueId}`
       })
     }
 

@@ -6,6 +6,8 @@ import {
 import type { OfflineTransaction, StorageAdapter } from '../types'
 import type { Collection } from '@tanstack/db'
 
+export class OutboxTransactionNotFoundError extends Error {}
+
 export class OutboxManager {
   private storage: StorageAdapter
   private serializer: TransactionSerializer
@@ -158,7 +160,7 @@ export class OutboxManager {
     return withSpan(`outbox.update`, { 'transaction.id': id }, async () => {
       const existing = await this.get(id)
       if (!existing) {
-        throw new Error(`Transaction ${id} not found`)
+        throw new OutboxTransactionNotFoundError(`Transaction ${id} not found`)
       }
 
       const updated = { ...existing, ...updates }

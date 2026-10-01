@@ -12,6 +12,13 @@
  * TANSTACK_DB_DRIVER_FAIRNESS_PATH replaces those lanes with one checked
  * seed+shrink-path replay. An axis-removal calibration proves that removing
  * tail-order variation loses hydrate-before-later-persist histories.
+ * The shared fixture holds the first `BEGIN IMMEDIATE` while cold `preload()`
+ * calls queue. This file supplies BetterSQLite; the receiving witness in
+ * `../e2e/shared-driver-fairness.opfs.spec.ts` uses the same fixture with a
+ * Chromium OPFSCoopSyncVFS worker after release. It checks rows and K=1 cuts.
+ * Generated failures record the original and reduced histories with their
+ * violated laws and checkpoints; the report says whether shrinking retained
+ * that violation. The full logical persist completion order checks lane FIFO.
  */
 import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
@@ -49,6 +56,24 @@ type FairnessPropertyMode = {
   label: `fixed-seed` | `seedless-random` | `checked-replay`
   seed?: number
   path?: string
+}
+
+class FairnessOracleFailure extends Error {
+  constructor(
+    readonly law: string,
+    readonly checkpoint: string,
+    cause: unknown,
+  ) {
+    super(cause instanceof Error ? cause.message : String(cause), { cause })
+  }
+}
+
+function checkAt(law: string, checkpoint: string, assertion: () => void): void {
+  try {
+    assertion()
+  } catch (error) {
+    throw new FairnessOracleFailure(law, checkpoint, error)
+  }
 }
 
 function readFairnessReplayConfig(
@@ -196,16 +221,10 @@ async function withNodeScenario(
 
   if (primaryFailure !== undefined) {
     if (nodeCleanupFailure !== undefined) {
-      const primaryMessage =
-        primaryFailure instanceof Error
-          ? primaryFailure.message
-          : String(primaryFailure)
-      const cleanupMessage =
-        nodeCleanupFailure instanceof Error
-          ? nodeCleanupFailure.message
-          : String(nodeCleanupFailure)
-      throw new Error(
-        `${primaryMessage}; node cleanup diagnostics: ${cleanupMessage}`,
+      throw new AggregateError(
+        [primaryFailure, nodeCleanupFailure],
+        `primary: ${String(primaryFailure)}; node cleanup diagnostics: ${String(nodeCleanupFailure)}`,
+        { cause: primaryFailure },
       )
     }
     throw primaryFailure
@@ -217,35 +236,81 @@ function expectObservationReach(
   observation: SharedDriverFairnessObservation,
 ): void {
   const expectedHydrates = expectedHydratedCollections(observation.scenario)
-  expect(observation.admittedHydrateIds).toEqual(
-    expectedHydrates.map(({ collectionId }) => collectionId),
+  checkAt(`hydrate admission IDs`, `after all preload requests`, () =>
+    expect(observation.admittedHydrateIds).toEqual(
+      expectedHydrates.map(({ collectionId }) => collectionId),
+    ),
   )
-  expect(observation.hydrationCompletions).toHaveLength(expectedHydrates.length)
+  checkAt(`hydrate completion count`, `after all preloads`, () =>
+    expect(observation.hydrationCompletions).toHaveLength(
+      expectedHydrates.length,
+    ),
+  )
   // Actual rows come from the public Collection after preload. The expected
   // rows above are derived independently from the generated seed history.
-  expect(observation.hydratedCollections).toEqual(expectedHydrates)
+  checkAt(`hydrated public rows`, `after all preloads`, () =>
+    expect(observation.hydratedCollections).toEqual(expectedHydrates),
+  )
 }
 
 function expectFairObservation(
   observation: SharedDriverFairnessObservation,
 ): void {
   expectObservationReach(observation)
+  const expectedPersistIds = observation.scenario.work
+    .filter((work) => work.kind === `persist`)
+    .map((work) => `${observation.scenario.id}-${work.id}`)
+  checkAt(`persist FIFO completion order`, `after all work settled`, () =>
+    expect(
+      observation.logicalCompletionOrder
+        .filter((entry) => entry.startsWith(`persist:`))
+        .map((entry) => entry.slice(`persist:`.length)),
+    ).toEqual(expectedPersistIds),
+  )
   const violation = findSharedDriverFairnessViolation(
     observation,
     SHARED_DRIVER_FAIRNESS_BOUND,
   )
   if (violation) {
-    throw new Error(
-      `shared-driver fairness mismatch at ${violation.checkpoint.collectionId}: ` +
-        `${violation.checkpoint.completedPersistIds.length} persists completed ` +
-        `(maximum ${violation.expectedMaximumCompletedPersists}), ` +
-        `${violation.checkpoint.pendingPersistCount} remained pending ` +
-        `(minimum ${violation.expectedMinimumPendingPersists}); ` +
-        `permitted completed ids: ${JSON.stringify(violation.permittedCompletedPersistIds)}; ` +
-        `cleanup diagnostics: ${JSON.stringify(observation.cleanupFailures)}`,
+    const checkpointIndex = observation.hydrationCompletions.indexOf(
+      violation.checkpoint,
+    )
+    const violatedLaws: Array<string> = []
+    if (violation.checkpoint.collectionId !== violation.expectedCollectionId) {
+      violatedLaws.push(`hydrate FIFO identity`)
+    }
+    if (
+      violation.checkpoint.completedPersistIds.length >
+      violation.expectedMaximumCompletedPersists
+    ) {
+      violatedLaws.push(`K=1 completed-persist bound`)
+    }
+    if (
+      violation.checkpoint.pendingPersistCount <
+      violation.expectedMinimumPendingPersists
+    ) {
+      violatedLaws.push(`K=1 pending-persist backlog`)
+    }
+    if (violation.unexpectedCompletedPersistIds.length > 0) {
+      violatedLaws.push(`completed persist outside permitted prefix`)
+    }
+    throw new FairnessOracleFailure(
+      violatedLaws.join(`; `),
+      `hydrate completion ${checkpointIndex}`,
+      new Error(
+        `shared-driver fairness mismatch at ${violation.checkpoint.collectionId}: ` +
+          `${violation.checkpoint.completedPersistIds.length} persists completed ` +
+          `(maximum ${violation.expectedMaximumCompletedPersists}), ` +
+          `${violation.checkpoint.pendingPersistCount} remained pending ` +
+          `(minimum ${violation.expectedMinimumPendingPersists}); ` +
+          `permitted completed ids: ${JSON.stringify(violation.permittedCompletedPersistIds)}; ` +
+          `cleanup diagnostics: ${JSON.stringify(observation.cleanupFailures)}`,
+      ),
     )
   }
-  expect(observation.cleanupFailures).toEqual([])
+  checkAt(`driver cleanup`, `after observation`, () =>
+    expect(observation.cleanupFailures).toEqual([]),
+  )
 }
 
 function buildGeneratedHistory(
@@ -318,6 +383,29 @@ function reachesHydrateBeforeLaterPersist(
 const generatedHistoryArbitrary = createGeneratedHistoryArbitrary(`varied`)
 const tailOrderAblatedArbitrary = createGeneratedHistoryArbitrary(`removed`)
 let generatedPropertyExecutions = 0
+type GeneratedFailureRecord = {
+  law: string
+  checkpoint: string
+  history: string
+  message: string
+}
+const generatedFailureRecords: Array<GeneratedFailureRecord> = []
+
+function recordGeneratedFailure(error: unknown, history: string): void {
+  const primary = error instanceof AggregateError ? error.cause : error
+  generatedFailureRecords.push({
+    law:
+      primary instanceof FairnessOracleFailure
+        ? primary.law
+        : `unclassified driver or setup failure`,
+    checkpoint:
+      primary instanceof FairnessOracleFailure
+        ? primary.checkpoint
+        : `before classified refinement check`,
+    history,
+    message: error instanceof Error ? error.message : String(error),
+  })
+}
 
 const generatedFairnessProperty = fc.asyncProperty(
   generatedHistoryArbitrary,
@@ -332,11 +420,16 @@ const generatedFairnessProperty = fc.asyncProperty(
     const observationId =
       `generated-h${hydrateCount}-p${persistCount}-m${mutationsPerPersist}-` +
       replayHistory.replaceAll(`,`, `-`)
-    await withNodeScenario(
-      createScenario(observationId, orderedKinds, mutationsPerPersist),
-      expectFairObservation,
-      fairnessCalibration,
-    )
+    try {
+      await withNodeScenario(
+        createScenario(observationId, orderedKinds, mutationsPerPersist),
+        expectFairObservation,
+        fairnessCalibration,
+      )
+    } catch (error) {
+      recordGeneratedFailure(error, replayHistory)
+      throw error
+    }
   },
 )
 
@@ -418,6 +511,9 @@ describe(`shared BrowserWASQLiteDriver fairness oracle`, () => {
       replayHistory: `p0,p1,p2,p3,h0,h1`,
     })
 
+    // Fixing hydrate count at two loses later completion checkpoints. Fixing
+    // persist count at three loses larger backlogs. Fixing mutation width at
+    // one loses multi-row work inside one logical persist.
     const marginalHistories = [
       buildGeneratedHistory(2, 3, 1, [
         { kind: `persist`, token: `p1` },
@@ -475,27 +571,116 @@ describe(`shared BrowserWASQLiteDriver fairness oracle`, () => {
     )
   })
 
-  it(`completes a pending cold hydrate before an unrelated persist backlog drains`, async () => {
-    await withNodeScenario(
-      createScenario(
-        `fixed-persist-storm`,
-        [`persist`, `persist`, `persist`, `hydrate`, `hydrate`],
-        2,
-      ),
-      expectFairObservation,
+  it(`completes a pending cold hydrate before an unrelated persist backlog drains and distinguishes K=1 from K=2`, async () => {
+    const scenario = createScenario(
+      `fixed-persist-storm`,
+      [`persist`, `persist`, `persist`, `hydrate`, `hydrate`],
+      2,
     )
+    await withNodeScenario(scenario, (observation) => {
+      expectFairObservation(observation)
+
+      // A K=2 scheduler could finish the third persist before the second
+      // hydrate. K=1 must leave it pending at that logical checkpoint.
+      const secondHydrate = observation.hydrationCompletions[1]!
+      expect(secondHydrate.pendingPersistCount).toBeGreaterThan(0)
+      const completedPersistIds = scenario.work
+        .filter((work) => work.kind === `persist`)
+        .map((work) => `${scenario.id}-${work.id}`)
+      expect(observation.hydrationCompletions[0]?.completedPersistIds).toEqual(
+        completedPersistIds.slice(0, 1),
+      )
+      const k2WrongAnswer = {
+        ...observation,
+        logicalCompletionOrder: [
+          `persist:${completedPersistIds[0]}`,
+          `hydrate:${observation.hydrationCompletions[0]!.collectionId}`,
+          `persist:${completedPersistIds[1]}`,
+          `persist:${completedPersistIds[2]}`,
+          `hydrate:${secondHydrate.collectionId}`,
+        ],
+        hydrationCompletions: [
+          observation.hydrationCompletions[0]!,
+          {
+            ...secondHydrate,
+            completionOrdinal: 4,
+            completedPersistIds,
+            pendingPersistCount: 0,
+          },
+        ],
+      }
+      expect(findSharedDriverFairnessViolation(k2WrongAnswer)).toMatchObject({
+        checkpoint: k2WrongAnswer.hydrationCompletions[1],
+        expectedMaximumCompletedPersists: 2,
+        expectedMinimumPendingPersists: 1,
+      })
+      expect(
+        findSharedDriverFairnessViolation(k2WrongAnswer, 2),
+      ).toBeUndefined()
+
+      const swappedPersistOrder = observation.logicalCompletionOrder.map(
+        (entry) => {
+          if (entry === `persist:${completedPersistIds[1]}`) {
+            return `persist:${completedPersistIds[2]}`
+          }
+          if (entry === `persist:${completedPersistIds[2]}`) {
+            return `persist:${completedPersistIds[1]}`
+          }
+          return entry
+        },
+      )
+      let orderFailure: unknown
+      try {
+        expectFairObservation({
+          ...observation,
+          logicalCompletionOrder: swappedPersistOrder,
+        })
+      } catch (error) {
+        orderFailure = error
+      }
+      expect(orderFailure).toMatchObject({
+        law: `persist FIFO completion order`,
+        checkpoint: `after all work settled`,
+      })
+    })
   })
 
   it.each(fairnessPropertyModes)(
     `bounds persist completions for generated ordered cold-hydrate/persist histories in $label mode`,
     async (mode) => {
       const executionsBefore = generatedPropertyExecutions
-      await fc.assert(generatedFairnessProperty, {
+      const failuresBefore = generatedFailureRecords.length
+      const result = await fc.check(generatedFairnessProperty, {
         numRuns: GENERATED_RUNS,
         verbose: 2,
         ...(mode.seed === undefined ? {} : { seed: mode.seed }),
         ...(mode.path === undefined ? {} : { path: mode.path }),
       })
+      if (result.failed) {
+        const failures = generatedFailureRecords.slice(failuresBefore)
+        const original = failures[0]
+        const reduced = failures.at(-1)
+        const sameViolation =
+          original !== undefined &&
+          reduced !== undefined &&
+          original.law !== `unclassified driver or setup failure` &&
+          original.law === reduced.law &&
+          original.checkpoint === reduced.checkpoint
+        const reductionOutcome =
+          result.numShrinks === 0
+            ? `no reduction`
+            : sameViolation
+              ? `same law and checkpoint`
+              : `different failure or unreached checkpoint`
+        throw new Error(
+          `shared-driver fairness property failed in ${mode.label} mode; ` +
+            `seed=${result.seed}, shrink path=${result.counterexamplePath ?? `none`}; ` +
+            `original=${JSON.stringify(original ?? null)}; ` +
+            `reduced=${JSON.stringify(reduced ?? null)}; ` +
+            `reduction outcome=${reductionOutcome}`,
+          { cause: result.errorInstance },
+        )
+      }
       expect(generatedPropertyExecutions).toBeGreaterThan(executionsBefore)
     },
   )

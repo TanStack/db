@@ -2,7 +2,10 @@ import { QueryClient, QueryObserver } from '@tanstack/query-core'
 import fc from 'fast-check'
 import { describe, expect, it, vi } from 'vitest'
 import { createDeferred } from '../../db/src/deferred.js'
-import { oraclePropertyOptions } from '../../db/tests/oracle-config.js'
+import {
+  oraclePropertyOptions,
+  readOracleRunConfig,
+} from '../../db/tests/oracle-config.js'
 import { createCursorPager } from '../src/index.js'
 import { createBackend } from './cursor-pagination/backend.js'
 import { expectedRows } from './cursor-pagination/model.js'
@@ -20,9 +23,49 @@ import type { Row } from './cursor-pagination/model.js'
  * fixture backends make stale cursor use visible. The full-relation model still
  * owns row truth; this file adds generation, cancellation, and publication
  * observations rather than copying Query's cache state.
+ *
+ * The forced-refresh and repeated-continuation laws come from
+ * cursor-pagination/README.md and createCursorPager's documented contract.
+ * The coverage map assigns bounded slice work to this owner: on cached
+ * immutable pages, reading a requested slice visits only its rows. These
+ * controlled sequences do not establish
+ * snapshot consistency for changing endpoints or browser transport behavior;
+ * the browser and live-window owners are listed in oracle-coverage.md.
+ *
+ * History grammar: page size 1–4 and depth 1–3/4 ensure a held growth or
+ * final-page response; refresh crosses cancellation and retained/new pagers,
+ * while malformed final tokens cross phase, earlier-token position, and Query
+ * retry. Cancellation distinguishes supported forced refresh from the stale
+ * publication control. Pager identity distinguishes queued same-pager reads
+ * from cache-sharing peers. Size and depth vary the page boundary and loaded
+ * prefix. Growth and refresh enter the malformed final page from different
+ * cache states; token position selects which earlier page repeats, and retry
+ * checks that another Query attempt cannot publish the malformed response.
+ * A size-one/depth-one history reconstructs each refresh cell; size one,
+ * depth four, and repeat 0–3 reconstruct every earlier-token position in both
+ * malformed phases. The slice grammar covers counts 1–100, offsets 0–120,
+ * and limits 0–120 or undefined; its zero, past-end, and unlimited margins
+ * distinguish empty, bounded, and draining reads. An invented/foreign cursor
+ * is outside this legal backend grammar and belongs to the boundary oracle.
  */
 
 const scope = { group: undefined, descending: false }
+const fixedSeed = 1_779_015
+const replay = readOracleRunConfig()
+
+/** Both ordinary campaigns use the same generator, checker, and run budget. */
+async function assertPublicationProperty<Ts>(
+  property: fc.IAsyncProperty<Ts>,
+  runs: number,
+  name: string,
+): Promise<void> {
+  if (replay.replayPath !== undefined && replay.replayProperty !== name) return
+  const options = oraclePropertyOptions(runs, name)
+  if (replay.replaySeed === undefined)
+    await fc.assert(property, { ...options, seed: fixedSeed })
+  await fc.assert(property, options)
+}
+
 const rowsFor = (count: number, version = 0): Array<Row> =>
   Array.from({ length: count }, (_, id) => ({ id, rank: id, group: version }))
 const createClient = () =>
@@ -32,6 +75,40 @@ const createClient = () =>
     },
   })
 
+async function checkCachedSlice(
+  count: number,
+  offset: number,
+  limit: number | undefined,
+): Promise<void> {
+  const client = createClient()
+  const rows = rowsFor(count)
+  let visits = 0
+  const observed = rows.map((row) => row)
+  for (let index = 0; index < count; index++) {
+    Object.defineProperty(observed, index, {
+      enumerable: true,
+      get: () => {
+        visits++
+        return rows[index]
+      },
+    })
+  }
+  const pager = createCursorPager({
+    queryClient: client,
+    queryKey: [`slice`],
+    fetchPage: () => Promise.resolve({ rows: observed, nextCursor: null }),
+  })
+  try {
+    await pager.read({})
+    visits = 0
+    const expected = expectedRows(rows, scope, { offset, limit })
+    expect(await pager.read({ offset, limit })).toEqual(expected)
+    expect(visits).toBe(expected.length)
+  } finally {
+    client.clear()
+  }
+}
+
 describe(`cursor cache publication`, () => {
   it.each(
     [true, false].flatMap((cancel) =>
@@ -40,7 +117,7 @@ describe(`cursor cache publication`, () => {
   )(
     `force refresh requires cancellation of held growth: $cancel/$sharedPager`,
     async ({ cancel, sharedPager }) => {
-      await fc.assert(
+      await assertPublicationProperty(
         fc.asyncProperty(
           fc.integer({ min: 1, max: 4 }),
           fc.integer({ min: 1, max: 3 }),
@@ -169,7 +246,8 @@ describe(`cursor cache publication`, () => {
             }
           },
         ),
-        oraclePropertyOptions(50, `cursor-pagination.refresh-publication`),
+        50,
+        `cursor-pagination.refresh-publication`,
       )
     },
   )
@@ -177,7 +255,7 @@ describe(`cursor cache publication`, () => {
   it.each([`growth`, `refresh`] as const)(
     `%s rejects malformed final continuations without poisoning the cache`,
     async (phase) => {
-      await fc.assert(
+      await assertPublicationProperty(
         fc.asyncProperty(
           fc.integer({ min: 1, max: 4 }),
           fc.integer({ min: 1, max: 4 }),
@@ -288,49 +366,27 @@ describe(`cursor cache publication`, () => {
             }
           },
         ),
-        oraclePropertyOptions(50, `cursor-pagination.protocol-publication`),
+        50,
+        `cursor-pagination.protocol-publication`,
       )
     },
   )
 
   it(`cached slices visit only requested rows`, async () => {
-    await fc.assert(
+    await assertPublicationProperty(
       fc.asyncProperty(
         fc.integer({ min: 1, max: 100 }),
         fc.nat({ max: 120 }),
         fc.option(fc.nat({ max: 120 }), { nil: undefined }),
-        async (count, offset, limit) => {
-          const client = createClient()
-          const rows = rowsFor(count)
-          let visits = 0
-          const observed = rows.map((row) => row)
-          for (let index = 0; index < count; index++) {
-            Object.defineProperty(observed, index, {
-              enumerable: true,
-              get: () => {
-                visits++
-                return rows[index]
-              },
-            })
-          }
-          const pager = createCursorPager({
-            queryClient: client,
-            queryKey: [`slice`],
-            fetchPage: () =>
-              Promise.resolve({ rows: observed, nextCursor: null }),
-          })
-          try {
-            await pager.read({})
-            visits = 0
-            const expected = expectedRows(rows, scope, { offset, limit })
-            expect(await pager.read({ offset, limit })).toEqual(expected)
-            expect(visits).toBe(expected.length)
-          } finally {
-            client.clear()
-          }
-        },
+        checkCachedSlice,
       ),
-      oraclePropertyOptions(100, `cursor-pagination.slice-work`),
+      100,
+      `cursor-pagination.slice-work`,
     )
+  })
+
+  it(`a one-row cached slice does not visit its preceding row`, async () => {
+    // A full-prefix traversal visits two rows; the requested slice visits one.
+    await checkCachedSlice(2, 1, 1)
   })
 })

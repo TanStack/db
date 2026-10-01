@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
 import { setImmediate } from 'node:timers/promises'
 import { fileURLToPath } from 'node:url'
+import { stripVTControlCharacters } from 'node:util'
 import fc from 'fast-check'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { oracleReplayManifest } from './oracle-replay-manifest.js'
@@ -38,6 +39,7 @@ function runReplay(
   args: Array<string> = [fixture],
   fault?: string,
   property = `oracle-replay.calibration`,
+  cleanupFailure = false,
 ): { status: number | null; output: string } {
   const result = spawnSync(
     process.execPath,
@@ -58,6 +60,9 @@ function runReplay(
         TANSTACK_DB_ORACLE_PATH: `0`,
         TANSTACK_DB_ORACLE_PROPERTY: property,
         TANSTACK_DB_ORACLE_REPLAY_CALIBRATION: fault,
+        TANSTACK_DB_ORACLE_REPLAY_TEST_CLEANUP_FAILURE: cleanupFailure
+          ? `1`
+          : undefined,
       },
       encoding: `utf8`,
       timeout: 30_000,
@@ -71,6 +76,54 @@ describe(`guarded oracle replay`, () => {
   // spawnSync blocks the worker. Let progress replies arrive between complete
   // replays instead of starving Vitest's RPC channel across the whole suite.
   afterEach(() => setImmediate())
+
+  it(`runs a named replay directly without the owner's fixed campaign`, () => {
+    const result = runReplay([fixture])
+    expect(result.status, result.output).toBe(0)
+    expect(result.output).toContain(`"executions":1`)
+    expect(result.output).not.toContain(`unrelated fixed campaign ran`)
+  }, 40_000)
+
+  it(`intersects a caller alternation with the named replay lane`, () => {
+    const result = runReplay([
+      fixture,
+      `-t`,
+      `does-not-exist|replay calibration property`,
+    ])
+    expect(result.status, result.output).toBe(0)
+    expect(result.output).toContain(`"executions":1`)
+  }, 40_000)
+
+  it.each([
+    [`index-update.reference-model`, `tests/index-update.property.test.ts`, 2],
+    [`index-update.exact-identity`, `tests/index-update.property.test.ts`, 2],
+    [
+      `index-update.custom-comparator`,
+      `tests/index-update.property.test.ts`,
+      2,
+    ],
+    [
+      `pagination.matrix.window-0`,
+      `tests/query/pagination-oracle.property.test.ts`,
+      1,
+    ],
+    [
+      `pagination.matrix.state-7`,
+      `tests/query/pagination-oracle.property.test.ts`,
+      1,
+    ],
+  ] as const)(
+    `selects only the requested %s replay lane`,
+    (property, file, expectedTests) => {
+      const result = runReplay([file], undefined, property)
+      expect(result.status, result.output).toBe(0)
+      expect(result.output).toContain(`"executions":${expectedTests}`)
+      expect(stripVTControlCharacters(result.output)).toMatch(
+        new RegExp(`Tests\\s+${expectedTests} passed \\| \\d+ skipped`),
+      )
+    },
+    40_000,
+  )
 
   it.each([
     [
@@ -167,7 +220,6 @@ describe(`guarded oracle replay`, () => {
   it.each([
     [`property`, `replay property sentinel`],
     [`setup`, `replay setup sentinel`],
-    [`unrelated`, `replay unrelated sentinel`],
     [`precondition`, `too many pre-condition failures`],
   ])(
     `preserves a %s failure`,
@@ -175,7 +227,7 @@ describe(`guarded oracle replay`, () => {
       const result = runReplay([fixture], fault)
       expect(result.status, result.output).toBe(1)
       expect(result.output).toContain(message)
-      if (fault === `property` || fault === `unrelated`) {
+      if (fault === `property`) {
         expect(result.output).toContain(`"executions":1`)
       } else {
         expect(result.output).toContain(`"executions":0`)
@@ -183,6 +235,24 @@ describe(`guarded oracle replay`, () => {
     },
     40_000,
   )
+
+  it(`does not run an unrelated failing assertion during direct replay`, () => {
+    const result = runReplay([fixture], `unrelated`)
+    expect(result.status, result.output).toBe(0)
+    expect(result.output).not.toContain(`replay unrelated sentinel`)
+    expect(result.output).toContain(`"executions":1`)
+  }, 40_000)
+
+  it(`reports the original failed replay and a later cleanup failure separately`, () => {
+    const result = runReplay([fixture], `property`, undefined, true)
+    expect(result.status, result.output).toBe(1)
+    expect(result.output).toContain(`replay property sentinel`)
+    expect(result.output).toContain(`oracle replay property failed`)
+    expect(result.output).toContain(
+      `oracle replay failed and cleanup also failed`,
+    )
+    expect(result.output).toContain(`replay cleanup sentinel`)
+  }, 40_000)
 
   it.each([
     [`coverage-registry.claim-churn`, `no-named-owner`],
@@ -294,9 +364,66 @@ describe(`named oracle replay manifest`, () => {
         expect(source).toContain(`${prefix}.${law}.\${q1Shape}.\${q2Shape}`)
         expect(source).toContain(`\`${q1}\``)
         expect(source).toContain(`\`${q2}\``)
+      } else if (entry.property.startsWith(`includes.matrix.`)) {
+        const computedFamilies = [
+          [`independent-`, `includes.matrix.independent-\${shape}`],
+          [`destination-`, `includes.matrix.destination-\${history}`],
+          [
+            `retired-route-`,
+            `includes.matrix.retired-route-\${depth}-\${sourceBranch}`,
+          ],
+          [
+            `intra-batch-route-`,
+            `includes.matrix.intra-batch-route-\${depth}-\${sourceBranch}`,
+          ],
+          [
+            `moved-child-`,
+            `includes.matrix.moved-child-\${depth}-\${targetLevel}-\${sourceBranch}`,
+          ],
+          [
+            `batch-`,
+            `includes.matrix.batch-\${publicId}-\${route}-\${ancestorUpdate}`,
+          ],
+          [`full-row-`, `includes.matrix.full-row-\${depth}`],
+          [
+            `visible-`,
+            `includes.matrix.visible-\${depth}-\${transition}-\${targetLevel}`,
+          ],
+          [
+            `transition-`,
+            `includes.matrix.transition-\${depth}-\${firstTransition}-\${secondTransition}-\${sourceBranch}`,
+          ],
+        ] as const
+        const family = computedFamilies.find(([prefix]) =>
+          entry.property.startsWith(`includes.matrix.${prefix}`),
+        )
+        if (family === undefined) {
+          expect(entry.property).toBe(`includes.matrix.flat-materialization`)
+        }
+        expect(source).toContain(
+          family?.[1] ?? `includes.matrix.flat-materialization`,
+        )
+      } else if (entry.property.startsWith(`pagination.matrix.`)) {
+        const [, , familyCell] = entry.property.split(`.`)
+        const [family, cell] = familyCell!.split(`-`)
+        expect([`window`, `state`]).toContain(family)
+        expect(Number(cell)).toBeGreaterThanOrEqual(0)
+        expect(Number(cell)).toBeLessThan(8)
+        expect(source).toContain(`\`pagination.matrix.${family}-\${index}\``)
       } else {
         expect(source).toContain(`\`${entry.property}\``)
       }
+    }
+  })
+
+  it(`gives every index and pagination matrix property a direct test selector`, () => {
+    const direct = oracleReplayManifest.filter(({ property }) =>
+      /^(index-update|pagination\.matrix)\./.test(property),
+    )
+    expect(direct).toHaveLength(19)
+    for (const entry of direct) {
+      expect(entry.status).toBe(`assertion`)
+      expect(entry.testNamePattern).toBeDefined()
     }
   })
 })

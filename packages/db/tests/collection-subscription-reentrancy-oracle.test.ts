@@ -121,6 +121,7 @@ describe(`Collection subscription callback reentry oracle`, () => {
         expect(publications).toEqual([])
         expect(loads).toHaveLength(1)
         expect(unloads).toEqual(loads)
+        expect(loads[0]?.signal?.aborted).toBe(true)
         expect(reads).toHaveBeenCalledTimes(
           phase === `loadSubset` ||
             phase === `onLoadSubsetResult` ||
@@ -272,6 +273,7 @@ describe(`Collection subscription callback reentry oracle`, () => {
   it(`does not start delegated replay after status reentry retires its only demand`, async () => {
     const requestedWhere = where()
     const delegate: Array<`start` | `succeed`> = []
+    let statusReentries = 0
     let operations!: Parameters<SyncConfig<{ id: string }>[`sync`]>[0]
     const collection = createCollection<{ id: string }>({
       id: `reentrant-replay-status-release`,
@@ -296,11 +298,13 @@ describe(`Collection subscription callback reentry oracle`, () => {
     try {
       subscription.requestSnapshot({ where: requestedWhere })
       subscription.on(`status:loadingSubset`, () => {
+        statusReentries++
         subscription.releaseSnapshot(requestedWhere)
       })
       operations.begin()
       operations.truncate()
       operations.commit()
+      expect(statusReentries).toBe(1)
       expect(delegate).toEqual([`succeed`])
     } finally {
       subscription.unsubscribe()

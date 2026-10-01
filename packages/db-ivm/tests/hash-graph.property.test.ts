@@ -4,16 +4,49 @@ import { hash } from '../src/hashing/hash'
 
 /**
  * Structural hash follows the reachable value graph, not object identity.
+ * This is the established structural-value contract recorded in the oracle
+ * coverage map: equal acyclic values have equal hashes, reachable cycles
+ * reject, and a failed traversal publishes no reusable sibling hashes.
  *
  * A small adjacency list is the model. Kahn's algorithm independently decides
  * whether the root-reachable graph is acyclic. Acyclic sharing is unfolded into
  * equal fresh trees and must hash the same; a reachable cycle must reject on
  * every attempt, while an unreachable cycle is irrelevant. Named witnesses
  * keep rare topology classes present even when random generation misses them.
+ * The generated topology claim is limited to plain objects with numeric
+ * labels and array edges, at most six nodes and three edges per node. Fixed
+ * cases also cover cycle rejection through other containers. This file does
+ * not establish collision freedom or complexity limits.
  */
 
-// Kahn's algorithm checks the reachable graph without using the hasher's
-// recursive active-path algorithm. Unreachable cycles do not affect the root.
+const fixedSeed = 1657019
+const replaySeedText = process.env.TANSTACK_DB_IVM_HASH_GRAPH_SEED
+const replayPath = process.env.TANSTACK_DB_IVM_HASH_GRAPH_PATH
+const replaySeed =
+  replaySeedText === undefined ? undefined : Number(replaySeedText)
+if (
+  replaySeedText !== undefined &&
+  (replaySeedText.trim() === `` || !Number.isSafeInteger(replaySeed))
+) {
+  throw new Error(`TANSTACK_DB_IVM_HASH_GRAPH_SEED must be an integer`)
+}
+if (replayPath !== undefined && replaySeed === undefined) {
+  throw new Error(
+    `TANSTACK_DB_IVM_HASH_GRAPH_PATH requires TANSTACK_DB_IVM_HASH_GRAPH_SEED`,
+  )
+}
+const campaigns =
+  replaySeed === undefined
+    ? [
+        { name: `fixed`, seed: fixedSeed, path: undefined },
+        { name: `random`, seed: undefined, path: undefined },
+      ]
+    : [{ name: `replay`, seed: replaySeed, path: replayPath }]
+
+// This adjacency list exists only in the model; production receives a rooted
+// JavaScript value. Kahn's algorithm checks reachability without using the
+// hasher's recursive active-path algorithm. Unreachable cycles do not affect
+// the root. The checkpoint is each hash() return or throw.
 function isAcyclic(edges: Array<Array<number>>): boolean {
   const reachable = new Set([0])
   for (const node of reachable) {
@@ -36,6 +69,12 @@ function isAcyclic(edges: Array<Array<number>>): boolean {
   return ready.length === reachable.size
 }
 
+// Grammar: one root and up to five other nodes; each node has zero to three
+// ordered edges. Target reduction keeps every edge in range while retaining
+// self, backward, duplicate, and disconnected-edge cases. An empty graph or
+// an out-of-range target is outside this grammar. Restricting to one node
+// loses diamonds and disconnected cycles; one edge per node loses branching
+// and duplicates; forward-only targets lose reachable cycles.
 const graphArbitrary = fc
   .array(fc.array(fc.nat({ max: 5 }), { maxLength: 3 }), {
     minLength: 1,
@@ -91,6 +130,11 @@ const graphWitnesses: Array<{
   },
   { name: `duplicate acyclic edges`, edges: [[1, 1], []], acyclic: true },
   { name: `duplicate cyclic edges`, edges: [[1, 1], [0]], acyclic: false },
+  {
+    name: `maximum node and edge bounds`,
+    edges: [[1, 2, 5], [3], [3], [4], [5], []],
+    acyclic: true,
+  },
 ]
 
 describe(`structural hash graph boundary`, () => {
@@ -131,13 +175,17 @@ describe(`structural hash graph boundary`, () => {
     expectGraphHash(edges)
   })
 
-  for (const seed of [1657019, undefined]) {
-    it(`matches reachable graph cycles and shared DAGs (${seed ?? `random`})`, () => {
+  for (const campaign of campaigns) {
+    it(`matches reachable graph cycles and shared DAGs (${campaign.name})`, () => {
       fc.assert(
         fc.property(graphArbitrary, (edges) => {
           expectGraphHash(edges)
         }),
-        { numRuns: 300, ...(seed === undefined ? {} : { seed }) },
+        {
+          numRuns: 300,
+          ...(campaign.seed === undefined ? {} : { seed: campaign.seed }),
+          ...(campaign.path === undefined ? {} : { path: campaign.path }),
+        },
       )
     })
   }
@@ -147,6 +195,29 @@ describe(`structural hash graph boundary`, () => {
     expectGraphHash([[1], []], () => 0)
     expectGraphHash([[1], [0]])
     expectGraphHash([[1], []])
+  })
+
+  it(`replays a cycle-acceptance mismatch at the same checkpoint`, () => {
+    const property = fc.property(fc.integer({ min: 1, max: 3 }), (length) => {
+      const edges = Array.from({ length: length + 1 }, (_, node) => [
+        node === length ? 0 : node + 1,
+      ])
+      expectGraphHash(edges)
+      expectGraphHash(edges, () => 0)
+    })
+    const failed = fc.check(property, { seed: fixedSeed, numRuns: 1 })
+    expect(failed.failed).toBe(true)
+    expect(failed.errorInstance).toMatchObject({ name: `AssertionError` })
+    if (failed.counterexamplePath === null) {
+      throw new Error(`Missing graph replay path`)
+    }
+    const replay = fc.check(property, {
+      seed: failed.seed,
+      path: failed.counterexamplePath,
+      endOnFailure: true,
+    })
+    expect(replay.counterexample).toEqual(failed.counterexample)
+    expect(replay.errorInstance).toMatchObject({ name: `AssertionError` })
   })
 
   it(`rejects false cycle rejection for unreachable cycles and shared DAGs`, () => {

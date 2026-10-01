@@ -1,7 +1,10 @@
 import fc from 'fast-check'
 import { describe, expect, it, vi } from 'vitest'
 import { createDeferred } from '../../db/src/deferred.js'
-import { oraclePropertyOptions } from '../../db/tests/oracle-config.js'
+import {
+  oraclePropertyOptions,
+  readOracleRunConfig,
+} from '../../db/tests/oracle-config.js'
 import { createBackend } from './cursor-pagination/backend.js'
 import { expectedRows } from './cursor-pagination/model.js'
 import { createCursorPager } from './cursor-pagination/pager.js'
@@ -10,16 +13,25 @@ import type { Row, Scope, Window } from './cursor-pagination/model.js'
 /**
  * # Can opaque pages reconstruct any requested ordered slice?
  *
+ * Contract authority: cursor-pagination/README.md, "Contract before
+ * implementation," and the exported createCursorPager API.
+ *
  * The backend owns unreadable continuation tokens and one stable filtered,
  * totally ordered sequence. The pager may fetch and cache pages, but `read()`
- * must equal the independent full-relation model for any offset and limit. It
- * must reject invalid windows, foreign tokens, missing continuation, duplicate
- * rows, wrong order, and protocol cycles instead of guessing.
+ * must equal the independent full-relation model for any offset and limit.
+ * The comparison detects missing, duplicate, and misordered rows. The pager
+ * rejects invalid windows and repeated cursors; the fixture rejects foreign
+ * tokens.
  *
  * Generated sources vary IDs, ties, groups, direction, backend page size, and
  * requested windows. The model never sees tokens. The driver observes returned
  * rows, fetch order, cancellation, and bounded page traversal. This separation
  * prevents a pager and its oracle from sharing the same cursor arithmetic.
+ * This owner does not claim snapshot consistency for changing endpoints or
+ * public Collection publication; the cache and integration owners cover those
+ * separate boundaries.
+ * `Scope` is model-only shorthand for the backend group filter and order
+ * direction; the public pager has no Scope object.
  */
 
 const rowsArbitrary = fc.uniqueArray(
@@ -45,8 +57,25 @@ const fixtureRows: Array<Row> = Array.from({ length: 9 }, (_, id) => ({
 }))
 const allAscending: Scope = { group: undefined, descending: false }
 
+const fixedSeed = 1_779_001
+const replay = readOracleRunConfig()
+
+/** Both ordinary campaigns use the same property and run budget. */
+async function assertCursorProperty<Ts>(
+  property: fc.IAsyncProperty<Ts>,
+  runs: number,
+  name: string,
+): Promise<void> {
+  if (replay.replayPath !== undefined && replay.replayProperty !== name) return
+  const options = oraclePropertyOptions(runs, name)
+  if (replay.replaySeed === undefined) {
+    await fc.assert(property, { ...options, seed: fixedSeed })
+  }
+  await fc.assert(property, options)
+}
+
 it(`backend sequences reject foreign tokens while retaining their own continuations`, async () => {
-  await fc.assert(
+  await assertCursorProperty(
     fc.asyncProperty(
       fc.integer({ min: 1, max: 5 }),
       fc.boolean(),
@@ -71,7 +100,8 @@ it(`backend sequences reject foreign tokens while retaining their own continuati
         )
       },
     ),
-    oraclePropertyOptions(50, `cursor-pagination.backend-ownership`),
+    50,
+    `cursor-pagination.backend-ownership`,
   )
 })
 
@@ -148,6 +178,19 @@ describe(`opaque cursor adapter`, () => {
     },
   )
 
+  it(`accepts the largest safe window end`, async () => {
+    const backend = createBackend(fixtureRows, allAscending, 2)
+    const pager = createCursorPager(backend.fetchPage)
+    // Rejecting at MAX_SAFE_INTEGER would pass the invalid-window cases above.
+    await checkRead(
+      fixtureRows,
+      allAscending,
+      { offset: Number.MAX_SAFE_INTEGER - 1, limit: 1 },
+      pager.read,
+    )
+    expect(backend.calls).toHaveLength(Math.ceil(fixtureRows.length / 2))
+  })
+
   it(`captures each requested window before queued work starts`, async () => {
     const backend = createBackend(fixtureRows, allAscending, 2)
     const pager = createCursorPager(backend.fetchPage)
@@ -191,7 +234,7 @@ describe(`opaque cursor adapter`, () => {
   )
 
   it(`matches whole-relation slices across random window histories`, async () => {
-    await fc.assert(
+    await assertCursorProperty(
       fc.asyncProperty(
         rowsArbitrary,
         scopeArbitrary,
@@ -208,12 +251,13 @@ describe(`opaque cursor adapter`, () => {
           expect(backend.calls).toHaveLength(calls)
         },
       ),
-      oraclePropertyOptions(100, `cursor-pagination.history`),
+      100,
+      `cursor-pagination.history`,
     )
   })
 
   it(`keeps answers invariant under backend page repartition`, async () => {
-    await fc.assert(
+    await assertCursorProperty(
       fc.asyncProperty(
         rowsArbitrary,
         scopeArbitrary,
@@ -230,7 +274,8 @@ describe(`opaque cursor adapter`, () => {
           }
         },
       ),
-      oraclePropertyOptions(100, `cursor-pagination.partition`),
+      100,
+      `cursor-pagination.partition`,
     )
   })
 
@@ -307,7 +352,7 @@ describe(`opaque cursor adapter`, () => {
   })
 
   it(`resets source generations and isolates filter/order scopes`, async () => {
-    await fc.assert(
+    await assertCursorProperty(
       fc.asyncProperty(
         rowsArbitrary,
         scopeArbitrary,
@@ -334,7 +379,8 @@ describe(`opaque cursor adapter`, () => {
           await checkRead(changed, secondScope, all, pager.read)
         },
       ),
-      oraclePropertyOptions(50, `cursor-pagination.reset`),
+      50,
+      `cursor-pagination.reset`,
     )
   })
 
@@ -351,7 +397,7 @@ describe(`opaque cursor adapter`, () => {
   })
 
   it(`recovers after faults at generated intermediate page boundaries`, async () => {
-    await fc.assert(
+    await assertCursorProperty(
       fc.asyncProperty(
         fc.array(fc.integer({ min: -2, max: 2 }), {
           minLength: 12,
@@ -396,7 +442,8 @@ describe(`opaque cursor adapter`, () => {
           expect(backend.calls).toHaveLength(before)
         },
       ),
-      oraclePropertyOptions(100, `cursor-pagination.failure`),
+      100,
+      `cursor-pagination.failure`,
     )
   })
 })

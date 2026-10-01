@@ -35,6 +35,10 @@ type Model = {
   retryableId?: string
 }
 
+// retryableId is the driver-only failed transaction awaiting its retry update;
+// it is not scheduler state. sequence records the insertion-order tie breaker
+// for equal creation times without relying on the runtime sort implementation.
+
 type Snapshot = {
   next?: {
     id: string
@@ -52,6 +56,7 @@ type Snapshot = {
 }
 
 const BASE_TIME = Date.parse(`2026-01-01T00:00:00.000Z`)
+const FIXED_SEED = 1815
 const {
   runs: RUNS,
   seed: SEED,
@@ -59,7 +64,6 @@ const {
 } = readOfflineOracleConfig({
   prefix: `TANSTACK_DB_OFFLINE_ORACLE`,
   defaultRuns: 150,
-  defaultSeed: 1815,
 })
 
 /**
@@ -68,9 +72,9 @@ const {
  * Contract and source: the established KeyScheduler FIFO tests and
  * TransactionExecutor calling order require one globally serial queue. Equal
  * creation times retain scheduling order. A delayed FIFO head blocks younger
- * work. Failure makes the active transaction retryable without changing its
- * place. Replay reconciliation may retire only unissued IDs. Clear retires all
- * scheduler work and leaves the scheduler reusable.
+ * work. Failure updates retry data before releasing the active transaction,
+ * without changing its place. Replay reconciliation may retire only unissued
+ * IDs. Clear retires all scheduler work and leaves the scheduler reusable.
  *
  * Model: a declarative ledger, fake clock, stable creation sequence, and active
  * ID predict scheduler observations. The model does not import scheduler state
@@ -78,8 +82,18 @@ const {
  *
  * History grammar: legal commands schedule, inspect, start, fulfill, reject,
  * update one or all pending records, reconcile one replay snapshot, advance
- * the clock, and clear. A reject is followed immediately by its retry update.
+ * the clock, and clear. A reject is followed immediately by its retry update
+ * and active release, matching TransactionExecutor's update-then-release order.
  * IDs are unique while pending. At most five IDs exist in generated histories.
+ * Slot choice prevents duplicate pending IDs; creation time controls FIFO order;
+ * delay and clock advance control readiness; payload makes updates observable.
+ * The selector reaches every legal command, including removal during a run.
+ * Histories use 1-50 tokens plus automatic retry steps. Slots span 0-4,
+ * creation times 0-3 seconds, delays and advances 0-5 seconds, and payloads
+ * -5 through 5. The domain includes equal creation times, zero and positive
+ * delays, and negative and positive payloads.
+ * The grammar excludes duplicate pending IDs, start without eligible work,
+ * completion without active work, and any intervening command before retry.
  *
  * Production driver and refinement check: the driver calls the real
  * executor-facing scheduler methods. After every command, it compares the next
@@ -88,7 +102,9 @@ const {
  * Reach and controls: one fixed history reaches every transition. Two fixed
  * histories cross retry-deadline order. Five injected observation faults prove
  * the comparison rejects bypass, double issue, stale payload, stale clear, and
- * failed selective retirement. The generated lane supports seed/path replay.
+ * failed selective retirement. The generated property runs at fixed seed 1815
+ * and at a random seed with the same budget. Set TANSTACK_DB_OFFLINE_ORACLE_SEED
+ * and TANSTACK_DB_OFFLINE_ORACLE_PATH to replay a failure directly.
  *
  * Limits: persistence, caller promise settlement, leadership, and real timers
  * have separate owners. The model does not promise fairness beyond FIFO order.
@@ -117,6 +133,11 @@ type PlanningState = {
   activeId?: string
   retryableId?: string
 }
+
+// PlanningState is a generator-only projection of the ledger. It tracks just
+// enough IDs and deadlines to choose legal commands. Its retryableId denotes
+// the TransactionExecutor step between mutation failure and retry update; the
+// scheduler has no corresponding retryable state.
 
 const commandToken = fc.record({
   selector: fc.nat(),
@@ -166,10 +187,10 @@ function applyPlanningCommand(
     state.activeId = undefined
   } else if (nextCommand.type === `fail`) {
     state.retryableId = state.activeId
-    state.activeId = undefined
   } else if (nextCommand.type === `retry`) {
     const entry = state.pending.find(({ id }) => id === state.retryableId)!
     entry.nextAttemptAt = state.now + nextCommand.delay * 1000
+    state.activeId = undefined
     state.retryableId = undefined
   } else if (nextCommand.type === `advance`) {
     state.now += nextCommand.duration * 1000
@@ -224,6 +245,12 @@ function buildLegalHistory(tokens: Array<CommandToken>): Array<Command> {
         createdAt: token.createdAt,
         delay: token.delay,
         payload: token.payload,
+      })
+    }
+    if (state.activeId) {
+      choices.push({
+        type: `remove`,
+        ids: [state.activeId, ...removable.slice(0, 1).map(({ id }) => id)],
       })
     }
     if (planningNext(state)) choices.push({ type: `start` })
@@ -425,22 +452,23 @@ function runHistory(
       const transaction = model.pending.find(
         ({ transaction: candidate }) => candidate.id === model.activeId,
       )!.transaction
-      scheduler.markFailed(transaction)
       model.retryableId = transaction.id
-      model.activeId = undefined
     } else if (nextCommand.type === `retry`) {
       if (!model.retryableId) throw new Error(`cannot retry before a failure`)
       const entry = model.pending.find(
         ({ transaction }) => transaction.id === model.retryableId,
       )!
+      const failedTransaction = entry.transaction
       const updated = {
-        ...entry.transaction,
-        retryCount: entry.transaction.retryCount + 1,
+        ...failedTransaction,
+        retryCount: failedTransaction.retryCount + 1,
         nextAttemptAt: model.now + nextCommand.delay * 1000,
         metadata: { payload: nextCommand.payload },
       }
       scheduler.updateTransaction(cloneTransaction(updated))
+      scheduler.markFailed(failedTransaction)
       entry.transaction = updated
+      model.activeId = undefined
       model.retryableId = undefined
     } else if (nextCommand.type === `bulkUpdate`) {
       const updated = model.pending.map(({ transaction }) => ({
@@ -487,17 +515,136 @@ function runHistory(
 describe(`KeyScheduler generated lifecycle`, () => {
   afterEach(() => vi.useRealTimers())
 
-  it(`matches the FIFO retry ledger after every legal event`, () => {
+  function runGeneratedHistory(seed?: number, path?: string): void {
     fc.assert(
       fc.property(legalHistory, (history) => {
         runHistory(history)
       }),
       {
-        seed: SEED,
+        ...(seed === undefined ? {} : { seed }),
         numRuns: RUNS,
-        ...(PATH ? { path: PATH } : {}),
+        ...(path === undefined ? {} : { path }),
       },
     )
+  }
+
+  if (SEED === undefined) {
+    it(`matches the FIFO retry ledger at the fixed seed`, () => {
+      runGeneratedHistory(FIXED_SEED)
+    })
+
+    it(`matches the FIFO retry ledger at a random seed`, () => {
+      runGeneratedHistory()
+    })
+  } else {
+    it(`replays the FIFO retry ledger at the requested seed and path`, () => {
+      runGeneratedHistory(SEED, PATH)
+    })
+  }
+
+  it(`reconstructs active removal with a waiting sibling`, () => {
+    const token = (selector: number, slot = 0): CommandToken => ({
+      selector,
+      slot,
+      createdAt: 0,
+      delay: 0,
+      payload: 1,
+      duration: 0,
+    })
+    const history = buildLegalHistory([
+      token(4), // schedule tx-0
+      token(5, 1), // schedule tx-1
+      token(6), // start tx-0
+      token(6), // request removal of both IDs while tx-0 is active
+      token(6), // complete tx-0
+    ])
+
+    expect(history).toEqual([
+      { type: `schedule`, slot: 0, createdAt: 0, delay: 0, payload: 1 },
+      { type: `schedule`, slot: 1, createdAt: 0, delay: 0, payload: 1 },
+      { type: `start` },
+      { type: `remove`, ids: [`tx-0`, `tx-1`] },
+      { type: `complete` },
+    ])
+    runHistory(history)
+
+    const duplicateSlotRequest = buildLegalHistory([token(4), token(5)])
+    expect(duplicateSlotRequest[1]).toEqual({
+      type: `schedule`,
+      slot: 1,
+      createdAt: 0,
+      delay: 0,
+      payload: 1,
+    })
+  })
+
+  it(`reconstructs a blocked FIFO head at the retry deadline`, () => {
+    const token = (
+      selector: number,
+      slot: number,
+      delay = 0,
+      duration = 0,
+    ): CommandToken => ({
+      selector,
+      slot,
+      createdAt: slot,
+      delay,
+      payload: 1,
+      duration,
+    })
+    const history = buildLegalHistory([
+      token(4, 0), // schedule tx-0
+      token(5, 1), // schedule tx-1
+      token(6, 0), // start tx-0
+      token(8, 0, 5), // fail tx-0, then retry after five seconds
+      token(0, 0), // tx-1 is ready but cannot bypass tx-0
+      token(2, 0, 0, 4),
+      token(0, 0), // still before the retry deadline
+      token(2, 0, 0, 1),
+      token(6, 0), // tx-0 becomes eligible at the deadline
+    ])
+
+    expect(history.map(({ type }) => type)).toEqual([
+      `schedule`,
+      `schedule`,
+      `start`,
+      `fail`,
+      `retry`,
+      `getNext`,
+      `advance`,
+      `getNext`,
+      `advance`,
+      `start`,
+    ])
+    expect(history[4]).toEqual({ type: `retry`, delay: 5, payload: 1 })
+    runHistory(history)
+  })
+
+  it(`replays a generated wrong count at the same checkpoint`, () => {
+    const wrongCount = fc.property(legalHistory, (history) => {
+      runHistory(history, {
+        commandIndex: history.length - 1,
+        apply: (actual) => ({
+          ...actual,
+          pendingCount: actual.pendingCount + 1,
+        }),
+      })
+    })
+    const first = fc.check(wrongCount, { seed: FIXED_SEED, numRuns: RUNS })
+    expect(first.failed).toBe(true)
+    expect(first.error).toContain(`AssertionError:`)
+    expect(first.error).toContain(`"commandIndex":`)
+    const replayPath = first.counterexamplePath
+    if (replayPath === null) throw new Error(`Missing shrink path`)
+
+    const replay = fc.check(wrongCount, {
+      seed: first.seed,
+      path: replayPath,
+      numRuns: RUNS,
+    })
+    expect(replay.failed).toBe(true)
+    expect(replay.counterexample).toEqual(first.counterexample)
+    expect(replay.error?.split(`\n`)[0]).toEqual(first.error.split(`\n`)[0])
   })
 
   it(`executes every modeled transition in a fixed replay`, () => {

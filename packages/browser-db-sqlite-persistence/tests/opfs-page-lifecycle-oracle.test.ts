@@ -11,10 +11,11 @@ import type {
  * # Who owns an OPFS worker when the browser page leaves?
  *
  * A database request, open deadline, caller abort, pagehide, worker response,
- * terminal worker event, close, and bfcache admission can race. Every accepted
- * request must settle once.
- * Non-persisted pagehide closes and terminates the worker after pending work;
- * persisted pagehide keeps the database eligible for restoration. Listener and
+ * terminal worker event, and close can race. Every accepted request must settle
+ * once.
+ * Pagehide terminates the worker and rejects pending work for either persisted
+ * value. A restored page must open a new connection. Completed init and execute
+ * requests leave the connection active until pagehide or close. Listener and
  * worker resources release exactly once even when init or close fails.
  *
  * Controlled page and worker objects implement only the browser event and
@@ -22,7 +23,8 @@ import type {
  * stage, persisted flag, execute count, release direction, and terminal event.
  * The driver observes exact requests, settlements, errors, listener counts,
  * held responses, close, and termination against this state machine. Fixed
- * open histories check the default/overridden deadline and caller abort.
+ * open histories check the default, overridden, and zero-boundary deadlines
+ * plus caller abort.
  *
  * This proves page/worker ownership in jsdom. It does not prove native OPFS
  * locking, real bfcache admission, or browser process teardown.
@@ -455,6 +457,11 @@ async function runPagehideHistory(history: PagehideHistory): Promise<void> {
         if (history.pending === `init`) {
           database = completed[0]?.value as Database
         }
+        if (history.pending !== `close`) {
+          // A completed request does not dispose an otherwise open connection.
+          expect(worker.terminationCalls).toBe(0)
+          expect(page.listenerCount).toBe(1)
+        }
         page.dispatchPageHide(history.persisted)
       } else {
         page.dispatchPageHide(history.persisted)
@@ -761,6 +768,35 @@ const terminalEventRuns = Number(
 )
 const terminalEventPath =
   process.env.TANSTACK_DB_OPFS_TERMINAL_EVENT_ORACLE_PATH
+const replayRequested = [
+  process.env.TANSTACK_DB_OPFS_LIFECYCLE_ORACLE_SEED,
+  lifecyclePath,
+  process.env.TANSTACK_DB_OPFS_MIXED_ORACLE_SEED,
+  mixedPath,
+  process.env.TANSTACK_DB_OPFS_FAILURE_ORACLE_SEED,
+  failurePath,
+  process.env.TANSTACK_DB_OPFS_TERMINAL_EVENT_ORACLE_SEED,
+  terminalEventPath,
+].some((value) => value !== undefined)
+
+type OracleCampaign = {
+  label: `fixed` | `random` | `replay`
+  seed?: number
+  path?: string
+}
+
+function oracleCampaigns(
+  seed: number,
+  replaySeedSupplied: boolean,
+  path: string | undefined,
+  replayRequestedForFile: boolean,
+): Array<OracleCampaign> {
+  if (replaySeedSupplied || path !== undefined) {
+    return [{ label: `replay`, seed, ...(path === undefined ? {} : { path }) }]
+  }
+  if (replayRequestedForFile) return []
+  return [{ label: `fixed`, seed }, { label: `random` }]
+}
 
 const pagehideHistory = fc.record({
   pending: fc.constantFrom<RequestKind>(`init`, `execute`, `close`),
@@ -876,9 +912,9 @@ Domain/histories: pending init/execute/close; one to three sibling queries;
 pagehide before response production, after production, or after delivery; mixed
 completed/pending siblings; both persisted values; Worker error/messageerror;
 late delivery; repeated disposal; and every response code at init and close.
-Fixed open cases cover default/overridden/disabled deadlines, pending and
-pre-aborted signals, an abort during synchronous option evaluation, a late
-response, and no cancellation after successful open.
+Fixed open cases cover default, overridden, minimum-positive, and disabled
+deadlines; pending and pre-aborted signals; an abort during synchronous option
+evaluation; a late response; and no cancellation after successful open.
 Reference: an independent settlement ledger and terminal-state model. The model
 uses a declarative public error table and derives outcomes from history, without
 consulting the production request map, disposal flag, or completion order.
@@ -890,15 +926,18 @@ exact values/errors, positive and negative request reach, listener ownership,
 and termination count. Synthetic events and a fake worker do not prove real
 bfcache admission, durability, native handle release, or wa-sqlite #88. The
 Chromium Web Lock fixture checks native queued-lock release separately.
-Challenge/replay: fixed examples exhaust the cheap structural products;
-generated lanes use verbose FastCheck output to retain original/reduced traces.
-Replay each property with its TANSTACK_DB_OPFS_*_ORACLE_{SEED,RUNS,PATH}
-controls and this file's package-local Vitest command.
+Challenge/replay: fixed examples exhaust the cheap structural products. Each
+generated lane runs a fixed and an unseeded campaign with the same grammar and
+run budget. Verbose FastCheck output retains original/reduced traces. Setting
+SEED or PATH selects only the direct replay for that lane. Use its
+TANSTACK_DB_OPFS_*_ORACLE_{SEED,RUNS,PATH} controls with this file's
+package-local Vitest command.
 */
 describe(`OPFS page lifecycle oracle`, () => {
   it.each([
     { label: `default`, timeoutMs: undefined, deadline: 30_000 },
     { label: `overridden`, timeoutMs: 40, deadline: 40 },
+    { label: `minimum positive`, timeoutMs: 1, deadline: 1 },
   ])(
     `terminates a silent worker at the $label open deadline`,
     async ({ timeoutMs, deadline }) => {
@@ -1097,47 +1136,75 @@ describe(`OPFS page lifecycle oracle`, () => {
     expectDisposed(page, worker)
   })
 
-  fcTest.prop([pagehideHistory], {
-    seed: lifecycleSeed,
-    numRuns: lifecycleRuns,
-    ...(lifecyclePath ? { path: lifecyclePath } : {}),
-    examples: pagehideExamples,
-    verbose: true,
-  })(
-    `matches the independent model across generated histories`,
-    runPagehideHistory,
-  )
+  for (const campaign of oracleCampaigns(
+    lifecycleSeed,
+    process.env.TANSTACK_DB_OPFS_LIFECYCLE_ORACLE_SEED !== undefined,
+    lifecyclePath,
+    replayRequested,
+  )) {
+    fcTest.prop([pagehideHistory], {
+      ...(campaign.seed === undefined ? {} : { seed: campaign.seed }),
+      numRuns: lifecycleRuns,
+      ...(campaign.path === undefined ? {} : { path: campaign.path }),
+      examples: pagehideExamples,
+      verbose: true,
+    })(
+      `matches the independent model across generated histories (${campaign.label})`,
+      runPagehideHistory,
+    )
+  }
 
-  fcTest.prop([mixedExecuteHistory], {
-    seed: mixedSeed,
-    numRuns: mixedRuns,
-    ...(mixedPath ? { path: mixedPath } : {}),
-    examples: mixedExamples,
-    verbose: true,
-  })(
-    `preserves completed siblings while aborting pending siblings`,
-    runMixedExecuteHistory,
-  )
+  for (const campaign of oracleCampaigns(
+    mixedSeed,
+    process.env.TANSTACK_DB_OPFS_MIXED_ORACLE_SEED !== undefined,
+    mixedPath,
+    replayRequested,
+  )) {
+    fcTest.prop([mixedExecuteHistory], {
+      ...(campaign.seed === undefined ? {} : { seed: campaign.seed }),
+      numRuns: mixedRuns,
+      ...(campaign.path === undefined ? {} : { path: campaign.path }),
+      examples: mixedExamples,
+      verbose: true,
+    })(
+      `preserves completed siblings while aborting pending siblings (${campaign.label})`,
+      runMixedExecuteHistory,
+    )
+  }
 
-  fcTest.prop([terminalEventHistory], {
-    seed: terminalEventSeed,
-    numRuns: terminalEventRuns,
-    ...(terminalEventPath ? { path: terminalEventPath } : {}),
-    examples: terminalEventExamples,
-    verbose: true,
-  })(
-    `rejects pending work across Worker terminal event paths`,
-    runTerminalEventHistory,
-  )
+  for (const campaign of oracleCampaigns(
+    terminalEventSeed,
+    process.env.TANSTACK_DB_OPFS_TERMINAL_EVENT_ORACLE_SEED !== undefined,
+    terminalEventPath,
+    replayRequested,
+  )) {
+    fcTest.prop([terminalEventHistory], {
+      ...(campaign.seed === undefined ? {} : { seed: campaign.seed }),
+      numRuns: terminalEventRuns,
+      ...(campaign.path === undefined ? {} : { path: campaign.path }),
+      examples: terminalEventExamples,
+      verbose: true,
+    })(
+      `rejects pending work across Worker terminal event paths (${campaign.label})`,
+      runTerminalEventHistory,
+    )
+  }
 
-  fcTest.prop([failureHistory], {
-    seed: failureSeed,
-    numRuns: failureRuns,
-    ...(failurePath ? { path: failurePath } : {}),
-    examples: failureExamples,
-    verbose: true,
-  })(
-    `matches terminal cleanup and error mapping across worker failures`,
-    runFailureHistory,
-  )
+  for (const campaign of oracleCampaigns(
+    failureSeed,
+    process.env.TANSTACK_DB_OPFS_FAILURE_ORACLE_SEED !== undefined,
+    failurePath,
+    replayRequested,
+  )) {
+    fcTest.prop([failureHistory], {
+      ...(campaign.seed === undefined ? {} : { seed: campaign.seed }),
+      numRuns: failureRuns,
+      ...(campaign.path === undefined ? {} : { path: campaign.path }),
+      examples: failureExamples,
+      verbose: true,
+    })(
+      `matches terminal cleanup and error mapping across worker failures (${campaign.label})`,
+      runFailureHistory,
+    )
+  }
 })

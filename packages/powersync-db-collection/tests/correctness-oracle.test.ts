@@ -2,10 +2,18 @@
  * # Does a PowerSync Collection preserve the database's independent truth?
  *
  * Collection updates change only their authored fields. A newer disjoint
- * SQLite field must survive. Persistence waits for the final effective update,
- * including metadata-only and falsey changes. Public rows expose exactly the
- * declared PowerSync view, and equality compares transformed schema output
- * rather than raw SQLite rows.
+ * SQLite field must survive. Persistence waits for diff observation of each
+ * Collection's effective writes. A native SQLite and unmocked-watcher witness
+ * covers a tracked-metadata Collection.update. Direct transactor probes also
+ * cover a synthetic trailing no-op and tracked metadata-only mutation;
+ * Collection.update does not create these zero-field mutations. Public rows
+ * expose exactly the declared PowerSync view, and equality compares transformed
+ * schema output rather than raw SQLite rows.
+ *
+ * The PowerSync Collection guide promises SQLite mirroring and transaction
+ * persistence; the public PowerSyncTransactor API persists the whole
+ * Transaction. These tests stop at local SQLite and Collection observation,
+ * not remote backend upload.
  *
  * The reference laws are small: compose disjoint patches by changed field,
  * derive readable keys from the declared view, and derive public values from
@@ -13,10 +21,14 @@
  * database, PowerSync CRUD rows, Collection sync, watcher callbacks, and the
  * adapter comparator. A held watcher is the only timing control.
  *
- * Every test proves the native path was reached before it compares full rows,
- * patches, metadata, logging, or cleanup. The suite skips when the native test
- * database implementation is unavailable; portable declarations alone are not
- * evidence of PowerSync execution.
+ * The pure tests calibrate comparisons and cleanup failure reporting. The
+ * production tests reach native SQLite before comparing rows, patches,
+ * metadata, logging, or cleanup.
+ * Held callbacks test the adapter after controlled delivery; ordinary and
+ * tracked-metadata Collection writes exercise the native watcher without
+ * invoking its callback from the test. Neither held delivery nor local CRUD
+ * queue inspection proves remote backend upload. The suite skips when the
+ * native test database implementation is unavailable.
  */
 import { randomUUID } from 'node:crypto'
 import { tmpdir } from 'node:os'
@@ -57,17 +69,28 @@ async function createDatabase(schema: Schema, logger?: PowerSyncLogger) {
 }
 
 function holdAdapterChanges(db: PowerSyncDatabase) {
-  let handler: WatchOnChangeHandler | undefined
-  vi.spyOn(db, `onChangeWithCallback`).mockImplementation((candidate) => {
-    handler = candidate
-    return () => {}
-  })
+  const handlers = new Map<string, WatchOnChangeHandler>()
+  vi.spyOn(db, `onChangeWithCallback`).mockImplementation(
+    (candidate, options) => {
+      const table = options?.tables?.[0]
+      if (!table) throw new Error(`adapter did not name a tracked table`)
+      if (!candidate)
+        throw new Error(`adapter did not register a change handler`)
+      handlers.set(table, candidate)
+      return () => {}
+    },
+  )
   return {
-    expectReached: () => expect(handler).toBeDefined(),
-    flush: async () => {
+    expectReached: (table?: string) =>
+      expect(table ? handlers.has(table) : handlers.size > 0).toBe(true),
+    flush: async (table?: string) => {
+      const watchedTable = table ?? handlers.keys().next().value
+      if (watchedTable === undefined)
+        throw new Error(`adapter did not register a tracked table`)
+      const handler = handlers.get(watchedTable)
       if (!handler)
         throw new Error(`adapter did not register its change handler`)
-      await handler.onChange({ changedTables: [] })
+      await handler.onChange({ changedTables: [watchedTable] })
     },
   }
 }
@@ -88,6 +111,29 @@ function observeViewKeys(
     collection: Object.keys(collectionRow)
       .filter((key) => !key.startsWith(`$`))
       .sort(),
+  }
+}
+
+async function cleanupAfterOracle(
+  failure: { error: unknown } | undefined,
+  cleanups: Array<() => Promise<unknown> | unknown>,
+): Promise<void> {
+  const cleanupErrors: Array<unknown> = []
+  for (const cleanup of cleanups) {
+    try {
+      await cleanup()
+    } catch (error) {
+      cleanupErrors.push(error)
+    }
+  }
+  if (cleanupErrors.length > 0) {
+    throw new AggregateError(
+      cleanupErrors,
+      failure
+        ? `Oracle failed and cleanup also failed`
+        : `Oracle cleanup failed`,
+      failure ? { cause: failure.error } : undefined,
+    )
   }
 }
 
@@ -117,6 +163,43 @@ describePowerSync(`PowerSync correctness oracle`, () => {
     })
   })
 
+  it(`retains the primary oracle failure and each cleanup failure`, async () => {
+    let primary: unknown
+    try {
+      expect({ id: `wrong` }).toEqual({ id: `expected` })
+    } catch (error) {
+      primary = error
+    }
+    expect(primary).toBeInstanceOf(Error)
+    const firstCleanup = new Error(`Collection cleanup failed`)
+    const secondCleanup = new Error(`database close failed`)
+    const attempted: Array<string> = []
+    let reported: unknown
+
+    try {
+      await cleanupAfterOracle({ error: primary }, [
+        () => {
+          attempted.push(`Collection`)
+          throw firstCleanup
+        },
+        () => {
+          attempted.push(`database`)
+          throw secondCleanup
+        },
+      ])
+    } catch (error) {
+      reported = error
+    }
+
+    expect(attempted).toEqual([`Collection`, `database`])
+    expect(reported).toBeInstanceOf(AggregateError)
+    expect((reported as AggregateError).cause).toBe(primary)
+    expect((reported as AggregateError).errors).toEqual([
+      firstCleanup,
+      secondCleanup,
+    ])
+  })
+
   it(`preserves a newer disjoint SQLite field across a collection update`, async () => {
     const schema = new Schema({
       todos: new Table({
@@ -137,6 +220,7 @@ describePowerSync(`PowerSync correctness oracle`, () => {
       }),
     )
 
+    let failure: { error: unknown } | undefined
     try {
       await collection.preload()
       heldChanges.expectReached()
@@ -175,14 +259,19 @@ describePowerSync(`PowerSync correctness oracle`, () => {
           { op: `PATCH`, data: { done: 1 } },
         ),
       )
+    } catch (error) {
+      failure = { error }
+      throw error
     } finally {
-      await collection.cleanup()
-      await db.disconnectAndClear()
-      await db.close()
+      await cleanupAfterOracle(failure, [
+        () => collection.cleanup(),
+        () => db.disconnectAndClear(),
+        () => db.close(),
+      ])
     }
   })
 
-  it(`waits for the last effective update when a trailing update changes nothing`, async () => {
+  it(`direct transactor waits for an effective update before a synthetic trailing no-op`, async () => {
     const schema = new Schema({
       todos: new Table({ title: column.text, done: column.integer }),
     })
@@ -199,6 +288,7 @@ describePowerSync(`PowerSync correctness oracle`, () => {
       autoCommit: false,
       mutationFn: async () => {},
     })
+    let failure: { error: unknown } | undefined
     try {
       await collection.preload()
       heldChanges.expectReached()
@@ -237,15 +327,114 @@ describePowerSync(`PowerSync correctness oracle`, () => {
       await heldChanges.flush()
       await persistence
       expect(settled).toBe(true)
+    } catch (error) {
+      failure = { error }
+      throw error
     } finally {
-      transaction.rollback()
-      await collection.cleanup()
-      await db.disconnectAndClear()
-      await db.close()
+      await cleanupAfterOracle(failure, [
+        () => transaction.rollback(),
+        () => collection.cleanup(),
+        () => db.disconnectAndClear(),
+        () => db.close(),
+      ])
     }
   })
 
-  it(`persists a tracked metadata-only update and waits for its diff`, async () => {
+  it(`waits for both Collections in a mixed transaction after one watcher flushes`, async () => {
+    const schema = new Schema({
+      todos: new Table({ done: column.integer }),
+      labels: new Table({ name: column.text }),
+    })
+    const db = await createDatabase(schema)
+    await db.execute(`INSERT INTO todos (id, done) VALUES ('t1', 0)`)
+    await db.execute(`INSERT INTO labels (id, name) VALUES ('l1', 'before')`)
+    const heldChanges = holdAdapterChanges(db)
+    const todos = createCollection(
+      powerSyncCollectionOptions({ database: db, table: schema.props.todos }),
+    )
+    const labels = createCollection(
+      powerSyncCollectionOptions({ database: db, table: schema.props.labels }),
+    )
+    const transaction = createTransaction({
+      autoCommit: false,
+      mutationFn: async () => {},
+    })
+
+    let failure: { error: unknown } | undefined
+    try {
+      await todos.preload()
+      await labels.preload()
+      const todosTracking = todos.utils.getMeta().trackedTableName
+      const labelsTracking = labels.utils.getMeta().trackedTableName
+      heldChanges.expectReached(todosTracking)
+      heldChanges.expectReached(labelsTracking)
+      transaction.mutate(() => {
+        todos.update(`t1`, (draft) => {
+          draft.done = 1
+        })
+        labels.update(`l1`, (draft) => {
+          draft.name = `after`
+        })
+      })
+      expect(
+        transaction.mutations.map((mutation) => mutation.collection.id),
+      ).toEqual([todos.id, labels.id])
+
+      const persistenceState = {
+        outcome: `pending` as `pending` | `fulfilled` | `rejected`,
+        error: undefined as unknown,
+      }
+      const persistence = new PowerSyncTransactor({ database: db })
+        .applyTransaction(transaction)
+        .then(
+          () => {
+            persistenceState.outcome = `fulfilled`
+          },
+          (error: unknown) => {
+            persistenceState.outcome = `rejected`
+            persistenceState.error = error
+          },
+        )
+
+      await vi.waitFor(async () => {
+        expect(
+          await db.get<{ done: number }>(
+            `SELECT done FROM todos WHERE id = 't1'`,
+          ),
+        ).toEqual({ done: 1 })
+        expect(
+          await db.get<{ name: string }>(
+            `SELECT name FROM labels WHERE id = 'l1'`,
+          ),
+        ).toEqual({ name: `after` })
+      })
+
+      // Waiting only for the globally final mutation would settle here.
+      await heldChanges.flush(labelsTracking)
+      for (let turn = 0; turn < 10; turn++) await Promise.resolve()
+      expect(persistenceState.outcome).toBe(`pending`)
+
+      await heldChanges.flush(todosTracking)
+      await persistence
+      expect(persistenceState).toEqual({
+        outcome: `fulfilled`,
+        error: undefined,
+      })
+    } catch (error) {
+      failure = { error }
+      throw error
+    } finally {
+      await cleanupAfterOracle(failure, [
+        () => transaction.rollback(),
+        () => todos.cleanup(),
+        () => labels.cleanup(),
+        () => db.disconnectAndClear(),
+        () => db.close(),
+      ])
+    }
+  })
+
+  it(`direct transactor persists a synthetic tracked metadata-only mutation and waits for its diff`, async () => {
     const schema = new Schema({
       todos: new Table(
         { title: column.text, done: column.integer },
@@ -265,6 +454,7 @@ describePowerSync(`PowerSync correctness oracle`, () => {
       mutationFn: async () => {},
     })
 
+    let failure: { error: unknown } | undefined
     try {
       await collection.preload()
       heldChanges.expectReached()
@@ -300,11 +490,98 @@ describePowerSync(`PowerSync correctness oracle`, () => {
       await heldChanges.flush()
       await persistence
       expect(settled).toBe(true)
+    } catch (error) {
+      failure = { error }
+      throw error
     } finally {
-      transaction.rollback()
-      await collection.cleanup()
-      await db.disconnectAndClear()
-      await db.close()
+      await cleanupAfterOracle(failure, [
+        () => transaction.rollback(),
+        () => collection.cleanup(),
+        () => db.disconnectAndClear(),
+        () => db.close(),
+      ])
+    }
+  })
+
+  it(`persists a metadata-bearing Collection update through the native watcher`, async () => {
+    const schema = new Schema({
+      todos: new Table(
+        { title: column.text, done: column.integer },
+        { trackMetadata: true },
+      ),
+    })
+    const db = await createDatabase(schema)
+    await db.execute(
+      `INSERT INTO todos (id, title, done) VALUES ('t1', 'Write report', 0)`,
+    )
+    // Forward unchanged callbacks to the SDK while recording genuine delivery;
+    // this test never invokes the registered handler itself.
+    const originalOnChange = db.onChangeWithCallback.bind(db)
+    const watcherDeliveries: Array<ReadonlyArray<string>> = []
+    const watcherRegistration = vi
+      .spyOn(db, `onChangeWithCallback`)
+      .mockImplementation((handler, options) => {
+        if (!handler) throw new Error(`adapter did not register a watcher`)
+        return originalOnChange(
+          {
+            ...handler,
+            onChange: async (event) => {
+              watcherDeliveries.push([...event.changedTables])
+              await handler.onChange(event)
+            },
+          },
+          options,
+        )
+      })
+    const collection = createCollection(
+      powerSyncCollectionOptions({ database: db, table: schema.props.todos }),
+    )
+
+    let failure: { error: unknown } | undefined
+    try {
+      await collection.preload()
+      expect(watcherRegistration).toHaveBeenCalled()
+      watcherDeliveries.length = 0
+
+      const metadata = { source: `Collection.update` }
+      await collection.update(`t1`, { metadata }, (draft) => {
+        draft.done = 1
+      }).isPersisted.promise
+
+      expect(
+        watcherDeliveries.some((tables) =>
+          tables.includes(collection.utils.getMeta().trackedTableName),
+        ),
+      ).toBe(true)
+
+      expect(
+        await db.get<{ done: number }>(
+          `SELECT done FROM todos WHERE id = 't1'`,
+        ),
+      ).toEqual({ done: 1 })
+      expect(collection.get(`t1`)?.done).toBe(1)
+      const batch = await db.getCrudBatch(100)
+      expect(batch?.crud.at(-1)?.metadata).toBe(JSON.stringify(metadata))
+      const crud = await db.getAll<CrudRow>(
+        `SELECT data FROM ps_crud ORDER BY id`,
+      )
+      const patch = JSON.parse(crud.at(-1)!.data) as {
+        op: string
+        data: Record<string, unknown>
+      }
+      expect({ op: patch.op, data: patch.data }).toEqual({
+        op: `PATCH`,
+        data: { done: 1 },
+      })
+    } catch (error) {
+      failure = { error }
+      throw error
+    } finally {
+      await cleanupAfterOracle(failure, [
+        () => collection.cleanup(),
+        () => db.disconnectAndClear(),
+        () => db.close(),
+      ])
     }
   })
 
@@ -347,6 +624,7 @@ describePowerSync(`PowerSync correctness oracle`, () => {
       }),
     )
 
+    let failure: { error: unknown } | undefined
     try {
       await collection.preload()
       await collection.update(`f1`, (draft) => {
@@ -367,10 +645,15 @@ describePowerSync(`PowerSync correctness oracle`, () => {
         op: `PATCH`,
         data: { label: ``, note: null, count: 0, active: 0 },
       })
+    } catch (error) {
+      failure = { error }
+      throw error
     } finally {
-      await collection.cleanup()
-      await db.disconnectAndClear()
-      await db.close()
+      await cleanupAfterOracle(failure, [
+        () => collection.cleanup(),
+        () => db.disconnectAndClear(),
+        () => db.close(),
+      ])
     }
   })
 
@@ -390,6 +673,7 @@ describePowerSync(`PowerSync correctness oracle`, () => {
     )
     const ignoredMetadata = { ignored: true }
 
+    let failure: { error: unknown } | undefined
     try {
       await collection.preload()
       await collection.update(`t1`, { metadata: ignoredMetadata }, (draft) => {
@@ -422,10 +706,15 @@ describePowerSync(`PowerSync correctness oracle`, () => {
       expect(
         records.filter((record) => record.level >= LogLevels.error),
       ).toEqual([])
+    } catch (error) {
+      failure = { error }
+      throw error
     } finally {
-      await collection.cleanup()
-      await db.disconnectAndClear()
-      await db.close()
+      await cleanupAfterOracle(failure, [
+        () => collection.cleanup(),
+        () => db.disconnectAndClear(),
+        () => db.close(),
+      ])
     }
   })
 
@@ -444,6 +733,7 @@ describePowerSync(`PowerSync correctness oracle`, () => {
       }),
     )
 
+    let failure: { error: unknown } | undefined
     try {
       await collection.preload()
       heldChanges.expectReached()
@@ -497,10 +787,15 @@ describePowerSync(`PowerSync correctness oracle`, () => {
       })
       expect(collectionRow).not.toHaveProperty(`priority`)
       expect(persistenceError).toBeUndefined()
+    } catch (error) {
+      failure = { error }
+      throw error
     } finally {
-      await collection.cleanup()
-      await db.disconnectAndClear()
-      await db.close()
+      await cleanupAfterOracle(failure, [
+        () => collection.cleanup(),
+        () => db.disconnectAndClear(),
+        () => db.close(),
+      ])
     }
   })
 
@@ -512,14 +807,20 @@ describePowerSync(`PowerSync correctness oracle`, () => {
       powerSyncCollectionOptions({ database: db, table: schema.props.ids }),
     )
 
+    let failure: { error: unknown } | undefined
     try {
       await collection.preload()
       expect(createDiffTrigger).toHaveBeenCalled()
       expect(createDiffTrigger.mock.calls[0]![0].columns).toEqual([])
+    } catch (error) {
+      failure = { error }
+      throw error
     } finally {
-      await collection.cleanup()
-      await db.disconnectAndClear()
-      await db.close()
+      await cleanupAfterOracle(failure, [
+        () => collection.cleanup(),
+        () => db.disconnectAndClear(),
+        () => db.close(),
+      ])
     }
   })
 
@@ -562,14 +863,20 @@ describePowerSync(`PowerSync correctness oracle`, () => {
       }),
     )
 
+    let failure: { error: unknown } | undefined
     try {
       await expect(collection.preload()).resolves.toBeUndefined()
       expect(compare).toHaveBeenCalled()
       expect([...collection.keys()]).toEqual([`undated`, `older`, `newer`])
+    } catch (error) {
+      failure = { error }
+      throw error
     } finally {
-      await collection.cleanup()
-      await db.disconnectAndClear()
-      await db.close()
+      await cleanupAfterOracle(failure, [
+        () => collection.cleanup(),
+        () => db.disconnectAndClear(),
+        () => db.close(),
+      ])
     }
   })
 })

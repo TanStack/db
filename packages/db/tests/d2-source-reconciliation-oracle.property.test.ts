@@ -1,5 +1,5 @@
 import { fc, test as fcTest } from '@fast-check/vitest'
-import { expect, it } from 'vitest'
+import { expect, it as vitestIt } from 'vitest'
 import {
   createCollection,
   createLiveQueryCollection,
@@ -8,13 +8,26 @@ import {
 import { BTreeIndex } from '../src/indexes/btree-index.js'
 import { createEffect } from '../src/query/effect.js'
 import { reconcileChangesForD2 } from '../src/query/live/utils.js'
-import { oraclePropertyOptions, oracleRuns } from './oracle-config.js'
+import {
+  oraclePropertyOptions,
+  oracleRuns,
+  readOracleRunConfig,
+} from './oracle-config.js'
 import { flushPromises } from './utils.js'
 import type { ChangeMessage, SyncConfig } from '../src/types.js'
 
+const { replayPath, replayProperty } = readOracleRunConfig()
+const it = replayPath === undefined ? vitestIt : vitestIt.skip
+const fixedCampaign = replayPath === undefined ? fcTest : fcTest.skip
+const randomCampaign = (property: string) =>
+  replayPath === undefined || replayProperty === property ? fcTest : fcTest.skip
+
 /**
  * D2 source reconciliation turns source-key snapshots into exact signed row
- * changes across graph lifetimes.
+ * changes across graph lifetimes. The contribution-conservation and
+ * publication laws in `src/query/live/ARCHITECTURE.md` authorize the graph
+ * result; the `reconcileChangesForD2` boundary owns the exact sent-row value
+ * used for each retraction.
  *
  * The model has three separate nodes: authoritative source rows, production's
  * sent-row memory, and an independently integrated weighted relation. Generated
@@ -22,10 +35,15 @@ import type { ChangeMessage, SyncConfig } from '../src/types.js'
  * types, replay rows, delete, truncate, tear down, and restart. The reference
  * derives truth from the source-key map, never from reported previous values.
  *
- * After each cut the raw reconciled messages must integrate to the source
- * relation, and a real live query must publish the same rows through both scan
- * and index routes. This catches locally balanced messages that still leave the
- * downstream graph wrong.
+ * After each helper cut the raw reconciled messages must integrate to the
+ * source relation. Ordered Effect and live-query Collection tests check exact
+ * retractions at indexed and scan consumer boundaries. The generated model
+ * exercises the reconciliation helper; fixed cases receive controlled
+ * truncate replay and live-query graph restart through actual consumers.
+ * The controlled source injects stale change messages; a provider E2E owner
+ * such as `electric-db-collection/e2e/electric.e2e.test.ts` must show which
+ * events a real source emits and the public result they produce. These cuts do
+ * not establish every graph shape or publication schedule.
  */
 
 type SourceRow = {
@@ -66,6 +84,7 @@ type ReconciliationModel = {
   sourceRows: Map<SourceKey, SourceRow>
   sentRows: Map<SourceKey, SourceRow>
   relation: Map<string, number>
+  // Model-only switch for helper invocation, not a production graph state.
   graphActive: boolean
 }
 
@@ -125,6 +144,24 @@ const reconciliationHistoryArbitrary = fc.array(reconciliationStepArbitrary, {
   minLength: 1,
   maxLength: 30,
 })
+
+// Grammar controls: the pinned numeric/string key, unknown update/delete,
+// stale previous-value, and changed-source restart histories below are all
+// reconstructible here. Upsert establishes or replaces authoritative source
+// rows; rawUpdate exercises an update without a prior sent row; replay checks
+// repeat delivery; delete tests exact retraction or an unknown key. Truncate
+// preserves the sent row for a later source batch, while teardown and restart
+// distinguish source ownership from graph memory. The helper simulator makes
+// truncate an explicit no-op; its effect is observable only in the ordered
+// consumer tests below. Removing another operation rule loses its named
+// transition; removing key type or revision/value variation loses a distinct
+// source contribution. Batches of 1..5 operations expose
+// within-batch transitions; histories of 1..30 expose later source replay.
+// Row fields and keys use the bounded domains above. Out-of-range row numbers
+// use the same equality law; object keys and malformed messages are excluded
+// by the SourceKey/SourceOperation grammar. Repeated teardown/restart and a
+// truncate without a later batch are harmless simulator signals, not claims
+// about public Collection lifecycle legality or real truncate replay.
 
 function sourceOperationForKeyArbitrary(
   key: SourceKey,
@@ -358,12 +395,14 @@ function upsert(
   }
 }
 
-function createOrderedSourceHarness(id: string) {
+function createOrderedSourceHarness(id: string, autoIndex: `eager` | `off`) {
   // Intentional fault-injection boundary: substitute stale subscription events
   // while retaining the actual ordered Effect/live-query consumer. This does
   // not establish that a particular SDK emits these events naturally.
+  // The Collection stays inert until initialize runs inside runWithCleanup;
+  // source sync and consumer construction can then fail without losing cleanup.
   let sync!: SourceSyncActions
-  let loadSubsetCalls = 0
+  let replayHeld = false
   const replayResolvers: Array<() => void> = []
   const contributed = { id: 1, revision: 1, value: 1 }
   const staleDelete = { id: 1, revision: 2, value: 1 }
@@ -371,9 +410,9 @@ function createOrderedSourceHarness(id: string) {
   const source = createCollection<SourceRow, number>({
     id,
     getKey: (row) => row.id,
-    startSync: true,
+    startSync: false,
     syncMode: `on-demand`,
-    autoIndex: `eager`,
+    autoIndex,
     defaultIndexType: BTreeIndex,
     sync: {
       sync: (actions) => {
@@ -381,10 +420,9 @@ function createOrderedSourceHarness(id: string) {
         actions.markReady()
         return {
           loadSubset: () => {
-            loadSubsetCalls++
-            // Initial page and its exact tie-boundary refinement are immediate;
-            // later calls are truncate replays controlled by the test.
-            if (loadSubsetCalls > 2) {
+            // Initial demand settles immediately on both routes. Truncate
+            // replay demand remains held at the same public checkpoint.
+            if (replayHeld) {
               return new Promise((resolve) => replayResolvers.push(resolve))
             }
             return true
@@ -393,25 +431,34 @@ function createOrderedSourceHarness(id: string) {
       },
     },
   })
-  sync.begin()
-  sync.write({ type: `insert`, value: contributed })
-  expect(sync.commit()).toBe(true)
-
   let sourceCallback: Parameters<typeof source.subscribeChanges>[0] | undefined
   let suppressSourceChanges = false
-  const subscribeChanges = source.subscribeChanges.bind(source)
-  source.subscribeChanges = ((callback, options) => {
-    sourceCallback = callback
-    return subscribeChanges((changes) => {
-      if (!suppressSourceChanges) callback(changes)
-    }, options)
-  }) as typeof source.subscribeChanges
+  const settlePendingReplay = async () => {
+    // Stop holding future acquisitions before releasing the current ones.
+    // A graph continuation may request another page during this drain.
+    replayHeld = false
+    for (const resolve of replayResolvers.splice(0)) resolve()
+    await flushPromises()
+  }
 
   return {
     contributed,
     replacement,
     source,
     staleDelete,
+    initialize: () => {
+      const subscribeChanges = source.subscribeChanges.bind(source)
+      source.subscribeChanges = ((callback, options) => {
+        sourceCallback = callback
+        return subscribeChanges((changes) => {
+          if (!suppressSourceChanges) callback(changes)
+        }, options)
+      }) as typeof source.subscribeChanges
+      source.startSyncImmediate()
+      sync.begin()
+      sync.write({ type: `insert`, value: contributed })
+      expect(sync.commit()).toBe(true)
+    },
     suppressSourceChanges: () => {
       suppressSourceChanges = true
     },
@@ -425,31 +472,177 @@ function createOrderedSourceHarness(id: string) {
       publish(changes)
     },
     truncate: () => {
+      replayHeld = true
       sync.begin()
       sync.truncate()
       expect(sync.commit()).toBe(true)
     },
+    pendingReplayCount: () => replayResolvers.length,
+    settlePendingReplay,
     resolveReplay: async () => {
       if (replayResolvers.length === 0) {
         throw new Error(`No truncate replay is pending`)
       }
-      for (let pass = 0; replayResolvers.length > 0; pass++) {
-        if (pass === 20) {
-          throw new Error(
-            `Truncate replay did not reach a fixed point after 20 passes`,
-          )
-        }
-        for (const resolve of replayResolvers.splice(0)) resolve()
-        await flushPromises()
-      }
+      await settlePendingReplay()
     },
   }
 }
 
-it(`ignores unknown deletes and inserts unknown updates at the D2 boundary`, () => {
+async function runWithCleanup(
+  check: () => Promise<void>,
+  cleanups: ReadonlyArray<{
+    resource: string
+    release: () => void | Promise<void>
+  }>,
+): Promise<void> {
+  let failed = false
+  let primaryFailure: unknown
+  try {
+    await check()
+  } catch (error) {
+    failed = true
+    primaryFailure = error
+  }
+
+  const cleanupFailures: Array<Error> = []
+  for (const { resource, release } of cleanups) {
+    try {
+      await release()
+    } catch (error) {
+      cleanupFailures.push(
+        new Error(`D2 oracle ${resource} cleanup failed`, { cause: error }),
+      )
+    }
+  }
+
+  if (failed && cleanupFailures.length > 0) {
+    throw new AggregateError(cleanupFailures, `D2 oracle cleanup failed`, {
+      cause: primaryFailure,
+    })
+  }
+  if (failed) throw primaryFailure
+  if (cleanupFailures.length > 0) {
+    throw new AggregateError(cleanupFailures, `D2 oracle cleanup failed`)
+  }
+}
+
+it(`retains a D2 mismatch and later cleanup diagnostics while releasing every resource`, async () => {
+  const mismatch = new Error(`wrong D2 row`)
+  const cleanupFailure = new Error(`first release failed`)
+  const secondCleanupFailure = new Error(`second release failed`)
+  const released: Array<string> = []
+  let report: unknown
+  try {
+    await runWithCleanup(
+      () => Promise.reject(mismatch),
+      [
+        {
+          resource: `first resource`,
+          release: () => {
+            released.push(`first`)
+            throw cleanupFailure
+          },
+        },
+        {
+          resource: `second resource`,
+          release: () => {
+            released.push(`second`)
+            throw secondCleanupFailure
+          },
+        },
+        {
+          resource: `last resource`,
+          release: () => {
+            released.push(`last`)
+          },
+        },
+      ],
+    )
+  } catch (error) {
+    report = error
+  }
+
+  expect(report).toBeInstanceOf(AggregateError)
+  if (!(report instanceof AggregateError)) return
+  expect(report.cause).toBe(mismatch)
+  expect(report.errors).toEqual([
+    new Error(`D2 oracle first resource cleanup failed`, {
+      cause: cleanupFailure,
+    }),
+    new Error(`D2 oracle second resource cleanup failed`, {
+      cause: secondCleanupFailure,
+    }),
+  ])
+  expect(released).toEqual([`first`, `second`, `last`])
+})
+
+it(`releases an initialized source when consumer setup fails`, async () => {
+  const harness = createOrderedSourceHarness(`d2-setup-failure`, `eager`)
+  const setupFailure = new Error(`consumer setup failed`)
+  let reported: unknown
+  try {
+    await runWithCleanup(() => {
+      harness.initialize()
+      return Promise.reject(setupFailure)
+    }, [
+      {
+        resource: `source Collection`,
+        release: () => harness.source.cleanup(),
+      },
+    ])
+  } catch (error) {
+    reported = error
+  }
+  expect(reported).toBe(setupFailure)
+  expect(harness.source.status).toBe(`cleaned-up`)
+})
+
+it(`settles held replay work after a D2 mismatch without replacing it`, async () => {
+  const harness = createOrderedSourceHarness(`d2-held-replay-failure`, `eager`)
+  const mismatch = new Error(`wrong row during held replay`)
+  let disposeEffect: (() => void | Promise<void>) | undefined
+  let reported: unknown
+  try {
+    await runWithCleanup(async () => {
+      harness.initialize()
+      const effect = createEffect<SourceRow, number>({
+        query: (query) =>
+          query
+            .from({ row: harness.source })
+            .orderBy(({ row }) => row.value)
+            .limit(1),
+        onBatch: () => {},
+      })
+      disposeEffect = () => effect.dispose()
+      await flushPromises()
+      harness.truncate()
+      await flushPromises()
+      expect(harness.pendingReplayCount()).toBeGreaterThan(0)
+      throw mismatch
+    }, [
+      {
+        resource: `held truncate replay`,
+        release: () => harness.settlePendingReplay(),
+      },
+      { resource: `Effect`, release: () => disposeEffect?.() },
+      {
+        resource: `source Collection`,
+        release: () => harness.source.cleanup(),
+      },
+    ])
+  } catch (error) {
+    reported = error
+  }
+  expect(reported).toBe(mismatch)
+  expect(harness.pendingReplayCount()).toBe(0)
+  expect(harness.source.status).toBe(`cleaned-up`)
+})
+
+it(`uses sent-row membership and values at the D2 change boundary`, () => {
   const sentRows = new Map<SourceKey, SourceRow>()
   const stale = { id: 1, revision: 1, value: 1 }
   const current = { id: 2, revision: 2, value: 2 }
+  const replacement = { id: 2, revision: 3, value: 3 }
 
   expect(
     reconcileChangesForD2(
@@ -471,217 +664,356 @@ it(`ignores unknown deletes and inserts unknown updates at the D2 boundary`, () 
     ),
   ).toEqual([{ type: `insert`, key: `row`, value: current }])
   expect(sentRows).toEqual(new Map([[`row`, current]]))
-})
 
-it(`retracts the exact Effect source row after an ordered truncate`, async () => {
-  const harness = createOrderedSourceHarness(
-    `d2-effect-truncate-reconciliation`,
-  )
-  const { contributed, source, staleDelete } = harness
-  const events: Array<{
-    type: string
-    value: { id: number; revision: number; value: number }
-  }> = []
-  const effect = createEffect<SourceRow, number>({
-    query: (query) =>
-      query
-        .from({ row: source })
-        .where(({ row }) => eq(row.revision, contributed.revision))
-        .orderBy(({ row }) => row.value)
-        .limit(1),
-    onBatch: (batch) => {
-      events.push(...batch)
-    },
-  })
-  try {
-    await flushPromises()
-    expect(events).toHaveLength(1)
-    expect(events[0]).toMatchObject({
-      type: `enter`,
-      key: 1,
-      value: contributed,
-    })
-    const publishedValue = events[0]!.value
-
-    harness.suppressSourceChanges()
-    harness.truncate()
-    await flushPromises()
-    expect(events).toEqual([{ type: `enter`, key: 1, value: publishedValue }])
-
-    harness.publish([{ type: `delete`, key: 1, value: staleDelete }])
-    await flushPromises()
-    expect(events).toEqual([{ type: `enter`, key: 1, value: publishedValue }])
-
-    await harness.resolveReplay()
-    expect(events).toEqual([
-      { type: `enter`, key: 1, value: publishedValue },
-      { type: `exit`, key: 1, value: publishedValue },
-    ])
-  } finally {
-    await effect.dispose()
-    await source.cleanup()
-  }
-})
-
-it(`retracts the exact live-query source row after ordered replay settles`, async () => {
-  const harness = createOrderedSourceHarness(
-    `d2-live-query-truncate-reconciliation`,
-  )
-  const { contributed, source, staleDelete } = harness
-  const live = createLiveQueryCollection({
-    id: `d2-live-query-truncate-result`,
-    query: (query) =>
-      query
-        .from({ row: source })
-        .where(({ row }) => eq(row.revision, contributed.revision))
-        .orderBy(({ row }) => row.value)
-        .limit(1),
-    startSync: true,
-  })
-
-  try {
-    await live.preload()
-    expect(live.get(contributed.id)).toMatchObject(contributed)
-
-    harness.suppressSourceChanges()
-    harness.truncate()
-    await flushPromises()
-    expect(live.get(contributed.id)).toMatchObject(contributed)
-
-    harness.publish([{ type: `delete`, key: 1, value: staleDelete }])
-    await flushPromises()
-    expect(live.get(contributed.id)).toMatchObject(contributed)
-
-    await harness.resolveReplay()
-    expect(live.get(contributed.id)).toBeUndefined()
-  } finally {
-    await live.cleanup()
-    await source.cleanup()
-  }
-})
-
-it(`replaces the retained Effect source row after an ordered truncate`, async () => {
-  const harness = createOrderedSourceHarness(`d2-effect-truncate-replacement`)
-  const { contributed, replacement, source, staleDelete } = harness
-  const batches: Array<
-    Array<{
-      type: string
-      value: SourceRow
-      previousValue?: SourceRow
-    }>
-  > = []
-  const effect = createEffect<SourceRow, number>({
-    query: (query) =>
-      query
-        .from({ row: source })
-        .orderBy(({ row }) => row.value)
-        .limit(1),
-    onBatch: (batch) => {
-      batches.push(batch)
-    },
-  })
-
-  try {
-    await flushPromises()
-    expect(batches).toHaveLength(1)
-    expect(batches[0]).toHaveLength(1)
-    expect(batches[0]![0]).toMatchObject({
-      type: `enter`,
-      key: 1,
-      value: contributed,
-    })
-    const publishedValue = batches[0]![0]!.value
-
-    harness.suppressSourceChanges()
-    harness.truncate()
-    await flushPromises()
-    expect(batches).toHaveLength(1)
-
-    harness.publish([
-      {
-        type: `update`,
-        key: 1,
-        previousValue: staleDelete,
-        value: replacement,
-      },
-    ])
-    await flushPromises()
-    expect(batches).toHaveLength(1)
-
-    await harness.resolveReplay()
-    expect(batches).toHaveLength(2)
-    expect(batches[1]).toHaveLength(1)
-    expect(batches[1]![0]).toMatchObject({
+  // A known-key update and delete retract the row sent to D2, even when the
+  // source reports a different previous value. These adjacent cells reject
+  // both "always insert updates" and "trust the reported value" rules.
+  expect(
+    reconcileChangesForD2(
+      [
+        {
+          type: `update`,
+          key: `row`,
+          previousValue: stale,
+          value: replacement,
+        },
+      ],
+      sentRows,
+    ),
+  ).toEqual([
+    {
       type: `update`,
-      key: 1,
+      key: `row`,
+      previousValue: current,
       value: replacement,
-    })
-    expect(batches[1]![0]!.previousValue).toBe(publishedValue)
-  } finally {
-    await effect.dispose()
-    await source.cleanup()
-  }
+    },
+  ])
+  expect(
+    reconcileChangesForD2(
+      [{ type: `delete`, key: `row`, value: stale }],
+      sentRows,
+    ),
+  ).toEqual([{ type: `delete`, key: `row`, value: replacement }])
+  expect(sentRows).toEqual(new Map())
 })
 
-it(`replaces the retained live-query source row after ordered replay settles`, async () => {
-  const harness = createOrderedSourceHarness(
-    `d2-live-query-truncate-replacement`,
-  )
-  const { contributed, replacement, source, staleDelete } = harness
-  const live = createLiveQueryCollection({
-    id: `d2-live-query-truncate-replacement-result`,
-    query: (query) =>
-      query
-        .from({ row: source })
-        .orderBy(({ row }) => row.value)
-        .limit(1),
-    startSync: true,
-  })
-  const batches: Array<Array<ChangeMessage<SourceRow, SourceKey>>> = []
-
-  try {
-    await live.preload()
-    expect(live.get(contributed.id)).toMatchObject(contributed)
-    const publishedValue = live.get(contributed.id)
-    const subscription = live.subscribeChanges(
-      (changes) => batches.push(changes),
-      { includeInitialState: false },
+it.each([`eager`, `off`] as const)(
+  `retracts the exact Effect source row after an ordered truncate (%s index)`,
+  async (autoIndex) => {
+    const harness = createOrderedSourceHarness(
+      `d2-effect-truncate-reconciliation-${autoIndex}`,
+      autoIndex,
     )
+    const { contributed, source, staleDelete } = harness
+    const events: Array<{
+      type: string
+      value: { id: number; revision: number; value: number }
+    }> = []
+    let disposeEffect: (() => void | Promise<void>) | undefined
+    await runWithCleanup(async () => {
+      harness.initialize()
+      const effect = createEffect<SourceRow, number>({
+        query: (query) =>
+          query
+            .from({ row: source })
+            .where(({ row }) => eq(row.revision, contributed.revision))
+            .orderBy(({ row }) => row.value)
+            .limit(1),
+        onBatch: (batch) => {
+          events.push(...batch)
+        },
+      })
+      disposeEffect = () => effect.dispose()
+      await flushPromises()
+      expect(events).toHaveLength(1)
+      expect(events[0]).toMatchObject({
+        type: `enter`,
+        key: 1,
+        value: contributed,
+      })
+      const publishedValue = events[0]!.value
 
-    harness.suppressSourceChanges()
-    harness.truncate()
-    await flushPromises()
-    expect(batches).toEqual([])
-    expect(live.get(contributed.id)).toBe(publishedValue)
+      harness.suppressSourceChanges()
+      harness.truncate()
+      await flushPromises()
+      expect(events).toEqual([{ type: `enter`, key: 1, value: publishedValue }])
 
-    harness.publish([
+      harness.publish([{ type: `delete`, key: 1, value: staleDelete }])
+      await flushPromises()
+      expect(events).toEqual([{ type: `enter`, key: 1, value: publishedValue }])
+
+      await harness.resolveReplay()
+      expect(events).toEqual([
+        { type: `enter`, key: 1, value: publishedValue },
+        { type: `exit`, key: 1, value: publishedValue },
+      ])
+    }, [
       {
+        resource: `held truncate replay`,
+        release: () => harness.settlePendingReplay(),
+      },
+      { resource: `Effect`, release: () => disposeEffect?.() },
+      { resource: `source Collection`, release: () => source.cleanup() },
+    ])
+  },
+)
+
+it.each([`eager`, `off`] as const)(
+  `retracts the exact live-query source row after ordered replay settles (%s index)`,
+  async (autoIndex) => {
+    const harness = createOrderedSourceHarness(
+      `d2-live-query-truncate-reconciliation-${autoIndex}`,
+      autoIndex,
+    )
+    const { contributed, source, staleDelete } = harness
+    let cleanupLive: (() => Promise<void>) | undefined
+    await runWithCleanup(async () => {
+      harness.initialize()
+      const live = createLiveQueryCollection({
+        id: `d2-live-query-truncate-result`,
+        query: (query) =>
+          query
+            .from({ row: source })
+            .where(({ row }) => eq(row.revision, contributed.revision))
+            .orderBy(({ row }) => row.value)
+            .limit(1),
+        startSync: true,
+      })
+      cleanupLive = () => live.cleanup()
+      await live.preload()
+      expect(live.get(contributed.id)).toMatchObject(contributed)
+
+      harness.suppressSourceChanges()
+      harness.truncate()
+      await flushPromises()
+      expect(live.get(contributed.id)).toMatchObject(contributed)
+
+      harness.publish([{ type: `delete`, key: 1, value: staleDelete }])
+      await flushPromises()
+      expect(live.get(contributed.id)).toMatchObject(contributed)
+
+      await harness.resolveReplay()
+      expect(live.get(contributed.id)).toBeUndefined()
+    }, [
+      {
+        resource: `held truncate replay`,
+        release: () => harness.settlePendingReplay(),
+      },
+      { resource: `live-query Collection`, release: () => cleanupLive?.() },
+      { resource: `source Collection`, release: () => source.cleanup() },
+    ])
+  },
+)
+
+it.each([`eager`, `off`] as const)(
+  `replaces the retained Effect source row after an ordered truncate (%s index)`,
+  async (autoIndex) => {
+    const harness = createOrderedSourceHarness(
+      `d2-effect-truncate-replacement-${autoIndex}`,
+      autoIndex,
+    )
+    const { contributed, replacement, source, staleDelete } = harness
+    const batches: Array<
+      Array<{
+        type: string
+        value: SourceRow
+        previousValue?: SourceRow
+      }>
+    > = []
+    let disposeEffect: (() => void | Promise<void>) | undefined
+    await runWithCleanup(async () => {
+      harness.initialize()
+      const effect = createEffect<SourceRow, number>({
+        query: (query) =>
+          query
+            .from({ row: source })
+            .orderBy(({ row }) => row.value)
+            .limit(1),
+        onBatch: (batch) => {
+          batches.push(batch)
+        },
+      })
+      disposeEffect = () => effect.dispose()
+      await flushPromises()
+      expect(batches).toHaveLength(1)
+      expect(batches[0]).toHaveLength(1)
+      expect(batches[0]![0]).toMatchObject({
+        type: `enter`,
+        key: 1,
+        value: contributed,
+      })
+      const publishedValue = batches[0]![0]!.value
+
+      harness.suppressSourceChanges()
+      harness.truncate()
+      await flushPromises()
+      expect(batches).toHaveLength(1)
+
+      harness.publish([
+        {
+          type: `update`,
+          key: 1,
+          previousValue: staleDelete,
+          value: replacement,
+        },
+      ])
+      await flushPromises()
+      expect(batches).toHaveLength(1)
+
+      await harness.resolveReplay()
+      expect(batches).toHaveLength(2)
+      expect(batches[1]).toHaveLength(1)
+      expect(batches[1]![0]).toMatchObject({
         type: `update`,
         key: 1,
-        previousValue: staleDelete,
         value: replacement,
+      })
+      expect(batches[1]![0]!.previousValue).toBe(publishedValue)
+    }, [
+      {
+        resource: `held truncate replay`,
+        release: () => harness.settlePendingReplay(),
       },
+      { resource: `Effect`, release: () => disposeEffect?.() },
+      { resource: `source Collection`, release: () => source.cleanup() },
     ])
-    await flushPromises()
-    expect(batches).toEqual([])
-    expect(live.get(contributed.id)).toBe(publishedValue)
+  },
+)
 
-    await harness.resolveReplay()
-    expect(batches).toHaveLength(1)
-    expect(batches[0]).toHaveLength(1)
-    expect(batches[0]![0]).toMatchObject({
-      type: `update`,
-      key: 1,
-      value: replacement,
-    })
-    expect(batches[0]![0]!.previousValue).toEqual(publishedValue)
-    expect(live.get(replacement.id)).toMatchObject(replacement)
-    subscription.unsubscribe()
-  } finally {
-    await live.cleanup()
-    await source.cleanup()
-  }
-})
+it.each([`eager`, `off`] as const)(
+  `replaces the retained live-query source row after ordered replay settles (%s index)`,
+  async (autoIndex) => {
+    const harness = createOrderedSourceHarness(
+      `d2-live-query-truncate-replacement-${autoIndex}`,
+      autoIndex,
+    )
+    const { contributed, replacement, source, staleDelete } = harness
+    const batches: Array<Array<ChangeMessage<SourceRow, SourceKey>>> = []
+    let unsubscribe: (() => void) | undefined
+    let cleanupLive: (() => Promise<void>) | undefined
+    await runWithCleanup(async () => {
+      harness.initialize()
+      const live = createLiveQueryCollection({
+        id: `d2-live-query-truncate-replacement-result`,
+        query: (query) =>
+          query
+            .from({ row: source })
+            .orderBy(({ row }) => row.value)
+            .limit(1),
+        startSync: true,
+      })
+      cleanupLive = () => live.cleanup()
+      await live.preload()
+      expect(live.get(contributed.id)).toMatchObject(contributed)
+      const publishedValue = live.get(contributed.id)
+      const subscription = live.subscribeChanges(
+        (changes) => batches.push(changes),
+        { includeInitialState: false },
+      )
+      unsubscribe = () => subscription.unsubscribe()
+
+      harness.suppressSourceChanges()
+      harness.truncate()
+      await flushPromises()
+      expect(batches).toEqual([])
+      expect(live.get(contributed.id)).toBe(publishedValue)
+
+      harness.publish([
+        {
+          type: `update`,
+          key: 1,
+          previousValue: staleDelete,
+          value: replacement,
+        },
+      ])
+      await flushPromises()
+      expect(batches).toEqual([])
+      expect(live.get(contributed.id)).toBe(publishedValue)
+
+      await harness.resolveReplay()
+      expect(batches).toHaveLength(1)
+      expect(batches[0]).toHaveLength(1)
+      expect(batches[0]![0]).toMatchObject({
+        type: `update`,
+        key: 1,
+        value: replacement,
+      })
+      expect(batches[0]![0]!.previousValue).toEqual(publishedValue)
+      expect(live.get(replacement.id)).toMatchObject(replacement)
+    }, [
+      {
+        resource: `held truncate replay`,
+        release: () => harness.settlePendingReplay(),
+      },
+      { resource: `live-query subscriber`, release: () => unsubscribe?.() },
+      { resource: `live-query Collection`, release: () => cleanupLive?.() },
+      { resource: `source Collection`, release: () => source.cleanup() },
+    ])
+  },
+)
+
+it.each([`eager`, `off`] as const)(
+  `retracts the previous graph contribution after a live-query restart (%s index)`,
+  async (autoIndex) => {
+    const harness = createOrderedSourceHarness(
+      `d2-live-query-graph-restart-${autoIndex}`,
+      autoIndex,
+    )
+    const { contributed, replacement, source, staleDelete } = harness
+    const batches: Array<Array<ChangeMessage<SourceRow, SourceKey>>> = []
+    let unsubscribe: (() => void) | undefined
+    let cleanupLive: (() => Promise<void>) | undefined
+    await runWithCleanup(async () => {
+      harness.initialize()
+      const live = createLiveQueryCollection({
+        id: `d2-live-query-graph-restart-result-${autoIndex}`,
+        query: (query) =>
+          query
+            .from({ row: source })
+            .orderBy(({ row }) => row.value)
+            .limit(1),
+        startSync: true,
+      })
+      cleanupLive = () => live.cleanup()
+      await live.preload()
+      expect(live.get(contributed.id)).toMatchObject(contributed)
+
+      await live.cleanup()
+      expect(live.status).toBe(`cleaned-up`)
+      await live.preload()
+      expect(live.get(contributed.id)).toMatchObject(contributed)
+      const restartedValue = live.get(contributed.id)
+      const subscription = live.subscribeChanges(
+        (changes) => batches.push(changes),
+        { includeInitialState: false },
+      )
+      unsubscribe = () => subscription.unsubscribe()
+
+      harness.publish([
+        {
+          type: `update`,
+          key: contributed.id,
+          previousValue: staleDelete,
+          value: replacement,
+        },
+      ])
+      await flushPromises()
+      expect(batches).toHaveLength(1)
+      expect(batches[0]).toHaveLength(1)
+      expect(batches[0]![0]).toMatchObject({
+        type: `update`,
+        key: contributed.id,
+        value: replacement,
+      })
+      expect(batches[0]![0]!.previousValue).toEqual(restartedValue)
+      expect(live.get(replacement.id)).toMatchObject(replacement)
+    }, [
+      { resource: `live-query subscriber`, release: () => unsubscribe?.() },
+      { resource: `live-query Collection`, release: () => cleanupLive?.() },
+      { resource: `source Collection`, release: () => source.cleanup() },
+    ])
+  },
+)
 
 it(`keeps revision and value in weighted row identity`, () => {
   const key = `row`
@@ -850,19 +1182,32 @@ it(`does not count absent replay or an unfinished downtime as replay coverage`, 
   ).toBe(0)
 })
 
-fcTest.prop([sourceRowArbitrary, sourceKeyArbitrary], { numRuns: 100 })(
-  `forces a changed source payload through every generated helper restart`,
-  (row, key) => {
-    const replacement = { ...row, revision: row.revision + 1 }
-    expect(
-      executedReplayReach([
-        upsert(key, row),
-        { type: `teardown` },
-        upsert(key, replacement, row),
-        { type: `restart` },
-      ]),
-    ).toBe(1)
-  },
+const assertChangedSourceReplay = (row: SourceRow, key: SourceKey) => {
+  const replacement = { ...row, revision: row.revision + 1 }
+  expect(
+    executedReplayReach([
+      upsert(key, row),
+      { type: `teardown` },
+      upsert(key, replacement, row),
+      { type: `restart` },
+    ]),
+  ).toBe(1)
+}
+
+fixedCampaign.prop([sourceRowArbitrary, sourceKeyArbitrary], {
+  numRuns: oracleRuns(100),
+  seed: 1782,
+})(
+  `forces a changed source payload through every generated helper restart for a fixed seed`,
+  assertChangedSourceReplay,
+)
+
+randomCampaign(`d2-source.changed-restart`).prop(
+  [sourceRowArbitrary, sourceKeyArbitrary],
+  oraclePropertyOptions(100, `d2-source.changed-restart`),
+)(
+  `forces a changed source payload through every generated helper restart for a random or replayed seed`,
+  assertChangedSourceReplay,
 )
 
 it.each([`upsert`, `rawUpdate`, `replay`, `restart`] as const)(
@@ -910,17 +1255,29 @@ it.each([`upsert`, `rawUpdate`, `replay`, `restart`] as const)(
   },
 )
 
-fcTest.prop(
+const assertExactSourceContributions = (
+  steps: ReadonlyArray<ReconciliationStep>,
+) => {
+  const model = createReconciliationModel()
+  for (const step of steps) {
+    applyReconciliationStep(model, step)
+  }
+}
+
+fixedCampaign.prop([reconciliationHistoryArbitrary], {
+  numRuns: oracleRuns(200),
+  seed: 1780,
+})(
+  `keeps one exact D2 contribution per source key for a fixed seed`,
+  assertExactSourceContributions,
+)
+
+randomCampaign(`d2-source.exact-retractions`).prop(
   [reconciliationHistoryArbitrary],
   oraclePropertyOptions(200, `d2-source.exact-retractions`),
 )(
-  `keeps one exact D2 contribution per source key across batched histories`,
-  (steps) => {
-    const model = createReconciliationModel()
-    for (const step of steps) {
-      applyReconciliationStep(model, step)
-    }
-  },
+  `keeps one exact D2 contribution per source key for a random or replayed seed`,
+  assertExactSourceContributions,
 )
 
 const assertDisjointHistoriesCommute = ([left, right]: [
@@ -938,7 +1295,7 @@ const assertDisjointHistoriesCommute = ([left, right]: [
   expect(snapshotModel(rightThenLeft)).toEqual(snapshotModel(leftThenRight))
 }
 
-fcTest.prop([disjointHistoriesArbitrary], {
+fixedCampaign.prop([disjointHistoriesArbitrary], {
   numRuns: oracleRuns(100),
   seed: 1781,
 })(
@@ -946,7 +1303,7 @@ fcTest.prop([disjointHistoriesArbitrary], {
   assertDisjointHistoriesCommute,
 )
 
-fcTest.prop(
+randomCampaign(`d2-source.disjoint-commutation`).prop(
   [disjointHistoriesArbitrary],
   oraclePropertyOptions(100, `d2-source.disjoint-commutation`),
 )(

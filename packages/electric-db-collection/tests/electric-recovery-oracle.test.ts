@@ -385,7 +385,7 @@ function cloneItem(item: Item): Item {
   return { id: item.id, name: item.name, stable: item.stable }
 }
 
-function attachPersistedRestartCleanupDiagnostics(
+function attachRecoveryCleanupDiagnostics(
   primary: unknown,
   cleanupEvidence: string,
   cleanupFailures: ReadonlyArray<unknown>,
@@ -407,6 +407,55 @@ function attachPersistedRestartCleanupDiagnostics(
     })
   }
   return error
+}
+
+async function withFixtureCleanup(
+  f: ReturnType<typeof fixture>,
+  run: () => Promise<void>,
+  beforeCleanup?: () => void,
+): Promise<void> {
+  let failed = false
+  let primaryFailure: unknown
+  try {
+    await run()
+  } catch (error) {
+    failed = true
+    primaryFailure = error
+  }
+  const cleanupFailures: Array<unknown> = []
+  try {
+    beforeCleanup?.()
+  } catch (error) {
+    cleanupFailures.push(
+      new Error(`Recovery gate release failed`, { cause: error }),
+    )
+  }
+  try {
+    f.stopObserving()
+  } catch (error) {
+    cleanupFailures.push(
+      new Error(`Recovery observer cleanup failed`, { cause: error }),
+    )
+  }
+  try {
+    await f.collection.cleanup()
+  } catch (error) {
+    cleanupFailures.push(
+      new Error(`Recovery Collection cleanup failed`, { cause: error }),
+    )
+  }
+  if (failed) {
+    throw attachRecoveryCleanupDiagnostics(
+      primaryFailure,
+      cleanupFailures.length === 0
+        ? `passed: recovery fixture cleanup`
+        : `failed: recovery fixture cleanup`,
+      cleanupFailures,
+    )
+  }
+  if (cleanupFailures.length > 0) {
+    throw new AggregateError(cleanupFailures, `Recovery fixture cleanup failed`)
+  }
 }
 
 async function observePersistedRestart(
@@ -711,7 +760,7 @@ async function observePersistedRestart(
     }
 
     if (semanticFailure !== undefined) {
-      deferredFailure = attachPersistedRestartCleanupDiagnostics(
+      deferredFailure = attachRecoveryCleanupDiagnostics(
         new Error(
           `Persisted Electric reset/resume violation. ` +
             `checkpoint=${observation.checkpoint} ` +
@@ -725,7 +774,7 @@ async function observePersistedRestart(
         cleanupFailures,
       )
     } else if (processingFailure !== undefined) {
-      deferredFailure = attachPersistedRestartCleanupDiagnostics(
+      deferredFailure = attachRecoveryCleanupDiagnostics(
         processingFailure,
         cleanupEvidence,
         cleanupFailures,
@@ -839,7 +888,7 @@ describe(`persisted Electric recovery laws`, () => {
 
   it(`keeps repaired intermediate publications in the persisted recovery record`, async () => {
     const f = fixture(`eager`)
-    try {
+    await withFixtureCleanup(f, async () => {
       f.start()
       await vi.waitFor(() => expect(f.publicRows()).toEqual([oldRow]))
       await vi.waitFor(() => expect(subscribers).toHaveLength(1))
@@ -866,10 +915,7 @@ describe(`persisted Electric recovery laws`, () => {
         [{ ...oldRow, name: `wrong` }],
         correct,
       ])
-    } finally {
-      f.stopObserving()
-      await f.collection.cleanup()
-    }
+    })
   })
 
   function externalPublisher() {
@@ -946,7 +992,7 @@ describe(`persisted Electric recovery laws`, () => {
     async ({ syncMode, fullReload }) => {
       const peer = externalPublisher()
       const f = fixture(syncMode, peer.coordinator)
-      try {
+      await withFixtureCleanup(f, async () => {
         f.start()
         await vi.waitFor(() => expect(subscribers).toHaveLength(1))
         if (syncMode === `on-demand`) await f.collection._sync.loadSubset({})
@@ -979,10 +1025,7 @@ describe(`persisted Electric recovery laws`, () => {
           [oldRow, freshRow],
           expected,
         ])
-      } finally {
-        f.stopObserving()
-        await f.collection.cleanup()
-      }
+      })
     },
   )
 
@@ -993,6 +1036,24 @@ describe(`persisted Electric recovery laws`, () => {
     fullReload: boolean
   }
 
+  /**
+   * One model command pairs two production boundaries: a committed peer
+   * publication, then an Electric stream update. The row Map models complete
+   * public values; the publication marker is only a reach witness, not model
+   * state. No later command branches on that marker.
+   *
+   * The bounded grammar permits 1–8 pairs, keys 2–4 beside the untouched
+   * baseline key 1, and names of length 0–8. Key variation distinguishes
+   * independent rows from repeated edits; name variation distinguishes peer
+   * values before the stream overwrites them; deletion changes membership;
+   * fullReload changes whether the adapter must read the persisted rows; and
+   * multiple pairs expose repeated-key histories. The authored history below
+   * reconstructs insert then delete with a reload. The other fixed histories
+   * reach both sequence-length and name/key margins. The grammar excludes a
+   * malformed peer transaction that lists one key as both changed and deleted;
+   * the publisher constructs exactly one of those lists from `deleted`.
+   * Arbitrary keys and longer histories remain outside this property.
+   */
   const publicationHistoryArbitrary = fc.array(
     fc.record({
       id: fc.integer({ min: 2, max: 4 }),
@@ -1012,93 +1073,113 @@ describe(`persisted Electric recovery laws`, () => {
     const expected = new Map([[oldRow.id, structuredClone(oldRow)]])
     const expectedRows = () =>
       structuredClone([...expected.values()].sort((a, b) => a.id - b.id))
-    try {
-      f.start()
-      await vi.waitFor(() => expect(subscribers).toHaveLength(1), {
-        interval: 1,
-      })
-      await f.collection._sync.loadSubset({})
-      subscribers[0]!([upToDate])
-      for (const command of commands) {
-        const before = expectedRows()
-        const cut = f.exposures.length
-        f.record(`before peer ${JSON.stringify(command)}`)
-        const row = {
-          id: command.id,
-          name: command.name,
-          stable: `peer-${command.id}`,
-        }
-        if (command.deleted) {
-          f.rows.delete(row.id)
-          expected.delete(row.id)
-        } else {
-          f.rows.set(row.id, structuredClone(row))
-          expected.set(row.id, structuredClone(row))
-        }
-        const subsetLoadsBeforeSettlement = f.subsetLoadCount()
-        const revision = peer.publish(
-          row,
-          command.deleted,
-          command.fullReload,
-          f.metadata,
-        )
-        f.record(`after peer revision ${revision}`)
-        // An unchanged row set is not proof that the peer publication ran.
-        // Its metadata marker commits with the rows, including empty deletes.
-        await vi.waitFor(
-          () =>
-            expect(
-              f.collection._state.syncedCollectionMetadata.get(
-                `oracle:publication`,
-              ),
-            ).toBe(revision),
-          { interval: 1 },
-        )
-        if (command.fullReload) {
+    let checkpoint = `startup`
+    await withFixtureCleanup(f, async () => {
+      try {
+        f.start()
+        await vi.waitFor(() => expect(subscribers).toHaveLength(1), {
+          interval: 1,
+        })
+        await f.collection._sync.loadSubset({})
+        subscribers[0]!([upToDate])
+        for (const command of commands) {
+          checkpoint = `peer publication ${JSON.stringify(command)}`
+          const before = expectedRows()
+          const cut = f.exposures.length
+          f.record(`before peer ${JSON.stringify(command)}`)
+          const row = {
+            id: command.id,
+            name: command.name,
+            stable: `peer-${command.id}`,
+          }
+          if (command.deleted) {
+            f.rows.delete(row.id)
+            expected.delete(row.id)
+          } else {
+            f.rows.set(row.id, structuredClone(row))
+            expected.set(row.id, structuredClone(row))
+          }
+          const subsetLoadsBeforeSettlement = f.subsetLoadCount()
+          const revision = peer.publish(
+            row,
+            command.deleted,
+            command.fullReload,
+            f.metadata,
+          )
+          f.record(`after peer revision ${revision}`)
+          // An unchanged row set is not proof that the peer publication ran.
+          // Its metadata marker commits with the rows, including empty deletes.
           await vi.waitFor(
             () =>
-              expect(f.subsetLoadCount()).toBeGreaterThan(
-                subsetLoadsBeforeSettlement,
-              ),
+              expect(
+                f.collection._state.syncedCollectionMetadata.get(
+                  `oracle:publication`,
+                ),
+              ).toBe(revision),
             { interval: 1 },
           )
-        } else {
-          expect(f.subsetLoadCount()).toBe(subsetLoadsBeforeSettlement)
+          if (command.fullReload) {
+            await vi.waitFor(
+              () =>
+                expect(f.subsetLoadCount()).toBeGreaterThan(
+                  subsetLoadsBeforeSettlement,
+                ),
+              { interval: 1 },
+            )
+          } else {
+            expect(f.subsetLoadCount()).toBe(subsetLoadsBeforeSettlement)
+          }
+          expect(f.publicRows()).toEqual(expectedRows())
+          f.record(`peer revision ${revision} settled`)
+          const afterPeer = expectedRows()
+          expectWholeRecoveryTrace(f.exposures.slice(cut), [before, afterPeer])
+          checkpoint = `stream delta after ${JSON.stringify(command)}`
+          const streamCut = f.exposures.length
+          f.record(`before stream revision ${revision}`)
+          subscribers[0]!([
+            change(`update`, { id: row.id, name: `stream` }),
+            upToDate,
+          ])
+          if (!command.deleted) expected.set(row.id, { ...row, name: `stream` })
+          f.record(`after stream revision ${revision}`)
+          expect(f.publicRows()).toEqual(expectedRows())
+          await vi.waitFor(
+            () => expect(f.durableRows()).toEqual(expectedRows()),
+            { interval: 1 },
+          )
+          expectWholeRecoveryTrace(f.exposures.slice(streamCut), [
+            afterPeer,
+            expectedRows(),
+          ])
         }
-        expect(f.publicRows()).toEqual(expectedRows())
-        f.record(`peer revision ${revision} settled`)
-        const afterPeer = expectedRows()
-        expectWholeRecoveryTrace(f.exposures.slice(cut), [before, afterPeer])
-        const streamCut = f.exposures.length
-        f.record(`before stream revision ${revision}`)
-        subscribers[0]!([
-          change(`update`, { id: row.id, name: `stream` }),
-          upToDate,
-        ])
-        if (!command.deleted) expected.set(row.id, { ...row, name: `stream` })
-        f.record(`after stream revision ${revision}`)
-        expect(f.publicRows()).toEqual(expectedRows())
-        await vi.waitFor(
-          () => expect(f.durableRows()).toEqual(expectedRows()),
-          { interval: 1 },
+      } catch (error) {
+        throw new Error(
+          `Electric publication history violation. checkpoint=${checkpoint} history=${JSON.stringify(commands)}`,
+          { cause: error },
         )
-        expectWholeRecoveryTrace(f.exposures.slice(streamCut), [
-          afterPeer,
-          expectedRows(),
-        ])
       }
-    } finally {
-      f.stopObserving()
-      await f.collection.cleanup()
-    }
+    })
   }
 
   const publicationHistoryExamples: Array<[Array<PublicationHistoryCommand>]> =
     [
+      [[{ id: 2, name: ``, deleted: false, fullReload: false }]],
       [
         [
           { id: 2, name: `external`, deleted: false, fullReload: false },
           { id: 2, name: `removed`, deleted: true, fullReload: true },
+        ],
+      ],
+      [
+        [
+          { id: 4, name: `abcdefgh`, deleted: false, fullReload: true },
+          { id: 2, name: `two`, deleted: false, fullReload: false },
+          { id: 4, name: `changed`, deleted: false, fullReload: false },
+          { id: 2, name: `gone`, deleted: true, fullReload: false },
+          { id: 3, name: `three`, deleted: false, fullReload: true },
+          { id: 4, name: `gone`, deleted: true, fullReload: true },
+          { id: 2, name: `again`, deleted: false, fullReload: false },
+          { id: 3, name: `last`, deleted: false, fullReload: true },
         ],
       ],
     ]
@@ -1144,101 +1225,120 @@ describe(`persisted Electric recovery laws`, () => {
     async ({ syncMode, empty, hydration }) => {
       const f = fixture(syncMode)
       const gate = deferred()
-      try {
-        f.start()
-        await vi.waitFor(() => expect(f.publicRows()).toEqual([oldRow]))
-        await vi.waitFor(() => expect(subscribers).toHaveLength(1))
-        expect(vi.mocked(ShapeStream).mock.calls[0]?.[0]).toMatchObject({
-          offset: `10_0`,
-          handle: `shape-old`,
-        })
-        const invalidCut = f.exposures.length
-        f.record(`before invalid resume`)
-        subscribers[0]!([
-          change(`delete`, { id: 1 }),
-          change(`update`, { id: 2, name: `partial` }),
-          upToDate,
-        ])
-        f.record(`after invalid resume`)
-        await vi.waitFor(() => expect(f.collection.status).toBe(`error`))
-        await vi.waitFor(() =>
-          expect(f.metadata.get(`electric:resume`)).toMatchObject({
-            kind: `reset`,
-          }),
-        )
-        expect(f.publicRows()).toEqual([oldRow])
-        expect(f.durableRows()).toEqual([oldRow])
-        expectWholeRecoveryTrace(f.exposures.slice(invalidCut), [[oldRow]])
+      await withFixtureCleanup(
+        f,
+        async () => {
+          f.start()
+          await vi.waitFor(() => expect(f.publicRows()).toEqual([oldRow]))
+          await vi.waitFor(() => expect(subscribers).toHaveLength(1))
+          expect(vi.mocked(ShapeStream).mock.calls[0]?.[0]).toMatchObject({
+            offset: `10_0`,
+            handle: `shape-old`,
+          })
+          const invalidCut = f.exposures.length
+          f.record(`before invalid resume`)
+          subscribers[0]!([
+            change(`delete`, { id: 1 }),
+            change(`update`, { id: 2, name: `partial` }),
+            upToDate,
+          ])
+          f.record(`after invalid resume`)
+          await vi.waitFor(() => expect(f.collection.status).toBe(`error`))
+          await vi.waitFor(() =>
+            expect(f.metadata.get(`electric:resume`)).toMatchObject({
+              kind: `reset`,
+            }),
+          )
+          expect(f.publicRows()).toEqual([oldRow])
+          expect(f.durableRows()).toEqual([oldRow])
+          expectWholeRecoveryTrace(f.exposures.slice(invalidCut), [[oldRow]])
 
-        f.stopObserving()
-        await f.collection.cleanup()
-        f.pauseHydration(gate.promise)
-        const recoveryCut = f.exposures.length
-        f.start()
-        await vi.waitFor(() => expect(subscribers).toHaveLength(2))
-        expect(vi.mocked(ShapeStream).mock.calls[1]?.[0]).toMatchObject({
-          offset: undefined,
-          handle: undefined,
-        })
-        // Fresh progressive mode hydrates persisted rows only on demand.
-        const hydrationDone =
-          syncMode === `progressive`
-            ? Promise.resolve(f.collection._sync.loadSubset({ limit: 10 }))
-            : undefined
-        const hydrationOutcome = hydrationDone?.then(
-          () => undefined,
-          (error: unknown) => ({ error }),
-        )
-        const awaitHydration = async () => {
-          const outcome = await hydrationOutcome
-          if (outcome) throw outcome.error
-        }
-        if (hydration === `before`) {
+          f.stopObserving()
+          await f.collection.cleanup()
+          f.pauseHydration(gate.promise)
+          const recoveryCut = f.exposures.length
+          f.start()
+          await vi.waitFor(() => expect(subscribers).toHaveLength(2))
+          expect(vi.mocked(ShapeStream).mock.calls[1]?.[0]).toMatchObject({
+            offset: undefined,
+            handle: undefined,
+          })
+          // Fresh progressive mode hydrates persisted rows only on demand.
+          const hydrationDone =
+            syncMode === `progressive`
+              ? Promise.resolve(f.collection._sync.loadSubset({ limit: 10 }))
+              : undefined
+          const hydrationOutcome = hydrationDone?.then(
+            () => undefined,
+            (error: unknown) => ({ error }),
+          )
+          const awaitHydration = async () => {
+            const outcome = await hydrationOutcome
+            if (outcome) throw outcome.error
+          }
+          if (hydration === `before`) {
+            gate.resolve()
+            await awaitHydration()
+            await vi.waitFor(() => expect(f.publicRows()).toEqual([oldRow]))
+          }
+          f.record(`before replacement data`)
+          const partialCut = f.exposures.length
+          const expected = empty ? [] : [freshRow]
+          subscribers[1]!(
+            expected.map((row) => change(`insert`, structuredClone(row))),
+          )
+          f.record(`after replacement data`)
+          subscribers[1]!([{ headers: { control: `subset-end` } }])
+          f.record(`after subset completion`)
+          expectWholeRecoveryTrace(f.exposures.slice(partialCut), [
+            hydration === `before` ? [oldRow] : [],
+          ])
+          subscribers[1]!([upToDate])
+          f.record(`after replacement commit`)
+          // Preserve the original hydration-after-commit cells: the final
+          // control is delivered before releasing the paused hydration gate.
           gate.resolve()
           await awaitHydration()
-          await vi.waitFor(() => expect(f.publicRows()).toEqual([oldRow]))
-        }
-        f.record(`before replacement data`)
-        const partialCut = f.exposures.length
-        const expected = empty ? [] : [freshRow]
-        subscribers[1]!(
-          expected.map((row) => change(`insert`, structuredClone(row))),
-        )
-        f.record(`after replacement data`)
-        subscribers[1]!([{ headers: { control: `subset-end` } }])
-        f.record(`after subset completion`)
-        expectWholeRecoveryTrace(f.exposures.slice(partialCut), [
-          hydration === `before` ? [oldRow] : [],
-        ])
-        subscribers[1]!([upToDate])
-        f.record(`after replacement commit`)
-        // Preserve the original hydration-after-commit cells: the final
-        // control is delivered before releasing the paused hydration gate.
-        gate.resolve()
-        await awaitHydration()
-        await vi.waitFor(() => expect(f.collection.status).toBe(`ready`))
-        await vi.waitFor(() =>
-          expect(f.metadata.get(`electric:resume`)).toMatchObject({
-            kind: `resume`,
-            requiresTagState: false,
-            offset: `20_0`,
-          }),
-        )
-        // The source's complete snapshot defines both results. A reset marker
-        // plus a fresh offset is not proof that the old materialization left.
-        expect.soft(f.publicRows()).toEqual(expected)
-        expect.soft(f.durableRows()).toEqual(expected)
-        f.record(`replacement ready`)
-        expectWholeRecoveryTrace(f.exposures.slice(recoveryCut), [
-          [],
-          [oldRow],
-          expected,
-        ])
-      } finally {
-        gate.resolve()
-        f.stopObserving()
-        await f.collection.cleanup()
-      }
+          await vi.waitFor(() => expect(f.collection.status).toBe(`ready`))
+          await vi.waitFor(() =>
+            expect(f.metadata.get(`electric:resume`)).toMatchObject({
+              kind: `resume`,
+              requiresTagState: false,
+              offset: `20_0`,
+            }),
+          )
+          // The source's complete snapshot defines both results. A reset marker
+          // plus a fresh offset is not proof that the old materialization left.
+          const rowFailures: Array<unknown> = []
+          try {
+            expect(f.publicRows()).toEqual(expected)
+          } catch (error) {
+            rowFailures.push(
+              new Error(`Public replacement rows differ`, { cause: error }),
+            )
+          }
+          try {
+            expect(f.durableRows()).toEqual(expected)
+          } catch (error) {
+            rowFailures.push(
+              new Error(`Durable replacement rows differ`, { cause: error }),
+            )
+          }
+          if (rowFailures.length > 0) {
+            throw new AggregateError(
+              rowFailures,
+              `Replacement-ready row mismatch`,
+            )
+          }
+          f.record(`replacement ready`)
+          expectWholeRecoveryTrace(f.exposures.slice(recoveryCut), [
+            [],
+            [oldRow],
+            expected,
+          ])
+        },
+        gate.resolve,
+      )
     },
   )
 
@@ -1246,7 +1346,7 @@ describe(`persisted Electric recovery laws`, () => {
     `%s valid resume retains cached rows and their unchanged fields`,
     async (syncMode) => {
       const f = fixture(syncMode)
-      try {
+      await withFixtureCleanup(f, async () => {
         f.start()
         await vi.waitFor(() => expect(f.publicRows()).toEqual([oldRow]))
         await vi.waitFor(() => expect(subscribers).toHaveLength(1))
@@ -1259,10 +1359,7 @@ describe(`persisted Electric recovery laws`, () => {
         expect(f.publicRows()).toEqual(expected)
         await vi.waitFor(() => expect(f.durableRows()).toEqual(expected))
         expect(f.commits.every((tx) => !tx.truncate)).toBe(true)
-      } finally {
-        f.stopObserving()
-        await f.collection.cleanup()
-      }
+      })
     },
   )
 })
