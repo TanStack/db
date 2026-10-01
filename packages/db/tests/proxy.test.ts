@@ -2671,6 +2671,8 @@ describe(`array read methods behave like native arrays`, () => {
 describe(`defineProperty behaves like on a native row`, () => {
   type Row = Record<string, unknown>
   const make = (): Row => ({ a: 1, nested: { b: 2 } })
+  // One getter for both rows, so their descriptors compare equal.
+  const getTwo = () => 2
   const definitions: Array<
     [string, (row: Row) => PropertyDescriptor & { key: string }]
   > = [
@@ -2696,6 +2698,11 @@ describe(`defineProperty behaves like on a native row`, () => {
       `a new key with only an object value`,
       () => ({ key: `k`, value: { c: 3 } }),
     ],
+    [`a getter over an existing key`, () => ({ key: `a`, get: getTwo })],
+    [
+      `a new enumerable getter`,
+      () => ({ key: `k`, get: getTwo, enumerable: true, configurable: true }),
+    ],
   ]
   const observe = (
     row: Row,
@@ -2717,12 +2724,96 @@ describe(`defineProperty behaves like on a native row`, () => {
   }
 
   it.each(definitions)(`%s`, (_name, define) => {
-    const expected = observe(make(), define)
+    const native = make()
+    const expected = observe(native, define)
     const { proxy, getChanges } = createChangeProxy(make())
     expect(observe(proxy, define)).toEqual(expected)
-    // Like a clone, changes hold enumerable string keys only.
-    const { key, value } = define(proxy)
+    // Like a clone, changes hold enumerable string keys only, with the value
+    // the native row now reads.
+    const { key } = define(proxy)
     const enumerable = expected.rest.enumerable === true
-    expect(getChanges()).toEqual(enumerable ? { [key]: value } : {})
+    expect(getChanges()).toEqual(enumerable ? { [key]: native[key] } : {})
+  })
+})
+
+/**
+ * Every typed-array method must behave on a draft as on a native typed array.
+ * The method list comes from the shared `TypedArray.prototype`, so a new
+ * built-in method fails here until it has arguments below. Each call is
+ * observed by its result and by the row after a write through a typed-array
+ * result, which on a native row changes the row when the result shares its
+ * buffer (`subarray`).
+ */
+describe(`typed-array methods behave like native typed arrays`, () => {
+  type Row = { t: Float64Array }
+  const make = (): Row => ({ t: Float64Array.of(3, 1, 2) })
+  const positive = (v: number) => v > 1
+  const calls: Record<string, Array<unknown>> = {
+    at: [0],
+    copyWithin: [0, 1],
+    entries: [],
+    every: [positive],
+    fill: [7],
+    filter: [positive],
+    find: [positive],
+    findIndex: [positive],
+    findLast: [positive],
+    findLastIndex: [positive],
+    forEach: [() => undefined],
+    includes: [2],
+    indexOf: [2],
+    join: [`,`],
+    keys: [],
+    lastIndexOf: [2],
+    map: [(v: number) => v * 2],
+    reduce: [(a: number, v: number) => a + v],
+    reduceRight: [(a: number, v: number) => a + v],
+    reverse: [],
+    set: [[9], 1],
+    slice: [0, 2],
+    some: [positive],
+    sort: [],
+    subarray: [0, 2],
+    toLocaleString: [],
+    toReversed: [],
+    toSorted: [],
+    toString: [],
+    values: [],
+    with: [0, 9],
+  }
+  const typedArrayPrototype = Object.getPrototypeOf(Float64Array.prototype)
+  const methods = Object.getOwnPropertyNames(typedArrayPrototype).filter(
+    (name) =>
+      name !== `constructor` &&
+      typeof Object.getOwnPropertyDescriptor(typedArrayPrototype, name)
+        ?.value === `function`,
+  )
+  const observe = (row: Row, method: string) => {
+    const call = (
+      row.t as unknown as Record<string, (...a: Array<unknown>) => unknown>
+    )[method]!
+    const raw = call.apply(row.t, calls[method]!)
+    const result =
+      raw !== null && typeof raw === `object` && Symbol.iterator in raw
+        ? Array.from(raw as Iterable<unknown>)
+        : raw
+    if (ArrayBuffer.isView(raw)) (raw as Float64Array)[0] = 42
+    return result
+  }
+
+  it(`has arguments for every method`, () => {
+    expect(methods.filter((name) => !(name in calls))).toEqual([])
+  })
+
+  it.each(methods)(`%s gives the native result`, (method) => {
+    const native = make()
+    const expected = observe(native, method)
+    let actual: unknown
+    const changes = withChangeTracking(make(), (draft) => {
+      actual = observe(draft, method)
+    })
+    expect(actual).toEqual(expected)
+    const changed = native.t.some((v, i) => v !== make().t[i])
+    expect(changes).toEqual(changed ? { t: native.t } : {})
   })
 })

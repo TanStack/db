@@ -31,7 +31,8 @@ function unwrapDraft(value: unknown): unknown {
 }
 
 /**
- * Set of array methods that modify the array in place.
+ * Array and typed-array methods that modify the value in place. A typed
+ * array's `subarray` shares its buffer, so later writes through it do too.
  */
 const ARRAY_MODIFYING_METHODS = new Set([
   `pop`,
@@ -43,6 +44,8 @@ const ARRAY_MODIFYING_METHODS = new Set([
   `reverse`,
   `fill`,
   `copyWithin`,
+  `set`,
+  `subarray`,
 ])
 
 /**
@@ -471,18 +474,17 @@ export function createChangeProxy<
         // Set) need the handling below.
         if (Object.hasOwn(ptarget, prop) || prop === `constructor`) return value
 
-        // For Array methods that modify the array
+        const methodName = prop.toString()
+
+        // Array and typed-array methods that modify the value in place
+        if (
+          ARRAY_MODIFYING_METHODS.has(methodName) &&
+          (Array.isArray(ptarget) || ArrayBuffer.isView(ptarget))
+        ) {
+          return createModifyingMethodHandler(value, changeTracker, markChanged)
+        }
+
         if (Array.isArray(ptarget)) {
-          const methodName = prop.toString()
-
-          if (ARRAY_MODIFYING_METHODS.has(methodName)) {
-            return createModifyingMethodHandler(
-              value,
-              changeTracker,
-              markChanged,
-            )
-          }
-
           // Other methods, iterators included, read through the draft
           // itself, so returned and callback elements are drafts and searches
           // find them. This also tracks the callback array and implicit
@@ -492,8 +494,6 @@ export function createChangeProxy<
 
         // For Map and Set methods that modify the collection
         if (ptarget instanceof Map || ptarget instanceof Set) {
-          const methodName = prop.toString()
-
           const resolveValue = (entry: unknown) => {
             const raw = unwrapDraft(entry)
             return raw !== null && typeof raw === `object`
@@ -612,7 +612,11 @@ export function createChangeProxy<
       // Forward the defineProperty to the target to maintain Proxy invariants
       // This allows Object.seal() and Object.freeze() to work on the proxy
       const result = Reflect.defineProperty(ptarget, prop, descriptor)
-      if (result && `value` in descriptor) {
+      // A value or an accessor changes what the key reads. Sealing does not.
+      if (
+        result &&
+        (`value` in descriptor || descriptor.get || descriptor.set)
+      ) {
         changeTracker.assigned_[prop.toString()] = true
         markChanged(changeTracker)
       }
