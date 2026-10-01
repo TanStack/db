@@ -1,7 +1,20 @@
 import { fc, test as fcTest } from '@fast-check/vitest'
 import { describe, expect } from 'vitest'
 import { BasicIndex } from '../../src/indexes/basic-index.js'
+import { cloneQueryForPlacement } from '../../src/query/builder/clone-query.js'
 import {
+  CollectionRef,
+  Func,
+  PropRef,
+  QueryRef,
+  UnionAll,
+  UnionFrom,
+  Value,
+  collectCollectionSources,
+} from '../../src/query/ir.js'
+import { optimizeQuery } from '../../src/query/optimizer.js'
+import {
+  and,
   createLiveQueryCollection,
   eq,
   materialize,
@@ -10,6 +23,7 @@ import { runTrace } from '../trace-runner.js'
 import { oraclePropertyOptions, oracleRuns } from '../oracle-config.js'
 import { createControlledCollection } from './includes-oracle-helpers.js'
 import type { TraceDriver, TraceProjection } from '../trace-runner.js'
+import type { QueryIR } from '../../src/query/ir.js'
 
 /**
  * # Which distinctions determine the shape of an included result?
@@ -20,6 +34,8 @@ import type { TraceDriver, TraceProjection } from '../trace-runner.js'
  * 1. Join multiplicity keeps a parent visible until its last contributor leaves.
  * 2. A correlation through the joined alias differs from one through the source.
  * 3. A null or unmatched singleton is absent, but a later valid key reactivates it.
+ * 4. Sibling scopes may reuse an alias; optimizer copies must keep the lexical
+ *    source identity so a joined parent and its include read their own inputs.
  *
  * These laws form separate model nodes. Each node uses plain Maps and full
  * recomputation. The shared trace runner applies an action to production and to
@@ -38,7 +54,11 @@ import type { TraceDriver, TraceProjection } from '../trace-runner.js'
  * is bounded: one parent with 1–5 child contributors; one joined
  * production/order with equal or distinct correlation keys; and one post
  * with null, unmatched, or existing author keys. Missing child IDs and
- * updates to absent orders are invalid driver actions. Each real live-query
+ * updates to absent orders are invalid driver actions. The source-identity
+ * grammar crosses sibling alias equality, separate/combined/nullable-only
+ * predicates, and updates to joined and included source rows. It keeps at
+ * most one matching joined row per parent; joined multiplicity has its own
+ * model above. Each real live-query
  * Collection is compared after preload and after every source write by
  * runTrace, which preserves the first divergent checkpoint.
  */
@@ -423,6 +443,296 @@ const nullableProjection: TraceProjection<
   assertEqual: assertRowsEqual,
 }
 
+type AliasShape = `reused` | `distinct`
+type PredicateShape = `separate` | `combined` | `nullable-only`
+type IdentityProject = { id: number; name: string }
+type IdentityIssue = {
+  id: number
+  projectId: number
+  title: string
+}
+type IdentityStep =
+  | { kind: `join-title`; title: `Bug in Alpha` | `Other` }
+  | { kind: `join-project`; projectId: 1 | 2 }
+  | { kind: `included-title`; title: `Feature for Alpha` | `Changed` }
+
+function createIdentitySources() {
+  const projects = [
+    { id: 1, name: `Alpha` },
+    { id: 2, name: `Beta` },
+  ]
+  const issues = [
+    { id: 10, projectId: 1, title: `Bug in Alpha` },
+    { id: 11, projectId: 1, title: `Feature for Alpha` },
+    { id: 20, projectId: 2, title: `Bug in Beta` },
+  ]
+  const sources = {
+    projects: createControlledCollection<IdentityProject>(
+      `identity-projects`,
+      projects,
+    ),
+    issues: createControlledCollection<IdentityIssue>(
+      `identity-issues`,
+      issues,
+    ),
+  }
+  sources.issues.collection.createIndex((issue) => issue.projectId, {
+    indexType: BasicIndex,
+  })
+  return { sources, projects, issues }
+}
+
+function createIdentityQuery(
+  sources: ReturnType<typeof createIdentitySources>[`sources`],
+  aliasShape: AliasShape,
+  predicateShape: PredicateShape,
+) {
+  return createLiveQueryCollection((q) => {
+    const joined = q
+      .from({ p: sources.projects.collection })
+      .leftJoin({ i: sources.issues.collection }, ({ p, i }) =>
+        eq(i.projectId, p.id),
+      )
+    const parent =
+      predicateShape === `combined`
+        ? joined.where(({ p, i }) =>
+            and(eq(i.title, `Bug in Alpha`), eq(p.name, `Alpha`)),
+          )
+        : predicateShape === `separate`
+          ? joined
+              .where(({ i }) => eq(i.title, `Bug in Alpha`))
+              .where(({ p }) => eq(p.name, `Alpha`))
+          : joined.where(({ i }) => eq(i.title, `Bug in Alpha`))
+    const parentQuery = parent.select(({ p }) => p)
+
+    return q.from({ p: parentQuery }).select(({ p }) => ({
+      id: p.id,
+      name: p.name,
+      issues:
+        aliasShape === `reused`
+          ? materialize(
+              q
+                .from({ i: sources.issues.collection })
+                .where(({ i }) => eq(i.projectId, p.id))
+                .select(({ i }) => ({ id: i.id, title: i.title })),
+            )
+          : materialize(
+              q
+                .from({ includedIssue: sources.issues.collection })
+                .where(({ includedIssue }) => eq(includedIssue.projectId, p.id))
+                .select(({ includedIssue }) => ({
+                  id: includedIssue.id,
+                  title: includedIssue.title,
+                })),
+            ),
+    }))
+  })
+}
+
+type IdentityContext = {
+  aliasShape: AliasShape
+  predicateShape: PredicateShape
+  sources: ReturnType<typeof createIdentitySources>[`sources`]
+  live: ReturnType<typeof createIdentityQuery>
+  projects: Map<number, IdentityProject>
+  issues: Map<number, IdentityIssue>
+}
+
+function createIdentityDriver(
+  aliasShape: AliasShape,
+  predicateShape: PredicateShape,
+): TraceDriver<IdentityStep, IdentityContext> {
+  return {
+    setup: () => {
+      const { sources, projects, issues } = createIdentitySources()
+      return {
+        aliasShape,
+        predicateShape,
+        sources,
+        live: createIdentityQuery(sources, aliasShape, predicateShape),
+        projects: rowsById(projects),
+        issues: rowsById(issues),
+      }
+    },
+    start: ({ live }) => live.preload(),
+    apply: (step, { issues, sources }) => {
+      const id = step.kind === `included-title` ? 11 : 10
+      const previous = issues.get(id)
+      if (!previous) throw new Error(`Missing issue ${id}`)
+      const next =
+        step.kind === `join-project`
+          ? { ...previous, projectId: step.projectId }
+          : { ...previous, title: step.title }
+      sources.issues.write(`update`, next)
+      issues.set(id, next)
+    },
+    cleanup: ({ live, sources }) => cleanupQuery(live, Object.values(sources)),
+  }
+}
+
+type IdentityResult = Array<{
+  id: number
+  name: string
+  issues: Array<{ id: number; title: string }>
+}>
+
+const identityProjection: TraceProjection<
+  IdentityContext,
+  IdentityResult,
+  IdentityResult
+> = {
+  observe: ({ live }) =>
+    live.toArray
+      .map((project) => ({
+        id: project.id,
+        name: project.name,
+        issues: project.issues
+          .map((issue) => ({ id: issue.id, title: issue.title }))
+          .sort((left, right) => left.id - right.id),
+      }))
+      .sort((left, right) => left.id - right.id),
+  // Full recomputation uses source rows and ordinary equality, never the
+  // optimizer's IDs, alias fallback, D2 inputs, or compiled include routes.
+  recompute: ({ projects, issues, predicateShape }) =>
+    [...projects.values()]
+      .filter(
+        (project) =>
+          (predicateShape === `nullable-only` || project.name === `Alpha`) &&
+          [...issues.values()].some(
+            (issue) =>
+              issue.projectId === project.id && issue.title === `Bug in Alpha`,
+          ),
+      )
+      .map((project) => ({
+        id: project.id,
+        name: project.name,
+        issues: [...issues.values()]
+          .filter((issue) => issue.projectId === project.id)
+          .map((issue) => ({ id: issue.id, title: issue.title }))
+          .sort((left, right) => left.id - right.id),
+      }))
+      .sort((left, right) => left.id - right.id),
+  assertEqual: assertRowsEqual,
+}
+
+const identitySteps = fc.oneof(
+  fc.record({
+    kind: fc.constant<`join-title`>(`join-title`),
+    title: fc.constantFrom<`Bug in Alpha` | `Other`>(`Bug in Alpha`, `Other`),
+  }),
+  fc.record({
+    kind: fc.constant<`join-project`>(`join-project`),
+    projectId: fc.constantFrom<1 | 2>(1, 2),
+  }),
+  fc.record({
+    kind: fc.constant<`included-title`>(`included-title`),
+    title: fc.constantFrom<`Feature for Alpha` | `Changed`>(
+      `Feature for Alpha`,
+      `Changed`,
+    ),
+  }),
+)
+
+type OptimizerSourceShape =
+  | `bare-from`
+  | `pushed-from`
+  | `bare-join`
+  | `unchanged-join`
+  | `pushed-join`
+  | `nested-push`
+  | `redundant-from`
+  | `renamed-from`
+  | `nested-renamed-from`
+  | `union-from`
+  | `union-all`
+
+const optimizerSourceShapes: ReadonlyArray<OptimizerSourceShape> = [
+  `bare-from`,
+  `pushed-from`,
+  `bare-join`,
+  `unchanged-join`,
+  `pushed-join`,
+  `nested-push`,
+  `redundant-from`,
+  `renamed-from`,
+  `nested-renamed-from`,
+  `union-from`,
+  `union-all`,
+]
+
+function createOptimizerSourceQuery(shape: OptimizerSourceShape): QueryIR {
+  const collection = { id: `identity-source` } as never
+  const root = new CollectionRef(collection, `root`)
+  const joined = new CollectionRef(collection, `joined`)
+  const rootPredicate = new Func(`eq`, [
+    new PropRef([`root`, `id`]),
+    new Value(1),
+  ])
+  const joinedPredicate = new Func(`eq`, [
+    new PropRef([`joined`, `id`]),
+    new Value(2),
+  ])
+  const secondRootPredicate = new Func(`gt`, [
+    new PropRef([`root`, `id`]),
+    new Value(0),
+  ])
+  const join = {
+    type: `inner` as const,
+    from: joined,
+    left: new PropRef([`root`, `id`]),
+    right: new PropRef([`joined`, `id`]),
+  }
+
+  switch (shape) {
+    case `bare-from`:
+      return { from: root }
+    case `pushed-from`:
+      return { from: root, where: [rootPredicate, secondRootPredicate] }
+    case `bare-join`:
+      return { from: root, join: [join] }
+    case `unchanged-join`:
+      return { from: root, join: [join], where: [rootPredicate] }
+    case `pushed-join`:
+      return {
+        from: root,
+        join: [join],
+        where: [rootPredicate, joinedPredicate],
+      }
+    case `nested-push`:
+      return {
+        from: new QueryRef(
+          { from: root, select: { id: new PropRef([`root`, `id`]) } },
+          `outer`,
+        ),
+        join: [join],
+        where: [new Func(`eq`, [new PropRef([`outer`, `id`]), new Value(1)])],
+      }
+    case `redundant-from`:
+      return { from: new QueryRef({ from: root }, `root`) }
+    case `renamed-from`:
+      return { from: new QueryRef({ from: root }, `outer`) }
+    case `nested-renamed-from`:
+      return {
+        from: new QueryRef(
+          { from: new QueryRef({ from: root }, `middle`) },
+          `middle`,
+        ),
+      }
+    case `union-from`:
+      return { from: new UnionFrom([root, joined]) }
+    case `union-all`:
+      return {
+        from: new UnionAll([{ from: root }, { from: joined }]),
+      }
+  }
+}
+
+function lexicalSourceIds(query: QueryIR): Array<string> {
+  return collectCollectionSources(query)
+    .map((source) => source.sourceId)
+    .sort()
+}
+
 function campaigns(fixedSeed: number, property: string) {
   // Grammar controls: the pinned 1-child case reconstructs final retirement,
   // while counts 2–5 keep a surviving contributor. Equal route keys are the
@@ -657,6 +967,118 @@ describe(`includes query-shape recompute oracle`, () => {
           },
         }),
       ).rejects.toMatchObject({ name: `TraceAssertionError`, checkpoint: 1 })
+    },
+  )
+
+  fcTest.each([
+    [`reused`, `separate`],
+    [`distinct`, `separate`],
+    [`reused`, `combined`],
+    [`distinct`, `combined`],
+    [`reused`, `nullable-only`],
+    [`distinct`, `nullable-only`],
+  ] as const)(
+    `preserves %s sibling alias with %s predicates through source updates`,
+    (aliasShape, predicateShape) =>
+      runTrace({
+        steps: [
+          { kind: `join-title`, title: `Other` },
+          { kind: `join-title`, title: `Bug in Alpha` },
+          { kind: `included-title`, title: `Changed` },
+          { kind: `join-project`, projectId: 2 },
+          { kind: `join-project`, projectId: 1 },
+        ],
+        driver: createIdentityDriver(aliasShape, predicateShape),
+        projection: identityProjection,
+      }),
+  )
+
+  for (const campaign of campaigns(1707, `includes-query-shape.identity`)) {
+    fcTest.prop(
+      [
+        fc.constantFrom<AliasShape>(`reused`, `distinct`),
+        fc.constantFrom<PredicateShape>(
+          `separate`,
+          `combined`,
+          `nullable-only`,
+        ),
+        fc.array(identitySteps, { minLength: 1, maxLength: 5 }),
+      ],
+      campaign.options,
+    )(
+      `matches recomputation across sibling aliases and predicate forms (${campaign.name})`,
+      (aliasShape, predicateShape, steps) =>
+        runTrace({
+          steps,
+          driver: createIdentityDriver(aliasShape, predicateShape),
+          projection: identityProjection,
+        }),
+    )
+  }
+
+  fcTest(
+    `rejects an omitted parent at the initial identity checkpoint`,
+    async () => {
+      await expect(
+        runTrace({
+          steps: [],
+          driver: createIdentityDriver(`reused`, `separate`),
+          projection: { ...identityProjection, observe: () => [] },
+        }),
+      ).rejects.toMatchObject({ name: `TraceAssertionError`, checkpoint: 0 })
+    },
+  )
+
+  fcTest.each(optimizerSourceShapes)(
+    `keeps lexical source identity through %s optimization and placement`,
+    (shape) => {
+      const original = createOptimizerSourceQuery(shape)
+      const originalFrom = original.from
+      const originalJoin = original.join
+      const originalWhere = original.where
+      const originalSources = collectCollectionSources(original).map(
+        (source) => ({
+          source,
+          sourceId: source.sourceId,
+          alias: source.alias,
+          collection: source.collection,
+        }),
+      )
+      const firstPlacement = cloneQueryForPlacement(original)
+      const secondPlacement = cloneQueryForPlacement(original)
+      const originalIds = lexicalSourceIds(original)
+      const firstIds = lexicalSourceIds(firstPlacement)
+      const secondIds = lexicalSourceIds(secondPlacement)
+      const optimizedOriginal = optimizeQuery(original).optimizedQuery
+
+      // A placement is a new lexical position. Optimization of that placement
+      // must not create a third source identity for the same position.
+      expect(new Set([...originalIds, ...firstIds, ...secondIds]).size).toBe(
+        originalIds.length + firstIds.length + secondIds.length,
+      )
+      expect(lexicalSourceIds(optimizedOriginal)).toEqual(originalIds)
+      expect(original.from).toBe(originalFrom)
+      expect(original.join).toBe(originalJoin)
+      expect(original.where).toBe(originalWhere)
+      for (const { source, sourceId, alias, collection } of originalSources) {
+        expect(source.sourceId).toBe(sourceId)
+        expect(source.alias).toBe(alias)
+        expect(source.collection).toBe(collection)
+      }
+      if (shape === `renamed-from` || shape === `nested-renamed-from`) {
+        if (optimizedOriginal.from.type !== `queryRef`) {
+          throw new Error(`Alias-remapped wrapper was removed`)
+        }
+        expect(optimizedOriginal.from.alias).toBe(
+          shape === `renamed-from` ? `outer` : `middle`,
+        )
+      }
+      expect(
+        lexicalSourceIds(optimizeQuery(firstPlacement).optimizedQuery),
+      ).toEqual(firstIds)
+      expect(
+        lexicalSourceIds(optimizeQuery(secondPlacement).optimizedQuery),
+      ).toEqual(secondIds)
     },
   )
 })

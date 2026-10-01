@@ -124,7 +124,6 @@ import { deepEquals } from '../utils.js'
 import { CannotCombineEmptyExpressionListError } from '../errors.js'
 import { containsAggregate } from './compiler/group-by.js'
 import {
-  CollectionRef as CollectionRefClass,
   Func,
   PropRef,
   QueryRef as QueryRefClass,
@@ -135,7 +134,14 @@ import {
   getWhereExpression,
   isResidualWhere,
 } from './ir.js'
-import type { BasicExpression, From, QueryIR, Select, Where } from './ir.js'
+import type {
+  BasicExpression,
+  CollectionRef as CollectionRefClass,
+  From,
+  QueryIR,
+  Select,
+  Where,
+} from './ir.js'
 
 /**
  * Represents a WHERE clause after source analysis
@@ -497,7 +503,7 @@ function removeRedundantFromClause(from: From): From {
     // Return the inner query's FROM clause with this alias
     const innerFrom = removeRedundantFromClause(processedQuery.from)
     if (innerFrom.type === `collectionRef`) {
-      return new CollectionRefClass(innerFrom.collection, from.alias)
+      return innerFrom
     } else if (innerFrom.type === `queryRef`) {
       return new QueryRefClass(innerFrom.query, from.alias)
     }
@@ -814,13 +820,10 @@ function applyOptimizations(
 }
 
 /**
- * Helper function to create a deep copy of a QueryIR object for immutability.
- *
- * This ensures that all optimizations create new objects rather than modifying
- * existing ones, preventing infinite recursion and shared reference issues.
+ * Copy query containers and arrays while retaining lexical source references.
  *
  * @param query - QueryIR to deep copy
- * @returns New QueryIR object with all nested objects copied
+ * @returns New QueryIR containers with the same lexical collection sources
  */
 function deepCopyQuery(query: QueryIR): QueryIR {
   return {
@@ -845,7 +848,7 @@ function deepCopyQuery(query: QueryIR): QueryIR {
 
 function deepCopyFrom(from: From): From {
   if (from.type === `collectionRef`) {
-    return new CollectionRefClass(from.collection, from.alias)
+    return from
   }
 
   if (from.type === `queryRef`) {
@@ -930,9 +933,8 @@ function optimizeFromWithTracking(
   const whereClause = singleSourceClauses.get(from.alias)
 
   if (!whereClause) {
-    // No optimization needed, but return a copy to maintain immutability
     if (from.type === `collectionRef`) {
-      return new CollectionRefClass(from.collection, from.alias)
+      return from
     }
     // Must be queryRef due to type system
     return new QueryRefClass(deepCopyQuery(from.query), from.alias)
@@ -942,7 +944,7 @@ function optimizeFromWithTracking(
     // Create a new subquery with the WHERE clause for the collection
     // This is always safe since we're creating a new subquery
     const subQuery: QueryIR = {
-      from: new CollectionRefClass(from.collection, from.alias),
+      from,
       where: [whereClause],
     }
     actuallyOptimized.add(from.alias) // Mark as successfully optimized

@@ -90,6 +90,7 @@ const staticOracleProperties = [
   `includes-optimistic.repeated-history`,
   `includes-optimistic.sibling-route-rollback`,
   `includes-query-shape.correlation`,
+  `includes-query-shape.identity`,
   `includes-query-shape.multiplicity`,
   `includes-query-shape.nullable`,
   `includes-work.correlated-links`,
