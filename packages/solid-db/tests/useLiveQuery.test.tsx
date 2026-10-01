@@ -330,19 +330,19 @@ describe(`Query Collections`, () => {
 
     // Verify that we have the expected joined results
 
-    expect(result.state.get(`[1,1]`)).toMatchObject({
+    expect(result.state.get(`["1","1"]`)).toMatchObject({
       id: `1`,
       name: `John Doe`,
       title: `Issue 1`,
     })
 
-    expect(result.state.get(`[2,2]`)).toMatchObject({
+    expect(result.state.get(`["2","2"]`)).toMatchObject({
       id: `2`,
       name: `Jane Doe`,
       title: `Issue 2`,
     })
 
-    expect(result.state.get(`[3,1]`)).toMatchObject({
+    expect(result.state.get(`["3","1"]`)).toMatchObject({
       id: `3`,
       name: `John Doe`,
       title: `Issue 3`,
@@ -364,7 +364,7 @@ describe(`Query Collections`, () => {
     await waitFor(() => {
       expect(result.state.size).toBe(4)
     })
-    expect(result.state.get(`[4,2]`)).toMatchObject({
+    expect(result.state.get(`["4","2"]`)).toMatchObject({
       id: `4`,
       name: `Jane Doe`,
       title: `Issue 4`,
@@ -385,7 +385,7 @@ describe(`Query Collections`, () => {
 
     await waitFor(() => {
       // The updated title should be reflected in the joined results
-      expect(result.state.get(`[2,2]`)).toMatchObject({
+      expect(result.state.get(`["2","2"]`)).toMatchObject({
         id: `2`,
         name: `Jane Doe`,
         title: `Updated Issue 2`,
@@ -407,7 +407,7 @@ describe(`Query Collections`, () => {
 
     await waitFor(() => {
       // After deletion, issue 3 should no longer have a joined result
-      expect(result.state.get(`[3,1]`)).toBeUndefined()
+      expect(result.state.get(`["3","1"]`)).toBeUndefined()
       expect(result.state.size).toBe(3)
     })
   })
@@ -811,8 +811,8 @@ describe(`Query Collections`, () => {
       createEffect(
         () => [
           queryResult.state.size,
-          queryResult.state.has(`[temp-key,1]`),
-          queryResult.state.has(`[4,1]`),
+          queryResult.state.has(`["temp-key","1"]`),
+          queryResult.state.has(`["4","1"]`),
         ] as [number, boolean, boolean],
         ([stateSize, hasTempKey, hasPermKey]) => {
           renderStates.push({
@@ -889,23 +889,24 @@ describe(`Query Collections`, () => {
       userId: `1`,
     })
 
-    await waitFor(() => {
-      // Verify optimistic state is immediately reflected
-      expect(result.state.size).toBe(4)
-    })
-    expect(result.state.get(`[temp-key,1]`)).toMatchObject({
+    // The optimistic publication lands after the current synchronous block;
+    // settle one macrotask so the assertions observe it inside the 10ms
+    // mutation window (waitFor polls too coarsely to catch it).
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    expect(result.state.size).toBe(4)
+    expect(result.state.get(`["temp-key","1"]`)).toMatchObject({
       id: `temp-key`,
       name: `John Doe`,
       title: `New Issue`,
     })
-    expect(result.state.get(`[4,1]`)).toBeUndefined()
+    expect(result.state.get(`["4","1"]`)).toBeUndefined()
 
     // Wait for the transaction to be committed
     await transaction.isPersisted.promise
 
     await waitFor(() => {
       // Wait for the permanent key to appear
-      expect(result.state.get(`[4,1]`)).toBeDefined()
+      expect(result.state.get(`["4","1"]`)).toBeDefined()
     })
 
     // Check if we had any render where the temp key was removed but the permanent key wasn't added yet
@@ -918,8 +919,8 @@ describe(`Query Collections`, () => {
 
     // Verify the temporary key is replaced by the permanent one
     expect(result.state.size).toBe(4)
-    expect(result.state.get(`[temp-key,1]`)).toBeUndefined()
-    expect(result.state.get(`[4,1]`)).toMatchObject({
+    expect(result.state.get(`["temp-key","1"]`)).toBeUndefined()
+    expect(result.state.get(`["4","1"]`)).toMatchObject({
       id: `4`,
       name: `John Doe`,
       title: `New Issue`,
@@ -1145,19 +1146,17 @@ describe(`Query Collections`, () => {
 
         // Enable the query
         setEnabled(true)
-        await new Promise((resolve) => setTimeout(resolve, 10))
-
         await waitFor(() => {
-          expect(rendered.result.state.size).toBe(1) // Only John Smith (age 35)
+          expect(rendered.result.collection?.status).toBe('ready')
         })
+        expect(rendered.result.state.size).toBe(1) // Only John Smith (age 35)
         expect(rendered.result()).toHaveLength(1)
-        expect(rendered.result.collection.status).toBe('ready')
 
         // Disable the query again
         setEnabled(false)
-        await new Promise((resolve) => setTimeout(resolve, 10))
-
-        expect(rendered.result.collection).toBeNull()
+        await waitFor(() => {
+          expect(rendered.result.collection).toBeNull()
+        })
 
         dispose()
       })
@@ -1198,13 +1197,11 @@ describe(`Query Collections`, () => {
 
         // Enable the query
         setEnabled(true)
-        await new Promise((resolve) => setTimeout(resolve, 10))
-
         await waitFor(() => {
-          expect(rendered.result.state.size).toBe(1)
+          expect(rendered.result.collection?.status).toBe('ready')
         })
+        expect(rendered.result.state.size).toBe(1)
         expect(rendered.result()).toHaveLength(1)
-        expect(rendered.result.collection.status).toBe('ready')
 
         dispose()
       })

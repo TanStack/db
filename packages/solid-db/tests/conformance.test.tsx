@@ -6,8 +6,6 @@
  * getters stay current. Solid auto-tracks signals, so controllable inputs use a
  * signal read inside the query fn (no deps array). Collection/config inputs are
  * passed as accessors, per Solid's arity-based input detection.
- *
- * `knownGaps` is populated empirically from the run below.
  */
 import {
   coalesce,
@@ -17,6 +15,7 @@ import {
   createOptimisticAction,
   eq,
   gt,
+  isSingleResultCollection,
   sum,
 } from '@tanstack/db'
 import { NotReadyError, createRoot, createSignal  } from 'solid-js'
@@ -99,22 +98,26 @@ function makePrecreated(build: QueryBuild, opts?: { startSync?: boolean }) {
 }
 
 function makeErrorSource() {
+  const expectedError = new Error(`conformance: sync failure`)
+  let startup: { returned: true } | { returned: false; error: unknown } = {
+    returned: true,
+  }
   const collection = createCollection<{ id: string }>({
     id: `conformance-solid-err-${sourceSeq++}`,
     getKey: (r) => r.id,
     startSync: false,
     sync: {
       sync: () => {
-        throw new Error(`conformance: sync failure`)
+        throw expectedError
       },
     },
   })
   try {
     collection.startSyncImmediate()
-  } catch {
-    // expected: engine catches the sync error and sets status to `error`
+  } catch (error) {
+    startup = { returned: false, error }
   }
-  return { collection }
+  return { collection, expectedError, startup }
 }
 
 async function settle() {
@@ -130,9 +133,15 @@ function makeHandle(
       const result = getResult()
       const col = result?.collection
       const status = col ? col.status : `disabled`
+      // The accessor suspends while loading (Solid's Loading model), so the
+      // readable rows come from the keyed state map — insertion-ordered like
+      // the collection. Reading the accessor itself surfaces captured errors
+      // for the throw-boundary model below.
       let data: any
       try {
-        data = result()
+        const rows = Array.from(result.state.values())
+        data = col && isSingleResultCollection(col) ? rows[0] : rows
+        result()
       } catch (err) {
         if (!(err instanceof NotReadyError)) throw err
       }
@@ -140,7 +149,10 @@ function makeHandle(
         data,
         state: result?.state,
         status,
-        isReady: status === `ready`,
+        isReady: status === `ready` || status === `disabled`,
+        persistedStatus: result?.persistedStatus,
+        isPersistedReady: Boolean(result?.isPersistedReady),
+        persistedError: result?.persistedError,
         isError: status === `error`,
         isEnabled: status !== `disabled`,
       }
@@ -211,6 +223,7 @@ function mountControllable<P>(
 
 const solidDriver: LiveQueryDriver = {
   name: `solid`,
+  disabledRepresentation: `empty-reactive`,
   ops: { eq, gt, count, sum, coalesce, createOptimisticAction },
   makeSource,
   makeDeferredSource,
@@ -226,7 +239,7 @@ const solidDriver: LiveQueryDriver = {
   // rather than exposing a readable isError flag. That's a framework idiom, not a
   // gap — the error-status scenario is parametrized to assert it via the boundary.
   errorSurface: `throw`,
-  knownGaps: [`eager-visible-while-loading`],
+  knownGaps: [],
   features: { serverSnapshot: false, suspense: true },
 }
 
