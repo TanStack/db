@@ -760,4 +760,47 @@ describe(`Mutation result detachment`, () => {
     expect(saved.child).toBe(saved.alias)
     expect(child.name).toBe(`before`)
   })
+
+  // Current behavior, not a promise: a draft copies a row's own enumerable
+  // string keys and every own symbol key, enumerable or not. Non-enumerable
+  // string keys are not copied. The change record keeps only the written key.
+  it.each([`unchanged`, `nested`] as const)(
+    `copies enumerable string keys and every symbol key into a %s draft`,
+    (shape) => {
+      const tag = Symbol(`tag`)
+      const hidden = Symbol(`hidden`)
+      const make = () => {
+        const value: Record<PropertyKey, unknown> = { id: 1, title: `a` }
+        Object.defineProperty(value, `secret`, {
+          value: `s`,
+          enumerable: false,
+          writable: true,
+          configurable: true,
+        })
+        value[tag] = `t`
+        Object.defineProperty(value, hidden, {
+          value: `h`,
+          enumerable: false,
+          writable: true,
+          configurable: true,
+        })
+        return value
+      }
+      const row = shape === `nested` ? { child: make() } : make()
+      const { proxy, getChanges } = createChangeProxy(row)
+      const draft = (
+        shape === `nested` ? (proxy as { child: object }).child : proxy
+      ) as Record<PropertyKey, unknown>
+      expect(Reflect.ownKeys(draft)).toEqual([`id`, `title`, tag, hidden])
+      expect(draft.secret).toBeUndefined()
+      expect(draft[tag]).toBe(`t`)
+      expect(draft[hidden]).toBe(`h`)
+      draft.title = `b`
+      expect(Reflect.ownKeys(draft)).toEqual([`id`, `title`, tag, hidden])
+      const changes = getChanges() as Record<PropertyKey, unknown>
+      expect(Object.keys(changes)).toEqual([
+        shape === `nested` ? `child` : `title`,
+      ])
+    },
+  )
 })

@@ -1,4 +1,4 @@
-import { fc, test as fcTest } from '@fast-check/vitest'
+import { fc } from '@fast-check/vitest'
 import { describe, expect, it, vi } from 'vitest'
 import { Temporal } from 'temporal-polyfill'
 import { createCollection } from '../src/collection/index'
@@ -238,18 +238,47 @@ describe(`native array callback oracle`, () => {
     target: fc.integer({ min: 0, max: 5 }),
     delta: fc.integer({ min: -5, max: 5 }),
   })
-  fcTest.prop(
-    {
-      values: fc.array(fc.integer({ min: -10, max: 10 }), {
-        minLength: 1,
-        maxLength: 6,
-      }),
-      steps: fc.tuple(step, step),
-    },
-    { numRuns: 200 },
-  )(`matches native two-step callback histories`, ({ values, steps }) => {
-    assertArrayCallbacks(observeArrayCallbacks(values, steps))
+  // A fixed and a random campaign. TANSTACK_DB_PROXY_CALLBACK_SEED and
+  // TANSTACK_DB_PROXY_CALLBACK_PATH select a direct replay instead.
+  const callbackHistory = fc.record({
+    values: fc.array(fc.integer({ min: -10, max: 10 }), {
+      minLength: 1,
+      maxLength: 6,
+    }),
+    steps: fc.tuple(step, step),
   })
+  const replaySeed = process.env.TANSTACK_DB_PROXY_CALLBACK_SEED
+  const replayPath = process.env.TANSTACK_DB_PROXY_CALLBACK_PATH
+  const callbackCampaigns =
+    replaySeed === undefined && replayPath === undefined
+      ? [
+          { name: `2026103`, seed: 2026103 as number | undefined },
+          { name: `random`, seed: undefined },
+        ]
+      : [
+          {
+            name: `replay`,
+            seed: replaySeed === undefined ? undefined : Number(replaySeed),
+          },
+        ]
+  for (const { name, seed } of callbackCampaigns) {
+    it(`matches native two-step callback histories (${name})`, () => {
+      if (replayPath !== undefined && replaySeed === undefined)
+        throw new Error(`TANSTACK_DB_PROXY_CALLBACK_PATH requires a seed`)
+      if (seed !== undefined && !Number.isSafeInteger(seed))
+        throw new Error(`TANSTACK_DB_PROXY_CALLBACK_SEED must be an integer`)
+      fc.assert(
+        fc.property(callbackHistory, ({ values, steps }) => {
+          assertArrayCallbacks(observeArrayCallbacks(values, steps))
+        }),
+        {
+          numRuns: 200,
+          ...(seed === undefined ? {} : { seed }),
+          ...(replayPath === undefined ? {} : { path: replayPath }),
+        },
+      )
+    })
+  }
 
   it.each([`lost-write`, `extra-visit`, `wrong-peer`] as const)(
     `rejects a captured %s independently of the native authority`,
@@ -2428,5 +2457,284 @@ describe(`Proxy Library`, () => {
         })
       })
     })
+  })
+})
+
+// A function stored as data is a value like any other. Reading it from a draft
+// must give back the stored function, by any read path, as the native row
+// does. Calling a stored method must see the draft as `this`, so its writes are
+// tracked. Inherited methods (Array, Map, and Set methods) are not data and
+// keep their own draft handling.
+describe(`stored functions behave like native values`, () => {
+  type Row = {
+    handler: () => number
+    fns: Array<() => number>
+    obj: { g: () => number; count: number; bump: () => unknown }
+    m: Map<string, () => number>
+    s: Set<() => number>
+  }
+  const make = (f: () => number, f2: () => number): Row => ({
+    handler: f,
+    fns: [f, f2],
+    obj: {
+      g: f,
+      count: 0,
+      bump() {
+        this.count++
+        return this
+      },
+    },
+    m: new Map([[`k`, f]]),
+    s: new Set([f]),
+  })
+
+  // Each probe returns an observation that must be the same for a native row
+  // and for a draft of an equal row.
+  const probes: Array<[string, (row: Row, f: () => number) => unknown]> = [
+    [`field access`, (row, f) => row.handler === f],
+    [`array index`, (row, f) => row.fns[0] === f],
+    [
+      `for...of`,
+      (row, f) => {
+        for (const fn of row.fns) return fn === f
+        return undefined
+      },
+    ],
+    [`spread`, (row, f) => [...row.fns][0] === f],
+    [
+      `includes and indexOf`,
+      (row, f) => [row.fns.includes(f), row.fns.indexOf(f)],
+    ],
+    [`array callback`, (row, f) => row.fns.map((fn) => fn === f)],
+    [`nested field`, (row, f) => row.obj.g === f],
+    [`Object.values`, (row, f) => Object.values(row.obj).includes(f)],
+    [`Map value`, (row, f) => row.m.get(`k`) === f],
+    [`Set member`, (row, f) => [...row.s][0] === f && row.s.has(f)],
+    [`calling a stored function`, (row) => row.handler()],
+    [
+      `a function assigned during the callback`,
+      (row, f) => {
+        const assigned = row as Row & { added?: () => number }
+        assigned.added = f
+        return assigned.added === f
+      },
+    ],
+    [
+      `a stored method sees its object as this`,
+      (row) => row.obj.bump() === row.obj,
+    ],
+    [
+      `a detached stored method has no this`,
+      (row) => {
+        const { bump } = row.obj
+        try {
+          bump()
+          return `returned`
+        } catch (error) {
+          return (error as Error).constructor.name
+        }
+      },
+    ],
+    [
+      `an inherited constructor`,
+      (row) => [
+        row.constructor === Object,
+        row.fns.constructor === Array,
+        row.m.constructor === Map,
+        row.s.constructor === Set,
+      ],
+    ],
+  ]
+
+  it.each(probes)(`%s gives the native result`, (_name, probe) => {
+    const f = () => 1
+    const f2 = () => 2
+    const native = probe(make(f, f2), f)
+    const { proxy } = createChangeProxy(make(f, f2))
+    expect(probe(proxy, f)).toEqual(native)
+  })
+
+  it(`tracks writes a stored method makes through this`, () => {
+    const native = make(
+      () => 1,
+      () => 2,
+    )
+    native.obj.bump()
+    const { proxy, getChanges } = createChangeProxy(
+      make(
+        () => 1,
+        () => 2,
+      ),
+    )
+    proxy.obj.bump()
+    expect(proxy.obj.count).toBe(native.obj.count)
+    const changes = getChanges() as Partial<Row>
+    expect(Object.keys(changes)).toEqual([`obj`])
+    expect(changes.obj?.count).toBe(1)
+  })
+})
+
+/**
+ * `Object.defineProperty` on a draft defines the property as on a native row:
+ * the same result, value, and descriptor. A defined enumerable value is a
+ * change.
+ */
+describe(`defineProperty behaves like on a native row`, () => {
+  type Row = Record<string, unknown>
+  const make = (): Row => ({ a: 1, nested: { b: 2 } })
+  // One getter for both rows, so their descriptors compare equal.
+  const getTwo = () => 2
+  const definitions: Array<
+    [string, (row: Row) => PropertyDescriptor & { key: string }]
+  > = [
+    [`a new key with only a value`, () => ({ key: `k`, value: 5 })],
+    [`an existing key with only a value`, () => ({ key: `a`, value: 5 })],
+    [
+      `an existing key made read-only`,
+      () => ({ key: `a`, value: 6, writable: false }),
+    ],
+    [
+      `a new enumerable writable key`,
+      () => ({
+        key: `k`,
+        value: 7,
+        writable: true,
+        enumerable: true,
+        configurable: true,
+      }),
+    ],
+    [`an object value`, () => ({ key: `a`, value: { c: 3 }, writable: false })],
+    [`a nested key`, () => ({ key: `nested`, value: { b: 3 } })],
+    [
+      `a new key with only an object value`,
+      () => ({ key: `k`, value: { c: 3 } }),
+    ],
+    [`a getter over an existing key`, () => ({ key: `a`, get: getTwo })],
+    [
+      `a new enumerable getter`,
+      () => ({ key: `k`, get: getTwo, enumerable: true, configurable: true }),
+    ],
+  ]
+  const observe = (
+    row: Row,
+    define: (row: Row) => PropertyDescriptor & { key: string },
+  ) => {
+    const { key, ...descriptor } = define(row)
+    const defined = Reflect.defineProperty(row, key, descriptor)
+    const { value, ...rest } = Object.getOwnPropertyDescriptor(row, key) ?? {}
+    // A read-only, non-configurable property must read back as defined.
+    const fixed = rest.configurable === false && rest.writable === false
+    const same = fixed ? row[key] === descriptor.value : undefined
+    return {
+      same,
+      defined,
+      value: JSON.stringify(value),
+      rest,
+      read: JSON.stringify(row[key]),
+    }
+  }
+
+  it.each(definitions)(`%s`, (_name, define) => {
+    const native = make()
+    const expected = observe(native, define)
+    const { proxy, getChanges } = createChangeProxy(make())
+    expect(observe(proxy, define)).toEqual(expected)
+    // Like a clone, changes hold enumerable string keys only, with the value
+    // the native row now reads.
+    const { key } = define(proxy)
+    const enumerable = expected.rest.enumerable === true
+    expect(getChanges()).toEqual(enumerable ? { [key]: native[key] } : {})
+  })
+})
+
+/**
+ * Freezing, sealing, or fixing a key of a draft must not lose a later write
+ * through a nested value. The Proxy invariants make a frozen key return the
+ * raw copy, so the draft counts that key as changed when it reads it. The law
+ * therefore compares rows, not patches: applying `getChanges()` to the
+ * original must give the native row.
+ */
+describe(`frozen and sealed drafts keep nested writes`, () => {
+  type Row = { n: { x: number }; m: number }
+  const make = (): Row => ({ n: { x: 1 }, m: 1 })
+  const histories: Array<[string, (row: Row) => void]> = [
+    [
+      `freeze, then a nested write`,
+      (row) => {
+        Object.freeze(row)
+        row.n.x = 2
+      },
+    ],
+    [`freeze, then a nested read`, (row) => void Object.freeze(row).n.x],
+    [
+      `seal, then a nested write`,
+      (row) => {
+        Object.seal(row)
+        row.n.x = 2
+      },
+    ],
+    [
+      `a fixed key, then a nested write`,
+      (row) => {
+        Object.defineProperty(row, `n`, {
+          writable: false,
+          configurable: false,
+        })
+        row.n.x = 2
+      },
+    ],
+  ]
+
+  it.each(histories)(`%s gives the native row`, (_name, run) => {
+    const native = make()
+    run(native)
+    const { proxy, getChanges } = createChangeProxy(make())
+    run(proxy)
+    expect({ ...make(), ...getChanges() }).toEqual({ ...native })
+  })
+
+  it(`does not count a primitive read under a frozen key`, () => {
+    const { proxy, getChanges } = createChangeProxy(make())
+    void Object.freeze(proxy).m
+    expect(getChanges()).toEqual({})
+  })
+
+  // The boundary is a read-only and non-configurable key. A sealed key is
+  // non-configurable but writable, and a read-only key may stay configurable.
+  // Either way the draft hands out a draft, so a read is no change. These
+  // cases reject a boundary that checks only one of the two attributes.
+  it.each([
+    [`sealed`, (row: Row) => Object.seal(row)],
+    [
+      `read-only but configurable`,
+      (row: Row) =>
+        Object.defineProperty(row, `n`, {
+          writable: false,
+          configurable: true,
+        }),
+    ],
+  ])(`does not count an object read under a %s key`, (_name, fix) => {
+    const { proxy, getChanges } = createChangeProxy(make())
+    fix(proxy)
+    void proxy.n.x
+    expect(getChanges()).toEqual({})
+  })
+
+  it(`does not count writing back the row's own class instance`, () => {
+    class Point {
+      constructor(public x: number) {}
+    }
+    const row = { p: new Point(1) }
+    expect(
+      withChangeTracking(row, (draft) => {
+        draft.p = row.p
+      }),
+    ).toEqual({})
+    expect(
+      withChangeTracking(row, (draft) => {
+        draft.p = new Point(2)
+        draft.p = row.p
+      }),
+    ).toEqual({})
   })
 })

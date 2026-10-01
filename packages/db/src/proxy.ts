@@ -3,7 +3,7 @@
  * and provides a way to retrieve those changes.
  */
 
-import { deepEquals, isTemporal } from './utils'
+import { deepEqualsInternal, isTemporal } from './utils'
 
 // Resolve draft handles before calling native Map/Set membership methods.
 const draftCopies = new WeakMap<object, object>()
@@ -31,26 +31,7 @@ function unwrapDraft(value: unknown): unknown {
 }
 
 /**
- * Set of array methods that iterate with callbacks and may return elements.
- * Hoisted to module scope to avoid creating a new Set on every property access.
- */
-const CALLBACK_ITERATION_METHODS = new Set([
-  `find`,
-  `findLast`,
-  `findIndex`,
-  `findLastIndex`,
-  `filter`,
-  `map`,
-  `flatMap`,
-  `forEach`,
-  `some`,
-  `every`,
-  `reduce`,
-  `reduceRight`,
-])
-
-/**
- * Set of array methods that modify the array in place.
+ * Array and typed-array methods that modify the value in place.
  */
 const ARRAY_MODIFYING_METHODS = new Set([
   `pop`,
@@ -62,6 +43,7 @@ const ARRAY_MODIFYING_METHODS = new Set([
   `reverse`,
   `fill`,
   `copyWithin`,
+  `set`,
 ])
 
 /**
@@ -90,56 +72,6 @@ function isProxiableObject(
 }
 
 /**
- * Creates a Symbol.iterator handler for arrays that yields proxied elements.
- */
-function createArrayIteratorHandler<T extends object>(
-  changeTracker: ChangeTracker<T>,
-  memoizedCreateChangeProxy: (
-    obj: Record<string | symbol, unknown>,
-    parent?: {
-      tracker: ChangeTracker<Record<string | symbol, unknown>>
-      prop: string | symbol
-    },
-  ) => { proxy: Record<string | symbol, unknown> },
-): () => Iterator<unknown> {
-  return function () {
-    const array = changeTracker.copy_ as unknown as Array<unknown>
-    let index = 0
-
-    return {
-      next() {
-        if (index >= array.length) {
-          return { done: true, value: undefined }
-        }
-
-        const element = array[index]
-        let proxiedElement = element
-
-        if (isProxiableObject(element)) {
-          const nestedParent = {
-            tracker: changeTracker as unknown as ChangeTracker<
-              Record<string | symbol, unknown>
-            >,
-            prop: String(index),
-          }
-          const { proxy: elementProxy } = memoizedCreateChangeProxy(
-            element,
-            nestedParent,
-          )
-          proxiedElement = elementProxy
-        }
-
-        index++
-        return { done: false, value: proxiedElement }
-      },
-      [Symbol.iterator]() {
-        return this
-      },
-    }
-  }
-}
-
-/**
  * Creates a wrapper for methods that modify a collection (array, Map, Set).
  * The wrapper calls the method and marks the change tracker as modified.
  */
@@ -147,11 +79,13 @@ function createModifyingMethodHandler<T extends object>(
   methodFn: (...args: Array<unknown>) => unknown,
   changeTracker: ChangeTracker<T>,
   markChanged: (tracker: ChangeTracker<T>) => void,
+  receiver: unknown,
 ): (...args: Array<unknown>) => unknown {
   return function (...args: Array<unknown>) {
     const result = methodFn.apply(changeTracker.copy_, args)
     markChanged(changeTracker)
-    return result
+    // A method that returns the value itself returns the draft.
+    return result === changeTracker.copy_ ? receiver : result
   }
 }
 
@@ -220,12 +154,6 @@ function createMapSetIteratorHandler<T extends object>(
   }
 }
 
-// Add TypedArray interface with proper type
-interface TypedArray {
-  length: number
-  [index: number]: number
-}
-
 // Update type for ChangeTracker
 interface ChangeParent {
   tracker: ChangeTracker<Record<string | symbol, unknown>>
@@ -247,6 +175,11 @@ interface ChangeTracker<T extends object> {
 /**
  * Deep clones an object while preserving special types like Date and RegExp
  */
+
+interface TypedArray {
+  length: number
+  set: (source: TypedArray) => void
+}
 
 function deepClone<T extends unknown>(
   obj: T,
@@ -300,18 +233,14 @@ function deepClone<T extends unknown>(
 
   // Handle TypedArrays
   if (ArrayBuffer.isView(obj) && !(obj instanceof DataView)) {
-    // Get the constructor to create a new instance of the same type
+    // Create an instance of the same type by length, then copy the values.
+    // A subclass constructor need not forward a source array to super.
     const TypedArrayConstructor = Object.getPrototypeOf(obj).constructor
     const clone = new TypedArrayConstructor(
       (obj as unknown as TypedArray).length,
-    ) as unknown as TypedArray
+    ) as TypedArray
     visited.set(obj as object, clone)
-
-    // Copy the values
-    for (let i = 0; i < (obj as unknown as TypedArray).length; i++) {
-      clone[i] = (obj as unknown as TypedArray)[i]!
-    }
-
+    clone.set(obj as unknown as TypedArray)
     return clone as unknown as T
   }
 
@@ -350,8 +279,12 @@ function deepClone<T extends unknown>(
   const clone = {} as Record<string | symbol, unknown>
   visited.set(obj as object, clone)
 
-  for (const key in obj) {
-    if (Object.prototype.hasOwnProperty.call(obj, key)) {
+  // Own enumerable string keys and every own symbol key, in native order.
+  for (const key of Reflect.ownKeys(obj)) {
+    if (
+      typeof key === `symbol` ||
+      Object.prototype.propertyIsEnumerable.call(obj, key)
+    ) {
       // Copy data properties without invoking Object.prototype.__proto__.
       defineDataProperty(
         clone,
@@ -365,15 +298,6 @@ function deepClone<T extends unknown>(
     }
   }
 
-  const symbolProps = Object.getOwnPropertySymbols(obj)
-  for (const sym of symbolProps) {
-    clone[sym] = deepClone(
-      (obj as Record<string | symbol, unknown>)[sym],
-      visited,
-      detach,
-    )
-  }
-
   return clone as T
 }
 
@@ -384,82 +308,7 @@ function draftValuesEqual(
   right: unknown,
   paired = new Map<object, object>(),
 ): boolean {
-  if (left === right) return true
-  if (
-    left === null ||
-    right === null ||
-    typeof left !== `object` ||
-    typeof right !== `object`
-  )
-    return deepEquals(left, right)
-  if (paired.has(left)) return paired.get(left) === right
-  paired.set(left, right)
-  try {
-    if (left instanceof Set || right instanceof Set) {
-      if (
-        !(left instanceof Set) ||
-        !(right instanceof Set) ||
-        left.size !== right.size
-      )
-        return false
-      const values = [...right]
-      return [...left].every((value, index) =>
-        draftValuesEqual(value, values[index], paired),
-      )
-    }
-    if (left instanceof RegExp || right instanceof RegExp)
-      return (
-        left instanceof RegExp &&
-        right instanceof RegExp &&
-        deepEquals(left, right) &&
-        left.lastIndex === right.lastIndex
-      )
-    if (left instanceof Map || right instanceof Map) {
-      if (
-        !(left instanceof Map) ||
-        !(right instanceof Map) ||
-        left.size !== right.size
-      )
-        return false
-      const entries = [...right]
-      return [...left].every(
-        ([key, value], index) =>
-          (key === entries[index]![0] || Object.is(key, entries[index]![0])) &&
-          draftValuesEqual(value, entries[index]![1], paired),
-      )
-    }
-    // Native leaf values retain their existing equality contract. Traverse
-    // ordinary containers so a nested Set or RegExp cannot bypass refinement.
-    if (
-      left instanceof Date ||
-      right instanceof Date ||
-      ArrayBuffer.isView(left) ||
-      ArrayBuffer.isView(right) ||
-      isTemporal(left) ||
-      isTemporal(right)
-    )
-      return deepEquals(left, right)
-    if (Array.isArray(left) !== Array.isArray(right)) return false
-    if (Array.isArray(left) && left.length !== (right as Array<unknown>).length)
-      return false
-    const keys = (value: object) =>
-      Reflect.ownKeys(value).filter((key) =>
-        Object.prototype.propertyIsEnumerable.call(value, key),
-      )
-    const leftKeys = keys(left)
-    if (leftKeys.length !== keys(right).length) return false
-    return leftKeys.every(
-      (key) =>
-        Object.prototype.propertyIsEnumerable.call(right, key) &&
-        draftValuesEqual(
-          (left as Record<PropertyKey, unknown>)[key],
-          (right as Record<PropertyKey, unknown>)[key],
-          paired,
-        ),
-    )
-  } finally {
-    paired.delete(left)
-  }
+  return deepEqualsInternal(left, right, paired, true)
 }
 
 /**
@@ -501,11 +350,6 @@ export function createChangeProxy<
       return changeProxy
     }
   }
-  // Create a WeakMap to cache proxies for nested objects
-  // This prevents creating multiple proxies for the same object
-  // and handles circular references
-  const proxyCache = new Map<object, object>()
-
   // Existing values share one private copy per row. Newly inserted objects
   // retain normal references during the callback; the result is detached below.
   const valueCopies =
@@ -545,7 +389,8 @@ export function createChangeProxy<
     }
   }
 
-  // Check if all properties in the current state have reverted to original values
+  // Check if all properties in the current state have reverted to original values.
+  // assigned_ keys are always strings: traps record `prop.toString()`.
   function checkIfReverted(
     state: ChangeTracker<Record<string | symbol, unknown>>,
   ): boolean {
@@ -560,49 +405,21 @@ export function createChangeProxy<
         ),
       )
     }
-    // If there are no assigned properties, object is unchanged
-    if (
-      Object.keys(state.assigned_).length === 0 &&
-      Object.getOwnPropertySymbols(state.assigned_).length === 0
-    ) {
-      return true
-    }
-
-    // Check each assigned regular property
     for (const prop in state.assigned_) {
-      // If this property is marked as assigned
-      if (state.assigned_[prop] === true) {
-        const currentValue = state.copy_[prop]
-        const originalValue = (state.originalObject as any)[prop]
-
-        // If the value is not equal to original, something is still changed
-        if (!draftValuesEqual(currentValue, originalValue)) {
-          return false
-        }
-      } else if (state.assigned_[prop] === false) {
-        // Property was deleted, so it's different from original
+      // false marks a deletion, which always differs from the original. A key
+      // added with the value undefined differs from an absent key.
+      if (
+        !state.assigned_[prop] ||
+        Object.hasOwn(state.copy_, prop) !==
+          Object.hasOwn(state.originalObject, prop) ||
+        !draftValuesEqual(
+          state.copy_[prop],
+          (state.originalObject as any)[prop],
+        )
+      ) {
         return false
       }
     }
-
-    // Check each assigned symbol property
-    const symbolProps = Object.getOwnPropertySymbols(state.assigned_)
-    for (const sym of symbolProps) {
-      if (state.assigned_[sym] === true) {
-        const currentValue = (state.copy_ as any)[sym]
-        const originalValue = (state.originalObject as any)[sym]
-
-        // If the value is not equal to original, something is still changed
-        if (!draftValuesEqual(currentValue, originalValue)) {
-          return false
-        }
-      } else if (state.assigned_[sym] === false) {
-        // Property was deleted, so it's different from original
-        return false
-      }
-    }
-
-    // All assigned properties match their original values
     return true
   }
 
@@ -618,286 +435,274 @@ export function createChangeProxy<
       parentState.modified = false
       parentState.assigned_ = Object.create(null)
 
-      // Continue up the chain
-      if (parentState.parent) {
-        checkParentStatus(parentState.parent.tracker)
+      // Continue up the chain. The parent's edge to this object no longer
+      // counts as a change when the parent's value equals its original; a
+      // replaced object can revert to its own snapshot and still differ.
+      const edge = parentState.parent
+      if (edge) {
+        if (
+          draftValuesEqual(
+            edge.tracker.copy_[edge.prop],
+            edge.tracker.originalObject[edge.prop],
+          )
+        )
+          delete edge.tracker.assigned_[edge.prop]
+        checkParentStatus(edge.tracker)
       }
     }
   }
 
-  // Create a proxy for the target object
-  function createObjectProxy<TObj extends object>(obj: TObj): TObj {
-    // If we've already created a proxy for this object, return it
-    if (proxyCache.has(obj)) {
-      return proxyCache.get(obj) as TObj
-    }
+  // Create a proxy for the target object.
+  // Use the unfrozen copy_ as the proxy target to avoid Proxy invariant violations
+  // when the original target is frozen (e.g., from Immer)
+  const proxy = new Proxy(changeTracker.copy_, {
+    get(ptarget, prop, receiver) {
+      const value = changeTracker.copy_[prop as keyof T]
 
-    // Create a proxy for the object
-    const proxy = new Proxy(obj, {
-      get(ptarget, prop, receiver) {
-        const value = changeTracker.copy_[prop as keyof T]
-
-        // If it's a getter, return the value directly
-        const desc = Object.getOwnPropertyDescriptor(ptarget, prop)
-        if (desc?.get) {
-          return value
-        }
-
-        // If the value is a function, bind it to the ptarget
-        if (typeof value === `function`) {
-          // For Array methods that modify the array
-          if (Array.isArray(ptarget)) {
-            const methodName = prop.toString()
-
-            if (ARRAY_MODIFYING_METHODS.has(methodName)) {
-              return createModifyingMethodHandler(
-                value,
-                changeTracker,
-                markChanged,
-              )
-            }
-
-            // Native callbacks and iterators read through the draft itself.
-            // This also tracks the callback array and implicit reduce seed.
-            if (
-              CALLBACK_ITERATION_METHODS.has(methodName) ||
-              methodName === `values` ||
-              methodName === `entries`
-            ) {
-              return value.bind(receiver)
-            }
-
-            // Handle array Symbol.iterator for for...of loops
-            if (prop === Symbol.iterator) {
-              return createArrayIteratorHandler(
-                changeTracker,
-                memoizedCreateChangeProxy,
-              )
-            }
-          }
-
-          // For Map and Set methods that modify the collection
-          if (ptarget instanceof Map || ptarget instanceof Set) {
-            const methodName = prop.toString()
-
-            const resolveValue = (entry: unknown) => {
-              const raw = unwrapDraft(entry)
-              return raw !== null && typeof raw === `object`
-                ? (valueCopies.get(raw) ?? raw)
-                : raw
-            }
-
-            if (
-              methodName === `has` ||
-              methodName === `delete` ||
-              methodName === `add` ||
-              methodName === `set`
-            ) {
-              return (...args: Array<unknown>) => {
-                if (ptarget instanceof Set) args[0] = resolveValue(args[0])
-                else if (methodName === `set`) args[1] = resolveValue(args[1])
-                const result = value.apply(ptarget, args)
-                if (methodName !== `has`) markChanged(changeTracker)
-                return result === ptarget ? receiver : result
-              }
-            }
-
-            if (ptarget instanceof Map && methodName === `get`) {
-              return (key: unknown) => {
-                const entry = ptarget.get(key)
-                return isProxiableObject(entry)
-                  ? memoizedCreateChangeProxy(entry, {
-                      tracker: changeTracker,
-                      prop: ``,
-                      retainIdentity: true,
-                    }).proxy
-                  : entry
-              }
-            }
-
-            if (methodName === `clear`) {
-              return createModifyingMethodHandler(
-                value,
-                changeTracker,
-                markChanged,
-              )
-            }
-
-            // Handle iterator methods for Map and Set
-            const iteratorHandler = createMapSetIteratorHandler(
-              methodName,
-              prop,
-              changeTracker,
-              receiver,
-              memoizedCreateChangeProxy,
-            )
-            if (iteratorHandler) {
-              return iteratorHandler
-            }
-          }
-          return value.bind(ptarget)
-        }
-
-        // If the value is an object (but not Date, RegExp, or Temporal), create a proxy for it
-        if (isProxiableObject(value)) {
-          // Create a parent reference for the nested object
-          const nestedParent = {
-            tracker: changeTracker,
-            prop: String(prop),
-          }
-
-          // Create a proxy for the nested object
-          const { proxy: nestedProxy } = memoizedCreateChangeProxy(
-            value,
-            nestedParent,
-          )
-
-          // Cache the proxy
-          proxyCache.set(value, nestedProxy)
-
-          return nestedProxy
-        }
-
+      // If it's a getter, return the value directly
+      const desc = Object.getOwnPropertyDescriptor(ptarget, prop)
+      if (desc?.get) {
         return value
-      },
+      }
 
-      set(_sobj, prop, value) {
-        const currentValue = changeTracker.copy_[prop as keyof T]
+      // The Proxy invariants require a read-only non-configurable value as
+      // stored, as after Object.freeze. A raw object can still be written
+      // through, so its key counts as changed.
+      if (desc?.configurable === false && !desc.writable) {
+        if (isProxiableObject(value)) {
+          changeTracker.assigned_[String(prop)] = true
+          markChanged(changeTracker)
+        }
+        return value
+      }
 
-        // Only track the change if the value is actually different
+      // If the value is a function, bind it to the ptarget
+      if (typeof value === `function`) {
+        // A function stored as data is returned as stored, like any value. A
+        // call then sees the draft as `this`, so its writes are tracked. A
+        // constructor is not a method. Only inherited methods (Array, Map,
+        // Set) need the handling below.
+        if (Object.hasOwn(ptarget, prop) || prop === `constructor`) return value
+
+        const methodName = prop.toString()
+
+        // A subarray shares the buffer, so it is a draft whose writes mark
+        // this value changed, like a Map value.
+        if (methodName === `subarray` && ArrayBuffer.isView(ptarget)) {
+          return (...args: Array<unknown>) =>
+            memoizedCreateChangeProxy(value.apply(ptarget, args), {
+              tracker: changeTracker,
+              prop: ``,
+              retainIdentity: true,
+            }).proxy
+        }
+
+        // Array and typed-array methods that modify the value in place
         if (
-          !Object.hasOwn(changeTracker.copy_, prop) ||
-          !draftValuesEqual(currentValue, value)
+          ARRAY_MODIFYING_METHODS.has(methodName) &&
+          (Array.isArray(ptarget) || ArrayBuffer.isView(ptarget))
         ) {
-          // Check if the new value is equal to the original value
-          // Important: Use the originalObject to get the true original value
-          const originalValue = changeTracker.originalObject[prop as keyof T]
-          const isRevertToOriginal =
-            Object.hasOwn(changeTracker.originalObject, prop) &&
-            draftValuesEqual(value, originalValue)
+          return createModifyingMethodHandler(
+            value,
+            changeTracker,
+            markChanged,
+            receiver,
+          )
+        }
 
-          if (isRevertToOriginal) {
-            // If the value is reverted to its original state, remove it from changes
-            delete changeTracker.assigned_[prop.toString()]
+        if (Array.isArray(ptarget)) {
+          // Other methods, iterators included, read through the draft
+          // itself, so returned and callback elements are drafts and searches
+          // find them. This also tracks the callback array and implicit
+          // reduce seed.
+          return value.bind(receiver)
+        }
 
-            // Make sure the copy is updated with the original value
-            changeTracker.copy_[prop as keyof T] = deepClone(originalValue)
+        // For Map and Set methods that modify the collection
+        if (ptarget instanceof Map || ptarget instanceof Set) {
+          const resolveValue = (entry: unknown) => {
+            const raw = unwrapDraft(entry)
+            return raw !== null && typeof raw === `object`
+              ? (valueCopies.get(raw) ?? raw)
+              : raw
+          }
 
-            // Check if all properties in this object have been reverted
-            const allReverted = checkIfReverted(changeTracker)
-
-            if (allReverted) {
-              // If all have been reverted, clear tracking
-              changeTracker.modified = false
-              changeTracker.assigned_ = Object.create(null)
-
-              // If we're a nested object, check if the parent needs updating
-              if (parent) {
-                checkParentStatus(parent.tracker)
-              }
-            } else {
-              // Some properties are still changed
-              changeTracker.modified = true
+          if (
+            methodName === `has` ||
+            methodName === `delete` ||
+            methodName === `add` ||
+            methodName === `set`
+          ) {
+            return (...args: Array<unknown>) => {
+              if (ptarget instanceof Set) args[0] = resolveValue(args[0])
+              else if (methodName === `set`) args[1] = resolveValue(args[1])
+              const result = value.apply(ptarget, args)
+              if (methodName !== `has`) markChanged(changeTracker)
+              return result === ptarget ? receiver : result
             }
+          }
+
+          if (ptarget instanceof Map && methodName === `get`) {
+            return (key: unknown) => {
+              const entry = ptarget.get(key)
+              return isProxiableObject(entry)
+                ? memoizedCreateChangeProxy(entry, {
+                    tracker: changeTracker,
+                    prop: ``,
+                    retainIdentity: true,
+                  }).proxy
+                : entry
+            }
+          }
+
+          if (methodName === `clear`) {
+            return createModifyingMethodHandler(
+              value,
+              changeTracker,
+              markChanged,
+              receiver,
+            )
+          }
+
+          // Handle iterator methods for Map and Set
+          const iteratorHandler = createMapSetIteratorHandler(
+            methodName,
+            prop,
+            changeTracker,
+            receiver,
+            memoizedCreateChangeProxy,
+          )
+          if (iteratorHandler) {
+            return iteratorHandler
+          }
+        }
+        return value.bind(ptarget)
+      }
+
+      // If the value is an object (but not Date, RegExp, or Temporal), create a proxy for it
+      if (isProxiableObject(value)) {
+        // Create a parent reference for the nested object
+        const nestedParent = {
+          tracker: changeTracker,
+          prop: String(prop),
+        }
+
+        // Create (or reuse) the proxy for the nested object
+        return memoizedCreateChangeProxy(value, nestedParent).proxy
+      }
+
+      return value
+    },
+
+    set(_sobj, prop, value) {
+      const currentValue = changeTracker.copy_[prop as keyof T]
+
+      // Only track the change if the value is actually different
+      if (
+        !Object.hasOwn(changeTracker.copy_, prop) ||
+        !draftValuesEqual(currentValue, value)
+      ) {
+        // Check if the new value is equal to the original value
+        // Important: Use the originalObject to get the true original value
+        const originalValue = changeTracker.originalObject[prop as keyof T]
+        const isRevertToOriginal =
+          Object.hasOwn(changeTracker.originalObject, prop) &&
+          draftValuesEqual(value, originalValue)
+
+        if (isRevertToOriginal) {
+          // If the value is reverted to its original state, remove it from changes
+          delete changeTracker.assigned_[prop.toString()]
+
+          // Make sure the copy is updated with the original value
+          changeTracker.copy_[prop as keyof T] = deepClone(originalValue)
+
+          // Some properties may still be changed; checkParentStatus clears
+          // tracking here and up the chain once everything is reverted.
+          changeTracker.modified = true
+          checkParentStatus(changeTracker)
+        } else {
+          // Set the value on the copy
+          changeTracker.copy_[prop as keyof T] = value
+
+          // Track that this property was assigned - store using the actual property (symbol or string)
+          changeTracker.assigned_[prop.toString()] = true
+
+          // Mark this object and its ancestors as modified
+          markChanged(changeTracker)
+        }
+      }
+
+      return true
+    },
+
+    defineProperty(ptarget, prop, descriptor) {
+      // Forward the defineProperty to the target to maintain Proxy invariants
+      // This allows Object.seal() and Object.freeze() to work on the proxy
+      const result = Reflect.defineProperty(ptarget, prop, descriptor)
+      // A value or an accessor changes what the key reads. Sealing does not.
+      if (
+        result &&
+        (`value` in descriptor || descriptor.get || descriptor.set)
+      ) {
+        changeTracker.assigned_[prop.toString()] = true
+        markChanged(changeTracker)
+      }
+      return result
+    },
+
+    getOwnPropertyDescriptor(ptarget, prop) {
+      // Forward to target to maintain Proxy invariants for seal/freeze
+      return Reflect.getOwnPropertyDescriptor(ptarget, prop)
+    },
+
+    preventExtensions(ptarget) {
+      // Forward to target to allow Object.seal() and Object.preventExtensions()
+      return Reflect.preventExtensions(ptarget)
+    },
+
+    isExtensible(ptarget) {
+      // Forward to target to maintain consistency
+      return Reflect.isExtensible(ptarget)
+    },
+
+    deleteProperty(dobj, prop) {
+      const stringProp = typeof prop === `symbol` ? prop.toString() : prop
+
+      if (Object.hasOwn(dobj, prop)) {
+        // Check if the property exists in the original object
+        const hadPropertyInOriginal = Object.hasOwn(
+          changeTracker.originalObject,
+          prop,
+        )
+
+        // Forward the delete to the target using Reflect
+        // This respects Object.seal/preventExtensions constraints
+        const result = Reflect.deleteProperty(dobj, prop)
+
+        if (result) {
+          // If the property didn't exist in the original object, removing it
+          // should revert to the original state
+          if (!hadPropertyInOriginal) {
+            delete changeTracker.assigned_[stringProp]
+
+            // Deleting an added key is a revert. Like the set trap, clear
+            // tracking here and up the chain once everything is reverted.
+            changeTracker.modified = true
+            checkParentStatus(changeTracker)
           } else {
-            // Set the value on the copy
-            changeTracker.copy_[prop as keyof T] = value
-
-            // Track that this property was assigned - store using the actual property (symbol or string)
-            changeTracker.assigned_[prop.toString()] = true
-
-            // Mark this object and its ancestors as modified
+            // Mark this property as deleted
+            changeTracker.assigned_[stringProp] = false
             markChanged(changeTracker)
           }
         }
 
-        return true
-      },
-
-      defineProperty(ptarget, prop, descriptor) {
-        // Forward the defineProperty to the target to maintain Proxy invariants
-        // This allows Object.seal() and Object.freeze() to work on the proxy
-        const result = Reflect.defineProperty(ptarget, prop, descriptor)
-        if (result && `value` in descriptor) {
-          changeTracker.copy_[prop as keyof T] = deepClone(descriptor.value)
-          changeTracker.assigned_[prop.toString()] = true
-          markChanged(changeTracker)
-        }
         return result
-      },
+      }
 
-      getOwnPropertyDescriptor(ptarget, prop) {
-        // Forward to target to maintain Proxy invariants for seal/freeze
-        return Reflect.getOwnPropertyDescriptor(ptarget, prop)
-      },
-
-      preventExtensions(ptarget) {
-        // Forward to target to allow Object.seal() and Object.preventExtensions()
-        return Reflect.preventExtensions(ptarget)
-      },
-
-      isExtensible(ptarget) {
-        // Forward to target to maintain consistency
-        return Reflect.isExtensible(ptarget)
-      },
-
-      deleteProperty(dobj, prop) {
-        const stringProp = typeof prop === `symbol` ? prop.toString() : prop
-
-        if (Object.hasOwn(dobj, prop)) {
-          // Check if the property exists in the original object
-          const hadPropertyInOriginal = Object.hasOwn(
-            changeTracker.originalObject,
-            prop,
-          )
-
-          // Forward the delete to the target using Reflect
-          // This respects Object.seal/preventExtensions constraints
-          const result = Reflect.deleteProperty(dobj, prop)
-
-          if (result) {
-            // If the property didn't exist in the original object, removing it
-            // should revert to the original state
-            if (!hadPropertyInOriginal) {
-              delete changeTracker.assigned_[stringProp]
-
-              // If this is the last change and we're not a nested object,
-              // mark the object as unmodified
-              if (
-                Object.keys(changeTracker.assigned_).length === 0 &&
-                Object.getOwnPropertySymbols(changeTracker.assigned_).length ===
-                  0
-              ) {
-                changeTracker.modified = false
-              } else {
-                // We still have changes, keep as modified
-                changeTracker.modified = true
-              }
-            } else {
-              // Mark this property as deleted
-              changeTracker.assigned_[stringProp] = false
-              markChanged(changeTracker)
-            }
-          }
-
-          return result
-        }
-
-        return true
-      },
-    })
-
-    // Cache the proxy
-    proxyCache.set(obj, proxy)
-    draftCopies.set(proxy, changeTracker.copy_)
-
-    return proxy
-  }
-
-  // Create a proxy for the target object
-  // Use the unfrozen copy_ as the proxy target to avoid Proxy invariant violations
-  // when the original target is frozen (e.g., from Immer)
-  const proxy = createObjectProxy(changeTracker.copy_ as unknown as T)
+      return true
+    },
+  })
+  draftCopies.set(proxy, changeTracker.copy_)
 
   // Return the proxy and a function to get the changes
   return {
@@ -938,14 +743,13 @@ export function createChangeProxy<
         // Compare child contents, stopping only at paired root backedges. A
         // child's own changes still count even when it also points to this row.
         if (
-          (changeTracker.assigned_[key] === true ||
-            (mayHaveChangedAliases &&
-              !draftValuesEqual(
-                value instanceof Set ? Array.from(value) : value,
-                original instanceof Set ? Array.from(original) : original,
-                pairedRoots,
-              ))) &&
-          key in changeTracker.copy_
+          changeTracker.assigned_[key] === true ||
+          (mayHaveChangedAliases &&
+            !draftValuesEqual(
+              value instanceof Set ? Array.from(value) : value,
+              original instanceof Set ? Array.from(original) : original,
+              pairedRoots,
+            ))
         ) {
           defineDataProperty(result, key, changeTracker.copy_[key])
         }
