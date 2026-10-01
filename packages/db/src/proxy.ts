@@ -306,7 +306,7 @@ function deepClone<T extends unknown>(
 function draftValuesEqual(
   left: unknown,
   right: unknown,
-  paired = new Map<object, object>(),
+  paired?: Map<object, object>,
 ): boolean {
   return deepEqualsInternal(left, right, paired, true)
 }
