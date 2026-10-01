@@ -86,6 +86,7 @@ type PublishedPublicationRow = PublicationRow & {
   $collectionId: string
   $key: number
   $origin: `local` | `remote`
+  $hasPendingWrites: boolean
   $synced: boolean
 }
 
@@ -234,6 +235,7 @@ function selectPublishedRow(
     $collectionId: published.$collectionId,
     $key: published.$key,
     $origin: published.$origin,
+    $hasPendingWrites: published.$hasPendingWrites,
     $synced: published.$synced,
   }
 }
@@ -353,6 +355,7 @@ async function applyRound(
     $collectionId: harness.rows.id,
     $key: row.id,
     $origin: `local`,
+    $hasPendingWrites: !synced,
     $synced: synced,
   })
   const expectedOptimisticChange = keyWasPreviouslyPublished

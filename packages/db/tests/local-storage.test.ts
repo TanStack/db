@@ -88,6 +88,7 @@ const publicRemoteTodo = {
   $collectionId: `local-collection:todos`,
   $key: `remote`,
   $origin: `remote`,
+  $hasPendingWrites: false,
   $synced: true,
 }
 
@@ -144,6 +145,7 @@ function assertStoredTodos(
       delete userRow.$collectionId
       delete userRow.$key
       delete userRow.$origin
+      delete userRow.$hasPendingWrites
       delete userRow.$synced
       return userRow
     }),

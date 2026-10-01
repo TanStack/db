@@ -104,7 +104,7 @@ export class CollectionChangesManager<
   }
 
   /**
-   * Enriches a change message with virtual properties ($synced, $origin, $key, $collectionId).
+   * Enriches a change message with virtual properties ($hasPendingWrites, $synced, $origin, $key, $collectionId).
    * Uses the "add-if-missing" pattern to preserve virtual properties from upstream collections.
    */
   private enrichChangeWithVirtualProps(

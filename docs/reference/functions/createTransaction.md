@@ -47,7 +47,7 @@ tx.mutate(() => {
   collection.update("2", draft => { draft.completed = true })
 })
 
-await tx.isPersisted.promise
+await tx.when('settled')
 ```
 
 ```ts
@@ -61,7 +61,7 @@ try {
     collection.insert({ id: "1", text: "New item" })
   })
 
-  await tx.isPersisted.promise
+  await tx.when('settled')
 } catch (error) {
   console.log('Transaction failed:', error)
 }

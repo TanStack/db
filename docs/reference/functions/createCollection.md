@@ -70,7 +70,7 @@ const todos = createCollection({
 
 // Direct usage (handlers manage transactions)
 const tx = todos.insert({ id: "1", text: "Buy milk", completed: false })
-await tx.isPersisted.promise
+await tx.when('settled')
 ```
 
 ```ts
@@ -94,7 +94,7 @@ tx.mutate(() => {
   todos.update("2", draft => { draft.completed = true })
 })
 
-await tx.isPersisted.promise
+await tx.when('settled')
 ```
 
 ```ts
@@ -179,7 +179,7 @@ const todos = createCollection({
 
 // Direct usage (handlers manage transactions)
 const tx = todos.insert({ id: "1", text: "Buy milk", completed: false })
-await tx.isPersisted.promise
+await tx.when('settled')
 ```
 
 ```ts
@@ -203,7 +203,7 @@ tx.mutate(() => {
   todos.update("2", draft => { draft.completed = true })
 })
 
-await tx.isPersisted.promise
+await tx.when('settled')
 ```
 
 ```ts
@@ -288,7 +288,7 @@ const todos = createCollection({
 
 // Direct usage (handlers manage transactions)
 const tx = todos.insert({ id: "1", text: "Buy milk", completed: false })
-await tx.isPersisted.promise
+await tx.when('settled')
 ```
 
 ```ts
@@ -312,7 +312,7 @@ tx.mutate(() => {
   todos.update("2", draft => { draft.completed = true })
 })
 
-await tx.isPersisted.promise
+await tx.when('settled')
 ```
 
 ```ts
@@ -397,7 +397,7 @@ const todos = createCollection({
 
 // Direct usage (handlers manage transactions)
 const tx = todos.insert({ id: "1", text: "Buy milk", completed: false })
-await tx.isPersisted.promise
+await tx.when('settled')
 ```
 
 ```ts
@@ -421,7 +421,7 @@ tx.mutate(() => {
   todos.update("2", draft => { draft.completed = true })
 })
 
-await tx.isPersisted.promise
+await tx.when('settled')
 ```
 
 ```ts
@@ -506,7 +506,7 @@ const todos = createCollection({
 
 // Direct usage (handlers manage transactions)
 const tx = todos.insert({ id: "1", text: "Buy milk", completed: false })
-await tx.isPersisted.promise
+await tx.when('settled')
 ```
 
 ```ts
@@ -530,7 +530,7 @@ tx.mutate(() => {
   todos.update("2", draft => { draft.completed = true })
 })
 
-await tx.isPersisted.promise
+await tx.when('settled')
 ```
 
 ```ts
@@ -615,7 +615,7 @@ const todos = createCollection({
 
 // Direct usage (handlers manage transactions)
 const tx = todos.insert({ id: "1", text: "Buy milk", completed: false })
-await tx.isPersisted.promise
+await tx.when('settled')
 ```
 
 ```ts
@@ -639,7 +639,7 @@ tx.mutate(() => {
   todos.update("2", draft => { draft.completed = true })
 })
 
-await tx.isPersisted.promise
+await tx.when('settled')
 ```
 
 ```ts
@@ -724,7 +724,7 @@ const todos = createCollection({
 
 // Direct usage (handlers manage transactions)
 const tx = todos.insert({ id: "1", text: "Buy milk", completed: false })
-await tx.isPersisted.promise
+await tx.when('settled')
 ```
 
 ```ts
@@ -748,7 +748,7 @@ tx.mutate(() => {
   todos.update("2", draft => { draft.completed = true })
 })
 
-await tx.isPersisted.promise
+await tx.when('settled')
 ```
 
 ```ts
@@ -833,7 +833,7 @@ const todos = createCollection({
 
 // Direct usage (handlers manage transactions)
 const tx = todos.insert({ id: "1", text: "Buy milk", completed: false })
-await tx.isPersisted.promise
+await tx.when('settled')
 ```
 
 ```ts
@@ -857,7 +857,7 @@ tx.mutate(() => {
   todos.update("2", draft => { draft.completed = true })
 })
 
-await tx.isPersisted.promise
+await tx.when('settled')
 ```
 
 ```ts

@@ -1637,8 +1637,9 @@ function expectNoRouteMetadata(row: object): void {
   expect(Object.hasOwn(row, `__parentContext`)).toBe(false)
 }
 
-// Public VirtualRowProps names these four keys, not arbitrary $-prefixed data.
+// Public VirtualRowProps names these five keys, not arbitrary $-prefixed data.
 const publicMetadataKeys = new Set([
+  `$hasPendingWrites`,
   `$synced`,
   `$origin`,
   `$key`,

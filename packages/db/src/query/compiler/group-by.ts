@@ -223,12 +223,17 @@ function getRowVirtualMetadata(row: NamespacedRow): RowVirtualMetadata {
     if (value === null || typeof value !== `object`) continue
     const asRecord = value as Record<string, unknown>
     const hasSyncedProp = `$synced` in asRecord
+    const hasPendingWritesProp = `$hasPendingWrites` in asRecord
     const hasOriginProp = `$origin` in asRecord
-    if (!hasSyncedProp && !hasOriginProp) {
+    if (!hasSyncedProp && !hasPendingWritesProp && !hasOriginProp) {
       continue
     }
     found = true
-    if (asRecord.$synced === false) {
+    // Preserve the existing alias while present; accept new-field-only rows too.
+    if (
+      asRecord.$synced === false ||
+      (!hasSyncedProp && asRecord.$hasPendingWrites === true)
+    ) {
       allSynced = false
     }
     if (asRecord.$origin === `local`) {
@@ -491,6 +496,7 @@ export function processGroupBy(
         | RowVirtualMetadata
         | undefined
       resultRow.$synced = virtual?.synced ?? true
+      resultRow.$hasPendingWrites = !resultRow.$synced
       resultRow.$origin = (
         virtual?.hasLocal ? `local` : `remote`
       ) satisfies VirtualOrigin

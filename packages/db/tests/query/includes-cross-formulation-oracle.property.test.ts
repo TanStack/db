@@ -193,6 +193,7 @@ type ReferenceContextChild = {
 // Their values and presence are a separate metadata law. They are not part of
 // this projection.
 const virtualKeys = new Set<string>([
+  `$hasPendingWrites`,
   `$synced`,
   `$origin`,
   `$key`,
@@ -1325,6 +1326,7 @@ describe(`includes cross-formulation oracle`, () => {
       ]
       const rows = captureOrderedNested(expected)
       Object.assign(rows[0]!, {
+        $hasPendingWrites: false,
         $synced: true,
         $origin: `remote`,
         $key: 0,

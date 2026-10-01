@@ -1904,9 +1904,14 @@ async function runPendingMutationScenario(
     Object.fromEntries(
       Object.entries(row).filter(
         ([key]) =>
-          ![`keep`, `$key`, `$collectionId`, `$origin`, `$synced`].includes(
-            key,
-          ),
+          ![
+            `keep`,
+            `$key`,
+            `$collectionId`,
+            `$origin`,
+            `$hasPendingWrites`,
+            `$synced`,
+          ].includes(key),
       ),
     )
   const capture = (
@@ -2488,7 +2493,13 @@ async function runPendingHistoryScenario(
     Object.fromEntries(
       Object.entries(row).filter(
         ([key]) =>
-          ![`$key`, `$collectionId`, `$origin`, `$synced`].includes(key),
+          ![
+            `$key`,
+            `$collectionId`,
+            `$origin`,
+            `$hasPendingWrites`,
+            `$synced`,
+          ].includes(key),
       ),
     )
   const capture = (

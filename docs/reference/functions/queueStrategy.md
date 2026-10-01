@@ -21,7 +21,7 @@ at its configured pace behind earlier writes. Cleanup does not wait for settleme
 
 **Error handling behavior:**
 - If a mutation fails, it is NOT automatically retried - the transaction transitions to "failed" state
-- Failed mutations surface their error via `transaction.isPersisted.promise` (which will reject)
+- Failed mutations surface their error via `transaction.when('settled')` (which will reject)
 - Subsequent mutations continue processing - a single failure does not block the queue
 - Each mutation is independent; there is no all-or-nothing transaction semantics
 

@@ -279,7 +279,7 @@ function mergePendingMutations<T extends object>(
  *   collection.update("2", draft => { draft.completed = true })
  * })
  *
- * await tx.isPersisted.promise
+ * await tx.when('settled')
  *
  * @example
  * // Handle transaction errors
@@ -292,7 +292,7 @@ function mergePendingMutations<T extends object>(
  *     collection.insert({ id: "1", text: "New item" })
  *   })
  *
- *   await tx.isPersisted.promise
+ *   await tx.when('settled')
  * } catch (error) {
  *   console.log('Transaction failed:', error)
  * }
@@ -342,7 +342,7 @@ class Transaction<T extends object = Record<string, unknown>> {
   /**
    * Deferred that settles when this transaction settles.
    *
-   * Await `isPersisted.promise`, not `isPersisted` itself. The promise resolves
+   * Await `when('settled')` instead. This legacy promise resolves
    * when the transaction completes successfully and rejects if the transaction
    * fails or is rolled back.
    *
@@ -350,6 +350,9 @@ class Transaction<T extends object = Record<string, unknown>> {
    * boundary. This does not inherently prove that a backend has uploaded,
    * confirmed, or read back the write unless the mutation function waits for
    * that backend observation before returning.
+   *
+   * @deprecated Use `when('settled')` instead. This alias will be removed in
+   * the 1.0 RC.
    */
   public isPersisted: Deferred<Transaction<T>>
   public autoCommit: boolean
@@ -382,6 +385,19 @@ class Transaction<T extends object = Record<string, unknown>> {
     transactionAmbientScopes.set(this, scope)
   }
 
+  /**
+   * Wait for this transaction to complete successfully or fail.
+   *
+   * The promise resolves with this transaction on success and rejects with
+   * the original error on failure (or `undefined` for a rollback without an
+   * error). For non-empty commits, this
+   * boundary is the mutation function's completion; it does not inherently
+   * prove backend acknowledgement or read-back.
+   */
+  when(_state: 'settled'): Promise<Transaction<T>> {
+    return this.isPersisted.promise
+  }
+
   setState(newState: TransactionState) {
     this.state = newState
 
@@ -411,7 +427,7 @@ class Transaction<T extends object = Record<string, unknown>> {
    *   collection.delete("3")
    * })
    *
-   * await tx.isPersisted.promise
+   * await tx.when('settled')
    *
    * @example
    * // Handle mutate errors
@@ -558,7 +574,7 @@ class Transaction<T extends object = Record<string, unknown>> {
    * @example
    * // Handle rollback in error scenarios
    * try {
-   *   await tx.isPersisted.promise
+   *   await tx.when('settled')
    * } catch (error) {
    *   console.log('Transaction was rolled back:', error)
    *   // Transaction automatically rolled back on mutation function failure

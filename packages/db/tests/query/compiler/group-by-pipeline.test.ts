@@ -36,6 +36,77 @@ const cases = [false, true].flatMap((grouped) =>
 )
 
 describe(`group-by production pipeline`, () => {
+  // Current Collections publish both fields. These relation rows also cover
+  // the new-field-only input expected after the deprecated alias is removed.
+  test.each([
+    {
+      name: `new-field-only pending row`,
+      rows: [{ key: `first`, pending: true, shape: `new` }],
+    },
+    {
+      name: `new-field-only settled row`,
+      rows: [{ key: `first`, pending: false, shape: `new` }],
+    },
+    {
+      name: `legacy pending row`,
+      rows: [{ key: `first`, pending: true, shape: `legacy` }],
+    },
+    {
+      name: `mixed new and legacy rows`,
+      rows: [
+        { key: `first`, pending: true, shape: `new` },
+        { key: `second`, pending: false, shape: `legacy` },
+      ],
+    },
+    {
+      name: `current rows with both fields`,
+      rows: [{ key: `first`, pending: true, shape: `both` }],
+    },
+  ] as const)(`derives grouped pending writes from $name`, ({ rows }) => {
+    const graph = new D2()
+    const input = graph.newInput<KeyedNamespacedRow>()
+    let actual = new MultiSet<KeyedNamespacedRow>()
+    processGroupBy(
+      input,
+      [],
+      createValueIdentity(),
+      undefined,
+      undefined,
+      undefined,
+      `aggregate-result`,
+    ).pipe(
+      output((delta) => {
+        actual = actual.concat(delta).consolidate()
+      }),
+    )
+    graph.finalize()
+
+    input.sendData(
+      new MultiSet<KeyedNamespacedRow>(
+        rows.map(({ key, pending, shape }): [KeyedNamespacedRow, number] => [
+          [
+            key,
+            {
+              row: {
+                id: key,
+                ...(shape !== `legacy` ? { $hasPendingWrites: pending } : {}),
+                ...(shape !== `new` ? { $synced: !pending } : {}),
+              },
+            },
+          ],
+          1,
+        ]),
+      ),
+    )
+    graph.run()
+
+    expect(actual.getInner()).toHaveLength(1)
+    const grouped = actual.getInner()[0]![0][1]
+    const expectedPending = rows.some((row) => row.pending)
+    expect(grouped.$hasPendingWrites).toBe(expectedPending)
+    expect(grouped.$synced).toBe(!expectedPending)
+  })
+
   test.each([false, true])(
     `validates ungrouped SELECT references only with grouping keys: %s`,
     (grouped) => {

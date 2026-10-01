@@ -200,6 +200,7 @@ async function checkCollectionsAndQueries(db) {
     const selectedRows = (rows) =>
       rows.map((row) => {
         const selected = { ...row }
+        delete selected.$hasPendingWrites
         delete selected.$synced
         delete selected.$origin
         delete selected.$key
