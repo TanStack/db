@@ -367,6 +367,11 @@ class PooledLiveQuery {
     return this.group.layoutRevision
   }
 
+  /** The group's rows, in key order. */
+  get rows(): SortedMap<string | number, Row> {
+    return this.group.rows
+  }
+
   entries(): Array<[string | number, Row]> {
     return (this.group.entries ??= [...this.group.rows.entries()])
   }
@@ -447,8 +452,7 @@ class PooledWholesaleObserver implements LiveQueryObserver<
   private snapshot: LiveQuerySnapshot<Row, string | number> | undefined
   private snapshotRevision = -1
   private snapshotStatus: CollectionStatus | undefined
-  private layoutKeys: Array<string | number> = []
-  private layoutRevision = 0
+
   private readonly records = new Set<{
     listener: LiveQueryObserverListener<Row, string | number>
   }>()
@@ -472,22 +476,22 @@ class PooledWholesaleObserver implements LiveQueryObserver<
     ) {
       return this.snapshot
     }
-    const entries = this.view.entries()
-    const keys = entries.map(([key]) => key)
-    if (
-      keys.length !== this.layoutKeys.length ||
-      keys.some((key, index) => key !== this.layoutKeys[index])
-    ) {
-      this.layoutKeys = keys
-      this.layoutRevision++
+    const rows = this.view.rows
+    const state = new Map<string | number, Row>()
+    const data: Array<Row> = []
+    for (const key of rows.keys()) {
+      const value = rows.get(key)!
+      state.set(key, value)
+      data.push(value)
     }
     this.snapshotRevision = this.view._stateRevision
     this.snapshotStatus = status
     return (this.snapshot = {
-      state: new Map(entries),
-      data: entries.map(([, value]) => value),
+      state,
+      data,
       collection: this.view.publicCollection,
-      layoutRevision: this.layoutRevision,
+      // Rows stay in key order, so only inserts and deletes move keys.
+      layoutRevision: this.view._layoutRevision,
       status,
       ...getLiveQueryStatusFlags(status),
       persistedStatus: `unavailable`,
