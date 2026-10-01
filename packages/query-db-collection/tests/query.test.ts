@@ -4769,12 +4769,10 @@ describe(`QueryCollection`, () => {
         })
         await first.isPersisted.promise
         expect(adapter.rows.get(`p`)?.revision).toBe(2)
-        await vi.waitFor(() => {
-          expect(collection.get(`p`)).toMatchObject({
-            a: 10,
-            revision: 2,
-            $synced: true,
-          })
+        expect(collection.get(`p`)).toMatchObject({
+          a: 10,
+          revision: 2,
+          $synced: true,
         })
 
         const second = collection.update(`p`, (draft) => {
@@ -4783,6 +4781,12 @@ describe(`QueryCollection`, () => {
         await second.isPersisted.promise
         expect(requestRevisions).toEqual([1, 2])
         expect(adapter.rows.get(`p`)?.revision).toBe(3)
+        expect(collection.get(`p`)).toMatchObject({
+          a: 10,
+          b: 1,
+          revision: 3,
+          $synced: true,
+        })
       } finally {
         await collection.cleanup()
       }
