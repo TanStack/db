@@ -13,6 +13,7 @@ import type { StandardSchemaV1 } from '@standard-schema/spec'
 import type {
   ChangeMessage,
   CollectionConfig,
+  OperationType,
   OptimisticChangeMessage,
   PendingMutation,
 } from '../types'
@@ -191,6 +192,16 @@ export class CollectionStateManager<
   private isDrainingSyncTransactions = false
   private syncRunGeneration = 0
   public isLocalOnly = false
+  /**
+   * Set by a local-only Collection for operation types without a user handler.
+   * Their direct mutations can be written as synced rows at once.
+   */
+  public localOnlyDirectWrite:
+    | {
+        types: ReadonlySet<OperationType>
+        write: (mutations: Array<PendingMutation<TOutput>>) => void
+      }
+    | undefined
 
   /**
    * Creates a new CollectionState manager
@@ -2137,6 +2148,7 @@ export class CollectionStateManager<
     this.hasAppliedAdapterTruncate = false
     this.clearOriginTrackingState()
     this.isLocalOnly = false
+    this.localOnlyDirectWrite = undefined
     this.size = 0
     this.pendingSyncedTransactions = []
     this.pendingSyncedProjection = { states: new Map(), truncated: false }

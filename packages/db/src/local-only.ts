@@ -187,7 +187,11 @@ export function localOnlyCollectionOptions<
   const collectionId = id ?? safeRandomUUID()
 
   // Create the sync configuration with transaction confirmation capability
-  const syncResult = createLocalOnlySync<T, TKey>(initialData)
+  const directTypes = new Set<OperationType>()
+  if (!onInsert) directTypes.add(`insert`)
+  if (!onUpdate) directTypes.add(`update`)
+  if (!onDelete) directTypes.add(`delete`)
+  const syncResult = createLocalOnlySync<T, TKey>(initialData, directTypes)
 
   /**
    * Create wrapper handlers that call user handlers first, then confirm transactions
@@ -304,7 +308,9 @@ export function localOnlyCollectionOptions<
  * @returns Object with sync configuration and confirmOperationsSync function
  */
 function createLocalOnlySync<T extends object, TKey extends string | number>(
-  initialData?: Array<T>,
+  initialData: Array<T> | undefined,
+  // Operation types without a user handler, which confirm synchronously.
+  directTypes: ReadonlySet<OperationType>,
 ) {
   // Capture sync functions and collection for transaction confirmation
   let syncBegin: (() => void) | null = null
@@ -329,6 +335,13 @@ function createLocalOnlySync<T extends object, TKey extends string | number>(
       syncCommit = commit
       collection = params.collection
       params.collection._state.isLocalOnly = true
+      if (directTypes.size > 0) {
+        params.collection._state.localOnlyDirectWrite = {
+          types: directTypes,
+          write: (mutations) =>
+            confirmOperationsSync(mutations),
+        }
+      }
 
       // Apply initial data if provided
       if (initialData && initialData.length > 0) {

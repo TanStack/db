@@ -5,8 +5,9 @@
 
 import { deepEquals, isTemporal } from './utils'
 
-// Resolve draft handles before calling native Map/Set membership methods.
-const draftCopies = new WeakMap<object, object>()
+// A draft proxy's get trap answers this key with its private copy, so draft
+// handles resolve before native Map/Set membership methods.
+const DRAFT_COPY: unique symbol = Symbol(`draftCopy`)
 function defineDataProperty(
   object: object,
   key: PropertyKey,
@@ -25,9 +26,13 @@ function defineDataProperty(
 }
 
 function unwrapDraft(value: unknown): unknown {
-  return value !== null && typeof value === `object`
-    ? (draftCopies.get(value) ?? value)
-    : value
+  if (value === null || typeof value !== `object`) return value
+  try {
+    return (value as Record<symbol, unknown>)[DRAFT_COPY] ?? value
+  } catch {
+    // A revoked proxy is not a draft.
+    return value
+  }
 }
 
 /**
@@ -235,11 +240,14 @@ interface ChangeParent {
 }
 
 interface ChangeTracker<T extends object> {
-  valueCopies: WeakMap<object, unknown>
+  // Shared by one update's drafts and dropped with them.
+  valueCopies: Map<object, unknown>
   originalObject: T
   modified: boolean
   copy_: T
-  assigned_: Record<string | symbol, boolean>
+  // A Map, not a null-prototype object: those start in dictionary mode,
+  // where reading their keys is slow.
+  assigned_: Map<string | symbol, boolean>
   parent?: ChangeParent
   target: T
 }
@@ -250,7 +258,8 @@ interface ChangeTracker<T extends object> {
 
 function deepClone<T extends unknown>(
   obj: T,
-  visited = new WeakMap<object, unknown>(),
+  // Lives only for this clone, so a Map avoids weak-reference bookkeeping.
+  visited = new Map<object, unknown>(),
   detach = false,
 ): T {
   // A draft handle and its underlying copy must share one cycle identity.
@@ -268,6 +277,12 @@ function deepClone<T extends unknown>(
   // If we've already cloned this object, return the cached clone
   if (visited.has(obj as object)) {
     return visited.get(obj as object) as T
+  }
+
+  // Plain objects, the common case, skip the special-type checks below.
+  const prototype = Object.getPrototypeOf(obj)
+  if (prototype === Object.prototype || prototype === null) {
+    return clonePlainObject(obj, visited, detach)
   }
 
   if (obj instanceof Date) {
@@ -342,25 +357,28 @@ function deepClone<T extends unknown>(
 
   // Arbitrary instances may carry private/native state we cannot reconstruct.
   // Keep them by reference at publication, rather than silently flattening them.
-  if (detach) {
-    const prototype = Object.getPrototypeOf(obj)
-    if (prototype !== Object.prototype && prototype !== null) return obj
-  }
+  if (detach) return obj
+  return clonePlainObject(obj, visited, detach)
+}
 
+function clonePlainObject<T extends object>(
+  obj: T,
+  visited: Map<object, unknown>,
+  detach: boolean,
+): T {
   const clone = {} as Record<string | symbol, unknown>
   visited.set(obj as object, clone)
 
   for (const key in obj) {
     if (Object.prototype.hasOwnProperty.call(obj, key)) {
       // Copy data properties without invoking Object.prototype.__proto__.
+      const value = (obj as Record<string | symbol, unknown>)[key]
       defineDataProperty(
         clone,
         key,
-        deepClone(
-          (obj as Record<string | symbol, unknown>)[key],
-          visited,
-          detach,
-        ),
+        value === null || typeof value !== `object`
+          ? value
+          : deepClone(value, visited, detach),
       )
     }
   }
@@ -501,23 +519,24 @@ export function createChangeProxy<
       return changeProxy
     }
   }
-  // Create a WeakMap to cache proxies for nested objects
+  // Cache proxies for nested objects
   // This prevents creating multiple proxies for the same object
   // and handles circular references
   const proxyCache = new Map<object, object>()
 
   // Existing values share one private copy per row. Newly inserted objects
   // retain normal references during the callback; the result is detached below.
-  const valueCopies =
-    parent?.tracker.valueCopies ?? new WeakMap<object, unknown>()
+  const valueCopies = parent?.tracker.valueCopies ?? new Map<object, unknown>()
   const changeTracker: ChangeTracker<T> = {
     valueCopies,
     copy_: parent
       ? ((valueCopies.get(target) ?? target) as T)
       : deepClone(target, valueCopies),
-    originalObject: deepClone(target),
+    // The root target is the stored row, which the draft never writes, so it
+    // is its own baseline. A nested target is a draft copy that writes reach.
+    originalObject: parent ? deepClone(target) : target,
     modified: false,
-    assigned_: Object.create(null),
+    assigned_: new Map(),
     parent,
     target, // Store reference to the target object
   }
@@ -537,7 +556,7 @@ export function createChangeProxy<
       ) {
         // Only mark an edge that still points to this child. A retained handle
         // must not reinstall itself after the callback replaces or deletes it.
-        state.parent.tracker.assigned_[state.parent.prop] = true
+        state.parent.tracker.assigned_.set(state.parent.prop, true)
       }
 
       // Mark parent as changed
@@ -561,43 +580,19 @@ export function createChangeProxy<
       )
     }
     // If there are no assigned properties, object is unchanged
-    if (
-      Object.keys(state.assigned_).length === 0 &&
-      Object.getOwnPropertySymbols(state.assigned_).length === 0
-    ) {
+    if (state.assigned_.size === 0) {
       return true
     }
 
-    // Check each assigned regular property
-    for (const prop in state.assigned_) {
-      // If this property is marked as assigned
-      if (state.assigned_[prop] === true) {
-        const currentValue = state.copy_[prop]
-        const originalValue = (state.originalObject as any)[prop]
+    // Check each assigned property
+    for (const [prop, assigned] of state.assigned_) {
+      // Property was deleted, so it's different from original
+      if (!assigned) return false
+      const currentValue = (state.copy_ as any)[prop]
+      const originalValue = (state.originalObject as any)[prop]
 
-        // If the value is not equal to original, something is still changed
-        if (!draftValuesEqual(currentValue, originalValue)) {
-          return false
-        }
-      } else if (state.assigned_[prop] === false) {
-        // Property was deleted, so it's different from original
-        return false
-      }
-    }
-
-    // Check each assigned symbol property
-    const symbolProps = Object.getOwnPropertySymbols(state.assigned_)
-    for (const sym of symbolProps) {
-      if (state.assigned_[sym] === true) {
-        const currentValue = (state.copy_ as any)[sym]
-        const originalValue = (state.originalObject as any)[sym]
-
-        // If the value is not equal to original, something is still changed
-        if (!draftValuesEqual(currentValue, originalValue)) {
-          return false
-        }
-      } else if (state.assigned_[sym] === false) {
-        // Property was deleted, so it's different from original
+      // If the value is not equal to original, something is still changed
+      if (!draftValuesEqual(currentValue, originalValue)) {
         return false
       }
     }
@@ -616,7 +611,7 @@ export function createChangeProxy<
     if (isReverted) {
       // If everything is reverted, clear the tracking
       parentState.modified = false
-      parentState.assigned_ = Object.create(null)
+      parentState.assigned_ = new Map()
 
       // Continue up the chain
       if (parentState.parent) {
@@ -635,6 +630,7 @@ export function createChangeProxy<
     // Create a proxy for the object
     const proxy = new Proxy(obj, {
       get(ptarget, prop, receiver) {
+        if (prop === DRAFT_COPY) return changeTracker.copy_
         const value = changeTracker.copy_[prop as keyof T]
 
         // If it's a getter, return the value directly
@@ -778,7 +774,7 @@ export function createChangeProxy<
 
           if (isRevertToOriginal) {
             // If the value is reverted to its original state, remove it from changes
-            delete changeTracker.assigned_[prop.toString()]
+            changeTracker.assigned_.delete(prop.toString())
 
             // Make sure the copy is updated with the original value
             changeTracker.copy_[prop as keyof T] = deepClone(originalValue)
@@ -789,7 +785,7 @@ export function createChangeProxy<
             if (allReverted) {
               // If all have been reverted, clear tracking
               changeTracker.modified = false
-              changeTracker.assigned_ = Object.create(null)
+              changeTracker.assigned_ = new Map()
 
               // If we're a nested object, check if the parent needs updating
               if (parent) {
@@ -804,7 +800,7 @@ export function createChangeProxy<
             changeTracker.copy_[prop as keyof T] = value
 
             // Track that this property was assigned - store using the actual property (symbol or string)
-            changeTracker.assigned_[prop.toString()] = true
+            changeTracker.assigned_.set(prop.toString(), true)
 
             // Mark this object and its ancestors as modified
             markChanged(changeTracker)
@@ -820,7 +816,7 @@ export function createChangeProxy<
         const result = Reflect.defineProperty(ptarget, prop, descriptor)
         if (result && `value` in descriptor) {
           changeTracker.copy_[prop as keyof T] = deepClone(descriptor.value)
-          changeTracker.assigned_[prop.toString()] = true
+          changeTracker.assigned_.set(prop.toString(), true)
           markChanged(changeTracker)
         }
         return result
@@ -859,15 +855,11 @@ export function createChangeProxy<
             // If the property didn't exist in the original object, removing it
             // should revert to the original state
             if (!hadPropertyInOriginal) {
-              delete changeTracker.assigned_[stringProp]
+              changeTracker.assigned_.delete(stringProp)
 
               // If this is the last change and we're not a nested object,
               // mark the object as unmodified
-              if (
-                Object.keys(changeTracker.assigned_).length === 0 &&
-                Object.getOwnPropertySymbols(changeTracker.assigned_).length ===
-                  0
-              ) {
+              if (changeTracker.assigned_.size === 0) {
                 changeTracker.modified = false
               } else {
                 // We still have changes, keep as modified
@@ -875,7 +867,7 @@ export function createChangeProxy<
               }
             } else {
               // Mark this property as deleted
-              changeTracker.assigned_[stringProp] = false
+              changeTracker.assigned_.set(stringProp, false)
               markChanged(changeTracker)
             }
           }
@@ -889,7 +881,6 @@ export function createChangeProxy<
 
     // Cache the proxy
     proxyCache.set(obj, proxy)
-    draftCopies.set(proxy, changeTracker.copy_)
 
     return proxy
   }
@@ -917,19 +908,27 @@ export function createChangeProxy<
         return changeTracker.copy_
       }
 
-      if (Object.keys(changeTracker.assigned_).length === 0) {
+      const assigned = changeTracker.assigned_
+      if (assigned.size === 0) {
         return changeTracker.copy_
       }
 
       const result: Record<string, any | undefined> = {}
-      const mayHaveChangedAliases = Object.keys(changeTracker.assigned_).some(
-        (key) =>
-          typeof changeTracker.copy_[key] === `object` ||
-          typeof changeTracker.originalObject[key] === `object`,
-      )
-      const pairedRoots = new Map<object, object>([
-        [changeTracker.copy_, changeTracker.originalObject],
-      ])
+      let mayHaveChangedAliases = false
+      for (const key of assigned.keys()) {
+        if (
+          typeof (changeTracker.copy_ as any)[key] === `object` ||
+          typeof (changeTracker.originalObject as any)[key] === `object`
+        ) {
+          mayHaveChangedAliases = true
+          break
+        }
+      }
+      const pairedRoots = mayHaveChangedAliases
+        ? new Map<object, object>([
+            [changeTracker.copy_, changeTracker.originalObject],
+          ])
+        : undefined
 
       // Iterate through keys in keyObj
       for (const key in changeTracker.copy_) {
@@ -938,7 +937,7 @@ export function createChangeProxy<
         // Compare child contents, stopping only at paired root backedges. A
         // child's own changes still count even when it also points to this row.
         if (
-          (changeTracker.assigned_[key] === true ||
+          (assigned.get(key) === true ||
             (mayHaveChangedAliases &&
               !draftValuesEqual(
                 value instanceof Set ? Array.from(value) : value,
@@ -951,9 +950,9 @@ export function createChangeProxy<
         }
       }
 
-      for (const key of Object.keys(changeTracker.assigned_)) {
-        if (changeTracker.assigned_[key] === false) {
-          defineDataProperty(result, key, undefined)
+      for (const [key, isAssigned] of assigned) {
+        if (!isAssigned) {
+          defineDataProperty(result, key as string, undefined)
         }
       }
 

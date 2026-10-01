@@ -25,6 +25,7 @@ import type {
   CollectionConfig,
   InsertConfig,
   OperationConfig,
+  OperationType,
   PendingMutation,
   StandardSchema,
   TransactionConfig,
@@ -36,6 +37,14 @@ import type {
 import type { TransactionScope } from '../transactions'
 import type { CollectionLifecycleManager } from './lifecycle'
 import type { CollectionStateManager } from './state'
+
+// One random prefix per runtime keeps mutation ids unique across tabs and
+// sessions; the counter avoids generating a random UUID per mutation.
+const mutationIdPrefix = safeRandomUUID()
+let mutationCount = 0
+function createMutationId(): string {
+  return `${mutationIdPrefix}-${++mutationCount}`
+}
 
 export class CollectionMutationsManager<
   TOutput extends object = Record<string, unknown>,
@@ -188,6 +197,40 @@ export class CollectionMutationsManager<
   }
 
   /**
+   * A local-only Collection confirms its own writes. Without a user handler
+   * for this operation type, and with no other transaction unsettled, write
+   * the mutations as synced rows and return a completed transaction instead
+   * of publishing an optimistic overlay and confirming it a tick later.
+   */
+  private commitLocalOnlyDirect(
+    mutations: Array<PendingMutation<TOutput>>,
+    type: OperationType,
+  ): TransactionType<TOutput> | undefined {
+    const direct = this.state.localOnlyDirectWrite
+    if (!direct?.types.has(type)) return undefined
+    for (const transaction of this.state.transactions.values()) {
+      // A persisting transaction holds sync commits, and a pending one
+      // overlays them.
+      if (
+        transaction.state === `pending` ||
+        transaction.state === `persisting`
+      ) {
+        return undefined
+      }
+    }
+    const transaction = this.createTransaction<TOutput>({
+      autoCommit: false,
+      metadata: { [DIRECT_TRANSACTION_METADATA_KEY]: true },
+      mutationFn: () => Promise.resolve(),
+    })
+    transaction.applyMutations(mutations)
+    direct.write(mutations)
+    transaction.setState(`completed`)
+    transaction.isPersisted.resolve(transaction)
+    return transaction
+  }
+
+  /**
    * Inserts one or more items into the collection
    */
   insert = (data: TInput | Array<TInput>, config?: InsertConfig) => {
@@ -218,7 +261,7 @@ export class CollectionMutationsManager<
       const globalKey = this.generateGlobalKey(key, item)
 
       const mutation: PendingMutation<TOutput, `insert`> = {
-        mutationId: safeRandomUUID(),
+        mutationId: createMutationId(),
         original: {},
         modified: validatedData,
         // Pick the values from validatedData based on what's passed in - this is for cases
@@ -262,6 +305,8 @@ export class CollectionMutationsManager<
 
       return ambientTransaction
     } else {
+      const localOnly = this.commitLocalOnlyDirect(mutations, `insert`)
+      if (localOnly) return localOnly
       // Create a new transaction with a mutation function that calls the onInsert handler
       const directOpTransaction = this.createTransaction<TOutput>({
         metadata: { [DIRECT_TRANSACTION_METADATA_KEY]: true },
@@ -403,7 +448,7 @@ export class CollectionMutationsManager<
         const globalKey = this.generateGlobalKey(modifiedItemId, modifiedItem)
 
         return {
-          mutationId: safeRandomUUID(),
+          mutationId: createMutationId(),
           original: originalItem,
           modified: modifiedItem,
           // Pick the values from modifiedItem based on what's passed in - this is for cases
@@ -462,6 +507,9 @@ export class CollectionMutationsManager<
     }
 
     // No need to check for onUpdate handler here as we've already checked at the beginning
+
+    const localOnly = this.commitLocalOnlyDirect(mutations, `update`)
+    if (localOnly) return localOnly
 
     // Create a new transaction with a mutation function that calls the onUpdate handler
     const directOpTransaction = this.createTransaction<TOutput>({
@@ -540,7 +588,7 @@ export class CollectionMutationsManager<
         `delete`,
         CollectionImpl<TOutput, TKey, TUtils, TSchema, TInput>
       > = {
-        mutationId: safeRandomUUID(),
+        mutationId: createMutationId(),
         original: this.state.get(key)!,
         modified: this.state.get(key)!,
         changes: this.state.get(key)!,
@@ -571,6 +619,9 @@ export class CollectionMutationsManager<
 
       return ambientTransaction
     }
+
+    const localOnly = this.commitLocalOnlyDirect(mutations, `delete`)
+    if (localOnly) return localOnly
 
     // Create a new transaction with a mutation function that calls the onDelete handler
     const directOpTransaction = this.createTransaction<TOutput>({
