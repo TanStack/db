@@ -92,12 +92,12 @@ export function deepEqualsInternal(
     }
     visited.set(a, b)
 
-    const entries = Array.from(a.entries())
-    const bEntries = draft ? Array.from(b.entries()) : []
-    const result = entries.every(([key, val], index) =>
-      draft
+    // A draft compares entries in order; general equality looks keys up.
+    const bEntries = draft && Array.from(b.entries())
+    const result = Array.from(a.entries()).every(([key, val], index) =>
+      bEntries
         ? Object.is(key, bEntries[index]![0]) &&
-          deepEqualsInternal(val, bEntries[index]![1], visited, draft)
+          deepEqualsInternal(val, bEntries[index]![1], visited, true)
         : b.has(key) && deepEqualsInternal(val, b.get(key), visited),
     )
 
