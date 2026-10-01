@@ -275,7 +275,7 @@ try {
     completed: false,
   })
   
-  await tx.isPersisted.promise
+  await tx.when('settled')
 } catch (error) {
   // The optimistic update has been automatically rolled back
   console.error("Failed to create todo:", error)
@@ -312,7 +312,7 @@ try {
     draft.completed = true
   })
   
-  await tx.isPersisted.promise
+  await tx.when('settled')
 } catch (error) {
   // Transaction has been rolled back
   console.log(tx.state) // "failed"
@@ -344,14 +344,14 @@ try {
 
 Explicit cancellation is different from a mutation failure. If you call
 `tx.rollback()` while `mutationFn` is pending, the rollback settles
-`tx.isPersisted.promise` as rejected. A later result or rejection from that
+`tx.when('settled')` as rejected. A later result or rejection from that
 mutation function is ignored: the outstanding `commit()` call resolves and
-`tx.error` is not populated by that late rejection. Observe `isPersisted.promise`
+`tx.error` is not populated by that late rejection. Observe `tx.when('settled')`
 when you need the transaction's outcome, including explicit cancellation.
 
 After the mutation function succeeds, a publication listener can still throw
 while the completed transaction updates its collections. In that case
-`commit()` rejects with the listener error, but `isPersisted.promise` resolves
+`commit()` rejects with the listener error, but `tx.when('settled')` resolves
 and the transaction remains completed. This is not a persistence failure.
 
 ## Collection Operation Errors
@@ -815,7 +815,7 @@ Thrown when calling `commit()` on a sync transaction that's already committed.
 2. **Import specific error types** - Import only the error classes you need for better tree-shaking
 3. **Always handle SchemaValidationError** - Provide clear feedback for validation failures
 4. **Check collection status** - Use `isError`, `isLoading`, `isReady` flags in React components
-5. **Handle transaction promises** - Always handle `isPersisted.promise` rejections
+5. **Handle transaction promises** - Always handle `when('settled')` rejections
 
 ## Example: Complete Error Handling
 
@@ -875,7 +875,7 @@ const TodoApp = () => {
       })
       
       // Wait for persistence
-      await tx.isPersisted.promise
+      await tx.when('settled')
     } catch (error) {
       if (error instanceof SchemaValidationError) {
         alert(`Validation error: ${error.issues[0]?.message}`)

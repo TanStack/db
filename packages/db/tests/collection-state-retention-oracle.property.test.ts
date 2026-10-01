@@ -602,6 +602,7 @@ it(`publishes a virtual-state update when a restarted optimistic row is confirme
     $collectionId: string
     $key: number
     $origin: `local` | `remote`
+    $hasPendingWrites: boolean
     $synced: boolean
   }
   type ObservedChange = {
@@ -616,6 +617,7 @@ it(`publishes a virtual-state update when a restarted optimistic row is confirme
     $collectionId: row.$collectionId,
     $key: row.$key,
     $origin: row.$origin,
+    $hasPendingWrites: row.$hasPendingWrites,
     $synced: row.$synced,
   })
   const publications: Array<{
@@ -693,6 +695,7 @@ it(`publishes a virtual-state update when a restarted optimistic row is confirme
       $collectionId: collection.id,
       $key: id,
       $origin: `remote`,
+      $hasPendingWrites: false,
       $synced: true,
     })
     const localRow = (id: number): ObservedRow => ({
@@ -701,6 +704,7 @@ it(`publishes a virtual-state update when a restarted optimistic row is confirme
       $collectionId: collection.id,
       $key: id,
       $origin: `local`,
+      $hasPendingWrites: true,
       $synced: false,
     })
     const expectedPublications = [

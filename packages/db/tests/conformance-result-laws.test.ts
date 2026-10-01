@@ -29,9 +29,10 @@ it(`checks declared result types without copying or repairing the surface`, () =
   }
 })
 
-it(`separates only the four documented virtual fields from selected values`, () => {
+it(`separates only the five documented virtual fields from selected values`, () => {
   const actual = rows.map((row) => ({
     ...row,
+    $hasPendingWrites: false,
     $synced: true,
     $origin: `remote`,
     $key: row.id,

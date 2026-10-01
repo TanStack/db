@@ -264,10 +264,14 @@ todoCollection.update(todo.id, (draft) => {
 
 If the handler throws an error during persistence, the optimistic state is automatically rolled back.
 
-`tx.isPersisted.promise` observes this transaction-settlement boundary. Despite
-the property name, it does not by itself prove that a server uploaded,
-confirmed, or returned the write. It proves those stronger guarantees only
-when the handler waits for that backend observation before returning.
+`tx.when('settled')` observes this transaction-settlement boundary. It resolves
+with the transaction on success and rejects with the original error on failure
+(or `undefined` for a rollback without an error). It does not by itself prove
+that a server uploaded, confirmed, or returned the write. It proves those
+stronger guarantees only when the handler waits for that backend observation
+before returning. The old `tx.isPersisted.promise` remains available for the
+pre-RC releases but is deprecated and will be removed in the 1.0 RC; replace
+each use with `tx.when('settled')`.
 
 ### Concurrent Optimistic Transactions
 
@@ -1063,7 +1067,7 @@ const tx = createTransaction({
 })
 
 // Wait for the transaction handler to settle
-tx.isPersisted.promise.then(() => {
+tx.when('settled').then(() => {
   console.log("Transaction completed!")
 })
 
@@ -1248,9 +1252,9 @@ function FileUploader() {
 
 **Error handling**:
 - If a mutation fails, **it is not automatically retried** - the transaction transitions to "failed" state
-- Failed mutations surface their error via `transaction.isPersisted.promise` (which will reject)
-- Queue overflow rejects `transaction.isPersisted.promise` with `QueueCapacityExceededError`
-- A call after queue cleanup rejects `transaction.isPersisted.promise` with `QueueDisposedError` and rolls back its optimistic mutation
+- Failed mutations surface their error via `transaction.when('settled')` (which will reject)
+- Queue overflow rejects `transaction.when('settled')` with `QueueCapacityExceededError`
+- A call after queue cleanup rejects `transaction.when('settled')` with `QueueDisposedError` and rolls back its optimistic mutation
 - **Subsequent mutations continue processing** - a single failure does not block the queue
 - Each mutation is independent; there is no all-or-nothing transaction semantics across multiple mutations
 - To implement retry logic, see [Retry Behavior](#retry-behavior)
@@ -1305,7 +1309,7 @@ function MyComponent({ itemId }: { itemId: string }) {
 
     // Optionally wait for handler settlement
     try {
-      await tx.isPersisted.promise
+      await tx.when('settled')
       console.log('Transaction completed!')
     } catch (error) {
       console.error('Save failed:', error)
@@ -1505,7 +1509,7 @@ const handleCreatePost = async (postData) => {
 
   try {
     // Wait for this transaction's handler to complete.
-    await tx.isPersisted.promise
+    await tx.when('settled')
 
     // This is confirmed and published only if the handler awaited both.
     navigate(`/posts/${postData.id}`)
@@ -1540,12 +1544,12 @@ const tx = todoCollection.update(todoId, (draft) => {
 console.log(tx.state) // 'pending'
 
 // Wait for specific states
-await tx.isPersisted.promise
+await tx.when('settled')
 console.log(tx.state) // 'completed'; a rejection takes the transaction to 'failed'
 
 // Handle errors
 try {
-  await tx.isPersisted.promise
+  await tx.when('settled')
   console.log("Success!")
 } catch (error) {
   console.log("Failed:", error)
@@ -1651,7 +1655,7 @@ This is the cleanest approach when your backend supports it, as the ID never cha
 
 Configure the mutation handler to wait for the server response and the
 authoritative row to sync before it returns. You can then await handler
-settlement before enabling subsequent operations. `isPersisted.promise` does
+settlement before enabling subsequent operations. `when('settled')` does
 not expose or translate the real ID; read it from the synced row or an
 application-owned response mapping. With a non-optimistic insert, the pending
 item stays out of the view until the collection publishes synced data.
@@ -1667,7 +1671,7 @@ const handleCreateTodo = async (text: string) => {
   })
 
   // This is an authoritative-sync gate only if onInsert waits for that sync.
-  await tx.isPersisted.promise
+  await tx.when('settled')
 
   // Do not infer ID readiness from transaction state. Read the synced row or
   // application-owned mapping, then enable operations with that real ID.

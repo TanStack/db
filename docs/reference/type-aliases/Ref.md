@@ -21,8 +21,8 @@ join side (left/right/full). When `true`, the `Nullable` flag propagates
 through all nested property accesses, ensuring the result type includes
 `| undefined` for all fields accessed through this ref.
 
-Inferred row-root refs include virtual properties ($synced, $origin, $key,
-$collectionId) for querying on row metadata. The default exported `Ref<T>`
+Inferred row-root refs include virtual properties ($hasPendingWrites, $origin,
+$key, $collectionId) for querying on row metadata. The default exported `Ref<T>`
 shape is suitable for reusable helpers that can accept either a row root or
 a recursively traversed user object, so it does not require those fields.
 Use `Ref<T, false, true>` when a helper specifically requires a row root.
@@ -34,7 +34,7 @@ const users: Ref<{ id: number; profile?: { bio: string } }> = { ... }
 users.id // Ref<number> - clean display
 users.profile?.bio // Ref<string> - nested optional access works
 const rootUsers: Ref<{ id: number }, false, true> = { ... }
-rootUsers.$synced // RefLeaf<boolean> - row-root virtual property access
+rootUsers.$hasPendingWrites // RefLeaf<boolean> - row-root virtual property access
 
 // Nullable ref (left/right/full join side):
 select(({ dept }) => ({ name: dept.name })) // result: string | undefined

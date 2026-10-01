@@ -232,7 +232,13 @@ function requestFingerprint(options: LoadSubsetOptions): string {
 
 function copiedRow(row: Row): Row {
   const copy: Record<string, unknown> = { ...row }
-  for (const field of [`$key`, `$collectionId`, `$origin`, `$synced`])
+  for (const field of [
+    `$key`,
+    `$collectionId`,
+    `$origin`,
+    `$hasPendingWrites`,
+    `$synced`,
+  ])
     delete copy[field]
   return copy as Row
 }

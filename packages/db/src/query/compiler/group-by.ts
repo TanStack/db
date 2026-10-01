@@ -491,6 +491,7 @@ export function processGroupBy(
         | RowVirtualMetadata
         | undefined
       resultRow.$synced = virtual?.synced ?? true
+      resultRow.$hasPendingWrites = !resultRow.$synced
       resultRow.$origin = (
         virtual?.hasLocal ? `local` : `remote`
       ) satisfies VirtualOrigin

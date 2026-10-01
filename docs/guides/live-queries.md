@@ -31,7 +31,8 @@ The result types are automatically inferred from your query structure, providing
 
 Live query results include computed, read-only virtual properties on every row:
 
-- `$synced`: `true` when the row is confirmed by sync; `false` when it is still optimistic.
+- `$hasPendingWrites`: `true` while a pending local optimistic mutation affects the row; otherwise `false`. It is always `false` for local-only collections. It does not indicate server acknowledgement.
+- `$synced` (deprecated): the inverse of `$hasPendingWrites`. It will be removed in the 1.0 RC. Replace `row.$synced` with `!row.$hasPendingWrites`, and `eq(row.$synced, true)` with `eq(row.$hasPendingWrites, false)`.
 - `$origin`: `"local"` if the last confirmed change came from this client, otherwise `"remote"`.
 - `$key`: the row key for the result.
 - `$collectionId`: the source collection ID.

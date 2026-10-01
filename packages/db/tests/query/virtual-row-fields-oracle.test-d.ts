@@ -2,7 +2,7 @@
  * # Which types represent virtual-field-bearing rows?
  *
  * Law and source: `VirtualRowProps` gives Collection and live-query row roots
- * `$synced`, `$origin`, `$key`, and `$collectionId`. The reusable `Ref<T>`
+ * `$hasPendingWrites`, `$synced`, `$origin`, `$key`, and `$collectionId`. The reusable `Ref<T>`
  * contract in `docs/guides/live-queries.md` accepts nested refs without claiming
  * those refs are rows. The output contract established by `includes.test.ts`
  * keeps inline `toArray` and `materialize` selections in their selected shape.
@@ -66,6 +66,7 @@ type PublishedValueFor<
   TSubject extends VirtualFieldSubject,
 > = TSubject extends `row-root` | `whole-row-child`
   ? T & {
+      readonly $hasPendingWrites: boolean
       readonly $synced: boolean
       readonly $origin: `local` | `remote`
       readonly $key: string | number
@@ -118,6 +119,7 @@ describe(`virtual row field type boundary`, () => {
     const collection = createLiveQueryCollection((q) =>
       q.from({ row: rows }).select(({ row }) => {
         expectTypeOf(row.$key).toEqualTypeOf<RefLeaf<string | number>>()
+        expectTypeOf(row.$hasPendingWrites).toEqualTypeOf<RefLeaf<boolean>>()
         expectTypeOf(row.$synced).toEqualTypeOf<RefLeaf<boolean>>()
         expectTypeOf(row.$origin).toEqualTypeOf<RefLeaf<`local` | `remote`>>()
         expectTypeOf(row.$collectionId).toEqualTypeOf<RefLeaf<string>>()
@@ -140,6 +142,7 @@ describe(`virtual row field type boundary`, () => {
     const result = collection.toArray[0]!
     expectTypeOf(result.profile).toEqualTypeOf<Profile>()
     expectTypeOf(result.$key).toEqualTypeOf<string | number>()
+    expectTypeOf(result.$hasPendingWrites).toEqualTypeOf<boolean>()
     expectTypeOf(result.$synced).toEqualTypeOf<boolean>()
     expectTypeOf(result.$origin).toEqualTypeOf<`local` | `remote`>()
     expectTypeOf(result.$collectionId).toEqualTypeOf<string>()
@@ -155,6 +158,7 @@ describe(`virtual row field type boundary`, () => {
     rows.createIndex((row) => {
       expectTypeOf(row.$collectionId).toEqualTypeOf<RefLeaf<string>>()
       expectTypeOf(row.$key).toEqualTypeOf<RefLeaf<string | number>>()
+      expectTypeOf(row.$hasPendingWrites).toEqualTypeOf<RefLeaf<boolean>>()
       expectTypeOf(row.$synced).toEqualTypeOf<RefLeaf<boolean>>()
       expectTypeOf(row.$origin).toEqualTypeOf<RefLeaf<`local` | `remote`>>()
       profileLabelIs(row.profile)
@@ -266,6 +270,9 @@ describe(`virtual row field type boundary`, () => {
     expectTypeOf(result.selectedWholeRows[0]!.$key).toEqualTypeOf<
       string | number
     >()
+    expectTypeOf(
+      result.selectedWholeRows[0]!.$hasPendingWrites,
+    ).toEqualTypeOf<boolean>()
     expectTypeOf(result.selectedWholeRows[0]!.$synced).toEqualTypeOf<boolean>()
     expectTypeOf(result.selectedWholeRows[0]!.$origin).toEqualTypeOf<
       `local` | `remote`
@@ -281,6 +288,9 @@ describe(`virtual row field type boundary`, () => {
     >()
     expectTypeOf(result.unmatchedRows[0]!.$key).toEqualTypeOf<
       string | number | undefined
+    >()
+    expectTypeOf(result.unmatchedRows[0]!.$hasPendingWrites).toEqualTypeOf<
+      boolean | undefined
     >()
     expectTypeOf(result.unmatchedRows[0]!.$synced).toEqualTypeOf<
       boolean | undefined
