@@ -33,8 +33,8 @@ restored after each run. Every outcome below is an assertion failure.
 | Mutant | Oracle | Tests failed |
 | --- | --- | --- |
 | Partition ignores a row's previous group | Pooled | 6 of 9 |
-| Groups keep rows in arrival order | Pooled | 2 of 9 (pinned key-order history and one campaign) |
-| Literals and fields compared without `eq` normalization | Pooled | 3–4 of 9 |
+| Groups keep rows in arrival order | Pooled | 3 of 9 |
+| Literals and fields compared without `eq` normalization | Pooled | 4 of 9 |
 | Partition skips the source's initial state | Pooled | 8 of 9 |
 | View reports the source's status after cleanup | Pooled | 4 of 9 |
 | Partition never terminates on cleanup | Pooled | 4 of 9 |
@@ -42,9 +42,9 @@ restored after each run. Every outcome below is an assertion failure.
 | Update published as delete then insert | Pooled | 3 of 9 (0 of 7 before payload checks) |
 | Update carries a stale `previousValue` | Pooled | 3 of 9 (0 of 7 before) |
 | Update carries the old row as its value | Pooled | 3 of 9 (0 of 7 before) |
-| Within-group updates dropped | Pooled | 2 of 9 |
+| Within-group updates dropped | Pooled | 3 of 9 |
 | Partition built on a cleaned-up source starts terminal | Pooled | 3 of 9 (0 of 7 before) |
-| Frozen peers drop pending optimistic rows | Pooled | 2 of 9 (0 of 7 before) |
+| Frozen peers drop pending optimistic rows | Pooled | 3 of 9 (0 of 7 before) |
 | Flat diff with `!==` | Flat | 3 of 17 |
 | Flat diff with `Object.is` alone | Flat | 3 of 17 |
 | Flat diff without deletions | Flat | 5 of 17 |
@@ -55,9 +55,20 @@ restored after each run. Every outcome below is an assertion failure.
 | Frozen rows sent to the proxy | Flat | 3 of 17 |
 | Proxy ignores accessors defined in the callback | Flat | 3 of 17 |
 | Proxy reports a field defined back to its own value | Flat | 4 of 17 |
-| Proxy accepts a getter-only field's own value | Flat | 2 of 17 |
-| Proxy reports a written hidden field's delete | Flat | 1 of 17 (pinned witness only) |
-| Flat compares a hidden object field by identity | Flat | 1 of 17 (pinned witness only) |
+| Proxy accepts a getter-only field's own value | Flat | 3 of 17 |
+| Proxy reports a written hidden field's delete | Flat | 3 of 17 |
+| Flat compares a hidden object field by identity | Flat | 3 of 17 |
+
+Every pooled and flat mutant above fails its pinned history and both
+campaigns. The pooled grammar delivers initial rows in key order or in
+reverse and weights a pending insert most peers see before cleanup; the flat
+grammar weights runs that write and delete a hidden field, write an equal
+object over a hidden object field, and assign a getter-only field its own
+value. Before that weighting, arrival order and frozen optimistic rows
+escaped about one random campaign in three, and the three descriptor
+mutants escaped both campaigns. The `Object.is`-alone flat mutant still
+escapes about one random campaign in two; its pinned `-0` history and the
+fixed campaign always kill it.
 
 The pooled oracle found that a pooled view followed its source's status after
 cleanup instead of entering the live query's terminal error; the repair makes
@@ -129,7 +140,7 @@ oracle does not observe it.
 | ORC-001 Contract authority and limits | Pass. The change-set rules come from `src/proxy.ts`'s `getChanges` contract: changed fields with their final value and deleted fields as `undefined`. |
 | ORC-002 Independent judgment | Pass. `expectedChanges` folds the operations over a plain copy and does not import either tracker. |
 | ORC-003 Distinguishable responsibilities | Pass. Contract, model, grammar, driver, and refinement check are separate marked sections. |
-| ORC-004 Generated-history controls | Pass. Reconstruction: every pinned history uses domain values and operations. Ablation: removing `NaN`, `-0`, reverts, or deletions each loses a mutant. Range: one to three rows, three fields plus one added and one non-enumerable field, frozen or not, up to six operations per row including data and accessor defines, stored drafts, and a throw. Exclusion: none in generation; non-flat rows are rejected by the fallback witness. Hidden-field deletes and hidden object fields are killed only by pinned witnesses. |
+| ORC-004 Generated-history controls | Pass. Reconstruction: every pinned history uses domain values and operations. Ablation: removing `NaN`, `-0`, reverts, or deletions each loses a mutant. Range: one to three rows, three fields plus one added and one non-enumerable field, frozen or not, up to six operations per row including data and accessor defines, stored drafts, and a throw. Exclusion: none in generation; non-flat rows are rejected by the fallback witness. |
 | ORC-005 Production path and observation | Pass. `withFlatChangeTracking`, `withArrayChangeTracking`, and `withChangeTracking` run the same callbacks; the result change sets are observed. `collection.update` selects between them. |
 | ORC-006 Checker calibration | Pass. Thirteen mutants, classified above. |
 | ORC-007 Fixed/random replay | Pass. Fixed seed `44_502_101`, an unseeded campaign, and a replay entry; the file is in `test:oracles`. |
@@ -143,7 +154,5 @@ oracle does not observe it.
 
 ## Open work
 
-- The generated flat campaigns rarely reach a hidden object field or a
-  written hidden field's delete; their pinned witnesses carry those laws.
 - Pooled live queries run only in React; the other adapters keep compiled live
   queries until they use the shared resolver.

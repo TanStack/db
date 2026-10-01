@@ -20,7 +20,8 @@
  * the partition. Order, row values, and status come from a second
  * formulation: a live-query Collection compiled for the same query.
  *
- * History grammar: rows have ids 0 through 3, a field `f` from strings,
+ * History grammar: rows have ids 0 through 3, delivered initially in key
+ * order or in reverse, a field `f` from strings,
  * numbers and their look-alikes, `true`, a Date equal to 1, `NaN`, `-0`,
  * `0`, `null`, and a missing value, and a field `g` of `x` or `y`. Up to
  * three peer queries use `eq(f, literal)`, optionally with `eq(g, literal)`.
@@ -29,8 +30,8 @@
  * Steps commit sync transactions of one or two inserts, updates, or deletes,
  * where an update may keep `f` so the row stays in its group; apply one
  * optimistic insert, update, or delete and then confirm or roll it back,
- * optionally after cleaning up and restarting the source while it is
- * pending; mount or unmount a peer; or clean up the source and restart it,
+ * optionally after cleaning up and restarting the source while it is pending,
+ * with a weighted run that inserts a row most peers see before that cleanup; mount or unmount a peer; or clean up the source and restart it,
  * optionally (re)mounting a peer on the cleaned-up source first.
  *
  * Production driver: `createPooledLiveQuery` builds each peer's view from the
@@ -111,6 +112,8 @@ type Op =
   | { type: `delete`; id: number }
 type History = {
   rows: Array<{ f: FieldValue; g: string }>
+  // The source delivers its initial rows in reverse key order.
+  reverseInitial?: boolean
   peers: Array<Peer>
   steps: Array<Step>
 }
@@ -225,6 +228,7 @@ const historyArbitrary: fc.Arbitrary<History> = fc.record({
   rows: fc.array(fc.record({ f: fieldArbitrary, g: gArbitrary }), {
     maxLength: 4,
   }),
+  reverseInitial: fc.boolean(),
   peers: fc.array(peerArbitrary, { minLength: 1, maxLength: 3 }),
   steps: fc.array(
     fc.oneof(
@@ -235,15 +239,31 @@ const historyArbitrary: fc.Arbitrary<History> = fc.record({
           ops: fc.array(opArbitrary, { minLength: 1, maxLength: 2 }),
         }),
       },
-      fc.record(
-        {
-          kind: fc.constant(`optimistic` as const),
-          op: opArbitrary,
-          confirm: fc.boolean(),
-          cleanupFirst: fc.boolean(),
-        },
-        { requiredKeys: [`kind`, `op`, `confirm`] },
-      ),
+      {
+        weight: 2,
+        arbitrary: fc.record(
+          {
+            kind: fc.constant(`optimistic` as const),
+            op: opArbitrary,
+            confirm: fc.boolean(),
+            cleanupFirst: fc.boolean(),
+          },
+          { requiredKeys: [`kind`, `op`, `confirm`] },
+        ),
+      },
+      // A pending write that most peers see, settled after cleanup, is what
+      // a freeze must keep; independent choices rarely line it up.
+      fc.record({
+        kind: fc.constant(`optimistic` as const),
+        op: fc.record({
+          type: fc.constant(`insert` as const),
+          id: fc.nat({ max: 3 }),
+          f: fc.constant<FieldValue>(`a`),
+          g: gArbitrary,
+        }),
+        confirm: fc.boolean(),
+        cleanupFirst: fc.constant(true),
+      }),
       fc.record({
         kind: fc.constant(`mount` as const),
         peer: fc.nat({ max: 2 }),
@@ -447,7 +467,10 @@ async function runHistory(history: History): Promise<void> {
     mockSyncCollectionOptions<Row>({
       id: `pooled-${serial++}`,
       getKey: (row) => row.id,
-      initialData: [...rows.values()].map((row) => ({ ...row })),
+      initialData: (history.reverseInitial
+        ? [...rows.values()].reverse()
+        : [...rows.values()]
+      ).map((row) => ({ ...row })),
     }),
   )
   await source.stateWhenReady()
