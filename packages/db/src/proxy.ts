@@ -690,9 +690,17 @@ export function createChangeProxy<
     defineProperty(ptarget, prop, descriptor) {
       // Forward the defineProperty to the target to maintain Proxy invariants
       // This allows Object.seal() and Object.freeze() to work on the proxy
-      const result = Reflect.defineProperty(ptarget, prop, descriptor)
-      if (result && `value` in descriptor) {
-        changeTracker.copy_[prop as keyof T] = deepClone(descriptor.value)
+      // A defined value is stored as a clone, in the definition itself: a
+      // later assignment would fail on a read-only property.
+      const hasValue = `value` in descriptor
+      const result = Reflect.defineProperty(
+        ptarget,
+        prop,
+        hasValue
+          ? { ...descriptor, value: deepClone(descriptor.value) }
+          : descriptor,
+      )
+      if (result && hasValue) {
         changeTracker.assigned_[prop.toString()] = true
         markChanged(changeTracker)
       }

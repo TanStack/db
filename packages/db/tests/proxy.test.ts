@@ -2650,3 +2650,59 @@ describe(`array read methods behave like native arrays`, () => {
     expect(changes).toEqual(changed ? { items: native.items } : {})
   })
 })
+
+/**
+ * `Object.defineProperty` on a draft defines the property as on a native row:
+ * the same result, value, and descriptor. A defined enumerable value is a
+ * change.
+ */
+describe(`defineProperty behaves like on a native row`, () => {
+  type Row = Record<string, unknown>
+  const make = (): Row => ({ a: 1, nested: { b: 2 } })
+  const definitions: Array<
+    [string, (row: Row) => PropertyDescriptor & { key: string }]
+  > = [
+    [`a new key with only a value`, () => ({ key: `k`, value: 5 })],
+    [`an existing key with only a value`, () => ({ key: `a`, value: 5 })],
+    [
+      `an existing key made read-only`,
+      () => ({ key: `a`, value: 6, writable: false }),
+    ],
+    [
+      `a new enumerable writable key`,
+      () => ({
+        key: `k`,
+        value: 7,
+        writable: true,
+        enumerable: true,
+        configurable: true,
+      }),
+    ],
+    [`an object value`, () => ({ key: `a`, value: { c: 3 }, writable: false })],
+    [`a nested key`, () => ({ key: `nested`, value: { b: 3 } })],
+  ]
+  const observe = (
+    row: Row,
+    define: (row: Row) => PropertyDescriptor & { key: string },
+  ) => {
+    const { key, ...descriptor } = define(row)
+    const defined = Reflect.defineProperty(row, key, descriptor)
+    const { value, ...rest } = Object.getOwnPropertyDescriptor(row, key) ?? {}
+    return {
+      defined,
+      value: JSON.stringify(value),
+      rest,
+      read: JSON.stringify(row[key]),
+    }
+  }
+
+  it.each(definitions)(`%s`, (_name, define) => {
+    const expected = observe(make(), define)
+    const { proxy, getChanges } = createChangeProxy(make())
+    expect(observe(proxy, define)).toEqual(expected)
+    // Like a clone, changes hold enumerable string keys only.
+    const { key, value } = define(proxy)
+    const enumerable = expected.rest.enumerable === true
+    expect(getChanges()).toEqual(enumerable ? { [key]: value } : {})
+  })
+})
