@@ -56,6 +56,14 @@ the pooled path under React and compiled live queries under Vue, Solid,
 Svelte, and Angular. A partition that ignores a row's previous group fails
 both under React and none elsewhere.
 
+The loss audit found that a partition released its source one second after
+its last listener, whatever `gcTime` its views had. A focused release-timing
+test, `pooled-live-query-gc.test.ts`, now compares pooled and live-query
+Collection release times. A fixed delay failed 5 of 10 cases, a missing 50 ms
+floor for unsubscribed queries 1, a last-`gcTime`-wins rule 1, and releasing
+at `gcTime` 0 2. Release timing is resource lifetime, so the publication
+oracle does not observe it.
+
 ## Pooled live query oracle
 
 | Requirement | Outcome |

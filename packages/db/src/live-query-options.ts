@@ -162,7 +162,7 @@ export function resolveLiveQueryValue(
   }
   if (value instanceof BaseQueryBuilder) {
     return (
-      (pool ? createPooledLiveQuery(value) : undefined) ??
+      (pool ? createPooledLiveQuery(value, { gcTime }) : undefined) ??
       createLiveQueryCollection({ query: value, startSync: true, gcTime })
     )
   }

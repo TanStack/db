@@ -44,6 +44,9 @@ interface PartitionGroup {
   entries: Array<[string | number, Row]> | undefined
 }
 
+// Matches the Collection lifecycle's floor for a never-subscribed Collection.
+const UNSUBSCRIBED_RELEASE_FLOOR_MS = 50
+
 const partitionsBySource = new WeakMap<object, Map<string, Partition>>()
 
 // Typed so that 1, '1', and true stay distinct.
@@ -73,6 +76,8 @@ class Partition {
   // One source status listener serves every view of this partition.
   readonly statusListeners = new Set<StatusListener>()
   private listenerCount = 0
+  private gcTime = 0
+  private hadListener = false
   /** Set when the source starts cleanup; groups keep their last rows. */
   terminated = false
   private releaseTimer: ReturnType<typeof setTimeout> | undefined
@@ -110,7 +115,17 @@ class Partition {
   }
 
   /** Start the shared source subscription; release it when unused. */
-  retain(): void {
+  /**
+   * Keep the shared source subscription open. Each view brings its query's
+   * `gcTime`; the partition keeps the longest, so it never releases before
+   * one of its views' own live-query Collection would have.
+   */
+  retain(gcTime?: number): void {
+    if (gcTime !== undefined) {
+      // As for a Collection, a non-positive or non-finite gcTime disables GC.
+      const delay = gcTime > 0 && Number.isFinite(gcTime) ? gcTime : Infinity
+      this.gcTime = Math.max(this.gcTime, delay)
+    }
     if (this.terminated) return
     if (!this.subscription) {
       this.subscription = this.source.subscribeChanges(
@@ -139,6 +154,7 @@ class Partition {
 
   addListener(group: PartitionGroup, listener: Listener): void {
     this.retain()
+    this.hadListener = true
     group.listeners.add(listener)
     this.listenerCount++
   }
@@ -160,8 +176,12 @@ class Partition {
   private scheduleRelease(): void {
     if (this.releaseTimer !== undefined) clearTimeout(this.releaseTimer)
     this.releaseTimer = undefined
-    if (this.listenerCount > 0) return
-    // A rendered query may subscribe shortly after construction.
+    if (this.listenerCount > 0 || !Number.isFinite(this.gcTime)) return
+    // Like a Collection that synced before anything subscribed, a view built
+    // during a render gets a grace period to subscribe when it commits.
+    const delay = this.hadListener
+      ? this.gcTime
+      : Math.max(this.gcTime, UNSUBSCRIBED_RELEASE_FLOOR_MS)
     this.releaseTimer = setTimeout(() => {
       this.releaseTimer = undefined
       if (this.listenerCount > 0) return
@@ -171,7 +191,7 @@ class Partition {
       this.stopStatusEvents = undefined
       this.groups.clear()
       this.onEmpty()
-    }, 1000)
+    }, delay)
   }
 
   private apply(changes: Array<ChangeMessage<Row, string | number>>): void {
@@ -322,9 +342,10 @@ class PooledLiveQuery {
     private readonly query: BaseQueryBuilder,
     private readonly partition: Partition,
     groupKey: string,
+    private readonly gcTime: number,
   ) {
     this.group = partition.group(groupKey)
-    partition.retain()
+    partition.retain(gcTime)
   }
 
   get status(): CollectionStatus {
@@ -401,6 +422,7 @@ class PooledLiveQuery {
     return (this.collection ??= createLiveQueryCollection({
       query: this.query,
       startSync: true,
+      gcTime: this.gcTime,
     }))
   }
 }
@@ -587,6 +609,8 @@ const forwardToCollection: ProxyHandler<PooledLiveQuery> = {
  */
 export function createPooledLiveQuery(
   query: BaseQueryBuilder,
+  // A Collection's default when the adapter gives none.
+  { gcTime = 300_000 }: { gcTime?: number } = {},
 ): Collection<any, any, any> | undefined {
   const ir = query._getQuery()
   const shape = poolableShape(ir)
@@ -617,5 +641,6 @@ export function createPooledLiveQuery(
     query,
     partition,
     shape.groupKey,
+    gcTime,
   ) as unknown as Collection<any, any, any>
 }
