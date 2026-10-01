@@ -64,6 +64,7 @@ describe(`local-only direct writes`, () => {
     for (const transaction of [inserted, updated, deleted]) {
       expect(transaction.state).toBe(`completed`)
       await expect(transaction.isPersisted.promise).resolves.toBe(transaction)
+      await expect(transaction.when(`settled`)).resolves.toBe(transaction)
     }
     expect(batches).toEqual([
       [`insert:1`],
