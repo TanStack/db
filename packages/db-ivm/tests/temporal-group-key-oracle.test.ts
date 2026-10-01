@@ -173,6 +173,22 @@ describe('Temporal group keys', () => {
     )
   })
 
+  it('keeps an own-tagged plain object with no enumerable fields distinct', () => {
+    const date = Temporal.PlainDate.from('2024-01-15')
+    const taggedObject = {}
+    Object.defineProperty(taggedObject, Symbol.toStringTag, {
+      value: 'Temporal.PlainDate',
+    })
+    Object.defineProperty(taggedObject, 'toString', {
+      value: () => '2024-01-15',
+    })
+
+    expect(Object.keys(taggedObject)).toEqual([])
+    expect(observedGroupCounts([{ date }, { date: taggedObject }])).toEqual(
+      expectedGroupCounts(['Temporal', 'plain object']),
+    )
+  })
+
   it('still groups a Temporal value with an own matching tag', () => {
     const date = Temporal.PlainDate.from('2024-01-15')
     const matchingDate = Temporal.PlainDate.from('2024-01-15')

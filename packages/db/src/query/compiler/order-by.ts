@@ -150,6 +150,7 @@ export function processOrderBy(
   // because the limit is per-group, not global — the child collection needs all data loaded.
   if (
     limit !== undefined &&
+    orderByClause.length > 0 &&
     !groupKeyFn &&
     rawQuery.from.type !== `unionFrom` &&
     rawQuery.from.type !== `unionAll`

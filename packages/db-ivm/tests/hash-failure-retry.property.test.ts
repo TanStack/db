@@ -11,6 +11,12 @@ import { hash } from '../src/hashing/hash'
  * untouched tail, and agree with a plain structural copy. Only the successful
  * traversal may make a later call read nothing. This separates atomic cache
  * publication from cycle, depth, and work-limit rejection.
+ *
+ * This is the established structural-hash retry contract, also exercised for
+ * cycle rejection by hash-graph.property.test.ts. The claim here is limited to
+ * serial calls on one previously uncached array of plain objects with one
+ * rejecting getter. It does not cover pre-cached descendants, shared objects,
+ * reentrant getters, other containers, or other rejection causes.
  */
 
 type History = {
@@ -19,6 +25,43 @@ type History = {
   failures: number
   value: number
 }
+
+// The model-only row has `completed` successful getter reads before the
+// rejecting getter and `tail` untouched getters after it. Each failed attempt
+// is followed by another failed attempt or one success; success is terminal.
+// Ablating `completed` loses an already-read sibling; ablating `tail` loses the
+// never-read suffix; ablating `failures` loses repeated rejection. `value` is
+// not needed for those read-count laws, but varies the successful digest-copy
+// relation. The bounded domain is 0..3 completed, 0..2 tail, 1..3 failures,
+// and -20..20 value. A success followed by another rejection is outside this
+// grammar; the array and getters themselves stay unchanged.
+const retryHistoryArbitrary = fc.record({
+  completed: fc.integer({ min: 0, max: 3 }),
+  tail: fc.integer({ min: 0, max: 2 }),
+  failures: fc.integer({ min: 1, max: 3 }),
+  value: fc.integer({ min: -20, max: 20 }),
+})
+
+const replaySeedText = process.env.TANSTACK_DB_IVM_HASH_RETRY_SEED
+const replayPath = process.env.TANSTACK_DB_IVM_HASH_RETRY_PATH
+if (replayPath !== undefined && replaySeedText === undefined) {
+  throw new Error(`TANSTACK_DB_IVM_HASH_RETRY_PATH requires a seed`)
+}
+const replaySeed =
+  replaySeedText === undefined ? undefined : Number(replaySeedText)
+if (
+  replaySeedText !== undefined &&
+  (replaySeedText.trim() === `` || !Number.isSafeInteger(replaySeed))
+) {
+  throw new Error(`TANSTACK_DB_IVM_HASH_RETRY_SEED must be an integer`)
+}
+const campaigns =
+  replaySeed === undefined
+    ? [
+        { name: `fixed seed 205206`, seed: 205206, path: undefined },
+        { name: `random seed`, seed: undefined, path: undefined },
+      ]
+    : [{ name: `replay`, seed: replaySeed, path: replayPath }]
 
 function expectFailureCut(
   error: unknown,
@@ -71,26 +114,32 @@ function expectRetryHistory(history: History): void {
 }
 
 describe(`getter failure does not publish partial structural hashes`, () => {
-  it.each([1, 2, 3])(
+  it.each([0, 1, 2, 3])(
     `retries the same root after %s completed siblings`,
     (completed) => {
       expectRetryHistory({ completed, tail: 2, failures: 2, value: 10 })
     },
   )
 
-  for (const seed of [205206, fc.sample(fc.integer(), 1)[0]!]) {
-    it(`preserves failure causes and retry cuts (${seed})`, () => {
+  it(`retries a first-getter failure without an untouched tail`, () => {
+    expectRetryHistory({ completed: 0, tail: 0, failures: 1, value: -20 })
+  })
+
+  it(`retries three failures at the last getter`, () => {
+    expectRetryHistory({ completed: 3, tail: 0, failures: 3, value: 20 })
+  })
+
+  for (const { name, seed, path } of campaigns) {
+    it(`preserves failure causes and retry cuts (${name})`, () => {
       fc.assert(
-        fc.property(
-          fc.record({
-            completed: fc.integer({ min: 1, max: 3 }),
-            tail: fc.integer({ min: 0, max: 2 }),
-            failures: fc.integer({ min: 1, max: 3 }),
-            value: fc.integer({ min: -20, max: 20 }),
-          }),
-          (history) => expectRetryHistory(history),
+        fc.property(retryHistoryArbitrary, (history) =>
+          expectRetryHistory(history),
         ),
-        { numRuns: 100, seed },
+        {
+          numRuns: 100,
+          ...(seed === undefined ? {} : { seed }),
+          ...(path === undefined ? {} : { path }),
+        },
       )
     })
   }
@@ -110,7 +159,8 @@ describe(`getter failure does not publish partial structural hashes`, () => {
     const property = fc.property(
       fc.integer({ min: 1, max: 3 }),
       (completed) => {
-        expectRetryHistory({ completed, tail: 1, failures: 2, value: 0 })
+        // Keep this synthetic mismatch isolated: shrinking must not replace
+        // it with a failure from the production traversal.
         const error = new Error(`getter rejected`)
         const expected = [...Array.from({ length: completed + 1 }, () => 2), 0]
         const stale = [...expected]

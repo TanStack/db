@@ -4,22 +4,67 @@ import { createCollection } from '@tanstack/db'
 import fc from 'fast-check'
 import { describe, expect, it, vi } from 'vitest'
 import { createDeferred } from '../../db/src/deferred.js'
-import { oraclePropertyOptions } from '../../db/tests/oracle-config.js'
+import {
+  oraclePropertyOptions,
+  readOracleRunConfig,
+} from '../../db/tests/oracle-config.js'
 import { createCursorPager, queryCollectionOptions } from '../src/index.js'
 
 /**
  * # Do browser-facing readers release the right cursor work?
  *
- * A nested QueryCollection reader may cancel, be replaced, retry, or lose its
- * last owner while cursor pages are pending. Reader abort releases its queue;
- * it does not cancel a transport still owned by a peer. A replacement sequence
- * may satisfy the nested collection only after its own rows are authoritative.
+ * Contract authority: cursor-pagination/README.md, "Contract before
+ * implementation," and the exported createCursorPager API. QueryClient
+ * cancellation rejects a nested QueryCollection preload. A silent replacement
+ * may fulfill it only with replacement rows. Reader abort rejects that reader
+ * with its reason and leaves Query's shared transport active. Query's configured
+ * retry policy applies to both initial and growth acquisitions.
  *
- * These jsdom histories cross real QueryClient cancellation and retry defaults,
- * QueryCollection preload, shared transports, manual writes, and cleanup. They
- * observe fetch status, errors, rows, calls, abort signals, and later recovery.
- * Native browser page ownership remains in the OPFS oracle.
+ * Each generated size from one to four creates two pages, so the held second
+ * page is always reachable; size zero cannot enter that history. The independent
+ * outcome rules above judge QueryClient and QueryCollection at preload
+ * settlement, and the reader at abort settlement. Controlled fetchPage calls
+ * supply the held response; these histories do not establish behavior of a
+ * changing HTTP endpoint. The window, cache, publication, and manual-write
+ * owners check their separate boundaries.
  */
+
+const fixedSeed = 1_779_013
+const replay = readOracleRunConfig()
+
+/** Ordinary campaigns use the same property, observation, and run budget. */
+async function assertBoundaryProperty<Ts>(
+  property: fc.IAsyncProperty<Ts>,
+  name: string,
+): Promise<void> {
+  if (replay.replayPath !== undefined && replay.replayProperty !== name) return
+  const options = oraclePropertyOptions(30, name)
+  if (replay.replaySeed === undefined)
+    await fc.assert(property, { ...options, seed: fixedSeed })
+  await fc.assert(property, options)
+}
+
+async function finishBoundaryCleanup(
+  steps: ReadonlyArray<() => void | Promise<void>>,
+  primaryFailure: unknown,
+): Promise<void> {
+  const cleanupFailures: Array<unknown> = []
+  for (const step of steps) {
+    try {
+      await step()
+    } catch (error) {
+      cleanupFailures.push(error)
+    }
+  }
+  if (cleanupFailures.length > 0)
+    throw new AggregateError(
+      cleanupFailures,
+      `Cursor boundary cleanup failed`,
+      {
+        cause: primaryFailure,
+      },
+    )
+}
 
 const tick = () => new Promise<void>((resolve) => setTimeout(resolve, 0))
 const makeClient = () =>
@@ -39,7 +84,7 @@ describe(`cursor acquisition boundaries`, () => {
   it.each([false, true])(
     `nested row query settles when pages cancel; replacement=%s`,
     async (replace) => {
-      await fc.assert(
+      await assertBoundaryProperty(
         fc.asyncProperty(fc.integer({ min: 1, max: 4 }), async (size) => {
           const client = makeClient()
           const rows = rowsFor(size)
@@ -79,6 +124,7 @@ describe(`cursor acquisition boundaries`, () => {
             () => ({ ok: true }),
             (error: unknown) => ({ ok: false, error }),
           )
+          let primaryFailure: unknown
           try {
             await entered.promise
             if (replace) {
@@ -107,20 +153,28 @@ describe(`cursor acquisition boundaries`, () => {
                 expect((outcome.error as Error).name).toBe(`AbortError`)
             }
             expect(logged).toHaveBeenCalledTimes(replace ? 0 : 1)
+          } catch (error) {
+            primaryFailure = error
+            throw error
           } finally {
-            logged.mockRestore()
-            release.resolve()
-            await collection.cleanup()
-            client.clear()
+            await finishBoundaryCleanup(
+              [
+                () => logged.mockRestore(),
+                () => release.resolve(),
+                () => collection.cleanup(),
+                () => client.clear(),
+              ],
+              primaryFailure,
+            )
           }
         }),
-        oraclePropertyOptions(30, `cursor-pagination.nested-cancellation`),
+        `cursor-pagination.nested-cancellation`,
       )
     },
   )
 
   it(`reader abort releases its queue without canceling shared transport`, async () => {
-    await fc.assert(
+    await assertBoundaryProperty(
       fc.asyncProperty(fc.integer({ min: 1, max: 4 }), async (size) => {
         const client = makeClient(),
           rows = rowsFor(size),
@@ -152,6 +206,7 @@ describe(`cursor acquisition boundaries`, () => {
             state = error
           },
         )
+        let primaryFailure: unknown
         try {
           const transport = await entered.promise
           abort.abort(reason)
@@ -159,13 +214,17 @@ describe(`cursor acquisition boundaries`, () => {
           expect(state).toBe(reason)
           expect(transport.aborted).toBe(false)
           expect(await pager.read({ limit: size })).toEqual(rows.slice(0, size))
+        } catch (error) {
+          primaryFailure = error
+          throw error
         } finally {
-          release.resolve()
-          await pending
-          client.clear()
+          await finishBoundaryCleanup(
+            [() => release.resolve(), () => pending, () => client.clear()],
+            primaryFailure,
+          )
         }
       }),
-      oraclePropertyOptions(30, `cursor-pagination.reader-abort`),
+      `cursor-pagination.reader-abort`,
     )
   })
 

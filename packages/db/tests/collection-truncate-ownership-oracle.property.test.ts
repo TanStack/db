@@ -16,14 +16,16 @@ import type { SyncConfig } from '../src/types.js'
  * This refines the accepted-snapshot contract in the Collection state-retention
  * owner; it does not define source acknowledgement or multi-key ordering.
  *
- * The independent model is the single expected accepted row. The grammar
- * varies its key, two distinguishable values, and rollback versus handler
- * rejection. The production driver uses a real Collection, holds the later
- * update, captures a real truncate, fails that update, then commits the source
+ * The independent model is the single expected accepted row. Here an accepted
+ * owner means a successful optimistic transaction still retained over source
+ * rows; the observation is the public snapshot, not the private replacement.
+ * The grammar varies its key, two distinguishable values, and rollback versus
+ * handler rejection. The production driver uses a real Collection, holds the
+ * later update, captures a real truncate, fails it, then commits the source
  * replacement. The refinement check compares the public row, key set, and
- * Collection status after publication. Grammar controls reconstruct and ablate
- * every axis, reject out-of-range/foreign histories, and the named wrong-answer
- * control proves the comparison rejects restoration of the failed owner.
+ * Collection status before and after publication. Grammar controls reconstruct
+ * the bounded domain and reject missing, out-of-range, and foreign fields.
+ * The named wrong-answer control rejects restoration of the failed owner.
  */
 type TruncateCaptureHistory = {
   key: number
@@ -33,7 +35,7 @@ type TruncateCaptureHistory = {
 }
 
 type TruncateCaptureObservation = {
-  finalRow: { id: number; value: number } | undefined
+  publicRow: { id: number; value: number } | undefined
   publicKeys: Array<number>
   status: string
 }
@@ -82,7 +84,7 @@ function expectObservation(
   history: TruncateCaptureHistory,
 ): void {
   expect(actual).toEqual({
-    finalRow: { id: history.key, value: history.acceptedValue },
+    publicRow: { id: history.key, value: history.acceptedValue },
     publicKeys: [history.key],
     status: `ready`,
   })
@@ -126,7 +128,10 @@ async function runHistory(history: TruncateCaptureHistory): Promise<void> {
     const failed = collection.update(history.key, (draft) => {
       draft.value = history.failedValue
     })
-    const failedOutcome = failed.isPersisted.promise.catch((error) => error)
+    const failedOutcome = failed.isPersisted.promise.then(
+      () => ({ status: `fulfilled` as const }),
+      (reason: unknown) => ({ status: `rejected` as const, reason }),
+    )
     expect(stripVirtualProps(collection.get(history.key))).toEqual({
       id: history.key,
       value: history.failedValue,
@@ -136,17 +141,19 @@ async function runHistory(history: TruncateCaptureHistory): Promise<void> {
     sync.truncate()
     if (history.failure === `rollback`) failed.rollback()
     releaseUpdate()
-    await failedOutcome
+    const outcome = await failedOutcome
+    expect(outcome.status).toBe(`rejected`)
+    if (history.failure === `reject`) {
+      expect(outcome).toEqual({ status: `rejected`, reason: updateFailure })
+    }
+    const publicSnapshot = (): TruncateCaptureObservation => ({
+      publicRow: stripVirtualProps(collection.get(history.key)),
+      publicKeys: [...collection.state.keys()],
+      status: collection.status,
+    })
+    expectObservation(publicSnapshot(), history)
     expect(sync.commit()).toBe(true)
-
-    expectObservation(
-      {
-        finalRow: stripVirtualProps(collection.get(history.key)),
-        publicKeys: [...collection.state.keys()],
-        status: collection.status,
-      },
-      history,
-    )
+    expectObservation(publicSnapshot(), history)
   } catch (error) {
     primaryFailure = error
   } finally {
@@ -172,6 +179,14 @@ async function runHistory(history: TruncateCaptureHistory): Promise<void> {
 
 describe(`generated truncate capture ownership oracle`, () => {
   if (requestedReplayProperty === undefined) {
+    it.each([
+      { key: 1, acceptedValue: -10, failedValue: 10, failure: `rollback` },
+      { key: 4, acceptedValue: 10, failedValue: -10, failure: `reject` },
+    ] as const)(
+      `preserves the accepted owner through $failure at the bounded value and key margins`,
+      async (history) => runHistory(reconstructHistory(history)),
+    )
+
     it(`reconstructs the grammar and rejects ablated, out-of-range, and foreign histories`, () => {
       const histories = fc.sample(historyArbitrary, {
         seed: 18_530_501,
@@ -179,6 +194,17 @@ describe(`generated truncate capture ownership oracle`, () => {
       })
       for (const history of histories) {
         expect(reconstructHistory(history)).toEqual(history)
+      }
+      for (let key = 1; key <= 4; key++) {
+        for (let acceptedValue = -10; acceptedValue <= 10; acceptedValue++) {
+          for (let failedValue = -10; failedValue <= 10; failedValue++) {
+            if (acceptedValue === failedValue) continue
+            for (const failure of [`rollback`, `reject`] as const) {
+              const history = { key, acceptedValue, failedValue, failure }
+              expect(reconstructHistory(history)).toEqual(history)
+            }
+          }
+        }
       }
 
       const witness = histories[0]!
@@ -209,7 +235,7 @@ describe(`generated truncate capture ownership oracle`, () => {
       expect(() =>
         expectObservation(
           {
-            finalRow: { id: 1, value: 2 },
+            publicRow: { id: 1, value: 2 },
             publicKeys: [1],
             status: `ready`,
           },

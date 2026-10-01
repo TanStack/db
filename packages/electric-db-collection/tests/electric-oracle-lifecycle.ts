@@ -28,9 +28,28 @@ export async function atCheckpoint<T>(
   }
 }
 
+type Cleanup =
+  | (() => void | Promise<void>)
+  | { label: string; release: () => void | Promise<void> }
+
+// A constructor can fail after its caller has acquired other resources. The
+// caller retains those resources on success and releases them on failure.
+export async function withElectricSetup<T>(
+  setup: () => T,
+  partialCleanups: Array<Cleanup>,
+): Promise<T> {
+  try {
+    return setup()
+  } catch (error) {
+    return withElectricCleanup(() => {
+      throw error
+    }, partialCleanups)
+  }
+}
+
 export async function withElectricCleanup<T>(
   run: () => T | Promise<T>,
-  cleanups: Array<() => void | Promise<void>>,
+  cleanups: Array<Cleanup>,
 ): Promise<T> {
   let outcome: { ok: true; value: T } | { ok: false; error: unknown }
   try {
@@ -38,26 +57,34 @@ export async function withElectricCleanup<T>(
   } catch (error) {
     outcome = { ok: false, error }
   }
-  const failures: Array<unknown> = []
+  const failures: Array<{ label?: string; error: unknown }> = []
   for (const cleanup of cleanups) {
+    const label = typeof cleanup === `function` ? undefined : cleanup.label
+    const release = typeof cleanup === `function` ? cleanup : cleanup.release
     try {
-      await atCheckpoint(Promise.resolve().then(cleanup), `cleanup`)
+      await atCheckpoint(
+        Promise.resolve().then(release),
+        label === undefined ? `cleanup` : `cleanup: ${label}`,
+      )
     } catch (error) {
-      failures.push(error)
+      failures.push({ label, error })
     }
   }
   if (!outcome.ok) {
-    for (const error of failures)
+    for (const { label, error } of failures)
       console.warn(
-        `Electric oracle cleanup failed after a primary error`,
+        `Electric oracle cleanup failed after a primary error${label === undefined ? `` : `: ${label}`}`,
         error,
       )
     throw outcome.error
   }
   if (failures.length) {
-    for (const error of failures.slice(1))
-      console.warn(`Electric oracle secondary cleanup failure`, error)
-    throw failures[0]
+    for (const { label, error } of failures.slice(1))
+      console.warn(
+        `Electric oracle secondary cleanup failure${label === undefined ? `` : `: ${label}`}`,
+        error,
+      )
+    throw failures[0]!.error
   }
   return outcome.value
 }

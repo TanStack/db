@@ -30,6 +30,22 @@ import type {
  * file adds the row-publication node. A truncate opens a private replacement;
  * source writes accumulate there until every gating attempt succeeds. Failure
  * retires that replacement. Independent live source work remains public.
+ * The `Collection.subscribeChanges` API contract in `../src/collection/index.ts`
+ * is the authority for callback batches and their per-key causal order. The
+ * public Collection lifecycle and shared lifecycle grammar specify cleanup,
+ * restart, and which acquisition attempts can authorize a replacement. The
+ * Collection's public reads supply the row observation. The coverage map's
+ * Collection lifecycle entry limits this owner to Collection publication; it
+ * does not establish compiled live-query includes publication or provider
+ * behavior beyond the controlled sync adapter below.
+ *
+ * `source` holds currently installed source rows; `visible` is the public
+ * snapshot.
+ * `replacement` is the private replacement. `retainedKeys` and `sentKeys` are
+ * model-only projections of rows retained after cleanup and keys already sent
+ * to this subscriber; neither represents a production ownership state.
+ * `PublicationPhase` combines the private replacement and acquisition
+ * settlement into one test-case label. It is not a Collection status.
  *
  * The reference state uses plain Maps and batches. It does not copy the
  * subscription implementation. After every command, the driver compares exact
@@ -501,6 +517,23 @@ const sourceMutationArbitrary: fc.Arbitrary<SourceMutation> = fc.record({
   value: fc.integer({ min: 0, max: 5 }),
 })
 
+// Generated publication histories contain 1–20 lifecycle commands from the
+// shared grammar plus 1–5 atomic source mutations inserted at any boundary,
+// including before the first and after the last lifecycle command. Keys a/b
+// can overlap demand; c/d distinguish independent source work. Upsert/delete
+// and values 0–5 distinguish insert, update, delete, and unchanged writes.
+// Removing insertion position loses public/private timing; removing either
+// key class loses demand overlap or independent publication. Without delete,
+// a source row cannot retract; without repeated writes and distinct values,
+// unchanged-write silence cannot be distinguished from an actual update. The
+// value field on delete is inert and contributes no separate semantic axis.
+// A source mutation after unsubscribe is legal and checks callback silence.
+// The bounded product below supplies fixed witnesses for each phase, source
+// effect, settlement, suffix, and prior independent row. Named histories below
+// reconstruct generated failures at their recorded seed and shrink path.
+// Truncate-with-replacement rows are outside this random grammar and have
+// separate fixed cases. A malformed sync transaction with an unmatched begin
+// is excluded: each generated source mutation commits as one transaction.
 const publicationCommandHistoryArbitrary: fc.Arbitrary<
   Array<PublicationCommand>
 > = greenLifecycleHistoryArbitrary.chain((history) =>
@@ -1002,7 +1035,13 @@ async function runPublicationHistory(
   }
   if (failures.length === 1) throw failures[0]
   if (failures.length > 1)
-    throw new AggregateError(failures, `Publication history and cleanup failed`)
+    throw new AggregateError(
+      failures,
+      `Publication history and cleanup failed`,
+      {
+        cause: failures[0],
+      },
+    )
   return observations
 }
 

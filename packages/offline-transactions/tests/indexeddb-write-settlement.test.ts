@@ -145,3 +145,33 @@ it.each(writes)(
     expect(outcome.error).toBe(error)
   },
 )
+
+it(`rejects delete when opening the write store fails and retains the key`, async () => {
+  const adapter = new IndexedDBAdapter(`controlled-delete`)
+  const stored = new Map([[`key`, `value`]])
+  const error = new DOMException(`database closed`, `InvalidStateError`)
+  const readStore = {
+    get: (key: string) => {
+      const request = {
+        result: stored.get(key),
+        onsuccess: null as ((event: Event) => void) | null,
+        onerror: null as ((event: Event) => void) | null,
+      }
+      queueMicrotask(() => request.onsuccess?.(new Event(`success`)))
+      return request
+    },
+  } as unknown as IDBObjectStore
+  vi.spyOn(
+    adapter as unknown as {
+      getStore: (mode?: IDBTransactionMode) => Promise<IDBObjectStore>
+    },
+    `getStore`,
+  ).mockImplementation((mode) =>
+    mode === `readwrite` ? Promise.reject(error) : Promise.resolve(readStore),
+  )
+  vi.spyOn(console, `warn`).mockImplementation(() => {})
+
+  expect(await adapter.get(`key`)).toBe(`value`)
+  await expect(adapter.delete(`key`)).rejects.toBe(error)
+  expect(await adapter.get(`key`)).toBe(`value`)
+})

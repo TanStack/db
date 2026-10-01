@@ -60,6 +60,7 @@ type DeliveryFault =
   | `dropPeerAfterThrow`
   | `duplicateBootstrap`
   | `reentrantOutOfOrder`
+  | `earlyPeerDelivery`
 type RunOptions = {
   fault?: DeliveryFault
   reach?: Reach
@@ -104,6 +105,20 @@ type RunOptions = {
  * The generated owner compares one-row insert/update histories. It preserves the
 raw callback batch, but does not claim multi-row layout/order, hydration,
 status scheduling, preload, framework wiring, or native boundaries.
+ * The controlled source synchronously commits one change per publication. This
+ * tests the observer's response to that source event shape; it does not show
+ * that a remote provider produces it.
+ *
+ * Grammar controls: fixed reaction histories reconstruct every declared
+ * command and callback action, while the two-publication add-peer history
+ * distinguishes current-dispatch eligibility from the next publication.
+ * Removing listener identity loses peer removal/addition; removing the second
+ * version loses FIFO reentry; removing mode loses the bootstrap distinction.
+ * Versions span -20..20, listener IDs 0..3, and histories 1..30 commands;
+ * equal nested and outer versions are the no-change margin. A repeated
+ * subscribe for one active model ID is excluded from the accepted action
+ * history (the driver skips it); independent subscriptions of one callback
+ * belong to the focused identity test above.
  */
 
 const reactions: ReadonlyArray<Reaction> = [
@@ -358,8 +373,41 @@ function injectDeliveryFault(
       corrupted[outer] = corrupted[nested]!
       corrupted[nested] = outerDelivery
     }
+  } else if (fault === `earlyPeerDelivery`) {
+    const outer = corrupted.findIndex(
+      (delivery) => delivery.listener === 0 && deliveryVersion(delivery) === 1,
+    )
+    if (outer >= 0) {
+      corrupted.splice(outer + 1, 0, {
+        ...corrupted[outer]!,
+        listener: 1,
+        bootstrap: false,
+      })
+    }
   }
   return corrupted
+}
+
+async function finishHistory(
+  cleanup: ReadonlyArray<() => void | Promise<void>>,
+  failure: { error: unknown } | undefined,
+): Promise<void> {
+  const cleanupFailures: Array<unknown> = []
+  for (const release of cleanup) {
+    try {
+      await release()
+    } catch (error) {
+      cleanupFailures.push(error)
+    }
+  }
+  if (cleanupFailures.length > 0) {
+    throw new AggregateError(
+      failure ? [failure.error, ...cleanupFailures] : cleanupFailures,
+      `Observer history cleanup failed`,
+      failure ? { cause: failure.error } : undefined,
+    )
+  }
+  if (failure) throw failure.error
 }
 
 async function runHistory(
@@ -466,6 +514,7 @@ async function runHistory(
     unsubscribers.set(id, unsubscribe)
   }
 
+  let failure: { error: unknown } | undefined
   try {
     for (const [checkpoint, nextCommand] of history.entries()) {
       if (nextCommand.type === `subscribe`) {
@@ -535,11 +584,14 @@ async function runHistory(
         )
       }
     }
-    return reach
-  } finally {
-    observer.dispose()
-    await source.cleanup()
+  } catch (error) {
+    failure = { error }
   }
+  await finishHistory(
+    [() => observer.dispose(), () => source.cleanup()],
+    failure,
+  )
+  return reach
 }
 
 function reactionHistory(reaction: Reaction): Array<Command> {
@@ -581,16 +633,20 @@ async function runStaleReadyHistory(
     if (changes === undefined) readyNotifications++
   }
 
+  let failure: { error: unknown } | undefined
   try {
     observer.subscribe(readyListener)
     observer.dispose()
     markReady()
     if (injectStaleReady) readyListener(undefined)
     expect(readyNotifications).toBe(0)
-  } finally {
-    observer.dispose()
-    await source.cleanup()
+  } catch (error) {
+    failure = { error }
   }
+  await finishHistory(
+    [() => observer.dispose(), () => source.cleanup()],
+    failure,
+  )
 }
 
 describe(`LiveQueryObserver generated histories`, () => {
@@ -625,7 +681,7 @@ describe(`LiveQueryObserver generated histories`, () => {
   it.each([`granular`, `wholesale`] as const)(
     `%s listeners joining during dispatch start with the next eligible publication`,
     async (mode) => {
-      await runHistory(mode, [
+      const history: Array<Command> = [
         { type: `subscribe`, listener: 0 },
         {
           type: `publish`,
@@ -643,23 +699,31 @@ describe(`LiveQueryObserver generated histories`, () => {
           peer: 0,
           reaction: `none`,
         },
-      ])
+      ]
+      const reach = emptyReach()
+      await runHistory(mode, history, { reach })
+      expect(reach.reactions.addPeer).toBe(1)
+      await expect(
+        runHistory(mode, history, { fault: `earlyPeerDelivery` }),
+      ).rejects.toMatchObject({ name: `AssertionError` })
     },
   )
 
   it(`executes every command and reaction kind in fixed production histories`, async () => {
     const reach = emptyReach()
-    await runHistory(
-      `granular`,
-      [
-        { type: `subscribe`, listener: 0 },
-        { type: `unsubscribe`, listener: 0 },
-        { type: `dispose` },
-      ],
-      { reach },
-    )
-    for (const reaction of reactions) {
-      await runHistory(`granular`, reactionHistory(reaction), { reach })
+    for (const mode of [`granular`, `wholesale`] as const) {
+      await runHistory(
+        mode,
+        [
+          { type: `subscribe`, listener: 0 },
+          { type: `unsubscribe`, listener: 0 },
+          { type: `dispose` },
+        ],
+        { reach },
+      )
+      for (const reaction of reactions) {
+        await runHistory(mode, reactionHistory(reaction), { reach })
+      }
     }
 
     expect(Object.values(reach.commands).every((count) => count > 0)).toBe(true)
@@ -667,6 +731,39 @@ describe(`LiveQueryObserver generated histories`, () => {
       true,
     )
   })
+
+  it.each([`granular`, `wholesale`] as const)(
+    `%s one-row version margins retain the no-change boundary`,
+    async (mode) => {
+      await runHistory(mode, [
+        {
+          type: `publish`,
+          version: -20,
+          nestedVersion: -20,
+          reactor: 0,
+          peer: 0,
+          reaction: `none`,
+        },
+        { type: `subscribe`, listener: 0 },
+        {
+          type: `publish`,
+          version: 20,
+          nestedVersion: 20,
+          reactor: 0,
+          peer: 0,
+          reaction: `nested`,
+        },
+        {
+          type: `publish`,
+          version: 20,
+          nestedVersion: 20,
+          reactor: 0,
+          peer: 0,
+          reaction: `none`,
+        },
+      ])
+    },
+  )
 
   it.each([`granular`, `wholesale`] as const)(
     `rejects dropped peer delivery after a throwing listener through the %s production path`,

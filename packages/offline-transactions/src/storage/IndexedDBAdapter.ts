@@ -147,6 +147,7 @@ export class IndexedDBAdapter extends BaseStorageAdapter {
       })
     } catch (error) {
       console.warn(`IndexedDB delete failed:`, error)
+      throw error
     }
   }
 

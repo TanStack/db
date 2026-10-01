@@ -381,9 +381,10 @@ function buildRecords(history: History): MultiSetArray<Data> {
 // ---------------------------------------------------------------------------
 // Production driver and refinement check.
 
-// A tagged encoding of every record's contents. Objects become ids in
-// first-seen order, so a changed shared reference also shows. The tags keep
-// `-0`, `NaN`, and `undefined` distinct.
+// A tagged encoding of every record's contents. Reusing identities across
+// snapshots exposes replacement by a distinct reference with equal contents.
+// Symbol and function identities remain distinct; tags keep `-0`, `NaN`, and
+// `undefined` distinct.
 function contentsOf(
   records: MultiSetArray<Data>,
   ids: Map<object | symbol, number>,
@@ -468,6 +469,14 @@ const campaigns =
       ]
 
 describe(`MultiSet consolidation oracle`, () => {
+  it(`detects replacement of an input value with equal contents`, () => {
+    const records: MultiSetArray<Data> = [[[0, { v: 1 }], 1]]
+    const ids = new Map<object | symbol, number>()
+    const inputContents = contentsOf(records, ids)
+    ;(records[0]![0] as [number, Data])[1] = { v: 1 }
+    expect(contentsOf(records, ids)).not.toBe(inputContents)
+  })
+
   it.each(collisionCases)(`$name`, ({ records }) =>
     expectRecordsConsolidated(records),
   )

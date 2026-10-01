@@ -24,6 +24,13 @@ if (fault === `seed`) options.seed = 43
 if (fault === `path`) options.path = `1`
 const propertyTest =
   fault === `skip` ? fcTest.skip : fault === `expected` ? fcTest.fails : fcTest
+fcTest.prop([fc.constant(1)], { numRuns: 1, seed: 20260930 })(
+  `runs an unrelated fixed campaign`,
+  () => {
+    if (process.env.TANSTACK_DB_ORACLE_REPLAY_WITNESS !== undefined)
+      process.stdout.write(`unrelated fixed campaign ran\n`)
+  },
+)
 propertyTest.prop([fc.integer({ min: 0, max: 100 })], options)(
   `executes the replay calibration property`,
   (value) => {

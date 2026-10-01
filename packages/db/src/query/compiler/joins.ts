@@ -416,7 +416,9 @@ function processJoin(
     const lazyFrom = activeSource === `main` ? joinClause.from : rawQuery.from
     const limitedSubquery =
       lazyFrom.type === `queryRef` &&
-      (lazyFrom.query.limit || lazyFrom.query.offset)
+      (lazyFrom.query.limit !== undefined ||
+        lazyFrom.query.offset !== undefined ||
+        lazyFrom.query.singleResult)
     const resultUnionLazySide = lazyFrom.type === `unionAll`
 
     const lazySourceJoinExpr = activeSource === `main` ? joinedExpr : mainExpr

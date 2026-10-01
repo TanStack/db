@@ -5,6 +5,12 @@
  * to a synchronous Vue watcher. The source Collection has published a coherent
  * snapshot by the time its change reaches this hook. This adapter must expose
  * either the preceding result or that new result, never a transient clear.
+ * For these one-message transactions, it must notify the watcher once with
+ * the final result.
+ * Authority: `packages/db/tests/conformance/contract.ts` defines `data` as
+ * the rows exposed by the live-query Collection. The project glossary defines
+ * publication as coherent visibility. This oracle checks that binding at
+ * Vue's synchronous watcher cut.
  *
  * Model: For these identity queries, copy source rows into a plain array after
  * each sync transaction. The model uses no Vue refs or hook array mechanics.
@@ -18,8 +24,8 @@
  * apply one sync transaction. A `flush: 'sync'` Vue watcher records every
  * public `data` value during that transaction, before a Vue scheduler tick.
  * The refinement check rejects every value other than the old or final rows
- * and requires the final rows to appear. This also rejects an always-empty
- * adapter, which a simple "no torn value" assertion would miss.
+ * and requires the final rows to appear. A clear-then-publish adapter would
+ * expose `[]` between two nonempty results and fail at the watcher checkpoint.
  */
 import { createCollection } from '@tanstack/db'
 import { effectScope, watch } from 'vue'
@@ -81,19 +87,21 @@ it.each(cases)(
       }),
     )
     const scope = effectScope()
-    const result = scope.run(() =>
-      input === `collection`
-        ? useLiveQuery(source)
-        : useLiveQuery((q) =>
-            q.from({ items: source }).select(({ items }) => ({
-              id: items.id,
-              value: items.value,
-            })),
-          ),
-    )!
     const expectedBefore = snapshot(initial)
+    let resultCollection: { value: unknown } | undefined
     let primaryFailure: unknown
     try {
+      const result = scope.run(() =>
+        input === `collection`
+          ? useLiveQuery(source)
+          : useLiveQuery((q) =>
+              q.from({ items: source }).select(({ items }) => ({
+                id: items.id,
+                value: items.value,
+              })),
+            ),
+      )!
+      resultCollection = result.collection
       await vi.waitFor(() =>
         expect(snapshot(result.data.value)).toEqual(expectedBefore),
       )
@@ -133,10 +141,12 @@ it.each(cases)(
     }
     const cleanupErrors: Array<unknown> = []
     let liveQueryCollection: typeof source | null = null
-    try {
-      liveQueryCollection = result.collection.value as typeof source | null
-    } catch (error) {
-      cleanupErrors.push(error)
+    if (resultCollection) {
+      try {
+        liveQueryCollection = resultCollection.value as typeof source | null
+      } catch (error) {
+        cleanupErrors.push(error)
+      }
     }
     try {
       scope.stop()

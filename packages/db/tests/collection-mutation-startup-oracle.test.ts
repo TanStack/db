@@ -3,6 +3,7 @@ import { z } from 'zod'
 import { DbClient, collectionOptions } from '../src/client.js'
 import { createCollection } from '../src/collection/index.js'
 import {
+  DeleteKeyNotFoundError,
   DuplicateKeyError,
   InvalidKeyError,
   MissingDeleteHandlerError,
@@ -12,6 +13,7 @@ import {
   NoKeysPassedToUpdateError,
   SchemaValidationError,
   UndefinedKeyError,
+  UpdateKeyNotFoundError,
 } from '../src/errors.js'
 import type { Collection } from '../src/collection/index.js'
 import type { SyncConfig } from '../src/types.js'
@@ -19,17 +21,18 @@ import type { SyncConfig } from '../src/types.js'
 /**
  * # What may an idle Collection mutation start?
  *
- * A Collection with `startSync: false` delays its source until a valid public
- * mutation needs it. Invalid mutations must fail before startup and before a
- * handler runs. A valid insert starts the source once, waits for synchronous
- * hydration, then checks the hydrated rows for duplicates before it applies
- * optimistic state.
+ * A Collection with `startSync: false` delays its source until a public
+ * mutation passes local preflight and needs it. Local preflight rejection must
+ * happen before startup and before a handler runs. Once startup synchronously
+ * hydrates rows, update and delete check target existence; insert checks for
+ * duplicates. Only admitted mutations apply optimistic state.
  *
  * This is a finite admission model rather than a second Collection. Each case
- * belongs to one of five cells: reject before startup, hydrate then reject a
- * duplicate, hydrate then accept, reuse an existing start, or surface startup
- * failure unchanged. The production driver observes starts, handler calls,
- * status, rows, mutation type and key, and persistence through the public API.
+ * belongs to one of five cells: reject before startup, hydrate then reject,
+ * hydrate then accept, reuse an existing start, or surface startup failure
+ * unchanged. The production driver observes starts, handler calls, status,
+ * rows, mutation type and key, and persistence through the public API. The
+ * immediate return is the checkpoint for successful hydrated state lookup.
  *
  * Deferred providers, ambient transactions, reconciliation, publication, and
  * settlement belong to the subscription and optimistic-history oracles.
@@ -308,11 +311,61 @@ describe(`Collection mutation startup oracle`, () => {
         expect(syncStarts).toBe(1)
         expect(collection.status).toBe(`ready`)
         expect(transaction.mutations).toMatchObject([
-          { key: `target`, type: operation },
+          { key: `target`, type: operation, original: target },
         ])
+        expect(
+          collection.toArray.map(({ id, value }) => ({ id, value })),
+        ).toEqual(
+          operation === `update` ? [{ id: `target`, value: `updated` }] : [],
+        )
         await transaction.isPersisted.promise
         expect(onUpdate).toHaveBeenCalledTimes(operation === `update` ? 1 : 0)
         expect(onDelete).toHaveBeenCalledTimes(operation === `delete` ? 1 : 0)
+      } finally {
+        await collection.cleanup()
+      }
+    },
+  )
+
+  it.each([`update`, `delete`] as const)(
+    `starts before rejecting %s of a missing target`,
+    async (operation) => {
+      let syncStarts = 0
+      let callbackCalls = 0
+      const onUpdate = vi.fn(noop)
+      const onDelete = vi.fn(noop)
+      const collection = createCollection<Row, string>({
+        ...idleConfig({
+          sync: ({ markReady }) => {
+            syncStarts++
+            markReady()
+          },
+        }),
+        onUpdate,
+        onDelete,
+      })
+
+      try {
+        expect(syncStarts).toBe(0)
+        expect(collection.status).toBe(`idle`)
+        const error = captureError(() =>
+          operation === `update`
+            ? collection.update(`missing`, () => {
+                callbackCalls++
+              })
+            : collection.delete(`missing`),
+        )
+        expect(error).toBeInstanceOf(
+          operation === `update`
+            ? UpdateKeyNotFoundError
+            : DeleteKeyNotFoundError,
+        )
+        expect(syncStarts).toBe(1)
+        expect(collection.status).toBe(`ready`)
+        expect(collection.toArray).toEqual([])
+        expect(callbackCalls).toBe(0)
+        expect(onUpdate).not.toHaveBeenCalled()
+        expect(onDelete).not.toHaveBeenCalled()
       } finally {
         await collection.cleanup()
       }

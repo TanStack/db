@@ -14,7 +14,11 @@ import {
   toArray,
 } from '../../src/query/index.js'
 import { runTrace } from '../trace-runner.js'
-import { oraclePropertyOptions } from '../oracle-config.js'
+import {
+  oraclePropertyOptions,
+  oracleRuns,
+  readOracleRunConfig,
+} from '../oracle-config.js'
 import { flushPromises } from '../utils.js'
 import type { Collection } from '../../src/collection/index.js'
 import type { CollectionSubscription } from '../../src/collection/subscription.js'
@@ -44,6 +48,10 @@ import type { Scheduler } from 'fast-check'
  * No one state machine mirrors the production controller. The file uses small
  * models for readiness, cancellation, scheduled completion, and progressive
  * delivery. Each model records only the public facts needed for its law.
+ * "Demand incarnation" is a model label for one interval of active logical
+ * demand on a route. Reactivation starts another interval; the label does not
+ * imply one physical acquisition or one provider transport. The fast/late
+ * phase is a fixture clock around source startup, not an ordered query window.
  * fast-check schedules current and obsolete completions in new orders, while
  * fixed scheduler orders pin both directions.
  *
@@ -59,6 +67,12 @@ import type { Scheduler } from 'fast-check'
  * boundary. A compiled includes lane also makes adapter unload remove owned
  * rows, so rejection proves that established child rows remain publicly
  * visible rather than only that old signals remain live.
+ *
+ * Known omissions: these controlled adapters establish core demand and graph
+ * behavior, not that a real provider honors abort or supplies the same applied
+ * receipts. The scheduled history has two demand incarnations; it does not
+ * establish arbitrary route churn or transport completion order. This file
+ * does not judge framework render timing.
  */
 
 type Post = {
@@ -101,6 +115,58 @@ type PreloadState = {
   preloadOutcome?: Promise<void>
   preloadSettled: boolean
 }
+
+type CapturedFailure = { error: unknown }
+
+// Run every cleanup step after the first mismatch. Keep that mismatch as the
+// cause and retain each secondary cleanup error separately.
+async function finishTemporalCleanup(
+  primary: CapturedFailure | undefined,
+  cleanups: ReadonlyArray<() => unknown>,
+): Promise<void> {
+  const cleanupFailures: Array<unknown> = []
+  for (const cleanup of cleanups) {
+    try {
+      await cleanup()
+    } catch (error) {
+      cleanupFailures.push(error)
+    }
+  }
+  if (cleanupFailures.length > 0) {
+    if (!primary && cleanupFailures.length === 1) throw cleanupFailures[0]
+    throw new AggregateError(
+      [...(primary ? [primary.error] : []), ...cleanupFailures],
+      `Temporal oracle and cleanup failed`,
+      { cause: primary ? primary.error : cleanupFailures[0] },
+    )
+  }
+  if (primary) throw primary.error
+}
+
+it(`preserves a row mismatch and later cleanup failures together`, async () => {
+  const mismatch = new Error(`row mismatch at checkpoint 1`)
+  const cleanupError = new Error(`release failed`)
+  const cleanupCalls: Array<string> = []
+  let reported: unknown
+  try {
+    await finishTemporalCleanup({ error: mismatch }, [
+      () => {
+        cleanupCalls.push(`release`)
+        throw cleanupError
+      },
+      () => {
+        cleanupCalls.push(`remaining cleanup`)
+      },
+    ])
+  } catch (error) {
+    reported = error
+  }
+  expect(reported).toBeInstanceOf(AggregateError)
+  if (!(reported instanceof AggregateError)) return
+  expect(reported.cause).toBe(mismatch)
+  expect(reported.errors).toEqual([mismatch, cleanupError])
+  expect(cleanupCalls).toEqual([`release`, `remaining cleanup`])
+})
 
 // A preload can reject before cleanup observes it. This record retains both
 // settlement and the original error without changing the production Promise.
@@ -602,6 +668,7 @@ it.each(
         settled = true
       },
     )
+    let primaryFailure: CapturedFailure | undefined
     try {
       await Promise.race([started.promise, preload])
       expect(loads).toHaveLength(1)
@@ -622,13 +689,16 @@ it.each(
         })),
       ).toEqual([{ id: 100, postId: 1, body: `one` }])
       if (projection === `functional`) expect(live.toArray[0]?.count).toBe(1)
-    } finally {
-      release.resolve()
-      await live.cleanup()
-      await observed
-      await posts.collection.cleanup()
-      await comments.cleanup()
+    } catch (error) {
+      primaryFailure = { error }
     }
+    release.resolve()
+    await finishTemporalCleanup(primaryFailure, [
+      () => live.cleanup(),
+      () => observed,
+      () => posts.collection.cleanup(),
+      () => comments.cleanup(),
+    ])
   },
 )
 
@@ -891,9 +961,12 @@ function createReadinessDriver(
     },
     apply: () => undefined,
     cleanup: async ({ posts, comments, live, preload }) => {
-      await live.cleanup()
-      await finishPreload(preload)
-      await Promise.all([posts.cleanup(), comments.cleanup()])
+      await finishTemporalCleanup(undefined, [
+        () => live.cleanup(),
+        () => finishPreload(preload),
+        () => posts.cleanup(),
+        () => comments.cleanup(),
+      ])
     },
   }
 }
@@ -1050,9 +1123,12 @@ function createDemandCancellationDriver(): TraceDriver<
     },
     cleanup: async ({ posts, comments, live, childLoad, preload }) => {
       childLoad.resolve()
-      await live.cleanup()
-      await finishPreload(preload)
-      await Promise.all([posts.cleanup(), comments.cleanup()])
+      await finishTemporalCleanup(undefined, [
+        () => live.cleanup(),
+        () => finishPreload(preload),
+        () => posts.cleanup(),
+        () => comments.cleanup(),
+      ])
     },
   }
 }
@@ -1134,6 +1210,7 @@ async function expectObsoleteDemandCannotPublishAfterReactivation(): Promise<voi
   )
 
   const preload = live.preload()
+  let primaryFailure: CapturedFailure | undefined
   try {
     await flushPromises()
     expect(requests).toHaveLength(1)
@@ -1156,12 +1233,17 @@ async function expectObsoleteDemandCannotPublishAfterReactivation(): Promise<voi
     await flushPromises()
     expect(live.get(1)?.comments).toEqual([{ id: 200, body: `current` }])
     expect(requests[0]!.signal?.aborted).toBe(true)
-  } finally {
-    for (const request of requests) request.deferred.resolve()
-    await Promise.allSettled(requests.map(({ outcome }) => outcome))
-    await live.cleanup()
-    await Promise.all([posts.cleanup(), comments.cleanup()])
+  } catch (error) {
+    primaryFailure = { error }
   }
+  for (const request of requests) request.deferred.resolve()
+  await finishTemporalCleanup(primaryFailure, [
+    () => Promise.allSettled(requests.map(({ outcome }) => outcome)),
+    () => live.cleanup(),
+    () => Promise.allSettled([preload]),
+    () => posts.cleanup(),
+    () => comments.cleanup(),
+  ])
 }
 
 async function expectScheduledDemandCompletionsStayGenerationSafe(
@@ -1209,12 +1291,9 @@ async function expectScheduledDemandCompletionsStayGenerationSafe(
   })
   const live = createPostsWithCommentsLive(posts, comments)
   const preload = live.preload()
-  const observations: Array<{
-    completed: Array<string>
-    ready: boolean
-    rows: Array<{ id: number; comments: Array<{ id: number; body: string }> }>
-  }> = []
+  const observations: Array<ScheduledDemandObservation> = []
 
+  let primaryFailure: CapturedFailure | undefined
   try {
     await flushPromises()
     expect(requests).toHaveLength(1)
@@ -1251,26 +1330,46 @@ async function expectScheduledDemandCompletionsStayGenerationSafe(
 
     expect(observations).toHaveLength(2)
     for (const [index, observation] of observations.entries()) {
-      expect(observation.completed).toHaveLength(index + 1)
-      const currentCompleted = observation.completed.includes(`demand-1`)
-      expect(observation.rows).toEqual([
-        {
-          id: 1,
-          comments: currentCompleted ? [{ id: 200, body: `current` }] : [],
-        },
-      ])
-      if (currentCompleted) expect(observation.ready).toBe(true)
+      expectScheduledDemandObservation(observation, index)
     }
     expect(live.isReady()).toBe(true)
     expect(live.get(1)?.comments.map(({ id, body }) => ({ id, body }))).toEqual(
       [{ id: 200, body: `current` }],
     )
-  } finally {
-    if (scheduler.count() > 0) await scheduler.waitAll()
-    await Promise.allSettled(requests.map(({ outcome }) => outcome))
-    await live.cleanup()
-    await Promise.all([posts.cleanup(), comments.cleanup()])
+  } catch (error) {
+    primaryFailure = { error }
   }
+  await finishTemporalCleanup(primaryFailure, [
+    () => scheduler.count() > 0 && scheduler.waitAll(),
+    () => Promise.allSettled(requests.map(({ outcome }) => outcome)),
+    () => live.cleanup(),
+    () => Promise.allSettled([preload]),
+    () => posts.cleanup(),
+    () => comments.cleanup(),
+  ])
+}
+
+type ScheduledDemandObservation = {
+  completed: Array<string>
+  ready: boolean
+  rows: Array<{ id: number; comments: Array<{ id: number; body: string }> }>
+}
+
+// The public row is determined by whether the current demand completed. An
+// obsolete completion alone cannot add its child row.
+function expectScheduledDemandObservation(
+  observation: ScheduledDemandObservation,
+  index: number,
+): void {
+  expect(observation.completed).toHaveLength(index + 1)
+  const currentCompleted = observation.completed.includes(`demand-1`)
+  expect(observation.rows).toEqual([
+    {
+      id: 1,
+      comments: currentCompleted ? [{ id: 200, body: `current` }] : [],
+    },
+  ])
+  if (currentCompleted) expect(observation.ready).toBe(true)
 }
 
 function createMutablePosts(
@@ -1379,6 +1478,7 @@ async function expectRetainedDemandBlocksReadiness(): Promise<void> {
   const preload: PreloadState = { preloadSettled: false }
   startPreload(live, preload)
 
+  let primaryFailure: CapturedFailure | undefined
   try {
     await flushPromises()
     expect(requests.map(({ keys }) => keys)).toEqual([[1]])
@@ -1397,12 +1497,17 @@ async function expectRetainedDemandBlocksReadiness(): Promise<void> {
     await requests[0]!.outcome
     await finishPreload(preload)
     expect(live.isReady()).toBe(true)
-  } finally {
-    for (const request of requests) request.deferred.resolve()
-    await Promise.allSettled(requests.map(({ outcome }) => outcome))
-    await live.cleanup()
-    await Promise.all([posts.collection.cleanup(), comments.cleanup()])
+  } catch (error) {
+    primaryFailure = { error }
   }
+  for (const request of requests) request.deferred.resolve()
+  await finishTemporalCleanup(primaryFailure, [
+    () => Promise.allSettled(requests.map(({ outcome }) => outcome)),
+    () => live.cleanup(),
+    () => preload.preloadOutcome,
+    () => posts.collection.cleanup(),
+    () => comments.cleanup(),
+  ])
 }
 
 async function expectDemandChurnPreservesCoverage(
@@ -1425,6 +1530,7 @@ async function expectDemandChurnPreservesCoverage(
     if (ready instanceof Promise) await ready
   }
 
+  let primaryFailure: CapturedFailure | undefined
   try {
     for (let key = 1; key <= 3; key++) {
       const update = controller.setDemand(
@@ -1479,13 +1585,16 @@ async function expectDemandChurnPreservesCoverage(
 
     expect(requests[1]!.signal?.aborted).toBe(true)
     expect(requests[2]!.signal?.aborted).toBe(true)
-  } finally {
-    for (const request of requests) request.deferred.resolve()
-    await Promise.allSettled(requests.map(({ outcome }) => outcome))
-    controller.clear()
-    subscription.unsubscribe()
-    await collection.cleanup()
+  } catch (error) {
+    primaryFailure = { error }
   }
+  for (const request of requests) request.deferred.resolve()
+  await finishTemporalCleanup(primaryFailure, [
+    () => Promise.allSettled(requests.map(({ outcome }) => outcome)),
+    () => controller.clear(),
+    () => subscription.unsubscribe(),
+    () => collection.cleanup(),
+  ])
 }
 
 async function expectFailedConsolidationKeepsVisibleRows(): Promise<void> {
@@ -1558,6 +1667,7 @@ async function expectFailedConsolidationKeepsVisibleRows(): Promise<void> {
       .flatMap(({ comments: rows }) => rows.map(({ id }) => id))
       .sort((left, right) => left - right)
 
+  let primaryFailure: CapturedFailure | undefined
   try {
     const preload = live.preload()
     await flushPromises()
@@ -1600,13 +1710,17 @@ async function expectFailedConsolidationKeepsVisibleRows(): Promise<void> {
     expect(live.status).toBe(`error`)
     expect(live.utils.lastSubsetError).toBe(failure)
     expect(visibleCommentIds()).toEqual([200, 300])
-  } finally {
-    for (const request of requests) request.deferred.resolve()
-    await Promise.allSettled(requests.map(({ outcome }) => outcome))
-    await live.cleanup()
-    await Promise.all([posts.collection.cleanup(), comments.cleanup()])
-    consoleError.mockRestore()
+  } catch (error) {
+    primaryFailure = { error }
   }
+  for (const request of requests) request.deferred.resolve()
+  await finishTemporalCleanup(primaryFailure, [
+    () => Promise.allSettled(requests.map(({ outcome }) => outcome)),
+    () => live.cleanup(),
+    () => posts.collection.cleanup(),
+    () => comments.cleanup(),
+    () => consoleError.mockRestore(),
+  ])
 }
 
 function expectContradictoryReplacementStartCrashes(): void {
@@ -1645,6 +1759,7 @@ async function expectObsoleteDemandCannotSettleReactivatedDemand(): Promise<void
   const preload: PreloadState = { preloadSettled: false }
   startPreload(live, preload)
 
+  let primaryFailure: CapturedFailure | undefined
   try {
     await flushPromises()
     expect(requests).toHaveLength(1)
@@ -1665,12 +1780,17 @@ async function expectObsoleteDemandCannotSettleReactivatedDemand(): Promise<void
     requests[1]!.deferred.resolve()
     await requests[1]!.outcome
     await finishPreload(preload)
-  } finally {
-    for (const request of requests) request.deferred.resolve()
-    await Promise.allSettled(requests.map(({ outcome }) => outcome))
-    await live.cleanup()
-    await Promise.all([posts.collection.cleanup(), comments.cleanup()])
+  } catch (error) {
+    primaryFailure = { error }
   }
+  for (const request of requests) request.deferred.resolve()
+  await finishTemporalCleanup(primaryFailure, [
+    () => Promise.allSettled(requests.map(({ outcome }) => outcome)),
+    () => live.cleanup(),
+    () => preload.preloadOutcome,
+    () => posts.collection.cleanup(),
+    () => comments.cleanup(),
+  ])
 }
 
 async function expectRejectedDemandEntersError(): Promise<void> {
@@ -1713,6 +1833,7 @@ async function expectRejectedDemandEntersError(): Promise<void> {
   const consoleError = vi.spyOn(console, `error`).mockImplementation(() => {})
   startPreload(live, preload)
 
+  let primaryFailure: CapturedFailure | undefined
   try {
     await flushPromises()
     expect(loadCount).toBe(1)
@@ -1733,12 +1854,16 @@ async function expectRejectedDemandEntersError(): Promise<void> {
         comments: rows.map(({ id: childId, body }) => ({ id: childId, body })),
       })),
     ).toEqual([{ id: 1, comments: [{ id: 100, body: `after restart` }] }])
-  } finally {
-    await live.cleanup()
-    await preload.preloadOutcome
-    await Promise.all([posts.collection.cleanup(), comments.cleanup()])
-    consoleError.mockRestore()
+  } catch (error) {
+    primaryFailure = { error }
   }
+  await finishTemporalCleanup(primaryFailure, [
+    () => live.cleanup(),
+    () => preload.preloadOutcome,
+    () => posts.collection.cleanup(),
+    () => comments.cleanup(),
+    () => consoleError.mockRestore(),
+  ])
 }
 
 async function expectFailedDemandRetriesSameCoverage(): Promise<void> {
@@ -1775,6 +1900,7 @@ async function expectFailedDemandRetriesSameCoverage(): Promise<void> {
     initialKeys: new Set(),
   }
 
+  let primaryFailure: CapturedFailure | undefined
   try {
     const first = controller.setDemand(subscription, plan, new Set([1]))
     expect(first.ready).toBeInstanceOf(Promise)
@@ -1788,18 +1914,23 @@ async function expectFailedDemandRetriesSameCoverage(): Promise<void> {
     expect(retry.changed).toBe(true)
     expect(loadCount).toBe(2)
     if (retry.ready instanceof Promise) await retry.ready
-  } finally {
-    controller.clear()
-    subscription.unsubscribe()
-    await comments.cleanup()
+  } catch (error) {
+    primaryFailure = { error }
   }
+  await finishTemporalCleanup(primaryFailure, [
+    () => controller.clear(),
+    () => subscription.unsubscribe(),
+    () => comments.cleanup(),
+  ])
 }
 
 async function expectDemandReactivationRetriesAfterReleaseFailure(
   keys: ReadonlyArray<number>,
 ): Promise<void> {
   let loadCount = 0
+  let unloadCount = 0
   let allowUnload = false
+  const requestedKeys: Array<Array<number>> = []
   const releaseError = new Error(`child release failed`)
   const comments = createCollection<Comment>({
     id: nextCollectionId(`temporal-release-retry-comments`),
@@ -1809,12 +1940,14 @@ async function expectDemandReactivationRetriesAfterReleaseFailure(
     defaultIndexType: BasicIndex,
     sync: {
       sync: ({ markReady }) => ({
-        loadSubset: () => {
+        loadSubset: (options) => {
           loadCount += 1
+          requestedKeys.push(correlationKeys([options], `postId`))
           markReady()
           return true
         },
         unloadSubset: () => {
+          unloadCount += 1
           if (!allowUnload) throw releaseError
         },
       }),
@@ -1832,6 +1965,7 @@ async function expectDemandReactivationRetriesAfterReleaseFailure(
     initialKeys: new Set(),
   }
 
+  let primaryFailure: CapturedFailure | undefined
   try {
     expect(
       controller.setDemand(subscription, plan, new Set(keys)),
@@ -1840,16 +1974,47 @@ async function expectDemandReactivationRetriesAfterReleaseFailure(
 
     const retired = controller.setDemand(subscription, plan, new Set())
     expect(retired).toMatchObject({ changed: true, empty: true })
+    expect(unloadCount).toBe(1)
 
     const reactivated = controller.setDemand(subscription, plan, new Set(keys))
-    expect(reactivated).toMatchObject({ changed: true, empty: false })
-    expect(loadCount).toBe(2)
-  } finally {
-    allowUnload = true
-    controller.clear()
-    subscription.unsubscribe()
-    await comments.cleanup()
+    expectReleaseReentryObservation(
+      {
+        changed: reactivated.changed,
+        empty: reactivated.empty,
+        loadCount,
+        requestedKeys,
+      },
+      keys,
+    )
+  } catch (error) {
+    primaryFailure = { error }
   }
+  allowUnload = true
+  await finishTemporalCleanup(primaryFailure, [
+    () => controller.clear(),
+    () => subscription.unsubscribe(),
+    () => comments.cleanup(),
+  ])
+}
+
+type ReleaseReentryObservation = {
+  changed: boolean
+  empty: boolean
+  loadCount: number
+  requestedKeys: Array<Array<number>>
+}
+
+function expectReleaseReentryObservation(
+  observed: ReleaseReentryObservation,
+  keys: ReadonlyArray<number>,
+): void {
+  const expectedKeys = [...keys].sort((left, right) => left - right)
+  expect(observed).toEqual({
+    changed: true,
+    empty: false,
+    loadCount: 2,
+    requestedKeys: [expectedKeys, expectedKeys],
+  })
 }
 
 async function expectRetiredDemandStaysNonfatalAfterReleaseFailure(): Promise<void> {
@@ -1880,6 +2045,7 @@ async function expectRetiredDemandStaysNonfatalAfterReleaseFailure(): Promise<vo
   const live = createPostsWithCommentsLive(posts.collection, comments)
   const consoleError = vi.spyOn(console, `error`).mockImplementation(() => {})
 
+  let primaryFailure: CapturedFailure | undefined
   try {
     await live.preload()
     expect(loadCount).toBe(1)
@@ -1895,12 +2061,16 @@ async function expectRetiredDemandStaysNonfatalAfterReleaseFailure(): Promise<vo
     await flushPromises()
     expect(loadCount).toBe(2)
     expect(live.status).toBe(`ready`)
-  } finally {
-    allowUnload = true
-    await live.cleanup()
-    await Promise.all([posts.collection.cleanup(), comments.cleanup()])
-    consoleError.mockRestore()
+  } catch (error) {
+    primaryFailure = { error }
   }
+  allowUnload = true
+  await finishTemporalCleanup(primaryFailure, [
+    () => live.cleanup(),
+    () => posts.collection.cleanup(),
+    () => comments.cleanup(),
+    () => consoleError.mockRestore(),
+  ])
 }
 
 async function expectFailedReplayStopsGatingAfterLastDemandRetires(): Promise<void> {
@@ -1958,6 +2128,7 @@ async function expectFailedReplayStopsGatingAfterLastDemandRetires(): Promise<vo
   )
   const consoleError = vi.spyOn(console, `error`).mockImplementation(() => {})
 
+  let primaryFailure: CapturedFailure | undefined
   try {
     await live.preload()
     expect(live.get(post.id)?.comments.map(({ id }) => id)).toEqual([10])
@@ -1981,13 +2152,17 @@ async function expectFailedReplayStopsGatingAfterLastDemandRetires(): Promise<vo
     // longer gate unrelated parent changes in the shared graph.
     expect(live.size).toBe(0)
     expect(publications).toEqual([[]])
-  } finally {
-    replay.resolve()
-    subscription.unsubscribe()
-    await live.cleanup()
-    await Promise.all([posts.collection.cleanup(), comments.cleanup()])
-    consoleError.mockRestore()
+  } catch (error) {
+    primaryFailure = { error }
   }
+  replay.resolve()
+  await finishTemporalCleanup(primaryFailure, [
+    () => subscription.unsubscribe(),
+    () => live.cleanup(),
+    () => posts.collection.cleanup(),
+    () => comments.cleanup(),
+    () => consoleError.mockRestore(),
+  ])
 }
 
 async function expectSynchronousEmptyDemandIsReady(): Promise<void> {
@@ -2010,15 +2185,20 @@ async function expectSynchronousEmptyDemandIsReady(): Promise<void> {
   })
   const live = createPostsWithCommentsLive(posts.collection, comments)
 
+  let primaryFailure: CapturedFailure | undefined
   try {
     await live.preload()
     expect(loadCount).toBe(1)
     expect(live.isReady()).toBe(true)
     expect(live.get(1)?.comments).toEqual([])
-  } finally {
-    await live.cleanup()
-    await Promise.all([posts.collection.cleanup(), comments.cleanup()])
+  } catch (error) {
+    primaryFailure = { error }
   }
+  await finishTemporalCleanup(primaryFailure, [
+    () => live.cleanup(),
+    () => posts.collection.cleanup(),
+    () => comments.cleanup(),
+  ])
 }
 
 async function expectPartialShrinkRetainsCoverage(): Promise<void> {
@@ -2074,6 +2254,7 @@ async function expectPartialShrinkRetainsCoverage(): Promise<void> {
   const live = createPostsWithCommentsLive(posts.collection, comments)
   const preload = live.preload()
 
+  let primaryFailure: CapturedFailure | undefined
   try {
     await flushPromises()
     initialLoad.resolve()
@@ -2088,11 +2269,16 @@ async function expectPartialShrinkRetainsCoverage(): Promise<void> {
     posts.write(`delete`, firstPost)
     await flushPromises()
     expect(unloads).toEqual([[1, 2]])
-  } finally {
-    initialLoad.resolve()
-    await live.cleanup()
-    await Promise.all([posts.collection.cleanup(), comments.cleanup()])
+  } catch (error) {
+    primaryFailure = { error }
   }
+  initialLoad.resolve()
+  await finishTemporalCleanup(primaryFailure, [
+    () => live.cleanup(),
+    () => Promise.allSettled([preload]),
+    () => posts.collection.cleanup(),
+    () => comments.cleanup(),
+  ])
 }
 
 type FastPathEvent = {
@@ -2294,10 +2480,13 @@ function createProgressiveDriver(
       preload,
     }) => {
       releaseParent?.()
-      await parentDelivery
-      await live.cleanup()
-      await finishPreload(preload)
-      await Promise.all([users?.cleanup(), posts.cleanup()])
+      await finishTemporalCleanup(undefined, [
+        () => parentDelivery,
+        () => live.cleanup(),
+        () => finishPreload(preload),
+        () => users?.cleanup(),
+        () => posts.cleanup(),
+      ])
     },
   }
 }
@@ -2328,6 +2517,27 @@ async function expectProgressiveTraceMatches(
   })
 }
 
+// Each generated lane uses one grammar and one check in both campaigns. A
+// seed-and-path replay selects only its requested random lane.
+function temporalCampaigns(property: string, fixedSeed: number) {
+  const replay = readOracleRunConfig()
+  return [
+    {
+      label: `fixed seed ${fixedSeed}`,
+      test: replay.replayPath === undefined ? fcTest : fcTest.skip,
+      options: { numRuns: oracleRuns(20), seed: fixedSeed },
+    },
+    {
+      label: `random or replayed seed`,
+      test:
+        replay.replayPath === undefined || replay.replayProperty === property
+          ? fcTest
+          : fcTest.skip,
+      options: oraclePropertyOptions(20, property),
+    },
+  ]
+}
+
 describe(`includes temporal oracle`, () => {
   it(`an empty outer does not wait for an undemanded child`, () =>
     expectReadinessMatches([]))
@@ -2349,13 +2559,22 @@ describe(`includes temporal oracle`, () => {
     expectObsoleteDemandCannotPublishAfterReactivation,
   )
 
-  fcTest.prop(
-    [fc.scheduler()],
-    oraclePropertyOptions(20, `includes-temporal.demand-scheduling`),
-  )(
-    `obsolete and current demand completions are generation-safe in either order`,
-    expectScheduledDemandCompletionsStayGenerationSafe,
-  )
+  // Grammar: one route is retired and reactivated, leaving one obsolete and
+  // one current acquisition. The scheduler permutes their two completions.
+  // Retire, reactivate, and completion order each distinguish the stale-demand
+  // law; fixed orders below reconstruct both schedules. The two-task bound
+  // excludes a third incarnation. A canceled source write is forbidden by the
+  // fixture's signal guard, not treated as a valid completion.
+  const demandScheduler = fc.scheduler()
+  for (const campaign of temporalCampaigns(
+    `includes-temporal.demand-scheduling`,
+    1_658_301,
+  )) {
+    campaign.test.prop([demandScheduler], campaign.options)(
+      `obsolete and current demand completions are generation-safe with ${campaign.label}`,
+      expectScheduledDemandCompletionsStayGenerationSafe,
+    )
+  }
 
   it.each([{ order: [1, 2] }, { order: [2, 1] }])(
     `observes every completion in fixed scheduler order $order`,
@@ -2364,6 +2583,19 @@ describe(`includes temporal oracle`, () => {
         fc.schedulerFor(order),
       ),
   )
+
+  it(`rejects an obsolete child row at the first scheduled checkpoint`, () => {
+    expect(() =>
+      expectScheduledDemandObservation(
+        {
+          completed: [`demand-0`],
+          ready: false,
+          rows: [{ id: 1, comments: [{ id: 100, body: `obsolete` }] }],
+        },
+        0,
+      ),
+    ).toThrowError(expect.objectContaining({ name: `AssertionError` }))
+  })
 
   it(
     `retained pending demand blocks readiness after demand expands`,
@@ -2404,18 +2636,41 @@ describe(`includes temporal oracle`, () => {
   it(`reactivated demand retries after its prior release fails`, () =>
     expectDemandReactivationRetriesAfterReleaseFailure([1]))
 
-  fcTest.prop(
-    [
-      fc.uniqueArray(fc.integer({ min: -3, max: 3 }), {
-        minLength: 1,
-        maxLength: 5,
-      }),
-    ],
-    oraclePropertyOptions(20, `includes-temporal.release-reentry`),
-  )(
-    `failed release never suppresses a later demand incarnation`,
-    expectDemandReactivationRetriesAfterReleaseFailure,
-  )
+  it(`rejects a failed release that suppresses reacquisition`, () => {
+    expect(() =>
+      expectReleaseReentryObservation(
+        {
+          changed: false,
+          empty: false,
+          loadCount: 1,
+          requestedKeys: [[1]],
+        },
+        [1],
+      ),
+    ).toThrowError(expect.objectContaining({ name: `AssertionError` }))
+  })
+
+  // Grammar: a nonempty unique key set is acquired, retired through a failed
+  // adapter unload, then reacquired unchanged. The single-key fixed witness
+  // reconstructs the smallest history. Varying values challenges request-key
+  // preservation; varying cardinality challenges one grouped acquisition.
+  // The domain is 1..5 distinct integers in [-3, 3]. An empty reactivation
+  // does not satisfy the active-demand premise; duplicate keys are excluded
+  // because the demand is a set. Removing retirement or reactivation removes
+  // the law's distinguishing next action.
+  const releaseKeys = fc.uniqueArray(fc.integer({ min: -3, max: 3 }), {
+    minLength: 1,
+    maxLength: 5,
+  })
+  for (const campaign of temporalCampaigns(
+    `includes-temporal.release-reentry`,
+    1_658_302,
+  )) {
+    campaign.test.prop([releaseKeys], campaign.options)(
+      `failed release never suppresses a later demand incarnation with ${campaign.label}`,
+      expectDemandReactivationRetriesAfterReleaseFailure,
+    )
+  }
 
   it(
     `failed release retires an empty live-query demand without poisoning reentry`,
@@ -2444,130 +2699,154 @@ describe(`includes temporal oracle`, () => {
   it(`a nested progressive subset loads inside the fast-path window`, () =>
     expectProgressiveTraceMatches(`nested`))
 
-  fcTest.prop(
-    [fc.array(fc.string({ maxLength: 8 }), { minLength: 2, maxLength: 4 })],
-    oraclePropertyOptions(20, `includes-temporal.partial-values`),
-  )(
-    `publishes each partial child prefix before demand settles`,
-    async (bodies) => {
-      for (const form of [`array`, `materialized`] as const) {
-        const parents = createMutablePosts([
-          { id: 1, authorId: `selected`, title: `Receiving children` },
-          { id: 2, authorId: `selected`, title: `Empty sibling` },
-        ])
-        const acquired = createDeferred<void>()
-        const settled = createDeferred<void>()
-        const requested = new Set<number>()
-        let deliver!: (row: Comment) => Promise<void>
-        let complete!: () => void
-        const children = createCollection<Comment>({
-          id: nextCollectionId(`partial-children`),
-          getKey: (row) => row.id,
-          syncMode: `on-demand`,
-          sync: {
-            sync: ({ begin, write, commit, markReady }) => {
-              deliver = async (value) => {
-                begin()
-                write({ type: `insert`, value })
-                await commit()
-              }
-              complete = () => {
-                markReady()
-                settled.resolve()
-              }
-              return {
-                loadSubset: (options) => {
-                  for (const key of correlationKeys([options], `postId`))
-                    requested.add(key)
-                  acquired.resolve()
-                  return settled.promise
-                },
-              }
+  // Grammar: one parent receives 2..4 distinct-key children before its held
+  // demand settles; a sibling stays empty. Every prefix, including zero, is a
+  // public checkpoint in both inline forms. The two-child minimum reconstructs
+  // the first partial prefix and its continuation. Removing the hold loses the
+  // before-settlement law; removing the empty sibling loses its empty-value
+  // check. Bodies are strings of length 0..8, including duplicates and empty
+  // strings. Reusing a child public key or delivering after settlement is
+  // outside this legal history; longer prefixes remain untested here.
+  const partialBodies = fc.array(fc.string({ maxLength: 8 }), {
+    minLength: 2,
+    maxLength: 4,
+  })
+  for (const campaign of temporalCampaigns(
+    `includes-temporal.partial-values`,
+    1_658_303,
+  )) {
+    campaign.test.prop([partialBodies], campaign.options)(
+      `publishes each partial child prefix before demand settles with ${campaign.label}`,
+      async (bodies) => {
+        for (const form of [`array`, `materialized`] as const) {
+          const parents = createMutablePosts([
+            { id: 1, authorId: `selected`, title: `Receiving children` },
+            { id: 2, authorId: `selected`, title: `Empty sibling` },
+          ])
+          const acquired = createDeferred<void>()
+          const settled = createDeferred<void>()
+          const requested = new Set<number>()
+          let deliver!: (row: Comment) => Promise<void>
+          let complete!: () => void
+          const children = createCollection<Comment>({
+            id: nextCollectionId(`partial-children`),
+            getKey: (row) => row.id,
+            syncMode: `on-demand`,
+            sync: {
+              sync: ({ begin, write, commit, markReady }) => {
+                deliver = async (value) => {
+                  begin()
+                  write({ type: `insert`, value })
+                  await commit()
+                }
+                complete = () => {
+                  markReady()
+                  settled.resolve()
+                }
+                return {
+                  loadSubset: (options) => {
+                    for (const key of correlationKeys([options], `postId`))
+                      requested.add(key)
+                    acquired.resolve()
+                    return settled.promise
+                  },
+                }
+              },
             },
-          },
-        })
-        // Keep wrappers concrete at compilation. The query builder does not
-        // accept a union of wrapper types as its result.
-        const live =
-          form === `array`
-            ? createLiveQueryCollection((q) =>
-                q.from({ post: parents.collection }).select(({ post }) => ({
-                  id: post.id,
-                  children: toArray(
-                    q
-                      .from({ child: children })
-                      .where(({ child }) => eq(child.postId, post.id))
-                      .orderBy(({ child }) => child.id),
-                  ),
+          })
+          // Keep wrappers concrete at compilation. The query builder does not
+          // accept a union of wrapper types as its result.
+          const live =
+            form === `array`
+              ? createLiveQueryCollection((q) =>
+                  q.from({ post: parents.collection }).select(({ post }) => ({
+                    id: post.id,
+                    children: toArray(
+                      q
+                        .from({ child: children })
+                        .where(({ child }) => eq(child.postId, post.id))
+                        .orderBy(({ child }) => child.id),
+                    ),
+                  })),
+                )
+              : createLiveQueryCollection((q) =>
+                  q.from({ post: parents.collection }).select(({ post }) => ({
+                    id: post.id,
+                    children: materialize(
+                      q
+                        .from({ child: children })
+                        .where(({ child }) => eq(child.postId, post.id))
+                        .orderBy(({ child }) => child.id),
+                    ),
+                  })),
+                )
+          const preload: PreloadState = { preloadSettled: false }
+          startPreload(live, preload)
+          const expected: Array<Comment> = []
+          const observe = () =>
+            live.toArray
+              .map((row) => ({
+                id: row.id,
+                children: row.children.map(({ id, postId, body }) => ({
+                  id,
+                  postId,
+                  body,
                 })),
-              )
-            : createLiveQueryCollection((q) =>
-                q.from({ post: parents.collection }).select(({ post }) => ({
-                  id: post.id,
-                  children: materialize(
-                    q
-                      .from({ child: children })
-                      .where(({ child }) => eq(child.postId, post.id))
-                      .orderBy(({ child }) => child.id),
-                  ),
-                })),
-              )
-        const preload: PreloadState = { preloadSettled: false }
-        startPreload(live, preload)
-        const expected: Array<Comment> = []
-        const observe = () =>
-          live.toArray
-            .map((row) => ({
-              id: row.id,
-              children: row.children.map(({ id, postId, body }) => ({
-                id,
-                postId,
-                body,
-              })),
-            }))
-            .sort((a, b) => a.id - b.id)
-        const assertRows = (actual: ReturnType<typeof observe>) => {
-          expect(actual).toEqual([
-            { id: 1, children: expected },
-            { id: 2, children: [] },
+              }))
+              .sort((a, b) => a.id - b.id)
+          const assertRows = (actual: ReturnType<typeof observe>) => {
+            expect(actual).toEqual([
+              { id: 1, children: expected },
+              { id: 2, children: [] },
+            ])
+          }
+          let primaryFailure: CapturedFailure | undefined
+          try {
+            await acquired.promise
+            await flushPromises()
+            expect([...requested].sort()).toEqual([1, 2])
+            for (let count = 0; count <= bodies.length; count++) {
+              if (count > 0) {
+                const row = { id: count, postId: 1, body: bodies[count - 1]! }
+                expected.push(row)
+                await deliver(row)
+              }
+              const actual = observe()
+              assertRows(actual)
+              if (count === 1) {
+                const lostPrefix = structuredClone(actual)
+                lostPrefix[0]!.children = []
+                const wrongValue = structuredClone(actual)
+                wrongValue[0]!.children[0]!.body += `corrupt`
+                for (const bad of [
+                  lostPrefix,
+                  wrongValue,
+                  actual.slice(0, 1),
+                ]) {
+                  expect(() => assertRows(bad)).toThrowError(
+                    expect.objectContaining({ name: `AssertionError` }),
+                  )
+                }
+              }
+              expect(live.isReady()).toBe(false)
+              expect(preload.preloadSettled).toBe(false)
+            }
+            complete()
+            await finishPreload(preload)
+            expect(live.isReady()).toBe(true)
+            assertRows(observe())
+          } catch (error) {
+            primaryFailure = { error }
+          }
+          settled.resolve()
+          await finishTemporalCleanup(primaryFailure, [
+            () => live.cleanup(),
+            () => preload.preloadOutcome,
+            () => parents.collection.cleanup(),
+            () => children.cleanup(),
           ])
         }
-        try {
-          await acquired.promise
-          await flushPromises()
-          expect([...requested].sort()).toEqual([1, 2])
-          for (let count = 0; count <= bodies.length; count++) {
-            if (count > 0) {
-              const row = { id: count, postId: 1, body: bodies[count - 1]! }
-              expected.push(row)
-              await deliver(row)
-            }
-            const actual = observe()
-            assertRows(actual)
-            if (count === 1) {
-              const lostPrefix = structuredClone(actual)
-              lostPrefix[0]!.children = []
-              const wrongValue = structuredClone(actual)
-              wrongValue[0]!.children[0]!.body += `corrupt`
-              for (const bad of [lostPrefix, wrongValue, actual.slice(0, 1)]) {
-                expect(() => assertRows(bad)).toThrowError(
-                  expect.objectContaining({ name: `AssertionError` }),
-                )
-              }
-            }
-            expect(live.isReady()).toBe(false)
-            expect(preload.preloadSettled).toBe(false)
-          }
-          complete()
-          await finishPreload(preload)
-          expect(live.isReady()).toBe(true)
-          assertRows(observe())
-        } finally {
-          settled.resolve()
-          await live.cleanup()
-          await Promise.all([parents.collection.cleanup(), children.cleanup()])
-        }
-      }
-    },
-  )
+      },
+    )
+  }
 })

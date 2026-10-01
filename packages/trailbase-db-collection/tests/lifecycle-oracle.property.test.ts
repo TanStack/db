@@ -7,18 +7,18 @@ import { MockRecordApi } from './mock-record-api'
 import type { Event, ListResponse } from 'trailbase'
 
 /**
- * # Does a TrailBase provider session publish and retire one valid row history?
+ * # Does a TrailBase sync run publish and retire one valid row history?
  *
- * An eager provider session needs both its list and stream before readiness. An
- * on-demand provider session does not claim an initial list. Stream events update an independent
+ * An eager sync run needs both its list and stream before readiness. An
+ * on-demand sync run does not claim an initial list. Stream events update an independent
  * key/value relation. Startup failure rejects; later failure keeps the last
- * rows and reports the error. Cleanup clears rows, cancels work, and fences all
- * late results from the replacement provider session.
+ * rows and reports the error. Cleanup clears rows, cancels work, and fences
+ * late results from prior sync runs after restart.
  *
  * A controlled RecordApi and native ReadableStream provide explicit gates for
  * subscribe, list, events, closure, parse failure, cancellation, and cleanup.
  * The same interpreter runs a fixed boundary corpus and generated one-to-three
- * provider-session histories. It compares rows, readiness, exact reports, reader locks,
+ * sync-run histories. It compares rows, readiness, exact reports, reader locks,
  * timers, cancellations, and detached rejections after every step.
  *
  * See `ORACLE.md` for the full domain, replay commands, mutation evidence, and
@@ -33,7 +33,9 @@ type Ending =
   | `read-error`
   | `parse-error`
   | `cleanup`
-type ProviderSessionPlan =
+// Each plan represents one Collection sync run and its controlled RecordApi
+// work; subscription can fail before a TrailBase provider stream exists.
+type SyncRunPlan =
   | {
       kind: `cancel-subscribe`
       late: `resolve` | `reject`
@@ -50,7 +52,7 @@ type ProviderSessionPlan =
     }
 type Scenario = {
   mode: `eager` | `on-demand`
-  providerSessions: Array<ProviderSessionPlan>
+  syncRuns: Array<SyncRunPlan>
 }
 
 function deferred<T>() {
@@ -60,7 +62,7 @@ function deferred<T>() {
     resolve = yes
     reject = no
   })
-  // Every adapter promise is observed even when its provider session is abandoned.
+  // Every adapter promise is observed even when its sync run is abandoned.
   void promise.catch(() => undefined)
   return { promise, resolve, reject }
 }
@@ -119,7 +121,7 @@ function source() {
  * The model never reads adapter bookkeeping, pending transactions or caches.
  */
 async function checkLifecycle(
-  { mode, providerSessions }: Scenario,
+  { mode, syncRuns }: Scenario,
   providerFault?: `list` | `set` | `buffered`,
 ) {
   const api = new MockRecordApi<Row>()
@@ -198,7 +200,7 @@ async function checkLifecycle(
   }
   const failures: Array<unknown> = []
   try {
-    for (const [epoch, plan] of providerSessions.entries()) {
+    for (const [epoch, plan] of syncRuns.entries()) {
       current = source()
       const active = current
       allSources.push(active)
@@ -414,7 +416,7 @@ const changeArb = fc.record({
   id: fc.integer({ min: 0, max: 3 }),
   value: fc.integer({ min: -20, max: 20 }),
 })
-const providerSessionArb: fc.Arbitrary<ProviderSessionPlan> = fc.oneof(
+const syncRunArb: fc.Arbitrary<SyncRunPlan> = fc.oneof(
   fc.record({
     kind: fc.constantFrom(`cancel-subscribe` as const, `cancel-load` as const),
     late: fc.constantFrom(`resolve` as const, `reject` as const),
@@ -437,12 +439,12 @@ const providerSessionArb: fc.Arbitrary<ProviderSessionPlan> = fc.oneof(
 )
 const scenarioArb = fc.record({
   mode: fc.constantFrom(`eager` as const, `on-demand` as const),
-  providerSessions: fc.array(providerSessionArb, {
+  syncRuns: fc.array(syncRunArb, {
     minLength: 1,
     maxLength: 3,
   }),
 })
-const live = (ending: Ending, immediate = false): ProviderSessionPlan => ({
+const live = (ending: Ending, immediate = false): SyncRunPlan => ({
   kind: `stream`,
   ending,
   immediate,
@@ -457,25 +459,25 @@ const live = (ending: Ending, immediate = false): ProviderSessionPlan => ({
 // of the random distribution. The same interpreter runs corpus and fuzz cases.
 const corpus: Array<{
   name: string
-  providerSessions: Array<ProviderSessionPlan>
+  syncRuns: Array<SyncRunPlan>
 }> = [
   ...(
     [`close`, `buffered-close`, `read-error`, `parse-error`, `cleanup`] as const
   ).flatMap((ending) =>
     [false, true].map((immediate) => ({
       name: `${ending}, immediate=${immediate}`,
-      providerSessions: [live(ending, immediate)],
+      syncRuns: [live(ending, immediate)],
     })),
   ),
   ...([`cancel-subscribe`, `cancel-load`] as const).flatMap((kind) =>
     ([`resolve`, `reject`] as const).map((late) => ({
       name: `${kind}, stale ${late} after restart`,
-      providerSessions: [{ kind, late }, live(`close`)],
+      syncRuns: [{ kind, late }, live(`close`)],
     })),
   ),
   ...([`reject-subscribe`, `reject-load`] as const).map((kind) => ({
     name: kind,
-    providerSessions: [{ kind }, live(`close`)],
+    syncRuns: [{ kind }, live(`close`)],
   })),
 ]
 it.each([`resolve`, `reject`] as const)(
@@ -567,15 +569,15 @@ it.each(
   corpus.flatMap((entry) =>
     ([`eager`, `on-demand`] as const).map((mode) => ({ ...entry, mode })),
   ),
-)(`preserves lifecycle laws: $mode / $name`, ({ mode, providerSessions }) =>
-  checkLifecycle({ mode, providerSessions }),
+)(`preserves lifecycle laws: $mode / $name`, ({ mode, syncRuns }) =>
+  checkLifecycle({ mode, syncRuns }),
 )
 it.each([`eager`, `on-demand`] as const)(
   `releases a late acquired stream even when native cancellation rejects: %s`,
   (mode) =>
     checkLifecycle({
       mode,
-      providerSessions: [
+      syncRuns: [
         { kind: `cancel-subscribe`, late: `resolve`, cancelRejects: true },
         live(`close`),
       ],
@@ -586,7 +588,7 @@ it.each([`list`, `set`, `buffered`] as const)(
   async (cut) => {
     const scenario: Scenario = {
       mode: `eager`,
-      providerSessions: [live(`buffered-close`)],
+      syncRuns: [live(`buffered-close`)],
     }
     await checkLifecycle(scenario)
     await expect(checkLifecycle(scenario, cut)).rejects.toMatchObject({
@@ -595,7 +597,7 @@ it.each([`list`, `set`, `buffered`] as const)(
     })
   },
 )
-fcTest.prop([scenarioArb], { seed: 714_203, numRuns: oracleRuns(30) })(
+fcTest.prop([scenarioArb], { seed: 714_203, numRuns: oracleRuns(50) })(
   `matches generated lifecycle histories with a fixed seed`,
   (scenario) => checkLifecycle(scenario),
 )

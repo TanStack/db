@@ -42,7 +42,8 @@ import type { ChangeMessage, SyncConfig } from '../src/types'
  * A maintainer decision permits either order for different keys in one
  * callback. Changes to the same key retain their causal order. A deferred
  * sync history checks this by comparing one ordered trace per key, including
- * repeated changes, while leaving cross-key interleaving unconstrained.
+ * repeated changes and complete row values, while leaving cross-key
+ * interleaving unconstrained.
  *
  * This partial oracle does not cover failed persistence, sync-transaction
  * cancellation, general callback batch shape, callback-time index agreement, or
@@ -64,8 +65,8 @@ type SyncActions = Parameters<SyncConfig<TestItem, number>[`sync`]>[0]
 
 type EventProjection = {
   type: OpKind
-  value: string
-  previousValue?: string
+  value: TestItem
+  previousValue?: TestItem
 }
 
 const fileIdForKey = (key: number): TestItem[`fileId`] =>
@@ -159,6 +160,10 @@ function expectedRowsAfter(
 
 // A batch permits any interleaving of distinct keys. Each key's trace keeps
 // message order and multiplicity, which the Collection mirror depends on.
+function eventRow(row: TestItem): TestItem {
+  return { id: row.id, name: row.name, fileId: row.fileId }
+}
+
 function perKeyEventTrace(
   changes: ReadonlyArray<ChangeMessage<TestItem, number>>,
 ): Array<readonly [number, Array<EventProjection>]> {
@@ -167,10 +172,10 @@ function perKeyEventTrace(
     const trace = byKey.get(change.key) ?? []
     trace.push({
       type: change.type,
-      value: change.value.name,
+      value: eventRow(change.value),
       ...(change.previousValue === undefined
         ? {}
-        : { previousValue: change.previousValue.name }),
+        : { previousValue: eventRow(change.previousValue) }),
     })
     byKey.set(change.key, trace)
   }
@@ -189,17 +194,17 @@ function expectedEventTrace(
     let event: EventProjection
     if (op.kind === `delete`) {
       if (!before || after) throw new Error(`model delete requires a row`)
-      event = { type: `delete`, value: before.name }
+      event = { type: `delete`, value: before }
     } else if (op.kind === `insert`) {
       if (before || !after)
         throw new Error(`model insert requires an absent key`)
-      event = { type: `insert`, value: after.name }
+      event = { type: `insert`, value: after }
     } else {
       if (!before || !after) throw new Error(`model update requires a row`)
       event = {
         type: `update`,
-        value: after.name,
-        previousValue: before.name,
+        value: after,
+        previousValue: before,
       }
     }
     const trace = byKey.get(op.key) ?? []
@@ -699,6 +704,29 @@ describe(`change-event history oracle`, () => {
           [2, { id: 2, name: `ghost`, fileId: `f2` }],
         ]),
       ),
+    ).not.toEqual(expected)
+  })
+
+  it(`rejects a deferred message with the right name but wrong row fields`, () => {
+    const sequence: Array<Op> = [
+      { kind: `insert`, key: 1, step: 1 },
+      { kind: `update`, key: 1, step: 2 },
+    ]
+    const expected = expectedEventTrace(sequence)
+    expect(
+      perKeyEventTrace([
+        {
+          type: `insert`,
+          key: 1,
+          value: { id: 1, name: `v1`, fileId: `f2` },
+        },
+        {
+          type: `update`,
+          key: 1,
+          value: { id: 1, name: `v2`, fileId: `f1` },
+          previousValue: { id: 1, name: `v1`, fileId: `f2` },
+        },
+      ]),
     ).not.toEqual(expected)
   })
 

@@ -4,17 +4,23 @@ import { CollectionImpl, createCollection } from '../src/collection/index.js'
 import type { Transaction, TransactionState } from '../src/index.js'
 
 /**
- * Law and source: a collection mutation handler receives one homogeneous direct
- * operation, so every nested mutation carries the same row, key, and utilities
- * as the sibling `collection` parameter. `isPersisted.promise` remains the
- * documented local transaction-settlement receipt, not backend confirmation.
+ * Law and source: `docs/reference/functions/createCollection.md` and
+ * `docs/reference/interfaces/BaseCollectionConfig.md` document direct
+ * insert/update/delete handlers with a typed transaction and sibling Collection.
+ * Every nested mutation carries that operation's row, key, and utilities.
+ * `docs/reference/interfaces/Transaction.md` documents `isPersisted.promise`
+ * as local transaction settlement, not backend confirmation.
  *
- * Domain: insert/update/delete; default, explicit, schema-inferred,
- * branded-string, and numeric keys; incompatible authoritative-sync and
- * refetch utility records.
- * Judgment: compare each inferred boundary with independently declared types.
- * Production path: contextual handler types produced by `createCollection`.
- * Observe: operation, row, key, collection key/utilities, state, and receipt.
+ * Model and finite input grammar: independently declared Row, key, and utility
+ * types. Branded-string and numeric keys cover all three direct handlers;
+ * default, explicit, and schema-inferred keys cover delete. Incompatible
+ * authoritative-sync and refetch utility records distinguish the two shapes.
+ * These cases do not establish runtime mutation dispatch, backend persistence,
+ * or every schema/key shape.
+ * Production driver: the compiler checks contextual handler types produced by
+ * `createCollection` and the explicit `CollectionImpl` utility boundary.
+ * Refinement check: at compilation, compare inferred operation, row, key,
+ * Collection key/utilities, state, and receipt types with the declared model.
  * Challenge: explicit `IsAny` checks plus wrong-key and cross-utility mutants.
  */
 type IsAny<T> = 0 extends 1 & T ? true : false
@@ -154,6 +160,7 @@ describe(`mutation handler type oracle`, () => {
           AuthoritativeSyncUtils[`awaitTxId`]
         >()
         expectTypeOf(collection.utils).toEqualTypeOf<AuthoritativeSyncUtils>()
+        expectTypeOf(collection.get).parameter(0).toEqualTypeOf<BrandedKey>()
         expectTypeOf(transaction.state).toEqualTypeOf<TransactionState>()
         expectTypeOf(transaction.isPersisted.promise).toEqualTypeOf<
           Promise<Transaction<Row<BrandedKey>>>
@@ -165,16 +172,22 @@ describe(`mutation handler type oracle`, () => {
         mutation.collection.utils.refetch()
         return Promise.resolve()
       },
-      onUpdate: ({ transaction }) => {
+      onUpdate: ({ transaction, collection }) => {
         const mutation = transaction.mutations[0]
 
         expectTypeOf(mutation.type).toEqualTypeOf<`update`>()
         expectTypeOf(mutation.original).toEqualTypeOf<Row<BrandedKey>>()
+        expectTypeOf(mutation.modified).toEqualTypeOf<Row<BrandedKey>>()
         expectTypeOf(mutation.key).toEqualTypeOf<BrandedKey>()
         expectTypeOf<IsAny<typeof mutation.key>>().toEqualTypeOf<false>()
         expectTypeOf(mutation.collection.utils.awaitTxId).toEqualTypeOf<
           AuthoritativeSyncUtils[`awaitTxId`]
         >()
+        expectTypeOf(mutation.collection.get)
+          .parameter(0)
+          .toEqualTypeOf<BrandedKey>()
+        expectTypeOf(collection.utils).toEqualTypeOf<AuthoritativeSyncUtils>()
+        expectTypeOf(collection.get).parameter(0).toEqualTypeOf<BrandedKey>()
 
         // @ts-expect-error a branded string key is never a number
         const _wrongKey: number = mutation.key
@@ -182,16 +195,22 @@ describe(`mutation handler type oracle`, () => {
         mutation.collection.utils.refetch()
         return Promise.resolve()
       },
-      onDelete: ({ transaction }) => {
+      onDelete: ({ transaction, collection }) => {
         const mutation = transaction.mutations[0]
 
         expectTypeOf(mutation.type).toEqualTypeOf<`delete`>()
         expectTypeOf(mutation.original).toEqualTypeOf<Row<BrandedKey>>()
+        expectTypeOf(mutation.modified).toEqualTypeOf<Row<BrandedKey>>()
         expectTypeOf(mutation.key).toEqualTypeOf<BrandedKey>()
         expectTypeOf<IsAny<typeof mutation.key>>().toEqualTypeOf<false>()
         expectTypeOf(mutation.collection.utils.awaitTxId).toEqualTypeOf<
           AuthoritativeSyncUtils[`awaitTxId`]
         >()
+        expectTypeOf(mutation.collection.get)
+          .parameter(0)
+          .toEqualTypeOf<BrandedKey>()
+        expectTypeOf(collection.utils).toEqualTypeOf<AuthoritativeSyncUtils>()
+        expectTypeOf(collection.get).parameter(0).toEqualTypeOf<BrandedKey>()
 
         // @ts-expect-error a branded string key is never a number
         const _wrongKey: number = mutation.key

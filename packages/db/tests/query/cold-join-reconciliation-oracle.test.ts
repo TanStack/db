@@ -4,6 +4,11 @@ import { describe, expect, it } from 'vitest'
 import { createCollection } from '../../src/collection/index.js'
 import { BTreeIndex } from '../../src/indexes/btree-index.js'
 import { createLiveQueryCollection, eq } from '../../src/query/index.js'
+import {
+  oraclePropertyOptions,
+  oracleRuns,
+  readOracleRunConfig,
+} from '../oracle-config.js'
 import { runTrace } from '../trace-runner.js'
 import type { Collection } from '../../src/collection/index.js'
 import type {
@@ -29,6 +34,9 @@ import type {
  * paths. Faults prove a hidden acquisition, dropped delete, or wrong result is
  * detected independently.
  *
+ * The Identity and Initial demand sections of live/ARCHITECTURE.md authorize
+ * the equality and acquisition laws. The test-only replica folds public change
+ * messages; it does not represent an internal Collection or D2 relation.
  * Compound join syntax and demand minimization are outside this contract. The
  * cold witness requires real acquisition and correct rows, not a particular
  * optimization plan.
@@ -374,7 +382,9 @@ async function cleanupAll(
   ...resources: Array<{ cleanup: () => Promise<void> }>
 ) {
   const results = await Promise.allSettled(
-    resources.map((resource) => resource.cleanup()),
+    resources.map((resource) =>
+      Promise.resolve().then(() => resource.cleanup()),
+    ),
   )
   const errors = results.flatMap((result) =>
     result.status === `rejected` ? [result.reason] : [],
@@ -382,6 +392,68 @@ async function cleanupAll(
   if (errors.length)
     throw new AggregateError(errors, `join oracle cleanup failed`)
 }
+
+async function checkWithCleanup(
+  check: () => Promise<void>,
+  ...resources: Array<{ cleanup: () => Promise<void> }>
+): Promise<void> {
+  let primaryFailure: unknown
+  let checkFailed = false
+  try {
+    await check()
+  } catch (error) {
+    primaryFailure = error
+    checkFailed = true
+  }
+
+  try {
+    await cleanupAll(...resources)
+  } catch (cleanupFailure) {
+    if (checkFailed) {
+      throw new AggregateError(
+        [primaryFailure, cleanupFailure],
+        `join oracle check and cleanup failed`,
+        { cause: primaryFailure },
+      )
+    }
+    throw cleanupFailure
+  }
+  if (checkFailed) throw primaryFailure
+}
+
+it(`preserves the primary mismatch and releases every resource after cleanup failure`, async () => {
+  const mismatch = new Error(`join result mismatch`)
+  const cleanupFailure = new Error(`first cleanup failed`)
+  const released: Array<string> = []
+  let reported: unknown
+  try {
+    await checkWithCleanup(
+      async () => {
+        throw mismatch
+      },
+      {
+        cleanup: () => {
+          released.push(`first`)
+          throw cleanupFailure
+        },
+      },
+      {
+        cleanup: async () => {
+          released.push(`second`)
+        },
+      },
+    )
+  } catch (error) {
+    reported = error
+  }
+  expect(reported).toBeInstanceOf(AggregateError)
+  expect((reported as AggregateError).cause).toBe(mismatch)
+  expect((reported as AggregateError).errors).toEqual([
+    mismatch,
+    expect.objectContaining({ errors: [cleanupFailure] }),
+  ])
+  expect(released).toEqual([`first`, `second`])
+})
 
 function bytesEqual(left: Uint8Array, right: Uint8Array): boolean {
   return (
@@ -435,25 +507,32 @@ describe.each([`off`, `eager`] as const)(
               .select(({ right: row }) => ({ id: row.id })),
         })
 
-        try {
-          await Promise.all([joined.preload(), filtered.preload()])
-          const expected = [{ id: 10 }]
-          expect(joined.toArray, `${label} join result`).toMatchObject(expected)
-          expect(filtered.toArray, `${label} predicate result`).toMatchObject(
-            expected,
-          )
-          expect(joined.toArray.map(({ id }) => ({ id }))).toEqual(
-            filtered.toArray.map(({ id }) => ({ id })),
-          )
-          if (autoIndex === `eager`)
-            expect(
-              right.indexes.size,
-              `${label} join auto-index reach`,
-            ).toBeGreaterThan(0)
-          else expect(right.indexes.size, `${label} join scan path`).toBe(0)
-        } finally {
-          await cleanupAll(joined, filtered, predicateRight, right, left)
-        }
+        await checkWithCleanup(
+          async () => {
+            await Promise.all([joined.preload(), filtered.preload()])
+            const expected = [{ id: 10 }]
+            expect(joined.toArray, `${label} join result`).toMatchObject(
+              expected,
+            )
+            expect(filtered.toArray, `${label} predicate result`).toMatchObject(
+              expected,
+            )
+            expect(joined.toArray.map(({ id }) => ({ id }))).toEqual(
+              filtered.toArray.map(({ id }) => ({ id })),
+            )
+            if (autoIndex === `eager`)
+              expect(
+                right.indexes.size,
+                `${label} join auto-index reach`,
+              ).toBeGreaterThan(0)
+            else expect(right.indexes.size, `${label} join scan path`).toBe(0)
+          },
+          joined,
+          filtered,
+          predicateRight,
+          right,
+          left,
+        )
       },
     )
 
@@ -515,33 +594,32 @@ describe.each([`off`, `eager`] as const)(
             })),
       })
 
-      try {
-        await Promise.all([binaryJoin.preload(), fullJoin.preload()])
-        expect(binaryJoin.toArray).toMatchObject([{ id: 10 }])
-        expect(
-          sortJoinPairs(
-            fullJoin.toArray.map(
-              ({ leftId, rightId }) => [leftId, rightId] as const,
+      await checkWithCleanup(
+        async () => {
+          await Promise.all([binaryJoin.preload(), fullJoin.preload()])
+          expect(binaryJoin.toArray).toMatchObject([{ id: 10 }])
+          expect(
+            sortJoinPairs(
+              fullJoin.toArray.map(
+                ({ leftId, rightId }) => [leftId, rightId] as const,
+              ),
             ),
-          ),
-        ).toEqual([
-          [1, undefined],
-          [2, undefined],
-          [3, 3],
-          [4, 4],
-          [undefined, 1],
-          [undefined, 2],
-        ])
-      } finally {
-        await cleanupAll(
-          binaryJoin,
-          fullJoin,
-          binaryRight,
-          binaryLeft,
-          nullishRight,
-          nullishLeft,
-        )
-      }
+          ).toEqual([
+            [1, undefined],
+            [2, undefined],
+            [3, 3],
+            [4, 4],
+            [undefined, 1],
+            [undefined, 2],
+          ])
+        },
+        binaryJoin,
+        fullJoin,
+        binaryRight,
+        binaryLeft,
+        nullishRight,
+        nullishLeft,
+      )
     })
 
     it(`preserves equality classes through equal, unequal, and nullish replacements`, async () => {
@@ -589,61 +667,64 @@ describe.each([`off`, `eager`] as const)(
           `duplicate same-side null outer row must remain observable`,
         ).toEqual([...expected, duplicateNullPair])
       }
-      try {
-        await joined.preload()
-        expectPairs([
-          [1, 10],
-          [2, undefined],
-          [undefined, 20],
-        ])
-        await right.oracleReplace({
-          id: 10,
-          value: new Uint8Array([1, 2, 3]),
-        })
-        expectPairs([
-          [1, 10],
-          [2, undefined],
-          [undefined, 20],
-        ])
-        await right.oracleReplace({
-          id: 10,
-          value: new Uint8Array([1, 2, 4]),
-        })
-        expectPairs([
-          [1, undefined],
-          [2, undefined],
-          [undefined, 10],
-          [undefined, 20],
-        ])
-        await right.oracleReplace({
-          id: 10,
-          value: new Uint8Array([1, 2, 3]),
-        })
-        expectPairs([
-          [1, 10],
-          [2, undefined],
-          [undefined, 20],
-        ])
-        await right.oracleReplace({ id: 20, value: 1 })
-        expectPairs([
-          [1, 10],
-          [2, undefined],
-          [undefined, 20],
-        ])
-        await left.oracleReplace({ id: 2, value: 1 })
-        expectPairs([
-          [1, 10],
-          [2, 20],
-        ])
-        await left.oracleReplace({ id: 2, value: null })
-        expectPairs([
-          [1, 10],
-          [2, undefined],
-          [undefined, 20],
-        ])
-      } finally {
-        await cleanupAll(joined, right, left)
-      }
+      await checkWithCleanup(
+        async () => {
+          await joined.preload()
+          expectPairs([
+            [1, 10],
+            [2, undefined],
+            [undefined, 20],
+          ])
+          await right.oracleReplace({
+            id: 10,
+            value: new Uint8Array([1, 2, 3]),
+          })
+          expectPairs([
+            [1, 10],
+            [2, undefined],
+            [undefined, 20],
+          ])
+          await right.oracleReplace({
+            id: 10,
+            value: new Uint8Array([1, 2, 4]),
+          })
+          expectPairs([
+            [1, undefined],
+            [2, undefined],
+            [undefined, 10],
+            [undefined, 20],
+          ])
+          await right.oracleReplace({
+            id: 10,
+            value: new Uint8Array([1, 2, 3]),
+          })
+          expectPairs([
+            [1, 10],
+            [2, undefined],
+            [undefined, 20],
+          ])
+          await right.oracleReplace({ id: 20, value: 1 })
+          expectPairs([
+            [1, 10],
+            [2, undefined],
+            [undefined, 20],
+          ])
+          await left.oracleReplace({ id: 2, value: 1 })
+          expectPairs([
+            [1, 10],
+            [2, 20],
+          ])
+          await left.oracleReplace({ id: 2, value: null })
+          expectPairs([
+            [1, 10],
+            [2, undefined],
+            [undefined, 20],
+          ])
+        },
+        joined,
+        right,
+        left,
+      )
     })
 
     it(`passes raw binary equality demand through the lazy join path`, async () => {
@@ -713,19 +794,22 @@ describe.each([`off`, `eager`] as const)(
             })),
       })
 
-      try {
-        await joined.preload()
-        expect(loadCalls).toBe(1)
-        expect(candidateChecks).toBe(2)
-        expect(requestedValues).toHaveLength(1)
-        expect(requestedValues[0]).toBeInstanceOf(Uint8Array)
-        expect(Array.from(requestedValues[0] as Uint8Array)).toEqual(
-          Array.from(activeKey),
-        )
-        expect(joined.toArray).toMatchObject([{ leftId: 1, rightId: 10 }])
-      } finally {
-        await cleanupAll(joined, lazy, active)
-      }
+      await checkWithCleanup(
+        async () => {
+          await joined.preload()
+          expect(loadCalls).toBe(1)
+          expect(candidateChecks).toBe(2)
+          expect(requestedValues).toHaveLength(1)
+          expect(requestedValues[0]).toBeInstanceOf(Uint8Array)
+          expect(Array.from(requestedValues[0] as Uint8Array)).toEqual(
+            Array.from(activeKey),
+          )
+          expect(joined.toArray).toMatchObject([{ leftId: 1, rightId: 10 }])
+        },
+        joined,
+        lazy,
+        active,
+      )
     })
   },
 )
@@ -737,38 +821,55 @@ const history: ReadonlyArray<Step> = [
   { type: `delete`, id: 30 },
   { type: `put`, row: { id: 20, parentId: 1, amount: 9 } },
 ]
+// History grammar: start with three unique child keys, then delete any key or
+// put one keyed replacement. Deleting an absent key is a legal no-op. The
+// fixed prefix reconstructs delete, restore, and both directions of a route
+// move; random tails add a fresh key (40), repeated replacements, and absent
+// deletes. Removing delete loses retraction; removing put loses restoration
+// and route movement; fixing parentId loses movement; excluding key 40 loses
+// fresh insertion. The bounded tail uses keys 10/20/30/40, parent IDs 1/2,
+// amounts -5..5, and lengths 0..15. It excludes simultaneous duplicate child
+// keys, which a keyed Collection cannot represent, and unmatched parent IDs.
 it(`reconciles cold join acquisition, deletion, restoration and route moves`, async () => {
   const batches = await runColdJoin(history)
   expect(
     batches.flat().filter((change) => change.type === `delete`).length,
   ).toBeGreaterThanOrEqual(2)
 })
-it.each([941207, undefined])(
-  `checks cold join histories, seed=%s`,
-  async (seed) => {
-    const step: fc.Arbitrary<Step> = fc.oneof(
-      fc
-        .constantFrom(10, 20, 30, 40)
-        .map((id) => ({ type: `delete` as const, id })),
-      fc
-        .record({
-          id: fc.constantFrom(10, 20, 30, 40),
-          parentId: fc.integer({ min: 1, max: 2 }),
-          amount: fc.integer({ min: -5, max: 5 }),
-        })
-        .map((row) => ({ type: `put` as const, row })),
-    )
-    await fc.assert(
-      fc.asyncProperty(
-        fc.array(step, { minLength: 0, maxLength: 15 }),
-        async (steps) => {
-          await runColdJoin([...history, ...steps])
-        },
-      ),
-      { seed, numRuns: 50 },
-    )
-  },
-)
+const coldJoinProperty = `cold-join.reconciliation`
+const { replayPath, replayProperty } = readOracleRunConfig()
+const coldJoinSeeds =
+  replayPath !== undefined && replayProperty === coldJoinProperty
+    ? [undefined]
+    : [941207, undefined]
+
+// The fixed and random campaigns use one grammar and checker. A seed and
+// shrink path replay only the requested campaign through oraclePropertyOptions.
+it.each(coldJoinSeeds)(`checks cold join histories, seed=%s`, async (seed) => {
+  const step: fc.Arbitrary<Step> = fc.oneof(
+    fc
+      .constantFrom(10, 20, 30, 40)
+      .map((id) => ({ type: `delete` as const, id })),
+    fc
+      .record({
+        id: fc.constantFrom(10, 20, 30, 40),
+        parentId: fc.integer({ min: 1, max: 2 }),
+        amount: fc.integer({ min: -5, max: 5 }),
+      })
+      .map((row) => ({ type: `put` as const, row })),
+  )
+  await fc.assert(
+    fc.asyncProperty(
+      fc.array(step, { minLength: 0, maxLength: 15 }),
+      async (steps) => {
+        await runColdJoin([...history, ...steps])
+      },
+    ),
+    seed === undefined
+      ? oraclePropertyOptions(50, coldJoinProperty)
+      : { seed, numRuns: oracleRuns(50) },
+  )
+})
 it.each([`hide-acquisition`, `drop-delete`, `wrong-result`] as const)(
   `rejects %s through the real cold join trace checker`,
   async (fault) => {

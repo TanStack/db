@@ -6,7 +6,9 @@ import { createTransaction } from '../../src/transactions.js'
 /**
  * # When can an abort cancel a load?
  *
- * An on-demand load has two stages:
+ * The applied-receipt contract in
+ * `packages/db/src/query/live/ARCHITECTURE.md` owns this boundary. An
+ * on-demand load has two stages:
  *
  * 1. The source writes a row to a pending batch.
  * 2. The collection publishes the row to readers.
@@ -18,7 +20,9 @@ import { createTransaction } from '../../src/transactions.js'
  *
  * `expectedOutcome` states this rule from public facts. It does not copy the
  * production queue. The test creates each timing phase in production. It then
- * compares the result with the model.
+ * compares the result with the model. This fixed grammar uses one row, one
+ * parked optimistic transaction, and three abort phases. It checks the direct
+ * source Collection boundary, not a live-query graph or other schedules.
  */
 
 type Row = { id: string; group: string }
@@ -28,16 +32,23 @@ type AbortPhase = `at-commit` | `while-parked` | `after-publication-starts`
 type ExpectedOutcome = {
   load: `rejects` | `resolves`
   rowIsVisible: boolean
+  publishedBatches: Array<Array<string>>
+  callbackReads: Array<Array<string>>
 }
 
 // Publication is the boundary. An abort before publication rejects the load
 // and discards the row. An abort after publication starts resolves the load
 // and keeps the row visible.
-function expectedOutcome(abortPhase: AbortPhase): ExpectedOutcome {
+function expectedOutcome(
+  abortPhase: AbortPhase,
+  remoteKey: string,
+): ExpectedOutcome {
   const publicationStarted = abortPhase === `after-publication-starts`
   return {
     load: publicationStarted ? `resolves` : `rejects`,
     rowIsVisible: publicationStarted,
+    publishedBatches: publicationStarted ? [[remoteKey]] : [],
+    callbackReads: publicationStarted ? [[remoteKey]] : [],
   }
 }
 
@@ -54,13 +65,17 @@ describe(`loadSubset transaction refinement`, () => {
   ])(
     `matches the independent receipt and publication model when aborting %s`,
     async (abortPhase) => {
-      const expected = expectedOutcome(abortPhase)
       const sourceId = `transaction-refinement-${abortPhase}`
       const remoteRow: Row = { id: `remote`, group: `requested` }
+      const expected = expectedOutcome(abortPhase, remoteRow.id)
       const controller = new AbortController()
       const persistence = createDeferred<void>()
       const publishedBatches: Array<Array<string>> = []
       const callbackReads: Array<Array<string>> = []
+      let loadSubsetCalls = 0
+      let abortObservedAtCommit = false
+      let receiptWasDeferred = false
+      let abortRaisedByPublication = false
 
       // Keep the local mutation unresolved. This delays publication of the
       // remote row and creates the second abort phase.
@@ -73,10 +88,14 @@ describe(`loadSubset transaction refinement`, () => {
             markReady()
             return {
               loadSubset: ({ signal }) => {
+                loadSubsetCalls++
                 begin()
                 write({ type: `insert`, value: remoteRow })
                 if (abortPhase === `at-commit`) controller.abort()
-                return commit(signal)
+                abortObservedAtCommit = signal?.aborted ?? false
+                const receipt = commit(signal)
+                receiptWasDeferred = receipt instanceof Promise
+                return receipt
               },
             }
           },
@@ -101,14 +120,27 @@ describe(`loadSubset transaction refinement`, () => {
           callbackReads.push(source.has(remoteRow.id) ? [remoteRow.id] : [])
           if (abortPhase === `after-publication-starts`) {
             controller.abort()
+            abortRaisedByPublication = controller.signal.aborted
           }
         },
         { includeInitialState: false },
       )
-      const load = source._sync.loadSubset({ signal: controller.signal })
-      expect(load).toBeInstanceOf(Promise)
-
+      let primaryFailure: unknown
+      let failed = false
+      const cleanupFailures: Array<unknown> = []
       try {
+        const load = source._sync.loadSubset({ signal: controller.signal })
+        // Keep a rejection observed if an earlier reach assertion fails.
+        if (load instanceof Promise) void load.catch(() => undefined)
+        expect(load).toBeInstanceOf(Promise)
+
+        // The adapter and applied-receipt boundary must be reached in every
+        // phase. The held mutation keeps the remote sync transaction parked.
+        expect(loadSubsetCalls).toBe(1)
+        expect(receiptWasDeferred).toBe(true)
+        expect(abortObservedAtCommit).toBe(abortPhase === `at-commit`)
+        expect(source.has(remoteRow.id)).toBe(false)
+
         if (abortPhase === `while-parked`) {
           controller.abort()
         }
@@ -125,18 +157,40 @@ describe(`loadSubset transaction refinement`, () => {
         // The load promise, change event, and collection snapshot must agree.
         // A mismatch would expose a partial publication to callers.
         expect(source.has(remoteRow.id)).toBe(expected.rowIsVisible)
-        expect(publishedBatches).toEqual(
-          expected.rowIsVisible ? [[remoteRow.id]] : [],
+        expect(publishedBatches).toEqual(expected.publishedBatches)
+        expect(callbackReads).toEqual(expected.callbackReads)
+        expect(abortRaisedByPublication).toBe(
+          abortPhase === `after-publication-starts`,
         )
-        expect(callbackReads).toEqual(
-          expected.rowIsVisible ? [[remoteRow.id]] : [],
-        )
+      } catch (error) {
+        primaryFailure = error
+        failed = true
       } finally {
         persistence.resolve()
-        await blocker.isPersisted.promise.catch(() => undefined)
-        subscription.unsubscribe()
-        await source.cleanup()
+        try {
+          await blocker.isPersisted.promise
+        } catch (error) {
+          cleanupFailures.push(error)
+        }
+        try {
+          subscription.unsubscribe()
+        } catch (error) {
+          cleanupFailures.push(error)
+        }
+        try {
+          await source.cleanup()
+        } catch (error) {
+          cleanupFailures.push(error)
+        }
       }
+      if (cleanupFailures.length > 0) {
+        throw new AggregateError(
+          cleanupFailures,
+          `loadSubset transaction refinement cleanup failed`,
+          { cause: failed ? primaryFailure : cleanupFailures[0] },
+        )
+      }
+      if (failed) throw primaryFailure
     },
   )
 })

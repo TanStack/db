@@ -49,6 +49,13 @@ production queues, caches, or semantic helpers merely to share their names.
 `source session`. Use `sync run` for the local Collection sync invocation
 and a provider-qualified `provider session` for a remote lifecycle.
 
+## Offline outbox terms
+
+| Term | Meaning |
+| --- | --- |
+| `deletion-pending` | The mutation function fulfilled; only acknowledged outbox deletion remains before caller success. A restart must not call the mutation function again. |
+| `rejection-pending` | The mutation function failed permanently; the caller rejects with that failure. A restart removes the marked row without calling the mutation function again or restoring its optimistic state. |
+
 ## Demand and pagination terms
 
 These terms form a graph, not a one-to-one pipeline. Keep the ownership, work,

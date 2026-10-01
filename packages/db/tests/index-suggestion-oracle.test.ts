@@ -5,12 +5,12 @@
  * no suggestion. `IndexDevModeConfig` documents the size threshold; this model
  * compares query metadata with mode, field-index presence, and Collection size.
  *
- * Grammar: manual/default and eager modes; 1,000 and 1,101 source rows; no
- * index, a matching index, or an unrelated index, with advice enabled or
- * disabled. The production driver builds a
- * public live-query Collection and checks suggestions and indexes after its
- * initial query is ready. This bounded oracle does not judge slow-query timing,
- * repeated query warnings, index benefit, or production-build suppression.
+ * Grammar: manual/default and eager modes; 1,000, 1,001, and 1,101 source
+ * rows; no index, a matching index, or an unrelated index; advice enabled or
+ * disabled. The production driver builds a public live-query Collection. It
+ * checks suggestions and indexes after initial query readiness. This bounded
+ * oracle does not judge slow-query timing, repeated query warnings, index
+ * benefit, or production-build suppression.
  */
 import { afterEach, describe, expect, test } from 'vitest'
 import { createCollection } from '../src/collection/index.js'
@@ -45,6 +45,8 @@ describe(`collection-size index suggestions`, () => {
     { mode: `off`, size: 1101, index: `none`, enabled: true },
     { mode: undefined, size: 1101, index: `none`, enabled: true },
     { mode: `off`, size: 1000, index: `none`, enabled: true },
+    // The first row above the threshold rejects a misplaced >1,001 cut.
+    { mode: `off`, size: 1001, index: `none`, enabled: true },
     { mode: `off`, size: 1101, index: `url`, enabled: true },
     { mode: `off`, size: 1101, index: `id`, enabled: true },
     { mode: `eager`, size: 1101, index: `none`, enabled: true },

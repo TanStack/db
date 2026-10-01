@@ -454,6 +454,7 @@ export class OfflineExecutor {
         }
 
         try {
+          this.executor.assertHealthy()
           await this.outbox.add(transaction)
           // A shared queue error belongs to its execution, not every caller
           // that durably admitted a transaction. Per-ID signals settle callers.

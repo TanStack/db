@@ -13,7 +13,7 @@ let fixtureId = 0
 
 // This regular tree separates result volume from facade ownership. Every root,
 // branch, and twig owns one outgoing relationship bucket. Leaves own none.
-function createRows(rootCount: number) {
+function createRows(rootCount: number, leafCount: number) {
   const roots: Array<RootRow> = []
   const branches: Array<BranchRow> = []
   const twigs: Array<TwigRow> = []
@@ -28,7 +28,7 @@ function createRows(rootCount: number) {
       for (let twigIndex = 0; twigIndex < 5; twigIndex++) {
         const twigId = `twig-${rootIndex}-${branchIndex}-${twigIndex}`
         twigs.push({ id: twigId, branchId })
-        for (let leafIndex = 0; leafIndex < 10; leafIndex++) {
+        for (let leafIndex = 0; leafIndex < leafCount; leafIndex++) {
           leaves.push({
             id: `leaf-${rootIndex}-${branchIndex}-${twigIndex}-${leafIndex}`,
             twigId,
@@ -57,9 +57,12 @@ function source<T extends { id: string }>(
   return collection
 }
 
-export async function createNestedCollectionFixture(rootCount: number) {
+export async function createNestedCollectionFixture(
+  rootCount: number,
+  leafCount = 10,
+) {
   fixtureId++
-  const rows = createRows(rootCount)
+  const rows = createRows(rootCount, leafCount)
   const cleanups: Array<() => Promise<void>> = []
   let transferred = false
   return withHistoryCleanup(
