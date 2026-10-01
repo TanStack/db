@@ -1,6 +1,7 @@
 import { LiveQueryObserverDisposedError } from './errors.js'
 import {
   getLiveQueryStatusFlags,
+  getPublicCollection,
   isSingleResultCollection,
 } from './live-query-adapter.js'
 import { getBuilderFromConfig } from './query/live/collection-registry.js'
@@ -308,11 +309,7 @@ class LiveQueryObserverImpl<
       this.cachedSnapshot = {
         state,
         data: singleResult ? data[0] : data,
-        // A pooled view observes its partition group directly and hands users a
-        // Collection that is built only when touched.
-        collection:
-          (collection as { publicCollection?: Collection<T, TKey, any> })
-            .publicCollection ?? collection,
+        collection: getPublicCollection(collection),
         layoutRevision: this.layoutRevision,
         status,
         ...getLiveQueryStatusFlags(status),
