@@ -1,4 +1,6 @@
 import { SortedMap } from '../SortedMap.js'
+import { CleanupQueue } from '../collection/cleanup-queue.js'
+import { UNSUBSCRIBED_GC_FLOOR_MS } from '../collection/lifecycle.js'
 import { normalizeValue } from '../utils/comparison.js'
 import { isVirtualPropName } from '../virtual-props.js'
 import { getPersistedReadinessSource } from '../persisted-readiness.js'
@@ -33,9 +35,6 @@ interface PartitionGroup {
   revision: number
   layoutRevision: number
 }
-
-// Matches the Collection lifecycle's floor for a never-subscribed Collection.
-const UNSUBSCRIBED_RELEASE_FLOOR_MS = 50
 
 const partitionsBySource = new WeakMap<object, Map<string, Partition>>()
 
@@ -72,10 +71,8 @@ class Partition {
   readonly statusListeners = new Set<StatusListener>()
   private listenerCount = 0
   private gcTime = 0
-  private hadListener = false
   /** Set when the source starts cleanup; groups keep their last rows. */
   terminated = false
-  private releaseTimer: ReturnType<typeof setTimeout> | undefined
 
   constructor(
     private readonly source: CollectionImpl<any, any, any, any, any>,
@@ -127,7 +124,14 @@ class Partition {
       this.gcTime = Math.max(this.gcTime, delay)
     }
     if (this.terminated) return
-    if (!this.subscription) {
+    this.subscribe()
+    // Like a Collection that synced before anything subscribed, a view built
+    // during a render gets a grace period to subscribe when it commits.
+    this.scheduleRelease(UNSUBSCRIBED_GC_FLOOR_MS)
+  }
+
+  private subscribe(): void {
+    if (!this.terminated && !this.subscription) {
       this.subscription = this.source.subscribeChanges(
         (changes) =>
           this.apply(changes as Array<ChangeMessage<Row, string | number>>),
@@ -144,12 +148,10 @@ class Partition {
         if (this.terminated) this.stopStatusEvents?.()
       })
     }
-    this.scheduleRelease()
   }
 
   addListener(group: PartitionGroup, listener: Listener): void {
-    this.retain()
-    this.hadListener = true
+    this.subscribe()
     group.listeners.add(listener)
     this.listenerCount++
   }
@@ -157,12 +159,12 @@ class Partition {
   removeListener(group: PartitionGroup, listener: Listener): void {
     if (!group.listeners.delete(listener)) return
     this.listenerCount--
-    this.scheduleRelease()
+    this.scheduleRelease(0)
   }
 
   private terminate(): void {
     this.terminated = true
-    clearTimeout(this.releaseTimer)
+    CleanupQueue.getInstance().cancel(this)
     this.release()
   }
 
@@ -172,29 +174,26 @@ class Partition {
     this.onEmpty()
   }
 
-  private scheduleRelease(): void {
-    clearTimeout(this.releaseTimer)
-    this.releaseTimer = undefined
+  // Releases on the Collections' shared GC queue, after the longest
+  // `gcTime` of this partition's views.
+  private scheduleRelease(minDelay: number): void {
     if (this.listenerCount > 0 || !Number.isFinite(this.gcTime)) return
-    // Like a Collection that synced before anything subscribed, a view built
-    // during a render gets a grace period to subscribe when it commits.
-    const delay = this.hadListener
-      ? this.gcTime
-      : Math.max(this.gcTime, UNSUBSCRIBED_RELEASE_FLOOR_MS)
-    this.releaseTimer = setTimeout(() => {
-      this.releaseTimer = undefined
-      if (this.listenerCount > 0) return
-      this.stopStatusEvents?.()
-      this.stopStatusEvents = undefined
-      // Views outlive a release and may subscribe again, so they keep their
-      // groups for the next subscription to refill.
-      for (const group of this.groups.values()) {
-        group.rows.clear()
-        group.revision++
-        group.layoutRevision++
-      }
-      this.release()
-    }, delay)
+    const delay = Math.max(this.gcTime, minDelay)
+    CleanupQueue.getInstance().schedule(this, delay, this.releaseIfUnused)
+  }
+
+  private readonly releaseIfUnused = (): void => {
+    if (this.listenerCount > 0) return
+    this.stopStatusEvents?.()
+    this.stopStatusEvents = undefined
+    // Views outlive a release and may subscribe again, so they keep their
+    // groups for the next subscription to refill.
+    for (const group of this.groups.values()) {
+      group.rows.clear()
+      group.revision++
+      group.layoutRevision++
+    }
+    this.release()
   }
 
   private apply(changes: Array<ChangeMessage<Row, string | number>>): void {
