@@ -21,7 +21,7 @@ For comprehensive documentation on writing queries (filtering, joins, aggregatio
 
 ### useLiveQuery
 
-The `useLiveQuery` primitive creates a live query that automatically updates your component when data changes. It returns an accessor — call it as a function (`query()`) to read data. Status fields (`isLoading`, `isReady`, `isError`, `status`) are plain properties:
+The `useLiveQuery` primitive creates a live query that automatically updates your component when data changes. It returns an accessor — call it as a function (`query()`) to read data, and read `query.state` / `query.collection` as properties for the keyed row map and the underlying `Collection`.
 
 ```tsx
 import { useLiveQuery } from '@tanstack/solid-db'
@@ -48,7 +48,7 @@ function TodoList() {
 }
 ```
 
-**Note:** Call `query()` to read data. Use `<Loading>` and `<Errored>` boundaries to handle loading and error states. The accessor also exposes `query.state` (a `ReactiveMap`) and `query.collection` (the underlying `Collection`).
+**Note:** Call `query()` to read data. Use `<Loading>` and `<Errored>` boundaries to handle loading and error states — the accessor itself has no status flags. For a non-reactive status read, use `query.collection?.status`.
 
 ### Loading and Error Boundaries
 
@@ -72,28 +72,22 @@ function TodoList() {
 }
 ```
 
-You can also check status without boundaries:
-
-```tsx
-<Show when={query.isError}>
-  <div>Error: {query.status}</div>
-</Show>
-```
+Persisted (network-first) restore state is exposed as reactive properties — `query.persistedStatus`, `query.isPersistedReady`, and `query.persistedError` — for apps that layer local persistence under live queries.
 
 ### isPending and latest Helpers
 
-Solid v2's async `createMemo` enables `isPending` and `latest` on the accessor result:
+Solid v2's async `createMemo` inside `useLiveQuery` works with Solid's built-in `isPending` and `latest` helpers:
 
 ```tsx
 import { isPending, latest } from 'solid-js'
 
-// isPending: true during revalidation while new collection loads
-<Show when={isPending(query)}>
+// isPending: true during revalidation while a new collection loads
+<Show when={isPending(() => query())}>
   <Spinner />
 </Show>
 
-// latest: returns stale value during revalidation, skipping <Loading>
-<For each={latest(query)}>
+// latest: returns the stale value during revalidation, skipping <Loading>
+<For each={latest(() => query())}>
   {(todo) => <li>{todo.text}</li>}
 </For>
 ```
