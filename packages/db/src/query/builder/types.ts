@@ -10,7 +10,10 @@ import type {
   Value,
 } from '../ir.js'
 import type { InitialQueryBuilder, QueryBuilder } from './index.js'
-import type { VirtualRowProps, WithVirtualProps } from '../../virtual-props.js'
+import type {
+  PublishedVirtualRowProps,
+  WithVirtualProps,
+} from '../../virtual-props.js'
 import type {
   CaseWhenWrapper,
   ConcatToArrayWrapper,
@@ -848,7 +851,7 @@ type NonNull<T> = T extends null ? never : T
  * @example
  * ```typescript
  * // Filter by sync status
- * .where(({ user }) => eq(user.$synced, true))
+ * .where(({ user }) => eq(user.$hasPendingWrites, false))
  *
  * // Filter by origin
  * .where(({ order }) => eq(order.$origin, 'local'))
@@ -861,7 +864,9 @@ type NonNull<T> = T extends null ? never : T
  * ```
  */
 type VirtualPropsRef<TKey extends string | number = string | number> = {
-  readonly [K in keyof VirtualRowProps<TKey>]: RefLeaf<VirtualRowProps<TKey>[K]>
+  readonly [K in keyof PublishedVirtualRowProps<TKey>]: RefLeaf<
+    PublishedVirtualRowProps<TKey>[K]
+  >
 }
 
 /**
@@ -877,8 +882,8 @@ type VirtualPropsRef<TKey extends string | number = string | number> = {
  * through all nested property accesses, ensuring the result type includes
  * `| undefined` for all fields accessed through this ref.
  *
- * Inferred row-root refs include virtual properties ($synced, $origin, $key,
- * $collectionId) for querying on row metadata. The default exported `Ref<T>`
+ * Inferred row-root refs include virtual properties ($hasPendingWrites, $origin,
+ * $key, $collectionId) for querying on row metadata. The default exported `Ref<T>`
  * shape is suitable for reusable helpers that can accept either a row root or
  * a recursively traversed user object, so it does not require those fields.
  * Use `Ref<T, false, true>` when a helper specifically requires a row root.
@@ -890,7 +895,7 @@ type VirtualPropsRef<TKey extends string | number = string | number> = {
  * users.id // Ref<number> - clean display
  * users.profile?.bio // Ref<string> - nested optional access works
  * const rootUsers: Ref<{ id: number }, false, true> = { ... }
- * rootUsers.$synced // RefLeaf<boolean> - row-root virtual property access
+ * rootUsers.$hasPendingWrites // RefLeaf<boolean> - row-root virtual property access
  *
  * // Nullable ref (left/right/full join side):
  * select(({ dept }) => ({ name: dept.name })) // result: string | undefined

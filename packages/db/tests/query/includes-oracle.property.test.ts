@@ -1,5 +1,6 @@
 import { fc, test as fcTest } from '@fast-check/vitest'
 import { describe, expect } from 'vitest'
+import { DuplicateAliasInSubqueryError } from '../../src/errors.js'
 import {
   concat,
   createLiveQueryCollection,
@@ -12,12 +13,35 @@ import { flushPromises, withExpectedRejection } from '../utils.js'
 import { oraclePropertyOptions, oracleRuns } from '../oracle-config.js'
 import { runTrace } from '../trace-runner.js'
 import { createControlledCollection as createOracleControlledCollection } from './includes-oracle-helpers.js'
+import {
+  applyScopedWrite,
+  canonicalScopedAliases,
+  classifyScopedNaming,
+  createModelState,
+  createScopedQuery,
+  createScopedSources,
+  normalizeScopedRows,
+  recomputeScopedRows,
+  scopedScenarioArbitrary,
+  sortedRequests,
+} from './includes-scope-identity-oracle.js'
 import type {
   TraceCheckpoint,
   TraceDriver,
   TraceProjection,
 } from '../trace-runner.js'
 import type { OracleSyncChange as SyncChange } from './includes-oracle-helpers.js'
+import type {
+  ScopedAliases,
+  ScopedInclude,
+  ScopedNaming,
+  ScopedPart,
+  ScopedRef,
+  ScopedResultRow,
+  ScopedScenario,
+  ScopedShape,
+  ScopedSubquery,
+} from './includes-scope-identity-oracle.js'
 
 /**
  * # Does the incremental include graph equal full relationship recomputation?
@@ -40,7 +64,8 @@ import type { OracleSyncChange as SyncChange } from './includes-oracle-helpers.j
  *    the same logical source state.
  * 4. Nested scalar materialization follows reference changes and shared paths.
  * 5. Alpha-renaming, sibling order, and unrelated siblings do not change the
- *    relevant result.
+ *    relevant result, including when sibling scopes such as a `from()`
+ *    subquery and an include reuse alias names.
  *
  * These laws use a model graph, not one universal controller. The structural
  * node recomputes relationship trees. A separate scalar-reference node follows
@@ -5562,4 +5587,394 @@ describe(`includes recompute oracle`, () => {
       },
     )
   })
+})
+
+/**
+ * # Does an alias name in one scope leak into another?
+ *
+ * Law: ARCHITECTURE.md normative law 1. Changing any accepted alias to another
+ * legal name cannot change an explicitly projected result. Aliases are lexical
+ * names; a `SourceId` is the plan's identity for one Collection reference
+ * (§Identity). A `from()` subquery, a `unionAll()` branch, a join subquery,
+ * and an include are sibling scopes when neither can see the other's names,
+ * so they may reuse names freely.
+ *
+ * Bug class: a plan rewrite loses a `SourceId`, or alias text otherwise
+ * decides which source's input, request, or remap is used. A sibling source
+ * with the same name then supplies the wrong rows. Issue #1975 reached it
+ * through optimizer predicate pushdown into a joined `from()` subquery.
+ *
+ * Grammar, model, driver, and observation live in
+ * `includes-scope-identity-oracle.ts`. The grammar crosses three topologies
+ * that place a rewritable source beside a same-named sibling source:
+ * `fromSubquery`, `unionBranch`, and a top-level pure `wrapper` beside a join
+ * subquery. The subquery varies joins (none, refs, refs then notes), LEFT or
+ * INNER refs joins, zero to two predicates in separate or combined form, a
+ * plain, ordered-and-limited, or DISTINCT body, and whole-row or field
+ * selection. The include varies its body (direct, joined, a `unionAll()`
+ * with an anchor join, or a `from()` subquery that reads the parent row),
+ * `toArray()` or `materialize()`, its source, an extra child predicate, and
+ * outer spread or field selection. Sources are
+ * eager or on-demand finite providers. Alias slots draw from a three-name
+ * pool, so cross-scope reuse is frequent.
+ *
+ * Legality follows the documented lexical rules: one scope keeps its names
+ * distinct, and no scope inside an include can reuse an alias its ancestors
+ * can see. One in four scenarios draws any naming. An illegal naming must be
+ * rejected when the query is created; a shadowing naming must be rejected
+ * with `DuplicateAliasInSubqueryError`. `validate-aliases.test.ts` pins the
+ * named shadowing cases.
+ *
+ * Checks at each checkpoint (after preload and after every source write):
+ *
+ * 1. The canonical all-distinct naming equals a plain recomputation of the
+ *    current source rows. This judges the shape independently of aliases.
+ * 2. The generated naming equals the canonical naming. This is the law.
+ * 3. For on-demand sources, each Collection receives the same `loadSubset`
+ *    WHERE clauses under both namings. Requests name Collection fields, not
+ *    aliases, so they must match exactly as bags.
+ *
+ * Limits: the model covers this grammar only. Rows and members are compared
+ * as bags because no query here promises an order. Publication events,
+ * observer timing, unload, and nested includes are outside this owner; the
+ * includes publication and recomputation owners cover them for their shapes.
+ * The review record is
+ * `docs/contributing/oracle-reviews/issue-1975-scope-identity.md`.
+ */
+async function expectScopedNamingRejected(
+  scenario: ScopedScenario,
+  naming: Exclude<ScopedNaming, `legal`>,
+) {
+  const sources = createScopedSources(scenario)
+  let created: ReturnType<typeof createScopedQuery> | undefined
+  try {
+    expect(
+      () => {
+        created = createScopedQuery(scenario.shape, scenario.aliases, sources)
+      },
+      `${naming} naming ${JSON.stringify(scenario.aliases)} must be rejected`,
+    ).toThrow(naming === `shadowing` ? DuplicateAliasInSubqueryError : Error)
+  } finally {
+    await created?.cleanup()
+    await Promise.all(
+      Object.values(sources).map((source) => source.collection.cleanup()),
+    )
+  }
+}
+
+async function expectScopedAlphaRenamingHolds(
+  scenario: ScopedScenario,
+  expectedAfterPreload?: Array<ScopedResultRow>,
+) {
+  const naming = classifyScopedNaming(scenario.shape, scenario.aliases)
+  if (naming !== `legal`) {
+    await expectScopedNamingRejected(scenario, naming)
+    return
+  }
+  const canonicalNames = canonicalScopedAliases(scenario.shape)
+  const canonicalSources = createScopedSources(scenario)
+  const renamedSources = createScopedSources(scenario)
+  const state = createModelState(scenario)
+  const canonical = createScopedQuery(
+    scenario.shape,
+    canonicalNames,
+    canonicalSources,
+  )
+  const renamed = createScopedQuery(
+    scenario.shape,
+    scenario.aliases,
+    renamedSources,
+  )
+
+  const check = (checkpoint: string) => {
+    const label = `${checkpoint}, naming ${JSON.stringify(scenario.aliases)}`
+    expect(
+      normalizeScopedRows(canonical.toArray),
+      `${label}: canonical naming against recomputation`,
+    ).toEqual(normalizeScopedRows(recomputeScopedRows(scenario.shape, state)))
+    expect(
+      normalizeScopedRows(renamed.toArray),
+      `${label}: generated naming against canonical naming`,
+    ).toEqual(normalizeScopedRows(canonical.toArray))
+    if (scenario.mode === `onDemand`) {
+      expect(
+        sortedRequests(renamedSources),
+        `${label}: loadSubset requests per Collection`,
+      ).toEqual(sortedRequests(canonicalSources))
+    }
+  }
+
+  let primary: unknown
+  try {
+    await Promise.all([canonical.preload(), renamed.preload()])
+    await flushPromises()
+    if (expectedAfterPreload) {
+      expect(normalizeScopedRows(canonical.toArray)).toEqual(
+        normalizeScopedRows(expectedAfterPreload),
+      )
+    }
+    check(`after preload`)
+    for (const [index, write] of scenario.writes.entries()) {
+      applyScopedWrite([canonicalSources, renamedSources], state, write)
+      await flushPromises()
+      check(`after write ${index} (${JSON.stringify(write)})`)
+    }
+  } catch (error) {
+    primary = error
+  }
+
+  // Cleanup failures must not replace the violated law.
+  const cleanup = await Promise.allSettled([
+    canonical.cleanup(),
+    renamed.cleanup(),
+    ...[canonicalSources, renamedSources].flatMap((sources) =>
+      Object.values(sources).map((source) => source.collection.cleanup()),
+    ),
+  ])
+  const cleanupErrors = cleanup.flatMap((result) =>
+    result.status === `rejected` ? [result.reason] : [],
+  )
+  if (primary !== undefined && cleanupErrors.length > 0) {
+    throw new AggregateError(
+      [primary, ...cleanupErrors],
+      `scoped alpha-renaming failed, and cleanup also failed`,
+      { cause: primary },
+    )
+  }
+  if (primary !== undefined) throw primary
+  if (cleanupErrors.length > 0) {
+    throw new AggregateError(cleanupErrors, `scoped oracle cleanup failed`)
+  }
+}
+
+const scopedPartRows: Array<ScopedPart> = [
+  { id: 1, active: true },
+  { id: 2, active: true },
+  { id: 3, active: false },
+]
+const scopedRefRows: Array<ScopedRef> = [
+  { id: 10, partId: 1, clientId: 1 },
+  { id: 11, partId: 1, clientId: 2 },
+  { id: 20, partId: 2, clientId: 2 },
+  { id: 30, partId: 3, clientId: 1 },
+]
+const scopedNoteRows: Array<ScopedRef> = [
+  { id: 100, partId: 1, clientId: 1 },
+  { id: 200, partId: 2, clientId: 1 },
+]
+
+const plainSubquery: ScopedSubquery = {
+  joins: `refs`,
+  refsJoin: `left`,
+  predicates: [`subActive`],
+  predicateForm: `separate`,
+  body: `plain`,
+  subSelect: `row`,
+}
+const refsInclude: ScopedInclude = {
+  body: `plain`,
+  form: `toArray`,
+  source: `refs`,
+  clientFilter: false,
+  outerSelect: `spread`,
+}
+
+function pinnedScenario(
+  shape: ScopedShape,
+  aliases: ScopedAliases,
+): ScopedScenario {
+  return {
+    shape,
+    mode: `eager`,
+    aliases,
+    parts: scopedPartRows,
+    refs: scopedRefRows,
+    notes: scopedNoteRows,
+    writes: [],
+  }
+}
+
+/**
+ * Each optimizer witness failed on the unrepaired optimizer and passes with
+ * the repair. The joined-union witness guards a legal naming that an
+ * overbroad shadowing check once rejected. Together they reach every optimizer site that once re-minted a
+ * SourceId; the review record maps each site to its killing witness.
+ */
+const pinnedScopeWitnesses: Array<[string, ScopedScenario]> = [
+  [
+    `an include reuses the join alias of a joined subquery`,
+    pinnedScenario(
+      {
+        topology: `fromSubquery`,
+        subquery: {
+          ...plainSubquery,
+          predicates: [`joinedClient`, `subActive`],
+        },
+        include: { ...refsInclude, form: `materialize` },
+      },
+      { outer: `part`, sub: `part`, joined: `ref`, noted: `n`, include: `ref` },
+    ),
+  ],
+  [
+    `an include reuses the second join alias`,
+    pinnedScenario(
+      {
+        topology: `fromSubquery`,
+        subquery: { ...plainSubquery, joins: `refsThenNotes` },
+        include: refsInclude,
+      },
+      { outer: `o`, sub: `s`, joined: `j`, noted: `k`, include: `k` },
+    ),
+  ],
+  [
+    `an include reuses the source alias of an ordered, limited subquery`,
+    pinnedScenario(
+      {
+        topology: `fromSubquery`,
+        subquery: { ...plainSubquery, body: `orderedLimit` },
+        include: refsInclude,
+      },
+      { outer: `o`, sub: `p`, joined: `j`, noted: `n`, include: `p` },
+    ),
+  ],
+  [
+    `an include reuses the source alias of a DISTINCT subquery`,
+    pinnedScenario(
+      {
+        topology: `fromSubquery`,
+        subquery: { ...plainSubquery, body: `distinct`, subSelect: `fields` },
+        include: refsInclude,
+      },
+      { outer: `o`, sub: `p`, joined: `j`, noted: `n`, include: `p` },
+    ),
+  ],
+  [
+    `an include reuses the source alias of a joined union branch`,
+    pinnedScenario(
+      {
+        topology: `unionBranch`,
+        subquery: { ...plainSubquery, subSelect: `fields` },
+        include: refsInclude,
+      },
+      {
+        outer: `o`,
+        sub: `x`,
+        joined: `j`,
+        noted: `n`,
+        include: `x`,
+        inactive: `y`,
+      },
+    ),
+  ],
+  [
+    `an include on a joined union reuses a branch alias`,
+    pinnedScenario(
+      { topology: `unionParent`, includeSource: `refs` },
+      { activeBranch: `x`, inactiveBranch: `y`, anchor: `a`, include: `x` },
+    ),
+  ],
+  [
+    `a join subquery reuses the alias of a collapsed pure wrapper`,
+    pinnedScenario(
+      { topology: `wrapper`, wrapperJoin: `inner` },
+      { wrapped: `x`, joinSub: `k`, joinSource: `x` },
+    ),
+  ],
+]
+
+describe(`includes alpha-renaming across sibling scopes`, () => {
+  fcTest(
+    `an include that reuses a joined subquery alias keeps the reported rows`,
+    // Issue #1975: only part 1 has a ref for client 1; parts 1 and 2 are
+    // active.
+    () =>
+      expectScopedAlphaRenamingHolds(
+        {
+          ...pinnedScopeWitnesses[0]![1],
+          parts: [
+            { id: 1, active: true },
+            { id: 2, active: true },
+          ],
+          refs: [
+            { id: 10, partId: 1, clientId: 1 },
+            { id: 20, partId: 2, clientId: 2 },
+          ],
+          notes: [],
+        },
+        [{ id: 1, active: true, members: [{ id: 10, clientId: 1 }] }],
+      ),
+  )
+
+  for (const [name, scenario] of pinnedScopeWitnesses) {
+    for (const mode of [`eager`, `onDemand`] as const) {
+      fcTest(`${name} [${mode}]`, () =>
+        expectScopedAlphaRenamingHolds({ ...scenario, mode }),
+      )
+    }
+  }
+
+  fcTest(`legality rejects shadowing and same-scope reuse`, () => {
+    const shape: ScopedShape = {
+      topology: `fromSubquery`,
+      subquery: { ...plainSubquery, joins: `refsThenNotes` },
+      include: refsInclude,
+    }
+    const legal = {
+      outer: `a`,
+      sub: `a`,
+      joined: `b`,
+      noted: `c`,
+      include: `b`,
+    }
+    expect(classifyScopedNaming(shape, legal)).toBe(`legal`)
+    expect(classifyScopedNaming(shape, { ...legal, include: `a` })).toBe(
+      `shadowing`,
+    )
+    expect(classifyScopedNaming(shape, { ...legal, noted: `b` })).toBe(
+      `sameScope`,
+    )
+    expect(
+      classifyScopedNaming(
+        { ...shape, topology: `unionBranch` },
+        { ...legal, inactive: `c` },
+      ),
+    ).toBe(`sameScope`)
+    expect(
+      classifyScopedNaming(
+        { topology: `wrapper`, wrapperJoin: `left` },
+        { wrapped: `x`, joinSub: `x`, joinSource: `y` },
+      ),
+    ).toBe(`sameScope`)
+    const nestedShape: ScopedShape = {
+      ...shape,
+      include: { ...refsInclude, body: `nestedFrom` },
+    }
+    expect(
+      classifyScopedNaming(nestedShape, {
+        ...legal,
+        include: `c`,
+        includeOuter: `c`,
+      }),
+    ).toBe(`legal`)
+    expect(
+      classifyScopedNaming(nestedShape, {
+        ...legal,
+        include: `a`,
+        includeOuter: `c`,
+      }),
+    ).toBe(`shadowing`)
+  })
+
+  for (const { label, options } of generatedCampaigns(
+    80,
+    `includes.scoped-alpha-renaming`,
+    1715,
+  )) {
+    fcTest.prop([scopedScenarioArbitrary], options)(
+      `is unchanged when sibling scopes reuse alias names [${label}]`,
+      (scenario) => expectScopedAlphaRenamingHolds(scenario),
+      // Each run builds four live queries; scale with the run budget.
+      Math.max(5_000, oracleRuns(80) * 50),
+    )
+  }
 })

@@ -431,6 +431,7 @@ describe(`Transactions`, () => {
           $collectionId: collection.id,
           $key: 1,
           $origin: `local`,
+          $hasPendingWrites: true,
           $synced: false,
         })
         expect(batches).toEqual([

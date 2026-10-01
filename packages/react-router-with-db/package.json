@@ -56,8 +56,8 @@
   },
   "devDependencies": {
     "@tanstack/react-db": "workspace:*",
-    "@tanstack/react-router": "^1.159.5",
-    "@tanstack/router-core": "^1.159.4",
+    "@tanstack/react-router": "^1.170.41",
+    "@tanstack/router-core": "^1.171.34",
     "@vitejs/plugin-react": "^5.1.3",
     "@vitest/coverage-istanbul": "^3.2.4",
     "react": "^19.2.4",

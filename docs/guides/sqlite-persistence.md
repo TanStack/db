@@ -70,7 +70,7 @@ const transaction = todos.insert({
   title: 'Buy milk',
   completed: false,
 })
-await transaction.isPersisted.promise
+await transaction.when('settled')
 ```
 
 This Collection has no `sync` option. Its normal insert, update, and delete handlers save local mutations to SQLite. It does not contact a server. The browser must support OPFS and run in a secure context. If multiple tabs can open the same database, use the [multi-tab setup](#browser-tabs-and-electron-renderers).

@@ -20,7 +20,13 @@ export function selectedRow(row: unknown): Record<PropertyKey, unknown> {
   expect(row).not.toBeNull()
   expect(typeof row).toBe(`object`)
   const value = row as Record<PropertyKey, unknown>
-  const virtual = [`$synced`, `$origin`, `$key`, `$collectionId`]
+  const virtual = [
+    `$hasPendingWrites`,
+    `$synced`,
+    `$origin`,
+    `$key`,
+    `$collectionId`,
+  ]
   return Object.fromEntries(
     Reflect.ownKeys(value)
       // Solid stores nonenumerable bookkeeping symbols on its row wrappers.

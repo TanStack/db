@@ -34,7 +34,7 @@ addTx.mutate(() => {
 })
 
 await addTx.commit()
-await addTx.isPersisted.promise
+await addTx.when('settled')
 ```
 
 ## Param

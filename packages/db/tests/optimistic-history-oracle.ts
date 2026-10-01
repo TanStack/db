@@ -65,6 +65,7 @@ type Intent = {
 }
 type ObservedRow = HistoryRow & {
   $origin: `local` | `remote`
+  $hasPendingWrites: boolean
   $synced: boolean
 }
 
@@ -101,7 +102,12 @@ class HistoryModel {
     const result = new Map<number, ObservedRow>(
       [...this.base].map(([key, row]) => [
         key,
-        { ...row, $origin: this.origins.get(key)!, $synced: true },
+        {
+          ...row,
+          $origin: this.origins.get(key)!,
+          $hasPendingWrites: false,
+          $synced: true,
+        },
       ]),
     )
     const accepted = this.intents
@@ -118,6 +124,7 @@ class HistoryModel {
       result.set(intent.key, {
         ...intent.snapshot,
         $origin: `local`,
+        $hasPendingWrites: true,
         $synced: false,
       })
       if (intent.kind === `insert` && !intent.acknowledged) {
@@ -128,6 +135,7 @@ class HistoryModel {
             result.set(intent.key, {
               ...child.snapshot,
               $origin: `local`,
+              $hasPendingWrites: true,
               $synced: false,
             })
           }
@@ -282,7 +290,11 @@ class HistoryModel {
 
 const plain = ({ id, a, b, c }: HistoryRow): HistoryRow => ({ id, a, b, c })
 const observed = (
-  row: HistoryRow & { $origin: `local` | `remote`; $synced: boolean },
+  row: HistoryRow & {
+    $origin: `local` | `remote`
+    $hasPendingWrites: boolean
+    $synced: boolean
+  },
 ): ObservedRow => ({
   ...Object.fromEntries(
     Object.entries(row).filter(
@@ -294,6 +306,7 @@ const observed = (
   b: row.b,
   c: row.c,
   $origin: row.$origin,
+  $hasPendingWrites: row.$hasPendingWrites,
   $synced: row.$synced,
 })
 const sorted = <T extends HistoryRow>(rows: Iterable<T>) =>

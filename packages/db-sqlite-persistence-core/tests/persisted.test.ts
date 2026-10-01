@@ -524,6 +524,7 @@ const stripVirtualProps = <T extends Record<string, any> | undefined>(
 ): T => {
   if (!value || typeof value !== `object`) return value
   const {
+    $hasPendingWrites: _hasPendingWrites,
     $synced: _synced,
     $origin: _origin,
     $key: _key,

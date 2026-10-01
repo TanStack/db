@@ -575,6 +575,7 @@ describe(`live query scheduler`, () => {
         $collectionId,
         $key,
         $origin,
+        $hasPendingWrites,
         $synced,
       }: UserWithVirtual): UserWithVirtual => ({
         id,
@@ -582,6 +583,7 @@ describe(`live query scheduler`, () => {
         $collectionId,
         $key,
         $origin,
+        $hasPendingWrites,
         $synced,
       })
       const source = createCollection<User>({
@@ -673,6 +675,7 @@ describe(`live query scheduler`, () => {
             $collectionId: collectionId,
             $key: 1,
             $origin: `remote`,
+            $hasPendingWrites: false,
             $synced: true,
           }
           return {

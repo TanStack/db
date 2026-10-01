@@ -163,10 +163,12 @@ const APP_SCHEMA = new Schema({
   documents: new Table({ name: column.text }, { trackMetadata: true }),
 })
 
-await collection.insert(
-  { id: safeRandomUUID(), name: 'Report' },
-  { metadata: { source: 'web-app', userId: 'user-123' } },
-).isPersisted.promise
+await collection
+  .insert(
+    { id: safeRandomUUID(), name: 'Report' },
+    { metadata: { source: 'web-app', userId: 'user-123' } },
+  )
+  .when('settled')
 ```
 
 Metadata appears as `entry.metadata` (stringified JSON) in PowerSync `CrudEntry`.
@@ -193,7 +195,7 @@ tx.mutate(() => {
   })
 })
 await tx.commit()
-await tx.isPersisted.promise
+await tx.when('settled')
 ```
 
 ## On-Demand Sync Mode
