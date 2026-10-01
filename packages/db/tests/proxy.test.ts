@@ -1,4 +1,4 @@
-import { fc, test as fcTest } from '@fast-check/vitest'
+import { fc } from '@fast-check/vitest'
 import { describe, expect, it, vi } from 'vitest'
 import { Temporal } from 'temporal-polyfill'
 import { createCollection } from '../src/collection/index'
@@ -238,18 +238,47 @@ describe(`native array callback oracle`, () => {
     target: fc.integer({ min: 0, max: 5 }),
     delta: fc.integer({ min: -5, max: 5 }),
   })
-  fcTest.prop(
-    {
-      values: fc.array(fc.integer({ min: -10, max: 10 }), {
-        minLength: 1,
-        maxLength: 6,
-      }),
-      steps: fc.tuple(step, step),
-    },
-    { numRuns: 200 },
-  )(`matches native two-step callback histories`, ({ values, steps }) => {
-    assertArrayCallbacks(observeArrayCallbacks(values, steps))
+  // A fixed and a random campaign. TANSTACK_DB_PROXY_CALLBACK_SEED and
+  // TANSTACK_DB_PROXY_CALLBACK_PATH select a direct replay instead.
+  const callbackHistory = fc.record({
+    values: fc.array(fc.integer({ min: -10, max: 10 }), {
+      minLength: 1,
+      maxLength: 6,
+    }),
+    steps: fc.tuple(step, step),
   })
+  const replaySeed = process.env.TANSTACK_DB_PROXY_CALLBACK_SEED
+  const replayPath = process.env.TANSTACK_DB_PROXY_CALLBACK_PATH
+  const callbackCampaigns =
+    replaySeed === undefined && replayPath === undefined
+      ? [
+          { name: `2026103`, seed: 2026103 as number | undefined },
+          { name: `random`, seed: undefined },
+        ]
+      : [
+          {
+            name: `replay`,
+            seed: replaySeed === undefined ? undefined : Number(replaySeed),
+          },
+        ]
+  for (const { name, seed } of callbackCampaigns) {
+    it(`matches native two-step callback histories (${name})`, () => {
+      if (replayPath !== undefined && replaySeed === undefined)
+        throw new Error(`TANSTACK_DB_PROXY_CALLBACK_PATH requires a seed`)
+      if (seed !== undefined && !Number.isSafeInteger(seed))
+        throw new Error(`TANSTACK_DB_PROXY_CALLBACK_SEED must be an integer`)
+      fc.assert(
+        fc.property(callbackHistory, ({ values, steps }) => {
+          assertArrayCallbacks(observeArrayCallbacks(values, steps))
+        }),
+        {
+          numRuns: 200,
+          ...(seed === undefined ? {} : { seed }),
+          ...(replayPath === undefined ? {} : { path: replayPath }),
+        },
+      )
+    })
+  }
 
   it.each([`lost-write`, `extra-visit`, `wrong-peer`] as const)(
     `rejects a captured %s independently of the native authority`,
@@ -2667,6 +2696,27 @@ describe(`frozen and sealed drafts keep nested writes`, () => {
   it(`does not count a primitive read under a frozen key`, () => {
     const { proxy, getChanges } = createChangeProxy(make())
     void Object.freeze(proxy).m
+    expect(getChanges()).toEqual({})
+  })
+
+  // The boundary is a read-only and non-configurable key. A sealed key is
+  // non-configurable but writable, and a read-only key may stay configurable.
+  // Either way the draft hands out a draft, so a read is no change. These
+  // cases reject a boundary that checks only one of the two attributes.
+  it.each([
+    [`sealed`, (row: Row) => Object.seal(row)],
+    [
+      `read-only but configurable`,
+      (row: Row) =>
+        Object.defineProperty(row, `n`, {
+          writable: false,
+          configurable: true,
+        }),
+    ],
+  ])(`does not count an object read under a %s key`, (_name, fix) => {
+    const { proxy, getChanges } = createChangeProxy(make())
+    fix(proxy)
+    void proxy.n.x
     expect(getChanges()).toEqual({})
   })
 

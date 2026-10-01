@@ -30,15 +30,19 @@ import { createChangeProxy } from '../src/proxy'
  *    instances as plain objects. A class instance without enumerable keys
  *    (here, one with only a private field) equals only itself.
  *
- * Laws checked after every generated history:
+ * Laws checked at one checkpoint: after the last write of a history, before
+ * the draft publishes. The driver writes through `createChangeProxy`'s draft
+ * (its `set`, `deleteProperty`, and `get` traps, and the array iterator), and
+ * the check reads `getChanges()` and the draft.
  *
  * - `getChanges()` equals the model's changes.
  * - Reading the draft gives the model's final value.
  * - The original row is unchanged.
  *
- * Authority: the `createChangeProxy` and `getChanges` implementation comments
- * in `src/proxy.ts` and the revert examples in `tests/proxy.test.ts`, as of
- * `18abceee`. Rules 7 to 9 are design decisions recorded in
+ * Authority: rules 1 to 6 and the laws come from the `createChangeProxy` and
+ * `getChanges` implementation comments in `src/proxy.ts` and the revert
+ * examples in `tests/proxy.test.ts`, as of `18abceee`. Rules 7 to 9 are design
+ * decisions recorded in
  * `docs/contributing/oracle-reviews/code-weight-draft-proxy.md`.
  *
  * Limits:
@@ -300,7 +304,9 @@ const writtenArb: fc.Arbitrary<Spec> = fc.oneof(
 
 type Op =
   | { op: `set`; field: Field; value: Spec }
-  | { op: `revert`; field: Field }
+  // `same` writes the original row's own value back instead of an equal
+  // fresh value, so identity-based paths are reached too.
+  | { op: `revert`; field: Field; same?: boolean }
   | { op: `delete`; field: Field }
   | { op: `nested`; field: Field; key: `a` | `b` | `sym`; value: Primitive }
   | { op: `nestedDelete`; field: Field; key: `a` | `b` | `sym` }
@@ -318,6 +324,7 @@ const opArb: fc.Arbitrary<Op> = fc.oneof(
     arbitrary: fc.record({
       op: fc.constant(`revert` as const),
       field: fc.constantFrom(...FIELDS),
+      same: fc.boolean(),
     }),
   },
   fc.record({
@@ -696,7 +703,8 @@ function expectHistory({ original, ops }: History): void {
     if (op === undefined || !applicable(state, original, op)) continue
     if (op.op === `revert`) {
       if (original[op.field] === undefined) delete proxy[op.field]
-      else proxy[op.field] = realize(original[op.field]!)
+      else
+        proxy[op.field] = op.same ? row[op.field] : realize(original[op.field]!)
     } else drive(proxy as Record<string, any>, op)
     state = step(state, original, op)
   }
@@ -801,6 +809,9 @@ describe(`draft revert oracle`, () => {
     let partial = 0
     let full = 0
     let symbolOnly = 0
+    // Reverts that write the row's own object back, a class instance included.
+    let sameObjectReverts = 0
+    let samePointReverts = 0
     for (const { original, ops } of sample) {
       let state: Root = { ...original }
       // A revert counts only when the field differs from its original, so
@@ -810,6 +821,15 @@ describe(`draft revert oracle`, () => {
         const op = resolve(state, original, generated)
         if (op === undefined || !applicable(state, original, op)) continue
         reached.add(op.op)
+        const restored = original[op.field]
+        if (
+          op.op === `revert` &&
+          op.same &&
+          restored !== undefined &&
+          !(restored.k === `prim` || restored.k === `date`)
+        )
+          sameObjectReverts +=
+            restored.k === `point` ? (samePointReverts++, 1) : 1
         if (
           op.op === `revert` &&
           encode(state[op.field]) !== encode(original[op.field])
@@ -847,6 +867,8 @@ describe(`draft revert oracle`, () => {
     expect(partial).toBeGreaterThanOrEqual(5)
     expect(full).toBeGreaterThanOrEqual(30)
     expect(symbolOnly).toBeGreaterThan(0)
+    expect(sameObjectReverts).toBeGreaterThanOrEqual(20)
+    expect(samePointReverts).toBeGreaterThan(0)
   })
 
   // Writes that a keyless comparison would call equal: another URL, or a
