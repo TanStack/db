@@ -939,6 +939,81 @@ describe(`deepEquals property-based tests`, () => {
     )
   })
 
+  // `deepEquals` drives change-event suppression, so it deliberately ignores
+  // state that draft revert detection keeps (see proxy-revert-oracle): Map and
+  // Set insertion order, RegExp `lastIndex`, and array holes. These laws pin
+  // that current relation so a shared walker cannot leak draft rules into it.
+  describe(`order and state the general relation ignores`, () => {
+    utilsProperty([
+      fc.uniqueArray(fc.tuple(fc.string(), fc.integer()), {
+        minLength: 2,
+        maxLength: 5,
+        selector: ([key]) => key,
+      }),
+    ])(
+      `Maps with the same entries in another insertion order are equal`,
+      (entries) => {
+        const reordered = new Map([...entries].reverse())
+        expect([...reordered.keys()]).not.toEqual(entries.map(([key]) => key))
+        expectEqualityPair(new Map(entries), reordered, true)
+        expectEqualityPair(
+          new Map(entries.map(([key, value]) => [key, { value }])),
+          new Map(
+            [...entries].reverse().map(([key, value]) => [key, { value }]),
+          ),
+          true,
+        )
+      },
+    )
+
+    utilsProperty([
+      fc.uniqueArray(fc.integer(), { minLength: 2, maxLength: 5 }),
+    ])(
+      `Sets with the same values in another insertion order are equal`,
+      (values) => {
+        expectEqualityPair(
+          new Set(values),
+          new Set([...values].reverse()),
+          true,
+        )
+        expectEqualityPair(
+          new Set(values.map((value) => ({ value }))),
+          new Set([...values].reverse().map((value) => ({ value }))),
+          true,
+        )
+      },
+    )
+
+    utilsProperty([fc.constantFrom(``, `g`, `y`), fc.nat(5), fc.nat(5)])(
+      `RegExps with the same source and flags are equal at any lastIndex`,
+      (flags, left, right) => {
+        const a = new RegExp(`x`, flags)
+        const b = new RegExp(`x`, flags)
+        a.lastIndex = left
+        b.lastIndex = right
+        expectEqualityPair(a, b, true)
+        expectEqualityPair({ pattern: a }, { pattern: b }, true)
+      },
+    )
+
+    utilsProperty([
+      fc.array(fc.oneof(fc.integer(), fc.constant(`hole`)), {
+        minLength: 1,
+        maxLength: 5,
+      }),
+    ])(`an array hole equals undefined at the same index`, (cells) => {
+      const sparse: Array<unknown> = []
+      sparse.length = cells.length
+      const dense: Array<unknown> = []
+      cells.forEach((cell, index) => {
+        if (cell !== `hole`) sparse[index] = cell
+        dense[index] = cell === `hole` ? undefined : cell
+      })
+      expectEqualityPair(sparse, dense, true)
+      expectEqualityPair({ items: sparse }, { items: dense }, true)
+    })
+  })
+
   describe(`nested structure consistency`, () => {
     utilsProperty([
       fc.array(fc.array(fc.integer(), { maxLength: 3 }), { maxLength: 3 }),
