@@ -192,7 +192,9 @@ marked phase remain receiving witnesses for this owner.
 The same owner also needs a captured failing seed-and-shrink-path replay for
 its generated settlement property. The
 [deletion-settlement review record](oracle-reviews/2026-09-30-offline-deletion-settlement.md)
-preserves the exact executable revision, RED/GREEN witnesses, and limits.
+preserves its earlier executable revision. The
+[fail-stop follow-up](oracle-reviews/2026-09-30-offline-fail-stop-followup.md)
+records the revised storage-failure law, RED/GREEN witnesses, and limits.
 The guarded replay owner (`packages/db/tests/oracle-replay.test.ts`) now checks
 that named pagination and index campaigns execute only the requested replay
 lane. An unrelated failing fixed campaign no longer runs first. The
