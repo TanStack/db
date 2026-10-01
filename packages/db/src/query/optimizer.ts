@@ -497,7 +497,11 @@ function removeRedundantFromClause(from: From): From {
     // Return the inner query's FROM clause with this alias
     const innerFrom = removeRedundantFromClause(processedQuery.from)
     if (innerFrom.type === `collectionRef`) {
-      return new CollectionRefClass(innerFrom.collection, from.alias)
+      return new CollectionRefClass(
+        innerFrom.collection,
+        from.alias,
+        innerFrom.sourceId,
+      )
     } else if (innerFrom.type === `queryRef`) {
       return new QueryRefClass(innerFrom.query, from.alias)
     }
@@ -845,7 +849,7 @@ function deepCopyQuery(query: QueryIR): QueryIR {
 
 function deepCopyFrom(from: From): From {
   if (from.type === `collectionRef`) {
-    return new CollectionRefClass(from.collection, from.alias)
+    return new CollectionRefClass(from.collection, from.alias, from.sourceId)
   }
 
   if (from.type === `queryRef`) {
@@ -932,7 +936,7 @@ function optimizeFromWithTracking(
   if (!whereClause) {
     // No optimization needed, but return a copy to maintain immutability
     if (from.type === `collectionRef`) {
-      return new CollectionRefClass(from.collection, from.alias)
+      return new CollectionRefClass(from.collection, from.alias, from.sourceId)
     }
     // Must be queryRef due to type system
     return new QueryRefClass(deepCopyQuery(from.query), from.alias)
@@ -942,7 +946,7 @@ function optimizeFromWithTracking(
     // Create a new subquery with the WHERE clause for the collection
     // This is always safe since we're creating a new subquery
     const subQuery: QueryIR = {
-      from: new CollectionRefClass(from.collection, from.alias),
+      from: new CollectionRefClass(from.collection, from.alias, from.sourceId),
       where: [whereClause],
     }
     actuallyOptimized.add(from.alias) // Mark as successfully optimized

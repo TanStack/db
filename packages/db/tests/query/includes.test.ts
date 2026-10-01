@@ -7879,5 +7879,72 @@ describe(`includes subqueries`, () => {
         },
       ])
     })
+
+    describe(`materialize alias matching a join inside the parent's from() subquery`, () => {
+      // The parent comes from a subquery that left-joins `issues` as `i` and
+      // filters with more than one predicate. The included subquery reads the
+      // same collection under the same alias `i`. The aliases live in different
+      // scopes, so neither the parent rows nor the included rows may change.
+      const expectedAlpha = [
+        {
+          id: 1,
+          name: `Alpha`,
+          issues: [
+            { id: 10, title: `Bug in Alpha` },
+            { id: 11, title: `Feature for Alpha` },
+          ],
+        },
+      ]
+
+      it(`keeps parent rows when the included subquery reuses the join alias`, async () => {
+        const collection = createLiveQueryCollection((q) => {
+          const alphaWithBug = q
+            .from({ p: projects })
+            .leftJoin({ i: issues }, ({ p, i }) => eq(i.projectId, p.id))
+            .where(({ i }) => eq(i.title, `Bug in Alpha`))
+            .where(({ p }) => eq(p.name, `Alpha`))
+            .select(({ p }) => p)
+
+          return q.from({ p: alphaWithBug }).select(({ p }) => ({
+            id: p.id,
+            name: p.name,
+            issues: materialize(
+              q
+                .from({ i: issues })
+                .where(({ i }) => eq(i.projectId, p.id))
+                .select(({ i }) => ({ id: i.id, title: i.title })),
+            ),
+          }))
+        })
+        await collection.preload()
+
+        expect(toTree(collection)).toEqual(expectedAlpha)
+      })
+
+      it(`keeps parent rows when the included subquery uses a distinct alias`, async () => {
+        const collection = createLiveQueryCollection((q) => {
+          const alphaWithBug = q
+            .from({ p: projects })
+            .leftJoin({ i: issues }, ({ p, i }) => eq(i.projectId, p.id))
+            .where(({ i }) => eq(i.title, `Bug in Alpha`))
+            .where(({ p }) => eq(p.name, `Alpha`))
+            .select(({ p }) => p)
+
+          return q.from({ p: alphaWithBug }).select(({ p }) => ({
+            id: p.id,
+            name: p.name,
+            issues: materialize(
+              q
+                .from({ issue: issues })
+                .where(({ issue }) => eq(issue.projectId, p.id))
+                .select(({ issue }) => ({ id: issue.id, title: issue.title })),
+            ),
+          }))
+        })
+        await collection.preload()
+
+        expect(toTree(collection)).toEqual(expectedAlpha)
+      })
+    })
   })
 })

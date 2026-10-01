@@ -93,10 +93,11 @@ export class CollectionRef extends BaseExpression {
   constructor(
     public collection: CollectionImpl,
     public alias: string,
+    sourceId?: string,
   ) {
     super()
     Object.defineProperty(this, `sourceId`, {
-      value: `source-${++nextCollectionSourceId}`,
+      value: sourceId ?? `source-${++nextCollectionSourceId}`,
       enumerable: false,
     })
   }
