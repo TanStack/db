@@ -12,9 +12,7 @@ import { LoadSubsetOperationAbortedError } from '../errors.js'
 import {
   createFilterFunctionFromExpression,
   createFilteredCallback,
-  findEqualityRoute,
 } from './change-events.js'
-import type { EqualityRoute } from './change-events.js'
 import type { BasicExpression, OrderBy } from '../query/ir.js'
 import type { IndexReader } from '../indexes/base-index.js'
 import type {
@@ -174,9 +172,6 @@ export class CollectionSubscription
 
   private filteredCallback: (changes: Array<ChangeMessage<any, any>>) => boolean
 
-  /** Field and literal the where clause requires, if it has a cheap one. */
-  private readonly equalityRoute: EqualityRoute | undefined
-
   private orderByIndex: IndexReader<string | number> | undefined
 
   // Status tracking
@@ -238,10 +233,6 @@ export class CollectionSubscription
     }
 
     this.callback = callbackWithSentKeysTracking
-
-    this.equalityRoute = options.whereExpression
-      ? findEqualityRoute(options.whereExpression)
-      : undefined
 
     // Create a filtered callback if where clause is provided
     this.filteredCallback = options.whereExpression
@@ -1131,23 +1122,6 @@ export class CollectionSubscription
     // missing content. Delegated publication keeps its private D2 contributions.
     if (this.bufferPrivately(newChanges)) return false
     return this.filteredCallback(newChanges)
-  }
-
-  /**
-   * The route through which this subscription may receive only the changes
-   * whose value or previous value holds the route's literal. A change reaches
-   * the where filter only through those values, so the others cannot publish,
-   * and sent-key records cover published rows only. Stale published rows and
-   * truncate replay consume unfiltered changes, so no route applies then.
-   */
-  get changeRoute(): EqualityRoute | undefined {
-    if (
-      this.stalePublishedRows.size > 0 ||
-      this.truncateReplayState !== undefined
-    ) {
-      return undefined
-    }
-    return this.equalityRoute
   }
 
   /** Keep direct snapshot reads private while an authoritative replay is open. */

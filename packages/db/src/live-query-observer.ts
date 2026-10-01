@@ -5,6 +5,7 @@ import {
 } from './live-query-adapter.js'
 import { getBuilderFromConfig } from './query/live/collection-registry.js'
 import { getPersistedReadinessSource } from './persisted-readiness.js'
+import { createPooledObserver } from './query/pooled-live-query.js'
 import type { Collection } from './collection/index.js'
 import type { DbClient, DehydratedLiveQueryResult } from './client.js'
 import type { PersistedReadinessSource } from './persisted-readiness.js'
@@ -307,7 +308,11 @@ class LiveQueryObserverImpl<
       this.cachedSnapshot = {
         state,
         data: singleResult ? data[0] : data,
-        collection,
+        // A pooled view observes its bucket directly and hands users a
+        // Collection that is built only when touched.
+        collection:
+          (collection as { publicCollection?: Collection<T, TKey, any> })
+            .publicCollection ?? collection,
         layoutRevision: this.layoutRevision,
         status,
         ...getLiveQueryStatusFlags(status),
@@ -816,8 +821,19 @@ class LiveQueryObserverImpl<
       // listener delivery: useSyncExternalStore performs its consistency read
       // immediately after subscribe returns.
       this.flushPublications(!this.wholesale)
-      const { entries, revision } = this.readEntries(collection)
-      this.updateCachedEntries(entries, revision)
+      // The render-time read is still current unless the handshake published.
+      const revision = this.getCollectionRevision(collection)
+      const layoutRevision = this.getCollectionLayoutRevision(collection)
+      if (
+        revision === undefined ||
+        this.cachedEntries === undefined ||
+        revision !== this.cachedCollectionRevision ||
+        layoutRevision !== this.cachedCollectionLayoutRevision
+      ) {
+        const { entries } = this.readEntries(collection)
+        this.updateCachedEntries(entries, revision)
+        this.cachedCollectionLayoutRevision = layoutRevision
+      }
     }
     if (this.hasHydrationSeed()) {
       if (!this.wholesale) this.seed(Array.from(this.subscriptions)[0]!)
@@ -1150,6 +1166,12 @@ export function createLiveQueryObserver<
   collection: Collection<T, TKey, any> | null | undefined,
   options: CreateLiveQueryObserverOptions = {},
 ): LiveQueryObserver<T, TKey> {
+  const pooled = createPooledObserver<T, TKey>(collection, {
+    wholesale: options.mode === `wholesale`,
+    client: options.client,
+    onPreload: options.onPreload,
+  })
+  if (pooled) return pooled
   return new LiveQueryObserverImpl<T, TKey>(
     collection ?? null,
     options.mode === `wholesale`,

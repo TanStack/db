@@ -1,5 +1,5 @@
 import { PropRef, Value, isBasicOrAggregateExpression } from '../ir.js'
-import { isRefProxy, registerRefProxy } from './ref-proxy-identity.js'
+import { REF_PROXY_BRAND, isRefProxy } from './ref-proxy-identity.js'
 import { getWrapperExpressionName } from './wrapper-identity.js'
 import type { BasicExpression } from '../ir.js'
 import type { IsPlainObject, RefLeaf } from './types.js'
@@ -86,6 +86,7 @@ export function createSingleRowRefProxy<
         if (prop === `__path`) return path
         if (prop === `__sourceAlias`) return undefined
         if (prop === `__type`) return undefined // Type is only for TypeScript inference
+        if (prop === REF_PROXY_BRAND) return true
         if (typeof prop === `symbol`) return Reflect.get(target, prop, receiver)
 
         const newPath = [...path, String(prop)]
@@ -119,8 +120,6 @@ export function createSingleRowRefProxy<
         return Reflect.getOwnPropertyDescriptor(target, prop)
       },
     })
-
-    registerRefProxy(proxy)
     cache.set(pathKey, proxy)
     return proxy
   }
@@ -136,25 +135,28 @@ export function createSingleRowRefProxy<
 export function createRefProxy<T extends Record<string, any>>(
   aliases: Array<string>,
 ): RefProxy<T> & T {
-  const cache = new Map<string, any>()
+  // Each path has one proxy, cached by its parent under the property name.
+  const aliasProxies = new Map<string, any>()
   let accessId = 0 // Monotonic counter to record evaluation order
 
   function createProxy(path: Array<string>): any {
-    const pathKey = JSON.stringify(path)
-    if (cache.has(pathKey)) {
-      return cache.get(pathKey)
-    }
-
+    let children: Map<string, any> | undefined
     const proxy = new Proxy({} as any, {
       get(target, prop, receiver) {
         if (prop === `__refProxy`) return true
         if (prop === `__path`) return path
         if (prop === `__sourceAlias`) return path[0]
         if (prop === `__type`) return undefined // Type is only for TypeScript inference
+        if (prop === REF_PROXY_BRAND) return true
         if (typeof prop === `symbol`) return Reflect.get(target, prop, receiver)
 
-        const newPath = [...path, String(prop)]
-        return createProxy(newPath)
+        children ??= new Map()
+        let child = children.get(prop)
+        if (child === undefined) {
+          child = createProxy([...path, prop])
+          children.set(prop, child)
+        }
+        return child
       },
 
       has(target, prop) {
@@ -193,9 +195,6 @@ export function createRefProxy<T extends Record<string, any>>(
         return Reflect.getOwnPropertyDescriptor(target, prop)
       },
     })
-
-    registerRefProxy(proxy)
-    cache.set(pathKey, proxy)
     return proxy
   }
 
@@ -206,11 +205,17 @@ export function createRefProxy<T extends Record<string, any>>(
       if (prop === `__path`) return []
       if (prop === `__sourceAlias`) return undefined
       if (prop === `__type`) return undefined // Type is only for TypeScript inference
+      if (prop === REF_PROXY_BRAND) return true
       if (typeof prop === `symbol`) return Reflect.get(target, prop, receiver)
 
       const propStr = String(prop)
       if (aliases.includes(propStr) || aliases.includes(`*`)) {
-        return createProxy([propStr])
+        let proxy = aliasProxies.get(propStr)
+        if (proxy === undefined) {
+          proxy = createProxy([propStr])
+          aliasProxies.set(propStr, proxy)
+        }
+        return proxy
       }
 
       return undefined
@@ -247,8 +252,6 @@ export function createRefProxy<T extends Record<string, any>>(
       return undefined
     },
   })
-
-  registerRefProxy(rootProxy)
   return rootProxy
 }
 
@@ -283,6 +286,7 @@ export function createRefProxyWithSelected<T extends Record<string, any>>(
         if (prop === `__path`) return [`$selected`, ...path]
         if (prop === `__sourceAlias`) return `$selected`
         if (prop === `__type`) return undefined
+        if (prop === REF_PROXY_BRAND) return true
         if (typeof prop === `symbol`) return Reflect.get(target, prop, receiver)
 
         const newPath = [...path, String(prop)]
@@ -316,8 +320,6 @@ export function createRefProxyWithSelected<T extends Record<string, any>>(
         return Reflect.getOwnPropertyDescriptor(target, prop)
       },
     })
-
-    registerRefProxy(proxy)
     cache.set(pathKey, proxy)
     return proxy
   }
@@ -356,7 +358,6 @@ export function createRefProxyWithSelected<T extends Record<string, any>>(
     T & {
       $selected: SingleRowRefProxy<any, string | number, true>
     }
-  registerRefProxy(selectedRootProxy)
   return selectedRootProxy
 }
 

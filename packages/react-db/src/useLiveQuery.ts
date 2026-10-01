@@ -5,13 +5,13 @@ import {
   BaseQueryBuilder,
   IR,
   UnhashableQueryIRError,
-  createLiveQueryCollection,
   createLiveQueryObserver,
   deepEquals,
   getPreparedLiveQueryIdentity,
   getStableValueHash,
   isCollection,
   prepareLiveQueryValue,
+  resolveLiveQueryValue,
 } from '@tanstack/db'
 import { useOptionalDbClient } from './DbProvider'
 import { setLiveQueryResultInfo } from './live-query-internals'
@@ -333,40 +333,6 @@ export function warnUnhashableDerivedIdentity(
     `[useLiveQuery] This query cannot derive a stable identity because ${error.reason} at ${error.path}. ` +
       `It will keep the legacy mount-stable behavior for now. Add queryKey: [...] to make captured values reactive. ` +
       `Unhashable queries without queryKey will throw in 1.0.`,
-  )
-}
-
-function createCollectionFromPreparedQuery(
-  value: unknown,
-  defaultGcTime = DEFAULT_GC_TIME_MS,
-) {
-  if (value === undefined || value === null) {
-    return null
-  }
-
-  if (isCollection(value)) {
-    value.startSyncImmediate()
-    return value
-  }
-
-  if (value instanceof BaseQueryBuilder) {
-    return createLiveQueryCollection({
-      query: value,
-      startSync: true,
-      gcTime: defaultGcTime,
-    })
-  }
-
-  if (typeof value === `object`) {
-    return createLiveQueryCollection({
-      startSync: true,
-      gcTime: defaultGcTime,
-      ...(value as LiveQueryCollectionConfig<any>),
-    })
-  }
-
-  throw new Error(
-    `useLiveQuery callback must return a QueryBuilder, LiveQueryCollectionConfig, Collection, undefined, or null. Got: ${typeof value}`,
   )
 }
 
@@ -825,22 +791,29 @@ function useLiveQueryImpl(
     streamIdentity = [`queryKey`, queryKey]
   } else if (deps !== undefined) {
     identityDeps = resolvedDeps
-    try {
-      preparedQueryValue = prepareQueryValue(
-        configOrQueryOrCollection,
-        dbClient,
-        deferredCollectionsRef.current,
-      )
-      streamIdentity = [
-        `deps`,
-        resolvedDeps,
-        getPreparedLiveQueryIdentity(preparedQueryValue),
-      ]
-    } catch (error) {
-      if (!(error instanceof UnhashableQueryIRError)) throw error
-      warnUnhashableDerivedIdentity(error)
-      identityError = error
-    }
+    // Deps decide reuse. Only hydration and Suspense read the query hash; the
+    // development warning about unhashable queries still derives it.
+    if (
+      dbClient ||
+      forSuspense ||
+      shouldWarnInDevelopment(`TANSTACK_DB_DISABLE_QUERY_IDENTITY_WARNINGS`)
+    )
+      try {
+        preparedQueryValue = prepareQueryValue(
+          configOrQueryOrCollection,
+          dbClient,
+          deferredCollectionsRef.current,
+        )
+        streamIdentity = [
+          `deps`,
+          resolvedDeps,
+          getPreparedLiveQueryIdentity(preparedQueryValue),
+        ]
+      } catch (error) {
+        if (!(error instanceof UnhashableQueryIRError)) throw error
+        warnUnhashableDerivedIdentity(error)
+        identityError = error
+      }
   } else if (inputIsCollection) {
     identityDeps = []
     streamIdentity = [`collection`, configOrQueryOrCollection.id]
@@ -976,10 +949,13 @@ function useLiveQueryImpl(
             deferredCollectionsRef.current,
           )
         }
-        collectionRef.current = createCollectionFromPreparedQuery(
-          preparedQueryValue,
-          forSuspense ? DEFAULT_SUSPENSE_GC_TIME_MS : DEFAULT_GC_TIME_MS,
-        ) as SuspenseCollection | null
+        collectionRef.current = resolveLiveQueryValue(preparedQueryValue, {
+          gcTime: forSuspense
+            ? DEFAULT_SUSPENSE_GC_TIME_MS
+            : DEFAULT_GC_TIME_MS,
+          // Hydration and Suspense key the live-query Collection by identity.
+          pool: !forSuspense && !dbClient,
+        }) as SuspenseCollection | null
         if (suspenseCollections && suspenseKey && collectionRef.current) {
           const collection = collectionRef.current
           const removeCleanupListener = collection.on(`status:cleaned-up`, () =>

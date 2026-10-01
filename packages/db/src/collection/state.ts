@@ -501,23 +501,6 @@ export class CollectionStateManager<
   }
 
   /**
-   * Visible entries whose stored row passes `prefilter`, enriched with virtual
-   * properties. Rows that fail are never copied.
-   */
-  public *entriesPassing(
-    prefilter: (row: object) => boolean,
-  ): IterableIterator<[TKey, WithVirtualProps<TOutput, TKey>]> {
-    // Without optimistic state, the visible rows are the synced rows in order.
-    const rows =
-      this.optimisticUpserts.size === 0 && this.optimisticDeletes.size === 0
-        ? this.syncedData
-        : this.entries()
-    for (const [key, row] of rows) {
-      if (prefilter(row)) yield [key, this.enrichWithVirtualProps(row, key)]
-    }
-  }
-
-  /**
    * Get all entries (virtual derived state)
    */
   public *[Symbol.iterator](): IterableIterator<[TKey, TOutput]> {

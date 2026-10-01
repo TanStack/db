@@ -1,11 +1,13 @@
 import { BaseQueryBuilder } from './query/builder/index.js'
 import { isCollection } from './live-query-adapter.js'
+import { createLiveQueryCollection } from './query/live-query-collection.js'
+import { createPooledLiveQuery } from './query/pooled-live-query.js'
 import {
   getStableQueryBuilderHash,
   getStableValueHash,
 } from './query/ir-stable-identity.js'
 import { getStringCollationIdentity } from './query/runtime-reference-identity.js'
-import type { CollectionImpl } from './collection/index.js'
+import type { Collection, CollectionImpl } from './collection/index.js'
 import type { CollectionOptionsIdentity } from './collection-options.js'
 import type { CollectionOptions, DbClient } from './client.js'
 import type {
@@ -141,4 +143,37 @@ export function getLiveQueryHash(
       : [`derived`, getPreparedLiveQueryIdentity(preparedValue)]
 
   return getStableValueHash(identity, `queryKey`)
+}
+
+/**
+ * Resolve an adapter's query value to what its observer watches: `null` for a
+ * disabled query, an existing Collection with sync started, or a live query.
+ * A query builder whose shape a shared partition can serve gets a pooled view
+ * instead of its own live-query Collection.
+ */
+export function resolveLiveQueryValue(
+  value: unknown,
+  { gcTime, pool = true }: { gcTime?: number; pool?: boolean } = {},
+): Collection<any, any, any> | null {
+  if (value === undefined || value === null) return null
+  if (isCollection(value)) {
+    value.startSyncImmediate()
+    return value
+  }
+  if (value instanceof BaseQueryBuilder) {
+    return (
+      (pool ? createPooledLiveQuery(value) : undefined) ??
+      createLiveQueryCollection({ query: value, startSync: true, gcTime })
+    )
+  }
+  if (typeof value === `object`) {
+    return createLiveQueryCollection({
+      startSync: true,
+      gcTime,
+      ...(value as LiveQueryCollectionConfig<any>),
+    })
+  }
+  throw new Error(
+    `A live query must be a QueryBuilder, LiveQueryCollectionConfig, Collection, undefined, or null. Got: ${typeof value}`,
+  )
 }
