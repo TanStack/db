@@ -41,7 +41,9 @@
  * `Object.defineProperty` as an enumerable or non-enumerable data or accessor
  * property,
  * or store a row's draft in it. A weighted run changes a field, adds `d` as
- * `undefined`, and reverts the field. Histories call the tracker with an
+ * `undefined`, and reverts the field; others write and delete `h`, write an
+ * equal object over an object `h`, or define a getter and assign it its own
+ * value. Histories call the tracker with an
  * array or with a single row, and may throw after any operation.
  *
  * Production driver: `withFlatChangeTracking` and the proxy trackers
@@ -320,6 +322,26 @@ const excursionArbitrary: fc.Arbitrary<Array<Operation>> = fc
     { kind: `set`, field: `d`, value: undefined },
     { kind: `revert`, field },
   ])
+// Runs that reach the descriptor laws, each of which a single operation
+// rarely forms: a hidden field written then deleted, an equal object written
+// over a hidden object field, and a getter-only field assigned its own value.
+const descriptorRunArbitrary: fc.Arbitrary<Array<Operation>> = fc.oneof(
+  valueArbitrary.map(
+    (value): Array<Operation> => [
+      { kind: `set`, field: `h`, value },
+      { kind: `delete`, field: `h` },
+    ],
+  ),
+  fc.constant<Array<Operation>>([
+    { kind: `set`, field: `h`, value: FRESH_OBJECT },
+  ]),
+  fc.tuple(fc.constantFrom(...fields), valueArbitrary, fc.boolean()).map(
+    ([field, value, enumerable]): Array<Operation> => [
+      { kind: `define-getter`, field, value, enumerable },
+      { kind: `set`, field, value },
+    ],
+  ),
+)
 const operationsArbitrary: fc.Arbitrary<Array<Operation>> = fc
   .array(
     fc.oneof(
@@ -328,6 +350,7 @@ const operationsArbitrary: fc.Arbitrary<Array<Operation>> = fc
         arbitrary: operationArbitrary.map((operation) => [operation]),
       },
       excursionArbitrary,
+      descriptorRunArbitrary,
     ),
     { maxLength: 5 },
   )
@@ -340,7 +363,8 @@ const rowArbitrary: fc.Arbitrary<RowShape> = fc.record({
   frozen: fc.boolean(),
   hidden: fc.oneof(
     { weight: 2, arbitrary: fc.constant(MISSING) },
-    fc.constantFrom(...values, FRESH_OBJECT),
+    fc.constant(FRESH_OBJECT),
+    fc.constantFrom(...values),
   ),
 })
 const historyArbitrary: fc.Arbitrary<History> = fc
