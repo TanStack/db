@@ -3,7 +3,7 @@ import { REF_PROXY_BRAND, readRefProxyBrand } from './ref-proxy-identity.js'
 import { getWrapperExpressionName } from './wrapper-identity.js'
 import type { BasicExpression } from '../ir.js'
 import type { IsPlainObject, RefLeaf } from './types.js'
-import type { VirtualRowProps } from '../../virtual-props.js'
+import type { PublishedVirtualRowProps } from '../../virtual-props.js'
 
 export { isRefProxy } from './ref-proxy-identity.js'
 
@@ -25,7 +25,9 @@ export interface RefProxy<T = any> {
 export type VirtualPropsRefProxy<
   TKey extends string | number = string | number,
 > = {
-  readonly [K in keyof VirtualRowProps<TKey>]: RefLeaf<VirtualRowProps<TKey>[K]>
+  readonly [K in keyof PublishedVirtualRowProps<TKey>]: RefLeaf<
+    PublishedVirtualRowProps<TKey>[K]
+  >
 }
 
 // Strip nullish members before deciding whether a schema field is traversable,
@@ -46,8 +48,8 @@ type SingleRowField<V, TKey extends string | number> = [
  * Type for creating a RefProxy for a single row/type without namespacing
  * Used in collection indexes and where clauses
  *
- * Inferred row roots include virtual properties ($synced, $origin, $key,
- * $collectionId). The default exported shape is suitable for reusable helpers
+ * Inferred row roots include virtual properties ($hasPendingWrites, $origin,
+ * $key, $collectionId). The default exported shape is suitable for reusable helpers
  * that can accept either roots or recursively traversed user objects. Use the
  * third parameter as `true` when a helper specifically requires a row root.
  */

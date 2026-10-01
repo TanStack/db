@@ -2,7 +2,7 @@
  * # Which published values carry virtual row fields?
  *
  * Law and source: `VirtualRowProps` gives Collection and live-query row roots
- * `$synced`, `$origin`, `$key`, and `$collectionId`. The output contract
+ * `$hasPendingWrites`, `$synced`, `$origin`, `$key`, and `$collectionId`. The output contract
  * established by `includes.test.ts` keeps inline `toArray` and `materialize`
  * selections in their selected shape instead of publishing each selected value
  * as a Collection row.
@@ -63,6 +63,7 @@ type VirtualFieldSubject =
 
 const virtualFieldNames = [
   `$key`,
+  `$hasPendingWrites`,
   `$synced`,
   `$origin`,
   `$collectionId`,
@@ -161,6 +162,12 @@ describe(`virtual row field runtime boundary`, () => {
       for (const { name, row } of observed) {
         expect(row, `${name} root must publish`).toBeDefined()
         assertPublishedRootFields(row, name)
+        expect(row!.$hasPendingWrites, `${name} has no pending write`).toBe(
+          false,
+        )
+        expect(row!.$hasPendingWrites, `${name} legacy inverse`).toBe(
+          !row!.$synced,
+        )
       }
 
       expect(implicit.toArray[0]?.id).toBe(`row-1`)
@@ -391,6 +398,13 @@ describe(`virtual row field runtime boundary`, () => {
       }
 
       expect(result.$key).toBe(`row-1`)
+      expect(result.$hasPendingWrites).toBe(!result.$synced)
+      expect(result.wholeRows[0]!.$hasPendingWrites).toBe(
+        !result.wholeRows[0]!.$synced,
+      )
+      expect(result.selectedWholeRows[0]!.$hasPendingWrites).toBe(
+        !result.selectedWholeRows[0]!.$synced,
+      )
 
       expect(result.profile).toEqual({ label: `nested` })
       expect(`$key` in result.profile).toBe(false)

@@ -71,7 +71,7 @@ const transaction = addTodo({
 })
 
 // Report final failure. This promise can stay pending offline.
-void transaction.isPersisted.promise.catch((error) => console.error(error))
+void transaction.when('settled').catch((error) => console.error(error))
 ```
 
 `onMutate` must be synchronous. It applies the optimistic change before the executor writes the outbox entry. If that write fails, the transaction fails. A visible optimistic change alone does not prove durable storage.
@@ -92,7 +92,7 @@ The executor sends a stable `idempotencyKey` with each attempt. A server can rec
 
 `waitForInit()` waits for storage setup, leader election, and the initial outbox read. It does not wait for every pending mutation to reach the server.
 
-`transaction.isPersisted.promise` settles when the offline transaction completes
+`transaction.when('settled')` settles when the offline transaction completes
 or fails. Successful settlement means the configured `mutationFn` returned and
 the storage adapter acknowledged outbox deletion. It proves server confirmation
 only if that function waits for a server acknowledgement, read-back, or sync
@@ -100,7 +100,7 @@ observation. If deletion fails, the promise rejects with the storage error.
 A server must honor the supplied idempotency key because a crash before
 the executor records provider completion can replay the request.
 
-Do not await `isPersisted.promise` before you show an offline page. A pending mutation can keep that promise open until connectivity returns. Use it to update submission status or report a final error.
+Do not await `transaction.when('settled')` before you show an offline page. A pending mutation can keep that promise open until connectivity returns. Use it to update submission status or report a final error.
 
 For a multi-step manual transaction, use `createOfflineTransaction`:
 
@@ -277,7 +277,7 @@ const transaction = addTodo({
   title: 'Buy milk',
   completed: false,
 })
-void transaction.isPersisted.promise.catch((error) => console.error(error))
+void transaction.when('settled').catch((error) => console.error(error))
 ```
 
 For the leader, `waitForInit()` waits for the initial outbox read and optimistic restoration attempt. It does not make `todos` ready. The separate `preload()` call starts Collection loading without blocking offline actions. A screen that needs initial rows can await `todos.preload()` and handle a rejection.

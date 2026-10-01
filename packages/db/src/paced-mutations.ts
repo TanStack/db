@@ -69,7 +69,7 @@ export interface PacedMutationsConfig<
  * const tx = updateTodo('New text')
  *
  * // Await persistence or handle errors
- * await tx.isPersisted.promise
+ * await tx.when('settled')
  * ```
  *
  * @example

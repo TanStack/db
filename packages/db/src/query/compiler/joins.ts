@@ -613,7 +613,7 @@ function processJoinSource(
 ): { alias: string; input: KeyedStream; collectionId: string } {
   switch (from.type) {
     case `collectionRef`: {
-      const input = allInputs[from.sourceId] ?? allInputs[from.alias]
+      const input = allInputs[from.sourceId]
       if (!input) {
         throw new CollectionInputNotFoundError(
           from.alias,

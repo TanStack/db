@@ -2,7 +2,7 @@ import fc from 'fast-check'
 import { describe, expect, it } from 'vitest'
 import { createCollection } from '../src/collection/index.js'
 import { createDeferred } from '../src/deferred.js'
-import { createLiveQueryCollection } from '../src/query/index.js'
+import { createLiveQueryCollection, eq } from '../src/query/index.js'
 import { createTransaction } from '../src/transactions.js'
 import {
   expectHistoryEventSemantics,
@@ -743,7 +743,13 @@ describe(`Delete then insert transaction laws`, () => {
 // Observe user fields without discarding unexpected fields or undefined keys.
 function userRow<T extends object>(value: T): T {
   const copy = { ...value } as Record<string, unknown>
-  for (const field of [`$synced`, `$origin`, `$key`, `$collectionId`])
+  for (const field of [
+    `$hasPendingWrites`,
+    `$synced`,
+    `$origin`,
+    `$key`,
+    `$collectionId`,
+  ])
     delete copy[field]
   return copy as T
 }
@@ -786,6 +792,12 @@ async function runTransaction(scenario: Scenario, fault?: ObservationFault) {
   const derived = createLiveQueryCollection({
     query: (q) => q.from({ row: source }),
   })
+  const pendingOnly = createLiveQueryCollection({
+    query: (q) =>
+      q
+        .from({ row: source })
+        .where(({ row }) => eq(row.$hasPendingWrites, true)),
+  })
   const gate = createDeferred<void>()
   let payload:
     | Array<{
@@ -812,6 +824,7 @@ async function runTransaction(scenario: Scenario, fault?: ObservationFault) {
     },
   })
   const persisted = observeHistoryPromise(tx.isPersisted.promise)
+  const settled = observeHistoryPromise(tx.when(`settled`))
   let committed: ReturnType<typeof observeHistoryPromise<typeof tx>> | undefined
   let subscription: ReturnType<typeof source.subscribeChanges> | undefined
   const replica = new Map<number, Row>()
@@ -823,7 +836,28 @@ async function runTransaction(scenario: Scenario, fault?: ObservationFault) {
   }> = []
   const failure = new Error(`authored mutation failure`)
   let checked = 0
-  const check = (expected: Map<number, Row>, label: string, graph = true) => {
+  const check = (
+    expected: Map<number, Row>,
+    label: string,
+    graph = true,
+    pendingKeys: ReadonlySet<number> = new Set(),
+  ) => {
+    for (const [surface, rows] of [
+      [`source`, [...source.values()]],
+      ...(graph ? ([[`derived`, [...derived.values()]]] as const) : []),
+    ] as const) {
+      for (const row of rows) {
+        const expectedPending = pendingKeys.has(row.id)
+        expect(
+          row.$hasPendingWrites,
+          `${label}: ${surface} row ${row.id} pending local write`,
+        ).toBe(expectedPending)
+        expect(
+          row.$hasPendingWrites,
+          `${label}: ${surface} row ${row.id} legacy inverse`,
+        ).toBe(!row.$synced)
+      }
+    }
     const read = ordered(source.values())
     // Test-only faults alter captured observations, never the expected world or
     // runtime. Every fault also runs beside the same healthy real driver.
@@ -845,8 +879,14 @@ async function runTransaction(scenario: Scenario, fault?: ObservationFault) {
       })
     }
     expectRows(read, expected.values(), `${label}: source`)
-    if (graph)
+    if (graph) {
       expectRows(derived.values(), expected.values(), `${label}: derived`)
+      expectRows(
+        pendingOnly.values(),
+        [...expected.values()].filter((row) => pendingKeys.has(row.id)),
+        `${label}: pending-only query`,
+      )
+    }
     expectRows(replica.values(), expected.values(), `${label}: replica`)
     for (const publication of publications.slice(checked)) {
       expectHistoryEventSemantics(
@@ -873,7 +913,7 @@ async function runTransaction(scenario: Scenario, fault?: ObservationFault) {
   }
   return withHistoryCleanup(
     async () => {
-      await derived.preload()
+      await Promise.all([derived.preload(), pendingOnly.preload()])
       subscription = source.subscribeChanges(
         (batch) => {
           const before = new Map(replica)
@@ -915,6 +955,7 @@ async function runTransaction(scenario: Scenario, fault?: ObservationFault) {
       )
       check(base, `initial`)
       const draftRows = new Map(base)
+      const draftPendingKeys = new Set<number>()
       tx.mutate(() => {
         for (const operation of scenario.order) {
           if (operation === `delete`)
@@ -931,17 +972,23 @@ async function runTransaction(scenario: Scenario, fault?: ObservationFault) {
           // mutate groups persistence, not synchronous Collection calls. Each
           // authored operation may publish its own complete draft prefix.
           if (operation === `delete`) draftRows.delete(1)
-          else if (operation === `insert`) draftRows.set(3, proposed.get(3)!)
-          else draftRows.set(2, proposed.get(2)!)
+          else if (operation === `insert`) {
+            draftRows.set(3, proposed.get(3)!)
+            if (scenario.optimistic) draftPendingKeys.add(3)
+          } else {
+            draftRows.set(2, proposed.get(2)!)
+            if (scenario.optimistic) draftPendingKeys.add(2)
+          }
           check(
             scenario.optimistic ? draftRows : base,
             `draft ${operation}`,
             false,
+            draftPendingKeys,
           )
         }
       })
       const pendingRows = scenario.optimistic ? proposed : base
-      check(pendingRows, `complete mutation scope`)
+      check(pendingRows, `complete mutation scope`, true, draftPendingKeys)
       committed = observeHistoryPromise(tx.commit())
       expect(mutationCalls, `whole mutation persistence delivery count`).toBe(1)
       expect(payload, `actual mutation function entered`).toBeDefined()
@@ -971,17 +1018,22 @@ async function runTransaction(scenario: Scenario, fault?: ObservationFault) {
         `held persistence`,
       )
       expectHistoryOutcome(
+        settled.read(),
+        { status: `pending` },
+        `held settled receipt`,
+      )
+      expectHistoryOutcome(
         committed.read(),
         { status: `pending` },
         `held commit`,
       )
-      check(pendingRows, `held handler`)
+      check(pendingRows, `held handler`, true, draftPendingKeys)
       if (scenario.outcome === `reject`) gate.reject(failure)
       else {
         if (scenario.outcome === `rollback`) tx.rollback()
         gate.resolve()
       }
-      await Promise.all([persisted.settled, committed.settled])
+      await Promise.all([persisted.settled, settled.settled, committed.settled])
       expect(mutationCalls, `settled mutation persistence delivery count`).toBe(
         1,
       )
@@ -993,6 +1045,15 @@ async function runTransaction(scenario: Scenario, fault?: ObservationFault) {
             ? { status: `rejected`, reason: failure }
             : { status: `rejected` },
         `persistence settlement`,
+      )
+      expectHistoryOutcome(
+        settled.read(),
+        scenario.outcome === `resolve`
+          ? { status: `fulfilled`, value: tx }
+          : scenario.outcome === `reject`
+            ? { status: `rejected`, reason: failure }
+            : { status: `rejected` },
+        `settled receipt`,
       )
       // Manual rollback rejects persistence; the already running commit returns
       // its transaction when the held handler finishes without a new failure.
@@ -1037,8 +1098,10 @@ async function runTransaction(scenario: Scenario, fault?: ObservationFault) {
       },
       () => gate.resolve(),
       () => persisted.settled,
+      () => settled.settled,
       () => committed?.settled,
       () => subscription?.unsubscribe(),
+      () => pendingOnly.cleanup(),
       () => derived.cleanup(),
       () => source.cleanup(),
     ],

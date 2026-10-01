@@ -75,7 +75,7 @@ const updateTodo = createPacedMutations<string>({
 const tx = updateTodo('New text')
 
 // Await persistence or handle errors
-await tx.isPersisted.promise
+await tx.when('settled')
 ```
 
 ```ts

@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { createCollection } from '../src/collection/index.js'
 import { localOnlyCollectionOptions } from '../src/local-only.js'
-import { mockSyncCollectionOptions } from './utils.js'
+import { mockSyncCollectionOptions, withExpectedRejection } from './utils.js'
 
 /**
  * A row read with virtual props is a copy, cached so repeated reads and
@@ -78,10 +78,12 @@ describe(`virtual props cache`, () => {
     collection.utils.commit()
     expect(cacheSize(collection)).toBe(0)
 
-    const transaction = collection.insert({ id: `y`, a: 1 })
-    collection.get(`y`)
-    collection.utils.rejectSync(new Error(`rolled back`))
-    await transaction.isPersisted.promise.catch(() => undefined)
+    await withExpectedRejection(`rolled back`, async () => {
+      const transaction = collection.insert({ id: `y`, a: 1 })
+      collection.get(`y`)
+      collection.utils.rejectSync(new Error(`rolled back`))
+      await transaction.isPersisted.promise.catch(() => undefined)
+    })
     expect(collection.has(`y`)).toBe(false)
     expect(cacheSize(collection)).toBe(0)
   })

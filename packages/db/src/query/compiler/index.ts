@@ -25,6 +25,7 @@ import {
   FnSelectWithGroupByError,
   HavingRequiresGroupByError,
   LimitOffsetRequireOrderByError,
+  QueryCompilationError,
   UnsupportedFnSelectResultError,
   UnsupportedFromTypeError,
 } from '../../errors.js'
@@ -1244,11 +1245,12 @@ function bindSourceInputs(
   sources: Array<CollectionRef>,
   inputs: Record<string, KeyedStream>,
 ): void {
+  // Callers may key inputs by alias. Bind them to source identities once;
+  // compilation then reads inputs by SourceId only, so a source whose
+  // identity was lost fails instead of reading a same-named source.
   for (const source of sources) {
     const input = inputs[source.sourceId] ?? inputs[source.alias]
-    if (!input) continue
-    inputs[source.sourceId] = input
-    inputs[source.alias] = input
+    if (input) inputs[source.sourceId] = input
   }
 }
 
@@ -1339,7 +1341,25 @@ function collectDirectCollectionAliases(query: QueryIR): Set<string> {
 function validateQueryStructure(
   query: QueryIR,
   parentCollectionAliases: Set<string> = new Set(),
+  visibleAliases: Set<string> = new Set(),
 ): void {
+  // One scope cannot name two sources alike.
+  const levelAliases = getAllSources(query).map((source) => source.alias)
+  for (const [index, alias] of levelAliases.entries()) {
+    if (levelAliases.indexOf(alias) !== index) {
+      throw new QueryCompilationError(
+        `Query uses alias "${alias}" more than once. Give each source in one query a distinct alias.`,
+      )
+    }
+  }
+
+  // A scope cannot shadow an alias that its ancestors can see.
+  for (const alias of collectScopeAliases(query)) {
+    if (visibleAliases.has(alias)) {
+      throw new DuplicateAliasInSubqueryError(alias, [...visibleAliases])
+    }
+  }
+
   // Collect direct collection aliases from this query level
   const currentLevelAliases = collectDirectCollectionAliases(query)
 
@@ -1362,12 +1382,12 @@ function validateQueryStructure(
   // Recursively validate FROM subqueries
   if (query.from.type === `unionAll`) {
     for (const branch of query.from.queries) {
-      validateQueryStructure(branch, combinedAliases)
+      validateQueryStructure(branch, combinedAliases, visibleAliases)
     }
   } else {
     for (const source of getFromSources(query.from)) {
       if (source.type === `queryRef`) {
-        validateQueryStructure(source.query, combinedAliases)
+        validateQueryStructure(source.query, combinedAliases, visibleAliases)
       }
     }
   }
@@ -1376,16 +1396,37 @@ function validateQueryStructure(
   if (query.join) {
     for (const joinClause of query.join) {
       if (joinClause.from.type === `queryRef`) {
-        validateQueryStructure(joinClause.from.query, combinedAliases)
+        validateQueryStructure(
+          joinClause.from.query,
+          combinedAliases,
+          visibleAliases,
+        )
       }
     }
   }
 
+  // An include sees every alias of its ancestors, including subquery
+  // aliases, so it cannot shadow any of them.
   if (query.select) {
+    // A parent row exposes its from and join aliases, not the aliases inside
+    // its unionAll() branches.
+    const scopeAliases = new Set([...visibleAliases, ...levelAliases])
     for (const { subquery } of extractIncludesFromSelect(query.select)) {
-      validateQueryStructure(subquery.query, combinedAliases)
+      validateQueryStructure(subquery.query, combinedAliases, scopeAliases)
     }
   }
+}
+
+// unionAll() branches belong to the scope of the query that unions them.
+function collectScopeAliases(query: QueryIR): Array<string> {
+  const branchAliases =
+    query.from.type === `unionAll`
+      ? query.from.queries.flatMap(collectScopeAliases)
+      : []
+  return [
+    ...branchAliases,
+    ...getAllSources(query).map((source) => source.alias),
+  ]
 }
 
 /**
@@ -1747,7 +1788,7 @@ function processFrom(
 } {
   switch (from.type) {
     case `collectionRef`: {
-      const input = allInputs[from.sourceId] ?? allInputs[from.alias]
+      const input = allInputs[from.sourceId]
       if (!input) {
         throw new CollectionInputNotFoundError(
           from.alias,

@@ -171,7 +171,7 @@ export interface Collection<
  *
  * // Direct usage (handlers manage transactions)
  * const tx = todos.insert({ id: "1", text: "Buy milk", completed: false })
- * await tx.isPersisted.promise
+ * await tx.when('settled')
  *
  * @example
  * // Pattern 2: Manual transaction management
@@ -194,7 +194,7 @@ export interface Collection<
  *   todos.update("2", draft => { draft.completed = true })
  * })
  *
- * await tx.isPersisted.promise
+ * await tx.when('settled')
  *
  * @example
  * // Using schema for type inference (preferred as it also gives you client side validation)
@@ -818,7 +818,7 @@ export class CollectionImpl<
    * @example
    * // Insert a single todo (requires onInsert handler)
    * const tx = collection.insert({ id: "1", text: "Buy milk", completed: false })
-   * await tx.isPersisted.promise
+   * await tx.when('settled')
    *
    * @example
    * // Insert multiple todos at once
@@ -826,20 +826,20 @@ export class CollectionImpl<
    *   { id: "1", text: "Buy milk", completed: false },
    *   { id: "2", text: "Walk dog", completed: true }
    * ])
-   * await tx.isPersisted.promise
+   * await tx.when('settled')
    *
    * @example
    * // Insert with metadata
    * const tx = collection.insert({ id: "1", text: "Buy groceries" },
    *   { metadata: { source: "mobile-app" } }
    * )
-   * await tx.isPersisted.promise
+   * await tx.when('settled')
    *
    * @example
    * // Handle errors
    * try {
    *   const tx = collection.insert({ id: "1", text: "New item" })
-   *   await tx.isPersisted.promise
+   *   await tx.when('settled')
    *   console.log('Insert successful')
    * } catch (error) {
    *   console.log('Insert failed:', error)
@@ -861,14 +861,14 @@ export class CollectionImpl<
    * const tx = collection.update("todo-1", (draft) => {
    *   draft.completed = true
    * })
-   * await tx.isPersisted.promise
+   * await tx.when('settled')
    *
    * @example
    * // Update multiple items
    * const tx = collection.update(["todo-1", "todo-2"], (drafts) => {
    *   drafts.forEach(draft => { draft.completed = true })
    * })
-   * await tx.isPersisted.promise
+   * await tx.when('settled')
    *
    * @example
    * // Update with metadata
@@ -876,13 +876,13 @@ export class CollectionImpl<
    *   { metadata: { reason: "user update" } },
    *   (draft) => { draft.text = "Updated text" }
    * )
-   * await tx.isPersisted.promise
+   * await tx.when('settled')
    *
    * @example
    * // Handle errors
    * try {
    *   const tx = collection.update("item-1", draft => { draft.value = "new" })
-   *   await tx.isPersisted.promise
+   *   await tx.when('settled')
    *   console.log('Update successful')
    * } catch (error) {
    *   console.log('Update failed:', error)
@@ -936,23 +936,23 @@ export class CollectionImpl<
    * @example
    * // Delete a single item
    * const tx = collection.delete("todo-1")
-   * await tx.isPersisted.promise
+   * await tx.when('settled')
    *
    * @example
    * // Delete multiple items
    * const tx = collection.delete(["todo-1", "todo-2"])
-   * await tx.isPersisted.promise
+   * await tx.when('settled')
    *
    * @example
    * // Delete with metadata
    * const tx = collection.delete("todo-1", { metadata: { reason: "completed" } })
-   * await tx.isPersisted.promise
+   * await tx.when('settled')
    *
    * @example
    * // Handle errors
    * try {
    *   const tx = collection.delete("item-1")
-   *   await tx.isPersisted.promise
+   *   await tx.when('settled')
    *   console.log('Delete successful')
    * } catch (error) {
    *   console.log('Delete failed:', error)

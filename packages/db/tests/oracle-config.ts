@@ -105,6 +105,7 @@ const staticOracleProperties = [
   `includes-temporal.partial-values`,
   `includes-temporal.demand-scheduling`,
   `includes.alpha-renaming`,
+  `includes.scoped-alpha-renaming`,
   `includes.incremental-history`,
   `includes.nested-scalar-materialization`,
   `includes.optimistic-convergence`,
