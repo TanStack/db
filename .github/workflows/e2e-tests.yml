@@ -13,6 +13,12 @@ jobs:
     name: Run E2E Tests
     runs-on: ubuntu-latest
     timeout-minutes: 35
+    env:
+      # Since 2026-10-01 Docker Hub rejects anonymous pulls of
+      # electricsql/electric (401 "authentication required"). The Docker
+      # services and the suites that need Electric are skipped until the
+      # image can be pulled again. Set this back to 'true' then.
+      ELECTRIC_E2E: 'false'
 
     steps:
       - name: Checkout code
@@ -35,6 +41,7 @@ jobs:
         run: pnpm install --frozen-lockfile
 
       - name: Start Docker services
+        if: env.ELECTRIC_E2E == 'true'
         run: |
           cd packages/db-collection-e2e/docker
           docker compose up -d
@@ -51,6 +58,7 @@ jobs:
           pnpm --filter @tanstack/query-db-collection build
 
       - name: Run Electric E2E tests
+        if: env.ELECTRIC_E2E == 'true'
         run: |
           cd packages/electric-db-collection
           pnpm test:e2e
@@ -80,6 +88,7 @@ jobs:
           pnpm test:opfs-fairness
 
       - name: Run Browser SQLite OPFS with live Electric E2E tests
+        if: env.ELECTRIC_E2E == 'true'
         run: |
           cd packages/browser-db-sqlite-persistence
           pnpm test:opfs-electric
@@ -149,7 +158,7 @@ jobs:
           TANSTACK_DB_REQUIRE_MOBILE_RUNTIME_LANE: ${{ vars.TANSTACK_DB_REQUIRE_MOBILE_RUNTIME_LANE }}
 
       - name: Stop Docker services
-        if: always()
+        if: always() && env.ELECTRIC_E2E == 'true'
         run: |
           cd packages/db-collection-e2e/docker
           docker compose down -v
