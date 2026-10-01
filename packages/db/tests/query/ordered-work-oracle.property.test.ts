@@ -1906,7 +1906,7 @@ describe(`ordered source work oracle`, () => {
           expect(changedDuringStart).toBe(true)
           await vi.runAllTimersAsync()
           expect(batches).toEqual([
-            [{ type: `enter`, key: `[2,undefined]`, value: truth.get(2) }],
+            [{ type: `enter`, key: `[2,null]`, value: truth.get(2) }],
           ])
           expect(requests.some((options) => options.refetch === true)).toBe(
             true,

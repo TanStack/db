@@ -505,19 +505,19 @@ describe(`Query Collections`, () => {
       // Verify that we have the expected joined results
       expect(query.state.size).toBe(3)
 
-      expect(query.state.get(`[1,1]`)).toMatchObject({
+      expect(query.state.get(`["1","1"]`)).toMatchObject({
         id: `1`,
         name: `John Doe`,
         title: `Issue 1`,
       })
 
-      expect(query.state.get(`[2,2]`)).toMatchObject({
+      expect(query.state.get(`["2","2"]`)).toMatchObject({
         id: `2`,
         name: `Jane Doe`,
         title: `Issue 2`,
       })
 
-      expect(query.state.get(`[3,1]`)).toMatchObject({
+      expect(query.state.get(`["3","1"]`)).toMatchObject({
         id: `3`,
         name: `John Doe`,
         title: `Issue 3`,
@@ -539,7 +539,7 @@ describe(`Query Collections`, () => {
       flushSync()
 
       expect(query.state.size).toBe(4)
-      expect(query.state.get(`[4,2]`)).toMatchObject({
+      expect(query.state.get(`["4","2"]`)).toMatchObject({
         id: `4`,
         name: `Jane Doe`,
         title: `Issue 4`,
@@ -561,7 +561,7 @@ describe(`Query Collections`, () => {
       flushSync()
 
       // The updated title should be reflected in the joined results
-      expect(query.state.get(`[2,2]`)).toMatchObject({
+      expect(query.state.get(`["2","2"]`)).toMatchObject({
         id: `2`,
         name: `Jane Doe`,
         title: `Updated Issue 2`,
@@ -583,7 +583,7 @@ describe(`Query Collections`, () => {
       flushSync()
 
       // After deletion, issue 3 should no longer have a joined result
-      expect(query.state.get(`[3,1]`)).toBeUndefined()
+      expect(query.state.get(`["3","1"]`)).toBeUndefined()
       expect(query.state.size).toBe(3)
     })
   })
@@ -807,7 +807,7 @@ describe(`Query Collections`, () => {
 
       // Verify the new issue is reflected in the query
       expect(queryResult.state.size).toBe(4)
-      expect(queryResult.state.get(`[4,1]`)).toMatchObject({
+      expect(queryResult.state.get(`["4","1"]`)).toMatchObject({
         id: `4`,
         name: `John Doe`,
         title: `New Issue`,

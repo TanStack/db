@@ -1,4 +1,5 @@
 import { D2, output } from '@tanstack/db-ivm'
+import { createSourceRecord } from '../utils/source-record.js'
 import { createDeferred } from '../deferred.js'
 import { runAllCallbacks } from '../utils/callbacks.js'
 import { normalizeError } from '../utils/error.js'
@@ -389,18 +390,14 @@ class EffectPipelineRunner<TRow extends object, TKey extends string | number> {
   // Mutable objects passed to compileQuery by reference.
   // The join compiler captures these references and reads them later when
   // the graph runs, so they must be populated before the first graph run.
-  private readonly subscriptions: Record<string, CollectionSubscription> = {}
-  private readonly lazySourcesCallbacks: Record<
-    string,
-    LazyCollectionCallbacks
-  > = {}
+  private readonly subscriptions = createSourceRecord<CollectionSubscription>()
+  private readonly lazySourcesCallbacks =
+    createSourceRecord<LazyCollectionCallbacks>()
   private readonly lazySources = new Set<string>()
   private readonly demand = new SubsetDemandController()
   // OrderBy optimization info populated by the compiler when limit is present
-  private readonly optimizableOrderByCollections: Record<
-    string,
-    OrderByOptimizationInfo
-  > = {}
+  private readonly optimizableOrderByCollections =
+    createSourceRecord<OrderByOptimizationInfo>()
 
   // Ordered subscription state for cursor-based loading
   private readonly orderedLoaders = new Map<string, OrderedSourceLoader>()
@@ -464,12 +461,11 @@ class EffectPipelineRunner<TRow extends object, TKey extends string | number> {
   /** Compile the D2 graph and query pipeline */
   private compilePipeline(): void {
     this.graph = new D2()
-    this.inputs = Object.fromEntries(
-      this.collectionSources.map((source) => [
-        source.sourceId,
-        this.graph!.newInput<any>(),
-      ]),
-    )
+    const inputs = createSourceRecord<RootStreamBuilder<unknown>>()
+    for (const source of this.collectionSources) {
+      inputs[source.sourceId] = this.graph.newInput<any>()
+    }
+    this.inputs = inputs
 
     const compilation = compileQuery(
       this.query,

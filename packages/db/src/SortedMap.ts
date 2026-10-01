@@ -233,13 +233,11 @@ export class SortedMap<TKey extends string | number, TValue> {
    *
    * @returns An iterator for the map's values
    */
-  values(): IterableIterator<TValue> {
-    return function* (this: SortedMap<TKey, TValue>) {
-      this.restoreOrder()
-      for (const key of this.sortedKeys) {
-        yield this.map.get(key)!
-      }
-    }.call(this)
+  *values(): IterableIterator<TValue> {
+    this.restoreOrder()
+    for (const key of this.sortedKeys) {
+      yield this.map.get(key)!
+    }
   }
 
   /**

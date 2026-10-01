@@ -464,19 +464,19 @@ describe(`Query Collections`, () => {
 
     // Verify that we have the expected joined results
 
-    expect(result.current.state.get(`[1,1]`)).toMatchObject({
+    expect(result.current.state.get(`["1","1"]`)).toMatchObject({
       id: `1`,
       name: `John Doe`,
       title: `Issue 1`,
     })
 
-    expect(result.current.state.get(`[2,2]`)).toMatchObject({
+    expect(result.current.state.get(`["2","2"]`)).toMatchObject({
       id: `2`,
       name: `Jane Doe`,
       title: `Issue 2`,
     })
 
-    expect(result.current.state.get(`[3,1]`)).toMatchObject({
+    expect(result.current.state.get(`["3","1"]`)).toMatchObject({
       id: `3`,
       name: `John Doe`,
       title: `Issue 3`,
@@ -500,7 +500,7 @@ describe(`Query Collections`, () => {
     await waitFor(() => {
       expect(result.current.state.size).toBe(4)
     })
-    expect(result.current.state.get(`[4,2]`)).toMatchObject({
+    expect(result.current.state.get(`["4","2"]`)).toMatchObject({
       id: `4`,
       name: `Jane Doe`,
       title: `Issue 4`,
@@ -523,7 +523,7 @@ describe(`Query Collections`, () => {
 
     await waitFor(() => {
       // The updated title should be reflected in the joined results
-      expect(result.current.state.get(`[2,2]`)).toMatchObject({
+      expect(result.current.state.get(`["2","2"]`)).toMatchObject({
         id: `2`,
         name: `Jane Doe`,
         title: `Updated Issue 2`,
@@ -548,7 +548,7 @@ describe(`Query Collections`, () => {
     await new Promise((resolve) => setTimeout(resolve, 10))
 
     // After deletion, issue 3 should no longer have a joined result
-    expect(result.current.state.get(`[3,1]`)).toBeUndefined()
+    expect(result.current.state.get(`["3","1"]`)).toBeUndefined()
     expect(result.current.state.size).toBe(3)
   })
 
@@ -835,8 +835,8 @@ describe(`Query Collections`, () => {
       useEffect(() => {
         renderStates.push({
           stateSize: queryResult.state.size,
-          hasTempKey: queryResult.state.has(`[temp-key,1]`),
-          hasPermKey: queryResult.state.has(`[4,1]`),
+          hasTempKey: queryResult.state.has(`["temp-key","1"]`),
+          hasPermKey: queryResult.state.has(`["4","1"]`),
           timestamp: Date.now(),
         })
       }, [queryResult.state])
@@ -915,12 +915,12 @@ describe(`Query Collections`, () => {
     await waitFor(() => {
       // Verify optimistic state is immediately reflected
       expect(result.current.state.size).toBe(4)
-      expect(result.current.state.get(`[temp-key,1]`)).toMatchObject({
+      expect(result.current.state.get(`["temp-key","1"]`)).toMatchObject({
         id: `temp-key`,
         name: `John Doe`,
         title: `New Issue`,
       })
-      expect(result.current.state.get(`[4,1]`)).toBeUndefined()
+      expect(result.current.state.get(`["4","1"]`)).toBeUndefined()
     })
 
     // Wait for the transaction to be committed
@@ -928,7 +928,7 @@ describe(`Query Collections`, () => {
 
     await waitFor(() => {
       // Wait for the permanent key to appear
-      expect(result.current.state.get(`[4,1]`)).toBeDefined()
+      expect(result.current.state.get(`["4","1"]`)).toBeDefined()
     })
 
     // Check if we had any render where the temp key was removed but the permanent key wasn't added yet
@@ -941,8 +941,8 @@ describe(`Query Collections`, () => {
 
     // Verify the temporary key is replaced by the permanent one
     expect(result.current.state.size).toBe(4)
-    expect(result.current.state.get(`[temp-key,1]`)).toBeUndefined()
-    expect(result.current.state.get(`[4,1]`)).toMatchObject({
+    expect(result.current.state.get(`["temp-key","1"]`)).toBeUndefined()
+    expect(result.current.state.get(`["4","1"]`)).toMatchObject({
       id: `4`,
       name: `John Doe`,
       title: `New Issue`,

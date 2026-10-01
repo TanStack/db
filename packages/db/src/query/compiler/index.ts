@@ -48,6 +48,7 @@ import {
   isExpressionLike,
 } from '../ir.js'
 import { ensureIndexForField } from '../../indexes/auto-index.js'
+import { createSourceRecord } from '../../utils/source-record.js'
 import { deepEquals } from '../../utils.js'
 import { normalizeValue } from '../../utils/comparison.js'
 import {
@@ -401,7 +402,7 @@ export function compileQuery(
   mapNestedQueries(query, rawQuery, queryMapping)
 
   // Create a copy of the inputs map to avoid modifying the original
-  const allInputs = { ...inputs }
+  const allInputs = Object.assign(createSourceRecord<KeyedStream>(), inputs)
   const rawSources = collectCollectionSources(rawQuery)
   bindSourceInputs(rawSources, allInputs)
 
@@ -1082,12 +1083,14 @@ export function compileQuery(
     }
   }
 
-  // Normalize every logical row before DISTINCT and ordering. Those operators
-  // track visibility by row key, so an insert-before-delete replacement with
-  // the same key would otherwise keep the old value and hide route or order
-  // changes. Joined contributors may differ in unselected namespaces; only
-  // the public value and its route/order inputs must be congruent.
-  if (!selectHasAggregates) {
+  // DISTINCT tracks visibility by selected value, so an insert-before-delete
+  // replacement with the same key must be normalized first; joined
+  // contributors may differ in unselected namespaces, and only the public
+  // value and its route/order inputs must be congruent. Ordering already
+  // batches each key's retractions before its insertions (topKBatch), and
+  // materialized relations reduce by public key, so other queries keep their
+  // compiled rows.
+  if (!selectHasAggregates && query.distinct) {
     pipeline = canonicalizeSelectedRows(
       pipeline,
       query,

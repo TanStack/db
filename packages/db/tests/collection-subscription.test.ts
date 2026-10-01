@@ -1700,6 +1700,119 @@ describe(`CollectionSubscription status tracking`, () => {
     }
   })
 
+  // The next limited page starts after the rows this subscription published.
+  // A change its where clause drops is not published and cannot advance the
+  // offset, whether it arrives alone or beside a matching change. Change
+  // routing withholds dropped rows from an `eq` subscription before sent keys
+  // are recorded, so an `or` predicate, which is not routed, is also needed to
+  // reach that record.
+  const statusA = new Func(`eq`, [new PropRef([`status`]), new Value(`a`)])
+  it.each(
+    [
+      `alone`,
+      `beside a matching change`,
+      `as an update beside a matching change`,
+    ].flatMap((grouping) => [
+      { grouping, predicate: `routed eq`, where: statusA },
+      {
+        grouping,
+        predicate: `unrouted or`,
+        where: new Func(`or`, [
+          statusA,
+          new Func(`eq`, [new PropRef([`status`]), new Value(`z`)]),
+        ]),
+      },
+    ]),
+  )(
+    `does not advance the page offset for a dropped change that arrives $grouping ($predicate)`,
+    async ({ grouping, where }) => {
+      type Row = { id: string; rank: number; status: string }
+      const loads: Array<LoadSubsetOptions> = []
+      let sync!: {
+        begin: () => void
+        write: (message: { type: `insert` | `update`; value: Row }) => void
+        commit: () => void
+      }
+      const collection = createCollection<Row>({
+        id: `limited-offset-dropped-change-${grouping}-${String(where.name)}`,
+        getKey: ({ id }) => id,
+        syncMode: `on-demand`,
+        sync: {
+          sync: ({ begin, write, commit, markReady }) => {
+            sync = { begin, write, commit }
+            begin()
+            write({ type: `insert`, value: { id: `a1`, rank: 1, status: `a` } })
+            write({ type: `insert`, value: { id: `b0`, rank: 5, status: `b` } })
+            commit()
+            markReady()
+            return {
+              loadSubset: (options) => {
+                loads.push(options)
+                return true
+              },
+            }
+          },
+        },
+      })
+      const index = collection.createIndex((row) => row.rank, {
+        indexType: BTreeIndex,
+      })
+      const published = new Set<string | number>()
+      const subscription = collection.subscribeChanges(
+        (changes) => {
+          for (const change of changes) {
+            if (change.type === `delete`) published.delete(change.key)
+            else published.add(change.key)
+          }
+        },
+        { whereExpression: where },
+      )
+      subscription.setOrderByIndex(index)
+      const requestPage = () =>
+        subscription.requestLimitedSnapshot({
+          orderBy: [
+            {
+              expression: new PropRef([`rank`]),
+              compareOptions: { direction: `asc`, nulls: `first` },
+            },
+          ],
+          limit: 1,
+        })
+
+      try {
+        requestPage()
+        sync.begin()
+        if (grouping === `as an update beside a matching change`) {
+          sync.write({
+            type: `update`,
+            value: { id: `b0`, rank: 5, status: `c` },
+          })
+        } else {
+          sync.write({
+            type: `insert`,
+            value: { id: `b1`, rank: 2, status: `b` },
+          })
+        }
+        if (grouping !== `alone`) {
+          sync.write({
+            type: `insert`,
+            value: { id: `a2`, rank: 3, status: `a` },
+          })
+        }
+        sync.commit()
+        requestPage()
+
+        expect([...published].sort()).toEqual(
+          grouping === `alone` ? [`a1`] : [`a1`, `a2`],
+        )
+        expect(loads.at(-1)?.offset).toBe(published.size)
+      } finally {
+        subscription.unsubscribe()
+        await collection.cleanup()
+      }
+    },
+  )
+
   it(`does not observe limited adapter work after it unsubscribes`, async () => {
     type Row = { id: string; rank: number }
     const pending = createDeferred<void>()
