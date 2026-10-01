@@ -3,11 +3,20 @@ linkWorkspacePackages: true
 preferWorkspacePackages: true
 blockExoticSubdeps: false
 
+# @solidjs/vite-plugin dedupes solid-js to the importing project, so rollup
+# resolves solid-js's own imports from each project's node_modules; hoist the
+# signals package to keep it resolvable there.
+publicHoistPattern:
+  - '@solidjs/signals'
+
 packages:
   - packages/**
   - examples/**/*
 
 overrides:
+  # Newest @solidjs/vite-plugin builds (next.32+) require Vite 8; this repo's
+  # vitest 3.2.4 resolves Vite 7. Pin the newest Vite-7-compatible build.
+  '@solidjs/vite-plugin': 3.0.0-next.31
   metro: '0.82.5'
   metro-babel-transformer: '0.82.5'
   metro-cache: '0.82.5'
