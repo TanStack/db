@@ -34,17 +34,6 @@ function isPlainPrototype(prototype: object | null): boolean {
   return prototype === null || Object.getPrototypeOf(prototype) === null
 }
 
-// An object of another class differs. Plain and null-prototype objects, from
-// any realm, are one class.
-function isSameClass(a: object, b: object): boolean {
-  const prototype = Object.getPrototypeOf(a)
-  const prototypeB = Object.getPrototypeOf(b)
-  return (
-    prototype === prototypeB ||
-    (isPlainPrototype(prototype) && isPlainPrototype(prototypeB))
-  )
-}
-
 function enumerableOwnKeys(value: object): Array<string | symbol> {
   const keys: Array<string | symbol> = Object.keys(value)
   for (const key of Object.getOwnPropertySymbols(value)) {
@@ -262,6 +251,16 @@ export function deepEqualsInternal(
   }
   // Handle objects
   if (typeof a === `object`) {
+    // An object of another class differs. Plain and null-prototype objects,
+    // from any realm, are one class.
+    const prototype = Object.getPrototypeOf(a)
+    const prototypeB = Object.getPrototypeOf(b)
+    if (
+      prototype !== prototypeB &&
+      !(isPlainPrototype(prototype) && isPlainPrototype(prototypeB))
+    )
+      return false
+
     // Check for circular references
     if (visited.has(a)) {
       return visited.get(a) === b
@@ -285,10 +284,10 @@ export function deepEqualsInternal(
     if (
       keysA.length === 0 &&
       !Array.isArray(a) &&
-      !isPlainPrototype(Object.getPrototypeOf(a))
+      !isPlainPrototype(prototype)
     ) {
       visited.delete(a)
-      return a instanceof URL && b instanceof URL && a.href === b.href
+      return a instanceof URL && a.href === b.href
     }
 
     // Check if all keys exist in both objects and their values are equal
@@ -299,7 +298,7 @@ export function deepEqualsInternal(
     )
 
     visited.delete(a)
-    return result && isSameClass(a, b)
+    return result
   }
 
   // For primitives that aren't strictly equal

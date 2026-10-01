@@ -31,19 +31,6 @@ function unwrapDraft(value: unknown): unknown {
 }
 
 /**
- * Array methods whose results hold no elements of the array.
- */
-const ARRAY_VALUE_METHODS = new Set([
-  `includes`,
-  `indexOf`,
-  `lastIndexOf`,
-  `join`,
-  `keys`,
-  `toLocaleString`,
-  `toString`,
-])
-
-/**
  * Set of array methods that modify the array in place.
  */
 const ARRAY_MODIFYING_METHODS = new Set([
@@ -81,38 +68,6 @@ function isProxiableObject(
     !((value as any) instanceof RegExp) &&
     !isTemporal(value)
   )
-}
-
-/**
- * Iterates a draft array. Each element is read like an index read; `read` is
- * the draft's `get` trap, called directly because a read through the Proxy is
- * several times slower. Primitives skip it: the trap returns them as read.
- */
-function iterateArray<A>(
-  read: (array: A, prop: string, receiver: unknown) => unknown,
-  array: A & Array<unknown>,
-  receiver: unknown,
-  withIndex: boolean,
-): IterableIterator<unknown> {
-  let index = 0
-  return {
-    next() {
-      if (index >= array.length) return { done: true, value: undefined }
-      let element = array[index]
-      if (
-        element !== null &&
-        (typeof element === `object` || typeof element === `function`)
-      )
-        element = read(array, String(index), receiver)
-      return {
-        done: false,
-        value: withIndex ? [index++, element] : (index++, element),
-      }
-    },
-    [Symbol.iterator]() {
-      return this
-    },
-  }
 }
 
 /**
@@ -220,7 +175,7 @@ interface ChangeTracker<T extends object> {
 
 interface TypedArray {
   length: number
-  [index: number]: number
+  set: (source: TypedArray) => void
 }
 
 function deepClone<T extends unknown>(
@@ -280,11 +235,9 @@ function deepClone<T extends unknown>(
     const TypedArrayConstructor = Object.getPrototypeOf(obj).constructor
     const clone = new TypedArrayConstructor(
       (obj as unknown as TypedArray).length,
-    ) as unknown as TypedArray
+    ) as TypedArray
     visited.set(obj as object, clone)
-    for (let i = 0; i < (obj as unknown as TypedArray).length; i++) {
-      clone[i] = (obj as unknown as TypedArray)[i]!
-    }
+    clone.set(obj as unknown as TypedArray)
     return clone as unknown as T
   }
 
@@ -323,11 +276,12 @@ function deepClone<T extends unknown>(
   const clone = {} as Record<string | symbol, unknown>
   visited.set(obj as object, clone)
 
-  // Own enumerable string keys, then every own symbol key, in native order.
-  // A Reflect.ownKeys loop with an enumerability check is shorter but slower
-  // on this hot path.
-  for (const key in obj) {
-    if (Object.prototype.hasOwnProperty.call(obj, key)) {
+  // Own enumerable string keys and every own symbol key, in native order.
+  for (const key of Reflect.ownKeys(obj)) {
+    if (
+      typeof key === `symbol` ||
+      Object.prototype.propertyIsEnumerable.call(obj, key)
+    ) {
       // Copy data properties without invoking Object.prototype.__proto__.
       defineDataProperty(
         clone,
@@ -339,14 +293,6 @@ function deepClone<T extends unknown>(
         ),
       )
     }
-  }
-
-  for (const sym of Object.getOwnPropertySymbols(obj)) {
-    clone[sym] = deepClone(
-      (obj as Record<string | symbol, unknown>)[sym],
-      visited,
-      detach,
-    )
   }
 
   return clone as T
@@ -506,15 +452,9 @@ export function createChangeProxy<
   // Create a proxy for the target object.
   // Use the unfrozen copy_ as the proxy target to avoid Proxy invariant violations
   // when the original target is frozen (e.g., from Immer)
-  const handler: ProxyHandler<T> = {
+  const proxy = new Proxy(changeTracker.copy_, {
     get(ptarget, prop, receiver) {
       const value = changeTracker.copy_[prop as keyof T]
-      // Primitives return as read, from a getter or not.
-      if (
-        value === null ||
-        (typeof value !== `object` && typeof value !== `function`)
-      )
-        return value
 
       // If it's a getter, return the value directly
       const desc = Object.getOwnPropertyDescriptor(ptarget, prop)
@@ -542,30 +482,10 @@ export function createChangeProxy<
             )
           }
 
-          if (
-            methodName === `values` ||
-            methodName === `entries` ||
-            prop === Symbol.iterator
-          ) {
-            return () =>
-              iterateArray(
-                handler.get!,
-                ptarget,
-                receiver,
-                methodName === `entries`,
-              )
-          }
-
-          // These results hold no elements, so they run on the copy, where a
-          // draft element argument is its copy.
-          if (ARRAY_VALUE_METHODS.has(methodName)) {
-            return (search: unknown, ...rest: Array<unknown>) =>
-              value.call(ptarget, unwrapDraft(search), ...rest)
-          }
-
-          // Other methods read through the draft itself, so returned and
-          // callback elements are drafts. This also tracks the callback array
-          // and implicit reduce seed.
+          // Other methods, iterators included, read through the draft
+          // itself, so returned and callback elements are drafts and searches
+          // find them. This also tracks the callback array and implicit
+          // reduce seed.
           return value.bind(receiver)
         }
 
@@ -758,8 +678,7 @@ export function createChangeProxy<
 
       return true
     },
-  }
-  const proxy = new Proxy(changeTracker.copy_, handler)
+  })
   draftCopies.set(proxy, changeTracker.copy_)
 
   // Return the proxy and a function to get the changes
