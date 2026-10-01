@@ -1,4 +1,8 @@
-import { withArrayChangeTracking, withChangeTracking } from '../proxy'
+import {
+  withArrayChangeTracking,
+  withChangeTracking,
+  withFlatChangeTracking,
+} from '../proxy'
 import { safeRandomUUID } from '../utils/uuid'
 import { createTransaction, getActiveTransaction } from '../transactions'
 import {
@@ -395,20 +399,24 @@ export class CollectionMutationsManager<
       return item
     }) as unknown as Array<TInput>
 
-    let changesArray
-    if (isArray) {
-      // Use the proxy to track changes for all objects
-      changesArray = withArrayChangeTracking(
+    // Flat rows need no proxy; nested rows track changes through drafts.
+    const changesArray =
+      withFlatChangeTracking(
         currentObjects,
-        callback as (draft: Array<TInput>) => void,
-      )
-    } else {
-      const result = withChangeTracking(
-        currentObjects[0]!,
-        callback as (draft: TInput) => void,
-      )
-      changesArray = [result]
-    }
+        callback as (drafts: Array<TInput> | TInput) => void,
+        isArray,
+      ) ??
+      (isArray
+        ? withArrayChangeTracking(
+            currentObjects,
+            callback as (draft: Array<TInput>) => void,
+          )
+        : [
+            withChangeTracking(
+              currentObjects[0]!,
+              callback as (draft: TInput) => void,
+            ),
+          ])
 
     // Create mutations for each object that has changes
     const mutations: Array<

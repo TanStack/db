@@ -1020,3 +1020,51 @@ export function withArrayChangeTracking<T extends object>(
 
   return deepClone(getChanges(), undefined, true)
 }
+
+// Whether every own field of a plain object is a primitive or a function.
+function isFlatPlainObject(value: object): boolean {
+  const prototype = Object.getPrototypeOf(value)
+  if (prototype !== Object.prototype && prototype !== null) return false
+  for (const key in value) {
+    const field = (value as Record<string, unknown>)[key]
+    if (field !== null && typeof field === `object`) return false
+  }
+  return Object.getOwnPropertySymbols(value).length === 0
+}
+
+/**
+ * Change tracking for flat rows without proxies. A draft is a shallow copy,
+ * and its changes are the fields that differ from the row afterwards under
+ * the same equality the draft proxy uses for primitives. Returns undefined
+ * when any row has a nested object, a symbol key, or a class prototype, so
+ * the caller falls back to the proxy.
+ */
+export function withFlatChangeTracking<T extends object>(
+  targets: Array<T>,
+  callback: (drafts: Array<T> | T) => void,
+  asArray: boolean,
+): Array<Record<string, unknown>> | undefined {
+  if (!targets.every(isFlatPlainObject)) return undefined
+  const drafts = targets.map((target) => ({ ...target }))
+  callback(asArray ? drafts : drafts[0]!)
+  return drafts.map((draft, index) => {
+    const original = targets[index] as Record<string, unknown>
+    const changes: Record<string, unknown> = {}
+    for (const key in draft) {
+      const value = (draft as Record<string, unknown>)[key]
+      const before = original[key]
+      if (
+        !Object.hasOwn(original, key) ||
+        !(value === before || Object.is(value, before))
+      ) {
+        defineDataProperty(changes, key, value)
+      }
+    }
+    for (const key in original) {
+      if (!Object.hasOwn(draft, key))
+        defineDataProperty(changes, key, undefined)
+    }
+    // A callback may assign objects; detach them as the proxy path does.
+    return deepClone(changes, undefined, true)
+  })
+}

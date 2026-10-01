@@ -49,6 +49,7 @@ const staticOracleProperties = [
   `where-predicate.publication`,
   `join-result-key.pairs`,
   `pooled-live-query.publication`,
+  `flat-change-tracking.equivalence`,
   `derived-publication.membership-work`,
   `collection-publication.metadata-cancellation`,
   `collection-publication.metadata-only`,
