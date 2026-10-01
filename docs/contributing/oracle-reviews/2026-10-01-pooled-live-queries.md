@@ -97,13 +97,12 @@ mutation, or never complete the transaction fail 4, 4, 4, 8, 12, 1, and 9
 tests.
 
 Two shared conformance scenarios, `eq-filter-rows` and `eq-filter-peers`, run
-the pooled path under React and compiled live queries under Vue, Solid,
-Svelte, and Angular. A partition that ignores a row's previous group fails
-both under React and none elsewhere. `eq-filter-peers` also checks the
+the pooled path under React, Vue, Solid, Svelte, and Angular. A partition that
+ignores a row's previous group fails both under every adapter. `eq-filter-peers` also checks the
 source's public `subscriberCount`: an adapter that declares `pooledEqFilters`
-must share one subscription for two queries on the same fields. Disabling
-pooling or using one partition per query fails it under React; before this
-check the first passed.
+must share one subscription for two queries on the same fields. Disabling pooling or using one partition per query fails it under React;
+before this check the first passed. Each adapter's driver declares
+`pooledEqFilters`.
 
 The loss audit found that a partition released its source one second after
 its last listener, whatever `gcTime` its views had. A focused release-timing
@@ -153,5 +152,5 @@ oracle does not observe it.
 
 ## Open work
 
-- Pooled live queries run only in React; the other adapters keep compiled live
-  queries until they use the shared resolver.
+- Svelte's suite reads `@tanstack/db` from its built `dist`, so a mutant
+  must type-check and be rebuilt before Svelte can observe it.
