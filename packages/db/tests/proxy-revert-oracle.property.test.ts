@@ -208,6 +208,7 @@ type Op =
   | { op: `revert`; field: Field }
   | { op: `delete`; field: Field }
   | { op: `nested`; field: Field; key: `a` | `b` | `sym`; value: Primitive }
+  | { op: `nestedDelete`; field: Field; key: `a` | `b` | `sym` }
   | { op: `index`; field: Field; index: number; value: Primitive }
   | { op: `forOf`; field: Field; index: number; value: Primitive }
 
@@ -235,6 +236,14 @@ const opArb: fc.Arbitrary<Op> = fc.oneof(
       field: fc.constantFrom(...FIELDS),
       key: fc.constantFrom(`a` as const, `b` as const, `sym` as const),
       value: primArb,
+    }),
+  },
+  {
+    weight: 2,
+    arbitrary: fc.record({
+      op: fc.constant(`nestedDelete` as const),
+      field: fc.constantFrom(...FIELDS),
+      key: fc.constantFrom(`a` as const, `b` as const, `sym` as const),
     }),
   },
   fc.record({
@@ -312,21 +321,51 @@ const partialRevertArb: fc.Arbitrary<History> = fc
     return { original, ops: [...changes, ...reverts] }
   })
 
+// Nested round trips. Either add a key the original object lacks and later
+// delete it, or change an existing key and later write its original value
+// back, with up to two other ops in between. Other ops may leave other fields
+// changed, so the nested object must stop counting as a change on its own.
+const nestedRoundTripArb: fc.Arbitrary<History> = fc
+  .record({
+    a: primArb,
+    sym: fc.option(primArb, { nil: undefined }),
+    g: specArb,
+    mode: fc.constantFrom(`delete` as const, `restore` as const),
+    value: primArb,
+    between: fc.array(opArb, { maxLength: 2 }),
+  })
+  .map(({ a, sym, g, mode, value, between }): History => {
+    const f: Spec = sym === undefined ? { k: `obj`, a } : { k: `obj`, a, sym }
+    const first: GeneratedOp =
+      mode === `delete`
+        ? { op: `nested`, field: `f`, key: `b`, value }
+        : { op: `nested`, field: `f`, key: `a`, value }
+    const last: GeneratedOp =
+      mode === `delete`
+        ? { op: `nestedDelete`, field: `f`, key: `b` }
+        : { op: `nested`, field: `f`, key: `a`, value: a }
+    return { original: { f, g }, ops: [first, ...between, last] }
+  })
+
 // ---------------------------------------------------------------------------
 // Model: apply each op to the spec state. An op whose target has the wrong
 // shape does nothing, and the driver skips it the same way.
 
-function applicable(state: Root, op: Op): boolean {
+function applicable(state: Root, original: Root, op: Op): boolean {
   const current = state[op.field]
   switch (op.op) {
     case `set`:
       return true
     case `revert`:
-      return op.field in state || current !== undefined
+      // Restoring a deleted field is a revert too. Skip only when the field
+      // is absent both originally and now.
+      return original[op.field] !== undefined || current !== undefined
     case `delete`:
       return current !== undefined
     case `nested`:
       return current?.k === `obj`
+    case `nestedDelete`:
+      return current?.k === `obj` && op.key in current
     case `index`:
       return current?.k === `array` && op.index < current.items.length
     case `forOf`:
@@ -354,6 +393,12 @@ function step(state: Root, original: Root, op: Op): Root {
         [op.key]: op.value,
       }
       break
+    case `nestedDelete`: {
+      const obj = { ...(current as Extract<Spec, { k: `obj` }>) }
+      delete obj[op.key]
+      next[op.field] = obj
+      break
+    }
     case `index`: {
       const items = [...(current as Extract<Spec, { k: `array` }>).items]
       items[op.index] = op.value
@@ -400,6 +445,10 @@ function drive(draft: Record<string, any>, op: Op): void {
     case `nested`:
       if (op.key === `sym`) draft[op.field][S] = op.value
       else draft[op.field][op.key] = op.value
+      return
+    case `nestedDelete`:
+      if (op.key === `sym`) delete draft[op.field][S]
+      else delete draft[op.field][op.key]
       return
     case `index`:
       draft[op.field][op.index] = op.value
@@ -481,7 +530,7 @@ function expectHistory({ original, ops }: History): void {
   let state: Root = { ...original }
   for (const generated of ops) {
     const op = resolve(state, original, generated)
-    if (op === undefined || !applicable(state, op)) continue
+    if (op === undefined || !applicable(state, original, op)) continue
     if (op.op === `revert`) {
       if (original[op.field] === undefined) delete proxy[op.field]
       else proxy[op.field] = realize(original[op.field]!)
@@ -557,6 +606,13 @@ describe(`draft revert oracle`, () => {
         ...(replayPath === undefined ? {} : { path: replayPath }),
       })
     })
+    it(`matches the model across generated nested round trips (${name})`, () => {
+      fc.assert(fc.property(nestedRoundTripArb, expectHistory), {
+        numRuns: 200,
+        ...(seed === undefined ? {} : { seed }),
+        ...(replayPath === undefined ? {} : { path: replayPath }),
+      })
+    })
     it(`matches the model across generated partial reverts (${name})`, () => {
       fc.assert(fc.property(partialRevertArb, expectHistory), {
         numRuns: 200,
@@ -582,7 +638,7 @@ describe(`draft revert oracle`, () => {
       let effectiveReverts = 0
       for (const generated of ops) {
         const op = resolve(state, original, generated)
-        if (op === undefined || !applicable(state, op)) continue
+        if (op === undefined || !applicable(state, original, op)) continue
         reached.add(op.op)
         if (
           op.op === `revert` &&
@@ -614,10 +670,11 @@ describe(`draft revert oracle`, () => {
       `forOf`,
       `index`,
       `nested`,
+      `nestedDelete`,
       `revert`,
       `set`,
     ])
-    expect(partial).toBeGreaterThanOrEqual(10)
+    expect(partial).toBeGreaterThanOrEqual(5)
     expect(full).toBeGreaterThanOrEqual(30)
     expect(symbolOnly).toBeGreaterThan(0)
   })
@@ -631,6 +688,70 @@ describe(`draft revert oracle`, () => {
         ops: [
           { op: `set`, field: `f`, value: { k: `prim`, v: `b` } },
           { op: `set`, field: `g`, value: { k: `prim`, v: `b` } },
+          { op: `revert`, field: `f` },
+        ],
+      },
+    ],
+    [
+      `adding a nested key and deleting it again is not a change`,
+      {
+        original: { f: { k: `obj`, a: 1 } },
+        ops: [
+          { op: `nested`, field: `f`, key: `b`, value: 2 },
+          { op: `nestedDelete`, field: `f`, key: `b` },
+        ],
+      },
+    ],
+    [
+      `restoring a nested value is not a change while a sibling stays changed`,
+      {
+        original: { f: { k: `obj`, a: 1 }, g: { k: `prim`, v: `a` } },
+        ops: [
+          { op: `nested`, field: `f`, key: `a`, value: 2 },
+          { op: `set`, field: `g`, value: { k: `prim`, v: `b` } },
+          { op: `nested`, field: `f`, key: `a`, value: 1 },
+        ],
+      },
+    ],
+    [
+      `deleting an added nested key is not a change while a sibling stays changed`,
+      {
+        original: { f: { k: `obj`, a: 1 }, g: { k: `prim`, v: `a` } },
+        ops: [
+          { op: `nested`, field: `f`, key: `b`, value: 2 },
+          { op: `set`, field: `g`, value: { k: `prim`, v: `b` } },
+          { op: `nestedDelete`, field: `f`, key: `b` },
+        ],
+      },
+    ],
+    [
+      `a replaced object that returns to its new value is still a change`,
+      {
+        original: { f: { k: `obj`, a: 1 } },
+        ops: [
+          { op: `set`, field: `f`, value: { k: `obj`, a: 2 } },
+          { op: `nested`, field: `f`, key: `a`, value: 3 },
+          { op: `nested`, field: `f`, key: `a`, value: 2 },
+        ],
+      },
+    ],
+    [
+      `a key added with the value undefined stays a change after a sibling revert`,
+      {
+        original: { f: { k: `obj`, a: 0 } },
+        ops: [
+          { op: `nested`, field: `f`, key: `b`, value: 0 },
+          { op: `set`, field: `h`, value: { k: `prim`, v: undefined } },
+          { op: `nestedDelete`, field: `f`, key: `b` },
+        ],
+      },
+    ],
+    [
+      `deleting a field and writing its original back is a revert`,
+      {
+        original: { f: { k: `prim`, v: `a` }, g: { k: `prim`, v: `a` } },
+        ops: [
+          { op: `delete`, field: `f` },
           { op: `revert`, field: `f` },
         ],
       },

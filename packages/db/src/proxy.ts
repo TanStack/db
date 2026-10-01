@@ -420,9 +420,12 @@ export function createChangeProxy<
       )
     }
     for (const prop in state.assigned_) {
-      // false marks a deletion, which always differs from the original
+      // false marks a deletion, which always differs from the original. A key
+      // added with the value undefined differs from an absent key.
       if (
         !state.assigned_[prop] ||
+        Object.hasOwn(state.copy_, prop) !==
+          Object.hasOwn(state.originalObject, prop) ||
         !draftValuesEqual(
           state.copy_[prop],
           (state.originalObject as any)[prop],
@@ -446,9 +449,19 @@ export function createChangeProxy<
       parentState.modified = false
       parentState.assigned_ = Object.create(null)
 
-      // Continue up the chain
-      if (parentState.parent) {
-        checkParentStatus(parentState.parent.tracker)
+      // Continue up the chain. The parent's edge to this object no longer
+      // counts as a change when the parent's value equals its original; a
+      // replaced object can revert to its own snapshot and still differ.
+      const edge = parentState.parent
+      if (edge) {
+        if (
+          draftValuesEqual(
+            edge.tracker.copy_[edge.prop],
+            edge.tracker.originalObject[edge.prop],
+          )
+        )
+          delete edge.tracker.assigned_[edge.prop]
+        checkParentStatus(edge.tracker)
       }
     }
   }
@@ -662,10 +675,10 @@ export function createChangeProxy<
           if (!hadPropertyInOriginal) {
             delete changeTracker.assigned_[stringProp]
 
-            // If this is the last change and we're not a nested object,
-            // mark the object as unmodified
-            changeTracker.modified =
-              Object.keys(changeTracker.assigned_).length > 0
+            // Deleting an added key is a revert. Like the set trap, clear
+            // tracking here and up the chain once everything is reverted.
+            changeTracker.modified = true
+            checkParentStatus(changeTracker)
           } else {
             // Mark this property as deleted
             changeTracker.assigned_[stringProp] = false
