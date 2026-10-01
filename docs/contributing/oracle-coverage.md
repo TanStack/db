@@ -594,6 +594,17 @@ boundary. Track the generalized repairs here instead of accumulating isolated
 regressions. Completion requires an executable owner, a production-path witness,
 a hostile wrong-answer control, and an explicit statement of remaining limits.
 
+- [ ] **Optimizer residual convergence beyond the checked paths.** The
+      optimizer-semantics owner now checks `sourceWhereClauses`, source-free
+      predicates, namespace-only predicates, later RIGHT/FULL join nullability,
+      and an ordered QueryRef refusal at structural checkpoints. It still needs
+      public-row witnesses for later RIGHT/FULL chains, residual checks for
+      aggregate, functional, and projection-remapped QueryRef refusals, a
+      separate UNION branch model, and incremental source/publication histories.
+      Owner: `packages/db/tests/query/optimizer-semantics-oracle.test.ts` and
+      its production compiler driver. Each extension needs a distinguishing
+      wrong-plan control at the relevant checkpoint.
+
 - [x] **Real-provider conformance fixtures.** Frozen 15.2.7 React Native and
       Node receipts cover the supported peer version; 18.2.1 React Native, Node,
       and browser receipts cover the known forward shapes. Exact-row checks and a

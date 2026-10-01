@@ -10,6 +10,11 @@ and oracle file has SHA-256
 `bd5b06605814d3f1c190455438974f9112a53219930ec7d8b92673917d3dc56c`.
 The separate task-local external-feedback ledger preserves all 13 PR and bot
 items; this record preserves the oracle and repair evidence.
+The loss-audit follow-up reviewed PR head
+`0da9cb9a0612e0b905723dffd2791c27978c6ec2` against the guide and
+production paths. The code-bearing follow-up head is
+`92490bc7245c734ad547746786ae9c0219fe81db`. This review record is an
+evidence-only successor to that head.
 
 ## Contract and checked boundary
 
@@ -43,9 +48,9 @@ live-query Collection, with matched and unmatched source rows.
 | Candidate, optimizer, join, and join-subquery suites | 247 passed after the predicate-kind case was added. |
 | Wrong-design controls | Marking regular clauses residual fails on `member.userId`'s marker. Keeping only the first residual fails on the missing `tag.region` predicate. Both are assertion failures at the structural checkpoint, not setup failures or timeouts. |
 
-The production change adds 20 lines and removes 28, net **minus eight**.
-The expanded executable oracle adds 533 lines. This separates the cost of the
-repair from the broader test and documentation coverage.
+At the initial reviewed candidate, the production change added 20 lines and
+removed 28, net **minus eight**. The executable oracle added 533 lines. The
+loss-audit follow-up has separate code-weight figures below.
 
 ## Oracle guide audit
 
@@ -54,7 +59,7 @@ repair from the broader test and documentation coverage.
 | ORC-001 | The contract above states the optimizer and outer-join law, authority, finite grammar, and observations. The coverage map owns omitted expressions, join chains, and publication histories. |
 | ORC-002 | The structural expectation is an explicit relational-side table, not the optimizer's nullable-source classifier. The public result models join and filter plain arrays; they import neither optimizer analysis nor compiler evaluation. |
 | ORC-003 | The oracle opening states the contract, model, grammar, driver, and checkpoints. The table and array models give the answer; `optimizeQuery` and `createLiveQueryCollection` are the production drivers; assertions are adjacent to each case. |
-| ORC-004 | Not applicable: this is a finite, enumerated grammar, not a generated-history property. Its named cross product and fixed extensions are the claim's bound. |
+| ORC-004 | The finite matrix claims only its stated input grammar. Reconstruction: each of 4 join kinds × 2 clause forms × 2 clause orders × 2 predicate counts is constructed and run. Ablation: join kind changes nullable-side eligibility; clause form tests residual-marker retention after combination; order checks order independence; the extra predicate checks same-source multiplicity. Range: one or two active predicates, with the FULL no-push case, are the bounds. Exclusion: unknown source aliases are outside this valid-query grammar; UNION, arbitrary functions, and incremental histories are outside the claim. This records the controls even though the guide distinguishes finite enumeration from an important generated property. |
 | ORC-005 | Structural work is observed at the `optimizeQuery` return and after a later pass. The public driver observes exact projected rows at the first synchronous Collection snapshot. The recorder preserves duplicate predicate terms and result rows. |
 | ORC-006 | The original implementation and two wrong designs fail at the intended assertions. The contributor's partial fix also fails the later-pass clause-count assertion. |
 | ORC-007 | Not applicable: there is no important generated property or random campaign. Every enumerated case runs in the package oracle test file. |
@@ -80,3 +85,45 @@ successfully. The full `packages/db` Vitest suite then passed 229 files and
 7,937 tests with no type errors using `--testTimeout=120000`. This resolves
 the earlier self-package declaration setup errors. The structural and public
 history bounds above remain unchanged.
+
+## Loss-audit follow-up
+
+The audit found a real adjacent predicate-preservation defect: with a join,
+`groupWhereClauses` silently discarded a clause that touched no source. A
+`Value(false)` after an active-side filter therefore vanished, and the first
+public live-query Collection snapshot contained three rows instead of none.
+The structural predicate-preservation assertion and the public snapshot test
+both failed before the repair and passed afterward. The repair retains every
+clause without exactly one pushable source in the outer WHERE. Three older
+optimizer tests expected source-free or malformed clauses to disappear; their
+false-green expectations now assert preservation.
+
+The structural matrix now checks both `optimizedQuery` and
+`sourceWhereClauses`, including nullable-source exclusion. Replacing the latter
+with an empty map failed the left-join matrix case at the intended assertion
+(`[]` versus `['team']`). Fixed extensions check a namespace-only predicate,
+later RIGHT/FULL joins that make earlier aliases nullable, and an ordered
+QueryRef that declines pushdown. Each checks the first and later optimizer
+pass. The source-free case also checks public rows. These extensions do not
+establish public results for the later join chains or all QueryRef refusal
+reasons. UNION remains a separate optimizer path.
+
+The parallel preparation review found that the structural term reader ignored
+predicate values. It could not distinguish `team.active=true` from
+`team.active=false`. The reader now records literal values and rejects
+unexpected compared expressions. A calibration test failed when an equality
+literal was deliberately hidden, then passed with the corrected reader. The
+main matrix also checks those values in pushed and residual predicates.
+The duplicate focused LEFT JOIN test was removed because the matrix receives
+its trace and its original-implementation RED evidence.
+
+The final branch diff against the fetched `origin/main` adds 22 production
+lines and removes 31, net **minus nine**. The executable oracle adds 762 lines;
+the existing optimizer tests add 23 and remove 13. Tests and review documents
+are reported separately from production code.
+
+At the code-bearing head, the full `packages/db/tests` suite passed 197 files
+and 7,675 tests with two Vitest threads and a 120-second test timeout. The
+package TypeScript check, focused ESLint, Prettier, and diff check passed.
+An earlier sandboxed full run could not write Vitest's temporary cache and
+failed its replay calibration; the same suite passed with that cache writable.
