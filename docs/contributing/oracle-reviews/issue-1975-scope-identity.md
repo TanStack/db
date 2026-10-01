@@ -36,6 +36,12 @@ lookup returned a sibling scope's source with the same name.
   Top-level `from()` subqueries see no ancestor, so they may still reuse names.
 - `compiler/index.ts` `validateQueryStructure`: one query cannot give two of
   its sources the same alias. Two joins with one alias were accepted before.
+- An include sees its ancestors' from and join aliases, but not the aliases
+  inside a parent's `unionAll()` branches. A union row holds the branches'
+  projected fields, so those names belong to sibling scopes. An earlier
+  revision of this change rejected an include that reused a branch alias, which
+  base `18abceee4` accepted with correct rows. The `unionParent` topology now
+  guards that legal naming.
 
 ## Bug-class boundary
 
@@ -64,6 +70,7 @@ lookup returned a sibling scope's source with the same name.
 | Identity-only binding         | With it, each optimizer site mutant also fails the existing suite with `CollectionInputNotFoundError` (3, 53, 146, and 59 tests) instead of returning wrong rows. With the optimizer repair in place it is behavior-equivalent; its value is converting a future identity loss into an error. |
 | Include shadowing             | Four rejection witnesses (include, nested include, include `unionAll()` branch, include `from()` subquery) fail on `18abceee4` and pass with the repair; a sibling-reuse control passes on both. |
 | Generated rejection | One in four scenarios draws any naming; illegal ones must be rejected, and shadowing ones with `DuplicateAliasInSubqueryError`. At a 10x budget this check found the duplicate-join acceptance, and it fails when include `from()` visibility or the same-scope check is reverted. Reverting union-branch visibility is caught only by its pinned `validate-aliases.test.ts` witness, because the include level already checks branch aliases. |
+| Union scopes | Reintroducing branch aliases into an include's visible set fails both `unionParent` witnesses and both campaigns at the default budget. A derived branch alias and a same-named union join return the same rows as a renamed join; `validate-aliases.test.ts` pins both legal namings. |
 | Model calibration             | Planted model faults (ignore child filter, LEFT as INNER, drop join duplicates) fail only at "canonical naming against recomputation".                                                                                                                                                        |
 | Request calibration           | An alias-dependent WHERE routing mutant fails only at "loadSubset requests per Collection".                                                                                                                                                                                                   |
 | Ablation                      | Restricting the earlier grammar to all-distinct names made both campaigns pass on the unrepaired code; the failure needs cross-scope reuse.                                                                                                                                                   |

@@ -1408,10 +1408,9 @@ function validateQueryStructure(
   // An include sees every alias of its ancestors, including subquery
   // aliases, so it cannot shadow any of them.
   if (query.select) {
-    const scopeAliases = new Set([
-      ...visibleAliases,
-      ...collectScopeAliases(query),
-    ])
+    // A parent row exposes its from and join aliases, not the aliases inside
+    // its unionAll() branches.
+    const scopeAliases = new Set([...visibleAliases, ...levelAliases])
     for (const { subquery } of extractIncludesFromSelect(query.select)) {
       validateQueryStructure(subquery.query, combinedAliases, scopeAliases)
     }

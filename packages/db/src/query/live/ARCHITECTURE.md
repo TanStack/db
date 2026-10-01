@@ -159,8 +159,10 @@ A plan rewrite must preserve each Collection reference's `SourceId`. The
 optimizer reuses the reference when it copies, wraps, or collapses a source,
 and compilation reads source inputs by `SourceId` only. A source whose identity
 was lost raises `CollectionInputNotFoundError`; it never reads a same-named
-source from another scope. Every alias in every `unionAll()` branch belongs to
-one namespace, and the compiler rejects a repeated name.
+source from another scope. The branches of one `unionAll()` share an alias
+namespace, and the compiler rejects a name that two branches repeat. A union row
+holds the branches' projected fields, so a branch alias is not visible to the
+union's own joins or includes.
 
 A `CanonicalCorrelationKey` is the canonical tuple of every evaluated
 parent-dependent value that can affect the child plan. This includes values
@@ -1258,7 +1260,7 @@ create recursive Collection machinery.
    change an explicitly projected result. An implicit namespaced result keeps
    its aliases as public field names. Aliases must be unique within one lexical
    scope and cannot shadow an ancestor alias. Sibling scopes may reuse aliases,
-   except that all `unionAll()` branches share one alias namespace.
+   except that the branches of one `unionAll()` share one alias namespace.
 2. **Contribution conservation:** a public row exists exactly when its reduced
    supporting weight and collision policy produce one.
 3. **Batch partition:** equivalent valid split and atomic deliveries converge.

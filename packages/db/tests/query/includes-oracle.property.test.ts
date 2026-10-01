@@ -5795,8 +5795,9 @@ function pinnedScenario(
 }
 
 /**
- * Each pinned witness failed on the unrepaired optimizer and passes with the
- * repair. Together they reach every optimizer site that once re-minted a
+ * Each optimizer witness failed on the unrepaired optimizer and passes with
+ * the repair. The joined-union witness guards a legal naming that an
+ * overbroad shadowing check once rejected. Together they reach every optimizer site that once re-minted a
  * SourceId; the review record maps each site to its killing witness.
  */
 const pinnedScopeWitnesses: Array<[string, ScopedScenario]> = [
@@ -5863,6 +5864,13 @@ const pinnedScopeWitnesses: Array<[string, ScopedScenario]> = [
         include: `x`,
         inactive: `y`,
       },
+    ),
+  ],
+  [
+    `an include on a joined union reuses a branch alias`,
+    pinnedScenario(
+      { topology: `unionParent`, includeSource: `refs` },
+      { activeBranch: `x`, inactiveBranch: `y`, anchor: `a`, include: `x` },
     ),
   ],
   [

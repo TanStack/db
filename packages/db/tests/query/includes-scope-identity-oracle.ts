@@ -33,9 +33,9 @@ export type ScopedRef = { id: number; partId: number; clientId: number }
 // ## Grammar
 
 /**
- * Three topologies place a rewritable source and a same-named source in
- * sibling scopes. Each one reached a lost-SourceId failure on the
- * unrepaired optimizer:
+ * Four topologies place a source beside a same-named source in a sibling
+ * scope. The first three reached a lost-SourceId failure on the unrepaired
+ * optimizer:
  *
  * - `fromSubquery`: an outer `from()` subquery and a correlated include.
  * - `unionBranch`: the same subquery as one `unionAll()` branch, beside an
@@ -44,8 +44,15 @@ export type ScopedRef = { id: number; partId: number; clientId: number }
  *   beside a join subquery. Predicate pushdown would restructure the wrapper
  *   first, so this topology has no WHERE clause; it reaches the redundant
  *   subquery collapse.
+ * - `unionParent`: an include placed directly on a joined `unionAll()`. A
+ *   union row holds projected fields, so the include may reuse a branch
+ *   alias but not the anchor join alias.
  */
-export type ScopedTopology = `fromSubquery` | `unionBranch` | `wrapper`
+export type ScopedTopology =
+  | `fromSubquery`
+  | `unionBranch`
+  | `wrapper`
+  | `unionParent`
 
 export type ScopedSubquery = {
   /** Joins of the subquery source: none, refs, or refs then notes. */
@@ -80,6 +87,7 @@ export type ScopedShape =
       include: ScopedInclude
     }
   | { topology: `wrapper`; wrapperJoin: `left` | `inner` }
+  | { topology: `unionParent`; includeSource: `refs` | `notes` }
 
 /**
  * Alias slots. `fromSubquery` and `unionBranch` use `outer`, `sub`,
@@ -109,6 +117,9 @@ export type ScopedScenario = {
 
 export function scopedSlots(shape: ScopedShape): Array<string> {
   if (shape.topology === `wrapper`) return [`wrapped`, `joinSub`, `joinSource`]
+  if (shape.topology === `unionParent`) {
+    return [`activeBranch`, `inactiveBranch`, `anchor`, `include`]
+  }
   const slots = [`outer`, `sub`, `joined`, `noted`, `include`]
   if (shape.topology === `unionBranch`) slots.push(`inactive`)
   return [...slots, ...includeBodySlots[shape.include.body]]
@@ -135,9 +146,10 @@ export function canonicalScopedAliases(shape: ScopedShape): ScopedAliases {
  *
  * - subquery: `sub`, plus `joined` and `noted` when those joins exist;
  * - outer: `outer`;
- * - a union: every alias of every `unionAll()` branch and of the union's own
- *   joins. The compiler treats them as one namespace, so a union's subquery
- *   aliases and `inactive` must all differ;
+ * - a union: every alias of every `unionAll()` branch. The compiler rejects a
+ *   name that two branches repeat, so a union's subquery aliases and
+ *   `inactive` must all differ. A union row holds projected fields, so the
+ *   union's own joins and includes do not see branch aliases;
  * - include: `include` plus its body's level (`includeJoin`, or
  *   `includeOther` and `includeAnchor`); a `nestedFrom` body has the
  *   include level `includeOuter` and the inner body `include`. Every
@@ -159,6 +171,13 @@ export function classifyScopedNaming(
   if (shape.topology === `wrapper`) {
     return aliases.wrapped === aliases.joinSub ? `sameScope` : `legal`
   }
+  if (shape.topology === `unionParent`) {
+    // Branches share one namespace. The builder's existing rule rejects a
+    // branch that reuses the anchor, a parent Collection alias.
+    const { activeBranch, inactiveBranch, anchor, include } = aliases
+    if (repeats([activeBranch, inactiveBranch, anchor])) return `sameScope`
+    return include === anchor ? `shadowing` : `legal`
+  }
   const { joins } = shape.subquery
   const subScope = [aliases.sub]
   if (joins !== `none`) subScope.push(aliases.joined)
@@ -170,6 +189,8 @@ export function classifyScopedNaming(
   > = {
     plain: [[aliases.include]],
     joined: [[aliases.include, aliases.includeJoin]],
+    // The anchor join is a sibling of the branches, but the builder's existing
+    // rule rejects a nested query that reuses a parent Collection alias.
     union: [[aliases.include, aliases.includeOther, aliases.includeAnchor]],
     nestedFrom: [[aliases.includeOuter], [aliases.include]],
   }
@@ -245,6 +266,10 @@ export const scopedShapeArbitrary: fc.Arbitrary<ScopedShape> = fc.oneof(
   fc.record({
     topology: fc.constant(`wrapper` as const),
     wrapperJoin: fc.constantFrom(`left` as const, `inner` as const),
+  }),
+  fc.record({
+    topology: fc.constant(`unionParent` as const),
+    includeSource: fc.constantFrom(`refs` as const, `notes` as const),
   }),
 )
 
@@ -336,6 +361,18 @@ export function recomputeScopedRows(
   const parts = [...state.parts.values()]
   const refs = [...state.refs.values()]
   const notes = [...state.notes.values()]
+
+  if (shape.topology === `unionParent`) {
+    // The branches partition parts by `active`; the anchor matches each once.
+    const members = shape.includeSource === `refs` ? refs : notes
+    return parts.map((part) => ({
+      id: part.id,
+      active: part.active,
+      members: members
+        .filter((member) => member.partId === part.id)
+        .map((member) => ({ id: member.id, clientId: member.clientId })),
+    }))
+  }
 
   if (shape.topology === `wrapper`) {
     const clientOne = refs.filter((ref) => ref.clientId === 1)
@@ -554,6 +591,46 @@ export function createScopedQuery(
 ) {
   const n = aliases
   return createLiveQueryCollection((q) => {
+    if (shape.topology === `unionParent`) {
+      const branch = (alias: string, active: boolean) =>
+        q
+          .from({ [alias]: sources.parts.collection })
+          .where((c: Context) =>
+            active ? eq(c[alias].active, true) : not(eq(c[alias].active, true)),
+          )
+          .select((c: Context) => ({
+            id: c[alias].id,
+            active: c[alias].active,
+          }))
+      const members =
+        shape.includeSource === `refs`
+          ? sources.refs.collection
+          : sources.notes.collection
+      return q
+        .unionAll(
+          branch(n.activeBranch!, true),
+          branch(n.inactiveBranch!, false),
+        )
+        .innerJoin({ [n.anchor!]: sources.parts.collection }, (c: Context) =>
+          eq(c.id, c[n.anchor!].id),
+        )
+        .select((c: Context) => ({
+          id: c.id,
+          active: c.active,
+          members: toArray(
+            q
+              .from({ [n.include!]: members })
+              .where((cc: Context) =>
+                eq(cc[n.include!].partId, c[n.anchor!].id),
+              )
+              .select((cc: Context) => ({
+                id: cc[n.include!].id,
+                clientId: cc[n.include!].clientId,
+              })),
+          ),
+        }))
+    }
+
     if (shape.topology === `wrapper`) {
       const clientOne = q
         .from({ [n.joinSource!]: sources.refs.collection })

@@ -291,6 +291,80 @@ describe(`Alias validation in subqueries`, () => {
     }).toThrow(/alias "vote" more than once/)
   })
 
+  // A unionAll() parent row holds the branches' projected fields, not their
+  // aliases, so an include may reuse a branch alias.
+  test(`should allow an include under a unionAll() parent to reuse a branch alias`, async () => {
+    const live = createLiveQueryCollection({
+      startSync: true,
+      query: (q) =>
+        q
+          .unionAll(
+            q
+              .from({ item: locksCollection })
+              .select(({ item }) => ({ rid: item._id })),
+            q
+              .from({ tool: votesCollection })
+              .select(({ tool }) => ({ rid: tool._id })),
+          )
+          .innerJoin({ anchor: locksCollection }, ({ rid, anchor }) =>
+            eq(rid, anchor._id),
+          )
+          .select(({ rid, anchor }) => ({
+            rid,
+            votes: toArray(
+              q
+                .from({ item: votesCollection })
+                .where(({ item }) => eq(item.lockId, anchor._id))
+                .select(({ item }) => ({ _id: item._id })),
+            ),
+          })),
+    })
+    await live.preload()
+    expect(
+      live.toArray
+        .map((row) => ({
+          rid: row.rid,
+          votes: [...row.votes].map((vote) => vote._id).sort(),
+        }))
+        .sort((left, right) => left.rid - right.rid),
+    ).toEqual([
+      { rid: 1, votes: [1, 2] },
+      { rid: 1, votes: [1, 2] },
+      { rid: 2, votes: [3] },
+      { rid: 2, votes: [3] },
+    ])
+  })
+
+  // The same holds for the union's own joins: a branch alias is not visible
+  // to them.
+  test(`should allow a unionAll() join to reuse an alias of a derived branch source`, async () => {
+    const live = createLiveQueryCollection({
+      startSync: true,
+      query: (q) =>
+        q
+          .unionAll(
+            q
+              .from({
+                vote: q
+                  .from({ inner: votesCollection })
+                  .select(({ inner }) => ({ id: inner._id })),
+              })
+              .select(({ vote }) => ({ id: vote.id })),
+            q
+              .from({ lock: locksCollection })
+              .select(({ lock }) => ({ id: lock._id })),
+          )
+          .innerJoin({ vote: votesCollection }, ({ id, vote }) =>
+            eq(vote._id, id),
+          )
+          .select(({ id, vote }) => ({ id, lockId: vote.lockId })),
+    })
+    await live.preload()
+    expect(live.toArray.map((row) => `${row.id}/${row.lockId}`).sort()).toEqual(
+      [`1/1`, `1/1`, `2/1`, `2/1`, `3/2`],
+    )
+  })
+
   test(`should allow an include to reuse an alias from a sibling from() subquery`, async () => {
     const live = createLiveQueryCollection({
       startSync: true,
