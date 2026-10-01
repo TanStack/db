@@ -27,7 +27,11 @@ interface TypedArray {
  * ```
  */
 export function deepEquals(a: any, b: any): boolean {
-  return deepEqualsInternal(a, b, undefined)
+  return deepEqualsInternal(a, b, new Map())
+}
+
+function isPlainPrototype(prototype: object | null): boolean {
+  return prototype === null || Object.getPrototypeOf(prototype) === null
 }
 
 function enumerableOwnKeys(value: object): Array<string | symbol> {
@@ -41,12 +45,16 @@ function enumerableOwnKeys(value: object): Array<string | symbol> {
 /**
  * Internal implementation with cycle detection to prevent infinite recursion.
  * Internal callers can seed already-paired roots when comparing their children.
+ *
+ * `draft` selects the stricter equality used by change-tracking drafts: Map
+ * and Set contents must match in order, RegExp match position must match, and
+ * arrays compare as keyed objects (holes and extra enumerable keys count).
  */
 export function deepEqualsInternal(
   a: any,
   b: any,
-  // Created on the first container that can hold a cycle.
-  visited: Map<object, object> | undefined,
+  visited: Map<object, object>,
+  draft = false,
 ): boolean {
   // Handle strict equality (primitives, same reference)
   if (a === b || Object.is(a, b)) return true
@@ -68,7 +76,11 @@ export function deepEqualsInternal(
   // Handle RegExp objects
   if (a instanceof RegExp) {
     if (!(b instanceof RegExp)) return false
-    return a.source === b.source && a.flags === b.flags
+    return (
+      a.source === b.source &&
+      a.flags === b.flags &&
+      (!draft || a.lastIndex === b.lastIndex)
+    )
   }
   // Symmetric check: if b is RegExp but a is not, they're not equal
   if (b instanceof RegExp) return false
@@ -79,16 +91,19 @@ export function deepEqualsInternal(
     if (a.size !== b.size) return false
 
     // Check for circular references
-    if (visited?.has(a)) {
+    if (visited.has(a)) {
       return visited.get(a) === b
     }
-    visited ??= new Map()
     visited.set(a, b)
 
-    const entries = Array.from(a.entries())
-    const result = entries.every(([key, val]) => {
-      return b.has(key) && deepEqualsInternal(val, b.get(key), visited)
-    })
+    // A draft compares entries in order; general equality looks keys up.
+    const bEntries = draft && Array.from(b.entries())
+    const result = Array.from(a.entries()).every(([key, val], index) =>
+      bEntries
+        ? Object.is(key, bEntries[index]![0]) &&
+          deepEqualsInternal(val, bEntries[index]![1], visited, true)
+        : b.has(key) && deepEqualsInternal(val, b.get(key), visited),
+    )
 
     visited.delete(a)
     return result
@@ -102,15 +117,22 @@ export function deepEqualsInternal(
     if (a.size !== b.size) return false
 
     // Check for circular references
-    if (visited?.has(a)) {
+    if (visited.has(a)) {
       return visited.get(a) === b
     }
-    visited ??= new Map()
     visited.set(a, b)
 
     // Convert to arrays for comparison
     const aValues = Array.from(a)
     const bValues = Array.from(b)
+
+    if (draft) {
+      const result = aValues.every((val, index) =>
+        deepEqualsInternal(val, bValues[index], visited, draft),
+      )
+      visited.delete(a)
+      return result
+    }
 
     // Simple comparison for primitive values
     if (aValues.every((val) => typeof val !== `object`)) {
@@ -166,10 +188,18 @@ export function deepEqualsInternal(
   ) {
     const typedA = a as unknown as TypedArray
     const typedB = b as unknown as TypedArray
-    if (typedA.length !== typedB.length) return false
+    // Elements compare like numbers: -0 equals 0, NaN equals NaN. Only a
+    // draft treats a change of typed-array class as a change.
+    if (
+      (draft && Object.getPrototypeOf(a) !== Object.getPrototypeOf(b)) ||
+      typedA.length !== typedB.length
+    )
+      return false
 
     for (let i = 0; i < typedA.length; i++) {
-      if (typedA[i] !== typedB[i]) return false
+      const x = typedA[i]!
+      const y = typedB[i]!
+      if (x !== y && !(x !== x && y !== y)) return false
     }
 
     return true
@@ -204,14 +234,13 @@ export function deepEqualsInternal(
   if (isTemporal(b)) return false
 
   // Handle arrays
-  if (Array.isArray(a)) {
-    if (!Array.isArray(b) || a.length !== b.length) return false
-
+  if (Array.isArray(a) !== Array.isArray(b)) return false
+  if (Array.isArray(a) && a.length !== b.length) return false
+  if (Array.isArray(a) && !draft) {
     // Check for circular references
-    if (visited?.has(a)) {
+    if (visited.has(a)) {
       return visited.get(a) === b
     }
-    visited ??= new Map()
     visited.set(a, b)
 
     const result = a.every((item, index) =>
@@ -220,15 +249,22 @@ export function deepEqualsInternal(
     visited.delete(a)
     return result
   }
-  // Symmetric check: if b is array but a is not, they're not equal
-  if (Array.isArray(b)) return false
-
   // Handle objects
   if (typeof a === `object`) {
+    // Instances of two different classes differ. A plain or null-prototype
+    // object, from any realm, compares by keys with any class: a draft
+    // snapshot and plain JSON both hold class instances as plain objects.
+    const prototype = Object.getPrototypeOf(a)
+    const prototypeB = Object.getPrototypeOf(b)
+    const plain = isPlainPrototype(prototype)
+    const plainB = isPlainPrototype(prototypeB)
+    if (prototype !== prototypeB && !plain && !plainB) return false
+
     // Check for circular references
-    if (visited?.has(a)) {
+    if (visited.has(a)) {
       return visited.get(a) === b
     }
+    visited.set(a, b)
 
     // Compare enumerable symbol keys as well as string keys. Query results may
     // use user-owned symbols, and a symbol-only update is still a value change.
@@ -236,29 +272,27 @@ export function deepEqualsInternal(
     const keysB = enumerableOwnKeys(b)
 
     // Check if they have the same number of keys
-    if (keysA.length !== keysB.length) return false
+    if (keysA.length !== keysB.length) {
+      visited.delete(a)
+      return false
+    }
+
+    // A class instance without enumerable keys (a File, an object with
+    // private fields) keeps its state elsewhere, so it equals only itself.
+    // A draft copies a URL by its href, so URLs compare by href.
+    if (keysA.length === 0 && !Array.isArray(a) && !(plain && plainB)) {
+      visited.delete(a)
+      return a instanceof URL && a.href === b.href
+    }
 
     // Check if all keys exist in both objects and their values are equal
-    // Register for cycles only before descending, so a flat object
-    // allocates no cycle map.
-    let registered = false
-    let result = true
-    for (const key of keysA) {
-      const value = a[key]
-      if (!registered && value !== null && typeof value === `object`) {
-        visited ??= new Map()
-        visited.set(a, b)
-        registered = true
-      }
-      if (
-        !Object.prototype.propertyIsEnumerable.call(b, key) ||
-        !deepEqualsInternal(value, b[key], visited)
-      ) {
-        result = false
-        break
-      }
-    }
-    if (registered) visited!.delete(a)
+    const result = keysA.every(
+      (key) =>
+        Object.prototype.propertyIsEnumerable.call(b, key) &&
+        deepEqualsInternal(a[key], b[key], visited, draft),
+    )
+
+    visited.delete(a)
     return result
   }
 

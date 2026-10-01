@@ -939,6 +939,164 @@ describe(`deepEquals property-based tests`, () => {
     )
   })
 
+  // `deepEquals` drives change-event suppression, so it deliberately ignores
+  // state that draft revert detection keeps (see proxy-revert-oracle): Map and
+  // Set insertion order, RegExp `lastIndex`, and array holes. These laws pin
+  // that current relation so a shared walker cannot leak draft rules into it.
+  describe(`order and state the general relation ignores`, () => {
+    utilsProperty([
+      fc.uniqueArray(fc.tuple(fc.string(), fc.integer()), {
+        minLength: 2,
+        maxLength: 5,
+        selector: ([key]) => key,
+      }),
+    ])(
+      `Maps with the same entries in another insertion order are equal`,
+      (entries) => {
+        const reordered = new Map([...entries].reverse())
+        expect([...reordered.keys()]).not.toEqual(entries.map(([key]) => key))
+        expectEqualityPair(new Map(entries), reordered, true)
+        expectEqualityPair(
+          new Map(entries.map(([key, value]) => [key, { value }])),
+          new Map(
+            [...entries].reverse().map(([key, value]) => [key, { value }]),
+          ),
+          true,
+        )
+      },
+    )
+
+    utilsProperty([
+      fc.uniqueArray(fc.integer(), { minLength: 2, maxLength: 5 }),
+    ])(
+      `Sets with the same values in another insertion order are equal`,
+      (values) => {
+        expectEqualityPair(
+          new Set(values),
+          new Set([...values].reverse()),
+          true,
+        )
+        expectEqualityPair(
+          new Set(values.map((value) => ({ value }))),
+          new Set([...values].reverse().map((value) => ({ value }))),
+          true,
+        )
+      },
+    )
+
+    utilsProperty([fc.constantFrom(``, `g`, `y`), fc.nat(5), fc.nat(5)])(
+      `RegExps with the same source and flags are equal at any lastIndex`,
+      (flags, left, right) => {
+        const a = new RegExp(`x`, flags)
+        const b = new RegExp(`x`, flags)
+        a.lastIndex = left
+        b.lastIndex = right
+        expectEqualityPair(a, b, true)
+        expectEqualityPair({ pattern: a }, { pattern: b }, true)
+      },
+    )
+
+    utilsProperty([
+      fc.constantFrom(`a`, `b`),
+      fc.constantFrom(`a`, `b`),
+      fc.constantFrom(1, 2),
+      fc.constantFrom(1, 2),
+    ])(
+      `objects compare by class and keys, and keyless instances by identity`,
+      (pathA, pathB, v, w) => {
+        class Secret {
+          #v: number
+          constructor(value: number) {
+            this.#v = value
+          }
+          read(): number {
+            return this.#v
+          }
+        }
+        class Point {
+          constructor(public a: number) {}
+        }
+        class Other {
+          constructor(public a: number) {}
+        }
+        const url = (path: string) => new URL(`https://example.com/${path}`)
+        expectEqualityPair(url(pathA), url(pathB), pathA === pathB)
+        expectEqualityPair(
+          { u: url(pathA) },
+          { u: url(pathB) },
+          pathA === pathB,
+        )
+        // Another class with the same href is still another class.
+        expectEqualityPair(
+          url(pathA),
+          Object.create({ href: url(pathA).href }),
+          false,
+        )
+        // State outside enumerable keys is unknown, so only identity is equal.
+        const secret = new Secret(v)
+        expectEqualityPair(secret, secret, true)
+        expectEqualityPair(secret, new Secret(w), false)
+        expectEqualityPair({ s: secret }, { s: new Secret(v) }, false)
+        expectEqualityPair(new Secret(v), {}, false)
+        // Class instances with keys compare by keys within their class, and
+        // with a plain object, which is how JSON and draft snapshots hold
+        // them. Two different classes differ.
+        expectEqualityPair(new Point(v), new Point(w), v === w)
+        expectEqualityPair(new Point(v), { a: w }, v === w)
+        expectEqualityPair(new Point(v), new Other(v), false)
+        // Plain and null-prototype objects are one class.
+        const bare = Object.assign(Object.create(null), { a: v })
+        expectEqualityPair(bare, { a: w }, v === w)
+        expectEqualityPair(Object.create(null), {}, true)
+      },
+    )
+
+    utilsProperty([
+      fc.array(fc.oneof(fc.double(), fc.constant(NaN), fc.constant(-0)), {
+        minLength: 1,
+        maxLength: 5,
+      }),
+      fc.array(fc.integer({ min: 0, max: 127 }), {
+        minLength: 1,
+        maxLength: 5,
+      }),
+    ])(
+      `typed arrays compare elements like numbers and ignore their class`,
+      (values, bytes) => {
+        const a = Float64Array.from(values)
+        const b = Float64Array.from(
+          values.map((v) => (Object.is(v, -0) ? 0 : v)),
+        )
+        expectEqualityPair(a, b, true)
+        expectEqualityPair({ v: a }, { v: b }, true)
+        // Draft equality keeps the class; the draft revert oracle owns that.
+        expectEqualityPair(Uint8Array.from(bytes), Int8Array.from(bytes), true)
+        expectEqualityPair(
+          Uint8Array.from(bytes),
+          Int8Array.from([...bytes.slice(1), 128]),
+          false,
+        )
+      },
+    )
+
+    utilsProperty([
+      fc.array(fc.oneof(fc.integer(), fc.constant(`hole`)), {
+        minLength: 1,
+        maxLength: 5,
+      }),
+    ])(`an array hole equals undefined at the same index`, (cells) => {
+      const sparse: Array<unknown> = []
+      sparse.length = cells.length
+      const dense: Array<unknown> = []
+      cells.forEach((cell, index) => {
+        if (cell !== `hole`) sparse[index] = cell
+        dense[index] = cell === `hole` ? undefined : cell
+      })
+      expectEqualityPair(sparse, dense, true)
+      expectEqualityPair({ items: sparse }, { items: dense }, true)
+    })
+  })
+
   describe(`nested structure consistency`, () => {
     utilsProperty([
       fc.array(fc.array(fc.integer(), { maxLength: 3 }), { maxLength: 3 }),

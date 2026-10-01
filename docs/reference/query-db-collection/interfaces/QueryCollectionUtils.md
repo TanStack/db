@@ -176,12 +176,12 @@ Manually refetch and await the applicable fetch or application boundary.
 ### writeBatch()
 
 ```ts
-writeBatch: (callback) => void;
+writeBatch: (callback) => Promise<void>;
 ```
 
 Defined in: [packages/query-db-collection/src/query.ts:309](https://github.com/TanStack/db/blob/main/packages/query-db-collection/src/query.ts#L309)
 
-Execute direct writes as one atomic batch, then update or revalidate the Query cache
+Execute direct writes as one atomic batch. Resolves when the sync commit applies.
 
 #### Parameters
 
@@ -191,19 +191,19 @@ Execute direct writes as one atomic batch, then update or revalidate the Query c
 
 #### Returns
 
-`void`
+`Promise`<`void`>
 
 ***
 
 ### writeDelete()
 
 ```ts
-writeDelete: (keys) => void;
+writeDelete: (keys) => Promise<void>;
 ```
 
 Defined in: [packages/query-db-collection/src/query.ts:305](https://github.com/TanStack/db/blob/main/packages/query-db-collection/src/query.ts#L305)
 
-Delete items without an optimistic update. On-demand queries revalidate their scoped cache entries.
+Delete items without an optimistic update. Resolves when the sync commit applies.
 
 #### Parameters
 
@@ -213,19 +213,19 @@ Delete items without an optimistic update. On-demand queries revalidate their sc
 
 #### Returns
 
-`void`
+`Promise`<`void`>
 
 ***
 
 ### writeInsert()
 
 ```ts
-writeInsert: (data) => void;
+writeInsert: (data) => Promise<void>;
 ```
 
 Defined in: [packages/query-db-collection/src/query.ts:301](https://github.com/TanStack/db/blob/main/packages/query-db-collection/src/query.ts#L301)
 
-Insert items without an optimistic update. On-demand queries revalidate their scoped cache entries.
+Insert items without an optimistic update. Resolves when the sync commit applies.
 
 #### Parameters
 
@@ -235,19 +235,19 @@ Insert items without an optimistic update. On-demand queries revalidate their sc
 
 #### Returns
 
-`void`
+`Promise`<`void`>
 
 ***
 
 ### writeUpdate()
 
 ```ts
-writeUpdate: (updates) => void;
+writeUpdate: (updates) => Promise<void>;
 ```
 
 Defined in: [packages/query-db-collection/src/query.ts:303](https://github.com/TanStack/db/blob/main/packages/query-db-collection/src/query.ts#L303)
 
-Update items without an optimistic update. On-demand queries revalidate their scoped cache entries.
+Update items without an optimistic update. Resolves when the sync commit applies.
 
 #### Parameters
 
@@ -257,19 +257,19 @@ Update items without an optimistic update. On-demand queries revalidate their sc
 
 #### Returns
 
-`void`
+`Promise`<`void`>
 
 ***
 
 ### writeUpsert()
 
 ```ts
-writeUpsert: (data) => void;
+writeUpsert: (data) => Promise<void>;
 ```
 
 Defined in: [packages/query-db-collection/src/query.ts:307](https://github.com/TanStack/db/blob/main/packages/query-db-collection/src/query.ts#L307)
 
-Insert or update items without an optimistic update. On-demand queries revalidate their scoped cache entries.
+Insert or update items without an optimistic update. Resolves when the sync commit applies.
 
 #### Parameters
 
@@ -279,4 +279,4 @@ Insert or update items without an optimistic update. On-demand queries revalidat
 
 #### Returns
 
-`void`
+`Promise`<`void`>

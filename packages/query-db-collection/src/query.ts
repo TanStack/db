@@ -297,16 +297,18 @@ export interface QueryCollectionUtils<
   // nonexistent adapter utility appear as `any`.
   /** Manually refetch and await the applicable fetch or application boundary. */
   refetch: RefetchFn
-  /** Insert items without an optimistic update. On-demand queries revalidate their scoped cache entries. */
-  writeInsert: (data: TInsertInput | Array<TInsertInput>) => void
-  /** Update items without an optimistic update. On-demand queries revalidate their scoped cache entries. */
-  writeUpdate: (updates: Partial<TItem> | Array<Partial<TItem>>) => void
-  /** Delete items without an optimistic update. On-demand queries revalidate their scoped cache entries. */
-  writeDelete: (keys: TKey | Array<TKey>) => void
-  /** Insert or update items without an optimistic update. On-demand queries revalidate their scoped cache entries. */
-  writeUpsert: (data: Partial<TItem> | Array<Partial<TItem>>) => void
-  /** Execute direct writes as one atomic batch, then update or revalidate the Query cache */
-  writeBatch: (callback: () => void) => void
+  /** Insert items without an optimistic update. Resolves when the sync commit applies. */
+  writeInsert: (data: TInsertInput | Array<TInsertInput>) => Promise<void>
+  /** Update items without an optimistic update. Resolves when the sync commit applies. */
+  writeUpdate: (
+    updates: Partial<TItem> | Array<Partial<TItem>>,
+  ) => Promise<void>
+  /** Delete items without an optimistic update. Resolves when the sync commit applies. */
+  writeDelete: (keys: TKey | Array<TKey>) => Promise<void>
+  /** Insert or update items without an optimistic update. Resolves when the sync commit applies. */
+  writeUpsert: (data: Partial<TItem> | Array<Partial<TItem>>) => Promise<void>
+  /** Execute direct writes as one atomic batch. Resolves when the sync commit applies. */
+  writeBatch: (callback: () => void) => Promise<void>
 
   // Query Observer State (getters)
   /** Get the last error encountered by the query (if any); reset after a successful result applies */
@@ -387,11 +389,11 @@ class QueryCollectionUtilsImpl implements QueryCollectionUtils {
 
   // Write methods
   public refetch: RefetchFn
-  public writeInsert: any
-  public writeUpdate: any
-  public writeDelete: any
-  public writeUpsert: any
-  public writeBatch: any
+  public writeInsert: QueryCollectionUtils[`writeInsert`]
+  public writeUpdate: QueryCollectionUtils[`writeUpdate`]
+  public writeDelete: QueryCollectionUtils[`writeDelete`]
+  public writeUpsert: QueryCollectionUtils[`writeUpsert`]
+  public writeBatch: QueryCollectionUtils[`writeBatch`]
 
   constructor(
     state: QueryCollectionState,
@@ -3388,7 +3390,7 @@ export function queryCollectionOptions(
         : (queryKey as unknown as Array<unknown>)
 
     // Store references for manual write operations
-    writeContext = {
+    const currentWriteContext = {
       collection,
       queryClient,
       queryKey: contextQueryKey,
@@ -3398,6 +3400,7 @@ export function queryCollectionOptions(
       commit,
       updateCacheData,
     }
+    writeContext = currentWriteContext
 
     // Call the original internalSync logic, pairing QueryClient mount with the
     // collection sync lifecycle so focus/reconnect managers dispatch events for
@@ -3412,8 +3415,10 @@ export function queryCollectionOptions(
 
     return {
       ...sync,
-      cleanup: () =>
-        runCleanupWithLocalTeardown(sync.cleanup, unmountQueryClient),
+      cleanup: () => {
+        if (writeContext === currentWriteContext) writeContext = null
+        return runCleanupWithLocalTeardown(sync.cleanup, unmountQueryClient)
+      },
     }
   }
 

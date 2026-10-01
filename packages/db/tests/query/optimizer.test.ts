@@ -491,8 +491,10 @@ describe(`Query Optimizer`, () => {
 
       const { optimizedQuery: optimized } = optimizeQuery(query)
 
-      // The constant expression should be ignored, single-source clause should be optimized
-      expect(optimized.where).toEqual([])
+      // Source-free clauses still filter the joined result.
+      expect(optimized.where).toEqual([
+        createEq(createValue(1), createValue(1)),
+      ])
       expect(optimized.from.type).toBe(`queryRef`)
       if (optimized.from.type === `queryRef`) {
         expect(optimized.from.query.where).toHaveLength(1)
@@ -661,8 +663,10 @@ describe(`Query Optimizer`, () => {
 
       const { optimizedQuery: optimized } = optimizeQuery(query)
 
-      // The empty path PropRef should be treated as a constant (no sources)
-      expect(optimized.where).toEqual([])
+      // An unqualified reference cannot be pushed to either source.
+      expect(optimized.where).toEqual([
+        createEq(emptyPathPropRef, createValue(1)),
+      ])
       expect(optimized.from.type).toBe(`collectionRef`)
     })
 
@@ -687,10 +691,13 @@ describe(`Query Optimizer`, () => {
 
       const { optimizedQuery: optimized } = optimizeQuery(query)
 
-      // Multi-source clause should remain in main query
+      // Multi-source and source-free clauses should remain in the main query.
       expect(optimized.where).toHaveLength(1)
       expect(optimized.where![0]).toEqual(
-        createEq(createPropRef(`u`, `id`), createPropRef(`p`, `user_id`)),
+        createAnd(
+          createEq(createPropRef(`u`, `id`), createPropRef(`p`, `user_id`)),
+          createEq(createValue(1), createValue(1)),
+        ),
       )
 
       // Single-source clauses should be moved to subqueries
@@ -711,7 +718,7 @@ describe(`Query Optimizer`, () => {
   })
 
   describe(`Error Handling`, () => {
-    test(`should handle malformed expressions gracefully`, () => {
+    test(`does not silently discard a malformed expression`, () => {
       const malformedExpression = {
         type: `unknown`,
         value: `test`,
@@ -732,9 +739,8 @@ describe(`Query Optimizer`, () => {
 
       const { optimizedQuery: optimized } = optimizeQuery(query)
 
-      // Should not crash and should handle the malformed expression gracefully
       expect(optimized).toBeDefined()
-      expect(optimized.where).toEqual([])
+      expect(optimized.where).toEqual([malformedExpression])
     })
 
     test(`should handle PropRef with empty first element`, () => {
@@ -757,8 +763,10 @@ describe(`Query Optimizer`, () => {
 
       const { optimizedQuery: optimized } = optimizeQuery(query)
 
-      // PropRef with empty first element should be ignored, other clause should be optimized
-      expect(optimized.where).toEqual([])
+      // Keep the unqualified clause instead of silently removing a filter.
+      expect(optimized.where).toEqual([
+        createEq(propRefWithEmptyFirst, createValue(1)),
+      ])
       expect(optimized.from.type).toBe(`queryRef`)
       if (optimized.from.type === `queryRef`) {
         expect(optimized.from.query.where).toHaveLength(1)
@@ -788,8 +796,10 @@ describe(`Query Optimizer`, () => {
 
       const { optimizedQuery: optimized } = optimizeQuery(query)
 
-      // PropRef with undefined first element should be ignored, other clause should be optimized
-      expect(optimized.where).toEqual([])
+      // Keep the unqualified clause instead of silently removing a filter.
+      expect(optimized.where).toEqual([
+        createEq(propRefWithUndefinedFirst, createValue(1)),
+      ])
       expect(optimized.from.type).toBe(`queryRef`)
       if (optimized.from.type === `queryRef`) {
         expect(optimized.from.query.where).toHaveLength(1)
