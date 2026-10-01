@@ -728,6 +728,33 @@ export function useLiveQueryForSuspense(
   return useLiveQueryImpl(configOrQueryOrCollection, deps, true)
 }
 
+const ref = <T>(current: T): { current: T } => ({ current })
+
+// Every ref the hook keeps, created once per hook instance.
+function createHookRefs(dbClient: DbClient | undefined) {
+  return {
+    collectionRef: ref<Collection<object, string | number, {}> | null>(null),
+    depsRef: ref<Array<unknown> | null>(null),
+    configRef: ref<unknown>(null),
+    clientRef: ref(dbClient),
+    legacyUnhashableIdentityRef: ref<Array<unknown>>([`legacy-unhashable`]),
+    derivedIdentityProfilerRef: ref<DerivedIdentityProfiler>({
+      renderCount: 0,
+      totalMs: 0,
+      maxMs: 0,
+      warned: false,
+    }),
+    deferredCollectionsRef: ref(
+      new Set<CollectionImpl<any, string | number, any, any, any>>(),
+    ),
+    observerRef: ref<LiveQueryObserver<object, string | number> | null>(null),
+    queryHashRef: ref<string | undefined>(undefined),
+    suspenseKeyRef: ref<string | undefined>(undefined),
+    identityErrorRef: ref<UnhashableQueryIRError | undefined>(undefined),
+    subscribeRef: ref<((onStoreChange: () => void) => () => void) | null>(null),
+  }
+}
+
 function useLiveQueryImpl(
   configOrQueryOrCollection: any,
   deps: Array<unknown> | undefined,
@@ -741,32 +768,23 @@ function useLiveQueryImpl(
     : (getExplicitDbClient(configOrQueryOrCollection) ?? contextDbClient)
   const resolvedDeps = deps ?? []
 
-  // Use refs to cache collection and track dependencies
-  const collectionRef = useRef<Collection<object, string | number, {}> | null>(
-    null,
-  )
-  const depsRef = useRef<Array<unknown> | null>(null)
-  const configRef = useRef<unknown>(null)
-  const clientRef = useRef(dbClient)
-  const legacyUnhashableIdentityRef = useRef<Array<unknown>>([
-    `legacy-unhashable`,
-  ])
-
-  const derivedIdentityProfilerRef = useRef<DerivedIdentityProfiler>({
-    renderCount: 0,
-    totalMs: 0,
-    maxMs: 0,
-    warned: false,
-  })
-  const deferredCollectionsRef = useRef(
-    new Set<CollectionImpl<any, string | number, any, any, any>>(),
-  )
-  const observerRef = useRef<LiveQueryObserver<object, string | number> | null>(
-    null,
-  )
-  const queryHashRef = useRef<string | undefined>(undefined)
-  const suspenseKeyRef = useRef<string | undefined>(undefined)
-  const identityErrorRef = useRef<UnhashableQueryIRError | undefined>(undefined)
+  // One hook slot holds every ref, so a render neither looks up nor
+  // allocates the others.
+  const refsRef = useRef<ReturnType<typeof createHookRefs> | null>(null)
+  const {
+    collectionRef,
+    depsRef,
+    configRef,
+    clientRef,
+    legacyUnhashableIdentityRef,
+    derivedIdentityProfilerRef,
+    deferredCollectionsRef,
+    observerRef,
+    queryHashRef,
+    suspenseKeyRef,
+    identityErrorRef,
+    subscribeRef,
+  } = (refsRef.current ??= createHookRefs(dbClient))
 
   const queryKey = !inputIsCollection
     ? getExplicitQueryKey(configOrQueryOrCollection)
@@ -1013,9 +1031,7 @@ function useLiveQueryImpl(
 
   // Stable subscribe bound to the current observer; the observer owns the
   // subscription, ready-race, and disposal.
-  const subscribeRef = useRef<
-    ((onStoreChange: () => void) => () => void) | null
-  >(null)
+
   if (!subscribeRef.current || needsNewCollection) {
     subscribeRef.current = (onStoreChange: () => void) => {
       const unsubscribe = observer.subscribe(() => onStoreChange())
