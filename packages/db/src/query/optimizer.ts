@@ -435,20 +435,7 @@ function applySingleLevelOptimization(query: QueryIR): QueryIR {
   const groupedClauses = groupWhereClauses(analyzedClauses)
 
   // Step 4: Apply optimizations by lifting single-source clauses into subqueries
-  const optimizedQuery = applyOptimizations(query, groupedClauses)
-
-  // Add back any residual WHERE clauses that were filtered out
-  const residualWhereClauses = query.where.filter((where) =>
-    isResidualWhere(where),
-  )
-  if (residualWhereClauses.length > 0) {
-    optimizedQuery.where = [
-      ...(optimizedQuery.where || []),
-      ...residualWhereClauses,
-    ]
-  }
-
-  return optimizedQuery
+  return applyOptimizations(query, groupedClauses)
 }
 
 /**
@@ -691,11 +678,10 @@ function groupWhereClauses(
         singleSource.set(source, [])
       }
       singleSource.get(source)!.push(clause.expression)
-    } else if (clause.touchedSources.size > 1 || clause.hasNamespaceOnlyRef) {
-      // Multi-source clause or namespace-only reference - must stay in main query
+    } else {
+      // Clauses without one pushable source must stay in the main query.
       multiSource.push(clause.expression)
     }
-    // Skip clauses that touch no sources (constants) - they don't need optimization
   }
 
   // Combine multiple clauses for each source with AND
@@ -766,8 +752,9 @@ function applyOptimizations(
       }))
     : undefined
 
-  // Build the remaining WHERE clauses: multi-source + residual single-source clauses
+  // Keep regular and residual clauses separate so neither loses its marker.
   const remainingWhereClauses: Array<Where> = []
+  const residualWhereClauses = query.where?.filter(isResidualWhere) ?? []
 
   // Add multi-source clauses
   if (groupedClauses.multiSource) {
@@ -784,24 +771,28 @@ function applyOptimizations(
       remainingWhereClauses.push(clause)
     } else if (hasOuterJoins) {
       // Was optimized AND query has outer JOINs - keep as residual WHERE clause
-      remainingWhereClauses.push(createResidualWhere(clause))
+      residualWhereClauses.push(createResidualWhere(clause))
     }
     // If optimized and no outer JOINs - don't keep (original behavior)
   }
 
-  // Combine multiple remaining WHERE clauses into a single clause to avoid
-  // multiple filter operations in the pipeline (performance optimization)
-  // First flatten any nested AND expressions to avoid and(and(...), ...)
-  const finalWhere: Array<Where> =
-    remainingWhereClauses.length > 1
-      ? [
-          combineWithAnd(
-            remainingWhereClauses.flatMap((clause) =>
-              splitAndClausesRecursive(getWhereExpression(clause)),
-            ),
+  // Combine within each group to avoid extra filters and nested ANDs.
+  const combineRemaining = (clauses: Array<Where>): Where | undefined =>
+    clauses.length > 1
+      ? combineWithAnd(
+          clauses.flatMap((clause) =>
+            splitAndClausesRecursive(getWhereExpression(clause)),
           ),
-        ]
-      : remainingWhereClauses
+        )
+      : clauses[0]
+  const regularWhere = combineRemaining(remainingWhereClauses)
+  const residualWhere = combineRemaining(residualWhereClauses)
+  const finalWhere: Array<Where> = [
+    ...(regularWhere ? [regularWhere] : []),
+    ...(residualWhere
+      ? [createResidualWhere(getWhereExpression(residualWhere))]
+      : []),
+  ]
 
   // Preserve untouched query options while replacing the optimized clauses.
   const optimizedQuery: QueryIR = {
