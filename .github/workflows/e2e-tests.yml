@@ -11,6 +11,11 @@ permissions:
 jobs:
   e2e-tests:
     name: Run E2E Tests
+    # Disabled: since 2026-10-01 Docker Hub rejects anonymous pulls of
+    # electricsql/electric (401 "authentication required"), so the Docker
+    # services step fails before any test runs. Remove this line when the
+    # image can be pulled again.
+    if: false
     runs-on: ubuntu-latest
     timeout-minutes: 35
 
