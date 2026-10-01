@@ -1050,6 +1050,7 @@ export function withFlatChangeTracking<T extends object>(
   return drafts.map((draft, index) => {
     const original = targets[index] as Record<string, unknown>
     const changes: Record<string, unknown> = {}
+    let assignedObject = false
     for (const key in draft) {
       const value = (draft as Record<string, unknown>)[key]
       const before = original[key]
@@ -1065,6 +1066,7 @@ export function withFlatChangeTracking<T extends object>(
         )
       ) {
         defineDataProperty(changes, key, value)
+        if (value !== null && typeof value === `object`) assignedObject = true
       }
     }
     for (const key in original) {
@@ -1072,6 +1074,6 @@ export function withFlatChangeTracking<T extends object>(
         defineDataProperty(changes, key, undefined)
     }
     // A callback may assign objects; detach them as the proxy path does.
-    return deepClone(changes, undefined, true)
+    return assignedObject ? deepClone(changes, undefined, true) : changes
   })
 }
