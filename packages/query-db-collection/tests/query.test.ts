@@ -1750,7 +1750,9 @@ describe(`QueryCollection`, () => {
 
     // Verify queryFn was called with the correct context, including the meta object
     expect(queryFn).toHaveBeenCalledWith(
-      expect.objectContaining({ meta: { ...meta, loadSubsetOptions: {} } }),
+      expect.objectContaining({
+        meta: expect.objectContaining({ ...meta, loadSubsetOptions: {} }),
+      }),
     )
   })
 

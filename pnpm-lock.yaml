@@ -1469,6 +1469,9 @@ importers:
       '@vitest/coverage-istanbul':
         specifier: ^3.2.4
         version: 3.2.4(vitest@3.2.4)
+      seroval:
+        specifier: 1.5.0
+        version: 1.5.0
 
   packages/react-db:
     dependencies:
