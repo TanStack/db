@@ -997,11 +997,63 @@ describe(`deepEquals property-based tests`, () => {
     )
 
     utilsProperty([
+      fc.constantFrom(`a`, `b`),
+      fc.constantFrom(`a`, `b`),
+      fc.constantFrom(1, 2),
+      fc.constantFrom(1, 2),
+    ])(
+      `objects compare within their class and keyless instances by identity`,
+      (pathA, pathB, v, w) => {
+        class Secret {
+          #v: number
+          constructor(value: number) {
+            this.#v = value
+          }
+          read(): number {
+            return this.#v
+          }
+        }
+        class Point {
+          constructor(public a: number) {}
+        }
+        const url = (path: string) => new URL(`https://example.com/${path}`)
+        expectEqualityPair(url(pathA), url(pathB), pathA === pathB)
+        expectEqualityPair(
+          { u: url(pathA) },
+          { u: url(pathB) },
+          pathA === pathB,
+        )
+        // Another class with the same href is still another class.
+        expectEqualityPair(
+          url(pathA),
+          Object.create({ href: url(pathA).href }),
+          false,
+        )
+        // State outside enumerable keys is unknown, so only identity is equal.
+        const secret = new Secret(v)
+        expectEqualityPair(secret, secret, true)
+        expectEqualityPair(secret, new Secret(w), false)
+        expectEqualityPair({ s: secret }, { s: new Secret(v) }, false)
+        expectEqualityPair(new Secret(v), {}, false)
+        // Class instances with keys compare by keys within their class.
+        expectEqualityPair(new Point(v), new Point(w), v === w)
+        expectEqualityPair(new Point(v), { a: v }, false)
+        // Plain and null-prototype objects are one class.
+        const bare = Object.assign(Object.create(null), { a: v })
+        expectEqualityPair(bare, { a: w }, v === w)
+        expectEqualityPair(Object.create(null), {}, true)
+      },
+    )
+
+    utilsProperty([
       fc.array(fc.oneof(fc.double(), fc.constant(NaN), fc.constant(-0)), {
         minLength: 1,
         maxLength: 5,
       }),
-      fc.array(fc.integer({ min: 0, max: 127 }), { minLength: 1, maxLength: 5 }),
+      fc.array(fc.integer({ min: 0, max: 127 }), {
+        minLength: 1,
+        maxLength: 5,
+      }),
     ])(
       `typed arrays compare elements like numbers and ignore their class`,
       (values, bytes) => {

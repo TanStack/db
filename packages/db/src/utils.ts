@@ -30,6 +30,21 @@ export function deepEquals(a: any, b: any): boolean {
   return deepEqualsInternal(a, b, new Map())
 }
 
+function isPlainPrototype(prototype: object | null): boolean {
+  return prototype === null || Object.getPrototypeOf(prototype) === null
+}
+
+// An object of another class differs. Plain and null-prototype objects, from
+// any realm, are one class.
+function isSameClass(a: object, b: object): boolean {
+  const prototype = Object.getPrototypeOf(a)
+  const prototypeB = Object.getPrototypeOf(b)
+  return (
+    prototype === prototypeB ||
+    (isPlainPrototype(prototype) && isPlainPrototype(prototypeB))
+  )
+}
+
 function enumerableOwnKeys(value: object): Array<string | symbol> {
   const keys: Array<string | symbol> = Object.keys(value)
   for (const key of Object.getOwnPropertySymbols(value)) {
@@ -264,6 +279,18 @@ export function deepEqualsInternal(
       return false
     }
 
+    // A class instance without enumerable keys (a File, an object with
+    // private fields) keeps its state elsewhere, so it equals only itself.
+    // A draft copies a URL by its href, so URLs compare by href.
+    if (
+      keysA.length === 0 &&
+      !Array.isArray(a) &&
+      !isPlainPrototype(Object.getPrototypeOf(a))
+    ) {
+      visited.delete(a)
+      return a instanceof URL && b instanceof URL && a.href === b.href
+    }
+
     // Check if all keys exist in both objects and their values are equal
     const result = keysA.every(
       (key) =>
@@ -272,7 +299,7 @@ export function deepEqualsInternal(
     )
 
     visited.delete(a)
-    return result
+    return result && isSameClass(a, b)
   }
 
   // For primitives that aren't strictly equal

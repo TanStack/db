@@ -23,6 +23,11 @@ import { createChangeProxy } from '../src/proxy'
  *    `undefined`.
  * 6. Plain objects compare by enumerable own string and symbol keys, in any
  *    order.
+ * 7. Typed arrays compare by class and by elements under rule 1.
+ * 8. URLs compare by `href`.
+ * 9. An object of another class differs, and a class instance without
+ *    enumerable keys (here, one with only a private field) equals only
+ *    itself.
  *
  * Laws checked after every generated history:
  *
@@ -43,6 +48,9 @@ import { createChangeProxy } from '../src/proxy'
  *   them; the coverage map lists symbol writes as unsupported. Symbol keys
  *   inside nested objects are written.
  * - Keys are non-index strings, so property order follows insertion order.
+ * - Class instances appear only as written values. A draft reads a class
+ *   instance of the original row as a plain object; the detachment contract
+ *   owns that boundary.
  */
 
 // ---------------------------------------------------------------------------
@@ -62,6 +70,8 @@ type Spec =
   | { k: `obj`; a?: Primitive; b?: Primitive; sym?: Primitive }
   | { k: `rows`; rows: Array<{ a: Primitive }> }
   | { k: `typed`; ctor: TypedKind; values: Array<number> }
+  | { k: `url`; path: `a` | `b` }
+  | { k: `secret`; v: number }
 
 // A Map value is a primitive or a nested Set, so draft rules must also hold
 // inside Map values.
@@ -87,6 +97,17 @@ const typedKind = (value: unknown): TypedKind | undefined =>
       : value instanceof Uint8Array
         ? `u8`
         : undefined
+
+// A class whose only state is a private field, so it has no enumerable keys.
+class Secret {
+  #v: number
+  constructor(v: number) {
+    this.#v = v
+  }
+  read(): number {
+    return this.#v
+  }
+}
 
 const HOLE = Symbol(`hole`)
 const FIELDS = [`f`, `g`, `h`] as const
@@ -132,6 +153,12 @@ function canon(spec: Spec | undefined): unknown {
       // Elements follow rule 1: -0 equals 0 and NaN equals NaN. The class is
       // part of the value.
       return [`typed`, spec.ctor, spec.values.map(String)]
+    case `url`:
+      return [`url`, spec.path]
+    case `secret`:
+      // Rule 9. Secrets appear only as written values, and the original is
+      // never a Secret, so the value is enough to compare written states.
+      return [`secret`, spec.v]
   }
 }
 
@@ -179,6 +206,10 @@ function realize(spec: Spec): unknown {
       spec.values.forEach((v, i) => (value[i] = v))
       return value
     }
+    case `url`:
+      return new URL(`https://example.com/${spec.path}`)
+    case `secret`:
+      return new Secret(spec.v)
   }
 }
 
@@ -241,6 +272,14 @@ const specArb: fc.Arbitrary<Spec> = fc.oneof(
       .tuple(...[0, 1, 2].map(() => fc.constantFrom(0, -0, 1, NaN)))
       .map((values): Spec => ({ k: `typed`, ctor: `vec3`, values })),
   ),
+  fc
+    .constantFrom(`a` as const, `b` as const)
+    .map((path): Spec => ({ k: `url`, path })),
+)
+// Written values may also be class instances with only private state.
+const writtenArb: fc.Arbitrary<Spec> = fc.oneof(
+  { weight: 9, arbitrary: specArb },
+  fc.constantFrom(1, 2).map((v): Spec => ({ k: `secret`, v })),
 )
 
 type Op =
@@ -256,7 +295,7 @@ const opArb: fc.Arbitrary<Op> = fc.oneof(
   fc.record({
     op: fc.constant(`set` as const),
     field: fc.constantFrom(...FIELDS),
-    value: specArb,
+    value: writtenArb,
   }),
   {
     weight: 3,
@@ -360,6 +399,40 @@ const partialRevertArb: fc.Arbitrary<History> = fc
       .map((field) => ({ op: `revert`, field }))
     return { original, ops: [...changes, ...reverts] }
   })
+
+// Two writes of URLs or keyless Secrets to one field, with up to two other
+// ops in between and an optional revert. The original field is a URL, an
+// object without keys, or any value.
+const urlOrSecretArb: fc.Arbitrary<Spec> = fc.oneof(
+  fc
+    .constantFrom(`a` as const, `b` as const)
+    .map((path): Spec => ({ k: `url`, path })),
+  fc.constantFrom(1, 2).map((v): Spec => ({ k: `secret`, v })),
+)
+const classWriteArb: fc.Arbitrary<History> = fc
+  .record({
+    f: fc.oneof(
+      urlOrSecretArb.filter((spec) => spec.k === `url`),
+      fc.constant<Spec>({ k: `obj` }),
+      specArb,
+    ),
+    g: specArb,
+    first: urlOrSecretArb,
+    second: urlOrSecretArb,
+    between: fc.array(opArb, { maxLength: 2 }),
+    revert: fc.boolean(),
+  })
+  .map(
+    ({ f, g, first, second, between, revert }): History => ({
+      original: { f, g },
+      ops: [
+        { op: `set`, field: `f`, value: first },
+        ...between,
+        { op: `set`, field: `f`, value: second },
+        ...(revert ? [{ op: `revert` as const, field: `f` as const }] : []),
+      ],
+    }),
+  )
 
 // Nested round trips. Either add a key the original object lacks and later
 // delete it, or change an existing key and later write its original value
@@ -583,6 +656,14 @@ function readSpec(value: unknown, like: Spec | undefined): string {
             values: Array.from(value as Float64Array),
           })
     }
+    case `url`:
+      return value instanceof URL
+        ? encode({ k: `url`, path: value.pathname.slice(1) as `a` | `b` })
+        : `not a URL`
+    case `secret`:
+      return value instanceof Secret
+        ? encode({ k: `secret`, v: value.read() })
+        : `not a Secret`
   }
 }
 
@@ -676,6 +757,13 @@ describe(`draft revert oracle`, () => {
         ...(replayPath === undefined ? {} : { path: replayPath }),
       })
     })
+    it(`matches the model across generated URL and keyless writes (${name})`, () => {
+      fc.assert(fc.property(classWriteArb, expectHistory), {
+        numRuns: 200,
+        ...(seed === undefined ? {} : { seed }),
+        ...(replayPath === undefined ? {} : { path: replayPath }),
+      })
+    })
     it(`matches the model across generated partial reverts (${name})`, () => {
       fc.assert(fc.property(partialRevertArb, expectHistory), {
         numRuns: 200,
@@ -740,6 +828,33 @@ describe(`draft revert oracle`, () => {
     expect(partial).toBeGreaterThanOrEqual(5)
     expect(full).toBeGreaterThanOrEqual(30)
     expect(symbolOnly).toBeGreaterThan(0)
+  })
+
+  // Writes that a keyless comparison would call equal: another URL, or a
+  // Secret over another Secret or over an object without keys.
+  it(`reaches writes over URLs and keyless objects in the fixed campaign`, () => {
+    let urlWrites = 0
+    let keylessWrites = 0
+    const sample = fc.sample(classWriteArb, { seed: FIXED_SEED, numRuns: 200 })
+    for (const { original, ops } of sample) {
+      let state: Root = { ...original }
+      for (const generated of ops) {
+        const op = resolve(state, original, generated)
+        if (op === undefined || !applicable(state, original, op)) continue
+        const current = state[op.field]
+        if (op.op === `set` && op.value.k === `url` && current?.k === `url`)
+          if (op.value.path !== current.path) urlWrites++
+        if (op.op === `set` && op.value.k === `secret`)
+          if (
+            (current?.k === `secret` && current.v !== op.value.v) ||
+            (current?.k === `obj` && encode(current) === encode({ k: `obj` }))
+          )
+            keylessWrites++
+        state = step(state, original, op)
+      }
+    }
+    expect(urlWrites).toBeGreaterThanOrEqual(10)
+    expect(keylessWrites).toBeGreaterThanOrEqual(10)
   })
 
   // Pinned witnesses.
