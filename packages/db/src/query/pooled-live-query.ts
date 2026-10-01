@@ -58,6 +58,11 @@ function equalityKey(value: unknown): string | undefined {
     : undefined
 }
 
+// Length-prefixed, so no two part lists share an encoding.
+function appendGroupKeyPart(groupKey: string, part: string): string {
+  return `${groupKey}${part.length}:${part}`
+}
+
 function readPath(row: Row, path: Array<string>): unknown {
   try {
     let value: unknown = row
@@ -90,13 +95,20 @@ class Partition {
 
   groupKeyOf(row: Row | undefined): string | undefined {
     if (row === undefined) return undefined
-    const parts: Array<string> = []
+    let groupKey = ``
     for (const path of this.paths) {
       const key = equalityKey(readPath(row, path))
       if (key === undefined) return undefined
-      parts.push(key)
+      groupKey = appendGroupKeyPart(groupKey, key)
     }
-    return JSON.stringify(parts)
+    return groupKey
+  }
+
+  // Whether two versions of a row hold the same value in every field.
+  private sameFields(a: Row, b: Row): boolean {
+    return this.paths.every((path) =>
+      Object.is(readPath(a, path), readPath(b, path)),
+    )
   }
 
   group(key: string): PartitionGroup {
@@ -221,9 +233,13 @@ class Partition {
       const previous =
         change.type === `insert`
           ? undefined
-          : this.groupKeyOf(
-              change.type === `delete` ? change.value : change.previousValue,
-            )
+          : change.type === `update` &&
+              change.previousValue !== undefined &&
+              this.sameFields(change.value, change.previousValue)
+            ? next
+            : this.groupKeyOf(
+                change.type === `delete` ? change.value : change.previousValue,
+              )
       if (previous !== undefined && previous !== next) {
         const group = this.group(previous)
         const old = group.rows.get(change.key)
@@ -238,7 +254,9 @@ class Partition {
         record(
           group,
           existed
-            ? { ...change, type: `update` }
+            ? change.type === `update`
+              ? change
+              : { ...change, type: `update` }
             : { type: `insert`, key: change.key, value: change.value },
         )
       }
@@ -327,7 +345,10 @@ function poolableShape(
   return {
     paths: conjuncts.map(({ path }) => path),
     shapeKey: conjuncts.map(({ pathKey }) => pathKey).join(`,`),
-    groupKey: JSON.stringify(conjuncts.map(({ literalKey }) => literalKey)),
+    groupKey: conjuncts.reduce(
+      (groupKey, { literalKey }) => appendGroupKeyPart(groupKey, literalKey),
+      ``,
+    ),
   }
 }
 
