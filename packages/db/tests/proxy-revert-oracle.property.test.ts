@@ -56,11 +56,19 @@ type Spec =
   | { k: `prim`; v: Primitive }
   | { k: `date`; t: number }
   | { k: `regex`; flags: string; lastIndex: number }
-  | { k: `map`; entries: Array<[string, Primitive]> }
+  | { k: `map`; entries: Array<[string, MapValue]> }
   | { k: `set`; values: Array<string> }
   | { k: `array`; items: Array<Primitive | typeof HOLE> }
   | { k: `obj`; a?: Primitive; b?: Primitive; sym?: Primitive }
   | { k: `rows`; rows: Array<{ a: Primitive }> }
+
+// A Map value is a primitive or a nested Set, so draft rules must also hold
+// inside Map values.
+type MapValue = Primitive | { set: Array<string> }
+const isSetValue = (v: MapValue): v is { set: Array<string> } =>
+  typeof v === `object` && v !== null
+const mapValue = (v: MapValue): unknown =>
+  isSetValue(v) ? [`set`, v.set] : prim(v)
 
 const HOLE = Symbol(`hole`)
 const FIELDS = [`f`, `g`, `h`] as const
@@ -84,7 +92,7 @@ function canon(spec: Spec | undefined): unknown {
     case `regex`:
       return [`regex`, spec.flags, spec.lastIndex]
     case `map`:
-      return [`map`, spec.entries.map(([key, v]) => [key, prim(v)])]
+      return [`map`, spec.entries.map(([key, v]) => [key, mapValue(v)])]
     case `set`:
       return [`set`, spec.values]
     case `array`:
@@ -117,7 +125,12 @@ function realize(spec: Spec): unknown {
       return value
     }
     case `map`:
-      return new Map(spec.entries)
+      return new Map(
+        spec.entries.map(([key, v]) => [
+          key,
+          isSetValue(v) ? new Set(v.set) : v,
+        ]),
+      )
     case `set`:
       return new Set(spec.values)
     case `array`: {
@@ -162,10 +175,18 @@ const specArb: fc.Arbitrary<Spec> = fc.oneof(
     lastIndex: fc.nat(1),
   }),
   fc
-    .uniqueArray(fc.tuple(fc.constantFrom(`x`, `y`), primArb), {
-      maxLength: 2,
-      selector: ([key]) => key,
-    })
+    .uniqueArray(
+      fc.tuple(
+        fc.constantFrom(`x`, `y`),
+        fc.oneof(
+          primArb,
+          fc
+            .uniqueArray(fc.constantFrom(`x`, `y`), { maxLength: 2 })
+            .map((set): MapValue => ({ set })),
+        ),
+      ),
+      { maxLength: 2, selector: ([key]) => key },
+    )
     .map((entries) => ({ k: `map` as const, entries })),
   fc
     .uniqueArray(fc.constantFrom(`x`, `y`), { maxLength: 2 })
@@ -361,7 +382,13 @@ function readSpec(value: unknown, like: Spec | undefined): string {
         : `not a RegExp`
     case `map`:
       return value instanceof Map
-        ? encode({ k: `map`, entries: [...value] })
+        ? encode({
+            k: `map`,
+            entries: [...value].map(([key, v]): [string, MapValue] => [
+              key,
+              v instanceof Set ? { set: [...v] } : v,
+            ]),
+          })
         : `not a Map`
     case `set`:
       return value instanceof Set
@@ -406,12 +433,8 @@ function expectHistory({ original, ops }: History): void {
   for (const op of ops) {
     if (!applicable(state, op)) continue
     if (op.op === `revert`) {
-      if (original[op.field] === undefined)
-        delete (proxy)[op.field]
-      else
-        (proxy)[op.field] = realize(
-          original[op.field]!,
-        )
+      if (original[op.field] === undefined) delete proxy[op.field]
+      else proxy[op.field] = realize(original[op.field]!)
     } else drive(proxy as Record<string, any>, op)
     state = step(state, original, op)
   }
@@ -436,7 +459,7 @@ function expectHistory({ original, ops }: History): void {
   }
   for (const field of FIELDS)
     expect(
-      readSpec((proxy)[field], state[field]),
+      readSpec(proxy[field], state[field]),
       `draft ${field}, ${context}`,
     ).toBe(encode(state[field]))
   for (const field of FIELDS)
@@ -604,6 +627,19 @@ describe(`draft revert oracle`, () => {
                 [`x`, 1],
               ],
             },
+          },
+        ],
+      },
+    ],
+    [
+      `a reordered Set inside a Map value is a change`,
+      {
+        original: { f: { k: `map`, entries: [[`x`, { set: [`x`, `y`] }]] } },
+        ops: [
+          {
+            op: `set`,
+            field: `f`,
+            value: { k: `map`, entries: [[`x`, { set: [`y`, `x`] }]] },
           },
         ],
       },
