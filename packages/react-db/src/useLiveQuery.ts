@@ -728,30 +728,29 @@ export function useLiveQueryForSuspense(
   return useLiveQueryImpl(configOrQueryOrCollection, deps, true)
 }
 
-const ref = <T>(current: T): { current: T } => ({ current })
-
-// Every ref the hook keeps, created once per hook instance.
-function createHookRefs(dbClient: DbClient | undefined) {
+// What one hook instance keeps across renders. It lives in a single ref
+// slot, so a render neither looks up nor allocates more.
+function createHookInstance(dbClient: DbClient | undefined) {
   return {
-    collectionRef: ref<Collection<object, string | number, {}> | null>(null),
-    depsRef: ref<Array<unknown> | null>(null),
-    configRef: ref<unknown>(null),
-    clientRef: ref(dbClient),
-    legacyUnhashableIdentityRef: ref<Array<unknown>>([`legacy-unhashable`]),
-    derivedIdentityProfilerRef: ref<DerivedIdentityProfiler>({
+    collection: null as Collection<object, string | number, {}> | null,
+    deps: null as Array<unknown> | null,
+    config: null as unknown,
+    client: dbClient,
+    legacyUnhashableIdentity: [`legacy-unhashable`] as Array<unknown>,
+    derivedIdentityProfiler: {
       renderCount: 0,
       totalMs: 0,
       maxMs: 0,
       warned: false,
-    }),
-    deferredCollectionsRef: ref(
-      new Set<CollectionImpl<any, string | number, any, any, any>>(),
-    ),
-    observerRef: ref<LiveQueryObserver<object, string | number> | null>(null),
-    queryHashRef: ref<string | undefined>(undefined),
-    suspenseKeyRef: ref<string | undefined>(undefined),
-    identityErrorRef: ref<UnhashableQueryIRError | undefined>(undefined),
-    subscribeRef: ref<((onStoreChange: () => void) => () => void) | null>(null),
+    } as DerivedIdentityProfiler,
+    deferredCollections: new Set<
+      CollectionImpl<any, string | number, any, any, any>
+    >(),
+    observer: null as LiveQueryObserver<object, string | number> | null,
+    queryHash: undefined as string | undefined,
+    suspenseKey: undefined as string | undefined,
+    identityError: undefined as UnhashableQueryIRError | undefined,
+    subscribe: null as ((onStoreChange: () => void) => () => void) | null,
   }
 }
 
@@ -768,23 +767,8 @@ function useLiveQueryImpl(
     : (getExplicitDbClient(configOrQueryOrCollection) ?? contextDbClient)
   const resolvedDeps = deps ?? []
 
-  // One hook slot holds every ref, so a render neither looks up nor
-  // allocates the others.
-  const refsRef = useRef<ReturnType<typeof createHookRefs> | null>(null)
-  const {
-    collectionRef,
-    depsRef,
-    configRef,
-    clientRef,
-    legacyUnhashableIdentityRef,
-    derivedIdentityProfilerRef,
-    deferredCollectionsRef,
-    observerRef,
-    queryHashRef,
-    suspenseKeyRef,
-    identityErrorRef,
-    subscribeRef,
-  } = (refsRef.current ??= createHookRefs(dbClient))
+  const instanceRef = useRef<ReturnType<typeof createHookInstance> | null>(null)
+  const instance = (instanceRef.current ??= createHookInstance(dbClient))
 
   const queryKey = !inputIsCollection
     ? getExplicitQueryKey(configOrQueryOrCollection)
@@ -811,7 +795,7 @@ function useLiveQueryImpl(
         preparedQueryValue = prepareQueryValue(
           configOrQueryOrCollection,
           dbClient,
-          deferredCollectionsRef.current,
+          instance.deferredCollections,
         )
         streamIdentity = [
           `deps`,
@@ -830,8 +814,8 @@ function useLiveQueryImpl(
     const preparation = prepareDerivedQuery(
       configOrQueryOrCollection,
       dbClient,
-      derivedIdentityProfilerRef.current,
-      deferredCollectionsRef.current,
+      instance.derivedIdentityProfiler,
+      instance.deferredCollections,
     )
     preparedQueryValue = preparation.value
     if (preparation.status === `hashable`) {
@@ -839,7 +823,7 @@ function useLiveQueryImpl(
       streamIdentity = preparation.identityDeps
     } else {
       warnUnhashableDerivedIdentity(preparation.error)
-      identityDeps = legacyUnhashableIdentityRef.current
+      identityDeps = instance.legacyUnhashableIdentity
       identityError = preparation.error
     }
   }
@@ -867,10 +851,10 @@ function useLiveQueryImpl(
     !inputIsCollection &&
     queryHash !== undefined &&
     !dbClient &&
-    collectionRef.current !== null &&
-    clientRef.current === dbClient &&
-    queryHashRef.current === queryHash &&
-    suspenseKeyRef.current !== undefined
+    instance.collection !== null &&
+    instance.client === dbClient &&
+    instance.queryHash === queryHash &&
+    instance.suspenseKey !== undefined
 
   if (
     forSuspense &&
@@ -883,14 +867,14 @@ function useLiveQueryImpl(
     preparedQueryValue = prepareQueryValue(
       configOrQueryOrCollection,
       dbClient,
-      deferredCollectionsRef.current,
+      instance.deferredCollections,
     )
   }
 
   const suspenseKey =
     queryHash && !dbClient
       ? canReuseSuspenseKey
-        ? suspenseKeyRef.current
+        ? instance.suspenseKey
         : getUnscopedSuspenseKey(preparedQueryValue, queryHash)
       : queryHash
 
@@ -904,24 +888,24 @@ function useLiveQueryImpl(
   const suspenseCollection = suspenseEntry?.collection
 
   const identityChanged =
-    depsRef.current === null ||
+    instance.deps === null ||
     (deps !== undefined
-      ? depsRef.current.length !== identityDeps.length ||
-        depsRef.current.some((dep, index) => dep !== identityDeps[index])
-      : !deepEquals(depsRef.current, identityDeps))
+      ? instance.deps.length !== identityDeps.length ||
+        instance.deps.some((dep, index) => dep !== identityDeps[index])
+      : !deepEquals(instance.deps, identityDeps))
 
   // Check if we need to create/recreate the collection
   const needsNewCollection =
-    !collectionRef.current ||
-    (inputIsCollection && configRef.current !== configOrQueryOrCollection) ||
-    (!inputIsCollection && (clientRef.current !== dbClient || identityChanged))
+    !instance.collection ||
+    (inputIsCollection && instance.config !== configOrQueryOrCollection) ||
+    (!inputIsCollection && (instance.client !== dbClient || identityChanged))
 
   const resumeDeferredCollections = () => {
-    if (deferredCollectionsRef.current.size === 0) return
-    for (const collection of deferredCollectionsRef.current) {
+    if (instance.deferredCollections.size === 0) return
+    for (const collection of instance.deferredCollections) {
       collection._resumeSyncStart()
     }
-    deferredCollectionsRef.current.clear()
+    instance.deferredCollections.clear()
   }
 
   if (needsNewCollection) {
@@ -946,28 +930,28 @@ function useLiveQueryImpl(
       }
       // It's already a collection, ensure sync is started for React hooks
       configOrQueryOrCollection.startSyncImmediate()
-      collectionRef.current = configOrQueryOrCollection
-      configRef.current = configOrQueryOrCollection
+      instance.collection = configOrQueryOrCollection
+      instance.config = configOrQueryOrCollection
     } else {
       if (suspenseCollection) {
-        collectionRef.current = suspenseCollection
+        instance.collection = suspenseCollection
       } else {
         if (preparedQueryValue === unpreparedQueryValue) {
           preparedQueryValue = prepareQueryValue(
             configOrQueryOrCollection,
             dbClient,
-            deferredCollectionsRef.current,
+            instance.deferredCollections,
           )
         }
-        collectionRef.current = resolveLiveQueryValue(preparedQueryValue, {
+        instance.collection = resolveLiveQueryValue(preparedQueryValue, {
           gcTime: forSuspense
             ? DEFAULT_SUSPENSE_GC_TIME_MS
             : DEFAULT_GC_TIME_MS,
           // Hydration and Suspense key the live-query Collection by identity.
           pool: !forSuspense && !dbClient,
         }) as SuspenseCollection | null
-        if (suspenseCollections && suspenseKey && collectionRef.current) {
-          const collection = collectionRef.current
+        if (suspenseCollections && suspenseKey && instance.collection) {
+          const collection = instance.collection
           const removeCleanupListener = collection.on(`status:cleaned-up`, () =>
             releaseSuspenseCollection(
               suspenseCollections,
@@ -999,13 +983,13 @@ function useLiveQueryImpl(
           suspenseCollections.set(suspenseKey, entry)
         }
       }
-      configRef.current = configOrQueryOrCollection
-      depsRef.current = [...identityDeps]
+      instance.config = configOrQueryOrCollection
+      instance.deps = [...identityDeps]
     }
-    clientRef.current = dbClient
-    queryHashRef.current = queryHash
-    suspenseKeyRef.current = suspenseKey
-    identityErrorRef.current = identityError
+    instance.client = dbClient
+    instance.queryHash = queryHash
+    instance.suspenseKey = suspenseKey
+    instance.identityError = identityError
   }
 
   // Recreate the observer when the underlying collection changes. The observer
@@ -1021,19 +1005,19 @@ function useLiveQueryImpl(
     // hook's pre-observer loading policy, and — because wholesale delivers
     // nothing synchronously during subscribe — never notifies
     // useSyncExternalStore inside its own subscribe call.
-    observerRef.current = createLiveQueryObserver(collectionRef.current, {
+    instance.observer = createLiveQueryObserver(instance.collection, {
       mode: `wholesale`,
       client: dbClient,
-      queryHash: queryHashRef.current,
+      queryHash: instance.queryHash,
       onPreload: resumeDeferredCollections,
     })
   }
-  const observer = observerRef.current!
+  const observer = instance.observer!
 
   // Stable subscribe bound to the current observer; the observer owns the
   // subscription, ready-race, and disposal.
-  if (!subscribeRef.current || needsNewCollection) {
-    subscribeRef.current = (onStoreChange: () => void) => {
+  if (!instance.subscribe || needsNewCollection) {
+    instance.subscribe = (onStoreChange: () => void) => {
       const unsubscribe = observer.subscribe(onStoreChange)
       resumeDeferredCollections()
       return unsubscribe
@@ -1041,7 +1025,7 @@ function useLiveQueryImpl(
   }
 
   const returned = useSyncExternalStore(
-    subscribeRef.current,
+    instance.subscribe,
     () => observer.getSnapshot(),
     () => observer.getServerSnapshot(),
   )
@@ -1049,8 +1033,8 @@ function useLiveQueryImpl(
   if (forSuspense) {
     setLiveQueryResultInfo(returned, {
       client: dbClient,
-      queryHash: queryHashRef.current,
-      identityError: identityErrorRef.current,
+      queryHash: instance.queryHash,
+      identityError: instance.identityError,
       observer,
     })
   }
