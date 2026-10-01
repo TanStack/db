@@ -2430,3 +2430,96 @@ describe(`Proxy Library`, () => {
     })
   })
 })
+
+// A function stored as data is a value like any other. Reading it from a draft
+// must give back the stored function, by any read path, as the native row
+// does. Calling a stored method must see the draft as `this`, so its writes are
+// tracked. Inherited methods (Array, Map, and Set methods) are not data and
+// keep their own draft handling.
+describe(`stored functions behave like native values`, () => {
+  type Row = {
+    handler: () => number
+    fns: Array<() => number>
+    obj: { g: () => number; count: number; bump: () => unknown }
+    m: Map<string, () => number>
+    s: Set<() => number>
+  }
+  const make = (f: () => number, f2: () => number): Row => ({
+    handler: f,
+    fns: [f, f2],
+    obj: {
+      g: f,
+      count: 0,
+      bump() {
+        this.count++
+        return this
+      },
+    },
+    m: new Map([[`k`, f]]),
+    s: new Set([f]),
+  })
+
+  // Each probe returns an observation that must be the same for a native row
+  // and for a draft of an equal row.
+  const probes: Array<[string, (row: Row, f: () => number) => unknown]> = [
+    [`field access`, (row, f) => row.handler === f],
+    [`array index`, (row, f) => row.fns[0] === f],
+    [
+      `for...of`,
+      (row, f) => {
+        for (const fn of row.fns) return fn === f
+        return undefined
+      },
+    ],
+    [`spread`, (row, f) => [...row.fns][0] === f],
+    [
+      `includes and indexOf`,
+      (row, f) => [row.fns.includes(f), row.fns.indexOf(f)],
+    ],
+    [`array callback`, (row, f) => row.fns.map((fn) => fn === f)],
+    [`nested field`, (row, f) => row.obj.g === f],
+    [`Object.values`, (row, f) => Object.values(row.obj).includes(f)],
+    [`Map value`, (row, f) => row.m.get(`k`) === f],
+    [`Set member`, (row, f) => [...row.s][0] === f && row.s.has(f)],
+    [`calling a stored function`, (row) => row.handler()],
+    [
+      `a function assigned during the callback`,
+      (row, f) => {
+        const assigned = row as Row & { added?: () => number }
+        assigned.added = f
+        return assigned.added === f
+      },
+    ],
+    [
+      `a stored method sees its object as this`,
+      (row) => row.obj.bump() === row.obj,
+    ],
+  ]
+
+  it.each(probes)(`%s gives the native result`, (_name, probe) => {
+    const f = () => 1
+    const f2 = () => 2
+    const native = probe(make(f, f2), f)
+    const { proxy } = createChangeProxy(make(f, f2))
+    expect(probe(proxy, f)).toEqual(native)
+  })
+
+  it(`tracks writes a stored method makes through this`, () => {
+    const native = make(
+      () => 1,
+      () => 2,
+    )
+    native.obj.bump()
+    const { proxy, getChanges } = createChangeProxy(
+      make(
+        () => 1,
+        () => 2,
+      ),
+    )
+    proxy.obj.bump()
+    expect(proxy.obj.count).toBe(native.obj.count)
+    const changes = getChanges() as Partial<Row>
+    expect(Object.keys(changes)).toEqual([`obj`])
+    expect(changes.obj?.count).toBe(1)
+  })
+})

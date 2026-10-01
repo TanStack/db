@@ -468,6 +468,11 @@ export function createChangeProxy<
 
       // If the value is a function, bind it to the ptarget
       if (typeof value === `function`) {
+        // A function stored as data is returned as stored, like any value. A
+        // call then sees the draft as `this`, so its writes are tracked. Only
+        // inherited methods (Array, Map, Set) need the handling below.
+        if (Object.hasOwn(ptarget, prop)) return value
+
         // For Array methods that modify the array
         if (Array.isArray(ptarget)) {
           const methodName = prop.toString()
