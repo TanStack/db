@@ -1,6 +1,6 @@
 # Code weight: simplify the draft proxy and share its equality walker
 
-Reviewed executable revision: `cccaf1b9e` (base `18abceee4`, the fetched
+Reviewed executable revision: `1a07cd3ce` (base `18abceee4`, the fetched
 `origin/main` at review time). This record follows in a documentation-only
 commit.
 
@@ -11,6 +11,9 @@ commit.
 - `6b68b8dc3` is the refactor.
 - `cccaf1b9e` returns functions stored in a draft as stored, with a new
   native-differential law. This is a behavior change and a lost-write fix.
+- `1a07cd3ce` applies review fixes: a stronger revert grammar and witness, a
+  duplicate comment, and a redundant `key in` check in `getChanges` (about 14
+  minified bytes).
 
 ## Change
 
@@ -41,10 +44,10 @@ two-loop form. See Performance.
 
 | Consumer bundle (esbuild, `es2020`) | min | gzip | brotli |
 | --- | ---: | ---: | ---: |
-| full public API | −1,725 (−0.49%) | −451 (−0.43%) | −246 (−0.28%) |
-| collection with a filtered live query | −1,725 (−0.65%) | −457 (−0.58%) | −302 (−0.44%) |
-| local-only collection with an insert, an update, and a delete | −1,722 (−1.41%) | −437 (−1.25%) | −270 (−0.87%) |
-| local-only collection with one insert | −1,722 (−1.41%) | −436 (−1.24%) | −276 (−0.89%) |
+| full public API | −1,739 (−0.50%) | −453 (−0.43%) | −145 (−0.16%) |
+| collection with a filtered live query | −1,739 (−0.65%) | −461 (−0.58%) | −356 (−0.52%) |
+| local-only collection with an insert, an update, and a delete | −1,736 (−1.42%) | −441 (−1.26%) | −256 (−0.83%) |
+| local-only collection with one insert | −1,736 (−1.42%) | −439 (−1.25%) | −295 (−0.95%) |
 
 Each row bundles the built `dist`, with private members renamed, for base and
 refactor under the same `package.json`.
@@ -53,14 +56,18 @@ refactor under the same `package.json`.
 
 Sixteen source mutants on unchanged code model plausible mistakes in this
 refactor. Before this work, eight of them passed the whole db suite (7,596
-tests):
+tests). Seven are real gaps:
 
-- a partial revert treated as a full revert, which drops the remaining change.
-- a nested write under a symbol key treated as no change.
+- A partial revert treated as a full revert, which drops the remaining change
+  (P2).
+- A nested write under a symbol key treated as no change (E5).
 - `deepClone` copying non-enumerable string keys, or dropping enumerable or
-  non-enumerable symbol keys.
+  non-enumerable symbol keys (C1, C2, C3).
 - `deepEquals` comparing RegExp `lastIndex`, or treating array holes as
-  differences.
+  differences (D2, D4).
+
+The eighth, a wrong parent edge for array iterator elements (P4), is
+equivalent under every public observation. See Mutant calibration.
 
 A ninth (`deepEquals` comparing Maps in order) failed one unrelated test only.
 
@@ -83,12 +90,27 @@ history, the check asserts:
 - The draft reads back the model's final value.
 - The original row is unchanged.
 
-Each run executes a fixed campaign (seed `2026101`) and a random campaign of
-400 histories. `TANSTACK_DB_PROXY_REVERT_SEED` and
-`TANSTACK_DB_PROXY_REVERT_PATH` select a replay. A positive witness requires
-the fixed campaign to reach every operation, more than 20 partial reverts,
-more than 20 full reverts, and a change made only under a nested symbol key.
-Eleven pinned histories hold one rule each.
+The generator also emits a revert of a field that is currently changed, so
+most reverts run the `set` trap's revert branch. A second property builds
+partial reverts directly: it changes two or three fields in any order, then
+reverts all of them but one.
+
+Each property runs a fixed campaign (seed `2026101`) and a random campaign:
+400 general histories and 200 partial-revert histories.
+`TANSTACK_DB_PROXY_REVERT_SEED` and `TANSTACK_DB_PROXY_REVERT_PATH` select a
+replay. A positive witness requires the fixed general campaign to reach every
+operation, a change made only under a nested symbol key, and effective
+reverts: at least 10 histories where a change survives a revert, and at least
+30 histories that end fully reverted. A revert counts only when the field
+differs from its original before the revert. Eleven pinned histories hold one
+rule each.
+
+Review of the first version found that its witness also counted reverts of
+unchanged fields, which write an equal value and do nothing. With those
+excluded, the first grammar reached 10 partial and 11 full reverts in 400
+histories. The changed-field revert and the partial-revert property raise
+that coverage. Mutant N2 now fails 6 of the oracle's 16 cases, including both
+partial-revert campaigns.
 
 Limits:
 
@@ -258,9 +280,9 @@ minified bytes. The harness is not checked in.
 
 ## Verification
 
-On `cccaf1b9e`, with the built `dist`:
+On `1a07cd3ce`, with the built `dist`:
 
-- `packages/db` Vitest, typecheck off: 198 files, 7,634 tests.
+- `packages/db` Vitest, typecheck off: 198 files, 7,636 tests.
 - `packages/db` `tsc --noEmit`: only the pre-existing errors in
   `tests/conformance` that `main` also has.
 - `pnpm check:mangle`: 368 names.
