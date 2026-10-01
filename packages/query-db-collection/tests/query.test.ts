@@ -4343,6 +4343,41 @@ describe(`QueryCollection`, () => {
       expect(collection.size).toBe(1)
     })
 
+    it(`observes rejection from an unsupported batch callback result`, async () => {
+      const collection = createCollection(
+        queryCollectionOptions<TestItem>({
+          id: `unsupported-batch-callback-result`,
+          queryKey: [`unsupported-batch-callback-result`],
+          queryFn: () => Promise.resolve([]),
+          queryClient,
+          getKey,
+          startSync: true,
+        }),
+      )
+
+      try {
+        await collection.stateWhenReady()
+        let observedRejection = false
+        const callbackResult = {
+          then(
+            _resolve: (value: unknown) => void,
+            reject: (reason: unknown) => void,
+          ) {
+            observedRejection = true
+            reject(new Error(`callback rejected`))
+          },
+        }
+
+        expect(() => collection.utils.writeBatch(() => callbackResult)).toThrow(
+          /async callbacks/,
+        )
+        await Promise.resolve()
+        expect(observedRejection).toBe(true)
+      } finally {
+        await collection.cleanup()
+      }
+    })
+
     it(`should prevent nested writeBatch calls`, async () => {
       const queryKey = [`nestedBatch`]
       const initialItems: Array<TestItem> = [{ id: `1`, name: `Item 1` }]

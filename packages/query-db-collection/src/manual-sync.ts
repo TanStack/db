@@ -321,6 +321,8 @@ export function createWriteUtils<
           typeof result.then === `function` &&
           !writeCompletionPromises.has(result)
         ) {
+          // Rejecting the batch can also reject an async callback awaiting it.
+          void Promise.resolve(result).catch(() => undefined)
           throw new Error(
             `writeBatch does not support async callbacks. The callback must be synchronous.`,
           )
