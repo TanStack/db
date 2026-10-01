@@ -248,6 +248,8 @@ export class CollectionMutationsManager<
     }
 
     const items = Array.isArray(data) ? data : [data]
+    // One timestamp per call; mutations replace these rather than mutate them.
+    const now = new Date()
     const mutations: Array<PendingMutation<TOutput>> = []
     const keysInCurrentBatch = new Set<TKey>()
 
@@ -283,8 +285,8 @@ export class CollectionMutationsManager<
         syncMetadata: this.config.sync.getSyncMetadata?.() || {},
         optimistic: config?.optimistic ?? true,
         type: `insert`,
-        createdAt: new Date(),
-        updatedAt: new Date(),
+        createdAt: now,
+        updatedAt: now,
         collection: this.collection,
       }
 
@@ -419,6 +421,8 @@ export class CollectionMutationsManager<
           ])
 
     // Create mutations for each object that has changes
+    // One timestamp per call; mutations replace these rather than mutate them.
+    const now = new Date()
     const mutations: Array<
       PendingMutation<
         TOutput,
@@ -463,12 +467,16 @@ export class CollectionMutationsManager<
           // where a schema has default values or transforms. The modified data has the extra
           // default or transformed values but for changes, we just want to show the data that
           // was actually passed in.
-          changes: Object.fromEntries(
-            Object.keys(itemChanges).map((k) => [
-              k,
-              modifiedItem[k as keyof typeof modifiedItem],
-            ]),
-          ) as TInput,
+          // Without a schema, validation returns the tracker's fresh change
+          // object, which already holds exactly these values.
+          changes: (validatedUpdatePayload === itemChanges
+            ? itemChanges
+            : Object.fromEntries(
+                Object.keys(itemChanges).map((k) => [
+                  k,
+                  modifiedItem[k as keyof typeof modifiedItem],
+                ]),
+              )) as TInput,
           globalKey,
           key,
           metadata: config.metadata as unknown,
@@ -478,8 +486,8 @@ export class CollectionMutationsManager<
           >,
           optimistic: config.optimistic ?? true,
           type: `update`,
-          createdAt: new Date(),
-          updatedAt: new Date(),
+          createdAt: now,
+          updatedAt: now,
           collection: this.collection,
         }
       })
@@ -578,6 +586,8 @@ export class CollectionMutationsManager<
 
     const keysArray = Array.isArray(keys) ? keys : [keys]
     this.collection._sync.startSync()
+    // One timestamp per call; mutations replace these rather than mutate them.
+    const now = new Date()
     const mutations: Array<
       PendingMutation<
         TOutput,
@@ -609,8 +619,8 @@ export class CollectionMutationsManager<
         >,
         optimistic: config?.optimistic ?? true,
         type: `delete`,
-        createdAt: new Date(),
-        updatedAt: new Date(),
+        createdAt: now,
+        updatedAt: now,
         collection: this.collection,
       }
 
