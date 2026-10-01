@@ -96,8 +96,12 @@ function setDataProperty(
 
 function assertOutboxPhase(
   phase: unknown,
-): asserts phase is `deletion-pending` | undefined {
-  if (phase !== undefined && phase !== `deletion-pending`)
+): asserts phase is `deletion-pending` | `rejection-pending` | undefined {
+  if (
+    phase !== undefined &&
+    phase !== `deletion-pending` &&
+    phase !== `rejection-pending`
+  )
     throw new Error(`Unsupported transaction outbox phase`)
 }
 

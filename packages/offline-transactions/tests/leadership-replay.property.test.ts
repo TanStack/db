@@ -18,8 +18,9 @@ import type { OfflineTransaction, OnlineDetector } from '../src/types'
  * scheduling, and OutboxManager durability define this boundary. Only the
  * current leader may admit stored work. Issued work may settle after leadership
  * loss, but loss or disposal fences startup, stale reads, retry hooks, and new
- * provider work. A durable row remains owned until its acknowledgement or
- * permanent rejection is durably removed, and an ID already pending, running,
+ * provider work. A failed outbox phase write or deletion stops the current
+ * executor and leaves later rows queued. A durable row remains owned until its
+ * acknowledgement or permanent rejection is durably removed, and an ID already pending, running,
  * completed, permanently rejected, or durably removed must not execute twice.
  *
  * Model: this file is a partial relational oracle, not a second executor. Each
@@ -719,7 +720,7 @@ it(`keeps retry timers live when a retry record update fails`, async () => {
   }
 })
 
-it(`keeps later work live when a permanent record removal fails`, async () => {
+it(`stops later work when terminal outbox removal fails`, async () => {
   vi.useFakeTimers()
   vi.setSystemTime(0)
   const storageError = new Error(`permanent removal failed`)
@@ -773,17 +774,19 @@ it(`keeps later work live when a permanent record removal fails`, async () => {
     expect({ calls, completed, pending: executor.getPendingCount() }).toEqual({
       calls: [permanent.id],
       completed: [],
-      pending: 1,
+      pending: 2,
     })
 
-    await vi.advanceTimersByTimeAsync(0)
+    await vi.advanceTimersByTimeAsync(60_000)
     expect({ calls, completed, pending: executor.getPendingCount() }).toEqual({
-      calls: [permanent.id, later.id],
-      completed: [later.id],
-      pending: 0,
+      calls: [permanent.id],
+      completed: [],
+      pending: 2,
     })
-    expect(await outbox.get(permanent.id)).toEqual(permanent)
-    expect(await outbox.get(later.id)).toBeNull()
+    expect((await outbox.get(permanent.id))?.outboxPhase).toBe(
+      `rejection-pending`,
+    )
+    expect(await outbox.get(later.id)).toEqual(later)
   } finally {
     executor.clear()
     vi.useRealTimers()

@@ -78,6 +78,14 @@ void transaction.isPersisted.promise.catch((error) => console.error(error))
 
 When `isOfflineEnabled` is true, the executor calls the named `mutationFn` after it records the transaction. A temporary error leaves the entry available for retry. `NonRetriableError` marks a permanent failure and rolls back optimistic state.
 
+If an outbox phase write or deletion fails after `mutationFn` returns, the
+affected transaction rejects with the storage error and the executor stops
+processing queued work. If `mutationFn` failed permanently, its caller keeps
+that provider error while the executor batch reports the storage error. Restart
+with a fresh executor after storage recovers. A durable phase marker prevents
+another provider call; if the marker write failed, the provider may be called
+again.
+
 The executor sends a stable `idempotencyKey` with each attempt. A server can receive an attempt more than once, especially after a restart or leadership change. Make the server treat repeated keys as one logical mutation.
 
 ## Wait for the right result

@@ -169,8 +169,8 @@ witness in those runtimes.
 The offline settlement owner follows the README's success boundary: the
 configured `mutationFn` has returned and the storage adapter has acknowledged
 outbox deletion. Its controlled storage histories hold and fail deletion,
-retain a queued peer at the FIFO head, retry deletion in-process, and restart
-after a persisted `deletion-pending` phase. A marked row skips provider replay
+stop the executor and queued peers on a storage failure, reject new admission,
+and restart after a persisted `deletion-pending` phase. A marked row skips provider replay
 even when `beforeRetry` filters all ordinary pending work; an old unmarked row
 still replays. Adapter tests prove that IndexedDB transaction failure and
 localStorage `removeItem` failure reject rather than masquerade as deletion.
@@ -694,8 +694,14 @@ for this oracle repair. Keep these scenarios and decisions with that owner:
   marked rows, physical power loss after adapter acknowledgement, and native
   browser restart or multi-owner handoff remain open. Provider idempotency is
   required to avoid a repeated effect in the first two cases.
-- **A10 R4/R5/R9:** loss before durable admission, terminal waiter/removal/clear
-  and restored optimistic lifetimes, and retry-hook failures.
+- **A10 R4/R5/R9:** loss before durable admission, manual removal/clear outside
+  the active-provider witnesses, restored optimistic lifetimes, and retry-hook
+  failures. The settlement owner now checks terminal provider rejection with
+  failed deletion, a halted executor with queued peers held, and restart
+  without a second provider call or optimistic restore. The executor does not
+  automatically retry a failed phase write or deletion. A failed terminal
+  marker write followed by a crash remains an unmarked replay window. Broader
+  offline retry and recovery policy remains with RFC #1659.
 - **A10 R11/R12 and earlier R8:** metadata/native-value domain, old readers of
   new wire records, and unreadable/unknown-version outbox recovery. New readers
   accepting old records does not prove reverse compatibility. Do not delete
