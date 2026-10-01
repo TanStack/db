@@ -15,6 +15,7 @@ import {
 } from '@tanstack/db'
 import { useOptionalDbClient } from './DbProvider'
 import { setLiveQueryResultInfo } from './live-query-internals'
+import { shouldWarnInDevelopment } from './development'
 import type {
   Collection,
   CollectionImpl,
@@ -169,16 +170,6 @@ export function warnDeprecatedDepsArray(
       : `useLiveInfiniteQuery(query, { queryKey })`
   console.warn(
     `[${hookName}] The dependency-array form is deprecated and will be removed in 1.0. Use ${replacement} instead. Provide queryKey only for functional/opaque queries or to avoid deriving identity from structured query IR on render.`,
-  )
-}
-
-function shouldWarnInDevelopment(disableEnvVar: string): boolean {
-  if (typeof process === `undefined`) {
-    return false
-  }
-
-  return (
-    process.env.NODE_ENV !== `production` && process.env[disableEnvVar] !== `1`
   )
 }
 
