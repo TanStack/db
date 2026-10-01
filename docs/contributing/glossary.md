@@ -19,6 +19,9 @@ production queues, caches, or semantic helpers merely to share their names.
 | Collection | The public keyed data container. Capitalize it when referring to the TanStack DB type. | Relation, table, or query result. |
 | source Collection | A Collection read by a query or adapter. | Source relation when the value is a public Collection. |
 | live-query Collection | A Collection whose rows are produced by a live query. | Query, observer, or result set. |
+| pooled live query | A live query filtered only by `eq(field, literal)` on one source Collection and served from an equality partition; its live-query Collection is built only when read. | Cached query or shared live-query Collection. |
+| equality partition | Source rows grouped by the `eq`-normalized values of one set of fields, shared by every pooled live query that filters on those fields. | Index or bucket relation. |
+| partition group | The rows of an equality partition whose fields equal one tuple of literals. | Bucket or active bucket. |
 | relation | An internal weighted multiset maintained by D2. | Collection. |
 | row | One keyed public Collection value or one relation value. Qualify source row, relation row, or public row when more than one kind appears. | Event or transaction. |
 | change message | One insert, update, or delete delivered through the Collection sync boundary. | Transaction or publication. |

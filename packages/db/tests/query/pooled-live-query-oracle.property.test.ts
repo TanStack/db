@@ -11,8 +11,8 @@
  * key order, with the same row values and status.
  *
  * Why an example can miss the failure: one query over static rows passes even
- * if rows never move between buckets, a peer bucket never sees a row leave, a
- * remounted query reads a stale bucket, or a rollback leaves an optimistic row
+ * if rows never move between groups, a peer group never sees a row leave, a
+ * remounted query reads a stale group, or a rollback leaves an optimistic row
  * behind.
  *
  * Model: `expectedKeys` filters the model's visible rows with an independent
@@ -39,7 +39,7 @@
  * rows it had, through the restart and later writes. A peer mounted after
  * the restart follows the restarted source.
  *
- * Calibration: a partition that ignored the previous value, kept bucket rows
+ * Calibration: a partition that ignored the previous value, kept group rows
  * in arrival order, or compared literals without normalization fails the
  * pinned histories and both campaigns. A view that kept reporting the
  * source's status after cleanup fails the cleanup history.
@@ -205,11 +205,11 @@ const historyArbitrary: fc.Arbitrary<History> = fc.record({
   ),
 })
 
-// Each pinned history moves a row across buckets a short example would keep
+// Each pinned history moves a row across groups a short example would keep
 // still.
 const pinnedHistories: ReadonlyArray<{ name: string; history: History }> = [
   {
-    name: `a Date row joins the bucket of its timestamp`,
+    name: `a Date row joins the group of its timestamp`,
     history: {
       rows: [{ f: `a`, g: `x` }],
       peers: [{ f: 1 }, { f: `a` }],
@@ -234,7 +234,7 @@ const pinnedHistories: ReadonlyArray<{ name: string; history: History }> = [
     },
   },
   {
-    name: `a rolled-back optimistic insert leaves its bucket`,
+    name: `a rolled-back optimistic insert leaves its group`,
     history: {
       rows: [],
       peers: [{ f: true, g: `y` }],
@@ -262,7 +262,7 @@ const pinnedHistories: ReadonlyArray<{ name: string; history: History }> = [
     },
   },
   {
-    name: `a remounted peer reads a bucket that changed while it was away`,
+    name: `a remounted peer reads a group that changed while it was away`,
     history: {
       rows: [{ f: 0, g: `x` }],
       peers: [{ f: 0 }, { f: Number.NaN }],

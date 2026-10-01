@@ -21,10 +21,10 @@ import type { DehydratedLiveQueryResult } from '../client.js'
 /**
  * Live queries that filter one source Collection only by `eq(field, literal)`
  * share one partition of that source per filtered field set. Each query reads
- * the bucket for its literal tuple, so mounting many queries of one shape
+ * the group for its literal tuple, so mounting many queries of one shape
  * costs a lookup each instead of a compiled graph and a source subscription.
  *
- * A bucket holds the rows the partition's source subscription has published,
+ * A group holds the rows the partition's source subscription has published,
  * keyed by the same normalized equality that `eq` uses: a Date equals its
  * timestamp, `NaN` equals `NaN`, `-0` equals `0`, and nullish values match no
  * literal.
@@ -34,7 +34,7 @@ type Row = Record<string, unknown>
 type Listener = (changes: Array<ChangeMessage<Row, string | number>>) => void
 type StatusListener = CollectionEventHandler<`status:change`>
 
-interface Bucket {
+interface PartitionGroup {
   // Key order, as in a live-query Collection without orderBy.
   rows: SortedMap<string | number, Row>
   listeners: Set<Listener>
@@ -67,13 +67,13 @@ function readPath(row: Row, path: Array<string>): unknown {
 }
 
 class Partition {
-  private readonly buckets = new Map<string, Bucket>()
+  private readonly groups = new Map<string, PartitionGroup>()
   private subscription: { unsubscribe: () => void } | undefined
   private stopStatusEvents: (() => void) | undefined
   // One source status listener serves every view of this partition.
   readonly statusListeners = new Set<StatusListener>()
   private listenerCount = 0
-  /** Set when the source starts cleanup; buckets keep their last rows. */
+  /** Set when the source starts cleanup; groups keep their last rows. */
   terminated = false
   private releaseTimer: ReturnType<typeof setTimeout> | undefined
 
@@ -83,7 +83,7 @@ class Partition {
     private readonly onEmpty: () => void,
   ) {}
 
-  bucketKeyOf(row: Row | undefined): string | undefined {
+  groupKeyOf(row: Row | undefined): string | undefined {
     if (row === undefined) return undefined
     const parts: Array<string> = []
     for (const path of this.paths) {
@@ -94,19 +94,19 @@ class Partition {
     return JSON.stringify(parts)
   }
 
-  bucket(key: string): Bucket {
-    let bucket = this.buckets.get(key)
-    if (!bucket) {
-      bucket = {
+  group(key: string): PartitionGroup {
+    let group = this.groups.get(key)
+    if (!group) {
+      group = {
         rows: new SortedMap(),
         listeners: new Set(),
         revision: 0,
         layoutRevision: 0,
         entries: undefined,
       }
-      this.buckets.set(key, bucket)
+      this.groups.set(key, group)
     }
-    return bucket
+    return group
   }
 
   /** Start the shared source subscription; release it when unused. */
@@ -132,19 +132,19 @@ class Partition {
     this.scheduleRelease()
   }
 
-  listen(bucket: Bucket, listener: Listener): () => void {
-    this.addListener(bucket, listener)
-    return () => this.removeListener(bucket, listener)
+  listen(group: PartitionGroup, listener: Listener): () => void {
+    this.addListener(group, listener)
+    return () => this.removeListener(group, listener)
   }
 
-  addListener(bucket: Bucket, listener: Listener): void {
+  addListener(group: PartitionGroup, listener: Listener): void {
     this.retain()
-    bucket.listeners.add(listener)
+    group.listeners.add(listener)
     this.listenerCount++
   }
 
-  removeListener(bucket: Bucket, listener: Listener): void {
-    if (!bucket.listeners.delete(listener)) return
+  removeListener(group: PartitionGroup, listener: Listener): void {
+    if (!group.listeners.delete(listener)) return
     this.listenerCount--
     this.scheduleRelease()
   }
@@ -169,57 +169,57 @@ class Partition {
       this.subscription = undefined
       this.stopStatusEvents?.()
       this.stopStatusEvents = undefined
-      this.buckets.clear()
+      this.groups.clear()
       this.onEmpty()
     }, 1000)
   }
 
   private apply(changes: Array<ChangeMessage<Row, string | number>>): void {
     const touched = new Map<
-      Bucket,
+      PartitionGroup,
       Array<ChangeMessage<Row, string | number>>
     >()
     const record = (
-      bucket: Bucket,
+      group: PartitionGroup,
       change: ChangeMessage<Row, string | number>,
     ) => {
-      const list = touched.get(bucket)
+      const list = touched.get(group)
       if (list) list.push(change)
-      else touched.set(bucket, [change])
-      if (change.type !== `update`) bucket.layoutRevision++
+      else touched.set(group, [change])
+      if (change.type !== `update`) group.layoutRevision++
     }
     for (const change of changes) {
       const next =
-        change.type === `delete` ? undefined : this.bucketKeyOf(change.value)
+        change.type === `delete` ? undefined : this.groupKeyOf(change.value)
       const previous =
         change.type === `insert`
           ? undefined
-          : this.bucketKeyOf(
+          : this.groupKeyOf(
               change.type === `delete` ? change.value : change.previousValue,
             )
       if (previous !== undefined && previous !== next) {
-        const bucket = this.bucket(previous)
-        const old = bucket.rows.get(change.key)
-        if (bucket.rows.delete(change.key)) {
-          record(bucket, { type: `delete`, key: change.key, value: old! })
+        const group = this.group(previous)
+        const old = group.rows.get(change.key)
+        if (group.rows.delete(change.key)) {
+          record(group, { type: `delete`, key: change.key, value: old! })
         }
       }
       if (next !== undefined) {
-        const bucket = this.bucket(next)
-        const existed = bucket.rows.has(change.key)
-        bucket.rows.set(change.key, change.value)
+        const group = this.group(next)
+        const existed = group.rows.has(change.key)
+        group.rows.set(change.key, change.value)
         record(
-          bucket,
+          group,
           existed
             ? { ...change, type: `update` }
             : { type: `insert`, key: change.key, value: change.value },
         )
       }
     }
-    for (const [bucket, bucketChanges] of touched) {
-      bucket.revision++
-      bucket.entries = undefined
-      for (const listener of [...bucket.listeners]) listener(bucketChanges)
+    for (const [group, groupChanges] of touched) {
+      group.revision++
+      group.entries = undefined
+      for (const listener of [...group.listeners]) listener(groupChanges)
     }
   }
 }
@@ -266,7 +266,7 @@ function collectConjuncts(
 function poolableShape(
   query: QueryIR,
 ):
-  | { paths: Array<Array<string>>; shapeKey: string; bucketKey: string }
+  | { paths: Array<Array<string>>; shapeKey: string; groupKey: string }
   | undefined {
   if (
     query.from.type !== `collectionRef` ||
@@ -300,12 +300,12 @@ function poolableShape(
   return {
     paths: conjuncts.map(({ path }) => path),
     shapeKey: conjuncts.map(({ pathKey }) => pathKey).join(`,`),
-    bucketKey: JSON.stringify(conjuncts.map(({ literalKey }) => literalKey)),
+    groupKey: JSON.stringify(conjuncts.map(({ literalKey }) => literalKey)),
   }
 }
 
 /**
- * One query's view of its bucket. It answers the calls the live-query observer
+ * One query's view of its group. It answers the calls the live-query observer
  * makes; any other Collection member builds the query's live-query Collection
  * once and forwards to it, so `result.collection` keeps its full API.
  */
@@ -314,16 +314,16 @@ class PooledLiveQuery {
   // No persisted readiness, single-result config, or layout channel.
   readonly config = undefined
   readonly _subscribeLayoutChanges = undefined
-  private readonly bucket: Bucket
+  private readonly group: PartitionGroup
   private collection: Collection<any, any, any> | undefined = undefined
 
   constructor(
     private readonly source: CollectionImpl<any, any, any, any, any>,
     private readonly query: BaseQueryBuilder,
     private readonly partition: Partition,
-    bucketKey: string,
+    groupKey: string,
   ) {
-    this.bucket = partition.bucket(bucketKey)
+    this.group = partition.group(groupKey)
     partition.retain()
   }
 
@@ -332,25 +332,25 @@ class PooledLiveQuery {
   }
 
   get _stateRevision(): number {
-    return this.bucket.revision
+    return this.group.revision
   }
 
   get _layoutRevision(): number {
-    return this.bucket.layoutRevision
+    return this.group.layoutRevision
   }
 
   entries(): Array<[string | number, Row]> {
-    return (this.bucket.entries ??= [...this.bucket.rows.entries()])
+    return (this.group.entries ??= [...this.group.rows.entries()])
   }
 
   subscribeChanges(
     callback: Listener,
     options: { includeInitialState?: boolean } = {},
   ): { unsubscribe: () => void } {
-    const unsubscribe = this.partition.listen(this.bucket, callback)
+    const unsubscribe = this.partition.listen(this.group, callback)
     if (options.includeInitialState) {
       callback(
-        [...this.bucket.rows].map(([key, value]) => ({
+        [...this.group.rows].map(([key, value]) => ({
           type: `insert`,
           key,
           value,
@@ -374,12 +374,12 @@ class PooledLiveQuery {
 
   /** Observe changes and status without allocating unsubscribe closures. */
   watch(onChanges: Listener, onStatus: StatusListener): void {
-    this.partition.addListener(this.bucket, onChanges)
+    this.partition.addListener(this.group, onChanges)
     this.partition.statusListeners.add(onStatus)
   }
 
   unwatch(onChanges: Listener, onStatus: StatusListener): void {
-    this.partition.removeListener(this.bucket, onChanges)
+    this.partition.removeListener(this.group, onChanges)
     this.partition.statusListeners.delete(onStatus)
   }
 
@@ -613,6 +613,6 @@ export function createPooledLiveQuery(
     source,
     query,
     partition,
-    shape.bucketKey,
+    shape.groupKey,
   ) as unknown as Collection<any, any, any>
 }

@@ -308,7 +308,7 @@ class LiveQueryObserverImpl<
       this.cachedSnapshot = {
         state,
         data: singleResult ? data[0] : data,
-        // A pooled view observes its bucket directly and hands users a
+        // A pooled view observes its partition group directly and hands users a
         // Collection that is built only when touched.
         collection:
           (collection as { publicCollection?: Collection<T, TKey, any> })

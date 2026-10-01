@@ -290,14 +290,12 @@ export function runSuite(rawDriver: LiveQueryDriver) {
 
         source.remove({ id: `3`, name: `John Smith`, age: 35, team: `a` })
         await h.flush()
-        expectOrderedRows(h.current().data, [
+        const remaining: Array<Row> = [
           { id: `2`, name: `Jane Doe`, age: 25, team: `a` },
           { id: `4`, name: `Dave`, age: 40, team: `a` },
-        ])
-        expectKeyedRows(h.current().state, [
-          { id: `2`, name: `Jane Doe`, age: 25, team: `a` },
-          { id: `4`, name: `Dave`, age: 40, team: `a` },
-        ])
+        ]
+        expectOrderedRows(h.current().data, remaining)
+        expectKeyedRows(h.current().state, remaining)
         expect(h.current().status).toBe(`ready`)
         h.unmount()
       },
