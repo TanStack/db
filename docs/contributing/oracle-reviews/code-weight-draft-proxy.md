@@ -1,6 +1,6 @@
 # Code weight: simplify the draft proxy and share its equality walker
 
-Reviewed executable revision: `31b2a6bd4` (base `18abceee4`, the fetched
+Reviewed executable revision: `b825e6483` (base `18abceee4`, the fetched
 `origin/main` at review time). This record follows in a documentation-only
 commit.
 
@@ -18,6 +18,9 @@ commit.
   fix extends an oracle first. See Fixes from the second review.
 - `31b2a6bd4` removes draft code that only bought speed. See Code weight over
   speed.
+- `b825e6483` fixes a CodeRabbit finding in the `defineProperty` fix: a
+  non-configurable property with an object value threw. See Fixes from the
+  second review.
 
 ## Change
 
@@ -196,6 +199,7 @@ commit before.
 | `b57d60022` | `at`, `slice`, `concat`, `flat`, `toReversed`, `toSpliced`, and `with` returned raw elements, so a write through them was lost. A search for a draft element failed, and `constructor` was a bound copy. | `proxy.test.ts`: every non-mutating method of `Array.prototype`, against a native array. | 15 of 39 cases | +38 / +16 |
 | `38d8ba78f` | `Object.defineProperty(draft, key, { value })` threw unless the descriptor set `writable`. | `proxy.test.ts`: six definitions against a native row. | 3 of 6 cases | +8 / +8 |
 | `815432ebd` | Two URLs, or two instances whose state is in private fields, were equal, so a draft dropped a write that replaced one. | Revert oracle: URL values and a private-field class, with a write-twice property. `utils.property`: class and identity law. | both campaigns | +312 / +79 |
+| `b825e6483` | `38d8ba78f` defined a clone, so a non-configurable object value broke the Proxy invariants and threw. `get` would also have wrapped it. | `defineProperty` law: a new key with only an object value, with identity where the invariants require it. | throws on `main` too | +9 / +5 (module only) |
 | `a49ae90e3` | None. A detached stored method must throw, as on a native row. | `proxy.test.ts` stored-function law. | passes | 0 |
 
 Design decisions for these fixes:
@@ -290,6 +294,8 @@ Mutants of each new form fail the owners:
 | K4: a null prototype is another class | assertion failure (2/539) |
 | K5: any two URLs are equal | assertion failure (5/539) |
 | K6: empty arrays compare by identity | assertion failure (8/539) |
+| D1 (on `b825e6483`): `get` wraps a read-only non-configurable value | crash, the reported TypeError (1/540) |
+| D2 (on `b825e6483`): `defineProperty` stores a clone | crash, the reported TypeError (1/540) |
 
 The I and A3 to A5 mutants in the previous section apply to code that
 `31b2a6bd4` removed.
@@ -426,9 +432,10 @@ before it.
 
 ## Verification
 
-On `31b2a6bd4`, with the built `dist`:
+On `bb48e2bc9` (`b825e6483` merged with `origin/main` at `3463cf8ad`), with
+the built `dist`:
 
-- `packages/db` Vitest, typecheck off: 198 files, 7,718 tests.
+- `packages/db` Vitest, typecheck off: 198 files, 7,751 tests.
 - `packages/db` `tsc --noEmit`: no errors.
 - `pnpm check:mangle`: 368 names.
 - `pnpm test:minified-db`: error names, index metadata, query rows, and live
