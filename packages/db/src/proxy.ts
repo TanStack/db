@@ -456,9 +456,10 @@ export function createChangeProxy<
     get(ptarget, prop, receiver) {
       const value = changeTracker.copy_[prop as keyof T]
 
-      // If it's a getter, return the value directly
+      // A getter's result, and a read-only non-configurable value, which
+      // the Proxy invariants require as stored, return directly.
       const desc = Object.getOwnPropertyDescriptor(ptarget, prop)
-      if (desc?.get) {
+      if (desc?.get || (desc?.configurable === false && !desc.writable)) {
         return value
       }
 
@@ -610,17 +611,8 @@ export function createChangeProxy<
     defineProperty(ptarget, prop, descriptor) {
       // Forward the defineProperty to the target to maintain Proxy invariants
       // This allows Object.seal() and Object.freeze() to work on the proxy
-      // A defined value is stored as a clone, in the definition itself: a
-      // later assignment would fail on a read-only property.
-      const hasValue = `value` in descriptor
-      const result = Reflect.defineProperty(
-        ptarget,
-        prop,
-        hasValue
-          ? { ...descriptor, value: deepClone(descriptor.value) }
-          : descriptor,
-      )
-      if (result && hasValue) {
+      const result = Reflect.defineProperty(ptarget, prop, descriptor)
+      if (result && `value` in descriptor) {
         changeTracker.assigned_[prop.toString()] = true
         markChanged(changeTracker)
       }

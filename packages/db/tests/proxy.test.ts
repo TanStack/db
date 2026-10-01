@@ -2692,6 +2692,10 @@ describe(`defineProperty behaves like on a native row`, () => {
     ],
     [`an object value`, () => ({ key: `a`, value: { c: 3 }, writable: false })],
     [`a nested key`, () => ({ key: `nested`, value: { b: 3 } })],
+    [
+      `a new key with only an object value`,
+      () => ({ key: `k`, value: { c: 3 } }),
+    ],
   ]
   const observe = (
     row: Row,
@@ -2700,7 +2704,11 @@ describe(`defineProperty behaves like on a native row`, () => {
     const { key, ...descriptor } = define(row)
     const defined = Reflect.defineProperty(row, key, descriptor)
     const { value, ...rest } = Object.getOwnPropertyDescriptor(row, key) ?? {}
+    // A read-only, non-configurable property must read back as defined.
+    const fixed = rest.configurable === false && rest.writable === false
+    const same = fixed ? row[key] === descriptor.value : undefined
     return {
+      same,
       defined,
       value: JSON.stringify(value),
       rest,
