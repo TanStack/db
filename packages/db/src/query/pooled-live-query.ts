@@ -305,9 +305,9 @@ function poolableShape(
 }
 
 /**
- * One query's view of its group. It answers the calls the live-query observer
- * makes; any other Collection member builds the query's live-query Collection
- * once and forwards to it, so `result.collection` keeps its full API.
+ * One query's view of its group, read by the live-query observer. Users get
+ * `publicCollection` instead, which builds the query's live-query Collection
+ * on first use and forwards every member to it.
  */
 class PooledLiveQuery {
   readonly isLoadingSubset = false
@@ -569,12 +569,15 @@ export function createPooledObserver<
   ) as unknown as LiveQueryObserver<T, TKey>
 }
 
+// The observer reads the view itself; users get the live-query Collection.
 const forwardToCollection: ProxyHandler<PooledLiveQuery> = {
   get(view, property) {
-    if (property in view) return Reflect.get(view, property, view)
     const collection = view.materialize()
     const value = Reflect.get(collection, property, collection)
     return typeof value === `function` ? value.bind(collection) : value
+  },
+  has(view, property) {
+    return Reflect.has(view.materialize(), property)
   },
 }
 

@@ -55,6 +55,7 @@ import { createLiveQueryObserver } from '../../src/live-query-observer.js'
 import { Query } from '../../src/query/builder/index.js'
 import { and, createLiveQueryCollection, eq } from '../../src/query/index.js'
 import { createPooledLiveQuery } from '../../src/query/pooled-live-query.js'
+import { Func, PropRef, Value } from '../../src/query/ir.js'
 import {
   oraclePropertyOptions,
   oracleRuns,
@@ -511,6 +512,25 @@ async function runHistory(history: History): Promise<void> {
         (collection.toArray as Array<Record<string, unknown>>).map(describeRow),
         `peer ${index} forwarded toArray`,
       ).toEqual(reference.toArray.map((row) => describeRow(row)))
+      // Members the observer also reads must still behave as the Collection's.
+      expect(
+        [...collection.entries()].map(([key]) => key),
+        `peer ${index} forwarded entries`,
+      ).toEqual([...reference.entries()].map(([key]) => key))
+      const narrower = new Func(`eq`, [new PropRef([`g`]), new Value(`x`)])
+      const keysOf = (target: {
+        currentStateAsChanges: (options: {
+          where: typeof narrower
+        }) => Array<{ key: unknown }> | void
+      }) =>
+        [...(target.currentStateAsChanges({ where: narrower }) || [])].map(
+          (change) => change.key,
+        )
+      expect(
+        keysOf(collection as unknown as Parameters<typeof keysOf>[0]),
+        `peer ${index} forwarded filter`,
+      ).toEqual(keysOf(reference as unknown as Parameters<typeof keysOf>[0]))
+      expect(collection.config, `peer ${index} forwarded config`).toBeDefined()
     }
   }, [
     () => {
