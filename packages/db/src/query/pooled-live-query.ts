@@ -73,6 +73,8 @@ class Partition {
   // One source status listener serves every view of this partition.
   readonly statusListeners = new Set<StatusListener>()
   private listenerCount = 0
+  /** Set when the source starts cleanup; buckets keep their last rows. */
+  terminated = false
   private releaseTimer: ReturnType<typeof setTimeout> | undefined
 
   constructor(
@@ -109,6 +111,7 @@ class Partition {
 
   /** Start the shared source subscription; release it when unused. */
   retain(): void {
+    if (this.terminated) return
     if (!this.subscription) {
       this.subscription = this.source.subscribeChanges(
         (changes) =>
@@ -116,7 +119,14 @@ class Partition {
         { includeInitialState: true },
       )
       this.stopStatusEvents = this.source.on(`status:change`, (event) => {
-        for (const listener of [...this.statusListeners]) listener(event)
+        // Like a live query, a pooled view fails for good when its source
+        // starts cleanup; queries mounted later get a new partition.
+        if (event.status === `cleaned-up`) this.terminate()
+        const delivered = this.terminated
+          ? { ...event, status: `error` as const }
+          : event
+        for (const listener of [...this.statusListeners]) listener(delivered)
+        if (this.terminated) this.stopStatusEvents?.()
       })
     }
     this.scheduleRelease()
@@ -137,6 +147,14 @@ class Partition {
     if (!bucket.listeners.delete(listener)) return
     this.listenerCount--
     this.scheduleRelease()
+  }
+
+  private terminate(): void {
+    this.terminated = true
+    if (this.releaseTimer !== undefined) clearTimeout(this.releaseTimer)
+    this.subscription?.unsubscribe()
+    this.subscription = undefined
+    this.onEmpty()
   }
 
   private scheduleRelease(): void {
@@ -310,7 +328,7 @@ class PooledLiveQuery {
   }
 
   get status(): CollectionStatus {
-    return this.source.status
+    return this.partition.terminated ? `error` : this.source.status
   }
 
   get _stateRevision(): number {

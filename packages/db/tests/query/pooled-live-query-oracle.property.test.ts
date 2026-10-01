@@ -25,8 +25,8 @@
  * missing value, and a field `g` of `x` or `y`. Up to three peer queries use
  * `eq(f, literal)`, optionally with `eq(g, literal)`. Steps commit sync
  * transactions of one or two inserts, updates, or deletes; apply one
- * optimistic insert, update, or delete and then confirm or roll it back; or
- * mount or unmount a peer.
+ * optimistic insert, update, or delete and then confirm or roll it back;
+ * mount or unmount a peer; or clean up the source and restart it.
  *
  * Production driver: `createPooledLiveQuery` builds each peer's view from the
  * query builder's IR, and `createLiveQueryObserver` observes it in wholesale
@@ -34,11 +34,15 @@
  *
  * Refinement check: after every step, each mounted peer's wholesale snapshot
  * equals its live-query Collection's keys in order, row values, and status;
- * both observers' key sets equal the model.
+ * both observers' key sets equal the model. A peer mounted when its source
+ * starts cleanup is terminal like its live query: status `error` with the
+ * rows it had, through the restart and later writes. A peer mounted after
+ * the restart follows the restarted source.
  *
  * Calibration: a partition that ignored the previous value, kept bucket rows
  * in arrival order, or compared literals without normalization fails the
- * pinned histories and both campaigns.
+ * pinned histories and both campaigns. A view that kept reporting the
+ * source's status after cleanup fails the cleanup history.
  *
  * Known omissions: on-demand and persisted sources, `DbClient` hydration,
  * Suspense, `select`, and every other clause keep the live-query Collection
@@ -76,6 +80,7 @@ type Step =
   | { kind: `optimistic`; op: Op; confirm: boolean }
   | { kind: `mount`; peer: number }
   | { kind: `unmount`; peer: number }
+  | { kind: `cleanup-restart` }
 type Op =
   | { type: `insert`; id: number; f: FieldValue; g: string }
   | { type: `update`; id: number; f: FieldValue; g: string }
@@ -194,6 +199,7 @@ const historyArbitrary: fc.Arbitrary<History> = fc.record({
         kind: fc.constant(`unmount` as const),
         peer: fc.nat({ max: 2 }),
       }),
+      fc.constant({ kind: `cleanup-restart` as const }),
     ),
     { maxLength: 8 },
   ),
@@ -238,6 +244,20 @@ const pinnedHistories: ReadonlyArray<{ name: string; history: History }> = [
           op: { type: `insert`, id: 2, f: true, g: `y` },
           confirm: false,
         },
+      ],
+    },
+  },
+  {
+    name: `a peer mounted at cleanup stays failed while a new one follows the restart`,
+    history: {
+      rows: [{ f: `a`, g: `x` }],
+      peers: [{ f: `a` }, { f: `a` }],
+      steps: [
+        { kind: `unmount`, peer: 1 },
+        { kind: `sync`, ops: [{ type: `insert`, id: 2, f: `a`, g: `y` }] },
+        { kind: `cleanup-restart` },
+        { kind: `mount`, peer: 1 },
+        { kind: `sync`, ops: [{ type: `insert`, id: 3, f: `a`, g: `x` }] },
       ],
     },
   },
@@ -296,10 +316,11 @@ async function runHistory(history: History): Promise<void> {
     }),
   )
   await source.stateWhenReady()
-  const references = history.peers.map((peer) =>
-    createLiveQueryCollection(peerQuery(source, peer)),
-  )
+  const references: Array<ReturnType<typeof createLiveQueryCollection>> = []
   type Mounted = {
+    reference: ReturnType<typeof createLiveQueryCollection>
+    // The model keys when the source started cleanup, if it has since.
+    frozen: Array<string> | undefined
     view: { collection?: unknown }
     layout: { keys: string; revision: number } | undefined
     wholesale: ReturnType<typeof createLiveQueryObserver<any, any>>
@@ -308,9 +329,12 @@ async function runHistory(history: History): Promise<void> {
     unsubscribe: () => void
   }
   const mounted = new Map<number, Mounted>()
-  const mount = (index: number) => {
+  const mount = async (index: number) => {
     const peer = history.peers[index]
     if (!peer || mounted.has(index)) return
+    const reference = createLiveQueryCollection(peerQuery(source, peer))
+    references.push(reference)
+    await reference.preload()
     const view = createPooledLiveQuery(peerQuery(source, peer)(new Query()))
     expect(view, `peer ${index} is poolable`).toBeDefined()
     const wholesale = createLiveQueryObserver(view as any, {
@@ -326,6 +350,8 @@ async function runHistory(history: History): Promise<void> {
       }
     })
     mounted.set(index, {
+      reference,
+      frozen: undefined,
       view: view as unknown as Mounted[`view`],
       layout: undefined,
       wholesale,
@@ -344,14 +370,14 @@ async function runHistory(history: History): Promise<void> {
       const { view, wholesale, granularKeys } = entry
       const peer = history.peers[index]!
       const snapshot = wholesale.getSnapshot()
-      const reference = references[index]!
+      const reference = entry.reference
       const label = `${checkpoint}, peer ${index}`
       expect(
         (snapshot.data as Array<Record<string, unknown>>).map(describeRow),
         `${label} rows`,
       ).toEqual(reference.toArray.map((row) => describeRow(row)))
       expect(snapshot.status, `${label} status`).toBe(reference.status)
-      const model = expectedKeys(rows, peer)
+      const model = entry.frozen ?? expectedKeys(rows, peer)
       expect(
         [...snapshot.state!.keys()].map(String).sort(),
         `${label} model`,
@@ -397,13 +423,24 @@ async function runHistory(history: History): Promise<void> {
   }
 
   await withOracleCleanup(async () => {
-    await Promise.all(references.map((reference) => reference.preload()))
-    history.peers.forEach((_, index) => mount(index))
+    for (const index of history.peers.keys()) await mount(index)
     check(`after mount`)
     for (const [n, step] of history.steps.entries()) {
       const checkpoint = `after step ${n} (${step.kind})`
-      if (step.kind === `mount`) mount(step.peer)
-      else if (step.kind === `unmount`) {
+      if (step.kind === `mount`) await mount(step.peer)
+      else if (step.kind === `cleanup-restart`) {
+        for (const [index, entry] of mounted) {
+          entry.frozen ??= expectedKeys(rows, history.peers[index]!)
+        }
+        await source.cleanup()
+        check(`${checkpoint} cleaned up`)
+        // The mock source re-syncs its initial rows when it restarts.
+        rows.clear()
+        history.rows.forEach((row, rowIndex) =>
+          rows.set(id(rowIndex), sourceRow(id(rowIndex), row.f, row.g)),
+        )
+        await source.preload()
+      } else if (step.kind === `unmount`) {
         mounted.get(step.peer)?.unsubscribe()
         mounted.delete(step.peer)
       } else if (step.kind === `sync`) {
@@ -465,12 +502,15 @@ async function runHistory(history: History): Promise<void> {
       check(checkpoint)
     }
     // Any other Collection member builds the live-query Collection.
-    for (const [index, { wholesale }] of mounted) {
+    // A terminal peer's Collection would be a new query on the restarted
+    // source, so only live peers compare forwarded rows.
+    for (const [index, { wholesale, reference, frozen }] of mounted) {
+      if (frozen) continue
       const collection = wholesale.getSnapshot().collection!
       expect(
         (collection.toArray as Array<Record<string, unknown>>).map(describeRow),
         `peer ${index} forwarded toArray`,
-      ).toEqual(references[index]!.toArray.map((row) => describeRow(row)))
+      ).toEqual(reference.toArray.map((row) => describeRow(row)))
     }
   }, [
     () => {
