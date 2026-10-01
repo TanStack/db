@@ -1038,11 +1038,14 @@ function useLiveQueryImpl(
     () => observer.getSnapshot(),
     () => observer.getServerSnapshot(),
   )
-  setLiveQueryResultInfo(returned, {
-    client: dbClient,
-    queryHash: queryHashRef.current,
-    identityError: identityErrorRef.current,
-    observer,
-  })
+  // Only useLiveSuspenseQuery reads this, and it costs a define per render.
+  if (forSuspense) {
+    setLiveQueryResultInfo(returned, {
+      client: dbClient,
+      queryHash: queryHashRef.current,
+      identityError: identityErrorRef.current,
+      observer,
+    })
+  }
   return returned as any
 }
