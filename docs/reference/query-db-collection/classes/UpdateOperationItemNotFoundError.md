@@ -3,7 +3,7 @@ id: UpdateOperationItemNotFoundError
 title: UpdateOperationItemNotFoundError
 ---
 
-Defined in: [packages/query-db-collection/src/errors.ts:78](https://github.com/TanStack/db/blob/main/packages/query-db-collection/src/errors.ts#L78)
+Defined in: [packages/query-db-collection/src/errors.ts:85](https://github.com/TanStack/db/blob/main/packages/query-db-collection/src/errors.ts#L85)
 
 ## Extends
 
@@ -17,7 +17,7 @@ Defined in: [packages/query-db-collection/src/errors.ts:78](https://github.com/T
 new UpdateOperationItemNotFoundError(key): UpdateOperationItemNotFoundError;
 ```
 
-Defined in: [packages/query-db-collection/src/errors.ts:79](https://github.com/TanStack/db/blob/main/packages/query-db-collection/src/errors.ts#L79)
+Defined in: [packages/query-db-collection/src/errors.ts:86](https://github.com/TanStack/db/blob/main/packages/query-db-collection/src/errors.ts#L86)
 
 #### Parameters
 

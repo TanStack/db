@@ -3,7 +3,7 @@ id: EffectContext
 title: EffectContext
 ---
 
-Defined in: [packages/db/src/query/effect.ts:74](https://github.com/TanStack/db/blob/main/packages/db/src/query/effect.ts#L74)
+Defined in: [packages/db/src/query/effect.ts:80](https://github.com/TanStack/db/blob/main/packages/db/src/query/effect.ts#L80)
 
 Context passed to effect handlers
 
@@ -15,7 +15,7 @@ Context passed to effect handlers
 effectId: string;
 ```
 
-Defined in: [packages/db/src/query/effect.ts:76](https://github.com/TanStack/db/blob/main/packages/db/src/query/effect.ts#L76)
+Defined in: [packages/db/src/query/effect.ts:82](https://github.com/TanStack/db/blob/main/packages/db/src/query/effect.ts#L82)
 
 ID of this effect (auto-generated if not provided)
 
@@ -27,6 +27,6 @@ ID of this effect (auto-generated if not provided)
 signal: AbortSignal;
 ```
 
-Defined in: [packages/db/src/query/effect.ts:78](https://github.com/TanStack/db/blob/main/packages/db/src/query/effect.ts#L78)
+Defined in: [packages/db/src/query/effect.ts:84](https://github.com/TanStack/db/blob/main/packages/db/src/query/effect.ts#L84)
 
 Aborted when effect.dispose() is called

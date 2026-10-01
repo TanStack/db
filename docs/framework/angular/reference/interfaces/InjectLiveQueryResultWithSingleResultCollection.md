@@ -3,7 +3,7 @@ id: InjectLiveQueryResultWithSingleResultCollection
 title: InjectLiveQueryResultWithSingleResultCollection
 ---
 
-Defined in: [index.ts:77](https://github.com/TanStack/db/blob/main/packages/angular-db/src/index.ts#L77)
+Defined in: [index.ts:97](https://github.com/TanStack/db/blob/main/packages/angular-db/src/index.ts#L97)
 
 ## Type Parameters
 
@@ -30,7 +30,7 @@ collection: Signal<
 | null>;
 ```
 
-Defined in: [index.ts:84](https://github.com/TanStack/db/blob/main/packages/angular-db/src/index.ts#L84)
+Defined in: [index.ts:104](https://github.com/TanStack/db/blob/main/packages/angular-db/src/index.ts#L104)
 
 ***
 
@@ -40,7 +40,7 @@ Defined in: [index.ts:84](https://github.com/TanStack/db/blob/main/packages/angu
 data: Signal<TResult | undefined>;
 ```
 
-Defined in: [index.ts:83](https://github.com/TanStack/db/blob/main/packages/angular-db/src/index.ts#L83)
+Defined in: [index.ts:103](https://github.com/TanStack/db/blob/main/packages/angular-db/src/index.ts#L103)
 
 ***
 
@@ -50,7 +50,7 @@ Defined in: [index.ts:83](https://github.com/TanStack/db/blob/main/packages/angu
 isCleanedUp: Signal<boolean>;
 ```
 
-Defined in: [index.ts:90](https://github.com/TanStack/db/blob/main/packages/angular-db/src/index.ts#L90)
+Defined in: [index.ts:113](https://github.com/TanStack/db/blob/main/packages/angular-db/src/index.ts#L113)
 
 ***
 
@@ -60,7 +60,7 @@ Defined in: [index.ts:90](https://github.com/TanStack/db/blob/main/packages/angu
 isError: Signal<boolean>;
 ```
 
-Defined in: [index.ts:89](https://github.com/TanStack/db/blob/main/packages/angular-db/src/index.ts#L89)
+Defined in: [index.ts:112](https://github.com/TanStack/db/blob/main/packages/angular-db/src/index.ts#L112)
 
 ***
 
@@ -70,7 +70,7 @@ Defined in: [index.ts:89](https://github.com/TanStack/db/blob/main/packages/angu
 isIdle: Signal<boolean>;
 ```
 
-Defined in: [index.ts:88](https://github.com/TanStack/db/blob/main/packages/angular-db/src/index.ts#L88)
+Defined in: [index.ts:111](https://github.com/TanStack/db/blob/main/packages/angular-db/src/index.ts#L111)
 
 ***
 
@@ -80,7 +80,17 @@ Defined in: [index.ts:88](https://github.com/TanStack/db/blob/main/packages/angu
 isLoading: Signal<boolean>;
 ```
 
-Defined in: [index.ts:86](https://github.com/TanStack/db/blob/main/packages/angular-db/src/index.ts#L86)
+Defined in: [index.ts:106](https://github.com/TanStack/db/blob/main/packages/angular-db/src/index.ts#L106)
+
+***
+
+### isPersistedReady
+
+```ts
+isPersistedReady: Signal<boolean>;
+```
+
+Defined in: [index.ts:109](https://github.com/TanStack/db/blob/main/packages/angular-db/src/index.ts#L109)
 
 ***
 
@@ -90,7 +100,27 @@ Defined in: [index.ts:86](https://github.com/TanStack/db/blob/main/packages/angu
 isReady: Signal<boolean>;
 ```
 
-Defined in: [index.ts:87](https://github.com/TanStack/db/blob/main/packages/angular-db/src/index.ts#L87)
+Defined in: [index.ts:107](https://github.com/TanStack/db/blob/main/packages/angular-db/src/index.ts#L107)
+
+***
+
+### persistedError
+
+```ts
+persistedError: Signal<unknown>;
+```
+
+Defined in: [index.ts:110](https://github.com/TanStack/db/blob/main/packages/angular-db/src/index.ts#L110)
+
+***
+
+### persistedStatus
+
+```ts
+persistedStatus: Signal<LiveQueryPersistedStatus>;
+```
+
+Defined in: [index.ts:108](https://github.com/TanStack/db/blob/main/packages/angular-db/src/index.ts#L108)
 
 ***
 
@@ -100,7 +130,7 @@ Defined in: [index.ts:87](https://github.com/TanStack/db/blob/main/packages/angu
 state: Signal<Map<TKey, TResult>>;
 ```
 
-Defined in: [index.ts:82](https://github.com/TanStack/db/blob/main/packages/angular-db/src/index.ts#L82)
+Defined in: [index.ts:102](https://github.com/TanStack/db/blob/main/packages/angular-db/src/index.ts#L102)
 
 ***
 
@@ -110,4 +140,4 @@ Defined in: [index.ts:82](https://github.com/TanStack/db/blob/main/packages/angu
 status: Signal<CollectionStatus | "disabled">;
 ```
 
-Defined in: [index.ts:85](https://github.com/TanStack/db/blob/main/packages/angular-db/src/index.ts#L85)
+Defined in: [index.ts:105](https://github.com/TanStack/db/blob/main/packages/angular-db/src/index.ts#L105)

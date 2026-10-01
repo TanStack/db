@@ -260,8 +260,19 @@ function compileFunction(func: Func, isSingleRow: boolean): (data: any) => any {
       const argA = compiledArgs[0]!
       const argB = compiledArgs[1]!
       return (data) => {
-        const a = normalizeEqualityOperand(argA(data))
-        const b = normalizeEqualityOperand(argB(data))
+        const rawA = argA(data)
+        const rawB = argB(data)
+        // Same-type strings and booleans need no normalization; this is the
+        // hot path for predicate scans and change filtering.
+        const typeA = typeof rawA
+        if (
+          typeA === typeof rawB &&
+          (typeA === `string` || typeA === `boolean`)
+        ) {
+          return rawA === rawB
+        }
+        const a = normalizeEqualityOperand(rawA)
+        const b = normalizeEqualityOperand(rawB)
         // In 3-valued logic, any comparison with null/undefined returns UNKNOWN
         if (isUnknown(a) || isUnknown(b)) {
           return null

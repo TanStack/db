@@ -11,6 +11,7 @@ title: "@tanstack/react-db"
 - [LiveQueryKey](type-aliases/LiveQueryKey.md)
 - [UseLiveInfiniteQueryConfig](type-aliases/UseLiveInfiniteQueryConfig.md)
 - [UseLiveInfiniteQueryReturn](type-aliases/UseLiveInfiniteQueryReturn.md)
+- [UseLiveInfiniteQueryReturnWithCollection](type-aliases/UseLiveInfiniteQueryReturnWithCollection.md)
 - [UseLiveQueryConfig](type-aliases/UseLiveQueryConfig.md)
 - [UseLiveQueryStatus](type-aliases/UseLiveQueryStatus.md)
 

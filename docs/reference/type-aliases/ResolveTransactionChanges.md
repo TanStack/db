@@ -7,7 +7,7 @@ title: ResolveTransactionChanges
 type ResolveTransactionChanges<T, TOperation> = TOperation extends "delete" ? T : Partial<T>;
 ```
 
-Defined in: [packages/db/src/types.ts:82](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L82)
+Defined in: [packages/db/src/types.ts:88](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L88)
 
 ## Type Parameters
 

@@ -3,7 +3,7 @@ id: LiveQueryObserver
 title: LiveQueryObserver
 ---
 
-Defined in: [packages/db/src/live-query-observer.ts:72](https://github.com/TanStack/db/blob/main/packages/db/src/live-query-observer.ts#L72)
+Defined in: [packages/db/src/live-query-observer.ts:117](https://github.com/TanStack/db/blob/main/packages/db/src/live-query-observer.ts#L117)
 
 **`Internal`**
 
@@ -38,7 +38,7 @@ not a public extension point yet; may change in any release.
 dehydrate: () => DehydratedLiveQueryResult<T, TKey>;
 ```
 
-Defined in: [packages/db/src/live-query-observer.ts:92](https://github.com/TanStack/db/blob/main/packages/db/src/live-query-observer.ts#L92)
+Defined in: [packages/db/src/live-query-observer.ts:141](https://github.com/TanStack/db/blob/main/packages/db/src/live-query-observer.ts#L141)
 
 Capture the ordered query result without serializing its source collections.
 
@@ -54,7 +54,7 @@ Capture the ordered query result without serializing its source collections.
 dispose: () => void;
 ```
 
-Defined in: [packages/db/src/live-query-observer.ts:94](https://github.com/TanStack/db/blob/main/packages/db/src/live-query-observer.ts#L94)
+Defined in: [packages/db/src/live-query-observer.ts:143](https://github.com/TanStack/db/blob/main/packages/db/src/live-query-observer.ts#L143)
 
 Idempotent teardown.
 
@@ -70,7 +70,7 @@ Idempotent teardown.
 getError: () => unknown;
 ```
 
-Defined in: [packages/db/src/live-query-observer.ts:90](https://github.com/TanStack/db/blob/main/packages/db/src/live-query-observer.ts#L90)
+Defined in: [packages/db/src/live-query-observer.ts:139](https://github.com/TanStack/db/blob/main/packages/db/src/live-query-observer.ts#L139)
 
 The transport or preload error for this query, if it has not produced data.
 
@@ -86,7 +86,7 @@ The transport or preload error for this query, if it has not produced data.
 getServerSnapshot: () => LiveQuerySnapshot<T, TKey>;
 ```
 
-Defined in: [packages/db/src/live-query-observer.ts:79](https://github.com/TanStack/db/blob/main/packages/db/src/live-query-observer.ts#L79)
+Defined in: [packages/db/src/live-query-observer.ts:124](https://github.com/TanStack/db/blob/main/packages/db/src/live-query-observer.ts#L124)
 
 Stable server snapshot used by useSyncExternalStore-style adapters.
 
@@ -102,7 +102,7 @@ Stable server snapshot used by useSyncExternalStore-style adapters.
 getSnapshot: () => LiveQuerySnapshot<T, TKey>;
 ```
 
-Defined in: [packages/db/src/live-query-observer.ts:77](https://github.com/TanStack/db/blob/main/packages/db/src/live-query-observer.ts#L77)
+Defined in: [packages/db/src/live-query-observer.ts:122](https://github.com/TanStack/db/blob/main/packages/db/src/live-query-observer.ts#L122)
 
 Stable per-revision snapshot for wholesale materialization.
 
@@ -112,15 +112,47 @@ Stable per-revision snapshot for wholesale materialization.
 
 ***
 
+### isInitialRenderReady()
+
+```ts
+isInitialRenderReady: () => boolean;
+```
+
+Defined in: [packages/db/src/live-query-observer.ts:137](https://github.com/TanStack/db/blob/main/packages/db/src/live-query-observer.ts#L137)
+
+Whether a persisted fallback has already passed the network-first gate.
+
+#### Returns
+
+`boolean`
+
+***
+
 ### preload()
 
 ```ts
 preload: () => Promise<void>;
 ```
 
-Defined in: [packages/db/src/live-query-observer.ts:88](https://github.com/TanStack/db/blob/main/packages/db/src/live-query-observer.ts#L88)
+Defined in: [packages/db/src/live-query-observer.ts:133](https://github.com/TanStack/db/blob/main/packages/db/src/live-query-observer.ts#L133)
 
 Resolve once the collection has loaded its first data.
+
+#### Returns
+
+`Promise`\<`void`\>
+
+***
+
+### preloadForInitialRender()
+
+```ts
+preloadForInitialRender: () => Promise<void>;
+```
+
+Defined in: [packages/db/src/live-query-observer.ts:135](https://github.com/TanStack/db/blob/main/packages/db/src/live-query-observer.ts#L135)
+
+Resolve at network readiness or a permitted persisted fallback.
 
 #### Returns
 
@@ -134,7 +166,7 @@ Resolve once the collection has loaded its first data.
 subscribe: (listener) => () => void;
 ```
 
-Defined in: [packages/db/src/live-query-observer.ts:86](https://github.com/TanStack/db/blob/main/packages/db/src/live-query-observer.ts#L86)
+Defined in: [packages/db/src/live-query-observer.ts:131](https://github.com/TanStack/db/blob/main/packages/db/src/live-query-observer.ts#L131)
 
 Subscribe to changes. The listener receives the change set (or `undefined`
 for the synthetic notify a ready collection emits on attach). Granular

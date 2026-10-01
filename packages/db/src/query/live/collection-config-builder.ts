@@ -11,6 +11,7 @@ import { createDeferred } from '../../deferred.js'
 import { deepEquals } from '../../utils.js'
 import { runAllCallbacks } from '../../utils/callbacks.js'
 import { normalizeError } from '../../utils/error.js'
+import { createSourceRecord } from '../../utils/source-record.js'
 import { CollectionSubscriber } from './collection-subscriber.js'
 import { getCollectionBuilder } from './collection-registry.js'
 import { LIVE_QUERY_INTERNAL } from './internal.js'
@@ -143,9 +144,9 @@ export class CollectionConfigBuilder<
     | undefined
 
   // Map of opaque source ID to subscription
-  readonly subscriptions: Record<string, CollectionSubscription> = {}
+  readonly subscriptions = createSourceRecord<CollectionSubscription>()
   // Map of opaque source ID to demand callbacks for that lazy source
-  lazySourcesCallbacks: Record<string, LazyCollectionCallbacks> = {}
+  lazySourcesCallbacks = createSourceRecord<LazyCollectionCallbacks>()
   // Set of opaque source IDs that are lazy (don't load initial state)
   readonly lazySources = new Set<string>()
   private readonly activeDemands = new Map<
@@ -164,7 +165,7 @@ export class CollectionConfigBuilder<
   private syncRunGeneration = 0
   private windowOperationGeneration = 0
   // Map of lexical source IDs to optimizable ORDER BY state
-  optimizableOrderByCollections: Record<string, OrderByOptimizationInfo> = {}
+  optimizableOrderByCollections = createSourceRecord<OrderByOptimizationInfo>()
 
   constructor(
     private readonly config: LiveQueryCollectionConfig<TContext, TResult>,
@@ -800,8 +801,8 @@ export class CollectionConfigBuilder<
     this.pendingOrderedLoads.clear()
     this.orderedLoadFailed = false
     this.windowFailed = false
-    this.optimizableOrderByCollections = {}
-    this.lazySourcesCallbacks = {}
+    this.optimizableOrderByCollections = createSourceRecord()
+    this.lazySourcesCallbacks = createSourceRecord()
 
     // Clear subscription references to prevent memory leaks
     // Note: Individual subscriptions are already unsubscribed via unsubscribeCallbacks
@@ -815,12 +816,11 @@ export class CollectionConfigBuilder<
    */
   private compileBasePipeline() {
     this.graphCache = new D2()
-    this.inputsCache = Object.fromEntries(
-      this.collectionSources.map((source) => [
-        source.sourceId,
-        this.graphCache!.newInput<any>(),
-      ]),
-    )
+    const inputs = createSourceRecord<RootStreamBuilder<unknown>>()
+    for (const source of this.collectionSources) {
+      inputs[source.sourceId] = this.graphCache.newInput<any>()
+    }
+    this.inputsCache = inputs
 
     const compilation = compileQuery(
       this.query,
@@ -893,20 +893,23 @@ export class CollectionConfigBuilder<
       }),
     )
 
-    const bucketFacades = new BucketFacadeAdapter(
-      this.id,
-      this.bucketFacadesCache ?? [],
-      (count) => {
-        syncState.messagesCount += count
-      },
-    )
-    syncState.unsubscribeCallbacks.add(() => bucketFacades.cleanup())
+    // A query whose pipeline was not materialized publishes its rows directly
+    // and pays for no facade state.
+    const facadeCompilations = this.bucketFacadesCache
+    const bucketFacades = facadeCompilations
+      ? new BucketFacadeAdapter(this.id, facadeCompilations, (count) => {
+          syncState.messagesCount += count
+        })
+      : undefined
+    if (bucketFacades) {
+      syncState.unsubscribeCallbacks.add(() => bucketFacades.cleanup())
+    }
 
     // Flush pending changes and reset the accumulator.
     // Called at the end of each graph run to commit all accumulated changes.
     syncState.flushPendingChanges = () => {
       const hasParentChanges = pendingChanges.size > 0
-      const hasChildChanges = bucketFacades.hasPendingChanges()
+      const hasChildChanges = bucketFacades?.hasPendingChanges() ?? false
 
       if (!hasParentChanges && !hasChildChanges) {
         return
@@ -926,6 +929,17 @@ export class CollectionConfigBuilder<
         return
       }
 
+      // A key has at most one result row, so one flush can add or remove at
+      // most one. Check before any state changes: anything else means an
+      // upstream operator broke multiplicity.
+      for (const [key, { inserts, deletes }] of pendingChanges) {
+        if (Math.abs(inserts - deletes) > 1) {
+          throw new Error(
+            `Live query result key ${String(key)} changed by ${inserts - deletes} rows in one flush; a key has at most one result row.`,
+          )
+        }
+      }
+
       let facadePublication:
         | ReturnType<BucketFacadeAdapter[`flush`]>
         | undefined
@@ -933,28 +947,30 @@ export class CollectionConfigBuilder<
         | ReturnType<Collection[`_deferPublication`]>
         | undefined
       try {
-        facadePublication = bucketFacades.flush()
+        facadePublication = bucketFacades?.flush()
         rootPublication = hasParentChanges
           ? config.collection._deferPublication()
           : undefined
-        const changesToApply: Map<unknown, Changes<TResult>> = new Map(
-          [...pendingChanges].map(([key, changes]) => {
-            const resolved: Changes<TResult> = {
-              ...changes,
-              value: bucketFacades.resolve(changes.value),
-            }
-            if (changes.previousValue !== undefined) {
-              resolved.previousValue = bucketFacades.resolve(
-                changes.previousValue,
-              )
-            }
-            return [key, resolved]
-          }),
-        )
+        const changesToApply: Map<unknown, Changes<TResult>> = bucketFacades
+          ? new Map(
+              [...pendingChanges].map(([key, changes]) => {
+                const resolved: Changes<TResult> = {
+                  ...changes,
+                  value: bucketFacades.resolve(changes.value),
+                }
+                if (changes.previousValue !== undefined) {
+                  resolved.previousValue = bucketFacades.resolve(
+                    changes.previousValue,
+                  )
+                }
+                return [key, resolved]
+              }),
+            )
+          : pendingChanges
         // New facades are not reachable until their root row is installed, so
         // make them ready first. A facade failure then leaves the root intact,
         // and the root commit is the final state change before publication.
-        facadePublication.prepare()
+        facadePublication?.prepare()
         if (hasParentChanges) {
           begin()
           let lookup: ((key: string | number) => boolean) | undefined
@@ -980,7 +996,7 @@ export class CollectionConfigBuilder<
       let publicationError: unknown
       for (const publish of [
         rootPublication?.publish,
-        facadePublication.publish,
+        facadePublication?.publish,
       ]) {
         if (!publish) continue
         try {
@@ -1014,7 +1030,6 @@ export class CollectionConfigBuilder<
   ) {
     const { write, collection } = config
     const { deletes, inserts, value, orderByIndex } = changes
-
     // Store the key of the result so that we can retrieve it in the
     // getKey function
     this.resultKeys.set(value, key)

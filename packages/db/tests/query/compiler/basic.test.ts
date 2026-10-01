@@ -55,7 +55,8 @@ describe(`Query2 Compiler`, () => {
       )
 
       expect(materialized.pipeline).toBe(compilation.pipeline)
-      expect(materialized.facades).toEqual([])
+      // Undefined facades mark a pass-through pipeline with nothing to resolve.
+      expect(materialized.facades).toBeUndefined()
     })
 
     test(`compiles a simple FROM query`, () => {

@@ -62,7 +62,7 @@ Defined in: [packages/db/src/query/subset-dedupe.ts:20](https://github.com/TanSt
 reset(): void;
 ```
 
-Defined in: [packages/db/src/query/subset-dedupe.ts:64](https://github.com/TanStack/db/blob/main/packages/db/src/query/subset-dedupe.ts#L64)
+Defined in: [packages/db/src/query/subset-dedupe.ts:65](https://github.com/TanStack/db/blob/main/packages/db/src/query/subset-dedupe.ts#L65)
 
 #### Returns
 

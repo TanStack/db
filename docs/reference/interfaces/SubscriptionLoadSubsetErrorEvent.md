@@ -3,7 +3,7 @@ id: SubscriptionLoadSubsetErrorEvent
 title: SubscriptionLoadSubsetErrorEvent
 ---
 
-Defined in: [packages/db/src/types.ts:239](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L239)
+Defined in: [packages/db/src/types.ts:254](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L254)
 
 Event emitted when a subset requested by this subscription fails to load.
 
@@ -15,7 +15,7 @@ Event emitted when a subset requested by this subscription fails to load.
 error: unknown;
 ```
 
-Defined in: [packages/db/src/types.ts:243](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L243)
+Defined in: [packages/db/src/types.ts:258](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L258)
 
 ***
 
@@ -25,7 +25,7 @@ Defined in: [packages/db/src/types.ts:243](https://github.com/TanStack/db/blob/m
 options: LoadSubsetOptions;
 ```
 
-Defined in: [packages/db/src/types.ts:242](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L242)
+Defined in: [packages/db/src/types.ts:257](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L257)
 
 ***
 
@@ -35,7 +35,7 @@ Defined in: [packages/db/src/types.ts:242](https://github.com/TanStack/db/blob/m
 subscription: Subscription;
 ```
 
-Defined in: [packages/db/src/types.ts:241](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L241)
+Defined in: [packages/db/src/types.ts:256](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L256)
 
 ***
 
@@ -45,4 +45,4 @@ Defined in: [packages/db/src/types.ts:241](https://github.com/TanStack/db/blob/m
 type: "loadSubset:error";
 ```
 
-Defined in: [packages/db/src/types.ts:240](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L240)
+Defined in: [packages/db/src/types.ts:255](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L255)

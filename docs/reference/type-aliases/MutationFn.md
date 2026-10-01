@@ -7,7 +7,7 @@ title: MutationFn
 type MutationFn<T> = (params) => Promise<any>;
 ```
 
-Defined in: [packages/db/src/types.ts:135](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L135)
+Defined in: [packages/db/src/types.ts:143](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L143)
 
 Persists an optimistic transaction. Do not start or await collection or
 live-query preloads here. Sync commits queue behind this function, so waiting

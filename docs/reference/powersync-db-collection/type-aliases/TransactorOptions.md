@@ -14,7 +14,7 @@ Defined in: [PowerSyncTransactor.ts:16](https://github.com/TanStack/db/blob/main
 ### database
 
 ```ts
-database: AbstractPowerSyncDatabase;
+database: CommonPowerSyncDatabase;
 ```
 
 Defined in: [PowerSyncTransactor.ts:17](https://github.com/TanStack/db/blob/main/packages/powersync-db-collection/src/PowerSyncTransactor.ts#L17)

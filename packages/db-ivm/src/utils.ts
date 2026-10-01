@@ -50,20 +50,24 @@ export function binarySearch<T>(
   return low
 }
 
-const objectIds = new WeakMap<object, number>()
-let nextObjectId = 0
-
 /**
- * A string identity for composite keys: primitives by value, objects by
- * reference.
+ * A string identity within one consolidation: primitives by value, objects,
+ * functions, and symbols by identity.
  */
-export function getStringId(value: unknown): string {
+export function getStringId(
+  value: unknown,
+  referenceIds: Map<object | symbol, number>,
+): string {
   if (value === null) return `null`
   if (value === undefined) return `undefined`
-  if (typeof value !== `object`) return `str_${String(value)}`
-  let id = objectIds.get(value)
-  if (id === undefined) objectIds.set(value, (id = nextObjectId++))
-  return `obj_${id}`
+  const type = typeof value
+  if (type === `object` || type === `function` || type === `symbol`) {
+    const reference = value as object | symbol
+    let id = referenceIds.get(reference)
+    if (id === undefined) referenceIds.set(reference, (id = referenceIds.size))
+    return `ref_${id}`
+  }
+  return `${type}_${String(value)}`
 }
 
 export function* concatIterable<T>(

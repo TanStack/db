@@ -3,7 +3,7 @@ id: CollectionRequiresSyncConfigError
 title: CollectionRequiresSyncConfigError
 ---
 
-Defined in: [packages/db/src/errors.ts:84](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L84)
+Defined in: [packages/db/src/errors.ts:94](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L94)
 
 ## Extends
 
@@ -17,7 +17,7 @@ Defined in: [packages/db/src/errors.ts:84](https://github.com/TanStack/db/blob/m
 new CollectionRequiresSyncConfigError(): CollectionRequiresSyncConfigError;
 ```
 
-Defined in: [packages/db/src/errors.ts:85](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L85)
+Defined in: [packages/db/src/errors.ts:95](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L95)
 
 #### Returns
 

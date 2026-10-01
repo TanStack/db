@@ -1,5 +1,7 @@
 // Consumer-build contract: public Collection/query behavior, error names, and
 // index metadata have the same observations after identifier minification.
+// The driver bundles the built packages/db/dist, which is what consumers
+// install, so it also covers the private-member renaming in the db build.
 // Authority: the corresponding source-facing tests in packages/db/tests for
 // queryOnce, live queries, collection events/indexes, and errors. The model is
 // a plain array filter/sort/projection over one initial and one updated source
@@ -11,6 +13,7 @@ import { mkdtemp, readFile, rm, stat } from 'node:fs/promises'
 import path from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import { build } from 'esbuild'
+import { assertDbDistFresh } from '../packages/db/scripts/assert-dist-fresh.mjs'
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 const mode = process.argv[2]
@@ -31,6 +34,8 @@ assert.ok(
   dbNodeModulesInfo?.isDirectory(),
   'Install workspace dependencies before running test:minified-db',
 )
+
+const builtEntry = await assertDbDistFresh(root)
 const bundleDirectory = await mkdtemp(path.join(dbNodeModules, '.minified-db-'))
 const bundlePath = path.join(bundleDirectory, 'index.mjs')
 
@@ -47,7 +52,7 @@ const errorNameMutant = {
   name: 'error-name-mutant',
   setup(builder) {
     builder.onLoad(
-      { filter: /packages\/db\/src\/errors\.ts$/ },
+      { filter: /packages\/db\/dist\/esm\/errors\.js$/ },
       async ({ path: file }) => {
         const source = await readFile(file, 'utf8')
         const original = 'this.name = `CollectionConfigurationError`'
@@ -58,7 +63,7 @@ const errorNameMutant = {
         )
         return {
           contents: source.replace(original, 'this.name = new.target.name'),
-          loader: 'ts',
+          loader: 'js',
         }
       },
     )
@@ -230,7 +235,7 @@ async function checkCollectionsAndQueries(db) {
 try {
   const bundle = await build({
     absWorkingDir: root,
-    entryPoints: [path.join(root, 'packages/db/src/index.ts')],
+    entryPoints: [builtEntry],
     outfile: bundlePath,
     bundle: true,
     minify: true,

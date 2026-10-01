@@ -15,7 +15,7 @@ type IndexReader<TKey> = Pick<IndexInterface<TKey>,
 | "canOptimizeRangeFor">;
 ```
 
-Defined in: [packages/db/src/indexes/base-index.ts:42](https://github.com/TanStack/db/blob/main/packages/db/src/indexes/base-index.ts#L42)
+Defined in: [packages/db/src/indexes/base-index.ts:45](https://github.com/TanStack/db/blob/main/packages/db/src/indexes/base-index.ts#L45)
 
 The read-side surface consumers use on a resolved (possibly reversed) index.
 

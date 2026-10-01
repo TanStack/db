@@ -17,6 +17,39 @@ export type OutputWithVirtual<
   T extends object,
   TKey extends string | number = string | number,
 > = WithVirtualProps<T, TKey>
+/**
+ * Runs an oracle check, then every cleanup step in order. A cleanup failure
+ * never replaces the check's own failure: the check failure is thrown alone or
+ * as the `cause` of an `AggregateError` that also holds each cleanup failure.
+ */
+export async function withOracleCleanup(
+  check: () => Promise<void> | void,
+  cleanups: ReadonlyArray<() => unknown>,
+): Promise<void> {
+  const failures: Array<unknown> = []
+  let checkFailed = false
+  try {
+    await check()
+  } catch (error) {
+    checkFailed = true
+    failures.push(error)
+  }
+  for (const cleanup of cleanups) {
+    try {
+      await cleanup()
+    } catch (error) {
+      failures.push(error)
+    }
+  }
+  if (failures.length === 1) throw failures[0]
+  if (failures.length > 1) {
+    throw new AggregateError(
+      failures,
+      checkFailed ? `Oracle check and cleanup failed` : `Oracle cleanup failed`,
+      { cause: failures[0] },
+    )
+  }
+}
 
 // Keep sync startup, writes, readiness, and load outcomes in the test itself.
 export function createOnDemandCollection<T extends { id: string | number }>(
@@ -80,32 +113,38 @@ export function createIndexUsageTracker(collection: any): {
     queriesExecuted: [],
   }
 
-  // Track index method calls by patching all existing indexes
+  // Track index method calls. Indexes are patched when first read through the
+  // collection, so indexes created after tracking starts (such as auto-indexes
+  // added by a live query) are tracked too.
   const originalMethods = new Map()
-
-  for (const [indexId, index] of collection.indexes) {
+  // A range lookup delegates to rangeQuery; record it once, as the lookup.
+  let lookupDepth = 0
+  const patchIndex = (indexId: unknown, index: any) => {
+    if (originalMethods.has(indexId)) return
     // Track lookup calls (new unified method)
     const originalLookup = index.lookup.bind(index)
     index.lookup = function (operation: any, value: any) {
-      // Only track non-range operations to avoid double counting
-      // Range operations (gt, gte, lt, lte) are handled by rangeQuery tracking
-      if (![`gt`, `gte`, `lt`, `lte`].includes(operation)) {
-        stats.rangeQueryCalls++
-        stats.indexesUsed.push(String(indexId))
-        stats.queriesExecuted.push({
-          type: `index`,
-          operation,
-          field: index.expression?.path?.join(`.`),
-          value,
-        })
+      stats.rangeQueryCalls++
+      stats.indexesUsed.push(String(indexId))
+      stats.queriesExecuted.push({
+        type: `index`,
+        operation,
+        field: index.expression?.path?.join(`.`),
+        value,
+      })
+      lookupDepth++
+      try {
+        return originalLookup(operation, value)
+      } finally {
+        lookupDepth--
       }
-      return originalLookup(operation, value)
     }
 
     // Track rangeQuery calls (for compound range queries)
-    if (index.rangeQuery) {
-      const originalRangeQuery = index.rangeQuery.bind(index)
+    const originalRangeQuery = index.rangeQuery?.bind(index)
+    if (originalRangeQuery) {
       index.rangeQuery = function (options: any) {
+        if (lookupDepth > 0) return originalRangeQuery(options)
         stats.rangeQueryCalls++
         stats.indexesUsed.push(String(indexId))
 
@@ -129,14 +168,30 @@ export function createIndexUsageTracker(collection: any): {
     }
 
     originalMethods.set(indexId, {
+      index,
       lookup: originalLookup,
-      rangeQuery: index.rangeQuery ? index.rangeQuery.bind(index) : undefined,
+      rangeQuery: originalRangeQuery,
     })
   }
+  const originalIndexesGetter = Object.getOwnPropertyDescriptor(
+    Object.getPrototypeOf(collection),
+    `indexes`,
+  )?.get
+  const readIndexes = (): Map<unknown, any> =>
+    originalIndexesGetter?.call(collection) ?? new Map()
+  for (const [indexId, index] of readIndexes()) patchIndex(indexId, index)
+  Object.defineProperty(collection, `indexes`, {
+    get: () => {
+      const indexes = readIndexes()
+      for (const [indexId, index] of indexes) patchIndex(indexId, index)
+      return indexes
+    },
+    configurable: true,
+  })
 
-  // Track full scan calls (entries() iteration)
-  const originalEntries = collection.entries
-  collection.entries = function* () {
+  // Track full scan calls: filtered iteration through either the public
+  // entries() or the stored-row scan used by a prefiltered snapshot.
+  const recordFullScan = () => {
     // Only count as full scan if we're in a filtering context
     // Check the call stack to see if we're inside createFilterFunction
     const stack = new Error().stack || ``
@@ -149,21 +204,28 @@ export function createIndexUsageTracker(collection: any): {
         type: `fullScan`,
       })
     }
+  }
+  const originalEntries = collection.entries
+  collection.entries = function* () {
+    recordFullScan()
     yield* originalEntries.call(this)
+  }
+  const state = collection._state
+  const originalEntriesPassing = state.entriesPassing
+  state.entriesPassing = function* (prefilter: (row: object) => boolean) {
+    recordFullScan()
+    yield* originalEntriesPassing.call(this, prefilter)
   }
 
   const restore = () => {
-    // Restore original index methods
-    for (const [indexId, index] of collection.indexes) {
-      const original = originalMethods.get(indexId)
-      if (original) {
-        index.lookup = original.lookup
-        if (original.rangeQuery) {
-          index.rangeQuery = original.rangeQuery
-        }
-      }
+    // Remove the instance getter so the prototype getter applies again
+    delete collection.indexes
+    for (const { index, lookup, rangeQuery } of originalMethods.values()) {
+      index.lookup = lookup
+      if (rangeQuery) index.rangeQuery = rangeQuery
     }
     collection.entries = originalEntries
+    state.entriesPassing = originalEntriesPassing
   }
 
   return { stats, restore }

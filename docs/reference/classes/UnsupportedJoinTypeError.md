@@ -3,7 +3,7 @@ id: UnsupportedJoinTypeError
 title: UnsupportedJoinTypeError
 ---
 
-Defined in: [packages/db/src/errors.ts:591](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L591)
+Defined in: [packages/db/src/errors.ts:629](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L629)
 
 ## Extends
 
@@ -17,7 +17,7 @@ Defined in: [packages/db/src/errors.ts:591](https://github.com/TanStack/db/blob/
 new UnsupportedJoinTypeError(joinType): UnsupportedJoinTypeError;
 ```
 
-Defined in: [packages/db/src/errors.ts:592](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L592)
+Defined in: [packages/db/src/errors.ts:630](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L630)
 
 #### Parameters
 

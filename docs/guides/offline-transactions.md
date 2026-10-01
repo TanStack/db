@@ -19,7 +19,7 @@ This example starts from an existing `todos` Collection. The server must accept 
 
 Keep the `collections` registry keys and Collection IDs stable across restarts. The executor uses that registry to restore stored mutations.
 
-An action enters the outbox only while `executor.isOfflineEnabled` is true. This requires available storage and leadership. Otherwise, the action uses the online-only path without durable retry.
+An action chooses its path when invoked. If `executor.isOfflineEnabled` is false then, it uses the online-only path without durable retry. If it selects the offline path but loses leadership before its outbox write, the transaction rejects with `NonRetriableError` and rolls back its optimistic change.
 
 ```ts
 import {

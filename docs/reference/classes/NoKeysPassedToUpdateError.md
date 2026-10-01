@@ -3,7 +3,7 @@ id: NoKeysPassedToUpdateError
 title: NoKeysPassedToUpdateError
 ---
 
-Defined in: [packages/db/src/errors.ts:229](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L229)
+Defined in: [packages/db/src/errors.ts:239](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L239)
 
 ## Extends
 
@@ -17,7 +17,7 @@ Defined in: [packages/db/src/errors.ts:229](https://github.com/TanStack/db/blob/
 new NoKeysPassedToUpdateError(): NoKeysPassedToUpdateError;
 ```
 
-Defined in: [packages/db/src/errors.ts:230](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L230)
+Defined in: [packages/db/src/errors.ts:240](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L240)
 
 #### Returns
 

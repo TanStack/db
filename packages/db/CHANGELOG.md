@@ -1,5 +1,32 @@
 # @tanstack/db
 
+## 0.11.0
+
+### Minor Changes
+
+- Add opt-in network-first initial rendering for eagerly persisted SQLite Collections. `initialRender: { strategy: 'network-first', networkTimeoutMs }` lets React and Solid Suspense render restored rows after the configured deadline (three seconds by default) or a network failure while sync continues. Live-query observers and the Angular, React, Solid, Svelte, and Vue integrations expose `persistedStatus`, `isPersistedReady`, and `persistedError` separately from Collection readiness. ([#1955](https://github.com/TanStack/db/pull/1955))
+
+### Patch Changes
+
+- Correct the error recovery guide for source Collections with dependent live queries. Document the supported sequence to restart the source and live query together. ([#1957](https://github.com/TanStack/db/pull/1957))
+
+- Reject invalid index comparator results instead of silently corrupting ordered indexes. A custom `compareFn`, or a custom collation `compare` in `compareOptions`, that returns `NaN` or a non-number (for example a boolean from `(a, b) => a > b`) now throws when an index operation calls it, on both `BTreeIndex` and `BasicIndex`. When this happens while a collection updates its indexes, the collection moves to the `error` state and later mutations throw `CollectionInErrorStateError`; previously the rows were kept with a misordered index. `NaN` keys remain supported with the default comparator. ([#1949](https://github.com/TanStack/db/pull/1949))
+
+- Speed up large collection sync batches by deferring row ordering until the batch completes. ([#1953](https://github.com/TanStack/db/pull/1953))
+
+- Use a monotonic clock for Collection garbage collection when available, so wall-clock changes do not delay or advance scheduled cleanup. ([#1941](https://github.com/TanStack/db/pull/1941))
+
+- Suggest an index for large manually indexed Collections when a queried field lacks one. Omit the suggestion when eager indexing creates the index. ([#1942](https://github.com/TanStack/db/pull/1942))
+
+- Fix live queries that order numeric NaN values in descending windows. Equal NaN values no longer cause a contributor-congruence error. ([#1952](https://github.com/TanStack/db/pull/1952))
+
+- Render completed persisted query data when a client query stream fails during network-first initial rendering. Keep derived-query load failures on the React ErrorBoundary, with errors isolated by client and cleared when the Collection restarts. ([#1960](https://github.com/TanStack/db/pull/1960))
+
+- Reduce the size of the B+ tree that `BTreeIndex` uses. Remove unused features from the vendored `sorted-btree` code and one insert branch that cannot run. Public behavior does not change. The full `@tanstack/db` entry is about 1.4 KB smaller when minified, and about 455 B smaller with gzip. ([#1946](https://github.com/TanStack/db/pull/1946))
+
+- Updated dependencies [[`1b317d2`](https://github.com/TanStack/db/commit/1b317d2bd77a62ce68b78d63f6ec2e4fb8331c69), [`8283f2e`](https://github.com/TanStack/db/commit/8283f2e80a44b49caa31372f50c89d5c048aaa8d), [`9125dab`](https://github.com/TanStack/db/commit/9125dab6ac0944bf55606a2f2356de59503b79a8)]:
+  - @tanstack/db-ivm@0.1.24
+
 ## 0.10.0
 
 ### Minor Changes

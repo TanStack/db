@@ -4,7 +4,7 @@ title: WithoutVirtualProps
 ---
 
 ```ts
-type WithoutVirtualProps<T> = Omit<T, keyof VirtualRowProps>;
+type WithoutVirtualProps<T> = T extends unknown ? Omit<T, keyof VirtualRowProps> : never;
 ```
 
 Defined in: [packages/db/src/virtual-props.ts:135](https://github.com/TanStack/db/blob/main/packages/db/src/virtual-props.ts#L135)

@@ -3,7 +3,7 @@ id: UnknownOperationTypeError
 title: UnknownOperationTypeError
 ---
 
-Defined in: [packages/query-db-collection/src/errors.ts:99](https://github.com/TanStack/db/blob/main/packages/query-db-collection/src/errors.ts#L99)
+Defined in: [packages/query-db-collection/src/errors.ts:106](https://github.com/TanStack/db/blob/main/packages/query-db-collection/src/errors.ts#L106)
 
 ## Extends
 
@@ -17,7 +17,7 @@ Defined in: [packages/query-db-collection/src/errors.ts:99](https://github.com/T
 new UnknownOperationTypeError(type): UnknownOperationTypeError;
 ```
 
-Defined in: [packages/query-db-collection/src/errors.ts:100](https://github.com/TanStack/db/blob/main/packages/query-db-collection/src/errors.ts#L100)
+Defined in: [packages/query-db-collection/src/errors.ts:107](https://github.com/TanStack/db/blob/main/packages/query-db-collection/src/errors.ts#L107)
 
 #### Parameters
 

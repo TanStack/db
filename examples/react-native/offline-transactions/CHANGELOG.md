@@ -1,5 +1,16 @@
 # offline-transactions-react-native
 
+## 1.0.10
+
+### Patch Changes
+
+- Updated dependencies [[`9c62ac3`](https://github.com/TanStack/db/commit/9c62ac3782779dc2a91335dd834ad8eb907db109), [`d5e4732`](https://github.com/TanStack/db/commit/d5e47325a7db907fb2c5f9bb6d1273754bfc4a69), [`c0d123b`](https://github.com/TanStack/db/commit/c0d123b86aeb2942d0a2a70a050bf10a3b3dda48), [`0122da8`](https://github.com/TanStack/db/commit/0122da80ae58d8e8e624b460506370a910037c8e), [`f7d96f7`](https://github.com/TanStack/db/commit/f7d96f7e22c8997bca0815521e8e944457c8888a), [`fb509ef`](https://github.com/TanStack/db/commit/fb509efb985f830736389d7ec2b53504c0611395), [`dc4b4e0`](https://github.com/TanStack/db/commit/dc4b4e089a5c5b4b9462fd833ff3c6e0c2f17988), [`f158258`](https://github.com/TanStack/db/commit/f15825858e09914b6b94c4150f77c5137efecdbf), [`f7c0afe`](https://github.com/TanStack/db/commit/f7c0afe1d28b2a8805695e84a383c3bc5496b63e), [`c879ba6`](https://github.com/TanStack/db/commit/c879ba6d855914e5c0cac49af7a007eb5cabe7e4), [`bef12e2`](https://github.com/TanStack/db/commit/bef12e24227aa993cea03c7b1cdeeda233cce739), [`eecbf4f`](https://github.com/TanStack/db/commit/eecbf4f24ff52886a79fa548b9265f1a5ec611a3), [`b5d92ce`](https://github.com/TanStack/db/commit/b5d92cebd0d951d8a3399618aea4f399915b6ea9)]:
+  - @tanstack/db@0.11.0
+  - @tanstack/react-db@0.5.0
+  - @tanstack/offline-transactions@1.0.58
+  - @tanstack/query-db-collection@1.3.1
+  - @tanstack/react-native-db-sqlite-persistence@0.2.25
+
 ## 1.0.9
 
 ### Patch Changes

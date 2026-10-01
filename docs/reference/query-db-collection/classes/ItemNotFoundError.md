@@ -3,7 +3,7 @@ id: ItemNotFoundError
 title: ItemNotFoundError
 ---
 
-Defined in: [packages/query-db-collection/src/errors.ts:64](https://github.com/TanStack/db/blob/main/packages/query-db-collection/src/errors.ts#L64)
+Defined in: [packages/query-db-collection/src/errors.ts:71](https://github.com/TanStack/db/blob/main/packages/query-db-collection/src/errors.ts#L71)
 
 ## Extends
 
@@ -17,7 +17,7 @@ Defined in: [packages/query-db-collection/src/errors.ts:64](https://github.com/T
 new ItemNotFoundError(key): ItemNotFoundError;
 ```
 
-Defined in: [packages/query-db-collection/src/errors.ts:65](https://github.com/TanStack/db/blob/main/packages/query-db-collection/src/errors.ts#L65)
+Defined in: [packages/query-db-collection/src/errors.ts:72](https://github.com/TanStack/db/blob/main/packages/query-db-collection/src/errors.ts#L72)
 
 #### Parameters
 

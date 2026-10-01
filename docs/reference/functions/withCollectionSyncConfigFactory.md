@@ -11,7 +11,7 @@ Defined in: [packages/db/src/collection/index.ts:66](https://github.com/TanStack
 
 **`Internal`**
 
-Lets adapters bind a sync config to each collection instance.
+The factory must defer `startSyncIfIdle` until construction ends.
 
 ## Type Parameters
 
@@ -27,7 +27,7 @@ Lets adapters bind a sync config to each collection instance.
 
 ### factory
 
-(`source`, `utilities`) => `TSync`
+(`source`, `utilities`, `startSyncIfIdle`) => `TSync`
 
 ## Returns
 

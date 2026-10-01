@@ -7,7 +7,7 @@ title: inArray
 function inArray(value, array): BasicExpression<boolean>;
 ```
 
-Defined in: [packages/db/src/query/builder/functions.ts:259](https://github.com/TanStack/db/blob/main/packages/db/src/query/builder/functions.ts#L259)
+Defined in: [packages/db/src/query/builder/functions.ts:282](https://github.com/TanStack/db/blob/main/packages/db/src/query/builder/functions.ts#L282)
 
 ## Parameters
 

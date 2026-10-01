@@ -7,7 +7,7 @@ title: ResultStream
 type ResultStream = IStreamBuilder<[unknown, [any, string | undefined]]>;
 ```
 
-Defined in: [packages/db/src/types.ts:895](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L895)
+Defined in: [packages/db/src/types.ts:1049](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L1049)
 
 Result stream type representing the output of compiled queries
 Always returns [key, [result, orderByIndex]] where orderByIndex is undefined for unordered queries
