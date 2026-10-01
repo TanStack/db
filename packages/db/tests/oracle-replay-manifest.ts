@@ -149,7 +149,7 @@ const ownerGroups: ReadonlyArray<readonly [string, string, string]> = [
   [
     `db/tests/query/includes-oracle.property.test.ts`,
     `includes`,
-    `scenario-statistics incremental-history nested-scalar-materialization alpha-renaming optimistic-convergence`,
+    `scenario-statistics incremental-history nested-scalar-materialization alpha-renaming scoped-alpha-renaming optimistic-convergence`,
   ],
   [
     `db/tests/query/includes-query-shape-oracle.test.ts`,

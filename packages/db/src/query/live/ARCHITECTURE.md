@@ -155,6 +155,13 @@ a namespaced row whose keys are the lexical aliases. Those observable keys are
 part of query identity. Alias text may otherwise remain as debug metadata
 without becoming source identity.
 
+A plan rewrite must preserve each Collection reference's `SourceId`. The
+optimizer reuses the reference when it copies, wraps, or collapses a source,
+and compilation reads source inputs by `SourceId` only. A source whose identity
+was lost raises `CollectionInputNotFoundError`; it never reads a same-named
+source from another scope. Every alias in every `unionAll()` branch belongs to
+one namespace, and the compiler rejects a repeated name.
+
 A `CanonicalCorrelationKey` is the canonical tuple of every evaluated
 parent-dependent value that can affect the child plan. This includes values
 used by filters, joins, grouping, aggregates, ordering, projections, limits,
@@ -1250,7 +1257,8 @@ create recursive Collection machinery.
 1. **Alpha-renaming:** changing any accepted alias to another unused name cannot
    change an explicitly projected result. An implicit namespaced result keeps
    its aliases as public field names. Aliases must be unique within one lexical
-   scope and cannot shadow an ancestor alias. Sibling scopes may reuse aliases.
+   scope and cannot shadow an ancestor alias. Sibling scopes may reuse aliases,
+   except that all `unionAll()` branches share one alias namespace.
 2. **Contribution conservation:** a public row exists exactly when its reduced
    supporting weight and collision policy produce one.
 3. **Batch partition:** equivalent valid split and atomic deliveries converge.
@@ -1323,26 +1331,27 @@ keep the meanings defined there.
 
 ## Executable contracts
 
-| Contract                                                                            | Test suite                                                                   |
-| ----------------------------------------------------------------------------------- | ---------------------------------------------------------------------------- |
-| State equivalence, route lifecycle, transition history, and batch partition         | `packages/db/tests/query/includes-oracle.property.test.ts`                   |
-| Joined multiplicity, alias identity, and null-key normalization                     | `packages/db/tests/query/includes-query-shape-oracle.test.ts`                |
-| Demand, cancellation, and progressive timing                                        | `packages/db/tests/query/includes-temporal-oracle.test.ts`                   |
-| Optimistic confirmation, rollback, and later reactivity                             | `packages/db/tests/query/includes-optimistic-oracle.property.test.ts`        |
-| Coherent layered publication                                                        | `packages/db/tests/query/includes-publication-oracle.test.ts`                |
-| Collection facades, event coherence, and route activation                           | `packages/db/tests/query/includes-collection-oracle.property.test.ts`        |
-| Correlated physical work                                                            | `packages/db/tests/query/includes-work-counter-oracle.test.ts`               |
-| Constructed and retained facades in a nested Collection tree                        | `packages/db/tests/query/includes-space-oracle.test.ts`                      |
-| Route-context discovery and transport across recursive and join boundaries          | `packages/db/tests/query/includes-context-transport-oracle.test.ts`          |
-| Functional projection input boundaries, timing, and output preservation             | `packages/db/tests/query/includes-functional-projection-oracle.test.ts`      |
-| Functional input rejection and inline alternatives                                  | `packages/db/tests/query/includes-functional-input-boundary.test.ts`         |
-| Public-container descriptors and reference-key matches across internal query stages | `packages/db/tests/query/public-container-copy.test.ts`                      |
-| Cross-formulation equivalence and reference-sensitive route identity                | `packages/db/tests/query/includes-cross-formulation-oracle.property.test.ts` |
-| Query-db ownership                                                                  | `packages/query-db-collection/tests/ownership-lifecycle.oracle.test.ts`      |
-| Failed replay retention, peer isolation, and explicit consumer-only recovery        | `packages/db/tests/query/replay-failure-boundary.test.ts`                    |
-| Replay lease balance, reference-counted peers, and failed-start recovery            | `packages/db/tests/replay-adapter-ownership.test.ts`                         |
-| Reachable nested shape                                                              | `packages/query-db-collection/tests/includes-work-counter-oracle.test.ts`    |
-| Cleanup-start invalidation, settlement, and restart admission                       | `packages/db/tests/collection-cleanup-restart-oracle.test.ts`                |
+| Contract                                                                            | Test suite                                                                                                                      |
+| ----------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------- |
+| State equivalence, route lifecycle, transition history, and batch partition         | `packages/db/tests/query/includes-oracle.property.test.ts`                                                                      |
+| Joined multiplicity, alias identity, and null-key normalization                     | `packages/db/tests/query/includes-query-shape-oracle.test.ts`                                                                   |
+| Alias reuse across sibling scopes and `SourceId` preservation                       | `packages/db/tests/query/includes-oracle.property.test.ts` (sibling scopes), `packages/db/tests/query/validate-aliases.test.ts` |
+| Demand, cancellation, and progressive timing                                        | `packages/db/tests/query/includes-temporal-oracle.test.ts`                                                                      |
+| Optimistic confirmation, rollback, and later reactivity                             | `packages/db/tests/query/includes-optimistic-oracle.property.test.ts`                                                           |
+| Coherent layered publication                                                        | `packages/db/tests/query/includes-publication-oracle.test.ts`                                                                   |
+| Collection facades, event coherence, and route activation                           | `packages/db/tests/query/includes-collection-oracle.property.test.ts`                                                           |
+| Correlated physical work                                                            | `packages/db/tests/query/includes-work-counter-oracle.test.ts`                                                                  |
+| Constructed and retained facades in a nested Collection tree                        | `packages/db/tests/query/includes-space-oracle.test.ts`                                                                         |
+| Route-context discovery and transport across recursive and join boundaries          | `packages/db/tests/query/includes-context-transport-oracle.test.ts`                                                             |
+| Functional projection input boundaries, timing, and output preservation             | `packages/db/tests/query/includes-functional-projection-oracle.test.ts`                                                         |
+| Functional input rejection and inline alternatives                                  | `packages/db/tests/query/includes-functional-input-boundary.test.ts`                                                            |
+| Public-container descriptors and reference-key matches across internal query stages | `packages/db/tests/query/public-container-copy.test.ts`                                                                         |
+| Cross-formulation equivalence and reference-sensitive route identity                | `packages/db/tests/query/includes-cross-formulation-oracle.property.test.ts`                                                    |
+| Query-db ownership                                                                  | `packages/query-db-collection/tests/ownership-lifecycle.oracle.test.ts`                                                         |
+| Failed replay retention, peer isolation, and explicit consumer-only recovery        | `packages/db/tests/query/replay-failure-boundary.test.ts`                                                                       |
+| Replay lease balance, reference-counted peers, and failed-start recovery            | `packages/db/tests/replay-adapter-ownership.test.ts`                                                                            |
+| Reachable nested shape                                                              | `packages/query-db-collection/tests/includes-work-counter-oracle.test.ts`                                                       |
+| Cleanup-start invalidation, settlement, and restart admission                       | `packages/db/tests/collection-cleanup-restart-oracle.test.ts`                                                                   |
 
 Each oracle identifies the first divergent checkpoint and compares either the
 whole result or one exact structural difference. Correlated-materialization
