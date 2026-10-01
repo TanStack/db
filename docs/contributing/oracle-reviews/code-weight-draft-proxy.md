@@ -1,6 +1,6 @@
 # Code weight: simplify the draft proxy and share its equality walker
 
-Reviewed executable revision: `7e5dfee25` (base `18abceee4`, the fetched
+Reviewed executable revision: `556cbd8ff` (base `18abceee4`, the fetched
 `origin/main` at review time). This record follows in a documentation-only
 commit.
 
@@ -23,6 +23,10 @@ commit.
   second review.
 - `0ce101acf` fixes two more lost-write classes from CodeRabbit review:
   accessor definitions and typed-array mutator methods.
+- `cbd2aff06` and `556cbd8ff` act on a loss audit of these oracles against
+  `docs/contributing/oracle-tests.md`. They fix one bug, make the array and
+  typed-array laws generated, and close the audit's grammar, checkpoint, and
+  replay gaps.
 - `7e5dfee25` fixes three bugs that code review found in the earlier fixes:
   class write-backs, writes after `Object.freeze`, and `subarray` reads.
 
@@ -206,6 +210,8 @@ commit before.
 | `b825e6483` | `38d8ba78f` defined a clone, so a non-configurable object value broke the Proxy invariants and threw. `get` would also have wrapped it. | `defineProperty` law: a new key with only an object value, with identity where the invariants require it. | throws on `main` too | +9 / +5 (module only) |
 | `0ce101acf` | Defining a getter over a field reported no change. `fill`, `set`, `sort`, `reverse`, `copyWithin`, and writes through `subarray` on a typed-array draft changed the private copy without a change. | `proxy.test.ts`: every method of `TypedArray.prototype` against a native typed array, and two getter definitions. | 6 of 31 methods, 2 of 2 getters | +70 / +25 (module only) |
 | `7e5dfee25` | The class rule made writing back the row's own class instance a change, because draft snapshots hold class instances as plain objects. After `Object.freeze(draft)`, a nested write was lost. A `subarray` read counted as a change. | Revert oracle: a keyed class instance in original rows. `proxy.test.ts`: rows after freeze, seal, or a fixed key against native rows, and the typed-array law with and without a write. | 7 oracle cases and 3 pinned cases on `ca0a2170c` | about +160 / — (proxy and utils modules) |
+| `cbd2aff06` | `sort`, `reverse`, `fill`, and `copyWithin` on a draft returned the private copy, not the draft. `main` has the same bug. | N: generated rows record whether a method returned the array itself. | the four self-returning mutators, on arrays and typed arrays | small (one comparison) |
+| `556cbd8ff` | No product bug. R's grammar could not write back the row's own object, the frozen-key boundary had no nearby witness, and the two-step callback property had no fixed campaign or replay. | R: same-object reverts. T: sealed and read-only configurable keys. `proxy.test.ts`: campaigns and replay. | F4 survived before the read-only configurable case | 0 |
 | `a49ae90e3` | None. A detached stored method must throw, as on a native row. | `proxy.test.ts` stored-function law. | passes | 0 |
 
 Design decisions for these fixes:
@@ -248,6 +254,11 @@ Limits that remain:
   change, because the snapshot holds it as an empty plain object.
 - `DataView` setters on a draft are not tracked. No owner generates a
   `DataView`.
+- A mutator method that changes nothing, such as `sort` on a sorted array or
+  `add` of a present Set member, counts as a change, so the row publishes an
+  equal value. Arrays, Maps, and Sets did this on `main`. Typed arrays do too
+  since `0ce101acf`. This is a deliberate limit: a revert check after mutators
+  would cost bytes to avoid a publish of an equal value.
 
 | Mutant | Owners |
 | --- | --- |
@@ -325,6 +336,11 @@ Mutants of each new form fail the owners:
 | F2 (on `7e5dfee25`): a frozen-key primitive read is a change | assertion failure (1/611) |
 | S1 (on `7e5dfee25`): `subarray` returns a plain view | assertion failure (2/611) |
 | S2 (on `7e5dfee25`): `subarray` marks a change on call | assertion failure (1/611) |
+| M1 (on `cbd2aff06`): mutators return the raw copy | assertion failure (12/587) |
+| M2 (on `cbd2aff06`): mutators always return the draft | assertion failure (10/587) |
+| A1, A2, N3, Y1, Y3, S1, S2 (rerun on `cbd2aff06` against N) | assertion failure (55, 21, 23, 7, 3, 3, 3 of 587) |
+| F3 (on `556cbd8ff`): the frozen-key boundary checks configurability alone | assertion failure (1/589) |
+| F4 (on `556cbd8ff`): the frozen-key boundary checks writability alone | assertion failure (1/589); survived before the read-only configurable case |
 
 The I and A3 to A5 mutants in the previous section apply to code that
 `31b2a6bd4` removed.
@@ -442,29 +458,134 @@ calls the trap through the handler object and skips primitives. The class
 check in `deepEquals` runs after the keys match, so an unequal row exits
 before it.
 
-## ORC-001 through ORC-012
+## ORC-001 through ORC-014
+
+The owners are:
+
+- **R**, the revert oracle `proxy-revert-oracle.property.test.ts`: four
+  generated properties over one grammar (general histories, partial reverts,
+  nested round trips, and URL and keyless writes).
+- **N**, the native-methods oracle `proxy-native-methods.property.test.ts`:
+  generated array and typed-array calls compared with native values.
+- **T**, the native-differential tables in `proxy.test.ts`: stored functions,
+  `defineProperty`, and frozen and sealed drafts. These are bounded
+  enumerations, not important generated properties.
+- **U**, the laws this change adds to `utils.property.test.ts`.
 
 | Requirement | Result |
 | --- | --- |
-| ORC-001 | The revert oracle's opening comment states the `getChanges()` contract, the six draft-equality rules, the three laws, the authority, and the limits. |
-| ORC-002 | The model is an encoding of plain-data specs. It does not import `draftValuesEqual`, `deepEquals`, or `deepClone`, and it never reads a draft. |
-| ORC-003 | The contract, model (`canon`, `step`, `expectedChanges`), grammar (`specArb`, `opArb`, `historyArb`), driver (`drive`, `realize`), and check (`expectHistory`) are separate in one file. |
-| ORC-004 | Pinned histories reconstruct each rule. The mutants above are the ablations. The positive witness is the range check. The grammar excludes mutator methods, top-level symbol writes, and class instances in the original row, as declared. |
-| ORC-005 | The driver uses `createChangeProxy`. The positive witnesses show that the fixed campaigns reach every operation, both revert outcomes, and at least 10 writes each of another URL and of a keyless instance. |
-| ORC-006 | Every mutant has an outcome class. P4 and A5 are recorded as equivalent with their reasons. |
-| ORC-007 | Fixed and random campaigns share each property, grammar, check, and budget (400 general histories, 200 for each focused property). The replay variables select a direct replay. |
-| ORC-008 | The model is a stateless recomputation over specs, so this requirement does not apply. |
-| ORC-009 | Terms match `proxy.ts` and `utils.ts`: draft, revert, changes, draft equality. Spec kinds such as `rows` are model-only and named in the oracle. |
-| ORC-010 | fast-check reports the seed, path, and shrunk history. Assertion messages give the field and the full history. |
-| ORC-011 | No shared semantic fault calls for a second formulation. |
-| ORC-012 | This record ties the reviewed revisions, outcome classes, limits, and performance evidence to the coverage map. |
+| ORC-001 | R states the `getChanges()` contract, nine draft-equality rules, the three laws, their authority (rules 1 to 6 from `src/proxy.ts` and earlier tests, rules 7 to 9 from this record), and the limits. N and each T table open with the contract they check, against a native value. |
+| ORC-002 | R's model is an encoding of plain-data specs. It does not import `draftValuesEqual`, `deepEquals`, or `deepClone`, and it never reads a draft. N and T take the expected result from the same call on a native value. U builds each pair with a known expected relation. |
+| ORC-003 | R keeps contract, model (`canon`, `step`, `expectedChanges`), grammar (the arbitraries), driver (`drive`, `realize`), and check (`expectHistory`) apart in one file. N's opening comment names the same five parts. |
+| ORC-004 | See ORC-004 controls below. |
+| ORC-005 | R and N drive the draft that `createChangeProxy` or `withChangeTracking` returns. The checkpoint is the end of the callback, before publication: R compares `getChanges()` and the draft, and N the call result and the published row. Positive witnesses: R's fixed general campaign reaches every operation, both revert outcomes, 20 or more same-object reverts, and a class-instance write-back. R's URL and keyless witness requires 10 or more of each write. N's witnesses reach every method, empty rows, holes, nested objects, `NaN`, and `-0`. The partial-revert and nested round-trip properties reach their histories by construction. |
+| ORC-006 | Every mutant in this record has an outcome class. P4 and A5 are equivalent within the tested domain, with reasons. |
+| ORC-007 | R, N, and the two-step callback property each run a fixed campaign (seeds `2026101`, `2026102`, `2026103`) and a random one with the same property, grammar, check, and budget. Replay: `TANSTACK_DB_PROXY_REVERT_*`, `TANSTACK_DB_PROXY_NATIVE_*`, and `TANSTACK_DB_PROXY_CALLBACK_*` accept a seed and path and run only the replay. Under mutant M1, a captured random failure (`[[], "sort", 0]`) replayed directly to the same counterexample. U uses the replay interface `utils.property.test.ts` already has. |
+| ORC-008 | R's model is a stateless recomputation over specs, and N and T use native values, so this requirement does not apply. |
+| ORC-009 | Terms match `proxy.ts` and `utils.ts`: draft, revert, changes, draft equality. Model-only spec kinds such as `rows` and `point` are named in R. |
+| ORC-010 | fast-check reports seed, path, and shrunk input. R's messages give the field and the history. N's give the row, method, and argument. |
+| ORC-011 | N and T are native-differential, a second formulation independent of R's model. No shared semantic fault was found that would call for another one. |
+| ORC-012 | This record ties the revisions, outcome classes, limits, and performance evidence to the coverage map. See Bug-class closure below. |
+| ORC-013 | See Reusable boundary laws below. |
+| ORC-014 | No controlled provider or host supplies a premise. Drafts run in-process on the JavaScript engine, so this requirement does not apply. |
+
+### ORC-004 controls
+
+**R (all four properties share one grammar).**
+
+- **Reconstruction:** the pinned histories rebuild each rule and each reported
+  bug in R's own grammar and check. These include a nested add-then-delete,
+  a stale parent edge, a key added as `undefined`, a typed-array subclass,
+  typed `NaN`, a URL write, a keyless write, and a class-instance write-back.
+  The general grammar reaches each of their shapes. `556cbd8ff` added the
+  same-object revert so that a write-back of the row's own object is
+  generated, not only pinned.
+- **Ablation:** each mutant in Mutant calibration and Fixes from the second
+  review removes one rule, edge, or clause. Every one fails an owner, except
+  P4, which is equivalent.
+- **Range:** three fields. Values are primitives `0`, `-0`, `1`, `NaN`,
+  `"a"`, `"b"`, `null`, and `undefined`; Dates (including invalid);
+  RegExps with `lastIndex` 0 or 1; Maps of up to two entries, with values
+  that may be Sets; Sets of up to two members; arrays of up to three slots
+  with holes; objects with up to two string keys and a symbol key; arrays of
+  rows; typed arrays of up to three elements (three classes); URLs; a keyed
+  class instance; and, as written values only, a keyless class instance. The
+  marginal cases are empty containers, `-0` and `NaN`, holes, and an absent
+  key against a key holding `undefined`. Typed-array subclasses, URLs,
+  keyless instances, and the class write-back each exposed a missing rule when
+  first added.
+- **Exclusion:** `applicable` rejects a nested write on a value that is not an
+  object, an index write beyond the length or into a `Uint8Array`, and a
+  revert of a field that is absent both originally and now. Model and driver
+  skip the same operations. Mutator methods and top-level symbol writes are
+  outside the grammar.
+
+**N (arrays and typed arrays).**
+
+- **Reconstruction:** the rows of the earlier pinned tables run for every
+  method as fixed cases.
+- **Ablation:** mutants A1, A2, N3, M1, M2, Y1, Y3, S1, and S2 each fail an
+  owner.
+- **Range:** array rows of up to four slots from `0` to `3`, `undefined`,
+  holes, objects, and nested arrays of up to two objects. Typed rows of up to
+  four values from `0`, `-0`, `1`, `2`, `NaN`, and `3.5`. An index-shaped
+  argument from 0 to 4, so negative and out-of-range indexes occur. Every
+  method of the built-in prototypes. The marginal cases are empty rows, holes,
+  and duplicate elements.
+- **Exclusion:** every generated call is legal JavaScript, and a native throw
+  is an observation that the draft must reproduce. A callback that writes is
+  outside the grammar.
+
+**U.** The laws use small fixed value sets with the pinned pairs inside the
+same property. Mutants K1 to K7 and R1 to R4 are the ablations. Every pair in
+the domain is legal, so no exclusion applies.
+
+The two-step callback property was already on `main`. This change only adds
+its campaigns and replay, and it makes no new grammar claim for it.
+
+### Reusable boundary laws (ORC-013)
+
+| Law | Premise witness | Nearby witness | Wrong boundary it rejects |
+| --- | --- | --- | --- |
+| A key that is both read-only and non-configurable returns the raw value and counts as changed | freeze, then a nested write | a sealed key, and a read-only configurable key, read without a change | F3 (configurability alone), F4 (writability alone) |
+| Two different classes differ, and a plain object compares with any class by keys | `Point` against `Other` | `Point` against a plain object, and a draft write-back | R1 (a plain object differs from a class), R2 (no class check) |
+| A keyless class instance equals only itself; a URL compares by `href` | `Secret` against `Secret` | `Secret` against `{}`, and a URL against an object that inherits the same `href` | K2, R3, K7 |
+| Typed-array class counts only in draft mode | the draft `Float64Array` to `Uint8Array` write | `deepEquals` of `Uint8Array` and `Int8Array` | T3, and the #434 test against a class check in general mode |
+| Every non-mutating array method reads through the draft | generated rows for every method | searches with draft elements and duplicates | A1 (all methods on the copy), A2 (searches on the copy) |
+
+### Bug-class closure (ORC-012)
+
+Each class below is bounded by contract, histories, production path, and
+observation. Open cells name their owner.
+
+| Class | Boundary | Open in-scope cells |
+| --- | --- | --- |
+| Stored functions read back bound | Any draft read path (field, index, iterator, spread, Map value, Set member, `Object.values`) on the `get` trap; observed by identity and `getChanges()` | A built-in method called through `this` on a nested Map or Set draft rejects the Proxy (T, a Proxy limit) |
+| Array and typed-array methods lose writes or identity | Every built-in method on generated rows (N); observed by result, identity, returned self, and the published row | A callback that writes (N, outside the grammar); a no-op mutator publishes an equal value (N and R, declared limit) |
+| `defineProperty` throws or loses changes | Value, accessor, read-only, and fixed definitions (T); observed by result, descriptor, read, and changes | None known |
+| Nested reverts leave stale changes | R's nested, delete, and round-trip histories; observed by `getChanges()` | Mutator methods have no revert check (R, declared) |
+| Equality hides writes of URLs, keyless objects, and classes | R's URL, keyed, and keyless class values and U's pairs; observed by `getChanges()` and `deepEquals` | Writing back a keyless instance of the original row is a change; a draft reads a class instance of the original row as a plain object (detachment owner) |
+| Frozen drafts lose nested writes | Freeze, seal, and fixed keys (T); observed by the published row | An object read under a frozen key publishes an equal value (T, declared) |
+
+None of these classes has a known reachable counterexample to its claimed law.
+The open cells are listed in the coverage map's Drafts row.
+
+### Guide prompts that do not apply
+
+The guide's reusable boundary-law checklist targets adapter and lifecycle
+oracles. Drafts have no provider, classifier, transport, `await` boundary, or
+acquired resource, so real-provider conformance, minimal ambiguity, name
+invariance, await-boundary transitions, local/transport refinement, and
+partial-construction cleanup do not apply. Representation symmetry appears as
+the class rule above. Value-and-work refinement does not apply, because no
+work bound is promised.
 
 ## Verification
 
-On `7e5dfee25`, which includes `origin/main` at `3463cf8ad`, with the built
+On `556cbd8ff`, which includes `origin/main` at `3463cf8ad`, with the built
 `dist`:
 
-- `packages/db` Vitest, typecheck off: 198 files, 7,822 tests.
+- `packages/db` Vitest, typecheck off: 199 files, 7,801 tests.
 - `packages/db` `tsc --noEmit`: no errors.
 - `pnpm check:mangle`: 368 names.
 - `pnpm test:minified-db`: error names, index metadata, query rows, and live
