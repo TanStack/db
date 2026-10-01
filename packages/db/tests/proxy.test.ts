@@ -2494,6 +2494,15 @@ describe(`stored functions behave like native values`, () => {
       `a stored method sees its object as this`,
       (row) => row.obj.bump() === row.obj,
     ],
+    [
+      `an inherited constructor`,
+      (row) => [
+        row.constructor === Object,
+        row.fns.constructor === Array,
+        row.m.constructor === Map,
+        row.s.constructor === Set,
+      ],
+    ],
   ]
 
   it.each(probes)(`%s gives the native result`, (_name, probe) => {
@@ -2521,5 +2530,123 @@ describe(`stored functions behave like native values`, () => {
     const changes = getChanges() as Partial<Row>
     expect(Object.keys(changes)).toEqual([`obj`])
     expect(changes.obj?.count).toBe(1)
+  })
+})
+
+/**
+ * Every array method that does not mutate the array must behave on a draft as
+ * on a native array. The method list comes from `Array.prototype`, so a new
+ * built-in method fails here until it has arguments below. Each call is
+ * observed by its result, the identity of each object in the result, and the
+ * row after a write through every object the result holds.
+ */
+describe(`array read methods behave like native arrays`, () => {
+  type Element = { x: number } | number | Array<{ x: number }>
+  type Row = { items: Array<Element> }
+  const make = (): Row => ({ items: [{ x: 1 }, 2, [{ x: 3 }], { x: 4 }] })
+  const mutators = new Set([
+    `copyWithin`,
+    `fill`,
+    `pop`,
+    `push`,
+    `reverse`,
+    `shift`,
+    `sort`,
+    `splice`,
+    `unshift`,
+  ])
+  // Arguments for each method. A draft element as the argument checks that
+  // searches find the element the draft returned.
+  const calls: Record<string, Array<(row: Row) => Array<unknown>>> = {
+    at: [() => [0], () => [-1]],
+    concat: [() => [[{ x: 5 }]], (row) => [row.items]],
+    entries: [() => []],
+    every: [() => [(v: unknown) => v !== 0]],
+    filter: [() => [(v: unknown) => typeof v === `object`]],
+    find: [() => [(v: unknown) => typeof v === `object`]],
+    findIndex: [() => [(v: unknown) => v === 2]],
+    findLast: [() => [(v: unknown) => typeof v === `object`]],
+    findLastIndex: [() => [(v: unknown) => v === 2]],
+    flat: [() => []],
+    flatMap: [() => [(v: unknown) => v]],
+    forEach: [() => [() => undefined]],
+    includes: [() => [2], (row) => [row.items[0]], (row) => [row.items.at(-1)]],
+    indexOf: [() => [2], (row) => [row.items[0]], (row) => [row.items.at(-1)]],
+    join: [() => [`,`]],
+    keys: [() => []],
+    lastIndexOf: [() => [2], (row) => [row.items[3]]],
+    map: [() => [(v: unknown) => v]],
+    reduce: [() => [(_acc: unknown, v: unknown) => v]],
+    reduceRight: [() => [(_acc: unknown, v: unknown) => v]],
+    slice: [() => [0, 2], () => [-1]],
+    some: [() => [(v: unknown) => v === 2]],
+    toLocaleString: [() => []],
+    toReversed: [() => []],
+    toSorted: [
+      () => [(a: unknown, b: unknown) => (a === 2 ? -1 : b === 2 ? 1 : 0)],
+    ],
+    toSpliced: [() => [0, 1]],
+    toString: [() => []],
+    values: [() => []],
+    with: [() => [1, { x: 7 }]],
+  }
+  const methods = Object.getOwnPropertyNames(Array.prototype).filter(
+    (name) =>
+      name !== `constructor` && name !== `length` && !mutators.has(name),
+  )
+
+  // Objects reachable from a result, in visit order, without repeats.
+  const objectsIn = (value: unknown, seen: Array<object> = []) => {
+    if (value === null || typeof value !== `object` || seen.includes(value))
+      return seen
+    seen.push(value)
+    for (const child of Array.isArray(value) ? value : Object.values(value))
+      objectsIn(child, seen)
+    return seen
+  }
+  const observe = (row: Row, method: string, args: Array<unknown>) => {
+    const call = (
+      row.items as unknown as Record<string, (...a: Array<unknown>) => unknown>
+    )[method]!
+    const raw = call.apply(row.items, args)
+    const result =
+      raw !== null && typeof raw === `object` && Symbol.iterator in raw
+        ? [...(raw as Iterable<unknown>)]
+        : raw
+    const snapshot = JSON.parse(JSON.stringify(result ?? null))
+    const objects = objectsIn(result).filter((o) => !Array.isArray(o))
+    // Where each object in the result sits in the row, by identity.
+    const identity = objects.map((o) =>
+      row.items.flatMap((element, i) =>
+        element === o
+          ? [i]
+          : Array.isArray(element) && element[0] === o
+            ? [i + 0.5]
+            : [],
+      ),
+    )
+    for (const o of objects) (o as { x: number }).x += 100
+    return { snapshot, identity }
+  }
+
+  it(`has arguments for every non-mutating method`, () => {
+    expect(methods.filter((name) => !(name in calls))).toEqual([])
+  })
+
+  const cases = methods.flatMap((method) =>
+    (calls[method] ?? []).map(
+      (makeArgs, i) => [`${method} #${i + 1}`, method, makeArgs] as const,
+    ),
+  )
+  it.each(cases)(`%s gives the native result`, (_name, method, makeArgs) => {
+    const native = make()
+    const expected = observe(native, method, makeArgs(native))
+    let actual: unknown
+    const changes = withChangeTracking(make(), (draft) => {
+      actual = observe(draft, method, makeArgs(draft))
+    })
+    expect(actual).toEqual(expected)
+    const changed = JSON.stringify(native) !== JSON.stringify(make())
+    expect(changes).toEqual(changed ? { items: native.items } : {})
   })
 })

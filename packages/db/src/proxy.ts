@@ -31,22 +31,16 @@ function unwrapDraft(value: unknown): unknown {
 }
 
 /**
- * Set of array methods that iterate with callbacks and may return elements.
- * Hoisted to module scope to avoid creating a new Set on every property access.
+ * Array methods whose results hold no elements of the array.
  */
-const CALLBACK_ITERATION_METHODS = new Set([
-  `find`,
-  `findLast`,
-  `findIndex`,
-  `findLastIndex`,
-  `filter`,
-  `map`,
-  `flatMap`,
-  `forEach`,
-  `some`,
-  `every`,
-  `reduce`,
-  `reduceRight`,
+const ARRAY_VALUE_METHODS = new Set([
+  `includes`,
+  `indexOf`,
+  `lastIndexOf`,
+  `join`,
+  `keys`,
+  `toLocaleString`,
+  `toString`,
 ])
 
 /**
@@ -515,6 +509,12 @@ export function createChangeProxy<
   const handler: ProxyHandler<T> = {
     get(ptarget, prop, receiver) {
       const value = changeTracker.copy_[prop as keyof T]
+      // Primitives return as read, from a getter or not.
+      if (
+        value === null ||
+        (typeof value !== `object` && typeof value !== `function`)
+      )
+        return value
 
       // If it's a getter, return the value directly
       const desc = Object.getOwnPropertyDescriptor(ptarget, prop)
@@ -525,9 +525,10 @@ export function createChangeProxy<
       // If the value is a function, bind it to the ptarget
       if (typeof value === `function`) {
         // A function stored as data is returned as stored, like any value. A
-        // call then sees the draft as `this`, so its writes are tracked. Only
-        // inherited methods (Array, Map, Set) need the handling below.
-        if (Object.hasOwn(ptarget, prop)) return value
+        // call then sees the draft as `this`, so its writes are tracked. A
+        // constructor is not a method. Only inherited methods (Array, Map,
+        // Set) need the handling below.
+        if (Object.hasOwn(ptarget, prop) || prop === `constructor`) return value
 
         // For Array methods that modify the array
         if (Array.isArray(ptarget)) {
@@ -539,12 +540,6 @@ export function createChangeProxy<
               changeTracker,
               markChanged,
             )
-          }
-
-          // Native callbacks read through the draft itself. This also tracks
-          // the callback array and implicit reduce seed.
-          if (CALLBACK_ITERATION_METHODS.has(methodName)) {
-            return value.bind(receiver)
           }
 
           if (
@@ -560,6 +555,18 @@ export function createChangeProxy<
                 methodName === `entries`,
               )
           }
+
+          // These results hold no elements, so they run on the copy, where a
+          // draft element argument is its copy.
+          if (ARRAY_VALUE_METHODS.has(methodName)) {
+            return (search: unknown, ...rest: Array<unknown>) =>
+              value.call(ptarget, unwrapDraft(search), ...rest)
+          }
+
+          // Other methods read through the draft itself, so returned and
+          // callback elements are drafts. This also tracks the callback array
+          // and implicit reduce seed.
+          return value.bind(receiver)
         }
 
         // For Map and Set methods that modify the collection
