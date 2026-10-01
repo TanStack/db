@@ -6,15 +6,20 @@ import type { RefProxy } from './ref-proxy.js'
  */
 export const REF_PROXY_BRAND: unique symbol = Symbol(`refProxy`)
 
-function hasRefProxyBrand(value: object): boolean {
+/** The brand a ref proxy answers, or undefined for any other value. */
+export function readRefProxyBrand(value: unknown): unknown {
+  if (!value || typeof value !== `object`) return undefined
   try {
-    return (value as Record<symbol, unknown>)[REF_PROXY_BRAND] === true
+    const brand = (value as Record<symbol, unknown>)[REF_PROXY_BRAND]
+    return brand === true || Array.isArray(brand) ? brand : undefined
   } catch {
     // A revoked proxy, such as a finished Immer draft, is not a ref proxy.
-    return false
+    return undefined
   }
 }
 
 export function isRefProxy(value: any): value is RefProxy {
-  return value && typeof value === `object` && hasRefProxyBrand(value)
+  return (
+    value && typeof value === `object` && readRefProxyBrand(value) !== undefined
+  )
 }
