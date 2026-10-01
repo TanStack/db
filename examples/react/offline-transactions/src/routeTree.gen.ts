@@ -9,21 +9,16 @@
 // Additionally, you should also exclude this file from your linter and/or formatter to prevent it from being checked or modified.
 
 import { Route as rootRouteImport } from './routes/__root'
-import { Route as WaSqliteRouteImport } from './routes/wa-sqlite'
-import { Route as LocalstorageRouteImport } from './routes/localstorage'
-import { Route as IndexeddbRouteImport } from './routes/indexeddb'
 import { Route as IndexRouteImport } from './routes/index'
+import { Route as IndexeddbRouteImport } from './routes/indexeddb'
+import { Route as LocalstorageRouteImport } from './routes/localstorage'
+import { Route as WaSqliteRouteImport } from './routes/wa-sqlite'
 import { Route as ApiTodosRouteImport } from './routes/api/todos'
 import { Route as ApiTodosTodoIdRouteImport } from './routes/api/todos.$todoId'
 
-const WaSqliteRoute = WaSqliteRouteImport.update({
-  id: '/wa-sqlite',
-  path: '/wa-sqlite',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const LocalstorageRoute = LocalstorageRouteImport.update({
-  id: '/localstorage',
-  path: '/localstorage',
+const IndexRoute = IndexRouteImport.update({
+  id: '/',
+  path: '/',
   getParentRoute: () => rootRouteImport,
 } as any)
 const IndexeddbRoute = IndexeddbRouteImport.update({
@@ -31,9 +26,14 @@ const IndexeddbRoute = IndexeddbRouteImport.update({
   path: '/indexeddb',
   getParentRoute: () => rootRouteImport,
 } as any)
-const IndexRoute = IndexRouteImport.update({
-  id: '/',
-  path: '/',
+const LocalstorageRoute = LocalstorageRouteImport.update({
+  id: '/localstorage',
+  path: '/localstorage',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const WaSqliteRoute = WaSqliteRouteImport.update({
+  id: '/wa-sqlite',
+  path: '/wa-sqlite',
   getParentRoute: () => rootRouteImport,
 } as any)
 const ApiTodosRoute = ApiTodosRouteImport.update({
@@ -109,18 +109,11 @@ export interface RootRouteChildren {
 
 declare module '@tanstack/react-router' {
   interface FileRoutesByPath {
-    '/wa-sqlite': {
-      id: '/wa-sqlite'
-      path: '/wa-sqlite'
-      fullPath: '/wa-sqlite'
-      preLoaderRoute: typeof WaSqliteRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/localstorage': {
-      id: '/localstorage'
-      path: '/localstorage'
-      fullPath: '/localstorage'
-      preLoaderRoute: typeof LocalstorageRouteImport
+    '/': {
+      id: '/'
+      path: '/'
+      fullPath: '/'
+      preLoaderRoute: typeof IndexRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/indexeddb': {
@@ -130,11 +123,18 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof IndexeddbRouteImport
       parentRoute: typeof rootRouteImport
     }
-    '/': {
-      id: '/'
-      path: '/'
-      fullPath: '/'
-      preLoaderRoute: typeof IndexRouteImport
+    '/localstorage': {
+      id: '/localstorage'
+      path: '/localstorage'
+      fullPath: '/localstorage'
+      preLoaderRoute: typeof LocalstorageRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/wa-sqlite': {
+      id: '/wa-sqlite'
+      path: '/wa-sqlite'
+      fullPath: '/wa-sqlite'
+      preLoaderRoute: typeof WaSqliteRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/api/todos': {
