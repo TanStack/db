@@ -286,13 +286,17 @@ describe('optimizer aggregate semantics', () => {
  *
  * Bounded grammar: LEFT, RIGHT, INNER, and FULL joins; one or two pushable
  * equality predicates; separate WHERE clauses or one AND; both clause orders;
- * greater-than and nullable-field isUndefined controls; then a LEFT/INNER
- * chain with two distinct pushable sources. Re-optimizing output checks the
- * later-pass boundary. The public driver includes matched and unmatched rows
- * and an OR predicate that accepts an unmatched row.
+ * greater-than, nullable-field and namespace-only isUndefined controls; then
+ * a LEFT/INNER chain with two distinct pushable sources and chains ending in
+ * RIGHT/FULL. A source-free false clause and an ordered QueryRef that declines
+ * pushdown check preservation of regular predicates. Re-optimizing output
+ * checks the later-pass boundary. The public driver includes matched and
+ * unmatched rows, an OR predicate that accepts an unmatched row, and a
+ * source-free false predicate that rejects every row.
  *
  * The structural checkpoint is `optimizeQuery` return: each source and outer
- * predicate has its expected exact multiplicity and marker. The public
+ * predicate has its expected exact multiplicity and marker, and the extracted
+ * source clauses exclude nullable sources. The public
  * checkpoint is the first synchronous live-query Collection snapshot. These
  * checks do not claim incremental histories, arbitrary functions, UNIONs, or
  * a maximum wall-clock runtime.
@@ -314,11 +318,12 @@ function observedTerms(where: Array<Where> | undefined): Array<ObservedTerm> {
           if (
             !(arg instanceof Func) ||
             arg.name !== `eq` ||
-            !(arg.args[0] instanceof PropRef)
+            !(arg.args[0] instanceof PropRef) ||
+            !(arg.args[1] instanceof Value)
           ) {
             throw new Error(`Unexpected OR term in residual oracle`)
           }
-          return arg.args[0].path.join(`.`)
+          return `${arg.args[0].path.join(`.`)}=${JSON.stringify(arg.args[1].value)}`
         })
         terms.push({ key: `or(${keys.join(`,`)})`, residual })
         return
@@ -330,17 +335,22 @@ function observedTerms(where: Array<Where> | undefined): Array<ObservedTerm> {
       ) {
         throw new Error(`Unexpected optimizer predicate in residual oracle`)
       }
-      const key = current.args[0].path.join(`.`)
-      const comparedRef = current.args[1]
-      terms.push({
-        key:
-          current.name !== `eq`
-            ? `${current.name}(${key})`
-            : comparedRef instanceof PropRef
-              ? `${key}=${comparedRef.path.join(`.`)}`
-              : key,
-        residual,
-      })
+      const path = current.args[0].path.join(`.`)
+      const compared = current.args[1]
+      let key: string
+      if (current.name === `isUndefined`) {
+        key = `isUndefined(${path})`
+      } else if (compared instanceof Value) {
+        key =
+          current.name === `gt`
+            ? `gt(${path},${JSON.stringify(compared.value)})`
+            : `${path}=${JSON.stringify(compared.value)}`
+      } else if (current.name === `eq` && compared instanceof PropRef) {
+        key = `${path}=${compared.path.join(`.`)}`
+      } else {
+        throw new Error(`Unexpected compared value in residual oracle`)
+      }
+      terms.push({ key, residual })
     }
     visit(expression)
   }
@@ -381,6 +391,21 @@ function expectedTerms(
 }
 
 describe(`optimizer residual convergence`, () => {
+  test(`structural recorder distinguishes changed predicate values`, () => {
+    expect(observedTerms([predicate(`team`, `active`, true)])).not.toEqual(
+      observedTerms([predicate(`team`, `active`, false)]),
+    )
+    expect(
+      observedTerms([
+        new Func(`gt`, [new PropRef([`team`, `score`]), new Value(5)]),
+      ]),
+    ).not.toEqual(
+      observedTerms([
+        new Func(`gt`, [new PropRef([`team`, `score`]), new Value(6)]),
+      ]),
+    )
+  })
+
   const joins = [
     { type: `left`, teamPush: true, memberPush: false, residual: true },
     { type: `right`, teamPush: false, memberPush: true, residual: true },
@@ -393,18 +418,18 @@ describe(`optimizer residual convergence`, () => {
       for (const reversed of [false, true]) {
         for (const twoActive of [false, true]) {
           test(`${join.type} ${form} reversed=${reversed} twoActive=${twoActive} preserves each predicate once`, () => {
-            const teamKeys = [`team.active`]
-            const memberKeys = [`member.userId`]
+            const teamKeys = [`team.active=true`]
+            const memberKeys = [`member.userId=100`]
             const clauses = [
               predicate(`team`, `active`, true),
               predicate(`member`, `userId`, 100),
             ]
             if (twoActive) {
               if (join.type === `right`) {
-                memberKeys.push(`member.role`)
+                memberKeys.push(`member.role="admin"`)
                 clauses.push(predicate(`member`, `role`, `admin`))
               } else {
-                teamKeys.push(`team.region`)
+                teamKeys.push(`team.region="west"`)
                 clauses.push(predicate(`team`, `region`, `west`))
               }
             }
@@ -425,7 +450,25 @@ describe(`optimizer residual convergence`, () => {
               where,
             }
 
-            const optimized = optimizeQuery(query).optimizedQuery
+            const result = optimizeQuery(query)
+            const optimized = result.optimizedQuery
+            expect([...result.sourceWhereClauses.keys()].sort()).toEqual(
+              [
+                ...(join.teamPush ? [`team`] : []),
+                ...(join.memberPush ? [`member`] : []),
+              ].sort(),
+            )
+            for (const [alias, keys] of [
+              [`team`, teamKeys],
+              [`member`, memberKeys],
+            ] as const) {
+              const clause = result.sourceWhereClauses.get(alias)
+              if (clause) {
+                expect(observedTerms([clause])).toEqual(
+                  expectedTerms(keys, false),
+                )
+              }
+            }
             const laterPass = optimizeQuery(optimized).optimizedQuery
             for (const actual of [optimized, laterPass]) {
               expect(sourceTerms(actual.from)).toEqual(
@@ -481,18 +524,17 @@ describe(`optimizer residual convergence`, () => {
     const optimized = optimizeQuery(query).optimizedQuery
     for (const actual of [optimized, optimizeQuery(optimized).optimizedQuery]) {
       expect(sourceTerms(actual.from)).toEqual(
-        expectedTerms([`team.active`], false),
+        expectedTerms([`team.active=true`], false),
       )
       expect(sourceTerms(actual.join![0]!.from)).toEqual([])
       expect(sourceTerms(actual.join![1]!.from)).toEqual(
-        expectedTerms([`tag.region`], false),
+        expectedTerms([`tag.region="west"`], false),
       )
       expect(observedTerms(actual.where)).toEqual([
-        { key: `member.userId`, residual: false },
-        { key: `tag.region`, residual: true },
-        { key: `team.active`, residual: true },
+        { key: `member.userId=100`, residual: false },
+        { key: `tag.region="west"`, residual: true },
+        { key: `team.active=true`, residual: true },
       ])
-      expect(actual.where).toHaveLength(2)
     }
   })
 
@@ -521,7 +563,7 @@ describe(`optimizer residual convergence`, () => {
         where: [cross, active],
       }
       const optimized = optimizeQuery(query).optimizedQuery
-      const activeKey = `or(${activeAlias}.active,${activeAlias}.region)`
+      const activeKey = `or(${activeAlias}.active=true,${activeAlias}.region="west")`
       const activeSource =
         joinType === `left` ? optimized.from : optimized.join![0]!.from
       expect(sourceTerms(activeSource)).toEqual(
@@ -533,7 +575,6 @@ describe(`optimizer residual convergence`, () => {
           { key: `team.id=member.teamId`, residual: false },
         ].sort((a, b) => a.key.localeCompare(b.key)),
       )
-      expect(optimized.where).toHaveLength(2)
     })
   }
 
@@ -558,14 +599,172 @@ describe(`optimizer residual convergence`, () => {
     const optimized = optimizeQuery(query).optimizedQuery
     for (const actual of [optimized, optimizeQuery(optimized).optimizedQuery]) {
       expect(sourceTerms(actual.from)).toEqual(
-        expectedTerms([`gt(team.score)`], false),
+        expectedTerms([`gt(team.score,5)`], false),
       )
       expect(sourceTerms(actual.join![0]!.from)).toEqual([])
       expect(observedTerms(actual.where)).toEqual([
-        { key: `gt(team.score)`, residual: true },
+        { key: `gt(team.score,5)`, residual: true },
         { key: `isUndefined(member.optional)`, residual: false },
       ])
-      expect(actual.where).toHaveLength(2)
+    }
+  })
+
+  test(`a source-free false predicate survives optimization passes`, () => {
+    const collection = inertCollection(`residual-constant`)
+    const query: QueryIR = {
+      from: new CollectionRef(collection, `team`),
+      join: [
+        {
+          type: `left`,
+          from: new CollectionRef(collection, `member`),
+          left: new PropRef([`team`, `id`]),
+          right: new PropRef([`member`, `teamId`]),
+        },
+      ],
+      where: [predicate(`team`, `active`, true), new Value(false)],
+    }
+
+    for (const actual of [
+      optimizeQuery(query).optimizedQuery,
+      optimizeQuery(optimizeQuery(query).optimizedQuery).optimizedQuery,
+    ]) {
+      expect(
+        actual.where?.some(
+          (clause) => clause instanceof Value && clause.value === false,
+        ),
+      ).toBe(true)
+    }
+  })
+
+  test(`a namespace predicate stays outside a nullable source`, () => {
+    const collection = inertCollection(`residual-namespace`)
+    const query: QueryIR = {
+      from: new CollectionRef(collection, `team`),
+      join: [
+        {
+          type: `left`,
+          from: new CollectionRef(collection, `member`),
+          left: new PropRef([`team`, `id`]),
+          right: new PropRef([`member`, `teamId`]),
+        },
+      ],
+      where: [
+        predicate(`team`, `active`, true),
+        new Func(`isUndefined`, [new PropRef([`member`])]),
+      ],
+    }
+
+    const result = optimizeQuery(query)
+    expect([...result.sourceWhereClauses.keys()]).toEqual([`team`])
+    for (const actual of [
+      result.optimizedQuery,
+      optimizeQuery(result.optimizedQuery).optimizedQuery,
+    ]) {
+      expect(sourceTerms(actual.from)).toEqual(
+        expectedTerms([`team.active=true`], false),
+      )
+      expect(sourceTerms(actual.join![0]!.from)).toEqual([])
+      expect(observedTerms(actual.where)).toEqual([
+        { key: `isUndefined(member)`, residual: false },
+        { key: `team.active=true`, residual: true },
+      ])
+    }
+  })
+
+  for (const laterJoin of [`right`, `full`] as const) {
+    test(`a later ${laterJoin} join keeps earlier aliases nullable`, () => {
+      const collection = inertCollection(`residual-later-${laterJoin}`)
+      const query: QueryIR = {
+        from: new CollectionRef(collection, `team`),
+        join: [
+          {
+            type: `left`,
+            from: new CollectionRef(collection, `member`),
+            left: new PropRef([`team`, `id`]),
+            right: new PropRef([`member`, `teamId`]),
+          },
+          {
+            type: laterJoin,
+            from: new CollectionRef(collection, `tag`),
+            left: new PropRef([`team`, `id`]),
+            right: new PropRef([`tag`, `teamId`]),
+          },
+        ],
+        where: [
+          predicate(`team`, `active`, true),
+          predicate(`member`, `userId`, 100),
+          predicate(`tag`, `region`, `west`),
+        ],
+      }
+
+      const result = optimizeQuery(query)
+      expect([...result.sourceWhereClauses.keys()]).toEqual(
+        laterJoin === `right` ? [`tag`] : [],
+      )
+      for (const actual of [
+        result.optimizedQuery,
+        optimizeQuery(result.optimizedQuery).optimizedQuery,
+      ]) {
+        expect(sourceTerms(actual.from)).toEqual([])
+        expect(sourceTerms(actual.join![0]!.from)).toEqual([])
+        expect(sourceTerms(actual.join![1]!.from)).toEqual(
+          laterJoin === `right`
+            ? expectedTerms([`tag.region="west"`], false)
+            : [],
+        )
+        expect(observedTerms(actual.where)).toEqual([
+          { key: `member.userId=100`, residual: false },
+          { key: `tag.region="west"`, residual: laterJoin === `right` },
+          { key: `team.active=true`, residual: false },
+        ])
+      }
+    })
+  }
+
+  test(`an ordered QueryRef that declines pushdown keeps its outer predicate`, () => {
+    const collection = inertCollection(`residual-declined-queryref`)
+    const query: QueryIR = {
+      from: new QueryRef(
+        {
+          from: new CollectionRef(collection, `team`),
+          orderBy: [
+            {
+              expression: new PropRef([`team`, `id`]),
+              compareOptions: {
+                direction: `desc`,
+                nulls: `first`,
+                stringSort: `locale`,
+              },
+            },
+          ],
+          limit: 1,
+        },
+        `team`,
+      ),
+      join: [
+        {
+          type: `left`,
+          from: new CollectionRef(collection, `member`),
+          left: new PropRef([`team`, `id`]),
+          right: new PropRef([`member`, `teamId`]),
+        },
+      ],
+      where: [
+        predicate(`team`, `active`, true),
+        predicate(`member`, `userId`, 100),
+      ],
+    }
+
+    const result = optimizeQuery(query)
+    expect(result.sourceWhereClauses.size).toBe(0)
+    for (const actual of [
+      result.optimizedQuery,
+      optimizeQuery(result.optimizedQuery).optimizedQuery,
+    ]) {
+      expect(sourceTerms(actual.from)).toEqual([])
+      expect(observedTerms(actual.where)).toEqual(
+        expectedTerms([`member.userId=100`, `team.active=true`], false),
+      )
     }
   })
 
@@ -592,12 +791,12 @@ describe(`optimizer residual convergence`, () => {
     const optimized = optimizeQuery(query).optimizedQuery
     for (const actual of [optimized, optimizeQuery(optimized).optimizedQuery]) {
       expect(sourceTerms(actual.from)).toEqual(
-        expectedTerms([`team.active`, `team.region`], false),
+        expectedTerms([`team.active=true`, `team.region="west"`], false),
       )
       expect(observedTerms(actual.where)).toEqual([
-        { key: `member.userId`, residual: false },
-        { key: `team.active`, residual: true },
-        { key: `team.region`, residual: true },
+        { key: `member.userId=100`, residual: false },
+        { key: `team.active=true`, residual: true },
+        { key: `team.region="west"`, residual: true },
       ])
       expect(actual.where).toHaveLength(2)
     }
@@ -616,6 +815,36 @@ describe(`optimizer residual convergence`, () => {
     { id: 12, teamId: 2, userId: 100 },
     { id: 13, teamId: 4, userId: 100 },
   ]
+
+  test(`a source-free false predicate publishes no joined rows`, () => {
+    const teamCollection = createCollection(
+      mockSyncCollectionOptions<Team>({
+        id: `optimizer-residual-constant-team`,
+        getKey: (row) => row.id,
+        initialData: teams,
+      }),
+    )
+    const memberCollection = createCollection(
+      mockSyncCollectionOptions<Member>({
+        id: `optimizer-residual-constant-member`,
+        getKey: (row) => row.id,
+        initialData: members,
+      }),
+    )
+    const result = createLiveQueryCollection({
+      startSync: true,
+      query: (q) =>
+        q
+          .from({ team: teamCollection })
+          .leftJoin({ member: memberCollection }, ({ team, member }) =>
+            eq(team.id, member.teamId),
+          )
+          .where(({ team }) => eq(team.active, true))
+          .where(() => new Value(false)),
+    })
+
+    expect(result.toArray).toEqual([])
+  })
 
   for (const joinType of [`left`, `right`] as const) {
     test(`${joinType} join publishes the independently joined rows`, () => {

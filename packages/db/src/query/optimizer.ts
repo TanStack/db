@@ -678,11 +678,10 @@ function groupWhereClauses(
         singleSource.set(source, [])
       }
       singleSource.get(source)!.push(clause.expression)
-    } else if (clause.touchedSources.size > 1 || clause.hasNamespaceOnlyRef) {
-      // Multi-source clause or namespace-only reference - must stay in main query
+    } else {
+      // Clauses without one pushable source must stay in the main query.
       multiSource.push(clause.expression)
     }
-    // Skip clauses that touch no sources (constants) - they don't need optimization
   }
 
   // Combine multiple clauses for each source with AND
