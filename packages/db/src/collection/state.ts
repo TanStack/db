@@ -167,9 +167,13 @@ export class CollectionStateManager<
   // failed mutations must not add to, or erase a sibling's entry in, this set.
   public pendingLocalOrigins = new Set<TKey>()
 
-  private virtualPropsCache = new WeakMap<
-    object,
+  // Keyed by row key, not row object: adding a WeakMap entry for each
+  // published row cost more than the copy it saves. Sync writes, deletes,
+  // and cleanup drop a key's entry.
+  private virtualPropsCache = new Map<
+    TKey,
     {
+      row: TOutput
       synced: boolean
       origin: VirtualOrigin
       key: TKey
@@ -334,9 +338,10 @@ export class CollectionStateManager<
     const resolvedKey = existingRow.$key ?? virtualProps.$key
     const collectionId = existingRow.$collectionId ?? virtualProps.$collectionId
 
-    const cached = this.virtualPropsCache.get(row as object)
+    const cached = this.virtualPropsCache.get(resolvedKey)
     if (
       cached &&
+      cached.row === row &&
       cached.synced === synced &&
       cached.origin === origin &&
       cached.key === resolvedKey &&
@@ -353,7 +358,8 @@ export class CollectionStateManager<
       $collectionId: collectionId,
     } as WithVirtualProps<TOutput, TKey>
 
-    this.virtualPropsCache.set(row as object, {
+    this.virtualPropsCache.set(resolvedKey, {
+      row,
       synced,
       origin,
       key: resolvedKey,
@@ -365,6 +371,7 @@ export class CollectionStateManager<
   }
 
   private clearOriginTrackingState(): void {
+    this.virtualPropsCache.clear()
     this.rowOrigins.clear()
     this.pendingLocalChanges.clear()
     this.pendingLocalOrigins.clear()
@@ -394,9 +401,8 @@ export class CollectionStateManager<
     change: ChangeMessage<TOutput, TKey>,
   ): ChangeMessage<WithVirtualProps<TOutput, TKey>, TKey> {
     const { __virtualProps } = change as InternalChangeMessage<TOutput, TKey>
-    const enrichedValue = __virtualProps?.value
-      ? this.enrichWithVirtualPropsSnapshot(change.value, __virtualProps.value)
-      : this.enrichWithVirtualProps(change.value, change.key)
+    // The cache holds one row per key, so the previous row goes first and
+    // the published value stays the row that later reads return.
     const enrichedPreviousValue = change.previousValue
       ? __virtualProps?.previousValue
         ? this.enrichWithVirtualPropsSnapshot(
@@ -405,6 +411,11 @@ export class CollectionStateManager<
           )
         : this.enrichWithVirtualProps(change.previousValue, change.key)
       : undefined
+    const enrichedValue = __virtualProps?.value
+      ? this.enrichWithVirtualPropsSnapshot(change.value, __virtualProps.value)
+      : this.enrichWithVirtualProps(change.value, change.key)
+    // A deleted key, such as a rolled-back insert, has no row to read again.
+    if (change.type === `delete`) this.virtualPropsCache.delete(change.key)
 
     return {
       key: change.key,
@@ -1584,8 +1595,7 @@ export class CollectionStateManager<
 
           // A sync source may reuse a live-reading row object, making an
           // enriched snapshot cached for an earlier publication stale.
-          if (operation.type !== `delete`)
-            this.virtualPropsCache.delete(operation.value)
+          this.virtualPropsCache.delete(key)
 
           // Update synced data
           switch (operation.type) {
