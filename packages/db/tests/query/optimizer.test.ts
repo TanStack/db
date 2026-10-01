@@ -7,6 +7,7 @@ import {
   PropRef,
   QueryRef,
   Value,
+  createResidualWhere,
 } from '../../src/query/ir.js'
 import type { QueryIR } from '../../src/query/ir.js'
 
@@ -1695,6 +1696,44 @@ describe(`Query Optimizer`, () => {
 
       // The optimizer should NOT create a subquery for the nullable side
       expect(optimizedQuery.join![0]!.from.type).toBe(`collectionRef`)
+    })
+
+    test(`should push a LEFT JOIN active-side clause down once when a nullable-side clause remains`, () => {
+      const teamsCollection = { id: `teams` } as any
+      const teamMembersCollection = { id: `team-members` } as any
+
+      const memberFilter = createEq(
+        createPropRef(`teamMember`, `user_id`),
+        createValue(100),
+      )
+      const teamFilter = createEq(
+        createPropRef(`team`, `active`),
+        createValue(true),
+      )
+
+      const query: QueryIR = {
+        from: new CollectionRef(teamsCollection, `team`),
+        join: [
+          {
+            type: `left`,
+            from: new CollectionRef(teamMembersCollection, `teamMember`),
+            left: createPropRef(`team`, `id`),
+            right: createPropRef(`teamMember`, `team_id`),
+          },
+        ],
+        where: [memberFilter, teamFilter],
+      }
+
+      const { optimizedQuery } = optimizeQuery(query)
+
+      expect(optimizedQuery.from.type).toBe(`queryRef`)
+      expect((optimizedQuery.from as QueryRef).query.where).toEqual([
+        teamFilter,
+      ])
+      expect(optimizedQuery.where).toEqual([
+        memberFilter,
+        createResidualWhere(teamFilter),
+      ])
     })
 
     test(`should preserve WHERE clause semantics when pushing down to RIGHT JOIN`, () => {

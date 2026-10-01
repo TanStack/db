@@ -786,16 +786,30 @@ function applyOptimizations(
   // Combine multiple remaining WHERE clauses into a single clause to avoid
   // multiple filter operations in the pipeline (performance optimization)
   // First flatten any nested AND expressions to avoid and(and(...), ...)
-  const finalWhere: Array<Where> =
-    remainingWhereClauses.length > 1
+  // Residual clauses are combined separately: merging them into a regular
+  // clause would drop the residual marker, so the next optimization pass
+  // would push the same predicates down again and never converge.
+  const combineRemaining = (clauses: Array<Where>): Array<Where> =>
+    clauses.length > 1
       ? [
           combineWithAnd(
-            remainingWhereClauses.flatMap((clause) =>
+            clauses.flatMap((clause) =>
               splitAndClausesRecursive(getWhereExpression(clause)),
             ),
           ),
         ]
-      : remainingWhereClauses
+      : clauses
+  const residualClauses = remainingWhereClauses.filter(isResidualWhere)
+  const finalWhere: Array<Where> = [
+    ...combineRemaining(
+      remainingWhereClauses.filter((clause) => !isResidualWhere(clause)),
+    ),
+    ...(residualClauses.length > 1
+      ? combineRemaining(residualClauses).map((clause) =>
+          createResidualWhere(getWhereExpression(clause)),
+        )
+      : residualClauses),
+  ]
 
   // Preserve untouched query options while replacing the optimized clauses.
   const optimizedQuery: QueryIR = {
