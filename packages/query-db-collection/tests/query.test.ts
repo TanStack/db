@@ -27,6 +27,7 @@ import {
 import { evaluateReferenceExpression } from '../../db/tests/reference-expression'
 import { persistedCollectionOptions } from '../../db-sqlite-persistence-core/src'
 import { queryCollectionOptions } from '../src/query'
+import { SyncNotInitializedError } from '../src/errors'
 import type { QueryFunctionContext } from '@tanstack/query-core'
 import type {
   Collection,
@@ -4342,6 +4343,41 @@ describe(`QueryCollection`, () => {
       expect(collection.size).toBe(1)
     })
 
+    it(`observes rejection from an unsupported batch callback result`, async () => {
+      const collection = createCollection(
+        queryCollectionOptions<TestItem>({
+          id: `unsupported-batch-callback-result`,
+          queryKey: [`unsupported-batch-callback-result`],
+          queryFn: () => Promise.resolve([]),
+          queryClient,
+          getKey,
+          startSync: true,
+        }),
+      )
+
+      try {
+        await collection.stateWhenReady()
+        let observedRejection = false
+        const callbackResult = {
+          then(
+            _resolve: (value: unknown) => void,
+            reject: (reason: unknown) => void,
+          ) {
+            observedRejection = true
+            reject(new Error(`callback rejected`))
+          },
+        }
+
+        expect(() => collection.utils.writeBatch(() => callbackResult)).toThrow(
+          /async callbacks/,
+        )
+        await Promise.resolve()
+        expect(observedRejection).toBe(true)
+      } finally {
+        await collection.cleanup()
+      }
+    })
+
     it(`should prevent nested writeBatch calls`, async () => {
       const queryKey = [`nestedBatch`]
       const initialItems: Array<TestItem> = [{ id: `1`, name: `Item 1` }]
@@ -4723,6 +4759,366 @@ describe(`QueryCollection`, () => {
         todosCollection._state.syncedData.get(`1`)?.metadata.createdBy,
       ).toBe(`user789`)
       expect(todosCollection.get(`1`)?.metadata.createdBy).toBe(`user789`)
+    })
+
+    it(`awaits persisted server responses in update handlers`, async () => {
+      type Row = { id: string; a: number; b: number; revision: number }
+      let server: Row = { id: `p`, a: 0, b: 0, revision: 1 }
+      const requestRevisions: Array<number> = []
+      const adapter = createPersistedQueryAdapter<Row>({
+        rows: new Map([[server.id, { ...server }]]),
+      })
+      const collection = createCollection(
+        persistedCollectionOptions<
+          Row,
+          string | number,
+          never,
+          QueryCollectionUtils<Row>
+        >({
+          ...queryCollectionOptions<Row>({
+            id: `canonical-update-settlement`,
+            queryKey: [`canonical-update-settlement`],
+            queryFn: () => Promise.resolve([{ ...server }]),
+            queryClient,
+            getKey: (row) => row.id,
+            startSync: true,
+            onUpdate: async ({
+              transaction,
+              collection: handlerCollection,
+            }) => {
+              const request = transaction.mutations[0].modified
+              requestRevisions.push(request.revision)
+              server = { ...request, a: 10, revision: server.revision + 1 }
+              await handlerCollection.utils.writeUpdate({ ...server })
+              expect(adapter.rows.get(`p`)?.revision).toBe(server.revision)
+              return { refetch: false }
+            },
+          }),
+          persistence: { adapter },
+        }),
+      )
+
+      try {
+        await collection.stateWhenReady()
+        const first = collection.update(`p`, (draft) => {
+          draft.a = 1
+        })
+        await first.isPersisted.promise
+        expect(adapter.rows.get(`p`)?.revision).toBe(2)
+        expect(collection.get(`p`)).toMatchObject({
+          a: 10,
+          revision: 2,
+          $synced: true,
+        })
+
+        const second = collection.update(`p`, (draft) => {
+          draft.b = 1
+        })
+        await second.isPersisted.promise
+        expect(requestRevisions).toEqual([1, 2])
+        expect(adapter.rows.get(`p`)?.revision).toBe(3)
+        expect(collection.get(`p`)).toMatchObject({
+          a: 10,
+          b: 1,
+          revision: 3,
+          $synced: true,
+        })
+      } finally {
+        await collection.cleanup()
+      }
+    })
+
+    it(`waits for persisted direct writes and batch writes`, async () => {
+      type Row = { id: string; name: string }
+      const initial: Row = { id: `base`, name: `Initial` }
+      const adapter = createPersistedQueryAdapter<Row>({
+        rows: new Map([[initial.id, initial]]),
+      })
+      const collection = createCollection(
+        persistedCollectionOptions<
+          Row,
+          string | number,
+          never,
+          QueryCollectionUtils<Row>
+        >({
+          ...queryCollectionOptions<Row>({
+            id: `direct-write-receipts`,
+            queryKey: [`direct-write-receipts`],
+            queryFn: () => Promise.resolve([initial]),
+            queryClient,
+            getKey: (row) => row.id,
+            startSync: true,
+          }),
+          persistence: { adapter },
+        }),
+      )
+
+      try {
+        await collection.stateWhenReady()
+        const applyCommittedTx = adapter.applyCommittedTx
+        let gate: ReturnType<typeof createDeferred<void>> | undefined
+        let entered: ReturnType<typeof createDeferred<void>> | undefined
+        adapter.applyCommittedTx = async (...args) => {
+          entered?.resolve(undefined)
+          await gate?.promise
+          return applyCommittedTx(...args)
+        }
+
+        async function expectPersistenceWait(
+          write: () => Promise<void>,
+          checkApplied: () => void,
+          checkPending?: () => void,
+        ) {
+          gate = createDeferred<void>()
+          entered = createDeferred<void>()
+          const completion = write()
+          let settled = false
+          void completion.then(
+            () => (settled = true),
+            () => (settled = true),
+          )
+          await entered.promise
+          await Promise.resolve()
+          expect(settled).toBe(false)
+          checkPending?.()
+          gate.resolve(undefined)
+          await completion
+          checkApplied()
+        }
+
+        await expectPersistenceWait(
+          () => collection.utils.writeInsert({ id: `inserted`, name: `One` }),
+          () => expect(adapter.rows.get(`inserted`)?.name).toBe(`One`),
+        )
+        await expectPersistenceWait(
+          () => collection.utils.writeUpdate({ id: `base`, name: `Updated` }),
+          () => expect(adapter.rows.get(`base`)?.name).toBe(`Updated`),
+        )
+        await expectPersistenceWait(
+          () => collection.utils.writeUpsert({ id: `upserted`, name: `Two` }),
+          () => expect(adapter.rows.get(`upserted`)?.name).toBe(`Two`),
+        )
+        await expectPersistenceWait(
+          () => collection.utils.writeDelete(`inserted`),
+          () => expect(adapter.rows.has(`inserted`)).toBe(false),
+        )
+
+        let inner!: Promise<void>
+        let innerSettled = false
+        await expectPersistenceWait(
+          () =>
+            collection.utils.writeBatch(() => {
+              inner = collection.utils.writeUpdate({
+                id: `base`,
+                name: `Batched`,
+              })
+              void inner.then(
+                () => (innerSettled = true),
+                () => (innerSettled = true),
+              )
+              collection.utils.writeDelete(`upserted`)
+            }),
+          () => {
+            expect(adapter.rows.get(`base`)?.name).toBe(`Batched`)
+            expect(adapter.rows.has(`upserted`)).toBe(false)
+          },
+          () => {
+            expect(inner).toBeInstanceOf(Promise)
+            expect(innerSettled).toBe(false)
+          },
+        )
+        await inner
+        expect(innerSettled).toBe(true)
+
+        await expectPersistenceWait(
+          () =>
+            collection.utils.writeBatch(() =>
+              collection.utils.writeUpdate({ id: `base`, name: `Concise` }),
+            ),
+          () => expect(adapter.rows.get(`base`)?.name).toBe(`Concise`),
+        )
+
+        const failure = new Error(`Persistence failed`)
+        adapter.applyCommittedTx = () => Promise.reject(failure)
+        const consoleError = vi
+          .spyOn(console, `error`)
+          .mockImplementation(() => {})
+        try {
+          let innerFailure!: Promise<void>
+          const batchFailure = collection.utils.writeBatch(() => {
+            innerFailure = collection.utils.writeUpdate({
+              id: `base`,
+              name: `Rejected`,
+            })
+          })
+          const expectedFailure = {
+            name: `PersistedCollectionDurabilityError`,
+            cause: failure,
+          }
+          await expect(batchFailure).rejects.toMatchObject(expectedFailure)
+          await expect(innerFailure).rejects.toMatchObject(expectedFailure)
+        } finally {
+          consoleError.mockRestore()
+        }
+      } finally {
+        await collection.cleanup()
+      }
+    })
+
+    it(`allows a synchronous batch callback to return another Collection's write or batch`, async () => {
+      const todos = createCollection(
+        queryCollectionOptions<TestItem>({
+          id: `batch-cross-collection-todos`,
+          queryKey: [`batch-cross-collection-todos`],
+          queryFn: () => Promise.resolve([]),
+          queryClient,
+          getKey,
+          startSync: true,
+        }),
+      )
+      const tags = createCollection(
+        queryCollectionOptions<TestItem>({
+          id: `batch-cross-collection-tags`,
+          queryKey: [`batch-cross-collection-tags`],
+          queryFn: () => Promise.resolve([]),
+          queryClient,
+          getKey,
+          startSync: true,
+        }),
+      )
+
+      try {
+        await Promise.all([todos.stateWhenReady(), tags.stateWhenReady()])
+        const tag = { id: `tag`, name: `Tag` }
+        let tagWrite!: Promise<void>
+        let batchError: unknown
+        try {
+          await todos.utils.writeBatch(
+            () => (tagWrite = tags.utils.writeUpsert(tag)),
+          )
+        } catch (error) {
+          batchError = error
+        }
+        await tagWrite
+        expect(tags.get(`tag`)).toMatchObject(tag)
+        expect(batchError).toBeUndefined()
+
+        const todo = { id: `todo`, name: `Todo` }
+        const secondTag = { id: `second-tag`, name: `Second tag` }
+        let secondTagWrite!: Promise<void>
+        await todos.utils.writeBatch(() => {
+          todos.utils.writeInsert(todo)
+          return (secondTagWrite = tags.utils.writeUpsert(secondTag))
+        })
+        await secondTagWrite
+        expect(todos.get(`todo`)).toMatchObject(todo)
+        expect(tags.get(`second-tag`)).toMatchObject(secondTag)
+
+        const batchedTag = { id: `batched-tag`, name: `Batched tag` }
+        await todos.utils.writeBatch(() =>
+          tags.utils.writeBatch(() => tags.utils.writeUpsert(batchedTag)),
+        )
+        expect(tags.get(`batched-tag`)).toMatchObject(batchedTag)
+
+        await expect(
+          Promise.resolve().then(() =>
+            todos.utils.writeBatch(async () =>
+              tags.utils.writeUpsert({ id: `async-tag`, name: `Async tag` }),
+            ),
+          ),
+        ).rejects.toThrow(/async callbacks/)
+      } finally {
+        await Promise.all([todos.cleanup(), tags.cleanup()])
+      }
+    })
+
+    it(`rejects direct writes after Collection cleanup`, async () => {
+      type Row = { id: string; name: string }
+      const adapter = createPersistedQueryAdapter<Row>()
+      const collection = createCollection(
+        persistedCollectionOptions<
+          Row,
+          string | number,
+          never,
+          QueryCollectionUtils<Row>
+        >({
+          ...queryCollectionOptions<Row>({
+            id: `direct-write-after-cleanup`,
+            queryKey: [`direct-write-after-cleanup`],
+            queryFn: () => Promise.resolve([]),
+            queryClient,
+            getKey: (row) => row.id,
+            startSync: true,
+          }),
+          persistence: { adapter },
+        }),
+      )
+
+      await collection.stateWhenReady()
+      const cleanup = collection.cleanup()
+      await expect(
+        Promise.resolve().then(() =>
+          collection.utils.writeInsert({ id: `late`, name: `Late` }),
+        ),
+      ).rejects.toBeInstanceOf(SyncNotInitializedError)
+      await cleanup
+      await expect(
+        Promise.resolve().then(() =>
+          collection.utils.writeInsert({ id: `later`, name: `Later` }),
+        ),
+      ).rejects.toBeInstanceOf(SyncNotInitializedError)
+      expect(adapter.rows.has(`late`)).toBe(false)
+      expect(adapter.rows.has(`later`)).toBe(false)
+      expect(collection.get(`late`)).toBeUndefined()
+
+      const subscription = collection.subscribeChanges(() => {})
+      try {
+        await collection.stateWhenReady()
+        await collection.utils.writeInsert({ id: `fresh`, name: `Fresh` })
+        expect(adapter.rows.get(`fresh`)?.name).toBe(`Fresh`)
+      } finally {
+        subscription.unsubscribe()
+        await collection.cleanup()
+      }
+    })
+
+    it(`commits a write made by a subscriber during a batch commit`, async () => {
+      const collection = createCollection(
+        queryCollectionOptions<TestItem>({
+          id: `batch-subscriber-write`,
+          queryKey: [`batch-subscriber-write`],
+          queryFn: () => Promise.resolve([]),
+          queryClient,
+          getKey,
+          startSync: true,
+        }),
+      )
+      await collection.stateWhenReady()
+
+      let subscriberWrite: Promise<void> | undefined
+      const subscription = collection.subscribeChanges((changes) => {
+        if (
+          !subscriberWrite &&
+          changes.some((change) => change.key === `first`)
+        ) {
+          subscriberWrite = collection.utils.writeInsert({
+            id: `second`,
+            name: `Second`,
+          })
+        }
+      })
+
+      try {
+        await collection.utils.writeBatch(() => {
+          collection.utils.writeInsert({ id: `first`, name: `First` })
+        })
+        expect(subscriberWrite).toBeInstanceOf(Promise)
+        await subscriberWrite
+        expect(collection.get(`second`)?.name).toBe(`Second`)
+      } finally {
+        subscription.unsubscribe()
+        await collection.cleanup()
+      }
     })
   })
 

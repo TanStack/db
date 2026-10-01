@@ -726,13 +726,18 @@ These operations:
 
 - Write directly to the synced data store
 - Do NOT create optimistic mutations
-- Are immediately visible in the UI
+- Return a promise that resolves when the sync commit applies, including any configured persistence write. Await it in a mutation handler before returning so the optimistic mutation remains active until the server response is stored.
 - In eager mode, update the full-result TanStack Query cache in place without refetching
 - In on-demand mode, refetch active enabled queries and remove inactive or disabled cache entries
+
+The promise waits for the sync commit. It does not wait for on-demand Query revalidation or guarantee that a completed optimistic snapshot no longer overlays the row.
+After Collection cleanup starts, direct writes fail with `SyncNotInitializedError` until a new sync run starts.
 
 ### Batch Operations
 
 The `writeBatch` method allows you to perform multiple operations atomically. Any write operations called within the callback will be collected and executed as a single transaction:
+
+The batch includes writes to this Collection only. A synchronous callback may also write to another Collection, but that write has its own completion promise.
 
 ```typescript
 todosCollection.utils.writeBatch(() => {
@@ -742,6 +747,8 @@ todosCollection.utils.writeBatch(() => {
   todosCollection.utils.writeDelete("4")
 })
 ```
+
+Await `writeBatch(...)` to wait for the whole sync commit. The callback must be synchronous; the promises returned by writes inside it settle with the batch.
 
 ### Real-World Example: WebSocket Integration
 
@@ -797,7 +804,7 @@ const todosCollection = createCollection(
 
       // Sync server-computed fields (like server-generated IDs, timestamps, etc.)
       // to the collection's synced data store using direct writes
-      collection.utils.writeBatch(() => {
+      await collection.utils.writeBatch(() => {
         serverItems.forEach((serverItem) => {
           collection.utils.writeInsert(serverItem)
         })
@@ -816,7 +823,7 @@ const todosCollection = createCollection(
       const serverItems = await api.updateTodos(updates)
 
       // Sync server-computed fields from the update response
-      collection.utils.writeBatch(() => {
+      await collection.utils.writeBatch(() => {
         serverItems.forEach((serverItem) => {
           collection.utils.writeUpdate(serverItem)
         })
