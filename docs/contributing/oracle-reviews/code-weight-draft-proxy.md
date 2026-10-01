@@ -1,6 +1,6 @@
 # Code weight: simplify the draft proxy and share its equality walker
 
-Reviewed executable revision: `a49ae90e3` (base `18abceee4`, the fetched
+Reviewed executable revision: `31b2a6bd4` (base `18abceee4`, the fetched
 `origin/main` at review time). This record follows in a documentation-only
 commit.
 
@@ -16,6 +16,8 @@ commit.
   minified bytes).
 - `fcc353d5d` through `a49ae90e3` fix the bugs that a second review found. Each
   fix extends an oracle first. See Fixes from the second review.
+- `31b2a6bd4` removes draft code that only bought speed. See Code weight over
+  speed.
 
 ## Change
 
@@ -41,21 +43,22 @@ commit.
   member) is now returned as stored. See Stored functions.
 
 The audit prototype also rewrote `deepClone` as one `Reflect.ownKeys` loop. That
-loop made every draft 8% to 17% slower, so this change keeps the original
-two-loop form. See Performance.
+loop made every draft 8% to 17% slower, so the refactor first kept the
+original two-loop form. `31b2a6bd4` adopts the shorter loop. See Code weight
+over speed.
 
 | Consumer bundle (esbuild, `es2020`) | min | gzip | brotli |
 | --- | ---: | ---: | ---: |
-| full public API | −822 (−0.23%) | −150 (−0.14%) | +1 (0.00%) |
-| collection with a filtered live query | −822 (−0.31%) | −146 (−0.18%) | −12 (−0.02%) |
-| local-only collection with an insert, an update, and a delete | −819 (−0.67%) | −155 (−0.44%) | −9 (−0.03%) |
-| local-only collection with one insert | −819 (−0.67%) | −145 (−0.41%) | −64 (−0.21%) |
+| full public API | −1,445 (−0.41%) | −343 (−0.33%) | −108 (−0.12%) |
+| collection with a filtered live query | −1,445 (−0.54%) | −363 (−0.46%) | −279 (−0.41%) |
+| local-only collection with an insert, an update, and a delete | −1,441 (−1.18%) | −350 (−1.00%) | −223 (−0.72%) |
+| local-only collection with one insert | −1,441 (−1.18%) | −350 (−1.00%) | −227 (−0.73%) |
 
 Each row bundles the built `dist`, with private members renamed, for base and
-`a49ae90e3` under the same `package.json`. The refactor alone (`1a07cd3ce`)
+`31b2a6bd4` under the same `package.json`. The refactor alone (`1a07cd3ce`)
 saved 1,739 minified and 453 gzip bytes on the full public API. The fixes from
-the second review add the rest back; Fixes from the second review lists the
-cost of each.
+the second review added 917 minified and 303 gzip bytes. `31b2a6bd4` then
+removed 623 minified and 193 gzip bytes of speed-only code.
 
 ## Why the oracle work came first
 
@@ -200,12 +203,11 @@ Design decisions for these fixes:
 - **Typed-array class.** Draft equality treats a typed array of another class
   as a change. `deepEquals` still ignores the class, as `utils.test.ts` has
   pinned since #434.
-- **Array read methods.** Every non-mutating method reads through the draft,
-  except searches, `join`, `keys`, `toString`, and `toLocaleString`. Their
-  results hold no elements, so they run on the copy, and a draft argument is
-  unwrapped. Reading through the draft makes `slice` slower (see
-  Performance). Running the element methods on the copy and then replacing
-  elements with drafts was faster but cost 167 more gzip bytes.
+- **Array read methods.** Every non-mutating method reads through the draft.
+  `b57d60022` first ran searches, `join`, `keys`, and `toString` on the copy
+  for speed. `31b2a6bd4` removed that list. Running the element methods on the
+  copy and then replacing elements with drafts was faster but cost 167 more
+  gzip bytes.
 - **Classes and keyless objects.** In both modes, an object of another class
   differs, and plain and null-prototype objects from any realm are one class.
   A class instance without enumerable keys equals only itself. URLs compare
@@ -255,6 +257,42 @@ iterator was open. The iteration contract's array law closes that gap. K7
 first survived too, and `utils.property` now compares a URL with an object
 that inherits the same `href`. A5 gives the same results and is only slower:
 searches through the draft compare memoized drafts.
+
+## Code weight over speed
+
+Drafts run inside `collection.update` callbacks. These calls are rare and
+almost never touch large values, so draft speed does not matter, and bytes
+do. `31b2a6bd4` removes code that only bought speed:
+
+| Removed | Speed it bought | Law that still owns the behavior |
+| --- | --- | --- |
+| The light array iterator from `967a28c1d` | `for...of` over 200 numbers: 0.98 of `main` instead of 4.0 | Iteration contract, array law |
+| The list of array methods that ran on the copy | `join()` on 50 numbers: 1.03 instead of 2.8 | `Array.prototype` law in `proxy.test.ts` |
+| The primitive fast path in the `get` trap | `slice` on small arrays | Every proxy owner |
+| The two-loop `deepClone` key walk | 8% to 17% for each draft | Detachment contract key-class law |
+| The typed-array element loop (`TypedArray#set` copies instead) | none | Revert oracle typed values |
+| The deferred class check in `deepEquals` | unequal rows exit before the class check | Class law in `utils.property` |
+
+Mutants of each new form fail the owners:
+
+| Mutant on `31b2a6bd4` | Owners |
+| --- | --- |
+| C1: clone copies non-enumerable strings | assertion failure (2/539) |
+| C2: clone drops every symbol | assertion failure (10/539) |
+| C3: clone drops non-enumerable symbols | assertion failure (2/539) |
+| T1: typed clone stays empty | assertion failure (13/539) |
+| N3: the iterator reads the raw copy | assertion failure (16/539) |
+| A1: read methods run on the copy | assertion failure (56/539) |
+| A2: searches run on the copy | assertion failure (4/539) |
+| K1: no class check | assertion failure (4/539) |
+| K2: keyless instances compare by keys | assertion failure (5/539) |
+| K3: URLs compare by identity | assertion failure (10/539) |
+| K4: a null prototype is another class | assertion failure (2/539) |
+| K5: any two URLs are equal | assertion failure (5/539) |
+| K6: empty arrays compare by identity | assertion failure (8/539) |
+
+The I and A3 to A5 mutants in the previous section apply to code that
+`31b2a6bd4` removed.
 
 ## Mutant calibration
 
@@ -347,7 +385,9 @@ minified bytes. The harness is not checked in.
 
 ### Timings for the fixes
 
-These runs used 11 processes of each variant. The machine was loaded, and an
+These timings describe `a49ae90e3`. `31b2a6bd4` removed the iterator and
+the copy-method list for code weight, so the iteration and `join` rows no
+longer hold. These runs used 11 processes of each variant. The machine was loaded, and an
 A/A control stayed within ±5%.
 
 | Workload | Ratio | Compared with |
@@ -386,7 +426,7 @@ before it.
 
 ## Verification
 
-On `a49ae90e3`, with the built `dist`:
+On `31b2a6bd4`, with the built `dist`:
 
 - `packages/db` Vitest, typecheck off: 198 files, 7,718 tests.
 - `packages/db` `tsc --noEmit`: no errors.

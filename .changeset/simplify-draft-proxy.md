@@ -2,7 +2,7 @@
 '@tanstack/db': patch
 ---
 
-Simplify the mutation draft proxy and share one equality walker with `deepEquals`. Draft writes are faster, and a typical app bundle is about 150 B smaller with gzip.
+Simplify the mutation draft proxy and share one equality walker with `deepEquals`. A typical app bundle is about 350 B smaller with gzip.
 
 This change also fixes draft writes that were lost or wrong:
 
