@@ -287,8 +287,8 @@ function deepClone<T extends unknown>(
   visited.set(obj as object, clone)
 
   // Own enumerable string keys, then every own symbol key, in native order.
-  // Own enumerable string keys, then every own symbol key. A Reflect.ownKeys
-  // loop with an enumerability check is shorter but slower on this hot path.
+  // A Reflect.ownKeys loop with an enumerability check is shorter but slower
+  // on this hot path.
   for (const key in obj) {
     if (Object.prototype.hasOwnProperty.call(obj, key)) {
       // Copy data properties without invoking Object.prototype.__proto__.
@@ -720,14 +720,13 @@ export function createChangeProxy<
         // Compare child contents, stopping only at paired root backedges. A
         // child's own changes still count even when it also points to this row.
         if (
-          (changeTracker.assigned_[key] === true ||
-            (mayHaveChangedAliases &&
-              !draftValuesEqual(
-                value instanceof Set ? Array.from(value) : value,
-                original instanceof Set ? Array.from(original) : original,
-                pairedRoots,
-              ))) &&
-          key in changeTracker.copy_
+          changeTracker.assigned_[key] === true ||
+          (mayHaveChangedAliases &&
+            !draftValuesEqual(
+              value instanceof Set ? Array.from(value) : value,
+              original instanceof Set ? Array.from(original) : original,
+              pairedRoots,
+            ))
         ) {
           defineDataProperty(result, key, changeTracker.copy_[key])
         }

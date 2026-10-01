@@ -254,14 +254,63 @@ const opArb: fc.Arbitrary<Op> = fc.oneof(
   },
 )
 
-type History = { original: Root; ops: Array<Op> }
+// Generated ops also include a revert of a field that is currently changed,
+// so most reverts run the set trap's revert branch. `resolve` turns it into a
+// concrete revert of one changed field, or nothing.
+type GeneratedOp = Op | { op: `revertChanged`; pick: number }
+type History = { original: Root; ops: Array<GeneratedOp> }
+
+function resolve(state: Root, original: Root, op: GeneratedOp): Op | undefined {
+  if (op.op !== `revertChanged`) return op
+  const changed = FIELDS.filter(
+    (field) => encode(state[field]) !== encode(original[field]),
+  )
+  return changed.length > 0
+    ? { op: `revert`, field: changed[op.pick % changed.length]! }
+    : undefined
+}
 const historyArb: fc.Arbitrary<History> = fc.record({
   original: fc.record(
     { f: specArb, g: specArb, h: specArb },
     { requiredKeys: [] },
   ),
-  ops: fc.array(opArb, { minLength: 1, maxLength: 6 }),
+  ops: fc.array(
+    fc.oneof(
+      { weight: 3, arbitrary: opArb as fc.Arbitrary<GeneratedOp> },
+      {
+        weight: 2,
+        arbitrary: fc.record({
+          op: fc.constant(`revertChanged` as const),
+          pick: fc.nat(2),
+        }),
+      },
+    ),
+    { minLength: 1, maxLength: 8 },
+  ),
 })
+
+// Partial reverts by construction: change two or three fields in some order,
+// then revert every changed field but one. The model decides whether a change
+// survives (a new value can equal the original).
+const partialRevertArb: fc.Arbitrary<History> = fc
+  .record({
+    original: fc.record({ f: specArb, g: specArb, h: specArb }),
+    values: fc.tuple(specArb, specArb, specArb),
+    order: fc.shuffledSubarray([...FIELDS], { minLength: 2 }),
+    keep: fc.nat(2),
+  })
+  .map(({ original, values, order, keep }) => {
+    const kept = order[keep % order.length]!
+    const changes: Array<GeneratedOp> = order.map((field) => ({
+      op: `set`,
+      field,
+      value: values[FIELDS.indexOf(field)]!,
+    }))
+    const reverts: Array<GeneratedOp> = order
+      .filter((field) => field !== kept)
+      .map((field) => ({ op: `revert`, field }))
+    return { original, ops: [...changes, ...reverts] }
+  })
 
 // ---------------------------------------------------------------------------
 // Model: apply each op to the spec state. An op whose target has the wrong
@@ -430,8 +479,9 @@ function expectHistory({ original, ops }: History): void {
   const before = realizeRoot(original)
   const { proxy, getChanges } = createChangeProxy(row)
   let state: Root = { ...original }
-  for (const op of ops) {
-    if (!applicable(state, op)) continue
+  for (const generated of ops) {
+    const op = resolve(state, original, generated)
+    if (op === undefined || !applicable(state, op)) continue
     if (op.op === `revert`) {
       if (original[op.field] === undefined) delete proxy[op.field]
       else proxy[op.field] = realize(original[op.field]!)
@@ -507,6 +557,13 @@ describe(`draft revert oracle`, () => {
         ...(replayPath === undefined ? {} : { path: replayPath }),
       })
     })
+    it(`matches the model across generated partial reverts (${name})`, () => {
+      fc.assert(fc.property(partialRevertArb, expectHistory), {
+        numRuns: 200,
+        ...(seed === undefined ? {} : { seed }),
+        ...(replayPath === undefined ? {} : { path: replayPath }),
+      })
+    })
   }
 
   // Positive execution witness: the fixed campaign reaches each operation, a
@@ -520,18 +577,23 @@ describe(`draft revert oracle`, () => {
     let symbolOnly = 0
     for (const { original, ops } of sample) {
       let state: Root = { ...original }
-      const applied: Array<Op> = []
-      for (const op of ops) {
-        if (!applicable(state, op)) continue
+      // A revert counts only when the field differs from its original, so
+      // the set trap's revert branch runs. Other reverts write an equal value.
+      let effectiveReverts = 0
+      for (const generated of ops) {
+        const op = resolve(state, original, generated)
+        if (op === undefined || !applicable(state, op)) continue
         reached.add(op.op)
-        applied.push(op)
+        if (
+          op.op === `revert` &&
+          encode(state[op.field]) !== encode(original[op.field])
+        )
+          effectiveReverts++
         state = step(state, original, op)
       }
       const changed = expectedChanges(original, state).size
-      const reverts = applied.filter((op) => op.op === `revert`).length
-      const touched = new Set(applied.map((op) => op.field)).size
-      if (reverts > 0 && changed > 0 && touched > changed) partial++
-      if (applied.length > 1 && reverts > 0 && changed === 0) full++
+      if (effectiveReverts > 0 && changed > 0) partial++
+      if (effectiveReverts > 0 && changed === 0) full++
       for (const field of FIELDS) {
         const a = original[field]
         const b = state[field]
@@ -555,8 +617,8 @@ describe(`draft revert oracle`, () => {
       `revert`,
       `set`,
     ])
-    expect(partial).toBeGreaterThan(20)
-    expect(full).toBeGreaterThan(20)
+    expect(partial).toBeGreaterThanOrEqual(10)
+    expect(full).toBeGreaterThanOrEqual(30)
     expect(symbolOnly).toBeGreaterThan(0)
   })
 
