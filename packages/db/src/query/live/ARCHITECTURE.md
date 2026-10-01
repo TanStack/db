@@ -1248,9 +1248,11 @@ listener lifetime.
 
 A framework adapter may serve a live query from an equality partition instead
 of this graph. That applies only when the query reads one eager,
-non-persisted source Collection, filters it only by `eq(field, literal)`
-conjuncts, and has no other clause, `DbClient`, or Suspense key. Such a pooled
-live query reads the partition group for its literal tuple
+non-persisted source Collection, its `where` has at least one
+`eq(field, literal)` conjunct, every other conjunct reads only that row's
+own fields, and it has no other clause, `DbClient`, or Suspense key. Such a
+pooled live query reads the partition group for its `eq` literal tuple and
+filters it by its remaining conjuncts with the compiler's evaluator
 (`packages/db/src/query/pooled-live-query.ts`). It builds its live-query
 Collection only when the application reads it.
 

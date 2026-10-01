@@ -1,9 +1,10 @@
 /**
  * # Does a pooled live query publish what its live-query Collection would?
  *
- * Law and source: a live query that filters one source Collection only by
- * `eq(field, literal)` conjuncts is served from a partition of that source
- * shared by every query with the same fields. Its observer must publish the
+ * Law and source: a live query that filters one source Collection by
+ * `eq(field, literal)` conjuncts, plus any conjuncts that read only its row,
+ * is served from a partition of that source shared by every query with the
+ * same `eq` fields; each view evaluates its other conjuncts itself. Its observer must publish the
  * rows the live-query Collection for the same query publishes: the visible
  * source rows whose fields equal the literals under `eq` semantics
  * (`src/query/compiler/evaluators.ts`: nullish is UNKNOWN, a Date equals its
@@ -16,15 +17,15 @@
  * behind.
  *
  * Model: `expectedKeys` filters the model's visible rows with an independent
- * `eq` over plain values. It does not import the evaluator, normalization, or
+ * `eq` over plain values and the peer's negated `g` equality. It does not import the evaluator, normalization, or
  * the partition. Order, row values, and status come from a second
  * formulation: a live-query Collection compiled for the same query.
  *
  * History grammar: rows have ids 0 through 3, delivered initially in key
  * order or in reverse, a field `f` from strings,
  * numbers and their look-alikes, `true`, a Date equal to 1, `NaN`, `-0`,
- * `0`, `null`, and a missing value, and a field `g` of `x` or `y`. Up to
- * three peer queries use `eq(f, literal)`, optionally with `eq(g, literal)`.
+ * `0`, `null`, and a missing value, and a field `g` of `x` or `y`. Up to three peer queries use `eq(f, literal)`, optionally with
+ * `eq(g, literal)` and a residual `not(eq(g, literal))`.
  * Values are weighted toward `a`, and toward the normalized values against
  * numeric literals, so groups hold rows that stay, move, and normalize.
  * Steps commit sync transactions of one or two inserts, updates, or deletes,
@@ -69,7 +70,12 @@ import { describe, expect, it } from 'vitest'
 import { createCollection } from '../../src/collection/index.js'
 import { createLiveQueryObserver } from '../../src/live-query-observer.js'
 import { Query } from '../../src/query/builder/index.js'
-import { and, createLiveQueryCollection, eq } from '../../src/query/index.js'
+import {
+  and,
+  createLiveQueryCollection,
+  eq,
+  not,
+} from '../../src/query/index.js'
 import { createPooledLiveQuery } from '../../src/query/pooled-live-query.js'
 import { Func, PropRef, Value } from '../../src/query/ir.js'
 import {
@@ -91,7 +97,12 @@ const requestedReplayProperty = readOracleRunConfig().replayProperty
 const MISSING = Symbol(`missing`)
 type FieldValue = string | number | boolean | Date | null | typeof MISSING
 type Row = { id: string; f?: unknown; g: string }
-type Peer = { f: string | number | boolean; g?: string }
+type Peer = {
+  f: string | number | boolean
+  g?: string
+  // A residual conjunct, `not(eq(r.g, notG))`, each view evaluates itself.
+  notG?: string
+}
 type Step =
   | { kind: `sync`; ops: Array<Op> }
   | {
@@ -156,7 +167,10 @@ function expectedKeys(
   return [...rows.values()]
     .filter(
       (row) =>
-        modelEq(row.f, peer.f) && (peer.g === undefined || row.g === peer.g),
+        modelEq(row.f, peer.f) &&
+        (peer.g === undefined || row.g === peer.g) &&
+        // `g` is never nullish here, so the negated equality is two-valued.
+        (peer.notG === undefined || row.g !== peer.notG),
     )
     .map((row) => row.id)
     .sort()
@@ -217,10 +231,14 @@ const peerArbitrary: fc.Arbitrary<Peer> = fc.record(
   {
     f: fc.oneof(
       { weight: 2, arbitrary: fc.constant<Peer[`f`]>(`a`) },
-      fc.constantFrom<Peer[`f`]>(1, Number.NaN, 0),
+      {
+        weight: 2,
+        arbitrary: fc.constantFrom<Peer[`f`]>(1, Number.NaN, 0),
+      },
       fc.constantFrom(...literals),
     ),
     g: gArbitrary,
+    notG: gArbitrary,
   },
   { requiredKeys: [`f`] },
 )
@@ -359,6 +377,26 @@ const pinnedHistories: ReadonlyArray<{ name: string; history: History }> = [
     },
   },
   {
+    name: `a residual conjunct moves rows in and out of a view within one group`,
+    history: {
+      rows: [
+        { f: `a`, g: `x` },
+        { f: `a`, g: `y` },
+      ],
+      peers: [{ f: `a`, notG: `y` }, { f: `a` }],
+      steps: [
+        { kind: `sync`, ops: [{ type: `update`, id: 0, f: `a`, g: `y` }] },
+        { kind: `sync`, ops: [{ type: `update`, id: 1, f: `a`, g: `x` }] },
+        {
+          kind: `optimistic`,
+          op: { type: `update`, id: 1, f: `a`, g: `y` },
+          confirm: false,
+        },
+        { kind: `sync`, ops: [{ type: `delete`, id: 1 }] },
+      ],
+    },
+  },
+  {
     name: `a row updated within its group reaches peers as one update`,
     history: {
       rows: [
@@ -403,13 +441,13 @@ const tick = () => new Promise((resolve) => setTimeout(resolve, 0))
 
 function peerQuery(source: any, peer: Peer) {
   return (q: any) =>
-    q
-      .from({ r: source })
-      .where(({ r }: any) =>
-        peer.g === undefined
-          ? eq(r.f, peer.f)
-          : and(eq(r.f, peer.f), eq(r.g, peer.g)),
-      )
+    q.from({ r: source }).where(({ r }: any) => {
+      const conjuncts = [eq(r.f, peer.f)]
+      if (peer.g !== undefined) conjuncts.push(eq(r.g, peer.g))
+      if (peer.notG !== undefined) conjuncts.push(not(eq(r.g, peer.notG)))
+      const [first, second, ...rest] = conjuncts
+      return second ? and(first, second, ...rest) : first
+    })
 }
 
 // A row's id and fields, which the model also knows.

@@ -5,6 +5,7 @@ import { normalizeValue } from '../utils/comparison.js'
 import { isVirtualPropName } from '../virtual-props.js'
 import { getPersistedReadinessSource } from '../persisted-readiness.js'
 import { getWhereExpression } from './ir.js'
+import { compileExpression, toBooleanPredicate } from './compiler/evaluators.js'
 import { createLiveQueryCollection } from './live-query-collection.js'
 import type { BasicExpression, QueryIR } from './ir.js'
 import type { BaseQueryBuilder } from './builder/index.js'
@@ -253,48 +254,93 @@ class Partition {
 
 type Conjunct = { path: Array<string>; pathKey: string; literalKey: string }
 
-// Adds `eq(alias.field, literal)` conjuncts to `out`; false for anything else.
+type PoolableShape = {
+  paths: Array<Array<string>>
+  shapeKey: string
+  groupKey: string
+  // Conjuncts each view evaluates over its group's rows.
+  residual: Array<BasicExpression>
+}
+
+// Whether an expression reads only this query's own row fields, so a view
+// can evaluate it with the compiler's evaluator.
+function readsOnlyRow(expression: BasicExpression, alias: string): boolean {
+  if (expression.type === `val`) return true
+  if (expression.type === `ref`) {
+    const [root, field] = expression.path
+    return root === alias && field !== undefined && !isVirtualPropName(field)
+  }
+  return expression.args.every((arg) => readsOnlyRow(arg, alias))
+}
+
+// Splits a conjunct into `eq(alias.field, literal)` groups and residual
+// conjuncts; false for an expression a view cannot evaluate.
 function collectConjuncts(
   expression: BasicExpression,
   alias: string,
   out: Array<Conjunct>,
+  residual: Array<BasicExpression>,
 ): boolean {
-  if (expression.type !== `func`) return false
-  const args = expression.args
-  if (expression.name === `and`) {
-    for (const arg of args) if (!collectConjuncts(arg, alias, out)) return false
+  if (expression.type === `func` && expression.name === `and`) {
+    for (const arg of expression.args) {
+      if (!collectConjuncts(arg, alias, out, residual)) return false
+    }
     return true
   }
-  if (expression.name !== `eq` || args.length !== 2) return false
+  const conjunct = equalityConjunct(expression, alias)
+  if (conjunct) out.push(conjunct)
+  else if (readsOnlyRow(expression, alias)) residual.push(expression)
+  else return false
+  return true
+}
+
+function equalityConjunct(
+  expression: BasicExpression,
+  alias: string,
+): Conjunct | undefined {
+  if (expression.type !== `func` || expression.name !== `eq`) return undefined
+  const args = expression.args
+  if (args.length !== 2) return undefined
   const left = args[0]!
   const right = args[1]!
   const ref = left.type === `ref` ? left : right
   const literal = left.type === `val` ? left : right
-  if (ref.type !== `ref` || literal.type !== `val`) return false
+  if (ref.type !== `ref` || literal.type !== `val`) return undefined
   const refPath = ref.path
   if (
     refPath[0] !== alias ||
     refPath.length < 2 ||
     isVirtualPropName(refPath[1]!)
   ) {
-    return false
+    return undefined
   }
   const literalKey = equalityKey(literal.value)
-  if (literalKey === undefined) return false
+  if (literalKey === undefined) return undefined
   const path = refPath.slice(1)
-  out.push({ path, pathKey: JSON.stringify(path), literalKey })
-  return true
+  return { path, pathKey: JSON.stringify(path), literalKey }
+}
+
+// Whether a row passes every residual conjunct, as a WHERE filter decides.
+function rowPredicate(
+  residual: Array<BasicExpression>,
+  alias: string,
+): (row: Row) => boolean {
+  const conjuncts = residual.map((expression) => compileExpression(expression))
+  // One namespaced row, reused so a check allocates nothing.
+  const namespaced: Record<string, unknown> = {}
+  return (row) => {
+    namespaced[alias] = row
+    return conjuncts.every((conjunct) =>
+      toBooleanPredicate(conjunct(namespaced as any)),
+    )
+  }
 }
 
 /**
  * The equality conjuncts of a query that a partition can serve, or undefined
  * when any other clause or operand is present.
  */
-function poolableShape(
-  query: QueryIR,
-):
-  | { paths: Array<Array<string>>; shapeKey: string; groupKey: string }
-  | undefined {
+function poolableShape(query: QueryIR): PoolableShape | undefined {
   if (
     query.from.type !== `collectionRef` ||
     query.select ||
@@ -314,13 +360,21 @@ function poolableShape(
     return undefined
   }
   const conjuncts: Array<Conjunct> = []
+  const residual: Array<BasicExpression> = []
   for (const where of query.where) {
     if (
-      !collectConjuncts(getWhereExpression(where), query.from.alias, conjuncts)
+      !collectConjuncts(
+        getWhereExpression(where),
+        query.from.alias,
+        conjuncts,
+        residual,
+      )
     ) {
       return undefined
     }
   }
+  // A partition needs at least one equality to group by.
+  if (conjuncts.length === 0) return undefined
   // Most shapes have one or two fields; a general sort costs more than both.
   if (conjuncts.length === 2) {
     if (conjuncts[1]!.pathKey < conjuncts[0]!.pathKey) conjuncts.reverse()
@@ -336,7 +390,7 @@ function poolableShape(
     shapeKey += pathKey
     groupKey = appendGroupKeyPart(groupKey, literalKey)
   }
-  return { paths, shapeKey, groupKey }
+  return { paths, shapeKey, groupKey, residual }
 }
 
 /**
@@ -358,6 +412,8 @@ class PooledLiveQuery {
     private readonly partition: Partition,
     groupKey: string,
     private readonly gcTime: number,
+    // The query's conjuncts beyond its group's equalities, if any.
+    private readonly passes: ((row: Row) => boolean) | undefined,
   ) {
     this.group = partition.group(groupKey)
     partition.retain(gcTime)
@@ -375,23 +431,21 @@ class PooledLiveQuery {
     return this.group.layoutRevision
   }
 
-  /** The group's rows, in key order. */
-  get rows(): SortedMap<string | number, Row> {
-    return this.group.rows
-  }
-
-  entries(): IterableIterator<[string | number, Row]> {
-    return this.group.rows.entries()
+  entries(): Iterable<[string | number, Row]> {
+    const rows = this.group.rows.entries()
+    const passes = this.passes
+    return passes ? [...rows].filter(([, row]) => passes(row)) : rows
   }
 
   subscribeChanges(
     callback: Listener,
     options: { includeInitialState?: boolean } = {},
   ): { unsubscribe: () => void } {
-    this.partition.addListener(this.group, callback)
+    const listener = this.passes ? this.filterChanges(callback) : callback
+    this.partition.addListener(this.group, listener)
     if (options.includeInitialState) {
       callback(
-        [...this.group.rows].map(([key, value]) => ({
+        Array.from(this.entries(), ([key, value]) => ({
           type: `insert`,
           key,
           value,
@@ -399,7 +453,32 @@ class PooledLiveQuery {
       )
     }
     return {
-      unsubscribe: () => this.partition.removeListener(this.group, callback),
+      unsubscribe: () => this.partition.removeListener(this.group, listener),
+    }
+  }
+
+  // Turns the group's changes into this query's, tracking which rows have
+  // passed its residual conjuncts for this subscription.
+  private filterChanges(callback: Listener): Listener {
+    const passes = this.passes!
+    const visible = new Map(this.entries())
+    return (changes) => {
+      const out: Array<ChangeMessage<Row, string | number>> = []
+      for (const change of changes) {
+        const { key, value } = change
+        const previous = visible.get(key)
+        const next = change.type !== `delete` && passes(value)
+        if (next) visible.set(key, value)
+        else visible.delete(key)
+        if (previous && next) {
+          out.push({ type: `update`, key, value, previousValue: previous })
+        } else if (previous) {
+          out.push({ type: `delete`, key, value: previous })
+        } else if (next) {
+          out.push({ type: `insert`, key, value })
+        }
+      }
+      if (out.length > 0) callback(out)
     }
   }
 
@@ -489,5 +568,8 @@ export function createPooledLiveQuery(
     partition,
     shape.groupKey,
     gcTime,
+    shape.residual.length > 0
+      ? rowPredicate(shape.residual, ir.from.alias)
+      : undefined,
   ) as unknown as Collection<any, any, any>
 }

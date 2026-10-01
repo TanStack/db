@@ -112,6 +112,19 @@ floor for unsubscribed queries 1, a last-`gcTime`-wins rule 1, and releasing
 at `gcTime` 0 2. Release timing is resource lifetime, so the publication
 oracle does not observe it.
 
+Pooling later admitted residual conjuncts: any `where` conjunct that reads
+only the query's own row, beside at least one `eq`, is evaluated per view
+with the compiler's evaluator. Peers may add `not(eq(g, literal))`, which the
+model evaluates itself, and a pinned history moves rows in and out of a view
+within one group. A view that ignores the residual, reports unfiltered
+entries, or sends a row entering or leaving it as an update fails the
+pinned history and both campaigns. Hiding part of a group makes some
+earlier histories rarer, so in one full run the arrival-order,
+normalization, delete-plus-insert, and dropped in-group update mutants
+escaped the random campaign; the fixed campaign and their pinned histories
+still kill each. Peers' literals were weighted toward the normalized values
+to keep the normalization mutant in the fixed campaign.
+
 ## Pooled live query oracle
 
 | Requirement | Outcome |
