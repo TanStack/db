@@ -1,6 +1,6 @@
 # Code weight: simplify the draft proxy and share its equality walker
 
-Reviewed executable revision: `6b68b8dc3` (base `18abceee4`, the fetched
+Reviewed executable revision: `cccaf1b9e` (base `18abceee4`, the fetched
 `origin/main` at review time). This record follows in a documentation-only
 commit.
 
@@ -9,6 +9,8 @@ commit.
 - `639ed5a1e` extends the revert oracle after a refactor mutant survived. The
   extension also passes on unchanged code.
 - `6b68b8dc3` is the refactor.
+- `cccaf1b9e` returns functions stored in a draft as stored, with a new
+  native-differential law. This is a behavior change and a lost-write fix.
 
 ## Change
 
@@ -30,16 +32,19 @@ commit.
   `packages/db/src/utils.ts`. Draft mode keeps Map and Set order, RegExp
   `lastIndex`, and array holes. The general mode does not change.
 
+- A function stored as data (a field, an array element, a nested object
+  member) is now returned as stored. See Stored functions.
+
 The audit prototype also rewrote `deepClone` as one `Reflect.ownKeys` loop. That
 loop made every draft 8% to 17% slower, so this change keeps the original
 two-loop form. See Performance.
 
 | Consumer bundle (esbuild, `es2020`) | min | gzip | brotli |
 | --- | ---: | ---: | ---: |
-| full public API | −1,756 (−0.50%) | −453 (−0.43%) | −197 (−0.22%) |
-| collection with a filtered live query | −1,756 (−0.66%) | −461 (−0.58%) | −278 (−0.41%) |
-| local-only collection with an insert, an update, and a delete | −1,753 (−1.43%) | −444 (−1.27%) | −251 (−0.81%) |
-| local-only collection with one insert | −1,753 (−1.43%) | −442 (−1.26%) | −330 (−1.07%) |
+| full public API | −1,725 (−0.49%) | −451 (−0.43%) | −246 (−0.28%) |
+| collection with a filtered live query | −1,725 (−0.65%) | −457 (−0.58%) | −302 (−0.44%) |
+| local-only collection with an insert, an update, and a delete | −1,722 (−1.41%) | −437 (−1.25%) | −270 (−0.87%) |
+| local-only collection with one insert | −1,722 (−1.41%) | −436 (−1.24%) | −276 (−0.89%) |
 
 Each row bundles the built `dist`, with private members renamed, for base and
 refactor under the same `package.json`.
@@ -103,6 +108,47 @@ Limits:
   and Set insertion order, RegExp `lastIndex`, and array holes. These are the
   rules draft equality keeps, so a shared walker must not leak one mode into
   the other.
+
+## Stored functions
+
+The `get` trap bound every function it returned to the private copy, so it
+could call built-in methods such as `Map.prototype.get`, which reject a Proxy
+receiver. That binding also applied to functions stored as data:
+
+| Read on a draft of `{ handler: f, fns: [f], obj: { g: f } }` | `main` | refactor before the fix | now |
+| --- | --- | --- | --- |
+| `draft.handler === f` | false | false | true |
+| `draft.fns[0] === f` | false | false | true |
+| `[...draft.fns][0] === f`, `for...of` | true | false | true |
+| `draft.obj.g === f` | false | false | true |
+
+On `main`, array iteration was the only read path that kept identity, because
+the custom array iterator did not take the `get` trap. The native iterator
+does, so the refactor first lost identity there too.
+
+The binding had a worse effect: a stored method saw the private copy as `this`.
+A method such as `bump() { this.count++ }` then changed the copy without
+tracking, and `getChanges()` reported no change. Inside `collection.update`,
+that write was lost.
+
+`cccaf1b9e` returns an own data function as stored. A call then sees the draft
+as `this`, so its writes take the `set` trap. Inherited Array, Map, and Set
+methods keep their draft handling.
+
+`proxy.test.ts` adds a native-differential law. Each probe runs on a native row
+and on a draft of an equal row, and the results must be equal. The probes are
+field access, array index, `for...of`, spread, `includes` and `indexOf`, an
+array callback, a nested field, `Object.values`, a Map value, a Set member, a
+call, a function assigned during the callback, and `this` inside a stored
+method. One more case checks that a write through `this` appears in
+`getChanges()`. The law fails 8 of 14 cases on `main` and 10 of 14 on the
+refactor before the fix.
+
+| Mutant on `cccaf1b9e` | Owners |
+| --- | --- |
+| F1: every function is bound again | assertion failure (10/455) |
+| F2: inherited methods are returned unbound too | assertion failure (103/455) |
+| F3: the own-property check reads the original row | assertion failure (1/455) |
 
 ## Mutant calibration
 
@@ -179,8 +225,13 @@ stayed within ±1%.
 | `deepEquals`: equal rows (20,000) | 0.993 | 0.953 | 0.965 |
 | `deepEquals`: equal rows with Map, Set, RegExp (10,000) | 1.010 | 1.019 | 1.023 |
 | `deepEquals`: unequal rows (20,000) | 0.999 | 1.024 | 1.009 |
+| draft: 20 Array method calls (10,000 rows) | 1.021 | — | 0.961 |
 
 Each ratio is new time over base time. "Prototype loop" is the audit prototype.
+"Kept loop" is the final code. The array-method row was measured with the
+stored-function fix, which adds an own-property check before each inherited
+method is handled. A second run with the fix gave 0.830, 0.876, and 0.766 for
+the three draft rows above.
 Bisection showed that its `deepClone` loop caused the regression: the
 equality fold alone was faster (0.92, 1.00, 0.81 on the draft rows), and the
 other proxy changes with the original loop were faster too (0.92, 0.93, 1.03).
@@ -207,9 +258,9 @@ minified bytes. The harness is not checked in.
 
 ## Verification
 
-On `6b68b8dc3`, with the built `dist`:
+On `cccaf1b9e`, with the built `dist`:
 
-- `packages/db` Vitest, typecheck off: 198 files, 7,620 tests.
+- `packages/db` Vitest, typecheck off: 198 files, 7,634 tests.
 - `packages/db` `tsc --noEmit`: only the pre-existing errors in
   `tests/conformance` that `main` also has.
 - `pnpm check:mangle`: 368 names.
