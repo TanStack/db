@@ -1,3 +1,4 @@
+import { createContext, runInContext } from 'node:vm'
 import { QueryClient, dehydrate, hydrate } from '@tanstack/query-core'
 import {
   IR,
@@ -5,7 +6,7 @@ import {
   createLiveQueryCollection,
   eq,
 } from '@tanstack/db'
-import { crossSerializeStream, deserialize, serialize } from 'seroval'
+import { crossSerializeStream, getCrossReferenceHeader } from 'seroval'
 import { describe, expect, it } from 'vitest'
 import { queryCollectionOptions } from '../src/query.js'
 import type { DehydratedState } from '@tanstack/query-core'
@@ -27,14 +28,14 @@ import type { LoadSubsetOptions } from '@tanstack/db'
  * isolate the unsupported values and adjacent request shapes. After
  * successful loading, the driver dehydrates the cache and passes it to
  * `crossSerializeStream`, as the router integration does. The check observes
- * the retained row, successful stream completion, and a Query Core hydration
- * round trip. This partial oracle does not run TanStack Start or prove that a
- * browser Collection resumes the query.
+ * the retained row, reconstructed stream payload, and Query Core hydration
+ * from that payload. This partial oracle does not run TanStack Start or prove
+ * that a browser Collection resumes the query.
  *
  * Review: ORC-001–003 and ORC-005 are supplied by the law, fixed forms, real
  * entry points, and cache/stream observations above. The original production
- * failure calibrates the stream comparison (ORC-006), and cleanup preserves it
- * if teardown also fails (ORC-010). ORC-004, ORC-007, and ORC-008 do not apply
+ * failure and a stream-only leak mutant calibrate the comparison (ORC-006).
+ * Cleanup preserves a primary failure if teardown also fails (ORC-010). ORC-004, ORC-007, and ORC-008 do not apply
  * to fixed, stateless cases. ORC-009 adds no model-only vocabulary. ORC-011 has
  * no named shared semantic fault; the plain cache control is a second path.
  */
@@ -51,17 +52,41 @@ function createQueryClient(): QueryClient {
   })
 }
 
-function serializeRouterPayload(initial: DehydratedState): Promise<number> {
+type RouterPayload = {
+  dehydratedData: { query: { initial: DehydratedState } }
+}
+
+function serializeRouterPayload(
+  initial: DehydratedState,
+): Promise<DehydratedState> {
   return new Promise((resolve, reject) => {
-    let chunkCount = 0
+    const context = createContext({
+      self: {} as { $R?: unknown },
+      $R: undefined as unknown,
+    })
+    // Router installs this reference header before the streamed script chunks.
+    const scopeId = `tsr`
+    runInContext(getCrossReferenceHeader(scopeId), context)
+    context.$R = context.self.$R
+    let payload: RouterPayload | undefined
     crossSerializeStream(
       { dehydratedData: { query: { initial } } },
       {
-        onSerialize: () => {
-          chunkCount++
+        scopeId,
+        onSerialize: (chunk, isInitial) => {
+          try {
+            const value: unknown = runInContext(chunk, context)
+            if (isInitial) payload = value as RouterPayload
+          } catch (error) {
+            reject(error)
+          }
         },
         onError: reject,
-        onDone: () => resolve(chunkCount),
+        onDone: () => {
+          if (payload) resolve(payload.dehydratedData.query.initial)
+          else
+            reject(new Error(`Router stream did not emit an initial payload`))
+        },
       },
     )
   })
@@ -74,17 +99,20 @@ function expectDehydratedRow(initial: DehydratedState): void {
 
 function expectHydratedRow(
   initial: DehydratedState,
+  restored: DehydratedState,
   expectedMeta?: Record<string, unknown>,
 ): void {
   const browserClient = createQueryClient()
-  const wire = serialize(initial)
-  const restored = deserialize<DehydratedState>(wire)
-  expect(restored.queries[0]?.meta?.loadSubsetOptions).toBeUndefined()
+  expectDehydratedRow(restored)
+  expect(
+    Object.hasOwn(restored.queries[0]?.meta ?? {}, `loadSubsetOptions`),
+  ).toBe(false)
+  if (expectedMeta) expect(restored.queries[0]?.meta).toEqual(expectedMeta)
   hydrate(browserClient, restored)
   const queryKey = initial.queries[0]!.queryKey
   expect(browserClient.getQueryData(queryKey)).toEqual([row])
   const hydratedMeta = browserClient.getQueryCache().find({ queryKey })?.meta
-  expect(hydratedMeta?.loadSubsetOptions).toBeUndefined()
+  expect(Object.hasOwn(hydratedMeta ?? {}, `loadSubsetOptions`)).toBe(false)
   if (expectedMeta) expect(hydratedMeta).toEqual(expectedMeta)
   browserClient.clear()
 }
@@ -131,8 +159,8 @@ describe(`Query collection SSR dehydration oracle`, () => {
       queryClient.setQueryData([`plain-ssr-control`], [row])
       const initial = dehydrate(queryClient)
       expectDehydratedRow(initial)
-      await expect(serializeRouterPayload(initial)).resolves.toBeGreaterThan(0)
-      expectHydratedRow(initial)
+      const streamed = await serializeRouterPayload(initial)
+      expectHydratedRow(initial, streamed)
     }, [() => queryClient.clear()])
   })
 
@@ -170,8 +198,8 @@ describe(`Query collection SSR dehydration oracle`, () => {
 
       const initial = dehydrate(queryClient)
       expectDehydratedRow(initial)
-      await expect(serializeRouterPayload(initial)).resolves.toBeGreaterThan(0)
-      expectHydratedRow(initial, { origin: `user` })
+      const streamed = await serializeRouterPayload(initial)
+      expectHydratedRow(initial, streamed, { origin: `user` })
     }, [
       () => live.cleanup(),
       () => collection.cleanup(),
@@ -205,8 +233,8 @@ describe(`Query collection SSR dehydration oracle`, () => {
       expect(receivedSignal).toBe(requestSignal)
       const initial = dehydrate(queryClient)
       expectDehydratedRow(initial)
-      await expect(serializeRouterPayload(initial)).resolves.toBeGreaterThan(0)
-      expectHydratedRow(initial)
+      const streamed = await serializeRouterPayload(initial)
+      expectHydratedRow(initial, streamed)
     }, [() => collection.cleanup(), () => queryClient.clear()])
   })
 
@@ -255,8 +283,8 @@ describe(`Query collection SSR dehydration oracle`, () => {
       expect(receivedOptions?.cursor?.whereFrom).toBe(cursor.whereFrom)
       const initial = dehydrate(queryClient)
       expectDehydratedRow(initial)
-      await expect(serializeRouterPayload(initial)).resolves.toBeGreaterThan(0)
-      expectHydratedRow(initial)
+      const streamed = await serializeRouterPayload(initial)
+      expectHydratedRow(initial, streamed)
     }, [() => collection.cleanup(), () => queryClient.clear()])
   })
 })

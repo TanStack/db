@@ -61,3 +61,33 @@ stream in a browser, Collection resume/refetch, and cancellation across SSR to
 a future Start integration owner. Subset and pagination oracles own predicate,
 order, and cursor meaning. These remaining paths are outside this bounded
 serialization claim.
+
+## External review follow-up (pre-change HEAD `f7272189f3f4213ef063616f877752bfcc6c48ae`)
+
+The original oracle checked only that `crossSerializeStream` emitted a chunk.
+It then used Seroval's synchronous `serialize`/`deserialize` for the exclusion
+and hydration assertions. A temporary stream-only mutant added a serializable
+`meta.loadSubsetOptions` marker to the streamed Query state while leaving the
+state used for the sync round trip untouched. All four original oracle cases
+passed. The revised oracle evaluates the emitted JavaScript chunks with the
+Router's scoped reference header, checks that request options are absent from
+the reconstructed payload, and hydrates Query Core from that payload. The same
+mutant failed all four cases at the request-options exclusion assertion. The
+unmutated implementation passed all four cases with no TypeScript errors.
+
+A second temporary mutant made the actual ordered-cursor request options
+enumerable in the streamed state. Seroval 1.5.0 rejected an unsupported IR
+object before emitting a chunk. The external review's assertion that this
+specific enumerable comparator shape could still complete the stream was
+incorrect. The stream-only serializable mutant still establishes the broader
+checker gap independently of that example.
+
+The test package pins Seroval 1.5.0, matching the installed Router Core
+1.159.4 in this lockfile. Issue #1950 reports Router Core 1.171.33 and Seroval
+1.6.8. A temporary Seroval 1.6.7 probe reconstructed the same plain Query
+payload and confirmed that its stream excludes non-enumerable request options
+while retaining enumerable user metadata; Seroval 1.5.0 did likewise. Version
+1.6.8 was unavailable from the configured npm registry during this review, so
+neither that version nor the full reported TanStack Start host has been
+certified. The coverage map assigns that witness to a future Start integration
+owner.
