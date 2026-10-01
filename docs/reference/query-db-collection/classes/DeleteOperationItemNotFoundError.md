@@ -3,7 +3,7 @@ id: DeleteOperationItemNotFoundError
 title: DeleteOperationItemNotFoundError
 ---
 
-Defined in: [packages/query-db-collection/src/errors.ts:85](https://github.com/TanStack/db/blob/main/packages/query-db-collection/src/errors.ts#L85)
+Defined in: [packages/query-db-collection/src/errors.ts:92](https://github.com/TanStack/db/blob/main/packages/query-db-collection/src/errors.ts#L92)
 
 ## Extends
 
@@ -17,7 +17,7 @@ Defined in: [packages/query-db-collection/src/errors.ts:85](https://github.com/T
 new DeleteOperationItemNotFoundError(key): DeleteOperationItemNotFoundError;
 ```
 
-Defined in: [packages/query-db-collection/src/errors.ts:86](https://github.com/TanStack/db/blob/main/packages/query-db-collection/src/errors.ts#L86)
+Defined in: [packages/query-db-collection/src/errors.ts:93](https://github.com/TanStack/db/blob/main/packages/query-db-collection/src/errors.ts#L93)
 
 #### Parameters
 

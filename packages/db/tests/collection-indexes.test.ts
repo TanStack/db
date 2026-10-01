@@ -1012,7 +1012,7 @@ describe(`Collection Indexes`, () => {
           type: `index`,
           operation: `gte`,
           field: `age`,
-          value: { from: 25, fromInclusive: true },
+          value: 25,
         })
       })
     })
@@ -2077,7 +2077,7 @@ describe(`Collection Indexes`, () => {
             type: `index`,
             operation: `gte`,
             field: `age`,
-            value: { from: 30, fromInclusive: true },
+            value: 30,
           },
           { type: `index`, operation: `eq`, field: `status`, value: `active` },
           { type: `index`, operation: `eq`, field: `name`, value: `Alice` },

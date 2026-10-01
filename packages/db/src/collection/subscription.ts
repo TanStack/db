@@ -12,7 +12,9 @@ import { LoadSubsetOperationAbortedError } from '../errors.js'
 import {
   createFilterFunctionFromExpression,
   createFilteredCallback,
+  findEqualityRoute,
 } from './change-events.js'
+import type { EqualityRoute } from './change-events.js'
 import type { BasicExpression, OrderBy } from '../query/ir.js'
 import type { IndexReader } from '../indexes/base-index.js'
 import type {
@@ -172,6 +174,9 @@ export class CollectionSubscription
 
   private filteredCallback: (changes: Array<ChangeMessage<any, any>>) => boolean
 
+  /** Field and literal the where clause requires, if it has a cheap one. */
+  private readonly equalityRoute: EqualityRoute | undefined
+
   private orderByIndex: IndexReader<string | number> | undefined
 
   // Status tracking
@@ -233,6 +238,10 @@ export class CollectionSubscription
     }
 
     this.callback = callbackWithSentKeysTracking
+
+    this.equalityRoute = options.whereExpression
+      ? findEqualityRoute(options.whereExpression)
+      : undefined
 
     // Create a filtered callback if where clause is provided
     this.filteredCallback = options.whereExpression
@@ -924,7 +933,15 @@ export class CollectionSubscription
   /** Create the record for a fresh, abortable acquisition attempt. */
   private createSubsetAcquisitionRecord(
     demand: SubsetDemand,
-  ): SubsetAcquisitionRecord & { abortController: AbortController } {
+  ): SubsetAcquisitionRecord {
+    // Eager sync never passes subset options to an adapter, so an abortable
+    // acquisition would only allocate a controller and an AbortError.
+    if (this.collection.config.syncMode !== `on-demand`) {
+      return {
+        options: demand.requestOptions,
+        syncRunGeneration: this.collection._sync.getSyncRunGeneration(),
+      }
+    }
     const abortController = new AbortController()
     const requestSignal = demand.requestOptions.signal
     let removeRequestAbortListener: (() => void) | undefined
@@ -1114,6 +1131,23 @@ export class CollectionSubscription
     // missing content. Delegated publication keeps its private D2 contributions.
     if (this.bufferPrivately(newChanges)) return false
     return this.filteredCallback(newChanges)
+  }
+
+  /**
+   * The route through which this subscription may receive only the changes
+   * whose value or previous value holds the route's literal. A change reaches
+   * the where filter only through those values, so the others cannot publish,
+   * and sent-key records cover published rows only. Stale published rows and
+   * truncate replay consume unfiltered changes, so no route applies then.
+   */
+  get changeRoute(): EqualityRoute | undefined {
+    if (
+      this.stalePublishedRows.size > 0 ||
+      this.truncateReplayState !== undefined
+    ) {
+      return undefined
+    }
+    return this.equalityRoute
   }
 
   /** Keep direct snapshot reads private while an authoritative replay is open. */
@@ -1591,15 +1625,21 @@ export class CollectionSubscription
     // 3. We're collecting all changes atomically, so filtering doesn't make sense
     const skipDeleteFilter = this.isBufferingForTruncate
 
+    // sentKeys records only published rows; trackSentKeys adds them after
+    // delivery. Keys inserted earlier in this batch are tracked locally, so a
+    // row the where clause drops cannot advance pagination or later look like
+    // a duplicate insert.
+    const insertedInBatch = new Set<string | number>()
     const newChanges = []
     for (const change of changes) {
       let newChange = change
-      const keyInSentKeys = this.sentKeys.has(change.key)
+      const keyInSentKeys =
+        this.sentKeys.has(change.key) || insertedInBatch.has(change.key)
 
       if (!keyInSentKeys) {
         if (change.type === `update`) {
           newChange = { ...change, type: `insert`, previousValue: undefined }
-          this.sentKeys.add(change.key)
+          insertedInBatch.add(change.key)
         } else if (change.type === `delete`) {
           // Filter out deletes for keys that have not been sent,
           // UNLESS we're buffering for truncate (where all deletes should pass through)
@@ -1607,7 +1647,7 @@ export class CollectionSubscription
             continue
           }
         } else {
-          this.sentKeys.add(change.key)
+          insertedInBatch.add(change.key)
         }
       } else {
         // Key was already sent - handle based on change type
@@ -1621,6 +1661,7 @@ export class CollectionSubscription
           // Remove from sentKeys so future inserts for this key are allowed
           // (e.g., after truncate + reinsert)
           this.sentKeys.delete(change.key)
+          insertedInBatch.delete(change.key)
         }
       }
       newChanges.push(newChange)

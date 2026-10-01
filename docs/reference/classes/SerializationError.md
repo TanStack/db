@@ -3,7 +3,7 @@ id: SerializationError
 title: SerializationError
 ---
 
-Defined in: [packages/db/src/errors.ts:683](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L683)
+Defined in: [packages/db/src/errors.ts:721](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L721)
 
 ## Extends
 
@@ -17,7 +17,7 @@ Defined in: [packages/db/src/errors.ts:683](https://github.com/TanStack/db/blob/
 new SerializationError(operation, originalError): SerializationError;
 ```
 
-Defined in: [packages/db/src/errors.ts:684](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L684)
+Defined in: [packages/db/src/errors.ts:722](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L722)
 
 #### Parameters
 

@@ -7,7 +7,7 @@ title: PowerSyncCollectionMeta
 type PowerSyncCollectionMeta<TTable> = object;
 ```
 
-Defined in: [definitions.ts:273](https://github.com/TanStack/db/blob/main/packages/powersync-db-collection/src/definitions.ts#L273)
+Defined in: [definitions.ts:279](https://github.com/TanStack/db/blob/main/packages/powersync-db-collection/src/definitions.ts#L279)
 
 Metadata for the PowerSync Collection.
 
@@ -25,7 +25,7 @@ Metadata for the PowerSync Collection.
 metadataIsTracked: boolean;
 ```
 
-Defined in: [definitions.ts:291](https://github.com/TanStack/db/blob/main/packages/powersync-db-collection/src/definitions.ts#L291)
+Defined in: [definitions.ts:297](https://github.com/TanStack/db/blob/main/packages/powersync-db-collection/src/definitions.ts#L297)
 
 Whether the PowerSync table tracks metadata.
 
@@ -37,7 +37,7 @@ Whether the PowerSync table tracks metadata.
 serializeValue: (value) => ExtractedTable<TTable>;
 ```
 
-Defined in: [definitions.ts:286](https://github.com/TanStack/db/blob/main/packages/powersync-db-collection/src/definitions.ts#L286)
+Defined in: [definitions.ts:292](https://github.com/TanStack/db/blob/main/packages/powersync-db-collection/src/definitions.ts#L292)
 
 Serializes a collection value to the SQLite type
 
@@ -59,7 +59,7 @@ Serializes a collection value to the SQLite type
 tableName: string;
 ```
 
-Defined in: [definitions.ts:277](https://github.com/TanStack/db/blob/main/packages/powersync-db-collection/src/definitions.ts#L277)
+Defined in: [definitions.ts:283](https://github.com/TanStack/db/blob/main/packages/powersync-db-collection/src/definitions.ts#L283)
 
 The SQLite table representing the collection.
 
@@ -71,6 +71,6 @@ The SQLite table representing the collection.
 trackedTableName: string;
 ```
 
-Defined in: [definitions.ts:281](https://github.com/TanStack/db/blob/main/packages/powersync-db-collection/src/definitions.ts#L281)
+Defined in: [definitions.ts:287](https://github.com/TanStack/db/blob/main/packages/powersync-db-collection/src/definitions.ts#L287)
 
 The internal table used to track diffs for the collection.

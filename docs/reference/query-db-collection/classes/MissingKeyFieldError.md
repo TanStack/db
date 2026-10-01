@@ -3,7 +3,7 @@ id: MissingKeyFieldError
 title: MissingKeyFieldError
 ---
 
-Defined in: [packages/query-db-collection/src/errors.ts:106](https://github.com/TanStack/db/blob/main/packages/query-db-collection/src/errors.ts#L106)
+Defined in: [packages/query-db-collection/src/errors.ts:113](https://github.com/TanStack/db/blob/main/packages/query-db-collection/src/errors.ts#L113)
 
 ## Extends
 
@@ -17,7 +17,7 @@ Defined in: [packages/query-db-collection/src/errors.ts:106](https://github.com/
 new MissingKeyFieldError(operation, message): MissingKeyFieldError;
 ```
 
-Defined in: [packages/query-db-collection/src/errors.ts:107](https://github.com/TanStack/db/blob/main/packages/query-db-collection/src/errors.ts#L107)
+Defined in: [packages/query-db-collection/src/errors.ts:114](https://github.com/TanStack/db/blob/main/packages/query-db-collection/src/errors.ts#L114)
 
 #### Parameters
 

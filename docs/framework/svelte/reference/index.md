@@ -10,6 +10,7 @@ title: "@tanstack/svelte-db"
 
 ## Type Aliases
 
+- [ConditionalUseLiveQueryReturn](type-aliases/ConditionalUseLiveQueryReturn.md)
 - [DbProvider](type-aliases/DbProvider.md)
 - [LiveInfiniteQueryConfig](type-aliases/LiveInfiniteQueryConfig.md)
 - [UseLiveInfiniteQueryConfig](type-aliases/UseLiveInfiniteQueryConfig.md)

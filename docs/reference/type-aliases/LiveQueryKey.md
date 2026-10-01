@@ -7,4 +7,4 @@ title: LiveQueryKey
 type LiveQueryKey = ReadonlyArray<unknown>;
 ```
 
-Defined in: [packages/db/src/live-query-options.ts:17](https://github.com/TanStack/db/blob/main/packages/db/src/live-query-options.ts#L17)
+Defined in: [packages/db/src/live-query-options.ts:18](https://github.com/TanStack/db/blob/main/packages/db/src/live-query-options.ts#L18)

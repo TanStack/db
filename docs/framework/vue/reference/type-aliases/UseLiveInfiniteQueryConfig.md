@@ -7,7 +7,7 @@ title: UseLiveInfiniteQueryConfig
 type UseLiveInfiniteQueryConfig<TContext> = LiveInfiniteQueryConfig<InferResultType<TContext>[number]>;
 ```
 
-Defined in: [useLiveInfiniteQuery.ts:43](https://github.com/TanStack/db/blob/main/packages/vue-db/src/useLiveInfiniteQuery.ts#L43)
+Defined in: [useLiveInfiniteQuery.ts:44](https://github.com/TanStack/db/blob/main/packages/vue-db/src/useLiveInfiniteQuery.ts#L44)
 
 ## Type Parameters
 

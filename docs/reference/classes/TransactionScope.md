@@ -3,7 +3,7 @@ id: TransactionScope
 title: TransactionScope
 ---
 
-Defined in: [packages/db/src/transactions.ts:21](https://github.com/TanStack/db/blob/main/packages/db/src/transactions.ts#L21)
+Defined in: [packages/db/src/transactions.ts:22](https://github.com/TanStack/db/blob/main/packages/db/src/transactions.ts#L22)
 
 ## Constructors
 
@@ -25,7 +25,7 @@ new TransactionScope(): TransactionScope;
 clear(): void;
 ```
 
-Defined in: [packages/db/src/transactions.ts:119](https://github.com/TanStack/db/blob/main/packages/db/src/transactions.ts#L119)
+Defined in: [packages/db/src/transactions.ts:120](https://github.com/TanStack/db/blob/main/packages/db/src/transactions.ts#L120)
 
 #### Returns
 
@@ -39,7 +39,7 @@ Defined in: [packages/db/src/transactions.ts:119](https://github.com/TanStack/db
 createTransaction<T>(config): Transaction<T>;
 ```
 
-Defined in: [packages/db/src/transactions.ts:26](https://github.com/TanStack/db/blob/main/packages/db/src/transactions.ts#L26)
+Defined in: [packages/db/src/transactions.ts:27](https://github.com/TanStack/db/blob/main/packages/db/src/transactions.ts#L27)
 
 #### Type Parameters
 
@@ -67,7 +67,7 @@ getActiveTransaction():
   | undefined;
 ```
 
-Defined in: [packages/db/src/transactions.ts:34](https://github.com/TanStack/db/blob/main/packages/db/src/transactions.ts#L34)
+Defined in: [packages/db/src/transactions.ts:35](https://github.com/TanStack/db/blob/main/packages/db/src/transactions.ts#L35)
 
 #### Returns
 
@@ -84,7 +84,7 @@ getActiveTransactionForCollection():
   | undefined;
 ```
 
-Defined in: [packages/db/src/transactions.ts:38](https://github.com/TanStack/db/blob/main/packages/db/src/transactions.ts#L38)
+Defined in: [packages/db/src/transactions.ts:39](https://github.com/TanStack/db/blob/main/packages/db/src/transactions.ts#L39)
 
 #### Returns
 
@@ -99,7 +99,7 @@ Defined in: [packages/db/src/transactions.ts:38](https://github.com/TanStack/db/
 registerTransaction(transaction): void;
 ```
 
-Defined in: [packages/db/src/transactions.ts:77](https://github.com/TanStack/db/blob/main/packages/db/src/transactions.ts#L77)
+Defined in: [packages/db/src/transactions.ts:78](https://github.com/TanStack/db/blob/main/packages/db/src/transactions.ts#L78)
 
 #### Parameters
 
@@ -119,7 +119,7 @@ Defined in: [packages/db/src/transactions.ts:77](https://github.com/TanStack/db/
 removeTransaction(transaction): void;
 ```
 
-Defined in: [packages/db/src/transactions.ts:93](https://github.com/TanStack/db/blob/main/packages/db/src/transactions.ts#L93)
+Defined in: [packages/db/src/transactions.ts:94](https://github.com/TanStack/db/blob/main/packages/db/src/transactions.ts#L94)
 
 #### Parameters
 
@@ -139,7 +139,7 @@ Defined in: [packages/db/src/transactions.ts:93](https://github.com/TanStack/db/
 rollbackConflictingTransactions(transaction, mutationIds): void;
 ```
 
-Defined in: [packages/db/src/transactions.ts:102](https://github.com/TanStack/db/blob/main/packages/db/src/transactions.ts#L102)
+Defined in: [packages/db/src/transactions.ts:103](https://github.com/TanStack/db/blob/main/packages/db/src/transactions.ts#L103)
 
 #### Parameters
 
@@ -163,7 +163,7 @@ Defined in: [packages/db/src/transactions.ts:102](https://github.com/TanStack/db
 unregisterTransaction(transaction): void;
 ```
 
-Defined in: [packages/db/src/transactions.ts:83](https://github.com/TanStack/db/blob/main/packages/db/src/transactions.ts#L83)
+Defined in: [packages/db/src/transactions.ts:84](https://github.com/TanStack/db/blob/main/packages/db/src/transactions.ts#L84)
 
 #### Parameters
 

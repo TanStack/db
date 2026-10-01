@@ -3,13 +3,13 @@ id: QueryCollectionConfig
 title: QueryCollectionConfig
 ---
 
-Defined in: [packages/query-db-collection/src/query.ts:101](https://github.com/TanStack/db/blob/main/packages/query-db-collection/src/query.ts#L101)
+Defined in: [packages/query-db-collection/src/query.ts:107](https://github.com/TanStack/db/blob/main/packages/query-db-collection/src/query.ts#L107)
 
 Configuration options for creating a Query Collection
 
 ## Extends
 
-- `BaseCollectionConfig`\<`T`, `TKey`, `TSchema`\>
+- `BaseCollectionConfig`\<`T`, `TKey`, `TSchema`, [`QueryCollectionUtils`](QueryCollectionUtils.md)\<`T`, `TKey`, \[`TSchema`\] *extends* \[`never`\] ? `T` : `InferSchemaInput`\<`TSchema`\>, `TError`\>\>
 
 ## Type Parameters
 
@@ -61,7 +61,7 @@ The schema type for validation
 optional enabled: Enabled<TQueryData, TError, TQueryData, TQueryKey>;
 ```
 
-Defined in: [packages/query-db-collection/src/query.ts:130](https://github.com/TanStack/db/blob/main/packages/query-db-collection/src/query.ts#L130)
+Defined in: [packages/query-db-collection/src/query.ts:146](https://github.com/TanStack/db/blob/main/packages/query-db-collection/src/query.ts#L146)
 
 Whether the query should automatically run (default: true)
 
@@ -73,7 +73,7 @@ Whether the query should automatically run (default: true)
 optional gcTime: number;
 ```
 
-Defined in: [packages/query-db-collection/src/query.ts:165](https://github.com/TanStack/db/blob/main/packages/query-db-collection/src/query.ts#L165)
+Defined in: [packages/query-db-collection/src/query.ts:181](https://github.com/TanStack/db/blob/main/packages/query-db-collection/src/query.ts#L181)
 
 Time in milliseconds after which the collection will be garbage collected
 when it has no active subscribers. Defaults to 5 minutes (300000ms).
@@ -96,7 +96,7 @@ BaseCollectionConfig.gcTime
 optional initialData: TQueryData | InitialDataFunction<TQueryData>;
 ```
 
-Defined in: [packages/query-db-collection/src/query.ts:205](https://github.com/TanStack/db/blob/main/packages/query-db-collection/src/query.ts#L205)
+Defined in: [packages/query-db-collection/src/query.ts:221](https://github.com/TanStack/db/blob/main/packages/query-db-collection/src/query.ts#L221)
 
 Data used to initialize the TanStack Query cache for an eager collection.
 The value has the original Query response shape and is projected through
@@ -110,7 +110,7 @@ the collection's select option before rows are materialized.
 optional initialDataUpdatedAt: number | () => number | undefined;
 ```
 
-Defined in: [packages/query-db-collection/src/query.ts:213](https://github.com/TanStack/db/blob/main/packages/query-db-collection/src/query.ts#L213)
+Defined in: [packages/query-db-collection/src/query.ts:229](https://github.com/TanStack/db/blob/main/packages/query-db-collection/src/query.ts#L229)
 
 The timestamp TanStack Query uses to determine initialData freshness.
 
@@ -122,7 +122,7 @@ The timestamp TanStack Query uses to determine initialData freshness.
 optional meta: Record<string, unknown>;
 ```
 
-Defined in: [packages/query-db-collection/src/query.ts:242](https://github.com/TanStack/db/blob/main/packages/query-db-collection/src/query.ts#L242)
+Defined in: [packages/query-db-collection/src/query.ts:258](https://github.com/TanStack/db/blob/main/packages/query-db-collection/src/query.ts#L258)
 
 Metadata to pass to the query.
 Available in queryFn via context.meta
@@ -154,7 +154,7 @@ meta: {
 optional networkMode: NetworkMode;
 ```
 
-Defined in: [packages/query-db-collection/src/query.ts:193](https://github.com/TanStack/db/blob/main/packages/query-db-collection/src/query.ts#L193)
+Defined in: [packages/query-db-collection/src/query.ts:209](https://github.com/TanStack/db/blob/main/packages/query-db-collection/src/query.ts#L209)
 
 ***
 
@@ -164,7 +164,7 @@ Defined in: [packages/query-db-collection/src/query.ts:193](https://github.com/T
 optional persistedGcTime: number;
 ```
 
-Defined in: [packages/query-db-collection/src/query.ts:220](https://github.com/TanStack/db/blob/main/packages/query-db-collection/src/query.ts#L220)
+Defined in: [packages/query-db-collection/src/query.ts:236](https://github.com/TanStack/db/blob/main/packages/query-db-collection/src/query.ts#L236)
 
 ***
 
@@ -174,7 +174,7 @@ Defined in: [packages/query-db-collection/src/query.ts:220](https://github.com/T
 queryClient: QueryClient;
 ```
 
-Defined in: [packages/query-db-collection/src/query.ts:126](https://github.com/TanStack/db/blob/main/packages/query-db-collection/src/query.ts#L126)
+Defined in: [packages/query-db-collection/src/query.ts:142](https://github.com/TanStack/db/blob/main/packages/query-db-collection/src/query.ts#L142)
 
 The TanStack Query client instance
 
@@ -186,7 +186,7 @@ The TanStack Query client instance
 queryFn: TQueryFn extends (context) => any[] | Promise<any[]> ? (context) => T[] | Promise<T[]> : TQueryFn;
 ```
 
-Defined in: [packages/query-db-collection/src/query.ts:115](https://github.com/TanStack/db/blob/main/packages/query-db-collection/src/query.ts#L115)
+Defined in: [packages/query-db-collection/src/query.ts:131](https://github.com/TanStack/db/blob/main/packages/query-db-collection/src/query.ts#L131)
 
 Function that fetches data from the server. Must return the complete collection state
 
@@ -198,7 +198,7 @@ Function that fetches data from the server. Must return the complete collection 
 queryKey: TQueryKey | TQueryKeyBuilder<TQueryKey>;
 ```
 
-Defined in: [packages/query-db-collection/src/query.ts:113](https://github.com/TanStack/db/blob/main/packages/query-db-collection/src/query.ts#L113)
+Defined in: [packages/query-db-collection/src/query.ts:129](https://github.com/TanStack/db/blob/main/packages/query-db-collection/src/query.ts#L129)
 
 The query key used by TanStack Query to identify this query
 
@@ -210,7 +210,7 @@ The query key used by TanStack Query to identify this query
 optional refetchInterval: number | false | (query) => number | false | undefined;
 ```
 
-Defined in: [packages/query-db-collection/src/query.ts:137](https://github.com/TanStack/db/blob/main/packages/query-db-collection/src/query.ts#L137)
+Defined in: [packages/query-db-collection/src/query.ts:153](https://github.com/TanStack/db/blob/main/packages/query-db-collection/src/query.ts#L153)
 
 ***
 
@@ -220,7 +220,7 @@ Defined in: [packages/query-db-collection/src/query.ts:137](https://github.com/T
 optional refetchOnMount: boolean | "always" | (query) => boolean | "always";
 ```
 
-Defined in: [packages/query-db-collection/src/query.ts:186](https://github.com/TanStack/db/blob/main/packages/query-db-collection/src/query.ts#L186)
+Defined in: [packages/query-db-collection/src/query.ts:202](https://github.com/TanStack/db/blob/main/packages/query-db-collection/src/query.ts#L202)
 
 ***
 
@@ -230,7 +230,7 @@ Defined in: [packages/query-db-collection/src/query.ts:186](https://github.com/T
 optional refetchOnReconnect: boolean | "always" | (query) => boolean | "always";
 ```
 
-Defined in: [packages/query-db-collection/src/query.ts:179](https://github.com/TanStack/db/blob/main/packages/query-db-collection/src/query.ts#L179)
+Defined in: [packages/query-db-collection/src/query.ts:195](https://github.com/TanStack/db/blob/main/packages/query-db-collection/src/query.ts#L195)
 
 ***
 
@@ -240,7 +240,7 @@ Defined in: [packages/query-db-collection/src/query.ts:179](https://github.com/T
 optional refetchOnWindowFocus: boolean | "always" | (query) => boolean | "always";
 ```
 
-Defined in: [packages/query-db-collection/src/query.ts:172](https://github.com/TanStack/db/blob/main/packages/query-db-collection/src/query.ts#L172)
+Defined in: [packages/query-db-collection/src/query.ts:188](https://github.com/TanStack/db/blob/main/packages/query-db-collection/src/query.ts#L188)
 
 ***
 
@@ -250,7 +250,7 @@ Defined in: [packages/query-db-collection/src/query.ts:172](https://github.com/T
 optional retry: RetryValue<TError>;
 ```
 
-Defined in: [packages/query-db-collection/src/query.ts:144](https://github.com/TanStack/db/blob/main/packages/query-db-collection/src/query.ts#L144)
+Defined in: [packages/query-db-collection/src/query.ts:160](https://github.com/TanStack/db/blob/main/packages/query-db-collection/src/query.ts#L160)
 
 ***
 
@@ -260,7 +260,7 @@ Defined in: [packages/query-db-collection/src/query.ts:144](https://github.com/T
 optional retryDelay: RetryDelayValue<TError>;
 ```
 
-Defined in: [packages/query-db-collection/src/query.ts:151](https://github.com/TanStack/db/blob/main/packages/query-db-collection/src/query.ts#L151)
+Defined in: [packages/query-db-collection/src/query.ts:167](https://github.com/TanStack/db/blob/main/packages/query-db-collection/src/query.ts#L167)
 
 ***
 
@@ -270,7 +270,7 @@ Defined in: [packages/query-db-collection/src/query.ts:151](https://github.com/T
 optional select: (data) => T[];
 ```
 
-Defined in: [packages/query-db-collection/src/query.ts:124](https://github.com/TanStack/db/blob/main/packages/query-db-collection/src/query.ts#L124)
+Defined in: [packages/query-db-collection/src/query.ts:140](https://github.com/TanStack/db/blob/main/packages/query-db-collection/src/query.ts#L140)
 
 Extracts the row array TanStack DB materializes from the Query response.
 The Query cache keeps the original response shape.
@@ -293,4 +293,4 @@ The Query cache keeps the original response shape.
 optional staleTime: StaleTimeFunction<TQueryData, TError, TQueryData, TQueryKey>;
 ```
 
-Defined in: [packages/query-db-collection/src/query.ts:158](https://github.com/TanStack/db/blob/main/packages/query-db-collection/src/query.ts#L158)
+Defined in: [packages/query-db-collection/src/query.ts:174](https://github.com/TanStack/db/blob/main/packages/query-db-collection/src/query.ts#L174)

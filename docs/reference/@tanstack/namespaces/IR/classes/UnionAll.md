@@ -3,7 +3,7 @@ id: UnionAll
 title: UnionAll
 ---
 
-Defined in: [packages/db/src/query/ir.ts:124](https://github.com/TanStack/db/blob/main/packages/db/src/query/ir.ts#L124)
+Defined in: [packages/db/src/query/ir.ts:126](https://github.com/TanStack/db/blob/main/packages/db/src/query/ir.ts#L126)
 
 ## Extends
 
@@ -17,7 +17,7 @@ Defined in: [packages/db/src/query/ir.ts:124](https://github.com/TanStack/db/blo
 new UnionAll(queries): UnionAll;
 ```
 
-Defined in: [packages/db/src/query/ir.ts:132](https://github.com/TanStack/db/blob/main/packages/db/src/query/ir.ts#L132)
+Defined in: [packages/db/src/query/ir.ts:134](https://github.com/TanStack/db/blob/main/packages/db/src/query/ir.ts#L134)
 
 Result-level UNION ALL. Downstream query clauses see the union result row
 shape, not the branch source aliases. Optimizers may push safe operations
@@ -48,7 +48,7 @@ BaseExpression.constructor
 readonly __returnType: any;
 ```
 
-Defined in: [packages/db/src/query/ir.ts:84](https://github.com/TanStack/db/blob/main/packages/db/src/query/ir.ts#L84)
+Defined in: [packages/db/src/query/ir.ts:86](https://github.com/TanStack/db/blob/main/packages/db/src/query/ir.ts#L86)
 
 **`Internal`**
 
@@ -68,7 +68,7 @@ BaseExpression.__returnType
 queries: QueryIR[];
 ```
 
-Defined in: [packages/db/src/query/ir.ts:132](https://github.com/TanStack/db/blob/main/packages/db/src/query/ir.ts#L132)
+Defined in: [packages/db/src/query/ir.ts:134](https://github.com/TanStack/db/blob/main/packages/db/src/query/ir.ts#L134)
 
 ***
 
@@ -78,7 +78,7 @@ Defined in: [packages/db/src/query/ir.ts:132](https://github.com/TanStack/db/blo
 type: "unionAll";
 ```
 
-Defined in: [packages/db/src/query/ir.ts:125](https://github.com/TanStack/db/blob/main/packages/db/src/query/ir.ts#L125)
+Defined in: [packages/db/src/query/ir.ts:127](https://github.com/TanStack/db/blob/main/packages/db/src/query/ir.ts#L127)
 
 #### Overrides
 
@@ -96,7 +96,7 @@ BaseExpression.type
 get alias(): string;
 ```
 
-Defined in: [packages/db/src/query/ir.ts:136](https://github.com/TanStack/db/blob/main/packages/db/src/query/ir.ts#L136)
+Defined in: [packages/db/src/query/ir.ts:138](https://github.com/TanStack/db/blob/main/packages/db/src/query/ir.ts#L138)
 
 ##### Returns
 

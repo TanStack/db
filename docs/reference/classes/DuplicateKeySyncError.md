@@ -3,7 +3,7 @@ id: DuplicateKeySyncError
 title: DuplicateKeySyncError
 ---
 
-Defined in: [packages/db/src/errors.ts:183](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L183)
+Defined in: [packages/db/src/errors.ts:193](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L193)
 
 ## Extends
 
@@ -20,7 +20,7 @@ new DuplicateKeySyncError(
    options?): DuplicateKeySyncError;
 ```
 
-Defined in: [packages/db/src/errors.ts:184](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L184)
+Defined in: [packages/db/src/errors.ts:194](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L194)
 
 #### Parameters
 

@@ -7,7 +7,7 @@ title: lower
 function lower<T>(arg): StringFunctionReturnType<T>;
 ```
 
-Defined in: [packages/db/src/query/builder/functions.ts:289](https://github.com/TanStack/db/blob/main/packages/db/src/query/builder/functions.ts#L289)
+Defined in: [packages/db/src/query/builder/functions.ts:312](https://github.com/TanStack/db/blob/main/packages/db/src/query/builder/functions.ts#L312)
 
 ## Type Parameters
 

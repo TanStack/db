@@ -9,7 +9,7 @@ title: useLiveInfiniteQuery
 function useLiveInfiniteQuery<TResult, TKey, TUtils>(liveQueryCollection, config): UseLiveInfiniteQueryReturnWithCollection<TResult, TKey, TUtils>;
 ```
 
-Defined in: [useLiveInfiniteQuery.ts:95](https://github.com/TanStack/db/blob/main/packages/vue-db/src/useLiveInfiniteQuery.ts#L95)
+Defined in: [useLiveInfiniteQuery.ts:102](https://github.com/TanStack/db/blob/main/packages/vue-db/src/useLiveInfiniteQuery.ts#L102)
 
 Create a Vue-native reactive view over the shared live-query window
 controller. The query must include an `orderBy` clause.
@@ -51,7 +51,7 @@ function useLiveInfiniteQuery<TContext>(
 deps?): UseLiveInfiniteQueryReturn<TContext>;
 ```
 
-Defined in: [useLiveInfiniteQuery.ts:106](https://github.com/TanStack/db/blob/main/packages/vue-db/src/useLiveInfiniteQuery.ts#L106)
+Defined in: [useLiveInfiniteQuery.ts:113](https://github.com/TanStack/db/blob/main/packages/vue-db/src/useLiveInfiniteQuery.ts#L113)
 
 Create a Vue-native reactive view over the shared live-query window
 controller. The query must include an `orderBy` clause.

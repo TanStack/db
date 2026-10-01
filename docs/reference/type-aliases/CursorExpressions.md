@@ -7,7 +7,7 @@ title: CursorExpressions
 type CursorExpressions = object;
 ```
 
-Defined in: [packages/db/src/types.ts:283](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L283)
+Defined in: [packages/db/src/types.ts:298](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L298)
 
 Cursor expressions for pagination, passed separately from the main `where` clause.
 The sync layer can choose to use cursor-based pagination (combining these with the where)
@@ -23,7 +23,7 @@ Neither expression includes the main `where` clause - they are cursor-specific o
 optional lastKey: string | number;
 ```
 
-Defined in: [packages/db/src/types.ts:300](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L300)
+Defined in: [packages/db/src/types.ts:316](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L316)
 
 The key of the last item that was loaded.
 Can be used by sync layers for tracking or deduplication.
@@ -36,7 +36,7 @@ Can be used by sync layers for tracking or deduplication.
 whereCurrent: BasicExpression<boolean>;
 ```
 
-Defined in: [packages/db/src/types.ts:295](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L295)
+Defined in: [packages/db/src/types.ts:311](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L311)
 
 Expression for rows equal to the current cursor value (first orderBy column only).
 Used to handle tie-breaking/duplicates at the boundary.
@@ -50,8 +50,9 @@ Example: eq(col1, v1) or for Dates: and(gte(col1, v1), lt(col1, v1+1ms))
 whereFrom: BasicExpression<boolean>;
 ```
 
-Defined in: [packages/db/src/types.ts:289](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L289)
+Defined in: [packages/db/src/types.ts:305](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L305)
 
 Expression for rows greater than (after) the cursor value.
-Core emits cursors for a single order column. Multi-column queries use
-prefix-and-tie loading instead of constructing a composite cursor.
+Core emits this predicate from the leading order column. Multi-column
+queries load the complete leading-value tie separately instead of
+constructing a composite cursor.

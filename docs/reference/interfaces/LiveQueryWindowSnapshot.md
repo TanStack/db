@@ -55,7 +55,7 @@ error: unknown;
 
 Defined in: [packages/db/src/live-query-window-controller.ts:490](https://github.com/TanStack/db/blob/main/packages/db/src/live-query-window-controller.ts#L490)
 
-The last pagination failure, cleared when a retry begins.
+Last pagination failure, retained through an earlier-started success until recovery begins.
 
 ***
 
@@ -75,7 +75,7 @@ Defined in: [packages/db/src/live-query-window-controller.ts:487](https://github
 isCleanedUp: boolean;
 ```
 
-Defined in: [packages/db/src/live-query-window-controller.ts:499](https://github.com/TanStack/db/blob/main/packages/db/src/live-query-window-controller.ts#L499)
+Defined in: [packages/db/src/live-query-window-controller.ts:502](https://github.com/TanStack/db/blob/main/packages/db/src/live-query-window-controller.ts#L502)
 
 ***
 
@@ -85,7 +85,7 @@ Defined in: [packages/db/src/live-query-window-controller.ts:499](https://github
 isEnabled: boolean;
 ```
 
-Defined in: [packages/db/src/live-query-window-controller.ts:500](https://github.com/TanStack/db/blob/main/packages/db/src/live-query-window-controller.ts#L500)
+Defined in: [packages/db/src/live-query-window-controller.ts:503](https://github.com/TanStack/db/blob/main/packages/db/src/live-query-window-controller.ts#L503)
 
 ***
 
@@ -95,7 +95,7 @@ Defined in: [packages/db/src/live-query-window-controller.ts:500](https://github
 isError: boolean;
 ```
 
-Defined in: [packages/db/src/live-query-window-controller.ts:498](https://github.com/TanStack/db/blob/main/packages/db/src/live-query-window-controller.ts#L498)
+Defined in: [packages/db/src/live-query-window-controller.ts:501](https://github.com/TanStack/db/blob/main/packages/db/src/live-query-window-controller.ts#L501)
 
 ***
 
@@ -115,7 +115,7 @@ Defined in: [packages/db/src/live-query-window-controller.ts:488](https://github
 isIdle: boolean;
 ```
 
-Defined in: [packages/db/src/live-query-window-controller.ts:497](https://github.com/TanStack/db/blob/main/packages/db/src/live-query-window-controller.ts#L497)
+Defined in: [packages/db/src/live-query-window-controller.ts:500](https://github.com/TanStack/db/blob/main/packages/db/src/live-query-window-controller.ts#L500)
 
 ***
 
@@ -126,6 +126,16 @@ isLoading: boolean;
 ```
 
 Defined in: [packages/db/src/live-query-window-controller.ts:495](https://github.com/TanStack/db/blob/main/packages/db/src/live-query-window-controller.ts#L495)
+
+***
+
+### isPersistedReady
+
+```ts
+isPersistedReady: boolean;
+```
+
+Defined in: [packages/db/src/live-query-window-controller.ts:498](https://github.com/TanStack/db/blob/main/packages/db/src/live-query-window-controller.ts#L498)
 
 ***
 
@@ -160,6 +170,26 @@ pages: readonly readonly T[][];
 Defined in: [packages/db/src/live-query-window-controller.ts:484](https://github.com/TanStack/db/blob/main/packages/db/src/live-query-window-controller.ts#L484)
 
 Rows grouped into committed pages of `pageSize`.
+
+***
+
+### persistedError
+
+```ts
+persistedError: unknown;
+```
+
+Defined in: [packages/db/src/live-query-window-controller.ts:499](https://github.com/TanStack/db/blob/main/packages/db/src/live-query-window-controller.ts#L499)
+
+***
+
+### persistedStatus
+
+```ts
+persistedStatus: LiveQueryPersistedStatus;
+```
+
+Defined in: [packages/db/src/live-query-window-controller.ts:497](https://github.com/TanStack/db/blob/main/packages/db/src/live-query-window-controller.ts#L497)
 
 ***
 

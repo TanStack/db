@@ -9,7 +9,7 @@ title: useLiveQuery
 function useLiveQuery<TContext>(queryFn, deps?): object;
 ```
 
-Defined in: [useLiveQuery.ts:360](https://github.com/TanStack/db/blob/main/packages/react-db/src/useLiveQuery.ts#L360)
+Defined in: [useLiveQuery.ts:443](https://github.com/TanStack/db/blob/main/packages/react-db/src/useLiveQuery.ts#L443)
 
 Create a live query using a query function.
 
@@ -82,10 +82,28 @@ isIdle: boolean;
 isLoading: boolean;
 ```
 
+#### isPersistedReady
+
+```ts
+isPersistedReady: boolean;
+```
+
 #### isReady
 
 ```ts
 isReady: boolean;
+```
+
+#### persistedError
+
+```ts
+persistedError: unknown;
+```
+
+#### persistedStatus
+
+```ts
+persistedStatus: LiveQueryPersistedStatus;
 ```
 
 #### state
@@ -178,7 +196,7 @@ return (
 function useLiveQuery<TContext>(queryFn, deps?): object;
 ```
 
-Defined in: [useLiveQuery.ts:377](https://github.com/TanStack/db/blob/main/packages/react-db/src/useLiveQuery.ts#L377)
+Defined in: [useLiveQuery.ts:463](https://github.com/TanStack/db/blob/main/packages/react-db/src/useLiveQuery.ts#L463)
 
 Create a live query using a query function.
 
@@ -253,10 +271,28 @@ isIdle: boolean;
 isLoading: boolean;
 ```
 
+#### isPersistedReady
+
+```ts
+isPersistedReady: boolean;
+```
+
 #### isReady
 
 ```ts
 isReady: boolean;
+```
+
+#### persistedError
+
+```ts
+persistedError: unknown;
+```
+
+#### persistedStatus
+
+```ts
+persistedStatus: LiveQueryPersistedStatus;
 ```
 
 #### state
@@ -351,7 +387,7 @@ return (
 function useLiveQuery<TContext>(queryFn, deps?): object;
 ```
 
-Defined in: [useLiveQuery.ts:396](https://github.com/TanStack/db/blob/main/packages/react-db/src/useLiveQuery.ts#L396)
+Defined in: [useLiveQuery.ts:485](https://github.com/TanStack/db/blob/main/packages/react-db/src/useLiveQuery.ts#L485)
 
 Create a live query using a query function.
 
@@ -429,10 +465,28 @@ isIdle: boolean;
 isLoading: boolean;
 ```
 
+#### isPersistedReady
+
+```ts
+isPersistedReady: boolean;
+```
+
 #### isReady
 
 ```ts
 isReady: boolean;
+```
+
+#### persistedError
+
+```ts
+persistedError: unknown;
+```
+
+#### persistedStatus
+
+```ts
+persistedStatus: LiveQueryPersistedStatus;
 ```
 
 #### state
@@ -527,7 +581,7 @@ return (
 function useLiveQuery<TResult, TKey, TUtils>(queryFn, deps?): object;
 ```
 
-Defined in: [useLiveQuery.ts:415](https://github.com/TanStack/db/blob/main/packages/react-db/src/useLiveQuery.ts#L415)
+Defined in: [useLiveQuery.ts:507](https://github.com/TanStack/db/blob/main/packages/react-db/src/useLiveQuery.ts#L507)
 
 Create a live query using a query function.
 
@@ -612,10 +666,28 @@ isIdle: boolean;
 isLoading: boolean;
 ```
 
+#### isPersistedReady
+
+```ts
+isPersistedReady: boolean;
+```
+
 #### isReady
 
 ```ts
 isReady: boolean;
+```
+
+#### persistedError
+
+```ts
+persistedError: unknown;
+```
+
+#### persistedStatus
+
+```ts
+persistedStatus: LiveQueryPersistedStatus;
 ```
 
 #### state
@@ -708,7 +780,7 @@ return (
 function useLiveQuery<TContext, TResult, TKey, TUtils>(queryFn, deps?): object;
 ```
 
-Defined in: [useLiveQuery.ts:438](https://github.com/TanStack/db/blob/main/packages/react-db/src/useLiveQuery.ts#L438)
+Defined in: [useLiveQuery.ts:533](https://github.com/TanStack/db/blob/main/packages/react-db/src/useLiveQuery.ts#L533)
 
 Create a live query using a query function.
 
@@ -801,10 +873,28 @@ isIdle: boolean;
 isLoading: boolean;
 ```
 
+#### isPersistedReady
+
+```ts
+isPersistedReady: boolean;
+```
+
 #### isReady
 
 ```ts
 isReady: boolean;
+```
+
+#### persistedError
+
+```ts
+persistedError: unknown;
+```
+
+#### persistedStatus
+
+```ts
+persistedStatus: LiveQueryPersistedStatus;
 ```
 
 #### state
@@ -900,7 +990,7 @@ return (
 function useLiveQuery<TContext>(config): object;
 ```
 
-Defined in: [useLiveQuery.ts:508](https://github.com/TanStack/db/blob/main/packages/react-db/src/useLiveQuery.ts#L508)
+Defined in: [useLiveQuery.ts:606](https://github.com/TanStack/db/blob/main/packages/react-db/src/useLiveQuery.ts#L606)
 
 Create a live query using configuration object
 
@@ -967,10 +1057,28 @@ isIdle: boolean;
 isLoading: boolean;
 ```
 
+#### isPersistedReady
+
+```ts
+isPersistedReady: boolean;
+```
+
 #### isReady
 
 ```ts
 isReady: boolean;
+```
+
+#### persistedError
+
+```ts
+persistedError: unknown;
+```
+
+#### persistedStatus
+
+```ts
+persistedStatus: LiveQueryPersistedStatus;
 ```
 
 #### state
@@ -1026,7 +1134,7 @@ return <div>{data.length} items loaded</div>
 function useLiveQuery<TContext>(config): object;
 ```
 
-Defined in: [useLiveQuery.ts:524](https://github.com/TanStack/db/blob/main/packages/react-db/src/useLiveQuery.ts#L524)
+Defined in: [useLiveQuery.ts:625](https://github.com/TanStack/db/blob/main/packages/react-db/src/useLiveQuery.ts#L625)
 
 Create a live query using a query function.
 
@@ -1093,10 +1201,28 @@ isIdle: boolean;
 isLoading: boolean;
 ```
 
+#### isPersistedReady
+
+```ts
+isPersistedReady: boolean;
+```
+
 #### isReady
 
 ```ts
 isReady: boolean;
+```
+
+#### persistedError
+
+```ts
+persistedError: unknown;
+```
+
+#### persistedStatus
+
+```ts
+persistedStatus: LiveQueryPersistedStatus;
 ```
 
 #### state
@@ -1191,7 +1317,7 @@ return (
 function useLiveQuery<TContext>(config, deps?): object;
 ```
 
-Defined in: [useLiveQuery.ts:540](https://github.com/TanStack/db/blob/main/packages/react-db/src/useLiveQuery.ts#L540)
+Defined in: [useLiveQuery.ts:644](https://github.com/TanStack/db/blob/main/packages/react-db/src/useLiveQuery.ts#L644)
 
 Create a live query using a query function.
 
@@ -1262,10 +1388,28 @@ isIdle: boolean;
 isLoading: boolean;
 ```
 
+#### isPersistedReady
+
+```ts
+isPersistedReady: boolean;
+```
+
 #### isReady
 
 ```ts
 isReady: boolean;
+```
+
+#### persistedError
+
+```ts
+persistedError: unknown;
+```
+
+#### persistedStatus
+
+```ts
+persistedStatus: LiveQueryPersistedStatus;
 ```
 
 #### state
@@ -1358,7 +1502,7 @@ return (
 function useLiveQuery<TContext>(config, deps): object;
 ```
 
-Defined in: [useLiveQuery.ts:557](https://github.com/TanStack/db/blob/main/packages/react-db/src/useLiveQuery.ts#L557)
+Defined in: [useLiveQuery.ts:664](https://github.com/TanStack/db/blob/main/packages/react-db/src/useLiveQuery.ts#L664)
 
 Create a live query using a query function.
 
@@ -1431,10 +1575,28 @@ isIdle: boolean;
 isLoading: boolean;
 ```
 
+#### isPersistedReady
+
+```ts
+isPersistedReady: boolean;
+```
+
 #### isReady
 
 ```ts
 isReady: boolean;
+```
+
+#### persistedError
+
+```ts
+persistedError: unknown;
+```
+
+#### persistedStatus
+
+```ts
+persistedStatus: LiveQueryPersistedStatus;
 ```
 
 #### state
@@ -1529,7 +1691,7 @@ return (
 function useLiveQuery<TResult, TKey, TUtils>(liveQueryCollection): object;
 ```
 
-Defined in: [useLiveQuery.ts:603](https://github.com/TanStack/db/blob/main/packages/react-db/src/useLiveQuery.ts#L603)
+Defined in: [useLiveQuery.ts:713](https://github.com/TanStack/db/blob/main/packages/react-db/src/useLiveQuery.ts#L713)
 
 Subscribe to an existing live query collection
 
@@ -1603,10 +1765,28 @@ isIdle: boolean;
 isLoading: boolean;
 ```
 
+#### isPersistedReady
+
+```ts
+isPersistedReady: boolean;
+```
+
 #### isReady
 
 ```ts
 isReady: boolean;
+```
+
+#### persistedError
+
+```ts
+persistedError: unknown;
+```
+
+#### persistedStatus
+
+```ts
+persistedStatus: LiveQueryPersistedStatus;
 ```
 
 #### state
@@ -1657,7 +1837,7 @@ return <div>{data.map(item => <Item key={item.id} {...item} />)}</div>
 function useLiveQuery<TResult, TKey, TUtils>(liveQueryCollection): object;
 ```
 
-Defined in: [useLiveQuery.ts:623](https://github.com/TanStack/db/blob/main/packages/react-db/src/useLiveQuery.ts#L623)
+Defined in: [useLiveQuery.ts:736](https://github.com/TanStack/db/blob/main/packages/react-db/src/useLiveQuery.ts#L736)
 
 Create a live query using a query function.
 
@@ -1729,10 +1909,28 @@ isIdle: boolean;
 isLoading: boolean;
 ```
 
+#### isPersistedReady
+
+```ts
+isPersistedReady: boolean;
+```
+
 #### isReady
 
 ```ts
 isReady: boolean;
+```
+
+#### persistedError
+
+```ts
+persistedError: unknown;
+```
+
+#### persistedStatus
+
+```ts
+persistedStatus: LiveQueryPersistedStatus;
 ```
 
 #### state

@@ -27,6 +27,7 @@ import { createOfflineAction } from './api/OfflineAction'
 
 // Replay
 import { withNestedSpan, withSpan } from './telemetry/tracer'
+import { NonRetriableError } from './types'
 import type {
   CreateOfflineActionOptions,
   CreateOfflineTransactionOptions,
@@ -448,9 +449,8 @@ export class OfflineExecutor {
       },
       async (span) => {
         if (!this.isOfflineEnabled || !this.outbox || !this.executor) {
-          span.setAttribute(`result`, `skipped_not_leader`)
-          this.resolveTransaction(transaction.id, undefined)
-          return
+          span.setAttribute(`result`, `rejected_not_admitted`)
+          throw new NonRetriableError(`Offline transaction was not admitted`)
         }
 
         try {

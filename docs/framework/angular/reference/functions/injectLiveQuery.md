@@ -9,7 +9,7 @@ title: injectLiveQuery
 function injectLiveQuery<TContext, TParams>(options): InjectLiveQueryResult<TContext>;
 ```
 
-Defined in: [index.ts:93](https://github.com/TanStack/db/blob/main/packages/angular-db/src/index.ts#L93)
+Defined in: [index.ts:116](https://github.com/TanStack/db/blob/main/packages/angular-db/src/index.ts#L116)
 
 ### Type Parameters
 
@@ -40,10 +40,10 @@ Defined in: [index.ts:93](https://github.com/TanStack/db/blob/main/packages/angu
 ## Call Signature
 
 ```ts
-function injectLiveQuery<TContext, TParams>(options): InjectLiveQueryResult<TContext>;
+function injectLiveQuery<TContext, TParams>(options): InjectConditionalLiveQueryResult<TContext>;
 ```
 
-Defined in: [index.ts:103](https://github.com/TanStack/db/blob/main/packages/angular-db/src/index.ts#L103)
+Defined in: [index.ts:126](https://github.com/TanStack/db/blob/main/packages/angular-db/src/index.ts#L126)
 
 ### Type Parameters
 
@@ -69,7 +69,7 @@ Defined in: [index.ts:103](https://github.com/TanStack/db/blob/main/packages/ang
 
 ### Returns
 
-[`InjectLiveQueryResult`](../interfaces/InjectLiveQueryResult.md)\<`TContext`\>
+[`InjectConditionalLiveQueryResult`](../type-aliases/InjectConditionalLiveQueryResult.md)\<`TContext`\>
 
 ## Call Signature
 
@@ -77,7 +77,7 @@ Defined in: [index.ts:103](https://github.com/TanStack/db/blob/main/packages/ang
 function injectLiveQuery<TContext>(queryFn): InjectLiveQueryResult<TContext>;
 ```
 
-Defined in: [index.ts:113](https://github.com/TanStack/db/blob/main/packages/angular-db/src/index.ts#L113)
+Defined in: [index.ts:136](https://github.com/TanStack/db/blob/main/packages/angular-db/src/index.ts#L136)
 
 ### Type Parameters
 
@@ -98,10 +98,10 @@ Defined in: [index.ts:113](https://github.com/TanStack/db/blob/main/packages/ang
 ## Call Signature
 
 ```ts
-function injectLiveQuery<TContext>(queryFn): InjectLiveQueryResult<TContext>;
+function injectLiveQuery<TContext>(queryFn): InjectConditionalLiveQueryResult<TContext>;
 ```
 
-Defined in: [index.ts:116](https://github.com/TanStack/db/blob/main/packages/angular-db/src/index.ts#L116)
+Defined in: [index.ts:139](https://github.com/TanStack/db/blob/main/packages/angular-db/src/index.ts#L139)
 
 ### Type Parameters
 
@@ -117,7 +117,7 @@ Defined in: [index.ts:116](https://github.com/TanStack/db/blob/main/packages/ang
 
 ### Returns
 
-[`InjectLiveQueryResult`](../interfaces/InjectLiveQueryResult.md)\<`TContext`\>
+[`InjectConditionalLiveQueryResult`](../type-aliases/InjectConditionalLiveQueryResult.md)\<`TContext`\>
 
 ## Call Signature
 
@@ -125,7 +125,7 @@ Defined in: [index.ts:116](https://github.com/TanStack/db/blob/main/packages/ang
 function injectLiveQuery<TContext>(config): InjectLiveQueryResult<TContext>;
 ```
 
-Defined in: [index.ts:121](https://github.com/TanStack/db/blob/main/packages/angular-db/src/index.ts#L121)
+Defined in: [index.ts:144](https://github.com/TanStack/db/blob/main/packages/angular-db/src/index.ts#L144)
 
 ### Type Parameters
 
@@ -149,7 +149,7 @@ Defined in: [index.ts:121](https://github.com/TanStack/db/blob/main/packages/ang
 function injectLiveQuery<TResult, TKey, TUtils>(liveQueryCollection): InjectLiveQueryResultWithCollection<TResult, TKey, TUtils>;
 ```
 
-Defined in: [index.ts:125](https://github.com/TanStack/db/blob/main/packages/angular-db/src/index.ts#L125)
+Defined in: [index.ts:148](https://github.com/TanStack/db/blob/main/packages/angular-db/src/index.ts#L148)
 
 ### Type Parameters
 
@@ -181,7 +181,7 @@ Defined in: [index.ts:125](https://github.com/TanStack/db/blob/main/packages/ang
 function injectLiveQuery<TResult, TKey, TUtils>(liveQueryCollection): InjectLiveQueryResultWithSingleResultCollection<TResult, TKey, TUtils>;
 ```
 
-Defined in: [index.ts:133](https://github.com/TanStack/db/blob/main/packages/angular-db/src/index.ts#L133)
+Defined in: [index.ts:156](https://github.com/TanStack/db/blob/main/packages/angular-db/src/index.ts#L156)
 
 ### Type Parameters
 

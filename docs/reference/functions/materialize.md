@@ -4,10 +4,10 @@ title: materialize
 ---
 
 ```ts
-function materialize<TContext>(query): MaterializeWrapper<GetRawResult<TContext>, TContext extends SingleResult ? true : false>;
+function materialize<TContext>(query): MaterializeWrapper<GetInlineResult<TContext>, TContext extends SingleResult ? true : false>;
 ```
 
-Defined in: [packages/db/src/query/builder/functions.ts:848](https://github.com/TanStack/db/blob/main/packages/db/src/query/builder/functions.ts#L848)
+Defined in: [packages/db/src/query/builder/functions.ts:884](https://github.com/TanStack/db/blob/main/packages/db/src/query/builder/functions.ts#L884)
 
 Materialize an includes subquery into a plain value on the parent row.
 
@@ -33,7 +33,7 @@ children change.
 
 ## Returns
 
-`MaterializeWrapper`\<`GetRawResult`\<`TContext`\>, `TContext` *extends* [`SingleResult`](../type-aliases/SingleResult.md) ? `true` : `false`\>
+`MaterializeWrapper`\<`GetInlineResult`\<`TContext`\>, `TContext` *extends* [`SingleResult`](../type-aliases/SingleResult.md) ? `true` : `false`\>
 
 ## Example
 

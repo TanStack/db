@@ -11,7 +11,7 @@ Implementation of powerSyncCollectionOptions that handles both schema and non-sc
 function powerSyncCollectionOptions<TTable>(config): EnhancedPowerSyncCollectionConfig<TTable, OptionalExtractedTable<TTable>, never>;
 ```
 
-Defined in: [powersync.ts:79](https://github.com/TanStack/db/blob/main/packages/powersync-db-collection/src/powersync.ts#L79)
+Defined in: [powersync.ts:84](https://github.com/TanStack/db/blob/main/packages/powersync-db-collection/src/powersync.ts#L84)
 
 Creates a PowerSync collection configuration with basic default validation.
 Input and Output types are the SQLite column types.
@@ -30,7 +30,7 @@ Input and Output types are the SQLite column types.
 
 ### Returns
 
-[`EnhancedPowerSyncCollectionConfig`](../type-aliases/EnhancedPowerSyncCollectionConfig.md)\<`TTable`, `OptionalExtractedTable`\<`TTable`\>, `never`\>
+[`EnhancedPowerSyncCollectionConfig`](../type-aliases/EnhancedPowerSyncCollectionConfig.md)\<`TTable`, [`OptionalExtractedTable`](../type-aliases/OptionalExtractedTable.md)\<`TTable`\>, `never`\>
 
 ### Example
 
@@ -64,7 +64,7 @@ const collection = createCollection(
 function powerSyncCollectionOptions<TTable, TSchema>(config): CollectionConfig<InferPowerSyncOutputType<TTable, TSchema>, string, TSchema, PowerSyncCollectionUtils<TTable>> & object & object;
 ```
 
-Defined in: [powersync.ts:136](https://github.com/TanStack/db/blob/main/packages/powersync-db-collection/src/powersync.ts#L136)
+Defined in: [powersync.ts:141](https://github.com/TanStack/db/blob/main/packages/powersync-db-collection/src/powersync.ts#L141)
 
 Creates a PowerSync collection configuration with schema validation.
 
@@ -84,7 +84,7 @@ serializer specifications. Partial column overrides can be supplied to `serializ
 
 #### TSchema
 
-`TSchema` *extends* `StandardSchemaV1`\<`OptionalExtractedTable`\<`TTable`\>, `AnyTableColumnType`\<`TTable`\>\>
+`TSchema` *extends* `StandardSchemaV1`\<[`OptionalExtractedTable`](../type-aliases/OptionalExtractedTable.md)\<`TTable`\>, `AnyTableColumnType`\<`TTable`\>\>
 
 ### Parameters
 
@@ -139,7 +139,7 @@ const collection = createCollection(
 function powerSyncCollectionOptions<TTable, TSchema>(config): CollectionConfig<InferPowerSyncOutputType<TTable, TSchema>, string, TSchema, PowerSyncCollectionUtils<TTable>> & object & object;
 ```
 
-Defined in: [powersync.ts:204](https://github.com/TanStack/db/blob/main/packages/powersync-db-collection/src/powersync.ts#L204)
+Defined in: [powersync.ts:209](https://github.com/TanStack/db/blob/main/packages/powersync-db-collection/src/powersync.ts#L209)
 
 Creates a PowerSync collection configuration with schema validation.
 
