@@ -41,11 +41,16 @@ function enumerableOwnKeys(value: object): Array<string | symbol> {
 /**
  * Internal implementation with cycle detection to prevent infinite recursion.
  * Internal callers can seed already-paired roots when comparing their children.
+ *
+ * `draft` selects the stricter equality used by change-tracking drafts: Map
+ * and Set contents must match in order, RegExp match position must match, and
+ * arrays compare as keyed objects (holes and extra enumerable keys count).
  */
 export function deepEqualsInternal(
   a: any,
   b: any,
   visited: Map<object, object>,
+  draft = false,
 ): boolean {
   // Handle strict equality (primitives, same reference)
   if (a === b || Object.is(a, b)) return true
@@ -67,7 +72,11 @@ export function deepEqualsInternal(
   // Handle RegExp objects
   if (a instanceof RegExp) {
     if (!(b instanceof RegExp)) return false
-    return a.source === b.source && a.flags === b.flags
+    return (
+      a.source === b.source &&
+      a.flags === b.flags &&
+      (!draft || a.lastIndex === b.lastIndex)
+    )
   }
   // Symmetric check: if b is RegExp but a is not, they're not equal
   if (b instanceof RegExp) return false
@@ -84,9 +93,13 @@ export function deepEqualsInternal(
     visited.set(a, b)
 
     const entries = Array.from(a.entries())
-    const result = entries.every(([key, val]) => {
-      return b.has(key) && deepEqualsInternal(val, b.get(key), visited)
-    })
+    const bEntries = draft ? Array.from(b.entries()) : []
+    const result = entries.every(([key, val], index) =>
+      draft
+        ? Object.is(key, bEntries[index]![0]) &&
+          deepEqualsInternal(val, bEntries[index]![1], visited, draft)
+        : b.has(key) && deepEqualsInternal(val, b.get(key), visited),
+    )
 
     visited.delete(a)
     return result
@@ -108,6 +121,14 @@ export function deepEqualsInternal(
     // Convert to arrays for comparison
     const aValues = Array.from(a)
     const bValues = Array.from(b)
+
+    if (draft) {
+      const result = aValues.every((val, index) =>
+        deepEqualsInternal(val, bValues[index], visited, draft),
+      )
+      visited.delete(a)
+      return result
+    }
 
     // Simple comparison for primitive values
     if (aValues.every((val) => typeof val !== `object`)) {
@@ -201,9 +222,9 @@ export function deepEqualsInternal(
   if (isTemporal(b)) return false
 
   // Handle arrays
-  if (Array.isArray(a)) {
-    if (!Array.isArray(b) || a.length !== b.length) return false
-
+  if (Array.isArray(a) !== Array.isArray(b)) return false
+  if (Array.isArray(a) && a.length !== b.length) return false
+  if (Array.isArray(a) && !draft) {
     // Check for circular references
     if (visited.has(a)) {
       return visited.get(a) === b
@@ -216,9 +237,6 @@ export function deepEqualsInternal(
     visited.delete(a)
     return result
   }
-  // Symmetric check: if b is array but a is not, they're not equal
-  if (Array.isArray(b)) return false
-
   // Handle objects
   if (typeof a === `object`) {
     // Check for circular references
@@ -242,7 +260,7 @@ export function deepEqualsInternal(
     const result = keysA.every(
       (key) =>
         Object.prototype.propertyIsEnumerable.call(b, key) &&
-        deepEqualsInternal(a[key], b[key], visited),
+        deepEqualsInternal(a[key], b[key], visited, draft),
     )
 
     visited.delete(a)
