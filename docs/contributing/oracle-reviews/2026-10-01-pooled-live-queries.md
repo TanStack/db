@@ -63,12 +63,11 @@ Every pooled and flat mutant above fails its pinned history and both
 campaigns. The pooled grammar delivers initial rows in key order or in
 reverse and weights a pending insert most peers see before cleanup; the flat
 grammar weights runs that write and delete a hidden field, write an equal
-object over a hidden object field, and assign a getter-only field its own
-value. Before that weighting, arrival order and frozen optimistic rows
+object over a hidden object field, assign a getter-only field its own value, and write the opposite-signed zero
+over each zero field. Before that weighting, arrival order and frozen optimistic rows
 escaped about one random campaign in three, and the three descriptor
-mutants escaped both campaigns. The `Object.is`-alone flat mutant still
-escapes about one random campaign in two; its pinned `-0` history and the
-fixed campaign always kill it.
+mutants escaped both campaigns. The `Object.is`-alone flat mutant escaped about one random campaign in two
+until the zero-flip run.
 
 The pooled oracle found that a pooled view followed its source's status after
 cleanup instead of entering the live query's terminal error; the repair makes

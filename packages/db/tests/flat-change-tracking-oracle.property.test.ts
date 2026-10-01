@@ -42,8 +42,8 @@
  * property,
  * or store a row's draft in it. A weighted run changes a field, adds `d` as
  * `undefined`, and reverts the field; others write and delete `h`, write an
- * equal object over an object `h`, or define a getter and assign it its own
- * value. Histories call the tracker with an
+ * equal object over an object `h`, or define a getter and assign it its own value; and one writes the
+ * opposite-signed zero over each zero field. Histories call the tracker with an
  * array or with a single row, and may throw after any operation.
  *
  * Production driver: `withFlatChangeTracking` and the proxy trackers
@@ -117,6 +117,8 @@ type Operation =
       enumerable: boolean
     }
   | { kind: `store-draft`; field: string; row: number }
+  // Writes the opposite-signed zero over every field the row holds as a zero.
+  | { kind: `flip-zeros` }
 type RowShape = {
   fields: Array<unknown>
   nullPrototype: boolean
@@ -219,6 +221,13 @@ function applyOperation(
       })
       break
     }
+    case `flip-zeros`:
+      for (const key of Object.keys(original)) {
+        if (original[key] === 0) {
+          draft[key] = Object.is(original[key], 0) ? -0 : 0
+        }
+      }
+      break
     case `store-draft`:
       draft[operation.field] = drafts[operation.row % drafts.length]
       break
@@ -351,6 +360,8 @@ const operationsArbitrary: fc.Arbitrary<Array<Operation>> = fc
       },
       excursionArbitrary,
       descriptorRunArbitrary,
+      // A field drawn as a zero rarely gets the other zero by chance.
+      fc.constant<Array<Operation>>([{ kind: `flip-zeros` }]),
     ),
     { maxLength: 5 },
   )
