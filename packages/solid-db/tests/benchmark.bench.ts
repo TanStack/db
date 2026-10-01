@@ -112,9 +112,10 @@ describe('benchmarks', () => {
             const query = useLiveQuery((q) => q.from({ data: collection }).select(({ data }) => ({
               id: data.id, name: data.name,
             })))
-            try { query(); resolve() } catch { resolve() }
-            if (query.isReady) resolve()
+            try { query() } catch { /* still loading */ }
+            flush()
             dispose()
+            resolve()
           })
         })
       })

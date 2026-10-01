@@ -1,8 +1,9 @@
 import { enableExternalSource } from 'solid-js'
-import type { LiveQuerySnapshot } from '@tanstack/db'
 
 type AnyObserver = {
-  getSnapshot: () => LiveQuerySnapshot<any, any>
+  // The bridge only stores an opaque snapshot result; the concrete observer's
+  // own getSnapshot type flows through `SnapshotOf` below.
+  getSnapshot: () => unknown
   subscribe: (listener: () => void) => () => void
 }
 

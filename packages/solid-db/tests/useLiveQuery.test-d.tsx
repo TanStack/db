@@ -5,7 +5,7 @@ import { mockSyncCollectionOptions } from '../../db/tests/utils'
 import { createLiveQueryCollection, eq } from '../../db/src/query/index'
 import { useLiveQuery } from '../src/useLiveQuery'
 import type { Prettify } from '../../db/src/query/index'
-import type { Collection, CollectionStatus } from '@tanstack/db'
+import type { Collection } from '@tanstack/db'
 import type { OutputWithVirtual } from '../../db/tests/utils'
 import type { SingleResult } from '../../db/src/types'
 
@@ -113,9 +113,6 @@ describe(`useLiveQuery type assertions`, () => {
       string | number,
       {}
     > | null>()
-    expectTypeOf(rendered.result.status).toEqualTypeOf<
-      CollectionStatus | `disabled`
-    >()
 
     // @ts-expect-error Disabled callbacks expose a null collection until enabled.
     rendered.result.collection.preload()

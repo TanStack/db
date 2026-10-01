@@ -6,13 +6,7 @@ import {
   isCollection,
   isSingleResultCollection,
 } from '@tanstack/db'
-import {
-  createMemo,
-  createRenderEffect,
-  createSignal,
-  createStore,
-  reconcile,
-} from 'solid-js'
+import { createEffect, createMemo, createProjection, createSignal } from 'solid-js'
 import type { Accessor } from 'solid-js'
 import type {
   Collection,
@@ -30,9 +24,12 @@ import type {
 
 export type UseLiveQueryStatus = CollectionStatus | `disabled`
 
-const RECONCILE_KEY = `$key` as const
+type AnySnapshot = LiveQuerySnapshot<any, any>
 
-type AnyCollection = Collection<any, any, any>
+type InferConditionalResultType<TContext extends Context> =
+  TContext extends SingleResult
+    ? InferResultType<TContext> | []
+    : InferResultType<TContext>
 
 /**
  * Create a live query using a query function
@@ -67,7 +64,7 @@ export function useLiveQuery<TContext extends Context>(
   queryFn: (
     q: InitialQueryBuilder,
   ) => QueryBuilder<TContext> | undefined | null,
-): Accessor<InferResultType<TContext>> & {
+): Accessor<InferConditionalResultType<TContext>> & {
   state: ReactiveMap<string | number, GetResult<TContext>>
   collection: Collection<GetResult<TContext>, string | number, {}> | null
 }
@@ -128,9 +125,10 @@ export function useLiveQuery<
   collection: Collection<TResult, TKey, TUtils> & SingleResult
 }
 
-// Wholesale observer mode: the observer delivers wake-up notifies; Solid's
-// keyed reconcile handles the per-field diff. Collection-level optimistic
-// transactions flow through the change stream and reconcile naturally.
+// The observer owns the subscription and publishes stable snapshots; Solid
+// state stays fully derived from the latest snapshot. The snapshot signal is
+// written from observer notifies (outside any owned scope) and seeded once
+// from the effect's apply phase, which is why it opts into `ownedWrite`.
 export function useLiveQuery(
   configOrQueryOrCollection: (queryFn?: any) => any,
 ) {
@@ -177,56 +175,55 @@ export function useLiveQuery(
     { name: `TanstackDBCollectionMemo` },
   )
 
-  // Lazily synced — populated on first `.state` read, then kept in sync
-  // from subsequent observer snapshots.
-  const state = new ReactiveMap<string | number, any>()
-  let stateAccessed = false
-  let stateSyncedCollection: AnyCollection | null = null
-
-  const [data, setData] = createStore<Array<any>>([], {
-    name: `TanstackDBData`,
+  const [snapshot, setSnapshot] = createSignal<AnySnapshot | null>(null, {
+    name: `TanstackDBSnapshot`,
+    // Seeded from the effect's apply phase — an owned scope where this
+    // intentional internal write is only legal with the opt-in.
+    ownedWrite: true,
   })
 
-  // ownedWrite lets setStatus be called from the split-effect's apply phase.
-  const [status, setStatus] = createSignal<UseLiveQueryStatus>(
-    () => collection() ? collection()!.status : (`disabled` as const),
-    {
-      name: `TanstackDBStatus`,
-      ownedWrite: true,
+  const status = createMemo<UseLiveQueryStatus>(
+    () => {
+      const currentSnapshot = snapshot()
+      if (currentSnapshot) return currentSnapshot.status
+      return collectionError ? `error` : `disabled`
     },
+    { name: `TanstackDBStatus` },
   )
 
-  // Single-result collections expose data[0]; wrap in a 1-element array
-  // for uniform keyed reconciliation.
-  const snapshotToRows = (
-    snapshot: LiveQuerySnapshot<any, any>,
-  ): Array<any> => {
-    const snapshotData = snapshot.data
-    if (snapshotData === undefined) return []
-    if (Array.isArray(snapshotData)) return snapshotData
-    return [snapshotData]
-  }
+  // Keyed projection: rows reconcile by `$key`, so surviving rows keep their
+  // store identity across snapshot replacements.
+  const data = createProjection(
+    () => {
+      const currentSnapshot = snapshot()
+      const snapshotData = currentSnapshot?.data
+      if (snapshotData === undefined) return []
+      if (Array.isArray(snapshotData)) return snapshotData
+      return [snapshotData]
+    },
+    [],
+    { key: `$key`, name: `TanstackDBData` },
+  )
 
-  const applySnapshot = (
-    snapshot: LiveQuerySnapshot<any, any>,
-    currentCollection: AnyCollection,
-  ) => {
-    setData(reconcile(snapshotToRows(snapshot), RECONCILE_KEY))
-    setStatus(snapshot.status)
-    if (stateAccessed) {
-      state.clear()
-      if (snapshot.state) {
-        for (const [key, value] of snapshot.state) {
-          state.set(key, value)
-        }
+  // Granular keyed state. Synced per snapshot; the ReactiveMap's trigger
+  // signals opt into owned writes, so syncing from the effect is legal.
+  const state = new ReactiveMap<string | number, any>()
+  let stateSyncedSnapshot: AnySnapshot | null | undefined
+
+  const syncState = (currentSnapshot: AnySnapshot | null) => {
+    if (stateSyncedSnapshot === currentSnapshot) return
+    stateSyncedSnapshot = currentSnapshot
+    state.clear()
+    if (currentSnapshot?.state) {
+      for (const [key, value] of currentSnapshot.state) {
+        state.set(key, value)
       }
-      stateSyncedCollection = currentCollection
     }
   }
 
-  // Async memo for Loading: awaits collection readiness. Reading this
-  // when pending throws NotReadyError (caught by <Loading>); reading when
-  // the collection errored throws the error (caught by <Errored>).
+  // Async computation for Loading: reading it while pending throws
+  // NotReadyError (caught by <Loading>); reading it when the collection
+  // errored rethrows the error (caught by <Errored>).
   const readiness = createMemo(async () => {
     const col = collection()
     if (!col) return null
@@ -237,32 +234,26 @@ export function useLiveQuery(
     return col
   })
 
-  // Split render effect owns the observer lifecycle per collection. Wholesale
-  // mode delivers nothing during subscribe, so the initial snapshot is pulled
-  // synchronously after attach.
-  createRenderEffect(
+  // The effect's apply phase owns the observer lifecycle per collection.
+  // Wholesale mode delivers nothing during subscribe, so the initial
+  // snapshot is pulled synchronously after attach.
+  createEffect(
     () => collection(),
     (currentCollection) => {
       if (!currentCollection) {
-        if (collectionError) {
-          setStatus(`error` as const)
-        } else {
-          setStatus(`disabled` as const)
-        }
-        stateSyncedCollection = null
-        if (stateAccessed) state.clear()
-        setData(reconcile([], RECONCILE_KEY))
+        setSnapshot(null)
+        syncState(null)
         return
       }
-
-      collectionError = null
 
       const observer = createLiveQueryObserver(currentCollection, {
         mode: `wholesale`,
       })
 
       const sync = () => {
-        applySnapshot(observer.getSnapshot(), currentCollection)
+        const currentSnapshot = observer.getSnapshot()
+        setSnapshot(currentSnapshot)
+        syncState(currentSnapshot)
       }
 
       const unsubscribe = observer.subscribe(sync)
@@ -270,28 +261,18 @@ export function useLiveQuery(
       // Wholesale delivers nothing during subscribe — seed synchronously.
       sync()
 
-      let cancelled = false
-
-      // Observer already handles status:change; this captures the error
-      // object itself for getData() to re-throw.
-      const offStatusError = currentCollection.on(`status:error`, () => {
-        if (cancelled) return
-        setStatus(`error` as const)
-      })
-
+      // Capture the sync error object for getData() to re-throw; the error
+      // STATUS itself arrives through the observer's status notifications.
       currentCollection.toArrayWhenReady().catch((error: unknown) => {
-        if (cancelled) return
         collectionError = error
-        setStatus(`error` as const)
       })
 
       return () => {
-        cancelled = true
-        offStatusError()
         unsubscribe()
         observer.dispose()
       }
     },
+    { name: `TanstackDBObserver` },
   )
 
   function getData() {
@@ -319,21 +300,23 @@ export function useLiveQuery(
     },
     state: {
       get() {
-        stateAccessed = true
-        const currentCollection = collection()
-        if (!currentCollection) {
-          if (stateSyncedCollection !== null) {
-            state.clear()
-            stateSyncedCollection = null
-          }
-        } else if (stateSyncedCollection !== currentCollection) {
-          state.clear()
-          for (const [key, value] of currentCollection.entries() as IterableIterator<[any, any]>) {
-            state.set(key, value)
-          }
-          stateSyncedCollection = currentCollection
-        }
+        syncState(snapshot())
         return state
+      },
+    },
+    persistedStatus: {
+      get() {
+        return snapshot()?.persistedStatus ?? `unavailable`
+      },
+    },
+    isPersistedReady: {
+      get() {
+        return snapshot()?.isPersistedReady ?? false
+      },
+    },
+    persistedError: {
+      get() {
+        return snapshot()?.persistedError
       },
     },
   })
