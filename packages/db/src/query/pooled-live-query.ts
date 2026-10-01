@@ -339,17 +339,22 @@ function poolableShape(
       return undefined
     }
   }
-  if (conjuncts.length > 1) {
+  // Most shapes have one or two fields; a general sort costs more than both.
+  if (conjuncts.length === 2) {
+    if (conjuncts[1]!.pathKey < conjuncts[0]!.pathKey) conjuncts.reverse()
+  } else if (conjuncts.length > 2) {
     conjuncts.sort((a, b) => (a.pathKey < b.pathKey ? -1 : 1))
   }
-  return {
-    paths: conjuncts.map(({ path }) => path),
-    shapeKey: conjuncts.map(({ pathKey }) => pathKey).join(`,`),
-    groupKey: conjuncts.reduce(
-      (groupKey, { literalKey }) => appendGroupKeyPart(groupKey, literalKey),
-      ``,
-    ),
+  const paths: Array<Array<string>> = []
+  let shapeKey = ``
+  let groupKey = ``
+  for (const { path, pathKey, literalKey } of conjuncts) {
+    paths.push(path)
+    // Each JSON path delimits itself, so concatenation stays unambiguous.
+    shapeKey += pathKey
+    groupKey = appendGroupKeyPart(groupKey, literalKey)
   }
+  return { paths, shapeKey, groupKey }
 }
 
 /**
