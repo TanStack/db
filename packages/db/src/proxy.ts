@@ -31,8 +31,7 @@ function unwrapDraft(value: unknown): unknown {
 }
 
 /**
- * Array and typed-array methods that modify the value in place. A typed
- * array's `subarray` shares its buffer, so later writes through it do too.
+ * Array and typed-array methods that modify the value in place.
  */
 const ARRAY_MODIFYING_METHODS = new Set([
   `pop`,
@@ -45,7 +44,6 @@ const ARRAY_MODIFYING_METHODS = new Set([
   `fill`,
   `copyWithin`,
   `set`,
-  `subarray`,
 ])
 
 /**
@@ -459,10 +457,20 @@ export function createChangeProxy<
     get(ptarget, prop, receiver) {
       const value = changeTracker.copy_[prop as keyof T]
 
-      // A getter's result, and a read-only non-configurable value, which
-      // the Proxy invariants require as stored, return directly.
+      // If it's a getter, return the value directly
       const desc = Object.getOwnPropertyDescriptor(ptarget, prop)
-      if (desc?.get || (desc?.configurable === false && !desc.writable)) {
+      if (desc?.get) {
+        return value
+      }
+
+      // The Proxy invariants require a read-only non-configurable value as
+      // stored, as after Object.freeze. A raw object can still be written
+      // through, so its key counts as changed.
+      if (desc?.configurable === false && !desc.writable) {
+        if (isProxiableObject(value)) {
+          changeTracker.assigned_[String(prop)] = true
+          markChanged(changeTracker)
+        }
         return value
       }
 
@@ -475,6 +483,17 @@ export function createChangeProxy<
         if (Object.hasOwn(ptarget, prop) || prop === `constructor`) return value
 
         const methodName = prop.toString()
+
+        // A subarray shares the buffer, so it is a draft whose writes mark
+        // this value changed, like a Map value.
+        if (methodName === `subarray` && ArrayBuffer.isView(ptarget)) {
+          return (...args: Array<unknown>) =>
+            memoizedCreateChangeProxy(value.apply(ptarget, args), {
+              tracker: changeTracker,
+              prop: ``,
+              retainIdentity: true,
+            }).proxy
+        }
 
         // Array and typed-array methods that modify the value in place
         if (

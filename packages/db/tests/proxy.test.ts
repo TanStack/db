@@ -2788,7 +2788,7 @@ describe(`typed-array methods behave like native typed arrays`, () => {
       typeof Object.getOwnPropertyDescriptor(typedArrayPrototype, name)
         ?.value === `function`,
   )
-  const observe = (row: Row, method: string) => {
+  const observe = (row: Row, method: string, write: boolean) => {
     const call = (
       row.t as unknown as Record<string, (...a: Array<unknown>) => unknown>
     )[method]!
@@ -2797,7 +2797,7 @@ describe(`typed-array methods behave like native typed arrays`, () => {
       raw !== null && typeof raw === `object` && Symbol.iterator in raw
         ? Array.from(raw as Iterable<unknown>)
         : raw
-    if (ArrayBuffer.isView(raw)) (raw as Float64Array)[0] = 42
+    if (write && raw instanceof Float64Array) raw[0] = 42
     return result
   }
 
@@ -2805,15 +2805,92 @@ describe(`typed-array methods behave like native typed arrays`, () => {
     expect(methods.filter((name) => !(name in calls))).toEqual([])
   })
 
-  it.each(methods)(`%s gives the native result`, (method) => {
+  // A call alone, and a call followed by a write through its result. A
+  // read must not count as a change.
+  const cases = methods.flatMap((method) => [
+    [method, `read`] as const,
+    [method, `write`] as const,
+  ])
+  it.each(cases)(`%s (%s) gives the native result`, (method, mode) => {
     const native = make()
-    const expected = observe(native, method)
+    const expected = observe(native, method, mode === `write`)
     let actual: unknown
     const changes = withChangeTracking(make(), (draft) => {
-      actual = observe(draft, method)
+      actual = observe(draft, method, mode === `write`)
     })
     expect(actual).toEqual(expected)
     const changed = native.t.some((v, i) => v !== make().t[i])
     expect(changes).toEqual(changed ? { t: native.t } : {})
+  })
+})
+
+/**
+ * Freezing, sealing, or fixing a key of a draft must not lose a later write
+ * through a nested value. The Proxy invariants make a frozen key return the
+ * raw copy, so the draft counts that key as changed when it reads it. The law
+ * therefore compares rows, not patches: applying `getChanges()` to the
+ * original must give the native row.
+ */
+describe(`frozen and sealed drafts keep nested writes`, () => {
+  type Row = { n: { x: number }; m: number }
+  const make = (): Row => ({ n: { x: 1 }, m: 1 })
+  const histories: Array<[string, (row: Row) => void]> = [
+    [
+      `freeze, then a nested write`,
+      (row) => {
+        Object.freeze(row)
+        row.n.x = 2
+      },
+    ],
+    [`freeze, then a nested read`, (row) => void Object.freeze(row).n.x],
+    [
+      `seal, then a nested write`,
+      (row) => {
+        Object.seal(row)
+        row.n.x = 2
+      },
+    ],
+    [
+      `a fixed key, then a nested write`,
+      (row) => {
+        Object.defineProperty(row, `n`, {
+          writable: false,
+          configurable: false,
+        })
+        row.n.x = 2
+      },
+    ],
+  ]
+
+  it.each(histories)(`%s gives the native row`, (_name, run) => {
+    const native = make()
+    run(native)
+    const { proxy, getChanges } = createChangeProxy(make())
+    run(proxy)
+    expect({ ...make(), ...getChanges() }).toEqual({ ...native })
+  })
+
+  it(`does not count a primitive read under a frozen key`, () => {
+    const { proxy, getChanges } = createChangeProxy(make())
+    void Object.freeze(proxy).m
+    expect(getChanges()).toEqual({})
+  })
+
+  it(`does not count writing back the row's own class instance`, () => {
+    class Point {
+      constructor(public x: number) {}
+    }
+    const row = { p: new Point(1) }
+    expect(
+      withChangeTracking(row, (draft) => {
+        draft.p = row.p
+      }),
+    ).toEqual({})
+    expect(
+      withChangeTracking(row, (draft) => {
+        draft.p = new Point(2)
+        draft.p = row.p
+      }),
+    ).toEqual({})
   })
 })

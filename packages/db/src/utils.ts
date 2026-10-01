@@ -251,15 +251,14 @@ export function deepEqualsInternal(
   }
   // Handle objects
   if (typeof a === `object`) {
-    // An object of another class differs. Plain and null-prototype objects,
-    // from any realm, are one class.
+    // Instances of two different classes differ. A plain or null-prototype
+    // object, from any realm, compares by keys with any class: a draft
+    // snapshot and plain JSON both hold class instances as plain objects.
     const prototype = Object.getPrototypeOf(a)
     const prototypeB = Object.getPrototypeOf(b)
-    if (
-      prototype !== prototypeB &&
-      !(isPlainPrototype(prototype) && isPlainPrototype(prototypeB))
-    )
-      return false
+    const plain = isPlainPrototype(prototype)
+    const plainB = isPlainPrototype(prototypeB)
+    if (prototype !== prototypeB && !plain && !plainB) return false
 
     // Check for circular references
     if (visited.has(a)) {
@@ -281,11 +280,7 @@ export function deepEqualsInternal(
     // A class instance without enumerable keys (a File, an object with
     // private fields) keeps its state elsewhere, so it equals only itself.
     // A draft copies a URL by its href, so URLs compare by href.
-    if (
-      keysA.length === 0 &&
-      !Array.isArray(a) &&
-      !isPlainPrototype(prototype)
-    ) {
+    if (keysA.length === 0 && !Array.isArray(a) && !(plain && plainB)) {
       visited.delete(a)
       return a instanceof URL && a.href === b.href
     }

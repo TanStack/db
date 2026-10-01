@@ -1002,7 +1002,7 @@ describe(`deepEquals property-based tests`, () => {
       fc.constantFrom(1, 2),
       fc.constantFrom(1, 2),
     ])(
-      `objects compare within their class and keyless instances by identity`,
+      `objects compare by class and keys, and keyless instances by identity`,
       (pathA, pathB, v, w) => {
         class Secret {
           #v: number
@@ -1014,6 +1014,9 @@ describe(`deepEquals property-based tests`, () => {
           }
         }
         class Point {
+          constructor(public a: number) {}
+        }
+        class Other {
           constructor(public a: number) {}
         }
         const url = (path: string) => new URL(`https://example.com/${path}`)
@@ -1035,9 +1038,12 @@ describe(`deepEquals property-based tests`, () => {
         expectEqualityPair(secret, new Secret(w), false)
         expectEqualityPair({ s: secret }, { s: new Secret(v) }, false)
         expectEqualityPair(new Secret(v), {}, false)
-        // Class instances with keys compare by keys within their class.
+        // Class instances with keys compare by keys within their class, and
+        // with a plain object, which is how JSON and draft snapshots hold
+        // them. Two different classes differ.
         expectEqualityPair(new Point(v), new Point(w), v === w)
-        expectEqualityPair(new Point(v), { a: v }, false)
+        expectEqualityPair(new Point(v), { a: w }, v === w)
+        expectEqualityPair(new Point(v), new Other(v), false)
         // Plain and null-prototype objects are one class.
         const bare = Object.assign(Object.create(null), { a: v })
         expectEqualityPair(bare, { a: w }, v === w)

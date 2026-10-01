@@ -25,9 +25,10 @@ import { createChangeProxy } from '../src/proxy'
  *    order.
  * 7. Typed arrays compare by class and by elements under rule 1.
  * 8. URLs compare by `href`.
- * 9. An object of another class differs, and a class instance without
- *    enumerable keys (here, one with only a private field) equals only
- *    itself.
+ * 9. Instances of two different classes differ. A class instance and a
+ *    plain object compare by keys, because a draft snapshot holds class
+ *    instances as plain objects. A class instance without enumerable keys
+ *    (here, one with only a private field) equals only itself.
  *
  * Laws checked after every generated history:
  *
@@ -49,9 +50,10 @@ import { createChangeProxy } from '../src/proxy'
  *   them; the coverage map lists symbol writes as unsupported. Symbol keys
  *   inside nested objects are written.
  * - Keys are non-index strings, so property order follows insertion order.
- * - Class instances appear only as written values. A draft reads a class
- *   instance of the original row as a plain object; the detachment contract
- *   owns that boundary.
+ * - A keyed class instance (`Point`) appears in original rows and written
+ *   values. A keyless one (`Secret`) appears only as a written value. A
+ *   draft reads a class instance of the original row as a plain object; the
+ *   detachment contract owns that boundary.
  */
 
 // ---------------------------------------------------------------------------
@@ -73,6 +75,7 @@ type Spec =
   | { k: `typed`; ctor: TypedKind; values: Array<number> }
   | { k: `url`; path: `a` | `b` }
   | { k: `secret`; v: number }
+  | { k: `point`; a: Primitive }
 
 // A Map value is a primitive or a nested Set, so draft rules must also hold
 // inside Map values.
@@ -108,6 +111,11 @@ class Secret {
   read(): number {
     return this.#v
   }
+}
+
+// A class instance with one enumerable key.
+class Point {
+  constructor(public a: unknown) {}
 }
 
 const HOLE = Symbol(`hole`)
@@ -156,6 +164,10 @@ function canon(spec: Spec | undefined): unknown {
       return [`typed`, spec.ctor, spec.values.map(String)]
     case `url`:
       return [`url`, spec.path]
+    case `point`:
+      // Rule 9: a Point compares by keys with the plain object a draft
+      // snapshot holds, so it encodes as that object.
+      return canon({ k: `obj`, a: spec.a })
     case `secret`:
       // Rule 9. Secrets appear only as written values, and the original is
       // never a Secret, so the value is enough to compare written states.
@@ -211,6 +223,8 @@ function realize(spec: Spec): unknown {
       return new URL(`https://example.com/${spec.path}`)
     case `secret`:
       return new Secret(spec.v)
+    case `point`:
+      return new Point(spec.a)
   }
 }
 
@@ -276,6 +290,7 @@ const specArb: fc.Arbitrary<Spec> = fc.oneof(
   fc
     .constantFrom(`a` as const, `b` as const)
     .map((path): Spec => ({ k: `url`, path })),
+  primArb.map((a): Spec => ({ k: `point`, a })),
 )
 // Written values may also be class instances with only private state.
 const writtenArb: fc.Arbitrary<Spec> = fc.oneof(
@@ -665,6 +680,9 @@ function readSpec(value: unknown, like: Spec | undefined): string {
       return value instanceof Secret
         ? encode({ k: `secret`, v: value.read() })
         : `not a Secret`
+    case `point`:
+      // A Point, or the plain object a draft reads for one.
+      return readSpec(value, { k: `obj`, a: like.a })
   }
 }
 
