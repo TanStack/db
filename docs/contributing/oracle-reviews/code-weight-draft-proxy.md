@@ -1,6 +1,6 @@
 # Code weight: simplify the draft proxy and share its equality walker
 
-Reviewed executable revision: `b825e6483` (base `18abceee4`, the fetched
+Reviewed executable revision: `0ce101acf` (base `18abceee4`, the fetched
 `origin/main` at review time). This record follows in a documentation-only
 commit.
 
@@ -21,6 +21,8 @@ commit.
 - `b825e6483` fixes a CodeRabbit finding in the `defineProperty` fix: a
   non-configurable property with an object value threw. See Fixes from the
   second review.
+- `0ce101acf` fixes two more lost-write classes from CodeRabbit review:
+  accessor definitions and typed-array mutator methods.
 
 ## Change
 
@@ -200,6 +202,7 @@ commit before.
 | `38d8ba78f` | `Object.defineProperty(draft, key, { value })` threw unless the descriptor set `writable`. | `proxy.test.ts`: six definitions against a native row. | 3 of 6 cases | +8 / +8 |
 | `815432ebd` | Two URLs, or two instances whose state is in private fields, were equal, so a draft dropped a write that replaced one. | Revert oracle: URL values and a private-field class, with a write-twice property. `utils.property`: class and identity law. | both campaigns | +312 / +79 |
 | `b825e6483` | `38d8ba78f` defined a clone, so a non-configurable object value broke the Proxy invariants and threw. `get` would also have wrapped it. | `defineProperty` law: a new key with only an object value, with identity where the invariants require it. | throws on `main` too | +9 / +5 (module only) |
+| `0ce101acf` | Defining a getter over a field reported no change. `fill`, `set`, `sort`, `reverse`, `copyWithin`, and writes through `subarray` on a typed-array draft changed the private copy without a change. | `proxy.test.ts`: every method of `TypedArray.prototype` against a native typed array, and two getter definitions. | 6 of 31 methods, 2 of 2 getters | +70 / +25 (module only) |
 | `a49ae90e3` | None. A detached stored method must throw, as on a native row. | `proxy.test.ts` stored-function law. | passes | 0 |
 
 Design decisions for these fixes:
@@ -231,6 +234,11 @@ Limits that remain:
 - A built-in method called through `this` on a nested Map or Set draft, such
   as `Map.prototype.get.call(this.m, key)`, throws, because the receiver is a
   Proxy. This is a Proxy limit.
+- A `subarray` call on a typed-array draft counts as a change even when no
+  write follows, so the row may publish an equal value. Tracking later writes
+  through the shared buffer would need a second proxy.
+- `DataView` setters on a draft are not tracked. No owner generates a
+  `DataView`.
 
 | Mutant | Owners |
 | --- | --- |
@@ -296,6 +304,11 @@ Mutants of each new form fail the owners:
 | K6: empty arrays compare by identity | assertion failure (8/539) |
 | D1 (on `b825e6483`): `get` wraps a read-only non-configurable value | crash, the reported TypeError (1/540) |
 | D2 (on `b825e6483`): `defineProperty` stores a clone | crash, the reported TypeError (1/540) |
+| G1 (on `0ce101acf`): accessor definitions untracked | assertion failure (2/574) |
+| G2 (on `0ce101acf`): every definition tracked, sealing too | assertion failure (1/574, the existing `Object.seal` test) |
+| Y1 (on `0ce101acf`): typed-array mutators untracked | assertion failure (6/574) |
+| Y2 (on `0ce101acf`): `subarray` untracked | assertion failure (1/574) |
+| Y3 (on `0ce101acf`): typed-array `set` untracked | assertion failure (1/574) |
 
 The I and A3 to A5 mutants in the previous section apply to code that
 `31b2a6bd4` removed.
@@ -432,10 +445,10 @@ before it.
 
 ## Verification
 
-On `bb48e2bc9` (`b825e6483` merged with `origin/main` at `3463cf8ad`), with
-the built `dist`:
+On `0ce101acf`, which includes `origin/main` at `3463cf8ad`, with the built
+`dist`:
 
-- `packages/db` Vitest, typecheck off: 198 files, 7,751 tests.
+- `packages/db` Vitest, typecheck off: 198 files, 7,785 tests.
 - `packages/db` `tsc --noEmit`: no errors.
 - `pnpm check:mangle`: 368 names.
 - `pnpm test:minified-db`: error names, index metadata, query rows, and live

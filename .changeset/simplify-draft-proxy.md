@@ -8,7 +8,8 @@ This change also fixes draft writes that were lost or wrong:
 
 - A function stored in a row is now returned as stored when read from a draft. Before, the draft returned a bound copy, so `draft.handler === handler` was false. A stored method also saw a private copy as `this`, so `collection.update` dropped the writes it made through `this`.
 - Array methods such as `at`, `slice`, `concat`, `flat`, `toReversed`, and `with` now return drafts, so a write through their result is saved. `indexOf` and `includes` find an element that the draft returned, and `draft.items.constructor === Array` is true.
-- `Object.defineProperty(draft, key, { value })` no longer throws when the descriptor does not set `writable`.
+- `Object.defineProperty(draft, key, { value })` no longer throws when the descriptor does not set `writable` or `configurable`. Defining a getter on a draft is now a change.
+- `fill`, `set`, `sort`, `reverse`, and `copyWithin` on a typed array in a draft, and writes through its `subarray`, are now saved.
 - Deleting a nested key that the callback added, or writing a nested value back, no longer leaves the parent marked as changed.
 - A typed-array subclass whose constructor does not forward its argument is now copied with its elements. Typed arrays that hold `NaN` now equal themselves.
 
