@@ -2,6 +2,19 @@
 '@tanstack/db': patch
 ---
 
-Simplify the mutation draft proxy and share one equality walker with `deepEquals`. Revert detection and `deepEquals` results do not change, and draft writes are faster. A typical app bundle is about 460 B smaller with gzip.
+Simplify the mutation draft proxy and share one equality walker with `deepEquals`. Draft writes are faster, and a typical app bundle is about 150 B smaller with gzip.
 
-A function stored in a row is now returned as stored when read from a draft, by any read path. Before, the draft returned a bound copy, so `draft.handler === handler` was false. A stored method also saw a private copy as `this`, so writes it made through `this` were not tracked and `collection.update` dropped them. Those writes are now tracked.
+This change also fixes draft writes that were lost or wrong:
+
+- A function stored in a row is now returned as stored when read from a draft. Before, the draft returned a bound copy, so `draft.handler === handler` was false. A stored method also saw a private copy as `this`, so `collection.update` dropped the writes it made through `this`.
+- Array methods such as `at`, `slice`, `concat`, `flat`, `toReversed`, and `with` now return drafts, so a write through their result is saved. `indexOf` and `includes` find an element that the draft returned, and `draft.items.constructor === Array` is true.
+- `Object.defineProperty(draft, key, { value })` no longer throws when the descriptor does not set `writable`.
+- Deleting a nested key that the callback added, or writing a nested value back, no longer leaves the parent marked as changed.
+- A typed-array subclass whose constructor does not forward its argument is now copied with its elements. Typed arrays that hold `NaN` now equal themselves.
+
+`deepEquals` and draft change detection also have new rules:
+
+- An object of another class is not equal. Plain and null-prototype objects are one class.
+- A class instance without enumerable keys, such as a `File` or an object whose state is in private fields, equals only itself. Before, two such instances were always equal, so a draft dropped a write that replaced one.
+- URLs compare by `href`.
+- In draft change detection only, a typed array of another class is a change.

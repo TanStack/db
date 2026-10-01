@@ -37,7 +37,8 @@ import { createChangeProxy } from '../src/proxy'
  *
  * Authority: the `createChangeProxy` and `getChanges` implementation comments
  * in `src/proxy.ts` and the revert examples in `tests/proxy.test.ts`, as of
- * `18abceee`.
+ * `18abceee`. Rules 7 to 9 are design decisions recorded in
+ * `docs/contributing/oracle-reviews/code-weight-draft-proxy.md`.
  *
  * Limits:
  * - Writes are assignments, deletes, nested property writes, and nested writes
