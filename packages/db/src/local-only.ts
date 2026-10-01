@@ -335,12 +335,9 @@ function createLocalOnlySync<T extends object, TKey extends string | number>(
       syncCommit = commit
       collection = params.collection
       params.collection._state.isLocalOnly = true
-      if (directTypes.size > 0) {
-        params.collection._state.localOnlyDirectWrite = {
-          types: directTypes,
-          write: (mutations) =>
-            confirmOperationsSync(mutations),
-        }
+      params.collection._state.localOnlyDirectWrite = {
+        types: directTypes,
+        write: confirmOperationsSync,
       }
 
       // Apply initial data if provided

@@ -840,7 +840,6 @@ export function createChangeProxy<
         const stringProp = typeof prop === `symbol` ? prop.toString() : prop
 
         if (Object.hasOwn(dobj, prop)) {
-          // Check if the property exists in the original object
           // A hidden original field is not row data, so as with a plain
           // delete of it, removing it is not a change.
           const hadPropertyInOriginal =
@@ -858,15 +857,7 @@ export function createChangeProxy<
             // should revert to the original state
             if (!hadPropertyInOriginal) {
               changeTracker.assigned_.delete(stringProp)
-
-              // If this is the last change and we're not a nested object,
-              // mark the object as unmodified
-              if (changeTracker.assigned_.size === 0) {
-                changeTracker.modified = false
-              } else {
-                // We still have changes, keep as modified
-                changeTracker.modified = true
-              }
+              changeTracker.modified = changeTracker.assigned_.size > 0
             } else {
               // Mark this property as deleted
               changeTracker.assigned_.set(stringProp, false)

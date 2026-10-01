@@ -176,7 +176,6 @@ export class CollectionStateManager<
       row: TOutput
       synced: boolean
       origin: VirtualOrigin
-      key: TKey
       collectionId: string
       enriched: WithVirtualProps<TOutput, TKey>
     }
@@ -346,7 +345,6 @@ export class CollectionStateManager<
       cached.row === row &&
       cached.synced === synced &&
       cached.origin === origin &&
-      cached.key === resolvedKey &&
       cached.collectionId === collectionId
     ) {
       return cached.enriched
@@ -365,7 +363,6 @@ export class CollectionStateManager<
       row,
       synced,
       origin,
-      key: resolvedKey,
       collectionId,
       enriched,
     })
