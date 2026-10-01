@@ -79,11 +79,13 @@ function createModifyingMethodHandler<T extends object>(
   methodFn: (...args: Array<unknown>) => unknown,
   changeTracker: ChangeTracker<T>,
   markChanged: (tracker: ChangeTracker<T>) => void,
+  receiver: unknown,
 ): (...args: Array<unknown>) => unknown {
   return function (...args: Array<unknown>) {
     const result = methodFn.apply(changeTracker.copy_, args)
     markChanged(changeTracker)
-    return result
+    // A method that returns the value itself returns the draft.
+    return result === changeTracker.copy_ ? receiver : result
   }
 }
 
@@ -500,7 +502,12 @@ export function createChangeProxy<
           ARRAY_MODIFYING_METHODS.has(methodName) &&
           (Array.isArray(ptarget) || ArrayBuffer.isView(ptarget))
         ) {
-          return createModifyingMethodHandler(value, changeTracker, markChanged)
+          return createModifyingMethodHandler(
+            value,
+            changeTracker,
+            markChanged,
+            receiver,
+          )
         }
 
         if (Array.isArray(ptarget)) {
@@ -553,6 +560,7 @@ export function createChangeProxy<
               value,
               changeTracker,
               markChanged,
+              receiver,
             )
           }
 
