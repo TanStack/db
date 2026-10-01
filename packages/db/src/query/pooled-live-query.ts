@@ -2,8 +2,6 @@ import { SortedMap } from '../SortedMap.js'
 import { normalizeValue } from '../utils/comparison.js'
 import { isVirtualPropName } from '../virtual-props.js'
 import { getPersistedReadinessSource } from '../persisted-readiness.js'
-import { LiveQueryObserverDisposedError } from '../errors.js'
-import { getLiveQueryStatusFlags } from '../live-query-adapter.js'
 import { getWhereExpression } from './ir.js'
 import { createLiveQueryCollection } from './live-query-collection.js'
 import type { BasicExpression, QueryIR } from './ir.js'
@@ -11,12 +9,6 @@ import type { BaseQueryBuilder } from './builder/index.js'
 import type { Collection, CollectionImpl } from '../collection/index.js'
 import type { ChangeMessage, CollectionStatus } from '../types.js'
 import type { CollectionEventHandler } from '../collection/events.js'
-import type {
-  LiveQueryObserver,
-  LiveQueryObserverListener,
-  LiveQuerySnapshot,
-} from '../live-query-observer.js'
-import type { DehydratedLiveQueryResult } from '../client.js'
 
 /**
  * Live queries that filter one source Collection only by `eq(field, literal)`
@@ -424,17 +416,6 @@ class PooledLiveQuery {
     return this.source.preload()
   }
 
-  /** Observe changes and status without allocating unsubscribe closures. */
-  watch(onChanges: Listener, onStatus: StatusListener): void {
-    this.partition.addListener(this.group, onChanges)
-    this.partition.statusListeners.add(onStatus)
-  }
-
-  unwatch(onChanges: Listener, onStatus: StatusListener): void {
-    this.partition.removeListener(this.group, onChanges)
-    this.partition.statusListeners.delete(onStatus)
-  }
-
   cleanup(): Promise<void> {
     return this.collection?.cleanup() ?? Promise.resolve()
   }
@@ -456,169 +437,6 @@ class PooledLiveQuery {
       gcTime: this.gcTime,
     }))
   }
-}
-
-/**
- * The wholesale observer for a pooled view without a `DbClient`. Pooled views
- * have no hydration, persisted restore, or single-result mode, so this keeps
- * only the snapshot, subscription, preload, and disposal parts of the general
- * observer contract.
- */
-class PooledWholesaleObserver implements LiveQueryObserver<
-  Row,
-  string | number
-> {
-  private snapshot: LiveQuerySnapshot<Row, string | number> | undefined
-  private snapshotRevision = -1
-  private snapshotStatus: CollectionStatus | undefined
-
-  private readonly records = new Set<{
-    listener: LiveQueryObserverListener<Row, string | number>
-  }>()
-  private watching = false
-  private readonly onChanges: Listener = (changes) => this.deliver(changes)
-  private readonly onStatus: StatusListener = () => this.deliver(undefined)
-  private preloadPromise: Promise<void> | undefined
-  private disposed = false
-
-  constructor(
-    private readonly view: PooledLiveQuery,
-    private readonly onPreload: (() => void) | undefined,
-  ) {}
-
-  getSnapshot(): LiveQuerySnapshot<Row, string | number> {
-    const status = this.view.status
-    if (
-      this.snapshot &&
-      this.snapshotRevision === this.view._stateRevision &&
-      this.snapshotStatus === status
-    ) {
-      return this.snapshot
-    }
-    const rows = this.view.rows
-    const state = new Map<string | number, Row>()
-    const data: Array<Row> = []
-    for (const key of rows.keys()) {
-      const value = rows.get(key)!
-      state.set(key, value)
-      data.push(value)
-    }
-    this.snapshotRevision = this.view._stateRevision
-    this.snapshotStatus = status
-    return (this.snapshot = {
-      state,
-      data,
-      collection: this.view.publicCollection,
-      // Rows stay in key order, so only inserts and deletes move keys.
-      layoutRevision: this.view._layoutRevision,
-      status,
-      ...getLiveQueryStatusFlags(status),
-      persistedStatus: `unavailable`,
-      isPersistedReady: false,
-      persistedError: undefined,
-      isEnabled: true,
-    })
-  }
-
-  getServerSnapshot(): LiveQuerySnapshot<Row, string | number> {
-    return this.getSnapshot()
-  }
-
-  subscribe(
-    listener: LiveQueryObserverListener<Row, string | number>,
-  ): () => void {
-    if (this.disposed) throw new LiveQueryObserverDisposedError()
-    // A record per call, so one listener subscribed twice tears down twice.
-    const record = { listener }
-    this.records.add(record)
-    if (!this.watching) {
-      this.watching = true
-      this.view.watch(this.onChanges, this.onStatus)
-    }
-    return () => {
-      if (this.records.delete(record) && this.records.size === 0) {
-        this.stopWatching()
-      }
-    }
-  }
-
-  private deliver(
-    changes: Array<ChangeMessage<Row, string | number>> | undefined,
-  ): void {
-    const records = this.records.size === 1 ? this.records : [...this.records]
-    for (const { listener } of records) listener(changes)
-  }
-
-  private stopWatching(): void {
-    if (!this.watching) return
-    this.watching = false
-    this.view.unwatch(this.onChanges, this.onStatus)
-  }
-
-  preload(): Promise<void> {
-    if (this.preloadPromise) return this.preloadPromise
-    this.onPreload?.()
-    const promise = this.view.preload()
-    this.preloadPromise = promise
-    const clear = () => {
-      if (this.preloadPromise === promise) this.preloadPromise = undefined
-    }
-    void promise.then(clear, clear)
-    return promise
-  }
-
-  preloadForInitialRender(): Promise<void> {
-    if (this.disposed) {
-      return Promise.reject(new LiveQueryObserverDisposedError())
-    }
-    return this.preload()
-  }
-
-  isInitialRenderReady(): boolean {
-    return false
-  }
-
-  getError(): unknown {
-    return undefined
-  }
-
-  dehydrate(): DehydratedLiveQueryResult<Row, string | number> {
-    return {
-      rows: Array.from(this.view.entries(), ([key, value]) => ({ key, value })),
-    }
-  }
-
-  dispose(): void {
-    if (this.disposed) return
-    this.disposed = true
-    this.records.clear()
-    this.stopWatching()
-  }
-}
-
-/** A lean observer for a pooled view, or undefined for anything else. */
-export function createPooledObserver<
-  T extends object,
-  TKey extends string | number,
->(
-  collection: unknown,
-  {
-    wholesale,
-    client,
-    onPreload,
-  }: {
-    wholesale: boolean
-    client: unknown
-    onPreload: (() => void) | undefined
-  },
-): LiveQueryObserver<T, TKey> | undefined {
-  if (!(collection instanceof PooledLiveQuery) || !wholesale || client) {
-    return undefined
-  }
-  return new PooledWholesaleObserver(
-    collection,
-    onPreload,
-  ) as unknown as LiveQueryObserver<T, TKey>
 }
 
 // The observer reads the view itself; users get the live-query Collection.

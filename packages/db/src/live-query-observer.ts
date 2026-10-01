@@ -6,7 +6,6 @@ import {
 } from './live-query-adapter.js'
 import { getBuilderFromConfig } from './query/live/collection-registry.js'
 import { getPersistedReadinessSource } from './persisted-readiness.js'
-import { createPooledObserver } from './query/pooled-live-query.js'
 import type { Collection } from './collection/index.js'
 import type { DbClient, DehydratedLiveQueryResult } from './client.js'
 import type { PersistedReadinessSource } from './persisted-readiness.js'
@@ -23,6 +22,12 @@ export type LiveQueryPersistedStatus =
 // must remain observable without treating source readiness as query readiness.
 const INITIAL_RENDER_PRELOADS = new WeakSet<Collection<any, any, any>>()
 
+const NO_PERSISTED_READINESS = {
+  status: `unavailable`,
+  error: undefined,
+} as const
+const noop = () => {}
+
 interface PersistedSourceEntry {
   collection: Collection<any, any, any>
   readiness: PersistedReadinessSource
@@ -31,6 +36,8 @@ interface PersistedSourceEntry {
 function collectPersistedReadinessSources(
   root: Collection<any, any, any>,
 ): ReadonlyArray<PersistedSourceEntry> | undefined {
+  // A few integrations provide Collection-compatible objects without config.
+  if (!(root as { config?: unknown }).config) return undefined
   const seen = new Set<Collection<any, any, any>>()
   const sources: Array<PersistedSourceEntry> = []
   const visit = (collection: Collection<any, any, any>): boolean => {
@@ -357,7 +364,7 @@ class LiveQueryObserverImpl<
     error: unknown | undefined
   } {
     const sources = this.persistedSources
-    if (!sources) return { status: `unavailable`, error: undefined }
+    if (!sources) return NO_PERSISTED_READINESS
     let loading = false
     let error: unknown | undefined
     let failed = false
@@ -753,7 +760,7 @@ class LiveQueryObserverImpl<
         ? subscribeLayoutChanges.call(collection, () =>
             notify([], collection.status, true),
           )
-        : () => {}
+        : noop
     const persistedUnsubs = this.persistedSources?.map((source) =>
       source.readiness.subscribe(() => {
         if (this.disposed || this.subscriptions.size === 0) return
@@ -794,7 +801,7 @@ class LiveQueryObserverImpl<
                 : this.diffEntries(previousEntries, nextEntries),
             )
           })
-        : () => {}
+        : noop
     const release = () => {
       clientUnsub()
       statusUnsub()
@@ -1163,12 +1170,6 @@ export function createLiveQueryObserver<
   collection: Collection<T, TKey, any> | null | undefined,
   options: CreateLiveQueryObserverOptions = {},
 ): LiveQueryObserver<T, TKey> {
-  const pooled = createPooledObserver<T, TKey>(collection, {
-    wholesale: options.mode === `wholesale`,
-    client: options.client,
-    onPreload: options.onPreload,
-  })
-  if (pooled) return pooled
   return new LiveQueryObserverImpl<T, TKey>(
     collection ?? null,
     options.mode === `wholesale`,

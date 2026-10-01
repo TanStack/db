@@ -479,7 +479,11 @@ async function runHistory(history: History): Promise<void> {
     reference: ReturnType<typeof createLiveQueryCollection>
     // The model rows when the source started cleanup, if it has since.
     frozen: Array<string> | undefined
-    view: { collection?: unknown }
+    view: {
+      collection?: unknown
+      status: string
+      entries: () => Iterable<[string | number, Record<string, unknown>]>
+    }
     layout: { keys: string; revision: number } | undefined
     wholesale: ReturnType<typeof createLiveQueryObserver<any, any>>
     // Rows folded from the pooled granular stream, and contradictions.
@@ -549,6 +553,12 @@ async function runHistory(history: History): Promise<void> {
         `${label} rows`,
       ).toEqual(reference.toArray.map((row) => describeRow(row)))
       expect(snapshot.status, `${label} status`).toBe(reference.status)
+      // The view itself, which the observer reads only when notified.
+      expect(
+        [...view.entries()].map(([, row]) => describeRow(row)),
+        `${label} view rows`,
+      ).toEqual(reference.toArray.map((row) => describeRow(row)))
+      expect(view.status, `${label} view status`).toBe(reference.status)
       const model = entry.frozen ?? expectedRows(rows, peer)
       expect(
         [...snapshot.state!.values()].map(describeFields).sort(),
