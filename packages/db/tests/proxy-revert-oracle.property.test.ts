@@ -61,6 +61,7 @@ type Spec =
   | { k: `array`; items: Array<Primitive | typeof HOLE> }
   | { k: `obj`; a?: Primitive; b?: Primitive; sym?: Primitive }
   | { k: `rows`; rows: Array<{ a: Primitive }> }
+  | { k: `typed`; ctor: TypedKind; values: Array<number> }
 
 // A Map value is a primitive or a nested Set, so draft rules must also hold
 // inside Map values.
@@ -69,6 +70,23 @@ const isSetValue = (v: MapValue): v is { set: Array<string> } =>
   typeof v === `object` && v !== null
 const mapValue = (v: MapValue): unknown =>
   isSetValue(v) ? [`set`, v.set] : prim(v)
+
+// Typed arrays, including a subclass whose constructor ignores its argument,
+// so a clone must not rely on constructor arguments to copy elements.
+type TypedKind = `f64` | `u8` | `vec3`
+class Vec3 extends Float64Array {
+  constructor() {
+    super(3)
+  }
+}
+const typedKind = (value: unknown): TypedKind | undefined =>
+  value instanceof Vec3
+    ? `vec3`
+    : value instanceof Float64Array
+      ? `f64`
+      : value instanceof Uint8Array
+        ? `u8`
+        : undefined
 
 const HOLE = Symbol(`hole`)
 const FIELDS = [`f`, `g`, `h`] as const
@@ -110,6 +128,10 @@ function canon(spec: Spec | undefined): unknown {
       ]
     case `rows`:
       return [`rows`, spec.rows.map((row) => prim(row.a))]
+    case `typed`:
+      // Elements follow rule 1: -0 equals 0 and NaN equals NaN. The class is
+      // part of the value.
+      return [`typed`, spec.ctor, spec.values.map(String)]
   }
 }
 
@@ -150,6 +172,13 @@ function realize(spec: Spec): unknown {
     }
     case `rows`:
       return spec.rows.map((row) => ({ a: row.a }))
+    case `typed`: {
+      if (spec.ctor === `u8`) return Uint8Array.from(spec.values)
+      const value =
+        spec.ctor === `vec3` ? new Vec3() : new Float64Array(spec.values.length)
+      spec.values.forEach((v, i) => (value[i] = v))
+      return value
+    }
   }
 }
 
@@ -201,6 +230,17 @@ const specArb: fc.Arbitrary<Spec> = fc.oneof(
   fc
     .array(fc.record({ a: primArb }), { minLength: 1, maxLength: 3 })
     .map((rows) => ({ k: `rows` as const, rows })),
+  fc.oneof(
+    fc
+      .array(fc.constantFrom(0, -0, 1, NaN, 1.5), { maxLength: 3 })
+      .map((values): Spec => ({ k: `typed`, ctor: `f64`, values })),
+    fc
+      .array(fc.constantFrom(0, 1, 255), { maxLength: 3 })
+      .map((values): Spec => ({ k: `typed`, ctor: `u8`, values })),
+    fc
+      .tuple(...[0, 1, 2].map(() => fc.constantFrom(0, -0, 1, NaN)))
+      .map((values): Spec => ({ k: `typed`, ctor: `vec3`, values })),
+  ),
 )
 
 type Op =
@@ -367,6 +407,13 @@ function applicable(state: Root, original: Root, op: Op): boolean {
     case `nestedDelete`:
       return current?.k === `obj` && op.key in current
     case `index`:
+      // Float typed arrays store any number exactly; Uint8Array would coerce.
+      if (current?.k === `typed`)
+        return (
+          current.ctor !== `u8` &&
+          typeof op.value === `number` &&
+          op.index < current.values.length
+        )
       return current?.k === `array` && op.index < current.items.length
     case `forOf`:
       return current?.k === `rows` && op.index < current.rows.length
@@ -400,6 +447,12 @@ function step(state: Root, original: Root, op: Op): Root {
       break
     }
     case `index`: {
+      if (current?.k === `typed`) {
+        const values = [...current.values]
+        values[op.index] = op.value as number
+        next[op.field] = { ...current, values }
+        break
+      }
       const items = [...(current as Extract<Spec, { k: `array` }>).items]
       items[op.index] = op.value
       next[op.field] = { k: `array`, items }
@@ -520,6 +573,16 @@ function readSpec(value: unknown, like: Spec | undefined): string {
             rows: value.map((row: { a: Primitive }) => ({ a: row.a })),
           })
         : `not rows`
+    case `typed`: {
+      const ctor = typedKind(value)
+      return ctor === undefined
+        ? `not a typed array`
+        : encode({
+            k: `typed`,
+            ctor,
+            values: Array.from(value as Float64Array),
+          })
+    }
   }
 }
 
@@ -743,6 +806,40 @@ describe(`draft revert oracle`, () => {
           { op: `nested`, field: `f`, key: `b`, value: 0 },
           { op: `set`, field: `h`, value: { k: `prim`, v: undefined } },
           { op: `nestedDelete`, field: `f`, key: `b` },
+        ],
+      },
+    ],
+    [
+      `a typed-array subclass keeps its elements in the draft`,
+      {
+        original: { f: { k: `typed`, ctor: `vec3`, values: [1, 2, 3] } },
+        ops: [{ op: `index`, field: `f`, index: 0, value: 9 }],
+      },
+    ],
+    [
+      `rewriting NaN into a Float64Array is not a change`,
+      {
+        original: { f: { k: `typed`, ctor: `f64`, values: [NaN, 1] } },
+        ops: [
+          {
+            op: `set`,
+            field: `f`,
+            value: { k: `typed`, ctor: `f64`, values: [NaN, 1] },
+          },
+          { op: `index`, field: `f`, index: 0, value: NaN },
+        ],
+      },
+    ],
+    [
+      `a typed array of another class is a change`,
+      {
+        original: { f: { k: `typed`, ctor: `f64`, values: [1, 0] } },
+        ops: [
+          {
+            op: `set`,
+            field: `f`,
+            value: { k: `typed`, ctor: `u8`, values: [1, 0] },
+          },
         ],
       },
     ],

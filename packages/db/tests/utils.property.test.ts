@@ -997,6 +997,31 @@ describe(`deepEquals property-based tests`, () => {
     )
 
     utilsProperty([
+      fc.array(fc.oneof(fc.double(), fc.constant(NaN), fc.constant(-0)), {
+        minLength: 1,
+        maxLength: 5,
+      }),
+      fc.array(fc.integer({ min: 0, max: 127 }), { minLength: 1, maxLength: 5 }),
+    ])(
+      `typed arrays compare elements like numbers and ignore their class`,
+      (values, bytes) => {
+        const a = Float64Array.from(values)
+        const b = Float64Array.from(
+          values.map((v) => (Object.is(v, -0) ? 0 : v)),
+        )
+        expectEqualityPair(a, b, true)
+        expectEqualityPair({ v: a }, { v: b }, true)
+        // Draft equality keeps the class; the draft revert oracle owns that.
+        expectEqualityPair(Uint8Array.from(bytes), Int8Array.from(bytes), true)
+        expectEqualityPair(
+          Uint8Array.from(bytes),
+          Int8Array.from([...bytes.slice(1), 128]),
+          false,
+        )
+      },
+    )
+
+    utilsProperty([
       fc.array(fc.oneof(fc.integer(), fc.constant(`hole`)), {
         minLength: 1,
         maxLength: 5,

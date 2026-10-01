@@ -184,10 +184,18 @@ export function deepEqualsInternal(
   ) {
     const typedA = a as unknown as TypedArray
     const typedB = b as unknown as TypedArray
-    if (typedA.length !== typedB.length) return false
+    // Elements compare like numbers: -0 equals 0, NaN equals NaN. Only a
+    // draft treats a change of typed-array class as a change.
+    if (
+      (draft && Object.getPrototypeOf(a) !== Object.getPrototypeOf(b)) ||
+      typedA.length !== typedB.length
+    )
+      return false
 
     for (let i = 0; i < typedA.length; i++) {
-      if (typedA[i] !== typedB[i]) return false
+      const x = typedA[i]!
+      const y = typedB[i]!
+      if (x !== y && !(x !== x && y !== y)) return false
     }
 
     return true

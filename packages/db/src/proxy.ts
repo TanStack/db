@@ -192,6 +192,11 @@ interface ChangeTracker<T extends object> {
  * Deep clones an object while preserving special types like Date and RegExp
  */
 
+interface TypedArray {
+  length: number
+  [index: number]: number
+}
+
 function deepClone<T extends unknown>(
   obj: T,
   visited = new WeakMap<object, unknown>(),
@@ -244,11 +249,17 @@ function deepClone<T extends unknown>(
 
   // Handle TypedArrays
   if (ArrayBuffer.isView(obj) && !(obj instanceof DataView)) {
-    // Get the constructor to create a new instance of the same type
-    // and copy its elements.
-    const clone = new (Object.getPrototypeOf(obj).constructor)(obj)
+    // Create an instance of the same type by length, then copy the values.
+    // A subclass constructor need not forward a source array to super.
+    const TypedArrayConstructor = Object.getPrototypeOf(obj).constructor
+    const clone = new TypedArrayConstructor(
+      (obj as unknown as TypedArray).length,
+    ) as unknown as TypedArray
     visited.set(obj as object, clone)
-    return clone
+    for (let i = 0; i < (obj as unknown as TypedArray).length; i++) {
+      clone[i] = (obj as unknown as TypedArray)[i]!
+    }
+    return clone as unknown as T
   }
 
   if (obj instanceof Map) {
