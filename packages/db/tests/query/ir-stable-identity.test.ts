@@ -642,6 +642,18 @@ describe(`loadSubset demand identity`, () => {
     )
   })
 
+  it(`keeps an explicit source alias read-only`, () => {
+    const qualified = new PropRef([`profile`, `score`], `profile`)
+
+    expect(Object.getOwnPropertyDescriptor(qualified, `sourceAlias`)).toEqual({
+      value: `profile`,
+      enumerable: true,
+      writable: false,
+      configurable: false,
+    })
+    expect(Object.hasOwn(new PropRef([`profile`]), `sourceAlias`)).toBe(false)
+  })
+
   const id = new PropRef<string>([`id`])
   const group = new PropRef<string>([`group`])
   const first = new Func<boolean>(`eq`, [id, new Value(`a`)])

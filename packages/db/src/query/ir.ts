@@ -149,9 +149,11 @@ export class PropRef<T = any> extends BaseExpression<T> {
     sourceAlias?: string,
   ) {
     super()
-    // Present only when given, so unqualified refs keep their shape.
     if (sourceAlias !== undefined) {
-      ;(this as { sourceAlias?: string }).sourceAlias = sourceAlias
+      Object.defineProperty(this, `sourceAlias`, {
+        value: sourceAlias,
+        enumerable: true,
+      })
     }
   }
 }
