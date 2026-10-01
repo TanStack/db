@@ -81,6 +81,9 @@ import type { QueryCollectionUtils } from '../src/query.js'
  * below holds that commit after the initial fetch, then checks the returned
  * promise and stored row before and after release. It does not model native
  * SQLite failure or overlapping on-demand revalidation.
+ * Direct writes belong to the current sync run. Cleanup start invalidates that
+ * run, so later writes must fail without changing storage. Restart admits
+ * writes through a new run. The fixed history below checks each boundary.
  */
 
 type ResultSettlementOperationState =
@@ -1366,6 +1369,12 @@ function expectedDirectWriteReceipt(applied: boolean) {
     receipt: applied ? `fulfilled` : `pending`,
     storedName: applied ? `Updated` : shared.name,
   }
+}
+
+// A direct write can apply only in the current sync run. Cleanup start closes
+// that admission; restart creates a new current run.
+function expectedDirectWriteAdmission(syncRun: `current` | `invalidated`) {
+  return syncRun === `current` ? `fulfilled` : `rejected`
 }
 
 type ColdOwnershipObservation = { stored: Array<Item>; visible: Array<Item> }
@@ -5208,7 +5217,7 @@ describe(`query collection ownership lifecycle`, () => {
     expect(queryFn).not.toHaveBeenCalled()
   })
 
-  it(`does not restart a cleaned-up collection for a late mutation refetch`, async () => {
+  it(`rejects a late mutation write without restarting a cleaned-up collection`, async () => {
     const id = `late-mutation-after-cleanup`
     const queryKey = [id] as const
     const inserted = { id: `late`, category: `mutation`, name: `Late` }
@@ -5250,12 +5259,14 @@ describe(`query collection ownership lifecycle`, () => {
     await handlerEntered.promise
     await collection.cleanup()
     releaseHandler.resolve()
-    await mutation.isPersisted.promise
+    await expect(mutation.isPersisted.promise).rejects.toBeInstanceOf(
+      SyncNotInitializedError,
+    )
 
     expect(collection.status).toBe(`cleaned-up`)
     expect(queryFn).toHaveBeenCalledOnce()
     expect(itemIds(collection._state.syncedData.values())).toEqual([])
-    expect(queryClient.getQueryData(queryKey)).toEqual([])
+    expect(queryClient.getQueryData(queryKey)).toBeUndefined()
   })
 
   it.each([
@@ -5962,6 +5973,62 @@ describe(`query collection ownership lifecycle`, () => {
     await write
     expect(observe()).toEqual(expectedDirectWriteReceipt(true))
     expect(collection.get(shared.id)?.name).toBe(`Updated`)
+  })
+
+  it(`rejects writes from an invalidated sync run and admits writes after restart`, async () => {
+    const id = `direct-write-cleanup-admission`
+    const storage = createOwnershipStorage()
+    const { collection } = createPersistedOwnershipFixture(
+      id,
+      storage,
+      [shared],
+      `eager`,
+    )
+    await collection.stateWhenReady()
+
+    const observe = async (write: () => Promise<void>) => {
+      try {
+        await write()
+        return `fulfilled` as const
+      } catch (error) {
+        expect(error).toBeInstanceOf(SyncNotInitializedError)
+        return `rejected` as const
+      }
+    }
+
+    const before = { ...shared, name: `Before cleanup` }
+    expect(await observe(() => collection.utils.writeUpdate(before))).toBe(
+      expectedDirectWriteAdmission(`current`),
+    )
+    expect(storage.snapshot().rows.get(shared.id)?.name).toBe(before.name)
+
+    const cleanup = collection.cleanup()
+    const late = { id: `late`, category: `direct`, name: `Late` }
+    const lateWrites = [
+      () => collection.utils.writeInsert(late),
+      () => collection.utils.writeUpdate({ ...shared, name: `Late update` }),
+      () => collection.utils.writeDelete(shared.id),
+      () => collection.utils.writeUpsert(late),
+      () =>
+        collection.utils.writeBatch(() => collection.utils.writeInsert(late)),
+    ]
+    for (const write of lateWrites) {
+      expect(await observe(write)).toBe(
+        expectedDirectWriteAdmission(`invalidated`),
+      )
+    }
+    await cleanup
+    expect(storage.snapshot().rows.has(late.id)).toBe(false)
+    expect(storage.snapshot().rows.get(shared.id)?.name).toBe(before.name)
+
+    const subscription = collection.subscribeChanges(() => {})
+    cleanups.push(() => Promise.resolve(subscription.unsubscribe()))
+    await collection.stateWhenReady()
+    const restarted = { id: `restarted`, category: `direct`, name: `Restarted` }
+    expect(await observe(() => collection.utils.writeInsert(restarted))).toBe(
+      expectedDirectWriteAdmission(`current`),
+    )
+    expect(storage.snapshot().rows.get(restarted.id)).toEqual(restarted)
   })
 
   it(`retains post-publication ownership through durable persistence`, async () => {

@@ -3390,7 +3390,7 @@ export function queryCollectionOptions(
         : (queryKey as unknown as Array<unknown>)
 
     // Store references for manual write operations
-    writeContext = {
+    const currentWriteContext = {
       collection,
       queryClient,
       queryKey: contextQueryKey,
@@ -3400,6 +3400,7 @@ export function queryCollectionOptions(
       commit,
       updateCacheData,
     }
+    writeContext = currentWriteContext
 
     // Call the original internalSync logic, pairing QueryClient mount with the
     // collection sync lifecycle so focus/reconnect managers dispatch events for
@@ -3414,8 +3415,10 @@ export function queryCollectionOptions(
 
     return {
       ...sync,
-      cleanup: () =>
-        runCleanupWithLocalTeardown(sync.cleanup, unmountQueryClient),
+      cleanup: () => {
+        if (writeContext === currentWriteContext) writeContext = null
+        return runCleanupWithLocalTeardown(sync.cleanup, unmountQueryClient)
+      },
     }
   }
 

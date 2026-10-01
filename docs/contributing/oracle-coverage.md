@@ -272,12 +272,17 @@ comment and the current API/architecture contract before extending its model.
 
 The Query ownership oracle checks that a direct-write promise stays pending
 while a controlled persisted adapter holds its sync commit and settles after
-the adapter stores the row. A focused Query test checks two serialized updates:
-after each awaited response write and mutation settlement, the public row shows
-the server revision. These witnesses cover an eager Query Collection after
-initial load with a controlled adapter, not native SQLite or overlapping Query
-revalidation. The Query ownership and optimistic-history owners still need a
-joint generated witness for competing source writes around mutation settlement.
+the adapter stores the row. It also checks that all five direct-write methods
+reject after cleanup starts and that a restarted sync run can persist a new
+write. Focused Query tests check a synchronous batch callback returning another
+Collection's write without losing either write, while an async callback still
+rejects. They also check two serialized updates: after each awaited response
+write and mutation settlement, the public row shows the server revision. These
+witnesses cover an eager Query Collection after initial load with a controlled
+adapter, not a direct write already in flight when cleanup starts, native
+SQLite, or overlapping Query revalidation. The Query ownership and
+optimistic-history owners still need a joint generated witness
+for competing source writes around mutation settlement.
 
 The hash-identity owner also runs every law in a second module copy whose
 initialization draws are all equal, so every type marker has the same hash

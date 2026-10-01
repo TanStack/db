@@ -27,6 +27,7 @@ import {
 import { evaluateReferenceExpression } from '../../db/tests/reference-expression'
 import { persistedCollectionOptions } from '../../db-sqlite-persistence-core/src'
 import { queryCollectionOptions } from '../src/query'
+import { SyncNotInitializedError } from '../src/errors'
 import type { QueryFunctionContext } from '@tanstack/query-core'
 import type {
   Collection,
@@ -4925,6 +4926,123 @@ describe(`QueryCollection`, () => {
           consoleError.mockRestore()
         }
       } finally {
+        await collection.cleanup()
+      }
+    })
+
+    it(`allows a synchronous batch callback to return another Collection's write or batch`, async () => {
+      const todos = createCollection(
+        queryCollectionOptions<TestItem>({
+          id: `batch-cross-collection-todos`,
+          queryKey: [`batch-cross-collection-todos`],
+          queryFn: () => Promise.resolve([]),
+          queryClient,
+          getKey,
+          startSync: true,
+        }),
+      )
+      const tags = createCollection(
+        queryCollectionOptions<TestItem>({
+          id: `batch-cross-collection-tags`,
+          queryKey: [`batch-cross-collection-tags`],
+          queryFn: () => Promise.resolve([]),
+          queryClient,
+          getKey,
+          startSync: true,
+        }),
+      )
+
+      try {
+        await Promise.all([todos.stateWhenReady(), tags.stateWhenReady()])
+        const tag = { id: `tag`, name: `Tag` }
+        let tagWrite!: Promise<void>
+        let batchError: unknown
+        try {
+          await todos.utils.writeBatch(
+            () => (tagWrite = tags.utils.writeUpsert(tag)),
+          )
+        } catch (error) {
+          batchError = error
+        }
+        await tagWrite
+        expect(tags.get(`tag`)).toMatchObject(tag)
+        expect(batchError).toBeUndefined()
+
+        const todo = { id: `todo`, name: `Todo` }
+        const secondTag = { id: `second-tag`, name: `Second tag` }
+        let secondTagWrite!: Promise<void>
+        await todos.utils.writeBatch(() => {
+          todos.utils.writeInsert(todo)
+          return (secondTagWrite = tags.utils.writeUpsert(secondTag))
+        })
+        await secondTagWrite
+        expect(todos.get(`todo`)).toMatchObject(todo)
+        expect(tags.get(`second-tag`)).toMatchObject(secondTag)
+
+        const batchedTag = { id: `batched-tag`, name: `Batched tag` }
+        await todos.utils.writeBatch(() =>
+          tags.utils.writeBatch(() => tags.utils.writeUpsert(batchedTag)),
+        )
+        expect(tags.get(`batched-tag`)).toMatchObject(batchedTag)
+
+        await expect(
+          Promise.resolve().then(() =>
+            todos.utils.writeBatch(async () =>
+              tags.utils.writeUpsert({ id: `async-tag`, name: `Async tag` }),
+            ),
+          ),
+        ).rejects.toThrow(/async callbacks/)
+      } finally {
+        await Promise.all([todos.cleanup(), tags.cleanup()])
+      }
+    })
+
+    it(`rejects direct writes after Collection cleanup`, async () => {
+      type Row = { id: string; name: string }
+      const adapter = createPersistedQueryAdapter<Row>()
+      const collection = createCollection(
+        persistedCollectionOptions<
+          Row,
+          string | number,
+          never,
+          QueryCollectionUtils<Row>
+        >({
+          ...queryCollectionOptions<Row>({
+            id: `direct-write-after-cleanup`,
+            queryKey: [`direct-write-after-cleanup`],
+            queryFn: () => Promise.resolve([]),
+            queryClient,
+            getKey: (row) => row.id,
+            startSync: true,
+          }),
+          persistence: { adapter },
+        }),
+      )
+
+      await collection.stateWhenReady()
+      const cleanup = collection.cleanup()
+      await expect(
+        Promise.resolve().then(() =>
+          collection.utils.writeInsert({ id: `late`, name: `Late` }),
+        ),
+      ).rejects.toBeInstanceOf(SyncNotInitializedError)
+      await cleanup
+      await expect(
+        Promise.resolve().then(() =>
+          collection.utils.writeInsert({ id: `later`, name: `Later` }),
+        ),
+      ).rejects.toBeInstanceOf(SyncNotInitializedError)
+      expect(adapter.rows.has(`late`)).toBe(false)
+      expect(adapter.rows.has(`later`)).toBe(false)
+      expect(collection.get(`late`)).toBeUndefined()
+
+      const subscription = collection.subscribeChanges(() => {})
+      try {
+        await collection.stateWhenReady()
+        await collection.utils.writeInsert({ id: `fresh`, name: `Fresh` })
+        expect(adapter.rows.get(`fresh`)?.name).toBe(`Fresh`)
+      } finally {
+        subscription.unsubscribe()
         await collection.cleanup()
       }
     })

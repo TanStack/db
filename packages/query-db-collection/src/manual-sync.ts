@@ -19,6 +19,7 @@ const activeBatchContexts = new WeakMap<
     completion: Promise<void>
   }
 >()
+const writeCompletionPromises = new WeakSet<object>()
 
 // Types for sync operations
 export type SyncOperation<
@@ -259,7 +260,9 @@ export function createWriteUtils<
       batchContext.operations.push(operation)
       return batchContext.completion
     }
-    return performWriteOperations(operation, ctx)
+    const completion = performWriteOperations(operation, ctx)
+    writeCompletionPromises.add(completion)
+    return completion
   }
 
   return {
@@ -296,6 +299,7 @@ export function createWriteUtils<
         resolveBatch = resolve
         rejectBatch = reject
       })
+      writeCompletionPromises.add(completion)
       void completion.catch(() => undefined)
 
       // Set up the batch context for this specific collection
@@ -307,18 +311,15 @@ export function createWriteUtils<
 
       try {
         // Execute the callback - any write operations will be collected
-        const result = callback()
+        const result: unknown = callback()
 
-        // Check if callback returns a promise (async function)
+        // A direct write in another collection may be returned incidentally.
         if (
-          // @ts-expect-error - Runtime check for async callback, callback is typed as () => void but user might pass async
-          // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
-          result &&
-          result !== completion &&
+          result !== null &&
           typeof result === `object` &&
           `then` in result &&
-          // @ts-expect-error - Runtime check for async callback, callback is typed as () => void but user might pass async
-          typeof result.then === `function`
+          typeof result.then === `function` &&
+          !writeCompletionPromises.has(result)
         ) {
           throw new Error(
             `writeBatch does not support async callbacks. The callback must be synchronous.`,

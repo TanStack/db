@@ -731,10 +731,13 @@ These operations:
 - In on-demand mode, refetch active enabled queries and remove inactive or disabled cache entries
 
 The promise waits for the sync commit. It does not wait for on-demand Query revalidation or guarantee that a completed optimistic snapshot no longer overlays the row.
+After Collection cleanup starts, direct writes fail with `SyncNotInitializedError` until a new sync run starts.
 
 ### Batch Operations
 
 The `writeBatch` method allows you to perform multiple operations atomically. Any write operations called within the callback will be collected and executed as a single transaction:
+
+The batch includes writes to this Collection only. A synchronous callback may also write to another Collection, but that write has its own completion promise.
 
 ```typescript
 todosCollection.utils.writeBatch(() => {
