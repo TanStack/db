@@ -90,6 +90,38 @@ function isProxiableObject(
 }
 
 /**
+ * Iterates a draft array. Each element is read like an index read; `read` is
+ * the draft's `get` trap, called directly because a read through the Proxy is
+ * several times slower. Primitives skip it: the trap returns them as read.
+ */
+function iterateArray<A>(
+  read: (array: A, prop: string, receiver: unknown) => unknown,
+  array: A & Array<unknown>,
+  receiver: unknown,
+  withIndex: boolean,
+): IterableIterator<unknown> {
+  let index = 0
+  return {
+    next() {
+      if (index >= array.length) return { done: true, value: undefined }
+      let element = array[index]
+      if (
+        element !== null &&
+        (typeof element === `object` || typeof element === `function`)
+      )
+        element = read(array, String(index), receiver)
+      return {
+        done: false,
+        value: withIndex ? [index++, element] : (index++, element),
+      }
+    },
+    [Symbol.iterator]() {
+      return this
+    },
+  }
+}
+
+/**
  * Creates a wrapper for methods that modify a collection (array, Map, Set).
  * The wrapper calls the method and marks the change tracker as modified.
  */
@@ -480,7 +512,7 @@ export function createChangeProxy<
   // Create a proxy for the target object.
   // Use the unfrozen copy_ as the proxy target to avoid Proxy invariant violations
   // when the original target is frozen (e.g., from Immer)
-  const proxy = new Proxy(changeTracker.copy_, {
+  const handler: ProxyHandler<T> = {
     get(ptarget, prop, receiver) {
       const value = changeTracker.copy_[prop as keyof T]
 
@@ -509,15 +541,24 @@ export function createChangeProxy<
             )
           }
 
-          // Native callbacks and iterators read through the draft itself.
-          // This also tracks the callback array and implicit reduce seed.
+          // Native callbacks read through the draft itself. This also tracks
+          // the callback array and implicit reduce seed.
+          if (CALLBACK_ITERATION_METHODS.has(methodName)) {
+            return value.bind(receiver)
+          }
+
           if (
-            CALLBACK_ITERATION_METHODS.has(methodName) ||
             methodName === `values` ||
             methodName === `entries` ||
             prop === Symbol.iterator
           ) {
-            return value.bind(receiver)
+            return () =>
+              iterateArray(
+                handler.get!,
+                ptarget,
+                receiver,
+                methodName === `entries`,
+              )
           }
         }
 
@@ -702,7 +743,8 @@ export function createChangeProxy<
 
       return true
     },
-  })
+  }
+  const proxy = new Proxy(changeTracker.copy_, handler)
   draftCopies.set(proxy, changeTracker.copy_)
 
   // Return the proxy and a function to get the changes

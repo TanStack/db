@@ -20,6 +20,10 @@ import {
  * oracle compares membership, key order, callback arguments, nested writes,
  * aliases, cycles, rollback after throw, and the final detached result. Whole-
  * object detachment rules live in the companion contract, not this model.
+ *
+ * Array iterators follow the same live rule: an edit made while an iterator
+ * is open (a push, a removal, an index write, a length cut) changes what it
+ * visits next, as on a native array, and an object element is a draft.
  */
 describe.each([`Map`, `Set`] as const)(`%s draft iteration`, (kind) => {
   it(`calls a read-only forEach callback once per entry without reporting changes`, () => {
@@ -98,6 +102,67 @@ it.each([`Map`, `Set`] as const)(
     }
   },
 )
+
+describe(`Array draft iteration`, () => {
+  type Element = { x: number } | number
+  const iterations: Array<
+    [string, (array: Array<Element>) => Iterable<unknown>]
+  > = [
+    [`for...of`, (array) => array],
+    [`values()`, (array) => array.values()],
+    [`entries()`, (array) => array.entries()],
+  ]
+  // Each edit runs while the iterator holds its first element.
+  const edits: Array<
+    [string, (array: Array<Element>, first: unknown) => void]
+  > = [
+    [`push`, (array) => array.push({ x: 9 }, 8)],
+    [`pop`, (array) => array.pop()],
+    [`shift`, (array) => array.shift()],
+    [`index write`, (array) => (array[1] = 7)],
+    [`length cut`, (array) => (array.length = 1)],
+    [
+      `write through the element`,
+      (_array, first) => {
+        const element = (Array.isArray(first) ? first[1] : first) as {
+          x: number
+        }
+        element.x = 10
+      },
+    ],
+  ]
+  const run = (
+    array: Array<Element>,
+    iterate: (array: Array<Element>) => Iterable<unknown>,
+    edit: (array: Array<Element>, first: unknown) => void,
+  ) => {
+    const visited: Array<unknown> = []
+    for (const value of iterate(array)) {
+      if (visited.length === 0) edit(array, value)
+      visited.push(JSON.parse(JSON.stringify(value)))
+    }
+    return visited
+  }
+  const make = (): { items: Array<Element> } => ({
+    items: [{ x: 1 }, 2, { x: 3 }],
+  })
+
+  describe.each(iterations)(`%s`, (_name, iterate) => {
+    it.each(edits)(
+      `visits and publishes what a native array does after %s`,
+      (_edit, edit) => {
+        const native = make()
+        const expectedVisits = run(native.items, iterate, edit)
+        let visits: Array<unknown> = []
+        const changes = withChangeTracking(make(), (draft) => {
+          visits = run(draft.items, iterate, edit)
+        })
+        expect(visits).toEqual(expectedVisits)
+        expect(changes).toEqual({ items: native.items })
+      },
+    )
+  })
+})
 
 describe.each([`Map`, `Set`] as const)(
   `%s caller-owned insertion values`,
