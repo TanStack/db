@@ -18,9 +18,12 @@ it(`tries every Electric oracle resource and retains primary and secondary failu
       withElectricCleanup(() => {
         throw primary
       }, [
-        () => {
-          released.push(`stream`)
-          throw secondary
+        {
+          label: `stream`,
+          release: () => {
+            released.push(`stream`)
+            throw secondary
+          },
         },
         () => {
           released.push(`http`)
@@ -32,7 +35,7 @@ it(`tries every Electric oracle resource and retains primary and secondary failu
     ).rejects.toBe(primary)
     expect(released).toEqual([`stream`, `http`, `spy`])
     expect(warning).toHaveBeenCalledWith(
-      `Electric oracle cleanup failed after a primary error`,
+      `Electric oracle cleanup failed after a primary error: stream`,
       secondary,
     )
   } finally {
@@ -40,21 +43,63 @@ it(`tries every Electric oracle resource and retains primary and secondary failu
   }
 })
 
-it(`reports cleanup-only failures after trying later resources`, async () => {
-  const failure = new Error(`cleanup`)
+it(`reports each cleanup failure without replacing the semantic failure`, async () => {
+  const primary = new Error(`semantic mismatch`)
+  const streamFailure = new Error(`stream cleanup`)
+  const httpFailure = new Error(`http cleanup`)
   const released = vi.fn()
-  await expect(
-    withElectricCleanup(
-      () => 1,
-      [
+  const warning = vi.spyOn(console, `warn`).mockImplementation(() => {})
+  try {
+    await expect(
+      withElectricCleanup(() => {
+        throw primary
+      }, [
         () => {
-          throw failure
+          throw streamFailure
+        },
+        () => {
+          throw httpFailure
         },
         released,
-      ],
-    ),
-  ).rejects.toBe(failure)
-  expect(released).toHaveBeenCalledTimes(1)
+      ]),
+    ).rejects.toBe(primary)
+    expect(released).toHaveBeenCalledTimes(1)
+    expect(warning.mock.calls).toEqual([
+      [`Electric oracle cleanup failed after a primary error`, streamFailure],
+      [`Electric oracle cleanup failed after a primary error`, httpFailure],
+    ])
+  } finally {
+    warning.mockRestore()
+  }
+})
+
+it(`reports cleanup-only failures after trying later resources`, async () => {
+  const failure = new Error(`first cleanup`)
+  const secondary = new Error(`second cleanup`)
+  const released = vi.fn()
+  const warning = vi.spyOn(console, `warn`).mockImplementation(() => {})
+  try {
+    await expect(
+      withElectricCleanup(
+        () => 1,
+        [
+          () => {
+            throw failure
+          },
+          () => {
+            throw secondary
+          },
+          released,
+        ],
+      ),
+    ).rejects.toBe(failure)
+    expect(released).toHaveBeenCalledTimes(1)
+    expect(warning.mock.calls).toEqual([
+      [`Electric oracle secondary cleanup failure`, secondary],
+    ])
+  } finally {
+    warning.mockRestore()
+  }
 })
 
 it(`reports a missing semantic checkpoint without claiming cancellation`, async () => {

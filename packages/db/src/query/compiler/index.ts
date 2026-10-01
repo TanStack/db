@@ -1138,13 +1138,25 @@ export function compileQuery(
     ]
   }
 
+  // A single-result query must expose only its first row when another query
+  // consumes it as a QueryRef, before the outer join or filter runs.
+  const resultLimit = query.singleResult
+    ? Math.min(query.limit ?? 1, 1)
+    : query.limit
+  const hasOrderBy = (query.orderBy?.length ?? 0) > 0
+  if (
+    !hasOrderBy &&
+    (query.limit !== undefined || query.offset !== undefined)
+  ) {
+    throw new LimitOffsetRequireOrderByError()
+  }
   let resultPipeline: ResultStream
-  if (query.orderBy && query.orderBy.length > 0) {
+  if (hasOrderBy || query.singleResult) {
     // When in includes mode with limit/offset, use grouped ordering so that
     // the limit is applied per parent (per correlation key), not globally.
     const includesGroupKeyFn =
       parentKeyStream &&
-      (query.limit !== undefined || query.offset !== undefined)
+      (resultLimit !== undefined || query.offset !== undefined)
         ? (_key: unknown, row: unknown) => {
             const correlationKey = getRowCorrelationKey(
               row as NamespacedRow,
@@ -1167,19 +1179,18 @@ export function compileQuery(
     resultPipeline = processOrderBy(
       rawQuery,
       pipeline,
-      query.orderBy,
+      // With no explicit order, top-K breaks ties by the public row key.
+      query.orderBy ?? [],
       query.select || {},
       collections[mainCollectionId]!,
       optimizableOrderByCollections,
       setWindowFn,
-      query.limit,
+      resultLimit,
       query.offset,
       includesGroupKeyFn,
     ).pipe(
       map(([key, [row, orderByIndex]]) => finalizeRow(key, row, orderByIndex)),
     ) as ResultStream
-  } else if (query.limit !== undefined || query.offset !== undefined) {
-    throw new LimitOffsetRequireOrderByError()
   } else {
     resultPipeline = pipeline.pipe(
       map(([key, row]) => finalizeRow(key, row, undefined)),

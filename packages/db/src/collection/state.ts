@@ -257,8 +257,10 @@ export class CollectionStateManager<
     key: TKey,
     overrides?: Partial<VirtualRowProps<TKey>>,
   ): VirtualRowProps<TKey> {
+    const synced = overrides?.$synced ?? this.isRowSynced(key)
     return {
-      $synced: overrides?.$synced ?? this.isRowSynced(key),
+      $hasPendingWrites: !synced,
+      $synced: synced,
       $origin: overrides?.$origin ?? this.getRowOrigin(key),
       $key: overrides?.$key ?? key,
       $collectionId: overrides?.$collectionId ?? this.collection.id,
@@ -336,6 +338,7 @@ export class CollectionStateManager<
 
     const enriched = {
       ...row,
+      $hasPendingWrites: !synced,
       $synced: synced,
       $origin: origin,
       $key: resolvedKey,

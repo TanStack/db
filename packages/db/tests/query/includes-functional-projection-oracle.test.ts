@@ -39,6 +39,10 @@ import { createControlledCollection } from './includes-oracle-helpers.js'
  *
  * This suite owns functional projection compatibility. The route-context suite
  * owns hidden metadata transport. The Collection suite owns facade lifecycle.
+ * The authority is the functional-projection contract in
+ * `packages/db/src/query/live/ARCHITECTURE.md`. These finite cells use
+ * controlled source Collections and do not claim arbitrary callback bodies,
+ * provider timing, or every recursive query shape.
  */
 
 // These products are finite contract partitions. Calibration tests below
@@ -91,6 +95,7 @@ const operatorCells = forms.flatMap((form) =>
 
 type Child = { id: number; parentGroup: number; value: number }
 type Input = { id: number; kind: string; children?: unknown }
+// Phase labels name this oracle's observation cuts. They do not model D2 phases.
 type Phase = `initial` | `child-update` | `sibling-update` | `route-move`
 type ChildView = {
   valid: boolean
@@ -140,6 +145,30 @@ function rejectsCollectionInput(
   return form === `collection` && functional.some(Boolean)
 }
 
+const noPrimaryFailure = Symbol(`no primary oracle failure`)
+
+// Run every release even when an earlier one fails. If the oracle already
+// failed, keep that mismatch as the cause and report cleanup separately.
+async function cleanupAfterOracle(
+  primaryFailure: unknown,
+  releases: ReadonlyArray<() => void | Promise<void>>,
+): Promise<void> {
+  const cleanupFailures: Array<unknown> = []
+  for (const release of releases) {
+    try {
+      await release()
+    } catch (error) {
+      cleanupFailures.push(error)
+    }
+  }
+  if (cleanupFailures.length === 0) return
+  if (primaryFailure === noPrimaryFailure && cleanupFailures.length === 1)
+    throw cleanupFailures[0]
+  throw new AggregateError(cleanupFailures, `oracle cleanup failed`, {
+    ...(primaryFailure === noPrimaryFailure ? {} : { cause: primaryFailure }),
+  })
+}
+
 class Projection {
   constructor(
     readonly id: number,
@@ -150,6 +179,46 @@ class Projection {
 }
 
 describe(`functional projection output compatibility`, () => {
+  it(`retains the first mismatch and all cleanup failures`, async () => {
+    const primary = new Error(`public result mismatch`)
+    const firstCleanup = new Error(`first cleanup failed`)
+    const secondCleanup = new Error(`second cleanup failed`)
+    const released: Array<number> = []
+    let reported: unknown
+    let primaryFailure: unknown = noPrimaryFailure
+    try {
+      try {
+        throw primary
+      } catch (error) {
+        primaryFailure = error
+        throw error
+      } finally {
+        await cleanupAfterOracle(primaryFailure, [
+          () => {
+            released.push(1)
+            throw firstCleanup
+          },
+          () => {
+            released.push(2)
+            throw secondCleanup
+          },
+          () => {
+            released.push(3)
+          },
+        ])
+      }
+    } catch (error) {
+      reported = error
+    }
+    expect(released).toEqual([1, 2, 3])
+    expect(reported).toBeInstanceOf(AggregateError)
+    expect((reported as AggregateError).cause).toBe(primary)
+    expect((reported as AggregateError).errors).toEqual([
+      firstCleanup,
+      secondCleanup,
+    ])
+  })
+
   it.each(
     ([`expression`, `functional`] as const).flatMap((projection) =>
       ([`resolve`, `reject`, `cleanup-resolve`, `cleanup-reject`] as const).map(
@@ -206,12 +275,18 @@ describe(`functional projection output compatibility`, () => {
               })
         })
       if (rejectsCollectionInput(`collection`, projection === `functional`)) {
+        let primaryFailure: unknown = noPrimaryFailure
         try {
           expect(buildQuery).toThrow(collectionInputError)
           expect(captured).toEqual([])
+        } catch (error) {
+          primaryFailure = error
+          throw error
         } finally {
-          await parents.collection.cleanup()
-          await children.cleanup()
+          await cleanupAfterOracle(primaryFailure, [
+            () => parents.collection.cleanup(),
+            () => children.cleanup(),
+          ])
         }
         return
       }
@@ -232,6 +307,7 @@ describe(`functional projection output compatibility`, () => {
         )
         return { result, observed }
       }
+      let primaryFailure: unknown = noPrimaryFailure
       try {
         const initial = preload()
         await flushPromises()
@@ -284,11 +360,16 @@ describe(`functional projection output compatibility`, () => {
               expect(view.toArray.map((child) => child.id)).toEqual([10])
           }
         }
+      } catch (error) {
+        primaryFailure = error
+        throw error
       } finally {
-        await query.cleanup()
-        for (const { gate } of requests) gate.resolve()
-        await children.cleanup()
-        await parents.collection.cleanup()
+        await cleanupAfterOracle(primaryFailure, [
+          () => query.cleanup(),
+          ...requests.map(({ gate }) => gate.resolve),
+          () => children.cleanup(),
+          () => parents.collection.cleanup(),
+        ])
       }
     },
   )
@@ -385,6 +466,7 @@ describe(`functional projection output compatibility`, () => {
       }
       const ids = (observer: (typeof observers)[number]) =>
         [...observer.rows].sort((a, b) => a - b)
+      let primaryFailure: unknown = noPrimaryFailure
       try {
         await query.preload()
         if (subscribeAt === `after-preload`) observe(query.get(1)!.children)
@@ -444,13 +526,18 @@ describe(`functional projection output compatibility`, () => {
             `old graph exposes no fresh rows`,
           ).toEqual([])
         }
+      } catch (error) {
+        primaryFailure = error
+        throw error
       } finally {
         failing = false
-        flush?.mockRestore()
-        for (const release of releases) release()
-        await query.cleanup()
-        await parents.collection.cleanup()
-        await children.collection.cleanup()
+        await cleanupAfterOracle(primaryFailure, [
+          () => flush?.mockRestore(),
+          ...releases,
+          () => query.cleanup(),
+          () => parents.collection.cleanup(),
+          () => children.collection.cleanup(),
+        ])
       }
     },
   )
@@ -622,6 +709,7 @@ describe(`functional projection output compatibility`, () => {
             .toEqual(result)
         }
       }
+      let primaryFailure: unknown = noPrimaryFailure
       try {
         await query.preload()
         const initialRead = capture(query.get(1)!)
@@ -643,10 +731,15 @@ describe(`functional projection output compatibility`, () => {
         checkPublished(2, [20, 21, 22], `published insertion read`)
         children.write(`delete`, { id: 21, groupId: 2 })
         checkPublished(2, [20, 22], `published deletion read`)
+      } catch (error) {
+        primaryFailure = error
+        throw error
       } finally {
-        await query.cleanup()
-        await parents.collection.cleanup()
-        await children.collection.cleanup()
+        await cleanupAfterOracle(primaryFailure, [
+          () => query.cleanup(),
+          () => parents.collection.cleanup(),
+          () => children.collection.cleanup(),
+        ])
       }
     },
   )
@@ -680,6 +773,7 @@ describe(`functional projection output compatibility`, () => {
           box: { children: row.children },
         }))
       })
+      let primaryFailure: unknown = noPrimaryFailure
       try {
         await query.preload()
         const childrenAtPublication = query.get(1)!.box.children
@@ -727,10 +821,15 @@ describe(`functional projection output compatibility`, () => {
             )
             .toEqual([10, 11])
         }
+      } catch (error) {
+        primaryFailure = error
+        throw error
       } finally {
-        await query.cleanup()
-        await parents.collection.cleanup()
-        await childSource.collection.cleanup()
+        await cleanupAfterOracle(primaryFailure, [
+          () => query.cleanup(),
+          () => parents.collection.cleanup(),
+          () => childSource.collection.cleanup(),
+        ])
       }
     },
   )
@@ -767,6 +866,7 @@ describe(`functional projection output compatibility`, () => {
             .where(({ child }) => eq(child.groupId, row.groupId)),
         }))
       })
+      let primaryFailure: unknown = noPrimaryFailure
       try {
         await query.preload()
         const original = query.get(1)!
@@ -796,10 +896,15 @@ describe(`functional projection output compatibility`, () => {
           if (surface === `captured-method`)
             expect(capturedGet(20)).toBeUndefined()
         }
+      } catch (error) {
+        primaryFailure = error
+        throw error
       } finally {
-        await query.cleanup()
-        await parents.collection.cleanup()
-        await children.collection.cleanup()
+        await cleanupAfterOracle(primaryFailure, [
+          () => query.cleanup(),
+          () => parents.collection.cleanup(),
+          () => children.collection.cleanup(),
+        ])
       }
     },
   )
@@ -834,6 +939,7 @@ describe(`functional projection output compatibility`, () => {
       )
       const rows = () =>
         projected.toArray.map(({ id, count }) => ({ id, count }))
+      let primaryFailure: unknown = noPrimaryFailure
       try {
         await source.preload()
         await projected.preload()
@@ -849,11 +955,16 @@ describe(`functional projection output compatibility`, () => {
         children.write(`delete`, { id: 11, parentId: 1 })
         parents.write(`insert`, { id: 1 })
         expect(rows()).toEqual([{ id: 1, count: 1 }])
+      } catch (error) {
+        primaryFailure = error
+        throw error
       } finally {
-        await projected.cleanup()
-        await source.cleanup()
-        await parents.collection.cleanup()
-        await children.collection.cleanup()
+        await cleanupAfterOracle(primaryFailure, [
+          () => projected.cleanup(),
+          () => source.cleanup(),
+          () => parents.collection.cleanup(),
+          () => children.collection.cleanup(),
+        ])
       }
     },
   )
@@ -936,12 +1047,18 @@ describe(`functional projection output compatibility`, () => {
             operator === `custom-key` ? (row) => `result:${row.id}` : undefined,
         })
       if (rejectsCollectionInput(form, true)) {
+        let primaryFailure: unknown = noPrimaryFailure
         try {
           expect(buildQuery).toThrow(collectionInputError)
           expect(observed).toEqual([])
+        } catch (error) {
+          primaryFailure = error
+          throw error
         } finally {
-          await parents.collection.cleanup()
-          await children.collection.cleanup()
+          await cleanupAfterOracle(primaryFailure, [
+            () => parents.collection.cleanup(),
+            () => children.collection.cleanup(),
+          ])
         }
         return
       }
@@ -978,6 +1095,7 @@ describe(`functional projection output compatibility`, () => {
         }
         observed.length = 0
       }
+      let primaryFailure: unknown = noPrimaryFailure
       try {
         await live.preload()
         check()
@@ -990,10 +1108,15 @@ describe(`functional projection output compatibility`, () => {
         expectedScores.delete(1)
         parents.write(`delete`, { id: 1, group: 2, base: 5 })
         check()
+      } catch (error) {
+        primaryFailure = error
+        throw error
       } finally {
-        await live.cleanup()
-        await parents.collection.cleanup()
-        await children.collection.cleanup()
+        await cleanupAfterOracle(primaryFailure, [
+          () => live.cleanup(),
+          () => parents.collection.cleanup(),
+          () => children.collection.cleanup(),
+        ])
       }
     },
   )
@@ -1026,7 +1149,11 @@ describe(`functional projection output compatibility`, () => {
             expect.soft(value !== null && typeof value === `object`).toBe(true)
             if (value !== null && typeof value === `object`) {
               // Virtual properties are public metadata. Check the selected field
-              // and forbid input paths without imposing a new metadata contract.
+              // and forbid leaked input fields without imposing a new metadata
+              // contract on virtual properties.
+              expect
+                .soft(Object.keys(value).filter((key) => !key.startsWith(`$`)))
+                .toEqual([`code`])
               expect.soft(`children` in value || `row` in value).toBe(false)
               expect.soft(`code` in value).toBe(true)
               if (expected !== undefined && `code` in value)
@@ -1080,11 +1207,17 @@ describe(`functional projection output compatibility`, () => {
               })
         })
       if (rejectsCollectionInput(form, withInclude)) {
+        let primaryFailure: unknown = noPrimaryFailure
         try {
           expect(buildQuery).toThrow(collectionInputError)
+        } catch (error) {
+          primaryFailure = error
+          throw error
         } finally {
-          await parents.collection.cleanup()
-          await children.collection.cleanup()
+          await cleanupAfterOracle(primaryFailure, [
+            () => parents.collection.cleanup(),
+            () => children.collection.cleanup(),
+          ])
         }
         return
       }
@@ -1093,6 +1226,7 @@ describe(`functional projection output compatibility`, () => {
         expect.soft(live.toArray).toHaveLength(1)
         assertValue(live.toArray[0]?.value, expectedValue)
       }
+      let primaryFailure: unknown = noPrimaryFailure
       try {
         await live.preload()
         check()
@@ -1103,10 +1237,15 @@ describe(`functional projection output compatibility`, () => {
         check()
         parents.write(`delete`, { id: 1, value: expectedValue })
         expect.soft(live.toArray).toEqual([])
+      } catch (error) {
+        primaryFailure = error
+        throw error
       } finally {
-        await live.cleanup()
-        await parents.collection.cleanup()
-        await children.collection.cleanup()
+        await cleanupAfterOracle(primaryFailure, [
+          () => live.cleanup(),
+          () => parents.collection.cleanup(),
+          () => children.collection.cleanup(),
+        ])
       }
     },
   )
@@ -1217,12 +1356,18 @@ describe(`functional projection output compatibility`, () => {
           consumer === `functional`,
         )
       ) {
+        let primaryFailure: unknown = noPrimaryFailure
         try {
           expect(buildQuery).toThrow(collectionInputError)
           expect(calls).toEqual([])
+        } catch (error) {
+          primaryFailure = error
+          throw error
         } finally {
-          await parents.collection.cleanup()
-          await children.collection.cleanup()
+          await cleanupAfterOracle(primaryFailure, [
+            () => parents.collection.cleanup(),
+            () => children.collection.cleanup(),
+          ])
         }
         return
       }
@@ -1303,6 +1448,7 @@ describe(`functional projection output compatibility`, () => {
           }
         }
       }
+      let primaryFailure: unknown = noPrimaryFailure
       try {
         await live.preload()
         check()
@@ -1322,10 +1468,15 @@ describe(`functional projection output compatibility`, () => {
         group = 2
         parents.write(`update`, { id: 1, group, siblingGroup: 2 })
         check()
+      } catch (error) {
+        primaryFailure = error
+        throw error
       } finally {
-        await live.cleanup()
-        await parents.collection.cleanup()
-        await children.collection.cleanup()
+        await cleanupAfterOracle(primaryFailure, [
+          () => live.cleanup(),
+          () => parents.collection.cleanup(),
+          () => children.collection.cleanup(),
+        ])
       }
     },
   )
@@ -1355,13 +1506,19 @@ describe(`functional include projection boundary grammar`, () => {
         .from({ result: scalar })
         .select(({ result }) => ({ value: result }))
     })
+    let primaryFailure: unknown = noPrimaryFailure
     try {
       await live.preload()
       expect(live.toArray.map((row) => row.value)).toEqual([1])
+    } catch (error) {
+      primaryFailure = error
+      throw error
     } finally {
-      await live.cleanup()
-      await parents.collection.cleanup()
-      await children.collection.cleanup()
+      await cleanupAfterOracle(primaryFailure, [
+        () => live.cleanup(),
+        () => parents.collection.cleanup(),
+        () => children.collection.cleanup(),
+      ])
     }
   })
 
@@ -1376,6 +1533,7 @@ describe(`functional include projection boundary grammar`, () => {
           ({ parent }) => new Projection(parent.id, `plain`, undefined, 0),
         ),
     )
+    let primaryFailure: unknown = noPrimaryFailure
     try {
       await live.preload()
       expect(live.toArray).toHaveLength(1)
@@ -1385,9 +1543,14 @@ describe(`functional include projection boundary grammar`, () => {
       expect(row?.total).toBe(0)
       // Collection root records already flatten prototypes without includes.
       // This matrix checks their fields, not a new prototype-preservation API.
+    } catch (error) {
+      primaryFailure = error
+      throw error
     } finally {
-      await live.cleanup()
-      await parents.collection.cleanup()
+      await cleanupAfterOracle(primaryFailure, [
+        () => live.cleanup(),
+        () => parents.collection.cleanup(),
+      ])
     }
   })
 
@@ -1501,13 +1664,19 @@ describe(`functional include projection boundary grammar`, () => {
             : outer.fn.select(({ row }) => project(row))
         })
       if (rejectsCollectionInput(form, output !== `expression`)) {
+        let primaryFailure: unknown = noPrimaryFailure
         try {
           expect(buildQuery).toThrow(collectionInputError)
           expect(calls).toEqual([])
+        } catch (error) {
+          primaryFailure = error
+          throw error
         } finally {
-          await parents.collection.cleanup()
-          await children.collection.cleanup()
-          await absent.collection.cleanup()
+          await cleanupAfterOracle(primaryFailure, [
+            () => parents.collection.cleanup(),
+            () => children.collection.cleanup(),
+            () => absent.collection.cleanup(),
+          ])
         }
         return
       }
@@ -1560,13 +1729,13 @@ describe(`functional include projection boundary grammar`, () => {
             .toBe(expected.reduce((sum, item) => sum + item.value, 0))
         }
         if (boundary === `union`) {
-          const other: Input | undefined = live.toArray.find(
-            (item) => item.kind === `absent`,
-          )
+          const other: (Input & { total?: number }) | undefined =
+            live.toArray.find((item) => item.kind === `absent`)
           expect.soft(other, `${phase}: absent branch survives`).toBeDefined()
           expect
             .soft(other?.children, `${phase}: absent branch value`)
             .toBeUndefined()
+          expect.soft(other?.total, `${phase}: absent branch total`).toBe(0)
         }
         const current = calls.filter(
           (call) => call.phase === phase && call.kind === `included`,
@@ -1587,14 +1756,24 @@ describe(`functional include projection boundary grammar`, () => {
               .soft(call.view.ready, `${phase}: callback facade ready`)
               .toBe(true)
         }
-        for (const call of calls.filter(
+        const absentCalls = calls.filter(
           (item) => item.phase === phase && item.kind === `absent`,
-        )) {
+        )
+        if (
+          boundary === `union` &&
+          output !== `expression` &&
+          phase === `initial`
+        )
+          expect
+            .soft(absentCalls.length, `initial: absent callback reach`)
+            .toBeGreaterThan(0)
+        for (const call of absentCalls) {
           expect
             .soft(call.child, `${phase}: valid callback absence`)
             .toBeUndefined()
         }
       }
+      let primaryFailure: unknown = noPrimaryFailure
       try {
         await live.preload()
         check()
@@ -1607,12 +1786,15 @@ describe(`functional include projection boundary grammar`, () => {
         group = 2
         parents.write(`update`, { id: 1, group })
         check()
+      } catch (error) {
+        primaryFailure = error
+        throw error
       } finally {
-        await live.cleanup()
-        await Promise.all([
-          parents.collection.cleanup(),
-          children.collection.cleanup(),
-          absent.collection.cleanup(),
+        await cleanupAfterOracle(primaryFailure, [
+          () => live.cleanup(),
+          () => parents.collection.cleanup(),
+          () => children.collection.cleanup(),
+          () => absent.collection.cleanup(),
         ])
       }
     },

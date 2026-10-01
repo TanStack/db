@@ -9,9 +9,16 @@
  * queries are observed at the first public snapshot after synchronous sync.
  *
  * Grammar: direct, arithmetic-wrapped, conditional-branch, and
- * conditional-default global aggregates, plus a grouped control. The model's
- * missing `k` field represents the current global
- * aggregate projection, which omits fields that are not group keys.
+ * conditional-default global aggregates. The nested query crosses each shape
+ * with an accepting and rejecting outer predicate; a grouped query is the
+ * control. The model's missing `k` field represents the current global
+ * aggregate projection, which omits fields that are not group keys. The
+ * rejecting predicate distinguishes filtering after aggregation from dropping
+ * the predicate altogether.
+ * An inner join has a separate boundary: the global aggregate joins when its
+ * computed total matches an anchor. A materialized aggregate Collection
+ * supplies a second formulation for matching and nonmatching controls.
+ * The nested matching cases also reject an all-empty QueryRef implementation.
  */
 import { describe, expect, test } from 'vitest'
 import { createCollection } from '../../src/collection/index.js'
@@ -33,6 +40,97 @@ const rows: Array<Row> = [
 ]
 
 describe('optimizer aggregate semantics', () => {
+  for (const scenario of [
+    {
+      name: `matching without outer filter`,
+      target: 30,
+      filter: `none`,
+      expected: [{ total: 30 }],
+    },
+    {
+      name: `matching with accepting outer filter`,
+      target: 30,
+      filter: `accept`,
+      expected: [{ total: 30 }],
+    },
+    {
+      name: `matching with rejecting outer filter`,
+      target: 30,
+      filter: `reject`,
+      expected: [],
+    },
+    {
+      name: `nonmatching without outer filter`,
+      target: 31,
+      filter: `none`,
+      expected: [],
+    },
+  ] as const) {
+    test(`inner join of a global aggregate ${scenario.name}`, () => {
+      const source = createCollection(
+        mockSyncCollectionOptions<Row>({
+          id: `optimizer-inner-source-${scenario.name}`,
+          getKey: (row) => row.id,
+          initialData: rows,
+        }),
+      )
+      const anchor = createCollection(
+        mockSyncCollectionOptions({
+          id: `optimizer-inner-anchor-${scenario.name}`,
+          getKey: (row: { id: number; target: number }) => row.id,
+          initialData: [{ id: 1, target: scenario.target }],
+        }),
+      )
+      const result = createLiveQueryCollection({
+        startSync: true,
+        query: (q) => {
+          const summary = q.from({ b: source }).select(({ b }) => ({
+            k: b.k,
+            total: sum(b.v),
+          }))
+          const joined = q
+            .from({ s: summary })
+            .innerJoin({ a: anchor }, ({ s, a }) => eq(s.total, a.target))
+          if (scenario.filter === `accept`) {
+            return joined
+              .where(({ s }) => isUndefined(s.k))
+              .select(({ s }) => ({ total: s.total }))
+          }
+          if (scenario.filter === `reject`) {
+            return joined
+              .where(({ s }) => eq(s.k, 1))
+              .select(({ s }) => ({ total: s.total }))
+          }
+          return joined.select(({ s }) => ({ total: s.total }))
+        },
+      })
+
+      // The first synchronous public snapshot must follow aggregate, join,
+      // then outer-filter semantics. This compares complete rows, not counts.
+      const actual = result.toArray.map(stripVirtualProps)
+      expect(actual).toEqual(scenario.expected)
+
+      if (scenario.filter === `none`) {
+        const aggregate = createLiveQueryCollection({
+          startSync: true,
+          query: (q) =>
+            q.from({ b: source }).select(({ b }) => ({ total: sum(b.v) })),
+        })
+        const materialized = createLiveQueryCollection({
+          startSync: true,
+          query: (q) =>
+            q
+              .from({ s: aggregate })
+              .innerJoin({ a: anchor }, ({ s, a }) => eq(s.total, a.target))
+              .select(({ s }) => ({ total: s.total })),
+        })
+        expect(materialized.toArray.map(stripVirtualProps)).toEqual(
+          scenario.expected,
+        )
+      }
+    })
+  }
+
   for (const shape of [
     `direct`,
     `wrapped`,
@@ -87,28 +185,34 @@ describe('optimizer aggregate semantics', () => {
       })
       expect(materialized.toArray.map(stripVirtualProps)).toEqual(expected)
 
-      const nested = createLiveQueryCollection({
-        startSync: true,
-        query: (q) => {
-          const summary = q.from({ b: source }).select(({ b }) => ({
-            k: b.k,
-            total:
-              shape === `direct`
-                ? sum(b.v)
-                : shape === `wrapped`
-                  ? add(sum(b.v), 0)
-                  : shape === `caseWhenCondition`
-                    ? caseWhen(eq(sum(b.v), modelTotal), 1, 0)
-                    : caseWhen(eq(1, 2), 0, sum(b.v)),
-          }))
-          return q
-            .from({ s: summary })
-            .leftJoin({ a: anchor }, ({ s, a }) => eq(s.total, a.target))
-            .where(({ s }) => isUndefined(s.k))
-            .select(({ s }) => ({ total: s.total }))
-        },
-      })
-      expect(nested.toArray.map(stripVirtualProps)).toEqual(expected)
+      for (const outerPredicate of [`accept`, `reject`] as const) {
+        const nested = createLiveQueryCollection({
+          startSync: true,
+          query: (q) => {
+            const summary = q.from({ b: source }).select(({ b }) => ({
+              k: b.k,
+              total:
+                shape === `direct`
+                  ? sum(b.v)
+                  : shape === `wrapped`
+                    ? add(sum(b.v), 0)
+                    : shape === `caseWhenCondition`
+                      ? caseWhen(eq(sum(b.v), modelTotal), 1, 0)
+                      : caseWhen(eq(1, 2), 0, sum(b.v)),
+            }))
+            return q
+              .from({ s: summary })
+              .leftJoin({ a: anchor }, ({ s, a }) => eq(s.total, a.target))
+              .where(({ s }) =>
+                outerPredicate === `accept` ? isUndefined(s.k) : eq(s.k, 1),
+              )
+              .select(({ s }) => ({ total: s.total }))
+          },
+        })
+        expect(nested.toArray.map(stripVirtualProps)).toEqual(
+          outerPredicate === `accept` ? expected : [],
+        )
+      }
     })
   }
 

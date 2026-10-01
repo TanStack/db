@@ -22,10 +22,11 @@ import type { SyncConfig } from '../src/types'
  * it is not a Collection status and does not prove that adapter resources have
  * been released.
  *
- * The three-cut history grammar starts with a ready source and either a live
- * query or Effect dependent. It invokes cleanup, holds adapter cleanup, checks
- * the cleanup-start observation, releases the adapter, observes terminal
- * `cleaned-up` publication, and checks the later cleanup-Promise settlement.
+ * The three-cut history grammar starts with a ready or loading source. Selected
+ * histories add a live-query or Effect dependent. It invokes cleanup, holds
+ * adapter cleanup, checks the cleanup-start observation, releases the adapter,
+ * observes terminal `cleaned-up` publication, and checks the later
+ * cleanup-Promise settlement.
  * Adjacent histories re-enter start or preload from abort and
  * release callbacks, request nested cleanup, reject adapter cleanup, throw
  * from cleanup-start observers, or register observers during active cleanup.
@@ -59,7 +60,7 @@ import type { SyncConfig } from '../src/types'
  * points. Refinement checks run before releasing the controlled adapter gate
  * and after the cleanup promise settles. Counts, exact errors, status, rows,
  * subscription and observer ownership, and settlement are observed. The alias
- * and late-registration cases are pinned refinements outside the two-checkpoint
+ * and late-registration cases are pinned refinements outside the three-cut
  * model. This suite does not establish full demand/replay histories, transport
  * shutdown, persistence-wrapper behavior, or general row-publication laws.
  */
@@ -368,6 +369,67 @@ describe(`Collection cleanup admission oracle`, () => {
       expect(
         observeRestartAdmission(() => collection.startSyncImmediate()),
       ).toBe(atCleanupSettlement.restartAdmission)
+      expect(starts).toBe(2)
+      expect(collection.status).toBe(`ready`)
+    } finally {
+      cleanupGate.resolve()
+      off()
+      await collection.cleanup()
+    }
+  })
+
+  it(`retains loading status at cleanup start, then admits restart`, async () => {
+    const cleanupGate = createDeferred<void>()
+    const statuses: Array<string> = []
+    let starts = 0
+    const collection = createCollection<Row, number>({
+      getKey: (row) => row.id,
+      sync: {
+        sync: ({ markReady }) => {
+          starts++
+          if (starts > 1) markReady()
+          return { cleanup: () => cleanupGate.promise }
+        },
+      },
+    })
+    const off = collection.on(`status:change`, ({ status }) => {
+      statuses.push(status)
+    })
+
+    try {
+      collection.startSyncImmediate()
+      expect(collection.status).toBe(`loading`)
+      statuses.length = 0
+
+      let cleanupSettled = false
+      const cleanup = collection.cleanup().then(() => {
+        cleanupSettled = true
+      })
+      const atCleanupStart = expectedCleanupBoundary(`loading`, `cleanup-start`)
+
+      // A rule that forces ready at cleanup start fails at this held cut.
+      expect(collection.status).toBe(atCleanupStart.collectionStatus)
+      expect(statuses).toEqual([])
+      expect(observeCleanupSettlement(cleanupSettled)).toBe(
+        atCleanupStart.cleanup,
+      )
+      expect(
+        observeRestartAdmission(() => collection.startSyncImmediate()),
+      ).toBe(atCleanupStart.restartAdmission)
+
+      cleanupGate.resolve()
+      await cleanup
+      const atCleanupSettlement = expectedCleanupBoundary(
+        `loading`,
+        `cleanup-settlement`,
+      )
+      expect(collection.status).toBe(atCleanupSettlement.collectionStatus)
+      expect(statuses).toEqual([`cleaned-up`])
+      expect(observeCleanupSettlement(cleanupSettled)).toBe(
+        atCleanupSettlement.cleanup,
+      )
+
+      collection.startSyncImmediate()
       expect(starts).toBe(2)
       expect(collection.status).toBe(`ready`)
     } finally {

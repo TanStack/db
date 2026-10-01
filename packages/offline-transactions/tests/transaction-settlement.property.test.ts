@@ -3,25 +3,97 @@ import { createCollection, createTransaction } from '@tanstack/db'
 import { expect, it, vi } from 'vitest'
 import { NonRetriableError } from '../src/types'
 import { OutboxManager } from '../src/outbox/OutboxManager'
+import { KeyScheduler } from '../src/executor/KeyScheduler'
+import { TransactionExecutor } from '../src/executor/TransactionExecutor'
+import { DefaultRetryPolicy } from '../src/retry/RetryPolicy'
 import { FakeStorageAdapter, createTestOfflineEnvironment } from './harness'
 import { atOracleCheckpoint, cleanupOfflineOracle } from './oracle-lifecycle'
+import { readOfflineOracleConfig } from './oracle-config'
 import type { TestItem } from './harness'
+import type { OfflineTransaction, TransactionSignaler } from '../src/types'
 
 /**
  * # Does each offline transaction settle only from its own durable history?
  *
- * Transactions enter a global FIFO, but commit and wait promises belong to one
- * transaction ID. Success applies its server rows and fulfills both promises.
+ * The README's FIFO, durable-outbox, and NonRetriableError contracts, together
+ * with waitForTransactionCompletion's per-ID API, authorize this law:
+ * transactions enter a global FIFO, but commit and wait promises belong to one
+ * transaction ID. Success applies its server rows and, after outbox removal,
+ * fulfills both promises.
  * Permanent failure rejects those promises with the same error and rolls back
  * only its local overlay. A peer's provider, retry-record, or durable-admission
  * failure cannot settle or erase independently admitted work.
  *
- * Generated histories vary shared keys, transaction width, and success/failure
- * sequences. Gates expose each provider boundary. The driver compares exact
- * calls, IDs, promise outcomes, durable outbox state, server state, local rows,
- * pending counts, and later progress after every settlement. The simple expected
- * Maps do not copy executor or scheduler internals.
+ * The model is a prefix of completed transaction outcomes and an independently
+ * folded map of provider-applied rows. Its pending local rows represent the
+ * optimistic overlay, not durable outbox entries. Generated histories use 2–5
+ * transactions, 1–3 rows each, shared or disjoint keys, and success or permanent
+ * failure at each position. Pinned examples reconstruct all-success, middle
+ * failure, all-failure, and alternating outcomes. Shared keys distinguish
+ * sibling rollback from disjoint-key survival; width distinguishes whole-row
+ * snapshots from partial multirow application; outcome order distinguishes
+ * per-ID settlement from a global failure. Two transactions and one row are
+ * the marginal peer and width cases. Fresh production IDs exclude duplicate-ID
+ * histories; an outcome-less provider call is not a completed history here.
+ *
+ * Gates expose each provider boundary. The real executor, Collection, and
+ * outbox are the driver. At each held-provider checkpoint, the refinement
+ * check compares exact calls, IDs, promise outcomes, durable outbox state,
+ * provider-applied rows, and public local rows. A wrong global-settlement rule
+ * would fulfill a held sibling after the first transaction; the checkpoint
+ * compares that sibling with pending, and a wrong-result control verifies the
+ * comparison rejects early fulfillment. The simple expected Maps do not copy
+ * executor or scheduler internals.
+ *
+ * Held and failed deletion witnesses split provider application from durable
+ * outbox removal. At the held-delete cut the caller and isPersisted remain
+ * pending; a phase-write or deletion failure rejects that caller with the
+ * storage error, stops the executor, and holds queued peers. A fresh executor
+ * removes a durably marked row without repeating its provider call. An
+ * unmarked admitted row still replays through the provider. These two rows
+ * distinguish the crash windows around the phase write. The controlled provider and fake
+ * storage establish this executor boundary, not real server acknowledgement
+ * timing, native storage completion, or multiple-owner leadership. A normal
+ * run pairs fixed and seedless campaigns.
+ * A permanent provider failure uses a separate rejection-pending marker. The
+ * original caller rejects with that failure; a storage failure also throws
+ * from the executor batch and stops further work. Restart removes a marked row
+ * without another provider call or optimistic restore. Direct executor checks
+ * pin the storage error, FIFO peer hold, and refusal of further attempts. An
+ * unmarked row after a failed marker write can still replay after a crash.
+ * Public manual removal may acknowledge deletion while a provider call is
+ * held. Once that call fulfills, both success conditions have occurred, so
+ * the caller and local persistence promise must settle without another row.
+ * To replay one shrink directly, set OFFLINE_ORACLE_SEED and
+ * OFFLINE_ORACLE_PATH, then select this file and the failing test name.
  */
+
+const settlementOracle = readOfflineOracleConfig({
+  prefix: `OFFLINE_ORACLE`,
+  defaultRuns: 40,
+})
+const retryRecordOracle = readOfflineOracleConfig({
+  prefix: `OFFLINE_ORACLE`,
+  defaultRuns: 20,
+})
+const admissionOracle = readOfflineOracleConfig({
+  prefix: `OFFLINE_ORACLE`,
+  defaultRuns: 10,
+})
+
+type OracleConfig = ReturnType<typeof readOfflineOracleConfig>
+
+function oracleSeeds(fixedSeed: number, config: OracleConfig) {
+  return config.seed === undefined ? [fixedSeed, undefined] : [config.seed]
+}
+
+function oracleOptions(config: OracleConfig, seed: number | undefined) {
+  return {
+    numRuns: config.runs,
+    ...(seed === undefined ? {} : { seed }),
+    ...(config.path === undefined ? {} : { path: config.path }),
+  }
+}
 
 function gate() {
   let resolve!: () => void
@@ -50,7 +122,7 @@ function expectLocalRows(
   expect(localRows(actual)).toEqual(localRows(expected))
 }
 
-it.each([20260913, undefined])(
+it.each(oracleSeeds(20260913, settlementOracle))(
   `settles each transaction independently while preserving FIFO (seed %s)`,
   async (seed) => {
     await fc.assert(
@@ -120,29 +192,36 @@ it.each([20260913, undefined])(
                 .slice(0, Math.min(completed + 1, ids.length))
                 .map((id, index) => ({ id, rows: expectedRows[index] })),
             )
-            expect(
-              Object.fromEntries(
-                Object.entries(statuses).map(([name, status]) => [
-                  name,
-                  status instanceof Error ? status.message : status,
-                ]),
-              ),
-            ).toEqual(
-              Object.fromEntries(
-                ids.flatMap((_id, index) => {
-                  const status =
-                    index < completed
-                      ? succeeds[index]
-                        ? `fulfilled`
-                        : failures[index]!.message
-                      : `pending`
-                  return [
-                    [`commit-${index}`, status],
-                    [`wait-${index}`, status],
-                  ]
-                }),
-              ),
+            const actualStatuses = Object.fromEntries(
+              Object.entries(statuses).map(([name, status]) => [
+                name,
+                status instanceof Error ? status.message : status,
+              ]),
             )
+            const expectedStatuses = Object.fromEntries(
+              ids.flatMap((_id, index) => {
+                const status =
+                  index < completed
+                    ? succeeds[index]
+                      ? `fulfilled`
+                      : failures[index]!.message
+                    : `pending`
+                return [
+                  [`commit-${index}`, status],
+                  [`wait-${index}`, status],
+                ]
+              }),
+            )
+            expect(actualStatuses).toEqual(expectedStatuses)
+            if (completed === 1) {
+              expect(() =>
+                expect({ ...actualStatuses, 'wait-1': `fulfilled` }).toEqual(
+                  expectedStatuses,
+                ),
+              ).toThrowError(
+                expect.objectContaining({ name: `AssertionError` }),
+              )
+            }
             for (let index = 0; index < completed; index++) {
               if (!succeeds[index]) {
                 expect(statuses[`commit-${index}`]).toBe(failures[index])
@@ -238,8 +317,7 @@ it.each([20260913, undefined])(
         },
       ),
       {
-        seed,
-        numRuns: 40,
+        ...oracleOptions(settlementOracle, seed),
         examples: [
           [{ sharedKeys: true, width: 1, outcomes: [true, true] }],
           [{ sharedKeys: false, width: 2, outcomes: [true, false, true] }],
@@ -420,7 +498,12 @@ it.each([
   },
 )
 
-it(`keeps admitted transactions pending when a peer's retry record cannot be updated`, async () => {
+// A first-provider retry-record write fails after 2–5 transactions have been
+// admitted. Two is the marginal held-head/peer history; five checks that every
+// later peer survives. Removing the peer removes the independence question.
+// The fixture does not generate a duplicate ID or a successful retry-record
+// write, because neither has this failure premise.
+async function checkRetryRecordFailure(seed: number | undefined) {
   await fc.assert(
     fc.asyncProperty(fc.integer({ min: 2, max: 5 }), async (count) => {
       const storageError = new Error(`retry record unavailable`)
@@ -493,6 +576,11 @@ it(`keeps admitted transactions pending when a peer's retry record cannot be upd
         await turn()
         expect(calls).toEqual([ids[0]])
         expect(statuses).toEqual(ids.map(() => `pending`))
+        expect(() =>
+          expect([`fulfilled`, ...statuses.slice(1)]).toEqual(
+            ids.map(() => `pending`),
+          ),
+        ).toThrowError(expect.objectContaining({ name: `AssertionError` }))
         expect(warning).toHaveBeenCalledWith(
           `Failed to execute transactions:`,
           storageError,
@@ -530,11 +618,23 @@ it(`keeps admitted transactions pending when a peer's retry record cannot be upd
         )
       }
     }),
-    { seed: 20260916, numRuns: 20 },
+    {
+      ...oracleOptions(retryRecordOracle, seed),
+      examples: [[2], [5]],
+    },
   )
-})
+}
 
-it(`rejects only the transaction whose durable admission fails`, async () => {
+it.each(oracleSeeds(20260916, retryRecordOracle))(
+  `keeps admitted transactions pending when a peer's retry record cannot be updated (seed %s)`,
+  checkRetryRecordFailure,
+)
+
+// The failed durable write can be first, middle, or last among three distinct
+// IDs. All positions are pinned, so the conditional failure premise is reached
+// at each boundary. Removing the two admitted peers would hide accidental
+// global rejection. A duplicate ID is outside this legal admission grammar.
+async function checkDurableAdmissionFailure(seed: number | undefined) {
   await fc.assert(
     fc.asyncProperty(fc.integer({ min: 0, max: 2 }), async (failedIndex) => {
       const storageError = new Error(`admission unavailable`)
@@ -604,6 +704,12 @@ it(`rejects only the transaction whose durable admission fails`, async () => {
           )
           expect(env.collection.has(`row-${index}`)).toBe(index !== failedIndex)
         }
+        const expectedStatuses = ids.map((_id, index) =>
+          index === failedIndex ? storageError : `fulfilled`,
+        )
+        expect(() =>
+          expect(statuses.map(() => storageError)).toEqual(expectedStatuses),
+        ).toThrowError(expect.objectContaining({ name: `AssertionError` }))
         expect(await env.executor.peekOutbox()).toEqual([])
       } catch (error) {
         hasPrimaryFailure = true
@@ -620,27 +726,36 @@ it(`rejects only the transaction whose durable admission fails`, async () => {
         )
       }
     }),
-    { seed: 20260916, numRuns: 10 },
+    {
+      ...oracleOptions(admissionOracle, seed),
+      examples: [[0], [1], [2]],
+    },
   )
-})
+}
 
-it(`fulfills successful provider work when durable acknowledgement cleanup fails`, async () => {
-  const deletionAttempted = gate()
-  const storageError = new Error(`acknowledgement cleanup failed`)
+it.each(oracleSeeds(20260916, admissionOracle))(
+  `rejects only the transaction whose durable admission fails (seed %s)`,
+  checkDurableAdmissionFailure,
+)
+
+it(`keeps commit pending until successful outbox deletion`, async () => {
+  const deletionEntered = gate()
+  const releaseDeletion = gate()
   class Storage extends FakeStorageAdapter {
     override async delete(key: string): Promise<void> {
       if (key.startsWith(`tx:`)) {
-        deletionAttempted.resolve()
-        throw storageError
+        deletionEntered.resolve()
+        await releaseDeletion.promise
       }
       await super.delete(key)
     }
   }
   const env = createTestOfflineEnvironment({ storage: new Storage() })
-  const warning = vi.spyOn(console, `warn`).mockImplementation(() => {})
-  let status: unknown = `pending`
+  let commitStatus: unknown = `pending`
+  let persistedStatus: unknown = `pending`
   let transactionId = ``
   let observed: Promise<void> | undefined
+  let observedPersistence: Promise<void> | undefined
   let hasPrimaryFailure = false
   try {
     await env.waitForLeader()
@@ -649,7 +764,218 @@ it(`fulfills successful provider work when durable acknowledgement cleanup fails
       autoCommit: false,
     })
     transactionId = transaction.id
-    transaction.mutate(() =>
+    const localTransaction = transaction.mutate(() =>
+      env.collection.insert({
+        id: `held-delete`,
+        value: `provider-applied`,
+        completed: false,
+        updatedAt: new Date(0),
+      }),
+    )
+    observedPersistence = localTransaction.isPersisted.promise.then(
+      () => {
+        persistedStatus = `fulfilled`
+      },
+      (error: unknown) => {
+        persistedStatus = error
+      },
+    )
+    observed = transaction.commit().then(
+      () => {
+        commitStatus = `fulfilled`
+      },
+      (error: unknown) => {
+        commitStatus = error
+      },
+    )
+
+    await atOracleCheckpoint(deletionEntered.promise, `outbox deletion entered`)
+    await turn()
+    expect(env.mutationCalls.map(({ transaction: { id } }) => id)).toEqual([
+      transactionId,
+    ])
+    expect(env.serverState.has(`held-delete`)).toBe(true)
+    expect((await env.executor.peekOutbox()).map(({ id }) => id)).toEqual([
+      transactionId,
+    ])
+    expect([commitStatus, persistedStatus, localTransaction.state]).toEqual([
+      `pending`,
+      `pending`,
+      `persisting`,
+    ])
+
+    releaseDeletion.resolve()
+    await atOracleCheckpoint(
+      Promise.all([observed, observedPersistence]),
+      `outbox deletion settled caller`,
+    )
+    expect([commitStatus, persistedStatus, localTransaction.state]).toEqual([
+      `fulfilled`,
+      `fulfilled`,
+      `completed`,
+    ])
+    expect(await env.executor.peekOutbox()).toEqual([])
+  } catch (error) {
+    hasPrimaryFailure = true
+    throw error
+  } finally {
+    releaseDeletion.resolve()
+    if (commitStatus === `pending` && transactionId)
+      env.executor.resolveTransaction(transactionId, undefined)
+    await cleanupOfflineOracle(
+      [
+        () => Promise.all([observed, observedPersistence]),
+        () => env.executor.dispose(),
+        () => env.collection.cleanup(),
+      ],
+      hasPrimaryFailure,
+    )
+  }
+})
+
+it.each([`removeFromOutbox`, `clearOutbox`] as const)(
+  `settles active provider work after %s acknowledges outbox deletion`,
+  async (removal) => {
+    const providerEntered = gate()
+    const releaseProvider = gate()
+    const env = createTestOfflineEnvironment({
+      mutationFn: async (params) => {
+        providerEntered.resolve()
+        await releaseProvider.promise
+        env.applyMutations(params.transaction.mutations)
+      },
+    })
+    let transactionId = ``
+    let commitStatus: unknown = `pending`
+    let persistedStatus: unknown = `pending`
+    let observed: Promise<void> | undefined
+    let observedPersistence: Promise<void> | undefined
+    let hasPrimaryFailure = false
+    try {
+      await env.waitForLeader()
+      const transaction = env.executor.createOfflineTransaction({
+        mutationFnName: env.mutationFnName,
+        autoCommit: false,
+      })
+      transactionId = transaction.id
+      const localTransaction = transaction.mutate(() =>
+        env.collection.insert({
+          id: `manually-removed-active`,
+          value: `provider-applied`,
+          completed: false,
+          updatedAt: new Date(0),
+        }),
+      )
+      observedPersistence = localTransaction.isPersisted.promise.then(
+        () => {
+          persistedStatus = `fulfilled`
+        },
+        (error: unknown) => {
+          persistedStatus = error
+        },
+      )
+      observed = transaction.commit().then(
+        () => {
+          commitStatus = `fulfilled`
+        },
+        (error: unknown) => {
+          commitStatus = error
+        },
+      )
+
+      await atOracleCheckpoint(providerEntered.promise, `provider held`)
+      expect((await env.executor.peekOutbox()).map(({ id }) => id)).toEqual([
+        transactionId,
+      ])
+      if (removal === `removeFromOutbox`)
+        await env.executor.removeFromOutbox(transactionId)
+      else await env.executor.clearOutbox()
+      expect(await env.executor.peekOutbox()).toEqual([])
+      expect([commitStatus, persistedStatus, localTransaction.state]).toEqual([
+        `pending`,
+        `pending`,
+        `persisting`,
+      ])
+
+      releaseProvider.resolve()
+      await atOracleCheckpoint(
+        Promise.all([observed, observedPersistence]),
+        `provider fulfillment after ${removal} deletion settled caller`,
+      )
+      expect([commitStatus, persistedStatus, localTransaction.state]).toEqual([
+        `fulfilled`,
+        `fulfilled`,
+        `completed`,
+      ])
+      expect(env.mutationCalls.map(({ transaction: { id } }) => id)).toEqual([
+        transactionId,
+      ])
+      expect(env.serverState.has(`manually-removed-active`)).toBe(true)
+      expect(await env.executor.peekOutbox()).toEqual([])
+    } catch (error) {
+      hasPrimaryFailure = true
+      throw error
+    } finally {
+      releaseProvider.resolve()
+      if (commitStatus === `pending` && transactionId)
+        env.executor.resolveTransaction(transactionId, undefined)
+      await cleanupOfflineOracle(
+        [
+          () => Promise.all([observed, observedPersistence]),
+          () => env.executor.dispose(),
+          () => env.collection.cleanup(),
+        ],
+        hasPrimaryFailure,
+      )
+    }
+  },
+)
+
+it(`stops successful provider work when outbox deletion fails`, async () => {
+  const firstProviderEntered = gate()
+  const releaseFirstProvider = gate()
+  const deletionAttempted = gate()
+  const storageError = new Error(`acknowledgement cleanup failed`)
+  let transactionId = ``
+  class Storage extends FakeStorageAdapter {
+    attempts = 0
+    override async delete(key: string): Promise<void> {
+      if (key === `tx:${transactionId}`) {
+        this.attempts++
+        deletionAttempted.resolve()
+        throw storageError
+      }
+      await super.delete(key)
+    }
+  }
+  const storage = new Storage()
+  const env = createTestOfflineEnvironment({
+    storage,
+    mutationFn: async (params) => {
+      if (params.transaction.id === transactionId) {
+        firstProviderEntered.resolve()
+        await releaseFirstProvider.promise
+      }
+      env.applyMutations(params.transaction.mutations)
+    },
+  })
+  const warning = vi.spyOn(console, `warn`).mockImplementation(() => {})
+  let commitStatus: unknown = `pending`
+  let persistedStatus: unknown = `pending`
+  let peerStatus: unknown = `pending`
+  let peerId = ``
+  let observed: Promise<void> | undefined
+  let observedPersistence: Promise<void> | undefined
+  let observedPeer: Promise<void> | undefined
+  let hasPrimaryFailure = false
+  try {
+    await env.waitForLeader()
+    const transaction = env.executor.createOfflineTransaction({
+      mutationFnName: env.mutationFnName,
+      autoCommit: false,
+    })
+    transactionId = transaction.id
+    const localTransaction = transaction.mutate(() =>
       env.collection.insert({
         id: `successful-cleanup-failure`,
         value: `provider-applied`,
@@ -657,14 +983,50 @@ it(`fulfills successful provider work when durable acknowledgement cleanup fails
         updatedAt: new Date(0),
       }),
     )
-    observed = transaction.commit().then(
+    observedPersistence = localTransaction.isPersisted.promise.then(
       () => {
-        status = `fulfilled`
+        persistedStatus = `fulfilled`
       },
       (error: unknown) => {
-        status = error
+        persistedStatus = error
       },
     )
+    observed = transaction.commit().then(
+      () => {
+        commitStatus = `fulfilled`
+      },
+      (error: unknown) => {
+        commitStatus = error
+      },
+    )
+
+    await atOracleCheckpoint(
+      firstProviderEntered.promise,
+      `first provider held`,
+    )
+    const peer = env.executor.createOfflineTransaction({
+      mutationFnName: env.mutationFnName,
+      autoCommit: false,
+    })
+    peerId = peer.id
+    peer.mutate(() =>
+      env.collection.insert({
+        id: `queued-peer`,
+        value: `provider-applied`,
+        completed: false,
+        updatedAt: new Date(1),
+      }),
+    )
+    observedPeer = peer.commit().then(
+      () => {
+        peerStatus = `fulfilled`
+      },
+      (error: unknown) => {
+        peerStatus = error
+      },
+    )
+    await turn()
+    releaseFirstProvider.resolve()
 
     await atOracleCheckpoint(
       deletionAttempted.promise,
@@ -672,19 +1034,57 @@ it(`fulfills successful provider work when durable acknowledgement cleanup fails
     )
     await turn()
 
-    expect(status).toBe(`fulfilled`)
+    expect(env.mutationCalls.map(({ transaction: { id } }) => id)).toEqual([
+      transactionId,
+    ])
+    expect(env.serverState.has(`successful-cleanup-failure`)).toBe(true)
     expect((await env.executor.peekOutbox()).map(({ id }) => id)).toEqual([
-      transaction.id,
+      transactionId,
+      peerId,
+    ])
+    expect([
+      commitStatus,
+      persistedStatus,
+      localTransaction.state,
+      peerStatus,
+    ]).toEqual([storageError, storageError, `failed`, `pending`])
+
+    env.executor.getOnlineDetector().notifyOnline()
+    await turn()
+    expect(storage.attempts).toBe(1)
+    expect(env.mutationCalls.map(({ transaction: { id } }) => id)).toEqual([
+      transactionId,
+    ])
+    expect(peerStatus).toBe(`pending`)
+    const later = env.executor.createOfflineTransaction({
+      mutationFnName: env.mutationFnName,
+      autoCommit: false,
+    })
+    later.mutate(() =>
+      env.collection.insert({
+        id: `after-storage-stop`,
+        value: `not-admitted`,
+        completed: false,
+        updatedAt: new Date(2),
+      }),
+    )
+    await expect(later.commit()).rejects.toBe(storageError)
+    expect((await env.executor.peekOutbox()).map(({ id }) => id)).toEqual([
+      transactionId,
+      peerId,
     ])
   } catch (error) {
     hasPrimaryFailure = true
     throw error
   } finally {
-    if (status === `pending` && transactionId)
+    releaseFirstProvider.resolve()
+    if (commitStatus === `pending` && transactionId)
       env.executor.resolveTransaction(transactionId, undefined)
+    if (peerStatus === `pending` && peerId)
+      env.executor.resolveTransaction(peerId, undefined)
     await cleanupOfflineOracle(
       [
-        () => observed,
+        () => Promise.all([observed, observedPersistence, observedPeer]),
         () => env.executor.dispose(),
         () => env.collection.cleanup(),
         () => warning.mockRestore(),
@@ -694,27 +1094,456 @@ it(`fulfills successful provider work when durable acknowledgement cleanup fails
   }
 })
 
-it(`preserves permanent provider failure when rejection cleanup also fails`, async () => {
-  const deletionAttempted = gate()
-  const primaryError = new NonRetriableError(`provider rejected permanently`)
-  const storageError = new Error(`rejection cleanup failed`)
+it(`stops after a failed deletion-pending write and holds its queued peer`, async () => {
+  const firstProviderEntered = gate()
+  const releaseFirstProvider = gate()
+  const markerWriteFailed = gate()
+  const markerError = new Error(`deletion-pending record unavailable`)
+  let headId = ``
   class Storage extends FakeStorageAdapter {
+    markerWrites = 0
+    deletedIds: Array<string> = []
+
+    override async set(key: string, value: string): Promise<void> {
+      if (
+        key === `tx:${headId}` &&
+        (JSON.parse(value) as { outboxPhase?: string }).outboxPhase ===
+          `deletion-pending`
+      ) {
+        this.markerWrites++
+        markerWriteFailed.resolve()
+        throw markerError
+      }
+      await super.set(key, value)
+    }
+
+    override async delete(key: string): Promise<void> {
+      if (key.startsWith(`tx:`)) this.deletedIds.push(key.slice(3))
+      await super.delete(key)
+    }
+  }
+  const storage = new Storage()
+  const env = createTestOfflineEnvironment({
+    storage,
+    mutationFn: async (params) => {
+      if (params.transaction.id === headId) {
+        firstProviderEntered.resolve()
+        await releaseFirstProvider.promise
+      }
+      env.applyMutations(params.transaction.mutations)
+    },
+  })
+  let headStatus: unknown = `pending`
+  let persistedStatus: unknown = `pending`
+  let peerStatus: unknown = `pending`
+  let peerId = ``
+  let observedHead: Promise<void> | undefined
+  let observedPersistence: Promise<void> | undefined
+  let observedPeer: Promise<void> | undefined
+  let hasPrimaryFailure = false
+  try {
+    await env.waitForLeader()
+    const head = env.executor.createOfflineTransaction({
+      mutationFnName: env.mutationFnName,
+      autoCommit: false,
+    })
+    headId = head.id
+    const localTransaction = head.mutate(() =>
+      env.collection.insert({
+        id: `marker-write-head`,
+        value: `provider-applied`,
+        completed: false,
+        updatedAt: new Date(0),
+      }),
+    )
+    observedPersistence = localTransaction.isPersisted.promise.then(
+      () => {
+        persistedStatus = `fulfilled`
+      },
+      (error: unknown) => {
+        persistedStatus = error
+      },
+    )
+    observedHead = head.commit().then(
+      () => {
+        headStatus = `fulfilled`
+      },
+      (error: unknown) => {
+        headStatus = error
+      },
+    )
+
+    await atOracleCheckpoint(firstProviderEntered.promise, `head provider held`)
+    const peer = env.executor.createOfflineTransaction({
+      mutationFnName: env.mutationFnName,
+      autoCommit: false,
+    })
+    peerId = peer.id
+    peer.mutate(() =>
+      env.collection.insert({
+        id: `marker-write-peer`,
+        value: `queued`,
+        completed: false,
+        updatedAt: new Date(1),
+      }),
+    )
+    observedPeer = peer.commit().then(
+      () => {
+        peerStatus = `fulfilled`
+      },
+      (error: unknown) => {
+        peerStatus = error
+      },
+    )
+    await turn()
+    releaseFirstProvider.resolve()
+
+    await atOracleCheckpoint(
+      markerWriteFailed.promise,
+      `fulfilled-provider marker write failed`,
+    )
+    await turn()
+    expect(env.mutationCalls.map(({ transaction: { id } }) => id)).toEqual([
+      headId,
+    ])
+    expect(env.serverState.has(`marker-write-head`)).toBe(true)
+    expect(env.serverState.has(`marker-write-peer`)).toBe(false)
+    expect((await env.executor.peekOutbox()).map(({ id }) => id)).toEqual([
+      headId,
+      peerId,
+    ])
+    expect((await env.executor.peekOutbox())[0]?.outboxPhase).toBeUndefined()
+    expect(storage.deletedIds).toEqual([])
+    expect([
+      headStatus,
+      persistedStatus,
+      localTransaction.state,
+      peerStatus,
+    ]).toEqual([markerError, markerError, `failed`, `pending`])
+
+    env.executor.getOnlineDetector().notifyOnline()
+    await turn()
+    expect(storage.markerWrites).toBe(1)
+    expect(env.mutationCalls.map(({ transaction: { id } }) => id)).toEqual([
+      headId,
+    ])
+    expect(storage.deletedIds).toEqual([])
+    expect(peerStatus).toBe(`pending`)
+    expect((await env.executor.peekOutbox()).map(({ id }) => id)).toEqual([
+      headId,
+      peerId,
+    ])
+  } catch (error) {
+    hasPrimaryFailure = true
+    throw error
+  } finally {
+    releaseFirstProvider.resolve()
+    if (headStatus === `pending` && headId)
+      env.executor.resolveTransaction(headId, undefined)
+    if (peerStatus === `pending` && peerId)
+      env.executor.resolveTransaction(peerId, undefined)
+    await cleanupOfflineOracle(
+      [
+        () => Promise.all([observedHead, observedPersistence, observedPeer]),
+        () => env.executor.dispose(),
+        () => env.collection.cleanup(),
+      ],
+      hasPrimaryFailure,
+    )
+  }
+})
+
+it(`restarts a fulfilled provider transaction after a stopped deletion failure`, async () => {
+  const firstDeletionAttempted = gate()
+  const restartedDeletionAttempted = gate()
+  const storageError = new Error(`acknowledgement cleanup failed`)
+  const providerCalls: Array<{ id: string; idempotencyKey: string }> = []
+  let providerFulfilled = false
+  class Storage extends FakeStorageAdapter {
+    failDeletes = true
+    completedWritesAfterProviderFulfilled = 0
+
+    override async set(key: string, value: string): Promise<void> {
+      await super.set(key, value)
+      if (providerFulfilled) this.completedWritesAfterProviderFulfilled++
+    }
+
     override async delete(key: string): Promise<void> {
       if (key.startsWith(`tx:`)) {
-        deletionAttempted.resolve()
-        throw storageError
+        if (this.failDeletes) {
+          firstDeletionAttempted.resolve()
+          throw storageError
+        }
+        restartedDeletionAttempted.resolve()
       }
       await super.delete(key)
     }
   }
-  const env = createTestOfflineEnvironment({
-    storage: new Storage(),
-    mutationFn: () => Promise.reject(primaryError),
+  const storage = new Storage()
+  const first = createTestOfflineEnvironment({
+    storage,
+    mutationFn: (params) => {
+      providerCalls.push({
+        id: params.transaction.id,
+        idempotencyKey: params.idempotencyKey,
+      })
+      first.applyMutations(params.transaction.mutations)
+      providerFulfilled = true
+    },
   })
   const warning = vi.spyOn(console, `warn`).mockImplementation(() => {})
+  let second: ReturnType<typeof createTestOfflineEnvironment> | undefined
+  let transactionId = ``
+  let commitStatus: unknown = `pending`
+  let persistedStatus: unknown = `pending`
+  let observed: Promise<void> | undefined
+  let observedPersistence: Promise<void> | undefined
+  let replayStatus: unknown = `pending`
+  let observedReplay: Promise<void> | undefined
+  let hasPrimaryFailure = false
+  try {
+    await first.waitForLeader()
+    const transaction = first.executor.createOfflineTransaction({
+      mutationFnName: first.mutationFnName,
+      autoCommit: false,
+      idempotencyKey: `restart-after-provider-fulfillment`,
+    })
+    transactionId = transaction.id
+    const localTransaction = transaction.mutate(() =>
+      first.collection.insert({
+        id: `restart-after-delete-failure`,
+        value: `provider-applied`,
+        completed: false,
+        updatedAt: new Date(0),
+      }),
+    )
+    observedPersistence = localTransaction.isPersisted.promise.then(
+      () => {
+        persistedStatus = `fulfilled`
+      },
+      (error: unknown) => {
+        persistedStatus = error
+      },
+    )
+    observed = transaction.commit().then(
+      () => {
+        commitStatus = `fulfilled`
+      },
+      (error: unknown) => {
+        commitStatus = error
+      },
+    )
+
+    await atOracleCheckpoint(
+      firstDeletionAttempted.promise,
+      `first deletion failed after provider fulfillment`,
+    )
+    await turn()
+    expect(providerCalls).toEqual([
+      {
+        id: transactionId,
+        idempotencyKey: `restart-after-provider-fulfillment`,
+      },
+    ])
+    expect(first.serverState.has(`restart-after-delete-failure`)).toBe(true)
+    expect((await first.executor.peekOutbox()).map(({ id }) => id)).toEqual([
+      transactionId,
+    ])
+    expect([commitStatus, persistedStatus, localTransaction.state]).toEqual([
+      storageError,
+      storageError,
+      `failed`,
+    ])
+    expect(storage.completedWritesAfterProviderFulfilled).toBeGreaterThan(0)
+    const markerWrites = storage.completedWritesAfterProviderFulfilled
+
+    first.executor.dispose()
+    storage.failDeletes = false
+    second = createTestOfflineEnvironment({
+      storage,
+      config: {
+        // Filtering unfulfilled work cannot cancel already fulfilled provider
+        // work whose only remaining obligation is durable deletion.
+        beforeRetry: () => [],
+      },
+      mutationFn: (params) => {
+        providerCalls.push({
+          id: params.transaction.id,
+          idempotencyKey: params.idempotencyKey,
+        })
+      },
+    })
+    observedReplay = second.executor
+      .waitForTransactionCompletion(transactionId)
+      .then(
+        () => {
+          replayStatus = `fulfilled`
+        },
+        (error: unknown) => {
+          replayStatus = error
+        },
+      )
+    await second.waitForLeader()
+    await atOracleCheckpoint(
+      restartedDeletionAttempted.promise,
+      `restarted deletion attempted`,
+    )
+    expect(await second.executor.peekOutbox()).toEqual([])
+    await atOracleCheckpoint(observedReplay, `restarted deletion settled`)
+    expect(replayStatus).toBe(`fulfilled`)
+    expect(providerCalls).toEqual([
+      {
+        id: transactionId,
+        idempotencyKey: `restart-after-provider-fulfillment`,
+      },
+    ])
+    expect(storage.completedWritesAfterProviderFulfilled).toBe(markerWrites)
+  } catch (error) {
+    hasPrimaryFailure = true
+    throw error
+  } finally {
+    if (commitStatus === `pending` && transactionId)
+      first.executor.resolveTransaction(transactionId, undefined)
+    await cleanupOfflineOracle(
+      [
+        () => Promise.all([observed, observedPersistence]),
+        () => observedReplay,
+        () => first.executor.dispose(),
+        () => second?.executor.dispose(),
+        () => first.collection.cleanup(),
+        () => second?.collection.cleanup(),
+        () => warning.mockRestore(),
+      ],
+      hasPrimaryFailure,
+    )
+  }
+})
+
+it(`replays an admitted row with no fulfilled-provider checkpoint`, async () => {
+  const deletionCompleted = gate()
+  class Storage extends FakeStorageAdapter {
+    override async delete(key: string): Promise<void> {
+      await super.delete(key)
+      if (key === `tx:legacy-unmarked-transaction`) deletionCompleted.resolve()
+    }
+  }
+  const storage = new Storage()
+  const seed = createCollection<TestItem, string>({
+    id: `test-items`,
+    getKey: (row) => row.id,
+    startSync: true,
+    sync: { sync: (ops) => ops.markReady() },
+  })
+  const outbox = new OutboxManager(storage, { [seed.id]: seed })
+  const seedTransaction = createTransaction({
+    autoCommit: false,
+    mutationFn: () => Promise.resolve(),
+  })
+  void seedTransaction.isPersisted.promise.catch(() => {})
+  try {
+    seedTransaction.mutate(() =>
+      seed.insert({
+        id: `legacy-unmarked`,
+        value: `replay-me`,
+        completed: false,
+        updatedAt: new Date(0),
+      }),
+    )
+    await outbox.add({
+      id: `legacy-unmarked-transaction`,
+      mutationFnName: `syncData`,
+      mutations: seedTransaction.mutations,
+      keys: seedTransaction.mutations.map(({ globalKey }) => globalKey),
+      idempotencyKey: `legacy-unmarked-key`,
+      createdAt: new Date(0),
+      retryCount: 0,
+      nextAttemptAt: 0,
+      version: 1,
+    })
+  } finally {
+    seedTransaction.rollback({ isSecondaryRollback: true })
+    await seed.cleanup()
+  }
+
+  const providerEntered = gate()
+  const providerCalls: Array<{ id: string; idempotencyKey: string }> = []
+  const env = createTestOfflineEnvironment({
+    storage,
+    mutationFn: (params) => {
+      providerCalls.push({
+        id: params.transaction.id,
+        idempotencyKey: params.idempotencyKey,
+      })
+      env.applyMutations(params.transaction.mutations)
+      providerEntered.resolve()
+    },
+  })
+  let hasPrimaryFailure = false
+  try {
+    await env.waitForLeader()
+    await atOracleCheckpoint(
+      providerEntered.promise,
+      `unmarked provider replay`,
+    )
+    expect(providerCalls).toEqual([
+      {
+        id: `legacy-unmarked-transaction`,
+        idempotencyKey: `legacy-unmarked-key`,
+      },
+    ])
+    expect(env.serverState.has(`legacy-unmarked`)).toBe(true)
+    await atOracleCheckpoint(
+      deletionCompleted.promise,
+      `unmarked replay outbox deletion`,
+    )
+    expect(await env.executor.peekOutbox()).toEqual([])
+  } catch (error) {
+    hasPrimaryFailure = true
+    throw error
+  } finally {
+    await cleanupOfflineOracle(
+      [() => env.executor.dispose(), () => env.collection.cleanup()],
+      hasPrimaryFailure,
+    )
+  }
+})
+
+it(`preserves permanent provider failure when rejection cleanup also fails`, async () => {
+  const deletionAttempted = gate()
+  const restartedDeletionAttempted = gate()
+  const releaseRestartedDeletion = gate()
+  const primaryError = new NonRetriableError(`provider rejected permanently`)
+  const storageError = new Error(`rejection cleanup failed`)
+  class Storage extends FakeStorageAdapter {
+    failDeletes = true
+    override async delete(key: string): Promise<void> {
+      if (key.startsWith(`tx:`)) {
+        if (this.failDeletes) {
+          deletionAttempted.resolve()
+          throw storageError
+        }
+        restartedDeletionAttempted.resolve()
+        await releaseRestartedDeletion.promise
+      }
+      await super.delete(key)
+    }
+  }
+  const storage = new Storage()
+  let providerCalls = 0
+  const env = createTestOfflineEnvironment({
+    storage,
+    mutationFn: () => {
+      providerCalls++
+      return Promise.reject(primaryError)
+    },
+  })
+  const warning = vi.spyOn(console, `warn`).mockImplementation(() => {})
+  let restarted: ReturnType<typeof createTestOfflineEnvironment> | undefined
   let status: unknown = `pending`
+  let replayStatus: unknown = `pending`
   let transactionId = ``
   let observed: Promise<void> | undefined
+  let observedReplay: Promise<void> | undefined
   let hasPrimaryFailure = false
   try {
     await env.waitForLeader()
@@ -750,20 +1579,215 @@ it(`preserves permanent provider failure when rejection cleanup also fails`, asy
     expect((await env.executor.peekOutbox()).map(({ id }) => id)).toEqual([
       transaction.id,
     ])
+    expect(providerCalls).toBe(1)
+
+    env.executor.dispose()
+    storage.failDeletes = false
+    restarted = createTestOfflineEnvironment({
+      storage,
+      mutationFn: () => {
+        providerCalls++
+      },
+    })
+    observedReplay = restarted.executor
+      .waitForTransactionCompletion(transactionId)
+      .then(
+        () => {
+          replayStatus = `fulfilled`
+        },
+        (error: unknown) => {
+          replayStatus = error
+        },
+      )
+    await restarted.waitForLeader()
+    await atOracleCheckpoint(
+      restartedDeletionAttempted.promise,
+      `terminal rejection deletion retried after restart`,
+    )
+    expect(providerCalls).toBe(1)
+    expect(restarted.collection.toArray).toEqual([])
+    releaseRestartedDeletion.resolve()
+    await atOracleCheckpoint(observedReplay, `terminal replay settled`)
+    expect(replayStatus).toMatchObject({
+      name: `NonRetriableError`,
+      message: primaryError.message,
+    })
+    expect(await restarted.executor.peekOutbox()).toEqual([])
   } catch (error) {
     hasPrimaryFailure = true
     throw error
   } finally {
+    releaseRestartedDeletion.resolve()
     if (status === `pending` && transactionId)
       env.executor.rejectTransaction(transactionId, primaryError)
+    if (replayStatus === `pending` && transactionId)
+      restarted?.executor.rejectTransaction(transactionId, primaryError)
     await cleanupOfflineOracle(
       [
         () => observed,
+        () => observedReplay,
         () => env.executor.dispose(),
+        () => restarted?.executor.dispose(),
         () => env.collection.cleanup(),
+        () => restarted?.collection.cleanup(),
         () => warning.mockRestore(),
       ],
       hasPrimaryFailure,
     )
+  }
+})
+
+it(`stops the executor batch when terminal deletion fails`, async () => {
+  const providerError = new NonRetriableError(`provider rejected`)
+  const storageError = new Error(`delete rejected`)
+  const warning = vi.spyOn(console, `warn`).mockImplementation(() => {})
+  class Storage extends FakeStorageAdapter {
+    failDeletes = true
+    override async delete(key: string): Promise<void> {
+      if (this.failDeletes) throw storageError
+      await super.delete(key)
+    }
+  }
+  const storage = new Storage()
+  const outbox = new OutboxManager(storage, {})
+  const scheduler = new KeyScheduler()
+  const rejections: Array<Error> = []
+  const resolutions: Array<string> = []
+  let peerCalls = 0
+  const signaler: TransactionSignaler = {
+    isOfflineEnabled: true,
+    isOnline: () => true,
+    resolveTransaction: (id) => resolutions.push(id),
+    rejectTransaction: (_id, error) => rejections.push(error),
+    registerRestorationTransaction: () => {},
+  }
+  const executor = new TransactionExecutor(
+    scheduler,
+    outbox,
+    {
+      collections: {},
+      mutationFns: {
+        syncData: () => Promise.reject(providerError),
+        peer: () => {
+          peerCalls++
+          return Promise.resolve()
+        },
+      },
+      jitter: false,
+    },
+    signaler,
+  )
+  const transaction: OfflineTransaction = {
+    id: `terminal-delete-failure`,
+    mutationFnName: `syncData`,
+    mutations: [],
+    keys: [],
+    idempotencyKey: `terminal-delete-failure`,
+    createdAt: new Date(0),
+    retryCount: 0,
+    nextAttemptAt: 0,
+    version: 1,
+  }
+  const peer: OfflineTransaction = {
+    ...transaction,
+    id: `terminal-delete-peer`,
+    mutationFnName: `peer`,
+    idempotencyKey: `terminal-delete-peer`,
+    createdAt: new Date(1),
+  }
+  await outbox.add(transaction)
+  await outbox.add(peer)
+  scheduler.schedule(peer)
+  try {
+    await expect(executor.execute(transaction)).rejects.toBe(storageError)
+    expect(rejections).toEqual([providerError])
+    expect(resolutions).toEqual([])
+    expect(peerCalls).toBe(0)
+    expect(scheduler.getPendingCount()).toBe(2)
+    expect((await outbox.get(transaction.id))?.outboxPhase).toBe(
+      `rejection-pending`,
+    )
+
+    storage.failDeletes = false
+    executor.resetRetryDelays()
+    await expect(executor.executeAll()).rejects.toBe(storageError)
+    expect(peerCalls).toBe(0)
+    expect(resolutions).toEqual([])
+    expect(scheduler.getPendingCount()).toBe(2)
+    expect((await outbox.get(transaction.id))?.outboxPhase).toBe(
+      `rejection-pending`,
+    )
+  } finally {
+    executor.pause()
+    warning.mockRestore()
+  }
+})
+
+it(`stops after failed deletion without rerunning the provider`, async () => {
+  const storageError = new Error(`delete rejected`)
+  const rejections: Array<Error> = []
+  const retryCounts: Array<number> = []
+  const delay = vi.spyOn(DefaultRetryPolicy.prototype, `calculateDelay`)
+  delay.mockImplementation((retryCount) => {
+    retryCounts.push(retryCount)
+    return 60_000
+  })
+  class Storage extends FakeStorageAdapter {
+    override delete(): Promise<void> {
+      return Promise.reject(storageError)
+    }
+  }
+  const outbox = new OutboxManager(new Storage(), {})
+  const scheduler = new KeyScheduler()
+  let providerCalls = 0
+  const signaler: TransactionSignaler = {
+    isOfflineEnabled: true,
+    isOnline: () => true,
+    resolveTransaction: () => {
+      throw new Error(`deletion has not succeeded`)
+    },
+    rejectTransaction: (_id, error) => rejections.push(error),
+    registerRestorationTransaction: () => {},
+  }
+  const executor = new TransactionExecutor(
+    scheduler,
+    outbox,
+    {
+      collections: {},
+      mutationFns: {
+        syncData: () => {
+          providerCalls++
+          return Promise.resolve()
+        },
+      },
+      jitter: false,
+    },
+    signaler,
+  )
+  const transaction: OfflineTransaction = {
+    id: `deletion-backoff`,
+    mutationFnName: `syncData`,
+    mutations: [],
+    keys: [],
+    idempotencyKey: `deletion-backoff`,
+    createdAt: new Date(0),
+    retryCount: 0,
+    nextAttemptAt: 0,
+    version: 1,
+  }
+  await outbox.add(transaction)
+  try {
+    await expect(executor.execute(transaction)).rejects.toBe(storageError)
+    executor.resetRetryDelays()
+    await expect(executor.executeAll()).rejects.toBe(storageError)
+    expect(retryCounts).toEqual([])
+    expect(rejections).toEqual([storageError])
+    expect(providerCalls).toBe(1)
+    expect((await outbox.get(transaction.id))?.outboxPhase).toBe(
+      `deletion-pending`,
+    )
+  } finally {
+    executor.pause()
+    delay.mockRestore()
   }
 })

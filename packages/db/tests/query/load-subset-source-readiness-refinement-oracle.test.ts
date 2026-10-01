@@ -14,17 +14,66 @@ import type { LoadSubsetOptions } from '../../src/types.js'
 /**
  * # Can an obsolete source attempt satisfy a fresh correlated demand?
  *
- * Changing the parent correlation key retires the old child demand and starts
- * a new generation. The old request may resolve or reject before or after the
- * fresh one, but it may not mark the fresh query ready, publish stale children,
- * or release the fresh acquisition lease.
+ * The live-query architecture's stale-demand and initial-demand laws govern
+ * this boundary. Changing the parent correlation key retires the old child
+ * demand. The old request may resolve or reject before or after the fresh one,
+ * but it may not mark the query ready or release the fresh acquisition lease.
+ * Visible children are the applied source rows matching the current parent
+ * group, including while a request is pending. A prior child row remains in
+ * the source Collection after demand retirement but leaves the public route.
  *
- * This four-cell refinement crosses old resolve/reject with old-first/fresh-
- * first settlement. It drives real parent and on-demand child Collections and
- * checks request predicates, abort state at unload, readiness, and visible rows.
+ * The four-cell history grammar crosses old resolve/reject with old-first/
+ * fresh-first settlement. The independent model filters applied source rows by
+ * parent group and requires the fresh request for initial-query readiness.
+ * The driver uses real parent and on-demand child Collections with controlled
+ * adapter delivery. Each applied or settled cut checks public rows, readiness,
+ * request predicates, and acquisition release. These bounded fixtures do not
+ * establish arbitrary provider cancellation or framework render timing.
  */
 
 type Row = { id: string; group: string }
+
+function expectedRows(
+  parentGroup: string,
+  appliedSourceRows: ReadonlyArray<Row>,
+): Array<{ id: string; children: Array<Row> }> {
+  return [
+    {
+      id: `parent`,
+      children: appliedSourceRows.filter((row) => row.group === parentGroup),
+    },
+  ]
+}
+
+async function finishCleanup(
+  primaryFailure: { error: unknown } | undefined,
+  phases: ReadonlyArray<
+    ReadonlyArray<{ name: string; run: () => Promise<unknown> }>
+  >,
+): Promise<void> {
+  const cleanupErrors: Array<Error> = []
+  for (const phase of phases) {
+    const results = await Promise.allSettled(
+      phase.map(({ run }) => Promise.resolve().then(run)),
+    )
+    for (const [index, result] of results.entries()) {
+      if (result.status === `rejected`) {
+        cleanupErrors.push(
+          new Error(`${phase[index]!.name} cleanup failed`, {
+            cause: result.reason,
+          }),
+        )
+      }
+    }
+  }
+  if (cleanupErrors.length > 0) {
+    throw new AggregateError(
+      cleanupErrors,
+      `Oracle cleanup failed`,
+      primaryFailure && { cause: primaryFailure.error },
+    )
+  }
+}
 
 it.each([
   { oldOutcome: `resolve`, settlementOrder: `old-first` },
@@ -129,6 +178,14 @@ it.each([
         })),
       startSync: true,
     })
+    const visibleRows = (): Array<{ id: string; children: Array<Row> }> =>
+      live.toArray.map((row) => ({
+        id: row.id,
+        children: row.children.map((childRow) => ({
+          id: childRow.id,
+          group: childRow.group,
+        })),
+      }))
     let preloadState: `pending` | `resolved` | `rejected` = `pending`
     const preload = live.preload()
     void preload.then(
@@ -162,12 +219,25 @@ it.each([
       }
     }
     let liveCleaned = false
+    let primaryFailure: { error: unknown } | undefined
 
     try {
       await flushPromises()
       expect(pending).toHaveLength(1)
       expect(requestedGroups(pending[0]!.options)).toEqual([`old`])
       expect(live.status).toBe(`loading`)
+      expect(preloadState).toBe(`pending`)
+      expect(visibleRows()).toEqual(expectedRows(`old`, []))
+
+      // Progressive rows applied before retirement remain in the source.
+      // Their route must still disappear when the parent changes group.
+      const oldChild: Child = { id: `old-child`, group: `old` }
+      childBegin()
+      childWrite({ type: `insert`, value: oldChild })
+      const oldApplied = childCommit()
+      if (oldApplied !== true) await oldApplied
+      await flushPromises()
+      expect(visibleRows()).toEqual(expectedRows(`old`, [oldChild]))
       expect(preloadState).toBe(`pending`)
 
       parentBegin()
@@ -188,6 +258,12 @@ it.each([
       expectUnloads(pending[0]!.options)
       expect(live.status).toBe(`loading`)
       expect(preloadState).toBe(`pending`)
+      expect(child.get(oldChild.id)).toEqual(expect.objectContaining(oldChild))
+      expect(visibleRows()).toEqual(expectedRows(`fresh`, [oldChild]))
+      // A route that retained the retired bucket would fail this comparison.
+      expect([{ id: `parent`, children: [oldChild] }]).not.toEqual(
+        expectedRows(`fresh`, [oldChild]),
+      )
 
       const freshChild: Child = { id: `fresh-child`, group: `fresh` }
       const freshSettlement = { settled: false }
@@ -215,6 +291,12 @@ it.each([
         expect(preloadState).toBe(
           freshSettlement.settled ? `resolved` : `pending`,
         )
+        expect(visibleRows()).toEqual(
+          expectedRows(
+            `fresh`,
+            freshSettlement.settled ? [oldChild, freshChild] : [oldChild],
+          ),
+        )
         expect(live.utils.lastSubsetError).toBeUndefined()
       }
 
@@ -226,6 +308,9 @@ it.each([
       expect(live.utils.lastSubsetError).toBeUndefined()
       expect(child.get(freshChild.id)).toEqual(
         expect.objectContaining(freshChild),
+      )
+      expect(visibleRows()).toEqual(
+        expectedRows(`fresh`, [oldChild, freshChild]),
       )
       expect(live.toArray).toEqual([
         expect.objectContaining({
@@ -240,19 +325,36 @@ it.each([
       liveCleaned = true
       expect(pending[1]!.options.signal?.aborted).toBe(true)
       expectUnloads(pending[0]!.options, pending[1]!.options)
+    } catch (error) {
+      primaryFailure = { error }
+      throw error
     } finally {
       for (const request of pending) {
         request.rows.resolve([])
       }
-      await Promise.all([
-        preload.catch(() => undefined),
-        liveCleaned ? Promise.resolve() : live.cleanup(),
+      await finishCleanup(primaryFailure, [
+        [
+          { name: `preload waiter`, run: () => preload.catch(() => undefined) },
+          {
+            name: `live query`,
+            run: () => (liveCleaned ? Promise.resolve() : live.cleanup()),
+          },
+        ],
+        [
+          { name: `parent source`, run: () => parent.cleanup() },
+          { name: `child source`, run: () => child.cleanup() },
+        ],
       ])
-      await Promise.all([parent.cleanup(), child.cleanup()])
     }
   },
 )
 
+/**
+ * Initial-query readiness for this two-source join needs both root demands.
+ * The fixed model has no joined row after only the left source applies; the
+ * right source then either completes the join, fails preload, or is abandoned
+ * by cleanup. The controlled adapters hold only delivery, not a real provider.
+ */
 it.each([`resolve`, `reject`, `cleanup`] as const)(
   `matches cross-source initial readiness through %s`,
   async (secondOutcome) => {
@@ -315,6 +417,7 @@ it.each([`resolve`, `reject`, `cleanup`] as const)(
     })
     const preload = live.preload()
     void preload.catch(() => undefined)
+    let primaryFailure: { error: unknown } | undefined
 
     try {
       expect(live.status).toBe(`loading`)
@@ -328,7 +431,10 @@ it.each([`resolve`, `reject`, `cleanup`] as const)(
       if (secondOutcome === `cleanup`) {
         await live.cleanup()
         expect(live.status).toBe(`cleaned-up`)
+        await expect(preload).rejects.toMatchObject({ name: `AbortError` })
 
+        // This late write probes terminal query status with a nonconforming
+        // source; a conforming request-scoped loader stops after cancellation.
         rightDelivery.resolve()
         await flushPromises()
 
@@ -351,11 +457,19 @@ it.each([`resolve`, `reject`, `cleanup`] as const)(
       } else {
         await expect(preload).rejects.toThrow(`right source failed`)
       }
+    } catch (error) {
+      primaryFailure = { error }
+      throw error
     } finally {
       leftDelivery.resolve()
       rightDelivery.resolve()
-      await live.cleanup()
-      await Promise.all([left.cleanup(), right.cleanup()])
+      await finishCleanup(primaryFailure, [
+        [{ name: `live query`, run: () => live.cleanup() }],
+        [
+          { name: `left source`, run: () => left.cleanup() },
+          { name: `right source`, run: () => right.cleanup() },
+        ],
+      ])
     }
   },
 )

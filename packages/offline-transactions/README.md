@@ -216,10 +216,30 @@ persistence. `isPersisted.promise` settles at the same success or failure
 boundary.
 
 On the offline-execution path, successful settlement means the configured
-`mutationFn` returned. The executor also attempts to remove the durable outbox
-entry. It means the server confirmed or exposed the write only when that
+`mutationFn` returned and the storage adapter acknowledged outbox deletion.
+It means the server confirmed or exposed the write only when that
 `mutationFn` explicitly waits for the provider's acknowledgement, read-back, or
 sync observation before returning.
+
+After `mutationFn` returns, the executor records a `deletion-pending` outbox
+phase before removing the row. If recording that phase or removing the row
+fails, `commit()`, `isPersisted.promise`, and the per-ID completion waiter reject
+with the storage error. The executor stops: it does not retry the deletion,
+process queued peers, or admit new transactions. A fresh executor can remove a
+marked row without calling `mutationFn` again; `beforeRetry` only filters rows
+whose provider work is still pending. An unmarked row can replay after a crash
+or a failed phase write, so providers must honor the supplied `idempotencyKey`.
+Outbox removal means the storage adapter acknowledged deletion; it does not
+establish physical power-loss durability or exactly-once provider execution.
+If an app removes a row during an active provider call, that caller still waits
+for the provider call to return before it settles.
+
+After a permanent provider failure, the caller rejects with that provider
+error. The executor records a `rejection-pending` outbox phase before removing
+the row. If the phase write or deletion fails, the executor batch throws the
+storage error and stops with queued peers untouched. A fresh executor skips
+provider work and optimistic restoration for a marked row. If writing the
+marker failed, the unmarked row may replay after restart.
 
 ```typescript
 const offlineTx = offline.createOfflineTransaction({
@@ -306,8 +326,8 @@ for (const entry of outbox) {
 
 These values describe local executor work, not backend confirmation. A normal
 retriable error leaves the transaction queued. A `NonRetriableError` marks a
-permanent failure, removes the outbox entry, and rolls back its optimistic
-state.
+permanent failure, rejects the caller, and rolls back its optimistic state.
+The outbox entry remains until storage acknowledges its removal.
 
 ## Migration from TanStack DB
 
@@ -334,7 +354,7 @@ const tx = offline.createOfflineTransaction({
   autoCommit: false,
 })
 tx.mutate(() => todoCollection.insert({ id: '1', text: 'Buy milk' }))
-await tx.commit() // Remains pending until the mutation function succeeds.
+await tx.commit() // Waits for the mutation function and outbox deletion.
 ```
 
 ## Platform Support

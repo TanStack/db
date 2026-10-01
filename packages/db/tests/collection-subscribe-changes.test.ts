@@ -2847,7 +2847,7 @@ describe(`Virtual properties`, () => {
     expect(collection.state.get(`row-1`)?.$origin).toBe(`local`)
   })
 
-  it(`hasVirtualProps should require the full virtual prop shape`, () => {
+  it(`hasVirtualProps recognizes the legacy four-field shape`, () => {
     expect(
       hasVirtualProps({
         $synced: true,
@@ -2957,7 +2957,7 @@ describe(`Virtual properties`, () => {
     await syncedOnly.cleanup()
   })
 
-  it(`should aggregate $synced and $origin for grouped rows`, async () => {
+  it(`should aggregate pending writes and origin for grouped rows`, async () => {
     let syncFns:
       | {
           begin: () => void
@@ -3016,6 +3016,7 @@ describe(`Virtual properties`, () => {
 
     const groupRow = grouped.toArray.find((row) => row.group === `g1`)
     expect(groupRow).toBeDefined()
+    expect(groupRow!.$hasPendingWrites).toBe(true)
     expect(groupRow!.$synced).toBe(false)
     expect(groupRow!.$origin).toBe(`local`)
     expect(groupRow!.$collectionId).toBe(`virtual-props-aggregate-source`)
@@ -3024,7 +3025,7 @@ describe(`Virtual properties`, () => {
     await grouped.cleanup()
   })
 
-  it(`should mark local-only collections as synced with local origin`, async () => {
+  it(`should mark local-only collections as having no pending writes`, async () => {
     const collection = createCollection(
       localOnlyCollectionOptions({
         id: `virtual-props-local-only`,
@@ -3049,6 +3050,7 @@ describe(`Virtual properties`, () => {
     expect(insertChange).toBeDefined()
 
     const value = insertChange!.value as Record<string, any>
+    expect(value.$hasPendingWrites).toBe(false)
     expect(value.$synced).toBe(true)
     expect(value.$origin).toBe(`local`)
 

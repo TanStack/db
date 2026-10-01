@@ -170,7 +170,11 @@ function getTargetsFromPropRef(
     ]
   }
 
-  if (source.query.limit || source.query.offset) {
+  if (
+    source.query.limit !== undefined ||
+    source.query.offset !== undefined ||
+    source.query.singleResult
+  ) {
     return []
   }
 

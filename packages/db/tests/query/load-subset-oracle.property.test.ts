@@ -27,6 +27,8 @@ import type {
  * options, offset, limit, and cursor boundary. Equal demands share one physical
  * acquisition; distinct demands do not. Rejection reaches every waiter, then
  * leaves the demand retryable.
+ * `refetch` starts fresh work for the same request data. Requests with separate
+ * abort signals cannot share in-flight work.
  *
  * A separate application law says acquisition settlement is not enough. Loaded
  * rows must cross the Collection publication boundary before readiness settles.
@@ -37,6 +39,13 @@ import type {
  * expression evaluator. The application driver uses real transactions, sync
  * receipts, optimistic work, and live queries. Keeping these nodes separate
  * prevents a correct key function from hiding a broken settlement boundary.
+ *
+ * Authority: the exact-request and applied-settlement contracts in
+ * `packages/db/src/query/live/ARCHITECTURE.md` (Demand grouping and ownership,
+ * Source cancellation and applied settlement). The plain-record fingerprint
+ * models equality of request data, not source coverage or row ownership.
+ * The identity driver uses a controlled adapter; its result does not establish
+ * that an external provider honors an abort or returns complete ordered rows.
  */
 
 type PersistedLoadRow = {
@@ -118,10 +127,37 @@ const exactDemandTraceArbitrary = fc
   )
 
 const concurrentExactScenarioArbitrary: fc.Arbitrary<ConcurrentExactScenario> =
-  exactDemandTraceArbitrary.map((trace) => ({
-    trace,
-    settlementOrder: trace.length % 2 === 0 ? `forward` : `reverse`,
-  }))
+  fc.record({
+    trace: exactDemandTraceArbitrary,
+    settlementOrder: fc.constantFrom(`forward` as const, `reverse` as const),
+  })
+
+// Each pair differs in only one request-data axis. A deduper that drops that
+// axis would wrongly reuse the first acquisition at the second request.
+const exactDemandAxisPairs: ReadonlyArray<
+  readonly [axis: string, first: ExactDemand, second: ExactDemand]
+> = (() => {
+  const first: ExactDemand = {
+    values: [1, 2],
+    orderField: `rank`,
+    direction: `asc`,
+    nulls: `last`,
+    stringSort: `lexical`,
+    offset: 0,
+    limit: 2,
+    cursorBoundary: undefined,
+  }
+  return [
+    [`predicate values`, first, { ...first, values: [1, 3] }],
+    [`order field`, first, { ...first, orderField: `score` }],
+    [`direction`, first, { ...first, direction: `desc` }],
+    [`null placement`, first, { ...first, nulls: `first` }],
+    [`string sort`, first, { ...first, stringSort: `locale` }],
+    [`offset`, first, { ...first, offset: 1 }],
+    [`limit`, first, { ...first, limit: undefined }],
+    [`cursor boundary`, first, { ...first, cursorBoundary: 1 }],
+  ]
+})()
 
 function toLoadSubsetOptions(demand: ExactDemand): LoadSubsetOptions {
   const orderRef = demand.orderField === `rank` ? rankRef : scoreRef
@@ -334,6 +370,46 @@ const exactScenarioRuns = 40 * multiplier
 
 let collectionSequence = 0
 
+type OracleCleanupStep = {
+  label: string
+  run: () => void | Promise<void>
+}
+
+// A failed law remains the cause even if one or more releases also fail. Run
+// every release so an earlier cleanup failure cannot strand later resources.
+async function runOracleCleanup(
+  law: string,
+  primaryFailure: { error: unknown } | undefined,
+  steps: ReadonlyArray<OracleCleanupStep>,
+): Promise<void> {
+  const cleanupFailures: Array<Error> = []
+  for (const { label, run } of steps) {
+    try {
+      await run()
+    } catch (error) {
+      cleanupFailures.push(
+        new Error(`${label} cleanup failed`, { cause: error }),
+      )
+    }
+  }
+  if (cleanupFailures.length > 0) {
+    throw new AggregateError(cleanupFailures, `${law}: cleanup failed`, {
+      cause: primaryFailure?.error,
+    })
+  }
+}
+
+function releasePersistingMutation(
+  persistence: ReturnType<typeof createDeferred<void>>,
+  settlement?: Promise<unknown>,
+): void {
+  persistence.resolve()
+  // A broken applied-settlement path can leave optimistic transaction
+  // settlement pending forever. Collection teardown must proceed; observing
+  // rejection prevents an abandoned promise from becoming an unrelated error.
+  void settlement?.catch(() => undefined)
+}
+
 async function expectPersistingLoadIsApplied(
   persisting: boolean,
   delivery: `synchronous` | `asynchronous` = `synchronous`,
@@ -375,24 +451,31 @@ async function expectPersistingLoadIsApplied(
     },
   })
   const persistence = createDeferred<void>()
-  const transaction = createTransaction({
-    mutationFn: () => persistence.promise,
-  })
-  if (persisting) {
-    transaction.mutate(() => source.insert({ id: `other`, projectId: `p2` }))
-    expect(transaction.state).toBe(`persisting`)
-  }
-  const live = createLiveQueryCollection((query) =>
-    query.from({ row: source }).where(({ row }) => eq(row.projectId, `p1`)),
-  )
-
+  let settlement: Promise<unknown> | undefined
+  let cleanupLive: (() => Promise<void>) | undefined
+  let primaryFailure: { error: unknown } | undefined
   try {
+    const transaction = createTransaction({
+      mutationFn: () => persistence.promise,
+    })
+    settlement = transaction.isPersisted.promise
+    if (persisting) {
+      transaction.mutate(() => source.insert({ id: `other`, projectId: `p2` }))
+    }
+    const live = createLiveQueryCollection((query) =>
+      query.from({ row: source }).where(({ row }) => eq(row.projectId, `p1`)),
+    )
+    cleanupLive = () => live.cleanup()
+    if (persisting) expect(transaction.state).toBe(`persisting`)
     const ready = live.toArrayWhenReady()
     if (persisting) {
       let settled = false
-      void ready.then(() => {
-        settled = true
-      })
+      void ready.then(
+        () => {
+          settled = true
+        },
+        () => undefined,
+      )
       await Promise.resolve()
       await Promise.resolve()
 
@@ -411,13 +494,26 @@ async function expectPersistingLoadIsApplied(
     } catch (error) {
       throw new TraceAssertionError(0, error)
     }
+  } catch (error) {
+    primaryFailure = { error }
+    throw error
   } finally {
-    if (persisting) {
-      persistence.resolve()
-      await transaction.isPersisted.promise
-    }
-    await live.cleanup()
-    await source.cleanup()
+    await runOracleCleanup(
+      `applied load reaches live-query readiness`,
+      primaryFailure,
+      [
+        {
+          label: `optimistic persistence`,
+          run: () => {
+            if (persisting) {
+              releasePersistingMutation(persistence, settlement)
+            }
+          },
+        },
+        { label: `live query`, run: () => cleanupLive?.() },
+        { label: `source collection`, run: () => source.cleanup() },
+      ],
+    )
   }
 }
 
@@ -454,20 +550,20 @@ async function expectAppliedReceiptTiming(
       },
     },
   })
-  source.startSyncImmediate()
-
   const persistence = createDeferred<void>()
-  const transaction = createTransaction({
-    mutationFn: () => persistence.promise,
-  })
-  if (gate === `parked`) {
-    transaction.mutate(() => source.insert({ id: `local`, projectId: `p2` }))
-    expect(transaction.state).toBe(`persisting`)
-  }
-
-  const receipt = source._sync.loadSubset({})
-
+  let settlement: Promise<unknown> | undefined
+  let primaryFailure: { error: unknown } | undefined
   try {
+    source.startSyncImmediate()
+    const transaction = createTransaction({
+      mutationFn: () => persistence.promise,
+    })
+    settlement = transaction.isPersisted.promise
+    if (gate === `parked`) {
+      transaction.mutate(() => source.insert({ id: `local`, projectId: `p2` }))
+    }
+    if (gate === `parked`) expect(transaction.state).toBe(`persisting`)
+    const receipt = source._sync.loadSubset({})
     if (gate === `free` && delivery === `synchronous`) {
       expect(receipt).toBe(true)
       expect(source.get(`remote`)).toEqual(
@@ -479,10 +575,15 @@ async function expectAppliedReceiptTiming(
     const pending = requirePendingAppliedReceipt(receipt)
     let settled = false
     let visibleWhenSettled = false
-    void pending.then(() => {
-      settled = true
-      visibleWhenSettled = source.get(`remote`)?.id === `remote`
-    })
+    void pending
+      .then(
+        () => {
+          settled = true
+          visibleWhenSettled = source.get(`remote`)?.id === `remote`
+        },
+        () => undefined,
+      )
+      .catch(() => undefined)
 
     expect(settled).toBe(false)
     expect(source.get(`remote`)).toBeUndefined()
@@ -502,12 +603,21 @@ async function expectAppliedReceiptTiming(
     expect(source.get(`remote`)).toEqual(
       expect.objectContaining({ id: `remote`, projectId: `p1` }),
     )
+  } catch (error) {
+    primaryFailure = { error }
+    throw error
   } finally {
-    persistence.resolve()
-    if (gate === `parked`) {
-      await transaction.isPersisted.promise.catch(() => undefined)
-    }
-    await source.cleanup()
+    await runOracleCleanup(
+      `subset receipt follows applied publication`,
+      primaryFailure,
+      [
+        {
+          label: `persistence gate`,
+          run: () => releasePersistingMutation(persistence, settlement),
+        },
+        { label: `source collection`, run: () => source.cleanup() },
+      ],
+    )
   }
 }
 
@@ -544,26 +654,31 @@ async function expectAppliedLoadDoesNotFlushEarlierParkedSync() {
       },
     },
   })
-  source.startSyncImmediate()
-
   const persistence = createDeferred<void>()
-  const transaction = createTransaction({
-    mutationFn: () => persistence.promise,
-  })
-  transaction.mutate(() => source.insert({ id: `other`, projectId: `p2` }))
-  expect(transaction.state).toBe(`persisting`)
-  publishUnrelated()
-
-  const live = createLiveQueryCollection((query) =>
-    query.from({ row: source }).where(({ row }) => eq(row.projectId, `p1`)),
-  )
-
+  let settlement: Promise<unknown> | undefined
+  let cleanupLive: (() => Promise<void>) | undefined
+  let primaryFailure: { error: unknown } | undefined
   try {
+    source.startSyncImmediate()
+    const transaction = createTransaction({
+      mutationFn: () => persistence.promise,
+    })
+    settlement = transaction.isPersisted.promise
+    transaction.mutate(() => source.insert({ id: `other`, projectId: `p2` }))
+    publishUnrelated()
+    const live = createLiveQueryCollection((query) =>
+      query.from({ row: source }).where(({ row }) => eq(row.projectId, `p1`)),
+    )
+    cleanupLive = () => live.cleanup()
+    expect(transaction.state).toBe(`persisting`)
     const ready = live.toArrayWhenReady()
     let settled = false
-    void ready.then(() => {
-      settled = true
-    })
+    void ready.then(
+      () => {
+        settled = true
+      },
+      () => undefined,
+    )
     await Promise.resolve()
     await Promise.resolve()
 
@@ -578,11 +693,22 @@ async function expectAppliedLoadDoesNotFlushEarlierParkedSync() {
         expect.objectContaining({ id: `r2` }),
       ]),
     )
+  } catch (error) {
+    primaryFailure = { error }
+    throw error
   } finally {
-    persistence.resolve()
-    await transaction.isPersisted.promise.catch(() => undefined)
-    await live.cleanup()
-    await source.cleanup()
+    await runOracleCleanup(
+      `parked stream remains behind applied subset`,
+      primaryFailure,
+      [
+        {
+          label: `persistence gate`,
+          run: () => releasePersistingMutation(persistence, settlement),
+        },
+        { label: `live query`, run: () => cleanupLive?.() },
+        { label: `source collection`, run: () => source.cleanup() },
+      ],
+    )
   }
 }
 
@@ -619,16 +745,17 @@ async function expectCompletionWaitsForAppliedRows() {
       },
     },
   })
-  source.startSyncImmediate()
-
   const persistence = createDeferred<void>()
-  const transaction = createTransaction({
-    mutationFn: () => persistence.promise,
-  })
-  transaction.mutate(() => source.insert({ id: `other`, projectId: `p2` }))
-  publishUnrelated()
-
+  let settlement: Promise<unknown> | undefined
+  let primaryFailure: { error: unknown } | undefined
   try {
+    source.startSyncImmediate()
+    const transaction = createTransaction({
+      mutationFn: () => persistence.promise,
+    })
+    settlement = transaction.isPersisted.promise
+    transaction.mutate(() => source.insert({ id: `other`, projectId: `p2` }))
+    publishUnrelated()
     const first = source._sync.loadSubset({})
     expect(first).toBeInstanceOf(Promise)
     await Promise.resolve()
@@ -646,16 +773,30 @@ async function expectCompletionWaitsForAppliedRows() {
       expect.objectContaining({ id: `r1`, projectId: `p1` }),
     )
     expect(source._sync.loadSubset({})).toBe(true)
+  } catch (error) {
+    primaryFailure = { error }
+    throw error
   } finally {
-    persistence.resolve()
-    await transaction.isPersisted.promise.catch(() => undefined)
-    await source.cleanup()
+    await runOracleCleanup(
+      `subset completion follows applied rows`,
+      primaryFailure,
+      [
+        {
+          label: `persistence gate`,
+          run: () => releasePersistingMutation(persistence, settlement),
+        },
+        { label: `source collection`, run: () => source.cleanup() },
+      ],
+    )
   }
 }
 
-async function expectConcurrentStreamCommitStaysParked() {
+async function expectConcurrentStreamCommitStaysParked(
+  cancelBeforePersistence = false,
+) {
   let publishUnrelated!: () => void
   let publishSubset!: () => void
+  let rejectPendingSubset: ((reason: unknown) => void) | undefined
   const source = createCollection<PersistedLoadRow>({
     id: `load-subset-applied-concurrent-${collectionSequence++}`,
     getKey: (row) => row.id,
@@ -673,18 +814,31 @@ async function expectConcurrentStreamCommitStaysParked() {
         markReady()
         return {
           loadSubset: () =>
-            new Promise<void>((resolve) => {
+            new Promise<void>((resolve, reject) => {
+              const fulfill = () => {
+                rejectPendingSubset = undefined
+                resolve()
+              }
+              const fail = (reason: unknown) => {
+                rejectPendingSubset = undefined
+                reject(reason)
+              }
+              rejectPendingSubset = fail
               publishSubset = () => {
-                begin()
-                write({
-                  type: `insert`,
-                  value: { id: `r1`, projectId: `p1` },
-                })
-                const applied = commit()
-                if (applied === true) {
-                  resolve()
-                } else {
-                  void applied.then(resolve)
+                try {
+                  begin()
+                  write({
+                    type: `insert`,
+                    value: { id: `r1`, projectId: `p1` },
+                  })
+                  const applied = commit()
+                  if (applied === true) {
+                    fulfill()
+                  } else {
+                    void applied.then(fulfill, fail)
+                  }
+                } catch (error) {
+                  fail(error)
                 }
               }
             }),
@@ -692,29 +846,38 @@ async function expectConcurrentStreamCommitStaysParked() {
       },
     },
   })
-  source.startSyncImmediate()
-
   const persistence = createDeferred<void>()
-  const transaction = createTransaction({
-    mutationFn: () => persistence.promise,
-  })
-  transaction.mutate(() => source.insert({ id: `other`, projectId: `p2` }))
-
-  const load = requirePendingAppliedReceipt(source._sync.loadSubset({}))
-  publishUnrelated()
-  publishSubset()
-
+  let settlement: Promise<unknown> | undefined
+  let primaryFailure: { error: unknown } | undefined
   try {
-    let settled = false
-    void load.then(() => {
-      settled = true
+    source.startSyncImmediate()
+    const transaction = createTransaction({
+      mutationFn: () => persistence.promise,
     })
+    settlement = transaction.isPersisted.promise
+    transaction.mutate(() => source.insert({ id: `other`, projectId: `p2` }))
+    const load = requirePendingAppliedReceipt(source._sync.loadSubset({}))
+    void load.catch(() => undefined)
+    publishUnrelated()
+    publishSubset()
+    let settled = false
+    void load.then(
+      () => {
+        settled = true
+      },
+      () => undefined,
+    )
     await Promise.resolve()
     await Promise.resolve()
 
     expect(settled).toBe(false)
     expect(source.get(`unrelated`)).toBeUndefined()
     expect(source.get(`r1`)).toBeUndefined()
+    if (cancelBeforePersistence) {
+      await source.cleanup()
+      await expect(load).rejects.toMatchObject({ name: `AbortError` })
+      return
+    }
     persistence.resolve()
     await transaction.isPersisted.promise
     await load
@@ -724,10 +887,28 @@ async function expectConcurrentStreamCommitStaysParked() {
     expect(source.get(`r1`)).toEqual(
       expect.objectContaining({ id: `r1`, projectId: `p1` }),
     )
+  } catch (error) {
+    primaryFailure = { error }
+    throw error
   } finally {
-    persistence.resolve()
-    await transaction.isPersisted.promise.catch(() => undefined)
-    await source.cleanup()
+    await runOracleCleanup(
+      `concurrent stream commit remains parked`,
+      primaryFailure,
+      [
+        {
+          label: `persistence gate`,
+          run: () => releasePersistingMutation(persistence, settlement),
+        },
+        {
+          label: `controlled subset transport`,
+          run: () =>
+            rejectPendingSubset?.(
+              new DOMException(`Oracle fixture released`, `AbortError`),
+            ),
+        },
+        { label: `source collection`, run: () => source.cleanup() },
+      ],
+    )
   }
 }
 
@@ -767,24 +948,29 @@ async function expectLaterImmediateCommitSettlesAppliedSubset() {
       },
     },
   })
-  source.startSyncImmediate()
-
   const persistence = createDeferred<void>()
-  const transaction = createTransaction({
-    mutationFn: () => persistence.promise,
-  })
-  transaction.mutate(() => source.insert({ id: `local`, projectId: `p3` }))
-
-  const load = requirePendingAppliedReceipt(source._sync.loadSubset({}))
-  const later = publishLater()
-
+  let settlement: Promise<unknown> | undefined
+  let primaryFailure: { error: unknown } | undefined
   try {
+    source.startSyncImmediate()
+    const transaction = createTransaction({
+      mutationFn: () => persistence.promise,
+    })
+    settlement = transaction.isPersisted.promise
+    transaction.mutate(() => source.insert({ id: `local`, projectId: `p3` }))
+    const load = requirePendingAppliedReceipt(source._sync.loadSubset({}))
+    const later = publishLater()
     let loadSettled = false
     let subsetVisibleWhenSettled = false
-    void load.then(() => {
-      loadSettled = true
-      subsetVisibleWhenSettled = source.get(`subset`)?.id === `subset`
-    })
+    void load
+      .then(
+        () => {
+          loadSettled = true
+          subsetVisibleWhenSettled = source.get(`subset`)?.id === `subset`
+        },
+        () => undefined,
+      )
+      .catch(() => undefined)
     await later
     await load
 
@@ -807,10 +993,21 @@ async function expectLaterImmediateCommitSettlesAppliedSubset() {
     expect(source.get(`subset`)).toEqual(
       expect.objectContaining({ id: `subset` }),
     )
+  } catch (error) {
+    primaryFailure = { error }
+    throw error
   } finally {
-    persistence.resolve()
-    await transaction.isPersisted.promise.catch(() => undefined)
-    await source.cleanup()
+    await runOracleCleanup(
+      `later immediate commit applies subset`,
+      primaryFailure,
+      [
+        {
+          label: `persistence gate`,
+          run: () => releasePersistingMutation(persistence, settlement),
+        },
+        { label: `source collection`, run: () => source.cleanup() },
+      ],
+    )
   }
 }
 
@@ -857,23 +1054,24 @@ async function expectAbortedReceiptDoesNotSettleDemand(
       },
     },
   })
-  source.startSyncImmediate()
-
   const persistence = createDeferred<void>()
-  const transaction = createTransaction({
-    mutationFn: () => persistence.promise,
-  })
-  transaction.mutate(() => source.insert({ id: `local`, projectId: `p2` }))
   const controller = new AbortController()
-  const first = requirePendingAppliedReceipt(
-    source._sync.loadSubset({ signal: controller.signal }),
-  )
-  if (abortPhase === `while-parked`) {
-    await committed.promise
-  }
-  controller.abort()
-
+  let settlement: Promise<unknown> | undefined
+  let primaryFailure: { error: unknown } | undefined
   try {
+    source.startSyncImmediate()
+    const transaction = createTransaction({
+      mutationFn: () => persistence.promise,
+    })
+    settlement = transaction.isPersisted.promise
+    transaction.mutate(() => source.insert({ id: `local`, projectId: `p2` }))
+    const first = requirePendingAppliedReceipt(
+      source._sync.loadSubset({ signal: controller.signal }),
+    )
+    if (abortPhase === `while-parked`) {
+      await committed.promise
+    }
+    controller.abort()
     persistence.resolve()
     await transaction.isPersisted.promise
     if (abortPhase === `while-parked`) {
@@ -888,10 +1086,21 @@ async function expectAbortedReceiptDoesNotSettleDemand(
     if (retry !== true) await retry
     expect(transportCalls).toBe(2)
     expect(source.get(`row`)).toEqual(expect.objectContaining({ id: `row` }))
+  } catch (error) {
+    primaryFailure = { error }
+    throw error
   } finally {
-    persistence.resolve()
-    await transaction.isPersisted.promise.catch(() => undefined)
-    await source.cleanup()
+    await runOracleCleanup(
+      `aborted receipt remains retryable`,
+      primaryFailure,
+      [
+        {
+          label: `persistence gate`,
+          run: () => releasePersistingMutation(persistence, settlement),
+        },
+        { label: `source collection`, run: () => source.cleanup() },
+      ],
+    )
   }
 }
 
@@ -917,33 +1126,49 @@ async function expectAbortDuringPublicationDoesNotCancelReceipt() {
       },
     },
   })
-  source.startSyncImmediate()
-
   const persistence = createDeferred<void>()
-  const transaction = createTransaction({
-    mutationFn: () => persistence.promise,
-  })
-  transaction.mutate(() => source.insert({ id: `local`, projectId: `pending` }))
-  const subscription = source.subscribeChanges((changes) => {
-    if (changes.some((change) => change.key === `row`)) {
-      controller.abort()
-    }
-  })
-  const load = requirePendingAppliedReceipt(
-    source._sync.loadSubset({ signal: controller.signal }),
-  )
-
+  let settlement: Promise<unknown> | undefined
+  let unsubscribe: (() => void) | undefined
+  let primaryFailure: { error: unknown } | undefined
   try {
+    source.startSyncImmediate()
+    const transaction = createTransaction({
+      mutationFn: () => persistence.promise,
+    })
+    settlement = transaction.isPersisted.promise
+    transaction.mutate(() =>
+      source.insert({ id: `local`, projectId: `pending` }),
+    )
+    const subscription = source.subscribeChanges((changes) => {
+      if (changes.some((change) => change.key === `row`)) {
+        controller.abort()
+      }
+    })
+    unsubscribe = () => subscription.unsubscribe()
+    const load = requirePendingAppliedReceipt(
+      source._sync.loadSubset({ signal: controller.signal }),
+    )
     persistence.resolve()
     await transaction.isPersisted.promise
     await expect(load).resolves.toBeUndefined()
     expect(controller.signal.aborted).toBe(true)
     expect(source.get(`row`)).toEqual(expect.objectContaining({ id: `row` }))
+  } catch (error) {
+    primaryFailure = { error }
+    throw error
   } finally {
-    subscription.unsubscribe()
-    persistence.resolve()
-    await transaction.isPersisted.promise.catch(() => undefined)
-    await source.cleanup()
+    await runOracleCleanup(
+      `abort during publication retains applied rows`,
+      primaryFailure,
+      [
+        { label: `change subscription`, run: () => unsubscribe?.() },
+        {
+          label: `persistence gate`,
+          run: () => releasePersistingMutation(persistence, settlement),
+        },
+        { label: `source collection`, run: () => source.cleanup() },
+      ],
+    )
   }
 }
 
@@ -967,15 +1192,20 @@ async function expectCanceledReceiptReleasesOnlyItsSuppression() {
       },
     },
   })
-  await source.preload()
-  await Promise.resolve()
   const persistence = createDeferred<void>()
-  const transaction = createTransaction({
-    mutationFn: () => persistence.promise,
-  })
-  transaction.mutate(() => source.insert({ id: `local`, projectId: `pending` }))
-  expect(transaction.state).toBe(`persisting`)
+  let settlement: Promise<unknown> | undefined
+  let primaryFailure: { error: unknown } | undefined
   try {
+    await source.preload()
+    await Promise.resolve()
+    const transaction = createTransaction({
+      mutationFn: () => persistence.promise,
+    })
+    settlement = transaction.isPersisted.promise
+    transaction.mutate(() =>
+      source.insert({ id: `local`, projectId: `pending` }),
+    )
+    expect(transaction.state).toBe(`persisting`)
     begin()
     write({ type: `update`, value: { id: `first`, projectId: `new` } })
     const canceled = commit()
@@ -998,10 +1228,21 @@ async function expectCanceledReceiptReleasesOnlyItsSuppression() {
     if (canceled !== true) {
       await expect(canceled).rejects.toMatchObject({ name: `AbortError` })
     }
+  } catch (error) {
+    primaryFailure = { error }
+    throw error
   } finally {
-    persistence.resolve()
-    await transaction.isPersisted.promise.catch(() => undefined)
-    await source.cleanup()
+    await runOracleCleanup(
+      `canceled receipt releases only its suppression`,
+      primaryFailure,
+      [
+        {
+          label: `persistence gate`,
+          run: () => releasePersistingMutation(persistence, settlement),
+        },
+        { label: `source collection`, run: () => source.cleanup() },
+      ],
+    )
   }
 }
 
@@ -1046,43 +1287,61 @@ async function expectCleanupRejectsDemandOnce() {
       },
     },
   })
-  source.startSyncImmediate()
-
   const persistence = createDeferred<void>()
-  const transaction = createTransaction({
-    mutationFn: () => persistence.promise,
-  })
-  transaction.mutate(() => source.insert({ id: `local`, projectId: `p2` }))
-  const load = requirePendingAppliedReceipt(source._sync.loadSubset({}))
+  let settlement: Promise<unknown> | undefined
   let settlements = 0
-  void receipt.then(
-    () => {
-      settlements += 1
-    },
-    () => {
-      settlements += 1
-    },
-  )
 
-  await source.cleanup()
-  await expect(load).rejects.toMatchObject({ name: `AbortError` })
-  await expect(receipt).rejects.toMatchObject({ name: `AbortError` })
-  expect(settlements).toBe(1)
+  let primaryFailure: { error: unknown } | undefined
+  try {
+    source.startSyncImmediate()
+    const transaction = createTransaction({
+      mutationFn: () => persistence.promise,
+    })
+    settlement = transaction.isPersisted.promise
+    transaction.mutate(() => source.insert({ id: `local`, projectId: `p2` }))
+    const load = requirePendingAppliedReceipt(source._sync.loadSubset({}))
+    void load.catch(() => undefined)
+    void receipt.then(
+      () => {
+        settlements += 1
+      },
+      () => {
+        settlements += 1
+      },
+    )
+    await source.cleanup()
+    await expect(load).rejects.toMatchObject({ name: `AbortError` })
+    await expect(receipt).rejects.toMatchObject({ name: `AbortError` })
+    expect(settlements).toBe(1)
 
-  persistence.resolve()
-  await transaction.isPersisted.promise.catch(() => undefined)
-  await Promise.resolve()
-  expect(settlements).toBe(1)
+    persistence.resolve()
+    await transaction.isPersisted.promise.catch(() => undefined)
+    await Promise.resolve()
+    expect(settlements).toBe(1)
 
-  // Restarting installs fresh sync controls. Reacquisition must both perform
-  // transport work and publish its rows; stale callbacks cannot prove either.
-  source.startSyncImmediate()
-  const retry = source._sync.loadSubset({})
-  if (retry !== true) await retry
-  expect(transportCalls).toBe(2)
-  expect(source.get(`row`)).toEqual(expect.objectContaining({ id: `row` }))
-
-  await source.cleanup()
+    // Restarting installs fresh sync controls. Reacquisition must both perform
+    // transport work and publish its rows; stale callbacks cannot prove either.
+    source.startSyncImmediate()
+    const retry = source._sync.loadSubset({})
+    if (retry !== true) await retry
+    expect(transportCalls).toBe(2)
+    expect(source.get(`row`)).toEqual(expect.objectContaining({ id: `row` }))
+  } catch (error) {
+    primaryFailure = { error }
+    throw error
+  } finally {
+    await runOracleCleanup(
+      `cleanup rejects abandoned demand once`,
+      primaryFailure,
+      [
+        {
+          label: `persistence gate`,
+          run: () => releasePersistingMutation(persistence, settlement),
+        },
+        { label: `source collection`, run: () => source.cleanup() },
+      ],
+    )
+  }
 }
 
 async function expectDerivedSyncDuringOptimisticMutation(): Promise<void> {
@@ -1101,31 +1360,35 @@ async function expectDerivedSyncDuringOptimisticMutation(): Promise<void> {
       },
     },
   })
-  const derived = createLiveQueryCollection({
-    query: (query) =>
-      query
-        .from({ row: source })
-        .select(({ row }) => ({ id: row.id, value: row.value })),
-    getKey: (row) => row.id,
-    startSync: true,
-  })
   const persistence = createDeferred<void>()
-  // Query collections currently expose read-side virtual properties in their
-  // insert input type even though the runtime accepts the plain selected row.
-  const insertDerived = derived.insert.bind(derived) as unknown as (
-    row: OptimisticDerivedRow,
-  ) => ReturnType<typeof derived.insert>
-  const insertOptimistically = createOptimisticAction<OptimisticDerivedRow>({
-    onMutate: insertDerived,
-    mutationFn: () => persistence.promise,
-  })
-
-  await derived.preload()
-  const transaction = insertOptimistically({
-    id: `optimistic`,
-    value: `optimistic`,
-  })
+  let settlement: Promise<unknown> | undefined
+  let cleanupDerived: (() => Promise<void>) | undefined
+  let primaryFailure: { error: unknown } | undefined
   try {
+    const derived = createLiveQueryCollection({
+      query: (query) =>
+        query
+          .from({ row: source })
+          .select(({ row }) => ({ id: row.id, value: row.value })),
+      getKey: (row) => row.id,
+      startSync: true,
+    })
+    cleanupDerived = () => derived.cleanup()
+    // Query collections currently expose read-side virtual properties in their
+    // insert input type even though the runtime accepts the plain selected row.
+    const insertDerived = derived.insert.bind(derived) as unknown as (
+      row: OptimisticDerivedRow,
+    ) => ReturnType<typeof derived.insert>
+    const insertOptimistically = createOptimisticAction<OptimisticDerivedRow>({
+      onMutate: insertDerived,
+      mutationFn: () => persistence.promise,
+    })
+    await derived.preload()
+    const transaction = insertOptimistically({
+      id: `optimistic`,
+      value: `optimistic`,
+    })
+    settlement = transaction.isPersisted.promise
     begin()
     write({ type: `insert`, value: { id: `synced`, value: `synced` } })
     commit()
@@ -1135,15 +1398,82 @@ async function expectDerivedSyncDuringOptimisticMutation(): Promise<void> {
     } catch (error) {
       throw new TraceAssertionError(0, error)
     }
+  } catch (error) {
+    primaryFailure = { error }
+    throw error
   } finally {
-    persistence.resolve()
-    await transaction.isPersisted.promise
-    await derived.cleanup()
-    await source.cleanup()
+    await runOracleCleanup(
+      `derived sync during optimistic mutation`,
+      primaryFailure,
+      [
+        {
+          label: `persistence gate`,
+          run: () => releasePersistingMutation(persistence, settlement),
+        },
+        { label: `derived collection`, run: () => cleanupDerived?.() },
+        { label: `source collection`, run: () => source.cleanup() },
+      ],
+    )
   }
 }
 
 describe(`exact loadSubset demand oracle`, () => {
+  it.each(exactDemandAxisPairs)(
+    `distinguishes a change to %s in completed and concurrent demands`,
+    async (_axis, first, second) => {
+      assertCompletedExactDemandTrace([first, second, first])
+      await assertConcurrentExactDemandTrace({
+        trace: [first, second, first],
+        settlementOrder: `reverse`,
+      })
+    },
+  )
+
+  it(`refetch starts fresh work for the same exact demand`, () => {
+    let starts = 0
+    const dedupe = new DeduplicatedLoadSubset({
+      loadSubset: () => {
+        starts++
+        return true
+      },
+    })
+    const options = toLoadSubsetOptions(exactDemandAxisPairs[0]![1])
+
+    expect(dedupe.loadSubset(options)).toBe(true)
+    expect(dedupe.loadSubset(options)).toBe(true)
+    expect(starts).toBe(1)
+
+    expect(dedupe.loadSubset({ ...options, refetch: true })).toBe(true)
+    expect(starts).toBe(2)
+    expect(dedupe.loadSubset(options)).toBe(true)
+    expect(starts).toBe(2)
+  })
+
+  it(`starts separate acquisitions for independently cancelable exact demands`, async () => {
+    const acquisitions: Array<ReturnType<typeof createDeferred<void>>> = []
+    const dedupe = new DeduplicatedLoadSubset({
+      loadSubset: () => {
+        const acquisition = createDeferred<void>()
+        acquisitions.push(acquisition)
+        return acquisition.promise
+      },
+    })
+    const options = toLoadSubsetOptions(exactDemandAxisPairs[0]![1])
+    const first = dedupe.loadSubset({
+      ...options,
+      signal: new AbortController().signal,
+    })
+    const second = dedupe.loadSubset({
+      ...options,
+      signal: new AbortController().signal,
+    })
+
+    expect(acquisitions).toHaveLength(2)
+    expect(first).not.toBe(second)
+    for (const acquisition of acquisitions) acquisition.resolve()
+    await Promise.all([first, second])
+  })
+
   it(`uses SQL unknown for nullish comparisons in the independent model`, () => {
     const missing = new PropRef<number | null>([`missing`])
 
@@ -1278,6 +1608,135 @@ describe(`exact loadSubset demand oracle`, () => {
 })
 
 describe(`loadSubset application and cancellation`, () => {
+  it(`releases a pending mutation and source despite a cleanup fault`, async () => {
+    const primary = new TraceAssertionError(
+      4,
+      new Error(`subset receipt settled before publication`),
+    )
+    const persistence = createDeferred<void>()
+    const stillPending = createDeferred<void>()
+    const cleanupFault = new Error(`subscription release failed`)
+    const released: Array<string> = []
+    let receiptSettled = false
+    let receiptSettledAtCleanup = false
+    void stillPending.promise.then(
+      () => {
+        receiptSettled = true
+      },
+      () => undefined,
+    )
+
+    let failure: unknown
+    try {
+      await runOracleCleanup(
+        `subset receipt follows applied publication`,
+        { error: primary },
+        [
+          {
+            label: `persistence gate`,
+            run: () => {
+              released.push(`persistence gate`)
+              releasePersistingMutation(persistence, stillPending.promise)
+            },
+          },
+          {
+            label: `subscription`,
+            run: () => {
+              released.push(`subscription`)
+              throw cleanupFault
+            },
+          },
+          {
+            label: `source collection`,
+            run: () => {
+              released.push(`source collection`)
+            },
+          },
+        ],
+      )
+    } catch (error) {
+      failure = error
+    } finally {
+      receiptSettledAtCleanup = receiptSettled
+      stillPending.resolve()
+    }
+
+    await persistence.promise
+    expect(released).toEqual([
+      `persistence gate`,
+      `subscription`,
+      `source collection`,
+    ])
+    expect(receiptSettledAtCleanup).toBe(false)
+    expect(failure).toBeInstanceOf(AggregateError)
+    const aggregate = failure as AggregateError
+    expect(aggregate.cause).toBe(primary)
+    expect(primary.checkpoint).toBe(4)
+    expect(aggregate.errors).toEqual([
+      new Error(`subscription cleanup failed`, { cause: cleanupFault }),
+    ])
+  })
+
+  it(`keeps the violated law and checkpoint when two cleanup steps fail`, async () => {
+    const primary = new TraceAssertionError(
+      3,
+      new Error(`loaded row absent at readiness`),
+    )
+    const firstCleanup = new Error(`release failed`)
+    const secondCleanup = new Error(`collection cleanup failed`)
+    const releases: Array<string> = []
+
+    let failure: unknown
+    try {
+      await runOracleCleanup(
+        `applied load reaches live-query readiness`,
+        { error: primary },
+        [
+          {
+            label: `acquisition`,
+            run: () => {
+              releases.push(`acquisition`)
+              throw firstCleanup
+            },
+          },
+          {
+            label: `live query`,
+            run: () => {
+              releases.push(`live query`)
+              throw secondCleanup
+            },
+          },
+          {
+            label: `source collection`,
+            run: () => {
+              releases.push(`source collection`)
+            },
+          },
+        ],
+      )
+    } catch (error) {
+      failure = error
+    }
+
+    expect(failure).toBeInstanceOf(AggregateError)
+    const aggregate = failure as AggregateError
+    expect(aggregate.message).toContain(
+      `applied load reaches live-query readiness`,
+    )
+    expect(aggregate.cause).toBe(primary)
+    expect(primary.checkpoint).toBe(3)
+    expect(aggregate.errors).toHaveLength(2)
+    expect(aggregate.errors[0]).toMatchObject({
+      message: `acquisition cleanup failed`,
+      cause: firstCleanup,
+    })
+    expect(aggregate.errors[1]).toMatchObject({
+      message: `live query cleanup failed`,
+      cause: secondCleanup,
+    })
+    expect(releases).toEqual([`acquisition`, `live query`, `source collection`])
+  })
+
   it(`applies loaded rows when no mutation is persisting`, async () => {
     await expectPersistingLoadIsApplied(false)
   })
@@ -1314,6 +1773,10 @@ describe(`loadSubset application and cancellation`, () => {
 
   it(`keeps an unrelated stream commit parked during a subset acquisition`, async () => {
     await expectConcurrentStreamCommitStaysParked()
+  })
+
+  it(`rejects the controlled subset transport when its applied receipt is canceled`, async () => {
+    await expectConcurrentStreamCommitStaysParked(true)
   })
 
   it(`settles a subset receipt after a later immediate commit applies it`, async () => {

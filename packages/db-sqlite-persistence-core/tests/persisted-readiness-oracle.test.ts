@@ -178,10 +178,15 @@ async function checkWithCleanup(
  * derived-query/client-stream failure rejects false local fallback. ORC-009 maps model
  * outcome `ready` to completed persisted restore; it is not Collection status.
  * ORC-010 preserves a primary mismatch and distinct cleanup failures through
- * checkWithCleanup. ORC-011 has no named
- * shared-fault hypothesis requiring another model formulation. ORC-012 records
- * the bounded contract, driver, wrong-answer checks, and uncovered histories
- * here and in the coverage map; it does not claim all network histories.
+ * checkWithCleanup. ORC-011 has no named shared-fault hypothesis requiring
+ * another model formulation. ORC-012 records the bounded contract, driver,
+ * wrong-answer checks, and uncovered histories here and in the coverage map.
+ * It does not claim all network histories.
+ * ORC-013: the joined half-ready snapshot rejects any-one-ready; the empty
+ * restore rejects row-count readiness; the 99/100-ms deadline and 50/100-ms
+ * joined deadlines reject early fallback; the restart witness rejects stale
+ * public rows while the replacement read is held. ORC-014 does not apply to a
+ * real-provider claim: this oracle explicitly ends at its controlled adapter.
  */
 describe(`persisted-readiness oracle`, () => {
   it(`preserves a failed checkpoint and a secondary cleanup failure`, async () => {
@@ -564,29 +569,50 @@ describe(`persisted-readiness oracle`, () => {
     const secondRead = deferred<void>()
     const loadResumeSnapshot = fixture.adapter.loadResumeSnapshot
     let baselineReads = 0
+    let firstReadReturned = false
+    // The obsolete sync run returns a distinct row, so a leaked publication
+    // remains observable even after the replacement restore completes.
     fixture.adapter.loadResumeSnapshot = async (id, options) => {
       if (options?.includeRows !== false) {
-        baselineReads++
-        await (baselineReads === 1 ? firstRead.promise : secondRead.promise)
+        const read = ++baselineReads
+        await (read === 1 ? firstRead.promise : secondRead.promise)
+        const snapshot = await loadResumeSnapshot(id, options)
+        if (read === 1) {
+          firstReadReturned = true
+          return {
+            ...snapshot,
+            rows: [{ key: `stale`, value: { id: `stale`, value: `obsolete` } }],
+          }
+        }
+        return snapshot
       }
       return loadResumeSnapshot(id, options)
     }
     const persisted = source(`local-restart`, fixture.adapter, true)
     const observer = createLiveQueryObserver(persisted)
-    const unsubscribe = observer.subscribe(() => {})
+    const observedData: Array<unknown> = []
+    const unsubscribe = observer.subscribe(() => {
+      observedData.push(observer.getSnapshot().data)
+    })
     await checkWithCleanup(async () => {
       await vi.waitFor(() => expect(baselineReads).toBe(1))
       await persisted.cleanup()
       persisted.startSyncImmediate()
       firstRead.resolve()
       await vi.waitFor(() => expect(baselineReads).toBe(2))
+      await vi.waitFor(() => expect(firstReadReturned).toBe(true))
+      await new Promise<void>((resolve) => setTimeout(resolve, 0))
       expect(observer.getSnapshot().persistedStatus).toBe(`loading`)
+      expect(observer.getSnapshot().data).toEqual([])
 
       secondRead.resolve()
       await vi.waitFor(() => {
         expect(observer.getSnapshot().persistedStatus).toBe(`ready`)
         expect(persisted.has(`one`)).toBe(true)
       })
+      expect(observedData).not.toContainEqual(
+        expect.arrayContaining([expect.objectContaining({ id: `stale` })]),
+      )
     }, [
       () => firstRead.resolve(),
       () => secondRead.resolve(),

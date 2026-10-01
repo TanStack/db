@@ -204,9 +204,9 @@ presence of a preferred heading, class, comment template, or helper.
 
 - **Trigger:** A change claims that an oracle is new, repaired, or comprehensively
   audited against this guide.
-- **Obligation:** The review evidence MUST record the outcome of every applicable
-  requirement from ORC-001 through ORC-011 and MUST identify the requirements
-  that do not apply.
+- **Obligation:** The review evidence MUST record the outcome of every other
+  applicable numbered requirement and MUST identify the requirements that do
+  not apply.
 - **Acceptance evidence:** Each applicable requirement has concrete evidence or
   an explicit unresolved gap. Each non-applicable requirement has a reason tied
   to its trigger.
@@ -224,6 +224,38 @@ presence of a preferred heading, class, comment template, or helper.
 - **Not required:** Copying the layer-comparison questions or review card into
   every test, answering them in their printed order, or placing the audit in the
   oracle file.
+
+### ORC-013: Distinguishing witness for a reusable boundary law
+
+- **Trigger:** A fixed or generated oracle is cited as protecting a reusable
+  conditional, threshold, or range law beyond its named examples.
+- **Obligation:** The evidence MUST show a legal witness that reaches the law's
+  premise and a nearby in-domain witness whose observation at the claimed
+  checkpoint distinguishes the stated law from a plausible wrong boundary or
+  consequence. If those witnesses are unavailable, the claim MUST be limited
+  to the tested cases, and the reusable-law gap and its owner MUST be recorded.
+- **Acceptance evidence:** The test or review record names the wrong rule and
+  shows which existing case rejects it. For a numeric threshold, cases on
+  opposite sides are insufficient if a plausible misplaced threshold still
+  produces every expected result in the tested matrix.
+- **Not required:** Random generation, a permanent mutant, or exhaustive tests
+  of every adjacent value for a deliberately bounded example.
+
+### ORC-014: Controlled-premise handoff
+
+- **Trigger:** A controlled provider or host supplies a premise material to an
+  oracle result, and that result is cited as evidence for behavior with a real
+  provider or host.
+- **Obligation:** The evidence MUST identify that premise and either point to a
+  receiving witness in which the real provider or host supplies the same
+  premise, or mark the cross-boundary claim unresolved with an owner.
+- **Acceptance evidence:** A reviewer can trace the specific event shape,
+  ordering, error, or lifecycle condition from the controlled fixture to the
+  receiving witness. A real-provider test of an unrelated ordinary case does
+  not establish the handoff.
+- **Not required:** An end-to-end run inside every component oracle. An oracle
+  whose claim is explicitly limited to the controlled boundary does not need a
+  real-provider witness to satisfy this requirement.
 
 ## A quick start
 
@@ -735,6 +767,22 @@ Contrast a provider whose job is to gather several backend pages to satisfy one 
 
 The same discipline applies to reentry. If a callback conditionally triggers the second operation, assert that the callback and trigger occurred. “If reached, check it” is a useful conditional claim, but it is not evidence that reentry was tested.
 
+ORC-013 asks a different question from whether the fixture ran: would the
+tested cases reject a plausible wrong interpretation of the reusable law? A
+conditional assertion needs a legal case where its premise is true. A finite
+threshold matrix needs a case close enough to the boundary to distinguish the
+promised cut from a plausible displaced cut. The claim can instead remain about
+the named cases; record the broader law as open rather than stretching the
+matrix's result.
+
+ORC-014 applies only when evidence crosses from a controlled premise to a
+real-provider or host claim. Name the exact premise being transferred. For
+example, a controlled callback can judge a component's response to an event;
+claiming that a real provider emits that same event under the relevant
+conditions needs a receiving witness. The two witnesses may live in different
+tests. A declared controlled-boundary limit is an honest scope, not a failed
+component oracle.
+
 ## Observe what the contract promises
 
 Reaching the right state still leaves a choice: what evidence survives the test harness?
@@ -869,6 +917,9 @@ or a claimed repair, ask:
 5. What proves the path and assertion ran? What did the mutant or fault injection actually show?
 6. Can capture, cleanup or shrinking turn this into a different failure?
 7. Which larger promises remain outside this test, and where are they tracked?
+8. If a reusable boundary law is claimed, which case rejects a nearby wrong
+   boundary? If a controlled premise supports a real-provider claim, where is
+   that exact premise received?
 
 ### Reusable boundary-law checklist
 

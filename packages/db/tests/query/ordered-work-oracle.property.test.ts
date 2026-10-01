@@ -28,8 +28,8 @@ import type { LoadSubsetOptions, SyncConfig } from '../../src/types.js'
  *
  * Row truth and work truth are different laws. An ordered query must match an
  * independent filter/sort/window recomputation. It must also avoid duplicate
- * finite requests, repeated source scans, partial initial publications, and
- * cross-source suppression when joined loads overlap or replay.
+ * finite requests, partial initial publications, and cross-source suppression
+ * when joined loads overlap or replay.
  * Direct LEFT-joined filters require a finite indexed root prefix, settlement
  * of child demand before continuation, and one complete initial publication.
  * Custom collation uses one full-source request, while an unindexed underfilled
@@ -43,16 +43,26 @@ import type { LoadSubsetOptions, SyncConfig } from '../../src/types.js'
  * buffered change still invalidates its settled prefix before callbacks run.
  * A window move started during existing joined demand waits for its later root
  * refill and publication. Joined demand cannot discard a repair continuation.
+ * The authority is `packages/db/src/query/live/ARCHITECTURE.md`, especially
+ * "Ordered requests, continuation, and recovery", "Atomic window publication",
+ * and the initial-readiness law. This owner checks the local, controlled
+ * adapter boundary for these laws. It does not establish provider collation,
+ * remote relation-hint evaluation, or arbitrary source scheduling.
  *
- * The value model is a plain sorted array. The work model records normalized
- * page and boundary requests, examined source rows, publications, and errors.
+ * The value model is a plain sorted array. The work recorder captures normalized
+ * page and boundary requests, graph schedules, publications, and errors.
  * Live Collections and Effects receive the same scenario and must agree with
  * each other and the model. Exhaustive small domains cover ties, eligibility,
  * direction, and middle-row count; generated runs vary the same grammar.
+ * The driver starts a real live-query Collection or Effect over controlled
+ * source Collections. It compares complete public rows and callback-visible
+ * publications after initial preload/demand settlement and after each named
+ * mutation or repair checkpoint. Adapter requests and work counts are separate
+ * observations; they are not public rows or evidence of remote provider work.
  *
  * Counts are contract bounds, not timing benchmarks. They pin established
- * request and scan behavior only where the test names that promise. These
- * scenarios exercise local evaluation; they do not model a remote adapter
+ * request and graph-scheduling behavior only where the test names that promise.
+ * These scenarios exercise local evaluation; they do not model a remote adapter
  * applying a relation hint.
  */
 
@@ -94,6 +104,17 @@ type ConsumerObservation = {
   live: boolean
 }
 
+// Grammar for the generated consumer-parity law: zero to three middle rows,
+// either marker eligibility for middle and last rows, equal versus distinct
+// middle ranks, and both order directions. Every combination is legal and the
+// exhaustive matrix reconstructs all 64 cells before random sampling. Removing
+// middleCount loses empty and refill histories; removing either eligibility
+// bit loses matched/underfilled alternatives; removing tied loses the leading
+// tie boundary; removing direction loses descending continuation. Counts four
+// and 40 are an adjacent fixed range probe and a larger stress probe below.
+// Negative counts, duplicate row IDs, and directions other than asc/desc are
+// invalid in this grammar.
+// "Scenario" is a model-only input description, not a runtime demand state.
 const scenarioArbitrary: fc.Arbitrary<Scenario> = fc.record({
   middleCount: fc.constantFrom(0 as const, 1 as const, 2 as const, 3 as const),
   middleEligible: fc.boolean(),
@@ -211,7 +232,13 @@ function requestFingerprint(options: LoadSubsetOptions): string {
 
 function copiedRow(row: Row): Row {
   const copy: Record<string, unknown> = { ...row }
-  for (const field of [`$key`, `$collectionId`, `$origin`, `$synced`])
+  for (const field of [
+    `$key`,
+    `$collectionId`,
+    `$origin`,
+    `$hasPendingWrites`,
+    `$synced`,
+  ])
     delete copy[field]
   return copy as Row
 }
@@ -1694,6 +1721,14 @@ async function observeHeldEffectDelta(
 }
 
 describe(`ordered source work oracle`, () => {
+  it(`reconstructs every legal small scenario exactly once`, () => {
+    expect(exhaustiveScenarios).toHaveLength(64)
+    expect(
+      new Set(exhaustiveScenarios.map((scenario) => JSON.stringify(scenario)))
+        .size,
+    ).toBe(64)
+  })
+
   it(`rejects scrambled order and partial or regressed initial publications`, () => {
     const rows: Array<Row> = [
       { id: 1, rank: 1, eligible: true, label: `first` },

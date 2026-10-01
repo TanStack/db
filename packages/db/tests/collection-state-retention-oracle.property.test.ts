@@ -208,6 +208,10 @@ async function runRetentionHistory(
   const harness = createRetentionHarness()
   const { collection } = harness
   const model = new Map<number, RetainedRow>()
+  let primaryFailure: unknown
+  let failed = false
+  let cleanupFailure: unknown
+  let cleanupFailed = false
   try {
     expectRetainedState(collection, model)
     for (const action of actions) {
@@ -345,9 +349,27 @@ async function runRetentionHistory(
       }
       expectRetainedState(collection, model)
     }
+  } catch (error) {
+    primaryFailure = error
+    failed = true
   } finally {
-    await collection.cleanup()
+    try {
+      await collection.cleanup()
+    } catch (error) {
+      cleanupFailure = error
+      cleanupFailed = true
+    }
   }
+  if (cleanupFailed) {
+    if (failed)
+      throw new AggregateError(
+        [cleanupFailure],
+        `Retention history and cleanup both failed`,
+        { cause: primaryFailure },
+      )
+    throw cleanupFailure
+  }
+  if (failed) throw primaryFailure
 }
 
 it(`retains only keys in the authoritative synced state`, async () => {
@@ -580,6 +602,7 @@ it(`publishes a virtual-state update when a restarted optimistic row is confirme
     $collectionId: string
     $key: number
     $origin: `local` | `remote`
+    $hasPendingWrites: boolean
     $synced: boolean
   }
   type ObservedChange = {
@@ -594,6 +617,7 @@ it(`publishes a virtual-state update when a restarted optimistic row is confirme
     $collectionId: row.$collectionId,
     $key: row.$key,
     $origin: row.$origin,
+    $hasPendingWrites: row.$hasPendingWrites,
     $synced: row.$synced,
   })
   const publications: Array<{
@@ -671,6 +695,7 @@ it(`publishes a virtual-state update when a restarted optimistic row is confirme
       $collectionId: collection.id,
       $key: id,
       $origin: `remote`,
+      $hasPendingWrites: false,
       $synced: true,
     })
     const localRow = (id: number): ObservedRow => ({
@@ -679,6 +704,7 @@ it(`publishes a virtual-state update when a restarted optimistic row is confirme
       $collectionId: collection.id,
       $key: id,
       $origin: `local`,
+      $hasPendingWrites: true,
       $synced: false,
     })
     const expectedPublications = [
@@ -2702,9 +2728,14 @@ const insertionPrefix: Array<OptimisticStep> = [
   { type: `edit`, key: 1, fields: { b: 2 }, optimistic: true },
   { type: `settle`, slot: 1, success: true, cascade: false },
 ]
+const acceptedSnapshotReplayProperty = {
+  'before delete': `collection-state.accepted-snapshot.before-delete`,
+  'during delete': `collection-state.accepted-snapshot.during-delete`,
+  'after rollback': `collection-state.accepted-snapshot.after-rollback`,
+} as const
 it.each(
-  [`before delete`, `during delete`, `after rollback`].flatMap((timing) =>
-    [86105, undefined].map((seed) => ({ timing, seed })),
+  ([`before delete`, `during delete`, `after rollback`] as const).flatMap(
+    (timing) => [86105, undefined].map((seed) => ({ timing, seed })),
   ),
 )(
   `retains an accepted snapshot with truncate $timing (seed $seed)`,
@@ -2760,7 +2791,9 @@ it.each(
         expect(counts.deletes).toBe(1)
         expect(counts.settlements).toBe(3)
       }),
-      { seed, numRuns: oracleRuns(30) },
+      seed === undefined
+        ? oraclePropertyOptions(30, acceptedSnapshotReplayProperty[timing])
+        : { seed, numRuns: oracleRuns(30) },
     )
   },
 )

@@ -1,5 +1,5 @@
-import { fc, test as fcTest } from '@fast-check/vitest'
-import { afterEach, describe, expect, vi } from 'vitest'
+import { fc } from '@fast-check/vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import type {
   BrowserOPFSWorkerRequest,
   BrowserOPFSWorkerResponse,
@@ -143,13 +143,19 @@ const diagnosticInput = fc.record({
   ),
 })
 
-const diagnosticSeed = Number(
-  process.env.TANSTACK_DB_OPFS_DIAGNOSTIC_ORACLE_SEED ?? 1846,
-)
+const replaySeed = process.env.TANSTACK_DB_OPFS_DIAGNOSTIC_ORACLE_SEED
+const diagnosticSeed = Number(replaySeed ?? 1846)
 const diagnosticRuns = Number(
   process.env.TANSTACK_DB_OPFS_DIAGNOSTIC_ORACLE_RUNS ?? 40,
 )
 const diagnosticPath = process.env.TANSTACK_DB_OPFS_DIAGNOSTIC_ORACLE_PATH
+const replayRequested = replaySeed !== undefined || diagnosticPath !== undefined
+const campaigns = replayRequested
+  ? [{ name: `replay`, seed: diagnosticSeed }]
+  : [
+      { name: `fixed`, seed: diagnosticSeed },
+      { name: `random`, seed: undefined },
+    ]
 
 const diagnosticExamples: Array<[DiagnosticInput]> = [
   [
@@ -202,6 +208,20 @@ const diagnosticExamples: Array<[DiagnosticInput]> = [
   ],
 ]
 
+async function checkDiagnostic(input: DiagnosticInput): Promise<void> {
+  const expectedMessage = referenceMessage(input)
+  const primary = makePrimary(input)
+  const cause = makeCause(input)
+
+  expect(await initialize(primary, cause)).toEqual({
+    type: `response`,
+    requestId: `diagnostic-oracle`,
+    ok: false,
+    code: `INTERNAL`,
+    error: expectedMessage,
+  })
+}
+
 /*
 Law/source: the README Notes section promises that SQLite open failures include
 the underlying VFS error name/message when available; without one, the primary
@@ -215,31 +235,52 @@ a mocked open_v2 rejection; call reach is asserted.
 Observed: exact response kind, request ID, status, error code, and text. Mocked
 wasm/VFS objects do not prove native open or handle release, and this does not
 cover the separate upstream partial-open race.
-Challenge/replay: six fixed examples exhaust primary kind × cause class and
-retain the original bracketed WAL-path diagnostic. Verbose FastCheck output
-retains original/reduced traces. Replay with TANSTACK_DB_OPFS_DIAGNOSTIC_ORACLE_*
-and this file's package-local Vitest command.
+Grammar: the bounded message alphabet has lengths 1–12; the six fixed examples
+reconstruct every primary kind × absent/plain/DOMException cause class. A
+non-Error cause is outside this promise. Removing either class or the absent
+case loses one of those fixed witnesses.
+Challenge/replay: the present-cause examples reject a response that drops the
+cause; the absent-cause examples reject an invented cause. Pinned examples run
+separately so both generated campaigns share one property and budget, and a
+reported shrink path selects its generated case directly. Verbose FastCheck
+output retains original/reduced traces. Set
+TANSTACK_DB_OPFS_DIAGNOSTIC_ORACLE_SEED and
+TANSTACK_DB_OPFS_DIAGNOSTIC_ORACLE_PATH for direct replay.
 */
 describe(`OPFS worker diagnostics oracle`, () => {
-  fcTest.prop([diagnosticInput], {
-    seed: diagnosticSeed,
-    numRuns: diagnosticRuns,
-    ...(diagnosticPath ? { path: diagnosticPath } : {}),
-    examples: diagnosticExamples,
-    verbose: true,
-  })(
-    `matches the independent diagnostic formatter`,
-    async (input) => {
-      const expectedMessage = referenceMessage(input)
-      const primary = makePrimary(input)
-      const cause = makeCause(input)
+  if (!replayRequested) {
+    it.each(diagnosticExamples)(
+      `preserves the pinned open-failure diagnostic (%#)`,
+      checkDiagnostic,
+    )
+  }
 
-      expect(await initialize(primary, cause)).toEqual({
+  it.skipIf(replayRequested)(
+    `rejects a diagnostic that drops an exposed VFS cause`,
+    async () => {
+      const input = diagnosticExamples[4]![0]
+      const response = await initialize(makePrimary(input), makeCause(input))
+      const expected = {
         type: `response`,
         requestId: `diagnostic-oracle`,
         ok: false,
         code: `INTERNAL`,
-        error: expectedMessage,
+        error: referenceMessage(input),
+      }
+
+      expect(response).toEqual(expected)
+      expect({ ...response, error: input.primaryMessage }).not.toEqual(expected)
+    },
+  )
+
+  it.each(campaigns)(
+    `matches the independent diagnostic formatter ($name campaign)`,
+    async ({ seed }) => {
+      await fc.assert(fc.asyncProperty(diagnosticInput, checkDiagnostic), {
+        ...(seed === undefined ? {} : { seed }),
+        numRuns: diagnosticRuns,
+        ...(diagnosticPath ? { path: diagnosticPath } : {}),
+        verbose: true,
       })
     },
     15_000,

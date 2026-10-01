@@ -36,6 +36,9 @@ const staticOracleProperties = [
   `sqlite-resume.startup-generation`,
   `collection-sync.reentrant-drain`,
   `collection-state.retention`,
+  `collection-state.accepted-snapshot.before-delete`,
+  `collection-state.accepted-snapshot.during-delete`,
+  `collection-state.accepted-snapshot.after-rollback`,
   `collection-state.queued-update-dependency`,
   `collection-state.change-event-history`,
   `collection-state.eager-index-history`,
@@ -44,6 +47,16 @@ const staticOracleProperties = [
   `collection-state.mixed-transaction`,
   `collection-state.optimistic-outcomes`,
   `collection-state.same-key`,
+  `cold-join.reconciliation`,
+  `cursor.scalar-continuation`,
+  `cursor.exact-width`,
+  `cursor.exact-local-order`,
+  `cursor.partial-width`,
+  `cursor.partial-local-order`,
+  `cursor.repeat-construction`,
+  `index-update.reference-model`,
+  `index-update.exact-identity`,
+  `index-update.custom-comparator`,
   `query-identity.compiled-output`,
   `query-identity.equality-partition`,
   `where-predicate.publication`,
@@ -55,6 +68,7 @@ const staticOracleProperties = [
   `coverage-registry.claim-churn`,
   `coverage-registry.state-machine`,
   `d2-source.exact-retractions`,
+  `d2-source.changed-restart`,
   `d2-source.disjoint-commutation`,
   `live-query-observer.granular-history`,
   `live-query-observer.wholesale-history`,
@@ -168,6 +182,74 @@ const refinementProperties = Array.from(
   { length: 11 },
   (_, index) => `load-subset-refinement.${1_779_001 + index}`,
 )
+const paginationMatrixProperties = [`window`, `state`].flatMap((family) =>
+  Array.from(
+    { length: 8 },
+    (_, index) => `pagination.matrix.${family}-${index}`,
+  ),
+)
+
+// Each includes matrix cell owns a distinct replay coordinate. Keep this
+// finite registry in step with includes-oracle.property.test.ts.
+const includesMatrixProperties: Array<string> = []
+for (const shape of [
+  `ancestor-descendant`,
+  `descendant-ancestor`,
+  `sibling`,
+  `cross-branch`,
+  `root`,
+])
+  includesMatrixProperties.push(`includes.matrix.independent-${shape}`)
+for (const history of [`fresh`, `restore`, `merge-split`, `retired`]) {
+  includesMatrixProperties.push(`includes.matrix.destination-${history}`)
+}
+for (const depth of [2, 3, 4]) {
+  for (const branch of [0, 1]) {
+    includesMatrixProperties.push(
+      `includes.matrix.retired-route-${depth}-${branch}`,
+      `includes.matrix.intra-batch-route-${depth}-${branch}`,
+    )
+  }
+}
+for (const depth of [3, 4]) {
+  for (let level = 1; level <= depth - 2; level++) {
+    for (const branch of [0, 1]) {
+      includesMatrixProperties.push(
+        `includes.matrix.moved-child-${depth}-${level}-${branch}`,
+      )
+    }
+  }
+}
+for (const publicId of [`same`, `new`]) {
+  for (const route of [`handoff`, `fresh`]) {
+    for (const update of [`route-only`, `route-and-position`]) {
+      includesMatrixProperties.push(
+        `includes.matrix.batch-${publicId}-${route}-${update}`,
+      )
+    }
+  }
+}
+includesMatrixProperties.push(`includes.matrix.flat-materialization`)
+for (const depth of [1, 2, 3, 4]) {
+  includesMatrixProperties.push(`includes.matrix.full-row-${depth}`)
+  for (const transition of [`reparent`, `rekey`]) {
+    for (let level = 1; level <= depth; level++) {
+      includesMatrixProperties.push(
+        `includes.matrix.visible-${depth}-${transition}-${level}`,
+      )
+    }
+  }
+  for (const first of [`reparent`, `rekey`]) {
+    for (const second of [`reparent`, `rekey`]) {
+      if (depth === 1 && (first === `rekey` || second === `rekey`)) continue
+      for (const branch of [0, 1]) {
+        includesMatrixProperties.push(
+          `includes.matrix.transition-${depth}-${first}-${second}-${branch}`,
+        )
+      }
+    }
+  }
+}
 
 export function validateOraclePropertyRegistry(
   properties: ReadonlyArray<string>,
@@ -186,6 +268,8 @@ export const registeredOracleProperties = validateOraclePropertyRegistry([
   ...staticOracleProperties,
   ...publicationProperties,
   ...refinementProperties,
+  ...paginationMatrixProperties,
+  ...includesMatrixProperties,
 ])
 
 function assertRegisteredOracleProperty(property: string): void {

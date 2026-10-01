@@ -27,10 +27,14 @@ import type { ControlledCollection } from './includes-oracle-helpers.js'
 /**
  * # How can a parent value cross a nested query without becoming user data?
  *
+ * Contract authority: `packages/db/src/query/live/ARCHITECTURE.md`, especially
+ * Route-context transport and normative route, nested-propagation, and
+ * publication laws.
+ *
  * A correlated include needs values from its lexical parent. The compiler
  * carries that route context through filters, projections, joins, aggregates,
- * unions, query references, and windows. The context belongs to the control
- * plane. User callbacks and query results must never see its private metadata.
+ * unions, query references, and windows. The context is internal compiler
+ * metadata. User callbacks and query results must never see it.
  *
  * This oracle states five laws:
  *
@@ -46,7 +50,8 @@ import type { ControlledCollection } from './includes-oracle-helpers.js'
  * Each grammar family has a small JavaScript model for its own result. The
  * production side compiles the matching live query and crosses the full
  * boundary. The suite expands the grammar across three materialization forms
- * and three checkpoints for 819 explicit observations.
+ * and three checkpoints for 819 explicit observations. This finite matrix does
+ * not establish arbitrary query structures, values, or update histories.
  *
  * This suite owns route-context transport and public-data hygiene. The temporal
  * oracle owns demand lifetime. The publication oracle owns coherent callbacks.
@@ -85,15 +90,13 @@ test('carries dotted and nested parent fields through one include', async () => 
       ),
     })),
   )
-  try {
+  await runWithCleanup(live, [parents, children], async () => {
     await live.preload()
     expect(live.get(1)?.children).toEqual([{ id: 10, flat: 11, nested: 22 }])
 
     parents.write(`update`, { id: 1, 'a.b': 33, a: { b: 44 } })
     expect(live.get(1)?.children).toEqual([{ id: 10, flat: 33, nested: 44 }])
-  } finally {
-    await cleanup(live, [parents, children])
-  }
+  })
 })
 
 test('carries both parent paths through nested includes', async () => {
@@ -129,15 +132,13 @@ test('carries both parent paths through nested includes', async () => {
       ),
     })),
   )
-  try {
+  await runWithCleanup(live, [parents, children, grandchildren], async () => {
     await live.preload()
     expect(live.toArray).toHaveLength(1)
     expect(live.toArray[0]?.children).toEqual([
       { id: 10, grandchildren: [{ id: 100, flat: 11, nested: 22 }] },
     ])
-  } finally {
-    await cleanup(live, [parents, children, grandchildren])
-  }
+  })
 })
 
 test('keeps dotted ancestor aliases distinct in nested includes', async () => {
@@ -181,15 +182,17 @@ test('keeps dotted ancestor aliases distinct in nested includes', async () => {
         ),
       })),
   )
-  try {
-    await live.preload()
-    expect(live.toArray).toHaveLength(1)
-    expect(live.toArray[0]?.children).toEqual([
-      { id: 10, grandchildren: [{ id: 100, flat: 11, nested: 22 }] },
-    ])
-  } finally {
-    await cleanup(live, [dotted, nested, children, grandchildren])
-  }
+  await runWithCleanup(
+    live,
+    [dotted, nested, children, grandchildren],
+    async () => {
+      await live.preload()
+      expect(live.toArray).toHaveLength(1)
+      expect(live.toArray[0]?.children).toEqual([
+        { id: 10, grandchildren: [{ id: 100, flat: 11, nested: 22 }] },
+      ])
+    },
+  )
 })
 
 test('routes dotted and nested include result paths independently', async () => {
@@ -225,23 +228,25 @@ test('routes dotted and nested include result paths independently', async () => 
       ),
     })),
   )
-  try {
-    await live.preload()
-    expect(live.toArray).toHaveLength(1)
-    expect(live.toArray[0]?.['a.b']).toEqual([{ id: 10 }])
-    expect(live.toArray[0]?.a.b).toEqual([{ id: 20 }])
+  await runWithCleanup(
+    live,
+    [parents, flatChildren, nestedChildren],
+    async () => {
+      await live.preload()
+      expect(live.toArray).toHaveLength(1)
+      expect(live.toArray[0]?.['a.b']).toEqual([{ id: 10 }])
+      expect(live.toArray[0]?.a.b).toEqual([{ id: 20 }])
 
-    parents.write(`update`, { id: 1, flatKey: 2, nestedKey: 1 })
-    expect(live.toArray[0]?.['a.b']).toEqual([])
-    expect(live.toArray[0]?.a.b).toEqual([])
+      parents.write(`update`, { id: 1, flatKey: 2, nestedKey: 1 })
+      expect(live.toArray[0]?.['a.b']).toEqual([])
+      expect(live.toArray[0]?.a.b).toEqual([])
 
-    flatChildren.write(`insert`, { id: 11, parentId: 2 })
-    nestedChildren.write(`insert`, { id: 21, parentId: 1 })
-    expect(live.toArray[0]?.['a.b']).toEqual([{ id: 11 }])
-    expect(live.toArray[0]?.a.b).toEqual([{ id: 21 }])
-  } finally {
-    await cleanup(live, [parents, flatChildren, nestedChildren])
-  }
+      flatChildren.write(`insert`, { id: 11, parentId: 2 })
+      nestedChildren.write(`insert`, { id: 21, parentId: 1 })
+      expect(live.toArray[0]?.['a.b']).toEqual([{ id: 11 }])
+      expect(live.toArray[0]?.a.b).toEqual([{ id: 21 }])
+    },
+  )
 })
 
 type MaterializationForm = (typeof materializationForms)[number]
@@ -257,7 +262,21 @@ const checkpoints = [`initial`, `parent-update`, `child-update`] as const
 
 // These axes name semantic boundaries, not implementation functions. Adding a
 // compiler feature means adding its boundary here or stating why it cannot
-// carry correlated context.
+// carry correlated context. Each declared tuple gets one named test below;
+// the path-specific witnesses above reconstruct the separate dotted-path cases.
+//
+// Removing a family loses a distinct question: field versus whole-parent
+// projection; unmatched versus null correlation; immediate versus ancestor
+// scope; grouping versus aggregate placement; recursive boundary versus
+// evaluation phase; join-key side versus correlation attachment; union form;
+// derived-result boundary versus selection and nullability; user-name location
+// versus boundary and spelling; or public-surface shape. Within a family, the
+// asserted parent and child changes distinguish route reuse from recomputation.
+// The fixtures bound the range to small finite source Collections, three public
+// forms, and the listed updates. New numeric values with the same relations
+// change parameters, while arbitrary path segments or deeper recursive shapes
+// require new grammar rules. Ancestor alias shadowing and compiled
+// Collection-valued functional inputs are invalid query forms and excluded.
 const routeContextGrammar = {
   parentProjection: {
     shapes: [`field`, `whole-row`] as const,
@@ -474,9 +493,55 @@ const grammarCells: Array<GrammarCell> = [
 async function cleanup(
   live: Cleanable,
   sources: Array<{ collection: Cleanable }>,
+): Promise<Array<Error>> {
+  const failures: Array<Error> = []
+  try {
+    await live.cleanup()
+  } catch (error) {
+    failures.push(
+      new Error(`live-query Collection cleanup failed`, { cause: error }),
+    )
+  }
+  const sourceResults = await Promise.allSettled(
+    sources.map(({ collection }) =>
+      Promise.resolve().then(() => collection.cleanup()),
+    ),
+  )
+  for (const [index, result] of sourceResults.entries()) {
+    if (result.status === `rejected`) {
+      failures.push(
+        new Error(`source Collection ${index} cleanup failed`, {
+          cause: result.reason,
+        }),
+      )
+    }
+  }
+  return failures
+}
+
+async function runWithCleanup(
+  live: Cleanable,
+  sources: Array<{ collection: Cleanable }>,
+  run: () => Promise<void>,
 ): Promise<void> {
-  await live.cleanup()
-  await Promise.all(sources.map(({ collection }) => collection.cleanup()))
+  const outcome = await Promise.resolve()
+    .then(run)
+    .then(
+      () => ({ ok: true }) as const,
+      (error: unknown) => ({ ok: false, error }) as const,
+    )
+  const cleanupFailures = await cleanup(live, sources)
+  if (!outcome.ok) {
+    if (cleanupFailures.length > 0) {
+      throw new AggregateError(cleanupFailures, `Oracle cleanup also failed`, {
+        cause: outcome.error,
+      })
+    }
+    throw outcome.error
+  }
+  if (cleanupFailures.length > 0) {
+    throw new AggregateError(cleanupFailures, `Oracle cleanup failed`)
+  }
 }
 
 function createGrammarCollection<T extends { id: number }>(
@@ -603,7 +668,7 @@ async function runParentProjectionCell({
     }
   }
 
-  try {
+  await runWithCleanup(live, [parents, children], async () => {
     await live.preload()
     assertParents()
 
@@ -613,9 +678,7 @@ async function runParentProjectionCell({
 
     children.write(`insert`, { id: 30, parentGroup: 1 })
     assertParents()
-  } finally {
-    await cleanup(live, [parents, children])
-  }
+  })
 }
 
 async function runCorrelationDomainCell({
@@ -658,7 +721,7 @@ async function runCorrelationDomainCell({
   }
   const assertResult = () => expectEveryForm(live.get(1)!, ids, expected())
 
-  try {
+  await runWithCleanup(live, [parents, children], async () => {
     await live.preload()
     assertResult()
 
@@ -667,9 +730,7 @@ async function runCorrelationDomainCell({
 
     children.write(`insert`, { id: 30, parentGroup: 1 })
     assertResult()
-  } finally {
-    await cleanup(live, [parents, children])
-  }
+  })
 }
 
 async function runLexicalScopeCell({ scope }: LexicalScopeCell): Promise<void> {
@@ -717,7 +778,7 @@ async function runLexicalScopeCell({ scope }: LexicalScopeCell): Promise<void> {
         .sort((left, right) => left - right)
     }
 
-    try {
+    await runWithCleanup(live, [parents, children, grandchildren], async () => {
       await live.preload()
       for (const parent of parents.collection.toArray) {
         expectEveryForm(live.get(parent.id)!, ids, expected(parent.id))
@@ -736,9 +797,7 @@ async function runLexicalScopeCell({ scope }: LexicalScopeCell): Promise<void> {
       for (const parent of parents.collection.toArray) {
         expectEveryForm(live.get(parent.id)!, ids, expected(parent.id))
       }
-    } finally {
-      await cleanup(live, [parents, children, grandchildren])
-    }
+    })
     return
   }
 
@@ -817,7 +876,7 @@ async function runLexicalScopeCell({ scope }: LexicalScopeCell): Promise<void> {
     }
   }
 
-  try {
+  await runWithCleanup(live, [parents, children, grandchildren], async () => {
     await live.preload()
     assertNestedProduct(1)
     assertNestedProduct(2)
@@ -829,9 +888,7 @@ async function runLexicalScopeCell({ scope }: LexicalScopeCell): Promise<void> {
     grandchildren.write(`insert`, { id: 300, parentGroup: 10, value: 2 })
     assertNestedProduct(1)
     assertNestedProduct(2)
-  } finally {
-    await cleanup(live, [parents, children, grandchildren])
-  }
+  })
 }
 
 async function runAggregationCell({
@@ -893,7 +950,7 @@ async function runAggregationCell({
   const project = (rows: Iterable<{ score: number }>) =>
     [...rows].map(({ score }) => score)
 
-  try {
+  await runWithCleanup(live, [parents, children], async () => {
     await live.preload()
     for (const parent of parents.collection.toArray) {
       expectEveryForm(live.get(parent.id)!, project, expected(parent.id))
@@ -907,9 +964,7 @@ async function runAggregationCell({
     for (const parent of parents.collection.toArray) {
       expectEveryForm(live.get(parent.id)!, project, expected(parent.id))
     }
-  } finally {
-    await cleanup(live, [parents, children])
-  }
+  })
 }
 
 type CandidateRow = {
@@ -923,6 +978,9 @@ async function runRecursiveSourceCell({
   phase,
 }: RecursiveSourceCell): Promise<void> {
   const name = `${boundary}-${phase}`
+  // The order-window cell gives two parents opposite sort directions over the
+  // same candidates. Routing only after the window would select the same rows
+  // for both parents and fail the initial public-result comparison.
   const initialParameter =
     phase === `order-window`
       ? [1, -1]
@@ -1252,39 +1310,41 @@ async function runRecursiveSourceCell({
     }
   }
 
-  try {
-    await live.preload()
-    assertParents()
-
-    const updatedParameter =
-      phase === `order-window`
-        ? -1
-        : phase === `projection` || phase === `aggregate`
-          ? 30
-          : phase === `having`
-            ? 1
-            : 4
-    parents.write(`update`, { id: 1, group: 1, parameter: updatedParameter })
-    assertParents()
-
-    if (phase === `having`) {
-      // Keep the rejected cut above, then make the child continuation visible.
-      parents.write(`update`, { id: 1, group: 1, parameter: 0 })
+  await runWithCleanup(
+    live,
+    [parents, candidates, left, right, anchors],
+    async () => {
+      await live.preload()
       assertParents()
-    }
 
-    const inserted = {
-      id: 50,
-      parentGroup: 1,
-      value: phase === `filter` ? 1 : 5,
-    }
-    modelRows.set(inserted.id, inserted)
-    if (boundary === `union-branch`) right.write(`insert`, inserted)
-    else candidates.write(`insert`, inserted)
-    assertParents()
-  } finally {
-    await cleanup(live, [parents, candidates, left, right, anchors])
-  }
+      const updatedParameter =
+        phase === `order-window`
+          ? -1
+          : phase === `projection` || phase === `aggregate`
+            ? 30
+            : phase === `having`
+              ? 1
+              : 4
+      parents.write(`update`, { id: 1, group: 1, parameter: updatedParameter })
+      assertParents()
+
+      if (phase === `having`) {
+        // Keep the rejected cut above, then make the child continuation visible.
+        parents.write(`update`, { id: 1, group: 1, parameter: 0 })
+        assertParents()
+      }
+
+      const inserted = {
+        id: 50,
+        parentGroup: 1,
+        value: phase === `filter` ? 1 : 5,
+      }
+      modelRows.set(inserted.id, inserted)
+      if (boundary === `union-branch`) right.write(`insert`, inserted)
+      else candidates.write(`insert`, inserted)
+      assertParents()
+    },
+  )
 }
 
 async function runUnionIdentityCell({
@@ -1383,7 +1443,7 @@ async function runUnionIdentityCell({
   }
   const assertRouteIndependentKeys = () => expect(keys(2)).toEqual(keys(1))
 
-  try {
+  await runWithCleanup(live, [parents, left, right, anchors], async () => {
     await live.preload()
     assertParents()
     assertRouteIndependentKeys()
@@ -1398,9 +1458,7 @@ async function runUnionIdentityCell({
     assertParents()
     expect(keys(1)).toEqual(initialKeys)
     assertRouteIndependentKeys()
-  } finally {
-    await cleanup(live, [parents, left, right, anchors])
-  }
+  })
 }
 
 type DerivedCandidateRow = {
@@ -1555,21 +1613,23 @@ async function runDerivedResultCell({
     }
   }
 
-  try {
-    await live.preload()
-    assertParents()
+  await runWithCleanup(
+    live,
+    [parents, candidates, left, right, anchors],
+    async () => {
+      await live.preload()
+      assertParents()
 
-    parents.write(`update`, { id: 1, group: 2 })
-    assertParents()
+      parents.write(`update`, { id: 1, group: 2 })
+      assertParents()
 
-    const updated = { id: 20, value: 30 }
-    modelRows.set(updated.id, updated)
-    if (boundary === `union-all`) right.write(`update`, updated)
-    else candidates.write(`update`, updated)
-    assertParents()
-  } finally {
-    await cleanup(live, [parents, candidates, left, right, anchors])
-  }
+      const updated = { id: 20, value: 30 }
+      modelRows.set(updated.id, updated)
+      if (boundary === `union-all`) right.write(`update`, updated)
+      else candidates.write(`update`, updated)
+      assertParents()
+    },
+  )
 }
 
 function expectNoRouteMetadata(row: object): void {
@@ -1577,8 +1637,9 @@ function expectNoRouteMetadata(row: object): void {
   expect(Object.hasOwn(row, `__parentContext`)).toBe(false)
 }
 
-// Public VirtualRowProps names these four keys, not arbitrary $-prefixed data.
+// Public VirtualRowProps names these five keys, not arbitrary $-prefixed data.
 const publicMetadataKeys = new Set([
+  `$hasPendingWrites`,
   `$synced`,
   `$origin`,
   `$key`,
@@ -1645,7 +1706,7 @@ async function runQueryRefMetadataCell(
         .select(({ candidateResult }) => candidateResult)
     })
 
-    try {
+    await runWithCleanup(live, [anchors, candidates], async () => {
       await live.preload()
       expect(captureMetadataRows(live.toArray)).toEqual([
         { id: 10, label: `ten` },
@@ -1655,9 +1716,7 @@ async function runQueryRefMetadataCell(
       expect(captureMetadataRows(live.toArray)).toEqual([
         { id: 10, label: `updated` },
       ])
-    } finally {
-      await cleanup(live, [anchors, candidates])
-    }
+    })
     return
   }
 
@@ -1697,7 +1756,7 @@ async function runQueryRefMetadataCell(
     }
   }
 
-  try {
+  await runWithCleanup(live, [parents, anchors, candidates], async () => {
     await live.preload()
     assertClean([{ id: 10, label: `ten` }])
 
@@ -1706,9 +1765,7 @@ async function runQueryRefMetadataCell(
 
     anchors.write(`update`, { id: 1, candidateId: 10, parentGroup: 2 })
     assertClean([{ id: 10, label: `ten` }])
-  } finally {
-    await cleanup(live, [parents, anchors, candidates])
-  }
+  })
 }
 
 async function runJoinCell({
@@ -1786,7 +1843,7 @@ async function runJoinCell({
     }
   }
 
-  try {
+  await runWithCleanup(live, [parents, children, tags], async () => {
     await live.preload()
     assertParents()
 
@@ -1795,9 +1852,7 @@ async function runJoinCell({
 
     children.write(`insert`, { id: 30, parentGroup: 1, tagId: 2 })
     assertParents()
-  } finally {
-    await cleanup(live, [parents, children, tags])
-  }
+  })
 }
 
 async function runNamespaceCollisionCell({
@@ -1972,7 +2027,7 @@ async function runNamespaceCollisionCell({
       expected(),
     )
 
-  try {
+  await runWithCleanup(live, [parents, children, tags], async () => {
     await live.preload()
     assertCurrent()
 
@@ -1986,9 +2041,7 @@ async function runNamespaceCollisionCell({
       label: `updated`,
     })
     assertCurrent()
-  } finally {
-    await cleanup(live, [parents, children, tags])
-  }
+  })
 }
 
 class PublicSurfaceBox {
@@ -2308,50 +2361,52 @@ async function runPublicSurfaceCell({
     }
   }
 
-  try {
-    await live.preload()
-    assertCurrent()
+  await runWithCleanup(
+    live,
+    [parents, children, candidates, anchors, tags],
+    async () => {
+      await live.preload()
+      assertCurrent()
 
-    parents.write(`update`, { id: 1, group: 2 })
-    assertCurrent()
+      parents.write(`update`, { id: 1, group: 2 })
+      assertCurrent()
 
-    if (shape === `object-query-ref-scalar`) {
-      candidates.write(`update`, { id: 20, value: third })
-    } else if (shape === `functional-having-input`) {
-      children.write(`insert`, {
-        id: 30,
-        parentGroup: 2,
-        value: third,
-        payload: { token: `third` },
-        adversarial: createAdversarialPayload(`third`),
-        symbols: { [userSymbol]: `third` },
-        label: `thirty`,
-      })
-    } else if (shape === `nested-reference`) {
-      children.write(`update`, {
-        ...children.collection.get(20)!,
-        payload: { token: `updated` },
-      })
-    } else if (shape === `adversarial-key`) {
-      children.write(`update`, {
-        ...children.collection.get(20)!,
-        adversarial: createAdversarialPayload(`updated`),
-      })
-    } else if (shape === `user-symbol`) {
-      children.write(`update`, {
-        ...children.collection.get(20)!,
-        symbols: { [userSymbol]: `updated` },
-      })
-    } else {
-      children.write(`update`, {
-        ...children.collection.get(20)!,
-        label: `updated`,
-      })
-    }
-    assertCurrent()
-  } finally {
-    await cleanup(live, [parents, children, candidates, anchors, tags])
-  }
+      if (shape === `object-query-ref-scalar`) {
+        candidates.write(`update`, { id: 20, value: third })
+      } else if (shape === `functional-having-input`) {
+        children.write(`insert`, {
+          id: 30,
+          parentGroup: 2,
+          value: third,
+          payload: { token: `third` },
+          adversarial: createAdversarialPayload(`third`),
+          symbols: { [userSymbol]: `third` },
+          label: `thirty`,
+        })
+      } else if (shape === `nested-reference`) {
+        children.write(`update`, {
+          ...children.collection.get(20)!,
+          payload: { token: `updated` },
+        })
+      } else if (shape === `adversarial-key`) {
+        children.write(`update`, {
+          ...children.collection.get(20)!,
+          adversarial: createAdversarialPayload(`updated`),
+        })
+      } else if (shape === `user-symbol`) {
+        children.write(`update`, {
+          ...children.collection.get(20)!,
+          symbols: { [userSymbol]: `updated` },
+        })
+      } else {
+        children.write(`update`, {
+          ...children.collection.get(20)!,
+          label: `updated`,
+        })
+      }
+      assertCurrent()
+    },
+  )
 }
 
 async function runGrammarCell(cell: GrammarCell): Promise<void> {
@@ -2380,6 +2435,85 @@ async function runGrammarCell(cell: GrammarCell): Promise<void> {
 }
 
 describe(`correlated include route-context transport grammar`, () => {
+  test(`public result comparison rejects wrong routes, omissions, and duplicates`, () => {
+    const expected = [{ id: 10, value: `one` }]
+    const forms: MaterializedForms<{ id: number; value: string }> = {
+      collection: { values: () => expected },
+      array: expected,
+      materialized: expected,
+    }
+    const project = (rows: Iterable<{ id: number; value: string }>) => [...rows]
+
+    expectEveryForm(forms, project, expected)
+    expect(() =>
+      expectEveryForm(
+        { ...forms, array: [{ id: 20, value: `two` }] },
+        project,
+        expected,
+      ),
+    ).toThrow()
+    expect(() =>
+      expectEveryForm(
+        { ...forms, collection: { values: () => [] } },
+        project,
+        expected,
+      ),
+    ).toThrow()
+    expect(() =>
+      expectEveryForm(
+        { ...forms, materialized: [...expected, ...expected] },
+        project,
+        expected,
+      ),
+    ).toThrow()
+  })
+
+  test(`cleanup retains the primary failure and releases every source`, async () => {
+    const primary = new Error(`route mismatch`)
+    const liveCleanupFailure = new Error(`live cleanup failed`)
+    const sourceCleanupFailure = new Error(`source cleanup failed`)
+    const released: Array<string> = []
+    const live: Cleanable = {
+      cleanup: async () => {
+        released.push(`live`)
+        throw liveCleanupFailure
+      },
+    }
+    const sources = [
+      {
+        collection: {
+          cleanup: async () => {
+            released.push(`first source`)
+            throw sourceCleanupFailure
+          },
+        },
+      },
+      {
+        collection: {
+          cleanup: async () => {
+            released.push(`second source`)
+          },
+        },
+      },
+    ]
+
+    let caught: unknown
+    try {
+      await runWithCleanup(live, sources, async () => {
+        throw primary
+      })
+    } catch (error) {
+      caught = error
+    }
+    expect(caught).toBeInstanceOf(AggregateError)
+    const failure = caught as AggregateError
+    expect(failure.cause).toBe(primary)
+    expect(failure.errors).toHaveLength(2)
+    expect((failure.errors[0] as Error).cause).toBe(liveCleanupFailure)
+    expect((failure.errors[1] as Error).cause).toBe(sourceCleanupFailure)
+    expect(released).toEqual([`live`, `first source`, `second source`])
+  })
+
   test(`metadata observations reject vacuity, extra rows, and unknown own keys`, () => {
     const expected = [{ id: 10, label: `ten` }]
     const valid = { id: 10, label: `ten` }
@@ -2477,13 +2611,11 @@ describe(`correlated include route-context transport grammar`, () => {
       })),
     )
 
-    try {
+    await runWithCleanup(live, [parents, children], async () => {
       await live.preload()
       expect(live.get(1)?.children).toEqual([{ id: 10 }])
       expect(reads).toBe(0)
-    } finally {
-      await cleanup(live, [parents, children])
-    }
+    })
   })
 
   for (const cell of grammarCells) {

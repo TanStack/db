@@ -40,10 +40,12 @@ import type {
  * not establish a backend's physical query plan, latency, complete SQL
  * predicate semantics, or behavior outside the generated and named domains.
  *
- * Plain arrays and `makeComparator` form the value oracle. Separate state
- * nodes track requested windows, authoritative coverage, pending acquisition,
- * and public batches. The production drivers cross scan and indexed routes,
- * direct and joined queries, synchronous and asynchronous delivery, reentry,
+ * Plain arrays and standalone comparisons form the value oracle. One
+ * reference-object fixture primes `makeComparator`'s runtime-local order; it
+ * checks local refinement after that order is fixed, not comparator semantics.
+ * Separate state nodes track requested windows, authoritative coverage,
+ * pending acquisition, and public batches. The production drivers cross scan
+ * and indexed routes, direct and joined queries, delivery timing, reentry,
  * restart, rejection, and abort. They compare exact request options,
  * acquisition releases, visible rows, readiness, errors, and every
  * publication cut.
@@ -914,7 +916,7 @@ async function runMultiOrderScenario(
       .select(({ row }) => ({ id: row.id })),
   )
 
-  try {
+  const work = async () => {
     await live.preload()
     try {
       expect(Array.from(live.values(), ({ id }) => id)).toEqual(
@@ -923,9 +925,11 @@ async function runMultiOrderScenario(
     } catch (error) {
       throw new TraceAssertionError(0, error)
     }
-  } finally {
-    await cleanupAll(live, source)
   }
+  await withHistoryCleanup(work, () => [
+    () => live.cleanup(),
+    () => source.cleanup(),
+  ])
 }
 
 async function runNullableCursorScenario(
@@ -981,7 +985,7 @@ async function runNullableCursorScenario(
       .limit(1),
   )
 
-  try {
+  const work = async () => {
     const preload = live.preload()
     expect(pending.length).toBeGreaterThan(0)
     // Settling one request can append its boundary-refinement request.
@@ -1006,10 +1010,14 @@ async function runNullableCursorScenario(
     } catch (error) {
       throw new TraceAssertionError(0, error)
     }
-  } finally {
-    for (const request of pending) request.deferred.resolve()
-    await cleanupAll(live, source)
   }
+  await withHistoryCleanup(work, () => [
+    () => {
+      for (const request of pending) request.deferred.resolve()
+    },
+    () => live.cleanup(),
+    () => source.cleanup(),
+  ])
 }
 
 async function runPaginationStateScenario(
@@ -1245,7 +1253,7 @@ async function runOnDemandPaginationScenario(
     { includeInitialState: false },
   )
 
-  try {
+  const work = async () => {
     const preloadPublicationCount = publications.length
     const preload = live.preload()
     expect(Array.from(live.values())).toHaveLength(0)
@@ -1374,10 +1382,12 @@ async function runOnDemandPaginationScenario(
       ),
     ).toBeLessThanOrEqual(scenario.windows.length * (expectedRows.length + 2))
     assertLoads?.(loads)
-  } finally {
-    publicationSubscription.unsubscribe()
-    await cleanupAll(live, source)
   }
+  await withHistoryCleanup(work, () => [
+    () => publicationSubscription.unsubscribe(),
+    () => live.cleanup(),
+    () => source.cleanup(),
+  ])
 }
 
 async function expectOnDemandWindowsAreCompletionOrderIndependent(
@@ -1894,9 +1904,14 @@ async function runPendingMutationScenario(
     Object.fromEntries(
       Object.entries(row).filter(
         ([key]) =>
-          ![`keep`, `$key`, `$collectionId`, `$origin`, `$synced`].includes(
-            key,
-          ),
+          ![
+            `keep`,
+            `$key`,
+            `$collectionId`,
+            `$origin`,
+            `$hasPendingWrites`,
+            `$synced`,
+          ].includes(key),
       ),
     )
   const capture = (
@@ -2478,7 +2493,13 @@ async function runPendingHistoryScenario(
     Object.fromEntries(
       Object.entries(row).filter(
         ([key]) =>
-          ![`$key`, `$collectionId`, `$origin`, `$synced`].includes(key),
+          ![
+            `$key`,
+            `$collectionId`,
+            `$origin`,
+            `$hasPendingWrites`,
+            `$synced`,
+          ].includes(key),
       ),
     )
   const capture = (
@@ -5477,29 +5498,50 @@ describe(`pagination recomputation oracle`, () => {
     },
   )
 
-  it.each(
-    paginationStructures.map((structure, index) => ({
-      name: `key=${structure.explicitPublicKeyOrder ? `explicit` : `implicit`}, filter=${structure.includeFilter ? `on` : `off`}, insertion=${structure.reverseInsertion ? `reverse` : `forward`}`,
-      structure,
-      index,
-    })),
-  )(`covers $name`, async ({ structure, index }) => {
+  for (const [index, structure] of paginationStructures.entries()) {
+    const name = `key=${structure.explicitPublicKeyOrder ? `explicit` : `implicit`}, filter=${structure.includeFilter ? `on` : `off`}, insertion=${structure.reverseInsertion ? `reverse` : `forward`}`
     const cellRuns = Math.max(1, Math.ceil(transitionScenarioRuns / 8))
-    await fc.assert(
-      fc.asyncProperty(scenarioPayloadArbitrary, async (scenario) => {
-        const complete = { ...scenario, ...structure }
-        await runPaginationScenario(complete)
-        await runOnDemandPaginationScenario(complete)
-      }),
-      { numRuns: cellRuns, seed: 16_570 + index },
+    const runWindowCell = async (scenario: PaginationScenario) => {
+      const complete = { ...scenario, ...structure }
+      await runPaginationScenario(complete)
+      await runOnDemandPaginationScenario(complete)
+    }
+    const runStateCell = async (scenario: PaginationStateScenario) => {
+      await runPaginationStateScenario({ ...scenario, ...structure })
+    }
+
+    fcTest.prop([scenarioPayloadArbitrary], {
+      numRuns: cellRuns,
+      seed: 16_570 + index,
+    })(`covers ${name} window paths for a fixed seed`, runWindowCell)
+    fcTest.prop(
+      [scenarioPayloadArbitrary],
+      oracleRandomParameters(
+        cellRuns,
+        replay,
+        `pagination.matrix.window-${index}`,
+      ),
+    )(
+      `covers ${name} window paths for a random or replayed seed [pagination.matrix.window-${index}]`,
+      runWindowCell,
     )
-    await fc.assert(
-      fc.asyncProperty(stateScenarioPayloadArbitrary, async (scenario) => {
-        await runPaginationStateScenario({ ...scenario, ...structure })
-      }),
-      { numRuns: cellRuns, seed: 16_580 + index },
+
+    fcTest.prop([stateScenarioPayloadArbitrary], {
+      numRuns: cellRuns,
+      seed: 16_580 + index,
+    })(`covers ${name} state paths for a fixed seed`, runStateCell)
+    fcTest.prop(
+      [stateScenarioPayloadArbitrary],
+      oracleRandomParameters(
+        cellRuns,
+        replay,
+        `pagination.matrix.state-${index}`,
+      ),
+    )(
+      `covers ${name} state paths for a random or replayed seed [pagination.matrix.state-${index}]`,
+      runStateCell,
     )
-  })
+  }
 
   fcTest.prop([scenarioArbitrary], {
     numRuns: orderedScenarioRuns,

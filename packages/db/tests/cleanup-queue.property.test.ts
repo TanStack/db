@@ -14,13 +14,21 @@ import { resetCleanupQueue } from './utils'
  *
  * A callback error must not stop another due callback. The contract does not
  * set callback order when one clock advance makes several callbacks due. The
- * queue must use at most one root timer.
+ * queue must use at most one root timer. These laws come from the
+ * `CleanupQueue.schedule`/`cancel` API and its documented batching contract;
+ * the elapsed GC deadline is also the `gcTime` promise recorded in
+ * `docs/contributing/oracle-reviews/issue-1796-gc-clock.md`.
  *
- * `stepModel` stores only elapsed appointments and public deliveries. It does
- * not copy the production timer, microtask, or wake-up logic. The grammar
+ * `stepModel` stores only elapsed appointments and callback deliveries.
+ * `Model.now` and `Appointment.at` use elapsed milliseconds; `Delivery.at`
+ * records the elapsed time at which the callback ran. These are model and
+ * observation values, not Collection lifecycle states. The model does not
+ * copy the production timer, microtask, or wake-up logic. The grammar
  * crosses registration, cancellation, replacement, elapsed advance, and
  * positive or negative wall-clock correction. Callback reentry is out of
- * scope.
+ * scope. So are suspend/resume, absent `performance.now()`, and timer-provider
+ * replacement while an appointment is pending. The public Collection effect
+ * of this queue is checked separately in `collection-gc-clock.test.ts`.
  */
 
 type Action =
@@ -137,6 +145,9 @@ async function runHistory(actions: Array<Action>, fault: Fault = `none`) {
     check()
     expect(vi.getTimerCount()).toBe(model.appointments.length ? 1 : 0)
   }
+  let primaryFailure: unknown
+  let failed = false
+  const cleanupErrors: Array<unknown> = []
   try {
     check()
     for (const [id, action] of actions.entries()) {
@@ -164,13 +175,34 @@ async function runHistory(actions: Array<Action>, fault: Fault = `none`) {
       check() // Registration and cancellation cannot deliver callbacks inline.
     }
     await advance(21) // Generated delays are <=20: require complete drainage.
+  } catch (error) {
+    primaryFailure = error
+    failed = true
   } finally {
     await Promise.resolve()
-    resetCleanupQueue()
-    vi.clearAllTimers()
-    errors.mockRestore()
-    vi.useRealTimers()
+    for (const cleanup of [
+      () => resetCleanupQueue(),
+      () => vi.clearAllTimers(),
+      () => errors.mockRestore(),
+      () => vi.useRealTimers(),
+    ]) {
+      try {
+        cleanup()
+      } catch (error) {
+        cleanupErrors.push(error)
+      }
+    }
   }
+  if (cleanupErrors.length > 0) {
+    throw new AggregateError(
+      cleanupErrors,
+      `cleanup queue oracle teardown failed`,
+      {
+        cause: primaryFailure,
+      },
+    )
+  }
+  if (failed) throw primaryFailure
 }
 
 const actionArbitrary: fc.Arbitrary<Action> = fc.oneof(
@@ -194,9 +226,21 @@ const actionArbitrary: fc.Arbitrary<Action> = fc.oneof(
   }),
 )
 
-// Run one stable campaign and one random campaign. Fixed witnesses retain
-// backward-step delay and forward-step early-delivery boundaries. The shared
-// oracle config accepts a seed and shrink path for replay of the random lane.
+// Grammar: 0..3 select a numeric key, its string twin, and two equal-shaped
+// object identities; delay/advance are integer milliseconds in 0..20, and
+// wall-clock corrections are integers in -1000..1000. Empty histories and
+// zero elapsed steps are legal. Fixed witnesses reconstruct a backward-step
+// delay, a forward-step early delivery, replacement plus cancellation plus
+// callback failure, and distinct key identities. Removing schedule loses
+// delivery, cancel loses suppression, explicit advance loses the intermediate
+// deadline checkpoint (the final drain still checks eventual delivery),
+// and wall-clock correction loses the monotonic-clock challenge. The throw
+// flag tests isolation when another callback is due. Negative/non-finite
+// delays and elapsed advances, and callback reentry are outside this bounded
+// grammar; a negative elapsed advance is invalid for its monotonic elapsed
+// clock. The fixed seed and seedless campaigns use the same property and run
+// budget. The shared oracle config
+// accepts a seed and shrink path for direct replay of the seedless lane.
 it.each([20260913, undefined])(
   `obeys appointment histories (seed %s)`,
   async (seed) => {
@@ -214,7 +258,9 @@ it.each([20260913, undefined])(
             [
               { kind: `schedule`, key: 0, delay: 10, throws: false },
               { kind: `stepWallClock`, offset: -1000 },
-              { kind: `advance`, elapsed: 10 },
+              // At 9 the callback is early; at 10 it is due.
+              { kind: `advance`, elapsed: 9 },
+              { kind: `advance`, elapsed: 1 },
             ],
           ],
           [
@@ -223,7 +269,9 @@ it.each([20260913, undefined])(
               { kind: `stepWallClock`, offset: 1000 },
               { kind: `schedule`, key: 1, delay: 20, throws: false },
               { kind: `advance`, elapsed: 0 },
-              { kind: `advance`, elapsed: 10 },
+              // The wall step cannot shift this elapsed-time boundary.
+              { kind: `advance`, elapsed: 9 },
+              { kind: `advance`, elapsed: 1 },
             ],
           ],
           [
@@ -237,6 +285,17 @@ it.each([20260913, undefined])(
               { kind: `advance`, elapsed: 1 },
               { kind: `schedule`, key: 0, delay: 0, throws: false },
               { kind: `advance`, elapsed: 0 },
+            ],
+          ],
+          [
+            [
+              { kind: `schedule`, key: 0, delay: 0, throws: false },
+              { kind: `schedule`, key: 1, delay: 0, throws: false },
+              { kind: `schedule`, key: 2, delay: 20, throws: false },
+              { kind: `schedule`, key: 3, delay: 20, throws: false },
+              { kind: `advance`, elapsed: 0 },
+              { kind: `cancel`, key: 2 },
+              { kind: `advance`, elapsed: 20 },
             ],
           ],
         ],
@@ -260,6 +319,6 @@ it.each([`ignore-cancel`, `lose-replacement`, `duplicate`, `late`] as const)(
         ],
         fault,
       ),
-    ).rejects.toThrow()
+    ).rejects.toMatchObject({ name: `AssertionError` })
   },
 )

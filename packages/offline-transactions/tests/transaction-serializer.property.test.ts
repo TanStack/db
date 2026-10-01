@@ -47,7 +47,9 @@ import type { PendingMutation } from '@tanstack/db'
  * cross-realm boxed values are outside current evidence. Cycles must fail
  * visibly while repeated non-cyclic references retain their values. This
  * oracle does not claim byte stability for object key order beyond JSON's
- * established rules.
+ * established rules. Temporal witnesses install controlled constructors;
+ * they do not establish behavior with a native or polyfill Temporal runtime.
+ * Retained-storage checks use FakeStorageAdapter, not browser storage.
  */
 
 type Value =
@@ -153,6 +155,7 @@ async function checkRoundtrip(
   boundary: `encoder` | `decoder` = `encoder`,
   legacy = false,
   versionTwo = false,
+  injectCleanupFailure = false,
 ) {
   const row = (index: number, revision: number, payload: Value): Row => ({
     id: `row:${index}`,
@@ -199,6 +202,7 @@ async function checkRoundtrip(
   })
   const rollback = transaction.isPersisted.promise.catch(() => undefined)
   let hasPrimaryFailure = false
+  let primaryFailure: unknown
   try {
     transaction.mutate(() => {
       edits.forEach((edit, index) => {
@@ -287,7 +291,9 @@ async function checkRoundtrip(
     }
     const serialized = serializer.serialize(offline)
     const encoded = boundary === `encoder` ? corrupt(serialized) : serialized
-    expect(JSON.parse(encoded)).toEqual(expectedWire)
+    expect(JSON.parse(encoded), `mutation wire checkpoint`).toEqual(
+      expectedWire,
+    )
     const fresh = new TransactionSerializer(registry(readers))
     // Also decode independently constructed wire data, so two matching wrong
     // halves cannot establish the format's compatibility by roundtrip alone.
@@ -324,8 +330,10 @@ async function checkRoundtrip(
     }
   } catch (error) {
     hasPrimaryFailure = true
-    throw error
-  } finally {
+    primaryFailure = error
+  }
+  let cleanupFailure: unknown
+  try {
     await cleanupOfflineOracle(
       [
         () => {
@@ -335,10 +343,31 @@ async function checkRoundtrip(
         ...[...writers, ...readers].map(
           (collection) => () => collection.cleanup(),
         ),
+        ...(injectCleanupFailure
+          ? [
+              () => {
+                throw new Error(`injected serializer cleanup failure`)
+              },
+            ]
+          : []),
       ],
-      hasPrimaryFailure,
+      false,
     )
+  } catch (error) {
+    cleanupFailure = error
   }
+  if (hasPrimaryFailure) {
+    if (cleanupFailure !== undefined)
+      throw new AggregateError(
+        cleanupFailure instanceof AggregateError
+          ? cleanupFailure.errors
+          : [cleanupFailure],
+        `Serializer oracle failed and cleanup also failed`,
+        { cause: primaryFailure },
+      )
+    throw primaryFailure
+  }
+  if (cleanupFailure !== undefined) throw cleanupFailure
 }
 
 const twin: Pair = {
@@ -1028,6 +1057,85 @@ it(`preserves prior wire meanings when reading native scalar markers`, async () 
   }
 })
 
+it(`keeps legacy pending-work records phase-free across serialization`, () => {
+  const serializer = new TransactionSerializer({})
+  const legacyWire = {
+    id: `legacy-pending`,
+    mutationFnName: `persist`,
+    mutations: [],
+    keys: [],
+    idempotencyKey: `legacy-key`,
+    createdAt: new Date(0).toISOString(),
+    retryCount: 0,
+    nextAttemptAt: 0,
+    version: 1,
+  }
+
+  const decoded = serializer.deserialize(JSON.stringify(legacyWire))
+  expect(decoded.outboxPhase).toBeUndefined()
+  const rewritten = JSON.parse(serializer.serialize(decoded)) as Record<
+    string,
+    unknown
+  >
+  expect(rewritten).not.toHaveProperty(`outboxPhase`)
+  expect(rewritten).toMatchObject(legacyWire)
+  expect(rewritten).toHaveProperty(`valueEncoding`, 3)
+})
+
+it(`round-trips a mutationFn-fulfilled deletion-pending record`, () => {
+  const serializer = new TransactionSerializer({})
+  const transaction: OfflineTransaction = {
+    id: `deletion-pending`,
+    mutationFnName: `persist`,
+    mutations: [],
+    keys: [],
+    idempotencyKey: `stable-key`,
+    createdAt: new Date(0),
+    retryCount: 0,
+    nextAttemptAt: 0,
+    outboxPhase: `deletion-pending`,
+    version: 1,
+  }
+
+  const encoded = serializer.serialize(transaction)
+  expect(JSON.parse(encoded)).toMatchObject({
+    id: transaction.id,
+    idempotencyKey: `stable-key`,
+    outboxPhase: `deletion-pending`,
+    valueEncoding: 3,
+    version: 1,
+  })
+  expect(serializer.deserialize(encoded)).toEqual(transaction)
+})
+
+it.each([null, false, 0, {}, `provider-pending`, `unknown`])(
+  `rejects malformed or unknown outbox phase %j`,
+  (outboxPhase) => {
+    const serializer = new TransactionSerializer({})
+    const wire = {
+      id: `invalid-phase`,
+      mutationFnName: `persist`,
+      mutations: [],
+      keys: [],
+      idempotencyKey: `stable-key`,
+      createdAt: new Date(0).toISOString(),
+      retryCount: 0,
+      nextAttemptAt: 0,
+      outboxPhase,
+      version: 1,
+    }
+    expect(() => serializer.deserialize(JSON.stringify(wire))).toThrow(
+      /Unsupported transaction outbox phase/,
+    )
+    expect(() =>
+      serializer.serialize({
+        ...wire,
+        createdAt: new Date(0),
+      } as unknown as OfflineTransaction),
+    ).toThrow(/Unsupported transaction outbox phase/)
+  },
+)
+
 it(`fails visibly with the retained native scalar transaction id`, async () => {
   const collection = createCollection<{ id: string; due: unknown }>({
     id: `native-scalar-missing-runtime`,
@@ -1238,6 +1346,16 @@ const pinned: Array<Edit> = [
     }
   }),
 ]
+// Grammar controls: the pinned history is a legal ten-edit reconstruction of
+// every edit kind, both registry slots, Date/string twins, marker escapes, and
+// an own __proto__ key. Dropping one of those axes loses a distinct wire or
+// restart observation. Generated trees add empty and nested arrays/objects,
+// with depth two and at most three children or keys; current records admit
+// zero edits, while compatibility records start at one. Cycles and malformed
+// markers are outside this valid-tree grammar and have rejection witnesses
+// above. The generated edit bound includes the complete pinned history. A
+// never-escape rule fails its marker-shaped user object; an always-escape rule
+// fails its ordinary object with an own __proto__ key at the wire checkpoint.
 // This package's test root is separate from core's named replay portfolio.
 // Keep a local replay entry point rather than importing files outside rootDir.
 const {
@@ -1248,36 +1366,111 @@ const {
   prefix: `OFFLINE_ORACLE`,
   defaultRuns: 100,
 })
-it.each([20260914, undefined])(
+// An explicit seed selects direct replay. Normal runs keep both the fixed and
+// unseeded campaigns with the same generator, budget, and assertions.
+const campaigns = (fixedSeed: number): Array<number | undefined> =>
+  replaySeed === undefined ? [fixedSeed, undefined] : [undefined]
+
+const mutationEdits = fc.array(
+  fc.record({
+    kind: fc.constantFrom<Edit[`kind`]>(`insert`, `update`, `delete`),
+    slot: fc.integer({ min: 0, max: 1 }),
+    before: tree(2),
+    after: tree(2),
+  }),
+  { maxLength: pinned.length },
+)
+const mutationTime = fc.integer({
+  min: -2000000000000,
+  max: 2000000000000,
+})
+const mutationMeaningProperty = (fault: Fault = `none`) =>
+  fc.asyncProperty(mutationEdits, mutationTime, (edits, time) =>
+    checkRoundtrip(edits, time, fault),
+  )
+
+it.each(campaigns(20260914))(
   `preserves mutation wire meaning across restart (seed %s)`,
   async (seed) => {
-    await fc.assert(
-      fc.asyncProperty(
-        fc.array(
-          fc.record({
-            kind: fc.constantFrom<Edit[`kind`]>(`insert`, `update`, `delete`),
-            slot: fc.integer({ min: 0, max: 1 }),
-            before: tree(2),
-            after: tree(2),
-          }),
-          { maxLength: 6 },
-        ),
-        fc.integer({ min: -2000000000000, max: 2000000000000 }),
-        (edits, time) => checkRoundtrip(edits, time),
-      ),
-      {
-        numRuns,
-        seed: seed ?? replaySeed,
-        ...(seed === undefined && replayPath !== undefined
-          ? { path: replayPath }
-          : {}),
-        examples: [[pinned, 1704067200000]],
-      },
-    )
+    await fc.assert(mutationMeaningProperty(), {
+      numRuns,
+      seed: seed ?? replaySeed,
+      ...(seed === undefined && replayPath !== undefined
+        ? { path: replayPath }
+        : {}),
+      examples: [[pinned, 1704067200000]],
+    })
   },
 )
 
-it.each([20260915, undefined])(
+it(`replays a shrunk mutation-wire failure at the same checkpoint`, async () => {
+  // The fault drops a mutation field after the real encoder runs. It leaves
+  // zero-edit histories green, so fast-check must find and shrink a generated
+  // history that reaches the wire assertion. The environment variables permit
+  // a command to run the recorded seed/path without repeating the capture.
+  // Captured replay: OFFLINE_ORACLE_SEED=20260914
+  // OFFLINE_ORACLE_PATH=0:1:0:0:0:1:1:1:1:1 pnpm exec vitest run
+  // tests/transaction-serializer.property.test.ts --configLoader runner
+  // -t 'replays a shrunk mutation-wire failure'
+  const property = mutationMeaningProperty(`omit-changes`)
+  const captured = await fc.check(property, {
+    seed: replaySeed ?? 20260914,
+    ...(replayPath === undefined ? {} : { path: replayPath }),
+    numRuns,
+  })
+  expect(captured.failed).toBe(true)
+  expect(captured.errorInstance).toMatchObject({ name: `AssertionError` })
+  expect(captured.error).toContain(`mutation wire checkpoint`)
+  if (replaySeed !== undefined) return
+
+  expect(captured.numShrinks).toBeGreaterThan(0)
+  expect(captured.counterexamplePath).toMatch(/^\d+(?::\d+)*$/)
+  const capturedPath = captured.counterexamplePath
+  if (capturedPath === null) throw new Error(`Missing captured shrink path`)
+  const original = await fc.check(property, {
+    seed: captured.seed,
+    numRuns,
+    endOnFailure: true,
+  })
+  expect(original.failed).toBe(true)
+  expect(original.errorInstance).toMatchObject({ name: `AssertionError` })
+  expect(original.error).toContain(`mutation wire checkpoint`)
+  const replayed = await fc.check(property, {
+    seed: captured.seed,
+    path: capturedPath,
+    numRuns,
+  })
+  expect(replayed.failed).toBe(true)
+  expect(replayed.counterexample).toEqual(captured.counterexample)
+  expect(replayed.errorInstance).toMatchObject({ name: `AssertionError` })
+  expect(replayed.error).toContain(`mutation wire checkpoint`)
+})
+
+it(`retains the wire mismatch when cleanup also fails`, async () => {
+  let failure: unknown
+  try {
+    await checkRoundtrip(
+      [pinned[0]!],
+      0,
+      `omit-changes`,
+      `encoder`,
+      false,
+      false,
+      true,
+    )
+  } catch (error) {
+    failure = error
+  }
+  expect(failure).toBeInstanceOf(AggregateError)
+  const aggregate = failure as AggregateError
+  expect(aggregate.cause).toMatchObject({ name: `AssertionError` })
+  expect(String(aggregate.cause)).toContain(`mutation wire checkpoint`)
+  expect(aggregate.errors).toEqual([
+    new Error(`injected serializer cleanup failure`),
+  ])
+})
+
+it.each(campaigns(20260915))(
   `reads unversioned Date-marker records across restart (seed %s)`,
   async (seed) => {
     await fc.assert(
@@ -1289,7 +1482,7 @@ it.each([20260915, undefined])(
             before: leaf,
             after: leaf,
           }),
-          { minLength: 1, maxLength: 6 },
+          { minLength: 1, maxLength: pinned.length },
         ),
         async (edits) => {
           // Old records had no object escape. Use only unambiguous legacy trees,
@@ -1325,7 +1518,7 @@ it.each([20260915, undefined])(
   },
 )
 
-it.each([20260916, undefined])(
+it.each(campaigns(20260916))(
   `reads version-two escaped values across restart (seed %s)`,
   async (seed) => {
     await fc.assert(
@@ -1337,7 +1530,7 @@ it.each([20260916, undefined])(
             before: tree(2),
             after: tree(2),
           }),
-          { minLength: 1, maxLength: 6 },
+          { minLength: 1, maxLength: pinned.length },
         ),
         async (edits) =>
           checkRoundtrip(edits, 0, `none`, `encoder`, false, true),

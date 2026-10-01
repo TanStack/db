@@ -4522,6 +4522,14 @@ describe(`CollectionSubscription replay oracle`, () => {
     runReplayScenario,
   )
 
+  fcTest.prop([sequentialReplayScenarioArbitrary], {
+    numRuns: generatedRuns,
+    seed: 1761,
+  })(
+    `matches synchronous, asynchronous, and partial-failure replay laws for a fixed seed`,
+    runSequentialReplayScenario,
+  )
+
   fcTest.prop(
     [sequentialReplayScenarioArbitrary],
     oracleRandomParameters(
@@ -4530,7 +4538,7 @@ describe(`CollectionSubscription replay oracle`, () => {
       `subscription-replay.sequential`,
     ),
   )(
-    `matches synchronous, asynchronous, and partial-failure replay laws`,
+    `matches synchronous, asynchronous, and partial-failure replay laws for a random or replayed seed`,
     runSequentialReplayScenario,
   )
 

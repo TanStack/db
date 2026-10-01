@@ -2,7 +2,10 @@ import { QueryClient } from '@tanstack/query-core'
 import fc from 'fast-check'
 import { describe, expect, it, vi } from 'vitest'
 import { createDeferred } from '../../db/src/deferred.js'
-import { oraclePropertyOptions } from '../../db/tests/oracle-config.js'
+import {
+  oraclePropertyOptions,
+  readOracleRunConfig,
+} from '../../db/tests/oracle-config.js'
 import { createCursorPager } from '../src/index.js'
 import { createBackend } from './cursor-pagination/backend.js'
 import { expectedRows } from './cursor-pagination/model.js'
@@ -13,17 +16,39 @@ import type { Row } from './cursor-pagination/model.js'
  * # When may cached cursor pages answer a later read?
  *
  * Cached pages belong to one query key and one immutable backend sequence.
- * Fresh reads may reuse them. Invalidation, expiry, forced refresh, garbage
- * collection, or protocol failure starts a new sequence before its rows become
- * authoritative. Cancellation stops the reader without poisoning later work.
+ * Fresh reads may reuse them. Invalidation, expiry, or garbage collection
+ * requires a new sequence for a later read. Cancellation stops the reader
+ * without poisoning later work.
  *
  * A fake clock and real QueryClient drive those boundaries. The reference keeps
  * only the permitted source snapshot and freshness deadline; it does not model
  * Query pages, retryers, observers, or garbage collection. Every returned
  * window still compares with the full-relation value model.
+ *
+ * The cache contract comes from cursor-pagination/README.md and QueryClient's
+ * public cache operations. The controlled backend holds each sequence stable;
+ * this oracle does not establish snapshot behavior for changing HTTP endpoints.
+ * Window values, cache publication, browser acquisition, and QueryCollection
+ * integration have separate owners in oracle-coverage.md.
  */
 
 const scope = { group: undefined, descending: false }
+const fixedSeed = 1_779_014
+const replay = readOracleRunConfig()
+
+/** Both ordinary campaigns exercise the same property and run budget. */
+async function assertCacheProperty<Ts>(
+  property: fc.IAsyncProperty<Ts>,
+  runs: number,
+  name: string,
+): Promise<void> {
+  if (replay.replayPath !== undefined && replay.replayProperty !== name) return
+  const options = oraclePropertyOptions(runs, name)
+  if (replay.replaySeed === undefined)
+    await fc.assert(property, { ...options, seed: fixedSeed })
+  await fc.assert(property, options)
+}
+
 const makeRows = (count: number, version = 0): Array<Row> =>
   Array.from({ length: count }, (_, id) => ({
     id,
@@ -53,7 +78,7 @@ describe(`cursor cache lifecycle`, () => {
   ] as const)(
     `preserves full windows with %s %s defaults`,
     async (level, mode) => {
-      await fc.assert(
+      await assertCacheProperty(
         fc.asyncProperty(
           fc.integer({ min: 1, max: 4 }),
           fc.integer({ min: 1, max: 3 }),
@@ -108,7 +133,8 @@ describe(`cursor cache lifecycle`, () => {
             }
           },
         ),
-        oraclePropertyOptions(50, `cursor-pagination.defaults`),
+        50,
+        `cursor-pagination.defaults`,
       )
     },
   )
@@ -116,7 +142,7 @@ describe(`cursor cache lifecycle`, () => {
   it.each([`initial`, `growth`, `refresh`] as const)(
     `cancellation stops a held %s acquisition and permits later recovery`,
     async (phase) => {
-      await fc.assert(
+      await assertCacheProperty(
         fc.asyncProperty(
           fc.integer({ min: 1, max: 4 }),
           fc.integer({ min: 1, max: 3 }),
@@ -228,7 +254,8 @@ describe(`cursor cache lifecycle`, () => {
             }
           },
         ),
-        oraclePropertyOptions(50, `cursor-pagination.cancellation`),
+        50,
+        `cursor-pagination.cancellation`,
       )
     },
   )
@@ -266,6 +293,41 @@ describe(`cursor cache lifecycle`, () => {
         vi.restoreAllMocks()
         client.clear()
       }
+    }
+  })
+
+  it(`reuses a cache one millisecond before expiry and refreshes at expiry`, async () => {
+    // A 99 ms cutoff refetches too soon; a 101 ms cutoff reuses stale rows.
+    vi.useFakeTimers({ toFake: [`Date`] })
+    vi.setSystemTime(1000)
+    const client = new QueryClient({
+      defaultOptions: { queries: { retry: false, gcTime: Infinity } },
+    })
+    const key = [`expiry-edge`]
+    const initial = makeRows(2)
+    let source = initial
+    let calls = 0
+    const pager = createCursorPager({
+      queryClient: client,
+      queryKey: key,
+      staleTime: 100,
+      fetchPage: () => {
+        calls++
+        return Promise.resolve({ rows: source, nextCursor: null })
+      },
+    })
+    try {
+      await checkWindow(pager, initial, 2)
+      source = makeRows(2, 1)
+      vi.setSystemTime(1099)
+      await checkWindow(pager, initial, 2)
+      expect(calls).toBe(1)
+      vi.setSystemTime(1100)
+      await checkWindow(pager, source, 2)
+      expect(calls).toBe(2)
+    } finally {
+      client.clear()
+      vi.useRealTimers()
     }
   })
 
@@ -316,9 +378,16 @@ describe(`cursor cache lifecycle`, () => {
   })
 
   it(`reuses pages until expiry or invalidation across generated histories`, async () => {
+    // Grammar: 1–12 source rows, 1–5 rows per backend page, and 1–25 actions.
+    // Read checks reuse; grow checks append and its new freshness deadline;
+    // age, invalidate, and remove cross the three refresh causes; change makes
+    // old and new snapshots observably different. These actions reconstruct
+    // reuse, growth, expiry, invalidation, and removal histories. A source
+    // change never mutates an already opened backend sequence. Foreign cursor
+    // delivery is excluded here and belongs to the protocol boundary owner.
     vi.useFakeTimers({ toFake: [`Date`] })
     try {
-      await fc.assert(
+      await assertCacheProperty(
         fc.asyncProperty(
           fc.integer({ min: 1, max: 12 }),
           fc.integer({ min: 1, max: 5 }),
@@ -406,7 +475,8 @@ describe(`cursor cache lifecycle`, () => {
             }
           },
         ),
-        oraclePropertyOptions(100, `cursor-pagination.cache`),
+        100,
+        `cursor-pagination.cache`,
       )
     } finally {
       vi.useRealTimers()
@@ -433,7 +503,12 @@ describe(`cursor cache lifecycle`, () => {
         await pager.read({ limit: 3 })
         expect(backend.calls).toHaveLength(2)
         expect(client.getQueryData(key)).toBeDefined()
-        await vi.advanceTimersByTimeAsync(gcTime + 1)
+        // The 25 ms case rejects a cutoff moved one millisecond either way.
+        if (gcTime > 0) {
+          await vi.advanceTimersByTimeAsync(gcTime - 1)
+          expect(client.getQueryData(key)).toBeDefined()
+        }
+        await vi.advanceTimersByTimeAsync(1)
         expect(client.getQueryData(key)).toBeUndefined()
         expect(await pager.read({ limit: 3 })).toEqual(
           expectedRows(makeRows(6), scope, { offset: 0, limit: 3 }),

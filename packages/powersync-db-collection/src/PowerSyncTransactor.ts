@@ -46,7 +46,7 @@ export type TransactorOptions = {
  * })
  *
  * await addTx.commit()
- * await addTx.isPersisted.promise
+ * await addTx.when('settled')
  * ```
  *
  * @param transaction - The transaction containing mutations to apply

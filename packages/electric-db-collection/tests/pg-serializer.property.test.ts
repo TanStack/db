@@ -2,18 +2,112 @@ import { describe, expect, it } from 'vitest'
 import { fc, test as fcTest } from '@fast-check/vitest'
 import { serialize } from '../src/pg-serializer'
 
+// Replay one named law directly with PG_SERIALIZER_ORACLE_PROPERTY=<test name>,
+// PG_SERIALIZER_ORACLE_SEED=<reported seed>, and
+// PG_SERIALIZER_ORACLE_PATH=<reported shrink path>.
+// Example: pnpm exec vitest run tests/pg-serializer.property.test.ts -t 'mixed finite arrays retain ordered typed contents'
+const replayProperty = process.env.PG_SERIALIZER_ORACLE_PROPERTY
+const replaySeedText = process.env.PG_SERIALIZER_ORACLE_SEED
+const replayPath = process.env.PG_SERIALIZER_ORACLE_PATH
+const runsText = process.env.PG_SERIALIZER_ORACLE_RUNS ?? `100`
+const runs = Number(runsText)
+const registeredProperties = new Set<string>()
+const example = replayProperty === undefined ? it : it.skip
+
+if (!Number.isSafeInteger(runs) || runs < 1) {
+  throw new Error(`PG_SERIALIZER_ORACLE_RUNS must be a positive integer`)
+}
+if (
+  replayProperty === undefined &&
+  (replaySeedText !== undefined || replayPath !== undefined)
+) {
+  throw new Error(`PostgreSQL serializer replay requires a property name`)
+}
+if (
+  replayProperty !== undefined &&
+  (replaySeedText === undefined || replayPath === undefined)
+) {
+  throw new Error(`PostgreSQL serializer replay requires seed and path`)
+}
+const replaySeed =
+  replaySeedText === undefined ? undefined : Number(replaySeedText)
+if (
+  replaySeedText !== undefined &&
+  (replaySeedText.trim() === `` || !Number.isSafeInteger(replaySeed))
+) {
+  throw new Error(`PG_SERIALIZER_ORACLE_SEED must be an integer`)
+}
+if (replayPath !== undefined && !/^\d+(?::\d+)*$/.test(replayPath)) {
+  throw new Error(
+    `PG_SERIALIZER_ORACLE_PATH must contain colon-separated nonnegative integers`,
+  )
+}
+
+function serializerReplayOptions(
+  seed: number | undefined,
+  path: string | undefined,
+) {
+  return { numRuns: runs, seed, path }
+}
+
+function serializerProp<T>([arbitrary]: [fc.Arbitrary<T>]) {
+  return (name: string, check: (value: T) => void): void => {
+    if (registeredProperties.has(name)) {
+      throw new Error(`duplicate PostgreSQL serializer property: ${name}`)
+    }
+    registeredProperties.add(name)
+    if (replayProperty === undefined) {
+      fcTest.prop([arbitrary], { numRuns: runs, seed: 20260930 })(
+        `${name} (fixed)`,
+        check,
+      )
+      fcTest.prop([arbitrary], { numRuns: runs })(`${name} (random)`, check)
+      return
+    }
+    if (replayProperty === name) {
+      fcTest.prop([arbitrary], serializerReplayOptions(replaySeed, replayPath))(
+        `${name} (replay)`,
+        check,
+      )
+    } else {
+      // Vitest requires each describe block to register at least one test.
+      it.skip(`${name} (not requested)`, () => {})
+    }
+  }
+}
+
 /**
  * # Does PostgreSQL text serialization preserve the supported value domain?
  *
- * Scalars have direct laws: strings pass through, finite numbers round-trip
- * through strict numeric parsing, booleans use PostgreSQL tokens, nullish values
- * become empty text, and Dates produce valid ISO strings. Flat arrays preserve
- * every element, type, position, quote, slash, comma, brace, and null marker.
+ * Established scalar output examples in pg-serializer.test.ts and PostgreSQL's
+ * array text grammar supply the contract; this file extends those examples to
+ * generated values. Scalars have direct laws: strings pass through, finite
+ * numbers round-trip through strict numeric parsing, booleans use PostgreSQL
+ * tokens, nullish values become empty text, and Dates produce valid ISO
+ * strings. Flat arrays preserve every element, type, position, quote, slash,
+ * comma, brace, and null marker.
  *
  * The decoder below is an independent parser for this finite output dialect,
  * not PostgreSQL or a copy of the serializer. Generated values compare decoded
- * output with the input. Corrupt-output controls and shrink/replay checks prove
- * the parser and properties reject omissions and malformed tokens.
+ * output with the input. Each input is a one-call history: the driver calls
+ * production serialize(), and the refinement check observes its complete
+ * returned text when that call returns. Corrupt-output controls and
+ * shrink/replay checks prove the parser and properties reject omissions and
+ * malformed tokens. This does not establish Electric's provider casting or
+ * server acceptance; the real-provider SQL suites own that boundary.
+ *
+ * The one-call input grammar varies scalar kind and value, and flat array
+ * length (0–10 for numeric, boolean, and mixed arrays; 0–5 for text and
+ * nullish arrays), element kind, element order, nullish presence, and quoted
+ * text containing delimiters, quotes, backslashes, or whitespace. The named
+ * controls below reconstruct empty, singleton, repeated, mixed, and escaped
+ * arrays. Removing an element, reversing distinct elements, replacing a NULL
+ * token with quoted text, or losing an escape changes the observed value, so
+ * each corresponding axis contributes to the law. Bounded Date inputs run
+ * from years 0000 through 9999; finite doubles exclude negative zero because
+ * JavaScript's number-to-string conversion loses its sign. Nested arrays,
+ * nonfinite numbers, unsupported objects, and provider casts are outside this
+ * flat finite-value model. Malformed array text is a nearby rejected output.
  */
 
 type FiniteArrayValue = string | number | boolean | null
@@ -95,11 +189,11 @@ function expectFiniteArrayContents(
 
 describe(`pg-serializer property-based tests`, () => {
   describe(`string serialization`, () => {
-    fcTest.prop([fc.string()])(`strings pass through unchanged`, (str) => {
+    serializerProp([fc.string()])(`strings pass through unchanged`, (str) => {
       expect(serialize(str)).toBe(str)
     })
 
-    fcTest.prop([fc.string()])(`strings are idempotent`, (str) => {
+    serializerProp([fc.string()])(`strings are idempotent`, (str) => {
       // serialize(serialize(str)) should equal serialize(str) for strings
       const once = serialize(str)
       const twice = serialize(once)
@@ -108,7 +202,7 @@ describe(`pg-serializer property-based tests`, () => {
   })
 
   describe(`number serialization`, () => {
-    fcTest.prop([fc.integer()])(
+    serializerProp([fc.integer()])(
       `integers round-trip through strict numeric parsing`,
       (n) => {
         const serialized = serialize(n)
@@ -116,7 +210,7 @@ describe(`pg-serializer property-based tests`, () => {
       },
     )
 
-    fcTest.prop([
+    serializerProp([
       fc
         .double({ noNaN: true, noDefaultInfinity: true })
         .filter((n) => !Object.is(n, -0)),
@@ -126,14 +220,14 @@ describe(`pg-serializer property-based tests`, () => {
       expect(parseFiniteNumber(serialized)).toBe(n)
     })
 
-    fcTest.prop([fc.integer()])(`integers produce numeric strings`, (n) => {
+    serializerProp([fc.integer()])(`integers produce numeric strings`, (n) => {
       const serialized = serialize(n)
       expect(serialized).toMatch(/^-?\d+$/)
     })
   })
 
   describe(`bigint serialization`, () => {
-    fcTest.prop([fc.bigInt()])(
+    serializerProp([fc.bigInt()])(
       `bigints round-trip through BigInt parsing`,
       (n) => {
         const serialized = serialize(n)
@@ -141,14 +235,14 @@ describe(`pg-serializer property-based tests`, () => {
       },
     )
 
-    fcTest.prop([fc.bigInt()])(`bigints produce integer strings`, (n) => {
+    serializerProp([fc.bigInt()])(`bigints produce integer strings`, (n) => {
       const serialized = serialize(n)
       expect(serialized).toMatch(/^-?\d+$/)
     })
   })
 
   describe(`boolean serialization`, () => {
-    fcTest.prop([fc.boolean()])(
+    serializerProp([fc.boolean()])(
       `booleans serialize to 'true' or 'false'`,
       (b) => {
         const serialized = serialize(b)
@@ -156,7 +250,7 @@ describe(`pg-serializer property-based tests`, () => {
       },
     )
 
-    fcTest.prop([fc.boolean()])(
+    serializerProp([fc.boolean()])(
       `booleans round-trip through string comparison`,
       (b) => {
         const serialized = serialize(b)
@@ -166,7 +260,7 @@ describe(`pg-serializer property-based tests`, () => {
   })
 
   describe(`null/undefined serialization`, () => {
-    fcTest.prop([fc.constantFrom(null, undefined)])(
+    serializerProp([fc.constantFrom(null, undefined)])(
       `null and undefined both serialize to empty string`,
       (val) => {
         expect(serialize(val)).toBe(``)
@@ -182,7 +276,14 @@ describe(`pg-serializer property-based tests`, () => {
       max: new Date(`9999-12-31T23:59:59.999Z`),
     })
 
-    fcTest.prop([arbitraryBoundedDate])(
+    example.each([
+      [new Date(`0000-01-01T00:00:00.000Z`), `0000-01-01T00:00:00.000Z`],
+      [new Date(`9999-12-31T23:59:59.999Z`), `9999-12-31T23:59:59.999Z`],
+    ] as const)(`serializes the bounded Date endpoint %s`, (date, text) => {
+      expect(serialize(date)).toBe(text)
+    })
+
+    serializerProp([arbitraryBoundedDate])(
       `dates produce valid ISO strings`,
       (date) => {
         const serialized = serialize(date)
@@ -192,7 +293,7 @@ describe(`pg-serializer property-based tests`, () => {
       },
     )
 
-    fcTest.prop([arbitraryBoundedDate])(
+    serializerProp([arbitraryBoundedDate])(
       `dates round-trip through Date parsing`,
       (date) => {
         const serialized = serialize(date)
@@ -203,7 +304,12 @@ describe(`pg-serializer property-based tests`, () => {
   })
 
   describe(`array serialization`, () => {
-    fcTest.prop([fc.array(fc.integer(), { maxLength: 10 })])(
+    example(`retains every element at the ten-element array bound`, () => {
+      const input = Array.from({ length: 10 }, (_, index) => index)
+      expectFiniteArrayContents(input, serialize(input))
+    })
+
+    serializerProp([fc.array(fc.integer(), { maxLength: 10 })])(
       `integer arrays produce Postgres array format`,
       (arr) => {
         const serialized = serialize(arr)
@@ -211,7 +317,7 @@ describe(`pg-serializer property-based tests`, () => {
       },
     )
 
-    fcTest.prop([fc.array(fc.integer(), { maxLength: 10 })])(
+    serializerProp([fc.array(fc.integer(), { maxLength: 10 })])(
       `integer arrays can be parsed back`,
       (arr) => {
         const serialized = serialize(arr)
@@ -219,7 +325,7 @@ describe(`pg-serializer property-based tests`, () => {
       },
     )
 
-    fcTest.prop([fc.array(fc.boolean(), { maxLength: 10 })])(
+    serializerProp([fc.array(fc.boolean(), { maxLength: 10 })])(
       `boolean arrays serialize correctly`,
       (arr) => {
         const serialized = serialize(arr)
@@ -228,17 +334,16 @@ describe(`pg-serializer property-based tests`, () => {
       },
     )
 
-    fcTest.prop([fc.array(fc.constantFrom(null, undefined), { maxLength: 5 })])(
-      `arrays with null/undefined serialize to NULL`,
-      (arr) => {
-        const serialized = serialize(arr)
-        expectFiniteArrayContents(arr, serialized)
-      },
-    )
+    serializerProp([
+      fc.array(fc.constantFrom(null, undefined), { maxLength: 5 }),
+    ])(`arrays with null/undefined serialize to NULL`, (arr) => {
+      const serialized = serialize(arr)
+      expectFiniteArrayContents(arr, serialized)
+    })
   })
 
   describe(`string array escaping`, () => {
-    fcTest.prop([fc.array(fc.string(), { maxLength: 5 })])(
+    serializerProp([fc.array(fc.string(), { maxLength: 5 })])(
       `string arrays are properly quoted`,
       (arr) => {
         const serialized = serialize(arr)
@@ -247,7 +352,7 @@ describe(`pg-serializer property-based tests`, () => {
       },
     )
 
-    fcTest.prop([
+    serializerProp([
       fc
         .tuple(fc.string(), fc.constantFrom(`"`, `\\`), fc.string())
         .map((parts) => parts.join(``)),
@@ -265,7 +370,7 @@ describe(`pg-serializer property-based tests`, () => {
   })
 
   describe(`consistency properties`, () => {
-    fcTest.prop([
+    serializerProp([
       fc.oneof(
         fc.string(),
         fc.integer(),
@@ -279,7 +384,7 @@ describe(`pg-serializer property-based tests`, () => {
       expect(first).toBe(second)
     })
 
-    fcTest.prop([fc.array(fc.integer(), { maxLength: 10 })])(
+    serializerProp([fc.array(fc.integer(), { maxLength: 10 })])(
       `array serialization is deterministic`,
       (arr) => {
         const first = serialize(arr)
@@ -290,7 +395,7 @@ describe(`pg-serializer property-based tests`, () => {
   })
 
   describe(`finite scalar and array checker calibration`, () => {
-    it.each([
+    example.each([
       [`0`, 0],
       [`-0`, -0],
       [`1.25`, 1.25],
@@ -301,7 +406,7 @@ describe(`pg-serializer property-based tests`, () => {
       expect(parseFiniteNumber(text)).toBe(value)
     })
 
-    it.each([
+    example.each([
       ``,
       ` `,
       `1.25junk`,
@@ -352,7 +457,7 @@ describe(`pg-serializer property-based tests`, () => {
         output: `{" leading ","line\nbreak","0","true"}`,
       },
     ]
-    it.each(validArrays)(
+    example.each(validArrays)(
       `decodes the independent $name control and the real serializer`,
       ({ input, output }) => {
         expectFiniteArrayContents(input, output)
@@ -403,13 +508,13 @@ describe(`pg-serializer property-based tests`, () => {
       },
       { name: `numeric suffix`, input: [1.25], output: `{1.25junk}` },
     ]
-    it.each(corruptArrays)(`rejects $name`, ({ input, output }) => {
+    example.each(corruptArrays)(`rejects $name`, ({ input, output }) => {
       // The same observer judges production outputs above; these outputs come
       // from test-owned faults, not a mutation of the serializer or its inputs.
       expect(() => expectFiniteArrayContents(input, output)).toThrow()
     })
 
-    it(`shrinks and exactly replays omitted nonempty arrays`, () => {
+    example(`shrinks and exactly replays omitted nonempty arrays`, () => {
       const property = fc.property(
         fc.array(fc.boolean(), { minLength: 1, maxLength: 10 }),
         (input) => expectFiniteArrayContents(input, `{}`),
@@ -421,17 +526,16 @@ describe(`pg-serializer property-based tests`, () => {
       }
       expect(failure.errorInstance).toMatchObject({ name: `AssertionError` })
       expect(failure.counterexample[0]).toHaveLength(1)
-      const replay = fc.check(property, {
-        seed: failure.seed,
-        path: failure.counterexamplePath,
-        numRuns: 1,
-      })
+      const replay = fc.check(
+        property,
+        serializerReplayOptions(failure.seed, failure.counterexamplePath),
+      )
       expect(replay.failed).toBe(true)
       expect(replay.counterexample).toEqual(failure.counterexample)
       expect(replay.errorInstance).toMatchObject({ name: `AssertionError` })
     })
 
-    it.each([
+    example.each([
       ``,
       `[]`,
       `{`,
@@ -449,7 +553,7 @@ describe(`pg-serializer property-based tests`, () => {
       expect(() => parseFiniteArray(output)).toThrow()
     })
 
-    fcTest.prop([
+    serializerProp([
       fc.array(
         fc.oneof(
           fc.string(),

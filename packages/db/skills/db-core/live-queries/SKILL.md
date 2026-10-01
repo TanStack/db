@@ -9,7 +9,7 @@ description: >
   add, subtract, multiply, divide.
   $selected namespace. createLiveQueryCollection. Derived collections. Predicate push-down.
   Incremental view maintenance via differential dataflow (d2ts). Virtual
-  properties ($synced, $origin, $key, $collectionId). Includes subqueries
+  properties ($hasPendingWrites, $origin, $key, $collectionId). Includes subqueries
   for hierarchical data. Collection, toArray, materialize, and
   concat(toArray(...)) include modes.
   queryOnce for one-shot queries. createEffect for reactive side effects
@@ -218,14 +218,16 @@ period. Explicit `cleanup()` can still abort a pending preload.
 
 Live query results include computed, read-only virtual properties on every row:
 
-- `$synced`: `true` when no pending local optimistic write affects the row;
-  `false` while one does. This is local mutation status, not proof that a
+- `$hasPendingWrites`: `true` while a pending local optimistic write affects
+  the row; `false` otherwise. This is local mutation status, not proof that a
   backend uploaded, confirmed, or read back the row.
 - `$origin`: `"local"` if the last confirmed change came from this client, otherwise `"remote"`.
 - `$key`: the row key for the result.
 - `$collectionId`: the source collection ID.
 
 These props are added automatically and can be used in `where`, `select`, and `orderBy` clauses. Do not persist them back to storage.
+The deprecated `$synced` alias is the inverse of `$hasPendingWrites` and will
+be removed in the 1.0 RC.
 
 ## Includes (Subqueries in Select)
 

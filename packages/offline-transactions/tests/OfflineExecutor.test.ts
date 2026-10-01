@@ -192,8 +192,11 @@ describe(`OfflineExecutor`, () => {
         storage,
         leaderElection,
       })
+      const replayCompleted =
+        secondExecutor.waitForTransactionCompletion(`readable`)
       await expect(secondExecutor.waitForInit()).resolves.toBeUndefined()
       await recoveredReplay
+      await replayCompleted
       expect(calls).toEqual([
         {
           id: `readable`,

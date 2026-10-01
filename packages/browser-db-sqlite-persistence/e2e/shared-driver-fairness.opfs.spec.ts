@@ -1,10 +1,14 @@
 /**
  * Browser checkpoint assertions for the OPFS refinement. Expected public rows
  * are rebuilt from the scenario IDs rather than from production output. The
- * neutral case proves cold-query reach; the storm case requires no K=1
- * violation. Failure-before-checkpoint, semantic mismatch, driver cleanup, and
- * OPFS cleanup remain distinct outcomes so setup or teardown cannot satisfy the
- * scheduling law.
+ * neutral case proves cold-query reach; the storm case checks K=1 at each
+ * hydrate completion and full FIFO completion of logical persists. This is the
+ * receiving witness for the Node fixture's held-BEGIN, cold-hydrate premise:
+ * the same public preload/core-adapter/driver path reaches a Chromium OPFS
+ * worker, then public rows and logical completions are checked after all work
+ * settles. Failure-before-checkpoint, semantic mismatch, driver cleanup, and
+ * OPFS cleanup remain distinct outcomes so setup or teardown cannot satisfy
+ * the scheduling laws.
  */
 import { expect, test } from '@playwright/test'
 import type { Page } from '@playwright/test'
@@ -74,7 +78,7 @@ test(`real Chromium OPFS fixture reaches and cleans up cold hydration`, async ({
   expect(result.opfsCleanupFailures).toEqual([])
 })
 
-test(`real Chromium OPFS fixture bounds pending cold hydration behind persists`, async ({
+test(`real Chromium OPFS fixture bounds cold hydration and completes persists in FIFO order`, async ({
   page,
 }) => {
   const result = await readOracleResult(page, `storm`)
@@ -85,6 +89,27 @@ test(`real Chromium OPFS fixture bounds pending cold hydration behind persists`,
   expect(result.observation.hydratedCollections).toEqual(
     expectedHydratedCollections(`opfs-fixed-persist-storm`, 4),
   )
+  expect(
+    result.observation.rawDequeues.some((entry) =>
+      entry.sql.startsWith(`SELECT key, value, metadata, row_version FROM`),
+    ),
+  ).toBe(true)
+  expect(
+    result.observation.hydrationCompletions.map(
+      (checkpoint) => checkpoint.collectionId,
+    ),
+  ).toEqual(
+    Array.from(
+      { length: 4 },
+      (_, index) => `opfs-fixed-persist-storm-hydrate-${index}`,
+    ),
+  )
+  expect(
+    result.observation.hydrationCompletions[0]?.completedPersistIds,
+  ).toEqual([`opfs-fixed-persist-storm-persist-0`])
+  expect(
+    result.observation.hydrationCompletions[1]?.pendingPersistCount,
+  ).toBeGreaterThanOrEqual(3)
   // This is the semantic RED checkpoint. Setup, wall time, and cleanup are
   // reported independently and cannot satisfy this assertion.
   if (result.violation !== undefined) {
@@ -97,6 +122,19 @@ test(`real Chromium OPFS fixture bounds pending cold hydration behind persists`,
         `OPFS cleanup diagnostics: ${JSON.stringify(result.opfsCleanupFailures)}`,
     )
   }
+  // The Node oracle rejects a swapped second/third completion. At this real
+  // provider boundary, the public adapter's logical persist promises must
+  // complete in the admitted persist-lane order after all work settles.
+  expect(
+    result.observation.logicalCompletionOrder.filter((entry) =>
+      entry.startsWith(`persist:`),
+    ),
+  ).toEqual(
+    Array.from(
+      { length: 5 },
+      (_, index) => `persist:opfs-fixed-persist-storm-persist-${index}`,
+    ),
+  )
   expect(result.observation.cleanupFailures).toEqual([])
   expect(result.opfsCleanupFailures).toEqual([])
 })

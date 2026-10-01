@@ -18,24 +18,113 @@ import type {
 /**
  * # Which replay may replace a loadSubset publication?
  *
- * A replay is authoritative only when its full participating source set
- * succeeds. Rows written by a failed, obsolete, or incomplete replay remain
- * private. The last complete public snapshot stays visible until a newer
- * complete replay replaces it. Direct subscribers may restart after source
- * cleanup; a dependent live query that entered a terminal source error does not
- * revive merely because that source restarts.
+ * Contract: The replay-participant rules and normative publication law 9 in
+ * packages/db/src/query/live/ARCHITECTURE.md require a complete participating
+ * source set before a truncate replay publishes. A failed replay keeps the
+ * prior public snapshot and later partial source changes private. A retired
+ * logical demand stops participating. Source cleanup terminates dependent
+ * live queries. A direct subscriber can acquire again after restart.
  *
- * Each distinguishing history uses small plain row sets and explicit deferred
- * attempts. The driver observes exact publications, readiness, errors, loads,
- * unloads, and final rows across single-source, include-route, and joined-source
- * replays. These are refinement checks for production replay boundaries, not a
- * second general lifecycle model.
+ * Model: the expected public rows are the last complete public snapshot until
+ * every current replay participant succeeds or retires and any older
+ * overlapping work that still participates settles. A completed replacement
+ * supplies the next public rows.
+ * The literal expected row sets below instantiate this rule independently of
+ * the Collection's replay bookkeeping.
+ *
+ * History grammar: fixed one-row and multi-row source replacements, failed
+ * work, later writes, overlapping attempts, retired include routes, joined
+ * sources, and cleanup/restart. Deferred loadSubset results control settlement.
+ * The driver uses real Collections and live queries. At each held or settled
+ * checkpoint, it compares exact public rows and callback reads with the model;
+ * selected histories also compare batches, readiness, and acquisition release.
+ * These controlled adapter promises do not establish real-provider cancellation
+ * or every legal replay interleaving.
  */
 
 type Row = { id: string; version: number }
 type ObservedRow = { sourceId: string; rowKey: string; version: number }
 
+type CleanupTask = { name: string; run: () => unknown | Promise<unknown> }
+
+async function finishCleanup(
+  primaryFailure: { error: unknown } | undefined,
+  phases: ReadonlyArray<ReadonlyArray<CleanupTask>>,
+): Promise<void> {
+  const cleanupErrors: Array<Error> = []
+  for (const phase of phases) {
+    const results = await Promise.allSettled(
+      phase.map(({ run }) => Promise.resolve().then(run)),
+    )
+    for (const [index, result] of results.entries()) {
+      if (result.status === `rejected`) {
+        cleanupErrors.push(
+          new Error(`${phase[index]!.name} cleanup failed`, {
+            cause: result.reason,
+          }),
+        )
+      }
+    }
+  }
+  if (cleanupErrors.length > 0) {
+    throw new AggregateError(
+      cleanupErrors,
+      `Replay oracle cleanup failed`,
+      primaryFailure && { cause: primaryFailure.error },
+    )
+  }
+}
+
 describe(`loadSubset replay refinement`, () => {
+  it(`preserves a replay mismatch and separate cleanup failures`, async () => {
+    const mismatch = new Error(`public snapshot mismatch after failed replay`)
+    const unloadFailure = new Error(`unload failed`)
+    const sourceFailure = new Error(`source cleanup failed`)
+    const completed: Array<string> = []
+    let reported: unknown
+
+    try {
+      await finishCleanup({ error: mismatch }, [
+        [
+          {
+            name: `acquisition unload`,
+            run: () => {
+              completed.push(`unload`)
+              throw unloadFailure
+            },
+          },
+          {
+            name: `subscription`,
+            run: () => completed.push(`subscription`),
+          },
+        ],
+        [
+          {
+            name: `source`,
+            run: () => {
+              completed.push(`source`)
+              throw sourceFailure
+            },
+          },
+        ],
+      ])
+    } catch (error) {
+      reported = error
+    }
+
+    expect(completed).toEqual([`unload`, `subscription`, `source`])
+    expect(reported).toBeInstanceOf(AggregateError)
+    const failure = reported as AggregateError
+    expect(failure.cause).toBe(mismatch)
+    expect(failure.errors).toHaveLength(2)
+    expect((failure.errors[0] as Error).message).toBe(
+      `acquisition unload cleanup failed`,
+    )
+    expect((failure.errors[0] as Error).cause).toBe(unloadFailure)
+    expect((failure.errors[1] as Error).message).toBe(`source cleanup failed`)
+    expect((failure.errors[1] as Error).cause).toBe(sourceFailure)
+  })
+
   // A direct subscriber survives source Collection cleanup. A dependent live
   // query enters
   // a terminal error instead; restarting only its source must not revive it.
@@ -96,6 +185,7 @@ describe(`loadSubset replay refinement`, () => {
         { includeInitialState: consumer === `live` },
       )
 
+      let primaryFailure: { error: unknown } | undefined
       try {
         if (live) await live.preload()
         else subscription.requestSnapshot({})
@@ -135,11 +225,18 @@ describe(`loadSubset replay refinement`, () => {
         expect(readEvents()).toEqual(expected)
         expect(publications).toEqual(publishes ? [replacement] : [])
         if (live) expect(live.status).toBe(`error`)
+      } catch (error) {
+        primaryFailure = { error }
+        throw error
       } finally {
-        pending.resolve()
-        subscription.unsubscribe()
-        await live?.cleanup()
-        await source.cleanup()
+        await finishCleanup(primaryFailure, [
+          [
+            { name: `pending replay`, run: () => pending.resolve() },
+            { name: `subscription`, run: () => subscription.unsubscribe() },
+          ],
+          [{ name: `live query`, run: () => live?.cleanup() }],
+          [{ name: `source`, run: () => source.cleanup() }],
+        ])
       }
     },
   )
@@ -231,6 +328,7 @@ describe(`loadSubset replay refinement`, () => {
       () => publications.push(read()),
       { includeInitialState: false },
     )
+    let primaryFailure: { error: unknown } | undefined
     try {
       await live.preload()
       expect(loads.map(({ ids }) => ids)).toEqual([[1], [2]])
@@ -278,12 +376,22 @@ describe(`loadSubset replay refinement`, () => {
         { id: `parent`, left: [], right: [{ id: 2, version: 3 }] },
       ])
       expect(publications).toHaveLength(2)
+    } catch (error) {
+      primaryFailure = { error }
+      throw error
     } finally {
-      failed.resolve()
-      successful.resolve()
-      subscription.unsubscribe()
-      await live.cleanup()
-      await Promise.all([parents.cleanup(), children.cleanup()])
+      await finishCleanup(primaryFailure, [
+        [
+          { name: `failed replay`, run: () => failed.resolve() },
+          { name: `successful replay`, run: () => successful.resolve() },
+          { name: `subscription`, run: () => subscription.unsubscribe() },
+        ],
+        [{ name: `live query`, run: () => live.cleanup() }],
+        [
+          { name: `parents`, run: () => parents.cleanup() },
+          { name: `children`, run: () => children.cleanup() },
+        ],
+      ])
     }
     expect(unloads).toHaveLength(loads.length)
     for (const { options } of loads) {
@@ -435,6 +543,25 @@ describe(`loadSubset replay refinement`, () => {
     }
   }
 
+  async function finishHarnessCleanup(
+    primaryFailure: { error: unknown } | undefined,
+    harness: ReturnType<typeof createHarness>,
+  ): Promise<void> {
+    await finishCleanup(primaryFailure, [
+      [
+        ...harness.pending.map(({ deferred }, index) => ({
+          name: `replay ${index}`,
+          run: () => deferred.resolve(),
+        })),
+        { name: `subscription`, run: () => harness.subscription.unsubscribe() },
+      ],
+      [
+        { name: `downstream`, run: () => harness.downstream.cleanup() },
+        { name: `source`, run: () => harness.source.cleanup() },
+      ],
+    ])
+  }
+
   it(`retains the last complete publication when replay fails after writing`, async () => {
     const sourceId = `replay-refinement-failure`
     const row = (version: number) => ({
@@ -444,24 +571,25 @@ describe(`loadSubset replay refinement`, () => {
     })
     const harness = createHarness(sourceId)
 
+    let primaryFailure: { error: unknown } | undefined
     try {
       await harness.downstream.preload()
       await harness.startReplay()
+      expect(harness.pending).toHaveLength(1)
 
       harness.replaceCore(2)
-      harness.pending[0]?.deferred.reject(new Error(`replay failed`))
+      harness.pending[0]!.deferred.reject(new Error(`replay failed`))
       await flushPromises()
 
       expect(harness.coreRows()).toEqual([row(2)])
       expect(harness.visibleRows()).toEqual([row(1)])
       expect(harness.batches).toEqual([[{ type: `insert`, row: row(1) }]])
       expect(harness.callbackReads).toEqual([[row(1)]])
+    } catch (error) {
+      primaryFailure = { error }
+      throw error
     } finally {
-      harness.subscription.unsubscribe()
-      await Promise.all([
-        harness.downstream.cleanup(),
-        harness.source.cleanup(),
-      ])
+      await finishHarnessCleanup(primaryFailure, harness)
     }
   })
 
@@ -510,6 +638,7 @@ describe(`loadSubset replay refinement`, () => {
     const readVersions = () => live.toArray.map(({ version }) => version)
     const readyReads: Array<Array<number>> = []
 
+    let primaryFailure: { error: unknown } | undefined
     try {
       await live.preload()
       expect(readVersions()).toEqual([1])
@@ -530,9 +659,17 @@ describe(`loadSubset replay refinement`, () => {
 
       expect(readyReads).toEqual([[2]])
       expect(readVersions()).toEqual([2])
+    } catch (error) {
+      primaryFailure = { error }
+      throw error
     } finally {
-      replay.resolve()
-      await Promise.all([live.cleanup(), source.cleanup()])
+      await finishCleanup(primaryFailure, [
+        [{ name: `replay`, run: () => replay.resolve() }],
+        [
+          { name: `live query`, run: () => live.cleanup() },
+          { name: `source`, run: () => source.cleanup() },
+        ],
+      ])
     }
   })
 
@@ -541,11 +678,13 @@ describe(`loadSubset replay refinement`, () => {
     const row = (version: number) => ({ sourceId, rowKey: `row`, version })
     const harness = createHarness(sourceId)
 
+    let primaryFailure: { error: unknown } | undefined
     try {
       await harness.downstream.preload()
       expect(harness.visibleRows().map(({ version }) => version)).toEqual([1])
 
       await harness.startReplay()
+      expect(harness.pending).toHaveLength(1)
       harness.replaceCore(2)
       harness.pending[0]!.deferred.reject(new Error(`replay failed`))
       await flushPromises()
@@ -562,6 +701,7 @@ describe(`loadSubset replay refinement`, () => {
       expect(harness.callbackReads).toEqual([[row(1)]])
 
       await harness.startReplay()
+      expect(harness.pending).toHaveLength(2)
       harness.replaceCore(4)
       harness.pending[1]!.deferred.resolve()
       await flushPromises()
@@ -572,13 +712,11 @@ describe(`loadSubset replay refinement`, () => {
         [{ type: `update`, row: row(4), previousVersion: 1 }],
       ])
       expect(harness.callbackReads).toEqual([[row(1)], [row(4)]])
+    } catch (error) {
+      primaryFailure = { error }
+      throw error
     } finally {
-      for (const replay of harness.pending) replay.deferred.resolve()
-      harness.subscription.unsubscribe()
-      await Promise.all([
-        harness.downstream.cleanup(),
-        harness.source.cleanup(),
-      ])
+      await finishHarnessCleanup(primaryFailure, harness)
     }
   })
 
@@ -603,6 +741,7 @@ describe(`loadSubset replay refinement`, () => {
         .coreRows()
         .sort((left, right) => left.rowKey.localeCompare(right.rowKey))
 
+    let primaryFailure: { error: unknown } | undefined
     try {
       await harness.downstream.preload()
       expect(sortedVisible()).toEqual([
@@ -613,6 +752,7 @@ describe(`loadSubset replay refinement`, () => {
       const publishedBatches = harness.batches.length
 
       await harness.startReplay()
+      expect(harness.pending).toHaveLength(1)
       harness.applyCore([
         { type: `insert`, value: { id: `a`, version: 2 } },
         { type: `insert`, value: { id: `d`, version: 1 } },
@@ -640,6 +780,7 @@ describe(`loadSubset replay refinement`, () => {
       expect(harness.batches).toHaveLength(publishedBatches)
 
       await harness.startReplay()
+      expect(harness.pending).toHaveLength(2)
       harness.applyCore([
         { type: `insert`, value: { id: `a`, version: 4 } },
         { type: `insert`, value: { id: `b`, version: 1 } },
@@ -668,13 +809,11 @@ describe(`loadSubset replay refinement`, () => {
           .at(-1)
           ?.sort((left, right) => left.rowKey.localeCompare(right.rowKey)),
       ).toEqual([observed(`a`, 4), observed(`b`, 1), observed(`e`, 2)])
+    } catch (error) {
+      primaryFailure = { error }
+      throw error
     } finally {
-      for (const replay of harness.pending) replay.deferred.resolve()
-      harness.subscription.unsubscribe()
-      await Promise.all([
-        harness.downstream.cleanup(),
-        harness.source.cleanup(),
-      ])
+      await finishHarnessCleanup(primaryFailure, harness)
     }
   })
 
@@ -687,21 +826,23 @@ describe(`loadSubset replay refinement`, () => {
     })
     const harness = createHarness(sourceId)
 
+    let primaryFailure: { error: unknown } | undefined
     try {
       await harness.downstream.preload()
       await harness.startReplay()
       await harness.startReplay()
+      expect(harness.pending).toHaveLength(2)
 
-      expect(harness.pending[0]?.options.signal?.aborted).toBe(true)
+      expect(harness.pending[0]!.options.signal?.aborted).toBe(true)
       harness.replaceCore(3)
-      harness.pending[1]?.deferred.resolve()
+      harness.pending[1]!.deferred.resolve()
       await flushPromises()
 
       expect(harness.visibleRows()).toEqual([row(1)])
       expect(harness.batches).toEqual([[{ type: `insert`, row: row(1) }]])
       expect(harness.callbackReads).toEqual([[row(1)]])
 
-      harness.pending[0]?.deferred.reject(
+      harness.pending[0]!.deferred.reject(
         new DOMException(`obsolete`, `AbortError`),
       )
       await flushPromises()
@@ -713,13 +854,11 @@ describe(`loadSubset replay refinement`, () => {
         [{ type: `update`, row: row(3), previousVersion: 1 }],
       ])
       expect(harness.callbackReads).toEqual([[row(1)], [row(3)]])
+    } catch (error) {
+      primaryFailure = { error }
+      throw error
     } finally {
-      for (const replay of harness.pending) replay.deferred.resolve()
-      harness.subscription.unsubscribe()
-      await Promise.all([
-        harness.downstream.cleanup(),
-        harness.source.cleanup(),
-      ])
+      await finishHarnessCleanup(primaryFailure, harness)
     }
   })
 
@@ -805,6 +944,7 @@ describe(`loadSubset replay refinement`, () => {
     let primaryReplay: true | Promise<void> = true
     let secondaryReplay: true | Promise<void> = true
 
+    let primaryFailure: { error: unknown } | undefined
     try {
       const preload = live.preload()
       await flushPromises()
@@ -879,17 +1019,30 @@ describe(`loadSubset replay refinement`, () => {
           },
         ],
       ])
+    } catch (error) {
+      primaryFailure = { error }
+      throw error
     } finally {
-      for (const request of [...primary.pending, ...secondary.pending]) {
-        request.resolve()
-      }
-      subscription?.unsubscribe()
-      await Promise.all([
-        Promise.resolve(primaryReplay).catch(() => undefined),
-        Promise.resolve(secondaryReplay).catch(() => undefined),
-        live.cleanup(),
-        primary.collection.cleanup(),
-        secondary.collection.cleanup(),
+      await finishCleanup(primaryFailure, [
+        [
+          ...[...primary.pending, ...secondary.pending].map(
+            (request, index) => ({
+              name: `source request ${index}`,
+              run: () => request.resolve(),
+            }),
+          ),
+          { name: `subscription`, run: () => subscription?.unsubscribe() },
+        ],
+        [
+          { name: `primary replay`, run: () => primaryReplay },
+          { name: `secondary replay`, run: () => secondaryReplay },
+          { name: `live query`, run: () => live.cleanup() },
+          { name: `primary source`, run: () => primary.collection.cleanup() },
+          {
+            name: `secondary source`,
+            run: () => secondary.collection.cleanup(),
+          },
+        ],
       ])
     }
   })

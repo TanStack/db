@@ -10,7 +10,8 @@ import type { ChangeMessage } from '../src/types'
  * adapter insert, update, or delete is authoritative for its key, even when an
  * older hydration chunk arrives later. An adapter truncate is authoritative
  * for the whole source snapshot. A separate, untouched key may still receive
- * hydration rows.
+ * hydration rows. The "Initial Data" contract in docs/guides/ssr.md makes
+ * hydration provisional and fresh adapter sync authoritative.
  *
  * The reference scans a declarative history for each key: the last adapter
  * decision affecting that key wins; without one, the latest seed wins. It does
@@ -21,6 +22,10 @@ import type { ChangeMessage } from '../src/types'
  * a real sync transaction, and applyCollectionChunk. At each completed action
  * it compares the complete retained source, public rows, and change-message
  * mirror with the reference. Each callback also checks mirror/public agreement.
+ * A late chunk after delete rejects resurrection of that key; its untouched
+ * peer rejects whole-chunk suppression. A late chunk after truncate rejects
+ * resurrection of any key. One model adapter decision represents a sync
+ * transaction only after its applied receipt fulfills.
  *
  * This owner covers one or two immediately applied adapter transactions, three
  * keys, and at most two hydration chunks. The state-retention oracle and focused
