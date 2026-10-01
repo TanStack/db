@@ -166,7 +166,7 @@ function comparisonProperty<
         throw new Error(`comparison oracle replay needs a seed and shrink path`)
       }
       const seed = Number(replaySeed)
-      if (!Number.isInteger(seed)) {
+      if (replaySeed.trim() === `` || !Number.isSafeInteger(seed)) {
         throw new Error(`comparison oracle replay seed must be an integer`)
       }
       it(`${label} replay`, () => {

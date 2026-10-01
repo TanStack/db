@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
 import { setImmediate } from 'node:timers/promises'
 import { fileURLToPath } from 'node:url'
+import { stripVTControlCharacters } from 'node:util'
 import fc from 'fast-check'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { oracleReplayManifest } from './oracle-replay-manifest.js'
@@ -83,6 +84,16 @@ describe(`guarded oracle replay`, () => {
     expect(result.output).not.toContain(`unrelated fixed campaign ran`)
   }, 40_000)
 
+  it(`intersects a caller alternation with the named replay lane`, () => {
+    const result = runReplay([
+      fixture,
+      `-t`,
+      `does-not-exist|replay calibration property`,
+    ])
+    expect(result.status, result.output).toBe(0)
+    expect(result.output).toContain(`"executions":1`)
+  }, 40_000)
+
   it.each([
     [`index-update.reference-model`, `tests/index-update.property.test.ts`, 2],
     [`index-update.exact-identity`, `tests/index-update.property.test.ts`, 2],
@@ -107,7 +118,7 @@ describe(`guarded oracle replay`, () => {
       const result = runReplay([file], undefined, property)
       expect(result.status, result.output).toBe(0)
       expect(result.output).toContain(`"executions":${expectedTests}`)
-      expect(result.output).toMatch(
+      expect(stripVTControlCharacters(result.output)).toMatch(
         new RegExp(`Tests\\s+${expectedTests} passed \\| \\d+ skipped`),
       )
     },

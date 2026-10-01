@@ -81,7 +81,10 @@ if (replayFault !== undefined && replayFault !== `accept-cycles`)
   throw new Error(`Unknown mixed graph replay fault`)
 const replaySeed =
   replaySeedText === undefined ? undefined : Number(replaySeedText)
-if (replaySeed !== undefined && !Number.isSafeInteger(replaySeed))
+if (
+  replaySeedText !== undefined &&
+  (replaySeedText.trim() === `` || !Number.isSafeInteger(replaySeed))
+)
   throw new Error(`Mixed graph replay seed must be an integer`)
 
 const campaigns =

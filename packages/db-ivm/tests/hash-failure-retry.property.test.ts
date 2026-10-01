@@ -49,7 +49,10 @@ if (replayPath !== undefined && replaySeedText === undefined) {
 }
 const replaySeed =
   replaySeedText === undefined ? undefined : Number(replaySeedText)
-if (replaySeed !== undefined && !Number.isSafeInteger(replaySeed)) {
+if (
+  replaySeedText !== undefined &&
+  (replaySeedText.trim() === `` || !Number.isSafeInteger(replaySeed))
+) {
   throw new Error(`TANSTACK_DB_IVM_HASH_RETRY_SEED must be an integer`)
 }
 const campaigns =

@@ -11,7 +11,7 @@ import {
   materialize,
 } from '../../src/query/index.js'
 import { runTrace } from '../trace-runner.js'
-import { oraclePropertyOptions } from '../oracle-config.js'
+import { oraclePropertyOptions, readOracleRunConfig } from '../oracle-config.js'
 import { withHistoryCleanup } from '../optimistic-history-oracle.js'
 import { flushPromises, withExpectedRejection } from '../utils.js'
 import { createControlledCollection } from './includes-oracle-helpers.js'
@@ -570,6 +570,9 @@ const q1Shapes = [`direct`, `joined`] as const
 // budget. A seed/path request runs only its directly replayed campaign.
 const fixedPublicationSeed = 1813
 function publicationCampaigns(baseRuns: number, property: string) {
+  const replay = readOracleRunConfig()
+  if (replay.replayPath !== undefined && replay.replayProperty !== property)
+    return []
   const options = oraclePropertyOptions(baseRuns, property)
   if (options.seed !== undefined) return [{ name: `replay`, options }]
   return [

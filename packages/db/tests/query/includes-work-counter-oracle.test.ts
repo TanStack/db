@@ -415,6 +415,10 @@ const joinFreeBaselineWork: SourceWork = {
 let joinedBaselineObservation: WorkObservation
 let joinFreeBaselineObservation: WorkObservation
 
+function expectSourceWorkBound(actual: SourceWork, expected: SourceWork): void {
+  expect(actual).toEqual(expected)
+}
+
 async function expectCorrelatedJoinWorkBound(
   fillerCount: number,
 ): Promise<void> {
@@ -432,7 +436,7 @@ async function expectCorrelatedJoinWorkBound(
   expect(scaled.result).toEqual(baseline.result)
   expect(baseline.sourceWork).toEqual(joinedBaselineWork)
 
-  expect(scaled.sourceWork).toEqual(baseline.sourceWork)
+  expectSourceWorkBound(scaled.sourceWork, baseline.sourceWork)
 }
 
 async function expectJoinTargetWorkBound(fillerCount: number): Promise<void> {
@@ -450,7 +454,7 @@ async function expectJoinTargetWorkBound(fillerCount: number): Promise<void> {
   expect(baseline.result).toEqual(expectedResult({ joinTargets: true }))
   expect(scaled.result).toEqual(baseline.result)
   expect(baseline.sourceWork).toEqual(joinedBaselineWork)
-  expect(scaled.sourceWork).toEqual(baseline.sourceWork)
+  expectSourceWorkBound(scaled.sourceWork, baseline.sourceWork)
 }
 
 async function expectJoinFreeWorkBound(fillerCount: number): Promise<void> {
@@ -468,7 +472,7 @@ async function expectJoinFreeWorkBound(fillerCount: number): Promise<void> {
   expect(baseline.result).toEqual(expectedResult({ joinTargets: false }))
   expect(scaled.result).toEqual(baseline.result)
   expect(baseline.sourceWork).toEqual(joinFreeBaselineWork)
-  expect(scaled.sourceWork).toEqual(baseline.sourceWork)
+  expectSourceWorkBound(scaled.sourceWork, baseline.sourceWork)
 }
 
 function campaigns(fixedSeed: number, property: string) {
@@ -549,7 +553,9 @@ describe(`includes deterministic work-counter oracle`, () => {
     }
 
     expect(baseline.result).toEqual(expectedResult({ joinTargets: true }))
-    expect(() => expect(faultyWork).toEqual(joinedBaselineWork)).toThrow()
+    expect(() =>
+      expectSourceWorkBound(faultyWork, baseline.sourceWork),
+    ).toThrow()
   })
 
   it.each([1, 2, 3])(

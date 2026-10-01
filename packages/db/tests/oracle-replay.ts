@@ -49,7 +49,7 @@ function selectReplayTest(args: Array<string>, pattern: string): Array<string> {
   // The manifest selects the named random/replay lane. Caller filters can
   // narrow that lane, but cannot replace it with a fixed or unrelated test.
   const intersection = `^${filters
-    .map((filter) => `(?=[\\s\\S]*${filter})`)
+    .map((filter) => `(?=[\\s\\S]*(?:${filter}))`)
     .join(``)}`
   return [...forwarded, `-t`, intersection]
 }
