@@ -2595,7 +2595,7 @@ const sourceBatch = fc.record({
     selector: (row) => row.id,
     maxLength: 3,
   }),
-  // The source may also delete keys; only keys it holds take effect.
+  // The source may also delete keys, including keys it does not hold.
   deletes: fc.oneof(
     { weight: 3, arbitrary: fc.constant([]) },
     {
@@ -2775,14 +2775,53 @@ it(`writes source inserts and deletes in the fixed campaign`, async () => {
   const histories = fc.sample(optimisticHistory, { seed: 86103, numRuns: 40 })
   let inserts = 0
   let deletes = 0
+  let absentDeletes = 0
   for (const { initial, steps } of histories) {
     const counts = await runOptimisticHistory(initial, steps)
     inserts += counts.sourceInserts
     deletes += counts.sourceDeletes
+    absentDeletes += counts.absentSourceDeletes
   }
   expect(inserts).toBeGreaterThan(0)
-  expect(deletes).toBeGreaterThan(0)
+  expect(deletes).toBeGreaterThan(absentDeletes)
+  expect(absentDeletes).toBeGreaterThan(0)
 })
+
+// The backend accepted an optimistic insert, then deleted the row before the
+// source streamed it. The source's delete for a key it never held is its
+// answer for the accepted snapshot, so the row disappears.
+it.each([
+  { immediate: false, inHandler: false },
+  { immediate: true, inHandler: false },
+  { immediate: false, inHandler: true },
+])(
+  `retires an accepted insert when the source deletes a key it never held: %o`,
+  async ({ immediate, inHandler }) => {
+    const deleteBatch = {
+      type: `sync` as const,
+      rows: [],
+      deletes: [1],
+      truncate: false,
+      immediate,
+      copies: 1,
+    }
+    const counts = await runOptimisticHistory(
+      [{ id: 2, a: 0, b: 0, c: 0 }],
+      [
+        {
+          type: `edit`,
+          key: 1,
+          fields: { a: 1 },
+          optimistic: true,
+          ...(inHandler ? { inHandler: deleteBatch } : {}),
+        },
+        { type: `settle`, slot: 0, success: true, cascade: false },
+        ...(inHandler ? [] : [deleteBatch]),
+      ],
+    )
+    expect(counts.absentSourceDeletes).toBe(1)
+  },
+)
 
 it(`generates source batches inside insert, update, and delete handlers`, () => {
   const histories = fc.sample(optimisticHistory, { seed: 86103, numRuns: 100 })
