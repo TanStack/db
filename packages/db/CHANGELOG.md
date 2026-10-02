@@ -1,5 +1,46 @@
 # @tanstack/db
 
+## 0.11.1
+
+### Patch Changes
+
+- Add `tx.when('settled')` to await transaction completion and `$hasPendingWrites` to identify rows with local optimistic writes. Deprecate `isPersisted.promise` and `$synced` while keeping them available for existing code. ([#1979](https://github.com/TanStack/db/pull/1979))
+
+- Expose `collection.base` for synchronous reads of applied authoritative rows without optimistic overlays. Reading the base does not start sync. ([#1982](https://github.com/TanStack/db/pull/1982))
+
+- Publish matching aggregate joins and a single initial row from `findOne()` QueryRefs. ([#1968](https://github.com/TanStack/db/pull/1968))
+
+- Fix joined live queries that dropped or rejected a row when two source key pairs printed alike, such as (`a,b`, `c`) and (`a`, `b,c`), or `1` and `'1'`. Joined result keys are now JSON arrays of the two source keys, with `null` for a missing side: `["a","b"]`, `[4,1]`, `[4,null]`. An infinite numeric key is written as an object, such as `[{"number":"Infinity"},1]`, so it cannot collide with a missing side. Code that looks up joined rows by a hand-built key, such as `collection.get('[1,2]')`, must use the new format. ([#1956](https://github.com/TanStack/db/pull/1956))
+
+- Fix live queries that returned no rows when an include reused an alias from a joined `from()` subquery. Query optimization now keeps each source's identity, and compilation reads source inputs by identity instead of by alias. An include that reuses a parent subquery alias is now rejected with `DuplicateAliasInSubqueryError` instead of returning wrong rows. Two joins that share an alias in one query are also rejected. ([#1981](https://github.com/TanStack/db/pull/1981))
+
+- Keep pushed outer-join predicates residual across optimizer passes and preserve source-free WHERE clauses on joins. This prevents repeated filters and ensures joined queries still honor constant conditions. ([#1977](https://github.com/TanStack/db/pull/1977))
+
+- Fix a confirmed direct mutation that stayed pending. When an `onInsert`, `onUpdate`, or `onDelete` handler confirmed its request through sync before it returned, the row kept its optimistic value and `$hasPendingWrites: true` after the transaction completed, and the next remote change to the row reported `$origin: 'local'`. The Collection now owns the request before its handler runs, so that confirmation waits for the transaction and then settles the row. ([#1986](https://github.com/TanStack/db/pull/1986))
+
+- Speed up apps that mount many small filtered live queries. Queries without includes keep their compiled pipeline instead of paying for include materialization, eager subscriptions no longer build an abort error on every unsubscribe, a filtered subscription skips source batches that cannot match its `eq` condition, and unindexed snapshots reject rows by that condition before copying them. With 240 `eq`-filtered live queries, mounting is about 2x faster (indexed) to 2.5x faster (unindexed), and a 50-row update batch is about 2.7x faster. ([#1956](https://github.com/TanStack/db/pull/1956))
+
+- Rename TypeScript-private class members to short names in the published build. Consumer minifiers never rename properties, so these long names reached every production bundle. A committed name map keeps the short names stable and reversible, and source maps still point at the original source. The public API and type declarations do not change. The full public API bundles about 30 KB smaller when minified (about 2.9 KB, or 2.7%, with gzip). ([#1962](https://github.com/TanStack/db/pull/1962))
+
+- Simplify the mutation draft proxy and share one equality walker with `deepEquals`. A typical app bundle is about 350 B smaller with gzip. ([#1980](https://github.com/TanStack/db/pull/1980))
+
+  This change also fixes draft writes that were lost or wrong:
+  - A function stored in a row is now returned as stored when read from a draft. Before, the draft returned a bound copy, so `draft.handler === handler` was false. A stored method also saw a private copy as `this`, so `collection.update` dropped the writes it made through `this`.
+  - Array methods such as `at`, `slice`, `concat`, `flat`, `toReversed`, and `with` now return drafts, so a write through their result is saved. `indexOf` and `includes` find an element that the draft returned, and `draft.items.constructor === Array` is true.
+  - `Object.defineProperty(draft, key, { value })` no longer throws when the descriptor does not set `writable` or `configurable`. Defining a getter on a draft is now a change.
+  - `fill`, `set`, `sort`, `reverse`, and `copyWithin` on a typed array in a draft, and writes through its `subarray`, are now saved. `sort`, `reverse`, `fill`, and `copyWithin` on a draft now return the draft, as the native methods return the array itself.
+  - Deleting a nested key that the callback added, or writing a nested value back, no longer leaves the parent marked as changed.
+  - A typed-array subclass whose constructor does not forward its argument is now copied with its elements. Typed arrays that hold `NaN` now equal themselves.
+
+  `deepEquals` and draft change detection also have new rules:
+  - Instances of two different classes are not equal. A plain or null-prototype object compares by keys with any class.
+  - A class instance without enumerable keys, such as a `File` or an object whose state is in private fields, equals only itself. Before, two such instances were always equal, so a draft dropped a write that replaced one.
+  - URLs compare by `href`.
+  - In draft change detection only, a typed array of another class is a change.
+
+- Updated dependencies [[`d2690bf`](https://github.com/TanStack/db/commit/d2690bf570dae1f1b527cf186e03a4f1e81e37ff), [`e075689`](https://github.com/TanStack/db/commit/e075689f8f3abc3085dd1a9b0346df30fc09b83a)]:
+  - @tanstack/db-ivm@0.1.25
+
 ## 0.11.0
 
 ### Minor Changes

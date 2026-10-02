@@ -1,5 +1,12 @@
 # @tanstack/powersync-db-collection
 
+## 0.2.2
+
+### Patch Changes
+
+- Updated dependencies [[`a18f63d`](https://github.com/TanStack/db/commit/a18f63d3562c0c9bebccffcdad1785cb5c9cc5f6), [`e706483`](https://github.com/TanStack/db/commit/e7064834f28b065c8bfc9356df61a158d68aab94), [`18abcee`](https://github.com/TanStack/db/commit/18abceee48ebde712e120cbc541289bb83f35d77), [`d2690bf`](https://github.com/TanStack/db/commit/d2690bf570dae1f1b527cf186e03a4f1e81e37ff), [`5b85af0`](https://github.com/TanStack/db/commit/5b85af08f2b02ff675d79c012a858e6b2bea3dbf), [`1dbf5f9`](https://github.com/TanStack/db/commit/1dbf5f9a5d3dee3ea4caec7fe935b3f018ce22c9), [`7ab48d8`](https://github.com/TanStack/db/commit/7ab48d83668b1c8a5051620e3963ccd72896e04f), [`d2690bf`](https://github.com/TanStack/db/commit/d2690bf570dae1f1b527cf186e03a4f1e81e37ff), [`7ca38db`](https://github.com/TanStack/db/commit/7ca38dbb9195ead55e7df60746157779b6d5e65a), [`f2f92c5`](https://github.com/TanStack/db/commit/f2f92c5b2c1500cc7b19c4294039700bb77dd4b3)]:
+  - @tanstack/db@0.11.1
+
 ## 0.2.1
 
 ### Patch Changes
