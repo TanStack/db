@@ -2714,8 +2714,8 @@ export function runSQLiteCoreAdapterContractSuite(
  * statement above that limit, even if its transaction driver omits the limit.
  *
  * Scope: finite primitive values; one or two list predicates, including an
- * empty list, and up to one scalar equality; two or three persisted rows; one
- * cursor route. Null, nonfinite,
+ * empty list, and up to one scalar equality; a fixed 100/101-scalar conjunction;
+ * two or three persisted rows; one cursor route. Null, nonfinite,
  * container values, unsupported expressions, and concurrency remain outside.
  * Index DDL has a separate literal-expression context. This Node `node:sqlite`
  * witness does not prove browser, mobile, or Tauri execution, multi-process WAL,
@@ -2746,7 +2746,7 @@ export function runSQLiteCoreAdapterContractSuite(
  * requested, and the attempted statements' bind counts.
  *
  * Refinement: require the exact rows, reached predicate SELECTs, no
- * SQLite error, and <=999 bindings on every attempted statement. The original 900-item
+ * SQLite error, and no statement above its declared binding cap. The original 900-item
  * OR-chunk lowering is the hostile design: it reaches the intended SELECT and
  * fails the public result/binding comparison. The legacy CLI test interpolates
  * literals, so it cannot exercise this boundary.

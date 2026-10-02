@@ -281,7 +281,8 @@ values with
 `loadSubset` on a real Node prepared SQLite connection capped at 999
 parameters. Fixed and generated cases cover empty lists, 998/999/1000
 single lists, 499+500 and 500+500 statement totals, mixed scalar/list and
-nested predicates, both transaction-driver routes, signed-64-bit BigInt edges,
+nested predicates, root and distinct transaction-driver routes (including an
+omitted transaction cap at the real 100/101 host boundary), signed-64-bit BigInt edges,
 escaped strings, an ordered two-hit list across the old 900-item chunk, both
 cursor SELECTs, and a 1,000-scalar fallback. Both index-definition `IN`
 contexts must remain literal SQL. The existing CLI

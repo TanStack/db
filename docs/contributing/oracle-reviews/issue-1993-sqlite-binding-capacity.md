@@ -1,10 +1,11 @@
 # SQLite subset binding capacity, issue #1993
 
-Reviewed executable revision: `51c060aa5` (the core repair, the Cloudflare
-transaction-driver follow-up, and their tests). The pre-repair core source was
+Reviewed executable revisions: `51c060aa5` (the initial core and Cloudflare
+repairs) and `14c0e4efc` (the CI integration follow-up, including the Node
+expression-index oracle repair at `398725d45`). The pre-repair core source was
 `ef1e6a4aa`; the Cloudflare transaction driver before its one-line repair was
-`cbd9d24de`. This record was added after the executable revision. No executable
-file changed while adding it.
+`cbd9d24de`. This record was updated after the follow-up executable revision.
+The subsequent test-file edit only clarifies the oracle's documented scope.
 
 ## Contract, model, and boundary
 
@@ -105,7 +106,51 @@ JSON support and the real 100-binding premise. Browser, mobile, Tauri, and
 native-device drivers each need their own receiving execution. A reachable
 in-scope counterexample would keep the broader class open.
 
-Production diff against `origin/main` at the reviewed revision: SQLite core
-`+14/-37` lines; Cloudflare driver `+1/-0`; combined `+15/-37`, net **22 fewer**
+Production diff against `origin/main` at `14c0e4efc`: SQLite core `+18/-37`
+lines; Cloudflare driver `+1/-0`; combined `+19/-37`, net **18 fewer**
 production lines. Test and documentation growth is reported separately in the
 branch diff.
+
+## CI integration follow-up at `14c0e4efc`
+
+The first PR CI run found four stale observations in the Node expression-index
+oracle. Two fixed BigInt cases still expected two or 901 scalar bindings; two
+hostile controls checked those old counts and stopped before changing the SQL.
+The runtime query now binds one JSON numeric array through `json_each(?)`.
+At `398725d45`, the fixed cases compare the exact unquoted numeric JSON text,
+and the hostile controls alter the first or last number inside that one bound
+array. The unchanged production failed four of 68 checks before this oracle
+repair. Afterward all 68 passed with no type errors. The oracle still compares
+exact adapter and direct SQL rows and the named expression-index plan. The
+controls reach the query and fail on wrong rows, not on an unreached guard.
+
+CodeRabbit review `5393828482` found a missing production path: a root driver
+can declare a host cap while `transactionWithDriver` returns a distinct driver
+without that property. The old oracle reused the root driver for its transaction
+route, so it could not see this omission. A new fixed witness uses a real Node
+SQLite connection capped at 100 variables, a root driver that advertises 100,
+and a distinct transaction driver that omits the cap. Its 100-equality control
+binds 100 and returns the exact rows. With unchanged production at `398725d45`,
+the 101-equality case submitted 101 bindings at the predicate SELECT and
+rejected with `too many SQL variables`: `capacity@predicate-select`, not a setup
+failure. At `14c0e4efc`, the transparent scheduling wrapper forwards the root
+cap, and subset queries fall back to that cap when the transaction driver omits
+one. The 101-equality case now makes an unbound SELECT, returns the exact rows,
+and passes the same 100-cap refinement check.
+
+The guide outcomes above carry forward for ORC-002, ORC-003, ORC-007 through
+ORC-009, and ORC-011. ORC-001 and ORC-004 now include the omitted-cap
+transaction path and the 100/101 boundary. ORC-005 observes the real prepared
+Node query and exact returned rows on that path. ORC-006 has the reached RED
+failure and repaired GREEN at the same predicate checkpoint. ORC-010 retains
+the original primary error separately from any close error. ORC-012 is bounded
+to the declared root-cap, distinct-driver history and exact-row plus binding
+observations; drivers that misreport their actual host limit remain outside it.
+ORC-013 distinguishes 100 from 101 and checks that 101 falls back before
+prepare. ORC-014 uses an actual Node SQLite variable limit of 100; other hosts
+still own their receiving witnesses.
+
+The focused follow-up checks passed: 41 SQLite core CLI and binding tests, 68
+Node expression-index tests, and 21 Cloudflare driver and host-limit tests, all
+with no type errors. Changed production and oracle files passed ESLint and
+Prettier.
