@@ -78,6 +78,10 @@ const initialIssues: Array<Issue> = [
   },
 ]
 
+async function settle() {
+  await new Promise((done) => setTimeout(done, 10))
+}
+
 describe(`Query Collections`, () => {
   it(`clears data immediately when switching to an already-ready empty collection`, async () => {
     return createRoot(async (dispose) => {
@@ -440,7 +444,7 @@ describe(`Query Collections`, () => {
       )
 
       // Wait for collection to sync
-      await new Promise((resolve) => setTimeout(resolve, 10))
+      await settle()
 
       // Initially should return only people older than 30
       expect(rendered.result.state.size).toBe(1)
@@ -453,7 +457,7 @@ describe(`Query Collections`, () => {
       // Change the parameter to include more people
       setMinAge(20)
 
-      await new Promise((resolve) => setTimeout(resolve, 10))
+      await settle()
 
       // Now should return all people as they're all older than 20
       expect(rendered.result.state.size).toBe(3)
@@ -476,7 +480,7 @@ describe(`Query Collections`, () => {
       // Change to exclude everyone
       setMinAge(50)
 
-      await new Promise((resolve) => setTimeout(resolve, 10))
+      await settle()
 
       // Should now be empty
       expect(rendered.result.state.size).toBe(0)
@@ -524,7 +528,7 @@ describe(`Query Collections`, () => {
       // Change the parameter to include more people
       setMinAge(25)
 
-      await new Promise((resolve) => setTimeout(resolve, 10))
+      await settle()
 
       // Query should now return all people older than 25
       expect(rendered.result.state.size).toBe(2)
@@ -540,7 +544,7 @@ describe(`Query Collections`, () => {
       // Change to a value that excludes everyone
       setMinAge(50)
 
-      await new Promise((resolve) => setTimeout(resolve, 10))
+      await settle()
 
       // Should now be empty
       expect(rendered.result.state.size).toBe(0)
@@ -634,12 +638,12 @@ describe(`Query Collections`, () => {
         )
       })
 
-      await new Promise((resolve) => setTimeout(resolve, 10))
+      await settle()
       expect(rendered.result.collection.status).toBe('loading')
 
       // Switch collections while the slow fetch is still awaiting readiness.
       setUseSlow(false)
-      await new Promise((resolve) => setTimeout(resolve, 10))
+      await settle()
       expect(rendered.result.state.has(`1`)).toBe(true)
 
       // The superseded collection now becomes ready with different rows; its
@@ -694,7 +698,7 @@ describe(`Query Collections`, () => {
     })
 
     // Wait for collection to sync
-    await new Promise((resolve) => setTimeout(resolve, 10))
+    await settle()
 
     // Grouped query derived from initial query
     const groupedLiveQuery = renderHook(() => {
@@ -710,7 +714,7 @@ describe(`Query Collections`, () => {
     })
 
     // Wait for grouped query to sync
-    await new Promise((resolve) => setTimeout(resolve, 10))
+    await settle()
 
     // Verify initial grouped results
     expect(groupedLiveQuery.result.state.size).toBe(1)
@@ -746,7 +750,7 @@ describe(`Query Collections`, () => {
     })
     collection.utils.commit()
 
-    await new Promise((resolve) => setTimeout(resolve, 10))
+    await settle()
 
     // Verify the grouped results include the new team members
     expect(groupedLiveQuery.result.state.size).toBe(2)
@@ -1121,6 +1125,8 @@ describe(`Query Collections`, () => {
           }),
         )
 
+        // The test body runs inside createRoot, so setEnabled writes from
+        // an owned scope and needs the ownedWrite opt-in.
         const [enabled, setEnabled] = createSignal(false, { ownedWrite: true })
         const rendered = renderHook(
           (props: { enabled: Accessor<boolean> }) => {
@@ -1172,6 +1178,8 @@ describe(`Query Collections`, () => {
           }),
         )
 
+        // The test body runs inside createRoot, so setEnabled writes from
+        // an owned scope and needs the ownedWrite opt-in.
         const [enabled, setEnabled] = createSignal(false, { ownedWrite: true })
         const rendered = renderHook(
           (props: { enabled: Accessor<boolean> }) => {
@@ -2101,6 +2109,66 @@ describe(`Query Collections`, () => {
     resolveNewLiveQuery!()
   })
 
+  it(`a superseded collection's late error does not poison the replacement`, async () => {
+    const sourceA = createCollection(
+      mockSyncCollectionOptions<Person>({
+        id: `late-error-source-a`,
+        getKey: (p) => p.id,
+        initialData: [initialPersons[0]!],
+      }),
+    )
+    const sourceB = createCollection(
+      mockSyncCollectionOptions<Person>({
+        id: `late-error-source-b`,
+        getKey: (p) => p.id,
+        initialData: [initialPersons[1]!],
+      }),
+    )
+
+    const liveA = createLiveQueryCollection({
+      query: (q) =>
+        q.from({ persons: sourceA }).select(({ persons }) => ({
+          id: persons.id,
+        })),
+      startSync: false,
+    })
+    const liveB = createLiveQueryCollection({
+      query: (q) =>
+        q.from({ persons: sourceB }).select(({ persons }) => ({
+          id: persons.id,
+        })),
+      startSync: false,
+    })
+
+    // liveA's ready-promise never settles until we reject it — after the
+    // hook has already moved on to liveB.
+    let rejectA: ((error: unknown) => void) | undefined
+    liveA.toArrayWhenReady = () =>
+      new Promise((_resolve, reject) => {
+        rejectA = reject
+      })
+
+    const [useA, setUseA] = createSignal(true)
+    const rendered = renderHook(() =>
+      useLiveQuery(() => (useA() ? liveA : liveB)),
+    )
+
+    await waitFor(() => {
+      expect(rendered.result()).toMatchObject([{ id: `1` }])
+    })
+
+    setUseA(false)
+    await waitFor(() => {
+      expect(rendered.result()).toMatchObject([{ id: `2` }])
+    })
+
+    rejectA!(new Error(`late error from superseded collection`))
+    await settle()
+
+    expect(() => rendered.result()).not.toThrow()
+    expect(rendered.result()).toMatchObject([{ id: `2` }])
+  })
+
   describe(`Errored boundary`, () => {
     it(`should throw when reading an errored query`, async () => {
       const collection = createCollection<Person>({
@@ -2221,7 +2289,7 @@ describe(`Query Collections`, () => {
         onDelete: () => Promise.resolve(),
       })
 
-      const [useFirst, setUseFirst] = createSignal(true, { ownedWrite: true })
+      const [useFirst, setUseFirst] = createSignal(true)
 
       const { result } = renderHook(() =>
         useLiveQuery((q) =>
@@ -2275,7 +2343,7 @@ describe(`Query Collections`, () => {
         onDelete: () => Promise.resolve(),
       })
 
-      const [useFirst, setUseFirst] = createSignal(true, { ownedWrite: true })
+      const [useFirst, setUseFirst] = createSignal(true)
 
       function TestComp() {
         const query = useLiveQuery((q) =>
