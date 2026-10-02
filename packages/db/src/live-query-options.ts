@@ -1,7 +1,10 @@
 import { BaseQueryBuilder } from './query/builder/index.js'
 import { isCollection } from './live-query-adapter.js'
 import { createLiveQueryCollection } from './query/live-query-collection.js'
-import { createPooledLiveQuery } from './query/pooled-live-query.js'
+import {
+  createPooledLiveQuery,
+  getPooledQueryIdentity,
+} from './query/pooled-live-query.js'
 import {
   getStableQueryBuilderHash,
   getStableValueHash,
@@ -112,7 +115,12 @@ export function prepareLiveQueryValue(
 export function getPreparedLiveQueryIdentity(value: unknown): unknown {
   if (isCollection(value)) return [`collection`, value.id]
   if (value instanceof BaseQueryBuilder) {
-    return [`query`, getStableQueryBuilderHash(value)]
+    // A pooled query's fields and literals identify its rows without
+    // canonicalizing its whole IR on every render.
+    const pooled = getPooledQueryIdentity(value)
+    return pooled === undefined
+      ? [`query`, getStableQueryBuilderHash(value)]
+      : [`pooled`, pooled]
   }
   if (value && typeof value === `object` && `query` in value) {
     const config = value as LiveQueryCollectionConfig<any>

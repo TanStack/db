@@ -588,6 +588,21 @@ const forwardToCollection: ProxyHandler<PooledLiveQuery> = {
 }
 
 /**
+ * The identity of a query a partition can serve with no residual conjunct:
+ * its source and its `eq` fields and literals, which determine its rows.
+ * Undefined for any other query, which keeps the full structural identity.
+ */
+export function getPooledQueryIdentity(
+  query: BaseQueryBuilder,
+): string | undefined {
+  const ir = query._getQuery()
+  if (ir.from.type !== `collectionRef`) return undefined
+  const shape = poolableShape(ir)
+  if (!shape || shape.residual.length > 0) return undefined
+  return JSON.stringify([ir.from.collection.id, shape.shapeKey, shape.groupKey])
+}
+
+/**
  * A pooled view for a query a partition can serve, or undefined. The view is
  * typed as the Collection it stands in for.
  */
