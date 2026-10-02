@@ -36,3 +36,52 @@ The loss audit found three missing distinctions. The final oracle adds two same-
 The original witness is the mounted A(id=x) → B(id=x) rerender. Adjacent histories include A(id=x) → C(id=y) → B(id=x), a changed predicate, source cleanup while mounted, same-query duplicate IDs, client scope changes, and separate Suspense hooks. The claim covers these legal React histories and their public error or row observations. It does not assert that an ID is globally unique across hooks or clients. No reachable in-scope counterexample was found in this bounded audit.
 
 The focused oracle passed 12 tests. The related React hook and Suspense suites passed 120 tests in five files. Lint and the React DB package build passed. This is sampled and bounded evidence, not a universal proof of every React schedule.
+
+## 2026-10-02 collision-path addendum
+
+Reviewed semantic head: `ebf7c785bc42f6dd1d652b296a3de7e15ec310a5`.
+The earlier review above remains evidence for its own head. This addendum
+evaluates the new sync-start deferral witness and fix.
+
+**Law and boundary.** A mounted derived-identity hook rejects a source object
+that reuses a remembered ID. If the rejected render also materialized a
+different shared `DbClient` descriptor, it must release the descriptor's
+sync-start deferral. A later direct Collection reader must be able to start
+sync and observe the descriptor's row. This is a controlled React render and
+ErrorBoundary history, observed through the public hook error, Collection
+status, and row after the later reader subscribes. It does not claim that all
+possible render exceptions release deferrals.
+
+**RED/GREEN and distinguishing histories.** At prior head `c5a1bd9f4`, the
+ErrorBoundary caught the expected collision, but the later direct reader stayed
+`idle` and the descriptor sync callback had run zero times. The same test at
+`ebf7c785b` reached `ready`, returned the exact shared row, and counted one
+sync start. The existing same-source, new-ID, same-ID collision, client-scope,
+and Suspense controls remained green. The old implementation is the relevant
+hostile design: it passes the original collision assertion but fails at the
+later reader's public status checkpoint.
+
+| Requirement | Addendum outcome |
+| --- | --- |
+| ORC-001 | Pass. The reported deferred-sync leak and the existing mounted-hook contract supply authority; the coverage map names the React owner and its limits. |
+| ORC-002 | Pass. The expected later `ready` status and row follow from a distinct reader's public Collection contract, not the production deferral flag or token map. |
+| ORC-003 | Pass. The oracle prologue states this law and its limit; the fixed history, React driver, and public assertions are in one file. |
+| ORC-004 | Not applicable. The new history is fixed, with no generated coverage claim. |
+| ORC-005 | Pass. The driver uses `useLiveQuery`, a real `DbClient` descriptor, a real ErrorBoundary, and a later direct reader. |
+| ORC-006 | Pass. The prior production implementation fails at `idle` versus `ready`; the same case passes after the fix. |
+| ORC-007 | Not applicable. No important generated property was added. |
+| ORC-008 | Pass. The model needs only a remembered same-ID binding, a distinct shared descriptor, a rejected render, and a later reader; it does not copy sync-manager state. |
+| ORC-009 | Pass. The new prose uses source Collection, sync-start deferral, and Collection status with the glossary meanings. |
+| ORC-010 | Pass. The test checks the caught error and later reader before test cleanup, with no error normalization or shrinking. |
+| ORC-011 | Not triggered by a shared-fault hypothesis for this new boundary; the later direct reader is a separate path from the rejected derived hook. |
+| ORC-012 | Pass. This versioned addendum identifies the exact reviewed semantic head, all requirement outcomes, original wrong design, and remaining limits. |
+| ORC-013 | Pass for the named collision condition. A same-source or fresh-ID rerender stays legal; a same-ID replacement rejects, while its unrelated descriptor remains usable. |
+| ORC-014 | Not triggered for a real-provider claim. The source sync is controlled; persisted SQLite and streaming remain outside this owner. |
+
+The updated oracle passed 13 cases. The oracle plus the surrounding React hook
+and Suspense suites passed 100 cases; ESLint and Prettier passed. A separate
+TypeScript project check was blocked by missing `@tanstack/query-core` and
+`@standard-schema/spec` dependencies in this checkout, while Vitest reported
+no type errors for the tested files. A bounded 32-ID diagnostic showed linear
+retention in one mounted hook; the coverage map records that unresolved space
+policy. No claim of space-bounded ID history is made.
