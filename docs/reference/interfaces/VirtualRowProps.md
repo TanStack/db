@@ -5,7 +5,10 @@ title: VirtualRowProps
 
 Defined in: [packages/db/src/virtual-props.ts:60](https://github.com/TanStack/db/blob/main/packages/db/src/virtual-props.ts#L60)
 
-Virtual properties recognized on TanStack DB rows. `$hasPendingWrites` is optional in this compatibility type because `hasVirtualProps` accepts legacy four-field rows. Collection-published rows use `WithVirtualProps`, which requires it.
+Virtual properties recognized on TanStack DB rows. The new
+`$hasPendingWrites` field is optional here so legacy four-field rows accepted
+by `hasVirtualProps` remain assignable. Rows returned by collections use
+`WithVirtualProps`, which requires it.
 
 These properties are:
 - Computed (not stored in the data model)
@@ -60,6 +63,23 @@ For live query collections, this is the ID of the upstream collection.
 
 ***
 
+### $hasPendingWrites?
+
+```ts
+readonly optional $hasPendingWrites: boolean;
+```
+
+Defined in: [packages/db/src/virtual-props.ts:71](https://github.com/TanStack/db/blob/main/packages/db/src/virtual-props.ts#L71)
+
+Whether this row currently has pending local optimistic writes.
+
+This describes the row's local optimistic state, not backend upload or
+acknowledgement. It is always `false` for local-only collections. It is
+optional only for compatibility with legacy rows; collection-published
+rows always provide it.
+
+***
+
 ### $key
 
 ```ts
@@ -72,18 +92,6 @@ The row's key (primary identifier).
 
 This is the same value returned by `collection.config.getKey(row)`.
 Useful when you need the key in projections or computations.
-
-***
-
-### $hasPendingWrites
-
-```ts
-readonly $hasPendingWrites?: boolean;
-```
-
-Defined in: [packages/db/src/virtual-props.ts:71](https://github.com/TanStack/db/blob/main/packages/db/src/virtual-props.ts#L71)
-
-Whether this row currently has pending local optimistic writes. It does not indicate backend upload or acknowledgement, and is always `false` for local-only collections. Collection-published rows always provide it.
 
 ***
 
@@ -128,4 +136,5 @@ For live query collections, this is passed through from the source collection.
 
 #### Deprecated
 
-Use `!row.$hasPendingWrites` instead. This alias will be removed in the 1.0 RC.
+Use `!row.$hasPendingWrites` instead. This alias will be
+removed in the 1.0 RC.
