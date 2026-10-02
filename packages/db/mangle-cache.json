@@ -141,7 +141,6 @@
   "completePendingSyncEntryCleanup": "ck",
   "normalizeLoadSubsetPromiseError": "cl",
   "deliveredLayoutRevision": "cm",
-  "markPendingLocalChanges": "cn",
   "observeLoadSubsetResult": "co",
   "ssrServerCleanupEnabled": "cp",
   "endTransition": "cq",
@@ -369,5 +368,9 @@
   "compilations": "f3",
   "writtenRows": "f4",
   "equalityRoute": "f5",
-  "checkReusedRow": "f6"
+  "checkReusedRow": "f6",
+  "collectPendingSyncKeys": "cn",
+  "emitLoadingSubsetChange": "f7",
+  "overlayActiveTransactions": "f8",
+  "retireLoadSubsetOperation": "f9"
 }
