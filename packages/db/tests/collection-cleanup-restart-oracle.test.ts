@@ -45,6 +45,8 @@ import type { SyncConfig } from '../src/types'
  * No replacement owner is admitted until terminal publication. Concurrent
  * callers share the cleanup promise. Rejection still finalizes the old run and
  * rejects every waiter. A later ordinary preload starts a new sync run.
+ * A subset load still pending at cleanup ends with one `loadingSubset:change`
+ * end transition, so no subscriber keeps a load that can no longer settle.
  *
  * `expectedCleanupBoundary` is a small independent three-cut timeline model. Its
  * `dependent` field combines the live query's terminal error and the Effect's
@@ -1572,4 +1574,50 @@ describe(`Collection cleanup admission oracle`, () => {
       }
     },
   )
+
+  it(`ends a pending subset load with one end transition at cleanup`, async () => {
+    const collection = createCollection<Row, number>({
+      getKey: (row) => row.id,
+      syncMode: `on-demand`,
+      startSync: true,
+      sync: {
+        sync: ({ markReady }) => {
+          markReady()
+          return { loadSubset: () => new Promise<void>(() => {}) }
+        },
+      },
+    })
+    const transitions: Array<{
+      isLoadingSubset: boolean
+      previousIsLoadingSubset: boolean
+      loadingSubsetTransition: string
+    }> = []
+    collection.on(`loadingSubset:change`, (event) => {
+      transitions.push({
+        isLoadingSubset: event.isLoadingSubset,
+        previousIsLoadingSubset: event.previousIsLoadingSubset,
+        loadingSubsetTransition: event.loadingSubsetTransition,
+      })
+    })
+
+    void collection._sync.loadSubset({})
+    await Promise.resolve()
+    expect(collection.isLoadingSubset).toBe(true)
+
+    await collection.cleanup()
+
+    expect(transitions).toEqual([
+      {
+        isLoadingSubset: true,
+        previousIsLoadingSubset: false,
+        loadingSubsetTransition: `start`,
+      },
+      {
+        isLoadingSubset: false,
+        previousIsLoadingSubset: true,
+        loadingSubsetTransition: `end`,
+      },
+    ])
+    expect(collection.isLoadingSubset).toBe(false)
+  })
 })
