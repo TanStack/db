@@ -273,7 +273,7 @@ export class CollectionStateManager<
       rowOrigins?: ReadonlyMap<TKey, VirtualOrigin>
       optimisticUpserts?: Pick<Map<TKey, unknown>, 'has'>
       optimisticDeletes?: Pick<Set<TKey>, 'has'>
-      completedOptimisticKeys?: Pick<Map<TKey, unknown>, 'has'>
+      completedOptimisticKeys?: Pick<Set<TKey>, 'has'>
     },
   ): VirtualRowProps<TKey> {
     if (this.isLocalOnly) {
