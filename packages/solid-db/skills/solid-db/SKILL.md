@@ -5,7 +5,7 @@ description: >
   doubles as data access (call as function — returns current rows
   synchronously, including partial rows synced before ready) with state,
   collection, status, isReady, and persisted-readiness properties. Suspense
-  is opt-in via the readiness accessor read inside <Loading>. Fine-grained
+  is opt-in via the whenReady accessor read inside <Loading>. Fine-grained
   reactivity: signal reads MUST happen inside the query function for
   tracking. Config passed as Accessor (() => config). Wholesale observer
   mode + keyed projection for per-field row reactivity keyed by live result
@@ -68,7 +68,7 @@ const query = useLiveQuery((q) => q.from({ todo: todoCollection }))
 // query.isReady / query.isError → boolean
 // query.persistedStatus / query.isPersistedReady / query.persistedError
 //                  → persisted (network-first) restore state
-// query.readiness  → Accessor; reading it inside <Loading> gates on first data
+// query.whenReady  → Accessor; reading it inside <Loading> gates on first data
 
 // With reactive signals — signals MUST be read INSIDE the query function
 const [minPriority, setMinPriority] = createSignal(5)
@@ -146,7 +146,7 @@ import { Loading, Errored } from '@solidjs/web'
 </Errored>
 ```
 
-Data reads never suspend — `query()` returns the current rows at any time, including partial rows synced while loading; only reading an errored query throws (for `<Errored>` to catch). Suspense is opt-in: `query.readiness()` gates on the initial render (throwing `NotReadyError` for `<Loading>` to catch) and then returns the rows exactly like `query()` — feed it straight into `<For each={...}>`. It settles at network readiness or a permitted persisted fallback.
+Data reads never suspend — `query()` returns the current rows at any time, including partial rows synced while loading; only reading an errored query throws (for `<Errored>` to catch). Suspense is opt-in: `query.whenReady()` gates on the initial render (throwing `NotReadyError` for `<Loading>` to catch) and then returns the rows exactly like `query()` — feed it straight into `<For each={...}>`. It settles at network readiness or a permitted persisted fallback.
 
 ### Revalidation progress with isPending
 
@@ -154,7 +154,7 @@ Data reads never suspend — `query()` returns the current rows at any time, inc
 import { isPending } from 'solid-js'
 
 // True while a changed input's new collection is loading:
-{isPending(() => todosQuery.readiness()) && <Spinner />}
+{isPending(() => todosQuery.whenReady()) && <Spinner />}
 ```
 
 Rendered content stays visible during revalidation (v2 `<Loading>` holds), so no fallback flash.

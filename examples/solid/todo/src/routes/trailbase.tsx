@@ -34,7 +34,7 @@ function TrailBasePage() {
   return (
     <Loading fallback="Loading...">
       <TodoApp
-        todos={todos.readiness()}
+        todos={todos.whenReady()}
         configData={configData()}
         todoCollection={trailBaseTodoCollection}
         configCollection={trailBaseConfigCollection}
