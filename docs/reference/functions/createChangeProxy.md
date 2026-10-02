@@ -7,7 +7,7 @@ title: createChangeProxy
 function createChangeProxy<T>(target, parent?): object;
 ```
 
-Defined in: [packages/db/src/proxy.ts:472](https://github.com/TanStack/db/blob/main/packages/db/src/proxy.ts#L472)
+Defined in: [packages/db/src/proxy.ts:321](https://github.com/TanStack/db/blob/main/packages/db/src/proxy.ts#L321)
 
 Creates a proxy that tracks changes to the target object
 

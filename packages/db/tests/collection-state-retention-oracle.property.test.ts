@@ -4,6 +4,7 @@ import { createCollection } from '../src/collection/index.js'
 import {
   DuplicateKeySyncError,
   SyncTransactionAbortedError,
+  SyncTransactionAlreadyCommittedWriteError,
 } from '../src/errors.js'
 import { BTreeIndex } from '../src/indexes/btree-index.js'
 import { createDeferred } from '../src/deferred.js'
@@ -1455,6 +1456,28 @@ it.each([
   },
 )
 
+// A committed source batch that waits for persistence is closed to writes.
+// Without the check, a late write would join the queued batch.
+it(`rejects a write to a committed batch that waits for persistence`, async () => {
+  await withParkedSync(
+    [{ id: 1, value: 0 }],
+    async ({ collection, sync, releasePersistence }) => {
+      sync.begin()
+      sync.write({ type: `update`, value: { id: 1, value: 1 } })
+      const receipt = sync.commit()
+      if (receipt === true) throw new Error(`update was not queued`)
+
+      expect(() =>
+        sync.write({ type: `update`, value: { id: 1, value: 2 } }),
+      ).toThrow(SyncTransactionAlreadyCommittedWriteError)
+
+      await releasePersistence()
+      await receipt
+      expect(collection.get(1)?.value).toBe(1)
+    },
+  )
+})
+
 it(`keeps an invalidated active transaction addressable until commit`, async () => {
   await withParkedSync(
     [{ id: 1, value: 0 }],
@@ -2566,6 +2589,32 @@ const historyRow = fc.record({
   b: fc.integer({ min: -2, max: 2 }),
   c: fc.integer({ min: -2, max: 2 }),
 })
+const sourceBatch = fc.record({
+  type: fc.constant(`sync` as const),
+  rows: fc.uniqueArray(historyRow, {
+    selector: (row) => row.id,
+    maxLength: 3,
+  }),
+  // The source may also delete keys; only keys it holds take effect.
+  deletes: fc.oneof(
+    { weight: 3, arbitrary: fc.constant([]) },
+    {
+      weight: 1,
+      arbitrary: fc.uniqueArray(fc.integer({ min: 1, max: 3 }), {
+        minLength: 1,
+        maxLength: 2,
+      }),
+    },
+  ),
+  truncate: fc.boolean(),
+  immediate: fc.boolean(),
+  copies: fc.integer({ min: 1, max: 2 }),
+})
+// A mutation handler may write a source batch before it returns.
+const handlerBatch = fc.oneof(
+  { weight: 3, arbitrary: fc.constant(undefined) },
+  { weight: 1, arbitrary: sourceBatch },
+)
 const optimisticStep: fc.Arbitrary<OptimisticStep> = fc.oneof(
   {
     weight: 2,
@@ -2573,6 +2622,7 @@ const optimisticStep: fc.Arbitrary<OptimisticStep> = fc.oneof(
       type: fc.constant(`delete` as const),
       key: fc.integer({ min: 1, max: 3 }),
       optimistic: fc.boolean(),
+      inHandler: handlerBatch,
     }),
   },
   {
@@ -2591,6 +2641,7 @@ const optimisticStep: fc.Arbitrary<OptimisticStep> = fc.oneof(
         )
         .filter((fields) => Object.keys(fields).length > 0),
       optimistic: fc.boolean(),
+      inHandler: handlerBatch,
     }),
   },
   {
@@ -2602,19 +2653,7 @@ const optimisticStep: fc.Arbitrary<OptimisticStep> = fc.oneof(
       cascade: fc.boolean(),
     }),
   },
-  {
-    weight: 3,
-    arbitrary: fc.record({
-      type: fc.constant(`sync` as const),
-      rows: fc.uniqueArray(historyRow, {
-        selector: (row) => row.id,
-        maxLength: 3,
-      }),
-      truncate: fc.boolean(),
-      immediate: fc.boolean(),
-      copies: fc.integer({ min: 1, max: 2 }),
-    }),
-  },
+  { weight: 3, arbitrary: sourceBatch },
 )
 const optimisticHistory = fc.record({
   initial: fc.uniqueArray(historyRow, {
@@ -2686,6 +2725,125 @@ it(`generates direct delete actions`, () => {
   const commands = fc.sample(optimisticStep, { seed: 86104, numRuns: 100 })
   expect(commands.some((step) => step.type === `delete`)).toBe(true)
 })
+
+// Replay of a random-campaign counterexample. A confirmed delete must clear the
+// key's local attribution, so a later source reinsert is remote.
+it(`attributes a source reinsert after a confirmed delete to the source`, async () => {
+  const row = { id: 2, a: 0, b: 0, c: 0 }
+  const counts = await runOptimisticHistory(
+    [],
+    [
+      {
+        type: `sync`,
+        rows: [row],
+        truncate: false,
+        immediate: false,
+        copies: 1,
+      },
+      {
+        type: `delete`,
+        key: 2,
+        optimistic: false,
+        inHandler: {
+          type: `sync`,
+          rows: [],
+          deletes: [2],
+          truncate: false,
+          immediate: false,
+          copies: 1,
+        },
+      },
+      {
+        type: `edit`,
+        key: 1,
+        fields: { b: 0 },
+        optimistic: false,
+        inHandler: {
+          type: `sync`,
+          rows: [row],
+          truncate: false,
+          immediate: true,
+          copies: 1,
+        },
+      },
+    ],
+  )
+  expect(counts.sourceDeletes).toBe(1)
+})
+
+it(`writes source inserts and deletes in the fixed campaign`, async () => {
+  const histories = fc.sample(optimisticHistory, { seed: 86103, numRuns: 40 })
+  let inserts = 0
+  let deletes = 0
+  for (const { initial, steps } of histories) {
+    const counts = await runOptimisticHistory(initial, steps)
+    inserts += counts.sourceInserts
+    deletes += counts.sourceDeletes
+  }
+  expect(inserts).toBeGreaterThan(0)
+  expect(deletes).toBeGreaterThan(0)
+})
+
+it(`generates source batches inside insert, update, and delete handlers`, () => {
+  const histories = fc.sample(optimisticHistory, { seed: 86103, numRuns: 100 })
+  const inHandler = histories.flatMap(({ steps }) =>
+    steps.flatMap((step) =>
+      (step.type === `edit` || step.type === `delete`) && step.inHandler
+        ? [{ type: step.type, batch: step.inHandler }]
+        : [],
+    ),
+  )
+  expect(inHandler.some((entry) => entry.type === `edit`)).toBe(true)
+  expect(inHandler.some((entry) => entry.type === `delete`)).toBe(true)
+  expect(inHandler.some((entry) => entry.batch.immediate)).toBe(true)
+  expect(inHandler.some((entry) => !entry.batch.immediate)).toBe(true)
+  expect(inHandler.some((entry) => entry.batch.rows.length > 0)).toBe(true)
+})
+
+// A handler that confirms its own request through sync, before it returns.
+// The request must already be owned by the Collection, so the batch waits for
+// settlement and then retires the accepted snapshot.
+it.each(
+  [`insert`, `update`, `delete`].flatMap((kind) =>
+    [false, true].map((immediate) => ({ kind, immediate })),
+  ),
+)(
+  `retires a request confirmed inside its own handler: %j`,
+  async ({ kind, immediate }) => {
+    const existing = { id: 1, a: 0, b: 0, c: 0 }
+    const confirmed = { id: 1, a: 1, b: 1, c: 1 }
+    const batch = {
+      type: `sync`,
+      rows: kind === `delete` ? [] : [confirmed],
+      truncate: false,
+      immediate,
+      copies: 1,
+    } as const
+    const counts = await runOptimisticHistory(
+      kind === `insert` ? [] : [existing],
+      [
+        kind === `delete`
+          ? { type: `delete`, key: 1, optimistic: true, inHandler: batch }
+          : {
+              type: `edit`,
+              key: 1,
+              fields: { a: 1, b: 1, c: 1 },
+              optimistic: true,
+              inHandler: batch,
+            },
+        { type: `settle`, slot: 0, success: true, cascade: false },
+        {
+          type: `sync`,
+          rows: [{ id: 1, a: 2, b: 2, c: 2 }],
+          truncate: false,
+          immediate: false,
+          copies: 1,
+        },
+      ],
+    )
+    expect(counts.handlerBatches).toBe(1)
+  },
+)
 
 const defaultHistory = (
   truncate: boolean,

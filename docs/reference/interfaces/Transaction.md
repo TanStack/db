@@ -86,7 +86,8 @@ that backend observation before returning.
 
 #### Deprecated
 
-Use `when('settled')` instead. This alias will be removed in the 1.0 RC.
+Use `when('settled')` instead. This alias will be removed in
+the 1.0 RC.
 
 ***
 
@@ -452,7 +453,13 @@ when(_state): Promise<Transaction<T>>;
 
 Defined in: [packages/db/src/transactions.ts:397](https://github.com/TanStack/db/blob/main/packages/db/src/transactions.ts#L397)
 
-Wait for this transaction to complete successfully or fail. The promise resolves with this transaction on success and rejects with the original error on failure (or `undefined` for a rollback without an error). For non-empty commits, this boundary is the mutation function's completion; it does not inherently prove backend acknowledgement or read-back.
+Wait for this transaction to complete successfully or fail.
+
+The promise resolves with this transaction on success and rejects with
+the original error on failure (or `undefined` for a rollback without an
+error). For non-empty commits, this
+boundary is the mutation function's completion; it does not inherently
+prove backend acknowledgement or read-back.
 
 #### Parameters
 

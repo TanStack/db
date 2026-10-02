@@ -1,5 +1,13 @@
 # @tanstack/db-ivm
 
+## 0.1.25
+
+### Patch Changes
+
+- Fix joins over rows keyed by `NaN`. The index compared row-key prefixes with `===`, which treats `NaN` as unequal to itself, while the `Map` holding the prefixes treats it as one key. A retracted `NaN`-keyed row then never cancelled, so the join published a duplicate row or threw `Mismatching prefixes`. ([#1956](https://github.com/TanStack/db/pull/1956))
+
+- Keep keyed records distinct when keys or values share text across types, contain delimiters, or hold different symbols and functions. Prevent a retraction of one record from canceling a different record. ([#1967](https://github.com/TanStack/db/pull/1967))
+
 ## 0.1.24
 
 ### Patch Changes

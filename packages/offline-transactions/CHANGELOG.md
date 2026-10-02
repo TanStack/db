@@ -1,5 +1,16 @@
 # @tanstack/offline-transactions
 
+## 1.0.59
+
+### Patch Changes
+
+- Reject offline transactions that lose leadership before outbox admission so optimistic changes roll back instead of reporting false success. ([#1966](https://github.com/TanStack/db/pull/1966))
+
+- Wait for acknowledged outbox deletion before reporting a successful offline transaction. Persist fulfilled and permanently rejected provider outcomes so a fresh executor can remove a marked row without calling the provider again. If a phase write or deletion fails, reject the affected caller, stop the executor, and leave queued work untouched. Keep active callers from hanging after manual outbox removal. ([#1968](https://github.com/TanStack/db/pull/1968))
+
+- Updated dependencies [[`a18f63d`](https://github.com/TanStack/db/commit/a18f63d3562c0c9bebccffcdad1785cb5c9cc5f6), [`e706483`](https://github.com/TanStack/db/commit/e7064834f28b065c8bfc9356df61a158d68aab94), [`18abcee`](https://github.com/TanStack/db/commit/18abceee48ebde712e120cbc541289bb83f35d77), [`d2690bf`](https://github.com/TanStack/db/commit/d2690bf570dae1f1b527cf186e03a4f1e81e37ff), [`5b85af0`](https://github.com/TanStack/db/commit/5b85af08f2b02ff675d79c012a858e6b2bea3dbf), [`1dbf5f9`](https://github.com/TanStack/db/commit/1dbf5f9a5d3dee3ea4caec7fe935b3f018ce22c9), [`7ab48d8`](https://github.com/TanStack/db/commit/7ab48d83668b1c8a5051620e3963ccd72896e04f), [`d2690bf`](https://github.com/TanStack/db/commit/d2690bf570dae1f1b527cf186e03a4f1e81e37ff), [`7ca38db`](https://github.com/TanStack/db/commit/7ca38dbb9195ead55e7df60746157779b6d5e65a), [`f2f92c5`](https://github.com/TanStack/db/commit/f2f92c5b2c1500cc7b19c4294039700bb77dd4b3)]:
+  - @tanstack/db@0.11.1
+
 ## 1.0.58
 
 ### Patch Changes

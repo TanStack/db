@@ -1,5 +1,12 @@
 # @tanstack/tauri-db-sqlite-persistence
 
+## 0.2.26
+
+### Patch Changes
+
+- Updated dependencies []:
+  - @tanstack/db-sqlite-persistence-core@0.4.1
+
 ## 0.2.25
 
 ### Patch Changes

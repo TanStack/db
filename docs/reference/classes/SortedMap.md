@@ -156,7 +156,7 @@ An iterator for the map's entries
 forEach(callbackfn): void;
 ```
 
-Defined in: [packages/db/src/SortedMap.ts:250](https://github.com/TanStack/db/blob/main/packages/db/src/SortedMap.ts#L250)
+Defined in: [packages/db/src/SortedMap.ts:248](https://github.com/TanStack/db/blob/main/packages/db/src/SortedMap.ts#L248)
 
 Executes a callback function for each key-value pair in the map in sorted order
 

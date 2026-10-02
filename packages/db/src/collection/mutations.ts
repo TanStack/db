@@ -340,13 +340,13 @@ export class CollectionMutationsManager<
       // Apply mutations to the new transaction
       directOpTransaction.applyMutations(mutations)
       this.markPendingLocalChanges(mutations)
-      // Errors still reject tx.isPersisted.promise; this catch only prevents global unhandled rejections
-      directOpTransaction.commit().catch(() => undefined)
-
-      // Add the transaction to the collection's transactions store
+      // The Collection owns the request before its handler can write through
+      // sync, so a confirmation written by the handler waits for settlement.
       state.transactions.set(directOpTransaction.id, directOpTransaction)
       state.scheduleTransactionCleanup(directOpTransaction)
       state.recomputeOptimisticState(true)
+      // Errors still reject tx.isPersisted.promise; this catch only prevents global unhandled rejections
+      directOpTransaction.commit().catch(() => undefined)
 
       return directOpTransaction
     }
@@ -554,14 +554,12 @@ export class CollectionMutationsManager<
     // Apply mutations to the new transaction
     directOpTransaction.applyMutations(mutations)
     this.markPendingLocalChanges(mutations)
-    // Errors still hit tx.isPersisted.promise; avoid leaking an unhandled rejection from the fire-and-forget commit
-    directOpTransaction.commit().catch(() => undefined)
-
-    // Add the transaction to the collection's transactions store
-
+    // Own the request before its handler runs; see insert.
     state.transactions.set(directOpTransaction.id, directOpTransaction)
     state.scheduleTransactionCleanup(directOpTransaction)
     state.recomputeOptimisticState(true)
+    // Errors still hit tx.isPersisted.promise; avoid leaking an unhandled rejection from the fire-and-forget commit
+    directOpTransaction.commit().catch(() => undefined)
 
     return directOpTransaction
   }
@@ -669,12 +667,12 @@ export class CollectionMutationsManager<
     // Apply mutations to the new transaction
     directOpTransaction.applyMutations(mutations)
     this.markPendingLocalChanges(mutations)
-    // Errors still reject tx.isPersisted.promise; silence the internal commit promise to prevent test noise
-    directOpTransaction.commit().catch(() => undefined)
-
+    // Own the request before its handler runs; see insert.
     state.transactions.set(directOpTransaction.id, directOpTransaction)
     state.scheduleTransactionCleanup(directOpTransaction)
     state.recomputeOptimisticState(true)
+    // Errors still reject tx.isPersisted.promise; silence the internal commit promise to prevent test noise
+    directOpTransaction.commit().catch(() => undefined)
 
     return directOpTransaction
   }

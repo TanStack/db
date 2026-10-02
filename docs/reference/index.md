@@ -189,6 +189,7 @@ title: "@tanstack/db"
 - [ChangesPayload](type-aliases/ChangesPayload.md)
 - [CleanupFn](type-aliases/CleanupFn.md)
 - [ClearStorageFn](type-aliases/ClearStorageFn.md)
+- [CollectionBase](type-aliases/CollectionBase.md)
 - [CollectionConfigSingleRowOption](type-aliases/CollectionConfigSingleRowOption.md)
 - [CollectionMaterializeOptions](type-aliases/CollectionMaterializeOptions.md)
 - [CollectionOptions](type-aliases/CollectionOptions.md)

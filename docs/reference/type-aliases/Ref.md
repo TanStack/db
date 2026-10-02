@@ -7,7 +7,7 @@ title: Ref
 type Ref<T, Nullable, IncludeVirtualProps> = T extends unknown ? RefBranch<T, Nullable, IncludeVirtualProps> : never;
 ```
 
-Defined in: [packages/db/src/query/builder/types.ts:902](https://github.com/TanStack/db/blob/main/packages/db/src/query/builder/types.ts#L902)
+Defined in: [packages/db/src/query/builder/types.ts:907](https://github.com/TanStack/db/blob/main/packages/db/src/query/builder/types.ts#L907)
 
 Ref - The user-facing ref interface for the query builder
 
