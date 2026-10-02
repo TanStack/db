@@ -367,16 +367,12 @@
   "restore": "f1",
   "attach": "f2",
   "compilations": "f3",
-  "releaseTimer": "f4",
   "commitLocalOnlyDirect": "f5",
   "stopStatusEvents": "f6",
-  "snapshotRevision": "f7",
   "scheduleRelease": "f8",
-  "snapshotStatus": "f9",
-  "layoutKeys": "ga",
-  "watching": "gb",
-  "stopWatching": "gc",
-  "onChanges": "gd",
-  "onStatus": "ge",
-  "onEmpty": "gf"
+  "onEmpty": "gf",
+  "releaseIfUnused": "f4",
+  "filterChanges": "f7",
+  "passes": "f9",
+  "sameFields": "ga"
 }
