@@ -41,6 +41,8 @@ type Fields = Partial<Omit<HistoryRow, `id`>>
 type SourceBatch = {
   type: `sync`
   rows: Array<HistoryRow>
+  // Keys the source deletes after writing its rows. Only present keys apply.
+  deletes?: Array<number> | undefined
   truncate: boolean
   immediate: boolean
   copies: number
@@ -253,7 +255,10 @@ class HistoryModel {
     )
     const replaced = this.queue.some((batch) => batch.truncate)
     const written = new Set(
-      this.queue.flatMap((batch) => batch.rows.map((row) => row.id)),
+      this.queue.flatMap((batch) => [
+        ...batch.rows.map((row) => row.id),
+        ...(batch.deletes ?? []),
+      ]),
     )
     const retainedKeys = new Set(
       this.intents
@@ -289,6 +294,14 @@ class HistoryModel {
           )
             intent.acknowledged = true
         }
+      }
+      // A source delete removes the base row. It acknowledges no request.
+      for (const key of batch.deletes ?? []) {
+        this.base.delete(key)
+        this.origins.delete(key)
+        localKeys.delete(key)
+        for (const intent of this.intents)
+          if (intent.key === key) intent.originPending = false
       }
       // Truncate retains attribution only for rows in its own replacement,
       // not for an unrelated future write after the old source was cleared.
@@ -519,16 +532,44 @@ export async function runOptimisticHistory(
     failures: 0,
     snapshotOverrides: 0,
     handlerBatches: 0,
+    sourceInserts: 0,
+    sourceDeletes: 0,
+  }
+  // The source admits each message against its own rows, including queued
+  // batches. An insert names an absent key; an update or delete a present
+  // one. Resolve each batch once, in write order, for the model and driver.
+  const sourceKeys = new Set(initial.map((row) => row.id))
+  const sourceInserts = new WeakMap<SourceBatch, Set<number>>()
+  function resolveSourceBatch(step: SourceBatch): SourceBatch {
+    if (step.truncate) sourceKeys.clear()
+    const inserts = new Set<number>()
+    for (const row of step.rows) {
+      if (!sourceKeys.has(row.id)) inserts.add(row.id)
+      sourceKeys.add(row.id)
+    }
+    const deletes = (step.deletes ?? []).filter((key) => sourceKeys.has(key))
+    for (const key of deletes) sourceKeys.delete(key)
+    const resolved = { ...step, deletes }
+    sourceInserts.set(resolved, inserts)
+    return resolved
   }
   function writeSourceBatch(step: SourceBatch) {
+    const inserts = sourceInserts.get(step)!
     sync.begin({ immediate: step.immediate })
     if (step.truncate) {
       sync.truncate()
       counts.replacements++
     }
     for (let copy = 0; copy < step.copies; copy++) {
-      for (const row of step.rows)
-        sync.write({ type: `update`, value: { ...row } })
+      for (const row of step.rows) {
+        const type = copy === 0 && inserts.has(row.id) ? `insert` : `update`
+        if (type === `insert`) counts.sourceInserts++
+        sync.write({ type, value: { ...row } })
+      }
+    }
+    for (const key of step.deletes ?? []) {
+      sync.write({ type: `delete`, key })
+      counts.sourceDeletes++
     }
     const receipt = sync.commit()
     if (receipt !== true) {
@@ -752,9 +793,10 @@ export async function runOptimisticHistory(
           const intent = model.intents[index]!
           cuts = [sorted(model.visible().values())]
           if (step.inHandler) {
-            model.sync(step.inHandler)
+            const batch = resolveSourceBatch(step.inHandler)
+            model.sync(batch)
             cuts.push(sorted(model.visible().values()))
-            handlerBatch = step.inHandler
+            handlerBatch = batch
             counts.handlerBatches++
           }
           const done = createDeferred<void>()
@@ -843,9 +885,10 @@ export async function runOptimisticHistory(
           counts.settlements++
           if (!step.success) counts.failures++
         } else {
-          model.sync(step)
+          const batch = resolveSourceBatch(step)
+          model.sync(batch)
           cuts = [sorted(model.visible().values())]
-          writeSourceBatch(step)
+          writeSourceBatch(batch)
         }
         check(`${position}: ${JSON.stringify(step)}`)
         // Count events as well as final values; value-only oracles miss redundant
