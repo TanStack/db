@@ -221,10 +221,10 @@ const solidDriver: LiveQueryDriver = {
   mountCollection,
   mountConfig,
   mountDisabled,
-  // solid-db routes errors through its data-accessor throw path: reading an
-  // errored query throws the captured error for an <Errored> boundary to catch,
-  // rather than exposing a readable isError flag. That's a framework idiom, not a
-  // gap — the error-status scenario is parametrized to assert it via the boundary.
+  // Reading an errored query throws the captured error for an <Errored>
+  // boundary to catch, so the error-status scenario asserts the throw model.
+  // The hook also exposes a readable isError flag, but the throw is the
+  // surface the suite pins here.
   errorSurface: `throw`,
   knownGaps: [],
   features: { serverSnapshot: false, suspense: true },
