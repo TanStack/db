@@ -1,5 +1,12 @@
 # @tanstack/query-db-collection
 
+## 1.3.3
+
+### Patch Changes
+
+- Updated dependencies [[`dac687d`](https://github.com/TanStack/db/commit/dac687d4b5cfac11ee93862ba1c781df7c7caf0f), [`dac687d`](https://github.com/TanStack/db/commit/dac687d4b5cfac11ee93862ba1c781df7c7caf0f), [`dac687d`](https://github.com/TanStack/db/commit/dac687d4b5cfac11ee93862ba1c781df7c7caf0f), [`dac687d`](https://github.com/TanStack/db/commit/dac687d4b5cfac11ee93862ba1c781df7c7caf0f), [`7595a2d`](https://github.com/TanStack/db/commit/7595a2d335b646d7913e836342c3ee60716bc875), [`dac687d`](https://github.com/TanStack/db/commit/dac687d4b5cfac11ee93862ba1c781df7c7caf0f), [`dac687d`](https://github.com/TanStack/db/commit/dac687d4b5cfac11ee93862ba1c781df7c7caf0f), [`8be6705`](https://github.com/TanStack/db/commit/8be6705a754b9e3d75d8c88fff88a971de1ce56b)]:
+  - @tanstack/db@0.11.2
+
 ## 1.3.2
 
 ### Patch Changes
