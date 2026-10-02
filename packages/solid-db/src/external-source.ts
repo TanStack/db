@@ -32,6 +32,14 @@ function detachTrigger(observer: AnyObserver, trigger: () => void): void {
   }
 }
 
+function detachObserversOf(trigger: () => void): void {
+  const observers = triggerObservers.get(trigger)
+  if (!observers) return
+  for (const observer of observers) {
+    detachTrigger(observer, trigger)
+  }
+}
+
 /**
  * Install the Solid v2 external-source bridge for TanStack DB observers.
  *
@@ -65,12 +73,7 @@ export function enableSolidDBExternalSource(): void {
     factory: (compute, trigger) => {
       return {
         track: (prev: unknown) => {
-          const prevDeps = triggerObservers.get(trigger)
-          if (prevDeps) {
-            for (const obs of prevDeps) {
-              detachTrigger(obs, trigger)
-            }
-          }
+          detachObserversOf(trigger)
           triggerObservers.set(trigger, new Set())
 
           const prevTrigger = activeTrigger
@@ -82,13 +85,8 @@ export function enableSolidDBExternalSource(): void {
           }
         },
         dispose: () => {
-          const deps = triggerObservers.get(trigger)
-          if (deps) {
-            for (const obs of deps) {
-              detachTrigger(obs, trigger)
-            }
-            triggerObservers.delete(trigger)
-          }
+          detachObserversOf(trigger)
+          triggerObservers.delete(trigger)
         },
       }
     },
