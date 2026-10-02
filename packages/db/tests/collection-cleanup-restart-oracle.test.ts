@@ -1574,50 +1574,50 @@ describe(`Collection cleanup admission oracle`, () => {
       }
     },
   )
-})
 
-it(`ends a pending subset load with one end transition at cleanup`, async () => {
-  const collection = createCollection<Row, number>({
-    getKey: (row) => row.id,
-    syncMode: `on-demand`,
-    startSync: true,
-    sync: {
-      sync: ({ markReady }) => {
-        markReady()
-        return { loadSubset: () => new Promise<void>(() => {}) }
+  it(`ends a pending subset load with one end transition at cleanup`, async () => {
+    const collection = createCollection<Row, number>({
+      getKey: (row) => row.id,
+      syncMode: `on-demand`,
+      startSync: true,
+      sync: {
+        sync: ({ markReady }) => {
+          markReady()
+          return { loadSubset: () => new Promise<void>(() => {}) }
+        },
       },
-    },
-  })
-  const transitions: Array<{
-    isLoadingSubset: boolean
-    previousIsLoadingSubset: boolean
-    loadingSubsetTransition: string
-  }> = []
-  collection.on(`loadingSubset:change`, (event) => {
-    transitions.push({
-      isLoadingSubset: event.isLoadingSubset,
-      previousIsLoadingSubset: event.previousIsLoadingSubset,
-      loadingSubsetTransition: event.loadingSubsetTransition,
     })
+    const transitions: Array<{
+      isLoadingSubset: boolean
+      previousIsLoadingSubset: boolean
+      loadingSubsetTransition: string
+    }> = []
+    collection.on(`loadingSubset:change`, (event) => {
+      transitions.push({
+        isLoadingSubset: event.isLoadingSubset,
+        previousIsLoadingSubset: event.previousIsLoadingSubset,
+        loadingSubsetTransition: event.loadingSubsetTransition,
+      })
+    })
+
+    void collection._sync.loadSubset({})
+    await Promise.resolve()
+    expect(collection.isLoadingSubset).toBe(true)
+
+    await collection.cleanup()
+
+    expect(transitions).toEqual([
+      {
+        isLoadingSubset: true,
+        previousIsLoadingSubset: false,
+        loadingSubsetTransition: `start`,
+      },
+      {
+        isLoadingSubset: false,
+        previousIsLoadingSubset: true,
+        loadingSubsetTransition: `end`,
+      },
+    ])
+    expect(collection.isLoadingSubset).toBe(false)
   })
-
-  void collection._sync.loadSubset({})
-  await Promise.resolve()
-  expect(collection.isLoadingSubset).toBe(true)
-
-  await collection.cleanup()
-
-  expect(transitions).toEqual([
-    {
-      isLoadingSubset: true,
-      previousIsLoadingSubset: false,
-      loadingSubsetTransition: `start`,
-    },
-    {
-      isLoadingSubset: false,
-      previousIsLoadingSubset: true,
-      loadingSubsetTransition: `end`,
-    },
-  ])
-  expect(collection.isLoadingSubset).toBe(false)
 })

@@ -1,4 +1,4 @@
-import { expect, it } from 'vitest'
+import { afterAll, expect, it } from 'vitest'
 
 /**
  * # Can a returning subscriber cancel idle cleanup that rescheduled itself?
@@ -15,14 +15,27 @@ import { expect, it } from 'vitest'
  * `src/utils/browser-polyfills.ts` loads, and the Node polyfill always reports
  * a timed-out deadline, so no history in the suite can reach a reschedule.
  * The file installs a controllable `window.requestIdleCallback` before it
- * imports the Collection. The cleanup-queue oracle owns GC appointments; this
- * file owns only the idle stage after an appointment fires.
+ * imports the Collection, checks that the polyfill module bound to it, and
+ * restores the browser globals afterward. It depends on per-file module
+ * isolation: a polyfill module loaded earlier in the same worker fails the
+ * binding check with an explicit error. The cleanup-queue oracle owns GC
+ * appointments; this file owns only the idle stage after an appointment fires.
  */
 
 type Deadline = { didTimeout: boolean; timeRemaining: () => number }
 const pending = new Map<number, (deadline: Deadline) => void>()
 let nextId = 1
 let firstPeriodHasNoTime = true
+const browser = window as any
+const original = {
+  requestIdleCallback: browser.requestIdleCallback,
+  cancelIdleCallback: browser.cancelIdleCallback,
+}
+afterAll(() => {
+  for (const [name, value] of Object.entries(original))
+    if (value === undefined) delete browser[name]
+    else browser[name] = value
+})
 ;(window as any).requestIdleCallback = (callback: (d: Deadline) => void) => {
   const id = nextId++
   pending.set(id, callback)
@@ -43,6 +56,15 @@ const wait = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms))
 
 it(`cancels a rescheduled idle cleanup when a subscriber returns`, async () => {
   const { createCollection } = await import('../src/collection/index.js')
+  const { safeRequestIdleCallback, safeCancelIdleCallback } =
+    await import('../src/utils/browser-polyfills.js')
+  // The polyfill module chooses its scheduler once, when it loads.
+  const probe = safeRequestIdleCallback(() => {})
+  if (!pending.has(probe))
+    throw new Error(
+      `browser-polyfills loaded before this file installed its idle scheduler; this test needs per-file module isolation`,
+    )
+  safeCancelIdleCallback(probe)
   const collection = createCollection<{ id: string }>({
     id: `idle-cleanup`,
     getKey: (row) => row.id,

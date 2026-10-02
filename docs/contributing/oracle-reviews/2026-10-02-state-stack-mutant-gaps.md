@@ -63,6 +63,14 @@ the code under the last two.
   reports a timed-out deadline.
 - Source deletes run only after a batch's rows. A delete before an insert of
   the same key in one batch is outside the grammar.
+- The driver drops a source delete for a key the source lacks, so the grammar
+  never sends one. On a plain Collection, such a delete is a silent no-op. Its
+  effect on an optimistic layer for the same key is unverified. The
+  optimistic-history oracle owns that open cell; it needs the contract for the
+  absent-key delete and a witness with an active and an accepted request on
+  the key.
+- The idle-cleanup test needs per-file module isolation, the Vitest default.
+  Without it, the binding check fails with an explicit error.
 - The fallback that derives previous `$synced`/`$origin` from completed
   request keys still has a survivor (see the
   [absent-key insert review](2026-10-02-insert-for-absent-key.md)).
