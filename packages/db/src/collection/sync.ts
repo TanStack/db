@@ -12,6 +12,7 @@ import {
   SyncTransactionAlreadyCommittedWriteError,
 } from '../errors'
 import { createDeferred } from '../deferred'
+import { withAcceptedReceipt } from '../sync-receipt'
 import { isPromiseLike } from '../utils/type-guards'
 import { LIVE_QUERY_INTERNAL } from '../query/live/internal.js'
 import type { StandardSchemaV1 } from '@standard-schema/spec'
@@ -339,17 +340,19 @@ export class CollectionSyncManager<
             }
 
             pendingTransaction.committed = true
-            // An accepted transaction always applies in commit order. One held
-            // by a persisting optimistic transaction applies when that
-            // transaction settles; its receipt resolves now, so the handler
-            // can await it.
+            // An accepted transaction always applies in commit order. Core
+            // accepts it now; the receipt resolves when it is visible. One
+            // held by a persisting optimistic transaction becomes visible when
+            // that transaction settles. A transaction without rows publishes
+            // nothing, so its receipt resolves at acceptance.
             this.state.commitPendingTransactions()
             if (
               !pendingTransaction.applied.isPending() ||
-              this.state.hasPersistingTransaction()
+              (!pendingTransaction.truncate &&
+                pendingTransaction.operations.length === 0)
             )
               return true
-            return pendingTransaction.applied.promise
+            return withAcceptedReceipt(pendingTransaction.applied.promise, true)
           },
           markReady: () => {
             if (!isCurrentSync()) return

@@ -9,6 +9,8 @@ import {
   getLoadSubsetDemandKey,
   safeRandomUUID,
   toBooleanPredicate,
+  whenSyncAccepted,
+  withAcceptedReceipt,
   withCollectionConfigFactory,
 } from '@tanstack/db'
 import {
@@ -1409,10 +1411,20 @@ class PersistedCollectionRuntime<
     return receipt
   }
 
-  private async waitForAppliedReceiptsAfter(cursor: number): Promise<void> {
+  // Startup waits for acceptance: a local mutation's handler can wait for
+  // startup, and the rows publish when that mutation settles. Readiness waits
+  // for them in core. A subset load waits for visibility.
+  private async waitForAppliedReceiptsAfter(
+    cursor: number,
+    until: `accepted` | `visible` = `visible`,
+  ): Promise<void> {
     await Promise.all(
       Array.from(this.pendingAppliedReceipts, ([sequence, receipt]) =>
-        sequence > cursor ? receipt : undefined,
+        sequence <= cursor
+          ? undefined
+          : until === `accepted`
+            ? whenSyncAccepted(receipt)
+            : receipt,
       ),
     )
   }
@@ -1623,7 +1635,10 @@ class PersistedCollectionRuntime<
           startup.appliedCursor !== undefined &&
           lifecycleGeneration === this.lifecycleGeneration
         ) {
-          await this.waitForAppliedReceiptsAfter(startup.appliedCursor)
+          await this.waitForAppliedReceiptsAfter(
+            startup.appliedCursor,
+            `accepted`,
+          )
         }
       }
       if (lifecycleGeneration === this.lifecycleGeneration) {
@@ -1664,7 +1679,7 @@ class PersistedCollectionRuntime<
         appliedCursor !== undefined &&
         lifecycleGeneration === this.lifecycleGeneration
       ) {
-        await this.waitForAppliedReceiptsAfter(appliedCursor)
+        await this.waitForAppliedReceiptsAfter(appliedCursor, `accepted`)
       }
     })().catch((error) => {
       throw this.markTerminalFailure(error, lifecycleGeneration)
@@ -1795,7 +1810,7 @@ class PersistedCollectionRuntime<
     const applied = this.replaceCollectionMetadataSnapshot(
       snapshot.collectionMetadata,
     )
-    if (applied !== true) await applied
+    await whenSyncAccepted(applied)
   }
 
   private async loadCollectionMetadataSnapshot(
@@ -2363,7 +2378,7 @@ class PersistedCollectionRuntime<
             hydrationContext.suppliedRowKeys.add(row.key)
           }
           const applied = this.applyRowsToCollection(rows)
-          if (applied !== true) await applied
+          await whenSyncAccepted(applied)
         }
       } finally {
         if (
@@ -2729,7 +2744,17 @@ class PersistedCollectionRuntime<
         : transaction.applyToCollection()
       applicationReturned = true
       abortedDuringApplication = transaction.signal?.aborted === true
-      if (applied !== true) await applied
+      // Inside the apply mutex, internal work waits only for acceptance: a
+      // local mutation's handler may need this mutex, and the rows publish
+      // when that mutation settles. A source transaction is stored once it is
+      // visible, except one held by a persisting optimistic transaction,
+      // which is stored now so a handler can await its acceptance.
+      if (transaction.internal) await whenSyncAccepted(applied)
+      else if (
+        applied !== true &&
+        !this.collection?._state.hasPersistingTransaction()
+      )
+        await applied
       this.throwIfLifecycleReplaced(transaction.lifecycleGeneration)
 
       if (!transaction.internal) {
@@ -2974,9 +2999,10 @@ class PersistedCollectionRuntime<
       return this.syncControls.commit?.() ?? true
     })
 
-    if (applied !== true) {
-      await applied
-    }
+    // The mutation handler awaits this confirmation, so wait only for
+    // acceptance: the rows become visible when the mutation settles.
+    const accepted = whenSyncAccepted(applied)
+    if (accepted !== true) await accepted
   }
 
   private filterMutationsForCollection(
@@ -3532,7 +3558,7 @@ class PersistedCollectionRuntime<
         this.syncControls.truncate?.()
         return this.syncControls.commit?.() ?? true
       })
-      if (applied !== true) await applied
+      await whenSyncAccepted(applied)
     }
 
     if (lifecycleGeneration !== this.lifecycleGeneration) return
@@ -3629,7 +3655,7 @@ class PersistedCollectionRuntime<
 
       return this.syncControls.commit?.() ?? true
     })
-    if (applied !== true) await applied
+    await whenSyncAccepted(applied)
   }
 
   private async reloadActiveSubsetsUnsafe(
@@ -3675,7 +3701,7 @@ class PersistedCollectionRuntime<
         })),
         collectionMetadata,
       )
-      if (applied !== true) await applied
+      await whenSyncAccepted(applied)
     } finally {
       if (
         this.activeHydrationContext === hydrationContext &&
@@ -3917,6 +3943,19 @@ function createWrappedSyncConfig<
       ) => {
         removePendingPublicationTransaction(transaction)
       }
+      // A source receipt is accepted once its rows are durable, and resolves
+      // when core makes them visible.
+      const visibleAfterDurable = (
+        transaction: OpenSyncTransaction<T, TKey>,
+        durable: Promise<void>,
+      ): Promise<void> => {
+        const visible = durable.then(async () => {
+          const receipt = transaction.applicationReceipt
+          if (receipt !== undefined && receipt !== true) await receipt
+        })
+        void visible.catch(() => undefined)
+        return withAcceptedReceipt(visible, durable)
+      }
       const settleRuntimeTransaction = (
         transaction: OpenSyncTransaction<T, TKey>,
         applied: Promise<void>,
@@ -4082,14 +4121,10 @@ function createWrappedSyncConfig<
 
           const applied = params.commit(signal)
           transaction.applicationReceipt = applied
-          if (applied === true) {
-            removePendingPublicationTransaction(transaction)
-          } else {
-            void applied.then(
-              () => removePendingPublicationTransaction(transaction),
-              () => removePendingPublicationTransaction(transaction),
-            )
-          }
+          // Core accepted the transaction, so it is no longer staged here;
+          // the receipt resolves when it is visible.
+          removePendingPublicationTransaction(transaction)
+          if (applied !== true) void applied.catch(() => undefined)
           return applied
         } catch (error) {
           removePendingPublicationTransaction(transaction)
@@ -4555,7 +4590,7 @@ function createWrappedSyncConfig<
             })
             settlePublicationAdmissionWaiters(openTransaction)
             settleRuntimeTransaction(openTransaction, applied)
-            return applied
+            return visibleAfterDurable(openTransaction, applied)
           }
 
           let applied: Promise<void>
@@ -4567,7 +4602,7 @@ function createWrappedSyncConfig<
           }
           settlePublicationAdmissionWaiters(openTransaction)
           settleRuntimeTransaction(openTransaction, applied)
-          return applied
+          return visibleAfterDurable(openTransaction, applied)
         },
       }
 

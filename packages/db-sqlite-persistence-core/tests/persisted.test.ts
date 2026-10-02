@@ -12,6 +12,7 @@ import {
   createLiveQueryCollection,
   createTransaction,
   eq,
+  whenSyncAccepted,
 } from '@tanstack/db'
 import {
   oraclePropertyOptions,
@@ -10057,9 +10058,12 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
       })
       remoteReceipt = sourceParams.commit()
       await atPersistedOracleCheckpoint(
-        Promise.resolve(remoteReceipt),
-        `source receipt before local settlement`,
+        Promise.resolve(whenSyncAccepted(remoteReceipt)),
+        `source commit accepted before local settlement`,
       )
+      expect(observeSettlement(Promise.resolve(remoteReceipt)).read()).toEqual({
+        status: `pending`,
+      })
       expect({
         localState: localTransaction.state,
         remoteVisible: collection.has(`remote`),
@@ -10129,7 +10133,7 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
         })
         dependencyReceipt = sourceParams.commit()
         dependencySubmitted.resolve()
-        await dependencyReceipt
+        await whenSyncAccepted(dependencyReceipt)
       },
     })
     const normalAbort = new AbortController()
@@ -10593,15 +10597,19 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
     const subset = { limit: 1 }
     let localReceipt: Promise<unknown> | undefined
     let sourceReceipt: Promise<void> | undefined
+    let demand: Promise<unknown> | undefined
     let hasPrimaryFailure = false
 
     try {
       await collection.stateWhenReady()
       const local = createTransaction({
+        // A handler awaiting an on-demand load of its own Collection would
+        // wait for itself: the load's rows publish when this mutation settles.
         mutationFn: async () => {
           mutationEntered.resolve()
           await allowDemand.promise
-          await Promise.resolve(collection._sync.loadSubset(subset))
+          demand = Promise.resolve(collection._sync.loadSubset(subset))
+          void demand.catch(() => undefined)
         },
       })
       local.mutate(() => {
@@ -10616,12 +10624,11 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
         type: `insert`,
         value: { id: `remote`, title: `authoritative source` },
       })
-      sourceReceipt = Promise.resolve(sourceParams.commit()).then(
-        () => undefined,
-      )
+      const sourceCommit = sourceParams.commit()
+      sourceReceipt = Promise.resolve(sourceCommit).then(() => undefined)
       await atPersistedOracleCheckpoint(
-        sourceReceipt,
-        `source publication beneath optimistic mutation`,
+        Promise.resolve(whenSyncAccepted(sourceCommit)),
+        `source commit accepted beneath optimistic mutation`,
       )
 
       expect({
@@ -10639,7 +10646,11 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
       allowDemand.resolve()
       await atPersistedOracleCheckpoint(
         localReceipt,
-        `mutation demand after source publication`,
+        `mutation settles after starting its demand`,
+      )
+      await atPersistedOracleCheckpoint(
+        demand!,
+        `demand settles after mutation`,
       )
       expect({
         remote: stripVirtualProps(collection.get(`remote`)),
@@ -17622,9 +17633,14 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
       // Give the public load continuation the opportunity to snapshot receipts.
       await flushAsyncWork()
       unrelated.abortController.abort()
-      await unrelated.receipt.catch(() => undefined)
 
+      // The subset's own hydrated rows wait behind the persisting mutation,
+      // so the load settles once that mutation does. It must not also wait
+      // for the unrelated receipt.
+      releaseMutation.resolve()
+      await mutation.isPersisted.promise
       await expect(load).resolves.toBeUndefined()
+      await unrelated.receipt.catch(() => undefined)
     } finally {
       unrelated?.abortController.abort()
       releaseMutation.resolve()
@@ -18036,7 +18052,9 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
             throw new Error(`source commit was not buffered during hydration`)
           }
           bufferedCommitReturned.resolve({ receipt: applied })
-          await applied
+          // The handler waits for acceptance; the row becomes visible when
+          // this mutation settles.
+          await whenSyncAccepted(applied)
         },
       }),
     )
@@ -18068,21 +18086,14 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
 
       allowHydrateLoad.resolve()
 
-      let causalCycleObserved = false
-      for (
-        let attempt = 0;
-        attempt < 100 && !replayState.persisted;
-        attempt++
-      ) {
-        causalCycleObserved = collection._state.pendingSyncedTransactions.some(
-          (transaction) =>
-            transaction.committed && transaction.applied.isPending(),
-        )
-        if (causalCycleObserved) break
-        await Promise.resolve()
-      }
-
-      expect(causalCycleObserved).toBe(false)
+      // The replay is accepted and stored while the mutation persists; its
+      // receipt resolves when the mutation settles and the row publishes.
+      await expect(
+        atPersistedOracleCheckpoint(
+          mutationPersisted,
+          `buffered causal replay mutation persisted`,
+        ),
+      ).resolves.toBeDefined()
       expect(replayState.persisted).toBe(true)
       await expect(
         atPersistedOracleCheckpoint(
@@ -18090,12 +18101,6 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
           `buffered causal replay source receipt`,
         ),
       ).resolves.toBeUndefined()
-      await expect(
-        atPersistedOracleCheckpoint(
-          mutationPersisted,
-          `buffered causal replay mutation persisted`,
-        ),
-      ).resolves.toBeDefined()
       await expect(
         atPersistedOracleCheckpoint(
           preload,

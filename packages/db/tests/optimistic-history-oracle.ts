@@ -4,6 +4,7 @@ import { z } from 'zod'
 import { createCollection } from '../src/collection/index.js'
 import { createDeferred } from '../src/deferred.js'
 import { createLiveQueryCollection } from '../src/query/index.js'
+import { whenSyncAccepted } from '../src/sync-receipt.js'
 import type { CollectionConfig, SyncConfig } from '../src/types.js'
 
 /**
@@ -17,13 +18,21 @@ import type { CollectionConfig, SyncConfig } from '../src/types.js'
  * drops the optimistic state in the same way.
  *
  * A sync transaction committed while an optimistic transaction is persisting
- * is accepted and queued. Its commit receipt resolves at acceptance, so a
- * mutation handler may write, and await, its own server row. Queued sync
+ * is accepted and queued. A sync transaction has two moments: accepted, when
+ * `commit()` returns (or a wrapping sync finishes its durable step), and
+ * visible, when it applies and publishes. Handler-facing writes wait for
+ * acceptance, so a mutation handler may write, and await, its own server row.
+ * Commit receipts, subset loads, and readiness wait for visibility. A handler
+ * that awaits a visibility receipt held by its own transaction, such as an
+ * on-demand load of its own Collection, waits for itself and never returns.
+ * Queued sync
  * transactions apply when no optimistic transaction is persisting, in the
  * same publication that drops the settling transaction's optimistic state.
  * A completed transaction's optimistic row is held only while a queued sync
  * transaction touches its key, so that drop and that sync transaction
- * publish together. `isPersisted` fulfills after that publication. A truncate
+ * publish together. A sync write committed while the transaction persists
+ * is attributed `$origin: 'local'`; one committed after its optimistic state
+ * drops is `'remote'`. `isPersisted` fulfills after that publication. A truncate
  * applies at once, with every queued sync transaction before it, and the
  * still-persisting transactions overlay the replacement.
  *
@@ -39,7 +48,7 @@ import type { CollectionConfig, SyncConfig } from '../src/types.js'
  * the drain that applies that queue clears it.
  *
  * A mutation handler can write a sync transaction before it returns, and can
- * await that write's receipt. It is the same event as a sync transaction
+ * await that write's acceptance. It is the same event as a sync transaction
  * written while the transaction persists: it waits for settlement unless it
  * is a truncate.
  *
@@ -62,7 +71,7 @@ type SourceBatch = {
   copies: number
 }
 // A sync transaction the mutation handler writes before it returns. With
-// `awaitReceipt`, the handler awaits the commit receipt before returning.
+// `awaitReceipt`, the handler awaits the write's acceptance before returning.
 type HandlerBatch = SourceBatch & { awaitReceipt?: boolean }
 export type OptimisticStep =
   | {
@@ -96,7 +105,7 @@ type ModelTransaction = {
   // Settled while a queued sync transaction touched its key. The drain that
   // applies that queue ends the hold.
   held: boolean
-  // A completed transaction attributes the next sync write of its key.
+  // A held confirmation of this completed transaction is local.
   originPending: boolean
 }
 type ObservedRow = HistoryRow & {
@@ -199,9 +208,9 @@ class HistoryModel {
     const transaction = this.transactions[index]!
     transaction.state = success ? `completed` : `failed`
     transaction.held = success && this.queuedKeys().has(transaction.key)
-    // A completed transaction attributes the next sync write of its key,
-    // even after its optimistic state drops.
-    transaction.originPending = success
+    // Only a confirmation committed before the optimistic state drops, and
+    // so held at this boundary, is local.
+    transaction.originPending = transaction.held
     // This grammar submits direct operations immediately. Rollback cascades
     // affect pending (not already persisting) peer transactions, so none of
     // these independently submitted requests is canceled by a sibling failure.
@@ -248,7 +257,7 @@ class HistoryModel {
     }
     for (const transaction of this.transactions) {
       transaction.held = false
-      transaction.originPending &&= attributed.has(transaction.key)
+      transaction.originPending = false
     }
     this.queue = []
   }
@@ -413,7 +422,9 @@ export async function runOptimisticHistory(
     handlerBatch = undefined
     if (batch) {
       const receipt = writeSourceBatch(batch)
-      if (batch.awaitReceipt) await receipt
+      // Handler-facing writes wait for acceptance. Waiting for visibility
+      // would wait for this handler's own transaction to settle.
+      if (batch.awaitReceipt) await whenSyncAccepted(receipt)
     }
     return done
   }
@@ -462,7 +473,11 @@ export async function runOptimisticHistory(
     expected: HistoryOutcome<unknown>
     changes: object
   }> = []
-  const receipts: Array<ReturnType<typeof observeHistoryPromise<void>>> = []
+  // A queued sync transaction's receipt stays pending until it is visible.
+  const receipts: Array<{
+    batch: SourceBatch
+    outcome: ReturnType<typeof observeHistoryPromise<void>>
+  }> = []
   const counts = {
     edits: 0,
     deletes: 0,
@@ -513,7 +528,8 @@ export async function runOptimisticHistory(
       counts.sourceDeletes++
     }
     const receipt = sync.commit()
-    if (receipt !== true) receipts.push(observeHistoryPromise(receipt))
+    if (receipt !== true)
+      receipts.push({ batch: step, outcome: observeHistoryPromise(receipt) })
     if (model.transactions.some((entry) => entry.state === `persisting`)) {
       if (step.truncate) counts.snapshotOverrides++
       else counts.queued++
@@ -695,6 +711,12 @@ export async function runOptimisticHistory(
             `${label}: authored request ${index}`,
           ).toStrictEqual(operation.changes)
         }
+        for (const [index, receipt] of receipts.entries())
+          if (model.queue.includes(receipt.batch))
+            expect(
+              receipt.outcome.read().status,
+              `${label}: receipt ${index} waits for visibility`,
+            ).toBe(`pending`)
         const expected = sorted(model.visible().values())
         const actual = sorted([...collection.values()].map(observed))
         if (
@@ -880,10 +902,10 @@ export async function runOptimisticHistory(
       () => sub?.unsubscribe(),
       () => downstream.cleanup(),
       () => collection.cleanup(),
-      ...receipts.map((receipt, index) => async () => {
-        await receipt.settled
+      ...receipts.map(({ outcome }, index) => async () => {
+        await outcome.settled
         expectHistoryOutcome(
-          receipt.read(),
+          outcome.read(),
           { status: `fulfilled`, value: undefined },
           `applied sync receipt ${index}`,
         )

@@ -140,9 +140,9 @@ export class CollectionStateManager<
    * When sync confirms data for a key with pending local changes, it keeps 'local' origin.
    */
   public pendingLocalChanges = new Set<TKey>()
-  // A completed mutation attributes the next sync write of its key, even after
-  // its optimistic state drops. Active or failed mutations must not add to, or
-  // erase a sibling's entry in, this set.
+  // A completed mutation attributes only the sync writes committed before its
+  // optimistic state dropped: those held at its completion boundary. Active or
+  // failed mutations must not add to, or erase a sibling's entry in, this set.
   public pendingLocalOrigins = new Set<TKey>()
 
   // Keyed by row key, not row object: adding a WeakMap entry for each
@@ -579,10 +579,23 @@ export class CollectionStateManager<
     const previousDeletes = new Set(this.optimisticDeletes)
     const previousRowOrigins = this.rowOrigins
 
+    // Hold completed optimistic rows, and their local attribution, only while
+    // a queued sync transaction touches them. That sync was committed before
+    // the optimistic state dropped; a later one is remote.
+    const pendingSyncKeys = new Set<TKey>()
+    for (const transaction of this.pendingSyncedTransactions) {
+      for (const operation of transaction.operations) {
+        pendingSyncKeys.add(operation.key as TKey)
+      }
+    }
     for (const transaction of this.transactions.values()) {
       if (transaction.state !== `completed`) continue
       for (const mutation of transaction.mutations) {
-        if (!this.isThisCollection(mutation.collection)) continue
+        if (
+          !this.isThisCollection(mutation.collection) ||
+          !pendingSyncKeys.has(mutation.key)
+        )
+          continue
         this.pendingLocalOrigins.add(mutation.key)
         if (!mutation.optimistic) continue
         if (mutation.type === `delete`) {
@@ -600,13 +613,6 @@ export class CollectionStateManager<
     this.optimisticDeletes.clear()
     this.pendingLocalChanges.clear()
 
-    // Hold completed optimistic rows only while a queued sync touches them
-    const pendingSyncKeys = new Set<TKey>()
-    for (const transaction of this.pendingSyncedTransactions) {
-      for (const operation of transaction.operations) {
-        pendingSyncKeys.add(operation.key as TKey)
-      }
-    }
     const staleOptimisticUpserts: Array<TKey> = []
     for (const [key, value] of this.pendingOptimisticUpserts) {
       if (pendingSyncKeys.has(key)) {
@@ -617,6 +623,7 @@ export class CollectionStateManager<
     }
     for (const key of staleOptimisticUpserts) {
       this.pendingOptimisticUpserts.delete(key)
+      this.pendingLocalOrigins.delete(key)
     }
     const staleOptimisticDeletes: Array<TKey> = []
     for (const key of this.pendingOptimisticDeletes) {
@@ -628,6 +635,7 @@ export class CollectionStateManager<
     }
     for (const key of staleOptimisticDeletes) {
       this.pendingOptimisticDeletes.delete(key)
+      this.pendingLocalOrigins.delete(key)
     }
 
     const activeTransactions: Array<Transaction<any>> = []

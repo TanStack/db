@@ -1,3 +1,4 @@
+import { whenSyncAccepted } from '@tanstack/db'
 import {
   DeleteOperationItemNotFoundError,
   DuplicateKeyInBatchError,
@@ -214,8 +215,11 @@ export function performWriteOperations<
 
   const applied = ctx.commit()
 
-  // The Query cache must hold accepted rows. A wrapping sync, such as
-  // persistence, accepts the transaction after its durable step.
+  // A handler awaits this write, so it resolves once the transaction is
+  // accepted, including any durable step; while the handler's own mutation
+  // persists, the rows become visible when that mutation settles. The Query
+  // cache holds accepted rows.
+  const accepted = whenSyncAccepted(applied)
   const updateCache = () => {
     const getItems = () =>
       Array.from(
@@ -225,9 +229,9 @@ export function performWriteOperations<
     if (ctx.updateCacheData) ctx.updateCacheData(getItems)
     else ctx.queryClient.setQueryData(ctx.queryKey, getItems())
   }
-  if (applied === true) updateCache()
-  const completion = Promise.resolve(applied).then(() => {
-    if (applied !== true) updateCache()
+  if (accepted === true) updateCache()
+  const completion = Promise.resolve(accepted).then(() => {
+    if (accepted !== true) updateCache()
   })
   void completion.catch(() => undefined)
   return completion
