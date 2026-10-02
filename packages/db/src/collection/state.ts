@@ -734,42 +734,8 @@ export class CollectionStateManager<
       this.pendingLocalOrigins.delete(key)
     }
 
-    const activeTransactions: Array<Transaction<any>> = []
-
-    for (const transaction of this.transactions.values()) {
-      if (![`completed`, `failed`].includes(transaction.state)) {
-        activeTransactions.push(transaction)
-      }
-    }
-
     // Apply active transactions only (completed transactions are handled by sync operations)
-    for (const transaction of activeTransactions) {
-      for (const mutation of transaction.mutations) {
-        if (!this.isThisCollection(mutation.collection)) {
-          continue
-        }
-
-        // Track that this key has pending local changes for $origin tracking
-        this.pendingLocalChanges.add(mutation.key)
-
-        if (mutation.optimistic) {
-          switch (mutation.type) {
-            case `insert`:
-            case `update`:
-              this.optimisticUpserts.set(
-                mutation.key,
-                this.resolveOptimisticUpsert(mutation),
-              )
-              this.optimisticDeletes.delete(mutation.key)
-              break
-            case `delete`:
-              this.optimisticUpserts.delete(mutation.key)
-              this.optimisticDeletes.add(mutation.key)
-              break
-          }
-        }
-      }
-    }
+    const activeTransactions = this.overlayActiveTransactions()
 
     // Update cached size
     this.size = this.calculateSize()
@@ -849,6 +815,44 @@ export class CollectionStateManager<
       // Emit all events if no pending sync transactions
       this.changes.emitEvents(filteredEventsBySyncStatus, triggeredByUserAction)
     }
+  }
+
+  /**
+   * Overlay still-active optimistic mutations on the current layers and
+   * record their keys as pending local changes for $origin tracking.
+   * An active insert whose key the source just wrote is acknowledged.
+   */
+  private overlayActiveTransactions(
+    sourceWrittenKeys?: ReadonlySet<TKey>,
+  ): Array<Transaction<any>> {
+    const activeTransactions: Array<Transaction<any>> = []
+    for (const transaction of this.transactions.values()) {
+      if (transaction.state === `completed` || transaction.state === `failed`)
+        continue
+      activeTransactions.push(transaction)
+      for (const mutation of transaction.mutations) {
+        if (!this.isThisCollection(mutation.collection)) continue
+        this.pendingLocalChanges.add(mutation.key)
+        if (
+          mutation.type === `insert` &&
+          sourceWrittenKeys?.has(mutation.key)
+        ) {
+          this.acknowledgedInserts.add(mutation)
+        }
+        if (!mutation.optimistic) continue
+        if (mutation.type === `delete`) {
+          this.optimisticUpserts.delete(mutation.key)
+          this.optimisticDeletes.add(mutation.key)
+        } else {
+          this.optimisticUpserts.set(
+            mutation.key,
+            this.resolveOptimisticUpsert(mutation),
+          )
+          this.optimisticDeletes.delete(mutation.key)
+        }
+      }
+    }
+    return activeTransactions
   }
 
   /**
@@ -1722,43 +1726,9 @@ export class CollectionStateManager<
       }
 
       // Always overlay any still-active optimistic transactions so mutations that started
-      // after the truncate snapshot are preserved.
-      for (const transaction of this.transactions.values()) {
-        if (![`completed`, `failed`].includes(transaction.state)) {
-          for (const mutation of transaction.mutations) {
-            // Truncate clears attribution with the old base, not the still-live
-            // local requests. Preserve them for later source acknowledgements.
-            if (this.isThisCollection(mutation.collection))
-              this.pendingLocalChanges.add(mutation.key)
-            if (
-              this.isThisCollection(mutation.collection) &&
-              mutation.type === `insert` &&
-              syncedInsertedOrUpdatedKeys.has(mutation.key)
-            ) {
-              this.acknowledgedInserts.add(mutation)
-            }
-            if (
-              this.isThisCollection(mutation.collection) &&
-              mutation.optimistic
-            ) {
-              switch (mutation.type) {
-                case `insert`:
-                case `update`:
-                  this.optimisticUpserts.set(
-                    mutation.key,
-                    this.resolveOptimisticUpsert(mutation),
-                  )
-                  this.optimisticDeletes.delete(mutation.key)
-                  break
-                case `delete`:
-                  this.optimisticUpserts.delete(mutation.key)
-                  this.optimisticDeletes.add(mutation.key)
-                  break
-              }
-            }
-          }
-        }
-      }
+      // after the truncate snapshot are preserved. Truncate clears attribution
+      // with the old base, not the still-live local requests.
+      this.overlayActiveTransactions(syncedInsertedOrUpdatedKeys)
 
       // After applying synced operations, if this commit included a truncate,
       // re-apply optimistic mutations on top of the fresh synced base. This ensures
