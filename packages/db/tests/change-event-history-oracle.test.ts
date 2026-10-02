@@ -20,7 +20,9 @@ import type { ChangeMessage, SyncConfig } from '../src/types'
  *
  * The public change-message contract and issue #1901 require a consumer that
  * applies every delivered insert, update, and delete to agree with the
- * Collection after the corresponding optimistic transactions persist.
+ * Collection after the corresponding optimistic transactions persist. Each
+ * message must also be valid for that consumer's state: an insert names an
+ * absent key, and an update or delete names a present one.
  *
  * A plain Map is the independent reference model. The history grammar inserts
  * only while a key is absent and updates or deletes only while it is present.
@@ -384,6 +386,9 @@ async function runHistory(
   let index: BaseIndex<number> | undefined
   let primaryFailure: unknown
   let hasPrimaryFailure = false
+  // A subscriber callback cannot fail the test by throwing, so record each
+  // message that is invalid for the mirror and assert at the checkpoint.
+  const protocolViolations: Array<string> = []
 
   try {
     if (initialKeys.length > 0) {
@@ -409,6 +414,10 @@ async function runHistory(
     }
     const onChanges = (changes: Array<ChangeMessage<TestItem, number>>) => {
       for (const change of changes) {
+        if (mirror.has(change.key) === (change.type === `insert`))
+          protocolViolations.push(
+            `${change.type} for key ${change.key} while ${mirror.has(change.key) ? `present` : `absent`}`,
+          )
         if (change.type === `delete`) mirror.delete(change.key)
         else
           mirror.set(change.key, {
@@ -464,6 +473,7 @@ async function runHistory(
     for (const publication of publications) {
       expect(publication.mirrorRows).toEqual(publication.publicRows)
     }
+    expect(protocolViolations, `change-message protocol`).toEqual([])
   } catch (error) {
     primaryFailure = error
     hasPrimaryFailure = true
