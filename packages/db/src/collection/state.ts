@@ -1841,6 +1841,8 @@ export class CollectionStateManager<
 
       // Now check what actually changed in the final visible state
       for (const key of changedKeys) {
+        // Truncate already published each re-applied upsert as an insert.
+        if (hasTruncateSync && this.optimisticUpserts.has(key)) continue
         const firstSyncOperation = firstSyncOperations.get(key)
         // A live-reading source can change a reused row before this commit
         // captures it. Later writes must not substitute an intermediate value.

@@ -964,7 +964,8 @@ describe(`sync publication reentrancy`, () => {
         {
           // Delete the prior public layout [1, 2, 3], not the unpublished
           // rank update's intermediate [2, 1, 3], then replay whole snapshots.
-          changes: [1, 2, 3, 1, 3, 1, 2],
+          // Each key is inserted once after the delete prefix.
+          changes: [1, 2, 3, 1, 3, 2],
           keys: [2, 1, 3],
           values: [`two`, `optimistic-one`, `optimistic-three`],
           markedReceiptSettled: false,
