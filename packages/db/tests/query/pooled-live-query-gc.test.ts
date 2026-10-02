@@ -202,6 +202,47 @@ describe(`pooled live query gcTime`, () => {
     third.stop()
   })
 
+  it(`turns terminal when source cleanup starts, before it settles`, async () => {
+    let release!: () => void
+    const source = createCollection<Row, string | number>({
+      id: `pooled-gc-${serial++}`,
+      getKey: (row) => row.id,
+      startSync: true,
+      sync: {
+        sync: ({ begin, write, commit, markReady }) => {
+          begin()
+          write({ type: `insert`, value: { id: `a`, g: `x` } })
+          commit()
+          markReady()
+          // The adapter's cleanup stays pending until released.
+          return () =>
+            new Promise<void>((resolve) => {
+              release = resolve
+            })
+        },
+      },
+    })
+    const observe = (view: any) => {
+      const observer = createLiveQueryObserver(view, { mode: `wholesale` })
+      return { observer, stop: observer.subscribe(() => {}) }
+    }
+    const pooledView = observe(
+      createPooledLiveQuery(query(source)(new Query()), { gcTime: 1 })!,
+    )
+    const compiledView = observe(
+      createLiveQueryCollection({ query: query(source), startSync: true }),
+    )
+    await vi.advanceTimersByTimeAsync(1)
+    const cleanup = source.cleanup()
+    await vi.advanceTimersByTimeAsync(1)
+    expect(compiledView.observer.getSnapshot().status).toBe(`error`)
+    expect(pooledView.observer.getSnapshot().status).toBe(`error`)
+    release()
+    await cleanup
+    pooledView.stop()
+    compiledView.stop()
+  })
+
   it(`keeps its public Collection live while observed`, async () => {
     const source = makeSource()
     const view = createPooledLiveQuery(query(source)(new Query()), {

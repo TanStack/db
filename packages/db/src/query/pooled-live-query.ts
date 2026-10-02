@@ -11,7 +11,10 @@ import type { BasicExpression, QueryIR } from './ir.js'
 import type { BaseQueryBuilder } from './builder/index.js'
 import type { Collection, CollectionImpl } from '../collection/index.js'
 import type { ChangeMessage, CollectionStatus } from '../types.js'
-import type { CollectionEventHandler } from '../collection/events.js'
+import type {
+  CollectionEventHandler,
+  CollectionStatusChangeEvent,
+} from '../collection/events.js'
 
 /**
  * Live queries that filter one source Collection only by `eq(field, literal)`
@@ -141,16 +144,37 @@ class Partition {
           this.apply(changes as Array<ChangeMessage<Row, string | number>>),
         { includeInitialState: true },
       )
-      this.stopStatusEvents = this.source.on(`status:change`, (event) => {
-        // Like a live query, a pooled view fails for good when its source
-        // starts cleanup; queries mounted later get a new partition.
-        if (event.status === `cleaned-up`) this.terminate()
-        const delivered = this.terminated
-          ? { ...event, status: `error` as const }
-          : event
-        for (const listener of [...this.statusListeners]) listener(delivered)
-        if (this.terminated) this.stopStatusEvents?.()
+      const stopStatus = this.source.on(`status:change`, (event) => {
+        this.deliverStatus(event)
       })
+      // Like a live query, a pooled view fails for good when its source
+      // starts cleanup, before the adapter's cleanup settles; queries
+      // mounted later get a new partition.
+      const stopCleanupStart = this.source._onCleanupStart(() => {
+        const previousStatus = this.source.status
+        this.terminate()
+        this.deliverStatus({
+          type: `status:change`,
+          collection: this.source as unknown as Collection,
+          previousStatus,
+          status: `error`,
+        })
+      })
+      this.stopStatusEvents = () => {
+        stopStatus()
+        stopCleanupStart()
+      }
+    }
+  }
+
+  private deliverStatus(event: CollectionStatusChangeEvent): void {
+    const delivered = this.terminated
+      ? { ...event, status: `error` as const }
+      : event
+    for (const listener of [...this.statusListeners]) listener(delivered)
+    if (this.terminated) {
+      this.stopStatusEvents?.()
+      this.stopStatusEvents = undefined
     }
   }
 

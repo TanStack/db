@@ -812,6 +812,43 @@ async function runHistory(history: History): Promise<void> {
 
 describe(`pooled live query oracle`, () => {
   if (requestedReplayProperty === undefined) {
+    // Generated fields are plain values; this pins a field whose getter
+    // throws, which both paths treat as a row that does not match.
+    it(`matches the live-query Collection when an eq path getter throws`, async () => {
+      const source = createCollection(
+        mockSyncCollectionOptions<any>({
+          id: `pooled-${serial++}`,
+          getKey: (row) => row.id,
+          initialData: [
+            { id: `a`, profile: { code: 1 } },
+            {
+              id: `b`,
+              profile: {
+                get code(): number {
+                  throw new Error(`getter failed`)
+                },
+              },
+            },
+          ],
+        }),
+      )
+      await source.stateWhenReady()
+      const query = (q: any) =>
+        q.from({ r: source }).where(({ r }: any) => eq(r.profile.code, 1))
+      const pooled = createLiveQueryObserver(
+        createPooledLiveQuery(query(new Query())),
+        { mode: `wholesale` },
+      )
+      const stop = pooled.subscribe(() => {})
+      const reference = createLiveQueryCollection({ query, startSync: true })
+      await reference.preload()
+      const snapshot = pooled.getSnapshot()
+      expect(snapshot.status).toBe(reference.status)
+      expect([...snapshot.state!.keys()]).toEqual([...reference.keys()])
+      stop()
+      await source.cleanup()
+    })
+
     for (const { name, history } of pinnedHistories) {
       it(`matches the live-query Collection when ${name}`, () =>
         runHistory(history))

@@ -376,5 +376,6 @@
   "sameFields": "ga",
   "collectionHold": "gb",
   "holdCollection": "gc",
-  "registry": "gd"
+  "registry": "gd",
+  "deliverStatus": "ge"
 }
