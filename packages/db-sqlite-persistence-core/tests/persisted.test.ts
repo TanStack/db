@@ -63,6 +63,9 @@ import type {
  * route through the configured collection owner. Publication precedes
  * durability, but a rejected durability boundary must reject its applied
  * receipt and fail-stop that sync run without admitting a suffix.
+ * An immediate source commit queued behind a normal source publication may
+ * release that publication while a mutation persists. Both source receipts
+ * still settle in durable FIFO order.
  *
  * `foldDurabilityLedger` is the independent model for append-only source
  * obligations. The recording adapter is a plain durable-state model: Maps for
@@ -10128,7 +10131,7 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
     },
   )
 
-  it(`rejects immediate replay that would close a normal publication cycle`, async () => {
+  it(`settles an immediate source write awaited by a mutation behind a normal source write`, async () => {
     const adapter = createRecordingAdapter()
     let sourceParams!: TodoSyncParams
     const collection = createCollection(
@@ -10200,26 +10203,17 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
         dependencySubmitted.promise,
         `immediate dependency submitted`,
       )
-      const dependencyOutcome = await atPersistedOracleCheckpoint(
-        Promise.resolve(dependencyReceipt).then(
-          () => ({ status: `fulfilled` as const }),
-          (reason: unknown) => ({ status: `rejected` as const, reason }),
-        ),
-        `immediate dependency rejected`,
+      await atPersistedOracleCheckpoint(
+        Promise.resolve(dependencyReceipt),
+        `immediate dependency persisted`,
       )
-      expect(dependencyOutcome).toMatchObject({
-        status: `rejected`,
-        reason: { name: `InvalidPersistedCollectionConfigError` },
-      })
-      await expect(
-        atPersistedOracleCheckpoint(
-          localTransaction.isPersisted.promise,
-          `user persistence rejects with unsupported reentry`,
-        ),
-      ).rejects.toMatchObject({ name: `InvalidPersistedCollectionConfigError` })
+      await atPersistedOracleCheckpoint(
+        localTransaction.isPersisted.promise,
+        `user persistence settled after its awaited source write`,
+      )
       await atPersistedOracleCheckpoint(
         normalReceipt,
-        `parked predecessor applies after user rollback`,
+        `parked predecessor persisted before its dependent`,
       )
       expect({
         dependencyVisible: collection.has(`dependency`),
@@ -10227,14 +10221,22 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
         parkedDurable: adapter.rows.get(`parked`),
         status: collection.status,
       }).toEqual({
-        dependencyVisible: false,
-        dependencyDurable: undefined,
+        dependencyVisible: true,
+        dependencyDurable: {
+          id: `dependency`,
+          title: `releases user persistence`,
+        },
         parkedDurable: {
           id: `parked`,
           title: `waits for user persistence`,
         },
         status: `ready`,
       })
+      expect(
+        adapter.applyCommittedTxCalls.flatMap(({ tx }) =>
+          tx.mutations.map((mutation) => mutation.key),
+        ),
+      ).toEqual([`parked`, `dependency`])
     } catch (error) {
       hasPrimaryFailure = true
       throw error

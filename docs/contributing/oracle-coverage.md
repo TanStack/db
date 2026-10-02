@@ -284,6 +284,53 @@ SQLite, or overlapping Query revalidation. The Query ownership and
 optimistic-history owners still need a joint generated witness
 for competing source writes around mutation settlement.
 
+The Query ownership oracle enumerates five controlled persisted-refetch
+overlaps after initial load: a committed metadata-only transaction before
+Collection publication followed by a newer refetch, direct `writeUpsert`, or
+mutation-handler `writeUpsert`; and a row transaction before durability
+followed by a newer refetch or direct `writeUpsert`. It checks the latest
+public receipt, public and stored rows, and the Query Collection error ledger.
+Adjacent controls cover precommit cancellation and cleanup fencing. With the
+Query result controller's post-commit supersession guard, refetch and direct
+write successors pass before publication and durability. Both before-publication
+mutation-handler schedules now settle: an immediate write queued before the
+older normal source reaches core and one queued after it begins waiting both
+release the older publication without overtaking its durable write. They
+require fulfilled awaited handler receipts and durable revisions in
+`one`, `two`, `three` order. The controlled adapter records distinct durable revisions,
+collapsing adjacent duplicate writes of the same value.
+Two additional before-publication refetch histories replace the held result's
+row key with either the same key and a new value or a different key. They
+require the latest public and durable row set at the successor receipt. These
+witnesses exposed stale ownership when a superseded committed row was absent
+from `syncedData`; preserving its staged ownership and deleting by key makes
+both pass.
+Precommit cancellation and cleanup controls pass. Each history has its own Collection identity and an exact
+adapter commit-count check at the hold. The controlled adapter
+establishes these cuts; it does not establish native SQLite or Expo scheduling.
+The Node and Expo persistence owners need versioned real-host receiving
+witnesses for the reported SQLite schedule. The Query result-settlement owner
+models an accepted refetch result retired before publication by cleanup and
+compares the public promise at source-commit and cleanup checkpoints. This
+corrected control passes: the row-2 source receipt and throwing refetch both
+reject with `AbortError`, cleanup fulfills, and durable row 1 remains. An
+earlier diagnostic was falsely red because it captured adapter commit #2,
+which writes metadata only, before the row-2 source commit was accepted; the
+new reach check requires the pending commit to contain row 2.
+
+The row-durability mutation-handler cell has a separate bounded two-case
+Query notification model. Holding observer notifications through mutation
+settlement leaves the accepted optimistic snapshot public while both handler
+receipts fulfill and durable row 3 is stored. Delivering a new row-3 Query
+result during the handler retires the predecessor result controller while its
+accepted source commit continues; queued publication retires the snapshot,
+so public and durable rows are 3 after the
+receipts settle. An explicit refetch restores row 3 after held notifications
+are released; the intermediate replay of those notifications is not modeled.
+These two controlled schedules pass the optimistic-history settlement law.
+The adapter's commit #3 alone did not distinguish them. Other handler
+schedules and native SQLite receiving witnesses remain unproven.
+
 The hash-identity owner also runs every law in a second module copy whose
 initialization draws are all equal, so every type marker has the same hash
 number in any declaration order. There it checks equality verdicts, equal
