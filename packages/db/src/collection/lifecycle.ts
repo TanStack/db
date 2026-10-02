@@ -194,9 +194,7 @@ export class CollectionLifecycleManager<
         this.hasBeenReady = true
 
         // Also mark as having received first commit for backwards compatibility
-        if (!this.hasReceivedFirstCommit) {
-          this.hasReceivedFirstCommit = true
-        }
+        this.hasReceivedFirstCommit = true
 
         readyEffects.push(...this.onFirstReadyCallbacks)
         this.onFirstReadyCallbacks = []
@@ -327,15 +325,9 @@ export class CollectionLifecycleManager<
     // This ensures cleanup happens even if the browser is busy
     this.idleCallbackId = safeRequestIdleCallback(
       (deadline) => {
-        // Perform cleanup if we still have no subscribers
-        if (this.canGarbageCollect()) {
-          const cleanupCompleted = this.performCleanup(deadline)
-          // Only clear the callback ID if cleanup actually completed
-          if (cleanupCompleted) {
-            this.idleCallbackId = null
-          }
-        } else {
-          // No need to cleanup, clear the callback ID
+        // Clean up if we still have no subscribers. Keep the callback ID
+        // only when cleanup rescheduled itself for a later idle period.
+        if (!this.canGarbageCollect() || this.performCleanup(deadline)) {
           this.idleCallbackId = null
         }
       },
@@ -410,28 +402,24 @@ export class CollectionLifecycleManager<
       // Keep cleanup observably asynchronous even when every release is
       // synchronous. Existing callers may use this turn to let optimistic
       // settlement finish before starting the next operation.
-      let failure: { error: unknown } | undefined
-      if (syncFailure && localFailures.length > 0) {
-        failure = {
-          error: new AggregateError(
-            [syncFailure.error, ...localFailures],
-            `Adapter cleanup and local teardown both failed`,
-            { cause: syncFailure.error },
-          ),
-        }
-      } else if (syncFailure) {
-        failure = syncFailure
-      } else if (localFailures.length === 1) {
-        failure = { error: localFailures[0] }
-      } else if (localFailures.length > 1) {
-        failure = {
-          error: new AggregateError(
-            localFailures,
-            `Multiple local teardown steps failed`,
-            { cause: localFailures[0] },
-          ),
-        }
-      }
+      const failures = syncFailure
+        ? [syncFailure.error, ...localFailures]
+        : localFailures
+      const failure =
+        failures.length === 0
+          ? undefined
+          : {
+              error:
+                failures.length === 1
+                  ? failures[0]
+                  : new AggregateError(
+                      failures,
+                      syncFailure
+                        ? `Adapter cleanup and local teardown both failed`
+                        : `Multiple local teardown steps failed`,
+                      { cause: failures[0] },
+                    ),
+            }
       void Promise.resolve()
         .then(() => Promise.resolve())
         .then(() => {
