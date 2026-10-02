@@ -385,5 +385,5 @@
   "collectPendingSyncKeys": "cn",
   "emitLoadingSubsetChange": "gk",
   "overlayActiveTransactions": "gl",
-  "retireLoadSubsetOperation": "gm"
+  "completeLoadSubsetOperation": "gm"
 }

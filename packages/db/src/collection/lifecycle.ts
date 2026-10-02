@@ -327,7 +327,9 @@ export class CollectionLifecycleManager<
       (deadline) => {
         // Clean up if we still have no subscribers. Keep the callback ID
         // only when cleanup rescheduled itself for a later idle period.
-        if (!this.canGarbageCollect() || this.performCleanup(deadline)) {
+        if (!this.canGarbageCollect()) {
+          this.idleCallbackId = null
+        } else if (this.performCleanup(deadline)) {
           this.idleCallbackId = null
         }
       },

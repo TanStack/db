@@ -773,10 +773,10 @@ export class CollectionStateManager<
       events,
     )
 
-    // User-triggered work always publishes. Sync-driven redraws skip keys a
-    // sync commit just published. Recompute keeps the optimistic layer of a
-    // key with a pending sync operation, so it never emits a delete that the
-    // sync would restore.
+    // User-triggered work always publishes. Sync-driven redraws skip keys in
+    // recentlySyncedKeys. capturePreSyncVisibleState adds every queued sync
+    // key to that set first, so a delete the sync would restore never
+    // publishes.
     const filteredEvents = triggeredByUserAction
       ? events
       : events.filter((event) => !this.recentlySyncedKeys.has(event.key))
@@ -1144,10 +1144,9 @@ export class CollectionStateManager<
     }
     for (const operation of transaction.operations) {
       const key = operation.key as TKey
+      if (explicitKeys.has(key)) continue
       const metadataWrite = automaticRowMetadataWrite(operation)
-      if (!explicitKeys.has(key) && metadataWrite) {
-        transaction.rowMetadataWrites.set(key, metadataWrite)
-      }
+      if (metadataWrite) transaction.rowMetadataWrites.set(key, metadataWrite)
     }
   }
 
@@ -1651,13 +1650,10 @@ export class CollectionStateManager<
         this.pendingOptimisticDirectDeletes.delete(key)
       }
 
-      // Maintain optimistic state appropriately
-      // Clear optimistic state since sync operations will now provide the authoritative data.
-      // Any still-active user transactions will be re-applied below in recompute.
+      // Sync operations now provide the authoritative data. Retained truncate
+      // layers and still-active transactions are overlaid again below.
       this.optimisticUpserts.clear()
       this.optimisticDeletes.clear()
-
-      // Reset flag and recompute optimistic state for any remaining active transactions
       this.isCommittingSyncTransactions = false
 
       // If we had a truncate, restore the preserved optimistic state from the snapshot

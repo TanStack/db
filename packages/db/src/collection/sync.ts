@@ -755,7 +755,7 @@ export class CollectionSyncManager<
   ): true | Promise<void> {
     operation.waiting = true
     if (operation.pending.size === 0) {
-      this.retireLoadSubsetOperation(operation)
+      this.completeLoadSubsetOperation(operation)
       return operation.hasError ? Promise.reject(operation.error) : true
     }
     operation.deferred = createDeferred<void>()
@@ -780,7 +780,7 @@ export class CollectionSyncManager<
     // is considered complete.
     queueMicrotask(() => {
       if (operation.completed || operation.pending.size > 0) return
-      this.retireLoadSubsetOperation(operation)
+      this.completeLoadSubsetOperation(operation)
       if (operation.hasError) {
         operation.deferred!.reject(operation.error)
       } else {
@@ -789,7 +789,7 @@ export class CollectionSyncManager<
     })
   }
 
-  private retireLoadSubsetOperation(operation: LoadSubsetOperation): void {
+  private completeLoadSubsetOperation(operation: LoadSubsetOperation): void {
     operation.completed = true
     this.loadSubsetOperations.delete(operation)
     if (this.activeLoadSubsetOperation === operation) {
