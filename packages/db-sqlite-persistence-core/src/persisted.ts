@@ -2086,7 +2086,9 @@ class PersistedCollectionRuntime<
         () => this.pendingImmediateSourceTransactions--,
       )
       if (this.sourcePublicationWaitDepth > 0) {
-        this.collection?._state.commitPendingTransactions(true)
+        this.collection?._state.commitPendingTransactions(true, (error) =>
+          this.reportSyncError(error),
+        )
       }
     }
     return applied
@@ -2747,7 +2749,9 @@ class PersistedCollectionRuntime<
         this.sourcePublicationWaitDepth++
         try {
           if (this.pendingImmediateSourceTransactions > 0) {
-            this.collection?._state.commitPendingTransactions(true)
+            this.collection?._state.commitPendingTransactions(true, (error) =>
+              this.reportSyncError(error),
+            )
           }
           await applied
         } finally {

@@ -10258,6 +10258,236 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
     }
   })
 
+  it.each([`already-waiting`, `queued-before-wait`] as const)(
+    `does not assign an earlier listener failure to an immediate source write $0`,
+    async (phase) => {
+      const adapter = createRecordingAdapter()
+      const gateEntered = createEventGate()
+      const releaseGate = createEventGate()
+      const applyCommittedTx = adapter.applyCommittedTx.bind(adapter)
+      adapter.applyCommittedTx = async (...args) => {
+        if (args[1].mutations.some((mutation) => mutation.key === `gate`)) {
+          gateEntered.resolve()
+          await releaseGate.promise
+        }
+        await applyCommittedTx(...args)
+      }
+      let sourceParams!: TodoSyncParams
+      const collection = createCollection(
+        persistedCollectionOptions<Todo, string>({
+          id: `immediate-source-listener-failure`,
+          getKey: (row) => row.id,
+          sync: {
+            sync: (params) => {
+              sourceParams = params
+              params.markReady()
+            },
+          },
+          persistence: { adapter },
+        }),
+      )
+      const publicationError = new Error(`older publication listener failed`)
+      const subscription = collection.subscribeChanges((changes) => {
+        if (changes.some((change) => change.key === `parked`)) {
+          throw publicationError
+        }
+      })
+      const mutationEntered = createEventGate()
+      const startDependency = createEventGate()
+      const dependencySubmitted = createEventGate()
+      let dependencyReceipt: true | Promise<void> | undefined
+      let synchronousFailure: unknown
+      const localTransaction = createTransaction({
+        mutationFn: async () => {
+          mutationEntered.resolve()
+          await startDependency.promise
+          sourceParams.begin({ immediate: true })
+          sourceParams.write({
+            type: `insert`,
+            value: { id: `dependency`, title: `later source write` },
+          })
+          try {
+            dependencyReceipt = sourceParams.commit()
+          } catch (error) {
+            synchronousFailure = error
+            throw error
+          } finally {
+            dependencySubmitted.resolve()
+          }
+          await dependencyReceipt
+        },
+      })
+      let normalReceipt: true | Promise<void> | undefined
+      let gateReceipt: true | Promise<void> | undefined
+      let hasPrimaryFailure = false
+
+      try {
+        await atPersistedOracleCheckpoint(
+          collection.stateWhenReady(),
+          `listener-failure collection ready`,
+        )
+        if (phase === `queued-before-wait`) {
+          sourceParams.begin()
+          sourceParams.write({
+            type: `insert`,
+            value: { id: `gate`, title: `holds the apply mutex` },
+          })
+          gateReceipt = sourceParams.commit()
+          if (gateReceipt !== true) void gateReceipt.catch(() => undefined)
+          await gateEntered.promise
+        }
+        localTransaction.mutate(() => {
+          collection.insert({ id: `local`, title: `user persistence pending` })
+        })
+        void localTransaction.isPersisted.promise.catch(() => undefined)
+        await mutationEntered.promise
+        expect(localTransaction.state).toBe(`persisting`)
+        sourceParams.begin()
+        sourceParams.write({
+          type: `insert`,
+          value: { id: `parked`, title: `older source write` },
+        })
+        normalReceipt = sourceParams.commit()
+        if (normalReceipt !== true) void normalReceipt.catch(() => undefined)
+        startDependency.resolve()
+        releaseGate.resolve()
+        await dependencySubmitted.promise
+        expect(synchronousFailure).toBeUndefined()
+
+        await atPersistedOracleCheckpoint(
+          localTransaction.isPersisted.promise,
+          `later mutation settles despite earlier listener failure`,
+        )
+        expect(synchronousFailure).toBeUndefined()
+        await atPersistedOracleCheckpoint(
+          Promise.resolve(normalReceipt),
+          `older source write still persists`,
+        )
+        await atPersistedOracleCheckpoint(
+          Promise.resolve(dependencyReceipt),
+          `later source write still persists`,
+        )
+        expect(
+          adapter.applyCommittedTxCalls.flatMap(({ tx }) =>
+            tx.mutations.map((mutation) => mutation.key),
+          ),
+        ).toEqual(
+          phase === `queued-before-wait`
+            ? [`gate`, `parked`, `dependency`]
+            : [`parked`, `dependency`],
+        )
+        expect(collection.status).toBe(`error`)
+      } catch (error) {
+        hasPrimaryFailure = true
+        throw error
+      } finally {
+        startDependency.resolve()
+        releaseGate.resolve()
+        subscription.unsubscribe()
+        await cleanupPersistedOracle(
+          [
+            () => localTransaction.isPersisted.promise.catch(() => undefined),
+            () =>
+              gateReceipt === true
+                ? undefined
+                : Promise.resolve(gateReceipt).catch(() => undefined),
+            () =>
+              normalReceipt === true
+                ? undefined
+                : Promise.resolve(normalReceipt).catch(() => undefined),
+            () =>
+              dependencyReceipt === true
+                ? undefined
+                : Promise.resolve(dependencyReceipt).catch(() => undefined),
+            () => collection.cleanup(),
+          ],
+          hasPrimaryFailure,
+        )
+      }
+    },
+  )
+
+  it(`does not swallow an index failure before the older receipt applies`, async () => {
+    const adapter = createRecordingAdapter()
+    let sourceParams!: TodoSyncParams
+    const collection = createCollection(
+      persistedCollectionOptions<Todo, string>({
+        id: `immediate-source-index-failure`,
+        getKey: (row) => row.id,
+        sync: {
+          sync: (params) => {
+            sourceParams = params
+            params.markReady()
+          },
+        },
+        persistence: { adapter },
+      }),
+    )
+    const indexError = new Error(`invalid index value`)
+    class RejectParkedIndex extends BasicIndex<string> {
+      override add(key: string, item: unknown): void {
+        if (key === `parked`) throw indexError
+        super.add(key, item)
+      }
+    }
+    const mutationEntered = createEventGate()
+    const startDependency = createEventGate()
+    const localTransaction = createTransaction({
+      mutationFn: async () => {
+        mutationEntered.resolve()
+        await startDependency.promise
+        sourceParams.begin({ immediate: true })
+        sourceParams.write({
+          type: `insert`,
+          value: { id: `dependency`, title: `must not report success` },
+        })
+        await sourceParams.commit()
+      },
+    })
+    let hasPrimaryFailure = false
+
+    try {
+      await collection.stateWhenReady()
+      collection.createIndex((row) => row.id, {
+        indexType: RejectParkedIndex,
+      })
+      localTransaction.mutate(() => {
+        collection.insert({ id: `local`, title: `user persistence pending` })
+      })
+      void localTransaction.isPersisted.promise.catch(() => undefined)
+      await mutationEntered.promise
+      sourceParams.begin()
+      sourceParams.write({
+        type: `insert`,
+        value: { id: `parked`, title: `index fails before publication` },
+      })
+      const normalReceipt = sourceParams.commit()
+      if (normalReceipt !== true) void normalReceipt.catch(() => undefined)
+      startDependency.resolve()
+
+      await expect(
+        atPersistedOracleCheckpoint(
+          localTransaction.isPersisted.promise,
+          `index failure rejects the dependent mutation`,
+        ),
+      ).rejects.toBe(indexError)
+      expect(adapter.rows.has(`dependency`)).toBe(false)
+      expect(collection.status).toBe(`error`)
+    } catch (error) {
+      hasPrimaryFailure = true
+      throw error
+    } finally {
+      startDependency.resolve()
+      await cleanupPersistedOracle(
+        [
+          () => localTransaction.isPersisted.promise.catch(() => undefined),
+          () => collection.cleanup(),
+        ],
+        hasPrimaryFailure,
+      )
+    }
+  })
+
   it(`replays source transactions one by one behind a held predecessor`, async () => {
     const adapter = createRecordingAdapter()
     const firstPersistenceEntered = createEventGate()

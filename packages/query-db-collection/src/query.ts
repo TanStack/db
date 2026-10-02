@@ -1159,6 +1159,7 @@ export function queryCollectionOptions(
       string,
       ResultApplicationController
     >()
+    const resultSourceCommitControllers = new Map<string, AbortController>()
     const effectivePersistedGcTimes = new Map<string, number>()
     const persistedRetentionTimers = new Map<
       string,
@@ -1171,14 +1172,19 @@ export function queryCollectionOptions(
       superseding = false,
     ) => {
       const controller = resultApplicationControllers.get(hashedQueryKey)
-      const shouldCancel = !superseding || !controller?.sourceCommitStarted
+      const shouldCancel =
+        !superseding || !persistence || !controller?.sourceCommitStarted
       if (shouldCancel) {
         controller?.rollback?.()
       }
       pendingResultApplications.delete(hashedQueryKey)
       failedResultApplications.delete(hashedQueryKey)
       resultApplicationControllers.delete(hashedQueryKey)
-      if (shouldCancel) controller?.abort()
+      controller?.abort()
+      if (!superseding) {
+        resultSourceCommitControllers.get(hashedQueryKey)?.abort()
+        resultSourceCommitControllers.delete(hashedQueryKey)
+      }
     }
 
     const waitForCurrentResultApplication = async (
@@ -2183,7 +2189,17 @@ export function queryCollectionOptions(
           applicationToken.settleRefetchAtFetchBoundary?.()
         }
         applicationToken.sourceCommitStarted = true
-        const applied = commit(signal)
+        let commitSignal = signal
+        if (persistence) {
+          let sourceController =
+            resultSourceCommitControllers.get(hashedQueryKey)
+          if (!sourceController) {
+            sourceController = new AbortController()
+            resultSourceCommitControllers.set(hashedQueryKey, sourceController)
+          }
+          commitSignal = sourceController.signal
+        }
+        const applied = commit(commitSignal)
         transactionActive = false
         retainedQueriesPendingRevalidation.delete(hashedQueryKey)
         cancelPersistedRetentionExpiry(hashedQueryKey)

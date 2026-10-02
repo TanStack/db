@@ -1494,6 +1494,7 @@ function createPersistedOverlapFixture(
   gatedCommit: number | undefined,
   handlerWrite = false,
   holdQueryResult = false,
+  syncMode: `eager` | `on-demand` = `eager`,
 ) {
   const storage = createOwnershipStorage(undefined, gatedCommit)
   const queryClient = createQueryClient()
@@ -1519,6 +1520,7 @@ function createPersistedOverlapFixture(
     queryKey: [id],
     queryFn,
     getKey: (item) => item.id,
+    syncMode,
     startSync: true,
     onUpdate: async ({ collection: handlerCollection }) => {
       if (!handlerWrite) throw new Error(`No handler write in this history`)
@@ -2162,6 +2164,60 @@ describe(`query collection ownership lifecycle`, () => {
         name: `late`,
       }),
     ).toThrow(SyncNotInitializedError)
+  })
+
+  // Releasing a demand retires every unpublished result it accepted, including
+  // one superseded after source commit but before Collection publication.
+  it(`does not publish a superseded persisted result after subset release`, async () => {
+    const id = `persisted-overlap-subset-release`
+    const { collection, queryClient, storage, sourceCommits } =
+      createPersistedOverlapFixture(id, undefined, false, false, `on-demand`)
+
+    const persistence = createDeferred<void>()
+    const mutation = createTransaction({
+      mutationFn: () => persistence.promise,
+    })
+    mutation.mutate(() =>
+      collection.insert({ id: `local`, category: `group`, name: `Local` }),
+    )
+
+    try {
+      const subset: LoadSubsetOptions = {}
+      const load = collection._sync.loadSubset(subset)
+      if (load !== true) void load.catch(() => undefined)
+      await vi.waitFor(() =>
+        expect(
+          sourceCommits.some((commit) => commit.writes.includes(`one`)),
+        ).toBe(true),
+      )
+      const first = sourceCommits.find((commit) =>
+        commit.writes.includes(`one`),
+      )!
+      expect(first.settled).toBe(false)
+
+      queryClient.setQueryData(
+        [id],
+        [{ id: `second`, category: `group`, name: `Second` }],
+      )
+      await vi.waitFor(() =>
+        expect(
+          sourceCommits.some((commit) => commit.writes.includes(`Second`)),
+        ).toBe(true),
+      )
+      collection._sync.unloadSubset(subset)
+      persistence.resolve()
+      await mutation.isPersisted.promise
+      await vi.waitFor(() => expect(first.settled).toBe(true))
+
+      expect(first.signal?.aborted).toBe(true)
+      expect(first.outcome).toBe(`rejected`)
+      expect(collection.has(`row`)).toBe(false)
+      expect(collection.has(`second`)).toBe(false)
+      expect(storage.snapshot().rows.size).toBe(0)
+    } finally {
+      persistence.resolve()
+      await mutation.isPersisted.promise.catch(() => undefined)
+    }
   })
 
   it(`keeps an accepted empty-diff result pending until application`, () => {

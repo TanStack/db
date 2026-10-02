@@ -1311,7 +1311,10 @@ export class CollectionStateManager<
 
   /** Apply committed source writes. A queued immediate write may authorize an
    * earlier normal write to publish while a user mutation is still active. */
-  commitPendingTransactions = (allowDuringPersistence = false) => {
+  commitPendingTransactions = (
+    allowDuringPersistence = false,
+    onPublicationError?: (error: unknown) => void,
+  ) => {
     if (this.isDrainingSyncTransactions) return
     this.isDrainingSyncTransactions = true
     let failed = false
@@ -1328,7 +1331,10 @@ export class CollectionStateManager<
     } finally {
       this.isDrainingSyncTransactions = false
     }
-    if (failed) throw firstError
+    if (failed) {
+      if (onPublicationError) onPublicationError(firstError)
+      else throw firstError
+    }
   }
 
   private commitNextPendingTransactionBatch(allowDuringPersistence = false): {

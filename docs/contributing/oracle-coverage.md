@@ -306,6 +306,15 @@ require the latest public and durable row set at the successor receipt. These
 witnesses exposed stale ownership when a superseded committed row was absent
 from `syncedData`; preserving its staged ownership and deleting by key makes
 both pass.
+An on-demand subset-release witness supersedes a persisted source commit while
+publication is held, then retires its logical demand. It checks rejection of
+the older applied receipt and absence of public and durable rows. The same
+request object drives load and release. Multiple logical owners for the same
+query key and native SQLite cancellation remain outside this witness.
+The persistence owner holds an earlier source publication until a later
+immediate source write is queued, on both sides of the wrapper's publication
+wait. A listener failure on the earlier batch must not reject the later write;
+a faulting index before receipt settlement still rejects the dependent write.
 Precommit cancellation and cleanup controls pass. Each history has its own Collection identity and an exact
 adapter commit-count check at the hold. The controlled adapter
 establishes these cuts; it does not establish native SQLite or Expo scheduling.
