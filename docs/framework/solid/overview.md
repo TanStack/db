@@ -61,7 +61,7 @@ function TodoList() {
   const query = useLiveQuery((q) => q.from({ todos: todosCollection }))
 
   return (
-    <Errored catch={(err) => <div>Error: {err.message}</div>}>
+    <Errored fallback={(err) => <div>Error: {String(err())}</div>}>
       <Loading fallback={<div>Loading...</div>}>
         <For each={query()}>
           {(todo) => <li>{todo.text}</li>}
