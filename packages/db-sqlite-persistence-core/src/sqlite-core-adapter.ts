@@ -1692,27 +1692,6 @@ export class SQLiteCorePersistenceAdapter implements PersistenceAdapter {
         await transactionDriver.run(`DELETE FROM ${tombstoneTableSql}`)
       }
 
-      const replacementKeys = replacesPersistedBaseline
-        ? tx.mutations.map((mutation) =>
-            encodePersistedStorageKey(mutation.key),
-          )
-        : []
-      const batchReplacement =
-        replacesPersistedBaseline &&
-        tx.mutations.length > 0 &&
-        tx.mutations.every((mutation) => mutation.type !== `delete`) &&
-        new Set(replacementKeys).size === replacementKeys.length
-
-      const finalRowMetadata = new Map<string, unknown>()
-      if (batchReplacement) {
-        for (const mutation of tx.rowMetadataMutations ?? []) {
-          finalRowMetadata.set(
-            encodePersistedStorageKey(mutation.key),
-            mutation.type === `delete` ? undefined : mutation.value,
-          )
-        }
-      }
-
       for (const batch of distinctKeyBatches(
         tx.mutations,
         (mutation) => encodePersistedStorageKey(mutation.key),
@@ -1720,7 +1699,7 @@ export class SQLiteCorePersistenceAdapter implements PersistenceAdapter {
       )) {
         const writes = batch.filter((mutation) => mutation.type !== `delete`)
         const deletes = batch.filter((mutation) => mutation.type === `delete`)
-        const readKeys = batchReplacement ? [] : writes
+        const readKeys = writes
           .filter(
             (mutation) =>
               mutation.type === `update` || mutation.metadataChanged !== true,
@@ -1787,11 +1766,9 @@ export class SQLiteCorePersistenceAdapter implements PersistenceAdapter {
               const value = mutation.type === `update`
                 ? mergeObjectRows(previousValue, mutation.value)
                 : mutation.value
-              const metadata = finalRowMetadata.has(writeKeys[index]!)
-                ? finalRowMetadata.get(writeKeys[index]!)
-                : mutation.metadataChanged === true
-                  ? mutation.metadata
-                  : previousMetadata
+              const metadata = mutation.metadataChanged === true
+                ? mutation.metadata
+                : previousMetadata
               return [
                 writeKeys[index]!,
                 serializePersistedRowValue(value),
@@ -1800,13 +1777,11 @@ export class SQLiteCorePersistenceAdapter implements PersistenceAdapter {
               ]
             }),
           )
-          if (!batchReplacement) {
-            await transactionDriver.run(
-              `DELETE FROM ${tombstoneTableSql}
-               WHERE key IN (${writeKeys.map(() => `?`).join(`, `)})`,
-              writeKeys,
-            )
-          }
+          await transactionDriver.run(
+            `DELETE FROM ${tombstoneTableSql}
+             WHERE key IN (${writeKeys.map(() => `?`).join(`, `)})`,
+            writeKeys,
+          )
         }
         if (deletes.length > 0) {
           await transactionDriver.run(
@@ -1827,7 +1802,7 @@ export class SQLiteCorePersistenceAdapter implements PersistenceAdapter {
       }
 
       for (const batch of distinctKeyBatches(
-        batchReplacement ? [] : (tx.rowMetadataMutations ?? []),
+        tx.rowMetadataMutations ?? [],
         (mutation) => encodePersistedStorageKey(mutation.key),
         this.replacementBatchSize,
       )) {
@@ -1850,25 +1825,32 @@ export class SQLiteCorePersistenceAdapter implements PersistenceAdapter {
         )
       }
 
-      for (const metadataMutation of tx.collectionMetadataMutations ?? []) {
-        if (metadataMutation.type === `delete`) {
+      for (const batch of distinctKeyBatches(
+        tx.collectionMetadataMutations ?? [],
+        (mutation) => mutation.key,
+        this.replacementBatchSize,
+      )) {
+        const deletes = batch.filter((mutation) => mutation.type === `delete`)
+        const sets = batch.filter((mutation) => mutation.type === `set`)
+        if (deletes.length > 0) {
           await transactionDriver.run(
             `DELETE FROM collection_metadata
-             WHERE collection_id = ? AND key = ?`,
-            [collectionId, metadataMutation.key],
+             WHERE collection_id = ? AND key IN (${deletes.map(() => `?`).join(`, `)})`,
+            [collectionId, ...deletes.map((mutation) => mutation.key)],
           )
-        } else {
+        }
+        if (sets.length > 0) {
           await transactionDriver.run(
             `INSERT INTO collection_metadata (collection_id, key, value, updated_at)
-             VALUES (?, ?, ?, CAST(strftime('%s', 'now') AS INTEGER))
+             VALUES ${sets.map(() => `(?, ?, ?, CAST(strftime('%s', 'now') AS INTEGER))`).join(`, `)}
              ON CONFLICT(collection_id, key) DO UPDATE SET
                value = excluded.value,
                updated_at = excluded.updated_at`,
-            [
+            sets.flatMap((mutation) => [
               collectionId,
-              metadataMutation.key,
-              serializePersistedRowValue(metadataMutation.value),
-            ],
+              mutation.key,
+              serializePersistedRowValue(mutation.value),
+            ]),
           )
         }
       }

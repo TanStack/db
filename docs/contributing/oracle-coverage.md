@@ -400,8 +400,9 @@ two collection-metadata prefix actions, and up to three committed positions;
 it does not claim arbitrary histories or concurrent owners. Every generated
 seed, candidate, dependent update, and late rollback must enter exactly one
 SQLite transaction; counters are captured before durable snapshot reads. A
-separate fixed/random generated work grammar covers 0–60 distinct keys, five
-insert/update/delete/metadata shapes, and 100/999 parameter caps. It checks
+separate fixed/random generated work grammar covers 0–60 distinct keys, six
+insert/update/delete/row and collection metadata shapes, and 100/999 parameter
+caps. It checks
 durable values before applying the same proposed chunk-bound work law; all
 repeated-key histories remain semantic-only. Fixed 25/26 and 10,000-row cases
 separately witness the work boundary. Both fixed and generated work laws were
@@ -410,9 +411,11 @@ plus metadata takes 505 query/run calls instead of 50,005. A temporary
 repeated-key classifier mutation fails the generated oracle at the candidate
 durable checkpoint, seed 1992, path `2:0:0:2:2:2:2`. A temporary chunk-limit
 mutation passes the Cloudflare 25-row case but fails at 26 rows under the
-100-parameter guard. Both mutations were restored. The Cloudflare receiving
-driver also persists ordinary writes with metadata at 25, 26, and 205 rows
-within that guard. Its Node SQLite storage seam does not establish Cloudflare
+100-parameter guard. A collection-metadata classifier mutation that ignores
+repeated keys fails at the durable checkpoint for a set/delete history. All
+mutations were restored. The Cloudflare receiving driver also persists ordinary
+writes with row and collection metadata at 25, 26, and 205 rows within that
+guard. Its Node SQLite storage seam does not establish Cloudflare
 Worker execution. The synthetic node:sqlite seam does not establish OPFS
 worker scheduling, browser latency, or native-device performance. Tagged-value
 serialization, unavailable key evidence after raw loss, concurrent schema
@@ -428,7 +431,8 @@ semantics. This in-memory driver-call law does not measure Chromium OPFS
 latency, worker scheduling, or an end-to-end Electric snapshot.
 
 The Cloudflare Durable Object test applies 25-, 26-, and 205-row full
-replacements and ordinary writes with row metadata through the actual Cloudflare
+replacements and ordinary writes with row and collection metadata through the
+actual Cloudflare
 driver. A storage seam enforces Cloudflare's documented 100-bound-parameter
 query limit and checks durable keys and metadata after each transaction. This
 Node SQLite seam does not execute in Workers.

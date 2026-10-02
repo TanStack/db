@@ -66,8 +66,9 @@ type Observation = {
  * string fixtures, and concurrent owners. The fixed size/parameter cases above
  * retain the work-threshold claim; the generated grammar tests semantics only.
  * A second generated grammar uses 0–60 distinct keys, two parameter caps, and
- * five independent-key action shapes (later/inline insert metadata, partial
- * update, delete, metadata-only). It applies an optional seed, then checks
+ * six independent-key action shapes (later/inline insert metadata, partial
+ * update, delete, row-metadata-only, collection-metadata-only). It applies an
+ * optional seed, then checks
  * durable semantics and the same chunk work bound after the candidate. Both
  * generated grammars reset driver counters around each apply, assert exactly
  * one SQLite transaction on success or rollback, and finish measurement before
@@ -387,10 +388,25 @@ function unmatchedMetadata(count: number): Case {
     ),
   }
 }
+function collectionMetadataOnly(count: number): Case {
+  const keys = Array.from({length: count}, (_, i) => `meta-${i}`)
+  return {
+    name: `collection-metadata-only-${count}`, cap: 100,
+    seed: transaction(`metadata-seed-${count}`, 1, [], [],
+      keys.map((key) => ({type:'set', key, value:{version:1}}))),
+    candidate: transaction(`metadata-candidate-${count}`, 2, [], [],
+      keys.map((key, index) => index % 2 === 0
+        ? {type:'set', key, value:{version:2}}
+        : {type:'delete', key})),
+    workSize: count,
+  }
+}
 const additionalWorkCases: Array<Case> = [
   updateRows(1), updateRows(26), updateRows(205),
   deleteRows(1), deleteRows(26), deleteRows(205),
   metadataOnly(1), metadataOnly(26), metadataOnly(205),
+  collectionMetadataOnly(1), collectionMetadataOnly(25),
+  collectionMetadataOnly(26), collectionMetadataOnly(205),
   unmatchedMetadata(26),
 ]
 workCases.push({name:'unique-10000', cap:999, candidate:insertRows(10000), workSize:10000})
@@ -441,6 +457,19 @@ const semanticCases: Array<Case> = [
     candidate: transaction('delete', 2, [
       {type:'delete', key:'gone', value:{id:'gone', deleted:2}},
     ], [{type:'set', key:'gone', value:{ignored:true}}]),
+  },
+  {
+    name: 'repeated-collection-metadata-key-keeps-order', cap: 100,
+    seed: transaction('metadata-seed', 1, [], [], [
+      {type:'set', key:'cursor', value:{version:1}},
+    ]),
+    candidate: transaction('metadata-repeat', 2, [], [], [
+      {type:'set', key:'cursor', value:{version:2}},
+      {type:'set', key:'mode', value:{enabled:true}},
+      {type:'delete', key:'cursor'},
+      {type:'set', key:'cursor', value:{version:3}},
+      {type:'delete', key:'cursor'},
+    ]),
   },
 ]
 
@@ -510,7 +539,8 @@ const generatedHistoryArbitrary: fc.Arbitrary<GeneratedHistory> = fc.record({
 
 type IndependentWorkCase = {
   shape: 'insert-later-metadata' | 'insert-inline-metadata' |
-    'partial-update' | 'delete' | 'row-metadata-only'
+    'partial-update' | 'delete' | 'row-metadata-only' |
+    'collection-metadata-only'
   size: number
   cap: 100 | 999
 }
@@ -519,6 +549,7 @@ const independentWorkArbitrary: fc.Arbitrary<IndependentWorkCase> = fc.record({
   shape: fc.constantFrom<IndependentWorkCase['shape']>(
     'insert-later-metadata', 'insert-inline-metadata',
     'partial-update', 'delete', 'row-metadata-only',
+    'collection-metadata-only',
   ),
   size: fc.integer({min:0, max:60}),
   cap: fc.constantFrom<100 | 999>(100, 999),
@@ -557,6 +588,15 @@ function independentTransactions(input: IndependentWorkCase): {
         candidate:transaction('metadata', 2, [], keys.map((key) => ({
           type:'set', key, value:{source:'later'},
         }))),
+      }
+    case 'collection-metadata-only':
+      return {
+        seed:transaction('collection-metadata-seed', 1, [], [],
+          keys.map((key) => ({type:'set', key, value:{version:1}}))),
+        candidate:transaction('collection-metadata', 2, [], [],
+          keys.map((key, index) => index % 2 === 0
+            ? {type:'set', key, value:{version:2}}
+            : {type:'delete', key})),
       }
   }
 }
@@ -738,6 +778,7 @@ export function runOrdinaryTransactionWorkOracle(): void {
     expect(new Set(samples.map((sample) => sample.shape))).toEqual(new Set<IndependentWorkCase['shape']>([
       'insert-later-metadata', 'insert-inline-metadata',
       'partial-update', 'delete', 'row-metadata-only',
+      'collection-metadata-only',
     ]))
     expect(new Set(samples.map((sample) => sample.cap))).toEqual(new Set([100, 999]))
     expect(samples.every((sample) => sample.size >= 0 && sample.size <= 60)).toBe(true)

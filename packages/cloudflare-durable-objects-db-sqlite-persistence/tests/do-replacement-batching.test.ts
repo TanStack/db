@@ -108,6 +108,11 @@ describe(`Cloudflare Durable Object batching`, () => {
             key,
             value: { source: `ordinary` },
           })),
+          collectionMetadataMutations: keys.map((key) => ({
+            type: `set` as const,
+            key,
+            value: { source: `ordinary` },
+          })),
         })
         const writeCalls = boundParameterCounts.length
         const maxBindings = Math.max(...boundParameterCounts)
@@ -115,6 +120,12 @@ describe(`Cloudflare Durable Object batching`, () => {
 
         expect(snapshot.rows.map(({ key }) => key).sort()).toEqual([...keys].sort())
         expect(snapshot.rows.map(({ metadata }) => metadata)).toEqual(
+          Array(rowCount).fill({ source: `ordinary` }),
+        )
+        expect(snapshot.collectionMetadata.map(({ key }) => key).sort()).toEqual(
+          [...keys].sort(),
+        )
+        expect(snapshot.collectionMetadata.map(({ value }) => value)).toEqual(
           Array(rowCount).fill({ source: `ordinary` }),
         )
         expect(snapshot.keySet).toEqual({ status: `consistent` })
