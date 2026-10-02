@@ -43,10 +43,13 @@ import type { CollectionLifecycleManager } from './lifecycle'
 import type { CollectionStateManager } from './state'
 
 // One random prefix per runtime keeps mutation ids unique across tabs and
-// sessions; the counter avoids generating a random UUID per mutation.
-const mutationIdPrefix = safeRandomUUID()
+// sessions; the counter avoids generating a random UUID per mutation. The
+// prefix waits for the first mutation, because some runtimes reject random
+// values at module scope.
+let mutationIdPrefix: string | undefined
 let mutationCount = 0
 function createMutationId(): string {
+  mutationIdPrefix ??= safeRandomUUID()
   return `${mutationIdPrefix}-${++mutationCount}`
 }
 
