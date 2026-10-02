@@ -339,10 +339,17 @@ export class CollectionSyncManager<
             }
 
             pendingTransaction.committed = true
-            // An accepted transaction always applies in commit order. A queued
-            // one becomes visible when the persisting transaction settles.
+            // An accepted transaction always applies in commit order. One held
+            // by a persisting optimistic transaction applies when that
+            // transaction settles; its receipt resolves now, so the handler
+            // can await it.
             this.state.commitPendingTransactions()
-            return true
+            if (
+              !pendingTransaction.applied.isPending() ||
+              this.state.hasPersistingTransaction()
+            )
+              return true
+            return pendingTransaction.applied.promise
           },
           markReady: () => {
             if (!isCurrentSync()) return

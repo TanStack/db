@@ -34,7 +34,9 @@ import type { CollectionConfig, SyncConfig } from '../src/types.js'
  * production caches, pending-mutation mergers, or publication code. Model
  * alignment: `transactions` are optimistic transactions, `queue` holds
  * accepted sync transactions, and `base` is the applied synced rows. `held` is
- * a model-only predicate for the hold described above.
+ * a model-only flag for the hold described above: it is set when a
+ * transaction completes while a queued sync transaction touches its key, and
+ * the drain that applies that queue clears it.
  *
  * A mutation handler can write a sync transaction before it returns, and can
  * await that write's receipt. It is the same event as a sync transaction
@@ -91,7 +93,10 @@ type ModelTransaction = {
   row: HistoryRow
   optimistic: boolean
   state: `persisting` | `completed` | `failed`
-  // A completed transaction attributes the sync write that ends its hold.
+  // Settled while a queued sync transaction touched its key. The drain that
+  // applies that queue ends the hold.
+  held: boolean
+  // A completed transaction attributes the next sync write of its key.
   originPending: boolean
 }
 type ObservedRow = HistoryRow & {
@@ -126,10 +131,6 @@ class HistoryModel {
     )
   }
 
-  private held(transaction: ModelTransaction, queued: Set<number>) {
-    return transaction.state === `completed` && queued.has(transaction.key)
-  }
-
   private persisting() {
     return this.transactions.some((entry) => entry.state === `persisting`)
   }
@@ -146,9 +147,8 @@ class HistoryModel {
         },
       ]),
     )
-    const queued = this.queuedKeys()
     const overlay = [
-      ...this.transactions.filter((entry) => this.held(entry, queued)),
+      ...this.transactions.filter((entry) => entry.held),
       ...this.transactions.filter((entry) => entry.state === `persisting`),
     ]
     for (const transaction of overlay) {
@@ -189,6 +189,7 @@ class HistoryModel {
       },
       optimistic: step.optimistic,
       state: `persisting`,
+      held: false,
       originPending: false,
     })
     return this.transactions.length - 1
@@ -197,9 +198,10 @@ class HistoryModel {
   settle(index: number, success: boolean) {
     const transaction = this.transactions[index]!
     transaction.state = success ? `completed` : `failed`
-    // Only a held row carries attribution to the sync write that ends it.
-    transaction.originPending =
-      success && this.queuedKeys().has(transaction.key)
+    transaction.held = success && this.queuedKeys().has(transaction.key)
+    // A completed transaction attributes the next sync write of its key,
+    // even after its optimistic state drops.
+    transaction.originPending = success
     // This grammar submits direct operations immediately. Rollback cascades
     // affect pending (not already persisting) peer transactions, so none of
     // these independently submitted requests is canceled by a sibling failure.
@@ -244,8 +246,10 @@ class HistoryModel {
       // Truncate keeps attribution only for rows in its own replacement.
       if (batch.truncate) attributed.clear()
     }
-    for (const transaction of this.transactions)
-      transaction.originPending = false
+    for (const transaction of this.transactions) {
+      transaction.held = false
+      transaction.originPending &&= attributed.has(transaction.key)
+    }
     this.queue = []
   }
 }
@@ -465,7 +469,6 @@ export async function runOptimisticHistory(
     settlements: 0,
     replacements: 0,
     queued: 0,
-    dependencies: 0,
     failures: 0,
     snapshotOverrides: 0,
     handlerBatches: 0,
@@ -728,10 +731,8 @@ export async function runOptimisticHistory(
           const intent = model.transactions[index]!
           cuts = [sorted(model.visible().values())]
           if (step.inHandler) {
-            const batch = {
-              ...resolveSourceBatch(step.inHandler),
-              awaitReceipt: step.inHandler.awaitReceipt,
-            }
+            const batch: HandlerBatch = resolveSourceBatch(step.inHandler)
+            batch.awaitReceipt = step.inHandler.awaitReceipt
             model.sync(batch)
             cuts.push(sorted(model.visible().values()))
             handlerBatch = batch

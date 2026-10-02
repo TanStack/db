@@ -382,12 +382,11 @@ export type LoadSubsetRequestResult = true | Promise<void>
 export type LoadSubsetFn = (options: LoadSubsetOptions) => true | Promise<void>
 
 /**
- * Confirms that a sync transaction was accepted. Core accepts synchronously
- * and returns `true`. A wrapping sync, such as persistence, can return a
- * promise that resolves after its own durable step. An accepted transaction
- * always applies in commit order; it becomes visible at once, or when the
- * persisting optimistic transaction that holds it settles. A receipt rejects
- * with an error named `AbortError` only if its signal aborted before
+ * Confirms a sync transaction. It resolves when the transaction applies, or
+ * at acceptance while a persisting optimistic transaction holds it. A
+ * wrapping sync, such as persistence, can resolve it after its own durable
+ * step. An accepted transaction always applies in commit order. A receipt
+ * rejects with an error named `AbortError` only if its signal aborted before
  * acceptance.
  */
 export type SyncAppliedReceipt = true | Promise<void>
@@ -429,14 +428,15 @@ export interface SyncConfig<
     begin: () => void
     write: (message: ChangeMessageOrDeleteKeyMessage<T, TKey>) => void
     /**
-     * Commit the active sync transaction in FIFO order and return `true` once
-     * core accepts it. An accepted transaction always applies. While an
-     * optimistic transaction is persisting, the accepted transaction waits and
-     * becomes visible when that transaction settles, together with the drop of
-     * its optimistic state. A handler can therefore await its own write.
-     * A signal that is already aborted abandons the transaction before
-     * acceptance, and the receipt rejects with an error named `AbortError`.
-     * Aborting after acceptance has no effect.
+     * Commit the active sync transaction in FIFO order. An accepted
+     * transaction always applies. Returns `true` when its writes are visible,
+     * or when a persisting optimistic transaction holds it: it then becomes
+     * visible when that transaction settles, together with the drop of its
+     * optimistic state, so a handler can await its own write. Otherwise, for
+     * example during another publication, returns a receipt that resolves
+     * when it applies. A signal that is already aborted abandons the
+     * transaction before acceptance, and the receipt rejects with an error
+     * named `AbortError`. Aborting after acceptance has no effect.
      */
     commit: (signal?: AbortSignal) => SyncAppliedReceipt
     /** Signal that a usable initial or recovered snapshot is available. */

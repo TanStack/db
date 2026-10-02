@@ -140,8 +140,9 @@ export class CollectionStateManager<
    * When sync confirms data for a key with pending local changes, it keeps 'local' origin.
    */
   public pendingLocalChanges = new Set<TKey>()
-  // Successful mutations retain attribution until sync applies. Active or
-  // failed mutations must not add to, or erase a sibling's entry in, this set.
+  // A completed mutation attributes the next sync write of its key, even after
+  // its optimistic state drops. Active or failed mutations must not add to, or
+  // erase a sibling's entry in, this set.
   public pendingLocalOrigins = new Set<TKey>()
 
   // Keyed by row key, not row object: adding a WeakMap entry for each
@@ -616,7 +617,6 @@ export class CollectionStateManager<
     }
     for (const key of staleOptimisticUpserts) {
       this.pendingOptimisticUpserts.delete(key)
-      this.pendingLocalOrigins.delete(key)
     }
     const staleOptimisticDeletes: Array<TKey> = []
     for (const key of this.pendingOptimisticDeletes) {
@@ -628,7 +628,6 @@ export class CollectionStateManager<
     }
     for (const key of staleOptimisticDeletes) {
       this.pendingOptimisticDeletes.delete(key)
-      this.pendingLocalOrigins.delete(key)
     }
 
     const activeTransactions: Array<Transaction<any>> = []
@@ -966,7 +965,8 @@ export class CollectionStateManager<
       const current = this.getProjectedSyncedKeyState(projection, key)
       projection.states.set(key, {
         exists: true,
-        value: Object.assign({}, current.value, operation.value),
+        // Spread defines own fields; assignment would run a `__proto__` setter.
+        value: { ...current.value, ...operation.value },
       })
     } else {
       projection.states.set(key, { exists: true, value: operation.value })
@@ -1178,19 +1178,19 @@ export class CollectionStateManager<
     if (failed) throw firstError
   }
 
+  hasPersistingTransaction(): boolean {
+    for (const transaction of this.transactions.values()) {
+      if (transaction.state === `persisting`) return true
+    }
+    return false
+  }
+
   private commitNextPendingTransactionBatch(): {
     processed: boolean
     failure?: { error: unknown }
   } {
     const syncRunGeneration = this.syncRunGeneration
-    // Check if there are any persisting transaction
-    let hasPersistingTransaction = false
-    for (const transaction of this.transactions.values()) {
-      if (transaction.state === `persisting`) {
-        hasPersistingTransaction = true
-        break
-      }
-    }
+    const hasPersistingTransaction = this.hasPersistingTransaction()
 
     // pending synced transactions could be either `committed` or still open.
     // we only want to process `committed` transactions here
@@ -1382,11 +1382,10 @@ export class CollectionStateManager<
               break
             case `update`: {
               if (rowUpdateMode === `partial`) {
-                const updatedValue = Object.assign(
-                  {},
-                  this.syncedData.get(key),
-                  operation.value,
-                )
+                const updatedValue = {
+                  ...this.syncedData.get(key),
+                  ...operation.value,
+                }
                 this.syncedData.set(key, updatedValue, deferOrder)
               } else {
                 this.syncedData.set(key, operation.value, deferOrder)
@@ -1798,9 +1797,7 @@ export class CollectionStateManager<
   public onTransactionStateChange(): void {
     // Batch only when the next sync drain can actually publish. A persisting
     // sibling can keep normal sync queued; it must not hide this rollback.
-    const hasPersistingTransaction = [...this.transactions.values()].some(
-      (transaction) => transaction.state === `persisting`,
-    )
+    const hasPersistingTransaction = this.hasPersistingTransaction()
     this.changes.shouldBatchEvents = this.pendingSyncedTransactions.some(
       (transaction) =>
         transaction.committed &&

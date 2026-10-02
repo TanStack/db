@@ -593,6 +593,10 @@ it.each(
     visit(expected, protocol, (value) => {
       value.x = 2
     })
+    let confirm: (value: {
+      id: number
+      values: ReturnType<typeof make>
+    }) => void = () => {}
     const collection = createCollection<{
       id: number
       values: ReturnType<typeof make>
@@ -608,9 +612,18 @@ it.each(
           })
           commit()
           markReady()
+          confirm = (value) => {
+            begin()
+            write({ type: `update`, value })
+            commit()
+          }
         },
       },
-      onUpdate: async () => {},
+      // The handler confirms the update, so the stored row is its result.
+      onUpdate: ({ transaction }) => {
+        confirm(transaction.mutations[0].modified)
+        return Promise.resolve()
+      },
     })
     try {
       const tx = collection.update(1, (draft) => {
