@@ -3,7 +3,7 @@ id: Context
 title: Context
 ---
 
-Defined in: [packages/db/src/query/builder/types.ts:44](https://github.com/TanStack/db/blob/main/packages/db/src/query/builder/types.ts#L44)
+Defined in: [packages/db/src/query/builder/types.ts:47](https://github.com/TanStack/db/blob/main/packages/db/src/query/builder/types.ts#L47)
 
 Context - The central state container for query builder operations
 
@@ -35,7 +35,7 @@ The context evolves through the query builder chain:
 baseSchema: ContextSchema;
 ```
 
-Defined in: [packages/db/src/query/builder/types.ts:46](https://github.com/TanStack/db/blob/main/packages/db/src/query/builder/types.ts#L46)
+Defined in: [packages/db/src/query/builder/types.ts:49](https://github.com/TanStack/db/blob/main/packages/db/src/query/builder/types.ts#L49)
 
 ***
 
@@ -45,7 +45,7 @@ Defined in: [packages/db/src/query/builder/types.ts:46](https://github.com/TanSt
 fromSourceName: string;
 ```
 
-Defined in: [packages/db/src/query/builder/types.ts:52](https://github.com/TanStack/db/blob/main/packages/db/src/query/builder/types.ts#L52)
+Defined in: [packages/db/src/query/builder/types.ts:55](https://github.com/TanStack/db/blob/main/packages/db/src/query/builder/types.ts#L55)
 
 ***
 
@@ -55,7 +55,7 @@ Defined in: [packages/db/src/query/builder/types.ts:52](https://github.com/TanSt
 optional fromSourceNames: readonly string[];
 ```
 
-Defined in: [packages/db/src/query/builder/types.ts:54](https://github.com/TanStack/db/blob/main/packages/db/src/query/builder/types.ts#L54)
+Defined in: [packages/db/src/query/builder/types.ts:57](https://github.com/TanStack/db/blob/main/packages/db/src/query/builder/types.ts#L57)
 
 ***
 
@@ -65,7 +65,7 @@ Defined in: [packages/db/src/query/builder/types.ts:54](https://github.com/TanSt
 optional hasJoins: boolean;
 ```
 
-Defined in: [packages/db/src/query/builder/types.ts:58](https://github.com/TanStack/db/blob/main/packages/db/src/query/builder/types.ts#L58)
+Defined in: [packages/db/src/query/builder/types.ts:61](https://github.com/TanStack/db/blob/main/packages/db/src/query/builder/types.ts#L61)
 
 ***
 
@@ -75,7 +75,7 @@ Defined in: [packages/db/src/query/builder/types.ts:58](https://github.com/TanSt
 optional hasResult: true;
 ```
 
-Defined in: [packages/db/src/query/builder/types.ts:67](https://github.com/TanStack/db/blob/main/packages/db/src/query/builder/types.ts#L67)
+Defined in: [packages/db/src/query/builder/types.ts:70](https://github.com/TanStack/db/blob/main/packages/db/src/query/builder/types.ts#L70)
 
 ***
 
@@ -85,7 +85,7 @@ Defined in: [packages/db/src/query/builder/types.ts:67](https://github.com/TanSt
 optional hasUnionFrom: true;
 ```
 
-Defined in: [packages/db/src/query/builder/types.ts:56](https://github.com/TanStack/db/blob/main/packages/db/src/query/builder/types.ts#L56)
+Defined in: [packages/db/src/query/builder/types.ts:59](https://github.com/TanStack/db/blob/main/packages/db/src/query/builder/types.ts#L59)
 
 ***
 
@@ -95,7 +95,7 @@ Defined in: [packages/db/src/query/builder/types.ts:56](https://github.com/TanSt
 optional joinTypes: Record<string, "inner" | "left" | "right" | "full" | "outer" | "cross">;
 ```
 
-Defined in: [packages/db/src/query/builder/types.ts:60](https://github.com/TanStack/db/blob/main/packages/db/src/query/builder/types.ts#L60)
+Defined in: [packages/db/src/query/builder/types.ts:63](https://github.com/TanStack/db/blob/main/packages/db/src/query/builder/types.ts#L63)
 
 ***
 
@@ -105,7 +105,7 @@ Defined in: [packages/db/src/query/builder/types.ts:60](https://github.com/TanSt
 optional refsSchema: ContextSchema;
 ```
 
-Defined in: [packages/db/src/query/builder/types.ts:50](https://github.com/TanStack/db/blob/main/packages/db/src/query/builder/types.ts#L50)
+Defined in: [packages/db/src/query/builder/types.ts:53](https://github.com/TanStack/db/blob/main/packages/db/src/query/builder/types.ts#L53)
 
 ***
 
@@ -115,7 +115,7 @@ Defined in: [packages/db/src/query/builder/types.ts:50](https://github.com/TanSt
 optional result: any;
 ```
 
-Defined in: [packages/db/src/query/builder/types.ts:65](https://github.com/TanStack/db/blob/main/packages/db/src/query/builder/types.ts#L65)
+Defined in: [packages/db/src/query/builder/types.ts:68](https://github.com/TanStack/db/blob/main/packages/db/src/query/builder/types.ts#L68)
 
 ***
 
@@ -125,7 +125,7 @@ Defined in: [packages/db/src/query/builder/types.ts:65](https://github.com/TanSt
 schema: ContextSchema;
 ```
 
-Defined in: [packages/db/src/query/builder/types.ts:48](https://github.com/TanStack/db/blob/main/packages/db/src/query/builder/types.ts#L48)
+Defined in: [packages/db/src/query/builder/types.ts:51](https://github.com/TanStack/db/blob/main/packages/db/src/query/builder/types.ts#L51)
 
 ***
 
@@ -135,4 +135,4 @@ Defined in: [packages/db/src/query/builder/types.ts:48](https://github.com/TanSt
 optional singleResult: boolean;
 ```
 
-Defined in: [packages/db/src/query/builder/types.ts:69](https://github.com/TanStack/db/blob/main/packages/db/src/query/builder/types.ts#L69)
+Defined in: [packages/db/src/query/builder/types.ts:72](https://github.com/TanStack/db/blob/main/packages/db/src/query/builder/types.ts#L72)
