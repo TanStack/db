@@ -86,6 +86,16 @@ interface PendingSyncedTransaction<
 
 type PendingMetadataWrite = { type: `set`; value: unknown } | { type: `delete` }
 
+/** The row metadata a sync operation writes unless the adapter set it explicitly. */
+export function automaticRowMetadataWrite(
+  operation: Pick<OptimisticChangeMessage<object>, `type` | `metadata`>,
+): PendingMetadataWrite | undefined {
+  if (operation.metadata !== undefined && operation.type !== `delete`) {
+    return { type: `set`, value: operation.metadata }
+  }
+  return operation.type === `update` ? undefined : { type: `delete` }
+}
+
 type InsertDependency = { mutation: object; transaction: Transaction<any> }
 
 type OptimisticUpsert<T extends object> = Pick<
@@ -1120,16 +1130,9 @@ export class CollectionStateManager<
     }
     for (const operation of transaction.operations) {
       const key = operation.key as TKey
-      if (explicitKeys.has(key)) continue
-      if (operation.type === `delete`) {
-        transaction.rowMetadataWrites.set(key, { type: `delete` })
-      } else if (operation.metadata !== undefined) {
-        transaction.rowMetadataWrites.set(key, {
-          type: `set`,
-          value: operation.metadata,
-        })
-      } else if (operation.type === `insert`) {
-        transaction.rowMetadataWrites.set(key, { type: `delete` })
+      const metadataWrite = automaticRowMetadataWrite(operation)
+      if (!explicitKeys.has(key) && metadataWrite) {
+        transaction.rowMetadataWrites.set(key, metadataWrite)
       }
     }
   }
