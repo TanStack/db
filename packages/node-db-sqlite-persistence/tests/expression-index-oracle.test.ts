@@ -2197,6 +2197,33 @@ describe(`SQLite expression-index oracle`, () => {
     ).toBe(true)
   })
 
+  it(`indexes every three-segment numeric carrier combination`, async () => {
+    const ref = new IR.PropRef([`part`, `0`, `0`, `0`])
+    const rows = Array.from({ length: 8 }, (_unused, mask) => {
+      let nested: unknown = `match`
+      for (let bit = 0; bit < 3; bit++) {
+        nested = mask & (1 << bit) ? [nested] : { '0': nested }
+      }
+      return { key: `carrier-${mask}`, value: { part: nested } }
+    })
+    const observation = await observeExpressionIndexScenario({
+      label: `three-numeric-carriers`,
+      indexExpression: ref,
+      where: new IR.Func<boolean>(`eq`, [ref, new IR.Value(`match`)]),
+      rows,
+    })
+    const expectedKeys = rows.map(({ key }) => key)
+    expect(observation.adapterKeys).toEqual(expectedKeys)
+    expect(observation.directSqlKeys).toEqual(expectedKeys)
+    expect(
+      planUsesNamedIndex(
+        observation.plan,
+        observation.tableName,
+        observation.indexName,
+      ),
+    ).toBe(true)
+  })
+
   it(`keeps deep numeric paths in the unbounded candidate set`, async () => {
     const ref = new IR.PropRef([`part`, `0`, `0`, `0`, `0`])
     const observation = await observeExpressionIndexScenario({
