@@ -1,11 +1,11 @@
 import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { runSQLiteCoreAdapterContractSuite } from '../../db-sqlite-persistence-core/tests/contracts/sqlite-core-adapter-contract'
+import { runSQLiteCoreAdapterContractSuite } from '../../db-sqlite-persistence-core/tests/contracts/sqlite-core-adapter-contract-oracle'
 import { OpSQLiteDriver } from '../src/op-sqlite-driver'
 import { SQLiteCorePersistenceAdapter } from '../../db-sqlite-persistence-core/src'
 import { createOpSQLiteTestDatabase } from './helpers/op-sqlite-test-db'
-import type { SQLiteCoreAdapterHarnessFactory } from '../../db-sqlite-persistence-core/tests/contracts/sqlite-core-adapter-contract'
+import type { SQLiteCoreAdapterHarnessFactory } from '../../db-sqlite-persistence-core/tests/contracts/sqlite-core-adapter-contract-oracle'
 
 const createHarness: SQLiteCoreAdapterHarnessFactory = (options) => {
   const tempDirectory = mkdtempSync(join(tmpdir(), `db-rn-sqlite-core-`))

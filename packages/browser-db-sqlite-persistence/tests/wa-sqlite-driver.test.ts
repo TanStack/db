@@ -1,10 +1,10 @@
 import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { runSQLiteDriverContractSuite } from '../../db-sqlite-persistence-core/tests/contracts/sqlite-driver-contract'
+import { runSQLiteDriverContractSuite } from '../../db-sqlite-persistence-core/tests/contracts/sqlite-driver-contract-oracle'
 import { BrowserWASQLiteDriver } from '../src/wa-sqlite-driver'
 import { createWASQLiteTestDatabase } from './helpers/wa-sqlite-test-db'
-import type { SQLiteDriverContractHarness } from '../../db-sqlite-persistence-core/tests/contracts/sqlite-driver-contract'
+import type { SQLiteDriverContractHarness } from '../../db-sqlite-persistence-core/tests/contracts/sqlite-driver-contract-oracle'
 
 function createDriverHarness(): SQLiteDriverContractHarness {
   const tempDirectory = mkdtempSync(join(tmpdir(), `db-browser-wa-sqlite-`))

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { expectAssertionFailure } from './expected-failure.js'
-import { TraceAssertionError, runTrace } from './trace-runner.js'
+import { TraceAssertionError, runTrace } from './trace-runner-oracle.js'
 import type { AssertionDifference } from './expected-failure.js'
 
 type CheckpointGuard = (

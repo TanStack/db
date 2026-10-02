@@ -191,7 +191,7 @@ function isSdkResetFramedPartition(
   batches: Array<Array<Message<OracleRow>>>,
 ): boolean {
   // Model the installed SDK's HTTP 409 reset path: it publishes a synthetic
-  // singleton reset, not the response body. See electric-sdk-framing.test.ts.
+  // singleton reset, not the response body. See electric-sdk-framing-oracle.test.ts.
   // Arbitrary data/reset coalescing is outside this verified protocol domain;
   // this is not a claim that the SDK validates every other server response.
   return batches.every(
@@ -1740,9 +1740,11 @@ type HistoryToken = {
   name: string
 }
 
+// Provider controls can initiate a sync commit; delivering them does not by
+// itself establish applied settlement, publication, or persistence durability.
 type DesignToken =
   | HistoryToken
-  | { operation: `reset` | `commit` | `subset` | `neutral` }
+  | { operation: `reset` | `deliver-up-to-date` | `subset` | `neutral` }
 
 type ProcessSlot = `a` | `b`
 
@@ -2150,20 +2152,19 @@ const designTokenArb: fc.Arbitrary<DesignToken> = fc.oneof(
     name: fc.string({ maxLength: 8 }),
   }),
   fc.record({
-    operation: fc.constantFrom<`reset` | `commit` | `subset` | `neutral`>(
-      `reset`,
-      `commit`,
-      `subset`,
-      `neutral`,
-    ),
+    operation: fc.constantFrom<
+      `reset` | `deliver-up-to-date` | `subset` | `neutral`
+    >(`reset`, `deliver-up-to-date`, `subset`, `neutral`),
   }),
 )
 
+// Releasing persistence application opens the adapter's held applyCommittedTx
+// call. It is separate from provider delivery and the sync applied receipt.
 type SchedulerEvent =
   | `startup-promise`
   | `hydration`
   | `snapshot-available`
-  | `commit`
+  | `release-persistence-apply`
   | `cleanup`
 
 function permutations<T>(values: ReadonlyArray<T>): Array<Array<T>> {
@@ -2218,7 +2219,7 @@ function buildValidHistory(tokens: Array<HistoryToken>): {
 
 function designMessage(token: DesignToken): Message<OracleRow> {
   if (token.operation === `reset`) return mustRefetch
-  if (token.operation === `commit`) return upToDate
+  if (token.operation === `deliver-up-to-date`) return upToDate
   if (token.operation === `subset`) return subsetEnd
   if (token.operation === `neutral`) {
     return {
@@ -2250,7 +2251,7 @@ function buildDifferentialHistory(
       continue
     }
     if (
-      token.operation === `commit` ||
+      token.operation === `deliver-up-to-date` ||
       token.operation === `subset` ||
       token.operation === `neutral`
     ) {
@@ -2620,7 +2621,7 @@ async function runSchedulerPermutation(
 }> {
   const startup = createDeferred<void>()
   const hydration = createDeferred<void>()
-  const commit = createDeferred<void>()
+  const persistenceApplyGate = createDeferred<void>()
   const persistedMetadata = new Map(resumeState())
   const persistedRows = new Map<string | number, OracleRow>([
     [1, { id: 1, name: `persisted`, stable: `stable-1` }],
@@ -2637,7 +2638,7 @@ async function runSchedulerPermutation(
   }
   const applyCommittedTx = adapter.applyCommittedTx.bind(adapter)
   adapter.applyCommittedTx = async (...args) => {
-    await commit.promise
+    await persistenceApplyGate.promise
     return applyCommittedTx(...args)
   }
 
@@ -2732,7 +2733,7 @@ async function runSchedulerPermutation(
       if (event === `startup-promise`) startup.resolve()
       if (event === `hydration`) hydration.resolve()
       if (event === `snapshot-available`) snapshotRequested = true
-      if (event === `commit`) commit.resolve()
+      if (event === `release-persistence-apply`) persistenceApplyGate.resolve()
       if (event === `cleanup`) {
         await collection.cleanup()
         cleanupCompleted = true
@@ -2745,7 +2746,7 @@ async function runSchedulerPermutation(
 
     startup.resolve()
     hydration.resolve()
-    commit.resolve()
+    persistenceApplyGate.resolve()
     snapshotRequested = true
     await drainScheduler()
     deliverSnapshotIfPossible()
@@ -3474,12 +3475,12 @@ describeUnlessQueuedPresenceReplay(`Electric adapter laws`, () => {
     }
   })
 
-  it(`settles every startup, hydration, snapshot availability, commit, and cleanup permutation`, async () => {
+  it(`settles every startup, hydration, snapshot availability, persistence-apply release, and cleanup permutation`, async () => {
     const events: Array<SchedulerEvent> = [
       `startup-promise`,
       `hydration`,
       `snapshot-available`,
-      `commit`,
+      `release-persistence-apply`,
       `cleanup`,
     ]
     let permutationIndex = 0
@@ -3871,7 +3872,7 @@ describeUnlessQueuedPresenceReplay(`Electric adapter laws`, () => {
     [
       [
         { operation: `insert`, id: 2, name: `` },
-        { operation: `commit` },
+        { operation: `deliver-up-to-date` },
         { operation: `delete`, id: 2, name: `` },
       ],
       2032071466,
@@ -5551,8 +5552,15 @@ describeUnlessQueuedPresenceReplay(`Electric adapter laws`, () => {
     fc.array(
       fc.record({
         operation: fc.constantFrom<
-          HistoryToken[`operation`] | `reset` | `acquire` | `commit`
-        >(`insert`, `update`, `delete`, `reset`, `acquire`, `commit`),
+          HistoryToken[`operation`] | `reset` | `acquire` | `deliver-subset-end`
+        >(
+          `insert`,
+          `update`,
+          `delete`,
+          `reset`,
+          `acquire`,
+          `deliver-subset-end`,
+        ),
         id: fc.integer({ min: 1, max: 3 }),
         name: fc.string({ maxLength: 8 }),
       }),
@@ -5576,7 +5584,7 @@ describeUnlessQueuedPresenceReplay(`Electric adapter laws`, () => {
           if (command.operation === `acquire`) {
             // This enters the acquisition API with a fresh disjoint predicate,
             // but the mock does not deliver response rows. Actual installed-SDK
-            // delivery and overlap are in electric-sdk-delivery.property.test.ts.
+            // delivery and overlap are in electric-sdk-delivery-oracle.property.test.ts.
             await trace.collection._sync.loadSubset({
               where: new IR.Func(`eq`, [
                 new IR.PropRef([`id`]),
@@ -5587,7 +5595,7 @@ describeUnlessQueuedPresenceReplay(`Electric adapter laws`, () => {
             const message =
               command.operation === `reset`
                 ? mustRefetch
-                : command.operation === `commit`
+                : command.operation === `deliver-subset-end`
                   ? subsetEnd
                   : change(
                       command.operation === `insert` &&
@@ -5616,9 +5624,15 @@ describeUnlessQueuedPresenceReplay(`Electric adapter laws`, () => {
     undefined,
     [
       [
-        ([`insert`, `commit`, `reset`, `acquire`, `update`] as const).map(
-          (operation) => ({ operation, id: 1, name: `` }),
-        ),
+        (
+          [
+            `insert`,
+            `deliver-subset-end`,
+            `reset`,
+            `acquire`,
+            `update`,
+          ] as const
+        ).map((operation) => ({ operation, id: 1, name: `` })),
       ],
     ],
   )

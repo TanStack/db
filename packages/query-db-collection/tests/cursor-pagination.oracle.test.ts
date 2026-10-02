@@ -6,9 +6,9 @@ import {
   readOracleRunConfig,
 } from '../../db/tests/oracle-config.js'
 import { createBackend } from './cursor-pagination/backend.js'
-import { expectedRows } from './cursor-pagination/model.js'
+import { expectedRows } from './cursor-pagination/model-oracle.js'
 import { createCursorPager } from './cursor-pagination/pager.js'
-import type { Row, Scope, Window } from './cursor-pagination/model.js'
+import type { Row, Scope, Window } from './cursor-pagination/model-oracle.js'
 
 /**
  * # Can opaque pages reconstruct any requested ordered slice?
@@ -321,8 +321,8 @@ describe(`opaque cursor adapter`, () => {
         expectedRows(fixtureRows, allAscending, { offset: 0, limit: 6 }),
       )
       expect(outcomes).toEqual([`first-error`, `peer-success`])
-      // Cancelling a reader does not cancel Query's shared acquisition. A
-      // successful page remains reusable; failed/reset acquisitions restart.
+      // Cancelling a reader leaves the shared Query fetch active. A successful
+      // page remains reusable; failed or reset Query fetches start again.
       if (action === `abort`) {
         expect(backend.calls[1]).toEqual(expect.any(String))
         expect(backend.calls).toHaveLength(3)
@@ -433,7 +433,7 @@ describe(`opaque cursor adapter`, () => {
             value: expectedRows(rows, scope, all),
           })
           expect(backend.calls).toHaveLength(
-            // Query marks failed acquisitions stale and rebuilds their prefix.
+            // Query marks failed fetches stale and rebuilds their prefix.
             Math.ceil(rows.length / size) +
               (fault === `reject` ? faultPage + 1 : 0),
           )

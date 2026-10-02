@@ -14,7 +14,7 @@ import {
   captureSeedData,
   generateSeedData,
 } from '../../db-collection-e2e/src/fixtures/seed-data'
-import { runPersistedCollectionConformanceSuite } from '../../db-sqlite-persistence-core/tests/contracts/persisted-collection-conformance-contract'
+import { runPersistedCollectionConformanceSuite } from '../../db-sqlite-persistence-core/tests/contracts/persisted-collection-conformance-contract-oracle'
 import {
   createElectronRuntimeBridgeInvoke,
   isElectronFullE2EEnabled,

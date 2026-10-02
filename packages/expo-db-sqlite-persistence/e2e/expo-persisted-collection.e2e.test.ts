@@ -1,6 +1,6 @@
 import { it } from 'vitest'
 import { createExpoSQLitePersistence } from '../src'
-import { runMobilePersistedCollectionConformanceSuite } from './mobile-persisted-collection-conformance-suite'
+import { runMobilePersistedCollectionConformanceSuite } from './mobile-persisted-collection-conformance-suite-oracle'
 
 const runtimePlatform = process.env.TANSTACK_DB_EXPO_RUNTIME_PLATFORM?.trim()
 

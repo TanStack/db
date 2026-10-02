@@ -1,10 +1,10 @@
 import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { runSQLiteDriverContractSuite } from '../../db-sqlite-persistence-core/tests/contracts/sqlite-driver-contract'
+import { runSQLiteDriverContractSuite } from '../../db-sqlite-persistence-core/tests/contracts/sqlite-driver-contract-oracle'
 import { ExpoSQLiteDriver } from '../src/expo-sqlite-driver'
 import { createExpoSQLiteTestDatabase } from './helpers/expo-sqlite-test-db'
-import type { SQLiteDriverContractHarness } from '../../db-sqlite-persistence-core/tests/contracts/sqlite-driver-contract'
+import type { SQLiteDriverContractHarness } from '../../db-sqlite-persistence-core/tests/contracts/sqlite-driver-contract-oracle'
 
 function createDriverHarness(): SQLiteDriverContractHarness {
   const tempDirectory = mkdtempSync(join(tmpdir(), `db-expo-driver-contract-`))

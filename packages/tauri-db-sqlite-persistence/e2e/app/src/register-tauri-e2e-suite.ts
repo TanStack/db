@@ -1,6 +1,6 @@
 import { createTauriSQLitePersistence } from '../../../src'
 import { createTauriPersistedCollectionHarnessConfig } from '../../shared/tauri-persisted-collection-harness'
-import { registerPersistedCollectionConformanceSuite } from '../../shared/register-persisted-collection-conformance-suite'
+import { registerPersistedCollectionConformanceSuite } from '../../shared/register-persisted-collection-conformance-suite-oracle'
 import type { PersistedCollectionPersistence } from '@tanstack/db-sqlite-persistence-core'
 import type { TauriSQLiteDatabaseLike } from '../../../src'
 

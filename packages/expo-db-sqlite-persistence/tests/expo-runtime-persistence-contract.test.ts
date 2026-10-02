@@ -4,7 +4,7 @@ import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import { createExpoSQLitePersistence, persistedCollectionOptions } from '../src'
 import { createExpoSQLiteDriver } from '../src/expo-sqlite-driver'
-import { runRuntimePersistenceContractSuite } from '../../db-sqlite-persistence-core/tests/contracts/runtime-persistence-contract'
+import { runRuntimePersistenceContractSuite } from '../../db-sqlite-persistence-core/tests/contracts/runtime-persistence-contract-oracle'
 import { SingleProcessCoordinator } from '../../db-sqlite-persistence-core/src'
 import { createExpoSQLiteTestDatabase } from './helpers/expo-sqlite-test-db'
 import type {
@@ -15,7 +15,7 @@ import type { ExpoSQLiteDatabaseLike } from '../src/expo-sqlite-driver'
 import type {
   RuntimePersistenceContractTodo,
   RuntimePersistenceDatabaseHarness,
-} from '../../db-sqlite-persistence-core/tests/contracts/runtime-persistence-contract'
+} from '../../db-sqlite-persistence-core/tests/contracts/runtime-persistence-contract-oracle'
 
 type RuntimePersistenceFactory = (options: {
   database: ExpoSQLiteDatabaseLike

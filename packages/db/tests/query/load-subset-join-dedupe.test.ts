@@ -4,7 +4,7 @@ import { BasicIndex } from '../../src/indexes/basic-index.js'
 import { extractSimpleComparisons } from '../../src/query/expression-helpers.js'
 import { createLiveQueryCollection, eq } from '../../src/query/index.js'
 import { expectAssertionFailure } from '../expected-failure.js'
-import { TraceAssertionError } from '../trace-runner.js'
+import { TraceAssertionError } from '../trace-runner-oracle.js'
 import { flushPromises } from '../utils.js'
 import type {
   ChangeMessageOrDeleteKeyMessage,

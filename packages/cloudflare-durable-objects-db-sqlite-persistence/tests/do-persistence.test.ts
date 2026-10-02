@@ -8,12 +8,12 @@ import {
 } from '../src'
 import { CloudflareDOSQLiteDriver } from '../src/do-driver'
 import { SingleProcessCoordinator } from '../../db-sqlite-persistence-core/src'
-import { runRuntimePersistenceContractSuite } from '../../db-sqlite-persistence-core/tests/contracts/runtime-persistence-contract'
+import { runRuntimePersistenceContractSuite } from '../../db-sqlite-persistence-core/tests/contracts/runtime-persistence-contract-oracle'
 import { createBetterSqliteDoStorageHarness } from './helpers/better-sqlite-do-storage'
 import type {
   RuntimePersistenceContractTodo,
   RuntimePersistenceDatabaseHarness,
-} from '../../db-sqlite-persistence-core/tests/contracts/runtime-persistence-contract'
+} from '../../db-sqlite-persistence-core/tests/contracts/runtime-persistence-contract-oracle'
 
 function createRuntimeDatabaseHarness(): RuntimePersistenceDatabaseHarness {
   const tempDirectory = mkdtempSync(join(tmpdir(), `db-cf-do-persistence-`))

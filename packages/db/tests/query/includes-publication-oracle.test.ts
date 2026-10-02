@@ -10,12 +10,12 @@ import {
   eq,
   materialize,
 } from '../../src/query/index.js'
-import { runTrace } from '../trace-runner.js'
+import { runTrace } from '../trace-runner-oracle.js'
 import { oraclePropertyOptions, readOracleRunConfig } from '../oracle-config.js'
 import { withHistoryCleanup } from '../optimistic-history-oracle.js'
 import { flushPromises, withExpectedRejection } from '../utils.js'
 import { createControlledCollection } from './includes-oracle-helpers.js'
-import type { TraceDriver, TraceProjection } from '../trace-runner.js'
+import type { TraceDriver, TraceProjection } from '../trace-runner-oracle.js'
 import type { SyncConfig } from '../../src/types.js'
 
 /**

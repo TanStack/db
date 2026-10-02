@@ -23,7 +23,7 @@ reset/cleanup.
 In `src/electric.ts`, remove the active-lifecycle term from either
 `processMessages` lifecycle guard.
 
-Killed by: `settles every startup, hydration, snapshot availability, commit, and cleanup permutation` and `keeps stream cleanup and stale callbacks scoped to their lifecycle`.
+Killed by: `settles every startup, hydration, snapshot availability, persistence-apply release, and cleanup permutation` and `keeps stream cleanup and stale callbacks scoped to their lifecycle`.
 
 ## 3. Acknowledgement liveness
 
@@ -114,10 +114,10 @@ checks retained rows, error state, and reset metadata together.
 
 ## 11. Tag ownership across collection reuse and restart
 
-Share one tag tracker between collections, or recreate it on every sync
-session instead of retaining it for a compatible same-collection resume.
+Share one tag tracker between collections, or recreate it on every sync run
+instead of retaining it for a compatible same-collection resume.
 
-Killed by `electric-descriptor-isolation.test.ts`: equal-key peer streams
+Killed by `electric-descriptor-isolation-oracle.test.ts`: equal-key peer streams
 cannot remove each other's rows, and compatible persisted restart must
 still apply move-outs to retained tagged rows. The fresh-restart control
 proves old tags do not leak into a new snapshot.
@@ -135,7 +135,7 @@ seven message kinds cross both sides of the reset, with split controls.
 The previous predicate rejected only commit-before-reset; it incorrectly
 accepted data-before-reset and reset-before-data in the protocol model.
 
-`electric-sdk-framing.test.ts` independently uses the real SDK with controlled
+`electric-sdk-framing-oracle.test.ts` independently uses the real SDK with controlled
 HTTP responses. Both normal and stale-row-bearing 409 bodies produce singleton
 reset callbacks, as the generated protocol histories now require. This pins the
 installed SDK's HTTP reset path, not an exhaustive specification of every possible
@@ -200,10 +200,10 @@ untagged resume fixtures explicitly declare that they do not need tag state;
 the legacy cells retain coverage for missing metadata. A subset-end during cold
 recovery must not publish the incomplete replacement.
 
-The callback-reentry histories retire a session either before a stale callback
+The callback-reentry histories retire a sync run either before a stale callback
 or inside an `awaitMatch` predicate at a generated row position. Only the
-replacement stream may acknowledge new-session waiters. Generated message tails
-must not cross that boundary. The law also registers a replacement waiter inside
+replacement stream may acknowledge waiters from the new sync run. Generated
+message tails must not cross that boundary. The law also registers a replacement waiter inside
 the restart callback: the old match iteration must not visit it. Epoch guards
 after user callbacks fence both the waiter loop and the remaining message batch.
 

@@ -9,7 +9,7 @@ import {
   oracleRuns,
   readOracleRunConfig,
 } from '../oracle-config.js'
-import { runTrace } from '../trace-runner.js'
+import { runTrace } from '../trace-runner-oracle.js'
 import type { Collection } from '../../src/collection/index.js'
 import type {
   ChangeMessage,
@@ -31,8 +31,8 @@ import type {
  * reference joins matching keys from scratch after each command. The production
  * driver starts with a cold child Collection and observes the actual acquisition,
  * raw batches, reconstructed replica, and live rows across scan and indexed
- * paths. Faults prove a hidden acquisition, dropped delete, or wrong result is
- * detected independently.
+ * paths. Observation mutants prove that a hidden acquisition, dropped delete,
+ * or wrong result is detected independently.
  *
  * The Identity and Initial demand sections of live/ARCHITECTURE.md authorize
  * the equality and acquisition laws. The test-only replica folds public change
@@ -46,7 +46,7 @@ type Parent = { id: number; name: string }
 type Child = { id: number; parentId: number; amount: number }
 type Joined = { id: number; parentId: number; name: string; amount: number }
 type Step = { type: `delete`; id: number } | { type: `put`; row: Child }
-type Fault = `hide-acquisition` | `drop-delete` | `wrong-result`
+type ObservationMutant = `hide-acquisition` | `drop-delete` | `wrong-result`
 
 const parents: ReadonlyArray<Parent> = [
   { id: 1, name: `Ada` },
@@ -66,7 +66,10 @@ const plain = ({ id, parentId, name, amount }: Joined): Joined => ({
 const ordered = (rows: Iterable<Joined>) =>
   [...rows].map(plain).sort((a, b) => a.id - b.id)
 
-async function runColdJoin(steps: ReadonlyArray<Step>, fault?: Fault) {
+async function runColdJoin(
+  steps: ReadonlyArray<Step>,
+  mutant?: ObservationMutant,
+) {
   const model = new Map(initial.map((row) => [row.id, { ...row }]))
   const backend = new Map(initial.map((row) => [row.id, { ...row }]))
   const installed = new Set<number>()
@@ -165,7 +168,7 @@ async function runColdJoin(steps: ReadonlyArray<Step>, fault?: Fault) {
             batches.push(captured)
             for (const change of captured) {
               if (change.type === `delete`) {
-                if (fault !== `drop-delete`) replica.delete(change.key)
+                if (mutant !== `drop-delete`) replica.delete(change.key)
               } else replica.set(change.key, change.value)
             }
           },
@@ -212,11 +215,11 @@ async function runColdJoin(steps: ReadonlyArray<Step>, fault?: Fault) {
     projection: {
       observe: () => {
         const rows = ordered(live.values())
-        if (fault === `wrong-result` && rows.length) rows[0]!.amount++
+        if (mutant === `wrong-result` && rows.length) rows[0]!.amount++
         return {
           rows,
           replica: ordered(replica.values()),
-          calls: fault === `hide-acquisition` ? [] : calls,
+          calls: mutant === `hide-acquisition` ? [] : calls,
         }
       },
       recompute: () =>
@@ -872,9 +875,9 @@ it.each(coldJoinSeeds)(`checks cold join histories, seed=%s`, async (seed) => {
 })
 it.each([`hide-acquisition`, `drop-delete`, `wrong-result`] as const)(
   `rejects %s through the real cold join trace checker`,
-  async (fault) => {
+  async (mutant) => {
     await runColdJoin(history)
-    await expect(runColdJoin(history, fault)).rejects.toMatchObject({
+    await expect(runColdJoin(history, mutant)).rejects.toMatchObject({
       name: `TraceAssertionError`,
       cause: { name: `AssertionError` },
     })

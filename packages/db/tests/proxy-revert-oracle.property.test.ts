@@ -30,8 +30,8 @@ import { createChangeProxy } from '../src/proxy'
  *    instances as plain objects. A class instance without enumerable keys
  *    (here, one with only a private field) equals only itself.
  *
- * Laws checked at one checkpoint: after the last write of a history, before
- * the draft publishes. The driver writes through `createChangeProxy`'s draft
+ * Laws checked at one checkpoint: after the last write of a history.
+ * The driver writes through `createChangeProxy`'s draft
  * (its `set`, `deleteProperty`, and `get` traps, and the array iterator), and
  * the check reads `getChanges()` and the draft.
  *
@@ -41,7 +41,7 @@ import { createChangeProxy } from '../src/proxy'
  *
  * Authority: rules 1 to 6 and the laws come from the `createChangeProxy` and
  * `getChanges` implementation comments in `src/proxy.ts` and the revert
- * examples in `tests/proxy.test.ts`, as of `18abceee`. Rules 7 to 9 are design
+ * examples in `tests/proxy-oracle.test.ts`, as of `18abceee`. Rules 7 to 9 are design
  * decisions recorded in
  * `docs/contributing/oracle-reviews/code-weight-draft-proxy.md`.
  *
@@ -49,7 +49,7 @@ import { createChangeProxy } from '../src/proxy'
  * - Writes are assignments, deletes, nested property writes, and nested writes
  *   through `for...of` on an array. Map, Set, and array mutator methods
  *   (`set`, `add`, `push`) mark a value changed without a revert check; the
- *   native-operation tests in `proxy.test.ts` own them.
+ *   native-operation tests in `proxy-oracle.test.ts` own them.
  * - Top-level symbol keys are not written. `getChanges()` does not report
  *   them; the coverage map lists symbol writes as unsupported. Symbol keys
  *   inside nested objects are written.

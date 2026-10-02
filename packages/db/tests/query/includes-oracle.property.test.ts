@@ -11,7 +11,7 @@ import {
 } from '../../src/query/index.js'
 import { flushPromises, withExpectedRejection } from '../utils.js'
 import { oraclePropertyOptions, oracleRuns } from '../oracle-config.js'
-import { runTrace } from '../trace-runner.js'
+import { runTrace } from '../trace-runner-oracle.js'
 import { createControlledCollection as createOracleControlledCollection } from './includes-oracle-helpers.js'
 import {
   applyScopedWrite,
@@ -29,7 +29,7 @@ import type {
   TraceCheckpoint,
   TraceDriver,
   TraceProjection,
-} from '../trace-runner.js'
+} from '../trace-runner-oracle.js'
 import type { OracleSyncChange as SyncChange } from './includes-oracle-helpers.js'
 import type {
   ScopedAliases,
@@ -5622,7 +5622,7 @@ describe(`includes recompute oracle`, () => {
  * distinct, and no scope inside an include can reuse an alias its ancestors
  * can see. One in four scenarios draws any naming. An illegal naming must be
  * rejected when the query is created; a shadowing naming must be rejected
- * with `DuplicateAliasInSubqueryError`. `validate-aliases.test.ts` pins the
+ * with `DuplicateAliasInSubqueryError`. `validate-aliases-oracle.test.ts` pins the
  * named shadowing cases.
  *
  * Checks at each checkpoint (after preload and after every source write):

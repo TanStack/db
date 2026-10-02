@@ -32,11 +32,11 @@ Read these stable entry points before the narrower owner:
   required above.
 - For Collection mutation admission, subscription ownership, replay,
   publication, or disposal, read
-  `packages/db/tests/collection-subscription-lifecycle-grammar.ts`.
+  `packages/db/tests/collection-subscription-lifecycle-grammar-oracle.ts`.
 - For optimistic snapshots and settlement, read
   `packages/db/tests/optimistic-history-oracle.ts`.
 - For opaque cursor pagination, read
-  `packages/query-db-collection/tests/cursor-pagination/model.ts`.
+  `packages/query-db-collection/tests/cursor-pagination/model-oracle.ts`.
 - For TrailBase lifecycle work, read
   `packages/trailbase-db-collection/tests/ORACLE.md`.
 - For cross-framework behavior, read the shared contract under
@@ -508,6 +508,14 @@ replay example for the broader oracle where possible. Verify that the expanded
 oracle fails without the fix and passes with it. Keep valuable unit tests, but
 do not treat them as a substitute for applicable oracle coverage. If an oracle
 is not practical for the behavior, explain why a focused test is sufficient.
+
+### Name Oracle Files for Discovery
+
+Include `oracle` in each executable oracle owner filename and in dedicated
+reference-model, grammar, and refinement-driver companion filenames. Preserve
+the test runner suffix. Update imports, explicit test commands, replay
+selectors, and coverage links in the same change. Generic utilities and
+production files do not need the oracle suffix.
 
 ### Name Tests After Behavior
 

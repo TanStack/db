@@ -21,7 +21,7 @@ import { BTreeIndex } from '../../src/indexes/btree-index'
 import { createFilterFunctionFromExpression } from '../../src/collection/change-events'
 import { Func, PropRef, Value } from '../../src/query/ir.js'
 import { withHistoryCleanup } from '../optimistic-history-oracle.js'
-import { evaluateReferenceExpression } from '../reference-expression.js'
+import { evaluateReferenceExpression } from '../reference-expression-oracle.js'
 import type { BasicExpression } from '../../src/query/ir.js'
 import type {
   ChangeMessage,

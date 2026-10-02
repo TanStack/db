@@ -90,7 +90,7 @@ function source(
             },
           }
         : {}),
-      // Upstream never declares network readiness. Local restore is a
+      // Upstream never declares Collection readiness. Local restore is a
       // separately observable boundary even while this stays loading.
       sync: { sync: () => ({}) },
     }),
@@ -145,8 +145,9 @@ async function checkWithCleanup(
  * its restore in the current sync run. A source that opts out makes the
  * query unavailable for this signal. A failed restore reports that exact
  * failure. Neither an empty persisted database nor a pending network source
- * changes the rule. Initial rendering prefers network readiness until the
- * longest opted-in source deadline, then permits only completed restoration.
+ * changes the rule. Initial rendering prefers upstream-signaled Collection
+ * readiness until the longest opted-in source deadline, then permits only
+ * completed restoration.
  * Network failure permits earlier fallback without stopping sync. A failed
  * client query stream is a network failure; a derived-query failure is not.
  * If the stream failure precedes restore, the fallback must include the
@@ -622,19 +623,19 @@ describe(`persisted-readiness oracle`, () => {
     ])
   })
 
-  it(`offers an initial-render fallback without changing preload's network boundary`, async () => {
+  it(`offers an initial-render fallback without changing preload's Collection readiness boundary`, async () => {
     const fixture = recordingAdapter([{ id: `one`, value: `local` }])
     const persisted = source(`local-suspense`, fixture.adapter, true)
     const query = createLiveQueryCollection({
       query: (q) => q.from({ row: persisted }),
     })
     const observer = createLiveQueryObserver(query)
-    let networkPreloadSettled = false
+    let collectionPreloadSettled = false
     await checkWithCleanup(async () => {
-      const networkPreload = observer.preload()
-      void networkPreload.then(
-        () => (networkPreloadSettled = true),
-        () => (networkPreloadSettled = true),
+      const collectionPreload = observer.preload()
+      void collectionPreload.then(
+        () => (collectionPreloadSettled = true),
+        () => (collectionPreloadSettled = true),
       )
       const initialRenderWait = observer.preloadForInitialRender()
       fixture.load.resolve()
@@ -644,7 +645,7 @@ describe(`persisted-readiness oracle`, () => {
         persistedStatus: `ready`,
         data: [{ id: `one`, value: `local` }],
       })
-      expect(networkPreloadSettled).toBe(false)
+      expect(collectionPreloadSettled).toBe(false)
     }, [
       () => observer.dispose(),
       () => query.cleanup(),
@@ -654,7 +655,7 @@ describe(`persisted-readiness oracle`, () => {
 
   it(`keeps the initial render gated until the network-first deadline`, async () => {
     const fixture = recordingAdapter([{ id: `one`, value: `persisted` }])
-    let markNetworkReady!: () => void
+    let markCollectionReady!: () => void
     const persisted = createCollection(
       persistedCollectionOptions<Row, string>({
         id: `network-first-deadline`,
@@ -666,7 +667,7 @@ describe(`persisted-readiness oracle`, () => {
         },
         sync: {
           sync: ({ markReady }) => {
-            markNetworkReady = markReady
+            markCollectionReady = markReady
             return {}
           },
         },
@@ -702,14 +703,14 @@ describe(`persisted-readiness oracle`, () => {
       } finally {
         vi.useRealTimers()
       }
-      markNetworkReady()
+      markCollectionReady()
       await vi.waitFor(() => expect(persisted.status).toBe(`ready`))
     }, [unsubscribe, () => observer.dispose(), () => persisted.cleanup()])
   })
 
-  it(`uses network readiness before the fallback deadline`, async () => {
+  it(`uses Collection readiness before the fallback deadline`, async () => {
     const fixture = recordingAdapter([{ id: `one`, value: `persisted` }])
-    let markNetworkReady!: () => void
+    let markCollectionReady!: () => void
     const persisted = createCollection(
       persistedCollectionOptions<Row, string>({
         id: `network-first-success`,
@@ -721,7 +722,7 @@ describe(`persisted-readiness oracle`, () => {
         },
         sync: {
           sync: ({ markReady }) => {
-            markNetworkReady = markReady
+            markCollectionReady = markReady
             return {}
           },
         },
@@ -742,7 +743,7 @@ describe(`persisted-readiness oracle`, () => {
       await Promise.resolve()
       expect(settled).toBe(false)
 
-      markNetworkReady()
+      markCollectionReady()
       await initialRender
       expect(settled).toBe(true)
       expect(persisted.status).toBe(`ready`)

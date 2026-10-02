@@ -2,7 +2,7 @@ import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { createSQLiteCorePersistenceAdapter } from '@tanstack/db-sqlite-persistence-core'
-import { runSQLiteCoreAdapterContractSuite } from '../../db-sqlite-persistence-core/tests/contracts/sqlite-core-adapter-contract'
+import { runSQLiteCoreAdapterContractSuite } from '../../db-sqlite-persistence-core/tests/contracts/sqlite-core-adapter-contract-oracle'
 import { BetterSqlite3SQLiteDriver } from '../../node-db-sqlite-persistence/src/node-driver'
 import {
   createElectronSQLitePersistence,
@@ -12,7 +12,7 @@ import {
   createElectronRuntimeBridgeInvoke,
   isElectronFullE2EEnabled,
 } from './e2e/electron-process-client'
-import type { SQLiteCoreAdapterHarnessFactory } from '../../db-sqlite-persistence-core/tests/contracts/sqlite-core-adapter-contract'
+import type { SQLiteCoreAdapterHarnessFactory } from '../../db-sqlite-persistence-core/tests/contracts/sqlite-core-adapter-contract-oracle'
 import type {
   ElectronPersistenceInvoke,
   ElectronPersistenceResponseEnvelope,

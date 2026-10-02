@@ -1,5 +1,5 @@
 import { createReactNativeSQLitePersistence } from '../src'
-import { runMobilePersistedCollectionConformanceSuite } from './mobile-persisted-collection-conformance-suite'
+import { runMobilePersistedCollectionConformanceSuite } from './mobile-persisted-collection-conformance-suite-oracle'
 
 runMobilePersistedCollectionConformanceSuite(
   `react-native persisted collection conformance`,

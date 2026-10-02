@@ -310,8 +310,17 @@ Two small examples show the form:
 
 - [`load-subset-transaction-refinement-oracle.test.ts`](https://github.com/TanStack/db/blob/main/packages/db/tests/query/load-subset-transaction-refinement-oracle.test.ts)
   explains when an abort can still cancel an on-demand load.
-- [`fifo-retry.property.test.ts`](https://github.com/TanStack/db/blob/main/packages/offline-transactions/tests/fifo-retry.property.test.ts)
+- [`fifo-retry-oracle.property.test.ts`](https://github.com/TanStack/db/blob/main/packages/offline-transactions/tests/fifo-retry-oracle.property.test.ts)
   explains why a ready transaction waits behind a delayed FIFO head.
+
+### Name oracle files consistently
+
+Include `oracle` in the filename of every executable oracle owner and its
+dedicated reference-model, grammar, or refinement-driver companion. Preserve
+runner suffixes such as `.property.test.ts`, `.test-d.ts`, and `.spec.ts`.
+Generic fixtures, shared utilities, and production files keep their ordinary
+names. Update imports, test commands, replay selectors, and coverage links
+whenever an oracle file moves.
 
 ### Keep five responsibilities distinguishable
 
@@ -628,7 +637,7 @@ observation recorder, refinement check, and run budget. Only their seed source
 may differ. This keeps a random failure eligible for promotion into a pinned
 example or fixed campaign.
 
-[`fifo-retry.property.test.ts`](https://github.com/TanStack/db/blob/main/packages/offline-transactions/tests/fifo-retry.property.test.ts)
+[`fifo-retry-oracle.property.test.ts`](https://github.com/TanStack/db/blob/main/packages/offline-transactions/tests/fifo-retry-oracle.property.test.ts)
 shows this shape. Its fixed run preserves one scheduler campaign. Its second
 campaign uses a random seed by default and accepts `OFFLINE_ORACLE_SEED` with
 `OFFLINE_ORACLE_PATH` for replay.

@@ -8,14 +8,14 @@ import {
   hash,
   registerOpaqueHash,
 } from '../src/hashing/hash.js'
-import { captureHashSession } from './hash-session'
+import { captureHashSession } from './hash-session-oracle'
 
 /**
- * # Which values do structural hashing and structural equality identify?
+ * # Which values share D2 value identity?
  *
  * `hash` fingerprints a value, and `equalHashValues` compares two values
  * without a digest (`topKBatch` uses it to cancel a retraction against its
- * replacement). Both use one value identity:
+ * replacement). Both use D2 value identity:
  *
  * 1. **Primitives** compare by value. `-0` equals `0`, `NaN` equals `NaN`,
  *    and a bigint differs from the number with the same text. Symbols compare
@@ -56,7 +56,7 @@ import { captureHashSession } from './hash-session'
  * Limits:
  * - Arrays from another realm (`node:vm`) are outside the grammar. One pinned
  *   case keeps equality's length check for them.
- * - Work and depth caps belong to `hash-work.test.ts`.
+ * - Work and depth caps belong to `hash-work-oracle.test.ts`.
  * - Map and Set order sensitivity and ignored Map/Set properties are current
  *   behavior. No contract promises them.
  * - Getters and proxies are outside the grammar.

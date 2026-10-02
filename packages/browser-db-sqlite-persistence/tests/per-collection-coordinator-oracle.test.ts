@@ -113,8 +113,8 @@ Coverage owner and test cards
 
 This suite owns the RFC #1659 Workstream 2 cut across
 BrowserCollectionCoordinator, browser persistence resolution, and the
-persisted sync wrapper. browser-coordinator.test.ts is still the focused RPC
-unit owner, and db-sqlite-persistence-core/tests/persisted.test.ts is still the
+persisted sync wrapper. browser-coordinator-oracle.test.ts is still the focused RPC
+unit owner, and db-sqlite-persistence-core/tests/persisted-oracle.test.ts is still the
 single-runtime owner. Putting this history in either file would replace the
 other production boundary with a stub and lose the collection x tab x adapter
 identity question. The real SQLite witness below extends the existing browser
@@ -157,6 +157,11 @@ Acquisition law and source:
   objects, prefix and duplicate release, owner replacement, and leadership
   transfer. `RemoteLeaseOwnerLedger` is a model-only call ledger whose active
   entries represent physical acquisitions and their acquisition leases.
+  In the composed history, the outer Collection acquisition calls the
+  persisted sync adapter, which retains coordinator demand across leadership
+  changes. Each accepted remote-owner load establishes a separate owner-level
+  physical acquisition and acquisition lease. Retiring that owner releases
+  its lease while the outer Collection acquisition remains active.
 - Production/checkpoint: real coordinator ensure/release calls. Compare owner
   load/unload counts, exact request-data identity, active acquisitions, and
   cleanup after each release and takeover cut.
@@ -1873,7 +1878,7 @@ describe(`remote subset ownership lease oracle`, () => {
     }
   })
 
-  it(`keeps one public acquisition live across leader takeover and releases both owners exactly`, async () => {
+  it(`retains the outer Collection acquisition across leader takeover and releases both owner acquisition leases exactly`, async () => {
     type Todo = { id: string; title: string }
     const firstOwner = new RemoteLeaseOwnerLedger()
     const secondOwner = new RemoteLeaseOwnerLedger()
@@ -1954,7 +1959,8 @@ describe(`remote subset ownership lease oracle`, () => {
         `remote subset takeover leader`,
       )
       // Deliver the new leader heartbeat and every acquisition replay it
-      // causes. The public acquisition remains live throughout this cut.
+      // causes. The outer Collection acquisition retains coordinator demand
+      // while the retired remote-owner acquisition is replaced.
       await pumpNetwork()
       await nextTurn()
       await pumpNetwork()
