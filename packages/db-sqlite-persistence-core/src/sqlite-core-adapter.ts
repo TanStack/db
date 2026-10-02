@@ -1705,18 +1705,19 @@ export class SQLiteCorePersistenceAdapter implements PersistenceAdapter {
               mutation.type === `update` || mutation.metadataChanged !== true,
           )
           .map((mutation) => encodePersistedStorageKey(mutation.key))
-        const existingRows = readKeys.length > 0
-          ? await transactionDriver.query<{
-              key: string
-              value: string
-              metadata: string | null
-            }>(
-              `SELECT key, value, metadata
+        const existingRows =
+          readKeys.length > 0
+            ? await transactionDriver.query<{
+                key: string
+                value: string
+                metadata: string | null
+              }>(
+                `SELECT key, value, metadata
                FROM ${collectionTableSql}
                WHERE key IN (${readKeys.map(() => `?`).join(`, `)})`,
-              readKeys,
-            )
-          : []
+                readKeys,
+              )
+            : []
         const existing = new Map(existingRows.map((row) => [row.key, row]))
         const writeKeys = writes.map((mutation) =>
           encodePersistedStorageKey(mutation.key),
@@ -1760,19 +1761,24 @@ export class SQLiteCorePersistenceAdapter implements PersistenceAdapter {
               const previousValue = previous?.value
                 ? deserializePersistedRowValue(previous.value)
                 : undefined
-              const previousMetadata = previous?.metadata != null
-                ? deserializePersistedRowValue(previous.metadata)
-                : undefined
-              const value = mutation.type === `update`
-                ? mergeObjectRows(previousValue, mutation.value)
-                : mutation.value
-              const metadata = mutation.metadataChanged === true
-                ? mutation.metadata
-                : previousMetadata
+              const previousMetadata =
+                previous?.metadata != null
+                  ? deserializePersistedRowValue(previous.metadata)
+                  : undefined
+              const value =
+                mutation.type === `update`
+                  ? mergeObjectRows(previousValue, mutation.value)
+                  : mutation.value
+              const metadata =
+                mutation.metadataChanged === true
+                  ? mutation.metadata
+                  : previousMetadata
               return [
                 writeKeys[index]!,
                 serializePersistedRowValue(value),
-                metadata === undefined ? null : serializePersistedRowValue(metadata),
+                metadata === undefined
+                  ? null
+                  : serializePersistedRowValue(metadata),
                 nextRowVersion,
               ]
             }),

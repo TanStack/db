@@ -88,7 +88,10 @@ describe(`Cloudflare Durable Object batching`, () => {
     async (rowCount) => {
       const { database, adapter, boundParameterCounts } = createHarness()
       const collectionId = `cloudflare-ordinary-${rowCount}`
-      const keys = Array.from({ length: rowCount }, (_, index) => `row-${index}`)
+      const keys = Array.from(
+        { length: rowCount },
+        (_, index) => `row-${index}`,
+      )
 
       try {
         await adapter.loadResumeSnapshot(collectionId)
@@ -118,13 +121,15 @@ describe(`Cloudflare Durable Object batching`, () => {
         const maxBindings = Math.max(...boundParameterCounts)
         const snapshot = await adapter.loadResumeSnapshot(collectionId)
 
-        expect(snapshot.rows.map(({ key }) => key).sort()).toEqual([...keys].sort())
+        expect(snapshot.rows.map(({ key }) => key).sort()).toEqual(
+          [...keys].sort(),
+        )
         expect(snapshot.rows.map(({ metadata }) => metadata)).toEqual(
           Array(rowCount).fill({ source: `ordinary` }),
         )
-        expect(snapshot.collectionMetadata.map(({ key }) => key).sort()).toEqual(
-          [...keys].sort(),
-        )
+        expect(
+          snapshot.collectionMetadata.map(({ key }) => key).sort(),
+        ).toEqual([...keys].sort())
         expect(snapshot.collectionMetadata.map(({ value }) => value)).toEqual(
           Array(rowCount).fill({ source: `ordinary` }),
         )
