@@ -1322,7 +1322,18 @@ export class CollectionStateManager<
     try {
       let result: { processed: boolean; failure?: { error: unknown } }
       do {
-        result = this.commitNextPendingTransactionBatch(allowDuringPersistence)
+        const pending = this.pendingSyncedTransactions
+        try {
+          result = this.commitNextPendingTransactionBatch(
+            allowDuringPersistence,
+          )
+        } catch (error) {
+          for (const transaction of pending) {
+            if (transaction.applicationStarted)
+              transaction.applied.reject(error)
+          }
+          throw error
+        }
         if (result.failure && !failed) {
           failed = true
           firstError = result.failure.error
