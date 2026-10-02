@@ -23,7 +23,7 @@ type SyncOperation<TRow, TKey, TInsertInput> =
 };
 ```
 
-Defined in: [packages/query-db-collection/src/manual-sync.ts:24](https://github.com/TanStack/db/blob/main/packages/query-db-collection/src/manual-sync.ts#L24)
+Defined in: [packages/query-db-collection/src/manual-sync.ts:25](https://github.com/TanStack/db/blob/main/packages/query-db-collection/src/manual-sync.ts#L25)
 
 ## Type Parameters
 

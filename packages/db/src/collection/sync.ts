@@ -7,6 +7,7 @@ import {
   NoPendingSyncTransactionCommitError,
   NoPendingSyncTransactionWriteError,
   SyncCleanupError,
+  SyncRowReusedWithoutPreviousValueError,
   SyncTransactionAlreadyCommittedError,
   SyncTransactionAlreadyCommittedWriteError,
 } from '../errors'
@@ -46,6 +47,27 @@ type LoadSubsetOperation = {
   deferred?: Deferred<void>
 }
 
+function shallowEqual(
+  left: Record<string, unknown>,
+  right: Record<string, unknown>,
+): boolean {
+  const keys = Object.keys(left)
+  return (
+    keys.length === Object.keys(right).length &&
+    keys.every((key) => Object.is(left[key], right[key]))
+  )
+}
+
+// Bundlers inline `process.env.NODE_ENV`; without a bundler or `process`,
+// the development checks stay off.
+function isDevelopment(): boolean {
+  try {
+    return process.env.NODE_ENV !== `production`
+  } catch {
+    return false
+  }
+}
+
 export class CollectionSyncManager<
   TOutput extends object = Record<string, unknown>,
   TKey extends string | number = string | number,
@@ -59,6 +81,8 @@ export class CollectionSyncManager<
   private config!: CollectionConfig<TOutput, TKey, TSchema, any>
   private id: string
   private syncMode: `eager` | `on-demand`
+  // Development only: each written row object's fields when it was written.
+  private writtenRows: WeakMap<object, Record<string, unknown>> | undefined
 
   public preloadPromise: Promise<void> | null = null
   private rejectPreload?: (error: unknown) => void
@@ -109,6 +133,38 @@ export class CollectionSyncManager<
     this.state = deps.state
     this.lifecycle = deps.lifecycle
     this._events = deps.events
+  }
+
+  /**
+   * Core keeps the object a source writes as the stored row. A source that
+   * changes that object in place and writes it again has already
+   * overwritten the previous value core would publish, unless it passes
+   * `previousValue`. Rewriting an unchanged object stays valid.
+   */
+  private checkReusedRow(
+    key: TKey,
+    type: string,
+    message: { value: TOutput; previousValue?: TOutput },
+  ): void {
+    const value = message.value as Record<string, unknown>
+    const writtenRows = (this.writtenRows ??= new WeakMap())
+    try {
+      const written = writtenRows.get(value)
+      if (
+        written &&
+        type === `update` &&
+        // A write that names its previous value declares the reuse.
+        !(`previousValue` in message) &&
+        !shallowEqual(written, value)
+      ) {
+        throw new SyncRowReusedWithoutPreviousValueError(key)
+      }
+      writtenRows.set(value, { ...value })
+    } catch (error) {
+      if (error instanceof SyncRowReusedWithoutPreviousValueError) throw error
+      // A row that cannot be read reports its failure where it is applied.
+      writtenRows.delete(value)
+    }
   }
 
   private createDuplicateKeyError(key: TKey): DuplicateKeySyncError {
@@ -217,6 +273,10 @@ export class CollectionSyncManager<
               if (disposition === `duplicate`)
                 throw this.createDuplicateKeyError(key)
               messageType = disposition
+            }
+
+            if (`value` in messageWithOptionalKey && isDevelopment()) {
+              this.checkReusedRow(key, messageType, messageWithOptionalKey)
             }
 
             const message = {

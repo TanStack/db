@@ -366,5 +366,8 @@
   "canRetryRepair": "f0",
   "restore": "f1",
   "attach": "f2",
-  "compilations": "f3"
+  "compilations": "f3",
+  "writtenRows": "f4",
+  "equalityRoute": "f5",
+  "checkReusedRow": "f6"
 }
