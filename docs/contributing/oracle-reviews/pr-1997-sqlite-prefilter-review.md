@@ -33,10 +33,13 @@ format check passed. Coverage was disabled for local Vitest runs because the
 worktree lacks its optional Istanbul package.
 
 The safe BigInt bound is kept selective. An unsafe positive BigInt bound adds
-an indexed candidate range from `Number.MAX_SAFE_INTEGER` upward; an unsafe
-negative bound adds the corresponding negative range. This admits Numbers
+a candidate range over the indexed expression from `Number.MAX_SAFE_INTEGER`
+upward; an unsafe negative bound adds the corresponding negative range. This admits Numbers
 whose serialized decimal and binary value straddle the bound while JavaScript
-still decides the public result. Numeric path compilation uses the same
+still decides the public result. The real SQLite plan uses the named index for
+the selective range orientation in either operand order. Its opposite
+orientation can scan because the candidate union also admits text and rounded
+Numbers. Numeric path compilation uses the same
 array/object alternatives for index DDL and runtime predicates. More than
 three numeric segments fall back to an unbounded candidate read.
 
@@ -48,7 +51,7 @@ three numeric segments fall back to an unbounded candidate read.
 | ORC-002 | Applicable. Fixed expected keys follow JavaScript comparison and independently constructed values; the direct SQL candidate keys are observed separately. The existing generated expression-index model uses its own path walker and scalar equality. |
 | ORC-003 | Applicable. Both oracle file headers state the contract, fixture/model, grammar, real adapter driver, checkpoint, and comparison. |
 | ORC-004 | Applicable to the existing generated expression-index campaign. Its file reconstructs the seven declared axes, checks ablations, bounds path/value domains, and rejects duplicate or missing axes. The new review witnesses are finite matrices, so no new random grammar is claimed. |
-| ORC-005 | Applicable. The Node oracle uses the public core adapter with the real Better SQLite driver, captures the exact receiving SELECT, and compares raw candidates, public keys, and `EXPLAIN QUERY PLAN`. The core oracle records SQL and compiler argument reads at `loadSubset` return. |
+| ORC-005 | Applicable. The Node oracle uses the public core adapter with the real Better SQLite driver, captures the exact receiving SELECT, and compares raw candidates, public keys, and `EXPLAIN QUERY PLAN`. The BigInt range matrix checks named-index use on the selective orientation and records the broad orientation's scan limit. The core oracle records SQL and compiler argument reads at `loadSubset` return. |
 | ORC-006 | Applicable. The prior code lost all three reported matches after SQL filtering; the old nested compiler exceeded the fixed work bound. The existing generated oracle also retains SQL and grammar mutants. |
 | ORC-007 | Applicable to the existing generated property. Its fixed-seed and seedless campaigns run the same matrix with direct seed/path replay. The new finite matrices are executed by both ordinary and oracle package runs but do not claim random coverage. |
 | ORC-008 | Inapplicable. Neither repair changes a stateful reference model. |
@@ -63,7 +66,8 @@ three numeric segments fall back to an unbounded candidate read.
 These checks establish the reported regressions and nearby legal histories at
 the named receiving paths. They do not prove every persisted scalar type,
 arbitrary numeric-path depth, every LIKE pattern, native-host planning,
-limit/offset after filtering, or elapsed performance. The SQLite boolean and
+limit/offset after filtering, index use for broad unsafe BigInt range
+candidates, or elapsed performance. The SQLite boolean and
 Node expression-index entries in `docs/contributing/oracle-coverage.md` own
 those remaining cells. A reachable in-scope counterexample would reopen the
 candidate-superset claim.

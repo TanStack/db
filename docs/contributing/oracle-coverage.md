@@ -556,12 +556,16 @@ range cases include adjacent fractional values and tagged or mixed scalars;
 this is bounded evidence, not a proof over every persisted representation.
 Large Number versus BigInt range cases check both operand directions, four
 inequalities, and unary boolean wrappers. Unsafe BigInt bounds admit a wider
-indexed candidate range for potentially rounded Numbers; JavaScript still
+candidate range over the indexed expression for potentially rounded Numbers; JavaScript still
 decides the public result. Numeric-key object and array cases check public
 rows and named-index use through three digit segments, including mixed
 carriers. Deeper numeric paths use an unbounded candidate read. Unicode
 lowercase cases place NUL before and after a fold and keep the matching row
 through either equality direction and unary wrapper.
+The receiving Node plan uses the named index for the selective BigInt range
+orientation in both operand orders. The opposite orientation can scan because
+its candidate union also admits text and rounded Numbers; this oracle makes no
+constant-index-use claim for that branch.
 Fixed `strftime`, `add`, and Date-range witnesses also use full reads for mixed
 stored types; direct SQL would exclude a matching numeric timestamp or string
 concatenation. A typed-field contract or a separate indexed representation is

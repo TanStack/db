@@ -2061,6 +2061,19 @@ describe(`SQLite expression-index oracle`, () => {
             expect(observation.directSqlKeys).toEqual(
               expect.arrayContaining(expectedKeys),
             )
+            const greaterSide = fieldOnLeft
+              ? operator === `gt` || operator === `gte`
+              : operator === `lt` || operator === `lte`
+            if (greaterSide) {
+              expect(
+                planUsesNamedIndex(
+                  observation.plan,
+                  observation.tableName,
+                  observation.indexName,
+                ),
+                `${testCase.name}-${operator}-${fieldOnLeft}-${wrapper}: ${observation.plan.map((row) => row.detail).join(`; `)}`,
+              ).toBe(true)
+            }
           }
         }
       }
