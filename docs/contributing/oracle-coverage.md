@@ -513,22 +513,29 @@ preserves the live-host and mutant evidence.
 
 `packages/db-sqlite-persistence-core/tests/sqlite-boolean-arity-oracle.test.ts`
 is the primary executable owner for bounded `and`/`or` predicate arity at
-`SQLiteCorePersistenceAdapter.loadSubset` return. It compares public keys to
-an independent three-valued model and observes the SQL and raw rows returned
-by each `node:sqlite` Collection SELECT. Its 348-case matrix and paired fixed
-and unseeded generated campaigns cover root arity 0–3, one nested operator,
-boolean and legal nonboolean operands, unsupported fallback, an empty-IN
-control, and one cursor composition. The pre-fix compiler was RED for
-public under-selection, unnecessary raw-row reads, empty-AND SQL form, and the
-cursor composition; the repaired compiler passes these checks. The no-WHERE and blind-unary controls distinguish these
-laws from public-result-only checks.
+`SQLiteCorePersistenceAdapter.loadSubset` return. Its independent three-valued
+model compares public keys while a `node:sqlite` driver records SQL and raw row
+work. The 796-case matrix and paired fixed and unseeded campaigns cover root
+arity 0–3, one nested operator, boolean and nonboolean operands, safe selective
+predicates, and unsafe fallback. Seven direct cases challenge Unicode `ilike`
+and `like` patterns, tagged `NaN` comparison, and null-vs-missing under `not`.
+An empty-IN control and two-SELECT cursor composition check zero-row work.
 
-The owner does not claim arbitrary depth or arity, limit/offset after filtering,
-all cursor shapes, order or value/metadata semantics, expression families outside
-its grammar, index-expression compilation, native hosts, OPFS, or multi-process
+The original compiler was RED for unary and empty boolean work and multioperand
+under-selection. The first repair was RED for unsafe SQL prefilters: Unicode
+case folding, an emoji spanning two JavaScript code units, tagged `NaN`, and
+null-vs-missing under negation. The current compiler passes the bounded oracle.
+A removed-WHERE mutant fails the raw-row work law and a blind-unary mutant
+fails public rows. For this grammar, SQL pushdown admits every row that the
+in-memory evaluator could retain; a statically false AND may read zero rows
+even with an unsafe sibling.
+
+The owner does not establish arbitrary depth or arity, every equality or LIKE
+pattern, limit/offset after filtering, all cursor shapes, order or value/metadata
+semantics, index-expression compilation, native hosts, OPFS, or multi-process
 execution. The existing SQLite owners above retain their separate reset/resume,
-order, driver, and host contracts. A broader class-closure claim needs witnesses for
-these remaining paths; this owner proves its bounded grammar and checkpoints.
+order, driver, and host contracts. Broader class closure needs witnesses at those
+remaining paths.
 
 ## Acceptance map
 

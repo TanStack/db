@@ -788,30 +788,58 @@ function argumentCompilationContext(
   }
 }
 
-// Core AND/OR treat only strict booleans as decisive. SQLite coerces other
-// values in WHERE, so a pushed operand must be boolean or null on every row.
-function isBooleanSqlOperand(expression: IR.BasicExpression): boolean {
+function isAlwaysFalse(expression: IR.BasicExpression): boolean {
+  if (expression.type === `val`) return expression.value === false
+  if (expression.type !== `func`) return false
+  if (expression.name === `or`) return expression.args.every(isAlwaysFalse)
+  if (expression.name === `and`) return expression.args.some(isAlwaysFalse)
+  return false
+}
+
+// The row evaluator runs after SQLite. A SQL prefilter may read extra rows,
+// but it must never discard one that the row evaluator would retain.
+function isSafeSqlPrefilter(expression: IR.BasicExpression): boolean {
   if (expression.type === `val`) {
     return typeof expression.value === `boolean` || expression.value == null
   }
   if (expression.type === `ref`) return false
 
+  const [left, right] = expression.args
   switch (expression.name) {
     case `and`:
+      return (
+        expression.args.some(isAlwaysFalse) ||
+        expression.args.every(isSafeSqlPrefilter)
+      )
     case `or`:
-    case `not`:
-      return expression.args.every(isBooleanSqlOperand)
+      return expression.args.every(isSafeSqlPrefilter)
     case `eq`:
-    case `gt`:
-    case `gte`:
-    case `lt`:
-    case `lte`:
+      return (
+        expression.args.length === 2 &&
+        ((left?.type === `ref` &&
+          right?.type === `val` &&
+          typeof right.value === `string`) ||
+          (right?.type === `ref` &&
+            left?.type === `val` &&
+            typeof left.value === `string`))
+      )
     case `in`:
+      return (
+        expression.args.length === 2 &&
+        right?.type === `val` &&
+        Array.isArray(right.value) &&
+        right.value.length === 0
+      )
     case `like`:
-    case `ilike`:
-    case `isNull`:
-    case `isUndefined`:
-      return true
+      return (
+        expression.args.length === 2 &&
+        left?.type === `ref` &&
+        right?.type === `val` &&
+        typeof right.value === `string` &&
+        /^[\x20-\x7e]*%$/.test(right.value) &&
+        !right.value.slice(0, -1).includes(`%`) &&
+        !right.value.includes(`_`)
+      )
     default:
       return false
   }
@@ -919,9 +947,6 @@ function compileSqlExpression(
     }
     case `and`:
     case `or`: {
-      if (expression.args.some((arg) => !isBooleanSqlOperand(arg))) {
-        return { supported: false, sql: ``, params: [] }
-      }
       if (argSql.length === 0) {
         return {
           supported: true,
@@ -2448,9 +2473,14 @@ export class SQLiteCorePersistenceAdapter implements PersistenceAdapter {
     driver: SQLiteDriver = this.driver,
   ): Promise<Array<InMemoryRow<string | number, Record<string, unknown>>>> {
     const collectionTableSql = quoteIdentifier(tableMapping.tableName)
-    const whereCompiled = options.where
-      ? compileSqlExpression(options.where)
-      : { supported: true, sql: ``, params: [] as Array<SqliteSupportedValue> }
+    const whereCompiled =
+      options.where && isSafeSqlPrefilter(options.where)
+        ? compileSqlExpression(options.where)
+        : {
+            supported: false,
+            sql: ``,
+            params: [] as Array<SqliteSupportedValue>,
+          }
     const orderByCompiled = compileOrderByClauses(options.orderBy)
 
     const queryParams: Array<SqliteSupportedValue> = []
