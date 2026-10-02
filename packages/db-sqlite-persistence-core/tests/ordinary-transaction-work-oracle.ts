@@ -23,8 +23,10 @@ type Observation = {
  * # Can an ordinary committed SQLite transaction persist many rows in bounded work?
  *
  * Authority: PersistedTx's row/metadata semantics and the established SQLite
- * resume-snapshot oracle. The proposed work law comes from issue #1992: for
- * independent keys, driver query/run calls scale with parameter-limited chunks,
+ * resume-snapshot oracle. Issue #1992 proposed chunk-bounded work for
+ * independent keys; the repeated-key follow-up extends that law to distinct
+ * keys within each row or metadata action family. Driver query/run calls scale
+ * with parameter-limited chunks of distinct keys, even when actions repeat,
  * while rows, metadata, tombstones, key evidence, replay and position remain
  * atomic. A successful `applyCommittedTx` is the durable checkpoint. A failed
  * transaction leaves the entire previous durable state and position intact.
@@ -56,12 +58,17 @@ type Observation = {
  * The generated history grammar below uses one fixed two-row seed, one bounded
  * ordinary transaction, and an optional dependent update. Its mandatory
  * scenario suffixes reconstruct repeated-key, delete/reinsert, partial-update,
- * and present/absent metadata witnesses; random action prefixes exercise
- * adjacent orders without erasing those suffixes. Late bookkeeping rejection
- * is the rollback branch. It excludes arbitrary-length histories, interleaved
+ * and present/absent metadata witnesses; random action prefixes in 0–4, 5–24,
+ * and 25–60 bands exercise adjacent orders and longer repeated-key work
+ * without erasing those suffixes. Late bookkeeping rejection is the rollback
+ * branch. It excludes arbitrary-length histories, interleaved
  * row metadata (the API applies it after mutations), key types beyond these
  * string fixtures, and concurrent owners. The fixed size/parameter cases above
- * retain the work-threshold claim; the generated grammar tests semantics only.
+ * retain the work-threshold claim; the generated grammar checks both semantics
+ * and a distinct-key work bound after committed and rolled-back candidates.
+ * A 205-update single-key case crosses the former per-action work path.
+ * Truncate tests keep serialization errors observable even if later same-key
+ * actions overwrite the invalid value.
  * A second generated grammar uses 0–60 distinct keys, two parameter caps, and
  * six independent-key action shapes (later/inline insert metadata, partial
  * update, delete, row-metadata-only, collection-metadata-only). It applies an
@@ -69,16 +76,17 @@ type Observation = {
  * durable semantics and the same chunk work bound after the candidate. Both
  * generated grammars reset driver counters around each apply, assert exactly
  * one SQLite transaction on success or rollback, and finish measurement before
- * reading any post-apply snapshot. Conflicting/repeated keys in the first
- * grammar are semantic-only because their legal work may differ.
+ * reading any post-apply snapshot. The first grammar's work bound counts unique
+ * keys per row, row-metadata and collection-metadata family.
  *
  * Production driver: real SQLiteCorePersistenceAdapter and node:sqlite with a
  * transaction-scoped driver, parameter cap and optional row-write fault.
  * Refinement: after settlement, compare complete durable rows and metadata,
  * expected keys, tombstones, position, and replay. Count calls only between
  * adapter entry and return, after schema setup and before the snapshot reads.
- * The bound is deliberately loose: 12 fixed calls plus six calls per chunk of
- * at most floor(maxBoundParameters / 4) rows. It rules out per-row persistence,
+ * The bound is deliberately loose: 12 fixed calls plus six calls per family
+ * chunk of at most floor(maxBoundParameters / 4) distinct keys. It rules out
+ * per-action persistence for repeated keys,
  * not every inefficient SQL design. This is a proposed work contract, not a
  * measured browser latency or proof for Cloudflare Workers, OPFS scheduling,
  * Electric, WAL across processes, Tauri, or native mobile. The existing owner
@@ -513,6 +521,31 @@ const additionalWorkCases: Array<Case> = [
   collectionMetadataOnly(205),
   unmatchedMetadata(26),
 ]
+additionalWorkCases.push({
+  name: 'repeated-update-205',
+  cap: 100,
+  seed: transaction('repeated-seed', 1, [
+    {
+      type: 'insert',
+      key: 'same',
+      value: { id: 'same', version: 1 },
+      metadataChanged: true,
+      metadata: { source: 'seed' },
+    },
+  ]),
+  candidate: transaction(
+    'repeated-updates',
+    2,
+    Array.from({ length: 205 }, (_, index) => ({
+      type: 'update' as const,
+      key: 'same',
+      value: { version: index + 2 },
+      metadataChanged: index % 4 === 0,
+      metadata: index % 4 === 0 ? { source: `update-${index}` } : undefined,
+    })),
+  ),
+  workSize: 1,
+})
 workCases.push({
   name: 'unique-10000',
   cap: 999,
@@ -669,6 +702,13 @@ type GeneratedHistory = {
   followup: boolean
 }
 
+const generatedActionArbitrary: fc.Arbitrary<ActionSpec> = fc.record({
+  kind: fc.constantFrom<ActionSpec['kind']>('insert', 'update', 'delete'),
+  key: fc.constantFrom<'a' | 'b'>('a', 'b'),
+  version: fc.integer({ min: 0, max: 9 }),
+  metadata: fc.constantFrom<ActionSpec['metadata']>('keep', 'set', 'clear'),
+})
+
 const generatedHistoryArbitrary: fc.Arbitrary<GeneratedHistory> = fc.record({
   scenario: fc.constantFrom<GeneratedScenario>(
     'repeated-key',
@@ -680,14 +720,10 @@ const generatedHistoryArbitrary: fc.Arbitrary<GeneratedHistory> = fc.record({
     'metadata-absent-delete',
   ),
   target: fc.constantFrom<'a' | 'b'>('a', 'b'),
-  prefix: fc.array(
-    fc.record({
-      kind: fc.constantFrom<ActionSpec['kind']>('insert', 'update', 'delete'),
-      key: fc.constantFrom<'a' | 'b'>('a', 'b'),
-      version: fc.integer({ min: 0, max: 9 }),
-      metadata: fc.constantFrom<ActionSpec['metadata']>('keep', 'set', 'clear'),
-    }),
-    { maxLength: 4 },
+  prefix: fc.oneof(
+    fc.array(generatedActionArbitrary, { maxLength: 4 }),
+    fc.array(generatedActionArbitrary, { minLength: 5, maxLength: 24 }),
+    fc.array(generatedActionArbitrary, { minLength: 25, maxLength: 60 }),
   ),
   rowMetadataPrefix: fc.array(
     fc
@@ -986,6 +1022,20 @@ function generatedTransactions(input: GeneratedHistory): {
   }
 }
 
+function expectGeneratedWork(candidate: Tx, counts: WriteCounts): void {
+  const uniqueKeys = (actions: ReadonlyArray<{ key: string }>): number =>
+    new Set(actions.map((action) => action.key)).size
+  const chunk = 25 // The generated driver permits 100 bindings, four per row.
+  const workChunks =
+    Math.ceil(uniqueKeys(candidate.mutations) / chunk) +
+    Math.ceil(uniqueKeys(candidate.rowMetadataMutations ?? []) / chunk) +
+    Math.ceil(uniqueKeys(candidate.collectionMetadataMutations ?? []) / chunk)
+  expect(
+    counts.query + counts.run,
+    'generated repeated-key work checkpoint',
+  ).toBeLessThanOrEqual(12 + 6 * workChunks)
+}
+
 async function assertGeneratedHistory(
   input: GeneratedHistory,
   corruptCandidateMetadata = false,
@@ -1015,11 +1065,12 @@ async function assertGeneratedHistory(
       await expect(
         host.adapter.applyCommittedTx(collectionId, candidate),
       ).rejects.toThrow('injected late bookkeeping failure')
-      finishMeasuredWrite(
+      const counts = finishMeasuredWrite(
         host,
         'generated rollback checkpoint',
         extraTransactionAt === 'candidate' ? 1 : 0,
       )
+      expectGeneratedWork(candidate, counts)
       host.failRunMatching(undefined)
       expect(
         await observe(host.adapter, host.driver, collectionId),
@@ -1030,11 +1081,12 @@ async function assertGeneratedHistory(
       history.push(clone(candidate))
       beginMeasuredWrite(host)
       await host.adapter.applyCommittedTx(collectionId, candidate)
-      finishMeasuredWrite(
+      const counts = finishMeasuredWrite(
         host,
         'generated candidate checkpoint',
         extraTransactionAt === 'candidate' ? 1 : 0,
       )
+      expectGeneratedWork(candidate, counts)
       expect(
         await observe(host.adapter, host.driver, collectionId),
         'candidate durable checkpoint',
@@ -1112,11 +1164,12 @@ export function runOrdinaryTransactionWorkOracle(): void {
       expect(
         samples.every(
           (sample) =>
-            sample.prefix.length <= 4 &&
+            sample.prefix.length <= 60 &&
             sample.rowMetadataPrefix.length <= 3 &&
             sample.collectionMetadata.length <= 2,
         ),
       ).toBe(true)
+      expect(samples.some((sample) => sample.prefix.length >= 25)).toBe(true)
     })
 
     it('reconstructs independent-key work shapes and host caps', () => {
@@ -1334,7 +1387,11 @@ export function runOrdinaryTransactionWorkOracle(): void {
       }
       // Check work after every semantic comparison, so the RED identifies work.
       console.log('ORDINARY_SQLITE_WORK', JSON.stringify(workObservations))
-      expect(workObservations.every((row) => row.calls <= row.bound)).toBe(true)
+      for (const row of workObservations) {
+        expect(row.calls, `${row.case}: work checkpoint`).toBeLessThanOrEqual(
+          row.bound,
+        )
+      }
     })
 
     it('rejects a writer that discards existing metadata while batching', async () => {
@@ -1352,6 +1409,126 @@ export function runOrdinaryTransactionWorkOracle(): void {
         expect(actual.rows[0]?.metadata).toBeUndefined()
         expect(actual).not.toEqual(expected)
         expect(sameObservation(actual, expected)).toBe(false)
+      } catch (error) {
+        primary = error
+      }
+      try {
+        host.close()
+      } catch (cleanup) {
+        if (primary !== undefined)
+          throw new AggregateError(
+            [primary, cleanup],
+            'primary and cleanup failed',
+            { cause: primary },
+          )
+        throw cleanup
+      }
+      if (primary !== undefined) throw primary
+    })
+
+    it('rejects invalid values even when a later same-key action overwrites them', async () => {
+      const host = fixture(100)
+      const collectionId = 'oracle-overwritten-invalid-value'
+      let primary: unknown
+      try {
+        await host.adapter.loadResumeSnapshot(collectionId)
+        const seed = transaction('seed', 1, [
+          { type: 'insert', key: 'same', value: { id: 'same' } },
+        ])
+        await host.adapter.applyCommittedTx(collectionId, seed)
+        const before = await observe(host.adapter, host.driver, collectionId)
+        const invalid = new Date(Number.NaN)
+        const candidates: Array<PersistedTx> = [
+          {
+            txId: 'invalid-row',
+            term: 1,
+            seq: 2,
+            rowVersion: 2,
+            truncate: true,
+            mutations: [
+              { type: 'insert', key: 'same', value: { invalid } },
+              { type: 'insert', key: 'same', value: { id: 'same' } },
+            ],
+          },
+          {
+            txId: 'invalid-row-before-delete',
+            term: 1,
+            seq: 2,
+            rowVersion: 2,
+            truncate: true,
+            mutations: [
+              { type: 'insert', key: 'same', value: { invalid } },
+              { type: 'delete', key: 'same', value: { id: 'same' } },
+            ],
+          },
+          {
+            txId: 'invalid-inline-metadata',
+            term: 1,
+            seq: 2,
+            rowVersion: 2,
+            truncate: true,
+            mutations: [
+              {
+                type: 'insert',
+                key: 'same',
+                value: { id: 'same' },
+                metadataChanged: true,
+                metadata: invalid,
+              },
+              {
+                type: 'insert',
+                key: 'same',
+                value: { id: 'same' },
+                metadataChanged: true,
+                metadata: { source: 'valid' },
+              },
+            ],
+          },
+          {
+            txId: 'invalid-row-metadata',
+            term: 1,
+            seq: 2,
+            rowVersion: 2,
+            truncate: true,
+            mutations: [],
+            rowMetadataMutations: [
+              { type: 'set', key: 'same', value: invalid },
+              { type: 'delete', key: 'same' },
+            ],
+          },
+          {
+            txId: 'invalid-collection-metadata',
+            term: 1,
+            seq: 2,
+            rowVersion: 2,
+            truncate: true,
+            mutations: [],
+            collectionMetadataMutations: [
+              { type: 'set', key: 'cursor', value: invalid },
+              { type: 'delete', key: 'cursor' },
+            ],
+          },
+          {
+            txId: 'undefined-collection-metadata',
+            term: 1,
+            seq: 2,
+            rowVersion: 2,
+            truncate: true,
+            mutations: [],
+            collectionMetadataMutations: [
+              { type: 'set', key: 'cursor', value: undefined },
+              { type: 'delete', key: 'cursor' },
+            ],
+          },
+        ]
+        for (const candidate of candidates) {
+          await expect(
+            host.adapter.applyCommittedTx(collectionId, candidate),
+          ).rejects.toThrow()
+          expect(
+            await observe(host.adapter, host.driver, collectionId),
+          ).toEqual(before)
+        }
       } catch (error) {
         primary = error
       }

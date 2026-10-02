@@ -2,4 +2,4 @@
 '@tanstack/db-sqlite-persistence-core': patch
 ---
 
-Batch ordinary SQLite row and metadata writes to reduce storage calls while preserving ordered mutations and atomic commits.
+Batch ordinary SQLite row and metadata writes, including repeated-key actions, to reduce storage calls while preserving mutation order and atomic commits.

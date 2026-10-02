@@ -395,7 +395,8 @@ histories. Its fixed and random generated campaigns cover a two-row seed,
 ordered action prefixes, seven required action/metadata suffixes, optional
 dependent updates, and late-bookkeeping rollback, comparing durable state after
 each settlement. The generated grammar is bounded to two writable string keys,
-one absent metadata key, at most four prefix mutations, three row-metadata and
+one absent metadata key, up to 60 prefix mutations sampled in short, middle,
+and long bands, three row-metadata and
 two collection-metadata prefix actions, and up to three committed positions;
 it does not claim arbitrary histories or concurrent owners. Every generated
 seed, candidate, dependent update, and late rollback must enter exactly one
@@ -404,8 +405,13 @@ separate fixed/random generated work grammar covers 0–60 distinct keys, six
 insert/update/delete/row and collection metadata shapes, and 100/999 parameter
 caps. It checks
 durable values before applying the same proposed chunk-bound work law; all
-repeated-key histories remain semantic-only. Fixed 25/26 and 10,000-row cases
-separately witness the work boundary. Both fixed and generated work laws were
+repeated-key histories now check a distinct-key work bound after both committed
+and rolled-back candidates. A fixed 205-update single-key case drops from 824
+to 8 query/run calls against a bound of 18. Truncate cases require overwritten
+invalid row and metadata values, including unbindable `undefined` collection
+metadata, to reject and roll back. Fixed 25/26 and
+10,000-row cases separately witness the independent-key work boundary. Both
+fixed and generated independent-key work laws were
 RED on `ef1e6a4` and are GREEN with ordinary batching: the 10,000-row insert
 plus metadata takes 505 query/run calls instead of 50,005. A temporary
 repeated-key classifier mutation fails the generated oracle at the candidate

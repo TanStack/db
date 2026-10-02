@@ -1175,24 +1175,37 @@ function mergeObjectRows<T extends object>(existing: unknown, incoming: T): T {
   return incoming
 }
 
-function* distinctKeyBatches<T>(
+function* batches<T>(
   changes: ReadonlyArray<T>,
-  keyOf: (change: T) => string,
   maxSize: number,
 ): Generator<Array<T>> {
-  let batch: Array<T> = []
-  let keys = new Set<string>()
+  for (let offset = 0; offset < changes.length; offset += maxSize) {
+    yield changes.slice(offset, offset + maxSize)
+  }
+}
+
+function lastMetadataByKey<
+  T extends { type: `set` | `delete`; value?: unknown },
+>(
+  changes: ReadonlyArray<T>,
+  keyOf: (change: T) => string,
+  undefinedSetIsNull = false,
+): Array<T> {
+  const latest = new Map<string, T>()
   for (const change of changes) {
     const key = keyOf(change)
-    if (batch.length === maxSize || keys.has(key)) {
-      yield batch
-      batch = []
-      keys = new Set()
+    const previous = latest.get(key)
+    if (
+      previous?.type === `set` &&
+      (previous.value !== undefined || !undefinedSetIsNull) &&
+      (serializePersistedRowValue(previous.value) as string | undefined) ===
+        undefined
+    ) {
+      throw new TypeError(`Metadata value cannot be bound to SQLite`)
     }
-    batch.push(change)
-    keys.add(key)
+    latest.set(key, change)
   }
-  if (batch.length > 0) yield batch
+  return [...latest.values()]
 }
 
 function buildIndexName(collectionId: string, signature: string): string {
@@ -1692,9 +1705,53 @@ export class SQLiteCorePersistenceAdapter implements PersistenceAdapter {
         await transactionDriver.run(`DELETE FROM ${tombstoneTableSql}`)
       }
 
-      for (const batch of distinctKeyBatches(
-        tx.mutations,
-        (mutation) => encodePersistedStorageKey(mutation.key),
+      const rowMutations = new Map<string, PersistedTx[`mutations`][number]>()
+      for (const mutation of tx.mutations) {
+        const key = encodePersistedStorageKey(mutation.key)
+        const previous = rowMutations.get(key)
+        if (!previous) {
+          rowMutations.set(key, mutation)
+          continue
+        }
+
+        // A superseded action still had to serialize successfully.
+        serializePersistedRowValue(previous.value)
+        if (
+          previous.type !== `delete` &&
+          previous.metadataChanged === true &&
+          previous.metadata !== undefined
+        ) {
+          serializePersistedRowValue(previous.metadata)
+        }
+        if (mutation.type === `delete`) {
+          rowMutations.set(key, mutation)
+          continue
+        }
+        const value =
+          mutation.type === `insert` || previous.type === `delete`
+            ? mutation.value
+            : mergeObjectRows(previous.value, mutation.value)
+        const metadataChanged =
+          mutation.metadataChanged === true ||
+          previous.type === `delete` ||
+          previous.metadataChanged === true
+        const metadata =
+          mutation.metadataChanged === true
+            ? mutation.metadata
+            : previous.type === `delete`
+              ? undefined
+              : previous.metadata
+        const next = { key: mutation.key, value, metadataChanged, metadata }
+        rowMutations.set(
+          key,
+          mutation.type === `insert` || previous.type !== `update`
+            ? { type: `insert`, ...next }
+            : { type: `update`, ...next },
+        )
+      }
+
+      for (const batch of batches(
+        [...rowMutations.values()],
         this.replacementBatchSize,
       )) {
         const writes = batch.filter((mutation) => mutation.type !== `delete`)
@@ -1807,9 +1864,12 @@ export class SQLiteCorePersistenceAdapter implements PersistenceAdapter {
         }
       }
 
-      for (const batch of distinctKeyBatches(
-        tx.rowMetadataMutations ?? [],
-        (mutation) => encodePersistedStorageKey(mutation.key),
+      for (const batch of batches(
+        lastMetadataByKey(
+          tx.rowMetadataMutations ?? [],
+          (mutation) => encodePersistedStorageKey(mutation.key),
+          true,
+        ),
         this.replacementBatchSize,
       )) {
         const keys = batch.map((mutation) =>
@@ -1831,9 +1891,11 @@ export class SQLiteCorePersistenceAdapter implements PersistenceAdapter {
         )
       }
 
-      for (const batch of distinctKeyBatches(
-        tx.collectionMetadataMutations ?? [],
-        (mutation) => mutation.key,
+      for (const batch of batches(
+        lastMetadataByKey(
+          tx.collectionMetadataMutations ?? [],
+          (mutation) => mutation.key,
+        ),
         this.replacementBatchSize,
       )) {
         const deletes = batch.filter((mutation) => mutation.type === `delete`)
