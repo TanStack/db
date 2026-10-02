@@ -1,0 +1,38 @@
+# React source Collection ID reuse oracle review
+
+Reviewed semantic head: `27560e3a4d1a0f76b12cf5bed720e4ab03485bb2`
+
+## Claim and limit
+
+The reported bug used a mounted `useLiveQuery({ query })` hook. A new source Collection reused the old source's ID. The hook returned rows from the old source because derived query identity used the ID. The user selected a fail-fast contract: one mounted derived-identity hook rejects a different source Collection object with a previously used ID in the same `DbClient` scope. The old hook must unmount before the application reuses that ID in a new hook. Separate hooks may use same-ID sources. Their Suspense cache entries must remain distinct.
+
+The public hook and Suspense wrappers are the production paths. The observation cuts are a rerender error for a mounted-hook collision and the public row for separate Suspense hooks. The controlled sources do not prove real SQLite persistence, DbClient SSR preload or streaming, explicit `queryKey`, legacy dependency arrays, or direct Collection input. The coverage map assigns those limits to this owner or the existing integration owners.
+
+The oracle keeps five responsibilities close together. Its opening states the contract, model, limits, and observation cuts. Its `Binding` histories and `expectedCollision` relation define the reference judgment. Each test constructs a bounded legal history. The driver renders the public React hooks. Assertions compare the thrown error or public row at the rerender or settled-render boundary.
+
+## Guide audit
+
+| Requirement | Outcome |
+| --- | --- |
+| ORC-001 authority and limits | Pass. The issue reports the ID-based stale query. The user selected fail-fast replacement in a mounted hook. The oracle and coverage map state the boundary and excluded paths. |
+| ORC-002 independent judgment | Pass. `expectedCollision` compares prior and next source object references for each client scope. It does not import the production token map, IR hash, or cache-key logic. Public-row checks also distinguish separate Suspense sources. |
+| ORC-003 visible responsibilities | Pass. The opening contract and model, bounded test histories, public hook driver, and error or row comparisons are visible in the oracle file. |
+| ORC-004 generated grammar | Not applicable. These are fixed legal histories, not a generated-history coverage claim. |
+| ORC-005 production path and observation | Pass. Tests render `useLiveQuery` or `useLiveSuspenseQuery`. They assert a thrown collision before stale rows or exact public row values after React renders. |
+| ORC-006 calibration | Pass. The original production file fails the mounted A-to-B collision test at its error assertion. A temporary cache-key mutant that restores the ID-only client cache fails both client-scoped Suspense row tests: the second render shows `first` instead of `second`. Both results are assertion failures at the intended checkpoints. The production file was restored after each run. |
+| ORC-007 fixed and random campaigns | Not applicable. No important generated property is claimed. |
+| ORC-008 model minimality | Pass. The pairwise model retains source object, ID, and client scope. A → other ID → B with A's ID distinguishes full mounted-hook history from a model that remembers only the current source. A client switch and return distinguish retained scope bindings from one global binding. |
+| ORC-009 vocabulary mapping | Pass. `Binding` is a model-only pair of a production source Collection and an optional `DbClient` scope. The model's history array represents mounted-hook source observations; it does not copy production refs or caches. |
+| ORC-010 failure fidelity and cleanup | Not triggered by shrinking or normalized capture. Tests compare the synchronous error or exact row before test cleanup. One controlled source cleanup intentionally logs the dependent live-query error; its following collision assertion remains the primary check. |
+| ORC-011 second formulation | Pass for the named cache fault. The mounted-hook relation judges object reuse through an error. Independent Suspense histories judge separate hook ownership through public rows, including an initial suspended retry. |
+| ORC-012 review evidence | Pass. This record names the reviewed semantic head, all guide outcomes, original and adjacent witnesses, mutant results, and limits. |
+| ORC-013 boundary witness | Pass. Same object and new ID rerenders are accepted. A different object with a prior ID rejects directly, after another ID, after cleanup, and when two same-ID sources occur within one query. Separate hooks remain legal and show their own rows. |
+| ORC-014 controlled premise handoff | Not triggered for a real-provider claim. The oracle claims controlled React identity behavior only. Real persisted SQLite remains outside its evidence. |
+
+## Loss audit and closeout
+
+The loss audit found three missing distinctions. The final oracle adds two same-ID sources in one query, mounted-hook reuse after source cleanup, and a `DbProvider` A → B → A scope history. A code review found that the client-scoped Suspense cache reused an ID-only key across separate hooks. The final oracle checks both a committed sibling hook and an initial suspended retry. A temporary ID-only cache-key mutant failed both checks.
+
+The original witness is the mounted A(id=x) → B(id=x) rerender. Adjacent histories include A(id=x) → C(id=y) → B(id=x), a changed predicate, source cleanup while mounted, same-query duplicate IDs, client scope changes, and separate Suspense hooks. The claim covers these legal React histories and their public error or row observations. It does not assert that an ID is globally unique across hooks or clients. No reachable in-scope counterexample was found in this bounded audit.
+
+The focused oracle passed 12 tests. The related React hook and Suspense suites passed 120 tests in five files. Lint and the React DB package build passed. This is sampled and bounded evidence, not a universal proof of every React schedule.
