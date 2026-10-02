@@ -1515,6 +1515,7 @@ export class CollectionStateManager<
       }
 
       const events: Array<ChangeMessage<TOutput, TKey>> = []
+      let reappliedKeys: ReadonlySet<TKey> | undefined
       if (hasTruncateSync) {
         // All queued transactions publish as one batch. Its clear prefix must
         // describe the prior visible rows, not intermediate queued writes.
@@ -1689,6 +1690,18 @@ export class CollectionStateManager<
       // Rebuild only the projection for still-open transactions.
       this.refreshPendingSyncedProjection()
 
+      // A retired key joins the changed keys late. Subscribers last saw any
+      // optimistic row over it, even one covering a retired delete. Truncate
+      // already emitted the prior visible rows as its clear prefix, so
+      // reconstructing one would publish a duplicate delete.
+      const addRetiredKey = (key: TKey) => {
+        changedKeys.add(key)
+        if (hasTruncateSync || currentVisibleState.has(key)) return
+        const previousValue = previousOptimisticUpserts.get(key)
+        if (previousValue !== undefined)
+          currentVisibleState.set(key, previousValue)
+      }
+
       // A completed optimistic insert may have used a temporary client key while
       // the sync confirmation used a different server-generated key. Once a
       // sync commit has been applied, stop retaining completed optimistic keys
@@ -1706,15 +1719,7 @@ export class CollectionStateManager<
         )
           continue
         if (!changedKeys.has(key)) {
-          changedKeys.add(key)
-          // Truncate already emitted the prior visible rows as its clear
-          // prefix. Reconstructing one here would publish a duplicate delete.
-          if (!hasTruncateSync && !currentVisibleState.has(key)) {
-            const previousValue = previousOptimisticUpserts.get(key)
-            if (previousValue !== undefined) {
-              currentVisibleState.set(key, previousValue)
-            }
-          }
+          addRetiredKey(key)
           this.pendingOptimisticUpserts.delete(key)
           this.pendingLocalOrigins.delete(key)
         }
@@ -1732,9 +1737,7 @@ export class CollectionStateManager<
           !changedKeys.has(key)
         )
           continue
-        if (!changedKeys.has(key)) {
-          changedKeys.add(key)
-        }
+        if (!changedKeys.has(key)) addRetiredKey(key)
         this.pendingOptimisticDeletes.delete(key)
         this.pendingLocalOrigins.delete(key)
         this.pendingOptimisticDirectDeletes.delete(key)
@@ -1851,6 +1854,10 @@ export class CollectionStateManager<
           events.push(...filtered)
         }
 
+        // A ready callback below can add optimistic upserts that this batch
+        // has not published, so freeze the keys it has.
+        reappliedKeys = new Set(reapplyUpserts.keys())
+
         // Ensure listeners are active before emitting this critical batch
         if (this.lifecycle.status !== `ready`) {
           this.lifecycle.markReady()
@@ -1859,6 +1866,8 @@ export class CollectionStateManager<
 
       // Now check what actually changed in the final visible state
       for (const key of changedKeys) {
+        // Truncate already published each re-applied upsert as an insert.
+        if (reappliedKeys?.has(key)) continue
         const firstSyncOperation = firstSyncOperations.get(key)
         // A live-reading source can change a reused row before this commit
         // captures it. Later writes must not substitute an intermediate value.
