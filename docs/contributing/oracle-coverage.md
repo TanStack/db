@@ -321,6 +321,9 @@ accepted `one`, `two`, `three` order, the latest Query cache and Collection row
 after settlement, and the row after an explicit refetch. The wrong-order
 `one`, `three`, `two` control fails its order check. This controlled adapter
 does not establish Expo SQLite scheduling or every multi-action interleaving.
+It also does not establish cache and Collection reconciliation after a durability
+rejection that follows publication, repeated writes, and lifecycle restart;
+the persistence and Query ownership owners need that recovery witness.
 Precommit cancellation and cleanup controls pass. Each history has its own Collection identity and an exact
 adapter commit-count check at the hold. The controlled adapter
 establishes these cuts; it does not establish native SQLite or Expo scheduling.
