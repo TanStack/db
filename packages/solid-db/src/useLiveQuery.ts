@@ -263,11 +263,15 @@ export function useLiveQuery(
 
       // Capture the sync error object for getData() to re-throw; the error
       // STATUS itself arrives through the observer's status notifications.
+      // The guard drops rejections from a collection this effect has already
+      // torn down, so a superseded query cannot poison its replacement.
+      let active = true
       currentCollection.toArrayWhenReady().catch((error: unknown) => {
-        collectionError = error
+        if (active) collectionError = error
       })
 
       return () => {
+        active = false
         unsubscribe()
         observer.dispose()
       }
