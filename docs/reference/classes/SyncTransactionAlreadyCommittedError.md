@@ -3,7 +3,7 @@ id: SyncTransactionAlreadyCommittedError
 title: SyncTransactionAlreadyCommittedError
 ---
 
-Defined in: [packages/db/src/errors.ts:402](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L402)
+Defined in: [packages/db/src/errors.ts:412](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L412)
 
 ## Extends
 
@@ -17,7 +17,7 @@ Defined in: [packages/db/src/errors.ts:402](https://github.com/TanStack/db/blob/
 new SyncTransactionAlreadyCommittedError(): SyncTransactionAlreadyCommittedError;
 ```
 
-Defined in: [packages/db/src/errors.ts:403](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L403)
+Defined in: [packages/db/src/errors.ts:413](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L413)
 
 #### Returns
 

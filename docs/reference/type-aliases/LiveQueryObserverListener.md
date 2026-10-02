@@ -7,7 +7,7 @@ title: LiveQueryObserverListener
 type LiveQueryObserverListener<T, TKey> = (changes) => void;
 ```
 
-Defined in: [packages/db/src/live-query-observer.ts:98](https://github.com/TanStack/db/blob/main/packages/db/src/live-query-observer.ts#L98)
+Defined in: [packages/db/src/live-query-observer.ts:107](https://github.com/TanStack/db/blob/main/packages/db/src/live-query-observer.ts#L107)
 
 Listener payload: changes, `[]` for an internal layout-only publication, or
 `undefined` for a synthetic status/ready notification.
