@@ -1585,58 +1585,30 @@ export class CollectionStateManager<
               : 'remote'
           if (origin === `local`) localKeys.add(key)
 
-          // A sync source may reuse a live-reading row object, making an
-          // enriched snapshot cached for an earlier publication stale.
-          if (operation.type !== `delete`)
+          if (operation.type === `delete`) {
+            this.syncedData.delete(key, deferOrder)
+            this.syncedMetadata.delete(key)
+            this.rowOrigins.delete(key)
+          } else {
+            // A sync source may reuse a live-reading row object, making an
+            // enriched snapshot cached for an earlier publication stale.
             this.virtualPropsCache.delete(operation.value)
-
-          // Update synced data
-          switch (operation.type) {
-            case `insert`:
-              this.syncedData.set(key, operation.value, deferOrder)
-              this.rowOrigins.set(key, origin)
-              // Clear pending local changes now that sync has confirmed
-              this.pendingLocalChanges.delete(key)
-              this.pendingLocalOrigins.delete(key)
-              this.pendingOptimisticUpserts.delete(key)
-              this.pendingOptimisticDeletes.delete(key)
-              this.pendingOptimisticDirectUpserts.delete(key)
-              this.pendingOptimisticDirectDeletes.delete(key)
-              break
-            case `update`: {
-              if (rowUpdateMode === `partial`) {
-                const updatedValue = Object.assign(
-                  {},
-                  this.syncedData.get(key),
-                  operation.value,
-                )
-                this.syncedData.set(key, updatedValue, deferOrder)
-              } else {
-                this.syncedData.set(key, operation.value, deferOrder)
-              }
-              this.rowOrigins.set(key, origin)
-              // Clear pending local changes now that sync has confirmed
-              this.pendingLocalChanges.delete(key)
-              this.pendingLocalOrigins.delete(key)
-              this.pendingOptimisticUpserts.delete(key)
-              this.pendingOptimisticDeletes.delete(key)
-              this.pendingOptimisticDirectUpserts.delete(key)
-              this.pendingOptimisticDirectDeletes.delete(key)
-              break
-            }
-            case `delete`:
-              this.syncedData.delete(key, deferOrder)
-              this.syncedMetadata.delete(key)
-              // Clean up origin and pending tracking for deleted rows
-              this.rowOrigins.delete(key)
-              this.pendingLocalChanges.delete(key)
-              this.pendingLocalOrigins.delete(key)
-              this.pendingOptimisticUpserts.delete(key)
-              this.pendingOptimisticDeletes.delete(key)
-              this.pendingOptimisticDirectUpserts.delete(key)
-              this.pendingOptimisticDirectDeletes.delete(key)
-              break
+            this.syncedData.set(
+              key,
+              operation.type === `update` && rowUpdateMode === `partial`
+                ? Object.assign({}, this.syncedData.get(key), operation.value)
+                : operation.value,
+              deferOrder,
+            )
+            this.rowOrigins.set(key, origin)
           }
+          // Source confirmation retires every pending local layer for the key.
+          this.pendingLocalChanges.delete(key)
+          this.pendingLocalOrigins.delete(key)
+          this.pendingOptimisticUpserts.delete(key)
+          this.pendingOptimisticDeletes.delete(key)
+          this.pendingOptimisticDirectUpserts.delete(key)
+          this.pendingOptimisticDirectDeletes.delete(key)
           if (!transaction.preserveHydrationSeedKeys) {
             this.hydrationSeedKeys.delete(key)
             this.hydratedKeys.delete(key)
