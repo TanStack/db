@@ -17,6 +17,10 @@
  * equality/IN, lower-wrapped BigInt IN, lone-surrogate coalesce, Date ranges,
  * strftime, and add keep full reads where SQLite could exclude a JavaScript
  * match. Integer threshold checks include adjacent fractional values.
+ * Fixed candidate-superset cases cover large Number versus BigInt bounds,
+ * numeric object keys and array indexes through three digit segments, and
+ * Unicode lowercase matches around NUL. The numeric-path cases also check
+ * named-index use; deeper digit paths retain a full candidate read.
  * Explicitly qualified refs lower to the same JSON field expression
  * without reinterpreting legacy nested paths. Known omissions: null, arbitrary
  * raw SQL, and native-host planning. Generated BigInts stay inside SQLite's
@@ -1378,6 +1382,7 @@ describe(`SQLite expression-index oracle`, () => {
         },
       ],
       expectedKeys: [`higher`],
+      expectedCandidateKeys: [`higher`, `lower`],
       expectedQueryParams: [],
     },
     {
@@ -1501,7 +1506,12 @@ describe(`SQLite expression-index oracle`, () => {
     },
   ])(
     `uses the raw $label field expression index`,
-    async ({ expectedKeys, expectedQueryParams, ...scenario }) => {
+    async ({
+      expectedKeys,
+      expectedCandidateKeys,
+      expectedQueryParams,
+      ...scenario
+    }) => {
       const observation = await observeExpressionIndexScenario(scenario)
       const diagnostic = JSON.stringify(
         {
@@ -1528,7 +1538,9 @@ describe(`SQLite expression-index oracle`, () => {
         )
         return
       }
-      expect(observation.directSqlKeys, diagnostic).toEqual(expectedKeys)
+      expect(observation.directSqlKeys, diagnostic).toEqual(
+        expectedCandidateKeys ?? expectedKeys,
+      )
       expect(observation.predicateQuery.params, diagnostic).toEqual(
         expectedQueryParams,
       )
@@ -1937,6 +1949,312 @@ describe(`SQLite expression-index oracle`, () => {
       ),
     ).toBe(true)
     expect(planScansTable(observation.plan, observation.tableName)).toBe(false)
+  })
+
+  it.each([
+    {
+      label: `large Number and BigInt bound`,
+      value: { n: 1000000000000000100 },
+      indexExpression: new IR.PropRef([`n`]),
+      predicate: new IR.Func<boolean>(`gt`, [
+        new IR.PropRef([`n`]),
+        new IR.Value(1000000000000000120n),
+      ]),
+    },
+    {
+      label: `numeric object key`,
+      value: { part: { '0': `match` } },
+      indexExpression: new IR.PropRef([`part`, `0`]),
+      predicate: new IR.Func<boolean>(`eq`, [
+        new IR.PropRef([`part`, `0`]),
+        new IR.Value(`match`),
+      ]),
+    },
+    {
+      label: `Unicode lowercase after NUL`,
+      value: { name: `a\u0000K` },
+      indexExpression: new IR.Func(`lower`, [new IR.PropRef([`name`])]),
+      predicate: new IR.Func<boolean>(`eq`, [
+        new IR.Func(`lower`, [new IR.PropRef([`name`])]),
+        new IR.Value(`a\u0000k`),
+      ]),
+    },
+  ])(`keeps $label through a unary SQL candidate`, async (testCase) => {
+    for (const wrapper of [`and`, `or`] as const) {
+      const observation = await observeExpressionIndexScenario({
+        label: `candidate-${testCase.label}-${wrapper}`,
+        indexExpression: testCase.indexExpression,
+        where: new IR.Func<boolean>(wrapper, [testCase.predicate]),
+        rows: [{ key: `match`, value: testCase.value }],
+      })
+
+      // The JavaScript predicate matches each row by the public contract.
+      // Every matching key must survive SQLite before that evaluator runs.
+      expect(observation.adapterKeys).toEqual([`match`])
+      expect(observation.directSqlKeys).toContain(`match`)
+    }
+  })
+
+  it(`keeps large Number matches across BigInt range directions and boolean wrappers`, async () => {
+    const field = new IR.PropRef([`n`])
+    const cases = [
+      {
+        name: `positive`,
+        number: 1000000000000000100,
+        bound: 1000000000000000120n,
+      },
+      {
+        name: `negative`,
+        number: -1000000000000000100,
+        bound: -1000000000000000120n,
+      },
+    ] as const
+    const operators = [`gt`, `gte`, `lt`, `lte`] as const
+    const matches = (
+      operator: (typeof operators)[number],
+      left: number | bigint,
+      right: number | bigint,
+    ): boolean => {
+      switch (operator) {
+        case `gt`:
+          return left > right
+        case `gte`:
+          return left >= right
+        case `lt`:
+          return left < right
+        case `lte`:
+          return left <= right
+      }
+    }
+
+    for (const testCase of cases) {
+      const rows = [
+        { key: `rounded-number`, value: { n: testCase.number } },
+        { key: `exact-bigint`, value: { n: testCase.bound } },
+      ]
+      for (const operator of operators) {
+        for (const fieldOnLeft of [true, false]) {
+          const literal = new IR.Value(testCase.bound)
+          const predicate = new IR.Func<boolean>(
+            operator,
+            fieldOnLeft ? [field, literal] : [literal, field],
+          )
+          const expectedKeys = rows
+            .filter(({ value }) =>
+              fieldOnLeft
+                ? matches(operator, value.n, testCase.bound)
+                : matches(operator, testCase.bound, value.n),
+            )
+            .map(({ key }) => key)
+            .sort()
+          for (const wrapper of [`direct`, `and`, `or`] as const) {
+            const observation = await observeExpressionIndexScenario({
+              label: `rounded-${testCase.name}-${operator}-${fieldOnLeft}-${wrapper}`,
+              indexExpression: field,
+              where:
+                wrapper === `direct`
+                  ? predicate
+                  : new IR.Func<boolean>(wrapper, [predicate]),
+              rows,
+            })
+            expect(observation.adapterKeys).toEqual(expectedKeys)
+            expect(observation.directSqlKeys).toEqual(
+              expect.arrayContaining(expectedKeys),
+            )
+          }
+        }
+      }
+    }
+  })
+
+  it(`keeps numeric-key object and array matches across candidate kinds`, async () => {
+    const variants = [
+      {
+        name: `equality`,
+        match: `match`,
+        other: `other`,
+        predicate: (ref: IR.PropRef) =>
+          new IR.Func<boolean>(`eq`, [ref, new IR.Value(`match`)]),
+      },
+      {
+        name: `coalesce`,
+        match: `match`,
+        other: `other`,
+        predicate: (ref: IR.PropRef) =>
+          new IR.Func<boolean>(`eq`, [
+            new IR.Func(`coalesce`, [ref, new IR.Value(`fallback`)]),
+            new IR.Value(`match`),
+          ]),
+      },
+      {
+        name: `membership`,
+        match: 1n,
+        other: 2n,
+        predicate: (ref: IR.PropRef) =>
+          new IR.Func<boolean>(`in`, [ref, new IR.Value([1n])]),
+      },
+      {
+        name: `prefix`,
+        match: `match`,
+        other: `other`,
+        predicate: (ref: IR.PropRef) =>
+          new IR.Func<boolean>(`like`, [ref, new IR.Value(`mat%`)]),
+      },
+      {
+        name: `lowercase`,
+        match: `MATCH`,
+        other: `other`,
+        predicate: (ref: IR.PropRef) =>
+          new IR.Func<boolean>(`eq`, [
+            new IR.Func(`lower`, [ref]),
+            new IR.Value(`match`),
+          ]),
+      },
+    ]
+    for (const segment of [`0`, `1`]) {
+      const wrapArray = (value: unknown) => {
+        const items: Array<unknown> = []
+        items[Number(segment)] = value
+        return { part: items }
+      }
+      for (const variant of variants) {
+        const ref = new IR.PropRef([`part`, segment])
+        const rows = [
+          {
+            key: `array-match`,
+            value: wrapArray(variant.match),
+          },
+          {
+            key: `object-match`,
+            value: { part: { [segment]: variant.match } },
+          },
+          {
+            key: `array-other`,
+            value: wrapArray(variant.other),
+          },
+          {
+            key: `object-other`,
+            value: { part: { [segment]: variant.other } },
+          },
+        ]
+        const predicate = variant.predicate(ref)
+        for (const wrapper of [`direct`, `and`, `or`] as const) {
+          const observation = await observeExpressionIndexScenario({
+            label: `numeric-key-${segment}-${variant.name}-${wrapper}`,
+            indexExpression: ref,
+            where:
+              wrapper === `direct`
+                ? predicate
+                : new IR.Func<boolean>(wrapper, [predicate]),
+            rows,
+          })
+          const expectedKeys = [`array-match`, `object-match`]
+          expect(observation.adapterKeys).toEqual(expectedKeys)
+          expect(observation.directSqlKeys).toEqual(
+            expect.arrayContaining(expectedKeys),
+          )
+          if (variant.name === `equality`) {
+            expect(
+              planUsesNamedIndex(
+                observation.plan,
+                observation.tableName,
+                observation.indexName,
+              ),
+            ).toBe(true)
+          }
+        }
+      }
+    }
+  })
+
+  it(`indexes mixed array and object numeric paths`, async () => {
+    const ref = new IR.PropRef([`part`, `0`, `0`])
+    const observation = await observeExpressionIndexScenario({
+      label: `mixed-numeric-carriers`,
+      indexExpression: ref,
+      where: new IR.Func<boolean>(`eq`, [ref, new IR.Value(`match`)]),
+      rows: [
+        { key: `array-array`, value: { part: [[`match`]] } },
+        { key: `array-object`, value: { part: [{ '0': `match` }] } },
+        { key: `object-array`, value: { part: { '0': [`match`] } } },
+        { key: `object-object`, value: { part: { '0': { '0': `match` } } } },
+      ],
+    })
+    const expectedKeys = [
+      `array-array`,
+      `array-object`,
+      `object-array`,
+      `object-object`,
+    ]
+    expect(observation.adapterKeys).toEqual(expectedKeys)
+    expect(observation.directSqlKeys).toEqual(expectedKeys)
+    expect(
+      planUsesNamedIndex(
+        observation.plan,
+        observation.tableName,
+        observation.indexName,
+      ),
+    ).toBe(true)
+  })
+
+  it(`keeps deep numeric paths in the unbounded candidate set`, async () => {
+    const ref = new IR.PropRef([`part`, `0`, `0`, `0`, `0`])
+    const observation = await observeExpressionIndexScenario({
+      label: `deep-numeric-carriers`,
+      indexExpression: ref,
+      where: new IR.Func<boolean>(`eq`, [ref, new IR.Value(`match`)]),
+      rows: [
+        {
+          key: `match`,
+          value: { part: { '0': { '0': { '0': { '0': `match` } } } } },
+        },
+      ],
+    })
+    expect(observation.adapterKeys).toEqual([`match`])
+    expect(observation.directSqlKeys).toEqual([`match`])
+    expect(observation.predicateQuery.sql).not.toContain(` WHERE `)
+  })
+
+  it(`keeps Unicode lowercase matches across NUL placement and equality direction`, async () => {
+    const spellings = [
+      { name: `NUL before fold`, source: `a\u0000K`, target: `a\u0000k` },
+      { name: `NUL after fold`, source: `K\u0000a`, target: `k\u0000a` },
+      { name: `NUL after prefix`, source: `aK\u0000b`, target: `ak\u0000b` },
+      { name: `no NUL`, source: `aK`, target: `ak` },
+    ]
+    const field = new IR.PropRef([`name`])
+    const lower = new IR.Func(`lower`, [field])
+    for (const spelling of spellings) {
+      expect(spelling.source.toLowerCase()).toBe(spelling.target)
+      const rows = [
+        { key: `ascii`, value: { name: spelling.target } },
+        { key: `unicode`, value: { name: spelling.source } },
+        { key: `other`, value: { name: `different` } },
+      ]
+      for (const lowerOnLeft of [true, false]) {
+        const literal = new IR.Value(spelling.target)
+        const predicate = new IR.Func<boolean>(
+          `eq`,
+          lowerOnLeft ? [lower, literal] : [literal, lower],
+        )
+        for (const wrapper of [`direct`, `and`, `or`] as const) {
+          const observation = await observeExpressionIndexScenario({
+            label: `nul-lower-${spelling.name}-${lowerOnLeft}-${wrapper}`,
+            indexExpression: lower,
+            where:
+              wrapper === `direct`
+                ? predicate
+                : new IR.Func<boolean>(wrapper, [predicate]),
+            rows,
+          })
+          const expectedKeys = [`ascii`, `unicode`]
+          expect(observation.adapterKeys).toEqual(expectedKeys)
+          expect(observation.directSqlKeys).toEqual(
+            expect.arrayContaining(expectedKeys),
+          )
+        }
+      }
+    }
   })
 
   it.each([

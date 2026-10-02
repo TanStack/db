@@ -52,7 +52,8 @@ import type { SQLiteDriver } from '../src'
  * Limits: simple rows, one SQLite process, ordinary loads and one cursor
  * composition. No native host, OPFS worker, multi-process WAL, ordering
  * comparator, typed bigint/date expression, index-expression, arbitrary
- * depth, or unbounded arity claim. Raw-row work is not a SQLite plan or
+ * depth beyond the fixed 80-level work witness, or unbounded arity claim.
+ * Raw-row work is not a SQLite plan or
  * elapsed-time assertion.
  */
 
@@ -658,6 +659,28 @@ it('refines boolean arity and SQL row work across generated SQLite loads', async
     expect(droppedConjunct.keys).toEqual(mixed.keys)
     expect(droppedConjunct.read?.rawRows).toBe(fixture.length)
     expect(droppedConjunct.read?.rawRows).not.toBe(mixed.read?.rawRows)
+
+    // A legal nested predicate should require work proportional to its depth.
+    // Reading each node's `args` is a deterministic proxy for compiler visits.
+    let argumentReads = 0
+    let nested: IR.BasicExpression = new IR.Value(true)
+    const depth = 80
+    for (let index = 0; index < depth; index++) {
+      const child: IR.BasicExpression = nested
+      const node: IR.Func = new IR.Func('and', [child])
+      Object.defineProperty(node, 'args', {
+        get() {
+          argumentReads++
+          return [child]
+        },
+      })
+      nested = node
+    }
+    const nestedRows = await adapter.loadSubset('boolean-arity', {
+      where: nested,
+    })
+    expect(nestedRows).toHaveLength(fixture.length)
+    expect(argumentReads).toBeLessThanOrEqual(depth * 10)
 
     driver.mutantPushUnsafeOr = true
     const unsafeOr = await check(

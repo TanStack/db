@@ -610,6 +610,39 @@ function createJsonPath(path: Array<string>): string | null {
   return jsonPath
 }
 
+const MAX_INDEXED_NUMERIC_PATH_SEGMENTS = 3
+
+function hasDeepNumericPath(expression: IR.BasicExpression): boolean {
+  if (expression.type === `ref`) {
+    return (
+      IR.getPropRefPropertyPath(expression).filter((segment) =>
+        /^[0-9]+$/.test(String(segment)),
+      ).length > MAX_INDEXED_NUMERIC_PATH_SEGMENTS
+    )
+  }
+  return expression.type === `func` && expression.args.some(hasDeepNumericPath)
+}
+
+function createJsonPathVariants(path: Array<string>): Array<string> | null {
+  const canonical = createJsonPath(path)
+  if (!canonical) return null
+
+  let paths = [`$`]
+  for (const segment of path) {
+    if (/^[A-Za-z_][A-Za-z0-9_]*$/.test(segment)) {
+      paths = paths.map((prefix) => `${prefix}.${segment}`)
+    } else if (/^[0-9]+$/.test(segment)) {
+      if (paths.length >= 2 ** MAX_INDEXED_NUMERIC_PATH_SEGMENTS)
+        return [canonical]
+      paths = paths.flatMap((prefix) => [
+        `${prefix}[${segment}]`,
+        `${prefix}."${segment}"`,
+      ])
+    }
+  }
+  return paths
+}
+
 function getLiteralValueKind(value: unknown): CompiledValueKind {
   if (typeof value === `bigint`) {
     return `bigint`
@@ -852,10 +885,10 @@ function compileSqlExpression(
   }
 
   if (expression.type === `ref`) {
-    const jsonPath = createJsonPath(
+    const jsonPaths = createJsonPathVariants(
       IR.getPropRefPropertyPath(expression).map(String),
     )
-    if (!jsonPath) {
+    if (!jsonPaths) {
       return {
         supported: false,
         sql: ``,
@@ -863,7 +896,13 @@ function compileSqlExpression(
       }
     }
 
-    return compileRefExpressionSql(jsonPath)
+    if (jsonPaths.length === 1) return compileRefExpressionSql(jsonPaths[0]!)
+    return {
+      supported: true,
+      sql: `COALESCE(${jsonPaths.map((path) => compileRefExpressionSql(path).sql).join(`, `)})`,
+      params: [],
+      valueKind: `unknown`,
+    }
   }
 
   const compiledArgs = expression.args.map((arg, index) =>
@@ -1092,11 +1131,14 @@ function compileSqlExpression(
 
 function compileSafeSqlPrefilter(
   expression: IR.BasicExpression,
-  compiled: CompiledSqlFragment = compileSqlExpression(expression),
+  compiled?: CompiledSqlFragment,
 ): CompiledSqlFragment | undefined {
   // Every public match must pass this SQL candidate before JavaScript applies
   // the authoritative row predicate. Extra candidates are allowed.
-  const direct = () => (compiled.supported ? compiled : undefined)
+  const direct = () => {
+    const candidate = compiled ?? compileSqlExpression(expression)
+    return candidate.supported ? candidate : undefined
+  }
   if (expression.type === `val`) {
     return typeof expression.value === `boolean` || expression.value == null
       ? direct()
@@ -1124,6 +1166,10 @@ function compileSafeSqlPrefilter(
     }
   }
 
+  // More than three digit segments need too many alternative JSON paths.
+  // Keep their prefilter unbounded rather than exclude an object-key match.
+  if (hasDeepNumericPath(expression)) return undefined
+  compiled ??= compileSqlExpression(expression)
   if (!compiled.supported) return undefined
   const [left, right] = expression.args
   if (expression.args.length === 2) {
@@ -1149,11 +1195,19 @@ function compileSafeSqlPrefilter(
         const greaterSide =
           (field === left && [`gt`, `gte`].includes(expression.name)) ||
           (field === right && [`lt`, `lte`].includes(expression.name))
+        const unsafeBigInt =
+          typeof literal.value === `bigint` &&
+          !Number.isSafeInteger(Number(literal.value))
+        const roundedNumberCandidates = unsafeBigInt
+          ? literal.value > 0n
+            ? ` OR ${fieldSql} >= ${Number.MAX_SAFE_INTEGER}`
+            : ` OR ${fieldSql} <= -${Number.MAX_SAFE_INTEGER}`
+          : ``
         return {
           supported: true,
           sql: greaterSide
-            ? `(${fieldSql} >= ${literalSql.sql} OR ${fieldSql} IS NULL)`
-            : `(${fieldSql} <= ${literalSql.sql} OR ${fieldSql} IS NULL OR ${fieldSql} >= '')`,
+            ? `(${fieldSql} >= ${literalSql.sql} OR ${fieldSql} IS NULL${roundedNumberCandidates})`
+            : `(${fieldSql} <= ${literalSql.sql} OR ${fieldSql} IS NULL OR ${fieldSql} >= ''${roundedNumberCandidates})`,
           params: literalSql.params,
         }
       }
@@ -1181,7 +1235,8 @@ function compileSafeSqlPrefilter(
         lower.args[0]?.type === `ref` &&
         literal?.type === `val` &&
         typeof literal.value === `string` &&
-        [...literal.value].every((char) => char.charCodeAt(0) <= 0x7f)
+        [...literal.value].every((char) => char.charCodeAt(0) <= 0x7f) &&
+        !literal.value.includes(`\u0000`)
       ) {
         const lowerSql = compileSqlExpression(lower, `index-expression`).sql
         return {

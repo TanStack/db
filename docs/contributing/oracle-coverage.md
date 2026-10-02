@@ -538,6 +538,10 @@ Mixed-AND witnesses retain a certified equality while an unsafe range, NOT,
 or OR sibling stays with the row evaluator. They cover child order and one
 nested AND, measure one raw row instead of twenty, and reject a removed-WHERE
 mutant. The unsafe OR mutant loses a public row.
+A fixed 80-level nested AND witness bounds compiler argument reads to linear
+work. It was RED on the prior quadratic compiler and is GREEN after removing
+the repeated subtree compilation; elapsed latency and arbitrary depth remain
+outside this owner.
 
 The Node expression-index oracle checks the receiving SQLite query, raw
 candidate keys, public keys, and named-index plan. Its generated indexed
@@ -550,6 +554,14 @@ retain fallback: SQLite converts the former to text and encodes the latter's
 inline fallback differently from a JSON-extracted binding. Integer-bound
 range cases include adjacent fractional values and tagged or mixed scalars;
 this is bounded evidence, not a proof over every persisted representation.
+Large Number versus BigInt range cases check both operand directions, four
+inequalities, and unary boolean wrappers. Unsafe BigInt bounds admit a wider
+indexed candidate range for potentially rounded Numbers; JavaScript still
+decides the public result. Numeric-key object and array cases check public
+rows and named-index use through three digit segments, including mixed
+carriers. Deeper numeric paths use an unbounded candidate read. Unicode
+lowercase cases place NUL before and after a fold and keep the matching row
+through either equality direction and unary wrapper.
 Fixed `strftime`, `add`, and Date-range witnesses also use full reads for mixed
 stored types; direct SQL would exclude a matching numeric timestamp or string
 concatenation. A typed-field contract or a separate indexed representation is
