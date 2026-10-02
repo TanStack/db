@@ -418,7 +418,11 @@ latency, worker scheduling, or an end-to-end Electric snapshot.
 The Cloudflare Durable Object replacement test applies 25-, 26-, and 205-row
 full replacements through the actual Cloudflare driver. A storage seam enforces
 Cloudflare's documented 100-bound-parameter query limit and checks the durable
-keys after each transaction. This Node SQLite seam does not execute in Workers.
+keys after each transaction. Its subset receiving witness compares exact rows
+for 100 and 101 equality or one-item `IN` clauses through both savepoint and
+native transaction drivers; the same seam rejects a statement above 100
+bindings. The original transaction driver exceeded the cap at 101. This Node
+SQLite seam does not execute in Workers or prove native JSON-function support.
 
 The browser OPFS lifecycle owner also checks that a silent initialization
 rejects at the default or overridden open deadline, terminates its worker,

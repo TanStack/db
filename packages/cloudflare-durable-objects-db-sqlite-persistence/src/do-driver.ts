@@ -206,6 +206,7 @@ export class CloudflareDOSQLiteDriver implements SQLiteDriver {
 
   private createTransactionDriver(): SQLiteDriver {
     const transactionDriver: SQLiteDriver = {
+      maxBoundParameters: this.maxBoundParameters,
       exec: (sql) => {
         this.execute(sql)
         return Promise.resolve()
