@@ -272,9 +272,12 @@ comment and the current API/architecture contract before extending its model.
 
 The SQLite core binding-capacity oracle in
 `packages/db-sqlite-persistence-core/tests/sqlite-core-adapter.test.ts` is a
-bounded owner for issue #1993. It failed on the original 900-item chunking and
-passes with one JSON table binding per runtime `IN` list and a statement-total
-fallback. It compares independently filtered rows and typed values with
+bounded owner for issue #1993. The
+[review record](oracle-reviews/issue-1993-sqlite-binding-capacity.md) gives the
+exact executable revision and guide audit. It failed on the original 900-item
+chunking and passes with one JSON table binding per runtime `IN` list and a
+statement-total fallback. It compares independently filtered rows and typed
+values with
 `loadSubset` on a real Node prepared SQLite connection capped at 999
 parameters. Fixed and generated cases cover empty lists, 998/999/1000
 single lists, 499+500 and 500+500 statement totals, mixed scalar/list and
