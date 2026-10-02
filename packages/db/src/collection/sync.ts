@@ -755,11 +755,7 @@ export class CollectionSyncManager<
   ): true | Promise<void> {
     operation.waiting = true
     if (operation.pending.size === 0) {
-      operation.completed = true
-      this.loadSubsetOperations.delete(operation)
-      if (this.activeLoadSubsetOperation === operation) {
-        this.activeLoadSubsetOperation = undefined
-      }
+      this.retireLoadSubsetOperation(operation)
       return operation.hasError ? Promise.reject(operation.error) : true
     }
     operation.deferred = createDeferred<void>()
@@ -784,16 +780,30 @@ export class CollectionSyncManager<
     // is considered complete.
     queueMicrotask(() => {
       if (operation.completed || operation.pending.size > 0) return
-      operation.completed = true
-      this.loadSubsetOperations.delete(operation)
-      if (this.activeLoadSubsetOperation === operation) {
-        this.activeLoadSubsetOperation = undefined
-      }
+      this.retireLoadSubsetOperation(operation)
       if (operation.hasError) {
         operation.deferred!.reject(operation.error)
       } else {
         operation.deferred!.resolve()
       }
+    })
+  }
+
+  private retireLoadSubsetOperation(operation: LoadSubsetOperation): void {
+    operation.completed = true
+    this.loadSubsetOperations.delete(operation)
+    if (this.activeLoadSubsetOperation === operation) {
+      this.activeLoadSubsetOperation = undefined
+    }
+  }
+
+  private emitLoadingSubsetChange(isLoadingSubset: boolean): void {
+    this._events.emit(`loadingSubset:change`, {
+      type: `loadingSubset:change`,
+      collection: this.collection,
+      isLoadingSubset,
+      previousIsLoadingSubset: !isLoadingSubset,
+      loadingSubsetTransition: isLoadingSubset ? `start` : `end`,
     })
   }
 
@@ -824,13 +834,7 @@ export class CollectionSyncManager<
     this.trackLoadSubsetOperationPromise(promise)
 
     if (loadingStarting) {
-      this._events.emit(`loadingSubset:change`, {
-        type: `loadingSubset:change`,
-        collection: this.collection,
-        isLoadingSubset: true,
-        previousIsLoadingSubset: false,
-        loadingSubsetTransition: `start`,
-      })
+      this.emitLoadingSubsetChange(true)
     }
 
     const finish = () => {
@@ -842,13 +846,7 @@ export class CollectionSyncManager<
       this.pendingLoadSubsetPromises.delete(promise)
 
       if (loadingEnding) {
-        this._events.emit(`loadingSubset:change`, {
-          type: `loadingSubset:change`,
-          collection: this.collection,
-          isLoadingSubset: false,
-          previousIsLoadingSubset: true,
-          loadingSubsetTransition: `end`,
-        })
+        this.emitLoadingSubsetChange(false)
       }
     }
     void promise.then(finish, finish)
@@ -1014,13 +1012,7 @@ export class CollectionSyncManager<
     const wasLoadingSubset = this.pendingLoadSubsetPromises.size > 0
     this.pendingLoadSubsetPromises.clear()
     if (wasLoadingSubset) {
-      this._events.emit(`loadingSubset:change`, {
-        type: `loadingSubset:change`,
-        collection: this.collection,
-        isLoadingSubset: false,
-        previousIsLoadingSubset: true,
-        loadingSubsetTransition: `end`,
-      })
+      this.emitLoadingSubsetChange(false)
     }
     this.activeLoadSubsetOperation = undefined
     for (const operation of this.loadSubsetOperations) {
