@@ -377,5 +377,6 @@
   "collectionHold": "gb",
   "holdCollection": "gc",
   "registry": "gd",
-  "deliverStatus": "ge"
+  "deliverStatus": "ge",
+  "compareRows": "gf"
 }

@@ -85,6 +85,23 @@ describe(`pooled query identity`, () => {
     ).not.toEqual(base)
   })
 
+  it(`separates orders`, () => {
+    const ordered = (direction: `asc` | `desc`) =>
+      identity((q) =>
+        q
+          .from({ r: source })
+          .where(({ r }: any) => eq(r.a, `x`))
+          .orderBy(({ r }: any) => r.n, direction),
+      )
+    expect(ordered(`asc`)).toEqual(ordered(`asc`))
+    expect(ordered(`asc`)).not.toEqual(ordered(`desc`))
+    expect(ordered(`asc`)).not.toEqual(
+      identity((q) =>
+        q.from({ r: source }).where(({ r }: any) => eq(r.a, `x`)),
+      ),
+    )
+  })
+
   it(`keeps the structural identity for queries a partition cannot serve`, () => {
     const residual = identity((q) =>
       q

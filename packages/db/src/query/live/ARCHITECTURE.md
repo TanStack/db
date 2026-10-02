@@ -1249,15 +1249,17 @@ listener lifetime.
 A framework adapter may serve a live query from an equality partition instead
 of this graph. That applies only when the query reads one eager,
 non-persisted source Collection, its `where` has at least one
-`eq(field, literal)` conjunct, every other conjunct reads only that row's
-own fields, and it has no other clause, `DbClient`, or Suspense key. Such a
+`eq(field, literal)` conjunct, every other conjunct reads only that row's own fields, any `orderBy` reads
+only that row's own fields without a custom string comparator, and it has no
+other clause, `limit`, `offset`, `DbClient`, or Suspense key. Such a
 pooled live query reads the partition group for its `eq` literal tuple and
-filters it by its remaining conjuncts with the compiler's evaluator
+filters it by its remaining conjuncts with the compiler's evaluator. Queries
+with different orders use different partitions, whose groups sort rows with
+the compiler's comparator and break ties by key
 (`packages/db/src/query/pooled-live-query.ts`). It builds its live-query
 Collection only when the application reads it.
 
-A pooled live query must publish what its live-query Collection would: the
-same rows, in key order, with the same values and status. When its source
+A pooled live query must publish what its live-query Collection would: the same rows, in its order or else key order, with the same values and status. When its source
 starts cleanup, it enters the same terminal error and keeps its last rows.
 The pooled live query oracle compares the two over generated histories.
 

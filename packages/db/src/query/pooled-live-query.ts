@@ -1,13 +1,14 @@
 import { SortedMap } from '../SortedMap.js'
 import { CleanupQueue } from '../collection/cleanup-queue.js'
 import { UNSUBSCRIBED_GC_FLOOR_MS } from '../collection/lifecycle.js'
-import { normalizeValue } from '../utils/comparison.js'
+import { makeComparator, normalizeValue } from '../utils/comparison.js'
 import { isVirtualPropName } from '../virtual-props.js'
 import { getPersistedReadinessSource } from '../persisted-readiness.js'
 import { getWhereExpression } from './ir.js'
 import { compileExpression, toBooleanPredicate } from './compiler/evaluators.js'
+import { buildCompareOptions } from './compiler/order-by.js'
 import { createLiveQueryCollection } from './live-query-collection.js'
-import type { BasicExpression, QueryIR } from './ir.js'
+import type { BasicExpression, OrderBy, QueryIR } from './ir.js'
 import type { BaseQueryBuilder } from './builder/index.js'
 import type { Collection, CollectionImpl } from '../collection/index.js'
 import type { ChangeMessage, CollectionStatus } from '../types.js'
@@ -81,6 +82,8 @@ class Partition {
   constructor(
     private readonly source: CollectionImpl<any, any, any, any, any>,
     private readonly paths: Array<Array<string>>,
+    // Row order for an `orderBy` shape; key order otherwise.
+    private readonly compareRows: ((a: Row, b: Row) => number) | undefined,
     // The partition's entry in its source's map, which a mount looks up.
     private readonly registry: { add: () => void; remove: () => void },
   ) {}
@@ -107,7 +110,7 @@ class Partition {
     let group = this.groups.get(key)
     if (!group) {
       group = {
-        rows: new SortedMap(),
+        rows: new SortedMap(this.compareRows),
         listeners: new Set(),
         revision: 0,
         layoutRevision: 0,
@@ -287,6 +290,7 @@ type PoolableShape = {
   groupKey: string
   // Conjuncts each view evaluates over its group's rows.
   residual: Array<BasicExpression>
+  orderBy: OrderBy | undefined
 }
 
 // Whether an expression reads only this query's own row fields, so a view
@@ -374,7 +378,6 @@ function poolableShape(query: QueryIR): PoolableShape | undefined {
     query.join ||
     query.groupBy ||
     query.having ||
-    query.orderBy ||
     query.limit !== undefined ||
     query.offset !== undefined ||
     query.distinct ||
@@ -402,6 +405,11 @@ function poolableShape(query: QueryIR): PoolableShape | undefined {
   }
   // A partition needs at least one equality to group by.
   if (conjuncts.length === 0) return undefined
+  const orderBy = query.orderBy?.length ? query.orderBy : undefined
+  const orderKey = orderBy
+    ? orderByKey(orderBy, query.from.alias, query.from.collection)
+    : ``
+  if (orderKey === undefined) return undefined
   // Most shapes have one or two fields; a general sort costs more than both.
   if (conjuncts.length === 2) {
     if (conjuncts[1]!.pathKey < conjuncts[0]!.pathKey) conjuncts.reverse()
@@ -417,7 +425,58 @@ function poolableShape(query: QueryIR): PoolableShape | undefined {
     shapeKey += pathKey
     groupKey = appendGroupKeyPart(groupKey, literalKey)
   }
-  return { paths, shapeKey, groupKey, residual }
+  // Groups of one shape share a row order, so the order is part of it.
+  if (orderKey) shapeKey += `|${orderKey}`
+  return { paths, shapeKey, groupKey, residual, orderBy }
+}
+
+// A key for an `orderBy` over this query's own row fields, or undefined for
+// one a partition cannot share by value, such as a custom string comparator.
+function orderByKey(
+  orderBy: OrderBy,
+  alias: string,
+  source: CollectionImpl<any, any, any, any, any>,
+): string | undefined {
+  let key = ``
+  for (const clause of orderBy) {
+    const { expression } = clause
+    if (
+      expression.type !== `ref` ||
+      !readsOnlyRow(expression, alias) ||
+      expression.path.length < 2
+    ) {
+      return undefined
+    }
+    const options = buildCompareOptions(clause, source)
+    if (options.stringSort === `custom`) return undefined
+    key += JSON.stringify([expression.path.slice(1), options])
+  }
+  return key
+}
+
+// Orders rows as a live-query Collection's `orderBy` does; the group's
+// SortedMap breaks ties by key.
+function rowComparator(
+  orderBy: OrderBy,
+  alias: string,
+  source: CollectionImpl<any, any, any, any, any>,
+): (a: Row, b: Row) => number {
+  const terms = orderBy.map((clause) => ({
+    read: compileExpression(clause.expression),
+    compare: makeComparator(buildCompareOptions(clause, source)),
+  }))
+  // One namespaced row, reused so a comparison allocates nothing.
+  const namespaced: Record<string, unknown> = {}
+  return (a, b) => {
+    for (const { read, compare } of terms) {
+      namespaced[alias] = a
+      const left = read(namespaced as any)
+      namespaced[alias] = b
+      const result = compare(left, read(namespaced as any))
+      if (result !== 0) return result
+    }
+    return 0
+  }
 }
 
 /**
@@ -633,14 +692,19 @@ export function createPooledLiveQuery(
     const owner = partitions
     // A released partition may subscribe again; it must not then replace or
     // remove a newer partition created under its key.
-    const created: Partition = new Partition(source, shape.paths, {
-      add: () => {
-        if (!owner.has(shapeKey)) owner.set(shapeKey, created)
+    const created: Partition = new Partition(
+      source,
+      shape.paths,
+      shape.orderBy && rowComparator(shape.orderBy, ir.from.alias, source),
+      {
+        add: () => {
+          if (!owner.has(shapeKey)) owner.set(shapeKey, created)
+        },
+        remove: () => {
+          if (owner.get(shapeKey) === created) owner.delete(shapeKey)
+        },
       },
-      remove: () => {
-        if (owner.get(shapeKey) === created) owner.delete(shapeKey)
-      },
-    })
+    )
     partition = created
     partitions.set(shapeKey, partition)
   }

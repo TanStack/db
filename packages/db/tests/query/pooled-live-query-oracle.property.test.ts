@@ -4,12 +4,11 @@
  * Law and source: a live query that filters one source Collection by
  * `eq(field, literal)` conjuncts, plus any conjuncts that read only its row,
  * is served from a partition of that source shared by every query with the
- * same `eq` fields; each view evaluates its other conjuncts itself. Its observer must publish the
+ * same `eq` fields and order; each view evaluates its other conjuncts itself. Its observer must publish the
  * rows the live-query Collection for the same query publishes: the visible
  * source rows whose fields equal the literals under `eq` semantics
  * (`src/query/compiler/evaluators.ts`: nullish is UNKNOWN, a Date equals its
- * timestamp, `NaN` equals `NaN`, `-0` equals `0`, other types differ), in
- * key order, with the same row values and status.
+ * timestamp, `NaN` equals `NaN`, `-0` equals `0`, other types differ), in its order or else key order, with the same row values and status.
  *
  * Why an example can miss the failure: one query over static rows passes even
  * if rows never move between groups, a peer group never sees a row leave, a
@@ -24,8 +23,9 @@
  * History grammar: rows have ids 0 through 3, delivered initially in key
  * order or in reverse, a field `f` from strings,
  * numbers and their look-alikes, `true`, a Date equal to 1, `NaN`, `-0`,
- * `0`, `null`, and a missing value, and a field `g` of `x` or `y`. Up to three peer queries use `eq(f, literal)`, optionally with
- * `eq(g, literal)` and a residual `not(eq(g, literal))`.
+ * `0`, `null`, and a missing value, and a field `g` of `x`, `y`, or `null`. Up to three peer queries use `eq(f, literal)`, optionally with
+ * `eq(g, literal)`, a residual `not(eq(g, literal))`, and an order by `id` or
+ * by `g` with explicit `nulls`; a weighted peer orders a whole `f` group.
  * Values are weighted toward `a`, and toward the normalized values against
  * numeric literals, so groups hold rows that stay, move, and normalize.
  * Steps commit sync transactions of one or two inserts, updates, or deletes,
@@ -96,13 +96,23 @@ const requestedReplayProperty = readOracleRunConfig().replayProperty
 
 const MISSING = Symbol(`missing`)
 type FieldValue = string | number | boolean | Date | null | typeof MISSING
-type Row = { id: string; f?: unknown; g: string }
+type Row = { id: string; f?: unknown; g: string | null }
 type Peer = {
   f: string | number | boolean
   g?: string
   // A residual conjunct, `not(eq(r.g, notG))`, each view evaluates itself.
   notG?: string
+  // Orders a peer's rows; the reference gives the expected order. A group's
+  // rows share `f`, so orders read `g`, which may be null, and the id.
+  order?: PeerOrder
 }
+type PeerOrder =
+  | `id-desc`
+  | `g-desc`
+  | `g-asc-id-desc`
+  | `g-asc-nulls-first`
+  | `g-asc-nulls-last`
+  | `g-desc-nulls-last`
 type Step =
   | { kind: `sync`; ops: Array<Op> }
   | {
@@ -117,12 +127,18 @@ type Step =
   // `mount` (re)mounts that peer after cleanup, before the restart.
   | { kind: `cleanup-restart`; mount?: number }
 type Op =
-  | { type: `insert`; id: number; f: FieldValue; g: string }
+  | { type: `insert`; id: number; f: FieldValue; g: string | null }
   // `keepF` keeps the row's current `f`, so the row stays in its group.
-  | { type: `update`; id: number; f: FieldValue; g: string; keepF?: boolean }
+  | {
+      type: `update`
+      id: number
+      f: FieldValue
+      g: string | null
+      keepF?: boolean
+    }
   | { type: `delete`; id: number }
 type History = {
-  rows: Array<{ f: FieldValue; g: string }>
+  rows: Array<{ f: FieldValue; g: string | null }>
   // The source delivers its initial rows in reverse key order.
   reverseInitial?: boolean
   peers: Array<Peer>
@@ -169,8 +185,8 @@ function expectedKeys(
       (row) =>
         modelEq(row.f, peer.f) &&
         (peer.g === undefined || row.g === peer.g) &&
-        // `g` is never nullish here, so the negated equality is two-valued.
-        (peer.notG === undefined || row.g !== peer.notG),
+        // A null `g` makes the negated equality UNKNOWN, which excludes.
+        (peer.notG === undefined || (row.g !== null && row.g !== peer.notG)),
     )
     .map((row) => row.id)
     .sort()
@@ -189,7 +205,7 @@ function sameValueZero(a: unknown, b: unknown): boolean {
   return a === b || (Number.isNaN(a) && Number.isNaN(b))
 }
 
-function sourceRow(id: string, f: FieldValue, g: string): Row {
+function sourceRow(id: string, f: FieldValue, g: string | null): Row {
   return f === MISSING ? { id, g } : { id, f, g }
 }
 
@@ -205,12 +221,14 @@ const fieldArbitrary = fc.oneof(
   fc.constantFrom(...fieldValues),
 )
 const gArbitrary = fc.constantFrom(`x`, `y`)
+// Rows may hold a null `g`, which orders by its `nulls` option.
+const rowGArbitrary = fc.constantFrom<string | null>(`x`, `y`, null)
 const opArbitrary: fc.Arbitrary<Op> = fc.oneof(
   fc.record({
     type: fc.constant(`insert` as const),
     id: fc.nat({ max: 3 }),
     f: fieldArbitrary,
-    g: gArbitrary,
+    g: rowGArbitrary,
   }),
   {
     weight: 2,
@@ -219,13 +237,21 @@ const opArbitrary: fc.Arbitrary<Op> = fc.oneof(
         type: fc.constant(`update` as const),
         id: fc.nat({ max: 3 }),
         f: fieldArbitrary,
-        g: gArbitrary,
+        g: rowGArbitrary,
         keepF: fc.boolean(),
       },
       { requiredKeys: [`type`, `id`, `f`, `g`] },
     ),
   },
   fc.record({ type: fc.constant(`delete` as const), id: fc.nat({ max: 3 }) }),
+)
+const orderArbitrary = fc.constantFrom<PeerOrder>(
+  `id-desc`,
+  `g-desc`,
+  `g-asc-id-desc`,
+  `g-asc-nulls-first`,
+  `g-asc-nulls-last`,
+  `g-desc-nulls-last`,
 )
 const peerArbitrary: fc.Arbitrary<Peer> = fc.record(
   {
@@ -239,15 +265,24 @@ const peerArbitrary: fc.Arbitrary<Peer> = fc.record(
     ),
     g: gArbitrary,
     notG: gArbitrary,
+    order: orderArbitrary,
   },
   { requiredKeys: [`f`] },
 )
 const historyArbitrary: fc.Arbitrary<History> = fc.record({
-  rows: fc.array(fc.record({ f: fieldArbitrary, g: gArbitrary }), {
+  rows: fc.array(fc.record({ f: fieldArbitrary, g: rowGArbitrary }), {
     maxLength: 4,
   }),
   reverseInitial: fc.boolean(),
-  peers: fc.array(peerArbitrary, { minLength: 1, maxLength: 3 }),
+  peers: fc.array(
+    fc.oneof(
+      { weight: 2, arbitrary: peerArbitrary },
+      // An ordered peer over a whole group, so rows with several `g`
+      // values, including null, share one ordered view.
+      fc.record({ f: fc.constant<Peer[`f`]>(`a`), order: orderArbitrary }),
+    ),
+    { minLength: 1, maxLength: 3 },
+  ),
   steps: fc.array(
     fc.oneof(
       {
@@ -377,6 +412,28 @@ const pinnedHistories: ReadonlyArray<{ name: string; history: History }> = [
     },
   },
   {
+    name: `an update reorders rows within one ordered group`,
+    history: {
+      rows: [
+        { f: `a`, g: `x` },
+        { f: `a`, g: `y` },
+      ],
+      peers: [
+        { f: `a`, order: `g-desc` },
+        { f: `a`, order: `g-asc-nulls-last` },
+      ],
+      steps: [
+        { kind: `sync`, ops: [{ type: `update`, id: 0, f: `a`, g: `y` }] },
+        { kind: `sync`, ops: [{ type: `update`, id: 1, f: `a`, g: null }] },
+        {
+          kind: `optimistic`,
+          op: { type: `update`, id: 0, f: `a`, g: null },
+          confirm: false,
+        },
+      ],
+    },
+  },
+  {
     name: `a residual conjunct moves rows in and out of a view within one group`,
     history: {
       rows: [
@@ -440,14 +497,42 @@ let serial = 0
 const tick = () => new Promise((resolve) => setTimeout(resolve, 0))
 
 function peerQuery(source: any, peer: Peer) {
-  return (q: any) =>
-    q.from({ r: source }).where(({ r }: any) => {
+  return (q: any) => {
+    const query = q.from({ r: source }).where(({ r }: any) => {
       const conjuncts = [eq(r.f, peer.f)]
       if (peer.g !== undefined) conjuncts.push(eq(r.g, peer.g))
       if (peer.notG !== undefined) conjuncts.push(not(eq(r.g, peer.notG)))
       const [first, second, ...rest] = conjuncts
       return second ? and(first, second, ...rest) : first
     })
+    switch (peer.order) {
+      case undefined:
+        return query
+      case `id-desc`:
+        return query.orderBy(({ r }: any) => r.id, `desc`)
+      case `g-desc`:
+        return query.orderBy(({ r }: any) => r.g, `desc`)
+      case `g-asc-id-desc`:
+        return query
+          .orderBy(({ r }: any) => r.g)
+          .orderBy(({ r }: any) => r.id, `desc`)
+      case `g-asc-nulls-first`:
+        return query.orderBy(({ r }: any) => r.g, {
+          direction: `asc`,
+          nulls: `first`,
+        })
+      case `g-asc-nulls-last`:
+        return query.orderBy(({ r }: any) => r.g, {
+          direction: `asc`,
+          nulls: `last`,
+        })
+      case `g-desc-nulls-last`:
+        return query.orderBy(({ r }: any) => r.g, {
+          direction: `desc`,
+          nulls: `last`,
+        })
+    }
+  }
 }
 
 // A row's id and fields, which the model also knows.
