@@ -279,11 +279,15 @@ cleanup, and independent client scopes remain usable. Returning to a prior
 client scope retains that scope's binding, including through `DbProvider`.
 A suspended render that starts a source query also claims the ID until unmount.
 Separate client-scoped Suspense hooks and an initial suspended retry keep their
-same-ID sources distinct. The public rerender error or row is the observation
-cut. This owner does not constrain explicit `queryKey`, direct Collection input,
+same-ID sources distinct. A rejected collision render releases sync-start
+deferral for a different shared client descriptor; a later direct reader reaches
+`ready` and observes its row. The public rerender error, status, or row is the
+observation cut. This owner does not constrain explicit `queryKey`, direct Collection input,
 or legacy dependency-array identity, and it does not install a process-wide ID
 registry. Real persisted SQLite sources and DbClient SSR preload/streaming
-remain outside this controlled React driver.
+remain outside this controlled React driver. A space policy for a mounted hook
+that visits unbounded distinct source IDs remains open; this owner needs a
+bounded-navigation counter witness once that policy is chosen.
 
 The Query ownership oracle checks that a direct-write promise stays pending
 while a controlled persisted adapter holds its sync commit and settles after

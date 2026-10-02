@@ -821,6 +821,12 @@ function useLiveQueryImpl(
     unscoped: new Map<string, number>(),
     byClient: new WeakMap<DbClient, Map<string, number>>(),
   })
+  const resumeDeferredCollections = () => {
+    for (const collection of deferredCollectionsRef.current) {
+      collection._resumeSyncStart()
+    }
+    deferredCollectionsRef.current.clear()
+  }
 
   const queryKey = !inputIsCollection
     ? getExplicitQueryKey(configOrQueryOrCollection)
@@ -904,6 +910,8 @@ function useLiveQueryImpl(
       const token = getSourceObjectToken(source)
       const previous = seen.get(source.id) ?? prior?.get(source.id)
       if (previous !== undefined && previous !== token) {
+        // The rejected render must not retain a shared Collection's sync deferral.
+        resumeDeferredCollections()
         throw new Error(
           `[useLiveQuery] Source Collection "${source.id}" was replaced by a different Collection with the same ID while this hook is mounted. Unmount the hook and clean up its previous source and client scope before reusing the ID.`,
         )
@@ -966,13 +974,6 @@ function useLiveQueryImpl(
     !collectionRef.current ||
     (inputIsCollection && configRef.current !== configOrQueryOrCollection) ||
     (!inputIsCollection && (clientRef.current !== dbClient || identityChanged))
-
-  const resumeDeferredCollections = () => {
-    for (const collection of deferredCollectionsRef.current) {
-      collection._resumeSyncStart()
-    }
-    deferredCollectionsRef.current.clear()
-  }
 
   if (needsNewCollection) {
     if (inputIsCollection) {

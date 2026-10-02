@@ -15,6 +15,8 @@
  * suspends, because the live query may still own that source until cleanup.
  * Separate hooks can use same-ID objects: their client-scoped Suspense cache
  * entries must remain distinct, including before the first hook commits.
+ * A rejected render must release any sync-start deferral it acquired for a
+ * shared client descriptor, so a later direct reader can start that Collection.
  * The bounded histories below distinguish this law from a hash-only check,
  * which would miss A(id=x) -> C(id=y) -> B(id=x), a changed predicate, and
  * two different same-ID sources in one query.
@@ -25,15 +27,37 @@
  * arrays, or explicit-key semantics; explicit queryKey callers own their key.
  */
 import { act, render, renderHook, waitFor } from '@testing-library/react'
-import { DbClient, createCollection, eq, gt } from '@tanstack/db'
-import { describe, expect, it } from 'vitest'
-import { Suspense } from 'react'
+import {
+  DbClient,
+  collectionOptions,
+  createCollection,
+  eq,
+  gt,
+} from '@tanstack/db'
+import { describe, expect, it, vi } from 'vitest'
+import { Component, Suspense } from 'react'
 import { DbProvider } from '../src/DbProvider'
 import { useLiveQuery } from '../src/useLiveQuery'
 import { useLiveSuspenseQuery } from '../src/useLiveSuspenseQuery'
 import { mockSyncCollectionOptions } from '../../db/tests/utils'
+import type { ReactNode } from 'react'
 
 type Row = { id: string; value: string; rank: number }
+
+class TestErrorBoundary extends Component<
+  { children: ReactNode },
+  { error?: Error }
+> {
+  state: { error?: Error } = {}
+
+  static getDerivedStateFromError(error: Error) {
+    return { error }
+  }
+
+  render() {
+    return this.state.error ? <div>Rejected</div> : this.props.children
+  }
+}
 
 function source(id: string, value: string) {
   return createCollection(
@@ -71,6 +95,76 @@ function checkRerender(
 }
 
 describe(`React source ID reuse`, () => {
+  it(`releases a shared descriptor's sync deferral when a collision tears down the hook`, async () => {
+    const client = new DbClient()
+    const first = source(`settings`, `first`)
+    const replacement = source(`settings`, `replacement`)
+    let syncStarts = 0
+    const descriptor = collectionOptions(`shared-after-collision`, () => ({
+      id: `shared-after-collision`,
+      getKey: (row: Row) => row.id,
+      sync: {
+        sync: ({ begin, write, commit, markReady }) => {
+          syncStarts++
+          begin()
+          write({
+            type: `insert`,
+            value: { id: `one`, value: `shared`, rank: 1 },
+          })
+          commit()
+          markReady()
+        },
+      },
+    }))
+    const consoleError = vi.spyOn(console, `error`).mockImplementation(() => {})
+
+    function View({
+      current,
+      includeShared,
+    }: {
+      current: typeof first
+      includeShared: boolean
+    }) {
+      useLiveQuery({
+        client,
+        query: (q) =>
+          includeShared
+            ? q
+                .from({ settings: current })
+                .join({ shared: descriptor }, ({ settings, shared }) =>
+                  eq(settings.id, shared.id),
+                )
+            : q.from({ settings: current }),
+      })
+      return <div>Query</div>
+    }
+
+    try {
+      const root = render(
+        <TestErrorBoundary>
+          <View current={first} includeShared={false} />
+        </TestErrorBoundary>,
+      )
+      await act(async () => {})
+      root.rerender(
+        <TestErrorBoundary>
+          <View current={replacement} includeShared={true} />
+        </TestErrorBoundary>,
+      )
+      expect(root.getByText(`Rejected`)).toBeDefined()
+      expect(syncStarts).toBe(0)
+
+      const shared = client.collection(descriptor)
+      const reader = renderHook(() => useLiveQuery(shared))
+      await act(async () => {})
+      expect(reader.result.current.status).toBe(`ready`)
+      expect(reader.result.current.data[0]?.value).toBe(`shared`)
+      expect(syncStarts).toBe(1)
+    } finally {
+      consoleError.mockRestore()
+    }
+  })
+
   it(`rejects a different active source with the same ID before exposing stale rows`, async () => {
     const first = source(`settings`, `first`)
     const second = source(`settings`, `second`)
