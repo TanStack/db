@@ -23,6 +23,11 @@ import type { CollectionConfig, SyncConfig } from '../src/types.js'
  * source drain changes the base and acknowledgement. It does not reuse
  * production caches, pending-mutation mergers, or publication code.
  *
+ * A source batch can also arrive inside a mutation handler, before the handler
+ * returns. It is the same event as a source batch written while the new intent
+ * is active: it waits for settlement unless it is immediate or a truncate. The
+ * Collection must already own the request when its handler starts.
+ *
  * `runOptimisticHistory` gives the same edit, delete, settle, and sync history
  * to this model and a real Collection. After every step it compares rows,
  * metadata, immutable handler payloads, promise outcomes, downstream query
@@ -33,9 +38,28 @@ import type { CollectionConfig, SyncConfig } from '../src/types.js'
 
 export type HistoryRow = { id: number; a: number; b: number; c: number }
 type Fields = Partial<Omit<HistoryRow, `id`>>
+type SourceBatch = {
+  type: `sync`
+  rows: Array<HistoryRow>
+  truncate: boolean
+  immediate: boolean
+  copies: number
+}
 export type OptimisticStep =
-  | { type: `edit`; key: number; fields: Fields; optimistic: boolean }
-  | { type: `delete`; key: number; optimistic: boolean }
+  | {
+      type: `edit`
+      key: number
+      fields: Fields
+      optimistic: boolean
+      // A source batch the mutation handler writes before it returns.
+      inHandler?: SourceBatch | undefined
+    }
+  | {
+      type: `delete`
+      key: number
+      optimistic: boolean
+      inHandler?: SourceBatch | undefined
+    }
   | {
       type: `settle`
       slot: number
@@ -43,13 +67,7 @@ export type OptimisticStep =
       cascade: boolean
       failure?: `rollback` | `reject`
     }
-  | {
-      type: `sync`
-      rows: Array<HistoryRow>
-      truncate: boolean
-      immediate: boolean
-      copies: number
-    }
+  | SourceBatch
 
 type Intent = {
   key: number
@@ -439,7 +457,14 @@ export async function runOptimisticHistory(
   const model = new HistoryModel(initial, options.insertDefault)
   let sync!: Parameters<SyncConfig<HistoryRow>[`sync`]>[0]
   let starting: ReturnType<typeof createDeferred<void>> | undefined
-  const handler = () => starting!.promise
+  // The next handler call writes this batch synchronously, before it returns.
+  let handlerBatch: SourceBatch | undefined
+  const handler = () => {
+    const batch = handlerBatch
+    handlerBatch = undefined
+    if (batch) writeSourceBatch(batch)
+    return starting!.promise
+  }
   const config: CollectionConfig<HistoryRow> = {
     getKey: (row) => row.id,
     onInsert: handler,
@@ -493,6 +518,28 @@ export async function runOptimisticHistory(
     dependencies: 0,
     failures: 0,
     snapshotOverrides: 0,
+    handlerBatches: 0,
+  }
+  function writeSourceBatch(step: SourceBatch) {
+    sync.begin({ immediate: step.immediate })
+    if (step.truncate) {
+      sync.truncate()
+      counts.replacements++
+    }
+    for (let copy = 0; copy < step.copies; copy++) {
+      for (const row of step.rows)
+        sync.write({ type: `update`, value: { ...row } })
+    }
+    const receipt = sync.commit()
+    if (receipt !== true) {
+      receipts.push(observeHistoryPromise(receipt))
+      counts.queued++
+    }
+    if (
+      (step.immediate || step.truncate) &&
+      model.intents.some((intent) => intent.state === `active`)
+    )
+      counts.snapshotOverrides++
   }
   return withHistoryCleanup(
     async () => {
@@ -704,6 +751,12 @@ export async function runOptimisticHistory(
           if (index === undefined) continue
           const intent = model.intents[index]!
           cuts = [sorted(model.visible().values())]
+          if (step.inHandler) {
+            model.sync(step.inHandler)
+            cuts.push(sorted(model.visible().values()))
+            handlerBatch = step.inHandler
+            counts.handlerBatches++
+          }
           const done = createDeferred<void>()
           starting = done
           const tx =
@@ -756,6 +809,7 @@ export async function runOptimisticHistory(
             tx.mutations[0]!.modified,
             `captured request snapshot`,
           ).toMatchObject(plain(intent.snapshot))
+          expect(handlerBatch, `handler wrote its source batch`).toBeUndefined()
           counts.edits++
           if (step.type === `delete`) counts.deletes++
           if (intent.dependency !== undefined) counts.dependencies++
@@ -791,25 +845,7 @@ export async function runOptimisticHistory(
         } else {
           model.sync(step)
           cuts = [sorted(model.visible().values())]
-          sync.begin({ immediate: step.immediate })
-          if (step.truncate) {
-            sync.truncate()
-            counts.replacements++
-          }
-          for (let copy = 0; copy < step.copies; copy++) {
-            for (const row of step.rows)
-              sync.write({ type: `update`, value: { ...row } })
-          }
-          const receipt = sync.commit()
-          if (receipt !== true) {
-            receipts.push(observeHistoryPromise(receipt))
-            counts.queued++
-          }
-          if (
-            (step.immediate || step.truncate) &&
-            model.intents.some((intent) => intent.state === `active`)
-          )
-            counts.snapshotOverrides++
+          writeSourceBatch(step)
         }
         check(`${position}: ${JSON.stringify(step)}`)
         // Count events as well as final values; value-only oracles miss redundant
