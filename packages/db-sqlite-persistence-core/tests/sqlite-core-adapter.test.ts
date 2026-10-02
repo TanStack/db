@@ -2709,9 +2709,9 @@ export function runSQLiteCoreAdapterContractSuite(
  * `and`, `or`, and scalar predicates. The core owner's 1,200-value case at
  * `packages/db-sqlite-persistence-core/tests/sqlite-core-adapter.test.ts:2459`
  * promises large-list support. Issue #1993 requests a total statement bound.
- * On a connection with 999 variable slots, a valid request
- * must return exactly its matching persisted rows without asking SQLite to
- * prepare a statement with more than 999 bindings.
+ * On a connection with a declared variable limit, a valid request must return
+ * exactly its matching persisted rows without asking SQLite to prepare a
+ * statement above that limit, even if its transaction driver omits the limit.
  *
  * Scope: finite primitive values; one or two list predicates, including an
  * empty list, and up to one scalar equality; two or three persisted rows; one
@@ -2735,12 +2735,13 @@ export function runSQLiteCoreAdapterContractSuite(
  * bindings are outside the domain. A scalar clause without one value is an
  * invalid model input. Removing any list-count or length axis loses one of
  * the three capacity forms. Kind and connective challenge value preservation.
- * The 998/999/1000 margins distinguish a
- * misplaced cap; 499+500 versus 500+500 distinguishes statement-wide counting.
+ * The 998/999/1000 margins distinguish a misplaced cap; 499+500 versus
+ * 500+500 distinguishes statement-wide counting. A distinct transaction
+ * driver without a cap crosses a real 100/101-variable host boundary.
  *
  * Production driver: use the real core adapter with an actual prepared SQLite
- * statement and `variableNumber: 999`. Record every attempted driver statement
- * during `loadSubset`, including a prepare failure. The observation cut is
+ * statement and `variableNumber: 999` or `100`. Record every attempted driver
+ * statement during `loadSubset`, including a prepare failure. The observation cut is
  * `loadSubset` fulfillment/rejection, typed returned values, ordered keys when
  * requested, and the attempted statements' bind counts.
  *
@@ -2867,11 +2868,13 @@ function preparedDriver(
   db: DatabaseSync,
   attempts: Array<Attempt>,
   withDriver = false,
+  cap = BINDING_CAP,
+  omitTransactionCap = false,
 ) {
   let record = false
   let nextSavepoint = 0
   const driver: SQLiteDriver & { startObservation: () => void } = {
-    maxBoundParameters: BINDING_CAP,
+    maxBoundParameters: cap,
     startObservation() {
       record = true
     },
@@ -2935,14 +2938,24 @@ function preparedDriver(
     },
   }
   if (withDriver) {
-    driver.transactionWithDriver = driver.transaction
+    driver.transactionWithDriver = omitTransactionCap
+      ? (fn) =>
+          driver.transaction(() =>
+            fn({
+              exec: driver.exec,
+              query: driver.query,
+              run: driver.run,
+              transaction: driver.transaction,
+            }),
+          )
+      : driver.transaction
   }
   return driver
 }
 
-function limitedDatabase(): DatabaseSync {
+function limitedDatabase(cap = BINDING_CAP): DatabaseSync {
   // Node supports this runtime option before the installed Node types declare it.
-  const options = { limits: { variableNumber: BINDING_CAP } }
+  const options = { limits: { variableNumber: cap } }
   return new DatabaseSync(
     ':memory:',
     options as unknown as NonNullable<
@@ -2960,12 +2973,23 @@ type Observation = {
   error?: string
   cleanupError?: string
 }
-async function observe(spec: Spec, withDriver = false): Promise<Observation> {
-  const db = limitedDatabase()
+async function observe(
+  spec: Spec,
+  withDriver = false,
+  cap = BINDING_CAP,
+  omitTransactionCap = false,
+): Promise<Observation> {
+  const db = limitedDatabase(cap)
   const attempts: Array<Attempt> = []
   let observation: Observation | undefined
   try {
-    const driver = preparedDriver(db, attempts, withDriver)
+    const driver = preparedDriver(
+      db,
+      attempts,
+      withDriver,
+      cap,
+      omitTransactionCap,
+    )
     const adapter = new SQLiteCorePersistenceAdapter({ driver })
     const rows: Array<Row> = spec.rows
       ? [...spec.rows]
@@ -3062,6 +3086,7 @@ type Violation = {
 function violation(
   spec: Spec,
   observation: Observation,
+  cap = BINDING_CAP,
 ): Violation | undefined {
   const predicateSelects = observation.attempts.filter(
     (entry) =>
@@ -3074,9 +3099,7 @@ function violation(
       checkpoint: 'driver-query',
       message: `predicate SELECT reach=${predicateSelects.length}`,
     }
-  const over = observation.attempts.filter(
-    (entry) => entry.bindings > BINDING_CAP,
-  )
+  const over = observation.attempts.filter((entry) => entry.bindings > cap)
   if (over.length)
     return {
       kind: 'capacity',
@@ -3454,6 +3477,31 @@ export function runSQLiteBindingCapacityOracleSuite(): void {
             )
         }
         expect(failures).toEqual([])
+      },
+    )
+
+    bindingFixedIt(
+      `honors the root connection limit when a distinct transaction driver omits it`,
+      async () => {
+        for (const count of [100, 101]) {
+          const spec: Spec = {
+            label: `${count}-scalar-conjunction`,
+            valueKind: `string`,
+            connective: `and`,
+            clauses: Array.from({ length: count }, () => ({
+              field: `a`,
+              kind: `eq`,
+              values: [`target`],
+            })),
+          }
+          const observation = await observe(spec, true, 100, true)
+          expect(violation(spec, observation, 100)).toBeUndefined()
+          const predicateReads = observation.attempts.filter((entry) =>
+            entry.sql.startsWith(`SELECT key, value, metadata, row_version`),
+          )
+          expect(predicateReads).toHaveLength(1)
+          expect(predicateReads[0]?.bindings).toBe(count === 100 ? 100 : 0)
+        }
       },
     )
 

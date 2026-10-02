@@ -222,6 +222,7 @@ function observeSharedLogicalSchedulingSupport(
   }
 
   return {
+    maxBoundParameters: driver.maxBoundParameters,
     exec: (sql) => observe(driver.exec(sql)),
     query: <T>(sql: string, params: ReadonlyArray<unknown> = []) =>
       observe(driver.query<T>(sql, params)),
@@ -2409,7 +2410,10 @@ export class SQLiteCorePersistenceAdapter implements PersistenceAdapter {
       queryParams.push(...orderByCompiled.params)
     }
 
-    if (queryParams.length > (driver.maxBoundParameters ?? 999)) {
+    if (
+      queryParams.length >
+      (driver.maxBoundParameters ?? this.driver.maxBoundParameters ?? 999)
+    ) {
       sql = `SELECT key, value, metadata, row_version FROM ${collectionTableSql}`
       queryParams.length = 0
     }
