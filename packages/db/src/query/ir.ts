@@ -88,17 +88,18 @@ abstract class BaseExpression<T = any> {
 
 export class CollectionRef extends BaseExpression {
   public type = `collectionRef` as const
-  /** Opaque runtime identity; aliases are lexical names only. */
-  public readonly sourceId!: string
+  // Not an own property, so structural identity and hashing ignore it.
+  readonly #sourceId = `source-${++nextCollectionSourceId}`
   constructor(
     public collection: CollectionImpl,
     public alias: string,
   ) {
     super()
-    Object.defineProperty(this, `sourceId`, {
-      value: `source-${++nextCollectionSourceId}`,
-      enumerable: false,
-    })
+  }
+
+  /** Opaque runtime identity; aliases are lexical names only. */
+  get sourceId(): string {
+    return this.#sourceId
   }
 }
 
@@ -148,11 +149,9 @@ export class PropRef<T = any> extends BaseExpression<T> {
     sourceAlias?: string,
   ) {
     super()
+    // Present only when given, so unqualified refs keep their shape.
     if (sourceAlias !== undefined) {
-      Object.defineProperty(this, `sourceAlias`, {
-        value: sourceAlias,
-        enumerable: true,
-      })
+      ;(this as { sourceAlias?: string }).sourceAlias = sourceAlias
     }
   }
 }

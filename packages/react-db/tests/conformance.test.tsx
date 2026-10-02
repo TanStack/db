@@ -214,7 +214,7 @@ const reactDriver: LiveQueryDriver = {
   mountConfig,
   mountDisabled,
   knownGaps: [],
-  features: { serverSnapshot: true, suspense: true },
+  features: { serverSnapshot: true, suspense: true, pooledEqFilters: true },
 }
 
 runSuite(reactDriver)
