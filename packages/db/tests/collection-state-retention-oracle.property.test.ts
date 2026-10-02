@@ -4,6 +4,7 @@ import { createCollection } from '../src/collection/index.js'
 import {
   DuplicateKeySyncError,
   SyncTransactionAbortedError,
+  SyncTransactionAlreadyCommittedWriteError,
 } from '../src/errors.js'
 import { BTreeIndex } from '../src/indexes/btree-index.js'
 import { createDeferred } from '../src/deferred.js'
@@ -1455,6 +1456,28 @@ it.each([
   },
 )
 
+// A committed source batch that waits for persistence is closed to writes.
+// Without the check, a late write would join the queued batch.
+it(`rejects a write to a committed batch that waits for persistence`, async () => {
+  await withParkedSync(
+    [{ id: 1, value: 0 }],
+    async ({ collection, sync, releasePersistence }) => {
+      sync.begin()
+      sync.write({ type: `update`, value: { id: 1, value: 1 } })
+      const receipt = sync.commit()
+      if (receipt === true) throw new Error(`update was not queued`)
+
+      expect(() =>
+        sync.write({ type: `update`, value: { id: 1, value: 2 } }),
+      ).toThrow(SyncTransactionAlreadyCommittedWriteError)
+
+      await releasePersistence()
+      await receipt
+      expect(collection.get(1)?.value).toBe(1)
+    },
+  )
+})
+
 it(`keeps an invalidated active transaction addressable until commit`, async () => {
   await withParkedSync(
     [{ id: 1, value: 0 }],
@@ -2572,6 +2595,17 @@ const sourceBatch = fc.record({
     selector: (row) => row.id,
     maxLength: 3,
   }),
+  // The source may also delete keys; only keys it holds take effect.
+  deletes: fc.oneof(
+    { weight: 3, arbitrary: fc.constant([]) },
+    {
+      weight: 1,
+      arbitrary: fc.uniqueArray(fc.integer({ min: 1, max: 3 }), {
+        minLength: 1,
+        maxLength: 2,
+      }),
+    },
+  ),
   truncate: fc.boolean(),
   immediate: fc.boolean(),
   copies: fc.integer({ min: 1, max: 2 }),
@@ -2690,6 +2724,64 @@ it.each(
 it(`generates direct delete actions`, () => {
   const commands = fc.sample(optimisticStep, { seed: 86104, numRuns: 100 })
   expect(commands.some((step) => step.type === `delete`)).toBe(true)
+})
+
+// Replay of a random-campaign counterexample. A confirmed delete must clear the
+// key's local attribution, so a later source reinsert is remote.
+it(`attributes a source reinsert after a confirmed delete to the source`, async () => {
+  const row = { id: 2, a: 0, b: 0, c: 0 }
+  const counts = await runOptimisticHistory(
+    [],
+    [
+      {
+        type: `sync`,
+        rows: [row],
+        truncate: false,
+        immediate: false,
+        copies: 1,
+      },
+      {
+        type: `delete`,
+        key: 2,
+        optimistic: false,
+        inHandler: {
+          type: `sync`,
+          rows: [],
+          deletes: [2],
+          truncate: false,
+          immediate: false,
+          copies: 1,
+        },
+      },
+      {
+        type: `edit`,
+        key: 1,
+        fields: { b: 0 },
+        optimistic: false,
+        inHandler: {
+          type: `sync`,
+          rows: [row],
+          truncate: false,
+          immediate: true,
+          copies: 1,
+        },
+      },
+    ],
+  )
+  expect(counts.sourceDeletes).toBe(1)
+})
+
+it(`writes source inserts and deletes in the fixed campaign`, async () => {
+  const histories = fc.sample(optimisticHistory, { seed: 86103, numRuns: 40 })
+  let inserts = 0
+  let deletes = 0
+  for (const { initial, steps } of histories) {
+    const counts = await runOptimisticHistory(initial, steps)
+    inserts += counts.sourceInserts
+    deletes += counts.sourceDeletes
+  }
+  expect(inserts).toBeGreaterThan(0)
+  expect(deletes).toBeGreaterThan(0)
 })
 
 it(`generates source batches inside insert, update, and delete handlers`, () => {
