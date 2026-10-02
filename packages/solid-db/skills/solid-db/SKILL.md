@@ -29,7 +29,7 @@ This skill builds on db-core. Read it first for collection setup, query builder,
 ## Setup
 
 ```tsx
-import { useLiveQuery, eq, not } from '@tanstack/solid-db'
+import { useLiveQuery, eq, gt, not } from '@tanstack/solid-db'
 import { For, Show } from 'solid-js'
 import { Loading } from '@solidjs/web'
 
@@ -155,7 +155,7 @@ Without the bridge, use `useLiveQuery` which handles subscription internally.
 ```tsx
 import { Loading, Errored } from '@solidjs/web'
 
-<Errored catch={(err) => <div>Error: {err.message}</div>}>
+<Errored fallback={(err) => <div>Error: {String(err())}</div>}>
   <Loading fallback={<div>Loading...</div>}>
     <For each={todosQuery()}>{(todo) => <li>{todo.text}</li>}</For>
   </Loading>

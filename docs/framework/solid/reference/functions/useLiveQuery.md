@@ -72,10 +72,10 @@ const todosQuery = useLiveQuery((q) =>
 )
 
 return (
-  <Errored catch={(err) => <div>Error: {err.message}</div>}>
+  <Errored fallback={(err) => <div>Error: {String(err())}</div>}>
     <Loading fallback={<div>Loading...</div>}>
       <For each={todosQuery()}>
-        {(todo) => <li key={todo.id}>{todo.text}</li>}
+        {(todo) => <li>{todo.text}</li>}
       </For>
     </Loading>
   </Errored>
@@ -91,7 +91,7 @@ const todosQuery = useLiveQuery((q) =>
 return (
   <Loading fallback={<div>Loading...</div>}>
     <For each={todosQuery()}>
-      {(todo) => <li key={todo.id}>{todo.text}</li>}
+      {(todo) => <li>{todo.text}</li>}
     </For>
   </Loading>
 )
@@ -166,10 +166,10 @@ const todosQuery = useLiveQuery((q) =>
 )
 
 return (
-  <Errored catch={(err) => <div>Error: {err.message}</div>}>
+  <Errored fallback={(err) => <div>Error: {String(err())}</div>}>
     <Loading fallback={<div>Loading...</div>}>
       <For each={todosQuery()}>
-        {(todo) => <li key={todo.id}>{todo.text}</li>}
+        {(todo) => <li>{todo.text}</li>}
       </For>
     </Loading>
   </Errored>
@@ -185,7 +185,7 @@ const todosQuery = useLiveQuery((q) =>
 return (
   <Loading fallback={<div>Loading...</div>}>
     <For each={todosQuery()}>
-      {(todo) => <li key={todo.id}>{todo.text}</li>}
+      {(todo) => <li>{todo.text}</li>}
     </For>
   </Loading>
 )
@@ -240,23 +240,17 @@ const personsQuery = useLiveQuery(() => ({ query: queryBuilder }))
 ```
 
 ```ts
-// Handle all states uniformly
+// Handle loading and errors through boundaries
 const itemsQuery = useLiveQuery(() => ({
   query: (q) => q.from({ items: itemCollection })
 }))
 
 return (
-  <Switch fallback={<div>{itemsQuery().length} items loaded</div>}>
-    <Match when={itemsQuery.isLoading}>
-      <div>Loading...</div>
-    </Match>
-    <Match when={itemsQuery.isError}>
-      <div>Something went wrong</div>
-    </Match>
-    <Match when={!itemsQuery.isReady}>
-      <div>Preparing...</div>
-    </Match>
-  </Switch>
+  <Errored fallback={(err) => <div>Something went wrong: {String(err())}</div>}>
+    <Loading fallback={<div>Loading...</div>}>
+      <div>{itemsQuery().length} items loaded</div>
+    </Loading>
+  </Errored>
 )
 ```
 
@@ -317,18 +311,15 @@ const handleToggle = (id) => {
 ```
 
 ```ts
-// Handle states consistently
+// Handle loading and errors through boundaries
 const sharedQuery = useLiveQuery(() => sharedCollection)
 
 return (
- <Switch fallback={<div><For each={sharedQuery()}>{(item) => <Item key={item.id} {...item} />}</For></div>}>
-   <Match when={sharedQuery.isLoading}>
-     <div>Loading...</div>
-   </Match>
-   <Match when={sharedQuery.isError}>
-     <div>Error loading data</div>
-   </Match>
- </Switch>
+  <Errored fallback={(err) => <div>Error loading data: {String(err())}</div>}>
+    <Loading fallback={<div>Loading...</div>}>
+      <For each={sharedQuery()}>{(item) => <Item {...item} />}</For>
+    </Loading>
+  </Errored>
 )
 ```
 
@@ -407,10 +398,10 @@ const todosQuery = useLiveQuery((q) =>
 )
 
 return (
-  <Errored catch={(err) => <div>Error: {err.message}</div>}>
+  <Errored fallback={(err) => <div>Error: {String(err())}</div>}>
     <Loading fallback={<div>Loading...</div>}>
       <For each={todosQuery()}>
-        {(todo) => <li key={todo.id}>{todo.text}</li>}
+        {(todo) => <li>{todo.text}</li>}
       </For>
     </Loading>
   </Errored>
@@ -426,7 +417,7 @@ const todosQuery = useLiveQuery((q) =>
 return (
   <Loading fallback={<div>Loading...</div>}>
     <For each={todosQuery()}>
-      {(todo) => <li key={todo.id}>{todo.text}</li>}
+      {(todo) => <li>{todo.text}</li>}
     </For>
   </Loading>
 )

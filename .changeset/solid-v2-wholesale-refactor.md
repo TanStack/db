@@ -4,7 +4,7 @@
 
 # Solid v2 RC migration + wholesale observer refactor
 
-Migrates `@tanstack/solid-db` from Solid v1 to **Solid v2 RC** (`solid-js@2.0.0-rc.0`) and reworks the adapter to use the shared `LiveQueryObserver` in wholesale mode. This is a **breaking** release — the peer dependency is now `solid-js: >=2.0.0-rc.0` and `@solidjs/web: >=2.0.0-rc.0`.
+Migrates `@tanstack/solid-db` from Solid v1 to **Solid v2 RC** (developed against `solid-js@2.0.0-rc.13`) and reworks the adapter to use the shared `LiveQueryObserver` in wholesale mode. This is a **breaking** release — the peer dependency is now `solid-js: >=2.0.0-rc.0` and `@solidjs/web: >=2.0.0-rc.0`.
 
 ## Breaking changes
 
@@ -15,12 +15,10 @@ Peer dependencies require Solid v2 RC. Code consuming `@tanstack/solid-db` must 
 - `Suspense` → `Loading` (from `@solidjs/web`)
 - `ErrorBoundary` → `Errored` (from `@solidjs/web`)
 - `createResource` → async `createMemo` (internal; `useLiveQuery` now throws `NotReadyError` for `<Loading>` and the captured error for `<Errored>`)
-- `createEffect` → split `createRenderEffect` (internal)
+- Effects use the split two-arg `createEffect(compute, apply)` form (internal)
 - `batch()` removed — v2 auto-batches
-- `createStore`/`reconcile` imported from `solid-js` root (not `solid-js/store`)
-- `reconcile(value, { key, merge })` → `reconcile(value, key | null)`
-- Store setter uses draft callback form
-- `ownedWrite: true` on status signal (written from observer callbacks)
+- Data materialization uses a keyed `createProjection` (key `$key`) instead of `createStore` + `reconcile` calls
+- `ownedWrite: true` on the snapshot signal (seeded from the effect's apply phase; observer notifies write it from outside any owned scope)
 
 ### Removed status flags and data property from accessor
 
