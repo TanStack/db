@@ -315,6 +315,12 @@ The persistence owner holds an earlier source publication until a later
 immediate source write is queued, on both sides of the wrapper's publication
 wait. A listener failure on the earlier batch must not reject the later write;
 a faulting index before receipt settlement still rejects the dependent write.
+A two-handler Query history holds the first durable write, then starts a second
+mutation on the same row. It checks four pending receipts, durable revisions in
+accepted `one`, `two`, `three` order, the latest Query cache and Collection row
+after settlement, and the row after an explicit refetch. The wrong-order
+`one`, `three`, `two` control fails its order check. This controlled adapter
+does not establish Expo SQLite scheduling or every multi-action interleaving.
 Precommit cancellation and cleanup controls pass. Each history has its own Collection identity and an exact
 adapter commit-count check at the hold. The controlled adapter
 establishes these cuts; it does not establish native SQLite or Expo scheduling.

@@ -84,6 +84,11 @@ import type { QueryCollectionUtils } from '../src/query.js'
  * Direct writes belong to the current sync run. Cleanup start invalidates that
  * run, so later writes must fail without changing storage. Restart admits
  * writes through a new run. The fixed history below checks each boundary.
+ * Two mutation handlers on the same row have a separate FIFO law. Their
+ * accepted revisions come from user action order, independent of Query cache
+ * notifications. A held first durable commit keeps all four public receipts
+ * pending. After release, the storage history, Query cache, and Collection
+ * must agree on the second revision, including after an explicit refetch.
  */
 
 type ResultSettlementOperationState =
@@ -1514,6 +1519,7 @@ function createPersistedOverlapFixture(
   const handlerWriteGate = createDeferred<void>()
   let holdHandlerWrite = false
   let handlerWriteReceipt: Promise<unknown> | undefined
+  const handlerWriteReceipts: Array<Promise<unknown>> = []
   const options = queryCollectionOptions<Item>({
     id,
     queryClient,
@@ -1531,6 +1537,7 @@ function createPersistedOverlapFixture(
       handlerWriteReceipt = Promise.resolve(
         handlerCollection.utils.writeUpsert(structuredClone(serverRows[0]!)),
       )
+      handlerWriteReceipts.push(handlerWriteReceipt)
       handlerEntered.resolve()
       await handlerWriteReceipt
       return { refetch: false }
@@ -1617,6 +1624,7 @@ function createPersistedOverlapFixture(
     },
     releaseHandlerWrite: () => handlerWriteGate.resolve(),
     handlerWriteReceipt: () => handlerWriteReceipt,
+    handlerWriteReceipts: () => [...handlerWriteReceipts],
     queryResultEntered: queryResultEntered.promise,
     releaseQueryResult: () => releaseQueryResult.resolve(),
     setServer: (name: string) => {
@@ -2011,6 +2019,84 @@ describe(`query collection ownership lifecycle`, () => {
       expect(collection.get(`row`)?.name).toBe(`three`)
     },
   )
+
+  // Two user actions may persist the same row at once. The source commits are
+  // accepted in handler order; storage must keep that order even when the first
+  // commit is held and both optimistic transactions remain active.
+  it(`settles parallel mutation handlers in accepted durable order`, async () => {
+    const {
+      collection,
+      queryClient,
+      storage,
+      sourceCommits,
+      handlerWriteReceipts,
+      setServer,
+    } = createPersistedOverlapFixture(`parallel-handler-writes`, 2, true)
+    await collection.preload()
+    expect(storage.durableRevisions()).toEqual([`one`])
+
+    setServer(`two`)
+    const first = collection.update(`row`, (draft) => {
+      draft.name = `optimistic-two`
+    })
+    void first.isPersisted.promise.catch(() => undefined)
+    await storage.entered
+    expect(
+      storage.gatedTransaction()?.mutations.map(({ value }) => value.name),
+    ).toContain(`two`)
+    await vi.waitFor(() => expect(handlerWriteReceipts()).toHaveLength(1))
+
+    setServer(`three`)
+    const second = collection.update(`row`, (draft) => {
+      draft.name = `optimistic-three`
+    })
+    void second.isPersisted.promise.catch(() => undefined)
+    await vi.waitFor(() => expect(handlerWriteReceipts()).toHaveLength(2))
+    await vi.waitFor(() =>
+      expect(sourceCommits.some(({ writes }) => writes.includes(`three`))).toBe(
+        true,
+      ),
+    )
+    const writeReceipts = handlerWriteReceipts()
+    const outcomes = [
+      first.isPersisted.promise,
+      second.isPersisted.promise,
+      ...writeReceipts,
+    ]
+    const settled = outcomes.map(() => false)
+    outcomes.forEach((outcome, index) => {
+      void outcome.then(
+        () => {
+          settled[index] = true
+        },
+        () => {
+          settled[index] = true
+        },
+      )
+    })
+    await Promise.resolve()
+    expect(settled).toEqual([false, false, false, false])
+    expect(storage.durableRevisions()).toEqual([`one`])
+
+    storage.release()
+    expect(
+      (await Promise.allSettled(outcomes)).map(({ status }) => status),
+    ).toEqual([`fulfilled`, `fulfilled`, `fulfilled`, `fulfilled`])
+    const expectedDurableOrder = [`one`, `two`, `three`]
+    const assertDurableOrder = (revisions: Array<string>) =>
+      expect(revisions).toEqual(expectedDurableOrder)
+    expect(() => assertDurableOrder([`one`, `three`, `two`])).toThrow()
+    assertDurableOrder(storage.durableRevisions())
+    expect(storage.snapshot().rows.get(`row`)?.name).toBe(`three`)
+    expect(collection.get(`row`)?.name).toBe(`three`)
+    expect(queryClient.getQueryData([`parallel-handler-writes`])).toEqual([
+      { id: `row`, category: `group`, name: `three` },
+    ])
+    await collection.utils.refetch({ throwOnError: true })
+    expect(collection.get(`row`)?.name).toBe(`three`)
+    expect(storage.snapshot().rows.get(`row`)?.name).toBe(`three`)
+    expect(collection.utils.lastError).toBeUndefined()
+  })
 
   it(`cancels a superseded result before its source commit`, async () => {
     const {
