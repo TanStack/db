@@ -35,6 +35,7 @@ type Listener = (changes: Array<ChangeMessage<Row, string | number>>) => void
 type StatusListener = CollectionEventHandler<`status:change`>
 
 interface PartitionGroup {
+  key: string
   // Key order, as in a live-query Collection without orderBy.
   rows: SortedMap<string | number, Row>
   listeners: Set<Listener>
@@ -44,6 +45,16 @@ interface PartitionGroup {
 
 const partitionsBySource = new WeakMap<object, Map<string, Partition>>()
 
+// What a view reads for a value with no rows and no watchers. Real groups
+// draw revisions from their partition's clock, which starts above 0.
+const EMPTY_GROUP: PartitionGroup = {
+  key: ``,
+  rows: new SortedMap(),
+  listeners: new Set(),
+  revision: 0,
+  layoutRevision: 0,
+}
+
 // Length-prefixed, so no two part lists share an encoding.
 function appendGroupKeyPart(groupKey: string, part: string): string {
   return `${groupKey}${part.length}:${part}`
@@ -51,6 +62,8 @@ function appendGroupKeyPart(groupKey: string, part: string): string {
 
 class Partition {
   private readonly groups = new Map<string, PartitionGroup>()
+  // Revisions for every group, so a recreated group never repeats one.
+  private clock = 0
   private subscription: { unsubscribe: () => void } | undefined
   private stopStatusEvents: (() => void) | undefined
   // One source status listener serves every view of this partition.
@@ -90,15 +103,29 @@ class Partition {
   group(key: string): PartitionGroup {
     let group = this.groups.get(key)
     if (!group) {
+      const revision = ++this.clock
       group = {
+        key,
         rows: new SortedMap(this.compareRows),
         listeners: new Set(),
-        revision: 0,
-        layoutRevision: 0,
+        revision,
+        layoutRevision: revision,
       }
       this.groups.set(key, group)
     }
     return group
+  }
+
+  /** A group for reading, without creating one. */
+  peek(key: string): PartitionGroup {
+    return this.groups.get(key) ?? EMPTY_GROUP
+  }
+
+  // A group with no rows and no watchers holds nothing anyone can read.
+  private dropIfUnused(group: PartitionGroup): void {
+    if (group.rows.size === 0 && group.listeners.size === 0) {
+      this.groups.delete(group.key)
+    }
   }
 
   /**
@@ -171,6 +198,7 @@ class Partition {
   removeListener(group: PartitionGroup, listener: Listener): void {
     if (!group.listeners.delete(listener)) return
     this.listenerCount--
+    this.dropIfUnused(group)
     this.scheduleRelease(0)
   }
 
@@ -198,13 +226,8 @@ class Partition {
     if (this.listenerCount > 0) return
     this.stopStatusEvents?.()
     this.stopStatusEvents = undefined
-    // Views outlive a release and may subscribe again, so they keep their
-    // groups for the next subscription to refill.
-    for (const group of this.groups.values()) {
-      group.rows.clear()
-      group.revision++
-      group.layoutRevision++
-    }
+    // Views read groups by key, so a later subscription refills new ones.
+    this.groups.clear()
     this.release()
   }
 
@@ -220,7 +243,7 @@ class Partition {
       const list = touched.get(group)
       if (list) list.push(change)
       else touched.set(group, [change])
-      if (change.type !== `update`) group.layoutRevision++
+      if (change.type !== `update`) group.layoutRevision = ++this.clock
     }
     for (const change of changes) {
       const next =
@@ -257,8 +280,9 @@ class Partition {
       }
     }
     for (const [group, groupChanges] of touched) {
-      group.revision++
+      group.revision = ++this.clock
       for (const listener of [...group.listeners]) listener(groupChanges)
+      this.dropIfUnused(group)
     }
   }
 }
@@ -454,7 +478,6 @@ class PooledLiveQuery {
   // No persisted readiness, single-result config, or layout channel.
   readonly config = undefined
   readonly _subscribeLayoutChanges = undefined
-  private readonly group: PartitionGroup
   private collection: Collection<any, any, any> | undefined = undefined
   private listenerCount = 0
   private collectionHold: { unsubscribe: () => void } | undefined = undefined
@@ -463,17 +486,21 @@ class PooledLiveQuery {
     private readonly source: CollectionImpl<any, any, any, any, any>,
     private readonly query: BaseQueryBuilder,
     private readonly partition: Partition,
-    groupKey: string,
+    private readonly groupKey: string,
     private readonly gcTime: number,
     // The query's conjuncts beyond its group's equalities, if any.
     private readonly passes: ((row: Row) => boolean) | undefined,
   ) {
-    this.group = partition.group(groupKey)
     partition.retain(gcTime)
   }
 
   get status(): CollectionStatus {
     return this.partition.terminated ? `error` : this.source.status
+  }
+
+  // Read by key: the partition drops a group nobody watches once it empties.
+  private get group(): PartitionGroup {
+    return this.partition.peek(this.groupKey)
   }
 
   get _stateRevision(): number {
@@ -497,7 +524,8 @@ class PooledLiveQuery {
     // A released partition refills its group here, so seed the filter after.
     this.partition.subscribe()
     const listener = this.passes ? this.filterChanges(callback) : callback
-    this.partition.addListener(this.group, listener)
+    const group = this.partition.group(this.groupKey)
+    this.partition.addListener(group, listener)
     this.listenerCount++
     this.holdCollection()
     if (options.includeInitialState) {
@@ -514,7 +542,7 @@ class PooledLiveQuery {
       unsubscribe: () => {
         if (!subscribed) return
         subscribed = false
-        this.partition.removeListener(this.group, listener)
+        this.partition.removeListener(group, listener)
         if (--this.listenerCount === 0) {
           this.collectionHold?.unsubscribe()
           this.collectionHold = undefined

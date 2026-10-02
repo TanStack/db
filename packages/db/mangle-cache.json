@@ -380,5 +380,7 @@
   "passes": "ge",
   "registry": "gf",
   "compareRows": "gg",
-  "sameFields": "gh"
+  "sameFields": "gh",
+  "dropIfUnused": "gi",
+  "clock": "gj"
 }

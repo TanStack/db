@@ -287,6 +287,83 @@ describe(`pooled live query gcTime`, () => {
     for (const stop of stops) stop()
   })
 
+  it(`keeps groups only for values with rows or watchers`, async () => {
+    const source = makeSource()
+    source.utils.begin()
+    for (let n = 0; n < 50; n++) {
+      source.utils.write({ type: `insert`, value: { id: `r${n}`, g: `v${n}` } })
+    }
+    source.utils.commit()
+    const view = createPooledLiveQuery(query(source)(new Query()), {
+      gcTime: 1,
+    })!
+    const observer = createLiveQueryObserver(view, { mode: `wholesale` })
+    const stop = observer.subscribe(() => {})
+    const groups = () =>
+      (view as unknown as { partition: { groups: Map<string, unknown> } })
+        .partition.groups.size
+    // One group per distinct value, plus the watched `x`.
+    expect(groups()).toBe(51)
+    source.utils.begin()
+    for (let n = 0; n < 50; n++) {
+      source.utils.write({ type: `delete`, value: { id: `r${n}`, g: `v${n}` } })
+    }
+    source.utils.commit()
+    expect(groups()).toBe(1)
+    // The watched group empties and is dropped; new rows recreate it, and
+    // the observer still sees them.
+    source.utils.begin()
+    source.utils.write({ type: `delete`, value: { id: `a`, g: `x` } })
+    source.utils.commit()
+    expect(groups()).toBe(1)
+    expect(observer.getSnapshot().data).toEqual([])
+    stop()
+    expect(groups()).toBe(0)
+    const again = observer.subscribe(() => {})
+    source.utils.begin()
+    source.utils.write({ type: `insert`, value: { id: `b`, g: `x` } })
+    source.utils.commit()
+    expect([...observer.getSnapshot().state!.keys()]).toEqual([`b`])
+    again()
+  })
+
+  it(`never reuses a dropped group's revision for a detached reader`, () => {
+    const source = makeSource()
+    const write = (type: `insert` | `delete`, id: string, g: string) => {
+      source.utils.begin()
+      source.utils.write({ type, value: { id, g } })
+      source.utils.commit()
+    }
+    // A watched `y` view keeps the partition subscribed.
+    write(`insert`, `z`, `y`)
+    const keepAlive = createLiveQueryObserver(
+      createPooledLiveQuery(
+        new Query()
+          .from({ r: source })
+          .where(({ r }: any) => eq(r.g, `y`)) as any,
+        { gcTime: 1 },
+      ),
+      { mode: `wholesale` },
+    ).subscribe(() => {})
+    // The `x` view is read without subscribing, so it compares revisions.
+    const reader = createLiveQueryObserver(
+      createPooledLiveQuery(query(source)(new Query()), { gcTime: 1 }),
+      { mode: `wholesale` },
+    )
+    write(`insert`, `b`, `x`)
+    const keys = () => [...reader.getSnapshot().state!.keys()]
+    expect(keys()).toEqual([`a`, `b`])
+    // Emptying the unwatched group drops it; new rows build a new one.
+    source.utils.begin()
+    source.utils.write({ type: `delete`, value: { id: `a`, g: `x` } })
+    source.utils.write({ type: `delete`, value: { id: `b`, g: `x` } })
+    source.utils.commit()
+    write(`insert`, `c`, `x`)
+    write(`insert`, `d`, `x`)
+    expect(keys()).toEqual([`c`, `d`])
+    keepAlive()
+  })
+
   it(`keeps its public Collection live while observed`, async () => {
     const source = makeSource()
     const view = createPooledLiveQuery(query(source)(new Query()), {
