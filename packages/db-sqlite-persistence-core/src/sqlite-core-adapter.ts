@@ -788,6 +788,35 @@ function argumentCompilationContext(
   }
 }
 
+// Core AND/OR treat only strict booleans as decisive. SQLite coerces other
+// values in WHERE, so a pushed operand must be boolean or null on every row.
+function isBooleanSqlOperand(expression: IR.BasicExpression): boolean {
+  if (expression.type === `val`) {
+    return typeof expression.value === `boolean` || expression.value == null
+  }
+  if (expression.type === `ref`) return false
+
+  switch (expression.name) {
+    case `and`:
+    case `or`:
+    case `not`:
+      return expression.args.every(isBooleanSqlOperand)
+    case `eq`:
+    case `gt`:
+    case `gte`:
+    case `lt`:
+    case `lte`:
+    case `in`:
+    case `like`:
+    case `ilike`:
+    case `isNull`:
+    case `isUndefined`:
+      return true
+    default:
+      return false
+  }
+}
+
 function compileSqlExpression(
   expression: IR.BasicExpression,
   context: SqlExpressionCompilationContext = `predicate`,
@@ -888,23 +917,23 @@ function compileSqlExpression(
         params,
       }
     }
-    case `and`: {
-      if (argSql.length < 2) {
-        return { supported: false, sql: ``, params: [] }
-      }
-      return {
-        supported: true,
-        sql: argSql.map((sql) => `(${sql})`).join(` AND `),
-        params,
-      }
-    }
+    case `and`:
     case `or`: {
-      if (argSql.length < 2) {
+      if (expression.args.some((arg) => !isBooleanSqlOperand(arg))) {
         return { supported: false, sql: ``, params: [] }
+      }
+      if (argSql.length === 0) {
+        return {
+          supported: true,
+          sql: expression.name === `and` ? `(1 = 1)` : `(0 = 1)`,
+          params: [],
+        }
       }
       return {
         supported: true,
-        sql: argSql.map((sql) => `(${sql})`).join(` OR `),
+        sql: argSql
+          .map((sql) => `(${sql})`)
+          .join(expression.name === `and` ? ` AND ` : ` OR `),
         params,
       }
     }

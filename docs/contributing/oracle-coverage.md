@@ -509,6 +509,27 @@ exclusive OPFS ownership. The
 [review record](oracle-reviews/issue-1754-live-electric-hydration-straddle.md)
 preserves the live-host and mutant evidence.
 
+### SQLite boolean predicate arity and row work
+
+`packages/db-sqlite-persistence-core/tests/sqlite-boolean-arity-oracle.test.ts`
+is the primary executable owner for bounded `and`/`or` predicate arity at
+`SQLiteCorePersistenceAdapter.loadSubset` return. It compares public keys to
+an independent three-valued model and observes the SQL and raw rows returned
+by each `node:sqlite` Collection SELECT. Its 348-case matrix and paired fixed
+and unseeded generated campaigns cover root arity 0–3, one nested operator,
+boolean and legal nonboolean operands, unsupported fallback, an empty-IN
+control, and one cursor composition. The pre-fix compiler was RED for
+public under-selection, unnecessary raw-row reads, empty-AND SQL form, and the
+cursor composition; the repaired compiler passes these checks. The no-WHERE and blind-unary controls distinguish these
+laws from public-result-only checks.
+
+The owner does not claim arbitrary depth or arity, limit/offset after filtering,
+all cursor shapes, order or value/metadata semantics, expression families outside
+its grammar, index-expression compilation, native hosts, OPFS, or multi-process
+execution. The existing SQLite owners above retain their separate reset/resume,
+order, driver, and host contracts. A broader class-closure claim needs witnesses for
+these remaining paths; this owner proves its bounded grammar and checkpoints.
+
 ## Acceptance map
 
 The post-merge review added three missing domains to existing owners:

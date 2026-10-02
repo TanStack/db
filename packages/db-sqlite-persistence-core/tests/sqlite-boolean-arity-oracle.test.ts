@@ -1,0 +1,594 @@
+// @vitest-environment node
+import { DatabaseSync } from 'node:sqlite'
+import { fc } from '@fast-check/vitest'
+import { expect, it } from 'vitest'
+import { IR } from '@tanstack/db'
+import { SQLiteCorePersistenceAdapter } from '../src'
+import type { SQLiteDriver } from '../src'
+
+/**
+ * # Boolean arity at the SQLite persistence boundary
+ *
+ * Contract: at `loadSubset` return, public rows refine the current core
+ * evaluator's three-valued AND/OR law: empty AND is true, empty OR is false,
+ * and only strict `true`/`false` operands determine a branch. Issue #1994
+ * also requires SQL-supported boolean predicates to reduce selective reads
+ * before SQLite returns stored rows for deserialization. Empty AND must emit
+ * a true SQL predicate; unsupported children retain full-table fallback.
+ * Open #506 proposes a conflicting future empty-OR API; this oracle follows
+ * the current evaluator until the product contract changes across both layers.
+ *
+ * Reference: `valueOf` computes atom values from private fixture records and
+ * folds an independent truth table. It does not call the core evaluator or
+ * SQLite compiler. `canPush` describes this oracle's deliberately small
+ * known-boolean domain, not production's support classifier.
+ *
+ * Grammar: AND/OR roots have 0..3 children; a child is one of twelve atoms or
+ * a nested AND/OR of 0..3 atoms. The bounded matrix exhausts all atom pairs
+ * for root arity 0..2 and samples triples and nested forms. Removing operator
+ * choice loses empty true/false; removing arity 0 loses both identities;
+ * removing arity 1 loses selective unary work; removing nonboolean atoms
+ * loses SQL under-selection; removing unsupported atoms loses fallback; and
+ * removing nesting loses inner empty-OR work. Arity 3 is the upper marginal.
+ * Malformed `caseWhen()` with no result arm is excluded because core rejects it.
+ * Fixed-seed and unseeded generated campaigns use the same grammar, driver,
+ * refinement check, and budget. The seed/path environment variables below
+ * replay a reduced failure directly.
+ *
+ * Driver/checkpoint: the real adapter runs against `node:sqlite`; a counting
+ * driver records the SQL and raw row count of each Collection SELECT. At
+ * `loadSubset` return, public keys must match the reference. SQL-supported
+ * selective boolean predicates must have `WHERE` and return exactly the
+ * selected raw rows. Unsupported children must retain the full-table route.
+ * A cursor witness checks both receiving SELECTs, and a removed-WHERE mutant
+ * proves the work check fails even when final public keys remain correct.
+ *
+ * Limits: simple rows, one SQLite process, ordinary loads and one cursor
+ * composition. No native host, OPFS worker, multi-process WAL, ordering
+ * comparator, typed bigint/date expression, index-expression, arbitrary
+ * depth, or unbounded arity claim. Raw-row work is not a SQLite plan or
+ * elapsed-time assertion.
+ */
+
+type Atom =
+  | 'first'
+  | 'last'
+  | 'true'
+  | 'false'
+  | 'unknown'
+  | 'word'
+  | 'one'
+  | 'text-ref'
+  | 'unsupported-function'
+  | 'unsupported-path'
+  | 'in-empty'
+  | 'like-prefix'
+type Model =
+  | { kind: 'atom'; atom: Atom }
+  | {
+      kind: 'and' | 'or'
+      children: Array<Model>
+    }
+type Row = { id: string; 'meta-field': string }
+type Read = { sql: string; rawRows: number; parameters: number }
+type Failure = {
+  law: 'public' | 'work' | 'compile' | 'fallback'
+  checkpoint: 'loadSubset-return'
+  model: Model
+  expected: Array<string>
+  actual: Array<string>
+  read: Read
+}
+
+const fixture: Array<Row> = Array.from({ length: 20 }, (_, index) => ({
+  id: `row-${index + 1}`,
+  'meta-field': index === 0 ? 'yes' : 'no',
+}))
+const atoms: Array<Atom> = [
+  'first',
+  'last',
+  'true',
+  'false',
+  'unknown',
+  'word',
+  'one',
+  'text-ref',
+  'unsupported-function',
+  'unsupported-path',
+  'in-empty',
+  'like-prefix',
+]
+const atom = (name: Atom): Model => ({ kind: 'atom', atom: name })
+const op = (kind: 'and' | 'or', ...children: Array<Model>): Model => ({
+  kind,
+  children,
+})
+
+function valueOf(model: Model, row: Row): unknown {
+  if (model.kind === 'atom') {
+    switch (model.atom) {
+      case 'first':
+      case 'unsupported-function':
+      case 'unsupported-path':
+        return row.id === 'row-1'
+      case 'last':
+        return row.id === 'row-20'
+      case 'true':
+        return true
+      case 'false':
+      case 'in-empty':
+        return false
+      case 'unknown':
+        return null
+      case 'word':
+        return 'x'
+      case 'one':
+        return 1
+      case 'text-ref':
+        return row['meta-field']
+      case 'like-prefix':
+        return row.id.startsWith('row-1')
+    }
+  }
+  const values = model.children.map((child) => valueOf(child, row))
+  if (model.kind === 'and') {
+    if (values.some((value) => value === false)) return false
+    if (values.some((value) => value == null)) return null
+    return true
+  }
+  if (values.some((value) => value === true)) return true
+  if (values.some((value) => value == null)) return null
+  return false
+}
+
+function expectedKeys(model: Model): Array<string> {
+  return fixture
+    .filter((row) => valueOf(model, row) === true)
+    .map((row) => row.id)
+    .sort()
+}
+
+function canPush(model: Model): boolean {
+  if (model.kind === 'atom') {
+    return ![
+      'word',
+      'one',
+      'text-ref',
+      'unsupported-function',
+      'unsupported-path',
+    ].includes(model.atom)
+  }
+  return model.children.every(canPush)
+}
+
+function hasUnsupported(model: Model): boolean {
+  if (model.kind === 'atom') {
+    return (
+      model.atom === 'unsupported-function' || model.atom === 'unsupported-path'
+    )
+  }
+  return model.children.some(hasUnsupported)
+}
+
+function toIR(model: Model): IR.BasicExpression {
+  if (model.kind === 'atom') {
+    const first = () =>
+      new IR.Func('eq', [new IR.PropRef(['id']), new IR.Value('row-1')])
+    switch (model.atom) {
+      case 'first':
+        return first()
+      case 'last':
+        return new IR.Func('eq', [
+          new IR.PropRef(['id']),
+          new IR.Value('row-20'),
+        ])
+      case 'true':
+        return new IR.Value(true)
+      case 'false':
+        return new IR.Value(false)
+      case 'unknown':
+        return new IR.Value(null)
+      case 'word':
+        return new IR.Value('x')
+      case 'one':
+        return new IR.Value(1)
+      case 'text-ref':
+        return new IR.PropRef(['meta-field'])
+      case 'unsupported-function':
+        return new IR.Func('caseWhen', [
+          first(),
+          new IR.Value(true),
+          new IR.Value(false),
+        ])
+      case 'unsupported-path':
+        return new IR.Func('eq', [
+          new IR.PropRef(['meta-field']),
+          new IR.Value('yes'),
+        ])
+      case 'in-empty':
+        return new IR.Func('in', [new IR.PropRef(['id']), new IR.Value([])])
+      case 'like-prefix':
+        return new IR.Func('like', [
+          new IR.PropRef(['id']),
+          new IR.Value('row-1%'),
+        ])
+    }
+  }
+  return new IR.Func(model.kind, model.children.map(toIR))
+}
+
+class CountingDriver implements SQLiteDriver {
+  readonly db = new DatabaseSync(':memory:')
+  reads: Array<Read> = []
+  private depth = 0
+  mutantUnaryValue: 'x' | 1 | undefined
+  mutantDropWhere = false
+
+  exec(sql: string): Promise<void> {
+    this.db.exec(sql)
+    return Promise.resolve()
+  }
+  run(sql: string, params: ReadonlyArray<unknown> = []): Promise<void> {
+    this.db
+      .prepare(sql)
+      .run(...(params as Array<string | number | bigint | null>))
+    return Promise.resolve()
+  }
+  query<T>(
+    sql: string,
+    params: ReadonlyArray<unknown> = [],
+  ): Promise<ReadonlyArray<T>> {
+    const collectionRead = sql.startsWith(
+      'SELECT key, value, metadata, row_version FROM',
+    )
+    if (
+      collectionRead &&
+      this.mutantUnaryValue !== undefined &&
+      !sql.includes(' WHERE ')
+    ) {
+      sql += ' WHERE (?)'
+      params = [...params, this.mutantUnaryValue]
+    }
+    if (collectionRead && this.mutantDropWhere && sql.includes(' WHERE ')) {
+      sql = sql.slice(0, sql.indexOf(' WHERE '))
+      params = []
+    }
+    const rows = this.db
+      .prepare(sql)
+      .all(...(params as Array<string | number | bigint | null>)) as Array<T>
+    if (collectionRead)
+      this.reads.push({
+        sql,
+        rawRows: rows.length,
+        parameters: params.length,
+      })
+    return Promise.resolve(rows)
+  }
+  async transaction<T>(fn: (driver: SQLiteDriver) => Promise<T>): Promise<T> {
+    const depth = this.depth++
+    this.db.exec(depth === 0 ? 'BEGIN' : `SAVEPOINT nested_${depth}`)
+    try {
+      const result = await fn(this)
+      this.db.exec(depth === 0 ? 'COMMIT' : `RELEASE SAVEPOINT nested_${depth}`)
+      return result
+    } catch (error) {
+      this.db.exec(
+        depth === 0 ? 'ROLLBACK' : `ROLLBACK TO SAVEPOINT nested_${depth}`,
+      )
+      if (depth > 0) this.db.exec(`RELEASE SAVEPOINT nested_${depth}`)
+      throw error
+    } finally {
+      this.depth--
+    }
+  }
+}
+
+function matrix(): Array<Model> {
+  const cases: Array<Model> = [
+    op('and', atom('first')),
+    op('or', atom('first')),
+    op('and'),
+    op('or'),
+    op('and', atom('unsupported-function')),
+    op('or', atom('unsupported-path')),
+    op('and', atom('in-empty')),
+    op('and', op('or', atom('first'))),
+  ]
+  for (const kind of ['and', 'or'] as const) {
+    cases.push(op(kind))
+    for (const name of atoms) cases.push(op(kind, atom(name)))
+    for (const left of atoms)
+      for (const right of atoms) {
+        cases.push(op(kind, atom(left), atom(right)))
+      }
+    for (const name of [
+      'first',
+      'false',
+      'word',
+      'unsupported-function',
+      'in-empty',
+    ] as const) {
+      cases.push(op(kind, atom(name), atom('true'), atom('last')))
+    }
+    for (const childKind of ['and', 'or'] as const) {
+      for (const name of [
+        'first',
+        'word',
+        'unsupported-function',
+        'unsupported-path',
+      ] as const) {
+        cases.push(op(kind, op(childKind, atom(name))))
+      }
+    }
+  }
+  return cases
+}
+
+const atomArb = fc.constantFrom(...atoms).map(atom)
+const nestedArb = fc.record({
+  kind: fc.constantFrom('and' as const, 'or' as const),
+  children: fc.array(atomArb, { minLength: 0, maxLength: 3 }),
+})
+const modelArb = fc.record({
+  kind: fc.constantFrom('and' as const, 'or' as const),
+  children: fc.array(fc.oneof(atomArb, nestedArb), {
+    minLength: 0,
+    maxLength: 3,
+  }),
+})
+
+function brief(failure: Failure | undefined) {
+  if (!failure) return undefined
+  return {
+    law: failure.law,
+    checkpoint: failure.checkpoint,
+    model: failure.model,
+    expectedCount: failure.expected.length,
+    actualCount: failure.actual.length,
+    rawRows: failure.read.rawRows,
+    hasWhere: failure.read.sql.includes(' WHERE '),
+  }
+}
+
+it('refines boolean arity and SQL row work across generated SQLite loads', async () => {
+  const driver = new CountingDriver()
+  const adapter = new SQLiteCorePersistenceAdapter({ driver })
+
+  async function check(model: Model): Promise<Array<Failure>> {
+    driver.reads = []
+    const result = await adapter.loadSubset('boolean-arity', {
+      where: toIR(model),
+    })
+    const actual = result.map((row) => String(row.key)).sort()
+    const expected = expectedKeys(model)
+    const read = driver.reads[0]
+    if (driver.reads.length !== 1 || !read) {
+      throw new Error(
+        `ordinary load must make one Collection SELECT; got ${driver.reads.length}`,
+      )
+    }
+    const fail = (law: Failure['law']): Failure => ({
+      law,
+      checkpoint: 'loadSubset-return',
+      model,
+      expected,
+      actual,
+      read,
+    })
+    const failures: Array<Failure> = []
+    if (JSON.stringify(actual) !== JSON.stringify(expected))
+      failures.push(fail('public'))
+    if (
+      canPush(model) &&
+      expected.length < fixture.length &&
+      (!read.sql.includes(' WHERE ') || read.rawRows !== expected.length)
+    ) {
+      failures.push(fail('work'))
+    }
+    if (
+      model.kind === 'and' &&
+      model.children.length === 0 &&
+      (!read.sql.includes(' WHERE ') || read.parameters !== 0)
+    ) {
+      failures.push(fail('compile'))
+    }
+    if (
+      hasUnsupported(model) &&
+      (read.sql.includes(' WHERE ') || read.rawRows !== fixture.length)
+    ) {
+      failures.push(fail('fallback'))
+    }
+    return failures
+  }
+
+  const runs = Number(process.env.TANSTACK_DB_SQLITE_BOOLEAN_ORACLE_RUNS ?? 150)
+  const replaySeed = process.env.TANSTACK_DB_SQLITE_BOOLEAN_ORACLE_SEED
+  const replayPath = process.env.TANSTACK_DB_SQLITE_BOOLEAN_ORACLE_PATH
+  if (!Number.isSafeInteger(runs) || runs < 1)
+    throw new Error('oracle runs must be positive')
+  if (replayPath !== undefined && !/^\d+(?::\d+)*$/.test(replayPath)) {
+    throw new Error('oracle replay path must be numeric')
+  }
+  if (replaySeed !== undefined && !Number.isSafeInteger(Number(replaySeed))) {
+    throw new Error('oracle replay seed must be an integer')
+  }
+
+  async function campaign(seed?: number, path?: string) {
+    let original: Failure | undefined
+    const property = fc.asyncProperty(modelArb, async (model) => {
+      const failures = await check(model)
+      if (failures.length === 0) return
+      const originalLaw = original?.law
+      const sameLaw = originalLaw
+        ? failures.find((failure) => failure.law === originalLaw)
+        : failures[0]
+      if (!sameLaw) return
+      original ??= sameLaw
+      throw new Error(JSON.stringify(brief(sameLaw)))
+    })
+    const result = await fc.check(property, { seed, path, numRuns: runs })
+    const reducedFailures = result.counterexample
+      ? await check(result.counterexample[0])
+      : []
+    const reduced = reducedFailures.find((failure) => failure.law === original?.law)
+    if (result.failed && original && !reduced) {
+      throw new Error(`shrinking lost the ${original.law} law`)
+    }
+    return {
+      failed: result.failed,
+      seed: result.seed,
+      path: result.counterexamplePath,
+      counterexample: result.counterexample,
+      original: brief(original),
+      reduced: brief(reduced),
+    }
+  }
+
+  async function runOracle(): Promise<void> {
+    await adapter.applyCommittedTx('boolean-arity', {
+      txId: 'seed',
+      term: 1,
+      seq: 1,
+      rowVersion: 1,
+      mutations: fixture.map((row) => ({
+        type: 'insert' as const,
+        key: row.id,
+        value: structuredClone(row),
+      })),
+    })
+    if (replaySeed !== undefined) {
+      const replay = await campaign(Number(replaySeed), replayPath)
+      if (replay.failed)
+        throw new Error(
+          `direct boolean-arity replay RED: ${JSON.stringify(replay)}`,
+        )
+      return
+    }
+
+    driver.reads = []
+    const baseline = await adapter.loadSubset('boolean-arity', {})
+    expect(baseline).toHaveLength(fixture.length)
+    expect(driver.reads).toHaveLength(1)
+    expect(driver.reads[0]?.rawRows).toBe(fixture.length)
+    expect(driver.reads[0]?.sql).not.toContain(' WHERE ')
+
+    const failures: Array<Failure> = []
+    for (const model of matrix()) failures.push(...(await check(model)))
+    const fixed = await campaign(1994)
+    const random = await campaign()
+
+    driver.reads = []
+    const emptyIn = await adapter.loadSubset('boolean-arity', {
+      where: toIR(atom('in-empty')),
+    })
+    expect(emptyIn).toHaveLength(0)
+    expect(driver.reads).toHaveLength(1)
+    expect(driver.reads[0]?.rawRows).toBe(0)
+    expect(driver.reads[0]?.sql).toContain(' WHERE ')
+
+    // The cursor receiver forms two new AND nodes around the base predicate.
+    // A root-only arity repair would leave this nested empty-OR work unbounded.
+    driver.reads = []
+    const cursorRows = await adapter.loadSubset('boolean-arity', {
+      where: toIR(op('or')),
+      orderBy: [
+        {
+          expression: new IR.PropRef(['id']),
+          compareOptions: { direction: 'asc', nulls: 'last' },
+        },
+      ],
+      limit: 2,
+      cursor: {
+        whereCurrent: toIR(atom('first')),
+        whereFrom: new IR.Func('gt', [
+          new IR.PropRef(['id']),
+          new IR.Value('row-1'),
+        ]),
+      },
+    })
+    const cursorReads = driver.reads.slice()
+    const cursorWorkFailed =
+      cursorRows.length !== 0 ||
+      cursorReads.length !== 2 ||
+      cursorReads.some(
+        (read) => !read.sql.includes(' WHERE ') || read.rawRows !== 0,
+      )
+
+    expect(await check(op('and', atom('unsupported-function')))).toEqual([])
+    expect(await check(op('or', atom('unsupported-path')))).toEqual([])
+
+    driver.mutantUnaryValue = 'x'
+    expect(
+      (await check(op('and', atom('word')))).map((failure) => failure.law),
+    ).toContain('public')
+    driver.mutantUnaryValue = 1
+    const blindOr = await check(op('or', atom('one')))
+    driver.mutantUnaryValue = undefined
+    driver.mutantDropWhere = true
+    expect(
+      (await check(op('and', atom('first'), atom('true')))).map(
+        (failure) => failure.law,
+      ),
+    ).toContain('work')
+    driver.mutantDropWhere = false
+
+    if (failures.length || fixed.failed || random.failed || cursorWorkFailed) {
+      const count = (law: Failure['law']) =>
+        failures.filter((failure) => failure.law === law).length
+      throw new Error(
+        `Boolean-arity oracle RED on current SQLite adapter: ` +
+          JSON.stringify({
+            cases: matrix().length,
+            failures: {
+              public: count('public'),
+              work: count('work'),
+              compile: count('compile'),
+              fallback: count('fallback'),
+            },
+            examples: failures
+              .filter((failure) =>
+                ['public', 'work', 'compile'].includes(failure.law),
+              )
+              .slice(0, 5)
+              .map(brief),
+            fixed,
+            random,
+            cursorWorkFailed,
+            cursorReads,
+            blindOrOutcome:
+              blindOr.length === 0
+                ? 'survived: JS post-filter removed SQL over-selection'
+                : 'assertion failure',
+          }),
+      )
+    }
+  }
+
+  let primary: unknown
+  let failed = false
+  try {
+    await runOracle()
+  } catch (error) {
+    failed = true
+    primary = error
+  }
+
+  let cleanupError: unknown
+  let cleanupFailed = false
+  try {
+    driver.db.close()
+  } catch (error) {
+    cleanupFailed = true
+    cleanupError = error
+  }
+
+  if (failed && cleanupFailed) {
+    throw new AggregateError(
+      [primary, cleanupError],
+      'SQLite oracle and cleanup failed',
+      { cause: primary },
+    )
+  }
+  if (failed) throw primary
+  if (cleanupFailed) throw cleanupError
+})
