@@ -1,6 +1,7 @@
 import { createFileRoute } from '@tanstack/solid-router'
 import { useLiveQuery } from '@tanstack/solid-db'
 import { Loading } from '@solidjs/web'
+import { createMemo } from 'solid-js'
 import { queryConfigCollection, queryTodoCollection } from '../lib/collections'
 import { TodoApp } from '../components/TodoApp'
 
@@ -29,10 +30,15 @@ function QueryPage() {
     q.from({ config: queryConfigCollection }),
   )
 
+  const gatedTodos = createMemo(() => {
+    todos.readiness()
+    return todos()
+  })
+
   return (
     <Loading fallback="Loading...">
       <TodoApp
-        todos={todos()}
+        todos={gatedTodos()}
         configData={configData()}
         todoCollection={queryTodoCollection}
         configCollection={queryConfigCollection}

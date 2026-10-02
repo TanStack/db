@@ -21,13 +21,12 @@ For comprehensive documentation on writing queries (filtering, joins, aggregatio
 
 ### useLiveQuery
 
-The `useLiveQuery` primitive creates a live query that automatically updates your component when data changes. It returns an accessor — call it as a function (`query()`) to read data, and read `query.state` / `query.collection` as properties for the keyed row map and the underlying `Collection`.
+The `useLiveQuery` primitive creates a live query that automatically updates your component when data changes. It returns an accessor — call it as a function (`query()`) to read the current rows synchronously. Rows that sync before the collection is ready render immediately (progressive sync); only reading an errored query throws.
 
 ```tsx
 import { useLiveQuery } from '@tanstack/solid-db'
 import { eq } from '@tanstack/db'
 import { For } from 'solid-js'
-import { Loading } from '@solidjs/web'
 
 function TodoList() {
   const query = useLiveQuery((q) =>
@@ -37,22 +36,20 @@ function TodoList() {
   )
 
   return (
-    <Loading fallback={<div>Loading...</div>}>
-      <ul>
-        <For each={query()}>
-          {(todo) => <li>{todo.text}</li>}
-        </For>
-      </ul>
-    </Loading>
+    <ul>
+      <For each={query()}>
+        {(todo) => <li>{todo.text}</li>}
+      </For>
+    </ul>
   )
 }
 ```
 
-**Note:** Call `query()` to read data. Use `<Loading>` and `<Errored>` boundaries to handle loading and error states — the accessor itself has no status flags. For a non-reactive status read, use `query.collection?.status`.
+**Note:** The accessor also exposes reactive properties: `query.state` (a `ReactiveMap` keyed by result key), `query.collection`, `query.status`, `query.isReady`, `query.isError`, and the persisted-readiness trio `query.persistedStatus` / `query.isPersistedReady` / `query.persistedError`.
 
-### Loading and Error Boundaries
+### Opt-in Suspense with readiness
 
-In Solid v2, reading the accessor while the collection is loading throws `NotReadyError` (caught by `<Loading>`), and reading an errored query throws the error (caught by `<Errored>`):
+Data reads never suspend. To gate rendering on first data, read `query.readiness()` inside a `<Loading>` boundary — it throws `NotReadyError` until the query passes its initial-render gate (network ready, or a permitted persisted fallback), and errors flow to `<Errored>`:
 
 ```tsx
 import { Loading, Errored } from '@solidjs/web'
@@ -63,33 +60,28 @@ function TodoList() {
   return (
     <Errored fallback={(err) => <div>Error: {String(err())}</div>}>
       <Loading fallback={<div>Loading...</div>}>
-        <For each={query()}>
-          {(todo) => <li>{todo.text}</li>}
-        </For>
+        {query.readiness() && (
+          <For each={query()}>
+            {(todo) => <li>{todo.text}</li>}
+          </For>
+        )}
       </Loading>
     </Errored>
   )
 }
 ```
 
-Persisted (network-first) restore state is exposed as reactive properties — `query.persistedStatus`, `query.isPersistedReady`, and `query.persistedError` — for apps that layer local persistence under live queries.
+Once content has rendered, revalidation keeps it visible — no fallback flash while a changed input loads its new collection.
 
-### isPending and latest Helpers
+### isPending for revalidation progress
 
-Solid v2's async `createMemo` inside `useLiveQuery` works with Solid's built-in `isPending` and `latest` helpers:
+Solid v2's `isPending` reads the `readiness` accessor to report an in-flight change without a boundary:
 
 ```tsx
-import { isPending, latest } from 'solid-js'
+import { isPending } from 'solid-js'
 
-// isPending: true during revalidation while a new collection loads
-<Show when={isPending(() => query())}>
-  <Spinner />
-</Show>
-
-// latest: returns the stale value during revalidation, skipping <Loading>
-<For each={latest(() => query())}>
-  {(todo) => <li>{todo.text}</li>}
-</For>
+// True while a changed input's new collection is loading:
+{isPending(() => query.readiness()) && <Spinner />}
 ```
 
 ### Reactive Queries with Signals
@@ -184,6 +176,22 @@ const query = useLiveQuery((q) =>
 // Won't update when minPriority changes!
 ```
 
+### findOne (single result)
+
+When the query uses `.findOne()`, the accessor returns a single object (or `undefined`) instead of an array:
+
+```tsx
+const userQuery = useLiveQuery((q) =>
+  q
+    .from({ user: usersCollection })
+    .where(({ user }) => eq(user.id, userId()))
+    .findOne(),
+)
+
+// userQuery() → T | undefined (not Array<T>)
+return <Show when={userQuery()}>{(user) => <div>{user().name}</div>}</Show>
+```
+
 ### Using Pre-created Collections
 
 You can also pass an existing collection to `useLiveQuery`. This is useful for sharing queries across components:
@@ -204,18 +212,4 @@ function TodoList() {
 
   return <div>{query().length} todos</div>
 }
-```
-
-### External-Source Bridge (Opt-in)
-
-For advanced use cases where you want observer snapshots to auto-track in any Solid compute without `useLiveQuery`, install the external-source bridge once at app startup:
-
-```tsx
-import { enableSolidDBExternalSource, trackSnapshot } from '@tanstack/solid-db'
-import { createMemo } from 'solid-js'
-
-enableSolidDBExternalSource()
-
-// Now trackSnapshot() auto-subscribes inside any Solid compute:
-const snapshot = createMemo(() => trackSnapshot(observer))
 ```

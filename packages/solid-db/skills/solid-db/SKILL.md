@@ -2,14 +2,14 @@
 name: solid-db
 description: >
   SolidJS v2 bindings for TanStack DB. useLiveQuery returns an Accessor that
-  doubles as data access (call as function) with state and collection
-  properties. Fine-grained reactivity: signal reads MUST happen inside the
-  query function for tracking. Config passed as Accessor (() => config).
-  Built-in Loading boundary support via async createMemo; use solid-js's
-  isPending/latest helpers for revalidation states. Wholesale observer mode +
-  keyed projection for per-field row reactivity. Opt-in external-source bridge
-  via enableSolidDBExternalSource. Import from @tanstack/solid-db (re-exports
-  all of @tanstack/db).
+  doubles as data access (call as function — returns current rows
+  synchronously, including partial rows synced before ready) with state,
+  collection, status, isReady, and persisted-readiness properties. Suspense
+  is opt-in via the readiness accessor read inside <Loading>. Fine-grained
+  reactivity: signal reads MUST happen inside the query function for
+  tracking. Config passed as Accessor (() => config). Wholesale observer
+  mode + keyed projection for per-field row reactivity keyed by live result
+  identity. Import from @tanstack/solid-db (re-exports all of @tanstack/db).
 type: framework
 library: db
 framework: solid
@@ -19,7 +19,6 @@ requires:
 sources:
   - 'TanStack/db:docs/framework/solid/overview.md'
   - 'TanStack/db:packages/solid-db/src/useLiveQuery.ts'
-  - 'TanStack/db:packages/solid-db/src/external-source.ts'
 ---
 
 This skill builds on db-core. Read it first for collection setup, query builder, and mutation patterns.
@@ -62,11 +61,14 @@ Returns an `Accessor<Array<T>>` (or `Accessor<T | undefined>` with `findOne`) wi
 ```tsx
 // Query function — call result as function for data
 const query = useLiveQuery((q) => q.from({ todo: todoCollection }))
-// query()          → Array<T> (data)  — or T | undefined when using findOne()
+// query()          → Array<T> (current rows, never suspends) — or T | undefined when using findOne()
 // query.state      → ReactiveMap<TKey, T>
 // query.collection → Collection
+// query.status     → CollectionStatus | 'disabled'
+// query.isReady / query.isError → boolean
 // query.persistedStatus / query.isPersistedReady / query.persistedError
 //                  → persisted (network-first) restore state
+// query.readiness  → Accessor; reading it inside <Loading> gates on first data
 
 // With reactive signals — signals MUST be read INSIDE the query function
 const [minPriority, setMinPriority] = createSignal(5)
@@ -132,24 +134,6 @@ const userQuery = useLiveQuery((q) =>
 return <Show when={userQuery()}>{(user) => <div>{user().name}</div>}</Show>
 ```
 
-### External-source bridge (opt-in)
-
-Solid v2's `enableExternalSource` API lets external reactive systems participate in Solid's tracking graph. TanStack DB exposes this as an opt-in one-time install:
-
-```tsx
-import { enableSolidDBExternalSource, trackSnapshot } from '@tanstack/solid-db'
-import { createMemo } from 'solid-js'
-
-// Call once at app startup:
-enableSolidDBExternalSource()
-
-// Now trackSnapshot() inside any Solid compute auto-subscribes:
-const snapshot = createMemo(() => trackSnapshot(observer))
-// re-runs automatically when the observer notifies — no manual subscribe needed
-```
-
-Without the bridge, use `useLiveQuery` which handles subscription internally.
-
 ### Loading boundary integration
 
 ```tsx
@@ -162,23 +146,18 @@ import { Loading, Errored } from '@solidjs/web'
 </Errored>
 ```
 
-`useLiveQuery` integrates with Solid v2's async `createMemo`: reading the accessor while the collection is loading throws `NotReadyError` (caught by `<Loading>`); reading an errored query throws the captured error (caught by `<Errored>`).
+Data reads never suspend — `query()` returns the current rows at any time, including partial rows synced while loading; only reading an errored query throws (for `<Errored>` to catch). Suspense is opt-in: `query.readiness()` is an async-computation accessor — reading it while the initial render is in flight throws `NotReadyError` (caught by `<Loading>`), and it settles at network readiness or a permitted persisted fallback.
 
-### Revalidation: isPending and latest
-
-During revalidation (a changed input is loading a new collection), Solid v2's built-in helpers read the accessor without a `<Loading>` boundary:
+### Revalidation progress with isPending
 
 ```tsx
-import { isPending, latest } from 'solid-js'
+import { isPending } from 'solid-js'
 
-// True while a value CHANGE is in flight (not during first load):
-{isPending(() => todosQuery()) && <Spinner />}
-
-// Last committed rows — no Loading flash while the new collection loads:
-<For each={latest(() => todosQuery())}>{(todo) => <li>{todo.text}</li>}</For>
+// True while a changed input's new collection is loading:
+{isPending(() => todosQuery.readiness()) && <Spinner />}
 ```
 
-These read the async `createMemo` inside `useLiveQuery`, so they follow Solid's standard pending/latest semantics.
+Rendered content stays visible during revalidation (v2 `<Loading>` holds), so no fallback flash.
 
 ## Includes (Hierarchical Data)
 
@@ -269,23 +248,23 @@ Solid's reactivity tracks signal reads inside reactive contexts. Reading outside
 
 Source: docs/framework/solid/overview.md
 
-### MEDIUM Reading removed v1 properties (query.data / query.status)
+### MEDIUM Reading removed v1 properties (query.data / query.isLoading)
 
 Wrong:
 
 ```tsx
 <For each={todosQuery.data}>{(todo) => <li>{todo.text}</li>}</For>
-{todosQuery.status === 'loading' && <Spinner />}
+{todosQuery.isLoading && <Spinner />}
 ```
 
 Correct:
 
 ```tsx
 <For each={todosQuery()}>{(todo) => <li>{todo.text}</li>}</For>
-{isPending(() => todosQuery()) && <Spinner />}
+{todosQuery.status === 'loading' && <Spinner />}
 ```
 
-`query.data` and the status flags (`status`, `isLoading`, `isReady`, `isError`) were removed in the v2 API. Read data by calling the accessor; use `isPending(() => query())` for in-flight changes and `query.collection.status` for a non-reactive status read.
+`query.data` was a deprecated duplicate of calling the accessor; `isLoading`, `isIdle`, and `isCleanedUp` were removed in favor of `query.status`. `status`, `isReady`, `isError`, and the persisted-readiness properties remain.
 
 See also: db-core/live-queries/SKILL.md — for query builder API.
 

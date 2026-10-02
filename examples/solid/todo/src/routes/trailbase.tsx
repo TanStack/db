@@ -1,6 +1,7 @@
 import { createFileRoute } from '@tanstack/solid-router'
 import { useLiveQuery } from '@tanstack/solid-db'
 import { Loading } from '@solidjs/web'
+import { createMemo } from 'solid-js'
 import {
   trailBaseConfigCollection,
   trailBaseTodoCollection,
@@ -31,10 +32,15 @@ function TrailBasePage() {
     q.from({ config: trailBaseConfigCollection }),
   )
 
+  const gatedTodos = createMemo(() => {
+    todos.readiness()
+    return todos()
+  })
+
   return (
     <Loading fallback="Loading...">
       <TodoApp
-        todos={todos()}
+        todos={gatedTodos()}
         configData={configData()}
         todoCollection={trailBaseTodoCollection}
         configCollection={trailBaseConfigCollection}

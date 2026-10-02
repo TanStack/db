@@ -16,6 +16,7 @@ import type {
   InferResultType,
   InitialQueryBuilder,
   LiveQueryCollectionConfig,
+  LiveQueryPersistedStatus,
   LiveQuerySnapshot,
   NonSingleResult,
   QueryBuilder,
@@ -34,7 +35,7 @@ type InferConditionalResultType<TContext extends Context> =
 /**
  * Create a live query using a query function
  * @param queryFn - Query function that defines what data to fetch
- * @returns Accessor that returns data with Loading boundary support, with state and collection as properties
+ * @returns Accessor that returns the current rows synchronously; gate rendering on `readiness` inside `<Loading>` for suspense
  * @example
  * const todosQuery = useLiveQuery((q) =>
  *   q.from({ todos: todosCollection })
@@ -42,14 +43,15 @@ type InferConditionalResultType<TContext extends Context> =
  *    .select(({ todos }) => ({ id: todos.id, text: todos.text }))
  * )
  *
- * @example
- * const todosQuery = useLiveQuery((q) => q.from({ todos: todoCollection }))
+ * <For each={todosQuery()}>{(todo) => <li>{todo.text}</li>}</For>
  *
- * return (
- *   <Loading fallback={<div>Loading...</div>}>
+ * @example
+ * // Opt-in suspense: read `readiness` inside <Loading> to gate on first data
+ * <Loading fallback={<div>Loading...</div>}>
+ *   {todosQuery.readiness() && (
  *     <For each={todosQuery()}>{(todo) => <li>{todo.text}</li>}</For>
- *   </Loading>
- * )
+ *   )}
+ * </Loading>
  */
 // Overload 1: Accept query function that always returns QueryBuilder
 export function useLiveQuery<TContext extends Context>(
@@ -57,6 +59,13 @@ export function useLiveQuery<TContext extends Context>(
 ): Accessor<InferResultType<TContext>> & {
   state: ReactiveMap<string | number, GetResult<TContext>>
   collection: Collection<GetResult<TContext>, string | number, {}>
+  status: UseLiveQueryStatus
+  isReady: boolean
+  isError: boolean
+  persistedStatus: LiveQueryPersistedStatus
+  isPersistedReady: boolean
+  persistedError: unknown | undefined
+  readiness: Accessor<Collection<GetResult<TContext>, string | number, {}>>
 }
 
 // Overload 1b: Accept query function that can return undefined/null
@@ -67,12 +76,21 @@ export function useLiveQuery<TContext extends Context>(
 ): Accessor<InferConditionalResultType<TContext>> & {
   state: ReactiveMap<string | number, GetResult<TContext>>
   collection: Collection<GetResult<TContext>, string | number, {}> | null
+  status: UseLiveQueryStatus
+  isReady: boolean
+  isError: boolean
+  persistedStatus: LiveQueryPersistedStatus
+  isPersistedReady: boolean
+  persistedError: unknown | undefined
+  readiness: Accessor<
+    Collection<GetResult<TContext>, string | number, {}> | null
+  >
 }
 
 /**
  * Create a live query using configuration object
  * @param config - Configuration object with query and options
- * @returns Accessor that returns data with Loading boundary support, with state and collection as properties
+ * @returns Accessor that returns the current rows synchronously, with state, collection, status, and persisted-readiness properties
  * @example
  * const todosQuery = useLiveQuery(() => ({
  *   query: (q) => q.from({ todos: todosCollection }),
@@ -85,12 +103,19 @@ export function useLiveQuery<TContext extends Context>(
 ): Accessor<InferResultType<TContext>> & {
   state: ReactiveMap<string | number, GetResult<TContext>>
   collection: Collection<GetResult<TContext>, string | number, {}>
+  status: UseLiveQueryStatus
+  isReady: boolean
+  isError: boolean
+  persistedStatus: LiveQueryPersistedStatus
+  isPersistedReady: boolean
+  persistedError: unknown | undefined
+  readiness: Accessor<Collection<GetResult<TContext>, string | number, {}>>
 }
 
 /**
  * Subscribe to an existing live query collection
  * @param liveQueryCollection - Pre-created live query collection to subscribe to
- * @returns Accessor that returns data with Loading boundary support, with state and collection as properties
+ * @returns Accessor that returns the current rows synchronously, with state, collection, status, and persisted-readiness properties
  * @example
  * const myLiveQuery = createLiveQueryCollection((q) =>
  *   q.from({ todos: todosCollection }).where(({ todos }) => eq(todos.active, true))
@@ -109,6 +134,13 @@ export function useLiveQuery<
 ): Accessor<Array<TResult>> & {
   state: ReactiveMap<TKey, TResult>
   collection: Collection<TResult, TKey, TUtils>
+  status: UseLiveQueryStatus
+  isReady: boolean
+  isError: boolean
+  persistedStatus: LiveQueryPersistedStatus
+  isPersistedReady: boolean
+  persistedError: unknown | undefined
+  readiness: Accessor<Collection<TResult, TKey, TUtils>>
 }
 
 // Overload 3b: Accept pre-created live query collection with singleResult: true
@@ -123,6 +155,13 @@ export function useLiveQuery<
 ): Accessor<TResult | undefined> & {
   state: ReactiveMap<TKey, TResult>
   collection: Collection<TResult, TKey, TUtils> & SingleResult
+  status: UseLiveQueryStatus
+  isReady: boolean
+  isError: boolean
+  persistedStatus: LiveQueryPersistedStatus
+  isPersistedReady: boolean
+  persistedError: unknown | undefined
+  readiness: Accessor<Collection<TResult, TKey, TUtils>>
 }
 
 // The observer owns the subscription and publishes stable snapshots; Solid
@@ -191,46 +230,77 @@ export function useLiveQuery(
     { name: `TanstackDBStatus` },
   )
 
-  // Keyed projection: rows reconcile by `$key`, so surviving rows keep their
-  // store identity across snapshot replacements.
+  // One stable store node per logical row, keyed by the live Collection's
+  // RESULT keys — the rule from #1825. A row's public $key belongs to an
+  // upstream collection and is not necessarily unique in a derived result
+  // (e.g. two unionAll branches publishing the same $key). Identities are
+  // stamped at derive time as `<epoch>:<result key>`, where the epoch bumps
+  // on collection replacement: overlapping keys from different collections
+  // are different entities. The registry persists across derives (the
+  // matcher re-keys existing nodes) and is a WeakMap so superseded rows
+  // drop out with GC.
+  const rowIdentities = new WeakMap<object, string>()
+  let identityCollection: unknown
+  let identityEpoch = 0
   const data = createProjection(
     () => {
       const currentSnapshot = snapshot()
-      const snapshotData = currentSnapshot?.data
-      if (snapshotData === undefined) return []
-      if (Array.isArray(snapshotData)) return snapshotData
-      return [snapshotData]
+      const entries = currentSnapshot?.state
+      if (currentSnapshot?.collection !== identityCollection) {
+        identityCollection = currentSnapshot?.collection
+        identityEpoch++
+      }
+      if (!entries) return []
+      const rows: Array<any> = []
+      for (const [key, row] of entries) {
+        rowIdentities.set(row, `${identityEpoch}:${String(key)}`)
+        rows.push(row)
+      }
+      return rows
     },
     [],
-    { key: `$key`, name: `TanstackDBData` },
+    { key: (row: any) => rowIdentities.get(row), name: `TanstackDBData` },
   )
 
-  // Granular keyed state. Synced per snapshot; the ReactiveMap's trigger
-  // signals opt into owned writes, so syncing from the effect is legal.
+  // Granular keyed state, synced incrementally per snapshot so only changed
+  // keys notify. The ReactiveMap's trigger signals opt into owned writes, so
+  // syncing from the effect is legal.
   const state = new ReactiveMap<string | number, any>()
   let stateSyncedSnapshot: AnySnapshot | null | undefined
 
   const syncState = (currentSnapshot: AnySnapshot | null) => {
     if (stateSyncedSnapshot === currentSnapshot) return
     stateSyncedSnapshot = currentSnapshot
-    state.clear()
-    if (currentSnapshot?.state) {
-      for (const [key, value] of currentSnapshot.state) {
-        state.set(key, value)
-      }
+    const next = currentSnapshot?.state
+    if (!next) {
+      state.clear()
+      return
     }
+    for (const [key, value] of next) {
+      if (state.get(key) !== value) state.set(key, value)
+    }
+    const staleKeys: Array<string | number> = []
+    for (const key of state.keys()) {
+      if (!next.has(key)) staleKeys.push(key)
+    }
+    for (const key of staleKeys) state.delete(key)
   }
 
-  // Async computation for Loading: reading it while pending throws
-  // NotReadyError (caught by <Loading>); reading it when the collection
-  // errored rethrows the error (caught by <Errored>).
+  // Opt-in render gate. Reading `readiness` while the initial render is in
+  // flight throws NotReadyError for a <Loading> boundary to catch. It settles
+  // at network readiness or a permitted persisted fallback — the same gate
+  // the React adapter's suspense hook uses — so persisted data can reveal
+  // content before the network answers.
   const readiness = createMemo(async () => {
     const col = collection()
     if (!col) return null
     if (col.isReady()) return col
-    await new Promise<void>((resolve) => {
-      col.onFirstReady(resolve)
-    })
+    const observer = createLiveQueryObserver(col)
+    try {
+      await observer.preloadForInitialRender()
+    } finally {
+      observer.dispose()
+    }
     return col
   })
 
@@ -279,6 +349,9 @@ export function useLiveQuery(
     { name: `TanstackDBObserver` },
   )
 
+  // Data reads never suspend: rows synced before readiness render
+  // immediately (progressive sync, on-demand loading). Only the error path
+  // throws, for an <Errored> boundary.
   function getData() {
     if (collectionError) throw collectionError
 
@@ -289,7 +362,6 @@ export function useLiveQuery(
     if (!currentCollection) {
       return data
     }
-    if (s !== `ready`) readiness()
     if (isSingleResultCollection(currentCollection)) {
       return data[0]
     }
@@ -308,6 +380,24 @@ export function useLiveQuery(
         return state
       },
     },
+    status: {
+      get() {
+        return status()
+      },
+    },
+    isReady: {
+      get() {
+        const currentSnapshot = snapshot()
+        return currentSnapshot
+          ? currentSnapshot.isReady
+          : status() === `disabled`
+      },
+    },
+    isError: {
+      get() {
+        return status() === `error`
+      },
+    },
     persistedStatus: {
       get() {
         return snapshot()?.persistedStatus ?? `unavailable`
@@ -321,6 +411,11 @@ export function useLiveQuery(
     persistedError: {
       get() {
         return snapshot()?.persistedError
+      },
+    },
+    readiness: {
+      get() {
+        return readiness
       },
     },
   })

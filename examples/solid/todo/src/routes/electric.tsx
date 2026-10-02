@@ -1,6 +1,7 @@
 import { createFileRoute } from '@tanstack/solid-router'
 import { useLiveQuery } from '@tanstack/solid-db'
 import { Loading } from '@solidjs/web'
+import { createMemo } from 'solid-js'
 import {
   electricConfigCollection,
   electricTodoCollection,
@@ -32,10 +33,15 @@ function ElectricPage() {
     q.from({ config: electricConfigCollection }),
   )
 
+  const gatedTodos = createMemo(() => {
+    todos.readiness()
+    return todos()
+  })
+
   return (
     <Loading fallback="Loading...">
       <TodoApp
-        todos={todos()}
+        todos={gatedTodos()}
         configData={configData()}
         todoCollection={electricTodoCollection}
         configCollection={electricConfigCollection}
