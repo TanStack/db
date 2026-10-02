@@ -29,7 +29,7 @@ documented 100 parameters before execution. It reaches the actual Cloudflare
 driver and core adapter through both savepoint and native transaction modes.
 
 The bounded history grammar crosses one/two lists, an optional scalar, nested
-`and`/`or`, five primitive value kinds, 998/999/1000-value and 499+500/500+500
+`and`/`or`, five value kinds, 998/999/1000-value and 499+500/500+500
 edges, direct and `transactionWithDriver` routes, cursor SELECTs, and both
 index-definition contexts. An empty `IN` is valid; a scalar equality clause
 with no value is excluded by the model-input guard. Cloudflare crosses 100/101
@@ -68,7 +68,8 @@ With the new Cloudflare receiving witness and the old transaction driver,
 both 101-clause kinds rejected with `host parameter limit exceeded` at
 `loadSubsetInternal`; the transaction driver had omitted the root driver's
 100-binding cap. The one-line propagation repair passes all 100/101 cases in
-both transaction modes. The host-limit test file passes 9/9 with no type errors.
+both transaction modes. The host-limit test file passes all seven runtime cases
+with no type errors.
 The SQLite CLI contract file passes 40/40. Both packages build and their
 changed files pass ESLint. A full core package run under two concurrent test
 threads passed 684 tests but timed out on three existing long-running cases;
