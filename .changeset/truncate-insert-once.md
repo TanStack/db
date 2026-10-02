@@ -2,4 +2,4 @@
 '@tanstack/db': patch
 ---
 
-Fix a truncate that sent a subscriber two inserts for the same key. When a sync truncate re-applied an optimistic row whose key the same commit also changed, a subscriber without initial state got a second insert for a row it already held.
+Fix two cases where a subscriber without initial state got an insert for a row it already held. A sync truncate inserted a re-applied optimistic row twice when the same commit also changed its key. A sync commit inserted a key again when it retired a completed delete that an active optimistic insert covered.
