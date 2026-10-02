@@ -106,6 +106,11 @@ export class SortedMap<TKey extends string | number, TValue> {
    * @returns This SortedMap instance for chaining
    */
   set(key: TKey, value: TValue, deferOrder = false): this {
+    // Key order cannot change when an existing key gets a new value.
+    if (!this.comparator && this.map.has(key)) {
+      this.map.set(key, value)
+      return this
+    }
     // Grouped Collections can produce nullish keys at runtime. compareKeys
     // is not a total order there, so retain the existing binary-insert path.
     const runtimeKey = typeof key !== `string` && typeof key !== `number`

@@ -222,7 +222,7 @@ const svelteDriver: LiveQueryDriver = {
   mountConfig,
   mountDisabled,
   knownGaps: [],
-  features: { serverSnapshot: false, suspense: false },
+  features: { serverSnapshot: false, suspense: false, pooledEqFilters: true },
 }
 
 runSuite(svelteDriver)

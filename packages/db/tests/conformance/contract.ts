@@ -183,5 +183,13 @@ export interface LiveQueryDriver {
    *   to catch (e.g. Solid's `createResource`/`<ErrorBoundary>` model).
    */
   errorSurface?: `flag` | `throw`
-  features?: { serverSnapshot?: boolean; suspense?: boolean }
+  features?: {
+    serverSnapshot?: boolean
+    suspense?: boolean
+    /**
+     * Public sharing policy: queries filtered only by `eq` on one source share
+     * one source subscription per filtered field set, instead of one each.
+     */
+    pooledEqFilters?: boolean
+  }
 }
