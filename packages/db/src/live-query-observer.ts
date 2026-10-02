@@ -1,6 +1,7 @@
 import { LiveQueryObserverDisposedError } from './errors.js'
 import {
   getLiveQueryStatusFlags,
+  getPublicCollection,
   isSingleResultCollection,
 } from './live-query-adapter.js'
 import { getBuilderFromConfig } from './query/live/collection-registry.js'
@@ -21,6 +22,12 @@ export type LiveQueryPersistedStatus =
 // must remain observable without treating source readiness as query readiness.
 const INITIAL_RENDER_PRELOADS = new WeakSet<Collection<any, any, any>>()
 
+const NO_PERSISTED_READINESS = {
+  status: `unavailable`,
+  error: undefined,
+} as const
+const noop = () => {}
+
 interface PersistedSourceEntry {
   collection: Collection<any, any, any>
   readiness: PersistedReadinessSource
@@ -29,6 +36,8 @@ interface PersistedSourceEntry {
 function collectPersistedReadinessSources(
   root: Collection<any, any, any>,
 ): ReadonlyArray<PersistedSourceEntry> | undefined {
+  // A few integrations provide Collection-compatible objects without config.
+  if (!(root as { config?: unknown }).config) return undefined
   const seen = new Set<Collection<any, any, any>>()
   const sources: Array<PersistedSourceEntry> = []
   const visit = (collection: Collection<any, any, any>): boolean => {
@@ -307,7 +316,7 @@ class LiveQueryObserverImpl<
       this.cachedSnapshot = {
         state,
         data: singleResult ? data[0] : data,
-        collection,
+        collection: getPublicCollection(collection),
         layoutRevision: this.layoutRevision,
         status,
         ...getLiveQueryStatusFlags(status),
@@ -355,7 +364,7 @@ class LiveQueryObserverImpl<
     error: unknown | undefined
   } {
     const sources = this.persistedSources
-    if (!sources) return { status: `unavailable`, error: undefined }
+    if (!sources) return NO_PERSISTED_READINESS
     let loading = false
     let error: unknown | undefined
     let failed = false
@@ -751,7 +760,7 @@ class LiveQueryObserverImpl<
         ? subscribeLayoutChanges.call(collection, () =>
             notify([], collection.status, true),
           )
-        : () => {}
+        : noop
     const persistedUnsubs = this.persistedSources?.map((source) =>
       source.readiness.subscribe(() => {
         if (this.disposed || this.subscriptions.size === 0) return
@@ -792,7 +801,7 @@ class LiveQueryObserverImpl<
                 : this.diffEntries(previousEntries, nextEntries),
             )
           })
-        : () => {}
+        : noop
     const release = () => {
       clientUnsub()
       statusUnsub()
@@ -816,8 +825,19 @@ class LiveQueryObserverImpl<
       // listener delivery: useSyncExternalStore performs its consistency read
       // immediately after subscribe returns.
       this.flushPublications(!this.wholesale)
-      const { entries, revision } = this.readEntries(collection)
-      this.updateCachedEntries(entries, revision)
+      // The render-time read is still current unless the handshake published.
+      const revision = this.getCollectionRevision(collection)
+      const layoutRevision = this.getCollectionLayoutRevision(collection)
+      if (
+        revision === undefined ||
+        this.cachedEntries === undefined ||
+        revision !== this.cachedCollectionRevision ||
+        layoutRevision !== this.cachedCollectionLayoutRevision
+      ) {
+        const { entries } = this.readEntries(collection)
+        this.updateCachedEntries(entries, revision)
+        this.cachedCollectionLayoutRevision = layoutRevision
+      }
     }
     if (this.hasHydrationSeed()) {
       if (!this.wholesale) this.seed(Array.from(this.subscriptions)[0]!)

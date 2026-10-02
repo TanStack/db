@@ -134,3 +134,40 @@ it('lets the full filter handle a throwing nested getter in a change', async () 
     await collection.cleanup()
   }
 })
+
+it.each(['inherited', 'non-enumerable'] as const)(
+  'keeps a row whose %s field the enriched row omits',
+  async (kind) => {
+    // The enriched row lacks `v`, so `isUndefined(v)` holds there although
+    // the stored row reads a value. A scan that evaluated the predicate on
+    // stored rows would drop it.
+    const row =
+      kind === 'inherited'
+        ? Object.assign(Object.create({ v: 'x' }) as Row, { id: 'hidden' })
+        : Object.defineProperty({ id: 'hidden' } as Row, 'v', {
+            value: 'x',
+            enumerable: false,
+          })
+    const collection = createCollection(
+      mockSyncCollectionOptions<Row>({
+        id: `prefilter-hidden-${kind}`,
+        getKey: (item) => item.id,
+        initialData: [row],
+      }),
+    )
+    try {
+      await collection.stateWhenReady()
+      const hidden = new Func('and', [
+        new Func('eq', [new PropRef(['id']), new Value('hidden')]),
+        new Func('isUndefined', [new PropRef(['v'])]),
+      ])
+      expect(
+        collection
+          .currentStateAsChanges({ where: hidden })
+          ?.map((change) => change.key),
+      ).toEqual(['hidden'])
+    } finally {
+      await collection.cleanup()
+    }
+  },
+)

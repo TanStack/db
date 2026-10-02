@@ -215,6 +215,7 @@ export function createIndexUsageTracker(collection: any): {
     recordFullScan()
     yield* originalEntries.call(this)
   }
+  // The unindexed snapshot scan reads stored rows through the state.
   const state = collection._state
   const originalEntriesPassing = state.entriesPassing
   state.entriesPassing = function* (prefilter: (row: object) => boolean) {

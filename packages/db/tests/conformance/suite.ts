@@ -262,6 +262,83 @@ export function runSuite(rawDriver: LiveQueryDriver) {
       },
     )
 
+    // Single-source eq filters may be served from a partition shared by every
+    // query of that shape; adapters must publish what the live query would.
+    scenario(
+      `eq-filter-rows`,
+      `an eq filter publishes matching rows in key order as rows move in and out`,
+      async () => {
+        const source = driver.makeSource(SEED)
+        const h = driver.mount((q) =>
+          q
+            .from({ items: source.collection })
+            .where(({ items }: any) => ops.eq(items.team, `a`)),
+        )
+        await h.flush()
+        const ids = () =>
+          (h.current().data as Array<{ id: string }>).map((row) => row.id)
+        expect(ids()).toEqual([`1`, `3`])
+
+        source.update({ id: `2`, name: `Jane Doe`, age: 25, team: `a` })
+        await h.flush()
+        expect(ids()).toEqual([`1`, `2`, `3`])
+
+        source.update({ id: `1`, name: `John Doe`, age: 30, team: `b` })
+        source.insert({ id: `4`, name: `Dave`, age: 40, team: `a` })
+        await h.flush()
+        expect(ids()).toEqual([`2`, `3`, `4`])
+
+        source.remove({ id: `3`, name: `John Smith`, age: 35, team: `a` })
+        await h.flush()
+        const remaining: Array<Row> = [
+          { id: `2`, name: `Jane Doe`, age: 25, team: `a` },
+          { id: `4`, name: `Dave`, age: 40, team: `a` },
+        ]
+        expectOrderedRows(h.current().data, remaining)
+        expectKeyedRows(h.current().state, remaining)
+        expect(h.current().status).toBe(`ready`)
+        h.unmount()
+      },
+    )
+
+    scenario(
+      `eq-filter-peers`,
+      `eq-filtered peers on one source each see only their rows`,
+      async () => {
+        const source = driver.makeSource(SEED)
+        const query = (team: string) => (q: any) =>
+          q
+            .from({ items: source.collection })
+            .where(({ items }: any) => ops.eq(items.team, team))
+        const teamA = driver.mount(query(`a`))
+        const teamB = driver.mount(query(`b`))
+        const olderA = driver.mount((q) =>
+          query(`a`)(q).where(({ items }: any) => ops.eq(items.age, 35)),
+        )
+        for (const h of [teamA, teamB, olderA]) await h.flush()
+        // Pooling shares one subscription between the two team queries.
+        expect(source.collection.subscriberCount).toBe(
+          driver.features?.pooledEqFilters ? 2 : 3,
+        )
+        const ids = (h: typeof teamA) =>
+          (h.current().data as Array<{ id: string }>).map((row) => row.id)
+        expect([ids(teamA), ids(teamB), ids(olderA)]).toEqual([
+          [`1`, `3`],
+          [`2`],
+          [`3`],
+        ])
+
+        source.update({ id: `3`, name: `John Smith`, age: 35, team: `b` })
+        for (const h of [teamA, teamB, olderA]) await h.flush()
+        expect([ids(teamA), ids(teamB), ids(olderA)]).toEqual([
+          [`1`],
+          [`2`, `3`],
+          [],
+        ])
+        for (const h of [teamA, teamB, olderA]) h.unmount()
+      },
+    )
+
     scenario(`live-insert`, `a sync insert appears in the result`, async () => {
       const source = driver.makeSource(SEED)
       const h = driver.mount((q) =>
@@ -941,7 +1018,7 @@ export function runSuite(rawDriver: LiveQueryDriver) {
     )
 
     it(`registers every distinct scenario without whole-test waivers`, () => {
-      expect(registry.size).toBe(28)
+      expect(registry.size).toBe(30)
     })
   })
 }

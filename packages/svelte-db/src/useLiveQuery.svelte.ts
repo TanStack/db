@@ -8,10 +8,12 @@ import {
   createLiveQueryCollection,
   createLiveQueryObserver,
   getLiveQueryHash,
+  getPublicCollection,
   getStableValueHash,
   isCollection,
   isSingleResultCollection,
   prepareLiveQueryValue,
+  resolveLiveQueryValue,
 } from '@tanstack/db'
 import { useOptionalDbClient } from './db-context.js'
 import type {
@@ -415,10 +417,8 @@ export function useLiveQuery(
     } else if (isCollection(preparedValue)) {
       collection = preparedValue
     } else if (preparedValue instanceof BaseQueryBuilder) {
-      collection = createLiveQueryCollection({
-        query: preparedValue,
-        startSync: true,
-      })
+      // Hydration keys the live-query Collection by identity.
+      collection = resolveLiveQueryValue(preparedValue, { pool: !dbClient })
     } else {
       collection = createLiveQueryCollection({
         ...(preparedValue as LiveQueryCollectionConfig<any>),
@@ -535,7 +535,7 @@ export function useLiveQuery(
       return internalData
     },
     get collection() {
-      return resolved.collection
+      return getPublicCollection(resolved.collection)
     },
     get status() {
       return status as CollectionStatus

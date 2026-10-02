@@ -135,19 +135,26 @@ type FnSelectQueryResult<TContext extends Context, TResult> =
     : QueryBuilder<WithResult<TContext, TResult>>
 
 export class BaseQueryBuilder<TContext extends Context = Context> {
-  private readonly query: Partial<QueryIR> = {}
+  private readonly query: Partial<QueryIR>
 
   constructor(
     query: Partial<QueryIR> = {},
     private readonly resolveCollection?: CollectionResolver,
+    /** @internal Whether the builder may keep `query` without copying it. */
+    owned = false,
   ) {
-    this.query = { ...query }
+    this.query = owned ? query : { ...query }
   }
 
   private _clone<TNextContext extends Context = Context>(
     query: Partial<QueryIR>,
   ): BaseQueryBuilder<TNextContext> {
-    return new BaseQueryBuilder<TNextContext>(query, this.resolveCollection)
+    // Every clone receives a freshly spread query, so it needs no copy.
+    return new BaseQueryBuilder<TNextContext>(
+      query,
+      this.resolveCollection,
+      true,
+    )
   }
 
   /**
