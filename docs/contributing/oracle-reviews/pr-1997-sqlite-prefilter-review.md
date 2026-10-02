@@ -1,6 +1,6 @@
 # PR #1997 SQLite prefilter oracle review
 
-Reviewed source head: `c207b9c41a629e3ca87a48cd4f3a38f512bbe326`.
+Reviewed source head: `8dd372c2575cec594b7add5df2f61bede5165346`.
 The published source before this repair was `5c45eaf1d74481aeb62a135236ffba3d363d5915`.
 This record is added in a documentation-only follow-up to the reviewed source.
 
