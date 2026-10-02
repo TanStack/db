@@ -1,6 +1,9 @@
 import { expect, it } from 'vitest'
 import { expectDisabledResult } from './conformance/disabled-laws-oracle'
-import type { ConformanceResult, LiveQueryDriver } from './conformance/contract-oracle'
+import type {
+  ConformanceResult,
+  LiveQueryDriver,
+} from './conformance/contract-oracle'
 
 const representations = [`absent`, `empty-reactive`] as const
 function disabled(

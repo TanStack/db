@@ -22,7 +22,10 @@ import {
   not,
   or,
 } from '@tanstack/db'
-import { assertAllItemsMatch, assertCollectionSize } from '../utils/assertions-oracle'
+import {
+  assertAllItemsMatch,
+  assertCollectionSize,
+} from '../utils/assertions-oracle'
 import { waitForQueryData } from '../utils/helpers'
 import type { E2ETestConfig, Post, User } from '../types'
 
