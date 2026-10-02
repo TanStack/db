@@ -4805,10 +4805,11 @@ describe(`QueryCollection`, () => {
         })
         await first.isPersisted.promise
         expect(adapter.rows.get(`p`)?.revision).toBe(2)
-        // Settlement guarantees the stored server response, not that the
-        // accepted optimistic snapshot has stopped overlaying the row: a
-        // later source acknowledgement retires it.
-        expect(collection.base.get(`p`)).toMatchObject({ a: 10, revision: 2 })
+        expect(collection.get(`p`)).toMatchObject({
+          a: 10,
+          revision: 2,
+          $synced: true,
+        })
 
         const second = collection.update(`p`, (draft) => {
           draft.b = 1
@@ -4816,10 +4817,11 @@ describe(`QueryCollection`, () => {
         await second.isPersisted.promise
         expect(requestRevisions).toEqual([1, 2])
         expect(adapter.rows.get(`p`)?.revision).toBe(3)
-        expect(collection.base.get(`p`)).toMatchObject({
+        expect(collection.get(`p`)).toMatchObject({
           a: 10,
           b: 1,
           revision: 3,
+          $synced: true,
         })
       } finally {
         await collection.cleanup()
