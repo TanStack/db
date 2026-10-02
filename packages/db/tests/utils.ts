@@ -215,12 +215,6 @@ export function createIndexUsageTracker(collection: any): {
     recordFullScan()
     yield* originalEntries.call(this)
   }
-  const state = collection._state
-  const originalEntriesPassing = state.entriesPassing
-  state.entriesPassing = function* (prefilter: (row: object) => boolean) {
-    recordFullScan()
-    yield* originalEntriesPassing.call(this, prefilter)
-  }
 
   const restore = () => {
     // Remove the instance getter so the prototype getter applies again
@@ -230,7 +224,6 @@ export function createIndexUsageTracker(collection: any): {
       if (rangeQuery) index.rangeQuery = rangeQuery
     }
     collection.entries = originalEntries
-    state.entriesPassing = originalEntriesPassing
   }
 
   return { stats, restore }
