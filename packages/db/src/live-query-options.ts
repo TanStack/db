@@ -131,6 +131,10 @@ export function getPreparedLiveQueryIdentity(value: unknown): unknown {
       [`schema`, config.schema],
       [`singleResult`, config.singleResult === true],
       [
+        `publishUnconfirmedOrderedResults`,
+        config.publishUnconfirmedOrderedResults === true,
+      ],
+      [
         `defaultStringCollation`,
         getStringCollationIdentity(config.defaultStringCollation),
       ],
