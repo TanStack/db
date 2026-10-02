@@ -9,7 +9,7 @@ function getFromSources(from): (
   | QueryRef)[];
 ```
 
-Defined in: [packages/db/src/query/ir.ts:359](https://github.com/TanStack/db/blob/main/packages/db/src/query/ir.ts#L359)
+Defined in: [packages/db/src/query/ir.ts:358](https://github.com/TanStack/db/blob/main/packages/db/src/query/ir.ts#L358)
 
 Sources declared by a FROM clause. UnionAll branches own their sources.
 

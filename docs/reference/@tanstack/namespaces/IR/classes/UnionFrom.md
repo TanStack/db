@@ -3,7 +3,7 @@ id: UnionFrom
 title: UnionFrom
 ---
 
-Defined in: [packages/db/src/query/ir.ts:115](https://github.com/TanStack/db/blob/main/packages/db/src/query/ir.ts#L115)
+Defined in: [packages/db/src/query/ir.ts:116](https://github.com/TanStack/db/blob/main/packages/db/src/query/ir.ts#L116)
 
 ## Extends
 
@@ -17,7 +17,7 @@ Defined in: [packages/db/src/query/ir.ts:115](https://github.com/TanStack/db/blo
 new UnionFrom(sources): UnionFrom;
 ```
 
-Defined in: [packages/db/src/query/ir.ts:117](https://github.com/TanStack/db/blob/main/packages/db/src/query/ir.ts#L117)
+Defined in: [packages/db/src/query/ir.ts:118](https://github.com/TanStack/db/blob/main/packages/db/src/query/ir.ts#L118)
 
 #### Parameters
 
@@ -63,7 +63,7 @@ BaseExpression.__returnType
 sources: (CollectionRef | QueryRef)[];
 ```
 
-Defined in: [packages/db/src/query/ir.ts:117](https://github.com/TanStack/db/blob/main/packages/db/src/query/ir.ts#L117)
+Defined in: [packages/db/src/query/ir.ts:118](https://github.com/TanStack/db/blob/main/packages/db/src/query/ir.ts#L118)
 
 ***
 
@@ -73,7 +73,7 @@ Defined in: [packages/db/src/query/ir.ts:117](https://github.com/TanStack/db/blo
 type: "unionFrom";
 ```
 
-Defined in: [packages/db/src/query/ir.ts:116](https://github.com/TanStack/db/blob/main/packages/db/src/query/ir.ts#L116)
+Defined in: [packages/db/src/query/ir.ts:117](https://github.com/TanStack/db/blob/main/packages/db/src/query/ir.ts#L117)
 
 #### Overrides
 
@@ -91,7 +91,7 @@ BaseExpression.type
 get alias(): string;
 ```
 
-Defined in: [packages/db/src/query/ir.ts:121](https://github.com/TanStack/db/blob/main/packages/db/src/query/ir.ts#L121)
+Defined in: [packages/db/src/query/ir.ts:122](https://github.com/TanStack/db/blob/main/packages/db/src/query/ir.ts#L122)
 
 ##### Returns
 

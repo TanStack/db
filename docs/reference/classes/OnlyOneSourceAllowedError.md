@@ -3,7 +3,7 @@ id: OnlyOneSourceAllowedError
 title: OnlyOneSourceAllowedError
 ---
 
-Defined in: [packages/db/src/errors.ts:418](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L418)
+Defined in: [packages/db/src/errors.ts:428](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L428)
 
 ## Extends
 
@@ -17,7 +17,7 @@ Defined in: [packages/db/src/errors.ts:418](https://github.com/TanStack/db/blob/
 new OnlyOneSourceAllowedError(context): OnlyOneSourceAllowedError;
 ```
 
-Defined in: [packages/db/src/errors.ts:419](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L419)
+Defined in: [packages/db/src/errors.ts:429](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L429)
 
 #### Parameters
 

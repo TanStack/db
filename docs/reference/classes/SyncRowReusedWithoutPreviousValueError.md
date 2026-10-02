@@ -1,37 +1,37 @@
 ---
-id: UnsupportedAggregateFunctionError
-title: UnsupportedAggregateFunctionError
+id: SyncRowReusedWithoutPreviousValueError
+title: SyncRowReusedWithoutPreviousValueError
 ---
 
-Defined in: [packages/db/src/errors.ts:703](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L703)
+Defined in: [packages/db/src/errors.ts:396](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L396)
 
 ## Extends
 
-- [`GroupByError`](GroupByError.md)
+- [`TransactionError`](TransactionError.md)
 
 ## Constructors
 
 ### Constructor
 
 ```ts
-new UnsupportedAggregateFunctionError(functionName): UnsupportedAggregateFunctionError;
+new SyncRowReusedWithoutPreviousValueError(key): SyncRowReusedWithoutPreviousValueError;
 ```
 
-Defined in: [packages/db/src/errors.ts:704](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L704)
+Defined in: [packages/db/src/errors.ts:397](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L397)
 
 #### Parameters
 
-##### functionName
+##### key
 
-`string`
+`string` | `number`
 
 #### Returns
 
-`UnsupportedAggregateFunctionError`
+`SyncRowReusedWithoutPreviousValueError`
 
 #### Overrides
 
-[`GroupByError`](GroupByError.md).[`constructor`](GroupByError.md#constructor)
+[`TransactionError`](TransactionError.md).[`constructor`](TransactionError.md#constructor)
 
 ## Properties
 
@@ -45,7 +45,7 @@ Defined in: node\_modules/.pnpm/typescript@5.9.3/node\_modules/typescript/lib/li
 
 #### Inherited from
 
-[`GroupByError`](GroupByError.md).[`cause`](GroupByError.md#cause)
+[`TransactionError`](TransactionError.md).[`cause`](TransactionError.md#cause)
 
 ***
 
@@ -59,7 +59,7 @@ Defined in: node\_modules/.pnpm/typescript@5.9.3/node\_modules/typescript/lib/li
 
 #### Inherited from
 
-[`GroupByError`](GroupByError.md).[`message`](GroupByError.md#message)
+[`TransactionError`](TransactionError.md).[`message`](TransactionError.md#message)
 
 ***
 
@@ -73,7 +73,7 @@ Defined in: node\_modules/.pnpm/typescript@5.9.3/node\_modules/typescript/lib/li
 
 #### Inherited from
 
-[`GroupByError`](GroupByError.md).[`name`](GroupByError.md#name)
+[`TransactionError`](TransactionError.md).[`name`](TransactionError.md#name)
 
 ***
 
@@ -87,7 +87,7 @@ Defined in: node\_modules/.pnpm/typescript@5.9.3/node\_modules/typescript/lib/li
 
 #### Inherited from
 
-[`GroupByError`](GroupByError.md).[`stack`](GroupByError.md#stack)
+[`TransactionError`](TransactionError.md).[`stack`](TransactionError.md#stack)
 
 ***
 
@@ -111,7 +111,7 @@ not capture any frames.
 
 #### Inherited from
 
-[`GroupByError`](GroupByError.md).[`stackTraceLimit`](GroupByError.md#stacktracelimit)
+[`TransactionError`](TransactionError.md).[`stackTraceLimit`](TransactionError.md#stacktracelimit)
 
 ## Methods
 
@@ -183,7 +183,7 @@ a();
 
 #### Inherited from
 
-[`GroupByError`](GroupByError.md).[`captureStackTrace`](GroupByError.md#capturestacktrace)
+[`TransactionError`](TransactionError.md).[`captureStackTrace`](TransactionError.md#capturestacktrace)
 
 ***
 
@@ -215,4 +215,4 @@ https://v8.dev/docs/stack-trace-api#customizing-stack-traces
 
 #### Inherited from
 
-[`GroupByError`](GroupByError.md).[`prepareStackTrace`](GroupByError.md#preparestacktrace)
+[`TransactionError`](TransactionError.md).[`prepareStackTrace`](TransactionError.md#preparestacktrace)
