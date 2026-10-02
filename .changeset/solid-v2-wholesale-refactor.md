@@ -52,7 +52,8 @@ Suspense is opt-in through the new `readiness` accessor: reading
 `NotReadyError` for a `<Loading>` boundary to catch. It settles at network
 readiness or a permitted persisted fallback — the same gate as the React
 adapter's suspense hook — so persisted data can reveal content before the
-network answers.
+network answers. Once settled it returns the rows exactly like `query()`,
+so it can feed `<For>` directly:
 
 ```tsx
 const todosQuery = useLiveQuery((q) => q.from({ todos: todosCollection }))
