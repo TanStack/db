@@ -256,7 +256,6 @@ export const DEFAULT_APPLIED_TX_PRUNE_MAX_ROWS = 1_000
  */
 export const DEFAULT_APPLIED_TX_PRUNE_MAX_AGE_SECONDS = 24 * 60 * 60
 
-const SQLITE_MAX_IN_BATCH_SIZE = 900
 const SAFE_IDENTIFIER_PATTERN = /^[a-zA-Z_][a-zA-Z0-9_]*$/
 const FORBIDDEN_SQL_FRAGMENT_PATTERN = /(;|--|\/\*)/
 type CompiledValueKind = `unknown` | `bigint` | `date` | `datetime`
@@ -948,44 +947,17 @@ function compileSqlExpression(
         }
       }
 
-      if (listValue.length > SQLITE_MAX_IN_BATCH_SIZE) {
-        const chunkClauses: Array<string> = []
-        const batchedParams: Array<SqliteSupportedValue> = []
-
-        for (
-          let startIndex = 0;
-          startIndex < listValue.length;
-          startIndex += SQLITE_MAX_IN_BATCH_SIZE
-        ) {
-          const chunkValues = listValue.slice(
-            startIndex,
-            startIndex + SQLITE_MAX_IN_BATCH_SIZE,
-          )
-          const chunkParams: Array<SqliteSupportedValue> = []
-          const chunkValueSql = chunkValues.map((value) => {
-            chunkParams.push(toSqliteParameterValue(value))
-            return typeof value === `bigint` ? `CAST(? AS NUMERIC)` : `?`
-          })
-          chunkClauses.push(`(${leftSql} IN (${chunkValueSql.join(`, `)}))`)
-          batchedParams.push(...leftParams, ...chunkParams)
-        }
-
-        return {
-          supported: true,
-          sql: `(${chunkClauses.join(` OR `)})`,
-          params: batchedParams,
-        }
-      }
-
-      const listParams: Array<SqliteSupportedValue> = []
-      const listValueSql = listValue.map((value) => {
-        listParams.push(toSqliteParameterValue(value))
-        return typeof value === `bigint` ? `CAST(? AS NUMERIC)` : `?`
-      })
+      const jsonList = `[${listValue
+        .map((value) =>
+          typeof value === `bigint`
+            ? assertSQLiteBigIntInRange(value).toString()
+            : JSON.stringify(toSqliteParameterValue(value)),
+        )
+        .join(`,`)}]`
       return {
         supported: true,
-        sql: `(${leftSql} IN (${listValueSql.join(`, `)}))`,
-        params: [...leftParams, ...listParams],
+        sql: `(${leftSql} IN (SELECT value FROM json_each(?)))`,
+        params: [...leftParams, jsonList],
       }
     }
     case `like`:
@@ -2435,6 +2407,11 @@ export class SQLiteCorePersistenceAdapter implements PersistenceAdapter {
     if (options.orderBy && orderByCompiled.supported) {
       sql = `${sql} ORDER BY ${orderByCompiled.sql}, key ASC`
       queryParams.push(...orderByCompiled.params)
+    }
+
+    if (queryParams.length > (driver.maxBoundParameters ?? 999)) {
+      sql = `SELECT key, value, metadata, row_version FROM ${collectionTableSql}`
+      queryParams.length = 0
     }
 
     const storedRows = await driver.query<StoredSqliteRow>(sql, queryParams)

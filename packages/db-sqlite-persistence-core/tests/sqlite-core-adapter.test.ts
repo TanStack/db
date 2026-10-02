@@ -1,9 +1,11 @@
+import assert from 'node:assert/strict'
 import { AsyncLocalStorage } from 'node:async_hooks'
+import { DatabaseSync } from 'node:sqlite'
 import { execFile } from 'node:child_process'
 import { copyFileSync, existsSync, mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { promisify } from 'node:util'
+import { inspect, promisify } from 'node:util'
 import { fc } from '@fast-check/vitest'
 import { afterEach, describe, expect, it } from 'vitest'
 import { IR, createCollection } from '@tanstack/db'
@@ -2456,7 +2458,7 @@ export function runSQLiteCoreAdapterContractSuite(
       expect(appliedRows.map((row) => row.seq)).toEqual([2])
     })
 
-    it(`supports large IN lists via batching`, async () => {
+    it(`supports large IN lists within the driver's binding cap`, async () => {
       const { adapter } = registerContractHarness()
       const collectionId = `large-in`
 
@@ -2697,5 +2699,850 @@ export function runSQLiteCoreAdapterContractSuite(
         }),
       ).rejects.toThrow(/Invalid persisted index SQL fragment/)
     })
+  })
+}
+
+/**
+ * # Can a SQLite subset predicate exceed the connection's binding capacity?
+ *
+ * Contract: `SQLiteCorePersistenceAdapter.loadSubset` accepts supported `IN`,
+ * `and`, `or`, and scalar predicates. The core owner's 1,200-value case at
+ * `packages/db-sqlite-persistence-core/tests/sqlite-core-adapter.test.ts:2459`
+ * promises large-list support. Issue #1993 requests a total statement bound.
+ * On a connection with 999 variable slots, a valid request
+ * must return exactly its matching persisted rows without asking SQLite to
+ * prepare a statement with more than 999 bindings.
+ *
+ * Scope: finite primitive values; one or two list predicates, including an
+ * empty list, and up to one scalar equality; two or three persisted rows; one
+ * cursor route. Null, nonfinite,
+ * container values, unsupported expressions, and concurrency remain outside.
+ * Index DDL has a separate literal-expression context. This Node `node:sqlite`
+ * witness does not prove browser, mobile, or Tauri execution, multi-process WAL,
+ * or host-specific availability of JSON functions.
+ *
+ * Model: compute each row's result directly from the declared `and`/`or` clauses
+ * using typed equality. The model does not read SQL, compiler fragments, or
+ * SQLite results. A `specification case` below is model-only input data; each
+ * clause maps to one IR predicate in the production driver.
+ *
+ * History grammar: seed three rows, choose one/two list clauses and optionally
+ * one scalar clause, choose string/number/boolean/date/bigint values, choose
+ * list lengths near 999 and above it, then call `loadSubset` once. Fixed cases
+ * reconstruct reported one-large, two-small, and two-large forms. Generated
+ * cases vary list counts, lengths, connective, and type. Nulls,
+ * >signed-64-bit bigint, unsupported fields, and index DDL with runtime
+ * bindings are outside the domain. A scalar clause without one value is an
+ * invalid model input. Removing any list-count or length axis loses one of
+ * the three capacity forms. Kind and connective challenge value preservation.
+ * The 998/999/1000 margins distinguish a
+ * misplaced cap; 499+500 versus 500+500 distinguishes statement-wide counting.
+ *
+ * Production driver: use the real core adapter with an actual prepared SQLite
+ * statement and `variableNumber: 999`. Record every attempted driver statement
+ * during `loadSubset`, including a prepare failure. The observation cut is
+ * `loadSubset` fulfillment/rejection, typed returned values, ordered keys when
+ * requested, and the attempted statements' bind counts.
+ *
+ * Refinement: require the exact rows, reached predicate SELECTs, no
+ * SQLite error, and <=999 bindings on every attempted statement. The original 900-item
+ * OR-chunk lowering is the hostile design: it reaches the intended SELECT and
+ * fails the public result/binding comparison. The legacy CLI test interpolates
+ * literals, so it cannot exercise this boundary.
+ *
+ * Replay: pass `TANSTACK_DB_SQLITE_BINDING_SEED` and
+ * `TANSTACK_DB_SQLITE_BINDING_PATH` together and select this test by
+ * name. The normal package test runs fixed and random campaigns.
+ */
+const BINDING_CAP = 999
+const BINDING_FIXED_SEED = 1_993_999
+const BINDING_RUNS = 12
+type Kind = 'string' | 'number' | 'boolean' | 'date' | 'bigint'
+type Scalar = string | number | boolean | Date | bigint
+type Clause = {
+  field: 'a' | 'b'
+  kind: 'in' | 'eq'
+  values: ReadonlyArray<Scalar>
+}
+type Spec = {
+  label: string
+  valueKind: Kind
+  connective: 'and' | 'or'
+  clauses: ReadonlyArray<Clause>
+  nested?: boolean
+  ordered?: boolean
+  rows?: ReadonlyArray<Row>
+}
+type Row = { key: string; value: { a: Scalar; b: Scalar } }
+type Attempt = {
+  method: 'exec' | 'query' | 'run'
+  sql: string
+  bindings: number
+  error?: string
+}
+
+function target(kind: Kind): Scalar {
+  switch (kind) {
+    case 'string':
+      return 'target'
+    case 'number':
+      return 123_456
+    case 'boolean':
+      return true
+    case 'date':
+      return new Date('2026-01-01T00:00:00.000Z')
+    case 'bigint':
+      return 9_007_199_254_740_993n
+  }
+}
+function miss(kind: Kind, ordinal: number): Scalar {
+  switch (kind) {
+    case 'string':
+      return `miss-${ordinal}`
+    case 'number':
+      return ordinal
+    case 'boolean':
+      return false
+    case 'date':
+      return new Date(Date.UTC(2020, 0, 1 + ordinal))
+    case 'bigint':
+      return 9_007_199_254_751_000n + BigInt(ordinal)
+  }
+}
+function values(kind: Kind, length: number): Array<Scalar> {
+  const result = Array.from({ length }, (_, index) => miss(kind, index))
+  if (length) result[Math.floor(length / 2)] = target(kind)
+  return result
+}
+function same(left: Scalar, right: Scalar): boolean {
+  return left instanceof Date && right instanceof Date
+    ? left.getTime() === right.getTime()
+    : left === right
+}
+function expectedBindingRows(
+  spec: Spec,
+  rows: ReadonlyArray<Row>,
+): Array<string> {
+  return rows
+    .filter((row) => {
+      const decisions = spec.clauses.map((clause) => {
+        const field = row.value[clause.field]
+        return clause.kind === 'eq'
+          ? same(field, clause.values[0]!)
+          : clause.values.some((candidate) => same(field, candidate))
+      })
+      if (spec.nested) return (decisions[0] || decisions[1]) && decisions[2]
+      return spec.connective === 'and'
+        ? decisions.every(Boolean)
+        : decisions.some(Boolean)
+    })
+    .sort((a, b) =>
+      spec.ordered
+        ? String(a.value.a).localeCompare(String(b.value.a))
+        : a.key.localeCompare(b.key),
+    )
+    .map((row) => row.key)
+}
+function predicate(spec: Spec): IR.BasicExpression<boolean> {
+  const clauses = spec.clauses.map(
+    (clause) =>
+      new IR.Func(clause.kind, [
+        new IR.PropRef([clause.field]),
+        new IR.Value(
+          clause.kind === 'eq' ? clause.values[0] : [...clause.values],
+        ),
+      ]),
+  )
+  if (spec.nested)
+    return new IR.Func('and', [
+      new IR.Func('or', [clauses[0]!, clauses[1]!]),
+      clauses[2]!,
+    ])
+  return clauses.length === 1
+    ? clauses[0]!
+    : new IR.Func(spec.connective, clauses)
+}
+
+function preparedDriver(
+  db: DatabaseSync,
+  attempts: Array<Attempt>,
+  withDriver = false,
+) {
+  let record = false
+  let nextSavepoint = 0
+  const driver: SQLiteDriver & { startObservation: () => void } = {
+    maxBoundParameters: BINDING_CAP,
+    startObservation() {
+      record = true
+    },
+    exec(sql: string): Promise<void> {
+      const attempt: Attempt = { method: 'exec', sql, bindings: 0 }
+      if (record) attempts.push(attempt)
+      try {
+        db.exec(sql)
+        return Promise.resolve()
+      } catch (error) {
+        attempt.error = String(error)
+        return Promise.reject(error)
+      }
+    },
+    query<T>(
+      sql: string,
+      params: ReadonlyArray<unknown> = [],
+    ): Promise<ReadonlyArray<T>> {
+      const attempt: Attempt = { method: 'query', sql, bindings: params.length }
+      if (record) attempts.push(attempt)
+      try {
+        return Promise.resolve(
+          db
+            .prepare(sql)
+            .all(
+              ...(params as Array<null | number | bigint | string>),
+            ) as Array<T>,
+        )
+      } catch (error) {
+        attempt.error = String(error)
+        return Promise.reject(error)
+      }
+    },
+    run(sql: string, params: ReadonlyArray<unknown> = []): Promise<void> {
+      const attempt: Attempt = { method: 'run', sql, bindings: params.length }
+      if (record) attempts.push(attempt)
+      try {
+        db.prepare(sql).run(
+          ...(params as Array<null | number | bigint | string>),
+        )
+        return Promise.resolve()
+      } catch (error) {
+        attempt.error = String(error)
+        return Promise.reject(error)
+      }
+    },
+    async transaction<T>(
+      fn: (transactionDriver: SQLiteDriver) => Promise<T>,
+    ): Promise<T> {
+      const savepoint = `oracle_${++nextSavepoint}`
+      db.exec(`SAVEPOINT ${savepoint}`)
+      try {
+        const result = await fn(driver)
+        db.exec(`RELEASE ${savepoint}`)
+        return result
+      } catch (error) {
+        db.exec(`ROLLBACK TO ${savepoint}`)
+        db.exec(`RELEASE ${savepoint}`)
+        throw error
+      }
+    },
+  }
+  if (withDriver) {
+    driver.transactionWithDriver = driver.transaction
+  }
+  return driver
+}
+
+function limitedDatabase(): DatabaseSync {
+  // Node supports this runtime option before the installed Node types declare it.
+  const options = { limits: { variableNumber: BINDING_CAP } }
+  return new DatabaseSync(
+    ':memory:',
+    options as unknown as NonNullable<
+      ConstructorParameters<typeof DatabaseSync>[1]
+    >,
+  )
+}
+
+type Observation = {
+  expected: Array<string>
+  expectedValues: Array<{ key: string; value: Row['value'] }>
+  actual?: Array<string>
+  actualValues?: Array<{ key: string; value: Row['value'] }>
+  attempts: Array<Attempt>
+  error?: string
+  cleanupError?: string
+}
+async function observe(spec: Spec, withDriver = false): Promise<Observation> {
+  const db = limitedDatabase()
+  const attempts: Array<Attempt> = []
+  let observation: Observation | undefined
+  try {
+    const driver = preparedDriver(db, attempts, withDriver)
+    const adapter = new SQLiteCorePersistenceAdapter({ driver })
+    const rows: Array<Row> = spec.rows
+      ? [...spec.rows]
+      : [
+          {
+            key: 'target',
+            value: { a: target(spec.valueKind), b: target(spec.valueKind) },
+          },
+          {
+            key: 'partial',
+            value: {
+              a: target(spec.valueKind),
+              b: miss(spec.valueKind, 10_000),
+            },
+          },
+          {
+            key: 'miss',
+            value: {
+              a: miss(spec.valueKind, 10_001),
+              b: miss(spec.valueKind, 10_002),
+            },
+          },
+        ]
+    const expected = expectedBindingRows(spec, rows)
+    const expectedValues = expected.map((key) => {
+      const row = rows.find((candidate) => candidate.key === key)!
+      return { key, value: row.value }
+    })
+    await adapter.applyCommittedTx('oracle-1993', {
+      txId: 'seed',
+      term: 1,
+      seq: 1,
+      rowVersion: 1,
+      mutations: rows.map((row) => ({
+        type: 'insert' as const,
+        key: row.key,
+        value: row.value,
+      })),
+    })
+    driver.startObservation()
+    try {
+      const result = await adapter.loadSubset('oracle-1993', {
+        where: predicate(spec),
+        ...(spec.ordered
+          ? {
+              orderBy: [
+                {
+                  expression: new IR.PropRef(['a']),
+                  compareOptions: {
+                    direction: 'asc' as const,
+                    nulls: 'last' as const,
+                  },
+                },
+              ],
+            }
+          : {}),
+      })
+      const actualValues = result.map((row) => ({
+        key: String(row.key),
+        value: row.value as Row['value'],
+      }))
+      if (!spec.ordered) actualValues.sort((a, b) => a.key.localeCompare(b.key))
+      observation = {
+        expected,
+        expectedValues,
+        actual: actualValues.map((row) => row.key),
+        actualValues,
+        attempts,
+      }
+    } catch (error) {
+      observation = { expected, expectedValues, attempts, error: String(error) }
+    }
+  } finally {
+    try {
+      db.close()
+    } catch (cleanupError) {
+      observation ??= {
+        expected: [],
+        expectedValues: [],
+        attempts,
+        error: 'setup failed',
+      }
+      observation.cleanupError = String(cleanupError)
+    }
+  }
+  return observation
+}
+
+type Violation = {
+  kind: 'reach' | 'capacity' | 'error' | 'rows' | 'cleanup'
+  checkpoint: string
+  message: string
+}
+function violation(
+  spec: Spec,
+  observation: Observation,
+): Violation | undefined {
+  const predicateSelects = observation.attempts.filter(
+    (entry) =>
+      entry.method === 'query' &&
+      entry.sql.startsWith('SELECT key, value, metadata, row_version'),
+  )
+  if (predicateSelects.length !== 1)
+    return {
+      kind: 'reach',
+      checkpoint: 'driver-query',
+      message: `predicate SELECT reach=${predicateSelects.length}`,
+    }
+  const over = observation.attempts.filter(
+    (entry) => entry.bindings > BINDING_CAP,
+  )
+  if (over.length)
+    return {
+      kind: 'capacity',
+      checkpoint: over.some((entry) => predicateSelects.includes(entry))
+        ? 'predicate-select'
+        : 'other-statement',
+      message: `binding cap exceeded: ${over.map((entry) => entry.bindings)}; error=${observation.error ?? 'none'}`,
+    }
+  if (observation.error)
+    return {
+      kind: 'error',
+      checkpoint: 'loadSubset-settlement',
+      message: `loadSubset rejected ${observation.error}`,
+    }
+  try {
+    assert.deepEqual(observation.actual, observation.expected)
+    assert.deepEqual(observation.actualValues, observation.expectedValues)
+  } catch {
+    return {
+      kind: 'rows',
+      checkpoint: 'loadSubset-fulfillment',
+      message: `rows ${inspect(observation.actualValues)} != ${inspect(observation.expectedValues)}`,
+    }
+  }
+  if (observation.cleanupError)
+    return {
+      kind: 'cleanup',
+      checkpoint: 'cleanup',
+      message: `cleanup failed: ${observation.cleanupError}`,
+    }
+  return undefined
+}
+
+function single(kind: Kind, count: number): Spec {
+  return {
+    label: `single-${kind}-${count}`,
+    valueKind: kind,
+    connective: 'or',
+    clauses: [{ field: 'a', kind: 'in', values: values(kind, count) }],
+  }
+}
+function dual(
+  kind: Kind,
+  a: number,
+  b: number,
+  connective: 'and' | 'or',
+): Spec {
+  return {
+    label: `dual-${kind}-${a}-${b}-${connective}`,
+    valueKind: kind,
+    connective,
+    clauses: [
+      { field: 'a', kind: 'in', values: values(kind, a) },
+      { field: 'b', kind: 'in', values: values(kind, b) },
+    ],
+  }
+}
+function mixed(kind: Kind, count: number): Spec {
+  return {
+    label: `mixed-${kind}-${count}+1`,
+    valueKind: kind,
+    connective: 'and',
+    clauses: [
+      { field: 'a', kind: 'in', values: values(kind, count) },
+      { field: 'b', kind: 'eq', values: [target(kind)] },
+    ],
+  }
+}
+function nested(kind: Kind, a: number, b: number): Spec {
+  return {
+    label: `nested-${kind}-${a}-${b}+1`,
+    valueKind: kind,
+    connective: 'and',
+    nested: true,
+    clauses: [
+      { field: 'a', kind: 'in', values: values(kind, a) },
+      { field: 'b', kind: 'in', values: values(kind, b) },
+      { field: 'b', kind: 'eq', values: [target(kind)] },
+    ],
+  }
+}
+function chunkBoundary(): Spec {
+  const list = Array.from({ length: 1200 }, (_, i) => `miss-${i}`)
+  list[100] = 'early'
+  list[1100] = 'late'
+  return {
+    label: 'two-hits-across-900',
+    valueKind: 'string',
+    connective: 'or',
+    ordered: true,
+    clauses: [{ field: 'a', kind: 'in', values: list }],
+    rows: [
+      { key: 'late', value: { a: 'late', b: 'none' } },
+      { key: 'miss', value: { a: 'other', b: 'none' } },
+      { key: 'early', value: { a: 'early', b: 'none' } },
+    ],
+  }
+}
+function escapedStringCase(): Spec {
+  const escaped = `quote' newline\n snowman☃ null\u0000`
+  return {
+    label: `escaped-string-list`,
+    valueKind: `string`,
+    connective: `or`,
+    clauses: [{ field: `a`, kind: `in`, values: [escaped, `different`] }],
+    rows: [
+      { key: `target`, value: { a: escaped, b: `other` } },
+      { key: `miss`, value: { a: `another`, b: `other` } },
+    ],
+  }
+}
+function bigintBoundary(value: bigint, label: string): Spec {
+  return {
+    label,
+    valueKind: 'bigint',
+    connective: 'or',
+    clauses: [{ field: 'a', kind: 'in', values: [value] }],
+    rows: [
+      { key: 'target', value: { a: value, b: value } },
+      { key: 'miss', value: { a: 0n, b: 0n } },
+    ],
+  }
+}
+function legalSpec(spec: Spec): boolean {
+  return (
+    spec.clauses.length >= 1 &&
+    spec.clauses.length <= 3 &&
+    (!spec.nested || spec.clauses.length === 3) &&
+    spec.clauses.every(
+      (clause) => clause.kind === 'in' || clause.values.length === 1,
+    )
+  )
+}
+
+const fixed: Array<Spec> = [
+  single('string', 0),
+  single('string', 998),
+  single('string', 999),
+  single('string', 1000),
+  single('string', 1200),
+  chunkBoundary(),
+  escapedStringCase(),
+  dual('string', 499, 500, 'or'),
+  dual('string', 500, 500, 'or'),
+  dual('string', 600, 600, 'and'),
+  dual('string', 1000, 1000, 'or'),
+  mixed('string', 998),
+  mixed('string', 999),
+  nested('string', 500, 500),
+  single('number', 2),
+  single('boolean', 2),
+  single('date', 2),
+  single('bigint', 2),
+  bigintBoundary(-9_223_372_036_854_775_808n, 'bigint-signed-min'),
+  bigintBoundary(9_223_372_036_854_775_807n, 'bigint-signed-max'),
+  single('bigint', 1000),
+]
+assert.ok(fixed.every(legalSpec))
+assert.equal(
+  legalSpec({
+    label: 'invalid-empty-eq',
+    valueKind: 'string',
+    connective: 'and',
+    clauses: [{ field: 'a', kind: 'eq', values: [] }],
+  }),
+  false,
+)
+
+const kindArbitrary = fc.constantFrom<Kind>(
+  'string',
+  'number',
+  'boolean',
+  'date',
+  'bigint',
+)
+const lengthArbitrary = fc.constantFrom(
+  498,
+  499,
+  500,
+  600,
+  998,
+  999,
+  1000,
+  1200,
+)
+const secondLengthArbitrary = fc.constantFrom(499, 500, 600, 1000)
+const generated = fc.oneof(
+  fc
+    .tuple(kindArbitrary, lengthArbitrary)
+    .map(([kind, length]) => single(kind, length)),
+  fc
+    .tuple(
+      kindArbitrary,
+      lengthArbitrary,
+      secondLengthArbitrary,
+      fc.constantFrom<'and' | 'or'>('and', 'or'),
+    )
+    .map(([kind, a, b, connective]) => dual(kind, a, b, connective)),
+  fc
+    .tuple(kindArbitrary, lengthArbitrary)
+    .map(([kind, length]) => mixed(kind, length)),
+  fc
+    .tuple(kindArbitrary, lengthArbitrary, secondLengthArbitrary)
+    .map(([kind, a, b]) => nested(kind, a, b)),
+)
+
+async function runIndexContext() {
+  const db = limitedDatabase()
+  const attempts: Array<Attempt> = []
+  try {
+    const driver = preparedDriver(db, attempts)
+    const adapter = new SQLiteCorePersistenceAdapter({ driver })
+    await adapter.applyCommittedTx('oracle-index', {
+      txId: 'seed',
+      term: 1,
+      seq: 1,
+      rowVersion: 1,
+      mutations: [
+        { type: 'insert', key: 'target', value: { a: 'target', b: 'target' } },
+      ],
+    })
+    driver.startObservation()
+    await adapter.ensureIndex('oracle-index', 'small-in-partial', {
+      expressionSql: [JSON.stringify({ type: 'ref', path: ['a'] })],
+      whereSql: JSON.stringify({
+        type: 'func',
+        name: 'in',
+        args: [
+          { type: 'ref', path: ['b'] },
+          { type: 'val', value: ['target', 'other'] },
+        ],
+      }),
+    })
+    await adapter.ensureIndex('oracle-index', 'small-in-expression', {
+      expressionSql: [
+        JSON.stringify({
+          type: 'func',
+          name: 'in',
+          args: [
+            { type: 'ref', path: ['a'] },
+            { type: 'val', value: ['target', 'other'] },
+          ],
+        }),
+      ],
+    })
+    const ddl = attempts.filter(
+      (entry) => entry.method === 'exec' && entry.sql.includes('CREATE INDEX'),
+    )
+    assert.equal(ddl.length, 2, 'both index-definition paths reached')
+    for (const entry of ddl) {
+      assert.ok(
+        !entry.sql.includes('json_each') && !entry.sql.includes('?'),
+        'index DDL must use literal values',
+      )
+      assert.ok(entry.sql.includes(`'target'`) && entry.sql.includes(`'other'`))
+    }
+  } finally {
+    db.close()
+  }
+}
+
+async function runCursorContext(): Promise<string | undefined> {
+  const db = limitedDatabase()
+  const attempts: Array<Attempt> = []
+  let error: string | undefined
+  let actual: Array<string> | undefined
+  try {
+    const driver = preparedDriver(db, attempts, true)
+    const adapter = new SQLiteCorePersistenceAdapter({ driver })
+    await adapter.applyCommittedTx('oracle-cursor', {
+      txId: 'seed',
+      term: 1,
+      seq: 1,
+      rowVersion: 1,
+      mutations: [
+        { type: 'insert', key: 'target', value: { a: 'target', b: 'target' } },
+      ],
+    })
+    driver.startObservation()
+    try {
+      const rows = await adapter.loadSubset('oracle-cursor', {
+        where: predicate(single('string', 999)),
+        cursor: {
+          whereCurrent: new IR.Func('eq', [
+            new IR.PropRef(['a']),
+            new IR.Value('target'),
+          ]),
+          whereFrom: new IR.Func('eq', [
+            new IR.PropRef(['b']),
+            new IR.Value('target'),
+          ]),
+        },
+      })
+      actual = rows.map((row) => String(row.key))
+    } catch (cause) {
+      error = String(cause)
+    }
+  } finally {
+    db.close()
+  }
+  const reads = attempts.filter(
+    (entry) =>
+      entry.method === 'query' &&
+      entry.sql.startsWith('SELECT key, value, metadata, row_version'),
+  )
+  const counts = reads.map((entry) => entry.bindings)
+  const problem =
+    reads.length !== 2
+      ? `expected two cursor SELECTs, got ${reads.length}`
+      : counts.some((count) => count > BINDING_CAP)
+        ? `two cursor SELECTs bind=${counts}; error=${error ?? 'none'}`
+        : error
+          ? `cursor load rejected ${error}`
+          : actual?.join(',') !== 'target'
+            ? `cursor rows=${actual}`
+            : undefined
+  return problem
+}
+
+const bindingReplaySeed = process.env.TANSTACK_DB_SQLITE_BINDING_SEED
+const bindingReplayPath = process.env.TANSTACK_DB_SQLITE_BINDING_PATH
+const bindingReplay =
+  bindingReplaySeed !== undefined && bindingReplayPath !== undefined
+if ((bindingReplaySeed === undefined) !== (bindingReplayPath === undefined)) {
+  throw new Error(`Binding oracle replay requires both seed and path`)
+}
+if (
+  bindingReplaySeed !== undefined &&
+  !Number.isSafeInteger(Number(bindingReplaySeed))
+) {
+  throw new Error(`Binding oracle replay seed must be an integer`)
+}
+if (
+  bindingReplayPath !== undefined &&
+  !/^\d+(?::\d+)*$/.test(bindingReplayPath)
+) {
+  throw new Error(`Binding oracle replay path must be numeric`)
+}
+
+const bindingFixedIt = bindingReplay ? it.skip : it
+
+export function runSQLiteBindingCapacityOracleSuite(): void {
+  describe(`SQLite subset binding-capacity oracle`, () => {
+    bindingFixedIt(
+      `returns exact rows at single-list, statement-total, and typed boundaries`,
+      async () => {
+        const failures: Array<string> = []
+        for (const spec of fixed) {
+          const observation = await observe(spec)
+          const problem = violation(spec, observation)
+          if (problem)
+            failures.push(
+              `${spec.label}: ${problem.kind}@${problem.checkpoint}: ${problem.message}`,
+            )
+        }
+        expect(failures).toEqual([])
+      },
+    )
+
+    bindingFixedIt(
+      `honors total capacity through transactionWithDriver`,
+      async () => {
+        const failures: Array<string> = []
+        for (const spec of [
+          single(`string`, 999),
+          single(`string`, 1000),
+          dual(`string`, 500, 500, `or`),
+          single(`bigint`, 1000),
+        ]) {
+          const observation = await observe(spec, true)
+          const problem = violation(spec, observation)
+          if (problem)
+            failures.push(
+              `${spec.label}: ${problem.kind}@${problem.checkpoint}: ${problem.message}`,
+            )
+        }
+        expect(failures).toEqual([])
+      },
+    )
+
+    bindingFixedIt(`honors total capacity in each cursor SELECT`, async () => {
+      expect(await runCursorContext()).toBeUndefined()
+    })
+
+    bindingFixedIt(
+      `never submits an over-capacity statement with many scalar predicates`,
+      async () => {
+        const scalarStress: Spec = {
+          label: `1000-scalar-conjunction`,
+          valueKind: `string`,
+          connective: `and`,
+          clauses: Array.from({ length: 1000 }, () => ({
+            field: `a`,
+            kind: `eq`,
+            values: [`target`],
+          })),
+        }
+        const observation = await observe(scalarStress)
+        expect(violation(scalarStress, observation)).toBeUndefined()
+        const predicateReads = observation.attempts.filter((entry) =>
+          entry.sql.startsWith(`SELECT key, value, metadata, row_version`),
+        )
+        expect(predicateReads).toHaveLength(1)
+        expect(predicateReads[0]?.bindings).toBe(0)
+      },
+    )
+
+    bindingFixedIt(
+      `keeps IN values literal in both index-definition contexts`,
+      async () => {
+        await runIndexContext()
+      },
+    )
+
+    async function campaign(
+      label: string,
+      parameters: { seed?: number; path?: string },
+    ) {
+      let firstFailure: Violation | undefined
+      const property = fc.asyncProperty(generated, async (spec) => {
+        assert.ok(legalSpec(spec))
+        const observation = await observe(spec)
+        const problem = violation(spec, observation)
+        if (problem) {
+          firstFailure ??= problem
+          throw new Error(
+            `${spec.label}: ${problem.kind}@${problem.checkpoint}: ${problem.message}${observation.cleanupError ? `; cleanup=${observation.cleanupError}` : ``}`,
+          )
+        }
+      })
+      const details = await fc.check(property, {
+        numRuns: BINDING_RUNS,
+        ...parameters,
+      })
+      const reduced = details.counterexample?.[0]
+      const reducedProblem = reduced
+        ? violation(reduced, await observe(reduced))
+        : undefined
+      const sameViolation =
+        !details.failed ||
+        Boolean(
+          firstFailure &&
+          reducedProblem &&
+          firstFailure.kind === reducedProblem.kind &&
+          firstFailure.checkpoint === reducedProblem.checkpoint,
+        )
+      expect(
+        details.failed,
+        `${label}: seed=${details.seed} path=${details.counterexamplePath ?? ``} first=${firstFailure?.kind ?? ``}@${firstFailure?.checkpoint ?? ``} reduced=${reducedProblem?.kind ?? ``}@${reducedProblem?.checkpoint ?? ``} sameViolation=${sameViolation}; ${details.error ?? ``}`,
+      ).toBe(false)
+    }
+
+    if (bindingReplay) {
+      it(`replays the requested binding history directly`, async () => {
+        await campaign(`direct replay`, {
+          seed: Number(bindingReplaySeed),
+          path: bindingReplayPath,
+        })
+      })
+    } else {
+      it(`preserves exact rows across fixed-seed binding histories`, async () => {
+        await campaign(`fixed seed`, { seed: BINDING_FIXED_SEED })
+      })
+      it(`preserves exact rows across random-seed binding histories`, async () => {
+        await campaign(`random seed`, {})
+      })
+    }
   })
 }
