@@ -2,12 +2,14 @@ import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import BetterSqlite3 from 'better-sqlite3'
+import { createCollection, createTransaction } from '@tanstack/db'
 import { describe, expect, it } from 'vitest'
 import { createNodeSQLitePersistence, persistedCollectionOptions } from '../src'
 import { BetterSqlite3SQLiteDriver } from '../src/node-driver'
 import { SingleProcessCoordinator } from '../../db-sqlite-persistence-core/src'
 import { runRuntimePersistenceContractSuite } from '../../db-sqlite-persistence-core/tests/contracts/runtime-persistence-contract'
 import type { SQLitePullSinceResult } from '../../db-sqlite-persistence-core/src'
+import type { SyncConfig } from '@tanstack/db'
 import type {
   RuntimePersistenceContractTodo,
   RuntimePersistenceDatabaseHarness,
@@ -53,6 +55,77 @@ runRuntimePersistenceContractSuite(`node runtime persistence helpers`, {
 })
 
 describe(`node persistence helpers`, () => {
+  it(`persists an awaited immediate write behind a pending source write`, async () => {
+    const database = new BetterSqlite3(`:memory:`)
+    const id = `awaited-immediate-source`
+    const persistence = createNodeSQLitePersistence({ database })
+    type Row = { id: string; title: string }
+    let source!: Parameters<SyncConfig<Row, string>[`sync`]>[0]
+    const collection = createCollection(
+      persistedCollectionOptions<Row, string>({
+        id,
+        getKey: (row) => row.id,
+        sync: {
+          sync: (params) => {
+            source = params
+            params.markReady()
+          },
+        },
+        persistence,
+      }),
+    )
+    let releaseHandler!: () => void
+    const handlerGate = new Promise<void>((resolve) => {
+      releaseHandler = resolve
+    })
+    let handlerEntered!: () => void
+    const entered = new Promise<void>((resolve) => {
+      handlerEntered = resolve
+    })
+    const mutation = createTransaction({
+      mutationFn: async () => {
+        handlerEntered()
+        await handlerGate
+        source.begin({ immediate: true })
+        source.write({
+          type: `update`,
+          value: { id: `row`, title: `three` },
+        })
+        await source.commit()
+      },
+    })
+    const abort = new AbortController()
+    try {
+      await collection.stateWhenReady()
+      source.begin()
+      source.write({ type: `insert`, value: { id: `row`, title: `one` } })
+      await source.commit()
+
+      mutation.mutate(() => {
+        collection.insert({ id: `local`, title: `optimistic` })
+      })
+      await entered
+      source.begin()
+      source.write({ type: `update`, value: { id: `row`, title: `two` } })
+      const predecessor = Promise.resolve(source.commit(abort.signal))
+      void predecessor.catch(() => undefined)
+      releaseHandler()
+      await Promise.all([predecessor, mutation.isPersisted.promise])
+
+      expect(collection.get(`row`)?.title).toBe(`three`)
+      expect(
+        (await persistence.adapter.loadSubset(id, {})).find(
+          ({ key }) => key === `row`,
+        )?.value,
+      ).toEqual({ id: `row`, title: `three` })
+    } finally {
+      releaseHandler()
+      abort.abort()
+      await collection.cleanup()
+      database.close()
+    }
+  })
+
   it(`defaults coordinator to SingleProcessCoordinator`, () => {
     const runtimeHarness = createRuntimeDatabaseHarness()
     const driver = runtimeHarness.createDriver()

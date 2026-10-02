@@ -309,8 +309,10 @@ both pass.
 Precommit cancellation and cleanup controls pass. Each history has its own Collection identity and an exact
 adapter commit-count check at the hold. The controlled adapter
 establishes these cuts; it does not establish native SQLite or Expo scheduling.
-The Node and Expo persistence owners need versioned real-host receiving
-witnesses for the reported SQLite schedule. The Query result-settlement owner
+The Node persistence owner now checks an awaited immediate source write behind
+a pending normal source write with real better-sqlite3 and exact public and
+durable rows. The reported two-refetch schedule still needs a Node receiving
+witness; Expo's asynchronous SQLite host also needs one. The Query result-settlement owner
 models an accepted refetch result retired before publication by cleanup and
 compares the public promise at source-commit and cleanup checkpoints. This
 corrected control passes: the row-2 source receipt and throwing refetch both

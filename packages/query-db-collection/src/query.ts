@@ -1171,13 +1171,14 @@ export function queryCollectionOptions(
       superseding = false,
     ) => {
       const controller = resultApplicationControllers.get(hashedQueryKey)
-      if (!superseding || !controller?.sourceCommitStarted) {
+      const shouldCancel = !superseding || !controller?.sourceCommitStarted
+      if (shouldCancel) {
         controller?.rollback?.()
       }
       pendingResultApplications.delete(hashedQueryKey)
       failedResultApplications.delete(hashedQueryKey)
       resultApplicationControllers.delete(hashedQueryKey)
-      if (!superseding || !controller?.sourceCommitStarted) controller?.abort()
+      if (shouldCancel) controller?.abort()
     }
 
     const waitForCurrentResultApplication = async (
