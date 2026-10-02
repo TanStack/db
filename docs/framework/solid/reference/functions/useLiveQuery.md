@@ -29,7 +29,7 @@ Query function that defines what data to fetch
 
 ### Returns
 
-Accessor that returns the current rows synchronously (opt-in suspense via the readiness accessor), with state, collection, status, and persisted-readiness properties
+Accessor that returns the current rows synchronously (opt-in suspense via the whenReady accessor), with state, collection, status, and persisted-readiness properties
 
 ### Examples
 
@@ -83,14 +83,14 @@ return (
 ```
 
 ```ts
-// Opt-in suspense: gate rendering on readiness inside <Loading>
+// Opt-in suspense: whenReady() gates on first data and returns the rows
 const todosQuery = useLiveQuery((q) =>
   q.from({ todos: todoCollection })
 )
 
 return (
   <Loading fallback={<div>Loading...</div>}>
-    <For each={todosQuery.readiness()}>
+    <For each={todosQuery.whenReady()}>
       {(todo) => <li>{todo.text}</li>}
     </For>
   </Loading>
@@ -123,7 +123,7 @@ Query function that defines what data to fetch
 
 ### Returns
 
-Accessor that returns the current rows synchronously (opt-in suspense via the readiness accessor), with state, collection, status, and persisted-readiness properties
+Accessor that returns the current rows synchronously (opt-in suspense via the whenReady accessor), with state, collection, status, and persisted-readiness properties
 
 ### Examples
 
@@ -177,14 +177,14 @@ return (
 ```
 
 ```ts
-// Opt-in suspense: gate rendering on readiness inside <Loading>
+// Opt-in suspense: whenReady() gates on first data and returns the rows
 const todosQuery = useLiveQuery((q) =>
   q.from({ todos: todoCollection })
 )
 
 return (
   <Loading fallback={<div>Loading...</div>}>
-    <For each={todosQuery.readiness()}>
+    <For each={todosQuery.whenReady()}>
       {(todo) => <li>{todo.text}</li>}
     </For>
   </Loading>
@@ -217,7 +217,7 @@ Configuration object with query and options
 
 ### Returns
 
-Accessor that returns the current rows synchronously (opt-in suspense via the readiness accessor), with state, collection, status, and persisted-readiness properties
+Accessor that returns the current rows synchronously (opt-in suspense via the whenReady accessor), with state, collection, status, and persisted-readiness properties
 
 ### Examples
 
@@ -288,7 +288,7 @@ Pre-created live query collection to subscribe to
 
 ### Returns
 
-Accessor that returns the current rows synchronously (opt-in suspense via the readiness accessor), with state, collection, status, and persisted-readiness properties
+Accessor that returns the current rows synchronously (opt-in suspense via the whenReady accessor), with state, collection, status, and persisted-readiness properties
 
 ### Examples
 
@@ -355,7 +355,7 @@ Create a live query using a query function
 
 ### Returns
 
-Accessor that returns the current rows synchronously (opt-in suspense via the readiness accessor), with state, collection, status, and persisted-readiness properties
+Accessor that returns the current rows synchronously (opt-in suspense via the whenReady accessor), with state, collection, status, and persisted-readiness properties
 
 ### Examples
 
@@ -409,14 +409,14 @@ return (
 ```
 
 ```ts
-// Opt-in suspense: gate rendering on readiness inside <Loading>
+// Opt-in suspense: whenReady() gates on first data and returns the rows
 const todosQuery = useLiveQuery((q) =>
   q.from({ todos: todoCollection })
 )
 
 return (
   <Loading fallback={<div>Loading...</div>}>
-    <For each={todosQuery.readiness()}>
+    <For each={todosQuery.whenReady()}>
       {(todo) => <li>{todo.text}</li>}
     </For>
   </Loading>
