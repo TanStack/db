@@ -273,7 +273,7 @@ export class CollectionStateManager<
       rowOrigins?: ReadonlyMap<TKey, VirtualOrigin>
       optimisticUpserts?: Pick<Map<TKey, unknown>, 'has'>
       optimisticDeletes?: Pick<Set<TKey>, 'has'>
-      completedOptimisticKeys?: Pick<Map<TKey, unknown>, 'has'>
+      completedOptimisticKeys?: Pick<Set<TKey>, 'has'>
     },
   ): VirtualRowProps<TKey> {
     if (this.isLocalOnly) {
@@ -1512,22 +1512,16 @@ export class CollectionStateManager<
         }
       }
       const rowUpdateMode = this.config.sync.rowUpdateMode || `partial`
-      const completedOptimisticOps = new Map<
-        TKey,
-        { type: string; value: TOutput }
-      >()
+      const completedOptimisticKeys = new Set<TKey>()
 
       for (const transaction of this.transactions.values()) {
         if (transaction.state === `completed`) {
           for (const mutation of transaction.mutations) {
-            if (this.isThisCollection(mutation.collection)) {
-              if (mutation.optimistic) {
-                completedOptimisticOps.set(mutation.key, {
-                  type: mutation.type,
-                  value: mutation.modified as TOutput,
-                })
-              }
-            }
+            if (
+              this.isThisCollection(mutation.collection) &&
+              mutation.optimistic
+            )
+              completedOptimisticKeys.add(mutation.key)
           }
         }
       }
@@ -1869,7 +1863,7 @@ export class CollectionStateManager<
             rowOrigins: previousRowOrigins,
             optimisticUpserts: previousOptimisticUpserts,
             optimisticDeletes: previousOptimisticDeletes,
-            completedOptimisticKeys: completedOptimisticOps,
+            completedOptimisticKeys,
           })
         const nextVirtualProps = this.getVirtualPropsSnapshotForState(key)
         const virtualChanged =
@@ -1896,30 +1890,14 @@ export class CollectionStateManager<
           previousVisibleValue === undefined &&
           newVisibleValue !== undefined
         ) {
-          const completedOptimisticOp = completedOptimisticOps.get(key)
-          if (completedOptimisticOp) {
-            const previousValueFromCompleted = completedOptimisticOp.value
-            const previousValueWithVirtualFromCompleted =
-              enrichRowWithVirtualProps(
-                previousValueFromCompleted,
-                key,
-                this.collection.id,
-                () => previousVirtualProps.$synced,
-                () => previousVirtualProps.$origin,
-              )
-            events.push({
-              type: `update`,
-              key,
-              value: newVisibleValue,
-              previousValue: previousValueWithVirtualFromCompleted,
-            })
-          } else {
-            events.push({
-              type: `insert`,
-              key,
-              value: newVisibleValue,
-            })
-          }
+          // Subscribers last saw this key absent, whatever a completed
+          // optimistic request held. Batching composes a buffered delete with
+          // this insert into an update.
+          events.push({
+            type: `insert`,
+            key,
+            value: newVisibleValue,
+          })
         } else if (
           previousVisibleValue !== undefined &&
           newVisibleValue === undefined
