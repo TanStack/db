@@ -707,12 +707,7 @@ export class CollectionStateManager<
     this.pendingLocalChanges.clear()
 
     // Seed optimistic state with pending optimistic mutations only when a sync is pending
-    const pendingSyncKeys = new Set<TKey>()
-    for (const transaction of this.pendingSyncedTransactions) {
-      for (const operation of transaction.operations) {
-        pendingSyncKeys.add(operation.key as TKey)
-      }
-    }
+    const pendingSyncKeys = this.collectPendingSyncKeys()
     const staleOptimisticUpserts: Array<TKey> = []
     for (const [key, value] of this.pendingOptimisticUpserts) {
       if (
@@ -1240,14 +1235,24 @@ export class CollectionStateManager<
     this.pendingSyncedTransactions = this.pendingSyncedTransactions.filter(
       (transaction) => !rejected.has(transaction),
     )
-    const canceledKeys = new Set<TKey>()
     for (const { transaction, error } of invalid) {
-      for (const operation of transaction.operations) {
-        canceledKeys.add(operation.key as TKey)
-      }
       transaction.applied.reject(error)
     }
-    return canceledKeys
+    return this.collectPendingSyncKeys(rejected)
+  }
+
+  /** Keys written by the given queued transactions (default: the whole queue). */
+  private collectPendingSyncKeys(
+    transactions: Iterable<PendingSyncedTransaction<TOutput, TKey>> = this
+      .pendingSyncedTransactions,
+  ): Set<TKey> {
+    const keys = new Set<TKey>()
+    for (const transaction of transactions) {
+      for (const operation of transaction.operations) {
+        keys.add(operation.key as TKey)
+      }
+    }
+    return keys
   }
 
   /** Rebuild after truncate or application changes queue history. */
@@ -1789,21 +1794,9 @@ export class CollectionStateManager<
     const index = this.pendingSyncedTransactions.indexOf(transaction)
     if (index === -1) return
 
-    const canceledKeys = new Set<TKey>()
-    const cancel = (
-      pending: PendingSyncedTransaction<TOutput, TKey>,
-      error: Error,
-    ) => {
-      const pendingIndex = this.pendingSyncedTransactions.indexOf(pending)
-      if (pendingIndex === -1 || pending.applicationStarted) return
-      this.pendingSyncedTransactions.splice(pendingIndex, 1)
-      for (const operation of pending.operations) {
-        canceledKeys.add(operation.key as TKey)
-      }
-      pending.applied.reject(error)
-    }
-
-    cancel(transaction, reason)
+    this.pendingSyncedTransactions.splice(index, 1)
+    const canceledKeys = this.collectPendingSyncKeys([transaction])
+    transaction.applied.reject(reason)
 
     // Admission can depend on earlier queued writes. After cancellation,
     // replay the queue with the same classifier used by normal admission.
@@ -1814,13 +1807,11 @@ export class CollectionStateManager<
       canceledKeys.add(key)
     }
 
-    const remainingPendingKeys = new Set<TKey>()
-    for (const pending of this.pendingSyncedTransactions) {
-      if (pending.invalidationError !== undefined) continue
-      for (const operation of pending.operations) {
-        remainingPendingKeys.add(operation.key as TKey)
-      }
-    }
+    const remainingPendingKeys = this.collectPendingSyncKeys(
+      this.pendingSyncedTransactions.filter(
+        (pending) => pending.invalidationError === undefined,
+      ),
+    )
     for (const key of canceledKeys) {
       if (!remainingPendingKeys.has(key)) {
         this.recentlySyncedKeys.delete(key)
@@ -1872,12 +1863,7 @@ export class CollectionStateManager<
     if (this.pendingSyncedTransactions.length === 0) return
 
     // Get all keys that will be affected by sync operations
-    const syncedKeys = new Set<TKey>()
-    for (const transaction of this.pendingSyncedTransactions) {
-      for (const operation of transaction.operations) {
-        syncedKeys.add(operation.key as TKey)
-      }
-    }
+    const syncedKeys = this.collectPendingSyncKeys()
 
     // Mark keys as about to be synced to suppress intermediate events from recomputeOptimisticState
     for (const key of syncedKeys) {
