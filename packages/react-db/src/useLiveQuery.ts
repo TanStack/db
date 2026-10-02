@@ -781,7 +781,7 @@ function useLiveQueryImpl(
   const instanceRef = useRef<ReturnType<typeof createHookInstance> | null>(null)
   const instance = (instanceRef.current ??= createHookInstance(dbClient))
   const resumeDeferredCollections = () => {
-    const collections = [...instance.deferredCollections]
+    const collections = Array.from(instance.deferredCollections)
     instance.deferredCollections.clear()
     const errors: Array<unknown> = []
     for (const collection of collections) {
