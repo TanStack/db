@@ -2566,6 +2566,21 @@ const historyRow = fc.record({
   b: fc.integer({ min: -2, max: 2 }),
   c: fc.integer({ min: -2, max: 2 }),
 })
+const sourceBatch = fc.record({
+  type: fc.constant(`sync` as const),
+  rows: fc.uniqueArray(historyRow, {
+    selector: (row) => row.id,
+    maxLength: 3,
+  }),
+  truncate: fc.boolean(),
+  immediate: fc.boolean(),
+  copies: fc.integer({ min: 1, max: 2 }),
+})
+// A mutation handler may write a source batch before it returns.
+const handlerBatch = fc.oneof(
+  { weight: 3, arbitrary: fc.constant(undefined) },
+  { weight: 1, arbitrary: sourceBatch },
+)
 const optimisticStep: fc.Arbitrary<OptimisticStep> = fc.oneof(
   {
     weight: 2,
@@ -2573,6 +2588,7 @@ const optimisticStep: fc.Arbitrary<OptimisticStep> = fc.oneof(
       type: fc.constant(`delete` as const),
       key: fc.integer({ min: 1, max: 3 }),
       optimistic: fc.boolean(),
+      inHandler: handlerBatch,
     }),
   },
   {
@@ -2591,6 +2607,7 @@ const optimisticStep: fc.Arbitrary<OptimisticStep> = fc.oneof(
         )
         .filter((fields) => Object.keys(fields).length > 0),
       optimistic: fc.boolean(),
+      inHandler: handlerBatch,
     }),
   },
   {
@@ -2602,19 +2619,7 @@ const optimisticStep: fc.Arbitrary<OptimisticStep> = fc.oneof(
       cascade: fc.boolean(),
     }),
   },
-  {
-    weight: 3,
-    arbitrary: fc.record({
-      type: fc.constant(`sync` as const),
-      rows: fc.uniqueArray(historyRow, {
-        selector: (row) => row.id,
-        maxLength: 3,
-      }),
-      truncate: fc.boolean(),
-      immediate: fc.boolean(),
-      copies: fc.integer({ min: 1, max: 2 }),
-    }),
-  },
+  { weight: 3, arbitrary: sourceBatch },
 )
 const optimisticHistory = fc.record({
   initial: fc.uniqueArray(historyRow, {
@@ -2686,6 +2691,67 @@ it(`generates direct delete actions`, () => {
   const commands = fc.sample(optimisticStep, { seed: 86104, numRuns: 100 })
   expect(commands.some((step) => step.type === `delete`)).toBe(true)
 })
+
+it(`generates source batches inside insert, update, and delete handlers`, () => {
+  const histories = fc.sample(optimisticHistory, { seed: 86103, numRuns: 100 })
+  const inHandler = histories.flatMap(({ steps }) =>
+    steps.flatMap((step) =>
+      (step.type === `edit` || step.type === `delete`) && step.inHandler
+        ? [{ type: step.type, batch: step.inHandler }]
+        : [],
+    ),
+  )
+  expect(inHandler.some((entry) => entry.type === `edit`)).toBe(true)
+  expect(inHandler.some((entry) => entry.type === `delete`)).toBe(true)
+  expect(inHandler.some((entry) => entry.batch.immediate)).toBe(true)
+  expect(inHandler.some((entry) => !entry.batch.immediate)).toBe(true)
+  expect(inHandler.some((entry) => entry.batch.rows.length > 0)).toBe(true)
+})
+
+// A handler that confirms its own request through sync, before it returns.
+// The request must already be owned by the Collection, so the batch waits for
+// settlement and then retires the accepted snapshot.
+it.each(
+  [`insert`, `update`, `delete`].flatMap((kind) =>
+    [false, true].map((immediate) => ({ kind, immediate })),
+  ),
+)(
+  `retires a request confirmed inside its own handler: %j`,
+  async ({ kind, immediate }) => {
+    const existing = { id: 1, a: 0, b: 0, c: 0 }
+    const confirmed = { id: 1, a: 1, b: 1, c: 1 }
+    const batch = {
+      type: `sync`,
+      rows: kind === `delete` ? [] : [confirmed],
+      truncate: false,
+      immediate,
+      copies: 1,
+    } as const
+    const counts = await runOptimisticHistory(
+      kind === `insert` ? [] : [existing],
+      [
+        kind === `delete`
+          ? { type: `delete`, key: 1, optimistic: true, inHandler: batch }
+          : {
+              type: `edit`,
+              key: 1,
+              fields: { a: 1, b: 1, c: 1 },
+              optimistic: true,
+              inHandler: batch,
+            },
+        { type: `settle`, slot: 0, success: true, cascade: false },
+        {
+          type: `sync`,
+          rows: [{ id: 1, a: 2, b: 2, c: 2 }],
+          truncate: false,
+          immediate: false,
+          copies: 1,
+        },
+      ],
+    )
+    expect(counts.handlerBatches).toBe(1)
+  },
+)
 
 const defaultHistory = (
   truncate: boolean,
