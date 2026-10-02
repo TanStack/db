@@ -835,13 +835,14 @@ export function withArrayChangeTracking<T extends object>(
   return deepClone(getChanges(), undefined, true)
 }
 
-// Whether every own field of a plain object is a primitive or a function.
+// Whether every own field of a plain object holds a primitive or a function.
 function isFlatPlainObject(value: object): boolean {
   const prototype = Object.getPrototypeOf(value)
   if (prototype !== Object.prototype && prototype !== null) return false
   for (const key in value) {
-    const field = (value as Record<string, unknown>)[key]
-    if (field !== null && typeof field === `object`) return false
+    // A getter may return a new value on each read; the proxy reads it once.
+    const { value: field, get } = Object.getOwnPropertyDescriptor(value, key)!
+    if (get || (field !== null && typeof field === `object`)) return false
   }
   return Object.getOwnPropertySymbols(value).length === 0
 }
@@ -850,8 +851,8 @@ function isFlatPlainObject(value: object): boolean {
  * Change tracking for flat rows without proxies. A draft is a shallow copy,
  * and its changes are the fields that differ from the row afterwards under
  * the same equality the draft proxy uses for primitives. Returns undefined
- * when any row has a nested object, a symbol key, or a class prototype, so
- * the caller falls back to the proxy.
+ * when any row has a nested object, a getter, a symbol key, or a class
+ * prototype, so the caller falls back to the proxy.
  */
 export function withFlatChangeTracking<T extends object>(
   targets: Array<T>,

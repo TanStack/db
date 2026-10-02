@@ -434,7 +434,7 @@ export class CollectionMutationsManager<
       >
     > = keysArray
       .map((key, index) => {
-        const itemChanges = changesArray[index] // User-provided changes for this specific item
+        const itemChanges = changesArray[index] // A fresh object the tracker recorded for this item
 
         // Skip items with no changes
         if (!itemChanges || Object.keys(itemChanges).length === 0) {

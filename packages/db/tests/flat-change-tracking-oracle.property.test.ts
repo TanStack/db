@@ -677,6 +677,9 @@ describe(`flat change tracking oracle`, () => {
         new (class Row {
           a = 1
         })(),
+        // A getter can return a new value on each read, so only the proxy,
+        // which reads it once, reports a stable change set.
+        Object.defineProperty({}, `a`, { get: () => 1, enumerable: true }),
       ]) {
         expect(withFlatChangeTracking([row], callback, true)).toBeUndefined()
       }
