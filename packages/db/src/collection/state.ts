@@ -1295,40 +1295,25 @@ export class CollectionStateManager<
 
     // pending synced transactions could be either `committed` or still open.
     // we only want to process `committed` transactions here
-    const {
-      committedSyncedTransactions,
-      uncommittedSyncedTransactions,
-      hasTruncateSync,
-      hasImmediateSync,
-      layoutChanged,
-    } = this.pendingSyncedTransactions.reduce(
-      (acc, t) => {
-        if (t.committed) {
-          acc.committedSyncedTransactions.push(t)
-          acc.layoutChanged ||= t.layoutChanged
-          if (t.truncate) {
-            acc.hasTruncateSync = true
-          }
-          if (t.immediate) {
-            acc.hasImmediateSync = true
-          }
-        } else {
-          acc.uncommittedSyncedTransactions.push(t)
-        }
-        return acc
-      },
-      {
-        committedSyncedTransactions: [] as Array<
-          PendingSyncedTransaction<TOutput, TKey>
-        >,
-        uncommittedSyncedTransactions: [] as Array<
-          PendingSyncedTransaction<TOutput, TKey>
-        >,
-        hasTruncateSync: false,
-        hasImmediateSync: false,
-        layoutChanged: false,
-      },
-    )
+    const committedSyncedTransactions: Array<
+      PendingSyncedTransaction<TOutput, TKey>
+    > = []
+    const uncommittedSyncedTransactions: Array<
+      PendingSyncedTransaction<TOutput, TKey>
+    > = []
+    let hasTruncateSync = false
+    let hasImmediateSync = false
+    let layoutChanged = false
+    for (const t of this.pendingSyncedTransactions) {
+      if (t.committed) {
+        committedSyncedTransactions.push(t)
+        layoutChanged ||= t.layoutChanged
+        hasTruncateSync ||= t.truncate === true
+        hasImmediateSync ||= t.immediate === true
+      } else {
+        uncommittedSyncedTransactions.push(t)
+      }
+    }
 
     if (committedSyncedTransactions.length === 0) {
       return { processed: false }
@@ -1459,16 +1444,11 @@ export class CollectionStateManager<
       }
       const rowUpdateMode = this.config.sync.rowUpdateMode || `partial`
       const completedOptimisticKeys = new Set<TKey>()
-
       for (const transaction of this.transactions.values()) {
-        if (transaction.state === `completed`) {
-          for (const mutation of transaction.mutations) {
-            if (
-              this.isThisCollection(mutation.collection) &&
-              mutation.optimistic
-            )
-              completedOptimisticKeys.add(mutation.key)
-          }
+        if (transaction.state !== `completed`) continue
+        for (const mutation of transaction.mutations) {
+          if (this.isThisCollection(mutation.collection) && mutation.optimistic)
+            completedOptimisticKeys.add(mutation.key)
         }
       }
 
@@ -1632,9 +1612,7 @@ export class CollectionStateManager<
           !changedKeys.has(key)
         )
           continue
-        if (!changedKeys.has(key)) {
-          changedKeys.add(key)
-        }
+        changedKeys.add(key)
         this.pendingOptimisticDeletes.delete(key)
         this.pendingLocalOrigins.delete(key)
         this.pendingOptimisticDirectDeletes.delete(key)
@@ -1721,55 +1699,36 @@ export class CollectionStateManager<
         const virtualChanged =
           previousVirtualProps.$synced !== nextVirtualProps.$synced ||
           previousVirtualProps.$origin !== nextVirtualProps.$origin
-        const previousValueWithVirtual =
-          previousVisibleValue !== undefined
-            ? enrichRowWithVirtualProps(
-                previousVisibleValue,
-                key,
-                this.collection.id,
-                () => previousVirtualProps.$synced,
-                () => previousVirtualProps.$origin,
-              )
-            : undefined
+        const withPreviousVirtualProps = (value: TOutput) =>
+          enrichRowWithVirtualProps(
+            value,
+            key,
+            this.collection.id,
+            () => previousVirtualProps.$synced,
+            () => previousVirtualProps.$origin,
+          )
 
-        const shouldEmitVirtualUpdate =
-          virtualChanged &&
-          previousVisibleValue !== undefined &&
-          newVisibleValue !== undefined &&
-          deepEquals(previousVisibleValue, newVisibleValue)
-
-        if (
-          previousVisibleValue === undefined &&
-          newVisibleValue !== undefined
-        ) {
+        if (previousVisibleValue === undefined) {
+          if (newVisibleValue === undefined) continue
           // Subscribers last saw this key absent, whatever a completed
           // optimistic request held. Batching composes a buffered delete with
           // this insert into an update.
-          events.push({
-            type: `insert`,
-            key,
-            value: newVisibleValue,
-          })
-        } else if (
-          previousVisibleValue !== undefined &&
-          newVisibleValue === undefined
-        ) {
+          events.push({ type: `insert`, key, value: newVisibleValue })
+        } else if (newVisibleValue === undefined) {
           events.push({
             type: `delete`,
             key,
-            value: previousValueWithVirtual ?? previousVisibleValue,
+            value: withPreviousVirtualProps(previousVisibleValue),
           })
         } else if (
-          previousVisibleValue !== undefined &&
-          newVisibleValue !== undefined &&
-          (!deepEquals(previousVisibleValue, newVisibleValue) ||
-            shouldEmitVirtualUpdate)
+          virtualChanged ||
+          !deepEquals(previousVisibleValue, newVisibleValue)
         ) {
           events.push({
             type: `update`,
             key,
             value: newVisibleValue,
-            previousValue: previousValueWithVirtual ?? previousVisibleValue,
+            previousValue: withPreviousVirtualProps(previousVisibleValue),
           })
         }
       }
@@ -1804,7 +1763,7 @@ export class CollectionStateManager<
             this.recentlySyncedKeys.clear()
           }
         })
-        if (!this.hasReceivedFirstCommit) this.hasReceivedFirstCommit = true
+        this.hasReceivedFirstCommit = true
       }
 
       for (const transaction of committedSyncedTransactions) {
