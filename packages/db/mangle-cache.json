@@ -370,9 +370,11 @@
   "commitLocalOnlyDirect": "f5",
   "stopStatusEvents": "f6",
   "scheduleRelease": "f8",
-  "onEmpty": "gf",
   "releaseIfUnused": "f4",
   "filterChanges": "f7",
   "passes": "f9",
-  "sameFields": "ga"
+  "sameFields": "ga",
+  "collectionHold": "gb",
+  "holdCollection": "gc",
+  "registry": "gd"
 }

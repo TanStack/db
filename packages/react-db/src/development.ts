@@ -6,5 +6,10 @@ export function shouldWarnInDevelopment(disableEnvVar: string): boolean {
   } catch {
     return false
   }
-  return typeof process === `undefined` || process.env[disableEnvVar] !== `1`
+  // A page may supply a `process` shim without `env`; nothing disabled it.
+  try {
+    return process.env[disableEnvVar] !== `1`
+  } catch {
+    return true
+  }
 }

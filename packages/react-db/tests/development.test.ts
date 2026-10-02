@@ -12,7 +12,11 @@ const source = readFileSync(
 
 // Evaluates the module as a browser bundle would: `NODE_ENV` inlined by the
 // bundler, or left alone, and no `process` global.
-function inBrowser(nodeEnv: string | undefined): (name: string) => boolean {
+function inBrowser(
+  nodeEnv: string | undefined,
+  // Globals of the page, such as a `process` shim from another library.
+  globals: Record<string, unknown> = {},
+): (name: string) => boolean {
   const { code } = transformSync(source, {
     loader: `ts`,
     format: `cjs`,
@@ -22,7 +26,10 @@ function inBrowser(nodeEnv: string | undefined): (name: string) => boolean {
         : { 'process.env.NODE_ENV': JSON.stringify(nodeEnv) },
   })
   const bundle = { exports: {} as Record<string, unknown> }
-  runInContext(code, createContext({ module: bundle, exports: bundle.exports }))
+  runInContext(
+    code,
+    createContext({ ...globals, module: bundle, exports: bundle.exports }),
+  )
   return bundle.exports.shouldWarnInDevelopment as (name: string) => boolean
 }
 
@@ -31,6 +38,10 @@ describe(`development warnings`, () => {
 
   it(`warn in a browser development bundle without a process global`, () => {
     expect(inBrowser(`development`)(`DISABLE`)).toBe(true)
+  })
+
+  it(`stay on when a page's process shim has no env`, () => {
+    expect(inBrowser(`development`, { process: {} })(`DISABLE`)).toBe(true)
   })
 
   it(`stay off in a browser production bundle or without a bundler`, () => {

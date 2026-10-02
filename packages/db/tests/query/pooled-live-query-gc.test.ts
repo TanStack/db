@@ -1,8 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { createCollection } from '../../src/collection/index.js'
+import { CollectionImpl, createCollection } from '../../src/collection/index.js'
 import { createLiveQueryObserver } from '../../src/live-query-observer.js'
 import { Query } from '../../src/query/builder/index.js'
-import { createLiveQueryCollection, eq } from '../../src/query/index.js'
+import { createLiveQueryCollection, eq, not } from '../../src/query/index.js'
 import { createPooledLiveQuery } from '../../src/query/pooled-live-query.js'
 import { mockSyncCollectionOptions } from '../utils.js'
 
@@ -129,6 +129,108 @@ describe(`pooled live query gcTime`, () => {
           createPooledLiveQuery(query(source)(new Query()), { gcTime: 1 })!,
       ),
     ).toEqual(compiledKeys)
+  })
+
+  it(`seeds a filtered view from its refilled group after a release`, async () => {
+    const source = makeSource()
+    source.utils.begin()
+    source.utils.write({ type: `insert`, value: { id: `b`, g: `x` } })
+    source.utils.commit()
+    // `not(eq(r.id, 'b'))` is evaluated per view, so this view keeps `a`.
+    const view = createPooledLiveQuery(
+      query(source)(new Query()).where(({ r }: any) => not(eq(r.id, `b`))),
+      { gcTime: 1 },
+    )!
+    const observer = createLiveQueryObserver(view, { mode: `wholesale` })
+    observer.subscribe(() => {})()
+    await vi.advanceTimersByTimeAsync(60)
+    const stop = observer.subscribe(() => {})
+    await vi.advanceTimersByTimeAsync(1)
+    expect([...observer.getSnapshot().state!.keys()]).toEqual([`a`])
+    source.utils.begin()
+    source.utils.write({ type: `delete`, value: { id: `a`, g: `x` } })
+    source.utils.commit()
+    await vi.advanceTimersByTimeAsync(1)
+    expect([...observer.getSnapshot().state!.keys()]).toEqual([])
+    stop()
+  })
+
+  it(`shares one partition after a released partition subscribes again`, async () => {
+    const source = makeSource()
+    const mount = () => {
+      const view = createPooledLiveQuery(query(source)(new Query()), {
+        gcTime: 1,
+      })!
+      const observer = createLiveQueryObserver(view, { mode: `wholesale` })
+      return { observer, stop: observer.subscribe(() => {}) }
+    }
+    const first = mount()
+    first.stop()
+    await vi.advanceTimersByTimeAsync(60)
+    // The released partition's view subscribes again, beside a new view.
+    const again = first.observer.subscribe(() => {})
+    const second = mount()
+    // The new view joins the partition that subscribed again.
+    expect(source.subscriberCount).toBe(1)
+    again()
+    await vi.advanceTimersByTimeAsync(60)
+    const third = mount()
+    expect(source.subscriberCount).toBe(1)
+    second.stop()
+    third.stop()
+  })
+
+  it(`keeps a newer partition when an older one releases again`, async () => {
+    const source = makeSource()
+    const mount = () => {
+      const view = createPooledLiveQuery(query(source)(new Query()), {
+        gcTime: 1,
+      })!
+      const observer = createLiveQueryObserver(view, { mode: `wholesale` })
+      return { observer, stop: observer.subscribe(() => {}) }
+    }
+    const first = mount()
+    first.stop()
+    await vi.advanceTimersByTimeAsync(60)
+    // A new partition takes the key before the old view subscribes again.
+    const second = mount()
+    first.observer.subscribe(() => {})()
+    await vi.advanceTimersByTimeAsync(60)
+    const third = mount()
+    expect(source.subscriberCount).toBe(1)
+    second.stop()
+    third.stop()
+  })
+
+  it(`keeps its public Collection live while observed`, async () => {
+    const source = makeSource()
+    const view = createPooledLiveQuery(query(source)(new Query()), {
+      gcTime: 1,
+    })!
+    const observer = createLiveQueryObserver(view, { mode: `wholesale` })
+    const stop = observer.subscribe(() => {})
+    const collection = observer.getSnapshot().collection!
+    expect(collection.toArray).toHaveLength(1)
+    await vi.advanceTimersByTimeAsync(500)
+    expect(collection.status).toBe(`ready`)
+    expect(collection.toArray).toHaveLength(1)
+    stop()
+  })
+
+  it(`hands users a Collection that queries accept as a source`, () => {
+    const source = makeSource()
+    const view = createPooledLiveQuery(query(source)(new Query()), {
+      gcTime: 1,
+    })!
+    const collection = createLiveQueryObserver(view, {
+      mode: `wholesale`,
+    }).getSnapshot().collection!
+    expect(collection).toBeInstanceOf(CollectionImpl)
+    const nested = createLiveQueryCollection({
+      query: (q) => q.from({ c: collection }),
+      startSync: true,
+    })
+    expect(nested.toArray.map((row) => row.id)).toEqual([`a`])
   })
 
   it.each([[[5, 120]], [[120, 5]]])(

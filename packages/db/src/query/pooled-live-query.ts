@@ -78,7 +78,8 @@ class Partition {
   constructor(
     private readonly source: CollectionImpl<any, any, any, any, any>,
     private readonly paths: Array<Array<string>>,
-    private readonly onEmpty: () => void,
+    // The partition's entry in its source's map, which a mount looks up.
+    private readonly registry: { add: () => void; remove: () => void },
   ) {}
 
   groupKeyOf(row: Row | undefined): string | undefined {
@@ -131,8 +132,10 @@ class Partition {
     this.scheduleRelease(UNSUBSCRIBED_GC_FLOOR_MS)
   }
 
-  private subscribe(): void {
+  subscribe(): void {
     if (!this.terminated && !this.subscription) {
+      // A released partition that subscribes again serves new mounts too.
+      this.registry.add()
       this.subscription = this.source.subscribeChanges(
         (changes) =>
           this.apply(changes as Array<ChangeMessage<Row, string | number>>),
@@ -172,7 +175,7 @@ class Partition {
   private release(): void {
     this.subscription?.unsubscribe()
     this.subscription = undefined
-    this.onEmpty()
+    this.registry.remove()
   }
 
   // Releases on the Collections' shared GC queue, after the longest
@@ -405,6 +408,8 @@ class PooledLiveQuery {
   readonly _subscribeLayoutChanges = undefined
   private readonly group: PartitionGroup
   private collection: Collection<any, any, any> | undefined = undefined
+  private listenerCount = 0
+  private collectionHold: { unsubscribe: () => void } | undefined = undefined
 
   constructor(
     private readonly source: CollectionImpl<any, any, any, any, any>,
@@ -441,8 +446,12 @@ class PooledLiveQuery {
     callback: Listener,
     options: { includeInitialState?: boolean } = {},
   ): { unsubscribe: () => void } {
+    // A released partition refills its group here, so seed the filter after.
+    this.partition.subscribe()
     const listener = this.passes ? this.filterChanges(callback) : callback
     this.partition.addListener(this.group, listener)
+    this.listenerCount++
+    this.holdCollection()
     if (options.includeInitialState) {
       callback(
         Array.from(this.entries(), ([key, value]) => ({
@@ -452,8 +461,25 @@ class PooledLiveQuery {
         })),
       )
     }
+    let subscribed = true
     return {
-      unsubscribe: () => this.partition.removeListener(this.group, listener),
+      unsubscribe: () => {
+        if (!subscribed) return
+        subscribed = false
+        this.partition.removeListener(this.group, listener)
+        if (--this.listenerCount === 0) {
+          this.collectionHold?.unsubscribe()
+          this.collectionHold = undefined
+        }
+      },
+    }
+  }
+
+  // While the view is observed, its built Collection stays subscribed, as
+  // the Collection would be if it served the observer itself.
+  private holdCollection(): void {
+    if (this.collection && this.listenerCount > 0) {
+      this.collectionHold ??= this.collection.subscribeChanges(() => {})
     }
   }
 
@@ -509,11 +535,15 @@ class PooledLiveQuery {
   }
 
   materialize(): Collection<any, any, any> {
-    return (this.collection ??= createLiveQueryCollection({
-      query: this.query,
-      startSync: true,
-      gcTime: this.gcTime,
-    }))
+    if (!this.collection) {
+      this.collection = createLiveQueryCollection({
+        query: this.query,
+        startSync: true,
+        gcTime: this.gcTime,
+      })
+      this.holdCollection()
+    }
+    return this.collection
   }
 }
 
@@ -526,6 +556,10 @@ const forwardToCollection: ProxyHandler<PooledLiveQuery> = {
   },
   has(view, property) {
     return Reflect.has(view.materialize(), property)
+  },
+  // So `instanceof` and query sources accept it as the Collection it is.
+  getPrototypeOf(view) {
+    return Reflect.getPrototypeOf(view.materialize())
   },
 }
 
@@ -558,7 +592,17 @@ export function createPooledLiveQuery(
   let partition = partitions.get(shapeKey)
   if (!partition) {
     const owner = partitions
-    partition = new Partition(source, shape.paths, () => owner.delete(shapeKey))
+    // A released partition may subscribe again; it must not then replace or
+    // remove a newer partition created under its key.
+    const created: Partition = new Partition(source, shape.paths, {
+      add: () => {
+        if (!owner.has(shapeKey)) owner.set(shapeKey, created)
+      },
+      remove: () => {
+        if (owner.get(shapeKey) === created) owner.delete(shapeKey)
+      },
+    })
+    partition = created
     partitions.set(shapeKey, partition)
   }
   // Observers read the view directly; users get its `publicCollection`.
