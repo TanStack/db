@@ -186,7 +186,9 @@ in place and writes it again, pass the row's previous value as
 `previousValue`. Without it, the change already overwrote the value the
 collection needs to publish the update, and live queries can keep the row in
 a result it left. In development, the collection throws
-`SyncRowReusedWithoutPreviousValueError` for that write.
+`SyncRowReusedWithoutPreviousValueError` for that write when a top-level field
+changed. The check compares shallow copies, so it does not detect a change
+inside a nested object. Pass `previousValue` for those writes too.
 
 ```ts
 // Changes a stored row in place, so it must name the previous value
