@@ -1001,6 +1001,15 @@ replacement instead of reviving a stale cursor.
 
 ### Atomic window publication
 
+`publishUnconfirmedOrderedResults` is an opt-in exception for initial row
+publication only. While the live-query Collection is loading and no explicit
+window operation is active, available local rows may cross the ordered-request
+publication hold. Their cached order is not authoritative. Initial-query
+readiness and preload still require all current provider requests to settle.
+Failure, source replay, repair, and joined-demand holds remain closed. Explicit
+window moves retain the atomic publication contract below. The option defaults
+to false.
+
 An initial ordered load or imperative window move includes every page,
 tie-boundary request, and forward refill needed to reach its fixed point. Its
 preload or window promise cannot settle before that chain, and a failure in any
