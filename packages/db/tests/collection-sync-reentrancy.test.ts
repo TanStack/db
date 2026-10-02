@@ -964,7 +964,8 @@ describe(`sync publication reentrancy`, () => {
         {
           // Delete the prior public layout [1, 2, 3], not the unpublished
           // rank update's intermediate [2, 1, 3], then replay whole snapshots.
-          changes: [1, 2, 3, 1, 3, 1, 2],
+          // Each key is inserted once after the delete prefix.
+          changes: [1, 2, 3, 1, 3, 2],
           keys: [2, 1, 3],
           values: [`two`, `optimistic-one`, `optimistic-three`],
           markedReceiptSettled: false,
@@ -982,6 +983,83 @@ describe(`sync publication reentrancy`, () => {
       await collection.cleanup()
     }
   })
+
+  // The truncate marks the Collection ready before it publishes its changed
+  // keys. A ready callback that edits a replaced key adds an optimistic upsert
+  // that the truncate batch has not published, so the batch must still
+  // insert that key.
+  it.each([`onFirstReady`, `status:change`] as const)(
+    `publishes a replaced key that a %s callback edits during truncate`,
+    async (hook) => {
+      const updatePersistence = createDeferred<void>()
+      let sync!: SyncOps
+      const collection = createCollection<Row, number>({
+        id: `truncate-ready-reentrant-${hook}`,
+        getKey: (row) => row.id,
+        startSync: true,
+        sync: {
+          sync: (ops) => {
+            sync = ops
+            ops.begin()
+            ops.write({ type: `insert`, value: { id: 1, value: `one` } })
+            ops.commit()
+          },
+        },
+        onUpdate: () => updatePersistence.promise,
+      })
+      const mirror = new Map<number, string>()
+      const violations: Array<string> = []
+      const subscription = collection.subscribeChanges(
+        (changes) => {
+          for (const change of changes) {
+            if (mirror.has(change.key) === (change.type === `insert`))
+              violations.push(`${change.type} ${change.key}`)
+            if (change.type === `delete`) mirror.delete(change.key)
+            else mirror.set(change.key, change.value.value)
+          }
+        },
+        { includeInitialState: true },
+      )
+      let update: ReturnType<typeof collection.update> | undefined
+      const edit = () => {
+        update ??= collection.update(1, (draft) => {
+          draft.value = `optimistic-one`
+        })
+      }
+      if (hook === `onFirstReady`) collection.onFirstReady(edit)
+      else
+        collection.on(`status:change`, ({ status }) => {
+          if (status === `ready`) edit()
+        })
+
+      try {
+        await flushPromises()
+        sync.begin()
+        sync.truncate()
+        sync.write({ type: `insert`, value: { id: 1, value: `one-again` } })
+        sync.write({ type: `insert`, value: { id: 2, value: `two` } })
+        expect(sync.commit()).toBe(true)
+
+        expect(update).toBeDefined()
+        expect(violations).toEqual([])
+        expect([...mirror].sort(([a], [b]) => a - b)).toEqual([
+          [1, `optimistic-one`],
+          [2, `two`],
+        ])
+        expect(
+          [...collection.state].map(([key, row]) => [key, row.value]),
+        ).toEqual([
+          [1, `optimistic-one`],
+          [2, `two`],
+        ])
+      } finally {
+        subscription.unsubscribe()
+        updatePersistence.resolve()
+        await update?.isPersisted.promise.catch(() => undefined)
+        await collection.cleanup()
+      }
+    },
+  )
 
   it(`captures a fresh layout boundary for each reentrant causal prefix`, async () => {
     let sync!: OrderedSync

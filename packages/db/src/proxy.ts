@@ -306,7 +306,7 @@ function deepClone<T extends unknown>(
 function draftValuesEqual(
   left: unknown,
   right: unknown,
-  paired = new Map<object, object>(),
+  paired?: Map<object, object>,
 ): boolean {
   return deepEqualsInternal(left, right, paired, true)
 }
@@ -359,7 +359,9 @@ export function createChangeProxy<
     copy_: parent
       ? ((valueCopies.get(target) ?? target) as T)
       : deepClone(target, valueCopies),
-    originalObject: deepClone(target),
+    // The root target is the stored row, which the draft never writes, so it
+    // is its own baseline. A nested target is a draft copy that writes reach.
+    originalObject: parent ? deepClone(target) : target,
     modified: false,
     assigned_: Object.create(null),
     parent,
@@ -455,6 +457,30 @@ export function createChangeProxy<
   // Create a proxy for the target object.
   // Use the unfrozen copy_ as the proxy target to avoid Proxy invariant violations
   // when the original target is frozen (e.g., from Immer)
+  // Whether a value equals the original's own value for a field.
+  function isOriginalValue(prop: string | symbol, value: unknown): boolean {
+    const original = changeTracker.originalObject
+    return (
+      Object.hasOwn(original, prop) &&
+      draftValuesEqual(value, original[prop as keyof T])
+    )
+  }
+
+  // Records a write the draft now holds. Assignment and defineProperty share
+  // it so they report the same change.
+  function recordWrite(prop: string | symbol, reverted: boolean) {
+    if (reverted) {
+      delete changeTracker.assigned_[prop.toString()]
+      // Some properties may still be changed; checkParentStatus clears
+      // tracking here and up the chain once everything is reverted.
+      changeTracker.modified = true
+      checkParentStatus(changeTracker)
+    } else {
+      changeTracker.assigned_[prop.toString()] = true
+      markChanged(changeTracker)
+    }
+  }
+
   const proxy = new Proxy(changeTracker.copy_, {
     get(ptarget, prop, receiver) {
       const value = changeTracker.copy_[prop as keyof T]
@@ -594,7 +620,12 @@ export function createChangeProxy<
       return value
     },
 
-    set(_sobj, prop, value) {
+    set(ptarget, prop, value) {
+      // An accessor the callback defined behaves as on a plain object; a
+      // getter without a setter rejects even a write of its own value.
+      if (Reflect.getOwnPropertyDescriptor(ptarget, prop)?.get) {
+        return Reflect.set(ptarget, prop, value)
+      }
       const currentValue = changeTracker.copy_[prop as keyof T]
 
       // Only track the change if the value is actually different
@@ -602,34 +633,12 @@ export function createChangeProxy<
         !Object.hasOwn(changeTracker.copy_, prop) ||
         !draftValuesEqual(currentValue, value)
       ) {
-        // Check if the new value is equal to the original value
-        // Important: Use the originalObject to get the true original value
-        const originalValue = changeTracker.originalObject[prop as keyof T]
-        const isRevertToOriginal =
-          Object.hasOwn(changeTracker.originalObject, prop) &&
-          draftValuesEqual(value, originalValue)
-
-        if (isRevertToOriginal) {
-          // If the value is reverted to its original state, remove it from changes
-          delete changeTracker.assigned_[prop.toString()]
-
-          // Make sure the copy is updated with the original value
-          changeTracker.copy_[prop as keyof T] = deepClone(originalValue)
-
-          // Some properties may still be changed; checkParentStatus clears
-          // tracking here and up the chain once everything is reverted.
-          changeTracker.modified = true
-          checkParentStatus(changeTracker)
-        } else {
-          // Set the value on the copy
-          changeTracker.copy_[prop as keyof T] = value
-
-          // Track that this property was assigned - store using the actual property (symbol or string)
-          changeTracker.assigned_[prop.toString()] = true
-
-          // Mark this object and its ancestors as modified
-          markChanged(changeTracker)
-        }
+        const reverted = isOriginalValue(prop, value)
+        // A revert restores a copy so the draft never aliases the row.
+        changeTracker.copy_[prop as keyof T] = reverted
+          ? deepClone(changeTracker.originalObject[prop as keyof T])
+          : value
+        recordWrite(prop, reverted)
       }
 
       return true
@@ -639,13 +648,13 @@ export function createChangeProxy<
       // Forward the defineProperty to the target to maintain Proxy invariants
       // This allows Object.seal() and Object.freeze() to work on the proxy
       const result = Reflect.defineProperty(ptarget, prop, descriptor)
-      // A value or an accessor changes what the key reads. Sealing does not.
+      // A value or an accessor changes what the key reads, counted by the
+      // value it reads as an assignment would be. Sealing does not.
       if (
         result &&
         (`value` in descriptor || descriptor.get || descriptor.set)
       ) {
-        changeTracker.assigned_[prop.toString()] = true
-        markChanged(changeTracker)
+        recordWrite(prop, isOriginalValue(prop, Reflect.get(ptarget, prop)))
       }
       return result
     },
@@ -669,11 +678,13 @@ export function createChangeProxy<
       const stringProp = typeof prop === `symbol` ? prop.toString() : prop
 
       if (Object.hasOwn(dobj, prop)) {
-        // Check if the property exists in the original object
-        const hadPropertyInOriginal = Object.hasOwn(
-          changeTracker.originalObject,
-          prop,
-        )
+        // A hidden original field is not row data, so as with a plain
+        // delete of it, removing it is not a change.
+        const hadPropertyInOriginal =
+          Object.prototype.propertyIsEnumerable.call(
+            changeTracker.originalObject,
+            prop,
+          )
 
         // Forward the delete to the target using Reflect
         // This respects Object.seal/preventExtensions constraints
@@ -822,4 +833,62 @@ export function withArrayChangeTracking<T extends object>(
   callback(proxies)
 
   return deepClone(getChanges(), undefined, true)
+}
+
+// Whether every own field of a plain object holds a primitive or a function.
+function isFlatPlainObject(value: object): boolean {
+  const prototype = Object.getPrototypeOf(value)
+  if (prototype !== Object.prototype && prototype !== null) return false
+  for (const key in value) {
+    // A getter may return a new value on each read; the proxy reads it once.
+    const { value: field, get } = Object.getOwnPropertyDescriptor(value, key)!
+    if (get || (field !== null && typeof field === `object`)) return false
+  }
+  return Object.getOwnPropertySymbols(value).length === 0
+}
+
+/**
+ * Change tracking for flat rows without proxies. A draft is a shallow copy,
+ * and its changes are the fields that differ from the row afterwards under
+ * the same equality the draft proxy uses for primitives. Returns undefined
+ * when any row has a nested object, a getter, a symbol key, or a class
+ * prototype, so the caller falls back to the proxy.
+ */
+export function withFlatChangeTracking<T extends object>(
+  targets: Array<T>,
+  callback: (drafts: Array<T> | T) => void,
+  asArray: boolean,
+): Array<Record<string, unknown>> | undefined {
+  if (!targets.every(isFlatPlainObject)) return undefined
+  const drafts = targets.map((target) => ({ ...target }))
+  callback(asArray ? drafts : drafts[0]!)
+  return drafts.map((draft, index) => {
+    const original = targets[index] as Record<string, unknown>
+    const changes: Record<string, unknown> = {}
+    let assignedObject = false
+    for (const key in draft) {
+      const value = (draft as Record<string, unknown>)[key]
+      const before = original[key]
+      // Only a hidden field can hold an object; compare it as the proxy does.
+      if (
+        !Object.hasOwn(original, key) ||
+        !(
+          value === before ||
+          Object.is(value, before) ||
+          (typeof before === `object` &&
+            before !== null &&
+            draftValuesEqual(value, before))
+        )
+      ) {
+        defineDataProperty(changes, key, value)
+        if (value !== null && typeof value === `object`) assignedObject = true
+      }
+    }
+    for (const key in original) {
+      if (!Object.hasOwn(draft, key))
+        defineDataProperty(changes, key, undefined)
+    }
+    // A callback may assign objects; detach them as the proxy path does.
+    return assignedObject ? deepClone(changes, undefined, true) : changes
+  })
 }

@@ -1,11 +1,16 @@
 import { BaseQueryBuilder } from './query/builder/index.js'
 import { isCollection } from './live-query-adapter.js'
+import { createLiveQueryCollection } from './query/live-query-collection.js'
+import {
+  createPooledLiveQuery,
+  getPooledQueryIdentity,
+} from './query/pooled-live-query.js'
 import {
   getStableQueryBuilderHash,
   getStableValueHash,
 } from './query/ir-stable-identity.js'
 import { getStringCollationIdentity } from './query/runtime-reference-identity.js'
-import type { CollectionImpl } from './collection/index.js'
+import type { Collection, CollectionImpl } from './collection/index.js'
 import type { CollectionOptionsIdentity } from './collection-options.js'
 import type { CollectionOptions, DbClient } from './client.js'
 import type {
@@ -110,7 +115,12 @@ export function prepareLiveQueryValue(
 export function getPreparedLiveQueryIdentity(value: unknown): unknown {
   if (isCollection(value)) return [`collection`, value.id]
   if (value instanceof BaseQueryBuilder) {
-    return [`query`, getStableQueryBuilderHash(value)]
+    // A pooled query's fields and literals identify its rows without
+    // canonicalizing its whole IR on every render.
+    const pooled = getPooledQueryIdentity(value)
+    return pooled === undefined
+      ? [`query`, getStableQueryBuilderHash(value)]
+      : [`pooled`, pooled]
   }
   if (value && typeof value === `object` && `query` in value) {
     const config = value as LiveQueryCollectionConfig<any>
@@ -141,4 +151,54 @@ export function getLiveQueryHash(
       : [`derived`, getPreparedLiveQueryIdentity(preparedValue)]
 
   return getStableValueHash(identity, `queryKey`)
+}
+
+/**
+ * Resolve an adapter's query value to what its observer watches: `null` for a
+ * disabled query, an existing Collection with sync started, or a live query.
+ * A query builder whose shape a shared partition can serve gets a pooled view
+ * instead of its own live-query Collection.
+ */
+// A config that names only its query and lifetime describes the same live
+// query as its builder. Any other option shapes its Collection, so compiles.
+function poolConfig(
+  config: LiveQueryCollectionConfig<any>,
+  gcTime: number | undefined,
+): Collection<any, any, any> | undefined {
+  if (
+    !(config.query instanceof BaseQueryBuilder) ||
+    !Object.keys(config).every((key) => key === `query` || key === `gcTime`)
+  ) {
+    return undefined
+  }
+  return createPooledLiveQuery(config.query, {
+    gcTime: config.gcTime ?? gcTime,
+  })
+}
+
+export function resolveLiveQueryValue(
+  value: unknown,
+  { gcTime, pool = true }: { gcTime?: number; pool?: boolean } = {},
+): Collection<any, any, any> | null {
+  if (value === undefined || value === null) return null
+  if (isCollection(value)) {
+    value.startSyncImmediate()
+    return value
+  }
+  if (value instanceof BaseQueryBuilder) {
+    return (
+      (pool ? createPooledLiveQuery(value, { gcTime }) : undefined) ??
+      createLiveQueryCollection({ query: value, startSync: true, gcTime })
+    )
+  }
+  if (typeof value === `object`) {
+    const config = value as LiveQueryCollectionConfig<any>
+    return (
+      (pool ? poolConfig(config, gcTime) : undefined) ??
+      createLiveQueryCollection({ startSync: true, gcTime, ...config })
+    )
+  }
+  throw new Error(
+    `A live query must be a QueryBuilder, LiveQueryCollectionConfig, Collection, undefined, or null. Got: ${typeof value}`,
+  )
 }

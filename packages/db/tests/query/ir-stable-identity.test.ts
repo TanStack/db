@@ -642,6 +642,16 @@ describe(`loadSubset demand identity`, () => {
     )
   })
 
+  it(`gives an unqualified ref no source alias property`, () => {
+    expect(Object.hasOwn(new PropRef([`profile`]), `sourceAlias`)).toBe(false)
+    expect(
+      Object.hasOwn(
+        new PropRef([`profile`, `score`], `profile`),
+        `sourceAlias`,
+      ),
+    ).toBe(true)
+  })
+
   const id = new PropRef<string>([`id`])
   const group = new PropRef<string>([`group`])
   const first = new Func<boolean>(`eq`, [id, new Value(`a`)])

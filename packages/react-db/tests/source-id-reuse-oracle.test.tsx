@@ -17,6 +17,8 @@
  * entries must remain distinct, including before the first hook commits.
  * A rejected render must release any sync-start deferral it acquired for a
  * shared client descriptor, so a later direct reader can start that Collection.
+ * This remains true when earlier deferred sync starts throw: each pending
+ * Collection is attempted before the first startup error is rethrown.
  * The bounded histories below distinguish this law from a hash-only check,
  * which would miss A(id=x) -> C(id=y) -> B(id=x), a changed predicate, and
  * two different same-ID sources in one query.
@@ -40,6 +42,7 @@ import { DbProvider } from '../src/DbProvider'
 import { useLiveQuery } from '../src/useLiveQuery'
 import { useLiveSuspenseQuery } from '../src/useLiveSuspenseQuery'
 import { mockSyncCollectionOptions } from '../../db/tests/utils'
+import type { Context, QueryBuilder } from '@tanstack/db'
 import type { ReactNode } from 'react'
 
 type Row = { id: string; value: string; rank: number }
@@ -95,6 +98,91 @@ function checkRerender(
 }
 
 describe(`React source ID reuse`, () => {
+  it(`releases a later shared source when earlier deferred sync starts fail`, async () => {
+    const client = new DbClient()
+    const first = source(`settings`, `first`)
+    const replacement = source(`settings`, `replacement`)
+    const failedStarts: [number, number] = [0, 0]
+    const failing = ([0, 1] as const).map((index) =>
+      collectionOptions(`failing-${index}`, () => ({
+        id: `failing-${index}`,
+        getKey: (row: Row) => row.id,
+        startSync: true,
+        sync: {
+          sync: () => {
+            failedStarts[index]++
+            throw new Error(`sync ${index} failed`)
+          },
+        },
+      })),
+    )
+    let healthyStarts = 0
+    const healthy = collectionOptions(`healthy-after-failures`, () => ({
+      id: `healthy-after-failures`,
+      getKey: (row: Row) => row.id,
+      startSync: true,
+      sync: {
+        sync: ({ begin, write, commit, markReady }) => {
+          healthyStarts++
+          begin()
+          write({
+            type: `insert`,
+            value: { id: `one`, value: `healthy`, rank: 1 },
+          })
+          commit()
+          markReady()
+        },
+      },
+    }))
+    const consoleError = vi.spyOn(console, `error`).mockImplementation(() => {})
+
+    function View({ current, include }: { current: typeof first; include: boolean }) {
+      useLiveQuery({
+        client,
+        query: (q): QueryBuilder<Context> =>
+          include
+            ? q
+                .from({ failingA: failing[0]! })
+                .join({ failingB: failing[1]! }, ({ failingA, failingB }) =>
+                  eq(failingA.id, failingB.id),
+                )
+                .join({ healthy }, ({ failingA, healthy }) =>
+                  eq(failingA.id, healthy.id),
+                )
+                .join({ settings: current }, ({ failingA, settings }) =>
+                  eq(failingA.id, settings.id),
+                )
+            : q.from({ settings: current }),
+      })
+      return <div>Query</div>
+    }
+
+    try {
+      const root = render(
+        <TestErrorBoundary>
+          <View current={first} include={false} />
+        </TestErrorBoundary>,
+      )
+      await act(async () => {})
+      root.rerender(
+        <TestErrorBoundary>
+          <View current={replacement} include={true} />
+        </TestErrorBoundary>,
+      )
+      expect(root.getByText(`Rejected`)).toBeDefined()
+      expect(failedStarts).toEqual([1, 1])
+
+      const shared = client.collection(healthy)
+      const reader = renderHook(() => useLiveQuery(shared))
+      await act(async () => {})
+      expect(reader.result.current.status).toBe(`ready`)
+      expect(reader.result.current.data[0]?.value).toBe(`healthy`)
+      expect(healthyStarts).toBe(1)
+    } finally {
+      consoleError.mockRestore()
+    }
+  })
+
   it(`releases a shared descriptor's sync deferral when a collision tears down the hook`, async () => {
     const client = new DbClient()
     const first = source(`settings`, `first`)

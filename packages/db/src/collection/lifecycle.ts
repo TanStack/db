@@ -28,7 +28,7 @@ import type { CollectionStateManager } from './state'
  * to the timer armed when the last subscriber leaves, which still honours
  * `gcTime` exactly.
  */
-const UNSUBSCRIBED_GC_FLOOR_MS = 50
+export const UNSUBSCRIBED_GC_FLOOR_MS = 50
 
 export class CollectionLifecycleManager<
   TOutput extends object = Record<string, unknown>,

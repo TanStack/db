@@ -16,7 +16,7 @@ import {
   toArray,
 } from '@tanstack/db'
 import { useEffect } from 'react'
-import { useLiveQuery } from '../src/useLiveQuery'
+import { useLiveQuery, useLiveQueryForSuspense } from '../src/useLiveQuery'
 import { getLiveQueryResultInfo } from '../src/live-query-internals'
 import { DbProvider } from '../src/DbProvider'
 import {
@@ -3621,15 +3621,19 @@ describe(`Query Collections`, () => {
           initialData: initialPersons,
         }),
       )
+      // Suspense is the reader of this identity; plain useLiveQuery skips it.
       const first = renderHook(() =>
-        useLiveQuery((q) => q.from({ people: collection }), [1]),
+        useLiveQueryForSuspense(
+          (q: any) => q.from({ people: collection }),
+          [1],
+        ),
       )
       const second = renderHook(() =>
-        useLiveQuery(
-          (q) =>
+        useLiveQueryForSuspense(
+          (q: any) =>
             q
               .from({ people: collection })
-              .where(({ people }) => gt(people.age, 30)),
+              .where(({ people }: any) => gt(people.age, 30)),
           [1],
         ),
       )

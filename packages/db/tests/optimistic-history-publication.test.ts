@@ -86,3 +86,27 @@ it.each([
     /native callback key|whole forward publication|callback-time complete source|event semantics/,
   )
 })
+
+// Found by the raw subscriber in a random campaign. A completed direct delete
+// retires on the next sync commit while an active insert covers the key.
+// Subscribers last saw the insert, so retirement must not insert the key again.
+it.each([true, false])(
+  `retires an accepted delete under an active insert once (immediate=%s)`,
+  async (immediate) => {
+    await runOptimisticHistory(
+      [{ id: 1, a: 0, b: 0, c: 0 }],
+      [
+        { type: `delete`, key: 1, optimistic: true },
+        { type: `settle`, slot: 0, success: true, cascade: false },
+        { type: `edit`, key: 1, fields: { b: 1 }, optimistic: true },
+        {
+          type: `sync`,
+          rows: [],
+          truncate: false,
+          immediate,
+          copies: 1,
+        },
+      ],
+    )
+  },
+)

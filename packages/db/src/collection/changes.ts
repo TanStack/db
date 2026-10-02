@@ -6,7 +6,6 @@ import {
   toExpression,
 } from '../query/builder/ref-proxy.js'
 import { CollectionSubscription } from './subscription.js'
-import { readRouteValue } from './change-events.js'
 import type { StandardSchemaV1 } from '@standard-schema/spec'
 import type { ChangeMessage, SubscribeChangesOptions } from '../types'
 import type { CollectionLifecycleManager } from './lifecycle.js'
@@ -260,25 +259,9 @@ export class CollectionChangesManager<
     const layoutListeners = [...this.layoutChangeListeners]
     const subscriptions = [...this.changeSubscriptions]
     withPublicationContext(() => {
-      // An empty batch signals readiness to every subscriber.
-      const routed =
-        rawEvents.length > 0
-          ? routeChanges(enrichedEvents, subscriptions)
-          : undefined
-      const callbacks: Array<() => void> = []
-      for (const subscription of subscriptions) {
-        const own = routed?.get(subscription)
-        callbacks.push(() => {
-          // An earlier callback in this publication can end routing for this
-          // subscription, for example by leaving stale rows to reconcile.
-          if (own === undefined || !subscription.changeRoute) {
-            subscription.emitEvents(enrichedEvents)
-          } else if (own.length > 0) {
-            // A routed subscription with no candidate change cannot publish.
-            subscription.emitEvents(own)
-          }
-        })
-      }
+      const callbacks: Array<() => void> = subscriptions.map(
+        (subscription) => () => subscription.emitEvents(enrichedEvents),
+      )
       if (rawEvents.length === 0) {
         callbacks.unshift(...layoutListeners)
       }
@@ -441,65 +424,4 @@ export class CollectionChangesManager<
     if (this.deferral) this.deferral.publications.length = 0
     this.deferral = undefined
   }
-}
-
-/**
- * Gives each routed subscription only the changes whose value or previous
- * value holds its route literal, in batch order. Subscriptions without a
- * route are absent from the result and receive the whole batch; with no
- * routed subscription the result is undefined.
- */
-function routeChanges<T extends object, TKey extends string | number>(
-  changes: Array<ChangeMessage<T, TKey>>,
-  subscriptions: Array<CollectionSubscription>,
-): Map<CollectionSubscription, Array<ChangeMessage<T, TKey>>> | undefined {
-  const routes = subscriptions.map((subscription) => subscription.changeRoute)
-  if (routes.every((route) => route === undefined)) return undefined
-  const routed = new Map<
-    CollectionSubscription,
-    Array<ChangeMessage<T, TKey>>
-  >()
-  const groups = new Map<
-    string,
-    {
-      path: Array<string>
-      byLiteral: Map<unknown, Array<CollectionSubscription>>
-    }
-  >()
-  for (const [index, subscription] of subscriptions.entries()) {
-    const route = routes[index]
-    if (!route) continue
-    routed.set(subscription, [])
-    let group = groups.get(route.pathKey)
-    if (!group) {
-      group = { path: route.path, byLiteral: new Map() }
-      groups.set(route.pathKey, group)
-    }
-    const peers = group.byLiteral.get(route.expected)
-    if (peers) peers.push(subscription)
-    else group.byLiteral.set(route.expected, [subscription])
-  }
-
-  const deliver = (
-    targets: Array<CollectionSubscription> | undefined,
-    change: ChangeMessage<T, TKey>,
-  ) => {
-    for (const subscription of targets ?? []) {
-      routed.get(subscription)!.push(change)
-    }
-  }
-  for (const change of changes) {
-    for (const group of groups.values()) {
-      const value = readRouteValue(change.value, group.path)
-      const previous =
-        change.previousValue === undefined
-          ? undefined
-          : readRouteValue(change.previousValue, group.path)
-      // The where filter reads these same values, and a read that throws makes
-      // its predicate false, so an unreadable value matches no literal here.
-      deliver(group.byLiteral.get(value), change)
-      if (previous !== value) deliver(group.byLiteral.get(previous), change)
-    }
-  }
-  return routed
 }
