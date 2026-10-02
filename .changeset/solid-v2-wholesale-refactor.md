@@ -4,157 +4,93 @@
 
 # Solid v2 RC migration + wholesale observer refactor
 
-Migrates `@tanstack/solid-db` from Solid v1 to **Solid v2 RC** (developed against `solid-js@2.0.0-rc.13`) and reworks the adapter to use the shared `LiveQueryObserver` in wholesale mode. This is a **breaking** release — the peer dependency is now `solid-js: >=2.0.0-rc.0` and `@solidjs/web: >=2.0.0-rc.0`.
+Migrates `@tanstack/solid-db` from Solid v1 to **Solid v2 RC** (developed
+against `solid-js@2.0.0-rc.13`) and reworks the adapter to derive all Solid
+state from the shared `LiveQueryObserver`'s wholesale snapshots. This is a
+**breaking** release — the peer dependency is now
+`solid-js: >=2.0.0-rc.0` and `@solidjs/web: >=2.0.0-rc.0`.
+
+Ship this as a **prerelease** until `solid-js` 2.0 final is out.
 
 ## Breaking changes
 
 ### Solid v2 RC migration
 
-Peer dependencies require Solid v2 RC. Code consuming `@tanstack/solid-db` must be migrated to Solid v2:
+Peer dependencies require Solid v2 RC. Code consuming `@tanstack/solid-db`
+must be migrated to Solid v2:
 
 - `Suspense` → `Loading` (from `@solidjs/web`)
 - `ErrorBoundary` → `Errored` (from `@solidjs/web`)
-- `createResource` → async `createMemo` (internal; `useLiveQuery` now throws `NotReadyError` for `<Loading>` and the captured error for `<Errored>`)
-- Effects use the split two-arg `createEffect(compute, apply)` form (internal)
+- `createResource` → async `createMemo` (internal)
 - `batch()` removed — v2 auto-batches
-- Data materialization uses a keyed `createProjection` (key `$key`) instead of `createStore` + `reconcile` calls
-- `ownedWrite: true` on the snapshot signal (seeded from the effect's apply phase; observer notifies write it from outside any owned scope)
+- Store APIs import from `solid-js` root (not `solid-js/store`)
 
-### Removed status flags and data property from accessor
+### Removed accessor properties
 
-The accessor no longer exposes `data`, `status`, `isLoading`, `isReady`,
-`isIdle`, `isError`, or `isCleanedUp`. Loading and error states are handled
-exclusively through `<Loading>` and `<Errored>` boundaries, with `isPending`
-and `latest` helpers for finer control. The accessor surface is now just
-`query()` (data), `query.state` (ReactiveMap), and `query.collection`.
+The `data`, `isLoading`, `isIdle`, and `isCleanedUp` properties are removed.
+`data` was a deprecated duplicate of calling the accessor; the removed flags
+are derivable from `status`.
 
 ```diff
 - query.data        // removed — use query()
-- query.status      // removed — use <Loading>/<Errored> boundaries
-- query.isLoading   // removed — use isPending(query)
-- query.isReady     // removed — wrap reads in <Loading>
-- query.isError     // removed — wrap reads in <Errored>
-+ query()           // data access (throws NotReadyError when loading)
-+ query.state       // ReactiveMap<TKey, TResult>
-+ query.collection  // underlying Collection
+- query.isLoading   // removed — use query.status === 'loading'
+- query.isIdle      // removed — use query.status === 'idle'
+- query.isCleanedUp // removed — use query.status === 'cleaned-up'
 ```
 
-### Data accessor throws during loading
+## Behavior changes
 
-Reading the accessor result (`query()`) while the collection is not yet ready
-now throws `NotReadyError` (caught by `<Loading>`). Previously, data reads
-during loading or revalidation returned stale or empty arrays synchronously.
-Consumers must wrap data reads in a `<Loading>` boundary, or use Solid v2's
-`isPending(() => query())` / `latest(() => query())` helpers for
-revalidation-aware reads without a boundary.
+### Data reads never suspend; readiness is opt-in
+
+`query()` now always returns the current rows synchronously — including rows
+that synced before the collection is ready (progressive sync, on-demand
+loading). Reading an errored query still throws the captured error for an
+`<Errored>` boundary.
+
+Suspense is opt-in through the new `readiness` accessor: reading
+`query.readiness()` while the initial render is in flight throws
+`NotReadyError` for a `<Loading>` boundary to catch. It settles at network
+readiness or a permitted persisted fallback — the same gate as the React
+adapter's suspense hook — so persisted data can reveal content before the
+network answers.
+
+```tsx
+const todosQuery = useLiveQuery((q) => q.from({ todos: todosCollection }))
+
+// Rows render as they sync — no boundary required:
+<For each={todosQuery()}>{(todo) => <li>{todo.text}</li>}</For>
+
+// Opt-in suspense:
+<Loading fallback={<div>Loading…</div>}>
+  {todosQuery.readiness() && (
+    <For each={todosQuery()}>{(todo) => <li>{todo.text}</li>}</For>
+  )}
+</Loading>
+
+// Revalidation progress (solid-js built-ins):
+<Show when={isPending(() => todosQuery.readiness())}><Spinner /></Show>
+```
 
 ### Wholesale observer mode
 
-`useLiveQuery` now subscribes to the `LiveQueryObserver` in **wholesale** mode instead of granular. The observer delivers wake-up notifies into a snapshot signal; a keyed `createProjection` (key `'$key'`) handles the per-field diff that preserves fine-grained row reactivity.
+`useLiveQuery` now subscribes to the `LiveQueryObserver` in **wholesale**
+mode instead of granular. The observer delivers wake-up notifies into a
+snapshot signal; Solid state stays fully derived from the latest snapshot —
+a keyed `createProjection` materializes rows with per-field granularity, a
+memo derives status, and the `state` map syncs incrementally (only changed
+keys notify). On-demand collections that relied on the granular adapter's
+`includeInitialState: true` behavior must load initial data explicitly —
+matching the React adapter's wholesale policy.
 
-On-demand collections that relied on the granular adapter's `includeInitialState: true` behavior must ensure initial data is loaded explicitly — matching the React adapter's wholesale policy.
+Row identity keeps the rule from #1825: store nodes are keyed by the live
+Collection's **result keys** (stamped with a per-collection epoch), never by
+a row's public `$key` — derived results such as `unionAll` can publish
+different rows sharing one `$key`, and a replaced collection's rows never
+adopt the previous collection's nodes.
 
-The manual delta-patching layer (`rowIndex`, `syncRows`, `patchArrayChanges`, `patchSingleResultChanges`, `patchStoreRow`, `syncDataFromCollection`) has been removed. The adapter is now a snapshot signal plus fully derived state (status memo, keyed projection, synced state map).
+## Retained API
 
-## New features
-
-### `isPending` and `latest` helpers
-
-The v2 migration unlocks Solid's built-in async helpers on the accessor result:
-
-- `isPending(() => query())` — returns `true` while a value change is in flight (e.g. during revalidation when a new collection is loading).
-- `latest(() => query())` — returns the last resolved value, skipping the `<Loading>` boundary during revalidation (useful for stale-while-revalidate UIs).
-
-```tsx
-import { isPending, latest } from 'solid-js'
-import { useLiveQuery } from '@tanstack/solid-db'
-
-const query = useLiveQuery((q) => q.from({ todos: todosCollection }))
-
-// Show a spinner refetching indicator during revalidation:
-<Show when={isPending(() => query())}>
-  <Spinner />
-</Show>
-
-// Render stale data immediately during revalidation (no Loading flash):
-<For each={latest(() => query())}>{(todo) => <li>{todo.text}</li>}</For>
-```
-
-These work because `useLiveQuery` now uses async `createMemo` whose previous
-value is held in place until the new value resolves — the v2 reactive graph
-contract `isPending` and `latest` read from.
-
-### External-source bridge (opt-in)
-
-New `enableSolidDBExternalSource()` and `trackSnapshot(observer)` exports. Uses Solid v2's `enableExternalSource` API to bridge `LiveQueryObserver` snapshots into Solid's tracking graph:
-
-```tsx
-import { enableSolidDBExternalSource, trackSnapshot } from '@tanstack/solid-db'
-
-// Call once at app startup:
-enableSolidDBExternalSource()
-
-// trackSnapshot() inside any Solid compute auto-subscribes:
-const snapshot = createMemo(() => trackSnapshot(observer))
-```
-
-Without the bridge, `useLiveQuery` handles subscription internally as before.
-
-## Performance
-
-Benchmarks comparing the previous Solid v1 adapter (main branch, commit
-`2c35b588`) against the new Solid v2 wholesale adapter. JSDOM, median of
-5 iterations each. The v1 adapter is the pre-renderer-rework version that
-was running in production before this MR.
-
-### Initial All-Row Mount
-
-| Rows  | v1 (main) | v2 wholesale | Result       |
-| ----- | --------: | -----------: | ------------ |
-| 10    |    2.35ms |       1.54ms | 1.53× faster |
-| 1,000 |   18.75ms |      11.53ms | 1.63× faster |
-| 10,000|  129.74ms |      73.35ms | 1.77× faster |
-
-### Single-Row Update in All-Row Query
-
-| Rows  | v1 (main) | v2 wholesale | Result       |
-| ----- | --------: | -----------: | ------------ |
-| 10    |    0.06ms |       0.03ms | 2.00× faster |
-| 1,000 |    0.08ms |       0.02ms | 4.00× faster |
-| 10,000|    0.08ms |       0.02ms | 4.00× faster |
-
-### 10% Row Batch Update
-
-| Rows  | v1 (main) | v2 wholesale | Result       |
-| ----- | --------: | -----------: | ------------ |
-| 10    |    0.07ms |       0.04ms | 1.75× faster |
-| 1,000 |    9.59ms |       1.68ms | 5.71× faster |
-| 10,000|   97.40ms |      24.00ms | 4.06× faster |
-
-### Repeated Single-Row Updates (1000 rows × 200 commits)
-
-| v1 (main) | v2 wholesale | Result       |
-| --------: | -----------: | ------------ |
-|    2.52ms |       2.60ms | 0.97× (par)  |
-
-### findOne Update (1000 rows)
-
-| v1 (main) | v2 wholesale | Result       |
-| --------: | -----------: | ------------ |
-|    0.01ms |       0.03ms | 0.33× slower |
-
-### Remount After Update (1000 rows)
-
-| v1 (main) | v2 wholesale | Result       |
-| --------: | -----------: | ------------ |
-|    3.13ms |       3.77ms | 0.83× slower |
-
-**Summary**: The v2 wholesale adapter is **1.5–5.7× faster** than the v1
-adapter for mount, single-row updates, and batch updates — the scenarios
-that dominate real-world usage. findOne and remount are marginally slower
-(sub-millisecond absolute difference). Repeated rapid-fire single-row
-updates are on par.
-
-The gains come from eliminating the v1 adapter's full-store-reset on every
-change (replaced by Solid v2's keyed `reconcile`) and from the wholesale
-observer's efficient snapshot caching.
+`status` (`CollectionStatus | 'disabled'`), `isReady`, `isError`, the
+persisted-readiness trio (`persistedStatus`, `isPersistedReady`,
+`persistedError`), `state` (`ReactiveMap`), and `collection` remain on the
+accessor, matching the React and Vue adapters.

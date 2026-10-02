@@ -29,7 +29,7 @@ Query function that defines what data to fetch
 
 ### Returns
 
-Accessor that returns data with Loading boundary support, with state and collection as properties
+Accessor that returns the current rows synchronously (opt-in suspense via the readiness accessor), with state, collection, status, and persisted-readiness properties
 
 ### Examples
 
@@ -83,16 +83,18 @@ return (
 ```
 
 ```ts
-// Use Loading boundaries
+// Opt-in suspense: gate rendering on readiness inside <Loading>
 const todosQuery = useLiveQuery((q) =>
   q.from({ todos: todoCollection })
 )
 
 return (
   <Loading fallback={<div>Loading...</div>}>
-    <For each={todosQuery()}>
-      {(todo) => <li>{todo.text}</li>}
-    </For>
+    {todosQuery.readiness() && (
+      <For each={todosQuery()}>
+        {(todo) => <li>{todo.text}</li>}
+      </For>
+    )}
   </Loading>
 )
 ```
@@ -123,7 +125,7 @@ Query function that defines what data to fetch
 
 ### Returns
 
-Accessor that returns data with Loading boundary support, with state and collection as properties
+Accessor that returns the current rows synchronously (opt-in suspense via the readiness accessor), with state, collection, status, and persisted-readiness properties
 
 ### Examples
 
@@ -177,16 +179,18 @@ return (
 ```
 
 ```ts
-// Use Loading boundaries
+// Opt-in suspense: gate rendering on readiness inside <Loading>
 const todosQuery = useLiveQuery((q) =>
   q.from({ todos: todoCollection })
 )
 
 return (
   <Loading fallback={<div>Loading...</div>}>
-    <For each={todosQuery()}>
-      {(todo) => <li>{todo.text}</li>}
-    </For>
+    {todosQuery.readiness() && (
+      <For each={todosQuery()}>
+        {(todo) => <li>{todo.text}</li>}
+      </For>
+    )}
   </Loading>
 )
 ```
@@ -217,7 +221,7 @@ Configuration object with query and options
 
 ### Returns
 
-Accessor that returns data with Loading boundary support, with state and collection as properties
+Accessor that returns the current rows synchronously (opt-in suspense via the readiness accessor), with state, collection, status, and persisted-readiness properties
 
 ### Examples
 
@@ -288,7 +292,7 @@ Pre-created live query collection to subscribe to
 
 ### Returns
 
-Accessor that returns data with Loading boundary support, with state and collection as properties
+Accessor that returns the current rows synchronously (opt-in suspense via the readiness accessor), with state, collection, status, and persisted-readiness properties
 
 ### Examples
 
@@ -355,7 +359,7 @@ Create a live query using a query function
 
 ### Returns
 
-Accessor that returns data with Loading boundary support, with state and collection as properties
+Accessor that returns the current rows synchronously (opt-in suspense via the readiness accessor), with state, collection, status, and persisted-readiness properties
 
 ### Examples
 
@@ -409,16 +413,18 @@ return (
 ```
 
 ```ts
-// Use Loading boundaries
+// Opt-in suspense: gate rendering on readiness inside <Loading>
 const todosQuery = useLiveQuery((q) =>
   q.from({ todos: todoCollection })
 )
 
 return (
   <Loading fallback={<div>Loading...</div>}>
-    <For each={todosQuery()}>
-      {(todo) => <li>{todo.text}</li>}
-    </For>
+    {todosQuery.readiness() && (
+      <For each={todosQuery()}>
+        {(todo) => <li>{todo.text}</li>}
+      </For>
+    )}
   </Loading>
 )
 ```

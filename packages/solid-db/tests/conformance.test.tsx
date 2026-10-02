@@ -15,16 +15,16 @@ import {
   createOptimisticAction,
   eq,
   gt,
-  isSingleResultCollection,
   sum,
 } from '@tanstack/db'
-import { NotReadyError, createRoot, createSignal  } from 'solid-js'
+import { createRoot, createSignal } from 'solid-js'
 import {
   mockSyncCollectionOptions,
   mockSyncCollectionOptionsNoInitialState,
 } from '../../db/tests/utils'
 import { useLiveQuery } from '../src/useLiveQuery'
 import { runSuite } from '../../db/tests/conformance/suite'
+import { expectResultSurface } from '../../db/tests/conformance/result-laws'
 import type {
   ConformanceResult,
   ControllableHandle,
@@ -131,31 +131,18 @@ function makeHandle(
   return {
     current(): ConformanceResult {
       const result = getResult()
-      const col = result?.collection
-      const status = col ? col.status : `disabled`
-      // The accessor suspends while loading (Solid's Loading model), so the
-      // readable rows come from the keyed state map — insertion-ordered like
-      // the collection. Reading the accessor itself surfaces captured errors
-      // for the throw-boundary model below.
-      let data: any
-      try {
-        const rows = Array.from(result.state.values())
-        data = col && isSingleResultCollection(col) ? rows[0] : rows
-        result()
-      } catch (err) {
-        if (!(err instanceof NotReadyError)) throw err
-      }
-      return {
-        data,
+      return expectResultSurface({
+        data: result(),
         state: result?.state,
-        status,
-        isReady: status === `ready` || status === `disabled`,
+        status: result?.status,
+        isReady: Boolean(result?.isReady),
         persistedStatus: result?.persistedStatus,
         isPersistedReady: Boolean(result?.isPersistedReady),
         persistedError: result?.persistedError,
-        isError: status === `error`,
-        isEnabled: status !== `disabled`,
-      }
+        isError: Boolean(result?.isError),
+        // solid-db exposes no `isEnabled`; derive it from status (status-derived).
+        isEnabled: result?.status !== `disabled`,
+      })
     },
     flush: settle,
     async apply(fn: () => void) {
