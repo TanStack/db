@@ -2473,20 +2473,21 @@ export class SQLiteCorePersistenceAdapter implements PersistenceAdapter {
     driver: SQLiteDriver = this.driver,
   ): Promise<Array<InMemoryRow<string | number, Record<string, unknown>>>> {
     const collectionTableSql = quoteIdentifier(tableMapping.tableName)
-    const whereCompiled =
-      options.where && isSafeSqlPrefilter(options.where)
-        ? compileSqlExpression(options.where)
-        : {
-            supported: false,
-            sql: ``,
-            params: [] as Array<SqliteSupportedValue>,
-          }
+    // Compile even when SQL cannot safely prefilter: invalid bindings must
+    // reject before the in-memory fallback reads rows.
+    const whereCompiled = options.where
+      ? compileSqlExpression(options.where)
+      : { supported: false, sql: ``, params: [] as Array<SqliteSupportedValue> }
+    const useSqlWhere =
+      options.where &&
+      whereCompiled.supported &&
+      isSafeSqlPrefilter(options.where)
     const orderByCompiled = compileOrderByClauses(options.orderBy)
 
     const queryParams: Array<SqliteSupportedValue> = []
     let sql = `SELECT key, value, metadata, row_version FROM ${collectionTableSql}`
 
-    if (options.where && whereCompiled.supported) {
+    if (useSqlWhere) {
       sql = `${sql} WHERE ${whereCompiled.sql}`
       queryParams.push(...whereCompiled.params)
     }
