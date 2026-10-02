@@ -245,6 +245,31 @@ describe(`pooled live query gcTime`, () => {
     compiledView.stop()
   })
 
+  it(`defaults to a live-query Collection's gcTime when the adapter gives none`, async () => {
+    // A pooled view and a compiled one, each on its own source.
+    const pooledOnOwn = makeSource()
+    const pooledObserver = createLiveQueryObserver(
+      resolveLiveQueryValue(query(pooledOnOwn)(new Query())),
+      { mode: `wholesale` },
+    )
+    pooledObserver.subscribe(() => {})()
+    const compiledOnOwn = makeSource()
+    const compiledObserver = createLiveQueryObserver(
+      createLiveQueryCollection({
+        query: query(compiledOnOwn),
+        startSync: true,
+      }),
+      { mode: `wholesale` },
+    )
+    compiledObserver.subscribe(() => {})()
+    await vi.advanceTimersByTimeAsync(4_900)
+    expect(compiledOnOwn.subscriberCount).toBe(1)
+    expect(pooledOnOwn.subscriberCount).toBe(1)
+    await vi.advanceTimersByTimeAsync(300)
+    expect(compiledOnOwn.subscriberCount).toBe(0)
+    expect(pooledOnOwn.subscriberCount).toBe(0)
+  })
+
   it(`pools a query config that names only its query`, () => {
     const source = makeSource()
     const observe = (value: unknown) =>

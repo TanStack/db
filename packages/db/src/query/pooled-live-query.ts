@@ -632,8 +632,8 @@ export function getPooledQueryIdentity(
  */
 export function createPooledLiveQuery(
   query: BaseQueryBuilder,
-  // A Collection's default when the adapter gives none.
-  { gcTime = 300_000 }: { gcTime?: number } = {},
+  // A live-query Collection's default when the adapter gives none.
+  { gcTime = 5_000 }: { gcTime?: number } = {},
 ): Collection<any, any, any> | undefined {
   const ir = query._getQuery()
   const shape = poolableShape(ir)
