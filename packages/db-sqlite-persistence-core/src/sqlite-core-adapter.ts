@@ -788,61 +788,34 @@ function argumentCompilationContext(
   }
 }
 
-function isAlwaysFalse(expression: IR.BasicExpression): boolean {
-  if (expression.type === `val`) return expression.value === false
-  if (expression.type !== `func`) return false
-  if (expression.name === `or`) return expression.args.every(isAlwaysFalse)
-  if (expression.name === `and`) return expression.args.some(isAlwaysFalse)
-  return false
+function hasUnpairedSurrogate(value: string): boolean {
+  // With /u, paired surrogates form one code point; lone surrogates still match.
+  return /[\uD800-\uDFFF]/u.test(value)
 }
 
-// The row evaluator runs after SQLite. A SQL prefilter may read extra rows,
-// but it must never discard one that the row evaluator would retain.
-function isSafeSqlPrefilter(expression: IR.BasicExpression): boolean {
-  if (expression.type === `val`) {
-    return typeof expression.value === `boolean` || expression.value == null
-  }
-  if (expression.type === `ref`) return false
+function isSafeEqualityLiteral(value: unknown): boolean {
+  return (
+    typeof value === `string` ||
+    typeof value === `boolean` ||
+    typeof value === `bigint`
+  )
+}
 
-  const [left, right] = expression.args
-  switch (expression.name) {
-    case `and`:
-      return (
-        expression.args.some(isAlwaysFalse) ||
-        expression.args.every(isSafeSqlPrefilter)
-      )
-    case `or`:
-      return expression.args.every(isSafeSqlPrefilter)
-    case `eq`:
-      return (
-        expression.args.length === 2 &&
-        ((left?.type === `ref` &&
-          right?.type === `val` &&
-          typeof right.value === `string`) ||
-          (right?.type === `ref` &&
-            left?.type === `val` &&
-            typeof left.value === `string`))
-      )
-    case `in`:
-      return (
-        expression.args.length === 2 &&
-        right?.type === `val` &&
-        Array.isArray(right.value) &&
-        right.value.length === 0
-      )
-    case `like`:
-      return (
-        expression.args.length === 2 &&
-        left?.type === `ref` &&
-        right?.type === `val` &&
-        typeof right.value === `string` &&
-        /^[\x20-\x7e]*%$/.test(right.value) &&
-        !right.value.slice(0, -1).includes(`%`) &&
-        !right.value.includes(`_`)
-      )
-    default:
-      return false
-  }
+function isSafeCoalesceOperand(
+  expression: IR.BasicExpression | undefined,
+): boolean {
+  return (
+    expression?.type === `func` &&
+    expression.name === `coalesce` &&
+    expression.args.length === 2 &&
+    expression.args[0]?.type === `ref` &&
+    expression.args[1]?.type === `val` &&
+    isSafeEqualityLiteral(expression.args[1].value) &&
+    !(
+      typeof expression.args[1].value === `string` &&
+      hasUnpairedSurrogate(expression.args[1].value)
+    )
+  )
 }
 
 function compileSqlExpression(
@@ -850,6 +823,19 @@ function compileSqlExpression(
   context: SqlExpressionCompilationContext = `predicate`,
 ): CompiledSqlFragment {
   if (expression.type === `val`) {
+    if (
+      context === `predicate` &&
+      typeof expression.value === `string` &&
+      hasUnpairedSurrogate(expression.value)
+    ) {
+      // JSON extraction changes lone surrogates in stored strings. Apply the
+      // same extraction to the binding so an indexed equality keeps its row.
+      return {
+        supported: true,
+        sql: `json_extract(?, '$')`,
+        params: [JSON.stringify(expression.value)],
+      }
+    }
     const valueKind = getLiteralValueKind(expression.value)
     return {
       supported: true,
@@ -1102,6 +1088,134 @@ function compileSqlExpression(
         params: [],
       }
   }
+}
+
+function compileSafeSqlPrefilter(
+  expression: IR.BasicExpression,
+  compiled: CompiledSqlFragment = compileSqlExpression(expression),
+): CompiledSqlFragment | undefined {
+  // Every public match must pass this SQL candidate before JavaScript applies
+  // the authoritative row predicate. Extra candidates are allowed.
+  const direct = () => (compiled.supported ? compiled : undefined)
+  if (expression.type === `val`) {
+    return typeof expression.value === `boolean` || expression.value == null
+      ? direct()
+      : undefined
+  }
+  if (expression.type === `ref`) return undefined
+
+  if (expression.name === `and` || expression.name === `or`) {
+    if (expression.args.length === 0) return direct()
+    const candidates = expression.args.map((argument) =>
+      compileSafeSqlPrefilter(argument),
+    )
+    if (expression.name === `or` && candidates.some((candidate) => !candidate))
+      return undefined
+    const selected = candidates.filter(
+      (candidate): candidate is CompiledSqlFragment => candidate !== undefined,
+    )
+    if (selected.length === 0) return undefined
+    return {
+      supported: true,
+      sql: selected
+        .map(({ sql }) => `(${sql})`)
+        .join(expression.name === `and` ? ` AND ` : ` OR `),
+      params: selected.flatMap(({ params }) => params),
+    }
+  }
+
+  if (!compiled.supported) return undefined
+  const [left, right] = expression.args
+  if (expression.args.length === 2) {
+    if (
+      [`gt`, `gte`, `lt`, `lte`].includes(expression.name) &&
+      (left?.type === `ref` || right?.type === `ref`)
+    ) {
+      const field =
+        left?.type === `ref` ? left : right?.type === `ref` ? right : undefined
+      const literal = field === left ? right : left
+      if (
+        field &&
+        literal?.type === `val` &&
+        ((typeof literal.value === `number` &&
+          Number.isSafeInteger(literal.value)) ||
+          typeof literal.value === `bigint`)
+      ) {
+        const fieldSql = compileSqlExpression(field, `index-expression`).sql
+        const literalSql = compileSqlExpression(
+          literal,
+          typeof literal.value === `bigint` ? `index-expression` : `predicate`,
+        )
+        const greaterSide =
+          (field === left && [`gt`, `gte`].includes(expression.name)) ||
+          (field === right && [`lt`, `lte`].includes(expression.name))
+        return {
+          supported: true,
+          sql: greaterSide
+            ? `(${fieldSql} >= ${literalSql.sql} OR ${fieldSql} IS NULL)`
+            : `(${fieldSql} <= ${literalSql.sql} OR ${fieldSql} IS NULL OR ${fieldSql} >= '')`,
+          params: literalSql.params,
+        }
+      }
+    }
+    if (expression.name === `eq`) {
+      if (
+        ((left?.type === `ref` || isSafeCoalesceOperand(left)) &&
+          right?.type === `val` &&
+          isSafeEqualityLiteral(right.value)) ||
+        ((right?.type === `ref` || isSafeCoalesceOperand(right)) &&
+          left?.type === `val` &&
+          isSafeEqualityLiteral(left.value))
+      ) {
+        return compiled
+      }
+      const lower =
+        left?.type === `func` && left.name === `lower`
+          ? left
+          : right?.type === `func` && right.name === `lower`
+            ? right
+            : undefined
+      const literal = lower === left ? right : left
+      if (
+        lower?.args.length === 1 &&
+        lower.args[0]?.type === `ref` &&
+        literal?.type === `val` &&
+        typeof literal.value === `string` &&
+        /^[\x00-\x7f]*$/.test(literal.value)
+      ) {
+        const lowerSql = compileSqlExpression(lower, `index-expression`).sql
+        return {
+          supported: true,
+          sql: `(${compiled.sql} OR (${lowerSql} >= ? AND ${lowerSql} GLOB '*[^ -~]*'))`,
+          params: [...compiled.params, literal.value],
+        }
+      }
+    }
+  }
+  if (
+    expression.name === `in` &&
+    expression.args.length === 2 &&
+    right?.type === `val` &&
+    Array.isArray(right.value) &&
+    (right.value.length === 0 ||
+      (left?.type === `ref` &&
+        right.value.every((value) => typeof value === `bigint`)))
+  ) {
+    return compiled
+  }
+  if (
+    expression.name === `like` &&
+    expression.args.length === 2 &&
+    left?.type === `ref` &&
+    right?.type === `val` &&
+    typeof right.value === `string` &&
+    /^[\x20-\x7e]*%$/.test(right.value) &&
+    !right.value.slice(0, -1).includes(`%`) &&
+    !right.value.includes(`_`)
+  ) {
+    return compiled
+  }
+  return undefined
 }
 
 function compileOrderByClauses(
@@ -2478,18 +2592,17 @@ export class SQLiteCorePersistenceAdapter implements PersistenceAdapter {
     const whereCompiled = options.where
       ? compileSqlExpression(options.where)
       : { supported: false, sql: ``, params: [] as Array<SqliteSupportedValue> }
-    const useSqlWhere =
-      options.where &&
-      whereCompiled.supported &&
-      isSafeSqlPrefilter(options.where)
+    const safePrefilter = options.where
+      ? compileSafeSqlPrefilter(options.where, whereCompiled)
+      : undefined
     const orderByCompiled = compileOrderByClauses(options.orderBy)
 
     const queryParams: Array<SqliteSupportedValue> = []
     let sql = `SELECT key, value, metadata, row_version FROM ${collectionTableSql}`
 
-    if (useSqlWhere) {
-      sql = `${sql} WHERE ${whereCompiled.sql}`
-      queryParams.push(...whereCompiled.params)
+    if (safePrefilter) {
+      sql = `${sql} WHERE ${safePrefilter.sql}`
+      queryParams.push(...safePrefilter.params)
     }
 
     if (options.orderBy && orderByCompiled.supported) {

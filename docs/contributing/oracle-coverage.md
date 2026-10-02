@@ -515,20 +515,45 @@ preserves the live-host and mutant evidence.
 is the primary executable owner for bounded `and`/`or` predicate arity at
 `SQLiteCorePersistenceAdapter.loadSubset` return. Its independent three-valued
 model compares public keys while a `node:sqlite` driver records SQL and raw row
-work. The 796-case matrix and paired fixed and unseeded campaigns cover root
+work. The 960-case matrix and paired fixed and unseeded campaigns cover root
 arity 0–3, one nested operator, boolean and nonboolean operands, safe selective
-predicates, and unsafe fallback. Seven direct cases challenge Unicode `ilike`
-and `like` patterns, tagged `NaN` comparison, and null-vs-missing under `not`.
+predicates, and sound candidate supersets for unsafe predicates. Eight direct cases challenge Unicode `ilike`
+and `like` patterns, tagged `NaN` comparison, lone-surrogate equality, and
+null-vs-missing under `not`. Paired- and lone-surrogate equality controls
+retain SQL row-work reduction.
 An empty-IN control and two-SELECT cursor composition check zero-row work.
 
 The original compiler was RED for unary and empty boolean work and multioperand
 under-selection. The first repair was RED for unsafe SQL prefilters: Unicode
 case folding, an emoji spanning two JavaScript code units, tagged `NaN`, and
-null-vs-missing under negation. The current compiler passes the bounded oracle.
+null-vs-missing under negation. A later lone-surrogate equality witness was RED
+for public rows and SQL work. The compiler now applies SQLite JSON extraction
+to the matching binding; paired and lone surrogates both keep indexed equality.
+The current compiler passes the bounded oracle.
 A removed-WHERE mutant fails the raw-row work law and a blind-unary mutant
 fails public rows. For this grammar, SQL pushdown admits every row that the
 in-memory evaluator could retain; a statically false AND may read zero rows
 even with an unsafe sibling.
+Mixed-AND witnesses retain a certified equality while an unsafe range, NOT,
+or OR sibling stays with the row evaluator. They cover child order and one
+nested AND, measure one raw row instead of twenty, and reject a removed-WHERE
+mutant. The unsafe OR mutant loses a public row.
+
+The Node expression-index oracle checks the receiving SQLite query, raw
+candidate keys, public keys, and named-index plan. Its generated indexed
+grammar uses string equality, BigInt membership, numeric range, and string
+conjunction. Focused Date-epoch witnesses keep numeric equality and numeric
+membership on the JavaScript fallback path: a stored `Date(1)` matches numeric
+`1` in the row evaluator but is ISO text in the SQLite expression index. Fixed
+lower-wrapped BigInt membership and lone-surrogate coalesce witnesses also
+retain fallback: SQLite converts the former to text and encodes the latter's
+inline fallback differently from a JSON-extracted binding. Integer-bound
+range cases include adjacent fractional values and tagged or mixed scalars;
+this is bounded evidence, not a proof over every persisted representation.
+Fixed `strftime`, `add`, and Date-range witnesses also use full reads for mixed
+stored types; direct SQL would exclude a matching numeric timestamp or string
+concatenation. A typed-field contract or a separate indexed representation is
+needed before those forms can gain a generally sound selective candidate.
 
 The owner does not establish arbitrary depth or arity, every equality or LIKE
 pattern, limit/offset after filtering, all cursor shapes, order or value/metadata

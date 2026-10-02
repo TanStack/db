@@ -6,14 +6,18 @@
  * SQLite requires syntactically matching expressions before an expression
  * index can satisfy a predicate.
  *
- * History grammar and domain: every generated matrix reaches equality,
- * ordinary and 901-value batched IN, range, conjunction, ordering, and
- * lower(ref) indexes. Paths have a one-to-six-character identifier root and up
- * to three identifier/0..3 tail segments. Numeric targets are
- * -10_000..10_000. String and boolean equality values keep independent
- * distractors. Fixed cases cover constant-bearing coalesce/strftime/add,
- * persisted Date ranges, and BigInt ranges/IN within SQLite's signed-integer
- * domain. Explicitly qualified refs lower to the same JSON field expression
+ * History grammar and domain: every generated matrix reaches indexed string
+ * equality, ordinary and 901-value batched BigInt IN, numeric range, string
+ * conjunction, ordering, and lower(ref). Paths have a one-to-six-character
+ * identifier root and up to three identifier/0..3 tail segments. Numeric
+ * targets are -10_000..10_000; generated BigInts use the same bounds plus a
+ * 900-member suffix. Fixed cases cover constant-bearing coalesce indexes,
+ * BigInt ranges/IN within SQLite's signed-integer domain, and indexed numeric
+ * comparisons with tagged values, null, missing, and text controls. Numeric
+ * equality/IN, lower-wrapped BigInt IN, lone-surrogate coalesce, Date ranges,
+ * strftime, and add keep full reads where SQLite could exclude a JavaScript
+ * match. Integer threshold checks include adjacent fractional values.
+ * Explicitly qualified refs lower to the same JSON field expression
  * without reinterpreting legacy nested paths. Known omissions: null, arbitrary
  * raw SQL, and native-host planning. Generated BigInts stay inside SQLite's
  * signed range. A fixed legacy-byte case checks read compatibility beyond it.
@@ -106,27 +110,6 @@ const legalPathArbitrary = fc
   )
   .map(([root, tail]) => [root, ...tail])
 
-const independentValuesArbitrary = fc.oneof(
-  fc.integer({ min: -10_000, max: 10_000 }).map((target) => ({
-    target,
-    distractors: [target - 1, target + 1] as [number, number],
-  })),
-  fc.integer({ min: 0, max: 10_000 }).map((suffix) => ({
-    target: `target-'${suffix}`,
-    distractors: [`before-${suffix}`, `after-${suffix}`] as [string, string],
-  })),
-  fc.boolean().map((target) => ({
-    target,
-    distractors: [!target, !target] as [boolean, boolean],
-  })),
-)
-
-// Path structure and scalar values come from separate arbitraries so neither
-// can derive or restrict the other.
-const expressionIndexCaseArbitrary = fc
-  .tuple(legalPathArbitrary, independentValuesArbitrary)
-  .map(([path, values]): OracleCase => ({ path, ...values }))
-
 type OracleReplayConfiguration = {
   seed: number
   path: string
@@ -209,7 +192,7 @@ function generatedCampaignParameters(campaign: GeneratedPropertyCampaign) {
 
 function createNestedRow(
   path: ReadonlyArray<string>,
-  value: OracleScalar,
+  value: OracleScalar | bigint,
 ): Record<string, unknown> {
   let nested: unknown = value
 
@@ -470,8 +453,7 @@ async function observeExpressionIndexScenario({
     (query) => {
       if (
         query.sql.includes(`SELECT key, value, metadata, row_version`) &&
-        query.sql.includes(`FROM "${tableName}"`) &&
-        (query.sql.includes(` WHERE `) || query.sql.includes(` ORDER BY `))
+        query.sql.includes(`FROM "${tableName}"`)
       ) {
         predicateQuery = query
       }
@@ -479,8 +461,7 @@ async function observeExpressionIndexScenario({
     transformQuery
       ? (query) =>
           query.sql.includes(`SELECT key, value, metadata, row_version`) &&
-          query.sql.includes(`FROM "${tableName}"`) &&
-          (query.sql.includes(` WHERE `) || query.sql.includes(` ORDER BY `))
+          query.sql.includes(`FROM "${tableName}"`)
             ? transformQuery(query)
             : query
       : undefined,
@@ -603,11 +584,11 @@ const stringIndexCaseArbitrary = fc
 
 const generatedScenarioMatrixArbitrary = fc
   .tuple(
-    expressionIndexCaseArbitrary,
+    stringIndexCaseArbitrary,
     numericIndexCaseArbitrary,
     numericIndexCaseArbitrary,
     numericIndexCaseArbitrary,
-    numericIndexCaseArbitrary,
+    stringIndexCaseArbitrary,
     numericIndexCaseArbitrary,
     stringIndexCaseArbitrary,
   )
@@ -628,16 +609,15 @@ const generatedScenarioMatrixArbitrary = fc
         },
         {
           key: `eq-different`,
-          value: createNestedRow(eqCase.path, eqCase.distractors[0]),
+          value: createNestedRow(eqCase.path, `${eqCase.target}-other`),
         },
         {
           key: `eq-match-b`,
           value: createNestedRow(eqCase.path, eqCase.target),
         },
       ]
-      const batchedValues = Array.from(
-        { length: 901 },
-        (_unused, index) => batchedCase.target + index,
+      const batchedValues = Array.from({ length: 901 }, (_unused, index) =>
+        BigInt(batchedCase.target + index),
       )
       const lowerTarget = lowerCase.target.toLowerCase()
 
@@ -660,20 +640,20 @@ const generatedScenarioMatrixArbitrary = fc
           indexExpression: new IR.PropRef(inCase.path),
           where: new IR.Func<boolean>(`in`, [
             new IR.PropRef(inCase.path),
-            new IR.Value([inCase.target - 1, inCase.target]),
+            new IR.Value([BigInt(inCase.target - 1), BigInt(inCase.target)]),
           ]),
           rows: [
             {
               key: `in-lower`,
-              value: createNestedRow(inCase.path, inCase.target - 1),
+              value: createNestedRow(inCase.path, BigInt(inCase.target - 1)),
             },
             {
               key: `in-match`,
-              value: createNestedRow(inCase.path, inCase.target),
+              value: createNestedRow(inCase.path, BigInt(inCase.target)),
             },
             {
               key: `in-higher`,
-              value: createNestedRow(inCase.path, inCase.target + 1),
+              value: createNestedRow(inCase.path, BigInt(inCase.target + 1)),
             },
           ],
           expectedKeys: [`in-lower`, `in-match`],
@@ -690,18 +670,24 @@ const generatedScenarioMatrixArbitrary = fc
           rows: [
             {
               key: `batch-first`,
-              value: createNestedRow(batchedCase.path, batchedCase.target),
+              value: createNestedRow(
+                batchedCase.path,
+                BigInt(batchedCase.target),
+              ),
             },
             {
               key: `batch-last`,
               value: createNestedRow(
                 batchedCase.path,
-                batchedCase.target + 900,
+                BigInt(batchedCase.target + 900),
               ),
             },
             {
               key: `batch-outside`,
-              value: createNestedRow(batchedCase.path, batchedCase.target - 1),
+              value: createNestedRow(
+                batchedCase.path,
+                BigInt(batchedCase.target - 1),
+              ),
             },
           ],
           expectedKeys: [`batch-first`, `batch-last`],
@@ -764,7 +750,7 @@ const generatedScenarioMatrixArbitrary = fc
             {
               key: `and-different`,
               value: {
-                ...createNestedRow(andCase.path, andCase.target + 1),
+                ...createNestedRow(andCase.path, `${andCase.target}-other`),
                 status: `active`,
               },
             },
@@ -882,11 +868,11 @@ function mutateGeneratedScenarioQuery(
           return unreached(`the ordinary IN bindings`)
         }
         const first = query.params[0]
-        if (typeof first !== `number`) {
-          return unreached(`a numeric ordinary IN binding`)
+        if (typeof first !== `string`) {
+          return unreached(`a BigInt ordinary IN binding`)
         }
         const params = [...query.params]
-        params[0] = first + 2
+        params[0] = (BigInt(first) + 2n).toString()
         return { sql: query.sql, params }
       }
     case `batched-in`:
@@ -895,11 +881,11 @@ function mutateGeneratedScenarioQuery(
           return unreached(`the 901 batched IN bindings`)
         }
         const first = query.params[0]
-        if (typeof first !== `number`) {
-          return unreached(`a numeric batched IN binding`)
+        if (typeof first !== `string`) {
+          return unreached(`a BigInt batched IN binding`)
         }
         const params = [...query.params]
-        params[params.length - 1] = first - 1
+        params[params.length - 1] = (BigInt(first) - 1n).toString()
         return { sql: query.sql, params }
       }
     case `range`:
@@ -1260,9 +1246,13 @@ describe(`SQLite expression-index oracle`, () => {
       ]),
       rows: [
         { key: `current`, value: { createdAt: `2026-04-05T00:00:00.000Z` } },
+        {
+          key: `epoch-milliseconds`,
+          value: { createdAt: new Date(`2026-04-05T00:00:00.000Z`).getTime() },
+        },
         { key: `past`, value: { createdAt: `2025-04-05T00:00:00.000Z` } },
       ],
-      expectedKeys: [`current`],
+      expectedKeys: [`current`, `epoch-milliseconds`],
     },
     {
       label: `add-constant`,
@@ -1272,10 +1262,10 @@ describe(`SQLite expression-index oracle`, () => {
       ]),
       where: new IR.Func<boolean>(`eq`, [
         new IR.Func(`add`, [new IR.PropRef([`score`]), new IR.Value(1)]),
-        new IR.Value(3),
+        new IR.Value(`21`),
       ]),
       rows: [
-        { key: `matching`, value: { score: 2 } },
+        { key: `matching`, value: { score: `2` } },
         { key: `different`, value: { score: 4 } },
       ],
       expectedKeys: [`matching`],
@@ -1301,11 +1291,24 @@ describe(`SQLite expression-index oracle`, () => {
       expectedKeys: [`minimum`, `missing`],
     },
   ])(
-    `uses a constant-bearing $label expression index`,
+    `loads through a constant-bearing $label expression`,
     async ({ expectedKeys, ...scenario }) => {
       const observation = await observeExpressionIndexScenario(scenario)
 
       expect(observation.adapterKeys).toEqual(expectedKeys)
+      if (
+        scenario.label === `strftime-constant` ||
+        scenario.label === `add-constant`
+      ) {
+        expect(observation.predicateQuery.sql).not.toContain(` WHERE `)
+        expect(observation.directSqlKeys).toEqual(
+          scenario.rows.map((row) => row.key).sort(),
+        )
+        expect(planScansTable(observation.plan, observation.tableName)).toBe(
+          true,
+        )
+        return
+      }
       expect(observation.directSqlKeys).toEqual(expectedKeys)
       expect(
         planUsesNamedIndex(
@@ -1433,9 +1436,13 @@ describe(`SQLite expression-index oracle`, () => {
           key: `later`,
           value: { createdAt: new Date(`2026-01-03T00:00:00.000Z`) },
         },
+        {
+          key: `numeric-later`,
+          value: { createdAt: new Date(`2026-01-03T00:00:00.000Z`).getTime() },
+        },
       ],
-      expectedKeys: [`later`],
-      expectedQueryParams: [`2026-01-02T12:00:00.000Z`],
+      expectedKeys: [`later`, `numeric-later`],
+      expectedQueryParams: [],
     },
     {
       label: `bigint-field-in`,
@@ -1509,6 +1516,18 @@ describe(`SQLite expression-index oracle`, () => {
       )
 
       expect(observation.adapterKeys, diagnostic).toEqual(expectedKeys)
+      if (scenario.label === `date-field-range`) {
+        expect(observation.predicateQuery.sql, diagnostic).not.toContain(
+          ` WHERE `,
+        )
+        expect(observation.directSqlKeys, diagnostic).toEqual(
+          scenario.rows.map((row) => row.key).sort(),
+        )
+        expect(planScansTable(observation.plan, observation.tableName)).toBe(
+          true,
+        )
+        return
+      }
       expect(observation.directSqlKeys, diagnostic).toEqual(expectedKeys)
       expect(observation.predicateQuery.params, diagnostic).toEqual(
         expectedQueryParams,
@@ -1520,6 +1539,449 @@ describe(`SQLite expression-index oracle`, () => {
           observation.indexName,
         ),
         diagnostic,
+      ).toBe(true)
+    },
+  )
+
+  it(`uses the field expression index for a paired-surrogate string equality`, async () => {
+    const field = new IR.PropRef([`name`])
+    const observation = await observeExpressionIndexScenario({
+      label: `paired-surrogate-equality`,
+      indexExpression: field,
+      where: new IR.Func<boolean>(`eq`, [field, new IR.Value(`😀`)]),
+      rows: [
+        { key: `matching`, value: { name: `😀` } },
+        { key: `other`, value: { name: `other` } },
+      ],
+    })
+
+    expect(observation.adapterKeys).toEqual([`matching`])
+    expect(observation.directSqlKeys).toEqual([`matching`])
+    expect(
+      planUsesNamedIndex(
+        observation.plan,
+        observation.tableName,
+        observation.indexName,
+      ),
+    ).toBe(true)
+  })
+
+  it.each([
+    { label: `field on the left`, reversed: false },
+    { label: `field on the right`, reversed: true },
+  ])(
+    `keeps indexed lone-surrogate equality sound with $label`,
+    async ({ reversed }) => {
+      const field = new IR.PropRef([`name`])
+      const value = new IR.Value(`\uD800`)
+      const observation = await observeExpressionIndexScenario({
+        label: `lone-surrogate-equality`,
+        indexExpression: field,
+        where: new IR.Func<boolean>(
+          `eq`,
+          reversed ? [value, field] : [field, value],
+        ),
+        rows: [
+          { key: `matching`, value: { name: `\uD800` } },
+          { key: `other-lone`, value: { name: `\uDC00` } },
+          { key: `ordinary`, value: { name: `ordinary` } },
+        ],
+      })
+
+      expect(observation.adapterKeys).toEqual([`matching`])
+      // The binding and stored value must have the same SQLite byte sequence.
+      expect(observation.directSqlKeys).toEqual([`matching`])
+      expect(
+        planUsesNamedIndex(
+          observation.plan,
+          observation.tableName,
+          observation.indexName,
+        ),
+      ).toBe(true)
+    },
+  )
+
+  it.each([
+    { label: `BigInt equality`, value: 1n, expectedKeys: [`bigint`] },
+    { label: `boolean equality`, value: true, expectedKeys: [`boolean`] },
+  ])(
+    `keeps indexed $label sound across stored scalar types`,
+    async ({ value, expectedKeys }) => {
+      const field = new IR.PropRef([`n`])
+      const observation = await observeExpressionIndexScenario({
+        label: `mixed-scalar-equality`,
+        indexExpression: field,
+        where: new IR.Func<boolean>(`eq`, [field, new IR.Value(value)]),
+        rows: [
+          { key: `bigint`, value: { n: 1n } },
+          { key: `boolean`, value: { n: true } },
+          { key: `number`, value: { n: 1 } },
+          { key: `text`, value: { n: `1` } },
+          { key: `nan`, value: { n: Number.NaN } },
+          { key: `date`, value: { n: new Date(1) } },
+          { key: `null`, value: { n: null } },
+          { key: `missing`, value: {} },
+        ],
+      })
+
+      expect(observation.adapterKeys).toEqual(expectedKeys)
+      expect(observation.directSqlKeys).toEqual([`bigint`, `boolean`, `number`])
+      expect(
+        planUsesNamedIndex(
+          observation.plan,
+          observation.tableName,
+          observation.indexName,
+        ),
+      ).toBe(true)
+    },
+  )
+
+  it.each([`eq`, `in`] as const)(
+    `keeps Date epoch matches when a numeric $operator predicate falls back`,
+    async (operator) => {
+      const field = new IR.PropRef([`n`])
+      const observation = await observeExpressionIndexScenario({
+        label: `numeric-${operator}-date-epoch`,
+        indexExpression: field,
+        where: new IR.Func<boolean>(operator, [
+          field,
+          new IR.Value(operator === `eq` ? 1 : [1]),
+        ]),
+        rows: [
+          { key: `date`, value: { n: new Date(1) } },
+          { key: `number`, value: { n: 1 } },
+          { key: `other`, value: { n: 2 } },
+        ],
+      })
+
+      expect(observation.adapterKeys).toEqual([`date`, `number`])
+      expect(observation.predicateQuery.sql).not.toContain(` WHERE `)
+      expect(observation.directSqlKeys).toEqual([`date`, `number`, `other`])
+    },
+  )
+
+  it(`keeps a BigInt match through a lower-wrapped membership fallback`, async () => {
+    const lower = new IR.Func(`lower`, [new IR.PropRef([`n`])])
+    const observation = await observeExpressionIndexScenario({
+      label: `bigint-lower-membership`,
+      indexExpression: lower,
+      where: new IR.Func<boolean>(`in`, [lower, new IR.Value([1n])]),
+      rows: [
+        { key: `bigint`, value: { n: 1n } },
+        { key: `number`, value: { n: 1 } },
+        { key: `text`, value: { n: `1` } },
+      ],
+    })
+
+    expect(observation.adapterKeys).toEqual([`bigint`])
+    expect(observation.predicateQuery.sql).not.toContain(` WHERE `)
+    expect(observation.directSqlKeys).toEqual([`bigint`, `number`, `text`])
+  })
+
+  it(`keeps a missing field equal to a lone-surrogate coalesce fallback`, async () => {
+    const fallback = `\uD800`
+    const coalesce = new IR.Func(`coalesce`, [
+      new IR.PropRef([`name`]),
+      new IR.Value(fallback),
+    ])
+    const observation = await observeExpressionIndexScenario({
+      label: `lone-surrogate-coalesce`,
+      indexExpression: coalesce,
+      where: new IR.Func<boolean>(`eq`, [coalesce, new IR.Value(fallback)]),
+      rows: [
+        { key: `missing`, value: {} },
+        { key: `other`, value: { name: `other` } },
+      ],
+    })
+
+    expect(observation.adapterKeys).toEqual([`missing`])
+    expect(observation.predicateQuery.sql).not.toContain(` WHERE `)
+    expect(observation.directSqlKeys).toEqual([`missing`, `other`])
+  })
+
+  it(`keeps indexed BigInt membership sound across stored scalar types`, async () => {
+    const field = new IR.PropRef([`n`])
+    const observation = await observeExpressionIndexScenario({
+      label: `mixed-scalar-bigint-in`,
+      indexExpression: field,
+      where: new IR.Func<boolean>(`in`, [field, new IR.Value([1n, 2n])]),
+      rows: [
+        { key: `bigint-one`, value: { n: 1n } },
+        { key: `bigint-two`, value: { n: 2n } },
+        { key: `boolean`, value: { n: true } },
+        { key: `number`, value: { n: 1 } },
+        { key: `text`, value: { n: `1` } },
+        { key: `nan`, value: { n: Number.NaN } },
+        { key: `date`, value: { n: new Date(1) } },
+        { key: `null`, value: { n: null } },
+        { key: `missing`, value: {} },
+      ],
+    })
+
+    expect(observation.adapterKeys).toEqual([`bigint-one`, `bigint-two`])
+    expect(observation.directSqlKeys).toEqual([
+      `bigint-one`,
+      `bigint-two`,
+      `boolean`,
+      `number`,
+    ])
+    expect(
+      planUsesNamedIndex(
+        observation.plan,
+        observation.tableName,
+        observation.indexName,
+      ),
+    ).toBe(true)
+  })
+
+  it(`uses an indexed safe conjunct while leaving an unsafe range to the row evaluator`, async () => {
+    const status = new IR.PropRef([`status`])
+    const observation = await observeExpressionIndexScenario({
+      label: `indexed-safe-conjunct`,
+      indexExpression: status,
+      where: new IR.Func<boolean>(`and`, [
+        new IR.Func<boolean>(`eq`, [status, new IR.Value(`active`)]),
+        new IR.Func<boolean>(`gt`, [new IR.PropRef([`n`]), new IR.Value(0)]),
+      ]),
+      rows: [
+        { key: `active-nan`, value: { status: `active`, n: Number.NaN } },
+        { key: `active-negative`, value: { status: `active`, n: -1 } },
+        { key: `active-zero`, value: { status: `active`, n: 0 } },
+        { key: `inactive-positive`, value: { status: `inactive`, n: 2 } },
+        { key: `inactive-zero`, value: { status: `inactive`, n: 0 } },
+        { key: `inactive-nan`, value: { status: `inactive`, n: Number.NaN } },
+      ],
+    })
+
+    expect(observation.adapterKeys).toEqual([`active-nan`])
+    expect(observation.directSqlKeys).toEqual([`active-nan`, `active-zero`])
+    expect(observation.predicateQuery.sql).toContain(` WHERE `)
+    expect(observation.predicateQuery.sql).toContain(`$.n`)
+    expect(
+      planUsesNamedIndex(
+        observation.plan,
+        observation.tableName,
+        observation.indexName,
+      ),
+    ).toBe(true)
+    expect(planScansTable(observation.plan, observation.tableName)).toBe(false)
+  })
+
+  it.each([
+    {
+      operator: `gt`,
+      target: 1,
+      expectedKeys: [
+        `array`,
+        `bigint-positive`,
+        `date`,
+        `infinity`,
+        `nan`,
+        `numeric-text`,
+        `positive`,
+      ],
+    },
+    {
+      operator: `lt`,
+      target: 2,
+      expectedKeys: [
+        `bigint-negative`,
+        `negative`,
+        `negative-infinity`,
+        `negative-subnormal`,
+        `negative-text`,
+        `one`,
+        `zero`,
+      ],
+    },
+  ] as const)(
+    `uses an indexed superset for a mixed scalar $operator range`,
+    async ({ operator, target, expectedKeys }) => {
+      const field = new IR.PropRef([`n`])
+      const rows = [
+        { key: `negative`, value: { n: -2 } },
+        { key: `negative-subnormal`, value: { n: -Number.MIN_VALUE } },
+        { key: `zero`, value: { n: 0 } },
+        { key: `one`, value: { n: 1 } },
+        { key: `positive`, value: { n: 3 } },
+        { key: `nan`, value: { n: Number.NaN } },
+        { key: `infinity`, value: { n: Number.POSITIVE_INFINITY } },
+        { key: `negative-infinity`, value: { n: Number.NEGATIVE_INFINITY } },
+        { key: `numeric-text`, value: { n: `3` } },
+        { key: `negative-text`, value: { n: `-2` } },
+        { key: `word`, value: { n: `abc` } },
+        { key: `bigint-negative`, value: { n: -2n } },
+        { key: `bigint-positive`, value: { n: 3n } },
+        { key: `date`, value: { n: new Date(3) } },
+        { key: `null`, value: { n: null } },
+        { key: `missing`, value: {} },
+        { key: `array`, value: { n: [3] } },
+        { key: `object`, value: { n: { x: 3 } } },
+      ]
+      const observation = await observeExpressionIndexScenario({
+        label: `mixed-scalar-${operator}-range`,
+        indexExpression: field,
+        where: new IR.Func<boolean>(operator, [field, new IR.Value(target)]),
+        rows,
+      })
+
+      expect(observation.adapterKeys).toEqual(expectedKeys)
+      expect(observation.directSqlKeys).toEqual(
+        expect.arrayContaining([...expectedKeys]),
+      )
+      expect(observation.directSqlKeys.length).toBeLessThan(rows.length)
+      expect(
+        planUsesNamedIndex(
+          observation.plan,
+          observation.tableName,
+          observation.indexName,
+        ),
+      ).toBe(true)
+      expect(planScansTable(observation.plan, observation.tableName)).toBe(
+        false,
+      )
+    },
+  )
+
+  it.each([
+    {
+      operator: `gt`,
+      expectedKeys: [`above`, `date`, `nan`, `numeric-text`],
+      expectedCandidates: 7,
+    },
+    {
+      operator: `gte`,
+      expectedKeys: [`above`, `date`, `equal`, `nan`, `numeric-text`],
+      expectedCandidates: 7,
+    },
+    {
+      operator: `lt`,
+      expectedKeys: [`below`, `negative`],
+      expectedCandidates: 8,
+    },
+    {
+      operator: `lte`,
+      expectedKeys: [`below`, `equal`, `negative`],
+      expectedCandidates: 8,
+    },
+  ] as const)(
+    `keeps matches adjacent to an indexed integer $operator bound`,
+    async ({ operator, expectedKeys, expectedCandidates }) => {
+      const field = new IR.PropRef([`n`])
+      const rows = [
+        { key: `negative`, value: { n: -1 } },
+        { key: `below`, value: { n: 1 - Number.EPSILON / 2 } },
+        { key: `equal`, value: { n: 1 } },
+        { key: `above`, value: { n: 1 + Number.EPSILON } },
+        { key: `nan`, value: { n: Number.NaN } },
+        { key: `numeric-text`, value: { n: `2` } },
+        { key: `date`, value: { n: new Date(2) } },
+        { key: `null`, value: { n: null } },
+        { key: `missing`, value: {} },
+      ]
+      const observation = await observeExpressionIndexScenario({
+        label: `adjacent-integer-${operator}`,
+        indexExpression: field,
+        where: new IR.Func<boolean>(operator, [field, new IR.Value(1)]),
+        rows,
+      })
+
+      expect(observation.adapterKeys).toEqual(expectedKeys)
+      expect(observation.directSqlKeys).toEqual(
+        expect.arrayContaining([...expectedKeys]),
+      )
+      expect(observation.directSqlKeys).toHaveLength(expectedCandidates)
+      expect(
+        planUsesNamedIndex(
+          observation.plan,
+          observation.tableName,
+          observation.indexName,
+        ),
+      ).toBe(true)
+    },
+  )
+
+  it(`keeps Unicode lowercase matches in an indexed candidate set`, async () => {
+    const field = new IR.PropRef([`name`])
+    const lower = new IR.Func(`lower`, [field])
+    const rows = [
+      { key: `ascii-lower`, value: { name: `ak` } },
+      { key: `ascii-upper`, value: { name: `AK` } },
+      { key: `kelvin-inside`, value: { name: `aK` } },
+      { key: `ascii-other`, value: { name: `ak-more` } },
+      { key: `unicode-other`, value: { name: `aé` } },
+      { key: `ascii-before`, value: { name: `abc` } },
+    ]
+    const observation = await observeExpressionIndexScenario({
+      label: `unicode-lower-candidates`,
+      indexExpression: lower,
+      where: new IR.Func<boolean>(`eq`, [lower, new IR.Value(`ak`)]),
+      rows,
+    })
+
+    expect(observation.adapterKeys).toEqual([
+      `ascii-lower`,
+      `ascii-upper`,
+      `kelvin-inside`,
+    ])
+    expect(observation.directSqlKeys).toEqual(
+      expect.arrayContaining(observation.adapterKeys),
+    )
+    expect(observation.directSqlKeys).not.toContain(`ascii-other`)
+    expect(observation.directSqlKeys).toHaveLength(4)
+    expect(
+      planUsesNamedIndex(
+        observation.plan,
+        observation.tableName,
+        observation.indexName,
+      ),
+    ).toBe(true)
+    expect(planScansTable(observation.plan, observation.tableName)).toBe(false)
+  })
+
+  it.each([
+    {
+      label: `greater than zero`,
+      operator: `gt`,
+      target: 0,
+      expectedKeys: [`infinity`, `nan`, `numeric-text`, `positive`],
+    },
+    {
+      label: `less than two`,
+      operator: `lt`,
+      target: 2,
+      expectedKeys: [`negative`, `negative-infinity`, `positive`],
+    },
+  ] as const)(
+    `keeps indexed numeric comparison matches for $label`,
+    async ({ label, operator, target, expectedKeys }) => {
+      const field = new IR.PropRef([`n`])
+      const observation = await observeExpressionIndexScenario({
+        label: `numeric-domain-${label}`,
+        indexExpression: field,
+        where: new IR.Func<boolean>(operator, [field, new IR.Value(target)]),
+        rows: [
+          { key: `negative`, value: { n: -1 } },
+          { key: `positive`, value: { n: 1 } },
+          { key: `nan`, value: { n: Number.NaN } },
+          { key: `infinity`, value: { n: Number.POSITIVE_INFINITY } },
+          { key: `negative-infinity`, value: { n: Number.NEGATIVE_INFINITY } },
+          { key: `missing`, value: {} },
+          { key: `null`, value: { n: null } },
+          { key: `numeric-text`, value: { n: `2` } },
+          { key: `text`, value: { n: `abc` } },
+        ],
+      })
+
+      // Public rows are exact. SQL may admit extra candidates for the row
+      // evaluator when SQLite and TanStack DB order stored values differently.
+      expect(observation.adapterKeys).toEqual(expectedKeys)
+      expect(
+        planUsesNamedIndex(
+          observation.plan,
+          observation.tableName,
+          observation.indexName,
+        ),
       ).toBe(true)
     },
   )
@@ -1898,12 +2360,12 @@ describe(`SQLite expression-index oracle`, () => {
       indexExpression: new IR.PropRef([`score`]),
       where: new IR.Func<boolean>(`eq`, [
         new IR.PropRef([`score`]),
-        new IR.Value(2),
+        new IR.Value(`2`),
       ]),
       rows: [
-        { key: `lower`, value: { score: 1 } },
-        { key: `matching`, value: { score: 2 } },
-        { key: `higher`, value: { score: 3 } },
+        { key: `lower`, value: { score: `1` } },
+        { key: `matching`, value: { score: `2` } },
+        { key: `higher`, value: { score: `3` } },
       ],
       transformQuery: makeOverbroadEqualityMutation,
     })
@@ -1926,11 +2388,11 @@ describe(`SQLite expression-index oracle`, () => {
       indexExpression: new IR.PropRef([`score`]),
       where: new IR.Func<boolean>(`eq`, [
         new IR.PropRef([`score`]),
-        new IR.Value(2),
+        new IR.Value(`2`),
       ]),
       rows: [
-        { key: `matching`, value: { score: 2 } },
-        { key: `different`, value: { score: 3 } },
+        { key: `matching`, value: { score: `2` } },
+        { key: `different`, value: { score: `3` } },
       ],
       transformQuery: makeLegacyPathBindingMutation,
     })

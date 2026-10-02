@@ -14,7 +14,8 @@ import type { SQLiteDriver } from '../src'
  * and only strict `true`/`false` operands determine a branch. Issue #1994
  * also requires sound SQL prefilters to reduce selective reads before SQLite
  * returns stored rows for deserialization. Empty AND must emit
- * a true SQL predicate; unsupported children retain full-table fallback.
+ * a true SQL predicate; unsupported children may admit a sound candidate
+ * prefilter, while the row evaluator decides the public result.
  * Open #506 proposes a conflicting future empty-OR API; this oracle follows
  * the current evaluator until the product contract changes across both layers.
  *
@@ -23,14 +24,16 @@ import type { SQLiteDriver } from '../src'
  * SQLite compiler. `canPush` describes this oracle's deliberately small
  * known-boolean domain, not production's support classifier.
  *
- * Grammar: AND/OR roots have 0..3 children; a child is one of nineteen atoms or
+ * Grammar: AND/OR roots have 0..3 children; a child is one of twenty-one atoms or
  * a nested AND/OR of 0..3 atoms. The bounded matrix exhausts all atom pairs
  * for root arity 0..2 and samples triples and nested forms. Removing operator
  * choice loses empty true/false; removing arity 0 loses both identities;
  * removing arity 1 loses selective unary work; removing nonboolean atoms
  * loses SQL under-selection; removing unsupported atoms loses fallback; and
  * removing nesting loses inner empty-OR work. Unicode LIKE/ILIKE, tagged
- * NaN ordering, and null-vs-missing under NOT challenge SQL equivalence.
+ * NaN ordering, lone-surrogate equality, and null-vs-missing under NOT
+ * challenge SQL equivalence. Fixed mixed AND cases cover child order,
+ * nesting, an unsafe OR sibling, and final rejection of an indexed candidate.
  * Arity 3 is the upper marginal.
  * Malformed `caseWhen()` with no result arm is excluded because core rejects it.
  * Fixed-seed and unseeded generated campaigns use the same grammar, driver,
@@ -41,8 +44,8 @@ import type { SQLiteDriver } from '../src'
  * driver records the SQL and raw row count of each Collection SELECT. At
  * `loadSubset` return, public keys must match the reference. SQL-supported
  * selective predicates in this safe fixture must have `WHERE` and return
- * exactly the selected raw rows. Unsafe children use full-table fallback, except a
- * predicate false on this bounded fixture may safely make a zero-row read.
+ * exactly the selected raw rows. Other predicates may read extra candidates,
+ * but every public match must cross the SQL boundary.
  * A cursor witness checks both receiving SELECTs, and a removed-WHERE mutant
  * proves the work check fails even when final public keys remain correct.
  *
@@ -70,6 +73,8 @@ type Atom =
   | 'ilike-unicode-prefix'
   | 'ilike-ascii-prefix'
   | 'gt-positive'
+  | 'eq-paired-surrogate'
+  | 'eq-lone-surrogate'
   | 'not-is-undefined'
   | 'not-is-null'
   | 'like-emoji-two'
@@ -88,7 +93,7 @@ type Row = {
 }
 type Read = { sql: string; rawRows: number; parameters: number }
 type Failure = {
-  law: 'public' | 'work' | 'compile' | 'fallback'
+  law: 'public' | 'work' | 'compile' | 'candidate'
   checkpoint: 'loadSubset-return'
   model: Model
   expected: Array<string>
@@ -99,7 +104,7 @@ type Failure = {
 const fixture: Array<Row> = Array.from({ length: 20 }, (_, index) => ({
   id: `row-${index + 1}`,
   'meta-field': index === 0 ? 'yes' : 'no',
-  name: ['Ä', 'Äland', 'Alpha', '😀'][index] ?? 'other',
+  name: ['Ä', 'Äland', 'Alpha', '😀', '\uD800'][index] ?? 'other',
   n: index === 0 ? Number.NaN : index - 1,
   ...(index === 0 ? { x: null } : {}),
 }))
@@ -120,6 +125,8 @@ const atoms: Array<Atom> = [
   'ilike-unicode-prefix',
   'ilike-ascii-prefix',
   'gt-positive',
+  'eq-paired-surrogate',
+  'eq-lone-surrogate',
   'not-is-undefined',
   'not-is-null',
   'like-emoji-two',
@@ -162,6 +169,10 @@ function valueOf(model: Model, row: Row): unknown {
         return row.id === 'row-3'
       case 'gt-positive':
         return Number.isNaN(row.n) || row.n > 0
+      case 'eq-paired-surrogate':
+        return row.name === '😀'
+      case 'eq-lone-surrogate':
+        return row.name === '\uD800'
       case 'not-is-undefined':
         return row.x !== undefined
       case 'not-is-null':
@@ -206,23 +217,6 @@ function canPush(model: Model): boolean {
     ].includes(model.atom)
   }
   return model.children.every(canPush)
-}
-
-function hasUnsafeOperand(model: Model): boolean {
-  if (model.kind === 'atom') {
-    return [
-      'unsupported-function',
-      'unsupported-path',
-      'ilike-unicode-exact',
-      'ilike-unicode-prefix',
-      'ilike-ascii-prefix',
-      'gt-positive',
-      'not-is-undefined',
-      'not-is-null',
-      'like-emoji-two',
-    ].includes(model.atom)
-  }
-  return model.children.some(hasUnsafeOperand)
 }
 
 function toIR(model: Model): IR.BasicExpression {
@@ -284,6 +278,13 @@ function toIR(model: Model): IR.BasicExpression {
         ])
       case 'gt-positive':
         return new IR.Func('gt', [new IR.PropRef(['n']), new IR.Value(0)])
+      case 'eq-paired-surrogate':
+        return new IR.Func('eq', [new IR.PropRef(['name']), new IR.Value('😀')])
+      case 'eq-lone-surrogate':
+        return new IR.Func('eq', [
+          new IR.PropRef(['name']),
+          new IR.Value('\uD800'),
+        ])
       case 'not-is-undefined':
         return new IR.Func('not', [
           new IR.Func('isUndefined', [new IR.PropRef(['x'])]),
@@ -308,6 +309,7 @@ class CountingDriver implements SQLiteDriver {
   private depth = 0
   mutantUnaryValue: 'x' | 1 | undefined
   mutantDropWhere = false
+  mutantPushUnsafeOr = false
 
   exec(sql: string): Promise<void> {
     this.db.exec(sql)
@@ -337,6 +339,10 @@ class CountingDriver implements SQLiteDriver {
     if (collectionRead && this.mutantDropWhere && sql.includes(' WHERE ')) {
       sql = sql.slice(0, sql.indexOf(' WHERE '))
       params = []
+    }
+    if (collectionRead && this.mutantPushUnsafeOr && !sql.includes(' WHERE ')) {
+      sql += ` WHERE LOWER(json_extract(value, '$.name')) LIKE LOWER(?)`
+      params = [...params, 'ä']
     }
     const rows = this.db
       .prepare(sql)
@@ -477,16 +483,8 @@ it('refines boolean arity and SQL row work across generated SQLite loads', async
     ) {
       failures.push(fail('compile'))
     }
-    if (hasUnsafeOperand(model)) {
-      const fullFallback =
-        !read.sql.includes(' WHERE ') && read.rawRows === fixture.length
-      const provenEmptyOnFixture =
-        expected.length === 0 &&
-        read.sql.includes(' WHERE ') &&
-        read.rawRows === 0
-      if (!fullFallback && !provenEmptyOnFixture)
-        failures.push(fail('fallback'))
-    }
+    if (read.rawRows < expected.length || read.rawRows > fixture.length)
+      failures.push(fail('candidate'))
     return failures
   }
 
@@ -611,6 +609,7 @@ it('refines boolean arity and SQL row work across generated SQLite loads', async
       'ilike-unicode-prefix',
       'ilike-ascii-prefix',
       'gt-positive',
+      'eq-lone-surrogate',
       'not-is-undefined',
       'not-is-null',
       'like-emoji-two',
@@ -620,6 +619,55 @@ it('refines boolean arity and SQL row work across generated SQLite loads', async
 
     expect(await check(op('and', atom('unsupported-function')))).toEqual([])
     expect(await check(op('or', atom('unsupported-path')))).toEqual([])
+
+    const mixedAnd = op('and', atom('first'), atom('gt-positive'))
+    async function observeMixedAnd(model: Model = mixedAnd) {
+      driver.reads = []
+      const rows = await adapter.loadSubset('boolean-arity', {
+        where: toIR(model),
+      })
+      return {
+        keys: rows.map((row) => String(row.key)).sort(),
+        read: driver.reads[0],
+      }
+    }
+    const mixed = await observeMixedAnd()
+    expect(mixed.keys).toEqual(['row-1']) // NaN compares above zero in core.
+    expect(mixed.read?.sql).toContain(' WHERE ')
+    expect(mixed.read?.rawRows).toBe(1) // Certified id equality is selective.
+
+    for (const model of [
+      op('and', atom('gt-positive'), atom('first')),
+      op('and', op('and', atom('first'), atom('gt-positive'))),
+      op(
+        'and',
+        atom('first'),
+        op('or', atom('ilike-unicode-exact'), atom('false')),
+      ),
+      op('and', atom('first'), atom('not-is-null')),
+    ]) {
+      const observation = await observeMixedAnd(model)
+      expect(observation.keys).toEqual(expectedKeys(model))
+      expect(observation.read?.sql).toContain(' WHERE ')
+      expect(observation.read?.rawRows).toBe(1)
+    }
+
+    driver.mutantDropWhere = true
+    const droppedConjunct = await observeMixedAnd()
+    driver.mutantDropWhere = false
+    expect(droppedConjunct.keys).toEqual(mixed.keys)
+    expect(droppedConjunct.read?.rawRows).toBe(fixture.length)
+    expect(droppedConjunct.read?.rawRows).not.toBe(mixed.read?.rawRows)
+
+    driver.mutantPushUnsafeOr = true
+    const unsafeOr = await check(
+      op('or', atom('ilike-unicode-exact'), atom('false')),
+    )
+    driver.mutantPushUnsafeOr = false
+    expect(unsafeOr.map((failure) => failure.law)).toContain('public')
+    expect(
+      unsafeOr.find((failure) => failure.law === 'public')?.read.sql,
+    ).toContain(' WHERE ')
 
     driver.mutantUnaryValue = 'x'
     expect(
@@ -653,7 +701,7 @@ it('refines boolean arity and SQL row work across generated SQLite loads', async
               public: count('public'),
               work: count('work'),
               compile: count('compile'),
-              fallback: count('fallback'),
+              candidate: count('candidate'),
             },
             examples: failures
               .filter((failure) =>
