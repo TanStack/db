@@ -1328,11 +1328,12 @@ export class CollectionStateManager<
     throw invalid[0]!.error
   }
 
-  /**
-   * Attempts to commit pending synced transactions if there are no active transactions
-   * This method processes operations from pending transactions and applies them to the synced data
-   */
-  commitPendingTransactions = () => {
+  /** Apply committed source writes. A queued immediate write may authorize an
+   * earlier normal write to publish while a user mutation is still active. */
+  commitPendingTransactions = (
+    allowDuringPersistence = false,
+    onPublicationError?: (error: unknown) => void,
+  ) => {
     if (this.isDrainingSyncTransactions) return
     this.isDrainingSyncTransactions = true
     let failed = false
@@ -1340,7 +1341,18 @@ export class CollectionStateManager<
     try {
       let result: { processed: boolean; failure?: { error: unknown } }
       do {
-        result = this.commitNextPendingTransactionBatch()
+        const pending = this.pendingSyncedTransactions
+        try {
+          result = this.commitNextPendingTransactionBatch(
+            allowDuringPersistence,
+          )
+        } catch (error) {
+          for (const transaction of pending) {
+            if (transaction.applicationStarted)
+              transaction.applied.reject(error)
+          }
+          throw error
+        }
         if (result.failure && !failed) {
           failed = true
           firstError = result.failure.error
@@ -1349,10 +1361,13 @@ export class CollectionStateManager<
     } finally {
       this.isDrainingSyncTransactions = false
     }
-    if (failed) throw firstError
+    if (failed) {
+      if (onPublicationError) onPublicationError(firstError)
+      else throw firstError
+    }
   }
 
-  private commitNextPendingTransactionBatch(): {
+  private commitNextPendingTransactionBatch(allowDuringPersistence = false): {
     processed: boolean
     failure?: { error: unknown }
   } {
@@ -1410,14 +1425,20 @@ export class CollectionStateManager<
     // Process committed transactions if:
     // 1. No persisting user transaction (normal sync flow), OR
     // 2. There's a truncate operation (must be processed immediately), OR
-    // 3. There's an immediate transaction (manual writes must be processed synchronously)
+    // 3. There's an immediate transaction (manual writes must be processed synchronously), OR
+    // 4. An immediate write is queued behind an earlier source receipt.
     //
     // Note: When hasImmediateSync or hasTruncateSync is true, we process ALL committed
     // sync transactions (not just the immediate/truncate ones). This is intentional for
     // ordering correctness: if we only processed the immediate transaction, earlier
     // non-immediate transactions would be applied later and could overwrite newer state.
     // Processing all committed transactions together preserves causal ordering.
-    if (!hasPersistingTransaction || hasTruncateSync || hasImmediateSync) {
+    if (
+      !hasPersistingTransaction ||
+      hasTruncateSync ||
+      hasImmediateSync ||
+      allowDuringPersistence
+    ) {
       const previousLayout = layoutChanged ? [...this.keys()] : undefined
       this.pendingSyncedTransactions = uncommittedSyncedTransactions
 

@@ -1327,6 +1327,9 @@ class PersistedCollectionRuntime<
   private lifecycleGeneration = 0
   private internalApplyDepth = 0
   private sourcePublicationWaitDepth = 0
+  // Buffered immediate commits can release an older core receipt without
+  // overtaking it at the durable apply mutex.
+  private pendingImmediateSourceTransactions = 0
   private appliedReceiptSequence = 0
   private syncErrorReported = false
   private reportedSyncError: unknown
@@ -2072,19 +2075,23 @@ class PersistedCollectionRuntime<
   ): Promise<void> {
     const failure = this.getCurrentTerminalFailure()
     if (failure) return Promise.reject(failure.error)
-    if (
-      transaction.beginOptions?.immediate &&
-      this.sourcePublicationWaitDepth > 0
-    ) {
-      return Promise.reject(
-        new InvalidPersistedCollectionConfigError(
-          `immediate persisted source replay cannot enter while an earlier source publication is waiting`,
-        ),
-      )
-    }
-    return this.applyMutex.run(async () => {
+    const immediate = transaction.beginOptions?.immediate === true
+    if (immediate) this.pendingImmediateSourceTransactions++
+    const applied = this.applyMutex.run(async () => {
       await this.applyBufferedSyncTransactionUnsafe(transaction)
     })
+    if (immediate) {
+      void applied.then(
+        () => this.pendingImmediateSourceTransactions--,
+        () => this.pendingImmediateSourceTransactions--,
+      )
+      if (this.sourcePublicationWaitDepth > 0) {
+        this.collection?._state.commitPendingTransactions(true, (error) =>
+          this.reportSyncError(error),
+        )
+      }
+    }
+    return applied
   }
 
   normalizeSyncWriteMessage(
@@ -2109,8 +2116,7 @@ class PersistedCollectionRuntime<
       }
     }
 
-    // Handle delete messages that include the full value instead of just a key
-    // (e.g. from queryCollectionOptions which sends { type: 'delete', value: oldItem })
+    // Handle delete messages that include the full value instead of just a key.
     if (message.type === `delete`) {
       const key = this.collection.getKeyFromItem(message.value)
       const previousValue = this.collection.get(key) ?? message.value
@@ -2742,6 +2748,11 @@ class PersistedCollectionRuntime<
       if (applied !== true) {
         this.sourcePublicationWaitDepth++
         try {
+          if (this.pendingImmediateSourceTransactions > 0) {
+            this.collection?._state.commitPendingTransactions(true, (error) =>
+              this.reportSyncError(error),
+            )
+          }
           await applied
         } finally {
           this.sourcePublicationWaitDepth--
