@@ -1793,44 +1793,12 @@ export class CollectionStateManager<
       // the UI preserves local intent while respecting server rebuild semantics.
       // Ordering: deletes (above) -> server ops (just applied) -> optimistic upserts.
       if (hasTruncateSync) {
-        // Events use the same rebuilt overlay as synchronous reads.
-        const reapplyUpserts = this.optimisticUpserts
-        const reapplyDeletes = this.optimisticDeletes
-
-        // Emit inserts for re-applied upserts, skipping any keys that have an optimistic delete.
-        // If the server also inserted/updated the same key in this batch, override that value
-        // with the optimistic value to preserve local intent.
-        for (const [key, value] of reapplyUpserts) {
-          if (reapplyDeletes.has(key)) continue
-          if (syncedInsertedOrUpdatedKeys.has(key)) {
-            let foundInsert = false
-            for (let i = events.length - 1; i >= 0; i--) {
-              const evt = events[i]!
-              if (evt.key === key && evt.type === `insert`) {
-                evt.value = value
-                foundInsert = true
-                break
-              }
-            }
-            if (!foundInsert) {
-              events.push({ type: `insert`, key, value })
-            }
-          } else {
-            events.push({ type: `insert`, key, value })
-          }
-        }
-
-        // Finally, ensure we do NOT insert keys that have an outstanding optimistic delete.
-        if (events.length > 0 && reapplyDeletes.size > 0) {
-          const filtered: Array<ChangeMessage<TOutput, TKey>> = []
-          for (const evt of events) {
-            if (evt.type === `insert` && reapplyDeletes.has(evt.key)) {
-              continue
-            }
-            filtered.push(evt)
-          }
-          events.length = 0
-          events.push(...filtered)
+        // Events use the same rebuilt overlay as synchronous reads. Until
+        // this point the batch holds only the truncate delete prefix, so each
+        // re-applied upsert publishes as an insert after it. A key is never
+        // both an optimistic upsert and an optimistic delete.
+        for (const [key, value] of this.optimisticUpserts) {
+          events.push({ type: `insert`, key, value })
         }
 
         // Ensure listeners are active before emitting this critical batch
