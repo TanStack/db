@@ -151,6 +151,23 @@ export function getLiveQueryHash(
  * A query builder whose shape a shared partition can serve gets a pooled view
  * instead of its own live-query Collection.
  */
+// A config that names only its query and lifetime describes the same live
+// query as its builder. Any other option shapes its Collection, so compiles.
+function poolConfig(
+  config: LiveQueryCollectionConfig<any>,
+  gcTime: number | undefined,
+): Collection<any, any, any> | undefined {
+  if (
+    !(config.query instanceof BaseQueryBuilder) ||
+    !Object.keys(config).every((key) => key === `query` || key === `gcTime`)
+  ) {
+    return undefined
+  }
+  return createPooledLiveQuery(config.query, {
+    gcTime: config.gcTime ?? gcTime,
+  })
+}
+
 export function resolveLiveQueryValue(
   value: unknown,
   { gcTime, pool = true }: { gcTime?: number; pool?: boolean } = {},
@@ -167,11 +184,11 @@ export function resolveLiveQueryValue(
     )
   }
   if (typeof value === `object`) {
-    return createLiveQueryCollection({
-      startSync: true,
-      gcTime,
-      ...(value as LiveQueryCollectionConfig<any>),
-    })
+    const config = value as LiveQueryCollectionConfig<any>
+    return (
+      (pool ? poolConfig(config, gcTime) : undefined) ??
+      createLiveQueryCollection({ startSync: true, gcTime, ...config })
+    )
   }
   throw new Error(
     `A live query must be a QueryBuilder, LiveQueryCollectionConfig, Collection, undefined, or null. Got: ${typeof value}`,

@@ -4,6 +4,7 @@ import { createLiveQueryObserver } from '../../src/live-query-observer.js'
 import { Query } from '../../src/query/builder/index.js'
 import { createLiveQueryCollection, eq, not } from '../../src/query/index.js'
 import { createPooledLiveQuery } from '../../src/query/pooled-live-query.js'
+import { resolveLiveQueryValue } from '../../src/live-query-options.js'
 import { mockSyncCollectionOptions } from '../utils.js'
 
 /**
@@ -241,6 +242,23 @@ describe(`pooled live query gcTime`, () => {
     await cleanup
     pooledView.stop()
     compiledView.stop()
+  })
+
+  it(`pools a query config that names only its query`, () => {
+    const source = makeSource()
+    const observe = (value: unknown) =>
+      createLiveQueryObserver(resolveLiveQueryValue(value, { gcTime: 1 }), {
+        mode: `wholesale`,
+      }).subscribe(() => {})
+    const stops = [
+      observe({ query: query(source)(new Query()) }),
+      observe({ query: query(source)(new Query()), gcTime: 5 }),
+    ]
+    expect(source.subscriberCount).toBe(1)
+    // An id names a distinct Collection, so that config compiles its own.
+    stops.push(observe({ query: query(source)(new Query()), id: `own` }))
+    expect(source.subscriberCount).toBe(2)
+    for (const stop of stops) stop()
   })
 
   it(`keeps its public Collection live while observed`, async () => {
