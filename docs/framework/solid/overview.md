@@ -49,7 +49,7 @@ function TodoList() {
 
 ### Opt-in Suspense with readiness
 
-Data reads never suspend. To gate rendering on first data, read `query.readiness()` inside a `<Loading>` boundary — it throws `NotReadyError` until the query passes its initial-render gate (network ready, or a permitted persisted fallback), and errors flow to `<Errored>`:
+Data reads never suspend. To gate rendering on first data, read `query.readiness()` inside a `<Loading>` boundary — it throws `NotReadyError` until the query passes its initial-render gate (network ready, or a permitted persisted fallback), then returns the rows exactly like `query()`. Errors flow to `<Errored>`:
 
 ```tsx
 import { Loading, Errored } from '@solidjs/web'
@@ -60,11 +60,9 @@ function TodoList() {
   return (
     <Errored fallback={(err) => <div>Error: {String(err())}</div>}>
       <Loading fallback={<div>Loading...</div>}>
-        {query.readiness() && (
-          <For each={query()}>
-            {(todo) => <li>{todo.text}</li>}
-          </For>
-        )}
+        <For each={query.readiness()}>
+          {(todo) => <li>{todo.text}</li>}
+        </For>
       </Loading>
     </Errored>
   )

@@ -119,11 +119,7 @@ describe(`useLiveQuery type assertions`, () => {
     >()
     expectTypeOf(rendered.result.isReady).toEqualTypeOf<boolean>()
     expectTypeOf(rendered.result.readiness).toEqualTypeOf<
-      Accessor<Collection<
-        Prettify<OutputWithVirtual<Person>>,
-        string | number,
-        {}
-      > | null>
+      Accessor<Array<Prettify<OutputWithVirtual<Person>>>>
     >()
 
     // @ts-expect-error Disabled callbacks expose a null collection until enabled.

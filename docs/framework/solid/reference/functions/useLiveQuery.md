@@ -90,11 +90,9 @@ const todosQuery = useLiveQuery((q) =>
 
 return (
   <Loading fallback={<div>Loading...</div>}>
-    {todosQuery.readiness() && (
-      <For each={todosQuery()}>
-        {(todo) => <li>{todo.text}</li>}
-      </For>
-    )}
+    <For each={todosQuery.readiness()}>
+      {(todo) => <li>{todo.text}</li>}
+    </For>
   </Loading>
 )
 ```
@@ -186,11 +184,9 @@ const todosQuery = useLiveQuery((q) =>
 
 return (
   <Loading fallback={<div>Loading...</div>}>
-    {todosQuery.readiness() && (
-      <For each={todosQuery()}>
-        {(todo) => <li>{todo.text}</li>}
-      </For>
-    )}
+    <For each={todosQuery.readiness()}>
+      {(todo) => <li>{todo.text}</li>}
+    </For>
   </Loading>
 )
 ```
@@ -420,11 +416,9 @@ const todosQuery = useLiveQuery((q) =>
 
 return (
   <Loading fallback={<div>Loading...</div>}>
-    {todosQuery.readiness() && (
-      <For each={todosQuery()}>
-        {(todo) => <li>{todo.text}</li>}
-      </For>
-    )}
+    <For each={todosQuery.readiness()}>
+      {(todo) => <li>{todo.text}</li>}
+    </For>
   </Loading>
 )
 ```

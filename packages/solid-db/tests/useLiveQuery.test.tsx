@@ -10,7 +10,7 @@ import {
   gt,
   toArray,
 } from '@tanstack/db'
-import { For, Loading, createEffect, createMemo, createRoot, createSignal, flush, isPending } from 'solid-js'
+import { For, Loading, createEffect, createRoot, createSignal, flush, isPending } from 'solid-js'
 import { useLiveQuery } from '../src/useLiveQuery'
 import { mockSyncCollectionOptions } from '../../db/tests/utils'
 import type { Accessor } from 'solid-js'
@@ -1234,16 +1234,9 @@ describe(`Query Collections`, () => {
             name: persons.name,
           })),
         )
-        // Reading readiness inside the memo suspends the boundary until the
-        // query is ready; the memo then serves the gated rows.
-        const rows = createMemo(() => {
-          query.readiness()
-          return query()
-        })
-
         return (
           <ul data-testid="list">
-            <For each={rows()}>
+            <For each={query.readiness()}>
               {(person) => (
                 <li data-testid={`person-${person.id}`}>{person.name}</li>
               )}
@@ -1291,14 +1284,9 @@ describe(`Query Collections`, () => {
             name: persons.name,
           })),
         )
-        const rows = createMemo(() => {
-          query.readiness()
-          return query()
-        })
-
         return (
           <div data-testid="content">
-            <span data-testid="count">{rows().length}</span>
+            <span data-testid="count">{query.readiness().length}</span>
           </div>
         )
       }
@@ -2989,14 +2977,12 @@ describe(`Query Collections`, () => {
             .from({ persons: collection })
             .select(({ persons }) => ({ id: persons.id, name: persons.name })),
         )
-        const rows = createMemo(() => {
-          query.readiness()
-          return query()
-        })
         return (
           <Loading fallback={<div data-testid="loading">Loading</div>}>
             <div data-testid="content">
-              <For each={rows()}>{(person) => <div>{person.name}</div>}</For>
+              <For each={query.readiness()}>
+                {(person) => <div>{person.name}</div>}
+              </For>
             </div>
           </Loading>
         )
@@ -3109,13 +3095,11 @@ describe(`Query Collections`, () => {
             .from({ persons: useFirst() ? source1 : source2 })
             .select(({ persons }) => ({ id: persons.id, name: persons.name })),
         )
-        const rows = createMemo(() => {
-          query.readiness()
-          return query()
-        })
         return (
           <Loading fallback={<div data-testid="loading">Loading</div>}>
-            <div data-testid="content">{`${rows().length} items`}</div>
+            <div data-testid="content">
+              {`${query.readiness().length} items`}
+            </div>
           </Loading>
         )
       }

@@ -146,7 +146,7 @@ import { Loading, Errored } from '@solidjs/web'
 </Errored>
 ```
 
-Data reads never suspend — `query()` returns the current rows at any time, including partial rows synced while loading; only reading an errored query throws (for `<Errored>` to catch). Suspense is opt-in: `query.readiness()` is an async-computation accessor — reading it while the initial render is in flight throws `NotReadyError` (caught by `<Loading>`), and it settles at network readiness or a permitted persisted fallback.
+Data reads never suspend — `query()` returns the current rows at any time, including partial rows synced while loading; only reading an errored query throws (for `<Errored>` to catch). Suspense is opt-in: `query.readiness()` gates on the initial render (throwing `NotReadyError` for `<Loading>` to catch) and then returns the rows exactly like `query()` — feed it straight into `<For each={...}>`. It settles at network readiness or a permitted persisted fallback.
 
 ### Revalidation progress with isPending
 
