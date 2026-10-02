@@ -387,6 +387,38 @@ public snapshots and change events before release, after release, and after
 rollback. Both use controlled provider timing; real-provider ordering remains
 a separate receiving handoff.
 
+The ordinary committed-transaction companion in the SQLite resume-snapshot
+owner checks durable rows, row and collection metadata, expected-key evidence,
+tombstones, applied position, idempotent reapply, and replay threshold behavior
+for bounded insert, partial-update, delete, metadata-only, and repeated-key
+histories. Its fixed and random generated campaigns cover a two-row seed,
+ordered action prefixes, seven required action/metadata suffixes, optional
+dependent updates, and late-bookkeeping rollback, comparing durable state after
+each settlement. The generated grammar is bounded to two writable string keys,
+one absent metadata key, at most four prefix mutations, three row-metadata and
+two collection-metadata prefix actions, and up to three committed positions;
+it does not claim arbitrary histories or concurrent owners. Every generated
+seed, candidate, dependent update, and late rollback must enter exactly one
+SQLite transaction; counters are captured before durable snapshot reads. A
+separate fixed/random generated work grammar covers 0–60 distinct keys, five
+insert/update/delete/metadata shapes, and 100/999 parameter caps. It checks
+durable values before applying the same proposed chunk-bound work law; all
+repeated-key histories remain semantic-only. Fixed 25/26 and 10,000-row cases
+separately witness the work boundary. Both fixed and generated work laws were
+RED on `ef1e6a4` and are GREEN with ordinary batching: the 10,000-row insert
+plus metadata takes 505 query/run calls instead of 50,005. A temporary
+repeated-key classifier mutation fails the generated oracle at the candidate
+durable checkpoint, seed 1992, path `2:0:0:2:2:2:2`. A temporary chunk-limit
+mutation passes the Cloudflare 25-row case but fails at 26 rows under the
+100-parameter guard. Both mutations were restored. The Cloudflare receiving
+driver also persists ordinary writes with metadata at 25, 26, and 205 rows
+within that guard. Its Node SQLite storage seam does not establish Cloudflare
+Worker execution. The synthetic node:sqlite seam does not establish OPFS
+worker scheduling, browser latency, or native-device performance. Tagged-value
+serialization, unavailable key evidence after raw loss, concurrent schema
+migration, WAL across processes, and arbitrary longer transaction histories
+remain with their existing owners or need explicit future witnesses.
+
 The SQLite resume-snapshot owner also checks a cold, unique-key, non-delete
 full replacement with 205 rows. It compares exact durable rows, row metadata,
 key-set evidence, resume metadata, and applied position at transaction return;
@@ -395,10 +427,11 @@ whole transaction. Duplicate-key and delete histories keep their sequential
 semantics. This in-memory driver-call law does not measure Chromium OPFS
 latency, worker scheduling, or an end-to-end Electric snapshot.
 
-The Cloudflare Durable Object replacement test applies 25-, 26-, and 205-row
-full replacements through the actual Cloudflare driver. A storage seam enforces
-Cloudflare's documented 100-bound-parameter query limit and checks the durable
-keys after each transaction. This Node SQLite seam does not execute in Workers.
+The Cloudflare Durable Object test applies 25-, 26-, and 205-row full
+replacements and ordinary writes with row metadata through the actual Cloudflare
+driver. A storage seam enforces Cloudflare's documented 100-bound-parameter
+query limit and checks durable keys and metadata after each transaction. This
+Node SQLite seam does not execute in Workers.
 
 The browser OPFS lifecycle owner also checks that a silent initialization
 rejects at the default or overridden open deadline, terminates its worker,

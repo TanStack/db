@@ -1175,6 +1175,26 @@ function mergeObjectRows<T extends object>(existing: unknown, incoming: T): T {
   return incoming
 }
 
+function* distinctKeyBatches<T>(
+  changes: ReadonlyArray<T>,
+  keyOf: (change: T) => string,
+  maxSize: number,
+): Generator<Array<T>> {
+  let batch: Array<T> = []
+  let keys = new Set<string>()
+  for (const change of changes) {
+    const key = keyOf(change)
+    if (batch.length === maxSize || keys.has(key)) {
+      yield batch
+      batch = []
+      keys = new Set()
+    }
+    batch.push(change)
+    keys.add(key)
+  }
+  if (batch.length > 0) yield batch
+}
+
 function buildIndexName(collectionId: string, signature: string): string {
   const sanitizedSignature = signature
     .toLowerCase()
@@ -1683,170 +1703,151 @@ export class SQLiteCorePersistenceAdapter implements PersistenceAdapter {
         tx.mutations.every((mutation) => mutation.type !== `delete`) &&
         new Set(replacementKeys).size === replacementKeys.length
 
+      const finalRowMetadata = new Map<string, unknown>()
       if (batchReplacement) {
-        const finalRowMetadata = new Map<string, unknown>()
         for (const mutation of tx.rowMetadataMutations ?? []) {
           finalRowMetadata.set(
             encodePersistedStorageKey(mutation.key),
             mutation.type === `delete` ? undefined : mutation.value,
           )
         }
+      }
 
-        for (
-          let start = 0;
-          start < tx.mutations.length;
-          start += this.replacementBatchSize
-        ) {
-          const mutations = tx.mutations.slice(
-            start,
-            start + this.replacementBatchSize,
+      for (const batch of distinctKeyBatches(
+        tx.mutations,
+        (mutation) => encodePersistedStorageKey(mutation.key),
+        this.replacementBatchSize,
+      )) {
+        const writes = batch.filter((mutation) => mutation.type !== `delete`)
+        const deletes = batch.filter((mutation) => mutation.type === `delete`)
+        const readKeys = batchReplacement ? [] : writes
+          .filter(
+            (mutation) =>
+              mutation.type === `update` || mutation.metadataChanged !== true,
           )
-          const keys = replacementKeys.slice(
-            start,
-            start + this.replacementBatchSize,
-          )
+          .map((mutation) => encodePersistedStorageKey(mutation.key))
+        const existingRows = readKeys.length > 0
+          ? await transactionDriver.query<{
+              key: string
+              value: string
+              metadata: string | null
+            }>(
+              `SELECT key, value, metadata
+               FROM ${collectionTableSql}
+               WHERE key IN (${readKeys.map(() => `?`).join(`, `)})`,
+              readKeys,
+            )
+          : []
+        const existing = new Map(existingRows.map((row) => [row.key, row]))
+        const writeKeys = writes.map((mutation) =>
+          encodePersistedStorageKey(mutation.key),
+        )
+        const deleteKeys = deletes.map((mutation) =>
+          encodePersistedStorageKey(mutation.key),
+        )
+
+        if (tracksPersistedKeySet && writeKeys.length > 0) {
           await transactionDriver.run(
             `INSERT INTO collection_expected_keys (collection_id, key)
-             VALUES ${keys.map(() => `(?, ?)`).join(`, `)}`,
-            keys.flatMap((key) => [collectionId, key]),
+             VALUES ${writeKeys.map(() => `(?, ?)`).join(`, `)}
+             ON CONFLICT(collection_id, key) DO NOTHING`,
+            writeKeys.flatMap((key) => [collectionId, key]),
           )
+        }
+        if (tracksPersistedKeySet && deleteKeys.length > 0) {
+          await transactionDriver.run(
+            `DELETE FROM collection_expected_keys
+             WHERE collection_id = ? AND key IN (${deleteKeys.map(() => `?`).join(`, `)})`,
+            [collectionId, ...deleteKeys],
+          )
+        }
+        if (deleteKeys.length > 0) {
+          await transactionDriver.run(
+            `DELETE FROM ${collectionTableSql}
+             WHERE key IN (${deleteKeys.map(() => `?`).join(`, `)})`,
+            deleteKeys,
+          )
+        }
+        if (writeKeys.length > 0) {
           await transactionDriver.run(
             `INSERT INTO ${collectionTableSql} (key, value, metadata, row_version)
-             VALUES ${keys.map(() => `(?, ?, ?, ?)`).join(`, `)}`,
-            mutations.flatMap((mutation, index) => {
-              const key = keys[index]!
-              const metadata = finalRowMetadata.has(key)
-                ? finalRowMetadata.get(key)
-                : mutation.type !== `delete` &&
-                    mutation.metadataChanged === true
+             VALUES ${writeKeys.map(() => `(?, ?, ?, ?)`).join(`, `)}
+             ON CONFLICT(key) DO UPDATE SET
+               value = excluded.value,
+               metadata = excluded.metadata,
+               row_version = excluded.row_version`,
+            writes.flatMap((mutation, index) => {
+              const previous = existing.get(writeKeys[index]!)
+              const previousValue = previous?.value
+                ? deserializePersistedRowValue(previous.value)
+                : undefined
+              const previousMetadata = previous?.metadata != null
+                ? deserializePersistedRowValue(previous.metadata)
+                : undefined
+              const value = mutation.type === `update`
+                ? mergeObjectRows(previousValue, mutation.value)
+                : mutation.value
+              const metadata = finalRowMetadata.has(writeKeys[index]!)
+                ? finalRowMetadata.get(writeKeys[index]!)
+                : mutation.metadataChanged === true
                   ? mutation.metadata
-                  : undefined
+                  : previousMetadata
               return [
-                key,
-                serializePersistedRowValue(mutation.value),
-                metadata === undefined
-                  ? null
-                  : serializePersistedRowValue(metadata),
+                writeKeys[index]!,
+                serializePersistedRowValue(value),
+                metadata === undefined ? null : serializePersistedRowValue(metadata),
                 nextRowVersion,
               ]
             }),
           )
-        }
-      }
-
-      for (const mutation of batchReplacement ? [] : tx.mutations) {
-        const encodedKey = encodePersistedStorageKey(mutation.key)
-        if (mutation.type === `delete`) {
-          if (tracksPersistedKeySet) {
+          if (!batchReplacement) {
             await transactionDriver.run(
-              `DELETE FROM collection_expected_keys
-               WHERE collection_id = ? AND key = ?`,
-              [collectionId, encodedKey],
+              `DELETE FROM ${tombstoneTableSql}
+               WHERE key IN (${writeKeys.map(() => `?`).join(`, `)})`,
+              writeKeys,
             )
           }
-          await transactionDriver.run(
-            `DELETE FROM ${collectionTableSql}
-             WHERE key = ?`,
-            [encodedKey],
-          )
+        }
+        if (deletes.length > 0) {
           await transactionDriver.run(
             `INSERT INTO ${tombstoneTableSql} (key, value, row_version, deleted_at)
-             VALUES (?, ?, ?, ?)
+             VALUES ${deleteKeys.map(() => `(?, ?, ?, ?)`).join(`, `)}
              ON CONFLICT(key) DO UPDATE SET
                value = excluded.value,
                row_version = excluded.row_version,
                deleted_at = excluded.deleted_at`,
-            [
-              encodedKey,
+            deletes.flatMap((mutation, index) => [
+              deleteKeys[index]!,
               serializePersistedRowValue(mutation.value),
               nextRowVersion,
               new Date().toISOString(),
-            ],
-          )
-          continue
-        }
-
-        const existingRows = await transactionDriver.query<{
-          value: string
-          metadata: string | null
-        }>(
-          `SELECT value, metadata
-           FROM ${collectionTableSql}
-           WHERE key = ?
-           LIMIT 1`,
-          [encodedKey],
-        )
-        const existingValue = existingRows[0]?.value
-          ? deserializePersistedRowValue(existingRows[0].value)
-          : undefined
-        const existingMetadata =
-          existingRows[0]?.metadata != null
-            ? deserializePersistedRowValue(existingRows[0].metadata)
-            : undefined
-        const mergedValue =
-          mutation.type === `update`
-            ? mergeObjectRows(existingValue, mutation.value)
-            : mutation.value
-        const nextMetadata =
-          mutation.metadataChanged === true
-            ? mutation.metadata
-            : existingMetadata
-
-        if (tracksPersistedKeySet) {
-          await transactionDriver.run(
-            `INSERT INTO collection_expected_keys (collection_id, key)
-             VALUES (?, ?)
-             ON CONFLICT(collection_id, key) DO NOTHING`,
-            [collectionId, encodedKey],
+            ]),
           )
         }
-        await transactionDriver.run(
-          `INSERT INTO ${collectionTableSql} (key, value, metadata, row_version)
-           VALUES (?, ?, ?, ?)
-           ON CONFLICT(key) DO UPDATE SET
-             value = excluded.value,
-             metadata = excluded.metadata,
-             row_version = excluded.row_version`,
-          [
-            encodedKey,
-            serializePersistedRowValue(mergedValue),
-            nextMetadata === undefined
-              ? null
-              : serializePersistedRowValue(nextMetadata),
-            nextRowVersion,
-          ],
-        )
-        await transactionDriver.run(
-          `DELETE FROM ${tombstoneTableSql}
-           WHERE key = ?`,
-          [encodedKey],
-        )
       }
 
-      for (const rowMetadataMutation of batchReplacement
-        ? []
-        : (tx.rowMetadataMutations ?? [])) {
-        const encodedKey = encodePersistedStorageKey(rowMetadataMutation.key)
-        if (rowMetadataMutation.type === `delete`) {
-          await transactionDriver.run(
-            `UPDATE ${collectionTableSql}
-             SET metadata = NULL
-             WHERE key = ?`,
-            [encodedKey],
-          )
-        } else {
-          await transactionDriver.run(
-            `UPDATE ${collectionTableSql}
-             SET metadata = ?
-             WHERE key = ?`,
-            [
-              rowMetadataMutation.value === undefined
+      for (const batch of distinctKeyBatches(
+        batchReplacement ? [] : (tx.rowMetadataMutations ?? []),
+        (mutation) => encodePersistedStorageKey(mutation.key),
+        this.replacementBatchSize,
+      )) {
+        const keys = batch.map((mutation) =>
+          encodePersistedStorageKey(mutation.key),
+        )
+        await transactionDriver.run(
+          `UPDATE ${collectionTableSql}
+           SET metadata = CASE key ${keys.map(() => `WHEN ? THEN ?`).join(` `)} END
+           WHERE key IN (${keys.map(() => `?`).join(`, `)})`,
+          [
+            ...batch.flatMap((mutation, index) => [
+              keys[index]!,
+              mutation.type === `delete` || mutation.value === undefined
                 ? null
-                : serializePersistedRowValue(rowMetadataMutation.value),
-              encodedKey,
-            ],
-          )
-        }
+                : serializePersistedRowValue(mutation.value),
+            ]),
+            ...keys,
+          ],
+        )
       }
 
       for (const metadataMutation of tx.collectionMetadataMutations ?? []) {
