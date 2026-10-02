@@ -225,7 +225,10 @@ export function useLiveQuery(
     () => {
       const currentSnapshot = snapshot()
       if (currentSnapshot) return currentSnapshot.status
-      return collectionError ? `error` : `disabled`
+      if (collectionError) return `error`
+      // Before the observer seeds the first snapshot, a live collection is
+      // already syncing — only a missing collection is disabled.
+      return collection() ? `loading` : `disabled`
     },
     { name: `TanstackDBStatus` },
   )
@@ -259,7 +262,7 @@ export function useLiveQuery(
       return rows
     },
     [],
-    { key: (row: any) => rowIdentities.get(row), name: `TanstackDBData` },
+    { key: (row: object) => rowIdentities.get(row), name: `TanstackDBData` },
   )
 
   // Granular keyed state, synced incrementally per snapshot so only changed
@@ -290,7 +293,9 @@ export function useLiveQuery(
   // flight throws NotReadyError for a <Loading> boundary to catch. It settles
   // at network readiness or a permitted persisted fallback — the same gate
   // the React adapter's suspense hook uses — so persisted data can reveal
-  // content before the network answers.
+  // content before the network answers. Eager, not lazy: a lazily
+  // autodisposed memo freezes at its last commit once unobserved, which
+  // would hide revalidation from isPending() readers.
   const readiness = createMemo(async () => {
     const col = collection()
     if (!col) return null
