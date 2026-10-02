@@ -735,7 +735,7 @@ export class CollectionStateManager<
     }
 
     // Apply active transactions only (completed transactions are handled by sync operations)
-    const activeTransactions = this.overlayActiveTransactions()
+    this.overlayActiveTransactions()
 
     // Update cached size
     this.size = this.calculateSize()
@@ -749,72 +749,17 @@ export class CollectionStateManager<
       events,
     )
 
-    // Filter out events for recently synced keys to prevent duplicates
-    // BUT: Only filter out events that are actually from sync operations
-    // New user transactions should NOT be filtered even if the key was recently synced
-    const filteredEventsBySyncStatus = events.filter((event) => {
-      if (!this.recentlySyncedKeys.has(event.key)) {
-        return true // Key not recently synced, allow event through
-      }
-
-      // Key was recently synced - allow if this is a user-triggered action
-      if (triggeredByUserAction) {
-        return true
-      }
-
-      // Otherwise filter out duplicate sync events
-      return false
-    })
-
-    // Filter out redundant delete events if there are pending sync transactions
-    // that will immediately restore the same data, but only for completed transactions
-    // IMPORTANT: Skip complex filtering for user-triggered actions to prevent UI blocking
-    if (this.changes.shouldBatchEvents && !triggeredByUserAction) {
-      const pendingSyncKeysForFilter = new Set<TKey>()
-
-      // Collect keys from pending sync operations
-      for (const transaction of this.pendingSyncedTransactions) {
-        for (const operation of transaction.operations) {
-          pendingSyncKeysForFilter.add(operation.key as TKey)
-        }
-      }
-
-      // Only filter out delete events for keys that:
-      // 1. Have pending sync operations AND
-      // 2. Are from completed transactions (being cleaned up)
-      const filteredEvents = filteredEventsBySyncStatus.filter((event) => {
-        if (
-          event.type === `delete` &&
-          pendingSyncKeysForFilter.has(event.key)
-        ) {
-          // Check if this delete is from clearing optimistic state of completed transactions
-          // We can infer this by checking if we have no remaining optimistic mutations for this key
-          const hasActiveOptimisticMutation = activeTransactions.some((tx) =>
-            tx.mutations.some(
-              (m) => this.isThisCollection(m.collection) && m.key === event.key,
-            ),
-          )
-
-          if (!hasActiveOptimisticMutation) {
-            return false // Skip this delete event as sync will restore the data
-          }
-        }
-        return true
-      })
-
-      // Update indexes for the filtered events
-      if (filteredEvents.length > 0) {
-        this.indexes.updateIndexes(filteredEvents)
-      }
-      this.changes.emitEvents(filteredEvents, triggeredByUserAction)
-    } else {
-      // Update indexes for all events
-      if (filteredEventsBySyncStatus.length > 0) {
-        this.indexes.updateIndexes(filteredEventsBySyncStatus)
-      }
-      // Emit all events if no pending sync transactions
-      this.changes.emitEvents(filteredEventsBySyncStatus, triggeredByUserAction)
+    // User-triggered work always publishes. Sync-driven redraws skip keys a
+    // sync commit just published. Recompute keeps the optimistic layer of a
+    // key with a pending sync operation, so it never emits a delete that the
+    // sync would restore.
+    const filteredEvents = triggeredByUserAction
+      ? events
+      : events.filter((event) => !this.recentlySyncedKeys.has(event.key))
+    if (filteredEvents.length > 0) {
+      this.indexes.updateIndexes(filteredEvents)
     }
+    this.changes.emitEvents(filteredEvents, triggeredByUserAction)
   }
 
   /**
@@ -824,12 +769,10 @@ export class CollectionStateManager<
    */
   private overlayActiveTransactions(
     sourceWrittenKeys?: ReadonlySet<TKey>,
-  ): Array<Transaction<any>> {
-    const activeTransactions: Array<Transaction<any>> = []
+  ): void {
     for (const transaction of this.transactions.values()) {
       if (transaction.state === `completed` || transaction.state === `failed`)
         continue
-      activeTransactions.push(transaction)
       for (const mutation of transaction.mutations) {
         if (!this.isThisCollection(mutation.collection)) continue
         this.pendingLocalChanges.add(mutation.key)
@@ -852,7 +795,6 @@ export class CollectionStateManager<
         }
       }
     }
-    return activeTransactions
   }
 
   /**
