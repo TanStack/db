@@ -1181,7 +1181,7 @@ function compileSafeSqlPrefilter(
         lower.args[0]?.type === `ref` &&
         literal?.type === `val` &&
         typeof literal.value === `string` &&
-        /^[\x00-\x7f]*$/.test(literal.value)
+        [...literal.value].every((char) => char.charCodeAt(0) <= 0x7f)
       ) {
         const lowerSql = compileSqlExpression(lower, `index-expression`).sql
         return {
