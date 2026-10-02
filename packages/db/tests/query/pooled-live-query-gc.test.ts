@@ -6,6 +6,7 @@ import { createLiveQueryCollection, eq, not } from '../../src/query/index.js'
 import { createPooledLiveQuery } from '../../src/query/pooled-live-query.js'
 import { resolveLiveQueryValue } from '../../src/live-query-options.js'
 import { mockSyncCollectionOptions } from '../utils.js'
+import type { Collection } from '../../src/collection/index.js'
 
 /**
  * # Does a pooled live query hold its source as long as its Collection would?
@@ -37,7 +38,7 @@ function makeSource() {
   )
 }
 
-const query = (source: ReturnType<typeof makeSource>) => (q: any) =>
+const query = (source: Collection<Row, string | number, any>) => (q: any) =>
   q.from({ r: source }).where(({ r }: any) => eq(r.g, `x`))
 
 // Milliseconds after which the source no longer has a subscriber, checking
