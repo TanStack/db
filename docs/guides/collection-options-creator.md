@@ -180,6 +180,21 @@ applying its rows. A successful `loadSubset` must await or return every commit
 receipt that establishes its result. Do not use `begin({ immediate: true })` to
 bypass that ordering just to settle a load.
 
+The collection keeps the object you pass to `write()` as the row's stored
+value. Pass a new object for each update. If your source changes a row object
+in place and writes it again, pass the row's previous value as
+`previousValue`. Without it, the change already overwrote the value the
+collection needs to publish the update, and live queries can keep the row in
+a result it left. In development, the collection throws
+`SyncRowReusedWithoutPreviousValueError` for that write.
+
+```ts
+// Changes a stored row in place, so it must name the previous value
+const previousValue = { ...row }
+row.status = `done`
+write({ type: `update`, value: row, previousValue })
+```
+
 For request-scoped writes, pass the request's abort signal to `commit(signal)`.
 Cancellation before application rejects the receipt with `AbortError`; aborting
 after application does not undo published rows. Do not attach one request's
