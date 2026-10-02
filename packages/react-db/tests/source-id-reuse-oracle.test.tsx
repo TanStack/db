@@ -136,7 +136,13 @@ describe(`React source ID reuse`, () => {
     }))
     const consoleError = vi.spyOn(console, `error`).mockImplementation(() => {})
 
-    function View({ current, include }: { current: typeof first; include: boolean }) {
+    function View({
+      current,
+      include,
+    }: {
+      current: typeof first
+      include: boolean
+    }) {
       useLiveQuery({
         client,
         query: (q): QueryBuilder<Context> =>

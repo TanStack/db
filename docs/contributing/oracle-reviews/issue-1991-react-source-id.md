@@ -85,3 +85,53 @@ TypeScript project check was blocked by missing `@tanstack/query-core` and
 no type errors for the tested files. A bounded 32-ID diagnostic showed linear
 retention in one mounted hook; the coverage map records that unresolved space
 policy. No claim of space-bounded ID history is made.
+
+## 2026-10-02 multiple startup failures and main integration
+
+Reviewed semantic head: `639bcd16fdb5db83fc11c3d53a94aa2d7e4c19fa`.
+This entry supplements the earlier heads. It covers the merge with main
+`06cab6fc7b808acfbfb3af1eb2fc1fdc3c9f0fa8` and the deferred-startup
+failure that CodeRabbit retained after the collision-path fix.
+
+**Law and boundary.** If a rejected derived-identity render defers several
+shared source Collections, one failing sync start must not prevent later
+Collections from starting. The hook reports the first startup error after it
+attempts each pending Collection once. A later direct reader observes the
+healthy source's `ready` status and row. This is a controlled React render,
+ErrorBoundary, and direct-reader history. It does not establish behavior for
+every render exception or a real persisted source.
+
+**RED/GREEN.** At prior head `0da7eae89`, two deferred sync starts threw
+across React's retry. The later healthy Collection stayed `idle`; its sync
+callback had not run. The new case failed at the public `ready` assertion.
+At `639bcd16f`, the same case reaches `ready`, returns the exact healthy row,
+and counts one healthy sync start. The two failing starts each run once.
+This rejects the plausible wrong design that stops draining at the first
+startup error. The existing one-failure collision case and source-binding,
+client-scope, and Suspense cases also pass. The merged production path keeps
+main's source-object-keyed pooled partitions and the PR's source-qualified
+Suspense keys.
+
+| Requirement | Addendum outcome |
+| --- | --- |
+| ORC-001 | Pass. The mounted-hook collision contract and the public direct-reader startup obligation authorize the expected result; the coverage map bounds the claim. |
+| ORC-002 | Pass. The expected `ready` status and row come from the public Collection behavior, independent of the hook's deferral set and drain algorithm. |
+| ORC-003 | Pass. The oracle prologue, fixed history, real React driver, and public assertions keep the five responsibilities visible together. |
+| ORC-004 | Not applicable. No generated-history coverage is claimed. |
+| ORC-005 | Pass. The driver uses `useLiveQuery`, a `DbClient` descriptor, an ErrorBoundary, and a later direct reader; it checks status and row after subscription. |
+| ORC-006 | Pass. The old sequential drain fails at `idle` versus `ready`; the same history passes with the new drain. |
+| ORC-007 | Not applicable. No important generated property was added. |
+| ORC-008 | Pass. The fixed history distinguishes failed and healthy source roles without modeling production's deferral set. |
+| ORC-009 | Pass. The prose and assertions use source Collection, sync start, and Collection status with the glossary meanings. |
+| ORC-010 | Pass. The test observes the caught error and later reader before cleanup; it has no shrinking or error normalization. |
+| ORC-011 | No shared-fault hypothesis requires a second formulation; the later direct reader is a separate public path. |
+| ORC-012 | Pass for this bounded repair. This record identifies the reviewed head, prior wrong design, observation cut, and limits. |
+| ORC-013 | Pass for the named startup boundary. The prior one-failure case reaches a later reader; this two-failure case distinguishes full draining from stopping after React's retry. |
+| ORC-014 | Not triggered for a real-provider claim. The controlled source sync callbacks are the declared premise. |
+
+The source-ID oracle passed 14 cases, six surrounding React hook and Suspense
+files passed 110 cases, and the React TypeScript project check passed after
+restoring workspace dependency links. The pooled-query oracle, GC, and identity
+suites passed on the merged main. The scope remains the controlled React paths
+listed in the coverage map; the bounded-navigation space policy, persisted
+SQLite sources, and DbClient SSR preload or streaming remain open there.
