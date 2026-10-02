@@ -1,10 +1,11 @@
 import { SortedMap } from '../SortedMap.js'
 import { CleanupQueue } from '../collection/cleanup-queue.js'
 import { UNSUBSCRIBED_GC_FLOOR_MS } from '../collection/lifecycle.js'
-import { makeComparator, normalizeValue } from '../utils/comparison.js'
+import { makeComparator } from '../utils/comparison.js'
 import { isVirtualPropName } from '../virtual-props.js'
 import { getPersistedReadinessSource } from '../persisted-readiness.js'
 import { getWhereExpression } from './ir.js'
+import { equalityConjunct, equalityKey, readPath } from './equality-conjunct.js'
 import { compileExpression, toBooleanPredicate } from './compiler/evaluators.js'
 import { buildCompareOptions } from './compiler/order-by.js'
 import { createLiveQueryCollection } from './live-query-collection.js'
@@ -43,29 +44,9 @@ interface PartitionGroup {
 
 const partitionsBySource = new WeakMap<object, Map<string, Partition>>()
 
-// Typed so that 1, '1', and true stay distinct.
-function equalityKey(value: unknown): string | undefined {
-  const normalized = normalizeValue(value)
-  const type = typeof normalized
-  return type === `string` || type === `number` || type === `boolean`
-    ? `${type}:${String(normalized)}`
-    : undefined
-}
-
 // Length-prefixed, so no two part lists share an encoding.
 function appendGroupKeyPart(groupKey: string, part: string): string {
   return `${groupKey}${part.length}:${part}`
-}
-
-function readPath(row: Row, path: Array<string>): unknown {
-  try {
-    let value: unknown = row
-    for (const segment of path) value = (value as Row | undefined)?.[segment]
-    return value
-  } catch {
-    // The full predicate treats a throwing read as false.
-    return undefined
-  }
 }
 
 class Partition {
@@ -318,37 +299,21 @@ function collectConjuncts(
     }
     return true
   }
-  const conjunct = equalityConjunct(expression, alias)
+  const conjunct = equalityConjunctOf(expression, alias)
   if (conjunct) out.push(conjunct)
   else if (readsOnlyRow(expression, alias)) residual.push(expression)
   else return false
   return true
 }
 
-function equalityConjunct(
+function equalityConjunctOf(
   expression: BasicExpression,
   alias: string,
 ): Conjunct | undefined {
-  if (expression.type !== `func` || expression.name !== `eq`) return undefined
-  const args = expression.args
-  if (args.length !== 2) return undefined
-  const left = args[0]!
-  const right = args[1]!
-  const ref = left.type === `ref` ? left : right
-  const literal = left.type === `val` ? left : right
-  if (ref.type !== `ref` || literal.type !== `val`) return undefined
-  const refPath = ref.path
-  if (
-    refPath[0] !== alias ||
-    refPath.length < 2 ||
-    isVirtualPropName(refPath[1]!)
-  ) {
-    return undefined
-  }
-  const literalKey = equalityKey(literal.value)
-  if (literalKey === undefined) return undefined
-  const path = refPath.slice(1)
-  return { path, pathKey: JSON.stringify(path), literalKey }
+  const conjunct = equalityConjunct(expression, (ref) =>
+    ref.path[0] === alias ? ref.path.slice(1) : undefined,
+  )
+  return conjunct && { ...conjunct, pathKey: JSON.stringify(conjunct.path) }
 }
 
 // Whether a row passes every residual conjunct, as a WHERE filter decides.

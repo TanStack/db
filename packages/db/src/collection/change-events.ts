@@ -8,7 +8,11 @@ import {
 } from '../utils/index-optimization.js'
 import { ensureIndexForField } from '../indexes/auto-index.js'
 import { getPropRefPropertyPath } from '../query/ir.js'
-import { isVirtualPropName } from '../virtual-props.js'
+import {
+  equalityConjunct,
+  equalityKey,
+  readPath,
+} from '../query/equality-conjunct.js'
 import { makeComparator } from '../utils/comparison.js'
 import { buildCompareOptions } from '../query/compiler/order-by'
 import type {
@@ -32,43 +36,23 @@ export type StoredRowScan<T extends object, TKey extends string | number> = (
 /**
  * A test on a stored row that is false only when `expression` must be false
  * on the row's enriched copy, so a scan can skip enriching rows that fail.
- *
- * It reads one `eq(field, literal)` conjunct with a string or boolean
- * literal. The copy holds each enumerable own root field of the stored row
- * and lacks the others, so its field is the stored value or `undefined`, and
- * equality normalization maps no other value onto a plain string or boolean.
- * A read that throws passes the row to the full predicate.
+ * It reads one `eq(field, literal)` conjunct. The copy holds each enumerable
+ * own root field of the stored row and lacks the others, so its field is the
+ * stored value or `undefined`, which matches no literal.
  */
 export function compileStoredRowPrefilter(
   expression: BasicExpression<boolean>,
 ): ((row: object) => boolean) | undefined {
-  const conjuncts: Array<BasicExpression> = []
-  const collect = (node: BasicExpression) => {
-    if (node.type === `func` && node.name === `and`) node.args.forEach(collect)
-    else conjuncts.push(node)
-  }
-  collect(expression)
+  const conjuncts =
+    expression.type === `func` && expression.name === `and`
+      ? expression.args
+      : [expression]
   for (const conjunct of conjuncts) {
-    if (conjunct.type !== `func` || conjunct.name !== `eq`) continue
-    const [left, right] = conjunct.args
-    const ref = left?.type === `ref` ? left : right
-    const literal = left?.type === `val` ? left : right
-    if (ref?.type !== `ref` || literal?.type !== `val`) continue
-    const expected: unknown = literal.value
-    if (typeof expected !== `string` && typeof expected !== `boolean`) continue
-    const path = getPropRefPropertyPath(ref)
-    if (path.length === 0 || isVirtualPropName(path[0]!)) continue
-    return (row) => {
-      try {
-        let value: unknown = row
-        for (const segment of path) {
-          if (value === null || value === undefined) return false
-          value = (value as Record<string, unknown>)[segment]
-        }
-        return value === expected
-      } catch {
-        return true
-      }
+    const eq = equalityConjunct(conjunct, getPropRefPropertyPath)
+    if (eq) {
+      return (row) =>
+        equalityKey(readPath(row as Record<string, unknown>, eq.path)) ===
+        eq.literalKey
     }
   }
   return undefined
