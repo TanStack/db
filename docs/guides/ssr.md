@@ -202,7 +202,7 @@ export const todoCollection = collectionOptions('todos', () => ({
       return {
         loadSubset: async () => {
           const todos = await api.todos.list()
-          begin({ immediate: true })
+          begin()
           for (const todo of todos) {
             write({ type: 'insert', value: todo })
           }

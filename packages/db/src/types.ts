@@ -375,20 +375,20 @@ export type LoadSubsetRequestResult = true | Promise<void>
  * Loads one subset and transfers its ongoing resource ownership only after
  * returning `true` or a promise. An implementation that throws synchronously
  * must release any partially acquired resource before throwing. A successful
- * implementation must await or return every applied receipt from the sync
+ * implementation must await or return every receipt from the sync
  * `commit()` calls that establish the loaded subset. A result describes only
  * the exact `options` passed to this call.
  */
 export type LoadSubsetFn = (options: LoadSubsetOptions) => true | Promise<void>
 
 /**
- * Confirms whether a committed sync transaction is visible or is waiting for
- * its turn in the collection's causal queue. A pending receipt rejects with an
- * error named `AbortError` if its own cancellation wins before application or
- * cancellation removes a row required by one of its partial updates. It
- * rejects with `DuplicateKeySyncError` if cancellation of earlier queued work
- * invalidates an insert admission. Once the writes are visible, later
- * cancellation has no effect.
+ * Confirms that a sync transaction was accepted. Core accepts synchronously
+ * and returns `true`. A wrapping sync, such as persistence, can return a
+ * promise that resolves after its own durable step. An accepted transaction
+ * always applies in commit order; it becomes visible at once, or when the
+ * persisting optimistic transaction that holds it settles. A receipt rejects
+ * with an error named `AbortError` only if its signal aborted before
+ * acceptance.
  */
 export type SyncAppliedReceipt = true | Promise<void>
 
@@ -425,25 +425,18 @@ export interface SyncConfig<
 > {
   sync: (params: {
     collection: Collection<T, TKey, any, any, any>
-    /**
-     * Begin a new sync transaction.
-     * @param options.immediate - When true, the transaction will be processed immediately
-     *   even if there are persisting user transactions. Used by manual write operations.
-     */
-    begin: (options?: { immediate?: boolean }) => void
+    /** Begin a new sync transaction. */
+    begin: () => void
     write: (message: ChangeMessageOrDeleteKeyMessage<T, TKey>) => void
     /**
-     * Commit the active sync transaction in FIFO order.
-     * Returns `true` when the writes and events are already visible. Otherwise
-     * returns a receipt that resolves after they become visible. If collection
-     * cleanup or an optional request abort abandons the transaction first, the
-     * receipt rejects with an error named `AbortError`. If cancellation of an
-     * earlier transaction invalidates this transaction's insert admission, the
-     * receipt rejects with `DuplicateKeySyncError`.
-     * If cancellation removes a row required by this transaction's partial
-     * update, its receipt rejects with an error named `AbortError`.
-     * Pass a signal only for request-scoped work that must not publish after
-     * cancellation. Aborting after application has no effect.
+     * Commit the active sync transaction in FIFO order and return `true` once
+     * core accepts it. An accepted transaction always applies. While an
+     * optimistic transaction is persisting, the accepted transaction waits and
+     * becomes visible when that transaction settles, together with the drop of
+     * its optimistic state. A handler can therefore await its own write.
+     * A signal that is already aborted abandons the transaction before
+     * acceptance, and the receipt rejects with an error named `AbortError`.
+     * Aborting after acceptance has no effect.
      */
     commit: (signal?: AbortSignal) => SyncAppliedReceipt
     /** Signal that a usable initial or recovered snapshot is available. */
@@ -543,6 +536,11 @@ export type SyncPersistenceCapabilityV1<
   readonly protocol: `@tanstack/db/sync-persistence`
   readonly version: 1
   readonly hydrateBaseline: () => Promise<void>
+  /**
+   * Reserve the open sync transaction's FIFO turn, so a subset hydration
+   * that starts before it commits waits for that commit.
+   */
+  readonly reserveCommitTurn: () => void
   readonly scanPersistedRows: (
     options?: SyncPersistenceScanOptions,
   ) => Promise<Array<SyncPersistenceScannedRow<TKey>>>

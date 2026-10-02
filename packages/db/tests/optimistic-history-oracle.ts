@@ -7,33 +7,46 @@ import { createLiveQueryCollection } from '../src/query/index.js'
 import type { CollectionConfig, SyncConfig } from '../src/types.js'
 
 /**
- * # Which rows should optimistic and synced histories expose?
+ * # Which rows do optimistic and sync histories expose?
  *
- * A mutation authors a whole-row snapshot. That snapshot does not rebase onto
- * later synced data. While active, an optimistic intent overlays the synced
- * base. After success it remains as an accepted local snapshot until source
- * acknowledgement retires it. Failure removes it. An update authored from an
- * unacknowledged insert depends on that insert's existence. An accepted delete
- * underneath that insert remains independently owned: if the insert fails,
- * the dependent update disappears but the delete does not.
+ * While its mutation function runs, an optimistic transaction overlays its
+ * optimistic state on the applied synced rows. When the mutation function
+ * settles, the transaction's optimistic state drops. Success does not wait
+ * for a sync confirmation: a handler that returns before the server row
+ * arrives exposes the previous synced row until that row applies. Failure
+ * drops the optimistic state in the same way.
  *
- * The reference graph has three small nodes: a synced base Map, an ordered list
- * of authored intents, and a queue of source batches. `visible()` folds accepted
- * intents before active intents over the base. Settlement changes intent state;
- * source drain changes the base and acknowledgement. It does not reuse
- * production caches, pending-mutation mergers, or publication code.
+ * A sync transaction committed while an optimistic transaction is persisting
+ * is accepted and queued. Its commit receipt resolves at acceptance, so a
+ * mutation handler may write, and await, its own server row. Queued sync
+ * transactions apply when no optimistic transaction is persisting, in the
+ * same publication that drops the settling transaction's optimistic state.
+ * A completed transaction's optimistic row is held only while a queued sync
+ * transaction touches its key, so that drop and that sync transaction
+ * publish together. `isPersisted` fulfills after that publication. A truncate
+ * applies at once, with every queued sync transaction before it, and the
+ * still-persisting transactions overlay the replacement.
  *
- * A source batch can also arrive inside a mutation handler, before the handler
- * returns. It is the same event as a source batch written while the new intent
- * is active: it waits for settlement unless it is immediate or a truncate. The
- * Collection must already own the request when its handler starts.
+ * The reference model has three small parts: the applied synced rows, an
+ * ordered list of optimistic transactions with one mutation each, and a queue
+ * of accepted sync transactions. `visible()` folds held completed
+ * transactions, then persisting ones, over the applied rows. It does not reuse
+ * production caches, pending-mutation mergers, or publication code. Model
+ * alignment: `transactions` are optimistic transactions, `queue` holds
+ * accepted sync transactions, and `base` is the applied synced rows. `held` is
+ * a model-only predicate for the hold described above.
+ *
+ * A mutation handler can write a sync transaction before it returns, and can
+ * await that write's receipt. It is the same event as a sync transaction
+ * written while the transaction persists: it waits for settlement unless it
+ * is a truncate.
  *
  * `runOptimisticHistory` gives the same edit, delete, settle, and sync history
  * to this model and a real Collection. After every step it compares rows,
- * metadata, immutable handler payloads, promise outcomes, downstream query
- * state, and complete publication cuts. Fault injection proves those
- * observations can reject wrong keys, partial batches, stale previous values,
- * and transient fields.
+ * metadata, immutable handler payloads, promise outcomes, the rows visible
+ * when `isPersisted` fulfills, downstream query state, and complete
+ * publication cuts. Fault injection proves those observations can reject
+ * wrong keys, partial batches, stale previous values, and transient fields.
  */
 
 export type HistoryRow = { id: number; a: number; b: number; c: number }
@@ -44,23 +57,24 @@ type SourceBatch = {
   // Keys the source deletes after writing its rows. Only present keys apply.
   deletes?: Array<number> | undefined
   truncate: boolean
-  immediate: boolean
   copies: number
 }
+// A sync transaction the mutation handler writes before it returns. With
+// `awaitReceipt`, the handler awaits the commit receipt before returning.
+type HandlerBatch = SourceBatch & { awaitReceipt?: boolean }
 export type OptimisticStep =
   | {
       type: `edit`
       key: number
       fields: Fields
       optimistic: boolean
-      // A source batch the mutation handler writes before it returns.
-      inHandler?: SourceBatch | undefined
+      inHandler?: HandlerBatch | undefined
     }
   | {
       type: `delete`
       key: number
       optimistic: boolean
-      inHandler?: SourceBatch | undefined
+      inHandler?: HandlerBatch | undefined
     }
   | {
       type: `settle`
@@ -71,16 +85,13 @@ export type OptimisticStep =
     }
   | SourceBatch
 
-type Intent = {
+type ModelTransaction = {
   key: number
   kind: `insert` | `update` | `delete`
-  snapshot: HistoryRow
+  row: HistoryRow
   optimistic: boolean
-  dependency?: number
-  state: `active` | `accepted` | `failed`
-  settled: number
-  retired: boolean
-  acknowledged: boolean
+  state: `persisting` | `completed` | `failed`
+  // A completed transaction attributes the sync write that ends its hold.
   originPending: boolean
 }
 type ObservedRow = HistoryRow & {
@@ -93,9 +104,8 @@ type ObservedRow = HistoryRow & {
 class HistoryModel {
   base = new Map<number, HistoryRow>()
   origins = new Map<number, `local` | `remote`>()
-  intents: Array<Intent> = []
-  queue: Array<Extract<OptimisticStep, { type: `sync` }>> = []
-  clock = 0
+  transactions: Array<ModelTransaction> = []
+  queue: Array<SourceBatch> = []
 
   constructor(
     rows: Array<HistoryRow>,
@@ -107,15 +117,21 @@ class HistoryModel {
     }
   }
 
-  private retained(intent: Intent) {
-    return (
-      intent.state === `accepted` &&
-      !intent.retired &&
-      intent.optimistic &&
-      (intent.dependency === undefined ||
-        this.intents[intent.dependency]!.state !== `failed` ||
-        this.intents[intent.dependency]!.acknowledged)
+  private queuedKeys() {
+    return new Set(
+      this.queue.flatMap((batch) => [
+        ...batch.rows.map((row) => row.id),
+        ...(batch.deletes ?? []),
+      ]),
     )
+  }
+
+  private held(transaction: ModelTransaction, queued: Set<number>) {
+    return transaction.state === `completed` && queued.has(transaction.key)
+  }
+
+  private persisting() {
+    return this.transactions.some((entry) => entry.state === `persisting`)
   }
 
   visible(): Map<number, ObservedRow> {
@@ -130,39 +146,24 @@ class HistoryModel {
         },
       ]),
     )
-    const accepted = this.intents
-      .filter((intent) => this.retained(intent))
-      .sort((a, b) => a.settled - b.settled)
-    const active = this.intents.filter(
-      (intent) => intent.state === `active` && intent.optimistic,
-    )
-    const apply = (intent: Intent) => {
-      if (intent.kind === `delete`) {
-        result.delete(intent.key)
-        return
+    const queued = this.queuedKeys()
+    const overlay = [
+      ...this.transactions.filter((entry) => this.held(entry, queued)),
+      ...this.transactions.filter((entry) => entry.state === `persisting`),
+    ]
+    for (const transaction of overlay) {
+      if (!transaction.optimistic) continue
+      if (transaction.kind === `delete`) {
+        result.delete(transaction.key)
+        continue
       }
-      result.set(intent.key, {
-        ...intent.snapshot,
+      result.set(transaction.key, {
+        ...transaction.row,
         $origin: `local`,
         $hasPendingWrites: true,
         $synced: false,
       })
-      if (intent.kind === `insert` && !intent.acknowledged) {
-        // An accepted dependent snapshot belongs after its creating insert even
-        // when transport completion occurs in the opposite order.
-        for (const child of accepted) {
-          if (child.dependency === this.intents.indexOf(intent)) {
-            result.set(intent.key, {
-              ...child.snapshot,
-              $origin: `local`,
-              $hasPendingWrites: true,
-              $synced: false,
-            })
-          }
-        }
-      }
     }
-    for (const intent of [...accepted, ...active]) apply(intent)
     return result
   }
 
@@ -179,142 +180,72 @@ class HistoryModel {
       )
     )
       return
-    const kind = step.type === `delete` ? `delete` : row ? `update` : `insert`
-    const snapshot = {
-      ...(row ?? { id: step.key, a: 0, b: 0, c: this.insertDefault }),
-      ...(step.type === `edit` ? step.fields : {}),
-    }
-    const dependency = this.intents.reduce(
-      (previous, intent, index) =>
-        kind === `update` &&
-        intent.key === step.key &&
-        intent.kind === `insert` &&
-        intent.optimistic &&
-        intent.state === `active` &&
-        !intent.acknowledged
-          ? index
-          : previous,
-      -1,
-    )
-    this.intents.push({
+    this.transactions.push({
       key: step.key,
-      kind,
-      snapshot,
+      kind: step.type === `delete` ? `delete` : row ? `update` : `insert`,
+      row: {
+        ...(row ?? { id: step.key, a: 0, b: 0, c: this.insertDefault }),
+        ...(step.type === `edit` ? step.fields : {}),
+      },
       optimistic: step.optimistic,
-      dependency: dependency < 0 ? undefined : dependency,
-      state: `active`,
-      settled: 0,
-      retired: false,
-      acknowledged: false,
+      state: `persisting`,
       originPending: false,
     })
-    return this.intents.length - 1
+    return this.transactions.length - 1
   }
 
   settle(index: number, success: boolean) {
-    const intent = this.intents[index]!
-    // A separately submitted update may succeed after the insert has already
-    // failed. That later server acceptance is not undone by an earlier failure.
-    if (
-      success &&
-      intent.dependency !== undefined &&
-      this.intents[intent.dependency]!.state === `failed`
-    )
-      intent.dependency = undefined
-    intent.state = success ? `accepted` : `failed`
-    if (intent.kind === `insert` && intent.acknowledged) intent.retired = true
-    intent.settled = ++this.clock
-    // A synced insert has already spent its acknowledgement. Completing its
-    // transport cannot turn the next unrelated remote write into a local one.
-    if (success && !(intent.kind === `insert` && intent.acknowledged))
-      intent.originPending = true
+    const transaction = this.transactions[index]!
+    transaction.state = success ? `completed` : `failed`
+    // Only a held row carries attribution to the sync write that ends it.
+    transaction.originPending =
+      success && this.queuedKeys().has(transaction.key)
     // This grammar submits direct operations immediately. Rollback cascades
     // affect pending (not already persisting) peer transactions, so none of
     // these independently submitted requests is canceled by a sibling failure.
-    const beforeDrain = this.visible()
-    if (!this.intents.some((entry) => entry.state === `active`)) this.drain()
-    return beforeDrain
+    if (!this.persisting()) this.drain()
   }
 
-  sync(step: Extract<OptimisticStep, { type: `sync` }>) {
+  sync(step: SourceBatch) {
     this.queue.push(step)
-    if (
-      step.immediate ||
-      step.truncate ||
-      !this.intents.some((entry) => entry.state === `active`)
-    )
-      this.drain()
+    if (step.truncate || !this.persisting()) this.drain()
   }
 
   private drain() {
-    if (!this.queue.length) return
-    const localKeys = new Set(
-      this.intents
-        .filter((intent) => intent.state === `active`)
-        .map((intent) => intent.key),
+    const persistingKeys = new Set(
+      this.transactions
+        .filter((entry) => entry.state === `persisting`)
+        .map((entry) => entry.key),
     )
-    const replaced = this.queue.some((batch) => batch.truncate)
-    const written = new Set(
-      this.queue.flatMap((batch) => [
-        ...batch.rows.map((row) => row.id),
-        ...(batch.deletes ?? []),
-      ]),
-    )
-    const retainedKeys = new Set(
-      this.intents
-        .filter((intent) => this.retained(intent))
-        .map((intent) => intent.key),
+    const attributed = new Set(
+      this.transactions
+        .filter((entry) => entry.originPending)
+        .map((entry) => entry.key),
     )
     for (const batch of this.queue) {
       if (batch.truncate) {
         this.base.clear()
         this.origins.clear()
-        // Origin is row-level attribution, not per-mutation acknowledgement.
-        // A truncate replacement of a retained optimistic row is remote unless
-        // a still-active request also owns that key. Do not invent finer
-        // acknowledgement matching between completed same-key requests.
-        for (const intent of this.intents)
-          if (intent.state === `accepted` && retainedKeys.has(intent.key))
-            intent.originPending = false
       }
       for (const row of batch.rows) {
-        const local =
-          this.intents.some(
-            (intent) => intent.key === row.id && intent.originPending,
-          ) || localKeys.has(row.id)
+        const local = attributed.has(row.id) || persistingKeys.has(row.id)
         this.base.set(row.id, row)
         this.origins.set(row.id, local ? `local` : `remote`)
-        localKeys.delete(row.id)
-        for (const intent of this.intents) {
-          if (intent.key === row.id) intent.originPending = false
-          if (
-            intent.key === row.id &&
-            intent.kind === `insert` &&
-            intent.state === `active`
-          )
-            intent.acknowledged = true
-        }
+        attributed.delete(row.id)
+        persistingKeys.delete(row.id)
       }
-      // A source delete removes the base row. It acknowledges no request.
+      // A source delete removes the applied row and ends its attribution.
       for (const key of batch.deletes ?? []) {
         this.base.delete(key)
         this.origins.delete(key)
-        localKeys.delete(key)
-        for (const intent of this.intents)
-          if (intent.key === key) intent.originPending = false
+        attributed.delete(key)
+        persistingKeys.delete(key)
       }
-      // Truncate retains attribution only for rows in its own replacement,
-      // not for an unrelated future write after the old source was cleared.
-      if (batch.truncate)
-        for (const intent of this.intents) intent.originPending = false
+      // Truncate keeps attribution only for rows in its own replacement.
+      if (batch.truncate) attributed.clear()
     }
-    // Ordinary source publication retires completed direct snapshots, including
-    // temporary keys. Truncate preserves snapshots omitted from its replacement.
-    for (const intent of this.intents)
-      if (intent.state === `accepted`) {
-        intent.retired ||= !replaced || written.has(intent.key)
-        if (retainedKeys.has(intent.key)) intent.originPending = false
-      }
+    for (const transaction of this.transactions)
+      transaction.originPending = false
     this.queue = []
   }
 }
@@ -470,13 +401,17 @@ export async function runOptimisticHistory(
   const model = new HistoryModel(initial, options.insertDefault)
   let sync!: Parameters<SyncConfig<HistoryRow>[`sync`]>[0]
   let starting: ReturnType<typeof createDeferred<void>> | undefined
-  // The next handler call writes this batch synchronously, before it returns.
-  let handlerBatch: SourceBatch | undefined
-  const handler = () => {
+  // The next handler call writes this batch before it returns.
+  let handlerBatch: HandlerBatch | undefined
+  const handler = async () => {
     const batch = handlerBatch
+    const done = starting!.promise
     handlerBatch = undefined
-    if (batch) writeSourceBatch(batch)
-    return starting!.promise
+    if (batch) {
+      const receipt = writeSourceBatch(batch)
+      if (batch.awaitReceipt) await receipt
+    }
+    return done
   }
   const config: CollectionConfig<HistoryRow> = {
     getKey: (row) => row.id,
@@ -518,6 +453,8 @@ export async function runOptimisticHistory(
       | ReturnType<typeof collection.insert>
     done: ReturnType<typeof createDeferred<void>>
     outcome: ReturnType<typeof observeHistoryPromise<unknown>>
+    // Rows visible when `isPersisted` fulfilled or rejected.
+    settledRows?: Array<ObservedRow>
     expected: HistoryOutcome<unknown>
     changes: object
   }> = []
@@ -532,6 +469,7 @@ export async function runOptimisticHistory(
     failures: 0,
     snapshotOverrides: 0,
     handlerBatches: 0,
+    awaitedReceipts: 0,
     sourceInserts: 0,
     sourceDeletes: 0,
   }
@@ -555,7 +493,7 @@ export async function runOptimisticHistory(
   }
   function writeSourceBatch(step: SourceBatch) {
     const inserts = sourceInserts.get(step)!
-    sync.begin({ immediate: step.immediate })
+    sync.begin()
     if (step.truncate) {
       sync.truncate()
       counts.replacements++
@@ -572,15 +510,12 @@ export async function runOptimisticHistory(
       counts.sourceDeletes++
     }
     const receipt = sync.commit()
-    if (receipt !== true) {
-      receipts.push(observeHistoryPromise(receipt))
-      counts.queued++
+    if (receipt !== true) receipts.push(observeHistoryPromise(receipt))
+    if (model.transactions.some((entry) => entry.state === `persisting`)) {
+      if (step.truncate) counts.snapshotOverrides++
+      else counts.queued++
     }
-    if (
-      (step.immediate || step.truncate) &&
-      model.intents.some((intent) => intent.state === `active`)
-    )
-      counts.snapshotOverrides++
+    return receipt
   }
   return withHistoryCleanup(
     async () => {
@@ -742,16 +677,16 @@ export async function runOptimisticHistory(
             operation.expected.status,
             `${label}: model outcome ${index}`,
           ).toBe(
-            model.intents[index]!.state === `active`
+            model.transactions[index]!.state === `persisting`
               ? `pending`
-              : model.intents[index]!.state === `accepted`
+              : model.transactions[index]!.state === `completed`
                 ? `fulfilled`
                 : `rejected`,
           )
           expect(
             operation.tx.mutations[0]!.modified,
             `${label}: immutable request ${index}`,
-          ).toMatchObject(plain(model.intents[index]!.snapshot))
+          ).toMatchObject(plain(model.transactions[index]!.row))
           expect(
             operation.tx.mutations[0]!.changes,
             `${label}: authored request ${index}`,
@@ -790,14 +725,18 @@ export async function runOptimisticHistory(
         if (step.type === `edit` || step.type === `delete`) {
           const index = model.author(step)
           if (index === undefined) continue
-          const intent = model.intents[index]!
+          const intent = model.transactions[index]!
           cuts = [sorted(model.visible().values())]
           if (step.inHandler) {
-            const batch = resolveSourceBatch(step.inHandler)
+            const batch = {
+              ...resolveSourceBatch(step.inHandler),
+              awaitReceipt: step.inHandler.awaitReceipt,
+            }
             model.sync(batch)
             cuts.push(sorted(model.visible().values()))
             handlerBatch = batch
             counts.handlerBatches++
+            if (batch.awaitReceipt) counts.awaitedReceipts++
           }
           const done = createDeferred<void>()
           starting = done
@@ -809,12 +748,12 @@ export async function runOptimisticHistory(
                   ? schemaCollection.insert(
                       {
                         id: intent.key,
-                        a: intent.snapshot.a,
-                        b: intent.snapshot.b,
+                        a: intent.row.a,
+                        b: intent.row.b,
                       },
                       { optimistic: step.optimistic },
                     )
-                  : collection.insert(plain(intent.snapshot), {
+                  : collection.insert(plain(intent.row), {
                       optimistic: step.optimistic,
                     })
                 : collection.update(
@@ -822,22 +761,28 @@ export async function runOptimisticHistory(
                     { optimistic: step.optimistic },
                     (draft) => Object.assign(draft, step.fields),
                   )
-          operations.push({
+          const operation: (typeof operations)[number] = {
             tx,
             done,
-            outcome: observeHistoryPromise<unknown>(tx.isPersisted.promise),
+            outcome: observeHistoryPromise<unknown>(
+              tx.isPersisted.promise.finally(() => {
+                operation.settledRows = sorted(
+                  [...collection.values()].map(observed),
+                )
+              }),
+            ),
             expected: { status: `pending` },
             changes:
               step.type === `delete`
-                ? plain(intent.snapshot)
+                ? plain(intent.row)
                 : intent.kind === `insert`
                   ? schemaCollection && step.fields.c === undefined
                     ? {
                         id: intent.key,
-                        a: intent.snapshot.a,
-                        b: intent.snapshot.b,
+                        a: intent.row.a,
+                        b: intent.row.b,
                       }
-                    : plain(intent.snapshot)
+                    : plain(intent.row)
                   : Object.fromEntries(
                       Object.entries(step.fields).filter(
                         ([key, value]) =>
@@ -846,27 +791,25 @@ export async function runOptimisticHistory(
                           ] !== value,
                       ),
                     ),
-          })
+          }
+          operations.push(operation)
           expect(
             tx.mutations[0]!.modified,
             `captured request snapshot`,
-          ).toMatchObject(plain(intent.snapshot))
+          ).toMatchObject(plain(intent.row))
           expect(handlerBatch, `handler wrote its source batch`).toBeUndefined()
           counts.edits++
           if (step.type === `delete`) counts.deletes++
-          if (intent.dependency !== undefined) counts.dependencies++
         } else if (step.type === `settle`) {
-          const active = model.intents.flatMap((intent, index) =>
-            intent.state === `active` ? [index] : [],
+          const active = model.transactions.flatMap((entry, index) =>
+            entry.state === `persisting` ? [index] : [],
           )
           if (!active.length) continue
           const index = active[step.slot % active.length]!
           const op = operations[index]!
-          const beforeDrain = model.settle(index, step.success)
-          cuts = [
-            sorted(beforeDrain.values()),
-            sorted(model.visible().values()),
-          ]
+          model.settle(index, step.success)
+          // The drop and the queued sync transactions publish together.
+          cuts = [sorted(model.visible().values())]
           if (step.success) {
             op.expected = { status: `fulfilled`, value: op.tx }
             op.done.resolve()
@@ -880,8 +823,16 @@ export async function runOptimisticHistory(
             op.tx.rollback({ isSecondaryRollback: !step.cascade })
             op.done.resolve()
           }
-          await op.outcome.settled
+          // A receipt that waited for visibility would deadlock the handler.
+          await Promise.race([
+            op.outcome.settled,
+            new Promise((resolve) => setTimeout(resolve, 20)),
+          ])
           await Promise.resolve()
+          expect(
+            op.settledRows,
+            `${position}: rows visible when isPersisted settled`,
+          ).toEqual(cuts[0])
           counts.settlements++
           if (!step.success) counts.failures++
         } else {

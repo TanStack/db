@@ -3927,7 +3927,9 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
     }
   })
 
-  it(`fail-stops a queued suffix when its staged predecessor aborts before publication`, async () => {
+  // An accepted sync transaction always applies, in commit order. A later
+  // abort of its signal cannot remove it or the suffix that depends on it.
+  it(`applies an accepted predecessor and its suffix after the predecessor's signal aborts`, async () => {
     const adapter = createRecordingAdapter()
     let remoteBegin: (() => void) | undefined
     let remoteWrite:
@@ -3998,8 +4000,9 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
           () => ({ status: `fulfilled` as const }),
           (reason: unknown) => ({ status: `rejected` as const, reason }),
         ),
-        `staged predecessor aborted before publication`,
+        `accepted predecessor receipt settled`,
       )
+      expect(collection.get(`dependent`)).toBeUndefined()
       localPersistence.resolve()
       await localTransaction.isPersisted.promise
       const dependentOutcome = await atPersistedOracleCheckpoint(
@@ -4009,33 +4012,20 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
         ),
         `post-abort staged suffix settled`,
       )
-      const terminalError =
-        abortedOutcome.status === `rejected` ? abortedOutcome.reason : undefined
-
       expect({
         abortedStatus: abortedOutcome.status,
-        abortedName:
-          terminalError instanceof Error ? terminalError.name : undefined,
         dependentStatus: dependentOutcome.status,
-        dependentExact:
-          dependentOutcome.status === `rejected` &&
-          dependentOutcome.reason === terminalError,
         status: collection.status,
-        exactPublicError:
-          collection._lifecycle.getSyncError() === terminalError,
-        visibleDependent: collection.get(`dependent`),
+        visibleDependent: stripVirtualProps(collection.get(`dependent`)),
         durableDependent: adapter.rows.get(`dependent`),
         durableMetadata: adapter.rowMetadata.get(`shared`),
       }).toEqual({
-        abortedStatus: `rejected`,
-        abortedName: `AbortError`,
-        dependentStatus: `rejected`,
-        dependentExact: true,
-        status: `error`,
-        exactPublicError: true,
-        visibleDependent: undefined,
-        durableDependent: undefined,
-        durableMetadata: undefined,
+        abortedStatus: `fulfilled`,
+        dependentStatus: `fulfilled`,
+        status: `ready`,
+        visibleDependent: { id: `dependent`, title: `aborted` },
+        durableDependent: { id: `dependent`, title: `aborted` },
+        durableMetadata: { owner: `aborted` },
       })
     } catch (error) {
       hasPrimaryFailure = true
@@ -10009,131 +9999,111 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
     }
   })
 
-  it.each([
-    {
-      label: `immediate source transaction`,
-      options: { immediate: true },
-      expectedVisibleBeforeLocalSettlement: true,
-      expectedApplyCallsBeforeLocalSettlement: 2,
-    },
-    {
-      label: `non-immediate control`,
-      options: undefined,
-      expectedVisibleBeforeLocalSettlement: false,
-      expectedApplyCallsBeforeLocalSettlement: 1,
-    },
-  ] as const)(
-    `preserves $label admission through the persisted wrapper`,
-    async ({
-      options,
-      expectedVisibleBeforeLocalSettlement,
-      expectedApplyCallsBeforeLocalSettlement,
-    }) => {
-      const adapter = createRecordingAdapter()
-      let sourceParams!: TodoSyncParams
-      const collection = createCollection(
-        persistedCollectionOptions<Todo, string>({
-          id: `begin-options-${options?.immediate ? `immediate` : `normal`}`,
-          getKey: (row) => row.id,
-          sync: {
-            sync: (params) => {
-              sourceParams = params
-              params.markReady()
-            },
-          },
-          persistence: { adapter },
-        }),
-      )
-      const localPersistence = createEventGate()
-      const localTransaction = createTransaction({
-        autoCommit: false,
-        mutationFn: () => localPersistence.promise,
-      })
-      let localCommit: Promise<unknown> | undefined
-      let remoteReceipt: true | Promise<void> | undefined
-      let hasPrimaryFailure = false
-
-      try {
-        await atPersistedOracleCheckpoint(
-          collection.stateWhenReady(),
-          `begin-options collection ready`,
-        )
-        sourceParams.begin()
-        sourceParams.write({
-          type: `insert`,
-          value: { id: `seed`, title: `baseline` },
-        })
-        await atPersistedOracleCheckpoint(
-          Promise.resolve(sourceParams.commit()),
-          `begin-options seed persisted`,
-        )
-
-        localTransaction.mutate(() => {
-          collection.update(`seed`, (draft) => {
-            draft.title = `local pending`
-          })
-        })
-        localCommit = localTransaction.commit()
-        void localCommit.catch(() => undefined)
-        expect(localTransaction.state).toBe(`persisting`)
-
-        sourceParams.begin(options)
-        sourceParams.write({
-          type: `insert`,
-          value: { id: `remote`, title: `source commit` },
-        })
-        remoteReceipt = sourceParams.commit()
-        expect(remoteReceipt).toBeInstanceOf(Promise)
-
-        expect({
-          localState: localTransaction.state,
-          remoteVisible: collection.has(`remote`),
-          applyCalls: adapter.applyCommittedTxCalls.length,
-        }).toEqual({
-          localState: `persisting`,
-          remoteVisible: expectedVisibleBeforeLocalSettlement,
-          applyCalls: expectedApplyCallsBeforeLocalSettlement,
-        })
-
-        if (options?.immediate) {
-          await atPersistedOracleCheckpoint(
-            Promise.resolve(remoteReceipt),
-            `immediate source receipt before local settlement`,
-          )
-          expect(localTransaction.state).toBe(`persisting`)
-        } else {
-          const settlement = observeSettlement(
-            Promise.resolve(remoteReceipt).then(() => undefined),
-          )
-          await Promise.resolve()
-          expect(settlement.read()).toEqual({ status: `pending` })
-        }
-      } catch (error) {
-        hasPrimaryFailure = true
-        throw error
-      } finally {
-        localPersistence.resolve()
-        await cleanupPersistedOracle(
-          [
-            () => localCommit,
-            () =>
-              remoteReceipt === true
-                ? undefined
-                : Promise.resolve(remoteReceipt),
-            () => collection.cleanup(),
-          ],
-          hasPrimaryFailure,
-        )
-      }
-    },
-  )
-
-  it(`rejects immediate replay that would close a normal publication cycle`, async () => {
+  // A source commit made while a local mutation persists is accepted and
+  // durably stored. Its rows stay hidden until that mutation settles.
+  it(`accepts and stores a source commit made beneath a persisting mutation`, async () => {
     const adapter = createRecordingAdapter()
     let sourceParams!: TodoSyncParams
     const collection = createCollection(
       persistedCollectionOptions<Todo, string>({
-        id: `immediate-source-dependency`,
+        id: `source-commit-beneath-mutation`,
+        getKey: (row) => row.id,
+        sync: {
+          sync: (params) => {
+            sourceParams = params
+            params.markReady()
+          },
+        },
+        persistence: { adapter },
+      }),
+    )
+    const localPersistence = createEventGate()
+    const localTransaction = createTransaction({
+      autoCommit: false,
+      mutationFn: () => localPersistence.promise,
+    })
+    let localCommit: Promise<unknown> | undefined
+    let remoteReceipt: true | Promise<void> | undefined
+    let hasPrimaryFailure = false
+
+    try {
+      await atPersistedOracleCheckpoint(
+        collection.stateWhenReady(),
+        `source commit collection ready`,
+      )
+      sourceParams.begin()
+      sourceParams.write({
+        type: `insert`,
+        value: { id: `seed`, title: `baseline` },
+      })
+      await atPersistedOracleCheckpoint(
+        Promise.resolve(sourceParams.commit()),
+        `source commit seed persisted`,
+      )
+
+      localTransaction.mutate(() => {
+        collection.update(`seed`, (draft) => {
+          draft.title = `local pending`
+        })
+      })
+      localCommit = localTransaction.commit()
+      void localCommit.catch(() => undefined)
+      expect(localTransaction.state).toBe(`persisting`)
+
+      sourceParams.begin()
+      sourceParams.write({
+        type: `insert`,
+        value: { id: `remote`, title: `source commit` },
+      })
+      remoteReceipt = sourceParams.commit()
+      await atPersistedOracleCheckpoint(
+        Promise.resolve(remoteReceipt),
+        `source receipt before local settlement`,
+      )
+      expect({
+        localState: localTransaction.state,
+        remoteVisible: collection.has(`remote`),
+        remoteDurable: adapter.rows.get(`remote`),
+      }).toEqual({
+        localState: `persisting`,
+        remoteVisible: false,
+        remoteDurable: { id: `remote`, title: `source commit` },
+      })
+
+      localPersistence.resolve()
+      await atPersistedOracleCheckpoint(
+        localTransaction.isPersisted.promise,
+        `local settlement publishes the source commit`,
+      )
+      expect(stripVirtualProps(collection.get(`remote`))).toEqual({
+        id: `remote`,
+        title: `source commit`,
+      })
+    } catch (error) {
+      hasPrimaryFailure = true
+      throw error
+    } finally {
+      localPersistence.resolve()
+      await cleanupPersistedOracle(
+        [
+          () => localCommit,
+          () =>
+            remoteReceipt === true ? undefined : Promise.resolve(remoteReceipt),
+          () => collection.cleanup(),
+        ],
+        hasPrimaryFailure,
+      )
+    }
+  })
+
+  // A handler may write, and await, a source commit queued behind an earlier
+  // parked source commit. Both apply in commit order when it settles.
+  it(`accepts a handler source commit queued behind a parked source commit`, async () => {
+    const adapter = createRecordingAdapter()
+    let sourceParams!: TodoSyncParams
+    const collection = createCollection(
+      persistedCollectionOptions<Todo, string>({
+        id: `handler-source-dependency`,
         getKey: (row) => row.id,
         sync: {
           sync: (params) => {
@@ -10152,7 +10122,7 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
       mutationFn: async () => {
         mutationEntered.resolve()
         await startDependency.promise
-        sourceParams.begin({ immediate: true })
+        sourceParams.begin()
         sourceParams.write({
           type: `insert`,
           value: { id: `dependency`, title: `releases user persistence` },
@@ -10169,7 +10139,7 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
     try {
       await atPersistedOracleCheckpoint(
         collection.stateWhenReady(),
-        `immediate dependency collection ready`,
+        `handler dependency collection ready`,
       )
       localTransaction.mutate(() => {
         collection.insert({ id: `local`, title: `user persistence pending` })
@@ -10198,43 +10168,45 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
       startDependency.resolve()
       await atPersistedOracleCheckpoint(
         dependencySubmitted.promise,
-        `immediate dependency submitted`,
+        `handler dependency submitted`,
       )
-      const dependencyOutcome = await atPersistedOracleCheckpoint(
-        Promise.resolve(dependencyReceipt).then(
-          () => ({ status: `fulfilled` as const }),
-          (reason: unknown) => ({ status: `rejected` as const, reason }),
-        ),
-        `immediate dependency rejected`,
+      await atPersistedOracleCheckpoint(
+        localTransaction.isPersisted.promise,
+        `user persistence completes after its awaited source commit`,
       )
-      expect(dependencyOutcome).toMatchObject({
-        status: `rejected`,
-        reason: { name: `InvalidPersistedCollectionConfigError` },
-      })
-      await expect(
-        atPersistedOracleCheckpoint(
-          localTransaction.isPersisted.promise,
-          `user persistence rejects with unsupported reentry`,
-        ),
-      ).rejects.toMatchObject({ name: `InvalidPersistedCollectionConfigError` })
       await atPersistedOracleCheckpoint(
         normalReceipt,
-        `parked predecessor applies after user rollback`,
+        `parked predecessor receipt`,
       )
       expect({
-        dependencyVisible: collection.has(`dependency`),
+        dependencyVisible: stripVirtualProps(collection.get(`dependency`)),
         dependencyDurable: adapter.rows.get(`dependency`),
+        parkedVisible: stripVirtualProps(collection.get(`parked`)),
         parkedDurable: adapter.rows.get(`parked`),
+        durableOrder: adapter.applyCommittedTxCalls.flatMap((call) =>
+          call.tx.mutations.map((mutation) => mutation.key),
+        ),
         status: collection.status,
       }).toEqual({
-        dependencyVisible: false,
-        dependencyDurable: undefined,
-        parkedDurable: {
-          id: `parked`,
-          title: `waits for user persistence`,
+        dependencyVisible: {
+          id: `dependency`,
+          title: `releases user persistence`,
         },
+        dependencyDurable: {
+          id: `dependency`,
+          title: `releases user persistence`,
+        },
+        parkedVisible: { id: `parked`, title: `waits for user persistence` },
+        parkedDurable: { id: `parked`, title: `waits for user persistence` },
+        durableOrder: expect.arrayContaining([`parked`, `dependency`]),
         status: `ready`,
       })
+      const durableKeys = adapter.applyCommittedTxCalls.flatMap((call) =>
+        call.tx.mutations.map((mutation) => mutation.key),
+      )
+      expect(durableKeys.indexOf(`parked`)).toBeLessThan(
+        durableKeys.indexOf(`dependency`),
+      )
     } catch (error) {
       hasPrimaryFailure = true
       throw error
@@ -10592,7 +10564,7 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
     }
   })
 
-  it(`publishes a FIFO source turn beneath an optimistic mutation before demand reentry`, async () => {
+  it(`stores a source turn beneath an optimistic mutation and publishes it at settlement`, async () => {
     const adapter = createRecordingAdapter()
     const mutationEntered = createEventGate()
     const allowDemand = createEventGate()
@@ -10639,7 +10611,7 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
       void localReceipt.catch(() => undefined)
       await mutationEntered.promise
 
-      sourceParams.begin({ immediate: true })
+      sourceParams.begin()
       sourceParams.write({
         type: `insert`,
         value: { id: `remote`, title: `authoritative source` },
@@ -10659,7 +10631,7 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
         localState: local.state,
       }).toEqual({
         local: { id: `local`, title: `optimistic local` },
-        remote: { id: `remote`, title: `authoritative source` },
+        remote: undefined,
         durableRemote: { id: `remote`, title: `authoritative source` },
         localState: `persisting`,
       })
@@ -10670,9 +10642,11 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
         `mutation demand after source publication`,
       )
       expect({
+        remote: stripVirtualProps(collection.get(`remote`)),
         status: collection.status,
         upstreamLoads,
       }).toEqual({
+        remote: { id: `remote`, title: `authoritative source` },
         status: `ready`,
         upstreamLoads: 1,
       })

@@ -1922,9 +1922,10 @@ function createElectricSync<T extends Row<unknown>>(
         return applied
       }
 
+      // Subset hydration must not split a stream transaction it overlaps.
       const beginSourceTransaction = () => {
-        if (metadata?.persistence) begin({ immediate: true })
-        else begin()
+        begin()
+        metadata?.persistence?.reserveCommitTurn()
       }
 
       // Track keys that have been synced to handle overlapping subset queries.
@@ -1966,7 +1967,7 @@ function createElectricSync<T extends Row<unknown>>(
         lifecycle.resumeState = resetState
 
         if (metadata) {
-          begin({ immediate: true })
+          begin()
           metadata.collection.set(`electric:resume`, resetState)
           if (expectInResumeSnapshot) {
             expectCurrentCommit?.()

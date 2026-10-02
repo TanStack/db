@@ -22,7 +22,6 @@ import {
   UndefinedKeyError,
   UpdateKeyNotFoundError,
 } from '../errors'
-import { DIRECT_TRANSACTION_METADATA_KEY } from './transaction-metadata.js'
 import type { Collection, CollectionImpl } from './index.js'
 import type { StandardSchemaV1 } from '@standard-schema/spec'
 import type {
@@ -227,7 +226,6 @@ export class CollectionMutationsManager<
     }
     const transaction = this.createTransaction<TOutput>({
       autoCommit: false,
-      metadata: { [DIRECT_TRANSACTION_METADATA_KEY]: true },
       mutationFn: () => Promise.resolve(),
     })
     transaction.applyMutations(mutations)
@@ -318,7 +316,6 @@ export class CollectionMutationsManager<
       if (localOnly) return localOnly
       // Create a new transaction with a mutation function that calls the onInsert handler
       const directOpTransaction = this.createTransaction<TOutput>({
-        metadata: { [DIRECT_TRANSACTION_METADATA_KEY]: true },
         mutationFn: async (params) => {
           // Call the onInsert handler with the transaction and collection
           return await this.config.onInsert!({
@@ -532,7 +529,6 @@ export class CollectionMutationsManager<
 
     // Create a new transaction with a mutation function that calls the onUpdate handler
     const directOpTransaction = this.createTransaction<TOutput>({
-      metadata: { [DIRECT_TRANSACTION_METADATA_KEY]: true },
       mutationFn: async (params) => {
         // Call the onUpdate handler with the transaction and collection
         return this.config.onUpdate!({
@@ -645,7 +641,6 @@ export class CollectionMutationsManager<
     // Create a new transaction with a mutation function that calls the onDelete handler
     const directOpTransaction = this.createTransaction<TOutput>({
       autoCommit: true,
-      metadata: { [DIRECT_TRANSACTION_METADATA_KEY]: true },
       mutationFn: async (params) => {
         // Call the onDelete handler with the transaction and collection
         return this.config.onDelete!({

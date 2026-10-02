@@ -40,12 +40,7 @@ export interface SyncContext<
   queryClient: QueryClient
   queryKey: Array<unknown>
   getKey: (item: TRow) => TKey
-  /**
-   * Begin a new sync transaction.
-   * @param options.immediate - When true, the transaction will be processed immediately
-   *   even if there are persisting user transactions. Used by manual write operations.
-   */
-  begin: (options?: { immediate?: boolean }) => void
+  begin: () => void
   write: (message: Omit<ChangeMessage<TRow>, `key`>) => void
   commit: () => SyncAppliedReceipt
   /**
@@ -126,14 +121,14 @@ function validateOperations<
     seenKeys.add(op.key)
 
     // Validate operation-specific requirements
-    // NOTE: These validations check the synced store only, not the combined view (synced + optimistic)
-    // This allows write operations to work correctly even when items are optimistically modified
+    // Validate against accepted synced rows, not the optimistic view, so a
+    // write works while its row is optimistically modified or queued.
     if (op.type === `update`) {
-      if (!ctx.collection._state.syncedData.has(op.key)) {
+      if (!ctx.collection._state.getAcceptedSyncedRow(op.key)) {
         throw new UpdateOperationItemNotFoundError(op.key)
       }
     } else if (op.type === `delete`) {
-      if (!ctx.collection._state.syncedData.has(op.key)) {
+      if (!ctx.collection._state.getAcceptedSyncedRow(op.key)) {
         throw new DeleteOperationItemNotFoundError(op.key)
       }
     }
@@ -154,9 +149,9 @@ export function performWriteOperations<
   const normalized = normalizeOperations(operations, ctx)
   validateOperations(normalized, ctx)
 
-  // Use immediate: true to ensure syncedData is updated synchronously,
-  // even when called from within a mutationFn with an active persisting transaction
-  ctx.begin({ immediate: true })
+  // While an optimistic transaction persists, this sync transaction waits
+  // and applies when that transaction settles.
+  ctx.begin()
 
   for (const op of normalized) {
     switch (op.type) {
@@ -169,8 +164,7 @@ export function performWriteOperations<
         break
       }
       case `update`: {
-        // Get from synced store only, not the combined view
-        const currentItem = ctx.collection._state.syncedData.get(op.key)!
+        const currentItem = ctx.collection._state.getAcceptedSyncedRow(op.key)!
         const updatedItem = {
           ...currentItem,
           ...op.data,
@@ -187,8 +181,7 @@ export function performWriteOperations<
         break
       }
       case `delete`: {
-        // Get from synced store only, not the combined view
-        const currentItem = ctx.collection._state.syncedData.get(op.key)!
+        const currentItem = ctx.collection._state.getAcceptedSyncedRow(op.key)!
         ctx.write({
           type: `delete`,
           value: currentItem,
@@ -196,8 +189,8 @@ export function performWriteOperations<
         break
       }
       case `upsert`: {
-        // Check synced store only, not the combined view
-        const existsInSyncedStore = ctx.collection._state.syncedData.has(op.key)
+        const existsInSyncedStore =
+          ctx.collection._state.getAcceptedSyncedRow(op.key) !== undefined
         const resolved = ctx.collection.validateData(
           op.data,
           existsInSyncedStore ? `update` : `insert`,
@@ -221,20 +214,21 @@ export function performWriteOperations<
 
   const applied = ctx.commit()
 
-  // Update query cache after successful commit
-  if (ctx.updateCacheData) {
-    ctx.updateCacheData(() =>
-      Array.from(ctx.collection._state.syncedData.values()),
-    )
-  } else {
-    // Fallback: directly set the cache with raw array (for non-Query Collection consumers)
-    ctx.queryClient.setQueryData(
-      ctx.queryKey,
-      Array.from(ctx.collection._state.syncedData.values()),
-    )
+  // The Query cache must hold accepted rows. A wrapping sync, such as
+  // persistence, accepts the transaction after its durable step.
+  const updateCache = () => {
+    const getItems = () =>
+      Array.from(
+        ctx.collection._state.acceptedSyncedEntries(),
+        ([, row]) => row,
+      )
+    if (ctx.updateCacheData) ctx.updateCacheData(getItems)
+    else ctx.queryClient.setQueryData(ctx.queryKey, getItems())
   }
-
-  const completion = Promise.resolve(applied).then(() => undefined)
+  if (applied === true) updateCache()
+  const completion = Promise.resolve(applied).then(() => {
+    if (applied !== true) updateCache()
+  })
   void completion.catch(() => undefined)
   return completion
 }

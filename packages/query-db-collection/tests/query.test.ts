@@ -111,6 +111,7 @@ function createInMemorySyncMetadataApi<
       protocol: `@tanstack/db/sync-persistence`,
       version: 1,
       hydrateBaseline: async () => {},
+      reserveCommitTurn: () => {},
       scanPersistedRows: async () =>
         Array.from(persistedRows.entries()).map(([key, value]) => ({
           key,
@@ -4576,12 +4577,10 @@ describe(`QueryCollection`, () => {
       expect(todo?.id).not.toBe(clientId)
     })
 
-    it(`should update syncedData immediately when writeUpsert is called after async API in onUpdate handler`, async () => {
-      // Reproduces bug where syncedData shows stale values when writeUpsert is called
-      // AFTER an async API call in a mutation handler. The async await causes the
-      // transaction to be added to state.transactions before writeUpsert runs,
-      // which means commitPendingTransactions() sees hasPersistingTransaction=true
-      // and would skip processing the sync transaction without the immediate flag.
+    // A handler that writes the server row before it returns must expose that
+    // row, and a Query cache holding it, once its mutation settles. See
+    // TanStack/db#1130: the cache once kept the stale row until the next sync.
+    it(`exposes a server row written after an async API call in onUpdate once the mutation settles`, async () => {
       const queryKey = [`writeUpsert-after-api-test`]
 
       type Brand = {
@@ -4595,9 +4594,7 @@ describe(`QueryCollection`, () => {
         return Promise.resolve([...serverBrands])
       })
 
-      // Track syncedData state immediately after writeUpsert
-      let syncedDataAfterWriteUpsert: Brand | undefined
-      let hasPersistingTransactionDuringWrite = false
+      let rowWhileHandlerRuns: Brand | undefined
 
       const collection = createCollection(
         queryCollectionOptions<Brand>({
@@ -4610,33 +4607,26 @@ describe(`QueryCollection`, () => {
           onUpdate: async ({ transaction }) => {
             const updates = transaction.mutations.map((m) => m.modified)
 
-            // Simulate async API call - THIS IS KEY!
-            // After this await, the transaction will be in state.transactions
+            // The async API call puts the transaction in the persisting state.
             await new Promise((resolve) => setTimeout(resolve, 10))
 
-            // Check if there's now a persisting transaction
-            hasPersistingTransactionDuringWrite = Array.from(
-              collection._state.transactions.values(),
-            ).some((tx) => tx.state === `persisting`)
-
-            // Update server state
             for (const update of updates) {
               const idx = serverBrands.findIndex((b) => b.id === update.id)
               if (idx !== -1) {
-                serverBrands[idx] = { ...serverBrands[idx], ...update }
+                serverBrands[idx] = {
+                  ...serverBrands[idx]!,
+                  ...update,
+                  brandName: `${update.brandName} (server)`,
+                }
               }
             }
 
-            // Write the server response back to syncedData
-            // Without the immediate flag, this would be blocked by the persisting transaction
-            collection.utils.writeBatch(() => {
-              for (const update of updates) {
-                collection.utils.writeUpsert(update)
+            await collection.utils.writeBatch(() => {
+              for (const brand of serverBrands) {
+                collection.utils.writeUpsert(brand)
               }
             })
-
-            // Check syncedData IMMEDIATELY after writeUpsert
-            syncedDataAfterWriteUpsert = collection._state.syncedData.get(`123`)
+            rowWhileHandlerRuns = stripVirtualProps(collection.get(`123`))
 
             return { refetch: false }
           },
@@ -4646,27 +4636,23 @@ describe(`QueryCollection`, () => {
       await vi.waitFor(() => {
         expect(collection.status).toBe(`ready`)
       })
+      expect(collection.get(`123`)?.brandName).toBe(`A`)
 
-      // Verify initial state
-      expect(collection._state.syncedData.get(`123`)?.brandName).toBe(`A`)
-
-      // Update brandName from A to B
-      collection.update(`123`, (draft) => {
+      const tx = collection.update(`123`, (draft) => {
         draft.brandName = `B`
       })
+      await tx.isPersisted.promise
 
-      // Wait for mutation to complete
-      await flushPromises()
-      await new Promise((resolve) => setTimeout(resolve, 50))
-
-      // Verify we had a persisting transaction during the write
-      expect(hasPersistingTransactionDuringWrite).toBe(true)
-
-      // The CRITICAL assertion: syncedData should have been updated IMMEDIATELY after writeUpsert
-      // Without the fix, this would fail because commitPendingTransactions() would skip
-      // processing due to hasPersistingTransaction being true
-      expect(syncedDataAfterWriteUpsert).toBeDefined()
-      expect(syncedDataAfterWriteUpsert?.brandName).toBe(`B`)
+      // The queued server row is hidden behind the optimistic row until the
+      // mutation settles, then both change in one publication.
+      expect(rowWhileHandlerRuns).toEqual({ id: `123`, brandName: `B` })
+      expect(collection.get(`123`)).toMatchObject({
+        brandName: `B (server)`,
+        $synced: true,
+      })
+      expect(queryClient.getQueryData(queryKey)).toEqual([
+        { id: `123`, brandName: `B (server)` },
+      ])
     })
 
     it(`should not rollback object field updates after server response with refetch: false`, async () => {
@@ -4827,6 +4813,88 @@ describe(`QueryCollection`, () => {
         await collection.cleanup()
       }
     })
+
+    // A refetch may cancel only work that has not committed. A committed
+    // result waiting for durable storage still applies, so the later result
+    // for the same row applies after it. See TanStack/db#1990.
+    it.each([`refetch`, `handler writeUpsert`] as const)(
+      `applies the latest result when a %s supersedes a result held in storage`,
+      async (successor) => {
+        type Row = { id: string; value: number }
+        let server: Row = { id: `row`, value: 1 }
+        const adapter = createPersistedQueryAdapter<Row>()
+        const applyCommittedTx = adapter.applyCommittedTx
+        let holdWrites = false
+        const entered = createDeferred<void>()
+        const release = createDeferred<void>()
+        // Hold the first durable write of a row, so the refetch's result is
+        // committed but not yet stored.
+        adapter.applyCommittedTx = async (...args) => {
+          if (holdWrites && args[1].mutations.length > 0) {
+            holdWrites = false
+            entered.resolve()
+            await release.promise
+          }
+          return applyCommittedTx(...args)
+        }
+        const errors = vi.spyOn(console, `error`).mockImplementation(() => {})
+        const collection = createCollection(
+          persistedCollectionOptions<
+            Row,
+            string | number,
+            never,
+            QueryCollectionUtils<Row>
+          >({
+            ...queryCollectionOptions<Row>({
+              id: `superseded-held-application-${successor}`,
+              queryKey: [`superseded-held-application`, successor],
+              queryFn: () => Promise.resolve([{ ...server }]),
+              queryClient,
+              getKey: (row) => row.id,
+              startSync: true,
+              onUpdate: async ({ collection: handlerCollection }) => {
+                server = { id: `row`, value: 3 }
+                await handlerCollection.utils.writeUpsert({ ...server })
+                return { refetch: false }
+              },
+            }),
+            persistence: { adapter },
+          }),
+        )
+
+        try {
+          await collection.preload()
+          expect(collection.get(`row`)?.value).toBe(1)
+
+          holdWrites = true
+          server = { id: `row`, value: 2 }
+          const first = collection.utils.refetch()
+          await entered.promise
+
+          let second: Promise<unknown>
+          if (successor === `refetch`) {
+            server = { id: `row`, value: 3 }
+            second = collection.utils.refetch()
+          } else {
+            second = collection.update(`row`, (draft) => {
+              draft.value = 0
+            }).isPersisted.promise
+          }
+          release.resolve()
+          await Promise.all([first, second])
+          await flushPromises()
+
+          expect(collection.status).toBe(`ready`)
+          expect(collection.get(`row`)?.value).toBe(3)
+          expect(adapter.rows.get(`row`)?.value).toBe(3)
+          expect(errors).not.toHaveBeenCalled()
+        } finally {
+          errors.mockRestore()
+          release.resolve()
+          await collection.cleanup()
+        }
+      },
+    )
 
     it(`waits for persisted direct writes and batch writes`, async () => {
       type Row = { id: string; name: string }
@@ -7522,6 +7590,7 @@ describe(`QueryCollection`, () => {
           protocol: `@tanstack/db/sync-persistence`,
           version: 1,
           hydrateBaseline: async () => {},
+          reserveCommitTurn: () => {},
           scanPersistedRows,
           resumeSnapshot: {
             certify: async () => {},

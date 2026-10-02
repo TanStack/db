@@ -2022,8 +2022,10 @@ export function queryCollectionOptions(
         validatedItems ??
         validateSuccessfulResultItemsForApplication(queryKey, result)
 
+      // Diff against accepted rows: an earlier result or direct write can be
+      // accepted while it waits behind a persisting optimistic transaction.
       const currentSyncedItems: Map<string | number, any> = new Map(
-        collection._state.syncedData.entries(),
+        collection._state.acceptedSyncedEntries(),
       )
       const shouldUsePersistedBaseline = persistedBaseline !== undefined
       const previouslyOwnedRows = shouldUsePersistedBaseline
@@ -2135,19 +2137,18 @@ export function queryCollectionOptions(
           const oldItem = shouldUsePersistedBaseline
             ? persistedBaseline.get(key)?.value
             : currentSyncedItems.get(key)
-          if (!oldItem) {
-            return
-          }
           const newItem = newItemsMap.get(key)
           if (!newItem) {
             const owners = getPersistedOwners(key)
             owners.delete(hashedQueryKey)
             setPersistedOwners(key, owners)
             const needToRemove = removeRowOwner(key, hashedQueryKey)
+            // A superseded result's row can still be waiting for durable
+            // storage, so delete by key even when no stored row is known.
             if (needToRemove) {
-              write({ type: `delete`, value: oldItem })
+              write({ type: `delete`, key })
             }
-          } else if (!deepEquals(oldItem, newItem)) {
+          } else if (oldItem && !deepEquals(oldItem, newItem)) {
             write({ type: `update`, value: newItem })
           }
         })
@@ -2178,7 +2179,10 @@ export function queryCollectionOptions(
         if (isMutationPublicationBlocked()) {
           applicationToken.settleRefetchAtFetchBoundary?.()
         }
-        const applied = commit(signal)
+        // An accepted sync transaction always applies, so a later result or
+        // cleanup must not cancel it or roll back the ownership it records.
+        const applied = commit()
+        applicationToken.rollback = undefined
         transactionActive = false
         retainedQueriesPendingRevalidation.delete(hashedQueryKey)
         cancelPersistedRetentionExpiry(hashedQueryKey)
@@ -2602,8 +2606,9 @@ export function queryCollectionOptions(
       const rowsToDelete: Array<any> = []
 
       nextOwnersByRow.forEach((nextOwners, rowKey) => {
-        if (nextOwners.size === 0 && collection.has(rowKey)) {
-          rowsToDelete.push(collection.get(rowKey))
+        const row = collection._state.getAcceptedSyncedRow(rowKey)
+        if (nextOwners.size === 0 && row) {
+          rowsToDelete.push(row)
         }
       })
 

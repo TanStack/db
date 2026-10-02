@@ -214,7 +214,7 @@ export class CollectionSyncManager<
       const syncRes = normalizeSyncFnResult(
         this.config.sync.sync({
           collection: this.collection,
-          begin: (options?: { immediate?: boolean }) => {
+          begin: () => {
             if (!isCurrentSync()) return
             const applied = createDeferred<void>()
             // A source may ignore a stream receipt. Keep cancellation from
@@ -229,7 +229,6 @@ export class CollectionSyncManager<
               rowMetadataWrites: new Map(),
               explicitRowMetadataWriteKeys: new Set(),
               collectionMetadataWrites: new Map(),
-              immediate: options?.immediate,
               applied,
               duplicateKeyError: (key) => this.createDuplicateKeyError(key),
             })
@@ -340,29 +339,22 @@ export class CollectionSyncManager<
             }
 
             pendingTransaction.committed = true
-
-            const cancel = () => {
-              this.state.cancelPendingSyncedTransaction(pendingTransaction)
-            }
-            signal?.addEventListener(`abort`, cancel, { once: true })
-
+            // An accepted transaction always applies in commit order. A queued
+            // one becomes visible when the persisting transaction settles.
             this.state.commitPendingTransactions()
-            if (!pendingTransaction.applied.isPending()) {
-              signal?.removeEventListener(`abort`, cancel)
-              return true
-            }
-
-            const receipt = pendingTransaction.applied.promise
-            if (signal) {
-              const removeAbortListener = () => {
-                signal.removeEventListener(`abort`, cancel)
-              }
-              void receipt.then(removeAbortListener, removeAbortListener)
-            }
-            return receipt
+            return true
           },
           markReady: () => {
             if (!isCurrentSync()) return
+            // Readiness is publication. While a persisting optimistic
+            // transaction holds accepted rows, become ready once they apply,
+            // unless another status transition happens first.
+            const status = this.lifecycle.status
+            const deferred = this.state.deferUntilAcceptedRowsApply(() => {
+              if (isCurrentSync() && this.lifecycle.status === status)
+                this.lifecycle.markReady()
+            })
+            if (deferred) return
             if (syncEntryActive) {
               readyEffectFailure ??= this.lifecycle.markReadyDuringSyncStart()
             } else {
@@ -402,9 +394,6 @@ export class CollectionSyncManager<
             // - Finally, optimistic mutations re-applied on top (single batch)
             pendingTransaction.truncate = true
             this.state.refreshPendingSyncedProjection()
-
-            pendingTransaction.optimisticSnapshot =
-              this.state.captureTruncateOptimisticSnapshot()
           },
           metadata: this.createSyncMetadataApi(isCurrentSync),
         }),

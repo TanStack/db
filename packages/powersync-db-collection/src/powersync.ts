@@ -410,7 +410,6 @@ function createPowerSyncCollectionConfig<
       async function createDiffTrigger(
         options: {
           setupContext?: LockContext
-          immediate?: boolean
           when: Record<DiffTriggerOperation, string>
           writeType: (rowId: string) => OperationType
           batchQuery: (
@@ -421,7 +420,7 @@ function createPowerSyncCollectionConfig<
         },
         appliedReceipts: Array<SyncAppliedReceipt>,
       ) {
-        const { setupContext, immediate, when, writeType, batchQuery } = options
+        const { setupContext, when, writeType, batchQuery } = options
 
         return await database.triggers.createDiffTrigger({
           source: viewName,
@@ -434,7 +433,7 @@ function createPowerSyncCollectionConfig<
               let currentBatchCount = syncBatchSize
               let cursor = 0
               while (currentBatchCount == syncBatchSize) {
-                begin(immediate ? { immediate: true } : undefined)
+                begin()
 
                 const batchItems = await batchQuery(
                   context,
@@ -599,9 +598,6 @@ function createPowerSyncCollectionConfig<
           const appliedReceipts: Array<SyncAppliedReceipt> = []
           await establishTracking(
             {
-              // Initial eager hydration must make the source usable before
-              // PowerSync can persist a mutation queued during startup.
-              immediate: true,
               when: {
                 [DiffTriggerOperation.INSERT]: `TRUE`,
                 [DiffTriggerOperation.UPDATE]: `TRUE`,

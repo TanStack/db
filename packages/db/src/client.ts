@@ -886,7 +886,6 @@ export class DbClient {
         rowMetadataWrites,
         collectionMetadataWrites: new Map(),
         applied: createDeferred<void>(),
-        immediate: true,
         preserveHydrationSeedKeys: seedKind !== undefined,
       })
       collection._state.commitPendingTransactions()

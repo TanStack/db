@@ -3330,7 +3330,9 @@ describe(`Electric Integration`, () => {
       }
     })
 
-    it(`does not publish a progressive snapshot aborted while its commit is parked`, async () => {
+    // A commit that core accepted always applies. Aborting the request after
+    // its snapshot committed cannot withdraw those rows.
+    it(`publishes an accepted progressive snapshot whose request aborts while it waits`, async () => {
       mockFetchSnapshot.mockResolvedValue({
         metadata: {},
         data: [
@@ -3376,9 +3378,9 @@ describe(`Electric Integration`, () => {
         abortController.abort()
         persistence.resolve()
         await transaction.isPersisted.promise
-        if (load instanceof Promise) await load
+        if (load instanceof Promise) await load.catch(() => undefined)
 
-        expect(testCollection.has(2)).toBe(false)
+        expect(testCollection.has(2)).toBe(true)
       } finally {
         abortController.abort()
         persistence.resolve()
@@ -3959,6 +3961,7 @@ describe(`Electric Integration`, () => {
           protocol: `@tanstack/db/sync-persistence`,
           version: 1,
           hydrateBaseline: () => Promise.resolve(),
+          reserveCommitTurn: () => {},
           scanPersistedRows: () => Promise.resolve([]),
           resumeSnapshot: {
             certify: () => Promise.resolve(),

@@ -1062,6 +1062,7 @@ function createOwnershipFixture({
                       protocol: `@tanstack/db/sync-persistence`,
                       version: 1,
                       hydrateBaseline: async () => {},
+                      reserveCommitTurn: () => {},
                       scanPersistedRows,
                       resumeSnapshot: {
                         certify: async () => {},

@@ -738,7 +738,7 @@ const DEFAULT_DB_NAME = `tanstack-db`
 const REMOTE_ENSURE_RETRY_DELAY_MS = 50
 
 type SyncControlFns<T extends object, TKey extends string | number> = {
-  begin: ((options?: { immediate?: boolean }) => void) | null
+  begin: (() => void) | null
   write:
     | ((
         message:
@@ -1046,7 +1046,6 @@ type BufferedSyncTransaction<T extends object, TKey extends string | number> = {
   truncate: boolean
   internal: boolean
   lifecycleGeneration: number
-  beginOptions?: { immediate?: boolean }
   expectedResumeGenerationOwner?: symbol
   signal?: AbortSignal
   prependHydrationRows: (
@@ -1066,6 +1065,8 @@ type OpenSyncTransaction<T extends object, TKey extends string | number> = Omit<
   applicationReceipt?: SyncAppliedReceipt
   operationKeys: Set<TKey>
   queuedBecauseHydrating: boolean
+  // Set by `reserveCommitTurn`: subset hydration waits for this commit.
+  reservesCommitTurn?: boolean
   hasDependentSuccessor: boolean
   publicationAdmissionWaiters?: Set<{
     resolve: () => void
@@ -1326,7 +1327,6 @@ class PersistedCollectionRuntime<
   private resumeGenerationOwner = Symbol(`persisted resume generation owner`)
   private lifecycleGeneration = 0
   private internalApplyDepth = 0
-  private sourcePublicationWaitDepth = 0
   private appliedReceiptSequence = 0
   private syncErrorReported = false
   private reportedSyncError: unknown
@@ -1827,7 +1827,7 @@ class PersistedCollectionRuntime<
       .map(({ key }) => key)
 
     return this.withInternalApply(() => {
-      this.syncControls.begin?.({ immediate: true })
+      this.syncControls.begin?.()
 
       currentKeys.forEach((key) => {
         if (!nextMetadata.has(key)) {
@@ -2072,16 +2072,6 @@ class PersistedCollectionRuntime<
   ): Promise<void> {
     const failure = this.getCurrentTerminalFailure()
     if (failure) return Promise.reject(failure.error)
-    if (
-      transaction.beginOptions?.immediate &&
-      this.sourcePublicationWaitDepth > 0
-    ) {
-      return Promise.reject(
-        new InvalidPersistedCollectionConfigError(
-          `immediate persisted source replay cannot enter while an earlier source publication is waiting`,
-        ),
-      )
-    }
     return this.applyMutex.run(async () => {
       await this.applyBufferedSyncTransactionUnsafe(transaction)
     })
@@ -2570,7 +2560,7 @@ class PersistedCollectionRuntime<
     }
 
     return this.withInternalApply(() => {
-      this.syncControls.begin?.({ immediate: true })
+      this.syncControls.begin?.()
 
       for (const row of rows) {
         if (this.collection?._hasHydratedKey(row.key)) {
@@ -2668,7 +2658,7 @@ class PersistedCollectionRuntime<
       .map(({ key }) => key)
 
     return this.withInternalApply(() => {
-      this.syncControls.begin?.({ immediate: true })
+      this.syncControls.begin?.()
       this.syncControls.truncate?.()
 
       for (const row of rows) {
@@ -2739,14 +2729,7 @@ class PersistedCollectionRuntime<
         : transaction.applyToCollection()
       applicationReturned = true
       abortedDuringApplication = transaction.signal?.aborted === true
-      if (applied !== true) {
-        this.sourcePublicationWaitDepth++
-        try {
-          await applied
-        } finally {
-          this.sourcePublicationWaitDepth--
-        }
-      }
+      if (applied !== true) await applied
       this.throwIfLifecycleReplaced(transaction.lifecycleGeneration)
 
       if (!transaction.internal) {
@@ -2972,7 +2955,7 @@ class PersistedCollectionRuntime<
     }
 
     const applied = this.withInternalApply(() => {
-      this.syncControls.begin?.({ immediate: true })
+      this.syncControls.begin?.()
 
       for (const mutation of mutations) {
         if (mutation.type === `delete`) {
@@ -3545,7 +3528,7 @@ class PersistedCollectionRuntime<
     this.resetSequence++
     if (this.syncControls.begin && this.syncControls.commit) {
       const applied = this.withInternalApply(() => {
-        this.syncControls.begin?.({ immediate: true })
+        this.syncControls.begin?.()
         this.syncControls.truncate?.()
         return this.syncControls.commit?.() ?? true
       })
@@ -3600,7 +3583,7 @@ class PersistedCollectionRuntime<
     )
 
     const applied = this.withInternalApply(() => {
-      this.syncControls.begin?.({ immediate: true })
+      this.syncControls.begin?.()
 
       for (const {
         key: changedKey,
@@ -4072,14 +4055,7 @@ function createWrappedSyncConfig<
           }
           transaction.deferredHydrationMetadataDeleteKeys.clear()
 
-          // A buffered source replay is part of the hydrate that owns it.
-          // It must not wait for a mutation whose persistence is queued
-          // behind that hydrate's apply mutex.
-          params.begin(
-            transaction.queuedBecauseHydrating
-              ? { immediate: true }
-              : transaction.beginOptions,
-          )
+          params.begin()
           if (transaction.truncate) params.truncate()
           for (const operation of transaction.operations) {
             if (operation.type === `delete`) {
@@ -4135,6 +4111,11 @@ function createWrappedSyncConfig<
       const persistenceCapability: SyncPersistenceCapabilityV1<TKey> = {
         protocol: SYNC_PERSISTENCE_PROTOCOL,
         version: SYNC_PERSISTENCE_VERSION,
+        reserveCommitTurn: () => {
+          const openTransaction = getOpenTransaction()
+          if (openTransaction && !openTransaction.internal)
+            openTransaction.reservesCommitTurn = true
+        },
         hydrateBaseline: async () => {
           if (startupState.cleanedUp) return
           try {
@@ -4192,7 +4173,7 @@ function createWrappedSyncConfig<
             })
             .catch(() => undefined)
         },
-        begin: (options?: { immediate?: boolean }) => {
+        begin: () => {
           if (startupState.cleanedUp) return undefined
           const terminalFailure = getTerminalFailure()
           const internal = runtime.isApplyingInternally()
@@ -4205,7 +4186,6 @@ function createWrappedSyncConfig<
             truncate: false,
             internal,
             lifecycleGeneration: runtime.getLifecycleGeneration(),
-            beginOptions: options,
             operationKeys: new Set(),
             hasDependentSuccessor: false,
             queuedBecauseHydrating:
@@ -4522,7 +4502,6 @@ function createWrappedSyncConfig<
             truncate: openTransaction.truncate,
             internal: false,
             lifecycleGeneration: openTransaction.lifecycleGeneration,
-            beginOptions: openTransaction.beginOptions,
             expectedResumeGenerationOwner:
               openTransaction.expectedResumeGenerationOwner,
             signal,
@@ -4728,9 +4707,7 @@ function createWrappedSyncConfig<
 
           const openTransaction = getOpenTransaction()
           const needsPublicationAdmission =
-            openTransaction &&
-            !openTransaction.internal &&
-            openTransaction.beginOptions?.immediate
+            openTransaction?.reservesCommitTurn === true
           const hydrated =
             sourceResultSettled && !needsPublicationAdmission
               ? runtime.loadHydratedSubset(options, (loadOptions) =>
@@ -4751,13 +4728,9 @@ function createWrappedSyncConfig<
               return
             }
             const currentTransaction = getOpenTransaction()
-            // An immediate source transaction reserves its FIFO turn before
+            // A source transaction that reserved its FIFO turn commits before
             // subset hydration advances the generation it was built against.
-            if (
-              currentTransaction &&
-              !currentTransaction.internal &&
-              currentTransaction.beginOptions?.immediate
-            ) {
+            if (currentTransaction?.reservesCommitTurn) {
               await waitForPublicationAdmission(
                 currentTransaction,
                 options,
