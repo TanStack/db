@@ -118,7 +118,7 @@ describe(`useLiveQuery type assertions`, () => {
       CollectionStatus | `disabled`
     >()
     expectTypeOf(rendered.result.isReady).toEqualTypeOf<boolean>()
-    expectTypeOf(rendered.result.whenReady).toEqualTypeOf<
+    expectTypeOf(rendered.result.suspense).toEqualTypeOf<
       Accessor<Array<Prettify<OutputWithVirtual<Person>>>>
     >()
 

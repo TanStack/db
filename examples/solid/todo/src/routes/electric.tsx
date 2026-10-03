@@ -35,7 +35,7 @@ function ElectricPage() {
   return (
     <Loading fallback="Loading...">
       <TodoApp
-        todos={todos.whenReady()}
+        todos={todos.suspense()}
         configData={configData()}
         todoCollection={electricTodoCollection}
         configCollection={electricConfigCollection}
