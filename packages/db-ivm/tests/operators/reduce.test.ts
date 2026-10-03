@@ -45,7 +45,7 @@ describe(`Operators`, () => {
       const result = tracker.getResult()
 
       // Assert only keys 'a' and 'b' are affected
-      assertOnlyKeysAffected(`basic reduce operation`, result.messages, [
+      assertOnlyKeysAffected(`basic reduce operation`, result.weightedDeltas, [
         `a`,
         `b`,
       ])
@@ -58,7 +58,7 @@ describe(`Operators`, () => {
           [`a`, 7], // 1*2 + 2*1 + 3*1 = 7
           [`b`, 9], // 4*1 + 5*1 = 9
         ],
-        4, // Expected message count
+        4, // Expected weighted delta count
       )
     })
 
@@ -96,7 +96,7 @@ describe(`Operators`, () => {
       // Assert only keys 'a' and 'b' are affected
       assertOnlyKeysAffected(
         `reduce with negative multiplicities`,
-        result.messages,
+        result.weightedDeltas,
         [`a`, `b`],
       )
 
@@ -108,7 +108,7 @@ describe(`Operators`, () => {
           [`a`, 3], // 1*(-1) + 2*2 = 3
           [`b`, -6], // 3*(-2) = -6
         ],
-        4, // Expected message count
+        4, // Expected weighted delta count
       )
     })
 
@@ -142,10 +142,11 @@ describe(`Operators`, () => {
       graph.run()
 
       const firstResult = tracker.getResult()
-      assertOnlyKeysAffected(`reduce first update`, firstResult.messages, [
-        `a`,
-        `b`,
-      ])
+      assertOnlyKeysAffected(
+        `reduce first update`,
+        firstResult.weightedDeltas,
+        [`a`, `b`],
+      )
       assertKeyedResults(
         `reduce first update`,
         firstResult,
@@ -153,7 +154,7 @@ describe(`Operators`, () => {
           [`a`, 1],
           [`b`, 2],
         ],
-        4, // Expected message count
+        4, // Expected weighted delta count
       )
 
       tracker.reset()
@@ -168,10 +169,11 @@ describe(`Operators`, () => {
       graph.run()
 
       const secondResult = tracker.getResult()
-      assertOnlyKeysAffected(`reduce second update`, secondResult.messages, [
-        `a`,
-        `b`,
-      ])
+      assertOnlyKeysAffected(
+        `reduce second update`,
+        secondResult.weightedDeltas,
+        [`a`, `b`],
+      )
       assertKeyedResults(
         `reduce second update`,
         secondResult,
@@ -179,7 +181,7 @@ describe(`Operators`, () => {
           [`a`, 4], // 1+3
           [`b`, 6], // 2+4
         ],
-        6, // Expected message count (old removed, new added for both keys)
+        6, // Expected weighted delta count (old removed, new added for both keys)
       )
 
       tracker.reset()
@@ -190,14 +192,18 @@ describe(`Operators`, () => {
 
       const thirdResult = tracker.getResult()
       // Only key 'a' should be affected, not 'b'
-      assertOnlyKeysAffected(`reduce third update`, thirdResult.messages, [`a`])
+      assertOnlyKeysAffected(
+        `reduce third update`,
+        thirdResult.weightedDeltas,
+        [`a`],
+      )
       assertKeyedResults(
         `reduce third update`,
         thirdResult,
         [
           [`a`, 3], // 4-1=3
         ],
-        3, // Expected message count (old removed, new added for key a)
+        3, // Expected weighted delta count (old removed, new added for key a)
       )
     })
 
@@ -245,7 +251,7 @@ describe(`Operators`, () => {
       // Assert only keys 'a' and 'b' are affected
       assertOnlyKeysAffected(
         `updates that cancel out completely`,
-        result.messages,
+        result.weightedDeltas,
         [`a`, `b`],
       )
 
@@ -257,7 +263,7 @@ describe(`Operators`, () => {
           [`a`, 0], // 5+3-5-3 = 0
           [`b`, 10], // 10 (unchanged)
         ],
-        6, // Expected message count
+        6, // Expected weighted delta count
       )
     })
 
@@ -308,7 +314,7 @@ describe(`Operators`, () => {
       // Assert only keys 'a', 'b', and 'c' are affected
       assertOnlyKeysAffected(
         `mixed positive and negative updates`,
-        result.messages,
+        result.weightedDeltas,
         [`a`, `b`, `c`],
       )
 
@@ -321,7 +327,7 @@ describe(`Operators`, () => {
           [`b`, 15], // 20-20+15 = 15
           [`c`, 100], // 100
         ],
-        8, // Expected message count
+        8, // Expected weighted delta count
       )
     })
 
@@ -382,7 +388,7 @@ describe(`Operators`, () => {
       // Assert only keys 'a' and 'b' are affected
       assertOnlyKeysAffected(
         `complex aggregation with multiple updates`,
-        result.messages,
+        result.weightedDeltas,
         [`a`, `b`],
       )
 
@@ -394,7 +400,7 @@ describe(`Operators`, () => {
           [`a`, { avg: 25, total: 50 }], // Final: (20*1+30*1)/(1+1) = 50/2 = 25
           [`b`, { avg: 50, total: 150 }], // Final: 50*3 = 150
         ],
-        6, // Expected message count
+        6, // Expected weighted delta count
       )
     })
 
@@ -442,7 +448,7 @@ describe(`Operators`, () => {
       // Assert only keys 'a' and 'b' are affected
       assertOnlyKeysAffected(
         `updates with zero-multiplicity results`,
-        result.messages,
+        result.weightedDeltas,
         [`a`, `b`],
       )
 
@@ -454,11 +460,11 @@ describe(`Operators`, () => {
           [`a`, 7], // Final: 5-3-2+7 = 7
           [`b`, 10], // Final: 10 (unchanged)
         ],
-        5, // Expected message count
+        5, // Expected weighted delta count
       )
     })
 
-    test(`reduce incremental updates - only affected keys produce messages`, () => {
+    test(`reduce incremental updates - only affected keys produce weighted deltas`, () => {
       const graph = new D2()
       const input = graph.newInput<[string, number]>()
       const tracker = new KeyedMessageTracker<string, number>()
@@ -506,10 +512,11 @@ describe(`Operators`, () => {
       const result = tracker.getResult()
 
       // Assert only keys 'x' and 'z' are affected (NOT 'y')
-      assertOnlyKeysAffected(`reduce incremental updates`, result.messages, [
-        `x`,
-        `z`,
-      ])
+      assertOnlyKeysAffected(
+        `reduce incremental updates`,
+        result.weightedDeltas,
+        [`x`, `z`],
+      )
 
       // Assert the final materialized results are correct
       assertKeyedResults(
@@ -519,11 +526,11 @@ describe(`Operators`, () => {
           [`x`, 60], // Sum increased from 30 to 60
           [`z`, 0], // Sum decreased from 100 to 0
         ],
-        4, // Expected message count: remove old 'x', add new 'x', remove old 'z', add new 'z'
+        4, // Expected weighted delta count: remove old 'x', add new 'x', remove old 'z', add new 'z'
       )
     })
 
-    test(`reduce with object identity - may produce messages for identical content`, () => {
+    test(`reduce with object identity - may produce weighted deltas for identical content`, () => {
       const graph = new D2()
       const input = graph.newInput<[string, { id: number; value: number }]>()
       const tracker = new KeyedMessageTracker<string, { result: number }>()
@@ -571,21 +578,21 @@ describe(`Operators`, () => {
 
       const result = tracker.getResult()
 
-      // With object identity: 'a' produces messages even though content is identical
+      // With object identity: 'a' produces weighted deltas even though content is identical
       // This demonstrates the object identity issue, but keysTodo should still limit processing
-      const aMessages = result.messages.filter(
+      const aDeltas = result.weightedDeltas.filter(
         ([[key, _value], _mult]) => key === `a`,
       )
-      expect(aMessages.length).toBe(2) // Object identity causes 2 messages (remove + add)
+      expect(aDeltas.length).toBe(2) // Object identity causes 2 weighted deltas (remove + add)
 
-      // But the messages cancel out due to identical content
+      // But the weighted deltas cancel out due to identical content
       assertKeyedResults(
         `reduce with object identity`,
         result,
         [
           [`b`, { result: 0 }], // Changed from 100 to 0
         ],
-        4, // With object identity: 4 messages total (2 for 'a', 2 for 'b')
+        4, // With object identity: 4 weighted deltas total (2 for 'a', 2 for 'b')
       )
     })
   })

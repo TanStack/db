@@ -37,7 +37,7 @@ import type { QueryIR } from '../../src/query/ir.js'
  * only when complete output bags—including lexical keys and multiplicity—match;
  * output-sensitive aliases remain part of identity.
  *
- * Fault drivers remove peers, collapse identity, corrupt aliases or weights,
+ * Result mutants remove peers, collapse identity, corrupt aliases or weights,
  * and require the checker to fail. This calibrates the implication that matters:
  * equal QueryIdentity implies equal compiled results, not merely equal hashes.
  *
@@ -57,7 +57,7 @@ type Form =
   | 'implicit-join'
   | 'implicit-union'
   | 'empty-group'
-type Fault =
+type ResultMutant =
   | 'alias'
   | 'missing-peer'
   | 'constant-identity'
@@ -93,7 +93,7 @@ async function runShapes(
   form: Form,
   aliases: [string, string, string, string],
   label: string,
-  fault?: Fault,
+  mutant?: ResultMutant,
 ) {
   const users = createCollection<User>({
     getKey: (row) => row.id,
@@ -192,7 +192,7 @@ async function runShapes(
             entry = { row, count: 0 }
             bag.push(entry)
           }
-          entry.count += fault === 'fractional-weight' ? weight * 1.25 : weight
+          entry.count += mutant === 'fractional-weight' ? weight * 1.25 : weight
         }
       }),
     )
@@ -240,7 +240,7 @@ async function runShapes(
         getQueryIdentity(left.query),
         getQueryIdentity(right.query),
       ]
-      if (fault === 'constant-identity') identities[1] = identities[0]!
+      if (mutant === 'constant-identity') identities[1] = identities[0]!
       expect(
         identities[0] === identities[1],
         'output-sensitive identity law',
@@ -269,9 +269,9 @@ async function runShapes(
         )
       }
       const check = (outputs: Array<Array<unknown>>, rows: Array<User>) => {
-        if (fault === 'alias') outputs[1]![0] = { wrongAlias: outputs[1]![0] }
-        if (fault === 'missing-peer') outputs[1]!.pop()
-        if (fault === 'shared-wrong-output') {
+        if (mutant === 'alias') outputs[1]![0] = { wrongAlias: outputs[1]![0] }
+        if (mutant === 'missing-peer') outputs[1]!.pop()
+        if (mutant === 'shared-wrong-output') {
           outputs[0] = [{ wrong: true }]
           outputs[1] = [{ wrong: true }]
         }
@@ -329,15 +329,15 @@ describe('query identity agrees with compiled lexical output shape', () => {
     'fractional-weight',
   ] as const)(
     'rejects captured %s against independent results',
-    async (fault) => {
-      const form = fault === 'missing-peer' ? 'explicit-join' : 'implicit-join'
+    async (mutant) => {
+      const form = mutant === 'missing-peer' ? 'explicit-join' : 'implicit-join'
       await runShapes(form, ['user', 'post', 'account', 'article'], 'author')
       await expect(
         runShapes(
           form,
           ['user', 'post', 'account', 'article'],
           'author',
-          fault,
+          mutant,
         ),
       ).rejects.toMatchObject({ name: 'AssertionError' })
     },

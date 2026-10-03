@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from 'vitest'
 import { createCollection } from '../src/collection/index.js'
 import { createDeferred } from '../src/deferred.js'
 import { Func, PropRef, Value } from '../src/query/ir.js'
-import { reentrantSnapshotHistories } from './collection-subscription-lifecycle-grammar.js'
+import { reentrantSnapshotHistories } from './collection-subscription-lifecycle-grammar-oracle.js'
 import type { LoadSubsetOptions, SyncConfig } from '../src/types.js'
 
 /**

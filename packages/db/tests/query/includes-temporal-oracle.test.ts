@@ -30,24 +30,27 @@ import type { TraceDriver, TraceProjection } from '../trace-runner.js'
 import type { Scheduler } from 'fast-check'
 
 /**
- * # Which child demand controls readiness and publication?
+ * # Which child acquisitions control initial-query readiness and publication?
  *
  * Parent routes can appear, disappear, and return. Their correlated child
  * demand changes with them. A settled Promise does not identify current work.
  * The model follows logical demand incarnations and applies these laws:
  *
- * 1. Every reachable child demand must settle before initial readiness.
- * 2. Demand that is no longer reachable cannot block readiness.
- * 3. An obsolete demand cannot publish rows or settle a later incarnation.
- * 4. A successful load settles only after its source writes are public.
+ * 1. Successful current acquisitions must cover every reachable child demand
+ *    before initial-query readiness, with their establishing sync writes applied.
+ * 2. Demand that is no longer reachable cannot block initial-query readiness.
+ * 3. An obsolete acquisition cannot publish request-scoped rows, satisfy
+ *    current demand, or complete the current preload.
+ * 4. A subset-load promise fulfills only after its establishing sync writes apply.
  * 5. Failure belongs to the demand that failed. Retired failure cannot poison
  *    a later demand or keep unrelated graph work private.
  * 6. Growth loads only uncovered keys. Churn replaces fragmented coverage only
  *    after the complete current union applies; failure preserves prior coverage.
  *
  * No one state machine mirrors the production controller. The file uses small
- * models for readiness, cancellation, scheduled completion, and progressive
- * delivery. Each model records only the public facts needed for its law.
+ * models for initial-query readiness, cancellation, acquisition promise
+ * settlement, and progressive delivery. Each model records only the public
+ * facts needed for its law.
  * "Demand incarnation" is a model label for one interval of active logical
  * demand on a route. Reactivation starts another interval; the label does not
  * imply one physical acquisition or one provider transport. The fast/late
@@ -57,9 +60,11 @@ import type { Scheduler } from 'fast-check'
  *
  * The production drivers use real Collections, compiled includes, applied
  * receipts, release callbacks, replay barriers, and source writes. They observe
- * readiness, preload settlement, visible rows, request keys, release signals,
- * and errors at each named boundary. The live-query architecture remains the
- * contract source.
+ * live-query Collection readiness, preload settlement, visible rows, request
+ * keys, release signals, and errors at each named boundary. Observation fields
+ * named `ready` record `live.isReady()`; `preloadSettled` records whether the
+ * preload promise fulfilled or rejected. The live-query architecture remains
+ * the contract source.
  *
  * The fragmented-demand lanes observe requested key unions and adapter abort
  * signals before settlement and after success, rejection, retry, or
@@ -897,7 +902,7 @@ it.each(
   },
 )
 
-// Model A: initial readiness depends only on currently reachable demand.
+// Model A: initial-query readiness depends only on currently reachable demand.
 type ReadinessObservation = {
   ready: boolean
   preloadSettled: boolean
@@ -999,8 +1004,8 @@ async function expectReadinessMatches(
   })
 }
 
-// Model B: retiring the only route removes its child load from readiness, even
-// when the physical acquisition cannot settle yet.
+// Model B: retiring the only route removes its child acquisition from
+// initial-query readiness, even when that acquisition's promise is pending.
 type DemandCancellationObservation = {
   ready: boolean
   rowCount: number
@@ -1158,7 +1163,7 @@ async function expectObsoleteDemandDoesNotBlockReadiness(): Promise<void> {
   })
 }
 
-async function expectObsoleteDemandCannotPublishAfterReactivation(): Promise<void> {
+async function expectObsoleteAcquisitionCannotPublishAfterReactivation(): Promise<void> {
   const { collection: posts, remove, add } = createRemovablePost()
   const requests: Array<{
     deferred: Deferred<void>
@@ -1246,11 +1251,11 @@ async function expectObsoleteDemandCannotPublishAfterReactivation(): Promise<voi
   ])
 }
 
-async function expectScheduledDemandCompletionsStayGenerationSafe(
+async function expectScheduledAcquisitionsRespectCurrentDemand(
   scheduler: Scheduler,
 ): Promise<void> {
-  // The scheduler changes only completion order. Request generations decide
-  // whether a completion can publish.
+  // The scheduler changes only acquisition promise settlement order. An aborted
+  // acquisition cannot publish request-scoped rows for the reactivated demand.
   const { collection: posts, remove, add } = createRemovablePost()
   const requests: Array<{
     outcome: Promise<void>
@@ -1355,8 +1360,8 @@ type ScheduledDemandObservation = {
   rows: Array<{ id: number; comments: Array<{ id: number; body: string }> }>
 }
 
-// The public row is determined by whether the current demand completed. An
-// obsolete completion alone cannot add its child row.
+// The public row depends on whether the current acquisition's promise fulfilled.
+// An obsolete acquisition's settlement alone cannot add its child row.
 function expectScheduledDemandObservation(
   observation: ScheduledDemandObservation,
   index: number,
@@ -1751,7 +1756,7 @@ function expectContradictoryReplacementStartCrashes(): void {
   expect(releaseSnapshot).not.toHaveBeenCalled()
 }
 
-async function expectObsoleteDemandCannotSettleReactivatedDemand(): Promise<void> {
+async function expectObsoleteAcquisitionCannotCompleteCurrentPreload(): Promise<void> {
   const post = { id: 1, authorId: `selected`, title: `one` }
   const posts = createMutablePosts([post], { markReadyInitially: false })
   const { collection: comments, requests } = createPendingComments()
@@ -2286,8 +2291,9 @@ type FastPathEvent = {
   keys: Array<number>
 }
 
-// Model C: progressive rows can publish before demand settles. The load still
-// starts inside the initial fast-path window and readiness waits for settlement.
+// Model C: progressive rows can publish while the acquisition promise is pending.
+// The load starts inside the initial fast-path phase; initial-query readiness
+// waits for fulfillment.
 type ProgressiveObservation = {
   events: Array<FastPathEvent>
   ready: boolean
@@ -2550,13 +2556,13 @@ describe(`includes temporal oracle`, () => {
   })
 
   it(
-    `obsolete child demand does not block readiness`,
+    `retired child demand does not block initial-query readiness`,
     expectObsoleteDemandDoesNotBlockReadiness,
   )
 
   it(
-    `obsolete child demand cannot publish after the route is reactivated`,
-    expectObsoleteDemandCannotPublishAfterReactivation,
+    `an obsolete child acquisition cannot publish after the route is reactivated`,
+    expectObsoleteAcquisitionCannotPublishAfterReactivation,
   )
 
   // Grammar: one route is retired and reactivated, leaving one obsolete and
@@ -2571,17 +2577,15 @@ describe(`includes temporal oracle`, () => {
     1_658_301,
   )) {
     campaign.test.prop([demandScheduler], campaign.options)(
-      `obsolete and current demand completions are generation-safe with ${campaign.label}`,
-      expectScheduledDemandCompletionsStayGenerationSafe,
+      `acquisition settlements preserve current demand with ${campaign.label}`,
+      expectScheduledAcquisitionsRespectCurrentDemand,
     )
   }
 
   it.each([{ order: [1, 2] }, { order: [2, 1] }])(
     `observes every completion in fixed scheduler order $order`,
     ({ order }) =>
-      expectScheduledDemandCompletionsStayGenerationSafe(
-        fc.schedulerFor(order),
-      ),
+      expectScheduledAcquisitionsRespectCurrentDemand(fc.schedulerFor(order)),
   )
 
   it(`rejects an obsolete child row at the first scheduled checkpoint`, () => {
@@ -2598,7 +2602,7 @@ describe(`includes temporal oracle`, () => {
   })
 
   it(
-    `retained pending demand blocks readiness after demand expands`,
+    `retained demand with a pending acquisition blocks initial-query readiness after demand expands`,
     expectRetainedDemandBlocksReadiness,
   )
 
@@ -2622,8 +2626,8 @@ describe(`includes temporal oracle`, () => {
   )
 
   it(
-    `obsolete demand cannot settle a reactivated demand incarnation`,
-    expectObsoleteDemandCannotSettleReactivatedDemand,
+    `an obsolete acquisition cannot complete preload for reactivated demand`,
+    expectObsoleteAcquisitionCannotCompleteCurrentPreload,
   )
 
   it(`rejected demand enters error`, expectRejectedDemandEntersError)
@@ -2699,8 +2703,8 @@ describe(`includes temporal oracle`, () => {
   it(`a nested progressive subset loads inside the fast-path window`, () =>
     expectProgressiveTraceMatches(`nested`))
 
-  // Grammar: one parent receives 2..4 distinct-key children before its held
-  // demand settles; a sibling stays empty. Every prefix, including zero, is a
+  // Grammar: one parent receives 2..4 distinct-key children while its acquisition
+  // promise is pending; a sibling stays empty. Every prefix, including zero, is a
   // public checkpoint in both inline forms. The two-child minimum reconstructs
   // the first partial prefix and its continuation. Removing the hold loses the
   // before-settlement law; removing the empty sibling loses its empty-value
@@ -2716,7 +2720,7 @@ describe(`includes temporal oracle`, () => {
     1_658_303,
   )) {
     campaign.test.prop([partialBodies], campaign.options)(
-      `publishes each partial child prefix before demand settles with ${campaign.label}`,
+      `publishes each partial child prefix before the acquisition promise fulfills with ${campaign.label}`,
       async (bodies) => {
         for (const form of [`array`, `materialized`] as const) {
           const parents = createMutablePosts([

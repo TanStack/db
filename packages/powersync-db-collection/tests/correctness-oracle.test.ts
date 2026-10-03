@@ -305,13 +305,13 @@ describePowerSync(`PowerSync correctness oracle`, () => {
         changes: {},
       }
       const transactor = new PowerSyncTransactor({ database: db })
-      let settled = false
+      let persistenceFulfilled = false
       const persistence = transactor
         .applyTransaction({
           mutations: [effective, trailingNoop],
         } as never)
         .then(() => {
-          settled = true
+          persistenceFulfilled = true
         })
 
       await vi.waitFor(async () => {
@@ -322,11 +322,11 @@ describePowerSync(`PowerSync correctness oracle`, () => {
         ).toEqual({ done: 1 })
       })
       for (let turn = 0; turn < 10; turn++) await Promise.resolve()
-      expect(settled).toBe(false)
+      expect(persistenceFulfilled).toBe(false)
 
       await heldChanges.flush()
       await persistence
-      expect(settled).toBe(true)
+      expect(persistenceFulfilled).toBe(true)
     } catch (error) {
       failure = { error }
       throw error
@@ -473,11 +473,11 @@ describePowerSync(`PowerSync correctness oracle`, () => {
         metadata,
       }
       const transactor = new PowerSyncTransactor({ database: db })
-      let settled = false
+      let persistenceFulfilled = false
       const persistence = transactor
         .applyTransaction({ mutations: [metadataOnly] } as never)
         .then(() => {
-          settled = true
+          persistenceFulfilled = true
         })
 
       await vi.waitFor(async () => {
@@ -485,11 +485,11 @@ describePowerSync(`PowerSync correctness oracle`, () => {
         expect(batch?.crud.at(-1)?.metadata).toBe(JSON.stringify(metadata))
       })
       for (let turn = 0; turn < 10; turn++) await Promise.resolve()
-      expect(settled).toBe(false)
+      expect(persistenceFulfilled).toBe(false)
 
       await heldChanges.flush()
       await persistence
-      expect(settled).toBe(true)
+      expect(persistenceFulfilled).toBe(true)
     } catch (error) {
       failure = { error }
       throw error

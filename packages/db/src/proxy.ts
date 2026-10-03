@@ -270,7 +270,7 @@ function deepClone<T extends unknown>(
   }
 
   // Arbitrary instances may carry private/native state we cannot reconstruct.
-  // Keep them by reference at publication, rather than silently flattening them.
+  // Keep them by reference when detaching a change set.
   if (detach) {
     const prototype = Object.getPrototypeOf(obj)
     if (prototype !== Object.prototype && prototype !== null) return obj

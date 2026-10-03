@@ -11,11 +11,11 @@ import {
 import { captureHashSession } from './hash-session'
 
 /**
- * # Which values do structural hashing and structural equality identify?
+ * # Which values share D2 value identity?
  *
  * `hash` fingerprints a value, and `equalHashValues` compares two values
  * without a digest (`topKBatch` uses it to cancel a retraction against its
- * replacement). Both use one value identity:
+ * replacement). Both use D2 value identity:
  *
  * 1. **Primitives** compare by value. `-0` equals `0`, `NaN` equals `NaN`,
  *    and a bigint differs from the number with the same text. Symbols compare

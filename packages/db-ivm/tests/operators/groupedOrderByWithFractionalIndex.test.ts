@@ -163,7 +163,7 @@ describe(`Operators`, () => {
       )
       expect(initialValues).toEqual([1, 3])
 
-      const initialMessageCount = initialResult.messageCount
+      const initialDeltaCount = initialResult.deltaCount
 
       // Insert a better value (0) which should evict value 3
       input.sendData(
@@ -174,8 +174,8 @@ describe(`Operators`, () => {
       graph.run()
 
       const updateResult = tracker.getResult(compareFractionalIndex)
-      // Should have 2 new messages: add 0, remove 3
-      expect(updateResult.messageCount - initialMessageCount).toBe(2)
+      // Should have 2 new weighted deltas: add 0, remove 3
+      expect(updateResult.deltaCount - initialDeltaCount).toBe(2)
 
       // Check final state (cumulative)
       const sortedFinalResults = sortByKeyAndIndex(updateResult.sortedResults)
@@ -217,7 +217,7 @@ describe(`Operators`, () => {
       )
       graph.run()
 
-      const initialMessageCount = tracker.getResult().messageCount
+      const initialDeltaCount = tracker.getResult().deltaCount
 
       // Remove the element with value 1 (which is in topK)
       input.sendData(
@@ -228,8 +228,8 @@ describe(`Operators`, () => {
       graph.run()
 
       const updateResult = tracker.getResult(compareFractionalIndex)
-      // Should have 2 new messages: remove 1, add 5
-      expect(updateResult.messageCount - initialMessageCount).toBe(2)
+      // Should have 2 new weighted deltas: remove 1, add 5
+      expect(updateResult.deltaCount - initialDeltaCount).toBe(2)
 
       // Final state should have values 3 and 5
       const sortedFinalResults = sortByKeyAndIndex(updateResult.sortedResults)
@@ -315,27 +315,27 @@ describe(`Operators`, () => {
 
       const updateResult = tracker.getResult()
 
-      // Should have exactly 2 messages: one removal and one addition
-      expect(updateResult.messages.length).toBe(2)
+      // Should have exactly 2 weighted deltas: one removal and one addition
+      expect(updateResult.weightedDeltas.length).toBe(2)
 
-      // Find the removal message (multiplicity -1) and addition message (multiplicity 1)
-      const removalMessage = updateResult.messages.find(
+      // Find the removal delta (multiplicity -1) and addition delta (multiplicity 1)
+      const removalDelta = updateResult.weightedDeltas.find(
         ([_item, mult]) => mult === -1,
       )
-      const additionMessage = updateResult.messages.find(
+      const additionDelta = updateResult.weightedDeltas.find(
         ([_item, mult]) => mult === 1,
       )
 
-      expect(removalMessage).toBeDefined()
-      expect(additionMessage).toBeDefined()
+      expect(removalDelta).toBeDefined()
+      expect(additionDelta).toBeDefined()
 
       // Check that removal is for value 20 (g1-b)
-      const [_removalKey, [removalValue, _removalIdx]] = removalMessage![0]
+      const [_removalKey, [removalValue, _removalIdx]] = removalDelta![0]
       expect(removalValue.value).toBe(20)
       expect(removalValue.id).toBe(`g1-b`)
 
       // Check that addition is for value 5 (g1-c)
-      const [_additionKey, [additionValue, additionIdx]] = additionMessage![0]
+      const [_additionKey, [additionValue, additionIdx]] = additionDelta![0]
       expect(additionValue.value).toBe(5)
       expect(additionValue.id).toBe(`g1-c`)
 
