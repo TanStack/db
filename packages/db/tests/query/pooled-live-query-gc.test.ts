@@ -126,9 +126,8 @@ describe(`pooled live query gcTime`, () => {
     )
     expect(compiledKeys).toEqual([`b`, `c`])
     expect(
-      await run(
-        (source) =>
-          createPooledLiveQuery(query(source)(new Query()), { gcTime: 1 })!,
+      await run((source) =>
+        createPooledLiveQuery(query(source)(new Query()), { gcTime: 1 })!,
       ),
     ).toEqual(compiledKeys)
   })

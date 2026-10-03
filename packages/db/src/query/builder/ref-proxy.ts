@@ -39,9 +39,8 @@ type SingleRowField<V, TKey extends string | number> = [
 ] extends [never]
   ? RefLeaf<V>
   : IsPlainObject<NonNullable<V>> extends true
-    ?
-        | SingleRowRefProxy<NonNullable<V>, TKey, false>
-        | Extract<V, null | undefined>
+    ? | SingleRowRefProxy<NonNullable<V>, TKey, false>
+      | Extract<V, null | undefined>
     : RefLeaf<V>
 
 /**
