@@ -2,6 +2,7 @@ import { fc, test as fcTest } from '@fast-check/vitest'
 import { describe, expect, it } from 'vitest'
 import { createCollection } from '../../src/collection/index.js'
 import { createDeferred } from '../../src/deferred.js'
+import { LoadSubsetOperationAbortedError } from '../../src/errors.js'
 import { createOptimisticAction } from '../../src/optimistic-action.js'
 import { createLiveQueryCollection, eq } from '../../src/query/index.js'
 import { Func, PropRef, Value } from '../../src/query/ir.js'
@@ -936,6 +937,9 @@ async function expectAbortedReceiptDoesNotSettleDemand(
       const applied = commit(signal)
       committed.resolve()
       if (applied !== true) await applied
+      // Source contract: accepted rows apply, but a caller that aborted sees
+      // `AbortError`.
+      if (signal?.aborted) throw new LoadSubsetOperationAbortedError()
     },
   })
   let begin!: () => void
@@ -975,9 +979,11 @@ async function expectAbortedReceiptDoesNotSettleDemand(
     controller.abort()
     persistence.resolve()
     await transaction.isPersisted.promise
-    // An accepted transaction always applies: an abort while it is parked
-    // has no effect, and its row publishes when the mutation settles.
-    await first
+    // An accepted transaction always applies, so the row publishes when the
+    // mutation settles. A caller that aborted still sees `AbortError`.
+    if (abortPhase === `while-parked`)
+      await expect(first).rejects.toMatchObject({ name: `AbortError` })
+    else await first
     expect(transportCalls).toBe(1)
     if (abortPhase === `while-parked`)
       expect(source.get(`row`)).toEqual(expect.objectContaining({ id: `row` }))
@@ -1681,7 +1687,7 @@ describe(`loadSubset application and cancellation`, () => {
   })
 
   it.each([`before-commit`, `while-parked`] as const)(
-    `settles a demand by its acceptance when its receipt is aborted %s`,
+    `rejects an aborted demand and keeps its accepted rows when aborted %s`,
     expectAbortedReceiptDoesNotSettleDemand,
   )
 

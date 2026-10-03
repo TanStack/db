@@ -743,6 +743,9 @@ function createLoadSubsetDedupe<T extends Row<unknown>>({
         }
         throw error
       }
+      // Rows accepted before an abort still apply, but the caller that
+      // aborted sees `AbortError`.
+      throwIfAborted()
       return
     }
 

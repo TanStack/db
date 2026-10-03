@@ -201,8 +201,11 @@ write({ type: `update`, value: row, previousValue })
 
 For request-scoped writes, pass the request's abort signal to `commit(signal)`.
 If the signal has already aborted, the transaction is abandoned and the receipt
-rejects with `AbortError`. An accepted transaction ignores a later abort. Do not
-attach one request's signal to a shared stream transaction.
+rejects with `AbortError`. An accepted transaction ignores a later abort: its
+rows apply. To discard a stale page, check the signal before `commit()`. If the
+caller aborted after the page was accepted, the rows still apply, but reject the
+load with `AbortError` once its receipt resolves. Do not attach one request's
+signal to a shared stream transaction.
 
 If an adapter supplies `unloadSubset`, release only the acquisition belonging to
 the supplied options. Release must be idempotent and non-throwing; the adapter

@@ -1,6 +1,9 @@
 /* eslint-disable @typescript-eslint/no-unnecessary-condition */
 import { Store } from '@tanstack/store'
-import { withCollectionConfigFactory } from '@tanstack/db'
+import {
+  LoadSubsetOperationAbortedError,
+  withCollectionConfigFactory,
+} from '@tanstack/db'
 import {
   ExpectedDeleteTypeError,
   ExpectedInsertTypeError,
@@ -258,11 +261,13 @@ export function trailBaseCollectionOptions<
             })
           }
 
+          // Check the signal before commit to discard a stale page: an
+          // accepted page always applies.
           const applied = commit(opts.signal)
           if (applied !== true) {
             appliedPages.push(applied)
           }
-          if (cancelled || opts.signal?.aborted) return
+          if (cancelled || opts.signal?.aborted) break
 
           remaining -= length
 
@@ -286,6 +291,9 @@ export function trailBaseCollectionOptions<
         }
 
         await Promise.all(appliedPages)
+        // An accepted page applies, but a caller that aborted still sees
+        // `AbortError`.
+        if (opts.signal?.aborted) throw new LoadSubsetOperationAbortedError()
       }
 
       // Afterwards subscribe.

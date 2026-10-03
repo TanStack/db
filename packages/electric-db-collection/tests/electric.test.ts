@@ -3331,8 +3331,8 @@ describe(`Electric Integration`, () => {
     })
 
     // A commit that core accepted always applies. Aborting the request after
-    // its snapshot committed cannot withdraw those rows.
-    it(`publishes an accepted progressive snapshot whose request aborts while it waits`, async () => {
+    // its snapshot committed cannot withdraw those rows, but the load rejects.
+    it(`publishes an accepted progressive snapshot and rejects its aborted load`, async () => {
       mockFetchSnapshot.mockResolvedValue({
         metadata: {},
         data: [
@@ -3378,7 +3378,10 @@ describe(`Electric Integration`, () => {
         abortController.abort()
         persistence.resolve()
         await transaction.isPersisted.promise
-        if (load instanceof Promise) await load.catch(() => undefined)
+        // The accepted snapshot applies, but the aborted caller sees
+        // `AbortError`.
+        if (load === true) throw new Error(`Expected a pending subset load`)
+        await expect(load).rejects.toMatchObject({ name: `AbortError` })
 
         expect(testCollection.has(2)).toBe(true)
       } finally {
