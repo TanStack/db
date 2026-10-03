@@ -47,9 +47,9 @@ function TodoList() {
 
 **Note:** The accessor also exposes reactive properties: `query.state` (a `ReactiveMap` keyed by result key), `query.collection`, `query.status`, `query.isReady`, `query.isError`, and the persisted-readiness trio `query.persistedStatus` / `query.isPersistedReady` / `query.persistedError`.
 
-### Opt-in Suspense with whenReady
+### Opt-in Suspense with suspense
 
-Data reads never suspend. To gate rendering on first data, read `query.whenReady()` inside a `<Loading>` boundary — it throws `NotReadyError` until the query passes its initial-render gate (network ready, or a permitted persisted fallback), then returns the rows exactly like `query()`. Errors flow to `<Errored>`:
+Data reads never suspend. To gate rendering on first data, read `query.suspense()` inside a `<Loading>` boundary — it throws `NotReadyError` until the query passes its initial-render gate (network ready, or a permitted persisted fallback), then returns the rows exactly like `query()`. Errors flow to `<Errored>`:
 
 ```tsx
 import { Loading, Errored } from '@solidjs/web'
@@ -60,7 +60,7 @@ function TodoList() {
   return (
     <Errored fallback={(err) => <div>Error: {String(err())}</div>}>
       <Loading fallback={<div>Loading...</div>}>
-        <For each={query.whenReady()}>
+        <For each={query.suspense()}>
           {(todo) => <li>{todo.text}</li>}
         </For>
       </Loading>
@@ -73,13 +73,13 @@ Once content has rendered, revalidation keeps it visible — no fallback flash w
 
 ### isPending for revalidation progress
 
-Solid v2's `isPending` reads the `whenReady` accessor to report an in-flight change without a boundary:
+Solid v2's `isPending` reads the `suspense` accessor to report an in-flight change without a boundary:
 
 ```tsx
 import { isPending } from 'solid-js'
 
 // True while a changed input's new collection is loading:
-{isPending(() => query.whenReady()) && <Spinner />}
+{isPending(() => query.suspense()) && <Spinner />}
 ```
 
 ### Reactive Queries with Signals
