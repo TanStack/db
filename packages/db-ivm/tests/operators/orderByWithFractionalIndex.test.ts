@@ -510,8 +510,7 @@ describe(`Operators`, () => {
       >()
 
       let windowFn:
-        | ((options: { offset?: number; limit?: number }) => void)
-        | undefined
+        ((options: { offset?: number; limit?: number }) => void) | undefined
 
       input.pipe(
         orderByWithFractionalIndex((item) => item.value, {
@@ -584,8 +583,7 @@ describe(`Operators`, () => {
       >()
 
       let windowFn:
-        | ((options: { offset?: number; limit?: number }) => void)
-        | undefined
+        ((options: { offset?: number; limit?: number }) => void) | undefined
 
       input.pipe(
         orderByWithFractionalIndex((item) => item.value, {
@@ -658,8 +656,7 @@ describe(`Operators`, () => {
       >()
 
       let windowFn:
-        | ((options: { offset?: number; limit?: number }) => void)
-        | null = null
+        ((options: { offset?: number; limit?: number }) => void) | null = null
 
       input.pipe(
         orderByWithFractionalIndex((item) => item.value, {
@@ -747,8 +744,7 @@ describe(`Operators`, () => {
       >()
 
       let windowFn:
-        | ((options: { offset?: number; limit?: number }) => void)
-        | null = null
+        ((options: { offset?: number; limit?: number }) => void) | null = null
 
       input.pipe(
         orderByWithFractionalIndex((item) => item.value, {
@@ -826,8 +822,7 @@ describe(`Operators`, () => {
       >()
 
       let windowFn:
-        | ((options: { offset?: number; limit?: number }) => void)
-        | null = null
+        ((options: { offset?: number; limit?: number }) => void) | null = null
 
       input.pipe(
         orderByWithFractionalIndex((item) => item.value, {

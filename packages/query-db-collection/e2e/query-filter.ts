@@ -89,14 +89,12 @@ function validateRequest(options: LoadSubsetOptions): void {
         throw new Error(`Unsupported Query test-backend empty reference`)
       return
     }
-    if (
-      !(
-        (unary.has(expression.name) && expression.args.length === 1) ||
-        (binary.has(expression.name) && expression.args.length === 2) ||
-        expression.name === `and` ||
-        expression.name === `or`
-      )
-    )
+    if (!(
+      (unary.has(expression.name) && expression.args.length === 1) ||
+      (binary.has(expression.name) && expression.args.length === 2) ||
+      expression.name === `and` ||
+      expression.name === `or`
+    ))
       throw new Error(
         `Unsupported Query test-backend expression: ${expression.name}`,
       )

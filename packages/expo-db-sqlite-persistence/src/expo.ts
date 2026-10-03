@@ -17,13 +17,10 @@ import type { ExpoSQLiteDatabaseLike } from './expo-sqlite-driver'
 export type { ExpoSQLiteDatabaseLike } from './expo-sqlite-driver'
 
 type ExpoSQLiteCoreSchemaMismatchPolicy =
-  | `sync-present-reset`
-  | `sync-absent-error`
-  | `reset`
+  `sync-present-reset` | `sync-absent-error` | `reset`
 
 export type ExpoSQLiteSchemaMismatchPolicy =
-  | ExpoSQLiteCoreSchemaMismatchPolicy
-  | `throw`
+  ExpoSQLiteCoreSchemaMismatchPolicy | `throw`
 
 export type ExpoSQLitePersistenceOptions = Omit<
   SQLiteCoreAdapterOptions,
