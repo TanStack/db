@@ -4896,6 +4896,57 @@ describe(`QueryCollection`, () => {
       },
     )
 
+    // A refetch that fetched before a handler wrote the server row must not
+    // overwrite that newer row when its older result applies afterward.
+    it(`keeps a handler's direct write over an older in-flight refetch result`, async () => {
+      type Row = { id: string; value: number }
+      let server: Row = { id: `row`, value: 1 }
+      const fetches: Array<ReturnType<typeof createDeferred<Array<Row>>>> = []
+      let holdFetches = false
+      const collection = createCollection(
+        queryCollectionOptions<Row>({
+          id: `stale-refetch-after-direct-write`,
+          queryKey: [`stale-refetch-after-direct-write`],
+          queryFn: () => {
+            const snapshot = [{ ...server }]
+            if (!holdFetches) return Promise.resolve(snapshot)
+            const fetch = createDeferred<Array<Row>>()
+            fetches.push(fetch)
+            return fetch.promise.then(() => snapshot)
+          },
+          queryClient,
+          getKey: (row) => row.id,
+          startSync: true,
+          onUpdate: async ({ collection: handlerCollection }) => {
+            server = { id: `row`, value: 3 }
+            await handlerCollection.utils.writeUpsert({ ...server })
+            return { refetch: false }
+          },
+        }),
+      )
+
+      try {
+        await collection.preload()
+        holdFetches = true
+        server = { id: `row`, value: 2 }
+        const refetch = collection.utils.refetch()
+        await vi.waitFor(() => expect(fetches).toHaveLength(1))
+
+        await collection.update(`row`, (draft) => {
+          draft.value = 0
+        }).isPersisted.promise
+        expect(collection.get(`row`)?.value).toBe(3)
+
+        fetches[0]!.resolve([])
+        await refetch
+        await flushPromises()
+        expect(collection.get(`row`)?.value).toBe(3)
+      } finally {
+        fetches.forEach((fetch) => fetch.resolve([]))
+        await collection.cleanup()
+      }
+    })
+
     it(`waits for persisted direct writes and batch writes`, async () => {
       type Row = { id: string; name: string }
       const initial: Row = { id: `base`, name: `Initial` }
@@ -7226,7 +7277,7 @@ describe(`QueryCollection`, () => {
           ...baseOptions,
           sync: {
             sync: (params: Parameters<typeof originalSync.sync>[0]) => {
-              params.begin({ immediate: true })
+              params.begin()
               params.write({ type: `insert`, value: retainedRow })
               params.commit()
               return originalSync.sync({
@@ -7266,6 +7317,10 @@ describe(`QueryCollection`, () => {
       // the observer since another subscription still needs it
 
       const baseQueryKey = [`refcount-bug-test`]
+      let persistInsert!: () => void
+      const insertPersisted = new Promise<void>((resolve) => {
+        persistInsert = resolve
+      })
       const items: Array<CategorisedItem> = [
         { id: `1`, name: `Item 1`, category: `A` },
         { id: `2`, name: `Item 2`, category: `A` },
@@ -7282,7 +7337,9 @@ describe(`QueryCollection`, () => {
         getKey: (item) => item.id,
         startSync: true,
         syncMode: `on-demand`,
-        onInsert: () => Promise.resolve({ refetch: false }),
+        // Keep the insert persisting while query2 observes it; its
+        // optimistic row drops when the handler returns.
+        onInsert: () => insertPersisted.then(() => ({ refetch: false })),
       }
 
       const options = queryCollectionOptions(config)
@@ -7342,7 +7399,6 @@ describe(`QueryCollection`, () => {
           name: `Item 4`,
           category: `A`,
         })
-        await inserted.isPersisted.promise
         await vi.waitFor(() => {
           expect(collection.size).toBe(4)
           expect(collection.has(`4`)).toBe(true)
@@ -7351,6 +7407,8 @@ describe(`QueryCollection`, () => {
           ...initial,
           { id: `4`, name: `Item 4` },
         ])
+        persistInsert()
+        await inserted.isPersisted.promise
         expect(queryFn).toHaveBeenCalledTimes(1)
         queryFn.mockResolvedValue([
           { id: `1`, name: `Provider changed`, category: `A` },
@@ -7541,7 +7599,7 @@ describe(`QueryCollection`, () => {
         ...baseOptions,
         sync: {
           sync: (params: Parameters<typeof originalSync.sync>[0]) => {
-            params.begin({ immediate: true })
+            params.begin()
             params.write({ type: `insert`, value: ownedRow })
             params.write({ type: `insert`, value: unrelatedRow })
             params.commit()
@@ -7699,7 +7757,7 @@ describe(`QueryCollection`, () => {
         ...baseOptions,
         sync: {
           sync: (params: Parameters<typeof originalSync.sync>[0]) => {
-            params.begin({ immediate: true })
+            params.begin()
             params.write({ type: `insert`, value: orphanRow })
             params.write({ type: `insert`, value: sharedRow })
             params.commit()
@@ -7778,7 +7836,7 @@ describe(`QueryCollection`, () => {
         ...baseOptions,
         sync: {
           sync: (params: Parameters<typeof originalSync.sync>[0]) => {
-            params.begin({ immediate: true })
+            params.begin()
             params.write({ type: `insert`, value: retainedRow })
             params.commit()
 
@@ -11066,7 +11124,7 @@ describe(`QueryCollection`, () => {
           sync: (params: Parameters<typeof originalSync.sync>[0]) => {
             // Simulate a persistence layer hydrating rows from a previous
             // session on warm start, before the query layer initializes.
-            params.begin({ immediate: true })
+            params.begin()
             for (const item of preHydratedItems) {
               params.write({ type: `insert`, value: item })
             }

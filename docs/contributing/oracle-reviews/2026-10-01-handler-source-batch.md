@@ -84,3 +84,12 @@ On `3ab428439`, with the built `dist`:
   `pnpm test:minified-db` pass.
 - Package unit tests: `query-db-collection` 558, `electric-db-collection` 629,
   `offline-transactions` 73.
+
+## Note added 2026-10-03
+
+The settlement contract changed after this record. A transaction's optimistic
+state now drops when its mutation function settles. A source batch written
+inside the handler is held and publishes with that drop, and it is
+`$origin: 'local'` because it was committed while the transaction persisted.
+A write committed after settlement is `'remote'`. The evidence above is
+historical.

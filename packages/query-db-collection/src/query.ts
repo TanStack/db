@@ -1009,6 +1009,10 @@ export function queryCollectionOptions(
     string,
     { data: unknown; dataUpdateCount: number }
   >()
+  // An eager fetch that started before a direct write returns older server
+  // data. Count direct writes, and record the count when each fetch starts.
+  let directWriteGeneration = 0
+  const fetchStartGenerations = new Map<string, number>()
 
   // queryKey → reference count (how many loadSubset calls are active)
   // Reference counting for QueryObserver lifecycle management
@@ -1863,7 +1867,16 @@ export function queryCollectionOptions(
         }),
         ...initialDataObserverOptions,
         queryKey: key,
-        queryFn: queryFunction,
+        queryFn:
+          syncMode === `on-demand`
+            ? queryFunction
+            : (context: Parameters<typeof queryFunction>[0]) => {
+                fetchStartGenerations.set(
+                  hashKey(context.queryKey),
+                  directWriteGeneration,
+                )
+                return queryFunction(context)
+              },
         meta: extendedMeta,
         structuralSharing: true,
         notifyOnChangeProps: `all`,
@@ -2371,6 +2384,26 @@ export function queryCollectionOptions(
             }
             requiredFetchStarts.delete(hashedQueryKey)
           }
+        }
+        if (
+          syncMode !== `on-demand` &&
+          result.isSuccess &&
+          !result.isFetching &&
+          (fetchStartGenerations.get(hashedQueryKey) ?? directWriteGeneration) <
+            directWriteGeneration
+        ) {
+          // This fetch started before a direct write, so its rows are older
+          // than the accepted rows. Put the accepted rows back in the cache
+          // instead of applying it.
+          fetchStartGenerations.set(hashedQueryKey, directWriteGeneration)
+          updateCacheDataForKey(
+            queryKey,
+            Array.from(
+              collection._state.acceptedSyncedEntries(),
+              ([, row]) => row,
+            ),
+          )
+          return
         }
         if (result.isSuccess) {
           // Skip processing this result while data refreshes are deferred.
@@ -3171,6 +3204,13 @@ export function queryCollectionOptions(
    * Eager collections retain their single full-result cache patch.
    */
   const updateCacheData = (getItems: () => Array<any>): void => {
+    directWriteGeneration++
+    // Only a fetch already in flight can return rows older than this write.
+    // On-demand queries revalidate through post-write authority instead.
+    for (const [hashedQueryKey, observer] of state.observers) {
+      if (observer.getCurrentQuery().state.fetchStatus !== `fetching`)
+        fetchStartGenerations.set(hashedQueryKey, directWriteGeneration)
+    }
     if (syncMode === `on-demand`) {
       const deferredRefresh = writeContext?.collection.deferDataRefresh
       const revalidatingQueries = new Set<AnyQuery>()

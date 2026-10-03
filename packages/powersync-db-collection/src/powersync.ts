@@ -1,10 +1,10 @@
 import { DiffTriggerOperation, LogLevels, sanitizeSQL } from '@powersync/common'
-import { or, withCollectionConfigFactory } from '@tanstack/db'
+import { or, whenSyncAccepted, withCollectionConfigFactory } from '@tanstack/db'
 import { compileSQLite } from './sqlite-compiler'
 import { PendingOperationStore } from './PendingOperationStore'
 import { PowerSyncTransactor } from './PowerSyncTransactor'
 import { DEFAULT_BATCH_SIZE } from './definitions'
-import { asPowerSyncRecord, mapOperation } from './helpers'
+import { asPowerSyncRecord, mapOperation, startupAccepted } from './helpers'
 import { convertTableToSchema } from './schema'
 import { serializeForSQLite } from './serialization'
 import type {
@@ -588,6 +588,11 @@ function createPowerSyncCollectionConfig<
         let onUnload: CleanupFn | void | null = null
         let onUnloadStarted = false
 
+        let acceptStartup!: () => void
+        const accepted = new Promise<void>((resolve) => {
+          acceptStartup = resolve
+        })
+        startupAccepted.set(collection, accepted)
         const startup = start(async () => {
           const cleanup = await restConfig.onLoad?.()
           onUnload = cleanup
@@ -616,6 +621,8 @@ function createPowerSyncCollectionConfig<
             },
             appliedReceipts,
           )
+          await Promise.all(appliedReceipts.map(whenSyncAccepted))
+          acceptStartup()
           await Promise.all(appliedReceipts)
           markReady()
         }).catch((error) => {
