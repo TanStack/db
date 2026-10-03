@@ -914,9 +914,7 @@ export class CollectionStateManager<
 
   private hasAcceptedRows(): boolean {
     return this.pendingSyncedTransactions.some(
-      (transaction) =>
-        transaction.committed &&
-        (transaction.truncate || transaction.operations.length > 0),
+      (transaction) => transaction.committed,
     )
   }
 
