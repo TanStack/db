@@ -232,8 +232,7 @@ describe(`Electric Integration`, () => {
     const loggedError = vi.spyOn(console, `error`).mockImplementation(() => {})
     const preload = collection.preload()
     const streamOptions = vi.mocked(ShapeStream).mock.calls.at(-1)?.[0] as
-      | { onError?: (error: unknown) => void }
-      | undefined
+      { onError?: (error: unknown) => void } | undefined
     const initialError = new Error(`initial stream failed`)
 
     try {
@@ -260,8 +259,7 @@ describe(`Electric Integration`, () => {
       expect(collection.status).toBe(`loading`)
 
       const streamOptions = vi.mocked(ShapeStream).mock.calls.at(-1)?.[0] as
-        | { onError?: (error: unknown) => void }
-        | undefined
+        { onError?: (error: unknown) => void } | undefined
       streamOptions?.onError?.(streamError)
       expect(collection.status).toBe(`error`)
 

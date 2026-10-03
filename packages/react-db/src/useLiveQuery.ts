@@ -504,9 +504,7 @@ export function useLiveQuery<
   deps?: Array<unknown>,
 ): {
   state:
-    | Map<string | number, GetResult<TContext>>
-    | Map<TKey, TResult>
-    | undefined
+    Map<string | number, GetResult<TContext>> | Map<TKey, TResult> | undefined
   data: InferResultType<TContext> | Array<TResult> | undefined
   collection:
     | Collection<GetResult<TContext>, string | number, {}>

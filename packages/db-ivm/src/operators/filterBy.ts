@@ -12,7 +12,7 @@ import type { IStreamBuilder, KeyValue, PipedOperator } from '../types.js'
  */
 export function filterBy<
   K,
-  V1 extends T extends KeyValue<infer _KT, infer VT> ? VT : never,
+  V1 extends (T extends KeyValue<infer _KT, infer VT> ? VT : never),
   T,
 >(
   other: IStreamBuilder<KeyValue<K, unknown>>,

@@ -50,11 +50,7 @@ type Model = {
   errors: Array<string>
 }
 type Fault =
-  | `none`
-  | `ignore-cancel`
-  | `lose-replacement`
-  | `duplicate`
-  | `late`
+  `none` | `ignore-cancel` | `lose-replacement` | `duplicate` | `late`
 
 // Each key has at most one appointment. A schedule replaces the old
 // appointment. Only elapsed advance moves its deadline toward delivery.

@@ -28,11 +28,7 @@ import type { Event, ListResponse } from 'trailbase'
 type Row = { id: number; value: number }
 type Change = { operation: `set` | `delete`; id: number; value: number }
 type Ending =
-  | `close`
-  | `buffered-close`
-  | `read-error`
-  | `parse-error`
-  | `cleanup`
+  `close` | `buffered-close` | `read-error` | `parse-error` | `cleanup`
 // Each plan represents one Collection sync run and its controlled RecordApi
 // work; subscription can fail before a TrailBase provider stream exists.
 type SyncRunPlan =

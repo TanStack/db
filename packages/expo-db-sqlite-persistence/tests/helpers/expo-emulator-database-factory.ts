@@ -14,8 +14,7 @@ function resolvePlatform(): `ios` | `android` {
 export function createMobileSQLiteTestDatabaseFactory(): ExpoSQLiteTestDatabaseFactory {
   const platform = resolvePlatform()
   let runtimePromise:
-    | Promise<Awaited<ReturnType<typeof ensureExpoEmulatorRuntime>>>
-    | undefined
+    Promise<Awaited<ReturnType<typeof ensureExpoEmulatorRuntime>>> | undefined
 
   const getRuntime = () => {
     runtimePromise ??= ensureExpoEmulatorRuntime(platform)

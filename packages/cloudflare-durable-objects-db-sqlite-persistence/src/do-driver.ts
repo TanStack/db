@@ -33,8 +33,7 @@ type CloudflareDOProvidedStorageOptions = {
 }
 
 export type CloudflareDOSQLiteDriverOptions =
-  | CloudflareDOProvidedSqlOptions
-  | CloudflareDOProvidedStorageOptions
+  CloudflareDOProvidedSqlOptions | CloudflareDOProvidedStorageOptions
 
 function assertTransactionCallbackHasDriverArg(
   fn: (transactionDriver: SQLiteDriver) => Promise<unknown>,
