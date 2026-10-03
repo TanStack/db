@@ -58,18 +58,17 @@ const graphArbitrary = fc
     }),
     { minLength: 1, maxLength: 6 },
   )
-  .map(
-    (nodes): Graph =>
-      nodes.map((node) =>
-        Object.freeze({
-          label: node.label,
-          edges: Object.freeze(
-            node.edges.map((edge) =>
-              Object.freeze({ ...edge, target: edge.target % nodes.length }),
-            ),
+  .map((nodes): Graph =>
+    nodes.map((node) =>
+      Object.freeze({
+        label: node.label,
+        edges: Object.freeze(
+          node.edges.map((edge) =>
+            Object.freeze({ ...edge, target: edge.target % nodes.length }),
           ),
-        }),
-      ),
+        ),
+      }),
+    ),
   )
 
 const replaySeedText = process.env.TANSTACK_DB_IVM_MIXED_GRAPH_SEED

@@ -336,8 +336,7 @@ app.put('/api/lists/:id', async (req, res) => {
     FROM tx, updated
   `
   const updated = updatedRows[0] as
-    | { txid: string; id: string; name: string; createdAt: unknown }
-    | undefined
+    { txid: string; id: string; name: string; createdAt: unknown } | undefined
 
   if (!updated) {
     return res.status(404).json({ error: `List not found` })
