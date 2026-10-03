@@ -5,11 +5,11 @@ import { fc } from '@fast-check/vitest'
 import { afterEach, expect, it } from 'vitest'
 import { OpSQLiteDriver } from '../src/op-sqlite-driver'
 import { InvalidPersistedCollectionConfigError } from '../../db-sqlite-persistence-core/src'
-import { runSQLiteDriverContractSuite } from '../../db-sqlite-persistence-core/tests/contracts/sqlite-driver-contract-oracle'
+import { runSQLiteDriverContractSuite } from '../../db-sqlite-persistence-core/tests/contracts/sqlite-driver-contract'
 import { createOpSQLiteTestDatabase } from './helpers/op-sqlite-test-db'
 import { opSQLiteProviderQueryFixtures } from './fixtures/op-sqlite-provider-results'
 import type { OpSQLiteDatabaseLike } from '../src/op-sqlite-driver'
-import type { SQLiteDriverContractHarnessFactory } from '../../db-sqlite-persistence-core/tests/contracts/sqlite-driver-contract-oracle'
+import type { SQLiteDriverContractHarnessFactory } from '../../db-sqlite-persistence-core/tests/contracts/sqlite-driver-contract'
 
 const activeCleanupFns: Array<() => void | Promise<void>> = []
 

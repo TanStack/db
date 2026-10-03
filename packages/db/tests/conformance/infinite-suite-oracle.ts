@@ -21,7 +21,7 @@ import { scenarioRegistry } from './registration'
 import type {
   InfiniteQueryDriver,
   InfiniteQueryHandle,
-} from './infinite-contract-oracle'
+} from './infinite-contract'
 
 interface InfiniteRow {
   id: string

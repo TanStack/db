@@ -8,7 +8,7 @@ import {
   hash,
   registerOpaqueHash,
 } from '../src/hashing/hash.js'
-import { captureHashSession } from './hash-session-oracle'
+import { captureHashSession } from './hash-session'
 
 /**
  * # Which values share D2 value identity?
@@ -56,7 +56,7 @@ import { captureHashSession } from './hash-session-oracle'
  * Limits:
  * - Arrays from another realm (`node:vm`) are outside the grammar. One pinned
  *   case keeps equality's length check for them.
- * - Work and depth caps belong to `hash-work-oracle.test.ts`.
+ * - Work and depth caps belong to `hash-work.test.ts`.
  * - Map and Set order sensitivity and ignored Map/Set properties are current
  *   behavior. No contract promises them.
  * - Getters and proxies are outside the grammar.

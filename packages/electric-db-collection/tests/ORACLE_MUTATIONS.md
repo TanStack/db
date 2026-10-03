@@ -135,7 +135,7 @@ seven message kinds cross both sides of the reset, with split controls.
 The previous predicate rejected only commit-before-reset; it incorrectly
 accepted data-before-reset and reset-before-data in the protocol model.
 
-`electric-sdk-framing-oracle.test.ts` independently uses the real SDK with controlled
+`electric-sdk-framing.test.ts` independently uses the real SDK with controlled
 HTTP responses. Both normal and stale-row-bearing 409 bodies produce singleton
 reset callbacks, as the generated protocol histories now require. This pins the
 installed SDK's HTTP reset path, not an exhaustive specification of every possible

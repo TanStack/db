@@ -7,7 +7,7 @@
  * either the preceding result or that new result, never a transient clear.
  * For these one-message transactions, it must notify the watcher once with
  * the final result.
- * Authority: `packages/db/tests/conformance/contract-oracle.ts` defines `data` as
+ * Authority: `packages/db/tests/conformance/contract.ts` defines `data` as
  * the rows exposed by the live-query Collection. The project glossary defines
  * publication as coherent visibility. This oracle checks that binding at
  * Vue's synchronous watcher cut.

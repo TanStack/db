@@ -1,5 +1,5 @@
 import { expect } from 'vitest'
-import { expectOrderedRows } from './result-laws-oracle'
+import { expectOrderedRows } from './result-laws'
 
 /** Page labels and request timing are separate laws, not inferred from rows. */
 export function expectPageRows(

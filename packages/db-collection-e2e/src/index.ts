@@ -8,7 +8,7 @@ export * from './types'
 export * from './fixtures/test-schema'
 export * from './fixtures/seed-data'
 export * from './utils/helpers'
-export * from './utils/assertions-oracle'
+export * from './utils/assertions'
 
 // Export specific utilities for convenience
 export {
@@ -21,9 +21,9 @@ export {
 export { createPredicatesTestSuite } from './suites/predicates-oracle.suite'
 export { createPaginationTestSuite } from './suites/pagination-oracle.suite'
 export { createJoinsTestSuite } from './suites/joins-oracle.suite'
-export { createDeduplicationTestSuite } from './suites/deduplication-oracle.suite'
-export { createCollationTestSuite } from './suites/collation-oracle.suite'
-export { createMutationsTestSuite } from './suites/mutations-oracle.suite'
+export { createDeduplicationTestSuite } from './suites/deduplication.suite'
+export { createCollationTestSuite } from './suites/collation.suite'
+export { createMutationsTestSuite } from './suites/mutations.suite'
 export { createLiveUpdatesTestSuite } from './suites/live-updates-oracle.suite'
-export { createProgressiveTestSuite } from './suites/progressive-oracle.suite'
+export { createProgressiveTestSuite } from './suites/progressive.suite'
 export { createMovesTestSuite } from './suites/moves-oracle.suite'

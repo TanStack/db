@@ -114,7 +114,7 @@ From `packages/query-db-collection`:
 ```sh
 TANSTACK_DB_ORACLE_RUNS_MULTIPLIER=100 TANSTACK_DB_ORACLE_SEED=863 \
   ../../node_modules/.bin/vitest run \
-  tests/cursor-pagination-oracle.no-peek.test.ts \
+  tests/cursor-pagination.no-peek.test.ts \
   tests/cursor-pagination-oracle.no-peek.integration.test.ts \
   tests/cursor-pagination.oracle.test.ts \
   tests/cursor-pagination-oracle.integration.test.ts \

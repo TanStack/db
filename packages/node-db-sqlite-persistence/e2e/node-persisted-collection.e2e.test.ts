@@ -9,7 +9,7 @@ import {
   captureSeedData,
   generateSeedData,
 } from '../../db-collection-e2e/src/fixtures/seed-data'
-import { runPersistedCollectionConformanceSuite } from '../../db-sqlite-persistence-core/tests/contracts/persisted-collection-conformance-contract-oracle'
+import { runPersistedCollectionConformanceSuite } from '../../db-sqlite-persistence-core/tests/contracts/persisted-collection-conformance-contract'
 import type { Collection } from '@tanstack/db'
 import type {
   Comment,

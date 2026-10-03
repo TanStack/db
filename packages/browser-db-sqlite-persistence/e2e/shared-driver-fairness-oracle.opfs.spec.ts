@@ -12,7 +12,7 @@
  */
 import { expect, test } from '@playwright/test'
 import type { Page } from '@playwright/test'
-import type { OPFSOracleResult } from './shared-driver-fairness-oracle.opfs'
+import type { OPFSOracleResult } from './shared-driver-fairness.opfs'
 
 async function readOracleResult(
   page: Page,

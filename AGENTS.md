@@ -511,11 +511,18 @@ is not practical for the behavior, explain why a focused test is sufficient.
 
 ### Name Oracle Files for Discovery
 
-Include `oracle` in each executable oracle owner filename and in dedicated
-reference-model, grammar, and refinement-driver companion filenames. Preserve
-the test runner suffix. Update imports, explicit test commands, replay
-selectors, and coverage links in the same change. Generic utilities and
-production files do not need the oracle suffix.
+Include `oracle` in filenames that own an independent reference computation,
+state model, differential or metamorphic comparison, or reusable law checker.
+Modules that define the model, checker, or its history grammar also qualify.
+Identify the actual mechanism before renaming a file. A coverage-map entry,
+contract comment, or collection of fixed assertions is not sufficient evidence.
+
+Ordinary example tests, type assertions, fixtures, registration wrappers, and
+runner utilities keep their ordinary names. A module that only drives production
+or records observations is not an oracle definition. Report oracle owners and
+definitions separately from supporting files; a file count is not an oracle count.
+Preserve runner suffixes and update imports, commands, replay selectors, and
+current documentation whenever an oracle file moves.
 
 ### Name Tests After Behavior
 

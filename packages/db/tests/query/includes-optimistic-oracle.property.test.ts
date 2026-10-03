@@ -13,10 +13,10 @@ import {
 } from '../../src/query/index.js'
 import { withHistoryCleanup } from '../optimistic-history-oracle.js'
 import { flushPromises, withExpectedRejection } from '../utils.js'
-import { runTrace } from '../trace-runner-oracle.js'
+import { runTrace } from '../trace-runner.js'
 import { oraclePropertyOptions, readOracleRunConfig } from '../oracle-config.js'
 import { createControlledCollection as createOracleControlledCollection } from './includes-oracle-helpers.js'
-import type { TraceDriver, TraceProjection } from '../trace-runner-oracle.js'
+import type { TraceDriver, TraceProjection } from '../trace-runner.js'
 import type { OracleSyncChange as SyncChange } from './includes-oracle-helpers.js'
 import type { LoadSubsetOptions, SyncConfig } from '../../src/types.js'
 

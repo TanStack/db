@@ -8,7 +8,7 @@ import {
   getLoadSubsetDemandKey,
 } from '@tanstack/db'
 import { describe, expect, it, vi } from 'vitest'
-import { TraceAssertionError } from '../../db/tests/trace-runner-oracle.js'
+import { TraceAssertionError } from '../../db/tests/trace-runner.js'
 import { createDeferred } from '../../db/src/deferred.js'
 import { queryCollectionOptions } from '../src/query.js'
 import type { QueryFunctionContext } from '@tanstack/query-core'

@@ -10,7 +10,7 @@ import {
   assertAllItemsMatch,
   assertCollectionSize,
   assertSorted,
-} from '../utils/assertions-oracle'
+} from '../utils/assertions'
 import { waitForQueryData } from '../utils/helpers'
 import type { E2ETestConfig, Post, User } from '../types'
 

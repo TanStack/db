@@ -4,7 +4,7 @@ import * as tauri from '../../tauri-db-sqlite-persistence/e2e/app/src/runtime-vi
 import {
   getPersistedConformanceTestNames,
   persistedConformanceLaws,
-} from '../../db-collection-e2e/src/fixtures/persisted-conformance-manifest-oracle'
+} from '../../db-collection-e2e/src/fixtures/persisted-conformance-manifest'
 
 const runtimes = [
   ['capacitor', capacitor],
@@ -415,7 +415,7 @@ describe.each(runtimes)('%s native test runner', (_name, runtime) => {
       vi.resetModules()
       vi.doMock('vitest', () => runtime)
       const { runPersistedCollectionConformanceSuite } =
-        await import('../../db-sqlite-persistence-core/tests/contracts/persisted-collection-conformance-contract-oracle')
+        await import('../../db-sqlite-persistence-core/tests/contracts/persisted-collection-conformance-contract')
       const getConfig = vi.fn(() => {
         throw new Error(
           'Database access is forbidden in registration-only control',

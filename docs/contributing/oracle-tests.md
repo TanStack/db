@@ -315,12 +315,25 @@ Two small examples show the form:
 
 ### Name oracle files consistently
 
-Include `oracle` in the filename of every executable oracle owner and its
-dedicated reference-model, grammar, or refinement-driver companion. Preserve
-runner suffixes such as `.property.test.ts`, `.test-d.ts`, and `.spec.ts`.
-Generic fixtures, shared utilities, and production files keep their ordinary
-names. Update imports, test commands, replay selectors, and coverage links
-whenever an oracle file moves.
+Use `oracle` in filenames that own an independent expected-result computation,
+state model, differential or metamorphic comparison, or reusable law checker.
+A separate module that defines that model, checker, or its history grammar also
+qualifies. Identify the mechanism in the code before applying the name. A mixed
+test file can qualify through a specific oracle inside it; its other tests do
+not thereby become separate oracles.
+
+An ordinary example or regression does not need this suffix merely because it
+asserts a contract. The same applies to concrete type assertions, fixtures,
+registration wrappers, and generic runner utilities. A driver that only invokes
+production or records observations remains support. Coverage-map inclusion,
+parameterization, and contract prose alone do not establish oracle ownership.
+
+Count owners, model/checker definitions, drivers, and other support separately.
+Several files may execute one shared oracle, and one file may contain several
+oracle mechanisms. A filename is a discovery aid, not evidence of guide
+conformance. Preserve runner suffixes such as `.property.test.ts`, `.test-d.ts`,
+and `.spec.ts`. Update imports, test commands, replay selectors, and current
+coverage links whenever an oracle file moves.
 
 ### Keep five responsibilities distinguishable
 

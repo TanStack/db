@@ -169,7 +169,7 @@ TANSTACK_DB_ORACLE_RUNS_MULTIPLIER=100 TANSTACK_DB_ORACLE_SEED=863 \
   tests/cursor-pagination.publication-oracle.test.ts \
   tests/cursor-pagination.boundary-oracle.test.ts \
   tests/cursor-pagination-oracle.integration.test.ts \
-  tests/cursor-pagination-oracle.no-peek.test.ts \
+  tests/cursor-pagination.no-peek.test.ts \
   tests/cursor-pagination-oracle.no-peek.integration.test.ts \
   --typecheck.enabled=false --maxWorkers=1 --testTimeout=60000
 ```

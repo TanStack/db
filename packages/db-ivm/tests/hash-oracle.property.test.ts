@@ -1,8 +1,8 @@
 import { describe, expect, it } from 'vitest'
 import { fc } from '@fast-check/vitest'
-import { HashReplayError, captureHashSession } from './hash-session-oracle'
+import { HashReplayError, captureHashSession } from './hash-session'
 import type { Arbitrary } from 'fast-check'
-import type { HashSession } from './hash-session-oracle'
+import type { HashSession } from './hash-session'
 
 const nativeSession = await captureHashSession()
 const { hash } = nativeSession

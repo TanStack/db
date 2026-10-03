@@ -1,6 +1,6 @@
 import { Capacitor } from '@capacitor/core'
 import { CapacitorSQLite, SQLiteConnection } from '@capacitor-community/sqlite'
-import { getPersistedConformanceTestNames } from '../../../../db-collection-e2e/src/fixtures/persisted-conformance-manifest-oracle'
+import { getPersistedConformanceTestNames } from '../../../../db-collection-e2e/src/fixtures/persisted-conformance-manifest'
 import { createNativeCapacitorSQLiteTestDatabaseFactory } from './native-capacitor-sqlite-test-db'
 import { registerCapacitorNativeE2ESuite } from './register-capacitor-e2e-suite'
 import {

@@ -2,11 +2,11 @@ import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
-import { runSQLiteDriverContractSuite } from '../../db-sqlite-persistence-core/tests/contracts/sqlite-driver-contract-oracle'
+import { runSQLiteDriverContractSuite } from '../../db-sqlite-persistence-core/tests/contracts/sqlite-driver-contract'
 import { CloudflareDOSQLiteDriver } from '../src/do-driver'
 import { InvalidPersistedCollectionConfigError } from '../../db-sqlite-persistence-core/src'
 import { createBetterSqliteDoStorageHarness } from './helpers/better-sqlite-do-storage'
-import type { SQLiteDriverContractHarness } from '../../db-sqlite-persistence-core/tests/contracts/sqlite-driver-contract-oracle'
+import type { SQLiteDriverContractHarness } from '../../db-sqlite-persistence-core/tests/contracts/sqlite-driver-contract'
 
 function createDriverHarness(): SQLiteDriverContractHarness {
   const tempDirectory = mkdtempSync(join(tmpdir(), `db-cf-do-driver-`))

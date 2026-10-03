@@ -13,7 +13,7 @@ import {
   materialize,
   toArray,
 } from '../../src/query/index.js'
-import { runTrace } from '../trace-runner-oracle.js'
+import { runTrace } from '../trace-runner.js'
 import {
   oraclePropertyOptions,
   oracleRuns,
@@ -26,7 +26,7 @@ import type { Deferred } from '../../src/deferred.js'
 import type { LoadSubsetOptions, SyncAppliedReceipt } from '../../src/types.js'
 import type { LazyDemandPlan } from '../../src/query/compiler/joins.js'
 import type { BasicExpression } from '../../src/query/ir.js'
-import type { TraceDriver, TraceProjection } from '../trace-runner-oracle.js'
+import type { TraceDriver, TraceProjection } from '../trace-runner.js'
 import type { Scheduler } from 'fast-check'
 
 /**

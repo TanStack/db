@@ -67,7 +67,7 @@ export default defineConfig({
     // instead of behavior. About 9 seconds in total.
     include: [
       `query/ordered-source-loader-state-oracle.test.ts`,
-      `live-query-observer-oracle.test.ts`,
+      `live-query-observer.test.ts`,
       `query/includes-publication-oracle.test.ts`,
       `query/bucket-facade-adapter.test.ts`,
       `collection-subscription.test.ts`,

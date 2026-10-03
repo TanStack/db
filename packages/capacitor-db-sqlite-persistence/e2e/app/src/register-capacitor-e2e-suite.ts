@@ -1,6 +1,6 @@
 import { createCapacitorSQLitePersistence } from '../../../src'
 import { createCapacitorPersistedCollectionHarnessConfig } from '../../shared/capacitor-persisted-collection-harness'
-import { registerPersistedCollectionConformanceSuite } from '../../shared/register-persisted-collection-conformance-suite-oracle'
+import { registerPersistedCollectionConformanceSuite } from '../../shared/register-persisted-collection-conformance-suite'
 import type { NativeCapacitorSQLiteTestDatabase } from './native-capacitor-sqlite-test-db'
 
 export function registerCapacitorNativeE2ESuite(options: {

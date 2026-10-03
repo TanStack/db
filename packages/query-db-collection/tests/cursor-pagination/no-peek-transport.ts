@@ -1,7 +1,7 @@
 import { createBackend } from './backend.js'
 import { createCursorPager } from './pager.js'
 import type { Row, Scope } from './model-oracle.js'
-import type { PrefixPublication } from './no-peek-oracle.js'
+import type { PrefixPublication } from './no-peek.js'
 
 /** Endpoint fixture derives continuation from opaque pages and retained tails,
  * never from the full-relation oracle or the window controller. */

@@ -6,10 +6,10 @@ import {
   eq,
   materialize,
 } from '../../src/query/index.js'
-import { runTrace } from '../trace-runner-oracle.js'
+import { runTrace } from '../trace-runner.js'
 import { oraclePropertyOptions, oracleRuns } from '../oracle-config.js'
 import { createControlledCollection } from './includes-oracle-helpers.js'
-import type { TraceDriver, TraceProjection } from '../trace-runner-oracle.js'
+import type { TraceDriver, TraceProjection } from '../trace-runner.js'
 
 /**
  * # Which distinctions determine the shape of an included result?

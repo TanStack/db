@@ -1,4 +1,4 @@
-import type { TraceProjection } from './trace-runner-oracle.js'
+import type { TraceProjection } from './trace-runner.js'
 
 const asyncAssertionProjection: TraceProjection<undefined, number> = {
   observe: () => 0,

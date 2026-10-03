@@ -7,10 +7,10 @@ import { describe, expect, it } from 'vitest'
 import { createDeferred } from '../../db/src/deferred.js'
 import { createLiveQueryWindowController } from '../../db/src/live-query-window-controller.js'
 import { expectedWindow } from './cursor-pagination/model-oracle.js'
-import { createNoPeekDemandModel } from './cursor-pagination/no-peek-oracle.js'
+import { createNoPeekDemandModel } from './cursor-pagination/no-peek.js'
 import { createFactTransport } from './cursor-pagination/no-peek-transport.js'
 import type { Row } from './cursor-pagination/model-oracle.js'
-import type { PrefixPublication } from './cursor-pagination/no-peek-oracle.js'
+import type { PrefixPublication } from './cursor-pagination/no-peek.js'
 
 const scope = { group: undefined, descending: false }
 

@@ -39,7 +39,7 @@ db-collection-e2e/
 │   │   └── regressions.test.ts
 │   └── utils/                # Helper functions
 │       ├── helpers.ts        # Common utilities
-│       └── assertions-oracle.ts     # Custom assertions
+│       └── assertions.ts     # Custom assertions
 └── support/                  # Vitest setup
     ├── global-setup.ts       # Health checks, DB init
     └── test-context.ts       # Vitest fixtures

@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest'
-import { runTrace } from './trace-runner-oracle.js'
-import type { TraceDriver } from './trace-runner-oracle.js'
+import { runTrace } from './trace-runner.js'
+import type { TraceDriver } from './trace-runner.js'
 
 type Context = {
   observed: number

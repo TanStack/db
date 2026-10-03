@@ -7,7 +7,7 @@ import {
   persistedCollectionOptions,
 } from '../src'
 import { CapacitorSQLiteDriver } from '../src/capacitor-sqlite-driver'
-import { runRuntimePersistenceContractSuite } from '../../db-sqlite-persistence-core/tests/contracts/runtime-persistence-contract-oracle'
+import { runRuntimePersistenceContractSuite } from '../../db-sqlite-persistence-core/tests/contracts/runtime-persistence-contract'
 import { SingleProcessCoordinator } from '../../db-sqlite-persistence-core/src'
 import { createCapacitorSQLiteTestDatabase } from './helpers/capacitor-sqlite-test-db'
 import type {
@@ -18,7 +18,7 @@ import type { CapacitorSQLiteDatabaseLike } from '../src/capacitor-sqlite-driver
 import type {
   RuntimePersistenceContractTodo,
   RuntimePersistenceDatabaseHarness,
-} from '../../db-sqlite-persistence-core/tests/contracts/runtime-persistence-contract-oracle'
+} from '../../db-sqlite-persistence-core/tests/contracts/runtime-persistence-contract'
 
 type RuntimePersistenceFactory = (options: {
   database: CapacitorSQLiteDatabaseLike

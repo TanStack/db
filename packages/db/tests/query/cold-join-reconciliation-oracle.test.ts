@@ -9,7 +9,7 @@ import {
   oracleRuns,
   readOracleRunConfig,
 } from '../oracle-config.js'
-import { runTrace } from '../trace-runner-oracle.js'
+import { runTrace } from '../trace-runner.js'
 import type { Collection } from '../../src/collection/index.js'
 import type {
   ChangeMessage,

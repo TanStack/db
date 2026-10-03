@@ -13,7 +13,7 @@ import {
   oracleRandomParameters,
   readOracleRunConfig,
 } from '../oracle-config.js'
-import { TraceAssertionError } from '../trace-runner-oracle.js'
+import { TraceAssertionError } from '../trace-runner.js'
 import type {
   LoadSubsetOptions,
   LoadSubsetRequestResult,

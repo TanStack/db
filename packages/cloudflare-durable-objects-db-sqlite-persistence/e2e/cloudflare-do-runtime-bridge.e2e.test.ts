@@ -6,13 +6,13 @@ import { setTimeout as delay } from 'node:timers/promises'
 import { fileURLToPath } from 'node:url'
 import { spawn } from 'node:child_process'
 import { describe, expect, it } from 'vitest'
-import { runRuntimeBridgeE2EContractSuite } from '../../db-sqlite-persistence-core/tests/contracts/runtime-bridge-e2e-contract-oracle'
+import { runRuntimeBridgeE2EContractSuite } from '../../db-sqlite-persistence-core/tests/contracts/runtime-bridge-e2e-contract'
 import type {
   RuntimeBridgeE2EContractError,
   RuntimeBridgeE2EContractHarness,
   RuntimeBridgeE2EContractHarnessFactory,
   RuntimeBridgeE2EContractTodo,
-} from '../../db-sqlite-persistence-core/tests/contracts/runtime-bridge-e2e-contract-oracle'
+} from '../../db-sqlite-persistence-core/tests/contracts/runtime-bridge-e2e-contract'
 
 type RuntimeProcessHarness = {
   baseUrl: string

@@ -7,13 +7,13 @@ import {
   persistedCollectionOptions,
 } from '../src'
 import { TauriSQLiteDriver } from '../src/tauri-sql-driver'
-import { runRuntimePersistenceContractSuite } from '../../db-sqlite-persistence-core/tests/contracts/runtime-persistence-contract-oracle'
+import { runRuntimePersistenceContractSuite } from '../../db-sqlite-persistence-core/tests/contracts/runtime-persistence-contract'
 import { SingleProcessCoordinator } from '../../db-sqlite-persistence-core/src'
 import { createTauriSQLiteTestDatabase } from './helpers/tauri-sql-test-db'
 import type {
   RuntimePersistenceContractTodo,
   RuntimePersistenceDatabaseHarness,
-} from '../../db-sqlite-persistence-core/tests/contracts/runtime-persistence-contract-oracle'
+} from '../../db-sqlite-persistence-core/tests/contracts/runtime-persistence-contract'
 
 function createRuntimeDatabaseHarness(): RuntimePersistenceDatabaseHarness {
   const tempDirectory = mkdtempSync(join(tmpdir(), `db-tauri-persistence-`))

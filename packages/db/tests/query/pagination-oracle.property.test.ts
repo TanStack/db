@@ -12,7 +12,7 @@ import {
   readOracleRunConfig,
 } from '../oracle-config.js'
 import { evaluateReferenceExpression } from '../reference-expression-oracle.js'
-import { TraceAssertionError } from '../trace-runner-oracle.js'
+import { TraceAssertionError } from '../trace-runner.js'
 import { flushPromises, mockSyncCollectionOptions } from '../utils.js'
 import { withHistoryCleanup } from '../optimistic-history-oracle.js'
 import type { Deferred } from '../../src/deferred.js'

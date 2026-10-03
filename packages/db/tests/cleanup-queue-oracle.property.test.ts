@@ -28,7 +28,7 @@ import { resetCleanupQueue } from './utils'
  * positive or negative wall-clock correction. Callback reentry is out of
  * scope. So are suspend/resume, absent `performance.now()`, and timer-provider
  * replacement while an appointment is pending. The public Collection effect
- * of this queue is checked separately in `collection-gc-clock-oracle.test.ts`.
+ * of this queue is checked separately in `collection-gc-clock.test.ts`.
  */
 
 type Action =

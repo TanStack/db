@@ -1,4 +1,4 @@
-import { getPersistedConformanceTestNames } from '../../../../db-collection-e2e/src/fixtures/persisted-conformance-manifest-oracle'
+import { getPersistedConformanceTestNames } from '../../../../db-collection-e2e/src/fixtures/persisted-conformance-manifest'
 import { createNativeTauriSQLiteTestDatabase } from './native-tauri-sql-test-db'
 import { registerTauriNativeE2ESuite } from './register-tauri-e2e-suite'
 import {

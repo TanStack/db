@@ -1,7 +1,7 @@
 import type {
   RuntimeBridgeE2EContractError,
   RuntimeBridgeE2EContractTodo,
-} from '../../../../db-sqlite-persistence-core/tests/contracts/runtime-bridge-e2e-contract-oracle'
+} from '../../../../db-sqlite-persistence-core/tests/contracts/runtime-bridge-e2e-contract'
 import type { SQLiteCoreAdapterOptions } from '@tanstack/db-sqlite-persistence-core'
 import type {
   ElectronPersistenceRequestEnvelope,

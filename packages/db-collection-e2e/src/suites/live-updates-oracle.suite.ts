@@ -13,7 +13,7 @@ import {
   waitForOwnedUser,
   waitForUserRows,
   withOwnedUsers,
-} from './mutations-oracle.suite'
+} from './mutations.suite'
 import type { E2ETestConfig, User } from '../types'
 
 export function createLiveUpdatesTestSuite(

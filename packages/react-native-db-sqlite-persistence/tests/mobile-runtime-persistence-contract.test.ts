@@ -7,7 +7,7 @@ import {
   persistedCollectionOptions,
 } from '../src'
 import { OpSQLiteDriver } from '../src/op-sqlite-driver'
-import { runRuntimePersistenceContractSuite } from '../../db-sqlite-persistence-core/tests/contracts/runtime-persistence-contract-oracle'
+import { runRuntimePersistenceContractSuite } from '../../db-sqlite-persistence-core/tests/contracts/runtime-persistence-contract'
 import { SingleProcessCoordinator } from '../../db-sqlite-persistence-core/src'
 import { createOpSQLiteTestDatabase } from './helpers/op-sqlite-test-db'
 import type { OpSQLiteArrayResultMode, OpSQLiteDatabaseLike } from '../src'
@@ -19,7 +19,7 @@ import type {
 import type {
   RuntimePersistenceContractTodo,
   RuntimePersistenceDatabaseHarness,
-} from '../../db-sqlite-persistence-core/tests/contracts/runtime-persistence-contract-oracle'
+} from '../../db-sqlite-persistence-core/tests/contracts/runtime-persistence-contract'
 
 type RuntimePersistenceFactory = (options: {
   database: OpSQLiteDatabaseLike
