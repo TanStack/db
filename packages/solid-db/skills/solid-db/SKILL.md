@@ -14,7 +14,7 @@ description: >
 type: framework
 library: db
 framework: solid
-library_version: '0.3.0'
+library_version: '0.3.3'
 requires:
   - db-core
 sources:
@@ -30,7 +30,7 @@ This skill builds on db-core. Read it first for collection setup, query builder,
 
 ```tsx
 import { useLiveQuery, eq, gt, not } from '@tanstack/solid-db'
-import { For, Show } from 'solid-js'
+import { For } from 'solid-js'
 import { Loading } from '@solidjs/web'
 
 function TodoList() {
@@ -87,6 +87,14 @@ const query = useLiveQuery(() => ({
 
 // Pre-created collection — pass as Accessor
 const query = useLiveQuery(() => preloadedCollection)
+```
+
+Query-function form note: identical eq-filtered queries share one pooled
+live-query Collection and subscription (default `gcTime` 5s), so two hooks
+rendering the same filter hit the source once. Pass a config object with
+`gcTime` or a pre-created collection to opt out per query.
+
+```tsx
 
 // Conditional query
 const query = useLiveQuery((q) => {
