@@ -330,11 +330,10 @@ const operationArbitrary: fc.Arbitrary<Operation> = fc.oneof(
       changeValueArbitrary,
       fc.option(fc.nat({ max: 7 }), { nil: undefined }),
     )
-    .map(
-      ([v, reuse]): Operation =>
-        reuse === undefined
-          ? { type: `insert`, v }
-          : { type: `insert`, v, reuse },
+    .map(([v, reuse]): Operation =>
+      reuse === undefined
+        ? { type: `insert`, v }
+        : { type: `insert`, v, reuse },
     ),
   {
     weight: 2,

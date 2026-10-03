@@ -402,8 +402,7 @@ export function createChangeProxy<
         Array.from(state.copy_),
         Array.from(
           state.originalObject as unknown as
-            | Map<unknown, unknown>
-            | Set<unknown>,
+            Map<unknown, unknown> | Set<unknown>,
         ),
       )
     }
