@@ -1154,5 +1154,6 @@
     "packages/tauri-db-sqlite-persistence/e2e/shared/register-persisted-collection-conformance-suite.ts": "packages/tauri-db-sqlite-persistence/e2e/shared/register-persisted-collection-conformance-suite-oracle.ts",
     "packages/vue-db/tests/conformance.test.ts": "packages/vue-db/tests/conformance-oracle.test.ts",
     "packages/vue-db/tests/infinite-query-conformance.test.ts": "packages/vue-db/tests/infinite-query-conformance-oracle.test.ts"
-  }
+  },
+  "namingInventoryRetraction": {"record": "2026-10-03-oracle-naming-scope.md", "reason": "The original owner/companion inventory mixed oracle mechanisms with ordinary tests and support. Use the corrected classification and path map.", "retainedPrRenames": 63, "reversedPrRenames": 101}
 }

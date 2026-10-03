@@ -114,3 +114,10 @@ The baseline copy preserves original sources and filenames, with four external h
 No external-provider, browser-host, Electron-process, or native-device E2E campaign ran.
 Local SQLite paths and controlled runtime fixtures executed within the package suites.
 Static entrypoint checks establish path consistency only.
+
+## Retraction of naming inventory — 2026-10-03
+
+The 251-file owner/companion classification above is withdrawn. It included ordinary examples, fixtures, harness tests, and documentation.
+The [corrected naming review](2026-10-03-oracle-naming-scope.md) classifies each file from executable evidence and supersedes that inventory.
+It restores 101 original filenames and retains 63 justified PR renames. The original 39 terminology resolutions remain intact.
+The earlier validation results describe the exact implementation revision stated above; they are not a current owner-count claim.
