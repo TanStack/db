@@ -329,8 +329,7 @@ function createPowerSyncCollectionConfig<
       const abortController = new AbortController()
 
       let disposeTracking:
-        | ((options?: { context?: LockContext }) => Promise<void>)
-        | null = null
+        ((options?: { context?: LockContext }) => Promise<void>) | null = null
       let trackingSetup: Promise<void> | null = null
       let activeTrackingDisposal: Promise<void> | null = null
       let abortTrackingDisposal: Promise<void> | null = null

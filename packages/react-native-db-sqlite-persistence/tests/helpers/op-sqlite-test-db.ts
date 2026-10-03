@@ -29,8 +29,7 @@ export type MobileSQLiteTestDatabaseFactory = (options: {
 
 declare global {
   var __tanstackDbCreateMobileSQLiteTestDatabase:
-    | MobileSQLiteTestDatabaseFactory
-    | undefined
+    MobileSQLiteTestDatabaseFactory | undefined
 }
 
 function createRowsList<T>(rows: Array<T>): OpSQLiteRowsListLike<T> {
