@@ -47,10 +47,8 @@ that synced before the collection is ready (progressive sync, on-demand
 loading). Reading an errored query still throws the captured error for an
 `<Errored>` boundary.
 
-Suspense is opt-in through the new `suspense` accessor, named for the
-verb Solid v2 uses for this mechanism ("a pending read suspends to the
-nearest `Loading` boundary") and matching React's `useLiveSuspenseQuery`:
-reading `query.suspense()` while the initial render is in flight throws
+Suspense is opt-in through the new `whenReady` accessor: reading
+`query.whenReady()` while the initial render is in flight throws
 `NotReadyError` for a `<Loading>` boundary to catch. It settles at network
 readiness or a permitted persisted fallback — the same gate as the React
 adapter's suspense hook — so persisted data can reveal content before the
@@ -65,13 +63,13 @@ const todosQuery = useLiveQuery((q) => q.from({ todos: todosCollection }))
 
 // Opt-in suspense:
 <Loading fallback={<div>Loading…</div>}>
-  {todosQuery.suspense() && (
+  {todosQuery.whenReady() && (
     <For each={todosQuery()}>{(todo) => <li>{todo.text}</li>}</For>
   )}
 </Loading>
 
 // Revalidation progress (solid-js built-ins):
-<Show when={isPending(() => todosQuery.suspense())}><Spinner /></Show>
+<Show when={isPending(() => todosQuery.whenReady())}><Spinner /></Show>
 ```
 
 ### Wholesale observer mode

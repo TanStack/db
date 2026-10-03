@@ -32,7 +32,7 @@ function QueryPage() {
   return (
     <Loading fallback="Loading...">
       <TodoApp
-        todos={todos.suspense()}
+        todos={todos.whenReady()}
         configData={configData()}
         todoCollection={queryTodoCollection}
         configCollection={queryConfigCollection}
