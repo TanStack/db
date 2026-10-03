@@ -103,9 +103,8 @@ function FilteredTodos(props: { minPriority: number }) {
 
 When `props.minPriority` changes, Solid's reactivity system automatically:
 1. Detects the prop access inside the query function
-2. Cleans up the previous live query collection
-3. Creates a new query with the updated value
-4. Updates the component with the new data
+2. Resolves the query for the updated value — identical eq-filtered queries share a pooled live-query Collection, others get a fresh one
+3. Updates the component with the new data
 
 #### Using Signals from Component State
 

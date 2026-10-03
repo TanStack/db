@@ -74,7 +74,7 @@ const todosQuery = useLiveQuery((q) =>
 return (
   <Errored fallback={(err) => <div>Error: {String(err())}</div>}>
     <Loading fallback={<div>Loading...</div>}>
-      <For each={todosQuery()}>
+      <For each={todosQuery.loaded()}>
         {(todo) => <li>{todo.text}</li>}
       </For>
     </Loading>
@@ -197,7 +197,7 @@ return (
 function useLiveQuery<TContext>(config): Accessor<InferResultType<TContext>> & object;
 ```
 
-Defined in: [useLiveQuery.ts:101](https://github.com/TanStack/db/blob/main/packages/solid-db/src/useLiveQuery.ts#L101)
+Defined in: [useLiveQuery.ts:99](https://github.com/TanStack/db/blob/main/packages/solid-db/src/useLiveQuery.ts#L99)
 
 Create a live query using configuration object
 
@@ -248,7 +248,7 @@ const itemsQuery = useLiveQuery(() => ({
 return (
   <Errored fallback={(err) => <div>Something went wrong: {String(err())}</div>}>
     <Loading fallback={<div>Loading...</div>}>
-      <div>{itemsQuery().length} items loaded</div>
+      <div>{itemsQuery.loaded().length} items loaded</div>
     </Loading>
   </Errored>
 )
@@ -260,7 +260,7 @@ return (
 function useLiveQuery<TResult, TKey, TUtils>(liveQueryCollection): Accessor<TResult[]> & object;
 ```
 
-Defined in: [useLiveQuery.ts:126](https://github.com/TanStack/db/blob/main/packages/solid-db/src/useLiveQuery.ts#L126)
+Defined in: [useLiveQuery.ts:124](https://github.com/TanStack/db/blob/main/packages/solid-db/src/useLiveQuery.ts#L124)
 
 Subscribe to an existing live query collection
 
@@ -317,7 +317,7 @@ const sharedQuery = useLiveQuery(() => sharedCollection)
 return (
   <Errored fallback={(err) => <div>Error loading data: {String(err())}</div>}>
     <Loading fallback={<div>Loading...</div>}>
-      <For each={sharedQuery()}>{(item) => <Item {...item} />}</For>
+      <For each={sharedQuery.loaded()}>{(item) => <Item {...item} />}</For>
     </Loading>
   </Errored>
 )
@@ -329,7 +329,7 @@ return (
 function useLiveQuery<TResult, TKey, TUtils>(liveQueryCollection): Accessor<TResult | undefined> & object;
 ```
 
-Defined in: [useLiveQuery.ts:147](https://github.com/TanStack/db/blob/main/packages/solid-db/src/useLiveQuery.ts#L147)
+Defined in: [useLiveQuery.ts:145](https://github.com/TanStack/db/blob/main/packages/solid-db/src/useLiveQuery.ts#L145)
 
 Create a live query using a query function
 

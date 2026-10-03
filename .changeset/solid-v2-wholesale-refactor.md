@@ -40,7 +40,7 @@ are derivable from `status`.
 
 ## Behavior changes
 
-### Data reads never suspend; readiness is opt-in
+### Data reads never suspend; the first-data gate is opt-in
 
 `query()` now always returns the current rows synchronously — including rows
 that synced before the collection is ready (progressive sync, on-demand
@@ -87,6 +87,11 @@ Collection's **result keys** (stamped with a per-collection epoch), never by
 a row's public `$key` — derived results such as `unionAll` can publish
 different rows sharing one `$key`, and a replaced collection's rows never
 adopt the previous collection's nodes.
+
+Query-function inputs resolve through `resolveLiveQueryValue`, so identical
+eq-filtered queries share one pooled live-query Collection and subscription
+(`collection` exposes its public view); pre-created collections and config
+objects keep their own.
 
 ## Retained API
 
