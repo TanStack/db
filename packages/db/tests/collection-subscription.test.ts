@@ -698,11 +698,9 @@ describe(`CollectionSubscription status tracking`, () => {
         new Value(`second`),
       ])
       let releaseFirst:
-        | ((primaryFailure?: { error: unknown }) => void)
-        | undefined
+        ((primaryFailure?: { error: unknown }) => void) | undefined
       let releaseSecond:
-        | ((primaryFailure?: { error: unknown }) => void)
-        | undefined
+        ((primaryFailure?: { error: unknown }) => void) | undefined
 
       subscription.requestSnapshot({
         where: firstWhere,
@@ -880,8 +878,7 @@ describe(`CollectionSubscription status tracking`, () => {
     const unloads: Array<LoadSubsetOptions> = []
     const reported: Array<unknown> = []
     let releaseFailedDemand:
-      | ((primaryFailure?: { error: unknown }) => void)
-      | undefined
+      ((primaryFailure?: { error: unknown }) => void) | undefined
     let cleanupAttempts = 0
     let caughtCleanup: unknown
     const collection = createCollection<{ id: string }>({

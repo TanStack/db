@@ -119,10 +119,7 @@ type PublicationModel = {
   sentKeys: Set<RowKey>
 }
 type PublicationPhase =
-  | `public`
-  | `private-pending`
-  | `private-settling`
-  | `private-failed`
+  `public` | `private-pending` | `private-settling` | `private-failed`
 type SourceEffect = `insert` | `update` | `delete`
 type PublicationObservation = {
   index: number
