@@ -2746,15 +2746,14 @@ describe(`Query Collections`, () => {
       startSync: true,
     })
 
+    // The hook awaits the observer's preload, which routes to the
+    // collection's preload — delay it to force the switch mid-flight.
     let resolveNewLiveQuery: (() => void) | undefined
-    const originalToArrayWhenReady =
-      newLiveQuery.toArrayWhenReady.bind(newLiveQuery)
-    newLiveQuery.toArrayWhenReady = async () => {
-      await new Promise<void>((resolve) => {
+    const originalPreload = newLiveQuery.preload.bind(newLiveQuery)
+    newLiveQuery.preload = () =>
+      new Promise<void>((resolve) => {
         resolveNewLiveQuery = resolve
-      })
-      return originalToArrayWhenReady()
-    }
+      }).then(originalPreload)
 
     const [activeCollection, setActiveCollection] = createSignal(oldLiveQuery)
 
@@ -2821,10 +2820,11 @@ describe(`Query Collections`, () => {
       startSync: false,
     })
 
-    // liveA's ready-promise never settles until we reject it — after the
-    // hook has already moved on to liveB.
+    // liveA's preload never settles until we reject it — after the hook has
+    // already moved on to liveB. The hook captures sync errors through the
+    // observer's preload, which routes here.
     let rejectA: ((error: unknown) => void) | undefined
-    liveA.toArrayWhenReady = () =>
+    liveA.preload = () =>
       new Promise((_resolve, reject) => {
         rejectA = reject
       })
