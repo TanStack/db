@@ -502,10 +502,7 @@ describe(`sync publication reentrancy`, () => {
       })
       sync.collection._markLayoutChange()
       const receipt = sync.commit()
-      // A persisting optimistic transaction holds the commit, which is
-      // accepted at once.
-      expect(receipt).toBe(true)
-      markedReceiptSettled = true
+      expect(receipt).not.toBe(true)
       if (receipt !== true) {
         void receipt.then(() => {
           markedReceiptSettled = true
@@ -515,7 +512,7 @@ describe(`sync publication reentrancy`, () => {
       callbacks.length = 0
       const revisionBeforeDrain = collection._layoutRevision
       await Promise.resolve()
-      expect(markedReceiptSettled).toBe(true)
+      expect(markedReceiptSettled).toBe(false)
       expect([...collection.keys()]).toEqual([1, 2])
 
       updatePersistence.resolve()
@@ -540,7 +537,7 @@ describe(`sync publication reentrancy`, () => {
           changes: [1, 2],
           keys: [2, 1],
           values: [`two`, `one`],
-          markedReceiptSettled: true,
+          markedReceiptSettled: false,
           revision: revisionBeforeDrain + 1,
         },
       ])
@@ -598,10 +595,7 @@ describe(`sync publication reentrancy`, () => {
       })
       sync.collection._markLayoutChange()
       const firstReceipt = sync.commit()
-      // A persisting optimistic transaction holds the commit, which is
-      // accepted at once.
-      expect(firstReceipt).toBe(true)
-      markedReceiptSettled = true
+      expect(firstReceipt).not.toBe(true)
       if (firstReceipt !== true) {
         void firstReceipt.then(() => {
           markedReceiptSettled = true
@@ -641,10 +635,11 @@ describe(`sync publication reentrancy`, () => {
         {
           // Delete the prior public layout [1, 2, 3], not the unpublished
           // rank update's intermediate [2, 1, 3], then replay whole snapshots.
-          changes: [1, 2, 3, 1, 3, 1, 2],
+          // Each key is inserted once after the delete prefix.
+          changes: [1, 2, 3, 1, 3, 2],
           keys: [2, 1, 3],
           values: [`two`, `optimistic-one`, `optimistic-three`],
-          markedReceiptSettled: true,
+          markedReceiptSettled: false,
           revision: revisionBeforeDrain + 1,
         },
       ])

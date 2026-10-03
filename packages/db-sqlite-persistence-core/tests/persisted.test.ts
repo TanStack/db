@@ -3996,6 +3996,9 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
 
       expect(stagedOwner).toEqual({ owner: `aborted` })
       aborted.abort()
+      expect(collection.get(`dependent`)).toBeUndefined()
+      localPersistence.resolve()
+      await localTransaction.isPersisted.promise
       const abortedOutcome = await atPersistedOracleCheckpoint(
         abortedReceipt.then(
           () => ({ status: `fulfilled` as const }),
@@ -4003,9 +4006,6 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
         ),
         `accepted predecessor receipt settled`,
       )
-      expect(collection.get(`dependent`)).toBeUndefined()
-      localPersistence.resolve()
-      await localTransaction.isPersisted.promise
       const dependentOutcome = await atPersistedOracleCheckpoint(
         dependentReceipt.then(
           () => ({ status: `fulfilled` as const }),

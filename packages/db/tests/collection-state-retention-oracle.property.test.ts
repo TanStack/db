@@ -725,7 +725,7 @@ it(`publishes a virtual-state update when a restarted optimistic row is confirme
 
     // The restarted sync run's commit is accepted at once and parked behind
     // the persisting mutation; the rollback publishes it.
-    expect(syncReceipt).toBe(true)
+    expect(syncReceipt).not.toBe(true)
     expect(
       collection._state.pendingSyncedTransactions.at(-1)?.committed,
     ).toBe(true)
@@ -1018,7 +1018,7 @@ it(`keeps the first queued before-image when metadata reserves the key`, async (
   let blockerCommit: Promise<unknown> | undefined
 
   const commitQueuedSync = () => {
-    expect(sync.commit(), `persisting work accepts sync`).toBe(true)
+    expect(sync.commit(), `persisting work queues sync`).not.toBe(true)
     expect(
       collection._state.pendingSyncedTransactions.at(-1)?.committed,
       `persisting work queues sync`,
@@ -1488,7 +1488,7 @@ it(`uses the preserved visible row when rollback releases a queued sync`, async 
       previousValue: { id: 1, value: 0 },
     })
     const receipt = sync.commit()
-    expect(receipt).toBe(true)
+    expect(receipt).not.toBe(true)
     expect(collection._state.pendingSyncedTransactions.at(-1)?.committed).toBe(
       true,
     )
@@ -1785,7 +1785,7 @@ it(`does not publish an authoritative update hidden by an optimistic overlay`, a
       value: { id: 1, value: 1 },
       previousValue: { id: 1, value: 0 },
     })
-    expect(sync.commit(), `hidden authoritative update is accepted`).toBe(true)
+    expect(sync.commit(), `hidden authoritative update is held`).not.toBe(true)
     expect(collection.get(1)?.value, `optimistic overlay remains visible`).toBe(
       100,
     )

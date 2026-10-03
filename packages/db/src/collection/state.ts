@@ -1258,6 +1258,7 @@ export class CollectionStateManager<
       // Set flag to prevent redundant optimistic state recalculations
       this.isCommittingSyncTransactions = true
 
+      const reappliedKeys = new Set<TKey>()
       let truncatePendingLocalChanges: Set<TKey> | undefined
       let truncatePendingLocalOrigins: Set<TKey> | undefined
 
@@ -1496,6 +1497,7 @@ export class CollectionStateManager<
       if (hasTruncateSync) {
         // Events use the same rebuilt overlay as synchronous reads.
         const reapplyUpserts = this.optimisticUpserts
+        // The rebuild already published these keys after the clear prefix.
         const reapplyDeletes = this.optimisticDeletes
 
         // Emit inserts for re-applied upserts, skipping any keys that have an optimistic delete.
@@ -1503,6 +1505,7 @@ export class CollectionStateManager<
         // with the optimistic value to preserve local intent.
         for (const [key, value] of reapplyUpserts) {
           if (reapplyDeletes.has(key)) continue
+          reappliedKeys.add(key)
           if (syncedInsertedOrUpdatedKeys.has(key)) {
             let foundInsert = false
             for (let i = events.length - 1; i >= 0; i--) {
@@ -1542,6 +1545,7 @@ export class CollectionStateManager<
 
       // Now check what actually changed in the final visible state
       for (const key of changedKeys) {
+        if (reappliedKeys.has(key)) continue
         const firstSyncOperation = firstSyncOperations.get(key)
         // A live-reading source can change a reused row before this commit
         // captures it. Later writes must not substitute an intermediate value.

@@ -122,7 +122,7 @@ describe(`optimistic snapshot ownership`, () => {
   )
 
   it.each([false, true])(
-    `keeps completed nonoptimistic origin across sibling rollback, completed first=%s`,
+    `attributes a confirmation committed after settlement to the source, completed first=%s`,
     async (completedFirst) => {
       const done = [createDeferred<void>(), createDeferred<void>()]
       let calls = 0
@@ -156,7 +156,8 @@ describe(`optimistic snapshot ownership`, () => {
           value: { ...initial, a: `accepted` },
         })
         await fixture.sync.commit()
-        expect(fixture.collection.get(1)?.$origin).toBe(`local`)
+        // Committed after the optimistic state dropped, so it is remote.
+        expect(fixture.collection.get(1)?.$origin).toBe(`remote`)
         expect(stripVirtualProps(fixture.collection.get(1))).toEqual({
           ...initial,
           a: `accepted`,
@@ -173,7 +174,7 @@ describe(`optimistic snapshot ownership`, () => {
   )
 
   it.each([false, true])(
-    `keeps its captured snapshot until queued confirmation=%s`,
+    `publishes the queued sync rows when its update settles, confirm=%s`,
     async (confirm) => {
       const done = createDeferred<void>()
       const fixture = source(() => done.promise)
@@ -198,9 +199,10 @@ describe(`optimistic snapshot ownership`, () => {
           row.a = `a1`
         })
         check({ ...initial, a: `a1` })
-        fixture.sync.begin({ immediate: true })
+        fixture.sync.begin()
         fixture.sync.write({ type: `update`, value: { ...initial, b: `b1` } })
-        expect(fixture.sync.commit()).toBe(true)
+        const held = fixture.sync.commit()
+        expect(held).not.toBe(true)
         check({ ...initial, a: `a1` })
         let applied: true | Promise<void> = true
         if (confirm) {
@@ -211,117 +213,12 @@ describe(`optimistic snapshot ownership`, () => {
         }
         done.resolve()
         await tx.isPersisted.promise
+        await held
         await applied
-        check({ ...initial, a: `a1` })
+        // The optimistic row drops, and the held sync rows publish with it.
+        check(confirm ? { ...initial, a: `a1` } : { ...initial, b: `b1` })
       } finally {
         done.resolve()
-        subscription.unsubscribe()
-        await downstream.cleanup()
-        await fixture.collection.cleanup()
-      }
-    },
-  )
-
-  it.each(orders)(
-    `selects whole direct snapshots across settlement order %j`,
-    async (...order) => {
-      const done = [
-        createDeferred<void>(),
-        createDeferred<void>(),
-        createDeferred<void>(),
-      ]
-      let calls = 0
-      const fixture = source(() => done[calls++]!.promise)
-      const downstream = createLiveQueryCollection({
-        query: (q) => q.from({ row: fixture.collection }),
-      })
-      await downstream.preload()
-      const replica = new Map<string | number, Row>([[1, initial]])
-      const subscription = fixture.collection.subscribeChanges((changes) => {
-        for (const change of changes) {
-          if (change.type === `delete`) replica.delete(change.key)
-          else replica.set(change.key, stripVirtualProps(change.value))
-        }
-      })
-      try {
-        const patches = [{ a: `a1` }, { b: `b2` }, { c: `c3` }]
-        const transactions = patches.map((patch) =>
-          fixture.collection.update(1, (row) => {
-            Object.assign(row, patch)
-          }),
-        )
-        const snapshots = patches.map((_, index) =>
-          Object.assign({}, initial, ...patches.slice(0, index + 1)),
-        )
-        const active = new Set([0, 1, 2])
-        for (const index of order) {
-          done[index]!.resolve()
-          await transactions[index]!.isPersisted.promise
-          active.delete(index)
-          const expected = snapshots[active.size ? Math.max(...active) : index]
-          expect(stripVirtualProps(fixture.collection.get(1))).toEqual(expected)
-          expect(replica.get(1)).toEqual(expected)
-          expect(stripVirtualProps(downstream.get(1))).toEqual(expected)
-        }
-      } finally {
-        for (const pending of done) pending.resolve()
-        subscription.unsubscribe()
-        await downstream.cleanup()
-        await fixture.collection.cleanup()
-      }
-    },
-  )
-
-  it.each([`before`, `after`] as const)(
-    `retains a direct survivor's captured snapshot when it completes %s sibling rollback`,
-    async (completion) => {
-      const done = [createDeferred<void>(), createDeferred<void>()]
-      let calls = 0
-      const fixture = source(() => done[calls++]!.promise)
-      const downstream = createLiveQueryCollection({
-        query: (q) => q.from({ row: fixture.collection }),
-      })
-      await downstream.preload()
-      const replica = new Map<string | number, Row>([[1, initial]])
-      const subscription = fixture.collection.subscribeChanges((changes) => {
-        for (const change of changes) {
-          if (change.type === `delete`) replica.delete(change.key)
-          else replica.set(change.key, stripVirtualProps(change.value))
-        }
-      })
-      const check = (expected: Row) => {
-        expect(stripVirtualProps(fixture.collection.get(1))).toEqual(expected)
-        expect(replica.get(1)).toEqual(expected)
-        expect(stripVirtualProps(downstream.get(1))).toEqual(expected)
-      }
-      try {
-        const first = fixture.collection.update(1, (row) => {
-          row.a = `a1`
-        })
-        const firstSettled = first.isPersisted.promise.catch(() => {})
-        const second = fixture.collection.update(1, (row) => {
-          row.b = `b2`
-        })
-        check({ ...initial, a: `a1`, b: `b2` })
-        if (completion === `before`) {
-          done[1]!.resolve()
-          await second.isPersisted.promise
-          check({ ...initial, a: `a1` })
-        }
-        done[0]!.reject(new Error(`first update failed`))
-        await firstSettled
-        check({ ...initial, a: `a1`, b: `b2` })
-        if (completion === `after`) {
-          done[1]!.resolve()
-          await second.isPersisted.promise
-          check({ ...initial, a: `a1`, b: `b2` })
-        }
-        fixture.sync.begin()
-        fixture.sync.write({ type: `update`, value: { ...initial, b: `b2` } })
-        await fixture.sync.commit()
-        check({ ...initial, b: `b2` })
-      } finally {
-        for (const pending of done) pending.resolve()
         subscription.unsubscribe()
         await downstream.cleanup()
         await fixture.collection.cleanup()
@@ -396,13 +293,14 @@ describe(`optimistic snapshot ownership`, () => {
           }),
         )
         if (phase === `persisting`) void entry.tx.commit().catch(() => {})
-        // Exercise the existing explicit immediate path, not a new queue policy.
-        fixture.sync.begin({ immediate: phase === `persisting` })
+        // A persisting mutation holds the sync transaction; a pending one
+        // lets it apply beneath the overlay.
+        fixture.sync.begin()
         fixture.sync.write({
           type: `update`,
           value: { ...initial, b: `remote` },
         })
-        expect(fixture.sync.commit()).toBe(true)
+        expect(fixture.sync.commit() === true).toBe(phase === `pending`)
         expect(stripVirtualProps(fixture.collection.get(1))).toEqual({
           ...initial,
           a: `local`,

@@ -343,15 +343,9 @@ export class CollectionSyncManager<
             // An accepted transaction always applies in commit order. Core
             // accepts it now; the receipt resolves when it is visible. One
             // held by a persisting optimistic transaction becomes visible when
-            // that transaction settles. A transaction without rows publishes
-            // nothing, so its receipt resolves at acceptance.
+            // that transaction settles.
             this.state.commitPendingTransactions()
-            if (
-              !pendingTransaction.applied.isPending() ||
-              (!pendingTransaction.truncate &&
-                pendingTransaction.operations.length === 0)
-            )
-              return true
+            if (!pendingTransaction.applied.isPending()) return true
             return withAcceptedReceipt(pendingTransaction.applied.promise, true)
           },
           markReady: () => {

@@ -440,7 +440,18 @@ describe(`Collection mutation startup oracle`, () => {
   it(`admits a distinct insert after startup hydrates another key`, async () => {
     const remote = { id: `remote`, value: `remote` }
     const local = { id: `local`, value: `local` }
-    const onInsert = vi.fn(noop)
+    let confirm: (rows: Array<Row>) => void = () => {}
+    // The handler confirms its insert, so the row stays once it settles.
+    const onInsert = vi.fn(
+      ({
+        transaction,
+      }: {
+        transaction: { mutations: Array<{ modified: Row }> }
+      }) => {
+        confirm(transaction.mutations.map((mutation) => mutation.modified))
+        return Promise.resolve()
+      },
+    )
     let syncStarts = 0
     const collection = createCollection<Row, string>({
       getKey: (row) => row.id,
@@ -452,6 +463,11 @@ describe(`Collection mutation startup oracle`, () => {
           write({ type: `insert`, value: remote })
           commit()
           markReady()
+          confirm = (rows) => {
+            begin()
+            for (const value of rows) write({ type: `insert`, value })
+            commit()
+          }
         },
       },
       onInsert,
@@ -473,19 +489,27 @@ describe(`Collection mutation startup oracle`, () => {
   })
 
   it(`starts once across accepted idle inserts and persists both`, async () => {
+    let confirm: (rows: Array<Row>) => void = () => {}
     let syncStarts = 0
     let handlerCalls = 0
     const collection = createCollection<Row, string>({
       getKey: (row) => row.id,
       startSync: false,
       sync: {
-        sync: ({ markReady }) => {
+        sync: ({ begin, write, commit, markReady }) => {
           syncStarts++
           markReady()
+          confirm = (rows) => {
+            begin()
+            for (const value of rows) write({ type: `insert`, value })
+            commit()
+          }
         },
       },
-      onInsert: () => {
+      // The handler confirms its insert, so the row stays once it settles.
+      onInsert: ({ transaction }) => {
         handlerCalls++
+        confirm(transaction.mutations.map((mutation) => mutation.modified))
         return Promise.resolve()
       },
     })
