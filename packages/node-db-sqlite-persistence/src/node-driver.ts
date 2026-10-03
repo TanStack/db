@@ -28,8 +28,7 @@ type BetterSqlite3OpenFileOptions = {
 }
 
 export type BetterSqlite3DriverOptions =
-  | BetterSqlite3ExistingDatabaseOptions
-  | BetterSqlite3OpenFileOptions
+  BetterSqlite3ExistingDatabaseOptions | BetterSqlite3OpenFileOptions
 
 type TransactionContext = {
   depth: number

@@ -497,8 +497,7 @@ describe(`Collection Lifecycle Management`, () => {
 
       // Trigger GC timeout - this will schedule the idle cleanup
       const gcCallback = scheduleSpy.mock.calls[0]?.[2] as
-        | (() => void)
-        | undefined
+        (() => void) | undefined
       if (gcCallback) {
         gcCallback()
       }
@@ -1626,8 +1625,7 @@ describe(`Collection Lifecycle Management`, () => {
 
       // Trigger GC timeout to schedule cleanup
       const gcCallback = scheduleSpy.mock.calls[0]?.[2] as
-        | (() => void)
-        | undefined
+        (() => void) | undefined
       if (gcCallback) {
         gcCallback()
       }

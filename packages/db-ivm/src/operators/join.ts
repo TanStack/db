@@ -254,7 +254,7 @@ export class JoinOperator<K, V1, V2> extends BinaryOperator<
  */
 export function join<
   K,
-  V1 extends T extends KeyValue<infer _KT, infer VT> ? VT : never,
+  V1 extends (T extends KeyValue<infer _KT, infer VT> ? VT : never),
   V2,
   T,
 >(
@@ -289,7 +289,7 @@ export function join<
  */
 export function innerJoin<
   K,
-  V1 extends T extends KeyValue<infer _KT, infer VT> ? VT : never,
+  V1 extends (T extends KeyValue<infer _KT, infer VT> ? VT : never),
   V2,
   T,
 >(
@@ -307,7 +307,7 @@ export function innerJoin<
  */
 export function antiJoin<
   K,
-  V1 extends T extends KeyValue<infer _KT, infer VT> ? VT : never,
+  V1 extends (T extends KeyValue<infer _KT, infer VT> ? VT : never),
   V2,
   T,
 >(
@@ -325,7 +325,7 @@ export function antiJoin<
  */
 export function leftJoin<
   K,
-  V1 extends T extends KeyValue<infer _KT, infer VT> ? VT : never,
+  V1 extends (T extends KeyValue<infer _KT, infer VT> ? VT : never),
   V2,
   T,
 >(
@@ -343,7 +343,7 @@ export function leftJoin<
  */
 export function rightJoin<
   K,
-  V1 extends T extends KeyValue<infer _KT, infer VT> ? VT : never,
+  V1 extends (T extends KeyValue<infer _KT, infer VT> ? VT : never),
   V2,
   T,
 >(
@@ -361,7 +361,7 @@ export function rightJoin<
  */
 export function fullJoin<
   K,
-  V1 extends T extends KeyValue<infer _KT, infer VT> ? VT : never,
+  V1 extends (T extends KeyValue<infer _KT, infer VT> ? VT : never),
   V2,
   T,
 >(

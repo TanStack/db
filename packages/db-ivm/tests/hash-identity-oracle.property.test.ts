@@ -472,12 +472,10 @@ function nearMiss(spec: Spec, choice: number): [Mutation, Spec] {
             },
           ]
     case `map`: {
-      const pairs = spec.entries.map(
-        ([key, value]): Spec => ({
-          k: `array`,
-          items: [key, value],
-        }),
-      )
+      const pairs = spec.entries.map(([key, value]): Spec => ({
+        k: `array`,
+        items: [key, value],
+      }))
       const [first, second] = spec.entries
       // Repeating a primitive key makes the Map merge the two entries.
       if (choice % 2 === 0 && first && second && MERGING_KINDS.has(first[0].k))
