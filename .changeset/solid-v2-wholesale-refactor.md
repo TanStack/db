@@ -47,9 +47,10 @@ that synced before the collection is ready (progressive sync, on-demand
 loading). Reading an errored query still throws the captured error for an
 `<Errored>` boundary.
 
-Suspense is opt-in through the new `whenReady` accessor: reading
-`query.whenReady()` while the initial render is in flight throws
-`NotReadyError` for a `<Loading>` boundary to catch. It settles at network
+Gating is opt-in through the new `loaded` accessor, named for the
+`<Loading>` boundary it participates in: reading `query.loaded()` while
+the initial render is in flight throws `NotReadyError` for the boundary
+to catch. It settles at network
 readiness or a permitted persisted fallback — the same gate as the React
 adapter's suspense hook — so persisted data can reveal content before the
 network answers. Once settled it returns the rows exactly like `query()`,
@@ -61,15 +62,13 @@ const todosQuery = useLiveQuery((q) => q.from({ todos: todosCollection }))
 // Rows render as they sync — no boundary required:
 <For each={todosQuery()}>{(todo) => <li>{todo.text}</li>}</For>
 
-// Opt-in suspense:
+// Opt-in first-data gate:
 <Loading fallback={<div>Loading…</div>}>
-  {todosQuery.whenReady() && (
-    <For each={todosQuery()}>{(todo) => <li>{todo.text}</li>}</For>
-  )}
+  <For each={todosQuery.loaded()}>{(todo) => <li>{todo.text}</li>}</For>
 </Loading>
 
 // Revalidation progress (solid-js built-ins):
-<Show when={isPending(() => todosQuery.whenReady())}><Spinner /></Show>
+<Show when={isPending(() => todosQuery.loaded())}><Spinner /></Show>
 ```
 
 ### Wholesale observer mode

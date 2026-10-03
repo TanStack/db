@@ -35,7 +35,7 @@ type InferConditionalResultType<TContext extends Context> =
 /**
  * Create a live query using a query function
  * @param queryFn - Query function that defines what data to fetch
- * @returns Accessor that returns the current rows synchronously; gate rendering on `whenReady` inside `<Loading>` for suspense
+ * @returns Accessor that returns the current rows synchronously; gate rendering on `loaded()` inside `<Loading>` for a first-data boundary
  * @example
  * const todosQuery = useLiveQuery((q) =>
  *   q.from({ todos: todosCollection })
@@ -46,9 +46,9 @@ type InferConditionalResultType<TContext extends Context> =
  * <For each={todosQuery()}>{(todo) => <li>{todo.text}</li>}</For>
  *
  * @example
- * // Opt-in suspense: `whenReady` gates on first data and returns the rows
+ * // Opt-in gate: `loaded()` participates in <Loading> and returns the rows
  * <Loading fallback={<div>Loading...</div>}>
- *   <For each={todosQuery.whenReady()}>{(todo) => <li>{todo.text}</li>}</For>
+ *   <For each={todosQuery.loaded()}>{(todo) => <li>{todo.text}</li>}</For>
  * </Loading>
  */
 // Overload 1: Accept query function that always returns QueryBuilder
@@ -63,7 +63,7 @@ export function useLiveQuery<TContext extends Context>(
   persistedStatus: LiveQueryPersistedStatus
   isPersistedReady: boolean
   persistedError: unknown | undefined
-  whenReady: Accessor<InferResultType<TContext>>
+  loaded: Accessor<InferResultType<TContext>>
 }
 
 // Overload 1b: Accept query function that can return undefined/null
@@ -80,7 +80,7 @@ export function useLiveQuery<TContext extends Context>(
   persistedStatus: LiveQueryPersistedStatus
   isPersistedReady: boolean
   persistedError: unknown | undefined
-  whenReady: Accessor<InferConditionalResultType<TContext>>
+  loaded: Accessor<InferConditionalResultType<TContext>>
 }
 
 /**
@@ -105,7 +105,7 @@ export function useLiveQuery<TContext extends Context>(
   persistedStatus: LiveQueryPersistedStatus
   isPersistedReady: boolean
   persistedError: unknown | undefined
-  whenReady: Accessor<InferResultType<TContext>>
+  loaded: Accessor<InferResultType<TContext>>
 }
 
 /**
@@ -136,7 +136,7 @@ export function useLiveQuery<
   persistedStatus: LiveQueryPersistedStatus
   isPersistedReady: boolean
   persistedError: unknown | undefined
-  whenReady: Accessor<Array<TResult>>
+  loaded: Accessor<Array<TResult>>
 }
 
 // Overload 3b: Accept pre-created live query collection with singleResult: true
@@ -157,7 +157,7 @@ export function useLiveQuery<
   persistedStatus: LiveQueryPersistedStatus
   isPersistedReady: boolean
   persistedError: unknown | undefined
-  whenReady: Accessor<TResult | undefined>
+  loaded: Accessor<TResult | undefined>
 }
 
 // The observer owns the subscription and publishes stable snapshots; Solid
@@ -285,7 +285,7 @@ export function useLiveQuery(
     for (const key of staleKeys) state.delete(key)
   }
 
-  // Opt-in render gate. Reading `whenReady` while the initial render is in
+  // Opt-in render gate. Reading `loaded` while the initial render is in
   // flight throws NotReadyError for a <Loading> boundary to catch. It settles
   // at network readiness or a permitted persisted fallback — the same gate
   // the React adapter's suspense hook uses — so persisted data can reveal
@@ -430,7 +430,7 @@ export function useLiveQuery(
         return snapshot()?.persistedError
       },
     },
-    whenReady: {
+    loaded: {
       get() {
         return gatedData
       },
