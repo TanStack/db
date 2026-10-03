@@ -1075,11 +1075,8 @@ describe(`optimistic relationship-transition oracle`, () => {
                 Promise.resolve().then(() => unsubscribe?.()),
                 Promise.resolve().then(() => driver.cleanup(context)),
               ])
-              const errors = results.flatMap(
-                (result): Array<unknown> =>
-                  result.status === `rejected`
-                    ? [result.reason as unknown]
-                    : [],
+              const errors = results.flatMap((result): Array<unknown> =>
+                result.status === `rejected` ? [result.reason as unknown] : [],
               )
               if (errors.length === 1) throw errors[0]
               if (errors.length > 1)

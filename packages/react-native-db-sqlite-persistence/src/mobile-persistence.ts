@@ -23,13 +23,10 @@ export type {
 } from './op-sqlite-driver'
 
 type MobileSQLiteCoreSchemaMismatchPolicy =
-  | `sync-present-reset`
-  | `sync-absent-error`
-  | `reset`
+  `sync-present-reset` | `sync-absent-error` | `reset`
 
 export type MobileSQLiteSchemaMismatchPolicy =
-  | MobileSQLiteCoreSchemaMismatchPolicy
-  | `throw`
+  MobileSQLiteCoreSchemaMismatchPolicy | `throw`
 
 type MobileSQLitePersistenceBaseOptions = Omit<
   SQLiteCoreAdapterOptions,

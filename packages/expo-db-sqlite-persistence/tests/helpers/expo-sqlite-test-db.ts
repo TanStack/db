@@ -18,8 +18,7 @@ export type ExpoSQLiteTestDatabaseFactory = (options: {
 
 declare global {
   var __tanstackDbCreateMobileSQLiteTestDatabase:
-    | ExpoSQLiteTestDatabaseFactory
-    | undefined
+    ExpoSQLiteTestDatabaseFactory | undefined
 }
 
 function normalizeRunResult(
