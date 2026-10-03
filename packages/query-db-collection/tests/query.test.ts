@@ -4817,9 +4817,13 @@ describe(`QueryCollection`, () => {
     // A refetch may cancel only work that has not committed. A committed
     // result waiting for durable storage still applies, so the later result
     // for the same row applies after it. See TanStack/db#1990.
-    it.each([`refetch`, `handler writeUpsert`] as const)(
-      `applies the latest result when a %s supersedes a result held in storage`,
-      async (successor) => {
+    it.each([
+      { successor: `refetch`, held: `the result write` },
+      { successor: `refetch`, held: `the first write` },
+      { successor: `handler writeUpsert`, held: `the result write` },
+    ] as const)(
+      `applies the latest result when a $successor supersedes a result while storage holds $held`,
+      async ({ successor, held }) => {
         type Row = { id: string; value: number }
         let server: Row = { id: `row`, value: 1 }
         const adapter = createPersistedQueryAdapter<Row>()
@@ -4827,10 +4831,14 @@ describe(`QueryCollection`, () => {
         let holdWrites = false
         const entered = createDeferred<void>()
         const release = createDeferred<void>()
-        // Hold the first durable write of a row, so the refetch's result is
-        // committed but not yet stored.
+        // Hold a durable write, so the refetch's result is committed but not
+        // yet stored: either its own row write, or the first write after the
+        // refetch starts, which can be its retention metadata.
         adapter.applyCommittedTx = async (...args) => {
-          if (holdWrites && args[1].mutations.length > 0) {
+          if (
+            holdWrites &&
+            (held === `the first write` || args[1].mutations.length > 0)
+          ) {
             holdWrites = false
             entered.resolve()
             await release.promise
@@ -4846,8 +4854,8 @@ describe(`QueryCollection`, () => {
             QueryCollectionUtils<Row>
           >({
             ...queryCollectionOptions<Row>({
-              id: `superseded-held-application-${successor}`,
-              queryKey: [`superseded-held-application`, successor],
+              id: `superseded-held-application-${successor}-${held}`,
+              queryKey: [`superseded-held-application`, successor, held],
               queryFn: () => Promise.resolve([{ ...server }]),
               queryClient,
               getKey: (row) => row.id,
