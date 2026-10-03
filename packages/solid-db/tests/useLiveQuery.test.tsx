@@ -1236,7 +1236,7 @@ describe(`Query Collections`, () => {
         )
         return (
           <ul data-testid="list">
-            <For each={query.suspense()}>
+            <For each={query.whenReady()}>
               {(person) => (
                 <li data-testid={`person-${person.id}`}>{person.name}</li>
               )}
@@ -1286,7 +1286,7 @@ describe(`Query Collections`, () => {
         )
         return (
           <div data-testid="content">
-            <span data-testid="count">{query.suspense().length}</span>
+            <span data-testid="count">{query.whenReady().length}</span>
           </div>
         )
       }
@@ -2940,7 +2940,7 @@ describe(`Query Collections`, () => {
     })
   })
 
-  describe(`suspense gating`, () => {
+  describe(`whenReady gating`, () => {
     it(`Loading shows fallback during initial load, data after ready`, async () => {
       let syncMarkReady: (() => void) | undefined
 
@@ -2980,7 +2980,7 @@ describe(`Query Collections`, () => {
         return (
           <Loading fallback={<div data-testid="loading">Loading</div>}>
             <div data-testid="content">
-              <For each={query.suspense()}>
+              <For each={query.whenReady()}>
                 {(person) => <div>{person.name}</div>}
               </For>
             </div>
@@ -3044,7 +3044,7 @@ describe(`Query Collections`, () => {
       )
 
       await waitFor(() => expect(result.status).toBe('ready'))
-      expect(isPending(() => result.suspense())).toBe(false)
+      expect(isPending(() => result.whenReady())).toBe(false)
 
       // Switch to source2 (not yet ready) — isPending must be true
       source2.preload()
@@ -3053,12 +3053,12 @@ describe(`Query Collections`, () => {
 
       // Still loading — check before ready
       expect(result.status).toBe('loading')
-      expect(isPending(() => result.suspense())).toBe(true)
+      expect(isPending(() => result.whenReady())).toBe(true)
 
       // Now ready
       secondSyncMarkReady!()
       await waitFor(() => expect(result.status).toBe('ready'))
-      expect(isPending(() => result.suspense())).toBe(false)
+      expect(isPending(() => result.whenReady())).toBe(false)
     })
 
     it(`gated rows stay visible with stale data during revalidation`, async () => {
@@ -3098,7 +3098,7 @@ describe(`Query Collections`, () => {
         return (
           <Loading fallback={<div data-testid="loading">Loading</div>}>
             <div data-testid="content">
-              {`${query.suspense().length} items`}
+              {`${query.whenReady().length} items`}
             </div>
           </Loading>
         )
