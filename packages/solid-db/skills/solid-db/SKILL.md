@@ -4,8 +4,9 @@ description: >
   SolidJS v2 bindings for TanStack DB. useLiveQuery returns an Accessor that
   doubles as data access (call as function — returns current rows
   synchronously, including partial rows synced before ready) with state,
-  collection, status, isReady, and persisted-readiness properties. Suspense
-  is opt-in via the loaded accessor read inside <Loading>. Fine-grained
+  collection, status, isReady, and persisted-readiness properties.
+  query.loaded() is the opt-in first-data gate: read it inside <Loading>
+  and it returns the rows once the query settles. Fine-grained
   reactivity: signal reads MUST happen inside the query function for
   tracking. Config passed as Accessor (() => config). Wholesale observer
   mode + keyed projection for per-field row reactivity keyed by live result
@@ -43,7 +44,7 @@ function TodoList() {
   return (
     <Loading fallback={<div>Loading...</div>}>
       <ul>
-        <For each={todosQuery()}>{(todo) => <li>{todo.text}</li>}</For>
+        <For each={todosQuery.loaded()}>{(todo) => <li>{todo.text}</li>}</For>
       </ul>
     </Loading>
   )
@@ -68,7 +69,7 @@ const query = useLiveQuery((q) => q.from({ todo: todoCollection }))
 // query.isReady / query.isError → boolean
 // query.persistedStatus / query.isPersistedReady / query.persistedError
 //                  → persisted (network-first) restore state
-// query.loaded  → Accessor; reading it inside <Loading> gates on first data
+// query.loaded  → Accessor; read inside <Loading> — gates on first data, then returns the rows
 
 // With reactive signals — signals MUST be read INSIDE the query function
 const [minPriority, setMinPriority] = createSignal(5)
@@ -141,7 +142,7 @@ import { Loading, Errored } from '@solidjs/web'
 
 <Errored fallback={(err) => <div>Error: {String(err())}</div>}>
   <Loading fallback={<div>Loading...</div>}>
-    <For each={todosQuery()}>{(todo) => <li>{todo.text}</li>}</For>
+    <For each={todosQuery.loaded()}>{(todo) => <li>{todo.text}</li>}</For>
   </Loading>
 </Errored>
 ```
