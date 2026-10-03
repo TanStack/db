@@ -48,8 +48,7 @@ import type { Ref } from '../../src/query/index.js'
 import type { WithoutVirtualProps } from '../../src/virtual-props.js'
 
 type Variant =
-  | { kind: `person`; name: string }
-  | { kind: `company`; legalName: string }
+  { kind: `person`; name: string } | { kind: `company`; legalName: string }
 
 type VirtualFieldSubject =
   | `row-root`
