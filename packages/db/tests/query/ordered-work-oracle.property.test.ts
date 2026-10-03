@@ -579,7 +579,7 @@ async function observeConsumer(
       const publicationsBeforeMutation = publications.length
       if (removeJoinedMarker) {
         const removed = markers[0]!
-        markerSync.begin({ immediate: true })
+        markerSync.begin()
         markerSync.write({ type: `delete`, value: removed })
         const receipt = markerSync.commit()
         if (receipt !== true) await receipt
@@ -596,7 +596,7 @@ async function observeConsumer(
       if (rowToDelete) {
         truth.splice(truth.indexOf(rowToDelete), 1)
         delivered.delete(rowToDelete.id)
-        sync.begin({ immediate: true })
+        sync.begin()
         sync.write({ type: `delete`, value: { ...rowToDelete } })
         const receipt = sync.commit()
         if (receipt !== true) await receipt
@@ -798,7 +798,7 @@ async function observeLaterOrderTermMutation(
       if (live) expect([...live.values()].map(({ id }) => id)).toEqual([1, 2])
 
       const first = { ...source.get(1)!, label: `z` }
-      sync.begin({ immediate: true })
+      sync.begin()
       sync.write({ type: `update`, value: { ...first } })
       const receipt = sync.commit()
       if (receipt !== true) await receipt
@@ -938,7 +938,7 @@ async function observeFinitePrefixMutation(
       const moved = { ...truth.get(1)!, rank: 10 }
       if (mutation === `delete`) truth.delete(1)
       else truth.set(1, moved)
-      sync.begin({ immediate: true })
+      sync.begin()
       sync.write({
         type: mutation === `delete` ? `delete` : `update`,
         value: { ...moved },
@@ -2040,7 +2040,7 @@ describe(`ordered source work oracle`, () => {
         await flushPromises()
         expect(events).toEqual([])
 
-        rootSync.begin({ immediate: true })
+        rootSync.begin()
         rootSync.write({
           type: `update`,
           value: { ...initial, label: `later` },
@@ -2453,7 +2453,7 @@ describe(`ordered source work oracle`, () => {
         expect(readRows()).toEqual(expected)
         const loadCount = loads
         const row = position === `first` ? expected[0]! : expected.at(-1)!
-        sync.begin({ immediate: true })
+        sync.begin()
         sync.write({ type: `update`, value: { ...row, label: `changed` } })
         sync.commit()
         await flushPromises()
@@ -2887,7 +2887,7 @@ describe(`ordered source work oracle`, () => {
       const requestsBeforeMutation = primaryRequests
       const moved = { id: 1, rank: 10 }
       primaryTruth.set(1, moved)
-      primarySync.begin({ immediate: true })
+      primarySync.begin()
       primarySync.write({ type: `update`, value: moved })
       const mutationReceipt = primarySync.commit()
       if (mutationReceipt !== true) await mutationReceipt
@@ -4262,7 +4262,7 @@ describe(`ordered source work oracle`, () => {
       if (truncateReceipt !== true) await truncateReceipt
       await vi.waitFor(() => expect(joinedLoads).toBeGreaterThan(1))
 
-      rootSync.begin({ immediate: true })
+      rootSync.begin()
       rootSync.write({ type: `update`, value: { ...initialRow, label: `new` } })
       const updateReceipt = rootSync.commit()
       if (updateReceipt !== true) await updateReceipt

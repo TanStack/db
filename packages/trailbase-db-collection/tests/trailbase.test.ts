@@ -499,7 +499,9 @@ describe(`TrailBase Integration`, () => {
     }
   })
 
-  it(`does not publish a parked subset page after its request is aborted`, async () => {
+  // A commit that core accepted always applies. Aborting the request while
+  // its page waits behind a persisting mutation cannot withdraw it.
+  it(`publishes an accepted parked subset page after its request is aborted`, async () => {
     const recordApi = new MockRecordApi<Data>()
     recordApi.list.mockResolvedValue({
       records: [{ id: 1, updated: 0, data: `obsolete` }],
@@ -556,9 +558,9 @@ describe(`TrailBase Integration`, () => {
       if (load === true) {
         throw new Error(`Expected a pending applied receipt`)
       }
-      await expect(load).rejects.toMatchObject({ name: `AbortError` })
+      await expect(load).resolves.toBeUndefined()
 
-      expect(collection.get(1)).toBeUndefined()
+      expect(collection.get(1)).toBeDefined()
       expect(recordApi.list).toHaveBeenCalledOnce()
     } finally {
       abortController.abort()

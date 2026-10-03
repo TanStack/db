@@ -1399,7 +1399,9 @@ async function runOptimisticReplayScenario(
               return true
             }
             // The load settles after its rows are visible.
-            return replay.promise.then(() => replayReceipt)
+            return replay.promise.then(async () => {
+              await replayReceipt
+            })
           },
           unloadSubset: () => {},
         }

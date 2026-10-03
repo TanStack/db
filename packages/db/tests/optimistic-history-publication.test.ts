@@ -27,10 +27,9 @@ it.each([false, true])(
         type: `sync`,
         rows: [{ id: 2, a: 0, b: 0, c: -1 }],
         truncate: false,
-        immediate: false,
         copies: 1,
       },
-      { type: `sync`, rows: [], truncate: true, immediate: false, copies: 1 },
+      { type: `sync`, rows: [], truncate: true, copies: 1 },
     ])
   },
 )
@@ -41,7 +40,6 @@ const history = (success: boolean): Array<OptimisticStep> => [
     type: `sync`,
     rows: initial.map((row) => ({ ...row, b: 2 })),
     truncate: false,
-    immediate: false,
     copies: 1,
   },
   { type: `settle`, slot: 0, success, cascade: false },
@@ -56,7 +54,6 @@ it.each([false, true])(
         type: `sync`,
         rows: replace ? initial : [],
         truncate: true,
-        immediate: false,
         copies: 1,
       },
     ])

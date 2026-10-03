@@ -66,7 +66,6 @@
   "loadSubsetOperations": "a5",
   "cancelInitialRenderWait": "a6",
   "pendingSyncedProjection": "a7",
-  "resolveOptimisticUpsert": "a8",
   "hasHydrationError": "a9",
   "orderedLoadFailed": "ba",
   "syncStartDeferred": "bb",
@@ -180,7 +179,6 @@
   "startTruncateReplayAttempt": "cX",
   "inputsCache": "cY",
   "readEntries": "cZ",
-  "acknowledgedInserts": "c_",
   "ssrStreamingEnabled": "c$",
   "_root": "c0",
   "applyPendingSyncOperation": "c1",
@@ -382,5 +380,7 @@
   "compareRows": "gg",
   "sameFields": "gh",
   "dropIfUnused": "gi",
-  "clock": "gj"
+  "clock": "gj",
+  "afterAcceptedApplied": "a8",
+  "hasAcceptedRows": "c_"
 }

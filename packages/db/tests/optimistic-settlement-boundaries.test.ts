@@ -16,9 +16,8 @@ const settle = (slot: number, success = true): OptimisticStep => ({
 const sync = (
   rows: Array<HistoryRow>,
   truncate = false,
-  immediate = false,
   copies = 1,
-): OptimisticStep => ({ type: `sync`, rows, truncate, immediate, copies })
+): OptimisticStep => ({ type: `sync`, rows, truncate, copies })
 
 // Every regression is a program for the same model, driver and checkpoint
 // assertions used by generated histories. Membership work has its own generated
@@ -33,7 +32,7 @@ const cases: Array<{
     initial: [row],
     steps: [
       edit({ a: 1 }),
-      sync([{ ...row, a: 1 }], false, false, 2),
+      sync([{ ...row, a: 1 }], false, 2),
       settle(0),
     ],
   },
@@ -42,7 +41,7 @@ const cases: Array<{
     initial: [],
     steps: [
       edit({ a: 1 }),
-      sync([{ ...row, a: 1 }], false, true),
+      sync([{ ...row, a: 1 }], false),
       edit({ b: 2 }),
       settle(1),
       settle(0, false),
@@ -90,7 +89,7 @@ const cases: Array<{
       edit({ a: 1 }),
       edit({ b: 2 }),
       settle(1),
-      sync([], truncate, true),
+      sync([], truncate),
       settle(0, false),
     ],
   })),
@@ -112,7 +111,7 @@ const cases: Array<{
   {
     name: `duplicate writes retain a local acknowledgement within a batch`,
     initial: [],
-    steps: [edit({ a: 1 }, false), sync([{ ...row, a: 1 }], false, true, 2)],
+    steps: [edit({ a: 1 }, false), sync([{ ...row, a: 1 }], false, 2)],
   },
   {
     name: `a persisting peer does not hide rollback publication`,
@@ -125,7 +124,7 @@ const cases: Array<{
     steps: [
       edit({ a: 1 }, false),
       sync([], true),
-      sync([{ ...row, a: 1 }], false, true),
+      sync([{ ...row, a: 1 }], false),
     ],
   },
   {
