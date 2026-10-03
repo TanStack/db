@@ -672,14 +672,12 @@ async function runTerminalEventHistory(
     await Promise.resolve()
     expect(settlements).toEqual(terminalLedger)
 
-    const expected = tracked.map(
-      (_, index): Settlement => ({
-        label:
-          history.pending === `execute` ? `execute-${index}` : history.pending,
-        status: `rejected`,
-        observation: terminalEventFailures[history.eventType],
-      }),
-    )
+    const expected = tracked.map((_, index): Settlement => ({
+      label:
+        history.pending === `execute` ? `execute-${index}` : history.pending,
+      status: `rejected`,
+      observation: terminalEventFailures[history.eventType],
+    }))
     expectSettlementSet(settlements, expected)
     expectSettlementSet(
       completed.map(({ settlement }) => settlement),

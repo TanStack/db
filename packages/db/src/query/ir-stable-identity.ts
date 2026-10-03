@@ -32,9 +32,7 @@ type StableIdentityValue =
   | { [key: string]: StableIdentityValue }
 
 type ValueIdentityContext =
-  | `exact-output`
-  | `equality-operand`
-  | `ordering-operand`
+  `exact-output` | `equality-operand` | `ordering-operand`
 
 type AliasScope = {
   bindings: ReadonlyMap<string, number>
@@ -585,10 +583,7 @@ function canonicalizeCompareOptions(
 
 function canonicalizeExpression(
   expression:
-    | BasicExpression
-    | Aggregate
-    | IncludesSubquery
-    | ConditionalSelect,
+    BasicExpression | Aggregate | IncludesSubquery | ConditionalSelect,
   path: string,
   seen: WeakSet<object>,
   valueContext: ValueIdentityContext = `exact-output`,

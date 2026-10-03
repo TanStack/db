@@ -67,8 +67,7 @@ it(`works without browser election primitives`, async () => {
   })
 
   const navigatorWithOptionalLocks = globalThis.navigator as
-    | (Navigator & { locks?: unknown })
-    | undefined
+    (Navigator & { locks?: unknown }) | undefined
   const originalLocks = navigatorWithOptionalLocks?.locks
   if (navigatorWithOptionalLocks) {
     try {

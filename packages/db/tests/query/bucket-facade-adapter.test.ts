@@ -710,8 +710,7 @@ describe(`BucketFacadeAdapter`, () => {
     )
     const originalGetConfig = CollectionConfigBuilder.prototype.getConfig
     let builder:
-      | CollectionConfigBuilder<Context, Record<string, unknown>>
-      | undefined
+      CollectionConfigBuilder<Context, Record<string, unknown>> | undefined
     CollectionConfigBuilder.prototype.getConfig = function () {
       builder = this as unknown as CollectionConfigBuilder<
         Context,

@@ -2373,8 +2373,7 @@ function rawSnapshotViolations(
 }
 
 type FreshInitOutcome =
-  | { status: `fulfilled` }
-  | { status: `rejected`; error: string }
+  { status: `fulfilled` } | { status: `rejected`; error: string }
 
 type FreshInitViolation =
   | { kind: `missing-outcome`; index: number }
