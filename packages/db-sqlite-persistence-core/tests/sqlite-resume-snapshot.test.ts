@@ -277,8 +277,7 @@ describe(`SQLite resume snapshots`, () => {
     let primaryFailure: unknown
     let releaseInitialSnapshot = () => {}
     let collection:
-      | Collection<{ id: string; title: string }, string>
-      | undefined
+      Collection<{ id: string; title: string }, string> | undefined
     try {
       const driver = createDriver(database)
       const collectionId = `generated-local-startup`
