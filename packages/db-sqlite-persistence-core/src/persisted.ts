@@ -289,8 +289,7 @@ export type PersistedRowMetadataMutation<
 > = { type: `set`; key: TKey; value: unknown } | { type: `delete`; key: TKey }
 
 export type PersistedCollectionMetadataMutation =
-  | { type: `set`; key: string; value: unknown }
-  | { type: `delete`; key: string }
+  { type: `set`; key: string; value: unknown } | { type: `delete`; key: string }
 
 export type ReplayableTxDelta<
   T extends Record<string, unknown> = Record<string, unknown>,
@@ -1333,8 +1332,7 @@ class PersistedCollectionRuntime<
   private readonly pendingAppliedReceipts = new Map<number, Promise<void>>()
   private hydratingGeneration: number | null = null
   private terminalFailure:
-    | { lifecycleGeneration: number; error: unknown }
-    | undefined
+    { lifecycleGeneration: number; error: unknown } | undefined
   private coordinatorUnsubscribe: (() => void) | null = null
   private remoteSubsetOwnerUnsubscribe: (() => void) | null = null
   private indexAddedUnsubscribe: (() => void) | null = null
@@ -2433,8 +2431,7 @@ class PersistedCollectionRuntime<
     adapter: HydrationPersistenceAdapter,
   ): Promise<void> {
     let snapshotRows:
-      | Map<TKey, { key: TKey; value: T; metadata?: unknown }>
-      | undefined
+      Map<TKey, { key: TKey; value: T; metadata?: unknown }> | undefined
     type RecoveryPresence = `present` | `absent` | `unknown`
     const recoveredPresence = new Map<TKey, RecoveryPresence>()
     let snapshotInvalidatedByTruncate = false
