@@ -3,8 +3,10 @@ import {
   BaseQueryBuilder,
   createLiveQueryCollection,
   createLiveQueryObserver,
+  getPublicCollection,
   isCollection,
   isSingleResultCollection,
+  resolveLiveQueryValue,
 } from '@tanstack/db'
 import { createEffect, createMemo, createProjection, createSignal } from 'solid-js'
 import type { Accessor } from 'solid-js'
@@ -181,10 +183,9 @@ export function useLiveQuery(
             return null
           }
 
-          return createLiveQueryCollection({
-            query: configOrQueryOrCollection,
-            startSync: true,
-          })
+          // resolveLiveQueryValue pools eq-filtered queries so identical
+          // hooks share one live-query Collection and subscription.
+          return resolveLiveQueryValue(result)
         }
 
         const innerCollection = configOrQueryOrCollection()
@@ -302,7 +303,8 @@ export function useLiveQuery(
   const readinessGate = createMemo(async () => {
     const col = collection()
     if (!col) return null
-    if (col.isReady()) return col
+    // status works for pooled eq-filter views too, which expose no isReady.
+    if (col.status === `ready`) return col
     const observer = createLiveQueryObserver(col)
     try {
       await observer.preloadForInitialRender()
@@ -343,8 +345,10 @@ export function useLiveQuery(
       // STATUS itself arrives through the observer's status notifications.
       // The guard drops rejections from a collection this effect has already
       // torn down, so a superseded query cannot poison its replacement.
+      // The observer's preload works for pooled eq-filter views, which
+      // expose no toArrayWhenReady of their own.
       let active = true
-      currentCollection.toArrayWhenReady().catch((error: unknown) => {
+      observer.preload().catch((error: unknown) => {
         if (active) collectionError = error
       })
 
@@ -364,7 +368,14 @@ export function useLiveQuery(
     if (collectionError) throw collectionError
 
     const s = status()
-    if (s === 'error') throw collectionError ?? new Error('Collection sync error')
+    if (s === `error`) {
+      // Collections do not yet expose their last error object (#671); name
+      // the failed query, matching the React suspense adapter's fallback.
+      throw (
+        collectionError ??
+        new Error(`Collection "${collection()?.id}" failed to load`)
+      )
+    }
 
     const currentCollection = collection()
     if (!currentCollection) {
@@ -388,7 +399,7 @@ export function useLiveQuery(
   Object.defineProperties(getData, {
     collection: {
       get() {
-        return collection()
+        return getPublicCollection(collection())
       },
     },
     state: {

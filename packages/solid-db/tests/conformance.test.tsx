@@ -227,7 +227,7 @@ const solidDriver: LiveQueryDriver = {
   // surface the suite pins here.
   errorSurface: `throw`,
   knownGaps: [],
-  features: { serverSnapshot: false, suspense: true },
+  features: { serverSnapshot: false, suspense: true, pooledEqFilters: true },
 }
 
 runSuite(solidDriver)
