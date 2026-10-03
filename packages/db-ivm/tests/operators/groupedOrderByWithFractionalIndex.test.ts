@@ -562,8 +562,7 @@ describe(`Operators`, () => {
         [string, [{ id: string; group: string; value: number }, string]]
       >()
       let windowFn:
-        | ((options: { offset?: number; limit?: number }) => void)
-        | undefined
+        ((options: { offset?: number; limit?: number }) => void) | undefined
 
       input.pipe(
         groupedOrderByWithFractionalIndex((item) => item.value, {

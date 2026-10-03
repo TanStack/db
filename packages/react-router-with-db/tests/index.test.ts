@@ -104,8 +104,7 @@ describe(`routerWithDbClient`, () => {
 
     adaptRouter(router, dbClient)
     const initialState = (await router.options.dehydrate?.()) as
-      | DehydratedRouterDbState
-      | undefined
+      DehydratedRouterDbState | undefined
     expect(initialState).toBeDefined()
     expect(initialState!.dehydratedDbClient.liveQueries).toBeUndefined()
 

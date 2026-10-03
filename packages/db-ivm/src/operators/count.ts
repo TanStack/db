@@ -29,8 +29,8 @@ export class CountOperator<K, V> extends ReduceOperator<K, V, number> {
  * Counts the number of elements by key (version-free)
  */
 export function count<
-  KType extends T extends KeyValue<infer K, infer _V> ? K : never,
-  VType extends T extends KeyValue<KType, infer V> ? V : never,
+  KType extends (T extends KeyValue<infer K, infer _V> ? K : never),
+  VType extends (T extends KeyValue<KType, infer V> ? V : never),
   T,
 >() {
   return (

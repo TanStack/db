@@ -122,8 +122,7 @@ export async function queryOnce<TContext extends Context>(
     // Extract and return results
     if (isSingleResult) {
       const first = collection.values().next().value as
-        | InferResultType<TContext>
-        | undefined
+        InferResultType<TContext> | undefined
       return first as InferResultType<TContext>
     }
     return collection.toArray as unknown as InferResultType<TContext>

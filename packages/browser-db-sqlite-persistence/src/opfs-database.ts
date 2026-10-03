@@ -102,7 +102,9 @@ function createOPFSWorkerInstance(): BrowserOPFSWorkerLike {
     )
   }
 
-  return new (OPFSWorkerConstructor as unknown as new () => BrowserOPFSWorkerLike)()
+  return new (
+    OPFSWorkerConstructor as unknown as new () => BrowserOPFSWorkerLike
+  )()
 }
 
 function getOpenAbortError(signal: AbortSignal): Error {

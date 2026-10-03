@@ -1189,8 +1189,7 @@ describe(`Operators`, () => {
       const input = graph.newInput<[number, { value: string }]>()
       const messages: Array<Array<unknown>> = []
       let windowFn:
-        | ((options: { offset?: number; limit?: number }) => void)
-        | undefined
+        ((options: { offset?: number; limit?: number }) => void) | undefined
 
       input.pipe(
         topKWithFractionalIndex((a, b) => a.value.localeCompare(b.value), {
@@ -1229,8 +1228,7 @@ describe(`Operators`, () => {
       >()
 
       let windowFn:
-        | ((options: { offset?: number; limit?: number }) => void)
-        | undefined
+        ((options: { offset?: number; limit?: number }) => void) | undefined
 
       input.pipe(
         topKWithFractionalIndex((a, b) => a.value.localeCompare(b.value), {
@@ -1302,8 +1300,7 @@ describe(`Operators`, () => {
       >()
 
       let windowFn:
-        | ((options: { offset?: number; limit?: number }) => void)
-        | undefined
+        ((options: { offset?: number; limit?: number }) => void) | undefined
 
       input.pipe(
         topKWithFractionalIndex((a, b) => a.value.localeCompare(b.value), {
@@ -1375,8 +1372,7 @@ describe(`Operators`, () => {
       >()
 
       let windowFn:
-        | ((options: { offset?: number; limit?: number }) => void)
-        | null = null
+        ((options: { offset?: number; limit?: number }) => void) | null = null
 
       input.pipe(
         topKWithFractionalIndex((a, b) => a.value.localeCompare(b.value), {
@@ -1460,8 +1456,7 @@ describe(`Operators`, () => {
       >()
 
       let windowFn:
-        | ((options: { offset?: number; limit?: number }) => void)
-        | null = null
+        ((options: { offset?: number; limit?: number }) => void) | null = null
 
       input.pipe(
         topKWithFractionalIndex((a, b) => a.value.localeCompare(b.value), {
@@ -1531,8 +1526,7 @@ describe(`Operators`, () => {
       >()
 
       let windowFn:
-        | ((options: { offset?: number; limit?: number }) => void)
-        | null = null
+        ((options: { offset?: number; limit?: number }) => void) | null = null
 
       input.pipe(
         topKWithFractionalIndex((a, b) => a.value.localeCompare(b.value), {
@@ -1621,8 +1615,7 @@ describe(`Operators`, () => {
       >()
 
       let windowFn:
-        | ((options: { offset?: number; limit?: number }) => void)
-        | null = null
+        ((options: { offset?: number; limit?: number }) => void) | null = null
 
       // Start with no limit (infinite limit)
       input.pipe(
@@ -1687,8 +1680,7 @@ describe(`Operators`, () => {
       >()
 
       let windowFn:
-        | ((options: { offset?: number; limit?: number }) => void)
-        | null = null
+        ((options: { offset?: number; limit?: number }) => void) | null = null
 
       // Start with no limit (infinite limit)
       input.pipe(
@@ -1746,8 +1738,7 @@ describe(`Operators`, () => {
       >()
 
       let windowFn:
-        | ((options: { offset?: number; limit?: number }) => void)
-        | null = null
+        ((options: { offset?: number; limit?: number }) => void) | null = null
 
       // Start with no limit (infinite limit) and offset 3
       input.pipe(
@@ -1810,8 +1801,7 @@ describe(`Operators`, () => {
       >()
 
       let windowFn:
-        | ((options: { offset?: number; limit?: number }) => void)
-        | null = null
+        ((options: { offset?: number; limit?: number }) => void) | null = null
 
       // Start with no limit (infinite limit) and offset 2
       input.pipe(
@@ -1874,8 +1864,7 @@ describe(`Operators`, () => {
       >()
 
       let windowFn:
-        | ((options: { offset?: number; limit?: number }) => void)
-        | null = null
+        ((options: { offset?: number; limit?: number }) => void) | null = null
 
       // Start with no limit (infinite limit) and offset 0
       input.pipe(
@@ -1938,8 +1927,7 @@ describe(`Operators`, () => {
       >()
 
       let windowFn:
-        | ((options: { offset?: number; limit?: number }) => void)
-        | null = null
+        ((options: { offset?: number; limit?: number }) => void) | null = null
 
       // Start with no limit (infinite limit) and offset 3
       input.pipe(
@@ -2002,8 +1990,7 @@ describe(`Operators`, () => {
       >()
 
       let windowFn:
-        | ((options: { offset?: number; limit?: number }) => void)
-        | null = null
+        ((options: { offset?: number; limit?: number }) => void) | null = null
 
       // Start with finite limit of 2 and offset 2
       input.pipe(
@@ -2067,8 +2054,7 @@ describe(`Operators`, () => {
       >()
 
       let windowFn:
-        | ((options: { offset?: number; limit?: number }) => void)
-        | null = null
+        ((options: { offset?: number; limit?: number }) => void) | null = null
 
       // Start with finite limit of 2 and offset 1
       input.pipe(
@@ -2132,8 +2118,7 @@ describe(`Operators`, () => {
       >()
 
       let windowFn:
-        | ((options: { offset?: number; limit?: number }) => void)
-        | null = null
+        ((options: { offset?: number; limit?: number }) => void) | null = null
 
       // Start with finite limit of 2 and offset 3
       input.pipe(
