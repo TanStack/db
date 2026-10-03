@@ -633,8 +633,7 @@ describe(`live query scheduler`, () => {
             .select(({ user }) => ({ id: user.id, name: user.name })),
       })
       let dependentSubscription:
-        | ReturnType<typeof live.subscribeChanges>
-        | undefined
+        ReturnType<typeof live.subscribeChanges> | undefined
 
       try {
         await live.preload()
