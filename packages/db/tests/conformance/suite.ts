@@ -98,8 +98,9 @@ export function runSuite(rawDriver: LiveQueryDriver) {
   const installPersistedReadiness = (
     source: DeferredSourceHandle,
     settledSnapshot:
-      | { status: `ready` }
-      | { status: `error`; error: unknown } = { status: `ready` },
+      { status: `ready` } | { status: `error`; error: unknown } = {
+      status: `ready`,
+    },
   ) => {
     let snapshot:
       | { status: `loading` }

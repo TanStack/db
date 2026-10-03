@@ -155,8 +155,7 @@ type FairnessReferenceCheckpoint = {
 }
 
 export type BrowserWASQLiteDatabaseFactory = () =>
-  | BrowserWASQLiteDatabase
-  | Promise<BrowserWASQLiteDatabase>
+  BrowserWASQLiteDatabase | Promise<BrowserWASQLiteDatabase>
 
 function createDeferred(): Deferred {
   let resolve!: () => void

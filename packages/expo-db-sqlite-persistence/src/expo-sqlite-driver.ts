@@ -40,8 +40,7 @@ type ExpoSQLiteOpenDatabaseOptions = {
 }
 
 export type ExpoSQLiteDriverOptions =
-  | ExpoSQLiteExistingDatabaseOptions
-  | ExpoSQLiteOpenDatabaseOptions
+  ExpoSQLiteExistingDatabaseOptions | ExpoSQLiteOpenDatabaseOptions
 
 function hasExistingDatabase(
   options: ExpoSQLiteDriverOptions,
