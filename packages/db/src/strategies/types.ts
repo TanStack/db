@@ -115,10 +115,7 @@ export interface BatchStrategy extends BaseStrategy<`batch`> {
  * Union type of all available strategies
  */
 export type Strategy =
-  | DebounceStrategy
-  | QueueStrategy
-  | ThrottleStrategy
-  | BatchStrategy
+  DebounceStrategy | QueueStrategy | ThrottleStrategy | BatchStrategy
 
 /**
  * Extract the options type from a strategy
