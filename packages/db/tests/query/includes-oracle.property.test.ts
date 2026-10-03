@@ -3080,12 +3080,10 @@ function createRelationshipBatchShapeScenarios({
   const replacementSteps: Array<FullRowBatchStep> =
     shape.delivery === `atomic`
       ? [{ level: childLevel, changes: replacementChanges }]
-      : replacementChanges.map(
-          (change): FullRowBatchStep => ({
-            level: childLevel,
-            changes: [change],
-          }),
-        )
+      : replacementChanges.map((change): FullRowBatchStep => ({
+          level: childLevel,
+          changes: [change],
+        }))
   const positionOnlyTarget = {
     ...currentTarget,
     position: movedTarget.position,
