@@ -1256,7 +1256,6 @@ export class CollectionStateManager<
       // Set flag to prevent redundant optimistic state recalculations
       this.isCommittingSyncTransactions = true
 
-      const reappliedKeys = new Set<TKey>()
       let truncatePendingLocalChanges: Set<TKey> | undefined
       let truncatePendingLocalOrigins: Set<TKey> | undefined
 
@@ -1299,6 +1298,7 @@ export class CollectionStateManager<
       }
 
       const events: Array<ChangeMessage<TOutput, TKey>> = []
+      let reappliedKeys: ReadonlySet<TKey> | undefined
       if (hasTruncateSync) {
         // All queued transactions publish as one batch. Its clear prefix must
         // describe the prior visible rows, not intermediate queued writes.
@@ -1495,7 +1495,6 @@ export class CollectionStateManager<
       if (hasTruncateSync) {
         // Events use the same rebuilt overlay as synchronous reads.
         const reapplyUpserts = this.optimisticUpserts
-        // The rebuild already published these keys after the clear prefix.
         const reapplyDeletes = this.optimisticDeletes
 
         // Emit inserts for re-applied upserts, skipping any keys that have an optimistic delete.
@@ -1503,7 +1502,6 @@ export class CollectionStateManager<
         // with the optimistic value to preserve local intent.
         for (const [key, value] of reapplyUpserts) {
           if (reapplyDeletes.has(key)) continue
-          reappliedKeys.add(key)
           if (syncedInsertedOrUpdatedKeys.has(key)) {
             let foundInsert = false
             for (let i = events.length - 1; i >= 0; i--) {
@@ -1535,6 +1533,10 @@ export class CollectionStateManager<
           events.push(...filtered)
         }
 
+        // A ready callback below can add optimistic upserts that this batch
+        // has not published, so freeze the keys it has.
+        reappliedKeys = new Set(reapplyUpserts.keys())
+
         // Ensure listeners are active before emitting this critical batch
         if (this.lifecycle.status !== `ready`) {
           this.lifecycle.markReady()
@@ -1543,7 +1545,8 @@ export class CollectionStateManager<
 
       // Now check what actually changed in the final visible state
       for (const key of changedKeys) {
-        if (reappliedKeys.has(key)) continue
+        // Truncate already published each re-applied upsert as an insert.
+        if (reappliedKeys?.has(key)) continue
         const firstSyncOperation = firstSyncOperations.get(key)
         // A live-reading source can change a reused row before this commit
         // captures it. Later writes must not substitute an intermediate value.

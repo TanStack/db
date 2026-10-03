@@ -3,7 +3,7 @@ id: AggregateFunctionNotInSelectError
 title: AggregateFunctionNotInSelectError
 ---
 
-Defined in: [packages/db/src/errors.ts:699](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L699)
+Defined in: [packages/db/src/errors.ts:709](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L709)
 
 ## Extends
 
@@ -17,7 +17,7 @@ Defined in: [packages/db/src/errors.ts:699](https://github.com/TanStack/db/blob/
 new AggregateFunctionNotInSelectError(functionName): AggregateFunctionNotInSelectError;
 ```
 
-Defined in: [packages/db/src/errors.ts:700](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L700)
+Defined in: [packages/db/src/errors.ts:710](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L710)
 
 #### Parameters
 

@@ -56,8 +56,12 @@ import type { CollectionConfig, SyncConfig } from '../src/types.js'
  * to this model and a real Collection. After every step it compares rows,
  * metadata, immutable handler payloads, promise outcomes, the rows visible
  * when `isPersisted` fulfills, downstream query state, and complete
- * publication cuts. Fault injection proves those observations can reject
- * wrong keys, partial batches, stale previous values, and transient fields.
+ * publication cuts. A second subscriber starts without initial state, so no
+ * sent-key filter can hide an invalid message. Each of its batches must be
+ * valid for its replica: an insert names an absent key, and an update or
+ * delete names a present one. Fault injection proves those observations can
+ * reject wrong keys, partial batches, stale previous values, and transient
+ * fields.
  */
 
 export type HistoryRow = { id: number; a: number; b: number; c: number }
@@ -462,6 +466,7 @@ export async function runOptimisticHistory(
     query: (q) => q.from({ row: collection }),
   })
   let sub: ReturnType<typeof collection.subscribeChanges> | undefined
+  let rawSub: ReturnType<typeof collection.subscribeChanges> | undefined
   const operations: Array<{
     tx:
       | ReturnType<typeof collection.update>
@@ -642,7 +647,42 @@ export async function runOptimisticHistory(
         },
         { includeInitialState: true },
       )
+      // A raw subscriber starts from the visible rows and receives only later
+      // changes. It has no sent-key filter to hide an invalid message.
+      const rawReplica = new Map(
+        [...model.visible()].map(([key, row]) => [key as unknown, row]),
+      )
+      let rawPublications: Array<{
+        before: Map<unknown, ObservedRow>
+        batch: Array<{ key: unknown; type: string; value: ObservedRow }>
+      }> = []
+      rawSub = collection.subscribeChanges(
+        (batch) => {
+          const before = new Map(rawReplica)
+          const captured = batch.map((change) => ({
+            ...change,
+            value: observed(change.value),
+            ...(change.previousValue === undefined
+              ? {}
+              : { previousValue: observed(change.previousValue) }),
+          }))
+          for (const change of captured) {
+            if (change.type === `delete`) rawReplica.delete(change.key)
+            else rawReplica.set(change.key, change.value)
+          }
+          rawPublications.push({ before, batch: captured })
+        },
+        { includeInitialState: false },
+      )
       const check = (label: string) => {
+        for (const publication of rawPublications) {
+          expectHistoryEventSemantics(
+            publication.before,
+            publication.batch,
+            `${label}: raw subscriber`,
+          )
+        }
+        rawPublications = []
         if (
           !injected &&
           fault === `backwards-cuts` &&
@@ -735,6 +775,10 @@ export async function runOptimisticHistory(
         expect(sorted(replica.values()), `${label}: event replica`).toEqual(
           expected,
         )
+        expect(
+          sorted(rawReplica.values()),
+          `${label}: raw event replica`,
+        ).toEqual(expected)
         expect(
           sorted([...downstream.values()].map(plain)),
           `${label}: downstream`,
@@ -900,6 +944,7 @@ export async function runOptimisticHistory(
         },
       ]),
       () => sub?.unsubscribe(),
+      () => rawSub?.unsubscribe(),
       () => downstream.cleanup(),
       () => collection.cleanup(),
       ...receipts.map(({ outcome }, index) => async () => {

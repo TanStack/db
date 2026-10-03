@@ -83,3 +83,19 @@ it.each([
     /native callback key|whole forward publication|callback-time complete source|event semantics/,
   )
 })
+
+// Found by the raw subscriber in a random campaign. A settled delete drops,
+// and a later active edit covers the key while a sync transaction waits.
+// The key must publish once when the edit's overlay and the sync apply.
+it(`publishes a key once after a settled delete beneath a later active edit`, async () => {
+  await runOptimisticHistory(
+    [{ id: 1, a: 0, b: 0, c: 0 }],
+    [
+      { type: `delete`, key: 1, optimistic: true },
+      { type: `settle`, slot: 0, success: true, cascade: false },
+      { type: `edit`, key: 1, fields: { b: 1 }, optimistic: true },
+      { type: `sync`, rows: [], truncate: false, copies: 1 },
+      { type: `settle`, slot: 0, success: true, cascade: false },
+    ],
+  )
+})
