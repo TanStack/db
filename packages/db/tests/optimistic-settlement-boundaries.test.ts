@@ -30,11 +30,7 @@ const cases: Array<{
   {
     name: `one confirmation for repeated queued writes`,
     initial: [row],
-    steps: [
-      edit({ a: 1 }),
-      sync([{ ...row, a: 1 }], false, 2),
-      settle(0),
-    ],
+    steps: [edit({ a: 1 }), sync([{ ...row, a: 1 }], false, 2), settle(0)],
   },
   {
     name: `an acknowledged insert cannot remove an accepted update`,

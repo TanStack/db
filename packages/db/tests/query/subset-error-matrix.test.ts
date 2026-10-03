@@ -118,7 +118,10 @@ function createStaticSource(id: string, initialData: ReadonlyArray<Row>) {
   )
 }
 
-type RowCollection = ReturnType<typeof createFailingSource>
+// Static sources carry mock-sync utilities; the drivers read only rows.
+type RowCollection =
+  | ReturnType<typeof createFailingSource>
+  | ReturnType<typeof createStaticSource>
 
 function startEffect(
   path: StartupPath,

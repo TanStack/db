@@ -726,9 +726,9 @@ it(`publishes a virtual-state update when a restarted optimistic row is confirme
     // The restarted sync run's commit is accepted at once and parked behind
     // the persisting mutation; the rollback publishes it.
     expect(syncReceipt).not.toBe(true)
-    expect(
-      collection._state.pendingSyncedTransactions.at(-1)?.committed,
-    ).toBe(true)
+    expect(collection._state.pendingSyncedTransactions.at(-1)?.committed).toBe(
+      true,
+    )
     expect(rollbackMutation).toBeDefined()
     await Promise.resolve()
     expect(settlementTimeline).toEqual([])
@@ -1275,7 +1275,9 @@ it(`rejects a write to a committed batch that waits for persistence`, async () =
       sync.begin()
       sync.write({ type: `update`, value: { id: 1, value: 1 } })
       const receipt = sync.commit()
-      expect(collection._state.pendingSyncedTransactions.at(-1)?.committed).toBe(true)
+      expect(
+        collection._state.pendingSyncedTransactions.at(-1)?.committed,
+      ).toBe(true)
 
       expect(() =>
         sync.write({ type: `update`, value: { id: 1, value: 2 } }),
@@ -1321,7 +1323,9 @@ it(`applies a partial update after an insert in the same sync transaction`, asyn
       sync.write({ type: `insert`, value: { id: 1, value: 1 } })
       sync.write({ type: `update`, value: { id: 1, value: 2 } })
       const receipt = sync.commit()
-      expect(collection._state.pendingSyncedTransactions.at(-1)?.committed).toBe(true)
+      expect(
+        collection._state.pendingSyncedTransactions.at(-1)?.committed,
+      ).toBe(true)
       await releasePersistence()
       await receipt
       expect(collection._state.syncedData.get(1)).toEqual({ id: 1, value: 2 })
@@ -1348,7 +1352,9 @@ it.each([
         let firstReceipt: true | Promise<void> | undefined
         if (predecessor === `earlier`) {
           firstReceipt = sync.commit()
-          expect(collection._state.pendingSyncedTransactions.at(-1)?.committed).toBe(true)
+          expect(
+            collection._state.pendingSyncedTransactions.at(-1)?.committed,
+          ).toBe(true)
           sync.begin()
         }
         expect(() =>
