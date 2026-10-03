@@ -71,8 +71,7 @@ async function initialize(
   cause: Error | null,
 ): Promise<BrowserOPFSWorkerResponse> {
   let receive:
-    | ((event: MessageEvent<BrowserOPFSWorkerRequest>) => void)
-    | undefined
+    ((event: MessageEvent<BrowserOPFSWorkerRequest>) => void) | undefined
   vi.resetModules()
   mocks.open.mockReset()
   mocks.open.mockRejectedValue(primary)

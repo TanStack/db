@@ -3,8 +3,7 @@ import { createRequire } from 'node:module'
 const require = createRequire(import.meta.url)
 
 type TestDatabaseImplementation =
-  | { type: 'better-sqlite3' }
-  | { type: 'node:sqlite' }
+  { type: 'better-sqlite3' } | { type: 'node:sqlite' }
 
 function canLoadBetterSqlite3(): boolean {
   try {
@@ -43,8 +42,7 @@ function canUseNodeSqlite(): boolean {
 }
 
 export const TEST_DATABASE_IMPLEMENTATION:
-  | TestDatabaseImplementation
-  | undefined = canLoadBetterSqlite3()
+  TestDatabaseImplementation | undefined = canLoadBetterSqlite3()
   ? { type: `better-sqlite3` }
   : canUseNodeSqlite()
     ? { type: `node:sqlite` }
