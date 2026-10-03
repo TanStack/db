@@ -28,10 +28,7 @@ export interface QueryIR {
 }
 
 export type IncludesMaterialization =
-  | `collection`
-  | `array`
-  | `singleton`
-  | `concat`
+  `collection` | `array` | `singleton` | `concat`
 
 export const INCLUDES_SCALAR_FIELD = `__includes_scalar__`
 
@@ -39,11 +36,7 @@ export type From = CollectionRef | QueryRef | UnionFrom | UnionAll
 
 export type Select = {
   [alias: string]:
-    | BasicExpression
-    | Aggregate
-    | Select
-    | IncludesSubquery
-    | ConditionalSelect
+    BasicExpression | Aggregate | Select | IncludesSubquery | ConditionalSelect
 }
 
 export type Join = Array<JoinClause>
@@ -224,11 +217,7 @@ export type ConditionalSelectBranch = {
 }
 
 export type SelectValueExpression =
-  | BasicExpression
-  | Aggregate
-  | Select
-  | IncludesSubquery
-  | ConditionalSelect
+  BasicExpression | Aggregate | Select | IncludesSubquery | ConditionalSelect
 
 export class ConditionalSelect extends BaseExpression {
   public type = `conditionalSelect` as const

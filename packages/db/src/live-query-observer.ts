@@ -12,10 +12,7 @@ import type { PersistedReadinessSource } from './persisted-readiness.js'
 import type { ChangeMessage, CollectionStatus } from './types.js'
 
 export type LiveQueryPersistedStatus =
-  | `unavailable`
-  | `loading`
-  | `ready`
-  | `error`
+  `unavailable` | `loading` | `ready` | `error`
 
 // React may discard an uncommitted Suspense render and construct a new observer
 // on retry. The Collection survives that retry; its initial-render preload
@@ -198,8 +195,7 @@ class LiveQueryObserverImpl<
   private readonly client: DbClient | undefined
   private readonly queryHash: string | undefined
   private readonly persistedSources:
-    | ReadonlyArray<PersistedSourceEntry>
-    | undefined
+    ReadonlyArray<PersistedSourceEntry> | undefined
   private readonly onPreload: (() => void) | undefined
   private visibleStatus: CollectionStatus | undefined
   private cachedEntries: Array<[TKey, T]> | undefined
