@@ -540,7 +540,8 @@ The post-merge review added three missing domains to existing owners:
   is `'remote'`. The earlier accepted-snapshot retention law and its
   truncate-capture ownership refinement were retired with this contract; the
   [PR #1907 review record](oracle-reviews/pr-1907-accepted-delete-ownership.md)
-  is historical. A handler that awaits a visibility receipt held by its own
+  is historical; the [settlement-drop review record](oracle-reviews/2026-10-03-settlement-drop.md)
+  holds the RED/GREEN and mutant evidence. A handler that awaits a visibility receipt held by its own
   transaction, such as an on-demand load of its own Collection, waits for
   itself; that history is outside the generated grammar.
 
