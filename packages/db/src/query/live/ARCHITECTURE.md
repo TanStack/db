@@ -775,18 +775,20 @@ to one acquisition.
 
 Every sync `commit()` returns an applied receipt: `true` when that
 transaction's writes and events are already visible, or a promise when the
-transaction is parked in the causal queue. The promise resolves only after the
-writes and events become visible. It rejects with `AbortError` if request
-cancellation or collection cleanup abandons the transaction first. An abort
-after application has no effect. Application becomes irrevocable before change
-events are emitted, so an abort raised by a publication observer is already
-late. A successful `loadSubset` implementation must await or return every
-receipt for the transactions that establish its result. A source must not add
-priority merely to make a subset load settle.
-Existing immediate bootstrap and persistence-hydration paths, plus truncate,
-retain their queue-bypass contract; if one applies a parked subset transaction
-as part of that prefix, the subset receipt settles only after the writes are
-visible. Rejected acquisitions establish no result. Canceled or obsolete
+transaction is parked in the causal queue. Commit accepts the transaction, and
+an accepted transaction always applies in commit order. The promise resolves
+only after the writes and events become visible. It rejects with `AbortError`
+only if its signal aborted before acceptance or collection cleanup abandons
+the transaction; a later abort has no effect. The receipt also carries its
+acceptance moment for handler-facing writes (`whenSyncAccepted`): a mutation
+handler waits for acceptance, because a transaction parked behind its own
+persisting optimistic transaction becomes visible only when that transaction
+settles. A successful `loadSubset` implementation must await or return every
+receipt for the transactions that establish its result, so a handler that
+awaits an on-demand load of its own Collection waits for itself. A source must
+not add priority merely to make a subset load settle. Truncate retains its
+queue-bypass contract; if it applies a parked subset transaction as part of
+that prefix, the subset receipt settles only after the writes are visible. Rejected acquisitions establish no result. Canceled or obsolete
 acquisitions either stop before publishing more request-scoped rows or settle
 behind the active replay barrier.
 

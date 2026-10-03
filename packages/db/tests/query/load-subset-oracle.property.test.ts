@@ -912,105 +912,6 @@ async function expectConcurrentStreamCommitStaysParked(
   }
 }
 
-async function expectLaterImmediateCommitSettlesAppliedSubset() {
-  let publishLater!: () => SyncAppliedReceipt
-  const source = createCollection<PersistedLoadRow>({
-    id: `load-subset-applied-priority-${collectionSequence++}`,
-    getKey: (row) => row.id,
-    syncMode: `on-demand`,
-    sync: {
-      sync: ({ begin, write, commit, markReady }) => {
-        begin()
-        write({
-          type: `insert`,
-          value: { id: `initial`, projectId: `p0` },
-        })
-        void commit()
-        publishLater = () => {
-          begin({ immediate: true })
-          write({
-            type: `insert`,
-            value: { id: `later`, projectId: `p2` },
-          })
-          return commit()
-        }
-        markReady()
-        return {
-          loadSubset: () => {
-            begin()
-            write({
-              type: `insert`,
-              value: { id: `subset`, projectId: `p1` },
-            })
-            return commit()
-          },
-        }
-      },
-    },
-  })
-  const persistence = createDeferred<void>()
-  let settlement: Promise<unknown> | undefined
-  let primaryFailure: { error: unknown } | undefined
-  try {
-    source.startSyncImmediate()
-    const transaction = createTransaction({
-      mutationFn: () => persistence.promise,
-    })
-    settlement = transaction.isPersisted.promise
-    transaction.mutate(() => source.insert({ id: `local`, projectId: `p3` }))
-    const load = requirePendingAppliedReceipt(source._sync.loadSubset({}))
-    const later = publishLater()
-    let loadSettled = false
-    let subsetVisibleWhenSettled = false
-    void load
-      .then(
-        () => {
-          loadSettled = true
-          subsetVisibleWhenSettled = source.get(`subset`)?.id === `subset`
-        },
-        () => undefined,
-      )
-      .catch(() => undefined)
-    await later
-    await load
-
-    expect(loadSettled).toBe(true)
-    expect(subsetVisibleWhenSettled).toBe(true)
-    expect(source.get(`subset`)).toEqual(
-      expect.objectContaining({ id: `subset` }),
-    )
-    expect(source.get(`later`)).toEqual(
-      expect.objectContaining({ id: `later` }),
-    )
-    expect(source.get(`initial`)).toEqual(
-      expect.objectContaining({ id: `initial` }),
-    )
-
-    persistence.resolve()
-    await transaction.isPersisted.promise
-    await Promise.all([load, later])
-
-    expect(source.get(`subset`)).toEqual(
-      expect.objectContaining({ id: `subset` }),
-    )
-  } catch (error) {
-    primaryFailure = { error }
-    throw error
-  } finally {
-    await runOracleCleanup(
-      `later immediate commit applies subset`,
-      primaryFailure,
-      [
-        {
-          label: `persistence gate`,
-          run: () => releasePersistingMutation(persistence, settlement),
-        },
-        { label: `source collection`, run: () => source.cleanup() },
-      ],
-    )
-  }
-}
-
 async function expectAbortedReceiptDoesNotSettleDemand(
   abortPhase: `before-commit` | `while-parked`,
 ) {
@@ -1074,13 +975,13 @@ async function expectAbortedReceiptDoesNotSettleDemand(
     controller.abort()
     persistence.resolve()
     await transaction.isPersisted.promise
-    if (abortPhase === `while-parked`) {
-      await expect(first).rejects.toMatchObject({ name: `AbortError` })
-    } else {
-      await first
-    }
+    // An accepted transaction always applies: an abort while it is parked
+    // has no effect, and its row publishes when the mutation settles.
+    await first
     expect(transportCalls).toBe(1)
-    expect(source.get(`row`)).toBeUndefined()
+    if (abortPhase === `while-parked`)
+      expect(source.get(`row`)).toEqual(expect.objectContaining({ id: `row` }))
+    else expect(source.get(`row`)).toBeUndefined()
 
     const retry = source._sync.loadSubset({})
     if (retry !== true) await retry
@@ -1779,12 +1680,8 @@ describe(`loadSubset application and cancellation`, () => {
     await expectConcurrentStreamCommitStaysParked(true)
   })
 
-  it(`settles a subset receipt after a later immediate commit applies it`, async () => {
-    await expectLaterImmediateCommitSettlesAppliedSubset()
-  })
-
   it.each([`before-commit`, `while-parked`] as const)(
-    `does not settle a demand when its parked receipt is aborted %s`,
+    `settles a demand by its acceptance when its receipt is aborted %s`,
     expectAbortedReceiptDoesNotSettleDemand,
   )
 

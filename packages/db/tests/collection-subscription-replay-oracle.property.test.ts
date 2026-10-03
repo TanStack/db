@@ -1352,11 +1352,12 @@ function applyOptimisticOperation(
 async function runOptimisticReplayScenario(
   scenario: OptimisticReplayScenario,
 ): Promise<void> {
-  let begin!: (options?: { immediate?: boolean }) => void
+  let begin!: () => void
   let write!: (
     message: ChangeMessageOrDeleteKeyMessage<ReplayRow, string>,
   ) => void
-  let commit!: () => void
+  let commit!: () => true | Promise<void>
+  let replayReceipt: true | Promise<void> = true
   let truncate!: () => void
   let loadCount = 0
   const replay = createDeferred<void>()
@@ -1397,7 +1398,8 @@ async function runOptimisticReplayScenario(
               commit()
               return true
             }
-            return replay.promise
+            // The load settles after its rows are visible.
+            return replay.promise.then(() => replayReceipt)
           },
           unloadSubset: () => {},
         }
@@ -1443,21 +1445,25 @@ async function runOptimisticReplayScenario(
     truncate()
     commit()
     await flushPromises()
-    // A loadSubset adapter must install its request-scoped rows before its
-    // promise settles, even while a user mutation is still persisting.
-    begin({ immediate: true })
+    // A loadSubset adapter commits its request-scoped rows before its
+    // promise settles. The persisting mutation holds them; they publish with
+    // the drop of its optimistic state when it settles.
+    begin()
     for (const row of replayRows) {
       write({ type: `insert`, value: { ...row } })
     }
-    commit()
+    replayReceipt = commit()
     if (scenario.outcome === `resolve`) replay.resolve()
     else replay.reject(replayFailure)
     await flushPromises()
+    mutation.resolve()
+    await transaction.isPersisted.promise
+    await flushPromises()
+    await flushPromises()
 
-    const expected = applyOptimisticOperation(
-      scenario.outcome === `resolve` ? replaySource : initialSource,
-      scenario,
-    )
+    // A failed replay leaves the subscription at its last coherent snapshot.
+    const expected =
+      scenario.outcome === `resolve` ? replaySource : optimisticBaseline
     const expectedBatch =
       scenario.outcome === `resolve`
         ? publicationDiff(optimisticBaseline, expected)

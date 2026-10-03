@@ -13,10 +13,10 @@ import { createTransaction } from '../../src/transactions.js'
  * 1. The source writes a row to a pending batch.
  * 2. The collection publishes the row to readers.
  *
- * Another transaction can delay the second stage. During this delay, the
- * source can finish the first stage. An abort before publication must reject
- * the load and discard the row. An abort after publication starts must resolve
- * the load and keep the row.
+ * Another transaction can delay the second stage. Commit accepts the batch,
+ * and an accepted batch always applies. An abort before acceptance must reject
+ * the load and discard the row. A later abort, while the batch waits or after
+ * publication starts, must resolve the load and keep the row.
  *
  * `expectedOutcome` states this rule from public facts. It does not copy the
  * production queue. The test creates each timing phase in production. It then
@@ -36,19 +36,20 @@ type ExpectedOutcome = {
   callbackReads: Array<Array<string>>
 }
 
-// Publication is the boundary. An abort before publication rejects the load
-// and discards the row. An abort after publication starts resolves the load
-// and keeps the row visible.
+// Acceptance is the boundary. An abort at commit, before acceptance, rejects
+// the load and discards the row. An accepted transaction always applies, so a
+// later abort resolves the load and the row publishes when the parked
+// optimistic transaction settles.
 function expectedOutcome(
   abortPhase: AbortPhase,
   remoteKey: string,
 ): ExpectedOutcome {
-  const publicationStarted = abortPhase === `after-publication-starts`
+  const accepted = abortPhase !== `at-commit`
   return {
-    load: publicationStarted ? `resolves` : `rejects`,
-    rowIsVisible: publicationStarted,
-    publishedBatches: publicationStarted ? [[remoteKey]] : [],
-    callbackReads: publicationStarted ? [[remoteKey]] : [],
+    load: accepted ? `resolves` : `rejects`,
+    rowIsVisible: accepted,
+    publishedBatches: accepted ? [[remoteKey]] : [],
+    callbackReads: accepted ? [[remoteKey]] : [],
   }
 }
 

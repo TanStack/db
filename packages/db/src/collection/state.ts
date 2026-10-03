@@ -1772,11 +1772,15 @@ export class CollectionStateManager<
   public capturePreSyncVisibleState(): void {
     if (this.pendingSyncedTransactions.length === 0) return
 
-    // Get all keys that will be affected by sync operations
+    // Get all keys that will be affected by sync operations, including
+    // metadata-only writes, which the drain also compares.
     const syncedKeys = new Set<TKey>()
     for (const transaction of this.pendingSyncedTransactions) {
       for (const operation of transaction.operations) {
         syncedKeys.add(operation.key as TKey)
+      }
+      for (const key of transaction.rowMetadataWrites.keys()) {
+        syncedKeys.add(key)
       }
     }
 
