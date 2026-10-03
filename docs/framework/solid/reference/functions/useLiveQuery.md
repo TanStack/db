@@ -9,7 +9,7 @@ title: useLiveQuery
 function useLiveQuery<TContext>(queryFn): Accessor<InferResultType<TContext>> & object;
 ```
 
-Defined in: [useLiveQuery.ts:112](https://github.com/TanStack/db/blob/main/packages/solid-db/src/useLiveQuery.ts#L112)
+Defined in: [useLiveQuery.ts:57](https://github.com/TanStack/db/blob/main/packages/solid-db/src/useLiveQuery.ts#L57)
 
 Create a live query using a query function
 
@@ -29,7 +29,7 @@ Query function that defines what data to fetch
 
 ### Returns
 
-Accessor that returns data with Suspense support, with state and status information as properties
+Accessor that returns the current rows synchronously (opt-in first-data gate via the loaded accessor), with state, collection, status, and persisted-readiness properties
 
 ### Examples
 
@@ -66,40 +66,34 @@ const personIssues = useLiveQuery((q) =>
 ```
 
 ```ts
-// Handle loading and error states
+// Handle loading and error states with boundaries
 const todosQuery = useLiveQuery((q) =>
   q.from({ todos: todoCollection })
 )
 
 return (
-  <Switch>
-    <Match when={todosQuery.isLoading}>
-      <div>Loading...</div>
-    </Match>
-    <Match when={todosQuery.isError}>
-      <div>Error: {todosQuery.status}</div>
-    </Match>
-    <Match when={todosQuery.isReady}>
-      <For each={todosQuery()}>
-        {(todo) => <li key={todo.id}>{todo.text}</li>}
+  <Errored fallback={(err) => <div>Error: {String(err())}</div>}>
+    <Loading fallback={<div>Loading...</div>}>
+      <For each={todosQuery.loaded()}>
+        {(todo) => <li>{todo.text}</li>}
       </For>
-    </Match>
-  </Switch>
+    </Loading>
+  </Errored>
 )
 ```
 
 ```ts
-// Use Suspense boundaries
+// Opt-in gate: loaded() participates in <Loading> and returns the rows
 const todosQuery = useLiveQuery((q) =>
   q.from({ todos: todoCollection })
 )
 
 return (
-  <Suspense fallback={<div>Loading...</div>}>
-    <For each={todosQuery()}>
-      {(todo) => <li key={todo.id}>{todo.text}</li>}
+  <Loading fallback={<div>Loading...</div>}>
+    <For each={todosQuery.loaded()}>
+      {(todo) => <li>{todo.text}</li>}
     </For>
-  </Suspense>
+  </Loading>
 )
 ```
 
@@ -109,7 +103,7 @@ return (
 function useLiveQuery<TContext>(queryFn): Accessor<InferConditionalResultType<TContext>> & object;
 ```
 
-Defined in: [useLiveQuery.ts:134](https://github.com/TanStack/db/blob/main/packages/solid-db/src/useLiveQuery.ts#L134)
+Defined in: [useLiveQuery.ts:72](https://github.com/TanStack/db/blob/main/packages/solid-db/src/useLiveQuery.ts#L72)
 
 Create a live query using a query function
 
@@ -129,7 +123,7 @@ Query function that defines what data to fetch
 
 ### Returns
 
-Accessor that returns data with Suspense support, with state and status information as properties
+Accessor that returns the current rows synchronously (opt-in first-data gate via the loaded accessor), with state, collection, status, and persisted-readiness properties
 
 ### Examples
 
@@ -166,40 +160,34 @@ const personIssues = useLiveQuery((q) =>
 ```
 
 ```ts
-// Handle loading and error states
+// Handle loading and error states with boundaries
 const todosQuery = useLiveQuery((q) =>
   q.from({ todos: todoCollection })
 )
 
 return (
-  <Switch>
-    <Match when={todosQuery.isLoading}>
-      <div>Loading...</div>
-    </Match>
-    <Match when={todosQuery.isError}>
-      <div>Error: {todosQuery.status}</div>
-    </Match>
-    <Match when={todosQuery.isReady}>
+  <Errored fallback={(err) => <div>Error: {String(err())}</div>}>
+    <Loading fallback={<div>Loading...</div>}>
       <For each={todosQuery()}>
-        {(todo) => <li key={todo.id}>{todo.text}</li>}
+        {(todo) => <li>{todo.text}</li>}
       </For>
-    </Match>
-  </Switch>
+    </Loading>
+  </Errored>
 )
 ```
 
 ```ts
-// Use Suspense boundaries
+// Opt-in gate: loaded() participates in <Loading> and returns the rows
 const todosQuery = useLiveQuery((q) =>
   q.from({ todos: todoCollection })
 )
 
 return (
-  <Suspense fallback={<div>Loading...</div>}>
-    <For each={todosQuery()}>
-      {(todo) => <li key={todo.id}>{todo.text}</li>}
+  <Loading fallback={<div>Loading...</div>}>
+    <For each={todosQuery.loaded()}>
+      {(todo) => <li>{todo.text}</li>}
     </For>
-  </Suspense>
+  </Loading>
 )
 ```
 
@@ -209,7 +197,7 @@ return (
 function useLiveQuery<TContext>(config): Accessor<InferResultType<TContext>> & object;
 ```
 
-Defined in: [useLiveQuery.ts:198](https://github.com/TanStack/db/blob/main/packages/solid-db/src/useLiveQuery.ts#L198)
+Defined in: [useLiveQuery.ts:99](https://github.com/TanStack/db/blob/main/packages/solid-db/src/useLiveQuery.ts#L99)
 
 Create a live query using configuration object
 
@@ -229,7 +217,7 @@ Configuration object with query and options
 
 ### Returns
 
-Accessor that returns data with Suspense support, with state and status information as properties
+Accessor that returns the current rows synchronously (opt-in first-data gate via the loaded accessor), with state, collection, status, and persisted-readiness properties
 
 ### Examples
 
@@ -252,23 +240,17 @@ const personsQuery = useLiveQuery(() => ({ query: queryBuilder }))
 ```
 
 ```ts
-// Handle all states uniformly
+// Handle loading and errors through boundaries
 const itemsQuery = useLiveQuery(() => ({
   query: (q) => q.from({ items: itemCollection })
 }))
 
 return (
-  <Switch fallback={<div>{itemsQuery().length} items loaded</div>}>
-    <Match when={itemsQuery.isLoading}>
-      <div>Loading...</div>
-    </Match>
-    <Match when={itemsQuery.isError}>
-      <div>Something went wrong</div>
-    </Match>
-    <Match when={!itemsQuery.isReady}>
-      <div>Preparing...</div>
-    </Match>
-  </Switch>
+  <Errored fallback={(err) => <div>Something went wrong: {String(err())}</div>}>
+    <Loading fallback={<div>Loading...</div>}>
+      <div>{itemsQuery.loaded().length} items loaded</div>
+    </Loading>
+  </Errored>
 )
 ```
 
@@ -278,7 +260,7 @@ return (
 function useLiveQuery<TResult, TKey, TUtils>(liveQueryCollection): Accessor<TResult[]> & object;
 ```
 
-Defined in: [useLiveQuery.ts:255](https://github.com/TanStack/db/blob/main/packages/solid-db/src/useLiveQuery.ts#L255)
+Defined in: [useLiveQuery.ts:124](https://github.com/TanStack/db/blob/main/packages/solid-db/src/useLiveQuery.ts#L124)
 
 Subscribe to an existing live query collection
 
@@ -306,7 +288,7 @@ Pre-created live query collection to subscribe to
 
 ### Returns
 
-Accessor that returns data with Suspense support, with state and status information as properties
+Accessor that returns the current rows synchronously (opt-in first-data gate via the loaded accessor), with state, collection, status, and persisted-readiness properties
 
 ### Examples
 
@@ -329,18 +311,15 @@ const handleToggle = (id) => {
 ```
 
 ```ts
-// Handle states consistently
+// Handle loading and errors through boundaries
 const sharedQuery = useLiveQuery(() => sharedCollection)
 
 return (
- <Switch fallback={<div><For each={sharedQuery()}>{(item) => <Item key={item.id} {...item} />}</For></div>}>
-   <Match when={sharedQuery.isLoading}>
-     <div>Loading...</div>
-   </Match>
-   <Match when={sharedQuery.isError}>
-     <div>Error loading data</div>
-   </Match>
- </Switch>
+  <Errored fallback={(err) => <div>Error loading data: {String(err())}</div>}>
+    <Loading fallback={<div>Loading...</div>}>
+      <For each={sharedQuery.loaded()}>{(item) => <Item {...item} />}</For>
+    </Loading>
+  </Errored>
 )
 ```
 
@@ -350,7 +329,7 @@ return (
 function useLiveQuery<TResult, TKey, TUtils>(liveQueryCollection): Accessor<TResult | undefined> & object;
 ```
 
-Defined in: [useLiveQuery.ts:283](https://github.com/TanStack/db/blob/main/packages/solid-db/src/useLiveQuery.ts#L283)
+Defined in: [useLiveQuery.ts:145](https://github.com/TanStack/db/blob/main/packages/solid-db/src/useLiveQuery.ts#L145)
 
 Create a live query using a query function
 
@@ -376,7 +355,7 @@ Create a live query using a query function
 
 ### Returns
 
-Accessor that returns data with Suspense support, with state and status information as properties
+Accessor that returns the current rows synchronously (opt-in first-data gate via the loaded accessor), with state, collection, status, and persisted-readiness properties
 
 ### Examples
 
@@ -413,39 +392,33 @@ const personIssues = useLiveQuery((q) =>
 ```
 
 ```ts
-// Handle loading and error states
+// Handle loading and error states with boundaries
 const todosQuery = useLiveQuery((q) =>
   q.from({ todos: todoCollection })
 )
 
 return (
-  <Switch>
-    <Match when={todosQuery.isLoading}>
-      <div>Loading...</div>
-    </Match>
-    <Match when={todosQuery.isError}>
-      <div>Error: {todosQuery.status}</div>
-    </Match>
-    <Match when={todosQuery.isReady}>
+  <Errored fallback={(err) => <div>Error: {String(err())}</div>}>
+    <Loading fallback={<div>Loading...</div>}>
       <For each={todosQuery()}>
-        {(todo) => <li key={todo.id}>{todo.text}</li>}
+        {(todo) => <li>{todo.text}</li>}
       </For>
-    </Match>
-  </Switch>
+    </Loading>
+  </Errored>
 )
 ```
 
 ```ts
-// Use Suspense boundaries
+// Opt-in gate: loaded() participates in <Loading> and returns the rows
 const todosQuery = useLiveQuery((q) =>
   q.from({ todos: todoCollection })
 )
 
 return (
-  <Suspense fallback={<div>Loading...</div>}>
-    <For each={todosQuery()}>
-      {(todo) => <li key={todo.id}>{todo.text}</li>}
+  <Loading fallback={<div>Loading...</div>}>
+    <For each={todosQuery.loaded()}>
+      {(todo) => <li>{todo.text}</li>}
     </For>
-  </Suspense>
+  </Loading>
 )
 ```

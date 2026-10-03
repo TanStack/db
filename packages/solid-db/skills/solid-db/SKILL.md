@@ -1,17 +1,20 @@
 ---
 name: solid-db
 description: >
-  SolidJS bindings for TanStack DB. useLiveQuery returns an Accessor that
-  doubles as data access (call as function) with state/status properties.
-  Fine-grained reactivity: signal reads MUST happen inside the query function
-  for tracking. Config passed as Accessor (() => config). Built-in Suspense
-  support via createResource and errors through Solid ErrorBoundary.
-  ReactiveMap for state. Import from
-  @tanstack/solid-db (re-exports all of @tanstack/db).
+  SolidJS v2 bindings for TanStack DB. useLiveQuery returns an Accessor that
+  doubles as data access (call as function — returns current rows
+  synchronously, including partial rows synced before ready) with state,
+  collection, status, isReady, and persisted-readiness properties.
+  query.loaded() is the opt-in first-data gate: read it inside <Loading>
+  and it returns the rows once the query settles. Fine-grained
+  reactivity: signal reads MUST happen inside the query function for
+  tracking. Config passed as Accessor (() => config). Wholesale observer
+  mode + keyed projection for per-field row reactivity keyed by live result
+  identity. Import from @tanstack/solid-db (re-exports all of @tanstack/db).
 type: framework
 library: db
 framework: solid
-library_version: '0.6.17'
+library_version: '0.3.3'
 requires:
   - db-core
 sources:
@@ -21,13 +24,14 @@ sources:
 
 This skill builds on db-core. Read it first for collection setup, query builder, and mutation patterns.
 
-# TanStack DB — SolidJS
+# TanStack DB — SolidJS v2
 
 ## Setup
 
 ```tsx
-import { useLiveQuery, eq, not } from '@tanstack/solid-db'
-import { ErrorBoundary, For, Show, Suspense } from 'solid-js'
+import { useLiveQuery, eq, gt, not } from '@tanstack/solid-db'
+import { For } from 'solid-js'
+import { Loading } from '@solidjs/web'
 
 function TodoList() {
   const todosQuery = useLiveQuery((q) =>
@@ -38,11 +42,11 @@ function TodoList() {
   )
 
   return (
-    <Suspense fallback={<div>Loading...</div>}>
+    <Loading fallback={<div>Loading...</div>}>
       <ul>
-        <For each={todosQuery()}>{(todo) => <li>{todo.text}</li>}</For>
+        <For each={todosQuery.loaded()}>{(todo) => <li>{todo.text}</li>}</For>
       </ul>
-    </Suspense>
+    </Loading>
   )
 }
 ```
@@ -58,12 +62,14 @@ Returns an `Accessor<Array<T>>` (or `Accessor<T | undefined>` with `findOne`) wi
 ```tsx
 // Query function — call result as function for data
 const query = useLiveQuery((q) => q.from({ todo: todoCollection }))
-// query()        → Array<T> (data)  — or T | undefined when using findOne()
-// query.data     → DEPRECATED — use query() instead. Migrate any existing code.
-// query.status   → CollectionStatus
-// query.isLoading, query.isReady, query.isError
-// query.state    → ReactiveMap<TKey, T>
+// query()          → Array<T> (current rows, never suspends) — or T | undefined when using findOne()
+// query.state      → ReactiveMap<TKey, T>
 // query.collection → Collection
+// query.status     → CollectionStatus | 'disabled'
+// query.isReady / query.isError → boolean
+// query.persistedStatus / query.isPersistedReady / query.persistedError
+//                  → persisted (network-first) restore state
+// query.loaded  → Accessor; read inside <Loading> — gates on first data, then returns the rows
 
 // With reactive signals — signals MUST be read INSIDE the query function
 const [minPriority, setMinPriority] = createSignal(5)
@@ -81,6 +87,14 @@ const query = useLiveQuery(() => ({
 
 // Pre-created collection — pass as Accessor
 const query = useLiveQuery(() => preloadedCollection)
+```
+
+Query-function form note: identical eq-filtered queries share one pooled
+live-query Collection and subscription (default `gcTime` 5s), so two hooks
+rendering the same filter hit the source once. Pass a config object with
+`gcTime` or a pre-created collection to opt out per query.
+
+```tsx
 
 // Conditional query
 const query = useLiveQuery((q) => {
@@ -129,19 +143,30 @@ const userQuery = useLiveQuery((q) =>
 return <Show when={userQuery()}>{(user) => <div>{user().name}</div>}</Show>
 ```
 
-### Suspense integration
+### Loading boundary integration
 
 ```tsx
-<ErrorBoundary fallback={(error) => <div>{error.message}</div>}>
-  <Suspense fallback={<div>Loading...</div>}>
-    <For each={todosQuery()}>{(todo) => <li>{todo.text}</li>}</For>
-  </Suspense>
-</ErrorBoundary>
+import { Loading, Errored } from '@solidjs/web'
+
+<Errored fallback={(err) => <div>Error: {String(err())}</div>}>
+  <Loading fallback={<div>Loading...</div>}>
+    <For each={todosQuery.loaded()}>{(todo) => <li>{todo.text}</li>}</For>
+  </Loading>
+</Errored>
 ```
 
-`useLiveQuery` integrates with Solid's `createResource`. Use `<Suspense>` for
-loading and `<ErrorBoundary>` for errors. Reading an errored query throws
-through the resource, so do not rely on reading `isError` after failure.
+Data reads never suspend — `query()` returns the current rows at any time, including partial rows synced while loading; only reading an errored query throws (for `<Errored>` to catch). The first-data gate is opt-in: `query.loaded()` participates in <Loading> (throwing `NotReadyError` for `<Loading>` to catch) and then returns the rows exactly like `query()` — feed it straight into `<For each={...}>`. It settles at network readiness or a permitted persisted fallback.
+
+### Revalidation progress with isPending
+
+```tsx
+import { isPending } from 'solid-js'
+
+// True while a changed input's new collection is loading:
+{isPending(() => todosQuery.loaded()) && <Spinner />}
+```
+
+Rendered content stays visible during revalidation (v2 `<Loading>` holds), so no fallback flash.
 
 ## Includes (Hierarchical Data)
 
@@ -232,21 +257,23 @@ Solid's reactivity tracks signal reads inside reactive contexts. Reading outside
 
 Source: docs/framework/solid/overview.md
 
-### MEDIUM Using deprecated query.data instead of query()
+### MEDIUM Reading removed v1 properties (query.data / query.isLoading)
 
 Wrong:
 
 ```tsx
 <For each={todosQuery.data}>{(todo) => <li>{todo.text}</li>}</For>
+{todosQuery.isLoading && <Spinner />}
 ```
 
 Correct:
 
 ```tsx
 <For each={todosQuery()}>{(todo) => <li>{todo.text}</li>}</For>
+{todosQuery.status === 'loading' && <Spinner />}
 ```
 
-`query.data` is deprecated. Always use `query()` to access data. If you encounter existing code using `.data`, migrate it to the function call form.
+`query.data` was a deprecated duplicate of calling the accessor; `isLoading`, `isIdle`, and `isCleanedUp` were removed in favor of `query.status`. `status`, `isReady`, `isError`, and the persisted-readiness properties remain.
 
 See also: db-core/live-queries/SKILL.md — for query builder API.
 

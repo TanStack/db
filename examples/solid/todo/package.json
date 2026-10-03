@@ -3,19 +3,20 @@
   "private": true,
   "version": "0.0.38",
   "dependencies": {
+    "@solidjs/web": "^2.0.0-rc.13",
     "@tanstack/electric-db-collection": "^0.5.4",
     "@tanstack/query-core": "^5.90.20",
     "@tanstack/query-db-collection": "^1.3.4",
     "@tanstack/solid-db": "^0.3.3",
-    "@tanstack/solid-router": "^1.170.38",
-    "@tanstack/solid-start": "^1.168.57",
+    "@tanstack/solid-router": "^2.0.0-rc.8",
+    "@tanstack/solid-start": "^2.0.0-rc.8",
     "@tanstack/trailbase-db-collection": "^0.1.114",
     "cors": "^2.8.6",
     "drizzle-orm": "^0.45.1",
     "drizzle-zod": "^0.8.3",
     "express": "^5.2.1",
     "postgres": "^3.4.8",
-    "solid-js": "^1.9.11",
+    "solid-js": "^2.0.0-rc.13",
     "tailwindcss": "^4.1.18",
     "trailbase": "^0.10.0",
     "vite-tsconfig-paths": "^5.1.4"
@@ -38,7 +39,7 @@
     "tsx": "^4.21.0",
     "typescript": "^5.9.2",
     "vite": "^7.3.0",
-    "vite-plugin-solid": "^2.11.10"
+    "vite-plugin-solid": "^3.0.0-next.27"
   },
   "scripts": {
     "build": "vite build",

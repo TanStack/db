@@ -1,11 +1,3 @@
-import {
-  batch,
-  createEffect,
-  createMemo,
-  createResource,
-  createSignal,
-  onCleanup,
-} from 'solid-js'
 import { ReactiveMap } from '@solid-primitives/map'
 import {
   BaseQueryBuilder,
@@ -16,10 +8,9 @@ import {
   isSingleResultCollection,
   resolveLiveQueryValue,
 } from '@tanstack/db'
-import { createStore, reconcile } from 'solid-js/store'
+import { createEffect, createMemo, createProjection, createSignal } from 'solid-js'
 import type { Accessor } from 'solid-js'
 import type {
-  ChangeMessage,
   Collection,
   CollectionStatus,
   Context,
@@ -27,12 +18,16 @@ import type {
   InferResultType,
   InitialQueryBuilder,
   LiveQueryCollectionConfig,
-  LiveQueryObserver,
   LiveQueryPersistedStatus,
+  LiveQuerySnapshot,
   NonSingleResult,
   QueryBuilder,
   SingleResult,
 } from '@tanstack/db'
+
+export type UseLiveQueryStatus = CollectionStatus | `disabled`
+
+type AnySnapshot = LiveQuerySnapshot<any, any>
 
 type InferConditionalResultType<TContext extends Context> =
   TContext extends SingleResult
@@ -42,92 +37,35 @@ type InferConditionalResultType<TContext extends Context> =
 /**
  * Create a live query using a query function
  * @param queryFn - Query function that defines what data to fetch
- * @returns Accessor that returns data with Suspense support, with state and status information as properties
+ * @returns Accessor that returns the current rows synchronously; gate rendering on `loaded()` inside `<Loading>` for a first-data boundary
  * @example
- * // Basic query with object syntax
  * const todosQuery = useLiveQuery((q) =>
  *   q.from({ todos: todosCollection })
  *    .where(({ todos }) => eq(todos.completed, false))
  *    .select(({ todos }) => ({ id: todos.id, text: todos.text }))
  * )
  *
- * @example
- * // With dependencies that trigger re-execution
- * const todosQuery = useLiveQuery(
- *   (q) => q.from({ todos: todosCollection })
- *          .where(({ todos }) => gt(todos.priority, minPriority())),
- * )
+ * <For each={todosQuery()}>{(todo) => <li>{todo.text}</li>}</For>
  *
  * @example
- * // Join pattern
- * const personIssues = useLiveQuery((q) =>
- *   q.from({ issues: issueCollection })
- *    .join({ persons: personCollection }, ({ issues, persons }) =>
- *      eq(issues.userId, persons.id)
- *    )
- *    .select(({ issues, persons }) => ({
- *      id: issues.id,
- *      title: issues.title,
- *      userName: persons.name
- *    }))
- * )
- *
- * @example
- * // Handle loading and error states
- * const todosQuery = useLiveQuery((q) =>
- *   q.from({ todos: todoCollection })
- * )
- *
- * return (
- *   <Switch>
- *     <Match when={todosQuery.isLoading}>
- *       <div>Loading...</div>
- *     </Match>
- *     <Match when={todosQuery.isError}>
- *       <div>Error: {todosQuery.status}</div>
- *     </Match>
- *     <Match when={todosQuery.isReady}>
- *       <For each={todosQuery()}>
- *         {(todo) => <li key={todo.id}>{todo.text}</li>}
- *       </For>
- *     </Match>
- *   </Switch>
- * )
- *
- * @example
- * // Use Suspense boundaries
- * const todosQuery = useLiveQuery((q) =>
- *   q.from({ todos: todoCollection })
- * )
- *
- * return (
- *   <Suspense fallback={<div>Loading...</div>}>
- *     <For each={todosQuery()}>
- *       {(todo) => <li key={todo.id}>{todo.text}</li>}
- *     </For>
- *   </Suspense>
- * )
+ * // Opt-in gate: `loaded()` participates in <Loading> and returns the rows
+ * <Loading fallback={<div>Loading...</div>}>
+ *   <For each={todosQuery.loaded()}>{(todo) => <li>{todo.text}</li>}</For>
+ * </Loading>
  */
 // Overload 1: Accept query function that always returns QueryBuilder
 export function useLiveQuery<TContext extends Context>(
   queryFn: (q: InitialQueryBuilder) => QueryBuilder<TContext>,
 ): Accessor<InferResultType<TContext>> & {
-  /**
-   * @deprecated use function result instead
-   * query.data -> query()
-   */
-  data: InferResultType<TContext>
   state: ReactiveMap<string | number, GetResult<TContext>>
   collection: Collection<GetResult<TContext>, string | number, {}>
-  status: CollectionStatus
-  isLoading: boolean
+  status: UseLiveQueryStatus
   isReady: boolean
+  isError: boolean
   persistedStatus: LiveQueryPersistedStatus
   isPersistedReady: boolean
   persistedError: unknown | undefined
-  isIdle: boolean
-  isError: boolean
-  isCleanedUp: boolean
+  loaded: Accessor<InferResultType<TContext>>
 }
 
 // Overload 1b: Accept query function that can return undefined/null
@@ -136,120 +74,51 @@ export function useLiveQuery<TContext extends Context>(
     q: InitialQueryBuilder,
   ) => QueryBuilder<TContext> | undefined | null,
 ): Accessor<InferConditionalResultType<TContext>> & {
-  /**
-   * @deprecated use function result instead
-   * query.data -> query()
-   */
-  data: InferConditionalResultType<TContext>
   state: ReactiveMap<string | number, GetResult<TContext>>
   collection: Collection<GetResult<TContext>, string | number, {}> | null
-  status: CollectionStatus | `disabled`
-  isLoading: boolean
+  status: UseLiveQueryStatus
   isReady: boolean
+  isError: boolean
   persistedStatus: LiveQueryPersistedStatus
   isPersistedReady: boolean
   persistedError: unknown | undefined
-  isIdle: boolean
-  isError: boolean
-  isCleanedUp: boolean
+  loaded: Accessor<InferConditionalResultType<TContext>>
 }
 
 /**
  * Create a live query using configuration object
  * @param config - Configuration object with query and options
- * @returns Accessor that returns data with Suspense support, with state and status information as properties
+ * @returns Accessor that returns the current rows synchronously, with state, collection, status, and persisted-readiness properties
  * @example
- * // Basic config object usage
  * const todosQuery = useLiveQuery(() => ({
  *   query: (q) => q.from({ todos: todosCollection }),
  *   gcTime: 60000
  * }))
- *
- * @example
- * // With query builder and options
- * const queryBuilder = new Query()
- *   .from({ persons: collection })
- *   .where(({ persons }) => gt(persons.age, 30))
- *   .select(({ persons }) => ({ id: persons.id, name: persons.name }))
- *
- * const personsQuery = useLiveQuery(() => ({ query: queryBuilder }))
- *
- * @example
- * // Handle all states uniformly
- * const itemsQuery = useLiveQuery(() => ({
- *   query: (q) => q.from({ items: itemCollection })
- * }))
- *
- * return (
- *   <Switch fallback={<div>{itemsQuery().length} items loaded</div>}>
- *     <Match when={itemsQuery.isLoading}>
- *       <div>Loading...</div>
- *     </Match>
- *     <Match when={itemsQuery.isError}>
- *       <div>Something went wrong</div>
- *     </Match>
- *     <Match when={!itemsQuery.isReady}>
- *       <div>Preparing...</div>
- *     </Match>
- *   </Switch>
- * )
  */
 // Overload 2: Accept config object
 export function useLiveQuery<TContext extends Context>(
   config: Accessor<LiveQueryCollectionConfig<TContext>>,
 ): Accessor<InferResultType<TContext>> & {
-  /**
-   * @deprecated use function result instead
-   * query.data -> query()
-   */
-  data: InferResultType<TContext>
   state: ReactiveMap<string | number, GetResult<TContext>>
   collection: Collection<GetResult<TContext>, string | number, {}>
-  status: CollectionStatus
-  isLoading: boolean
+  status: UseLiveQueryStatus
   isReady: boolean
+  isError: boolean
   persistedStatus: LiveQueryPersistedStatus
   isPersistedReady: boolean
   persistedError: unknown | undefined
-  isIdle: boolean
-  isError: boolean
-  isCleanedUp: boolean
+  loaded: Accessor<InferResultType<TContext>>
 }
 
 /**
  * Subscribe to an existing live query collection
  * @param liveQueryCollection - Pre-created live query collection to subscribe to
- * @returns Accessor that returns data with Suspense support, with state and status information as properties
+ * @returns Accessor that returns the current rows synchronously, with state, collection, status, and persisted-readiness properties
  * @example
- * // Using pre-created live query collection
  * const myLiveQuery = createLiveQueryCollection((q) =>
  *   q.from({ todos: todosCollection }).where(({ todos }) => eq(todos.active, true))
  * )
  * const todosQuery = useLiveQuery(() => myLiveQuery)
- *
- * @example
- * // Access collection methods directly
- * const existingQuery = useLiveQuery(() => existingCollection)
- *
- * // Use collection for mutations
- * const handleToggle = (id) => {
- *   existingQuery.collection.update(id, draft => { draft.completed = !draft.completed })
- * }
- *
- * @example
- * // Handle states consistently
- * const sharedQuery = useLiveQuery(() => sharedCollection)
- *
- * return (
- *  <Switch fallback={<div><For each={sharedQuery()}>{(item) => <Item key={item.id} {...item} />}</For></div>}>
- *    <Match when={sharedQuery.isLoading}>
- *      <div>Loading...</div>
- *    </Match>
- *    <Match when={sharedQuery.isError}>
- *      <div>Error loading data</div>
- *    </Match>
- *  </Switch>
- * )
  */
 // Overload 3: Accept pre-created live query collection (non-single result)
 export function useLiveQuery<
@@ -261,22 +130,15 @@ export function useLiveQuery<
     Collection<TResult, TKey, TUtils> & NonSingleResult
   >,
 ): Accessor<Array<TResult>> & {
-  /**
-   * @deprecated use function result instead
-   * query.data -> query()
-   */
-  data: Array<TResult>
   state: ReactiveMap<TKey, TResult>
   collection: Collection<TResult, TKey, TUtils>
-  status: CollectionStatus
-  isLoading: boolean
+  status: UseLiveQueryStatus
   isReady: boolean
+  isError: boolean
   persistedStatus: LiveQueryPersistedStatus
   isPersistedReady: boolean
   persistedError: unknown | undefined
-  isIdle: boolean
-  isError: boolean
-  isCleanedUp: boolean
+  loaded: Accessor<Array<TResult>>
 }
 
 // Overload 3b: Accept pre-created live query collection with singleResult: true
@@ -289,272 +151,252 @@ export function useLiveQuery<
     Collection<TResult, TKey, TUtils> & SingleResult
   >,
 ): Accessor<TResult | undefined> & {
-  /**
-   * @deprecated use function result instead
-   * query.data -> query()
-   */
-  data: TResult | undefined
   state: ReactiveMap<TKey, TResult>
   collection: Collection<TResult, TKey, TUtils> & SingleResult
-  status: CollectionStatus
-  isLoading: boolean
+  status: UseLiveQueryStatus
   isReady: boolean
+  isError: boolean
   persistedStatus: LiveQueryPersistedStatus
   isPersistedReady: boolean
   persistedError: unknown | undefined
-  isIdle: boolean
-  isError: boolean
-  isCleanedUp: boolean
+  loaded: Accessor<TResult | undefined>
 }
 
-// Implementation - use function overloads to infer the actual collection type
+// The observer owns the subscription and publishes stable snapshots; Solid
+// state stays fully derived from the latest snapshot. The snapshot signal is
+// written from observer notifies (outside any owned scope) and seeded once
+// from the effect's apply phase, which is why it opts into `ownedWrite`.
 export function useLiveQuery(
   configOrQueryOrCollection: (queryFn?: any) => any,
 ) {
+  let collectionError: unknown = null
+
   const collection = createMemo(
     () => {
-      if (configOrQueryOrCollection.length === 1) {
-        // This is a query function - check if it returns null/undefined
-        const queryBuilder = new BaseQueryBuilder() as InitialQueryBuilder
-        const result = configOrQueryOrCollection(queryBuilder)
+      collectionError = null
+      try {
+        if (configOrQueryOrCollection.length === 1) {
+          const queryBuilder = new BaseQueryBuilder() as InitialQueryBuilder
+          const result = configOrQueryOrCollection(queryBuilder)
 
-        if (result === undefined || result === null) {
-          // Disabled query - return null
+          if (result === undefined || result === null) {
+            return null
+          }
+
+          // resolveLiveQueryValue pools eq-filtered queries so identical
+          // hooks share one live-query Collection and subscription.
+          return resolveLiveQueryValue(result)
+        }
+
+        const innerCollection = configOrQueryOrCollection()
+
+        if (innerCollection === undefined || innerCollection === null) {
           return null
         }
 
-        return resolveLiveQueryValue(result)
-      }
+        if (isCollection(innerCollection)) {
+          innerCollection.startSyncImmediate()
+          return innerCollection as Collection
+        }
 
-      const innerCollection = configOrQueryOrCollection()
-
-      if (innerCollection === undefined || innerCollection === null) {
-        // Disabled query - return null
+        return createLiveQueryCollection({
+          ...innerCollection,
+          startSync: true,
+        })
+      } catch (error) {
+        collectionError = error
         return null
       }
-
-      if (isCollection(innerCollection)) {
-        innerCollection.startSyncImmediate()
-        return innerCollection as Collection
-      }
-
-      return createLiveQueryCollection({
-        ...innerCollection,
-        startSync: true,
-      })
     },
-    undefined,
     { name: `TanstackDBCollectionMemo` },
   )
 
-  // Reactive state that gets updated granularly through change events
-  const state = new ReactiveMap<string | number, any>()
-
-  // Keep the live Collection's result keys private while preserving one stable
-  // Solid store per logical row. A row's public $key can belong to an upstream
-  // Collection and is therefore not necessarily unique in this result.
-  const rowsByKey = new Map<
-    string | number,
-    { value: any; update: (value: any) => void }
-  >()
-  let rowsCollection: Collection<any, any, any> | undefined
-  const [data, setData] = createStore<Array<any>>([], {
-    name: `TanstackDBData`,
+  const [snapshot, setSnapshot] = createSignal<AnySnapshot | null>(null, {
+    name: `TanstackDBSnapshot`,
+    // Seeded from the effect's apply phase — an owned scope where this
+    // intentional internal write is only legal with the opt-in.
+    ownedWrite: true,
   })
 
-  // Track collection status reactively
-  const [status, setStatus] = createSignal(
-    collection() ? collection()!.status : (`disabled` as const),
-    {
-      name: `TanstackDBStatus`,
+  const status = createMemo<UseLiveQueryStatus>(
+    () => {
+      const currentSnapshot = snapshot()
+      if (currentSnapshot) return currentSnapshot.status
+      if (collectionError) return `error`
+      // Before the observer seeds the first snapshot, a live collection is
+      // already syncing — only a missing collection is disabled.
+      return collection() ? `loading` : `disabled`
     },
-  )
-  const [persistedStatus, setLocalStatus] =
-    createSignal<LiveQueryPersistedStatus>(`unavailable`)
-  const [persistedError, setLocalError] = createSignal<unknown>(undefined)
-
-  // Helper to sync data array from collection in correct order
-  const syncDataFromCollection = (
-    currentCollection: Collection<any, any, any>,
-  ) => {
-    const nextRows: Array<any> = []
-    const retainedKeys = new Set<string | number>()
-
-    for (const [key, value] of currentCollection.entries()) {
-      retainedKeys.add(key)
-
-      const existing = rowsByKey.get(key)
-      if (existing) {
-        existing.update(value)
-        nextRows.push(existing.value)
-      } else {
-        const [row, setRow] = createStore(value)
-        rowsByKey.set(key, {
-          value: row,
-          update: (nextValue) => setRow(reconcile(nextValue, { key: null })),
-        })
-        nextRows.push(row)
-      }
-    }
-
-    for (const key of rowsByKey.keys()) {
-      if (!retainedKeys.has(key)) rowsByKey.delete(key)
-    }
-
-    setData((previous) => reconcile(nextRows, { key: null })(previous))
-  }
-
-  // Generation guard for the resource's async continuations: Solid discards a
-  // superseded fetch's *return value*, but the writes below are side effects
-  // into hook-scoped state and would still run — resurrecting rows/status from
-  // a collection that has already been replaced.
-  let resourceGeneration = 0
-  let localWaitObserver: LiveQueryObserver<any, any> | undefined
-  onCleanup(() => localWaitObserver?.dispose())
-
-  const [getDataResource] = createResource(
-    () => ({ currentCollection: collection() }),
-    async ({ currentCollection }) => {
-      const generation = ++resourceGeneration
-      localWaitObserver?.dispose()
-      localWaitObserver = undefined
-      if (!currentCollection) {
-        return []
-      }
-      setStatus(currentCollection.status)
-      try {
-        const observer = createLiveQueryObserver(currentCollection)
-        localWaitObserver = observer
-        try {
-          await observer.preloadForInitialRender()
-        } finally {
-          observer.dispose()
-          if (localWaitObserver === observer) localWaitObserver = undefined
-        }
-      } catch (error) {
-        if (generation !== resourceGeneration) return data
-        setStatus(`error`)
-        throw error
-      }
-      if (generation !== resourceGeneration) {
-        return data
-      }
-      // Initialize state with current collection data
-      batch(() => {
-        state.clear()
-        for (const [key, value] of currentCollection.entries()) {
-          state.set(key, value)
-        }
-        syncDataFromCollection(currentCollection)
-        setStatus(currentCollection.status)
-      })
-      return data
-    },
-    {
-      name: `TanstackDBData`,
-      deferStream: false,
-      initialValue: data,
-    },
+    { name: `TanstackDBStatus` },
   )
 
-  createEffect(() => {
-    const currentCollection = collection()
-    if (!currentCollection) {
-      setStatus(`disabled` as const)
-      setLocalStatus(`unavailable`)
-      setLocalError(undefined)
+  // One stable store node per logical row, keyed by the live Collection's
+  // RESULT keys — the rule from #1825. A row's public $key belongs to an
+  // upstream collection and is not necessarily unique in a derived result
+  // (e.g. two unionAll branches publishing the same $key). Identities are
+  // stamped at derive time as `<epoch>:<result key>`, where the epoch bumps
+  // on collection replacement: overlapping keys from different collections
+  // are different entities. The registry persists across derives (the
+  // matcher re-keys existing nodes) and is a WeakMap so superseded rows
+  // drop out with GC.
+  const rowIdentities = new WeakMap<object, string>()
+  let identityCollection: unknown
+  let identityEpoch = 0
+  const data = createProjection(
+    () => {
+      const currentSnapshot = snapshot()
+      const entries = currentSnapshot?.state
+      if (currentSnapshot?.collection !== identityCollection) {
+        identityCollection = currentSnapshot?.collection
+        identityEpoch++
+      }
+      if (!entries) return []
+      const rows: Array<any> = []
+      for (const [key, row] of entries) {
+        rowIdentities.set(row, `${identityEpoch}:${String(key)}`)
+        rows.push(row)
+      }
+      return rows
+    },
+    [],
+    { key: (row: object) => rowIdentities.get(row), name: `TanstackDBData` },
+  )
+
+  // Granular keyed state, synced incrementally per snapshot so only changed
+  // keys notify. The ReactiveMap's trigger signals opt into owned writes, so
+  // syncing from the effect is legal.
+  const state = new ReactiveMap<string | number, any>()
+  let stateSyncedSnapshot: AnySnapshot | null | undefined
+
+  const syncState = (currentSnapshot: AnySnapshot | null) => {
+    if (stateSyncedSnapshot === currentSnapshot) return
+    stateSyncedSnapshot = currentSnapshot
+    const next = currentSnapshot?.state
+    if (!next) {
       state.clear()
-      rowsByKey.clear()
-      rowsCollection = undefined
-      setData([])
       return
     }
-
-    if (rowsCollection !== currentCollection) {
-      rowsByKey.clear()
-      rowsCollection = currentCollection
+    for (const [key, value] of next) {
+      if (state.get(key) !== value) state.set(key, value)
     }
+    const staleKeys: Array<string | number> = []
+    for (const key of state.keys()) {
+      if (!next.has(key)) staleKeys.push(key)
+    }
+    for (const key of staleKeys) state.delete(key)
+  }
 
-    // The shared observer owns subscription, the ready-race, and status; Solid
-    // materializes into its keyed ReactiveMap (granular) + reconciled store.
-    const observer = createLiveQueryObserver(currentCollection)
-    // Clear any keys carried over from a previous collection before the new
-    // observer re-seeds via `includeInitialState` (which only inserts current
-    // rows, never deletes stale ones). Without this, switching collections
-    // leaves the dropped keys in `state` until the async resource reconciles.
-    state.clear()
-    const unsubscribe = observer.subscribe(
-      (changes: Array<ChangeMessage<any>> | undefined) => {
-        batch(() => {
-          if (changes) {
-            for (const change of changes) {
-              switch (change.type) {
-                case `insert`:
-                case `update`:
-                  state.set(change.key, change.value)
-                  break
-                case `delete`:
-                  state.delete(change.key)
-                  break
-              }
-            }
-          } else {
-            // Cleanup and other status-only publications carry no row deltas.
-            // Rebuild the keyed view so it cannot diverge from ordered data.
-            state.clear()
-            for (const [key, value] of observer.getSnapshot().state ?? []) {
-              state.set(key, value)
-            }
-          }
-          syncDataFromCollection(currentCollection)
-          const snapshot = observer.getSnapshot()
-          setStatus(snapshot.status)
-          setLocalStatus(snapshot.persistedStatus)
-          setLocalError(snapshot.persistedError)
-        })
-      },
-    )
-    // An already-ready empty collection produces no initial row batch. Bring
-    // ordered data and status in line synchronously instead of waiting for the
-    // resource continuation to correct the previous collection's rows.
-    batch(() => {
-      syncDataFromCollection(currentCollection)
-      const snapshot = observer.getSnapshot()
-      setStatus(snapshot.status)
-      setLocalStatus(snapshot.persistedStatus)
-      setLocalError(snapshot.persistedError)
-    })
-
-    onCleanup(() => {
-      unsubscribe()
+  // Opt-in render gate. Reading `loaded` while the initial render is in
+  // flight throws NotReadyError for a <Loading> boundary to catch. It settles
+  // at network readiness or a permitted persisted fallback — the same gate
+  // the React adapter's suspense hook uses — so persisted data can reveal
+  // content before the network answers. Eager, not lazy: a lazily
+  // autodisposed memo freezes at its last commit once unobserved, which
+  // would hide revalidation from isPending() readers.
+  // Opt-in render gate, internal: reading it while the initial render is in
+  // flight throws NotReadyError for a <Loading> boundary to catch. It settles
+  // at network readiness or a permitted persisted fallback — the same gate
+  // the React adapter's suspense hook uses — so persisted data can reveal
+  // content before the network answers. Eager, not lazy: a lazily
+  // autodisposed memo freezes at its last commit once unobserved, which
+  // would hide revalidation from isPending() readers.
+  const readinessGate = createMemo(async () => {
+    const col = collection()
+    if (!col) return null
+    // status works for pooled eq-filter views too, which expose no isReady.
+    if (col.status === `ready`) return col
+    const observer = createLiveQueryObserver(col)
+    try {
+      await observer.preloadForInitialRender()
+    } finally {
       observer.dispose()
-    })
+    }
+    return col
   })
 
-  // We have to remove getters from the resource function so we wrap it
-  function getData() {
-    const currentCollection = collection()
-    if (currentCollection) {
-      if (isSingleResultCollection(currentCollection)) {
-        // Force resource tracking so Suspense works
-        getDataResource()
-        return data[0]
+  // The effect's apply phase owns the observer lifecycle per collection.
+  // Wholesale mode delivers nothing during subscribe, so the initial
+  // snapshot is pulled synchronously after attach.
+  createEffect(
+    () => collection(),
+    (currentCollection) => {
+      if (!currentCollection) {
+        setSnapshot(null)
+        syncState(null)
+        return
       }
+
+      const observer = createLiveQueryObserver(currentCollection, {
+        mode: `wholesale`,
+      })
+
+      const sync = () => {
+        const currentSnapshot = observer.getSnapshot()
+        setSnapshot(currentSnapshot)
+        syncState(currentSnapshot)
+      }
+
+      const unsubscribe = observer.subscribe(sync)
+
+      // Wholesale delivers nothing during subscribe — seed synchronously.
+      sync()
+
+      // Capture the sync error object for getData() to re-throw; the error
+      // STATUS itself arrives through the observer's status notifications.
+      // The guard drops rejections from a collection this effect has already
+      // torn down, so a superseded query cannot poison its replacement.
+      // The observer's preload works for pooled eq-filter views, which
+      // expose no toArrayWhenReady of their own.
+      let active = true
+      observer.preload().catch((error: unknown) => {
+        if (active) collectionError = error
+      })
+
+      return () => {
+        active = false
+        unsubscribe()
+        observer.dispose()
+      }
+    },
+    { name: `TanstackDBObserver` },
+  )
+
+  // Data reads never suspend: rows synced before readiness render
+  // immediately (progressive sync, on-demand loading). Only the error path
+  // throws, for an <Errored> boundary.
+  function getData() {
+    if (collectionError) throw collectionError
+
+    const s = status()
+    if (s === `error`) {
+      // Collections do not yet expose their last error object (#671); name
+      // the failed query, matching the React suspense adapter's fallback.
+      throw (
+        collectionError ??
+        new Error(`Collection "${collection()?.id}" failed to load`)
+      )
     }
-    return getDataResource()
+
+    const currentCollection = collection()
+    if (!currentCollection) {
+      return data
+    }
+    if (isSingleResultCollection(currentCollection)) {
+      return data[0]
+    }
+    return data
+  }
+
+  // The gated read: suspends the caller's boundary until the initial render
+  // is ready (or the preload errors), then returns exactly what getData()
+  // returns — the data read runs in the CALLER's reactive scope, so row
+  // granularity and replacement tracking are identical to query().
+  function gatedData() {
+    readinessGate()
+    return getData()
   }
 
   Object.defineProperties(getData, {
-    data: {
-      get() {
-        return getData()
-      },
-    },
-    status: {
-      get() {
-        return status()
-      },
-    },
     collection: {
       get() {
         return getPublicCollection(collection())
@@ -562,37 +404,21 @@ export function useLiveQuery(
     },
     state: {
       get() {
+        syncState(snapshot())
         return state
       },
     },
-    isLoading: {
+    status: {
       get() {
-        return status() === `loading`
+        return status()
       },
     },
     isReady: {
       get() {
-        return status() === `ready` || status() === `disabled`
-      },
-    },
-    persistedStatus: {
-      get() {
-        return persistedStatus()
-      },
-    },
-    isPersistedReady: {
-      get() {
-        return persistedStatus() === `ready`
-      },
-    },
-    persistedError: {
-      get() {
-        return persistedError()
-      },
-    },
-    isIdle: {
-      get() {
-        return status() === `idle`
+        const currentSnapshot = snapshot()
+        return currentSnapshot
+          ? currentSnapshot.isReady
+          : status() === `disabled`
       },
     },
     isError: {
@@ -600,9 +426,24 @@ export function useLiveQuery(
         return status() === `error`
       },
     },
-    isCleanedUp: {
+    persistedStatus: {
       get() {
-        return status() === `cleaned-up`
+        return snapshot()?.persistedStatus ?? `unavailable`
+      },
+    },
+    isPersistedReady: {
+      get() {
+        return snapshot()?.isPersistedReady ?? false
+      },
+    },
+    persistedError: {
+      get() {
+        return snapshot()?.persistedError
+      },
+    },
+    loaded: {
+      get() {
+        return gatedData
       },
     },
   })
