@@ -1070,8 +1070,7 @@ async function runPaginationStateScenario(
         rows: Array<PublicPageRow>
       }> = []
       let publicationSubscription:
-        | ReturnType<typeof live.subscribeChanges>
-        | undefined
+        ReturnType<typeof live.subscribeChanges> | undefined
 
       const readCurrentWindow = () =>
         Array.from(live.values(), ({ id, rank }) => ({ id, rank }))
