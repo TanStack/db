@@ -5944,6 +5944,129 @@ describe(`query collection ownership lifecycle`, () => {
     ).toEqual([])
   })
 
+  // Law: once a result's sync transaction is accepted, the rows it owns stay
+  // owned when a later result supersedes it. The later result diffs against
+  // that ownership, so a row only the superseded result added is deleted, and
+  // a later empty result deletes the rest. Model: the owned rows after each
+  // result are exactly that result's rows. Checkpoint: visible and stored rows
+  // after each refetch settles.
+  // Law: once a result's sync transaction is accepted, the rows it owns stay
+  // owned when a later result supersedes it, whether durable storage or a
+  // persisting mutation holds it. The later result diffs against that
+  // ownership, so a row only the superseded result added is deleted, and a
+  // later empty result deletes the rest. Model: the owned rows after each
+  // result are exactly that result's rows. Checkpoint: visible and stored rows
+  // after each refetch settles. Before this law, every supersession test held
+  // durable storage, where the result's core transaction had already applied,
+  // so restoring the old ownership was a no-op and no test observed it.
+  it.each([`storage`, `mutation`] as const)(
+    `keeps an accepted superseded result's ownership for the next diff when %s holds it`,
+    async (holder) => {
+      const id = `superseded-accepted-ownership-${holder}`
+      const row = (key: string): Item => ({
+        id: key,
+        category: `result`,
+        name: key.toUpperCase(),
+      })
+      let server: Array<Item> = [row(`a`)]
+      const storage = createOwnershipStorage()
+      const apply = storage.adapter.applyCommittedTx.bind(storage.adapter)
+      let holdStorage = false
+      const entered = createDeferred<void>()
+      const released = createDeferred<void>()
+      storage.adapter.applyCommittedTx = async (...args) => {
+        if (holdStorage && args[1].mutations.length > 0) {
+          holdStorage = false
+          entered.resolve()
+          await released.promise
+        }
+        return apply(...args)
+      }
+      const queryClient = createQueryClient()
+      const options = queryCollectionOptions<Item>({
+        id,
+        queryClient,
+        queryKey: [id],
+        queryFn: () => Promise.resolve(structuredClone(server)),
+        getKey: (item) => item.id,
+        startSync: true,
+      })
+      const collection = createCollection(
+        holder === `storage`
+          ? persistedCollectionOptions<
+              Item,
+              string | number,
+              never,
+              QueryCollectionUtils<Item, string | number, Item, unknown>
+            >({ ...options, persistence: { adapter: storage.adapter } })
+          : options,
+      )
+      const mutation = createTransaction({
+        mutationFn: () => released.promise,
+      })
+      cleanups.push(async () => {
+        released.resolve()
+        if (holder === `mutation`)
+          await mutation.isPersisted.promise.catch(() => undefined)
+        try {
+          await collection.cleanup()
+        } finally {
+          queryClient.clear()
+        }
+      })
+      const observe = () => ({
+        visible: [...collection.keys()].filter((key) => key !== `local`).sort(),
+        stored:
+          holder === `storage`
+            ? storedItems(storage).map((item) => item.id)
+            : [...collection._state.syncedData.keys()].sort(),
+      })
+
+      await collection.preload()
+      expect(observe()).toEqual({ visible: [`a`], stored: [`a`] })
+
+      // The first result is accepted and held before it can be stored or
+      // published; a second result supersedes it.
+      server = [row(`b`), row(`c`)]
+      if (holder === `storage`) holdStorage = true
+      else
+        mutation.mutate(() =>
+          collection.insert({ id: `local`, category: `local`, name: `L` }),
+        )
+      const first = collection.utils.refetch()
+      if (holder === `storage`) await entered.promise
+      else
+        await vi.waitFor(() =>
+          expect(
+            collection._state.pendingSyncedTransactions.length,
+          ).toBeGreaterThan(0),
+        )
+      const queuedAfterFirst =
+        collection._state.pendingSyncedTransactions.length
+      server = [row(`b`)]
+      const second = collection.utils.refetch()
+      if (holder === `mutation`)
+        await vi.waitFor(() =>
+          expect(
+            collection._state.pendingSyncedTransactions.length,
+          ).toBeGreaterThan(queuedAfterFirst),
+        )
+      released.resolve()
+      await Promise.all([first, second])
+      if (holder === `mutation`)
+        await mutation.isPersisted.promise.catch(() => undefined)
+      await vi.waitFor(() =>
+        expect(observe()).toEqual({ visible: [`b`], stored: [`b`] }),
+      )
+
+      server = []
+      await collection.utils.refetch()
+      await vi.waitFor(() =>
+        expect(observe()).toEqual({ visible: [], stored: [] }),
+      )
+    },
+  )
+
   it(`settles a direct write only after its persisted commit applies`, async () => {
     const id = `persisted-direct-write-receipt`
     const storage = createOwnershipStorage(undefined, 2)
