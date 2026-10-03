@@ -202,12 +202,7 @@ type StructuralStep =
   | { fresh: `array`; pair: [number, number] }
 
 type Mode =
-  | `keyed`
-  | `keyedCollision`
-  | `numbers`
-  | `strings`
-  | `structural`
-  | `fallback`
+  `keyed` | `keyedCollision` | `numbers` | `strings` | `structural` | `fallback`
 // `keyedCollision` selects grammar witnesses; it exercises the same keyed
 // production path as `keyed`. `caseName` labels a replay, not product state.
 type History = {

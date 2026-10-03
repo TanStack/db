@@ -82,8 +82,7 @@ type SourceWork = {
 }
 
 type LinkObservation =
-  | { id: string; text: string }
-  | { id: string; targetId: string }
+  { id: string; text: string } | { id: string; targetId: string }
 
 type WorkObservation = {
   result: Array<{
