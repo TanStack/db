@@ -29,7 +29,7 @@ Query function that defines what data to fetch
 
 ### Returns
 
-Accessor that returns the current rows synchronously (opt-in suspense via the loaded accessor), with state, collection, status, and persisted-readiness properties
+Accessor that returns the current rows synchronously (opt-in first-data gate via the loaded accessor), with state, collection, status, and persisted-readiness properties
 
 ### Examples
 
@@ -123,7 +123,7 @@ Query function that defines what data to fetch
 
 ### Returns
 
-Accessor that returns the current rows synchronously (opt-in suspense via the loaded accessor), with state, collection, status, and persisted-readiness properties
+Accessor that returns the current rows synchronously (opt-in first-data gate via the loaded accessor), with state, collection, status, and persisted-readiness properties
 
 ### Examples
 
@@ -217,7 +217,7 @@ Configuration object with query and options
 
 ### Returns
 
-Accessor that returns the current rows synchronously (opt-in suspense via the loaded accessor), with state, collection, status, and persisted-readiness properties
+Accessor that returns the current rows synchronously (opt-in first-data gate via the loaded accessor), with state, collection, status, and persisted-readiness properties
 
 ### Examples
 
@@ -288,7 +288,7 @@ Pre-created live query collection to subscribe to
 
 ### Returns
 
-Accessor that returns the current rows synchronously (opt-in suspense via the loaded accessor), with state, collection, status, and persisted-readiness properties
+Accessor that returns the current rows synchronously (opt-in first-data gate via the loaded accessor), with state, collection, status, and persisted-readiness properties
 
 ### Examples
 
@@ -355,7 +355,7 @@ Create a live query using a query function
 
 ### Returns
 
-Accessor that returns the current rows synchronously (opt-in suspense via the loaded accessor), with state, collection, status, and persisted-readiness properties
+Accessor that returns the current rows synchronously (opt-in first-data gate via the loaded accessor), with state, collection, status, and persisted-readiness properties
 
 ### Examples
 
