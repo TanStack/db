@@ -17,13 +17,10 @@ import type { BetterSqlite3Database } from './node-driver'
 export type { BetterSqlite3Database } from './node-driver'
 
 type NodeSQLiteCoreSchemaMismatchPolicy =
-  | `sync-present-reset`
-  | `sync-absent-error`
-  | `reset`
+  `sync-present-reset` | `sync-absent-error` | `reset`
 
 export type NodeSQLiteSchemaMismatchPolicy =
-  | NodeSQLiteCoreSchemaMismatchPolicy
-  | `throw`
+  NodeSQLiteCoreSchemaMismatchPolicy | `throw`
 
 type NodeSQLitePersistenceBaseOptions = Omit<
   SQLiteCoreAdapterOptions,

@@ -159,8 +159,7 @@ describe(`Query Collections`, () => {
     })
     const row = () =>
       rendered.getByTestId(`overlapping-switch-list`).children[0] as
-        | HTMLLIElement
-        | undefined
+        HTMLLIElement | undefined
 
     try {
       await waitFor(() => expect(row()?.textContent).toBe(`First`))

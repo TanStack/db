@@ -23,12 +23,7 @@ const SQLITE_ROW = 100
 const SQLITE_DONE = 101
 
 type SQLiteCompatibleBinding =
-  | null
-  | string
-  | number
-  | bigint
-  | Uint8Array
-  | Array<number>
+  null | string | number | bigint | Uint8Array | Array<number>
 
 type WorkerOPFSGlobal = {
   navigator?: {

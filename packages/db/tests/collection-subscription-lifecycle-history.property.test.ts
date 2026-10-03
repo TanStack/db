@@ -254,8 +254,7 @@ async function runHistory(
   let observedActive = true
   let observedUnsubscribed = false
   let syncOps:
-    | Parameters<SyncConfig<{ id: string }, string>[`sync`]>[0]
-    | undefined
+    Parameters<SyncConfig<{ id: string }, string>[`sync`]>[0] | undefined
 
   const collection = createCollection<{ id: string }, string>({
     id: `generated-async-demand-lifecycle`,
@@ -1025,10 +1024,9 @@ describe(`CollectionSubscription async lifecycle history oracle`, () => {
       await runHistory(
         [
           { type: `request`, demand: `a` },
-          ...Array.from(
-            { length: replays },
-            (): LifecycleCommand => ({ type: `truncate` }),
-          ),
+          ...Array.from({ length: replays }, (): LifecycleCommand => ({
+            type: `truncate`,
+          })),
           {
             type: `settle`,
             demand: `a`,
@@ -1036,16 +1034,13 @@ describe(`CollectionSubscription async lifecycle history oracle`, () => {
             age: `oldest`,
             outcome,
           },
-          ...Array.from(
-            { length: replays },
-            (_, index): LifecycleCommand => ({
-              type: `settle`,
-              demand: `a`,
-              scope: `obsolete`,
-              age: `oldest`,
-              outcome: index % 2 === 0 ? `reject` : `resolve`,
-            }),
-          ),
+          ...Array.from({ length: replays }, (_, index): LifecycleCommand => ({
+            type: `settle`,
+            demand: `a`,
+            scope: `obsolete`,
+            age: `oldest`,
+            outcome: index % 2 === 0 ? `reject` : `resolve`,
+          })),
           { type: `release`, demand: `a` },
           { type: `cleanup` },
           { type: `restart` },
