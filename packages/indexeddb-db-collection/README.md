@@ -30,8 +30,8 @@ const db = await createIndexedDB({
 })
 
 // Step 2: Create collections using the shared database
-const todosCollection = createCollection<Todo>(
-  indexedDBCollectionOptions({
+const todosCollection = createCollection(
+  indexedDBCollectionOptions<Todo>({
     db,
     name: 'todos',
     getKey: (todo) => todo.id,
@@ -56,6 +56,22 @@ const todosCollection = createCollection<Todo>(
 import { createCollection } from '@tanstack/db'
 import { createIndexedDB, indexedDBCollectionOptions } from '@tanstack/indexeddb-db-collection'
 
+interface Todo {
+  id: string
+  text: string
+  completed: boolean
+}
+
+interface User {
+  id: string
+  name: string
+}
+
+interface Setting {
+  key: string
+  value: string
+}
+
 // Create database with all stores at once
 const db = await createIndexedDB({
   name: 'myApp',
@@ -65,7 +81,7 @@ const db = await createIndexedDB({
 
 // Create multiple collections using the same database
 const todosCollection = createCollection(
-  indexedDBCollectionOptions({
+  indexedDBCollectionOptions<Todo>({
     db,
     name: 'todos',
     getKey: (todo) => todo.id,
@@ -73,7 +89,7 @@ const todosCollection = createCollection(
 )
 
 const usersCollection = createCollection(
-  indexedDBCollectionOptions({
+  indexedDBCollectionOptions<User>({
     db,
     name: 'users',
     getKey: (user) => user.id,
@@ -81,7 +97,7 @@ const usersCollection = createCollection(
 )
 
 const settingsCollection = createCollection(
-  indexedDBCollectionOptions({
+  indexedDBCollectionOptions<Setting>({
     db,
     name: 'settings',
     getKey: (setting) => setting.key,
@@ -127,7 +143,7 @@ const db = await createIndexedDB({
   // Required: Name of the IndexedDB database
   name: 'myApp',
 
-  // Required: Schema version (increment when adding/removing stores)
+  // Required: Schema version (increment when adding stores)
   version: 1,
 
   // Required: Object store names to create
@@ -137,6 +153,12 @@ const db = await createIndexedDB({
   idbFactory: fakeIndexedDB,
 })
 ```
+
+`stores` requests additive creation during a version upgrade. Omitting a
+previously created store does not remove that store or its data. Use explicit
+upgrade logic through `openDatabase` for a migration that removes stores.
+The returned instance's `stores` contains the requested names;
+`collection.utils.getDatabaseInfo()` reports the actual available stores.
 
 #### indexedDBCollectionOptions
 
@@ -235,25 +257,50 @@ await executeTransaction(db, 'items', 'readwrite', async (tx, stores) => {
 })
 ```
 
+`executeTransaction` waits for both the callback and the native transaction to
+succeed. Async callbacks can await IndexedDB requests in that transaction.
+Awaiting unrelated work, such as a timer or network request, does not keep the
+native transaction active. Complete that work before opening the transaction.
+If the callback rejects after the native transaction has committed, the helper
+rejects but cannot roll back the committed data.
+
+## Blocked database operations
+
+Opening a newer database version or deleting a database can be blocked by an
+open connection in another tab. Close those connections to let the native
+request continue. The promise remains pending until the request succeeds or
+fails. These operations have no deadline or cancellation option. The adapter
+does not switch to in-memory storage when a request is blocked.
+
+Database deletion closes the supplied descriptor. After deletion succeeds, its
+Collections publish empty snapshots and notify active Collections in every
+store. Create a new descriptor before further persistence. If deletion fails,
+the utility rejects and sends no success notification.
+
 ## Error Handling
 
-The package provides specific error classes for different failure scenarios:
+Collection configuration uses these specific error classes:
 
 ```typescript
 import {
-  // Low-level IndexedDB errors
-  IndexedDBError,
-  IndexedDBNotSupportedError,
-  IndexedDBConnectionError,
-  IndexedDBTransactionError,
-  IndexedDBOperationError,
-  // Configuration errors
   DatabaseRequiredError,
   ObjectStoreNotFoundError,
   NameRequiredError,
   GetKeyRequiredError,
 } from '@tanstack/indexeddb-db-collection'
 ```
+
+Low-level helpers reject with descriptive `Error` objects or native IndexedDB
+errors. When a callback rejection settles `executeTransaction`, its original
+rejection value is preserved. A native transaction abort can reject the
+operation before a pending callback settles. Underlying errors are available
+through `cause` where the helper provides it.
+
+The package also exports `IndexedDBError`, `IndexedDBNotSupportedError`,
+`IndexedDBConnectionError`, `IndexedDBTransactionError`, and
+`IndexedDBOperationError` constructors. The low-level helpers do not use these
+classes to classify failures, so consumers should not rely on those
+`instanceof` checks for errors from the helpers.
 
 ## Cross-Tab Synchronization
 

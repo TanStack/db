@@ -1,3 +1,5 @@
+/** Error constructors for consumers; low-level wrappers preserve their own
+ * contextual Error messages and callback rejection values. */
 export class IndexedDBError extends Error {
   constructor(message: string, options?: ErrorOptions) {
     super(message, options)
@@ -6,7 +8,7 @@ export class IndexedDBError extends Error {
 }
 
 /**
- * Thrown when IndexedDB is not available in the environment.
+ * Describes IndexedDB being unavailable in the environment.
  * This can happen in server-side rendering, older browsers,
  * or when running in contexts where IndexedDB is disabled.
  */
@@ -18,7 +20,7 @@ export class IndexedDBNotSupportedError extends IndexedDBError {
 }
 
 /**
- * Thrown when a database connection fails.
+ * Describes a database connection failure.
  * Includes the database name and the underlying error as cause.
  */
 export class IndexedDBConnectionError extends IndexedDBError {
@@ -34,7 +36,7 @@ export class IndexedDBConnectionError extends IndexedDBError {
 }
 
 /**
- * Thrown when a transaction fails.
+ * Describes a transaction failure.
  * Includes the transaction mode and store names for context.
  */
 export class IndexedDBTransactionError extends IndexedDBError {
@@ -50,9 +52,12 @@ export class IndexedDBTransactionError extends IndexedDBError {
       storeNames.length === 1
         ? `store "${storeNames[0]}"`
         : `stores [${storeNames.map((s) => `"${s}"`).join(`, `)}]`
-    super(`IndexedDB transaction failed in "${mode}" mode on ${storeNamesStr}`, {
-      cause,
-    })
+    super(
+      `IndexedDB transaction failed in "${mode}" mode on ${storeNamesStr}`,
+      {
+        cause,
+      },
+    )
     this.name = `IndexedDBTransactionError`
     this.mode = mode
     this.storeNames = storeNames
@@ -60,7 +65,7 @@ export class IndexedDBTransactionError extends IndexedDBError {
 }
 
 /**
- * Thrown when a CRUD operation fails.
+ * Describes a CRUD operation failure.
  * Includes the operation type and store name for context.
  */
 export class IndexedDBOperationError extends IndexedDBError {

@@ -15,7 +15,7 @@
  * and manual persistence, and bad rows before/after a valid write. The driver
  * in harness.ts uses real Collection APIs, fake-indexeddb transactions, and
  * explicit deferred handlers. Checkpoints are handler entry, settlement,
- * delivered notification, successful suffix and populated reopen.
+ * delivered notification, ordinary-insert and replacement suffixes, and reopen.
  *
  * The remote-delete model retains a source deletion independently of a local
  * optimistic delete. Rolling back or completing local intent cannot undo the
@@ -60,10 +60,12 @@ describe('application decision precedes durability', () => {
             const entered = deferred(),
               gate = deferred()
             const failure = new Error('application rejected')
-            const handler = vi.fn(() => {
-              entered.resolve()
-              return gate.promise
-            })
+            const handler = vi
+              .fn(() => Promise.resolve())
+              .mockImplementationOnce(() => {
+                entered.resolve()
+                return gate.promise
+              })
             const collection = await h.open('items', {
               onInsert: operation === 'insert' ? handler : undefined,
               onUpdate: operation === 'update' ? handler : undefined,
@@ -118,16 +120,37 @@ describe('application decision precedes durability', () => {
               expected,
               'settled durable',
             )
-            // A later success must not flush rejected intent to storage.
-            await collection.utils.importData([
-              ...expected,
-              { id: 3, name: 'suffix' },
-            ])
+            // An ordinary write cannot flush rejected intent. Replacement has a
+            // separate cut because clearing the store could otherwise hide it.
+            const suffix = { id: 3, name: 'suffix' }
+            const afterSuffix = [...expected, suffix]
+            await collection.insert({ ...suffix }).isPersisted.promise
+            await Channel.deliver()
+            assertRows(
+              collection.values(),
+              afterSuffix,
+              'ordinary suffix public',
+            )
+            assertRows(peer.values(), afterSuffix, 'ordinary suffix peer')
+            assertRows(
+              (await readStore<Row>(h.db, 'items')).rows,
+              afterSuffix,
+              'ordinary suffix durable',
+            )
+            assertRows(
+              (await h.open()).values(),
+              afterSuffix,
+              'ordinary suffix restore',
+            )
+            const replacement = [...afterSuffix, { id: 4, name: 'replacement' }]
+            await collection.utils.importData(
+              replacement.map((row) => ({ ...row })),
+            )
             await Channel.deliver()
             assertRows(
               (await h.open()).values(),
-              [...expected, { id: 3, name: 'suffix' }],
-              'suffix restore',
+              replacement,
+              'replacement suffix restore',
             )
           })
         },

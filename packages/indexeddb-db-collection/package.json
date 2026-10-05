@@ -22,7 +22,7 @@
     "dev": "vite build --watch",
     "lint": "eslint . --fix",
     "test": "vitest run",
-    "test:oracles": "vitest run tests/persistence-oracle.test.ts tests/settlement-oracle.test.ts tests/transport-oracle.test.ts tests/wrapper.test.ts",
+    "test:oracles": "vitest run tests/persistence-oracle.test.ts tests/settlement-oracle.test.ts tests/transport-oracle.test.ts tests/wrapper.test.ts tests/compatibility-oracle.test.ts",
     "typecheck": "tsc --noEmit"
   },
   "type": "module",

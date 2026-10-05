@@ -12,7 +12,8 @@
  * The independent model is just two arrays of authored rows. It deliberately
  * combines settled source and optimistic state: there is no unsettled work at
  * its checkpoint. The separate boundary oracle covers pending/rejected work.
- * No cache, version classification or production transition computes truth.
+ * Production receives copies of the authored scalar rows, so changing an input
+ * cannot change the expected snapshot. No production transition computes truth.
  *
  * Limits: fake-indexeddb plus controlled BroadcastChannel delivery, bounded
  * scalar keys/rows, sequential settled actions. This does not prove browser
@@ -113,18 +114,11 @@ async function runHistory(steps: Array<Step>) {
         versionKey: string
         updatedAt: number
       }>(h.db, '_versions')
+      // Typed key comparison avoids String conflating number 0 with string "0".
       expect(
-        versions.keys.map(String).sort(),
+        versions.keys.map((key) => JSON.stringify(key)).sort(),
         cut + ': version ownership',
       ).toEqual(
-        model
-          .flatMap((rows, slot) =>
-            rows.map((row) => String([names[slot], row.id])),
-          )
-          .sort(),
-      )
-      // Typed key comparison avoids String conflating number 0 with string "0".
-      expect(versions.keys.map((key) => JSON.stringify(key)).sort()).toEqual(
         model
           .flatMap((rows, slot) =>
             rows.map((row) => JSON.stringify([names[slot], row.id])),
@@ -173,7 +167,7 @@ async function runHistory(steps: Array<Step>) {
               if ('optional' in value) draft.optional = value.optional
               else delete draft.optional
             })
-          : target.insert(value)
+          : target.insert({ ...value })
       }
       switch (action.kind) {
         case 'write':
@@ -182,7 +176,7 @@ async function runHistory(steps: Array<Step>) {
           break
         case 'delete': {
           if (!model[slot]!.length) {
-            await collection.insert(row).isPersisted.promise
+            await collection.insert({ ...row }).isPersisted.promise
             remember(slot, row)
             await Channel.deliver()
           }
@@ -199,10 +193,13 @@ async function runHistory(steps: Array<Step>) {
           for (const old of model[slot]!)
             touched.add(JSON.stringify([names[slot], old.id]))
           if (action.kind === 'clear') await collection.utils.clearObjectStore()
-          else await collection.utils.importData(rows)
+          else
+            await collection.utils.importData(
+              rows.map((value) => ({ ...value })),
+            )
+          // Retained keys still owe a new version when replacement changes them.
+          for (const value of rows) remember(slot, value)
           model[slot] = rows
-          for (const value of rows)
-            touched.add(JSON.stringify([names[slot], value.id]))
           break
         }
         case 'manual': {
@@ -267,6 +264,20 @@ describe('settled histories', () => {
     await runHistory([
       { kind: 'write', slot: 0, key: 0, value: 0, optional: false },
       { kind: 'clear', slot: 0, key: 0, value: 0, optional: false },
+    ])
+  })
+  it('refreshes changed imported rows while allowing identical replacements', async () => {
+    const replacement: Step = {
+      kind: 'import',
+      slot: 0,
+      key: 0,
+      value: 1,
+      optional: true,
+    }
+    await runHistory([
+      replacement,
+      replacement,
+      { ...replacement, optional: false },
     ])
   })
   it('preserves rows through authored no-op updates', async () => {

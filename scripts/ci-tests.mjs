@@ -29,6 +29,7 @@ const groups = {
   ],
   collections: [
     `@tanstack/electric-db-collection`,
+    `@tanstack/indexeddb-db-collection`,
     `@tanstack/query-db-collection`,
     `@tanstack/powersync-db-collection`,
     `@tanstack/rxdb-db-collection`,

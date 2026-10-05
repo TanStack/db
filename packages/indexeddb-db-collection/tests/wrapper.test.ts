@@ -9,7 +9,8 @@
  * early success from durable success. Fake IndexedDB owns event scheduling;
  * deferred callbacks own application scheduling. No browser/crash claim.
  */
-import { expect, it } from 'vitest'
+import { IDBFactory as FakeIDBFactory } from 'fake-indexeddb'
+import { expect, it, vi } from 'vitest'
 import {
   clear,
   createObjectStore,
@@ -22,8 +23,60 @@ import {
   openDatabase,
   put,
 } from '../src'
-import { deferred, readStore, withHarness } from './harness'
+import { completed, deferred, readStore, request, withHarness } from './harness'
 import type { Row } from './harness'
+
+// These comparisons keep operation context while allowing the native provider
+// to own its error text. Abort follows invocation immediately, so the request
+// must already exist; deferring request creation would miss the error event.
+it('preserves native request-error text with operation context', async () => {
+  await withHarness(async (h) => {
+    const tx = h.db.db.transaction('items', 'readonly')
+    const done = completed(tx).catch(() => undefined)
+    const nativeErrors: Array<string> = []
+    tx.addEventListener('error', (event) => {
+      nativeErrors.push((event.target as IDBRequest).error!.message)
+    })
+    const result = getAll(tx.objectStore('items')).catch(
+      (error: unknown) => error,
+    )
+    tx.abort()
+    const error = await result
+    await done
+    expect(nativeErrors).toHaveLength(1)
+    expect(error).toEqual(
+      new Error(
+        `Failed to get all items from object store "items": ${nativeErrors[0]}`,
+      ),
+    )
+  })
+})
+
+it('preserves synchronous DOMException text as a rejected Promise', async () => {
+  await withHarness(async (h) => {
+    const tx = h.db.db.transaction('items', 'readonly')
+    const done = completed(tx).catch(() => undefined)
+    const store = tx.objectStore('items')
+    tx.abort()
+    await done
+    let nativeError: unknown
+    try {
+      store.getAll()
+    } catch (error) {
+      nativeError = error
+    }
+    expect(nativeError).toBeInstanceOf(DOMException)
+    // This provider DOMException is outside the test environment's Error realm.
+    expect(nativeError).not.toBeInstanceOf(Error)
+    const result = getAll(store)
+    expect(result).toBeInstanceOf(Promise)
+    await expect(result).rejects.toEqual(
+      new Error(
+        `Failed to get all items from object store "items": ${String(nativeError)}`,
+      ),
+    )
+  })
+})
 
 it('preserves exact keys and values through request helpers and whole-store clear', async () => {
   await withHarness(async (h) => {
@@ -215,3 +268,316 @@ it('rejects a failed upgrade', async () => {
     }),
   ).rejects.toThrow('upgrade rejected')
 })
+
+// Native completion makes these rows durable even while the callback remains
+// pending. A later callback rejection retains its identity, but cannot roll back
+// a transaction that has already completed. This law stops at the fake-IDB seam.
+it('retains committed rows when a held readwrite callback later rejects', async () => {
+  await withHarness(async (h) => {
+    const row = { id: 1, name: 'committed' }
+    const gate = deferred()
+    const nativeDone = deferred()
+    const failure = new Error('callback rejected after commit')
+    let settled = false
+    const outcome = executeTransaction(
+      h.db.db,
+      'items',
+      'readwrite',
+      (tx, stores) => {
+        stores.items!.put(row, row.id)
+        tx.addEventListener('complete', () => nativeDone.resolve())
+        return gate.promise
+      },
+    ).then(
+      () => {
+        settled = true
+        return undefined
+      },
+      (error: unknown) => {
+        settled = true
+        return error
+      },
+    )
+    await nativeDone.promise
+    await Promise.resolve()
+    const early = settled
+    const committed = await readStore<Row>(h.db, 'items')
+    gate.reject(failure)
+    const result = await outcome
+    expect(early, 'native completion does not settle the held callback').toBe(
+      false,
+    )
+    expect(committed.rows, 'native completion made the write durable').toEqual([
+      row,
+    ])
+    expect(result).toBe(failure)
+    expect((await readStore<Row>(h.db, 'items')).rows).toEqual([row])
+  })
+})
+
+// Native blocked events are nonterminal: the caller promise remains pending until
+// native success or failure. This transfers the settlement distinction from
+// offline-transactions/tests/indexeddb-write-settlement.test.ts. Successful open
+// transfers the connection to the caller; closing it permits a later upgrade and
+// deletion. This transfers the resource-ownership law from the OPFS lifecycle
+// oracle, but not its worker cancellation or deadline policy: native IndexedDB
+// open/delete requests have no equivalent cancellation API here.
+//
+// The finite grammar crosses open/delete with blocked/unblocked. The independent
+// rule is pending at blocked, fulfilled at native success, and no blocker after
+// caller close. Fake IndexedDB supplies native events; the wrapper supplies the
+// observed promise and connection. Captured handles are cleanup-only until after
+// the caller-owned close and native suffix have established resource release.
+// These histories make no browser scheduling, lock-timeout, or fallback claim.
+for (const operation of ['open', 'delete'] as const) {
+  for (const blocked of [false, true]) {
+    it(
+      operation +
+        ' settles at native success with temporary blockers ' +
+        blocked,
+      async () => {
+        const factory = new FakeIDBFactory()
+        const name = crypto.randomUUID()
+        const blocker = await openDatabase(name, 1, undefined, factory)
+        if (!blocked) blocker.close()
+        const entered = deferred()
+        const terminal = deferred()
+        let opened: IDBDatabase | undefined
+        let blockedEvents = 0
+        function observe(opening: IDBOpenDBRequest): IDBOpenDBRequest {
+          opening.addEventListener('blocked', () => {
+            blockedEvents++
+            entered.resolve()
+          })
+          opening.addEventListener('success', () => {
+            if (operation === 'open') opened = opening.result
+            terminal.resolve()
+          })
+          opening.addEventListener('error', () => {
+            terminal.reject(opening.error ?? new Error('native opening failed'))
+          })
+          return opening
+        }
+        const nativeOpen = factory.open.bind(factory)
+        const openSpy = vi
+          .spyOn(factory, 'open')
+          .mockImplementation((...args) => observe(nativeOpen(...args)))
+        const nativeDelete = factory.deleteDatabase.bind(factory)
+        const deleteSpy = vi
+          .spyOn(factory, 'deleteDatabase')
+          .mockImplementation((...args) => observe(nativeDelete(...args)))
+        let status = 'pending'
+        let statusAtBlocked: string | undefined
+        let result: unknown
+        try {
+          const promise =
+            operation === 'open'
+              ? openDatabase(name, 2, undefined, factory)
+              : deleteDatabase(name, factory)
+          const outcome = promise.then(
+            (value) => {
+              status = 'fulfilled'
+              return value
+            },
+            (error: unknown) => {
+              status = 'rejected'
+              return error
+            },
+          )
+          if (blocked) {
+            await entered.promise
+            await Promise.resolve()
+            statusAtBlocked = status
+            blocker.close()
+          }
+          await terminal.promise
+          result = await outcome
+          expect(blockedEvents, 'native blocker premise reached').toBe(
+            blocked ? 1 : 0,
+          )
+          if (blocked)
+            expect(statusAtBlocked, 'blocked caller settlement').toBe('pending')
+          expect(status, 'terminal caller settlement').toBe('fulfilled')
+          expect(result, 'caller owns the native result').toBe(
+            operation === 'open' ? opened : undefined,
+          )
+
+          if (operation === 'open') {
+            // Use only the returned connection to release ownership. Closing the
+            // captured native handle before this cut would conceal an orphan.
+            ;(result as IDBDatabase).close()
+            let suffixBlocked = 0
+            const upgrade = nativeOpen(name, 3)
+            upgrade.addEventListener('blocked', () => {
+              suffixBlocked++
+              opened?.close()
+            })
+            const upgraded = await request(upgrade)
+            upgraded.close()
+            await request(nativeDelete(name))
+            expect(
+              suffixBlocked,
+              'caller close releases the native connection',
+            ).toBe(0)
+          }
+        } finally {
+          blocker.close()
+          opened?.close()
+          openSpy.mockRestore()
+          deleteSpy.mockRestore()
+        }
+      },
+    )
+  }
+}
+
+// Failure is a different terminal outcome from blocking. A lower-version open
+// cannot upgrade; an explicitly aborted upgrade must preserve the old schema and
+// rows. The finite grammar includes abort with and without a temporary blocker;
+// lower-version rejection precedes blocking by IndexedDB's version rules.
+// Expected durable rows are authored constants, read through raw native requests.
+// Compare caller diagnostics after native failure, then retained version/schema/
+// rows after a fresh open and one successful write. This rejects a driver that
+// returns the expected error while leaving a partial upgrade or orphan connection.
+for (const failure of ['lower-version', 'abort-upgrade'] as const) {
+  for (const blocked of failure === 'lower-version' ? [false] : [false, true]) {
+    it(
+      failure + ' preserves durable state with temporary blockers ' + blocked,
+      async () => {
+        const factory = new FakeIDBFactory()
+        const name = crypto.randomUUID()
+        const retained = { id: 'retained', name: 'durable before failure' }
+        const suffix = { id: 'suffix', name: 'durable after failure' }
+        const version = failure === 'lower-version' ? 2 : 1
+        const initial = factory.open(name, version)
+        initial.onupgradeneeded = () =>
+          initial.result.createObjectStore('items')
+        const blocker = await request(initial)
+        const seed = blocker.transaction('items', 'readwrite')
+        const seeded = completed(seed)
+        seed.objectStore('items').put({ ...retained }, retained.id)
+        await seeded
+        if (!blocked) blocker.close()
+
+        const entered = deferred()
+        const terminal = deferred()
+        const nativeOpen = factory.open.bind(factory)
+        const native = { error: null as DOMException | null }
+        let blockedEvents = 0
+        let upgradeCalls = 0
+        let abortedConnection: IDBDatabase | undefined
+        const openSpy = vi
+          .spyOn(factory, 'open')
+          .mockImplementation((...args) => {
+            const opening = nativeOpen(...args)
+            opening.addEventListener('blocked', () => {
+              blockedEvents++
+              entered.resolve()
+            })
+            opening.addEventListener('error', () => {
+              native.error = opening.error
+              terminal.resolve()
+            })
+            opening.addEventListener('success', () => {
+              opening.result.close()
+              terminal.reject(
+                new Error('failing native open unexpectedly succeeded'),
+              )
+            })
+            return opening
+          })
+        let status = 'pending'
+        let statusAtBlocked: string | undefined
+        let restored: IDBDatabase | undefined
+        try {
+          const outcome = openDatabase(
+            name,
+            failure === 'lower-version' ? 1 : 2,
+            (database, _old, _next, transaction) => {
+              upgradeCalls++
+              abortedConnection = database
+              database.createObjectStore('uncommitted')
+              transaction
+                .objectStore('items')
+                .put(
+                  { id: retained.id, name: 'uncommitted replacement' },
+                  retained.id,
+                )
+              transaction.abort()
+            },
+            factory,
+          ).then(
+            (value) => {
+              status = 'fulfilled'
+              return value
+            },
+            (error: unknown) => {
+              status = 'rejected'
+              return error
+            },
+          )
+          if (blocked) {
+            await entered.promise
+            await Promise.resolve()
+            statusAtBlocked = status
+            blocker.close()
+          }
+          await terminal.promise
+          const result = await outcome
+          expect(blockedEvents, 'native blocker premise reached').toBe(
+            blocked ? 1 : 0,
+          )
+          if (blocked)
+            expect(statusAtBlocked, 'blocked caller settlement').toBe('pending')
+          expect(upgradeCalls, 'native upgrade failure premise reached').toBe(
+            failure === 'abort-upgrade' ? 1 : 0,
+          )
+          expect(native.error).toMatchObject({
+            name: failure === 'lower-version' ? 'VersionError' : 'AbortError',
+          })
+          expect(status, 'native failure rejects the caller').toBe('rejected')
+          expect(result, 'native diagnostic survives wrapper context').toEqual(
+            new Error(
+              `Failed to open IndexedDB database "${name}": ${native.error?.message}`,
+            ),
+          )
+
+          restored = await request(nativeOpen(name, version))
+          expect(
+            restored.version,
+            'failed upgrade retains the durable version',
+          ).toBe(version)
+          expect(Array.from(restored.objectStoreNames)).toEqual(['items'])
+          const read = restored.transaction('items', 'readonly')
+          const readDone = completed(read)
+          const rows = await request(read.objectStore('items').getAll())
+          await readDone
+          expect(rows, 'native failure retains the durable rows').toEqual([
+            retained,
+          ])
+          const write = restored.transaction('items', 'readwrite')
+          const writeDone = completed(write)
+          write.objectStore('items').put({ ...suffix }, suffix.id)
+          await writeDone
+          const finalRead = restored.transaction('items', 'readonly')
+          const finalDone = completed(finalRead)
+          const finalRows = await request(
+            finalRead.objectStore('items').getAll(),
+          )
+          await finalDone
+          expect(
+            finalRows,
+            'successful suffix preserves the retained row',
+          ).toEqual([retained, suffix])
+          restored.close()
+          await request(factory.deleteDatabase(name))
+        } finally {
+          blocker.close()
+          abortedConnection?.close()
+          restored?.close()
+          openSpy.mockRestore()
+        }
+      },
+    )
+  }
+}

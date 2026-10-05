@@ -903,19 +903,69 @@ question has an owner—not that there can be no more bugs.
 ## IndexedDB Collection persistence
 
 Owner: [IndexedDB oracle portfolio](../../packages/indexeddb-db-collection/tests/ORACLE.md).
-Settled histories compare authored rows with public/subscription/peer snapshots,
-raw durable rows, export and populated restore. Boundary histories cover handler
-decisions, clone/abort failure atomicity, source deletions under optimistic
-deletes, and startup settlement. Wrapper tests separate callback, request and
-native transaction completion. Transport tests cover disjoint writers, duplicate
-and excluded notifications, delayed CRUD and initial-load cleanup/restart.
-Normal package tests run fixed/random campaigns with direct seed/path replay.
+Settled histories compare independently authored scalar rows with public,
+subscription, peer, export, raw durable and fresh-restored snapshots. Imports
+check changed-value versions; detached driver inputs protect authored truth.
+Handler decisions are followed by an ordinary successful insert before a
+separate replacement suffix, so replacement cannot erase the observed leak.
+Wrong-version, input-mutation and suffix-leak controls calibrate those boundaries.
 
-Open cells owned by this package: same-key concurrent writers; arbitrary delayed
-clear/import notifications; cleanup during writes or remote reads; downstream
-query and transient publication observations; and real-browser receiving
-witnesses for quota, blocked upgrades, versionchange and crash durability. The
-fake-IDB/controlled transport seam does not establish those host laws. A browser
-owner must supply the same failure/order premises at the public and durable
-cuts. Separate per-Collection acceptance calls do not promise cross-Collection
-atomicity.
+The transport owner adds twelve histories: delayed clear/import followed by a
+later disjoint receiver insertion under FIFO/reverse/duplicate notifications;
+idle/cleaned-up clear/import; real manual acceptance after cleanup; and whole-
+database deletion with active sibling stores. Every affected public snapshot
+must match authored durable operation order after controlled delivery. A raw
+unseen row makes excluded-notification handling observable. These cases repair
+specific convergence laws; they do not establish arbitrary concurrent receivers.
+
+The [compatibility owner](../../packages/indexeddb-db-collection/tests/compatibility-oracle.test.ts)
+checks full versus getRandomValues-only crypto through write/broadcast, one
+reusable descriptor across independent DbClients and cleanup, and injected
+factories without ambient IndexedDB globals across typed-key multi-store
+restore/import/clear. Wrapper tests distinguish callback, request and native
+completion, including durable rows after late callback rejection. Store
+creation is additive; declared stores and actual native stores are distinct.
+Normal generated persistence tests retain fixed/random campaigns and direct
+seed/path replay. Blocked/unblocked open/delete cases check native terminal
+settlement and caller connection ownership through later native upgrade/delete.
+Native failed opens preserve durable rows/schema. A blocked utility deletion
+retains public and durable snapshots and sends no notification before native
+success; delivered success empties every affected Collection. Failure to issue
+deletion preserves those snapshots. No timeout, cancellation, automatic
+in-memory fallback or real-browser lock scheduling is established.
+
+Remaining package-owned cells and required witnesses:
+
+- **Persistence owner, PC02:** disjoint keys, mixed deletes, three Collections,
+  and same-ID manual payloads under the core identity contract.
+- **Settlement owner, PC04/PC06:** a middle failure in a batch of at least three
+  rows and multi-row held/resolved/rejected handlers; observe payload, caller
+  outcome, durable rows/versions and successful suffixes.
+- **Transport/settlement owners, PC08/PC10:** broader pending mutations, reused
+  keys and concurrently executing receiver callbacks across replacement.
+- **Transport owner, PC12/CC09:** cleanup/restart at actual write and receiving
+  read awaits, followed by a successful suffix; compare caller outcomes, active
+  public/durable rows, subsequent version-driven changes and channel ownership.
+- **Transport and core optimistic-history owners, PC16:** remote whole-row
+  omission and acknowledgement metadata at legal source/settlement cuts.
+- **Settlement owner, AUX01:** a valid post-durability publication/send failure
+  premise, with caller outcome, durable/source/public rows and successful suffix.
+  This is an unverified investigation, not a confirmed defect or a recovery mandate.
+- **Native receiving and consumer owners, CC10:** real-browser quota/abort,
+  blocked upgrades, versionchange, multi-page scheduling and crash durability;
+  downstream queries and raw event multiplicity/kind/previous-value/transient
+  traces. Controlled fake-IDB/channel witnesses do not prove these host laws.
+
+Same-key writer conflict policy, nested input identity and timing guarantees
+remain open. Separate Collection acceptance calls do not promise cross-Collection
+atomicity. These scope limits do not retire valid product obligations.
+
+**Known pre-existing core counterexample (HC005):** numeric 0 and string "0" in
+one Collection transaction can collapse before the adapter receives its mutation
+payload. Owner:
+[optimistic transaction payload oracle](../../packages/db/tests/optimistic-transaction-oracle.property.test.ts),
+whose relevant history grammar uses numeric keys. Needed witness: same-string-
+representation typed keys in one transaction, exact handler payload multiplicity
+and keys, then public and adapter-durable rows. IndexedDB import/restore and
+separate-operation typed-key evidence does not close this boundary. No adapter
+workaround is included; universal closure is not claimed.

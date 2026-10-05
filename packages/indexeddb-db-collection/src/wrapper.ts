@@ -34,8 +34,34 @@ function getIDBFactory(idbFactory?: IDBFactory): IDBFactory {
   )
 }
 
+function executeRequest<T>(
+  createRequest: () => IDBRequest<T>,
+  describeFailure: () => string,
+): Promise<T> {
+  return new Promise((resolve, reject) => {
+    let request: IDBRequest<T>
+    try {
+      request = createRequest()
+    } catch (error) {
+      reject(
+        new Error(
+          `${describeFailure()}: ${error instanceof Error ? error.message : String(error)}`,
+        ),
+      )
+      return
+    }
+    request.onsuccess = () => resolve(request.result)
+    request.onerror = () => {
+      const errorMessage = request.error?.message || 'Unknown error'
+      reject(new Error(`${describeFailure()}: ${errorMessage}`))
+    }
+  })
+}
+
 /**
  * Opens an IndexedDB database with the specified name and version.
+ * A blocked request stays pending until native success or error. The caller
+ * owns the returned connection and must close it when no longer needed.
  *
  * @param name - The name of the database to open
  * @param version - The version number of the database schema
@@ -65,13 +91,7 @@ export function openDatabase(
   idbFactory?: IDBFactory,
 ): Promise<IDBDatabase> {
   return new Promise((resolve, reject) => {
-    let factory: IDBFactory
-    try {
-      factory = getIDBFactory(idbFactory)
-    } catch (error) {
-      reject(error)
-      return
-    }
+    const factory = getIDBFactory(idbFactory)
 
     let request: IDBOpenDBRequest
     try {
@@ -117,15 +137,6 @@ export function openDatabase(
       reject(
         new Error(
           `Failed to open IndexedDB database "${name}": ${errorMessage}`,
-        ),
-      )
-    }
-
-    request.onblocked = () => {
-      reject(
-        new Error(
-          `Opening IndexedDB database "${name}" was blocked. ` +
-            'Close other tabs/connections to this database and try again.',
         ),
       )
     }
@@ -189,8 +200,11 @@ export function createObjectStore(
  * This function handles transaction lifecycle automatically:
  * - Creates the transaction with the specified mode
  * - Provides the transaction and object stores to the callback
- * - Waits for the transaction to complete (or abort)
+ * - Waits for both the callback and the transaction to complete (or abort)
  * - Returns the callback's result or rejects with an error
+ *
+ * IndexedDB can commit while an async callback is still pending. If that callback
+ * later rejects, this function rejects but cannot undo the committed writes.
  *
  * @template T - The return type of the callback
  * @param db - The IDBDatabase instance
@@ -306,32 +320,10 @@ export function executeTransaction<T>(
  * ```
  */
 export function getAll<T>(objectStore: IDBObjectStore): Promise<Array<T>> {
-  return new Promise((resolve, reject) => {
-    let request: IDBRequest<Array<T>>
-    try {
-      request = objectStore.getAll()
-    } catch (error) {
-      reject(
-        new Error(
-          `Failed to get all items from object store "${objectStore.name}": ${error instanceof Error ? error.message : String(error)}`,
-        ),
-      )
-      return
-    }
-
-    request.onsuccess = () => {
-      resolve(request.result)
-    }
-
-    request.onerror = () => {
-      const errorMessage = request.error?.message || 'Unknown error'
-      reject(
-        new Error(
-          `Failed to get all items from object store "${objectStore.name}": ${errorMessage}`,
-        ),
-      )
-    }
-  })
+  return executeRequest<Array<T>>(
+    () => objectStore.getAll(),
+    () => `Failed to get all items from object store "${objectStore.name}"`,
+  )
 }
 
 /**
@@ -353,32 +345,10 @@ export function getAll<T>(objectStore: IDBObjectStore): Promise<Array<T>> {
 export function getAllKeys(
   objectStore: IDBObjectStore,
 ): Promise<Array<IDBValidKey>> {
-  return new Promise((resolve, reject) => {
-    let request: IDBRequest<Array<IDBValidKey>>
-    try {
-      request = objectStore.getAllKeys()
-    } catch (error) {
-      reject(
-        new Error(
-          `Failed to get all keys from object store "${objectStore.name}": ${error instanceof Error ? error.message : String(error)}`,
-        ),
-      )
-      return
-    }
-
-    request.onsuccess = () => {
-      resolve(request.result)
-    }
-
-    request.onerror = () => {
-      const errorMessage = request.error?.message || 'Unknown error'
-      reject(
-        new Error(
-          `Failed to get all keys from object store "${objectStore.name}": ${errorMessage}`,
-        ),
-      )
-    }
-  })
+  return executeRequest(
+    () => objectStore.getAllKeys(),
+    () => `Failed to get all keys from object store "${objectStore.name}"`,
+  )
 }
 
 /**
@@ -403,32 +373,11 @@ export function getByKey<T>(
   objectStore: IDBObjectStore,
   key: IDBValidKey,
 ): Promise<T | undefined> {
-  return new Promise((resolve, reject) => {
-    let request: IDBRequest<T | undefined>
-    try {
-      request = objectStore.get(key)
-    } catch (error) {
-      reject(
-        new Error(
-          `Failed to get item with key "${String(key)}" from object store "${objectStore.name}": ${error instanceof Error ? error.message : String(error)}`,
-        ),
-      )
-      return
-    }
-
-    request.onsuccess = () => {
-      resolve(request.result)
-    }
-
-    request.onerror = () => {
-      const errorMessage = request.error?.message || 'Unknown error'
-      reject(
-        new Error(
-          `Failed to get item with key "${String(key)}" from object store "${objectStore.name}": ${errorMessage}`,
-        ),
-      )
-    }
-  })
+  return executeRequest<T | undefined>(
+    () => objectStore.get(key),
+    () =>
+      `Failed to get item with key "${String(key)}" from object store "${objectStore.name}"`,
+  )
 }
 
 /**
@@ -463,34 +412,11 @@ export function put<T>(
   value: T,
   key?: IDBValidKey,
 ): Promise<IDBValidKey> {
-  return new Promise((resolve, reject) => {
-    let request: IDBRequest<IDBValidKey>
-    try {
-      // Use the key parameter if provided, otherwise rely on keyPath
-      request =
-        key !== undefined ? objectStore.put(value, key) : objectStore.put(value)
-    } catch (error) {
-      reject(
-        new Error(
-          `Failed to write item to object store "${objectStore.name}": ${error instanceof Error ? error.message : String(error)}`,
-        ),
-      )
-      return
-    }
-
-    request.onsuccess = () => {
-      resolve(request.result)
-    }
-
-    request.onerror = () => {
-      const errorMessage = request.error?.message || 'Unknown error'
-      reject(
-        new Error(
-          `Failed to write item to object store "${objectStore.name}": ${errorMessage}`,
-        ),
-      )
-    }
-  })
+  return executeRequest(
+    () =>
+      key !== undefined ? objectStore.put(value, key) : objectStore.put(value),
+    () => `Failed to write item to object store "${objectStore.name}"`,
+  )
 }
 
 /**
@@ -512,32 +438,11 @@ export function deleteByKey(
   objectStore: IDBObjectStore,
   key: IDBValidKey,
 ): Promise<void> {
-  return new Promise((resolve, reject) => {
-    let request: IDBRequest<undefined>
-    try {
-      request = objectStore.delete(key)
-    } catch (error) {
-      reject(
-        new Error(
-          `Failed to delete item with key "${String(key)}" from object store "${objectStore.name}": ${error instanceof Error ? error.message : String(error)}`,
-        ),
-      )
-      return
-    }
-
-    request.onsuccess = () => {
-      resolve()
-    }
-
-    request.onerror = () => {
-      const errorMessage = request.error?.message || 'Unknown error'
-      reject(
-        new Error(
-          `Failed to delete item with key "${String(key)}" from object store "${objectStore.name}": ${errorMessage}`,
-        ),
-      )
-    }
-  })
+  return executeRequest(
+    () => objectStore.delete(key),
+    () =>
+      `Failed to delete item with key "${String(key)}" from object store "${objectStore.name}"`,
+  )
 }
 
 /**
@@ -555,36 +460,15 @@ export function deleteByKey(
  * ```
  */
 export function clear(objectStore: IDBObjectStore): Promise<void> {
-  return new Promise((resolve, reject) => {
-    let request: IDBRequest<undefined>
-    try {
-      request = objectStore.clear()
-    } catch (error) {
-      reject(
-        new Error(
-          `Failed to clear object store "${objectStore.name}": ${error instanceof Error ? error.message : String(error)}`,
-        ),
-      )
-      return
-    }
-
-    request.onsuccess = () => {
-      resolve()
-    }
-
-    request.onerror = () => {
-      const errorMessage = request.error?.message || 'Unknown error'
-      reject(
-        new Error(
-          `Failed to clear object store "${objectStore.name}": ${errorMessage}`,
-        ),
-      )
-    }
-  })
+  return executeRequest(
+    () => objectStore.clear(),
+    () => `Failed to clear object store "${objectStore.name}"`,
+  )
 }
 
 /**
  * Deletes an entire IndexedDB database.
+ * A blocked request stays pending until native success or error.
  *
  * Use with caution - this removes the database and all of its object stores and data.
  *
@@ -603,13 +487,7 @@ export function deleteDatabase(
   idbFactory?: IDBFactory,
 ): Promise<void> {
   return new Promise((resolve, reject) => {
-    let factory: IDBFactory
-    try {
-      factory = getIDBFactory(idbFactory)
-    } catch (error) {
-      reject(error)
-      return
-    }
+    const factory = getIDBFactory(idbFactory)
 
     let request: IDBOpenDBRequest
     try {
@@ -632,15 +510,6 @@ export function deleteDatabase(
       reject(
         new Error(
           `Failed to delete IndexedDB database "${name}": ${errorMessage}`,
-        ),
-      )
-    }
-
-    request.onblocked = () => {
-      reject(
-        new Error(
-          `Deleting IndexedDB database "${name}" was blocked. ` +
-            'Close all connections to this database and try again.',
         ),
       )
     }
