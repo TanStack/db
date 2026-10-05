@@ -48,6 +48,7 @@ const staticOracleProperties = [
   `collection-state.optimistic-outcomes`,
   `collection-state.same-key`,
   `cold-join.reconciliation`,
+  `cold-join.compound`,
   `cursor.scalar-continuation`,
   `cursor.exact-width`,
   `cursor.exact-local-order`,

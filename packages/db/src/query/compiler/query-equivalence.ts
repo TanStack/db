@@ -16,8 +16,7 @@ function normalizeQuery(query: QueryIR): Record<string, unknown> {
     join: query.join?.map((join) => ({
       from: normalizeFrom(join.from),
       type: join.type,
-      left: join.left,
-      right: join.right,
+      on: join.on,
     })),
     where: query.where,
     groupBy: query.groupBy,

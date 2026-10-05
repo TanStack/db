@@ -1,8 +1,8 @@
 import { D2, output } from '@tanstack/db-ivm'
 import { describe, expect, it } from 'vitest'
+import { CollectionRef, Func, PropRef  } from '../../../src/query/ir.js'
 import { createCollection } from '../../../src/collection/index.js'
 import { compileQuery } from '../../../src/query/compiler/index.js'
-import { CollectionRef, PropRef } from '../../../src/query/ir.js'
 import type { LazyCollectionCallbacks } from '../../../src/query/compiler/joins.js'
 
 type Row = { id: number; key: unknown }
@@ -29,8 +29,10 @@ function createDemandHarness(joinType: `left` | `right` | `full` = `left`) {
         {
           type: joinType,
           from: new CollectionRef(right, `right`),
-          left: new PropRef([`left`, `key`]),
-          right: new PropRef([`right`, `key`]),
+          on: new Func('eq', [
+            new PropRef([`left`, `key`]),
+            new PropRef([`right`, `key`]),
+          ]),
         },
       ],
     },

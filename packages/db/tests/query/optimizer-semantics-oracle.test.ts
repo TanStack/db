@@ -443,8 +443,10 @@ describe(`optimizer residual convergence`, () => {
                 {
                   type: join.type,
                   from: new CollectionRef(collection, `member`),
-                  left: new PropRef([`team`, `id`]),
-                  right: new PropRef([`member`, `teamId`]),
+                  on: new Func('eq', [
+                    new PropRef([`team`, `id`]),
+                    new PropRef([`member`, `teamId`]),
+                  ]),
                 },
               ],
               where,
@@ -505,14 +507,18 @@ describe(`optimizer residual convergence`, () => {
         {
           type: `left`,
           from: new CollectionRef(collection, `member`),
-          left: new PropRef([`team`, `id`]),
-          right: new PropRef([`member`, `teamId`]),
+          on: new Func('eq', [
+            new PropRef([`team`, `id`]),
+            new PropRef([`member`, `teamId`]),
+          ]),
         },
         {
           type: `inner`,
           from: new CollectionRef(collection, `tag`),
-          left: new PropRef([`team`, `id`]),
-          right: new PropRef([`tag`, `teamId`]),
+          on: new Func('eq', [
+            new PropRef([`team`, `id`]),
+            new PropRef([`tag`, `teamId`]),
+          ]),
         },
       ],
       where: [
@@ -556,8 +562,10 @@ describe(`optimizer residual convergence`, () => {
           {
             type: joinType,
             from: new CollectionRef(collection, `member`),
-            left: new PropRef([`team`, `id`]),
-            right: new PropRef([`member`, `teamId`]),
+            on: new Func('eq', [
+              new PropRef([`team`, `id`]),
+              new PropRef([`member`, `teamId`]),
+            ]),
           },
         ],
         where: [cross, active],
@@ -586,8 +594,10 @@ describe(`optimizer residual convergence`, () => {
         {
           type: `left`,
           from: new CollectionRef(collection, `member`),
-          left: new PropRef([`team`, `id`]),
-          right: new PropRef([`member`, `teamId`]),
+          on: new Func('eq', [
+            new PropRef([`team`, `id`]),
+            new PropRef([`member`, `teamId`]),
+          ]),
         },
       ],
       where: [
@@ -617,8 +627,10 @@ describe(`optimizer residual convergence`, () => {
         {
           type: `left`,
           from: new CollectionRef(collection, `member`),
-          left: new PropRef([`team`, `id`]),
-          right: new PropRef([`member`, `teamId`]),
+          on: new Func('eq', [
+            new PropRef([`team`, `id`]),
+            new PropRef([`member`, `teamId`]),
+          ]),
         },
       ],
       where: [predicate(`team`, `active`, true), new Value(false)],
@@ -644,8 +656,10 @@ describe(`optimizer residual convergence`, () => {
         {
           type: `left`,
           from: new CollectionRef(collection, `member`),
-          left: new PropRef([`team`, `id`]),
-          right: new PropRef([`member`, `teamId`]),
+          on: new Func('eq', [
+            new PropRef([`team`, `id`]),
+            new PropRef([`member`, `teamId`]),
+          ]),
         },
       ],
       where: [
@@ -680,14 +694,18 @@ describe(`optimizer residual convergence`, () => {
           {
             type: `left`,
             from: new CollectionRef(collection, `member`),
-            left: new PropRef([`team`, `id`]),
-            right: new PropRef([`member`, `teamId`]),
+            on: new Func('eq', [
+              new PropRef([`team`, `id`]),
+              new PropRef([`member`, `teamId`]),
+            ]),
           },
           {
             type: laterJoin,
             from: new CollectionRef(collection, `tag`),
-            left: new PropRef([`team`, `id`]),
-            right: new PropRef([`tag`, `teamId`]),
+            on: new Func('eq', [
+              new PropRef([`team`, `id`]),
+              new PropRef([`tag`, `teamId`]),
+            ]),
           },
         ],
         where: [
@@ -745,8 +763,10 @@ describe(`optimizer residual convergence`, () => {
         {
           type: `left`,
           from: new CollectionRef(collection, `member`),
-          left: new PropRef([`team`, `id`]),
-          right: new PropRef([`member`, `teamId`]),
+          on: new Func('eq', [
+            new PropRef([`team`, `id`]),
+            new PropRef([`member`, `teamId`]),
+          ]),
         },
       ],
       where: [
@@ -782,8 +802,10 @@ describe(`optimizer residual convergence`, () => {
         {
           type: `left`,
           from: new CollectionRef(collection, `member`),
-          left: new PropRef([`team`, `id`]),
-          right: new PropRef([`member`, `teamId`]),
+          on: new Func('eq', [
+            new PropRef([`team`, `id`]),
+            new PropRef([`member`, `teamId`]),
+          ]),
         },
       ],
       where: [createResidualWhere(prior), nullable, newlyPushable],

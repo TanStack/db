@@ -20,6 +20,7 @@ import {
   getParentContextValue,
 } from '../equality-value-identity.js'
 import { ensureIndexForField } from '../../indexes/auto-index.js'
+import { getJoinConditions } from '../join-conditions.js'
 import { getFromSources } from '../ir.js'
 import { compileExpression } from './evaluators.js'
 import { getSourceAliasesFromExpression } from './expressions.js'
@@ -142,14 +143,14 @@ function wrapJoinedInputRow(alias: string, row: any): NamespacedRow {
 function getRouteJoinKey(
   row: NamespacedRow,
   source: string,
-  value: unknown,
+  equalityKey: unknown,
   valueIdentity: ValueIdentity,
 ): string {
   const route = getNamespacedRouteMetadata(row, source)
   return serializeValue([
     valueIdentity.equality(route?.correlationKey),
     getParentContextIdentity(route?.parentContext ?? null),
-    valueIdentity.equality(value),
+    equalityKey,
   ])
 }
 
@@ -157,18 +158,22 @@ function getJoinKey(
   row: NamespacedRow,
   source: string,
   side: `main` | `joined`,
-  value: unknown,
+  values: Array<unknown>,
   routeJoinedSource: boolean,
   valueIdentity: ValueIdentity,
 ): string {
-  if (value == null) {
+  if (values.some((value) => value == null)) {
     // Serialized equality and route keys are JSON or `~`-prefixed, so these
     // side-local sentinels cannot collide with a satisfiable join operand.
     return side === `main` ? `\0m` : `\0j`
   }
+  const value =
+    values.length === 1
+      ? valueIdentity.equality(values[0])
+      : values.map(valueIdentity.equality)
   return routeJoinedSource
     ? getRouteJoinKey(row, source, value, valueIdentity)
-    : valueIdentity.serializeEquality(value)
+    : serializeValue(value)
 }
 
 export function registerLazyDemandPlan(
@@ -247,25 +252,6 @@ export function processJoins(
   return resultPipeline
 }
 
-/** Extract compound operands without changing the single-condition path. */
-function createJoinKeyExtractor(
-  compiledConditions: Array<(row: NamespacedRow) => unknown>,
-): (row: NamespacedRow) => unknown {
-  if (compiledConditions.length === 1) {
-    return compiledConditions[0]!
-  }
-
-  return (row) => {
-    const parts: Array<unknown> = []
-    for (const extract of compiledConditions) {
-      const value = extract(row)
-      if (value == null) return null
-      parts.push(value)
-    }
-    return JSON.stringify(parts)
-  }
-}
-
 /**
  * Processes a single join clause with lazy loading optimization.
  * For LEFT/RIGHT/INNER joins, marks one side as "lazy" (loads on-demand based on join keys).
@@ -298,10 +284,7 @@ function processJoin(
 
   const joinedSource = joinClause.from.alias
   const availableSources = [...Object.keys(sources), joinedSource]
-  const conditions = [
-    joinClause,
-    ...(joinClause.additionalConditions ?? []),
-  ].map(({ left, right }) =>
+  const conditions = getJoinConditions(joinClause.on).map(([left, right]) =>
     analyzeJoinExpressions(
       left,
       right,
@@ -310,12 +293,13 @@ function processJoin(
       rawQuery.from.type === `unionAll`,
     ),
   )
+  // The first equality supplies candidate demand; the full tuple decides matches.
   const { mainExpr, joinedExpr } = conditions[0]!
-  const hasCompoundJoin = conditions.length > 1
-  const joinedExpressionUsesParent = conditions.some((condition) =>
-    [...getSourceAliasesFromExpression(condition.joinedExpr)].some(
-      (alias) => alias !== joinedSource && !sources[alias],
-    ),
+  const joinedExpressionUsesParent = conditions.some(
+    ({ joinedExpr: expression }) =>
+      [...getSourceAliasesFromExpression(expression)].some(
+        (alias) => alias !== joinedSource && !sources[alias],
+      ),
   )
   const routeJoinedSource =
     parentKeyStream !== undefined &&
@@ -374,36 +358,37 @@ function processJoin(
     joinedCollection,
     mainSourceIsParentFiltered,
   )
-  const activeSource =
-    routeJoinedSource || hasCompoundJoin
-      ? undefined
-      : sourceActivity.activeSource
+  const activeSource = routeJoinedSource
+    ? undefined
+    : sourceActivity.activeSource
   const lazySource = sourceActivity.lazySource
 
   // Pre-compile the join expressions
-  const compiledMainExpr = createJoinKeyExtractor(
-    conditions.map((condition) => compileExpression(condition.mainExpr)),
+  const compiledMainExpressions = conditions.map((condition) =>
+    compileExpression(condition.mainExpr),
   )
-  const compiledJoinedExpr = createJoinKeyExtractor(
-    conditions.map((condition) => compileExpression(condition.joinedExpr)),
+  const compiledJoinedExpressions = conditions.map((condition) =>
+    compileExpression(condition.joinedExpr),
   )
 
   // Prepare the main pipeline for joining
   let mainPipeline = pipeline.pipe(
     map(([currentKey, namespacedRow]) => {
       // Extract the join key from the main source expression
-      const value = compiledMainExpr(namespacedRow)
+      const values = compiledMainExpressions.map((evaluate) =>
+        evaluate(namespacedRow),
+      )
       const mainKey = getJoinKey(
         namespacedRow,
         mainSource,
         `main`,
-        value,
+        values,
         routeJoinedSource,
         valueIdentity,
       )
 
       // Keep the raw value for lazy demand; the equality key is graph-local.
-      return [mainKey, [currentKey, namespacedRow, value]] as [
+      return [mainKey, [currentKey, namespacedRow, values[0]]] as [
         string,
         JoinInputValue,
       ]
@@ -417,18 +402,20 @@ function processJoin(
       const namespacedRow = wrapJoinedInputRow(joinedSource, row)
 
       // Extract the join key from the joined source expression
-      const value = compiledJoinedExpr(namespacedRow)
+      const values = compiledJoinedExpressions.map((evaluate) =>
+        evaluate(namespacedRow),
+      )
       const joinedKey = getJoinKey(
         namespacedRow,
         joinedSource,
         `joined`,
-        value,
+        values,
         routeJoinedSource,
         valueIdentity,
       )
 
       // Keep the raw value for lazy demand; the equality key is graph-local.
-      return [joinedKey, [currentKey, namespacedRow, value]] as [
+      return [joinedKey, [currentKey, namespacedRow, values[0]]] as [
         string,
         JoinInputValue,
       ]

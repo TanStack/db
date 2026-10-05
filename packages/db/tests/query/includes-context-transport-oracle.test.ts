@@ -20,6 +20,7 @@ import {
   stripInternalRouteMetadata,
 } from '../../src/query/compiler/route-metadata.js'
 import { createControlledCollection } from './includes-oracle-helpers.js'
+import type { RefLeaf } from '../../src/query/builder/types.js'
 import type { Collection } from '../../src/collection/index.js'
 import type { Context, QueryBuilder } from '../../src/query/builder/index.js'
 import type { ControlledCollection } from './includes-oracle-helpers.js'
@@ -428,10 +429,12 @@ const grammarCells: Array<GrammarCell> = [
       state,
     }),
   ),
-  ...routeContextGrammar.lexicalScope.scopes.map((scope): LexicalScopeCell => ({
-    family: `lexical-scope`,
-    scope,
-  })),
+  ...routeContextGrammar.lexicalScope.scopes.map(
+    (scope): LexicalScopeCell => ({
+      family: `lexical-scope`,
+      scope,
+    }),
+  ),
   ...routeContextGrammar.aggregation.groupings.flatMap((grouping) =>
     routeContextGrammar.aggregation.placements.map(
       (placement): AggregationCell => ({
@@ -459,10 +462,12 @@ const grammarCells: Array<GrammarCell> = [
       }),
     ),
   ),
-  ...routeContextGrammar.unionIdentity.forms.map((form): UnionIdentityCell => ({
-    family: `union-identity`,
-    form,
-  })),
+  ...routeContextGrammar.unionIdentity.forms.map(
+    (form): UnionIdentityCell => ({
+      family: `union-identity`,
+      form,
+    }),
+  ),
   ...routeContextGrammar.derivedResult.boundaries.flatMap((boundary) =>
     routeContextGrammar.derivedResult.selections.flatMap((selection) =>
       routeContextGrammar.derivedResult.domains.map(
@@ -2628,5 +2633,122 @@ describe(`correlated include route-context transport grammar`, () => {
   for (const routeMode of queryRefMetadataGrammar.routeModes) {
     test(`query-ref metadata / ${routeMode}`, () =>
       runQueryRefMetadataCell(routeMode))
+  }
+})
+
+/**
+ * A parent value used only in the second join equality is still route context.
+ * Parents sharing the correlation key may disagree on that equality. This
+ * extends the transport grammar with direct/joined QueryRef sources and a
+ * parent operand on either side. The independent model enumerates source
+ * pairs and adds the parent's parameter using ordinary numeric arithmetic.
+ * All three public forms are checked after preload, parent updates, and child
+ * updates. This bounded matrix makes no asynchronous publication claim.
+ */
+describe(`compound join parent context`, () => {
+  for (const boundary of [`direct`, `queryRef`] as const) {
+    for (const parentSide of [`main`, `joined`] as const) {
+      test(`preserves the later parent operand through ${boundary}, ${parentSide}`, async () => {
+        const parents = createGrammarCollection(`compound-parents`, [
+          { id: 1, group: 1, parameter: 1 },
+          { id: 2, group: 1, parameter: 2 },
+        ])
+        const children = createGrammarCollection(`compound-children`, [
+          { id: 10, group: 1, a: 1, b: 1 },
+          { id: 11, group: 1, a: 1, b: 2 },
+        ])
+        const peers = createGrammarCollection(`compound-peers`, [
+          { id: 20, a: 1, b: 2 },
+          { id: 21, a: 1, b: 3 },
+        ])
+        let cleanupLive: () => Promise<void> = async () => {}
+        await runWithCleanup(
+          { cleanup: () => cleanupLive() },
+          [parents, children, peers],
+          async () => {
+            const live = createLiveQueryCollection((q) =>
+              q.from({ parent: parents.collection }).select(({ parent }) => {
+                const base = q
+                  .from({ child: children.collection })
+                  .where(({ child }) => eq(child.group, parent.group))
+                const joinCondition = ({
+                  child,
+                  peer,
+                }: {
+                  child: {
+                    a: RefLeaf<number>
+                    b: RefLeaf<number>
+                  }
+                  peer: {
+                    a: RefLeaf<number>
+                    b: RefLeaf<number>
+                  }
+                }) =>
+                  and(
+                    eq(child.a, peer.a),
+                    parentSide === `main`
+                      ? eq(add(child.b, parent.parameter), peer.b)
+                      : eq(child.b, add(peer.b, parent.parameter)),
+                  )
+                const joined =
+                  boundary === `direct`
+                    ? base.innerJoin({ peer: peers.collection }, joinCondition)
+                    : base.innerJoin(
+                        {
+                          peer: q
+                            .from({ peer: peers.collection })
+                            .select(({ peer }) => ({
+                              id: peer.id,
+                              a: peer.a,
+                              b: peer.b,
+                            })),
+                        },
+                        joinCondition,
+                      )
+                const rows = joined.select(({ child, peer }) => ({
+                  id: child.id,
+                  peerId: peer.id,
+                }))
+                return { id: parent.id, ...includeInEveryForm(rows) }
+              }),
+            )
+            cleanupLive = () => live.cleanup()
+            const project = (rows: Iterable<{ id: number; peerId: number }>) =>
+              [...rows]
+                .map(({ id, peerId }) => [id, peerId])
+                .sort((a, b) => a[0]! - b[0]! || a[1]! - b[1]!)
+            const check = () => {
+              for (const parent of parents.collection.toArray) {
+                const expected = children.collection.toArray.flatMap((child) =>
+                  peers.collection.toArray
+                    .filter(
+                      (peer) =>
+                        child.group === parent.group &&
+                        child.a === peer.a &&
+                        (parentSide === `main`
+                          ? child.b + parent.parameter === peer.b
+                          : child.b === peer.b + parent.parameter),
+                    )
+                    .map((peer) => ({ id: child.id, peerId: peer.id })),
+                )
+                expectEveryForm(
+                  live.get(parent.id)!,
+                  project,
+                  project(expected),
+                )
+              }
+            }
+            await live.preload()
+            check()
+            parents.write(`update`, { id: 1, group: 1, parameter: -1 })
+            check()
+            peers.write(`update`, { id: 20, a: 1, b: 1 })
+            check()
+            children.write(`update`, { id: 10, group: 1, a: 1, b: 3 })
+            check()
+          },
+        )
+      })
+    }
   }
 })

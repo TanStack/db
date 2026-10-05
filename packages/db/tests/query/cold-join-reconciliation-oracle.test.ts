@@ -1,9 +1,18 @@
 import fc from 'fast-check'
 import { Temporal } from 'temporal-polyfill'
 import { describe, expect, it } from 'vitest'
+import { Func } from '../../src/query/ir.js'
+import { JoinConditionMustBeEqualityError } from '../../src/errors.js'
 import { createCollection } from '../../src/collection/index.js'
 import { BTreeIndex } from '../../src/indexes/btree-index.js'
-import { createLiveQueryCollection, eq } from '../../src/query/index.js'
+import {
+  Query,
+  and,
+  createLiveQueryCollection,
+  eq,
+  gt,
+  or,
+} from '../../src/query/index.js'
 import {
   oraclePropertyOptions,
   oracleRuns,
@@ -37,7 +46,8 @@ import type {
  * The Identity and Initial demand sections of live/ARCHITECTURE.md authorize
  * the equality and acquisition laws. The test-only replica folds public change
  * messages; it does not represent an internal Collection or D2 relation.
- * Compound join syntax and demand minimization are outside this contract. The
+ * The compound section extends equality and source-history coverage to AND.
+ * Demand minimization remains outside this contract. The
  * cold witness requires real acquisition and correct rows, not a particular
  * optimization plan.
  */
@@ -881,5 +891,421 @@ it.each([`hide-acquisition`, `drop-delete`, `wrong-result`] as const)(
       name: `TraceAssertionError`,
       cause: { name: `AssertionError` },
     })
+  },
+)
+
+/**
+ * Compound joins extend the same equality law to a nonempty conjunction. Every
+ * operand must be TRUE; UNKNOWN never matches, and outer joins preserve each
+ * unmatched source row. The feature request authorizes AND-of-equality syntax;
+ * ARCHITECTURE.md's Identity law supplies each operand's established meaning.
+ *
+ * The model below joins integer labels from an explicit equality-class table.
+ * Labels are a test abstraction for values, not production keys. It never
+ * calls the evaluator, normalizer, identity encoder, or join compiler.
+ *
+ * The grammar varies two/three terms, nested AND, term order, operand reversal, all four
+ * join types, scan/index paths, and eager/cold joined sources. Histories put,
+ * replace, delete and restore keyed rows; removing an absent key is a no-op in
+ * the driver. The cold provider publishes its whole finite table on demand;
+ * this proves acquisition and row truth, not demand minimality or real I/O.
+ * Reads and a replica reconstructed from public events are checked after
+ * preload and each applied sync transaction. No optimistic or replay law is
+ * claimed here. Correlated parent transport has its own includes oracle.
+ */
+type CompoundRow = {
+  id: number
+  a: unknown
+  b: number | null
+  c: number
+  revision: number
+}
+type CompoundModelRow = {
+  id: number
+  atom: number
+  b: number | null
+  c: number
+}
+type CompoundJoin = `inner` | `left` | `right` | `full`
+type CompoundStep = {
+  side: `left` | `right`
+  row: CompoundModelRow
+  remove: boolean
+}
+type CompoundHistory = {
+  left: Array<CompoundModelRow>
+  right: Array<CompoundModelRow>
+  steps: Array<CompoundStep>
+  join: CompoundJoin
+  width: 2 | 3
+  atomFirst: boolean
+  nested: boolean
+  reversed: boolean
+  autoIndex: EqualityMode
+  cold: boolean
+}
+
+function compoundAtoms(): Array<{ value: unknown; group: string | null }> {
+  const shared = { code: 1 }
+  const symbol = Symbol(`key`)
+  return [
+    { value: 0, group: `zero` },
+    { value: -0, group: `zero` },
+    { value: new Date(0), group: `zero` },
+    { value: new Date(0).toISOString(), group: `date-string` },
+    { value: NaN, group: `nan` },
+    { value: new Date(NaN), group: `nan` },
+    { value: Infinity, group: `positive-infinity` },
+    { value: -Infinity, group: `negative-infinity` },
+    { value: 1n, group: `bigint` },
+    { value: `1`, group: `string` },
+    { value: 1, group: `number` },
+    { value: shared, group: `shared-object` },
+    { value: shared, group: `shared-object` },
+    { value: { code: 1 }, group: `other-object` },
+    { value: symbol, group: `shared-symbol` },
+    { value: symbol, group: `shared-symbol` },
+    { value: Symbol(`key`), group: `other-symbol` },
+    { value: new Uint8Array([1, 2]), group: `bytes` },
+    { value: new Uint8Array([1, 2]), group: `bytes` },
+    { value: Temporal.PlainDate.from(`2024-04-05`), group: `temporal` },
+    { value: Temporal.PlainDate.from(`2024-04-05`), group: `temporal` },
+    { value: null, group: null },
+    { value: undefined, group: null },
+  ]
+}
+
+// Independent nested loops retain multiplicity and explicitly add unmatched
+// rows. Swapping term order or operand direction cannot change this result.
+function compoundPairs(
+  scenario: Pick<CompoundHistory, `join` | `width`>,
+  left: Iterable<CompoundModelRow>,
+  right: Iterable<CompoundModelRow>,
+  groups: Array<string | null>,
+): Array<JoinPair> {
+  const pairs: Array<JoinPair> = []
+  const rightRows = [...right]
+  const matchedRight = new Set<number>()
+  for (const l of left) {
+    const matches = rightRows.filter(
+      (r) =>
+        groups[l.atom] !== null &&
+        groups[l.atom] === groups[r.atom] &&
+        l.b !== null &&
+        l.b === r.b &&
+        (scenario.width === 2 || l.c === r.c),
+    )
+    for (const r of matches) {
+      pairs.push([l.id, r.id])
+      matchedRight.add(r.id)
+    }
+    if (
+      matches.length === 0 &&
+      (scenario.join === `left` || scenario.join === `full`)
+    )
+      pairs.push([l.id, undefined])
+  }
+  if (scenario.join === `right` || scenario.join === `full`) {
+    for (const r of rightRows) {
+      if (!matchedRight.has(r.id)) pairs.push([undefined, r.id])
+    }
+  }
+  return sortJoinPairs(pairs)
+}
+
+async function runCompoundHistory(scenario: CompoundHistory): Promise<void> {
+  const atoms = compoundAtoms()
+  const model = {
+    left: new Map(scenario.left.map((row) => [row.id, row])),
+    right: new Map(scenario.right.map((row) => [row.id, row])),
+  }
+  let revision = 0
+  const toRow = (row: CompoundModelRow): CompoundRow => ({
+    id: row.id,
+    a: atoms[row.atom]!.value,
+    b: row.b,
+    c: row.c,
+    revision: revision++,
+  })
+  const actions: Partial<
+    Record<
+      `left` | `right`,
+      Parameters<SyncConfig<CompoundRow, number>[`sync`]>[0]
+    >
+  > = {}
+  let acquisitions = 0
+  const installed = { left: new Set<number>(), right: new Set<number>() }
+  const makeSource = (side: `left` | `right`) =>
+    createCollection<CompoundRow, number>({
+      getKey: (row) => row.id,
+      autoIndex: scenario.autoIndex,
+      defaultIndexType: scenario.autoIndex === `eager` ? BTreeIndex : undefined,
+      syncMode: scenario.cold && side === `right` ? `on-demand` : `eager`,
+      sync: {
+        sync: (sync) => {
+          actions[side] = sync
+          const publish = () => {
+            sync.begin()
+            for (const row of model[side].values()) {
+              if (installed[side].has(row.id)) continue
+              installed[side].add(row.id)
+              sync.write({ type: `insert`, value: toRow(row) })
+            }
+            return sync.commit()
+          }
+          if (!(scenario.cold && side === `right`)) publish()
+          sync.markReady()
+          return {
+            loadSubset: () => {
+              acquisitions++
+              return publish()
+            },
+          }
+        },
+      },
+    })
+  const left = makeSource(`left`)
+  const right = makeSource(`right`)
+  // Construction belongs inside cleanup ownership: the RED implementation
+  // rejects the public syntax before a live-query Collection exists.
+  let cleanupLive = () => Promise.resolve()
+  let subscription: ReturnType<Collection[`subscribeChanges`]> | undefined
+  const replica = new Map<string | number, JoinPair>()
+  await checkWithCleanup(
+    async () => {
+      const live = createLiveQueryCollection((q) =>
+        q
+          .from({ left })
+          .join(
+            { right },
+            ({ left: l, right: r }) => {
+              const a = scenario.reversed ? eq(r.a, l.a) : eq(l.a, r.a)
+              const b = scenario.reversed ? eq(l.b, r.b) : eq(r.b, l.b)
+              const c = eq(l.c, r.c)
+              const [first, second] = scenario.atomFirst ? [a, b] : [b, a]
+              return scenario.width === 2
+                ? and(first, second)
+                : scenario.nested
+                  ? and(first, and(second, c))
+                  : and(first, second, c)
+            },
+            scenario.join,
+          )
+          .select(({ left: l, right: r }) => ({ leftId: l.id, rightId: r.id })),
+      )
+      cleanupLive = () => live.cleanup()
+      subscription = live.subscribeChanges(
+        (changes) => {
+          for (const change of changes) {
+            if (change.type === `delete`) replica.delete(change.key)
+            else
+              replica.set(change.key, [
+                change.value.leftId,
+                change.value.rightId,
+              ])
+          }
+        },
+        { includeInitialState: true },
+      )
+      const check = () => {
+        const expected = compoundPairs(
+          scenario,
+          model.left.values(),
+          model.right.values(),
+          atoms.map((atom) => atom.group),
+        )
+        expect(
+          sortJoinPairs(live.toArray.map((row) => [row.leftId, row.rightId])),
+          `compound public pairs`,
+        ).toEqual(expected)
+        expect(
+          sortJoinPairs([...replica.values()]),
+          `compound event replica`,
+        ).toEqual(expected)
+        expect(live.size).toBe(expected.length)
+      }
+      await live.preload()
+      check()
+      if (
+        scenario.cold &&
+        scenario.left.some((row) => atoms[row.atom]!.group !== null)
+      )
+        expect(acquisitions, `cold source acquisition`).toBeGreaterThan(0)
+      for (const step of scenario.steps) {
+        const { side, row, remove } = step
+        const sync = actions[side]!
+        if (remove) model[side].delete(row.id)
+        else model[side].set(row.id, row)
+        sync.begin()
+        if (remove) {
+          if (installed[side].delete(row.id))
+            sync.write({ type: `delete`, value: toRow(row) })
+        } else {
+          sync.write({
+            type: installed[side].has(row.id) ? `update` : `insert`,
+            value: toRow(row),
+          })
+          installed[side].add(row.id)
+        }
+        await sync.commit()
+        check()
+      }
+    },
+    {
+      cleanup: async () => {
+        subscription?.unsubscribe()
+        await cleanupLive()
+      },
+    },
+    left,
+    right,
+  )
+}
+
+// All atom classes occur in the initial matrix. Partial matches differ only
+// in the last term; nulls occur in both tuple positions. The pinned scenario
+// leaves, restores, deletes and reinserts a match on each side.
+const compoundBoundaryRows = compoundAtoms().map((_, atom) => ({
+  id: atom,
+  atom,
+  b: 1,
+  c: 1,
+}))
+const compoundWitness: CompoundHistory = {
+  left: [...compoundBoundaryRows, { id: 30, atom: 10, b: null, c: 1 }],
+  right: [
+    ...compoundBoundaryRows,
+    { id: 30, atom: 10, b: null, c: 1 },
+    { id: 31, atom: 10, b: 1, c: 2 },
+  ],
+  steps: [
+    { side: `left`, row: { id: 10, atom: 10, b: 2, c: 1 }, remove: false },
+    { side: `right`, row: { id: 10, atom: 10, b: 2, c: 1 }, remove: false },
+    { side: `left`, row: { id: 10, atom: 10, b: 2, c: 1 }, remove: true },
+    { side: `left`, row: { id: 10, atom: 10, b: 2, c: 1 }, remove: false },
+    { side: `right`, row: { id: 10, atom: 10, b: 2, c: 1 }, remove: true },
+    { side: `right`, row: { id: 10, atom: 10, b: 2, c: 1 }, remove: false },
+  ],
+  join: `inner`,
+  width: 3,
+  atomFirst: true,
+  nested: true,
+  reversed: true,
+  autoIndex: `off`,
+  cold: false,
+}
+
+describe(`compound join relational oracle`, () => {
+  it.each([
+    { name: `distinct objects`, leftAtom: 11, rightAtom: 13 },
+    { name: `opposite infinities`, leftAtom: 6, rightAtom: 7 },
+    { name: `Date and ISO string`, leftAtom: 2, rightAtom: 3 },
+    { name: `bigint`, leftAtom: 8, rightAtom: 8 },
+  ])(`preserves compound $name equality`, async ({ leftAtom, rightAtom }) => {
+    await runCompoundHistory({
+      ...compoundWitness,
+      atomFirst: false,
+      left: [{ id: 1, atom: leftAtom, b: 1, c: 1 }],
+      right: [{ id: 2, atom: rightAtom, b: 1, c: 1 }],
+      steps: [],
+    })
+  })
+  for (const join of [`inner`, `left`, `right`, `full`] as const) {
+    for (const cold of [false, true]) {
+      it(`preserves all equality classes through ${join} histories, cold=${cold}`, async () => {
+        await runCompoundHistory({ ...compoundWitness, join, cold })
+      })
+    }
+  }
+  const property = `cold-join.compound`
+  const config = readOracleRunConfig()
+  const seeds =
+    config.replayProperty === property ? [undefined] : [861593, undefined]
+  it.each(seeds)(
+    `recomputes generated compound histories, seed=%s`,
+    async (seed) => {
+      const rowArbitrary = fc.record({
+        id: fc.integer({ min: 0, max: 3 }),
+        atom: fc.integer({ min: 0, max: compoundBoundaryRows.length - 1 }),
+        b: fc.constantFrom<number | null>(0, 1, null),
+        c: fc.integer({ min: 0, max: 1 }),
+      })
+      await fc.assert(
+        fc.asyncProperty(
+          fc.record({
+            left: fc.uniqueArray(rowArbitrary, {
+              selector: (row) => row.id,
+              maxLength: 4,
+            }),
+            right: fc.uniqueArray(rowArbitrary, {
+              selector: (row) => row.id,
+              maxLength: 4,
+            }),
+            steps: fc.array(
+              fc.record({
+                side: fc.constantFrom<`left` | `right`>(`left`, `right`),
+                row: rowArbitrary,
+                remove: fc.boolean(),
+              }),
+              { maxLength: 8 },
+            ),
+            join: fc.constantFrom<CompoundJoin>(
+              `inner`,
+              `left`,
+              `right`,
+              `full`,
+            ),
+            width: fc.constantFrom<2 | 3>(2, 3),
+            atomFirst: fc.boolean(),
+            nested: fc.boolean(),
+            reversed: fc.boolean(),
+            autoIndex: fc.constantFrom<EqualityMode>(`off`, `eager`),
+            cold: fc.boolean(),
+          }),
+          runCompoundHistory,
+        ),
+        seed === undefined
+          ? oraclePropertyOptions(60, property)
+          : { seed, numRuns: oracleRuns(60) },
+      )
+    },
+  )
+})
+
+// Admission is a finite predicate grammar. OR, inequalities, and empty AND
+// are outside the feature contract, including when buried in a valid AND.
+// Rejection must happen at the builder boundary, before source acquisition.
+it.each([`or`, `inequality`, `empty`, `nested-invalid`] as const)(
+  `rejects unsupported compound join predicate %s`,
+  async (shape) => {
+    const source = () =>
+      createCollection<{ id: number }>({
+        getKey: (row) => row.id,
+        sync: {
+          sync: () => {
+            throw new Error(`unexpected acquisition`)
+          },
+        },
+      })
+    const left = source()
+    const right = source()
+    await checkWithCleanup(
+      () => {
+        expect(() =>
+          new Query()
+            .from({ left })
+            .innerJoin({ right }, ({ left: l, right: r }) => {
+              const equality = eq(l.id, r.id)
+              if (shape === `or`) return or(equality, equality)
+              if (shape === `inequality`) return gt(l.id, r.id)
+              if (shape === `empty`) return new Func<boolean>(`and`, [])
+              return and(equality, and(equality, gt(l.id, r.id)))
+            }),
+        ).toThrow(JoinConditionMustBeEqualityError)
+        return Promise.resolve()
+      },
+      left,
+      right,
+    )
   },
 )

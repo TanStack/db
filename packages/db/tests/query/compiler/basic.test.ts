@@ -214,8 +214,10 @@ describe(`Query2 Compiler`, () => {
             {
               type: `inner`,
               from: new CollectionRef(postsCollection, postAlias),
-              left: new PropRef([userAlias, `id`]),
-              right: new PropRef([postAlias, `userId`]),
+              on: new Func('eq', [
+                new PropRef([userAlias, `id`]),
+                new PropRef([postAlias, `userId`]),
+              ]),
             },
           ],
         }

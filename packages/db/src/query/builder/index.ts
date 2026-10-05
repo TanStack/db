@@ -18,11 +18,11 @@ import {
   InvalidSourceError,
   InvalidSourceTypeError,
   InvalidWhereExpressionError,
-  JoinConditionMustBeEqualityError,
   OnlyOneSourceAllowedError,
   QueryMustHaveFromClauseError,
   SubQueryMustHaveFromClauseError,
 } from '../../errors.js'
+import { getJoinConditions } from '../join-conditions.js'
 import { getQueryIR } from './query-ir.js'
 import { cloneQueryForPlacement } from './clone-query.js'
 import {
@@ -333,31 +333,6 @@ export class BaseQueryBuilder<TContext extends Context = Context> {
    * query
    *   .from({ u: usersCollection })
    *   .join({ p: postsCollection }, ({u, p}) => eq(u.id, p.userId), 'inner')
-   *
-   * // Compound join on multiple fields
-   * query
-   *   .from({ product: productsCollection })
-   *   .join(
-   *     { inventory: inventoryCollection },
-   *     ({ product, inventory }) =>
-   *       and(
-   *         eq(product.region, inventory.region),
-   *         eq(product.sku, inventory.sku)
-   *       )
-   *   )
-   *
-   * // Left join with compound condition
-   * query
-   *   .from({ item: itemsCollection })
-   *   .join(
-   *     { details: detailsCollection },
-   *     ({ item, details }) =>
-   *       and(
-   *         eq(item.category, details.category),
-   *         eq(item.subcategory, details.subcategory)
-   *       ),
-   *     'left'
-   *   )
    * ```
    *
    * // Join with a subquery
@@ -390,16 +365,8 @@ export class BaseQueryBuilder<TContext extends Context = Context> {
     // Get the join condition expression
     const onExpression = onCallback(refProxy)
 
-    // Extract join conditions (supports both eq() and and(eq(), ...))
-    const { primary, additional } = extractJoinConditions(onExpression)
-
-    const joinClause: JoinClause = {
-      from,
-      type,
-      left: primary.left,
-      right: primary.right,
-      additionalConditions: additional.length > 0 ? additional : undefined,
-    }
+    getJoinConditions(onExpression)
+    const joinClause: JoinClause = { from, type, on: onExpression }
 
     const existingJoins = this.query.join || []
 
@@ -1056,58 +1023,6 @@ export class BaseQueryBuilder<TContext extends Context = Context> {
   }
 }
 
-/**
- * Extracts join conditions from an expression.
- * Accepts either:
- *   - eq(left, right) - single condition
- *   - and(eq(l1, r1), eq(l2, r2), ...) - compound condition
- *
- * Returns primary condition (first eq) and additional conditions (remaining eqs).
- */
-function extractJoinConditions(expr: BasicExpression): {
-  primary: { left: BasicExpression; right: BasicExpression }
-  additional: Array<{ left: BasicExpression; right: BasicExpression }>
-} {
-  // Case 1: Single eq() expression
-  if (expr.type === `func` && expr.name === `eq` && expr.args.length === 2) {
-    return {
-      primary: {
-        left: expr.args[0]!,
-        right: expr.args[1]!,
-      },
-      additional: [],
-    }
-  }
-
-  // Case 2: and(eq(), eq(), ...) expression
-  if (expr.type === `func` && expr.name === `and`) {
-    const conditions: Array<{ left: BasicExpression; right: BasicExpression }> =
-      []
-
-    for (const arg of expr.args) {
-      if (arg.type !== `func` || arg.name !== `eq` || arg.args.length !== 2) {
-        throw new JoinConditionMustBeEqualityError()
-      }
-      conditions.push({
-        left: arg.args[0]!,
-        right: arg.args[1]!,
-      })
-    }
-
-    if (conditions.length === 0) {
-      throw new JoinConditionMustBeEqualityError()
-    }
-
-    return {
-      primary: conditions[0]!,
-      additional: conditions.slice(1),
-    }
-  }
-
-  // Case 3: Invalid expression
-  throw new JoinConditionMustBeEqualityError()
-}
-
 // Helper to get a descriptive type name for error messages
 function getValueTypeName(value: unknown): string {
   if (value === null) return `null`
@@ -1315,8 +1230,7 @@ function collectExternalRefsFromQuery(query: QueryIR): Array<PropRef> {
 
   for (const where of query.where ?? []) addWhere(where)
   for (const join of query.join ?? []) {
-    addExpression(join.left)
-    addExpression(join.right)
+    addExpression(join.on)
     if (join.from.type === `queryRef`) {
       refs.push(...collectExternalRefsFromQuery(join.from.query))
     }
@@ -1375,8 +1289,7 @@ function collectParentRefsFromQuery(
 
   for (const where of query.where ?? []) addWhere(where)
   for (const join of query.join ?? []) {
-    addExpression(join.left)
-    addExpression(join.right)
+    addExpression(join.on)
     if (join.from.type === `queryRef`) {
       refs.push(...collectParentRefsFromQuery(join.from.query, parentAliases))
     }

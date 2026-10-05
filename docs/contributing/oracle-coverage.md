@@ -826,13 +826,23 @@ historical counts in research notes do not certify later commits. Closing the
 bounded repair means the acceptance map has evidence and each remaining
 question has an owner—not that there can be no more bugs.
 
-## Compound join candidate: open evidence
+## Compound joins
 
-[PR #861's current-main assessment](oracle-reviews/pr-861-compound-join-relevance.md)
-records confirmed operand-equality and query-identity counterexamples. This
-candidate is not merge-ready. The cold-join reconciliation owner must extend
-its equality/replacement grammar to compound operands and cold acquisition;
-the identity-output-shape owner must distinguish additional conditions and
-exercise subquery reuse. Parent-correlated compound conditions need a receiving
-witness in the includes-context-transport owner. The five original examples
-and passing single-equality oracles do not establish those boundaries.
+[The replacement evidence record](oracle-reviews/2026-10-05-compound-joins.md)
+records RED admission on main, GREEN refinement, and hostile-mutant failures.
+The cold-join reconciliation owner now covers compound equality classes,
+nullish operands, two/three terms, order/reversal/nesting, all four join types,
+scan/index paths, controlled cold acquisition, and keyed replacement histories.
+The identity-output-shape owner checks complete predicates through direct,
+from-QueryRef and joined-QueryRef boundaries. The includes-context-transport
+owner checks parent values used only in a later equality across both operand
+sides and direct/joined-QueryRef sources, in all three materialization forms.
+
+The bounded claim excludes arbitrary expression trees and wider tuples. Real
+provider acquisition, eviction/reentry, and exact lazy-demand minimality need
+receiving witnesses in the cold-join and adapter owners. Compound async,
+optimistic, paginated, and deeper nested include histories remain with the
+includes-temporal, includes-optimistic, pagination, and includes owners. This
+feature does not claim those cross-products are established by its finite
+matrix. Consumer hook caches require framework conformance witnesses; the
+identity owner proves the compiler identity boundary and fresh public rows.

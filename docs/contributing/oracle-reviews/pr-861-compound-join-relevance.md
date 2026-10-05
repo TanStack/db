@@ -2,6 +2,10 @@
 
 Assessment date: 2026-10-05.
 
+This historical assessment is superseded by the fresh implementation and
+[compound-join oracle evidence](2026-10-05-compound-joins.md). The original
+implementation and its example tests were removed before the replacement.
+
 The feature remains relevant, but this branch is not ready to merge. Current
 main still rejects `and(eq(...), eq(...))` in a join callback. Issue #593 and
 PR #861 were both open when inspected. The two correctness gaps below remain
@@ -102,14 +106,9 @@ documentation weight.
 
 ## Reproduce the diagnostics
 
-The adjacent `.probe.ts.txt` file contains ordinary failing tests, excluded
-from the normal test discovery. From the repository root:
-
-```sh
-cp docs/contributing/oracle-reviews/pr-861-compound-join-relevance.probe.ts.txt packages/db/tests/query/compound-join-relevance.probe.test.ts
-cd packages/db
-node ../../node_modules/vitest/vitest.mjs run tests/query/compound-join-relevance.probe.test.ts --coverage.enabled=false --typecheck.enabled=false --maxWorkers=1
-```
-
-After inspection, remove only that copied diagnostic file. The five failures
-are expected on the evaluated revision. Do not count these as passing tests.
+The old failing probe was removed with the old implementation. Recover it from
+commit `bb404aa597e5c66de0a4a4cd4c545293a01aabaf` at
+`docs/contributing/oracle-reviews/pr-861-compound-join-relevance.probe.ts.txt`
+and run it against the evaluated merge above. Its results apply only to that
+historical implementation. Current replay instructions are in the replacement
+evidence record.
