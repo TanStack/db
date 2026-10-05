@@ -1028,13 +1028,14 @@ describe(`sync publication reentrancy`, () => {
     'insert 3': { type: `insert`, key: 3, value: `prior-three` },
   }
   const callbackIntents = (visible: ReadonlyMap<number, string>) =>
-    [1, 2, 3, 4].flatMap((key): Array<ReadyIntent> =>
-      visible.has(key)
-        ? [
-            { type: `update`, key, value: `callback-${key}` },
-            { type: `delete`, key },
-          ]
-        : [{ type: `insert`, key, value: `callback-${key}` }],
+    [1, 2, 3, 4].flatMap(
+      (key): Array<ReadyIntent> =>
+        visible.has(key)
+          ? [
+              { type: `update`, key, value: `callback-${key}` },
+              { type: `delete`, key },
+            ]
+          : [{ type: `insert`, key, value: `callback-${key}` }],
     )
   const describeIntent = (intent: ReadyIntent | undefined) =>
     intent ? `${intent.type} ${intent.key}` : `none`
@@ -1187,6 +1188,90 @@ describe(`sync publication reentrancy`, () => {
             request.isPersisted.promise.catch(() => undefined),
           ),
         )
+        await collection.cleanup()
+      }
+    },
+  )
+
+  // A subscriber or a ready callback can throw while a truncate makes the
+  // Collection ready. The commit must still settle every receipt it applied
+  // and report the error, as it does when the Collection is already ready.
+  it.each(
+    ([false, true] as const).flatMap((alreadyReady) =>
+      ([`subscriber`, `ready callback`] as const).map((thrower) => ({
+        alreadyReady,
+        thrower,
+      })),
+    ),
+  )(
+    `settles applied receipts when a $thrower throws during a truncate (alreadyReady: $alreadyReady)`,
+    async ({ alreadyReady, thrower }) => {
+      const failure = new Error(`${thrower} failure`)
+      const persistence = createDeferred<void>()
+      let sync!: SyncOps
+      const collection = createCollection<Row, number>({
+        id: `truncate-ready-throw-${thrower}-${alreadyReady}`,
+        getKey: (row) => row.id,
+        startSync: true,
+        sync: {
+          sync: (ops) => {
+            sync = ops
+            ops.begin()
+            ops.write({ type: `insert`, value: { id: 1, value: `one` } })
+            ops.commit()
+            if (alreadyReady) ops.markReady()
+          },
+        },
+        onUpdate: () => persistence.promise,
+      })
+      await flushPromises()
+      const blocker = collection.update(1, (draft) => {
+        draft.value = `optimistic`
+      })
+      let subscription: { unsubscribe: () => void } | undefined
+      try {
+        sync.begin()
+        sync.write({ type: `insert`, value: { id: 2, value: `two` } })
+        const held = sync.commit()
+        expect(held).not.toBe(true)
+        let heldSettled = false
+        if (held !== true)
+          void held.then(
+            () => (heldSettled = true),
+            () => (heldSettled = true),
+          )
+        if (thrower === `subscriber`) {
+          subscription = collection.subscribeChanges(() => {
+            throw failure
+          })
+        } else if (!alreadyReady) {
+          collection.onFirstReady(() => {
+            throw failure
+          })
+        }
+
+        sync.begin()
+        sync.truncate()
+        sync.write({ type: `insert`, value: { id: 3, value: `three` } })
+        const throws = thrower === `subscriber` || !alreadyReady
+        if (throws) expect(() => sync.commit()).toThrow(failure)
+        else expect(sync.commit()).toBe(true)
+        await flushPromises()
+
+        expect(heldSettled).toBe(true)
+        expect(collection.status).toBe(`ready`)
+        expect(
+          [...collection.state]
+            .map(([key, row]) => [key, row.value] as const)
+            .sort(([left], [right]) => left - right),
+        ).toEqual([
+          [1, `optimistic`],
+          [3, `three`],
+        ])
+      } finally {
+        subscription?.unsubscribe()
+        persistence.resolve()
+        await blocker.isPersisted.promise.catch(() => undefined)
         await collection.cleanup()
       }
     },
