@@ -2,6 +2,7 @@ import { readFileSync } from 'node:fs'
 import { transform } from 'esbuild'
 import { defineConfig, mergeConfig } from 'vitest/config'
 import { tanstackViteConfig } from '@tanstack/vite-config'
+import { commonJsDeclarations } from '../../scripts/commonjs-declarations.mjs'
 import packageJson from './package.json'
 import type { Plugin } from 'vite'
 
@@ -52,5 +53,6 @@ export default mergeConfig(
   tanstackViteConfig({
     entry: [`./src/index.ts`],
     srcDir: `./src`,
+    beforeWriteDeclarationFile: commonJsDeclarations,
   }),
 )
