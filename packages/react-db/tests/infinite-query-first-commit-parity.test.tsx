@@ -84,7 +84,9 @@ it(`publishes rows on the first commit for a synchronously loaded source, matchi
   cleanups.push(() => infinite.unmount())
   await waitFor(() => expect(infinite.result.current.status).toBe(`ready`))
 
-  const expectedIds = Array.from({ length: 10 }, (_, index) => String(index + 1))
+  const expectedIds = Array.from({ length: 10 }, (_, index) =>
+    String(index + 1),
+  )
 
   // Independent oracle: useLiveQuery shows data on its first commit.
   expect(liveCommits[0]).toEqual({ status: `ready`, ids: expectedIds })
