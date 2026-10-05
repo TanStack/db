@@ -22,7 +22,7 @@ import {
   PersistedCollectionDurabilityError,
   toPersistedCollectionDurabilityError,
 } from './errors'
-import { serializeSQLiteBigInt } from './sqlite-value'
+import { serializeSQLiteBigInt, serializeSQLiteTemporal } from './sqlite-value'
 import {
   toProcessLocalLoadSubsetOptions,
   toTransportedLoadSubsetOptions,
@@ -289,7 +289,8 @@ export type PersistedRowMetadataMutation<
 > = { type: `set`; key: TKey; value: unknown } | { type: `delete`; key: TKey }
 
 export type PersistedCollectionMetadataMutation =
-  { type: `set`; key: string; value: unknown } | { type: `delete`; key: string }
+  | { type: `set`; key: string; value: unknown }
+  | { type: `delete`; key: string }
 
 export type ReplayableTxDelta<
   T extends Record<string, unknown> = Record<string, unknown>,
@@ -1149,6 +1150,9 @@ function toStableSerializable(value: unknown): unknown {
       return undefined
   }
 
+  const temporal = serializeSQLiteTemporal(value)
+  if (temporal) return temporal
+
   if (value instanceof Date) {
     return value.toISOString()
   }
@@ -1332,7 +1336,8 @@ class PersistedCollectionRuntime<
   private readonly pendingAppliedReceipts = new Map<number, Promise<void>>()
   private hydratingGeneration: number | null = null
   private terminalFailure:
-    { lifecycleGeneration: number; error: unknown } | undefined
+    | { lifecycleGeneration: number; error: unknown }
+    | undefined
   private coordinatorUnsubscribe: (() => void) | null = null
   private remoteSubsetOwnerUnsubscribe: (() => void) | null = null
   private indexAddedUnsubscribe: (() => void) | null = null
@@ -1715,7 +1720,6 @@ class PersistedCollectionRuntime<
     await this.hydrateSubsetUnsafe(
       baseline,
       {
-        requestRemoteEnsure: false,
         lifecycleGeneration,
         bindKeySetEvidence: true,
       },
@@ -1851,6 +1855,9 @@ class PersistedCollectionRuntime<
     const truncateGeneration = this.sourceTruncateGeneration
     const routeRemoteDemandDuringHydration =
       this.canRouteRemoteDemandThroughCoordinator()
+    // Wire admission failures are permanent input errors, not transport retries.
+    if (routeRemoteDemandDuringHydration)
+      toTransportedLoadSubsetOptions(options)
     this.activeSubsets.set(subsetKey, options)
     const appliedCursor = this.appliedReceiptSequence
     try {
@@ -1860,9 +1867,6 @@ class PersistedCollectionRuntime<
             this.hydrateSubsetUnsafe(
               options,
               {
-                requestRemoteEnsure:
-                  this.mode === `sync-present` &&
-                  !routeRemoteDemandDuringHydration,
                 lifecycleGeneration,
                 requestLocalLoadFailure: true,
                 rejectBufferedReplayFailure: true,
@@ -1881,6 +1885,14 @@ class PersistedCollectionRuntime<
       })
       if (lifecycleGeneration !== this.lifecycleGeneration) return
       await this.waitForAppliedReceiptsAfter(appliedCursor)
+      // Leadership can change while hydration waits. Validate newly remote
+      // demand inside the admission cleanup boundary, before retry can own it.
+      if (
+        !routeRemoteDemandDuringHydration &&
+        this.canRouteRemoteDemandThroughCoordinator()
+      ) {
+        toTransportedLoadSubsetOptions(options)
+      }
     } catch (error) {
       if (this.activeSubsets.get(subsetKey) === options) {
         this.activeSubsets.delete(subsetKey)
@@ -2041,7 +2053,6 @@ class PersistedCollectionRuntime<
         this.hydrateSubsetUnsafe(
           options,
           {
-            requestRemoteEnsure: false,
             lifecycleGeneration,
             rejectBufferedReplayFailure: true,
           },
@@ -2324,7 +2335,6 @@ class PersistedCollectionRuntime<
   private async hydrateSubsetUnsafe(
     options: LoadSubsetOptions,
     config: {
-      requestRemoteEnsure: boolean
       lifecycleGeneration: number
       bindKeySetEvidence?: boolean
       requestLocalLoadFailure?: boolean
@@ -2385,10 +2395,6 @@ class PersistedCollectionRuntime<
       if (config.lifecycleGeneration !== this.lifecycleGeneration) return
       replayFailure = await this.flushQueuedHydrationTransactionsUnsafe(adapter)
       if (config.lifecycleGeneration !== this.lifecycleGeneration) return
-
-      if (config.requestRemoteEnsure && !replayFailure) {
-        this.queueRemoteSubsetEnsure(options)
-      }
     } catch (error) {
       if (config.requestLocalLoadFailure && !rowsLoaded) {
         // Keep admitting source work to the hydration queue while recovery
@@ -2431,7 +2437,8 @@ class PersistedCollectionRuntime<
     adapter: HydrationPersistenceAdapter,
   ): Promise<void> {
     let snapshotRows:
-      Map<TKey, { key: TKey; value: T; metadata?: unknown }> | undefined
+      | Map<TKey, { key: TKey; value: T; metadata?: unknown }>
+      | undefined
     type RecoveryPresence = `present` | `absent` | `unknown`
     const recoveredPresence = new Map<TKey, RecoveryPresence>()
     let snapshotInvalidatedByTruncate = false
@@ -3253,6 +3260,9 @@ class PersistedCollectionRuntime<
     const subsetKey = this.getSubsetKey(options)
     if (this.activeSubsets.get(subsetKey) !== options) return
 
+    // A previously local acquisition can become remote after an ownership
+    // change. Recovery must reject permanent wire errors before retry owns it.
+    toTransportedLoadSubsetOptions(options)
     this.pendingRemoteSubsetEnsures.set(subsetKey, options)
     void this.flushPendingRemoteSubsetEnsures()
   }

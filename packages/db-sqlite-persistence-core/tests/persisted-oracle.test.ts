@@ -32,6 +32,7 @@ import {
   persistedCollectionOptions,
   toTransportedLoadSubsetOptions,
 } from '../src'
+import { Temporal } from './temporal-value-oracle'
 import type {
   CollectionReset,
   PersistedCollectionCoordinator,
@@ -754,7 +755,8 @@ async function runRejectedHydrationBufferWitness(
 
   let remoteBegin: (() => void) | undefined
   let remoteWrite:
-    ((message: { type: `insert`; value: Todo }) => void) | undefined
+    | ((message: { type: `insert`; value: Todo }) => void)
+    | undefined
   let remoteCommit: (() => true | Promise<void>) | undefined
   const collection = createCollection(
     persistedCollectionOptions<Todo, string>({
@@ -3694,9 +3696,11 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
     const adapter = createRecordingAdapter()
     let remoteBegin: (() => void) | undefined
     let remoteWrite:
-      ((message: { type: `insert`; value: Todo }) => void) | undefined
+      | ((message: { type: `insert`; value: Todo }) => void)
+      | undefined
     let remoteCommit:
-      ((signal?: AbortSignal) => true | Promise<void>) | undefined
+      | ((signal?: AbortSignal) => true | Promise<void>)
+      | undefined
     const collection = createCollection(
       persistedCollectionOptions<Todo, string>({
         id: `sync-present-aborted-commit`,
@@ -3852,9 +3856,11 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
     const adapter = createRecordingAdapter()
     let remoteBegin: (() => void) | undefined
     let remoteWrite:
-      ((message: { type: `insert`; value: Todo }) => void) | undefined
+      | ((message: { type: `insert`; value: Todo }) => void)
+      | undefined
     let remoteCommit:
-      ((signal?: AbortSignal) => true | Promise<void>) | undefined
+      | ((signal?: AbortSignal) => true | Promise<void>)
+      | undefined
     const collection = createCollection(
       persistedCollectionOptions<Todo, string>({
         id: `sync-present-abort-after-application`,
@@ -3926,9 +3932,11 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
     const adapter = createRecordingAdapter()
     let remoteBegin: (() => void) | undefined
     let remoteWrite:
-      ((message: { type: `insert`; value: Todo }) => void) | undefined
+      | ((message: { type: `insert`; value: Todo }) => void)
+      | undefined
     let remoteCommit:
-      ((signal?: AbortSignal) => true | Promise<void>) | undefined
+      | ((signal?: AbortSignal) => true | Promise<void>)
+      | undefined
     let sourceParams!: TodoSyncParams
     const collection = createCollection(
       persistedCollectionOptions<Todo, string>({
@@ -4064,7 +4072,8 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
     }
     let remoteBegin: (() => void) | undefined
     let remoteWrite:
-      ((message: { type: `insert`; value: Todo }) => void) | undefined
+      | ((message: { type: `insert`; value: Todo }) => void)
+      | undefined
     let remoteCommit: (() => true | Promise<void>) | undefined
     const collection = createCollection(
       persistedCollectionOptions<Todo, string>({
@@ -4180,7 +4189,8 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
       })
     let remoteBegin: (() => void) | undefined
     let remoteWrite:
-      ((message: { type: `insert`; value: Todo }) => void) | undefined
+      | ((message: { type: `insert`; value: Todo }) => void)
+      | undefined
     let remoteCommit: (() => true | Promise<void>) | undefined
     const collection = createCollection(
       persistedCollectionOptions<Todo, string>({
@@ -4263,7 +4273,8 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
       Promise.resolve(persistenceResponse)
     let remoteBegin: (() => void) | undefined
     let remoteWrite:
-      ((message: { type: `insert`; value: Todo }) => void) | undefined
+      | ((message: { type: `insert`; value: Todo }) => void)
+      | undefined
     let remoteCommit: (() => true | Promise<void>) | undefined
     const collection = createCollection(
       persistedCollectionOptions<Todo, string>({
@@ -7513,7 +7524,8 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
     }
     let remoteBegin: (() => void) | undefined
     let remoteWrite:
-      ((message: { type: `insert`; value: Todo }) => void) | undefined
+      | ((message: { type: `insert`; value: Todo }) => void)
+      | undefined
     let remoteCommit: (() => true | Promise<void>) | undefined
     const collection = createCollection(
       persistedCollectionOptions<Todo, string>({
@@ -8235,7 +8247,8 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
 
     let remoteBegin: (() => void) | undefined
     let remoteWrite:
-      ((message: { type: `insert`; value: Todo }) => void) | undefined
+      | ((message: { type: `insert`; value: Todo }) => void)
+      | undefined
     let remoteCommit: (() => true | Promise<void>) | undefined
     const warning = vi.spyOn(console, `warn`).mockImplementation(() => {})
     const collection = createCollection(
@@ -8531,7 +8544,8 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
 
     let remoteBegin: (() => void) | undefined
     let remoteWrite:
-      ((message: { type: `insert`; value: Todo }) => void) | undefined
+      | ((message: { type: `insert`; value: Todo }) => void)
+      | undefined
     let remoteCommit: (() => void) | undefined
 
     const collection = createCollection(
@@ -8682,7 +8696,8 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
     const adapter = createRecordingAdapter()
     let remoteBegin: (() => void) | undefined
     let remoteWrite:
-      ((message: { type: `insert`; value: Todo }) => void) | undefined
+      | ((message: { type: `insert`; value: Todo }) => void)
+      | undefined
     let remoteCommit: (() => true | Promise<void>) | undefined
     const collection = createCollection(
       persistedCollectionOptions<Todo, string>({
@@ -8773,7 +8788,8 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
 
       let remoteBegin: (() => void) | undefined
       let remoteWrite:
-        ((message: { type: `insert`; value: Todo }) => void) | undefined
+        | ((message: { type: `insert`; value: Todo }) => void)
+        | undefined
       let remoteCommit: (() => true | Promise<void>) | undefined
       const collection = createCollection(
         persistedCollectionOptions<Todo, string>({
@@ -8930,7 +8946,8 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
 
     let remoteBegin: (() => void) | undefined
     let remoteWrite:
-      ((message: { type: `insert`; value: Todo }) => void) | undefined
+      | ((message: { type: `insert`; value: Todo }) => void)
+      | undefined
     let remoteCommit: (() => true | Promise<void>) | undefined
     const collection = createCollection(
       persistedCollectionOptions<Todo, string>({
@@ -9020,9 +9037,11 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
     })
     let remoteBegin: (() => void) | undefined
     let remoteWrite:
-      ((message: { type: `insert`; value: Todo }) => void) | undefined
+      | ((message: { type: `insert`; value: Todo }) => void)
+      | undefined
     let remoteCommit:
-      ((signal?: AbortSignal) => true | Promise<void>) | undefined
+      | ((signal?: AbortSignal) => true | Promise<void>)
+      | undefined
     const collection = createCollection(
       persistedCollectionOptions<Todo, string>({
         id: `aborted-hydration-straddle`,
@@ -9199,9 +9218,11 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
     }
     let remoteBegin: (() => void) | undefined
     let remoteWrite:
-      ((message: { type: `insert`; value: Todo }) => void) | undefined
+      | ((message: { type: `insert`; value: Todo }) => void)
+      | undefined
     let remoteCommit:
-      ((signal?: AbortSignal) => true | Promise<void>) | undefined
+      | ((signal?: AbortSignal) => true | Promise<void>)
+      | undefined
     const collection = createCollection(
       persistedCollectionOptions<Todo, string>({
         id: `sync-present-aborted-hydration-queue`,
@@ -9596,7 +9617,8 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
     const replayError = new Error(`replay application failed`)
     let remoteBegin: (() => void) | undefined
     let remoteWrite:
-      ((message: { type: `insert`; value: Todo }) => void) | undefined
+      | ((message: { type: `insert`; value: Todo }) => void)
+      | undefined
     let remoteCommit: (() => true | Promise<void>) | undefined
 
     const collection = createCollection(
@@ -11651,7 +11673,8 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
     let remoteCommit: (() => void) | undefined
     let remoteTruncate: (() => void) | undefined
     let remoteMetadata:
-      Parameters<SyncConfig<Todo, string>[`sync`]>[0][`metadata`] | undefined
+      | Parameters<SyncConfig<Todo, string>[`sync`]>[0][`metadata`]
+      | undefined
 
     const collection = createCollection(
       persistedCollectionOptions<Todo, string>({
@@ -12101,11 +12124,13 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
 
     let remoteBegin: (() => void) | undefined
     let remoteWrite:
-      ((message: { type: `insert`; value: Todo }) => void) | undefined
+      | ((message: { type: `insert`; value: Todo }) => void)
+      | undefined
     let remoteCommit: (() => void) | undefined
     let remoteTruncate: (() => void) | undefined
     let remoteMetadata:
-      Parameters<SyncConfig<Todo, string>[`sync`]>[0][`metadata`] | undefined
+      | Parameters<SyncConfig<Todo, string>[`sync`]>[0][`metadata`]
+      | undefined
 
     const collection = createCollection(
       persistedCollectionOptions<Todo, string>({
@@ -15032,7 +15057,8 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
     )
     let remoteBegin: (() => void) | undefined
     let remoteWrite:
-      ((message: { type: `insert`; value: Todo }) => void) | undefined
+      | ((message: { type: `insert`; value: Todo }) => void)
+      | undefined
     let remoteCommit: (() => true | Promise<void>) | undefined
     const collection = createCollection(
       persistedCollectionOptions<Todo, string>({
@@ -15689,6 +15715,176 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
         await collection.cleanup()
         warning.mockRestore()
         vi.useRealTimers()
+      }
+    },
+  )
+
+  // Wire-domain rejection precedes admission to the remote-demand retry path.
+  // Ownerless leaders can become followers while hydration waits; string
+  // controls must dispatch exactly once, while native input never dispatches.
+  // Existing transient-failure histories below retain retry as a separate law.
+  it.each([
+    [`Instant`, `immediate`],
+    [`PlainDate`, `immediate`],
+    [`Instant`, `leader-to-follower`],
+    [`PlainDate`, `leader-to-follower`],
+    [`string`, `immediate`],
+    [`string`, `leader-to-follower`],
+  ] as const)(
+    `applies wire admission before coordinator dispatch / %s / %s`,
+    async (kind, routing) => {
+      const id = `native-wire-${kind}-${routing}`
+      const adapter = createRecordingAdapter()
+      const coordinator = createFailStopCoordinatorHarness(id)
+      const hydrationStarted = createDeferred()
+      const hydrationGate = createDeferred()
+      let isLeader = true
+      coordinator.isLeader = () => isLeader
+      if (routing === `leader-to-follower`) {
+        const hydrate = adapter.loadSubset
+        adapter.loadSubset = async (...args) => {
+          hydrationStarted.resolve()
+          await hydrationGate.promise
+          return hydrate(...args)
+        }
+      }
+      const ensure = vi.fn(
+        (_collectionId: string, options: LoadSubsetOptions) => {
+          toTransportedLoadSubsetOptions(options)
+          return Promise.resolve()
+        },
+      )
+      coordinator.requestEnsureRemoteSubset = ensure
+      const loadSubset = vi.fn()
+      const collection = createCollection(
+        persistedCollectionOptions<Todo, string>({
+          id,
+          syncMode: `on-demand`,
+          getKey: (row) => row.id,
+          sync: {
+            sync: ({ markReady }) => {
+              markReady()
+              return routing === `immediate` ? { loadSubset } : {}
+            },
+          },
+          persistence: { adapter, coordinator },
+        }),
+      )
+      try {
+        collection.startSyncImmediate()
+        await flushAsyncWork()
+        const value =
+          kind === `Instant`
+            ? Temporal.Instant.from(`2026-01-02T00:00:00Z`)
+            : kind === `PlainDate`
+              ? Temporal.PlainDate.from(`2026-01-02`)
+              : `2026-01-02`
+        const options: LoadSubsetOptions = {
+          where: new IR.Func(`eq`, [
+            new IR.PropRef([`stamp`]),
+            new IR.Value(value),
+          ]),
+        }
+        const load = Promise.resolve().then(async () => {
+          await collection._sync.loadSubset(options)
+        })
+        if (routing === `leader-to-follower`) {
+          await hydrationStarted.promise
+          isLeader = false
+          hydrationGate.resolve()
+        }
+        if (kind === `string`) {
+          await expect(load).resolves.toBeUndefined()
+        } else {
+          await expect(load).rejects.toMatchObject({
+            name: `RemoteSubsetWireValueError`,
+          })
+        }
+        await flushAsyncWork(120)
+        expect(ensure).toHaveBeenCalledTimes(kind === `string` ? 1 : 0)
+        expect(loadSubset).not.toHaveBeenCalled()
+        expect(coordinator.remoteReleaseCalls).toEqual([])
+      } finally {
+        hydrationGate.resolve()
+        await collection.cleanup()
+      }
+    },
+  )
+
+  // A completed local acquisition remains active across a later role change.
+  // Gap recovery must validate that retained demand before retry admission.
+  it.each([`Instant`, `PlainDate`, `string`] as const)(
+    `validates retained demand after local success and follower recovery / %s`,
+    async (kind) => {
+      const id = `native-post-load-${kind}`
+      const adapter = createRecordingAdapter()
+      const coordinator = createFailStopCoordinatorHarness(id)
+      let leader = true
+      coordinator.isLeader = () => leader
+      const ensure = vi.fn((_id: string, options: LoadSubsetOptions) => {
+        toTransportedLoadSubsetOptions(options)
+        return Promise.resolve()
+      })
+      coordinator.requestEnsureRemoteSubset = ensure
+      const warning = vi.spyOn(console, `warn`).mockImplementation(() => {})
+      const collection = createCollection(
+        persistedCollectionOptions<Todo, string>({
+          id,
+          syncMode: `on-demand`,
+          getKey: (row) => row.id,
+          sync: {
+            sync: ({ markReady }) => {
+              markReady()
+              return {}
+            },
+          },
+          persistence: { adapter, coordinator },
+        }),
+      )
+      try {
+        collection.startSyncImmediate()
+        await flushAsyncWork()
+        const value =
+          kind === `Instant`
+            ? Temporal.Instant.from(`2026-01-02T00:00:00Z`)
+            : kind === `PlainDate`
+              ? Temporal.PlainDate.from(`2026-01-02`)
+              : `2026-01-02`
+        const options: LoadSubsetOptions = {
+          where: new IR.Func(`eq`, [
+            new IR.PropRef([`stamp`]),
+            new IR.Value(value),
+          ]),
+        }
+        await collection._sync.loadSubset(options)
+        expect(ensure).not.toHaveBeenCalled()
+        leader = false
+        coordinator.emit({
+          type: `tx:committed`,
+          term: 1,
+          seq: 2,
+          txId: `gap`,
+          latestRowVersion: 2,
+          changedRows: [],
+          deletedKeys: [],
+          requiresFullReload: true,
+        })
+        await flushAsyncWork()
+        if (kind === `string`) {
+          expect(collection.status).toBe(`ready`)
+          expect(ensure).toHaveBeenCalledTimes(1)
+        } else {
+          expect(collection.status).toBe(`error`)
+          await expect(
+            Promise.resolve().then(async () => {
+              await collection._sync.loadSubset(options)
+            }),
+          ).rejects.toMatchObject({ name: `RemoteSubsetWireValueError` })
+          expect(ensure).not.toHaveBeenCalled()
+        }
+      } finally {
+        await collection.cleanup()
+        warning.mockRestore()
       }
     },
   )
@@ -16756,7 +16952,8 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
     const coordinator = createCoordinatorHarness()
     let hydrateBaseline: (() => Promise<void>) | undefined
     let persistenceCapability:
-      NonNullable<SyncMetadataApi<string>[`persistence`]> | undefined
+      | NonNullable<SyncMetadataApi<string>[`persistence`]>
+      | undefined
     const collection = createCollection(
       persistedCollectionOptions<Todo, string>({
         id: `sync-present`,
@@ -16939,7 +17136,8 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
     let remoteBegin: (() => void) | undefined
     let remoteCommit: (() => true | Promise<void>) | undefined
     let persistenceCapability:
-      SyncMetadataApi<string>[`persistence`] | undefined
+      | SyncMetadataApi<string>[`persistence`]
+      | undefined
     const collection = createCollection(
       persistedCollectionOptions<Todo, string>({
         id: `owned-no-op-generation`,
@@ -17011,9 +17209,11 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
     let remoteBegin: (() => void) | undefined
     let remoteCommit: (() => true | Promise<void>) | undefined
     let remoteMetadata:
-      Parameters<SyncConfig<Todo, string>[`sync`]>[0][`metadata`] | undefined
+      | Parameters<SyncConfig<Todo, string>[`sync`]>[0][`metadata`]
+      | undefined
     let persistenceCapability:
-      SyncMetadataApi<string>[`persistence`] | undefined
+      | SyncMetadataApi<string>[`persistence`]
+      | undefined
     const collection = createCollection(
       persistedCollectionOptions<Todo, string>({
         id: `generation-fence`,
@@ -17453,9 +17653,11 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
     }
     let remoteBegin: (() => void) | undefined
     let remoteWrite:
-      ((message: { type: `insert`; value: Todo }) => void) | undefined
+      | ((message: { type: `insert`; value: Todo }) => void)
+      | undefined
     let remoteCommit:
-      ((signal?: AbortSignal) => true | Promise<void>) | undefined
+      | ((signal?: AbortSignal) => true | Promise<void>)
+      | undefined
 
     const collection = createCollection(
       persistedCollectionOptions<Todo, string>({
@@ -17542,9 +17744,11 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
     let probeActive = false
     let remoteBegin: (() => void) | undefined
     let remoteWrite:
-      ((message: { type: `insert`; value: Todo }) => void) | undefined
+      | ((message: { type: `insert`; value: Todo }) => void)
+      | undefined
     let remoteCommit:
-      ((signal?: AbortSignal) => true | Promise<void>) | undefined
+      | ((signal?: AbortSignal) => true | Promise<void>)
+      | undefined
 
     adapter.runInHydrationScope = async (task) => {
       if (!probeActive) return task(adapter)
@@ -17595,7 +17799,8 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
     let mutation: ReturnType<typeof collection.insert> | undefined
     let load: Promise<unknown> | undefined
     let unrelated:
-      { abortController: AbortController; receipt: Promise<void> } | undefined
+      | { abortController: AbortController; receipt: Promise<void> }
+      | undefined
 
     try {
       collection.startSyncImmediate()
@@ -17988,7 +18193,8 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
 
     let remoteBegin: (() => void) | undefined
     let remoteWrite:
-      ((message: { type: `update`; value: Todo }) => void) | undefined
+      | ((message: { type: `update`; value: Todo }) => void)
+      | undefined
     let remoteCommit: (() => true | Promise<void>) | undefined
     const sourceReady = createDeferred()
     const bufferedCommitReturned = createDeferred<{

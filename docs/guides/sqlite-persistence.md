@@ -130,6 +130,39 @@ await reopenedTodos.cleanup()
 await reopenedDatabase.close?.()
 ```
 
+## Temporal values
+
+SQLite persistence preserves `Temporal.Instant` and `Temporal.PlainDate` as
+native values, including nested fields, metadata and replay. Register the same
+Temporal implementation globally before writing or reopening persisted data.
+On a runtime without native Temporal, for example:
+
+```ts
+import 'temporal-polyfill/global'
+```
+
+Missing constructors and other Temporal kinds reject explicitly. Strings remain
+strings. Equality retains the Temporal kind and canonical text, including a
+PlainDate's calendar; ordering follows Temporal comparison. Supported native
+predicates and persisted expression indexes use the existing SQL filtering and
+in-memory cleanup pipeline without reducing nanosecond precision.
+
+This support applies to the shared SQLite adapter and local persisted wrapper.
+The remote-subset coordinator wire domain does not include Temporal literals;
+those requests reject before remote retry admission. If retained local demand
+becomes remote after an ownership change, recovery reports a collection error
+before it can retry that invalid request. Multiprocess transport of
+native Temporal rows is not covered by this support claim.
+
+Values already stored as `{}` cannot be recovered. If an older version damaged
+a synced cache, replace it through the existing `schemaVersion` and schema-reset
+policy, then refetch. Updating the library does not automatically erase data.
+Also rebuild an older cache if ordinary objects used the reserved
+`__tanstack_db_persisted_type__` marker with a newly recognized type name. Older
+writes did not escape those objects, so their original meaning is ambiguous.
+New writes escape the marker and preserve the ordinary object.
+Older library versions cannot interpret the new Temporal encoding.
+
 ## Add persistence to a synced Collection
 
 Pass the options from a sync adapter into `persistedCollectionOptions`. The wrapper keeps that adapter's sync behavior and stores its applied data in SQLite.

@@ -3,6 +3,7 @@ import {
   toExpression,
 } from '../query/builder/ref-proxy'
 import { CollectionConfigurationError } from '../errors'
+import { isTemporal } from '../utils'
 import { builtInIndexResolverNames } from '../indexes/base-index'
 import type { StandardSchemaV1 } from '@standard-schema/spec'
 import type { BaseIndex, IndexConstructor } from '../indexes/base-index'
@@ -65,6 +66,13 @@ function toSerializableIndexValue(
 
   if (Array.isArray(value)) {
     return value.map((entry) => toSerializableIndexValue(entry) ?? null)
+  }
+
+  if (isTemporal(value)) {
+    return {
+      __type: (value as { [Symbol.toStringTag]: string })[Symbol.toStringTag],
+      value: String(value),
+    }
   }
 
   if (value instanceof Date) {
@@ -204,8 +212,24 @@ function cloneSerializableIndexValue(
   return cloned
 }
 
+function cloneIndexExpressionValue(value: unknown): unknown {
+  // Immutable native values retain their slots; JSON/structuredClone erase them.
+  if (isTemporal(value)) return value
+  if (value instanceof Date) return new Date(value.getTime())
+  if (Array.isArray(value)) return value.map(cloneIndexExpressionValue)
+  if (value !== null && typeof value === `object`) {
+    return Object.fromEntries(
+      Object.entries(value).map(([key, entry]) => [
+        key,
+        cloneIndexExpressionValue(entry),
+      ]),
+    )
+  }
+  return value
+}
+
 function cloneExpression(expression: BasicExpression): BasicExpression {
-  return JSON.parse(JSON.stringify(expression)) as BasicExpression
+  return cloneIndexExpressionValue(expression) as BasicExpression
 }
 
 export class CollectionIndexesManager<

@@ -1048,6 +1048,82 @@ green:
   An earlier suggestion to merge unnamed cleanup helpers still lacks exact
   targets; do not perform a blind consolidation.
 
+## SQLite Temporal value preservation
+
+The implemented [v2 grammar and evidence](oracle-reviews/issue-2034-design/v2.md)
+cover native `Temporal.Instant` and `Temporal.PlainDate` through the shared
+SQLite adapter and local persisted wrapper. Global constructors must be
+registered; other Temporal kinds reject. Existing lifecycle, receipt and
+publication-before-durability laws remain with their current owners.
+
+- The [typed-value owner](../../packages/db-sqlite-persistence-core/tests/sqlite-temporal-value-oracle.test.ts)
+  checks real file reopen, direct/nested rows, metadata, replay, equality/range,
+  Boolean/IN, large IN, field comparisons, cursor ties/continuation and ordered
+  windows. Its directly named rank/text companion supplies independent native
+  observations across precision, signed-year, endpoint and calendar families.
+  Constructor failures, invalid brands and marker-shaped records are included.
+- The [Node expression-index owner](../../packages/node-db-sqlite-persistence/tests/expression-index-oracle.test.ts)
+  checks raw SQL before residual cleanup, final adapter keys and actual named
+  index use. Wrapper-created coalesce indexes reach Collection metadata/native
+  literals and distinguish adjacent-literal signatures. Small and large scalar
+  membership indexes protect compatibility with SQLite's DDL restrictions.
+  Numeric array/object native EQ and IN also inspect persisted expression values.
+  Mixed-domain polarity checks retain NaN, null/missing and scalar controls.
+  NUL strings cover both equality directions, membership and Boolean composition.
+  Negated coalesce and scalar eq(in(...), true) keep #1997's full-read fallback.
+  Exact replay excludes unrelated native cases; simultaneous semantic/cleanup
+  failure retains both errors and still closes SQLite.
+- The [ordinary-work owner](../../packages/db-sqlite-persistence-core/tests/ordinary-transaction-work-oracle.ts)
+  adds twelve native repeated-action success/rollback histories and invalid
+  superseded actions. Its independent Map model retains immutable native values;
+  kind/text observations reject the old structuredClone false-green boundary.
+- The [persisted wrapper owner](../../packages/db-sqlite-persistence-core/tests/persisted-oracle.test.ts)
+  rejects native remote-subset literals before dispatch/retry, including an
+  ownerless leader that becomes a follower while hydration waits or after local
+  success followed by sequence-gap recovery. The latter uses the existing
+  terminal error path before retry admission. String controls dispatch once;
+  existing transient retry, receipt and FIFO histories still run.
+
+The [initial RED receipt](oracle-reviews/issue-2034-temporal-persistence.md)
+remains historical. The v2 receipt records failures against original production,
+a lexical-order mutant that retains native reconstruction, and intermediate
+paired-IN, nested-path, routing and membership-index counterexamples. Final
+results are green for the reached paths; this is not a universal proof or a
+latency guarantee. SQL cleanup alone cannot compensate for lost candidates.
+
+Remaining witnesses have explicit owners: engine-native/alternate constructors
+and old-byte/marker-shaped compatibility belong to the typed-value owner;
+native truncate/delete, crash and format-transition histories belong jointly
+with ordinary-work/resume owners; real mobile/browser roundtrips belong to each
+adapter's receiving contract; actual native multiprocess transport belongs to
+browser/Electron coordinator receiving owners. The persisted owner retains
+native release/abort/reset and wider ownership schedules. None of those receiving
+claims follows from this Node/shared-core result. Same-kind ordering is the
+supported domain; arbitrary Temporal arithmetic and other kinds are excluded.
+Applications may rebuild old damaged caches through existing schema/reset paths;
+no type can be recovered from an already-erased empty object.
+
+
+### Remaining review investigations
+
+These are assigned questions, not established product failures:
+
+- The boolean-arity compiler-work owner needs a deterministic allocation or
+  cardinality witness before claiming that discarded string-IN identity SQL is
+  too expensive (BUG-007).
+- The typed-value/resume owners retain old-writer/new-reader marker ambiguity
+  (HISTORY-002). Rebuild is the selected migration policy; lossless old-byte
+  preservation is not proved. The guide states this limit.
+- The Collection index metadata owner needs a public mutation/query witness for
+  mutable own-tag and altered-prototype impersonators before changing clone
+  semantics (BOUNDARY-004, HISTORY-004).
+- The Collection index-signature owner needs distinct legal expressions and a
+  receiving effect before introducing another signature representation
+  (BOUNDARY-005).
+- The Node expression-index owner now reaches direct NUL string IN and Boolean
+  composition. Mixed-list/index-definition NUL cases remain a narrower follow-up
+  witness, not a confirmed second runtime defect (VERIFY-NUL-NOTE).
+
 ## Final evidence record
 
 Verification receipts and follow-up issue links are recorded in the PR and

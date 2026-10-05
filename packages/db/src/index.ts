@@ -100,3 +100,6 @@ export { safeRandomUUID } from './utils/uuid.js'
 export type { Collection } from './collection/index.js'
 export { IR }
 export { operators, type OperatorName } from './query/builder/functions.js'
+
+/** @internal Shared native ordering for first-party persistence. */
+export { compareTemporalValues } from './utils/comparison'
