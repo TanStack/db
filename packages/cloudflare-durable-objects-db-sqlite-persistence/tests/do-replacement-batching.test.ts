@@ -149,4 +149,66 @@ describe(`Cloudflare Durable Object replacement batching`, () => {
       }
     },
   )
+
+  it.each([25, 26, 205])(
+    `persists %i ordinary rows with metadata in bounded host calls`,
+    async (rowCount) => {
+      const { adapter, boundParameterCounts, close } = createLimitedHost()
+      const collectionId = `cloudflare-ordinary-${rowCount}`
+      const keys = Array.from(
+        { length: rowCount },
+        (_, index) => `row-${index}`,
+      )
+
+      try {
+        await adapter.loadResumeSnapshot(collectionId)
+        boundParameterCounts.length = 0
+        await adapter.applyCommittedTx(collectionId, {
+          txId: `ordinary`,
+          term: 1,
+          seq: 1,
+          rowVersion: 1,
+          mutations: keys.map((key) => ({
+            type: `insert` as const,
+            key,
+            value: { id: key },
+          })),
+          rowMetadataMutations: keys.map((key) => ({
+            type: `set` as const,
+            key,
+            value: { source: `ordinary` },
+          })),
+          collectionMetadataMutations: keys.map((key) => ({
+            type: `set` as const,
+            key,
+            value: { source: `ordinary` },
+          })),
+        })
+        const writeCalls = boundParameterCounts.length
+        const maxBindings = Math.max(...boundParameterCounts)
+        const snapshot = await adapter.loadResumeSnapshot(collectionId)
+
+        expect(snapshot.rows.map(({ key }) => key).sort()).toEqual(
+          [...keys].sort(),
+        )
+        expect(snapshot.rows.map(({ metadata }) => metadata)).toEqual(
+          Array(rowCount).fill({ source: `ordinary` }),
+        )
+        expect(
+          snapshot.collectionMetadata.map(({ key }) => key).sort(),
+        ).toEqual([...keys].sort())
+        expect(snapshot.collectionMetadata.map(({ value }) => value)).toEqual(
+          Array(rowCount).fill({ source: `ordinary` }),
+        )
+        expect(snapshot.keySet).toEqual({ status: `consistent` })
+        expect(maxBindings).toBe(MAX_BOUND_PARAMETERS)
+        // Includes the host's BEGIN and COMMIT around core query/run calls.
+        expect(writeCalls).toBeLessThanOrEqual(
+          14 + 6 * Math.ceil(rowCount / 25),
+        )
+      } finally {
+        close()
+      }
+    },
+  )
 })

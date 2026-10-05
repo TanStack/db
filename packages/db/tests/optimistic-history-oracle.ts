@@ -28,6 +28,12 @@ import type { CollectionConfig, SyncConfig } from '../src/types.js'
  * is active: it waits for settlement unless it is immediate or a truncate. The
  * Collection must already own the request when its handler starts.
  *
+ * The source may delete a key it does not hold, for example after its backend
+ * accepted an optimistic insert and deleted the row before the source streamed
+ * it. That delete is the source's answer for an accepted snapshot of the key:
+ * like any ordinary source publication, it retires the snapshot. It removes no
+ * base row and acknowledges no active request.
+ *
  * `runOptimisticHistory` gives the same edit, delete, settle, and sync history
  * to this model and a real Collection. After every step it compares rows,
  * metadata, immutable handler payloads, promise outcomes, downstream query
@@ -44,7 +50,7 @@ type Fields = Partial<Omit<HistoryRow, `id`>>
 type SourceBatch = {
   type: `sync`
   rows: Array<HistoryRow>
-  // Keys the source deletes after writing its rows. Only present keys apply.
+  // Keys the source deletes after writing its rows, held or not.
   deletes?: Array<number> | undefined
   truncate: boolean
   immediate: boolean
@@ -538,12 +544,15 @@ export async function runOptimisticHistory(
     handlerBatches: 0,
     sourceInserts: 0,
     sourceDeletes: 0,
+    absentSourceDeletes: 0,
   }
   // The source admits each message against its own rows, including queued
   // batches. An insert names an absent key; an update or delete a present
-  // one. Resolve each batch once, in write order, for the model and driver.
+  // one, except that the source may delete a key it does not hold. Resolve
+  // each batch once, in write order, for the model and driver.
   const sourceKeys = new Set(initial.map((row) => row.id))
   const sourceInserts = new WeakMap<SourceBatch, Set<number>>()
+  const absentDeletes = new WeakMap<SourceBatch, Set<number>>()
   function resolveSourceBatch(step: SourceBatch): SourceBatch {
     if (step.truncate) sourceKeys.clear()
     const inserts = new Set<number>()
@@ -551,11 +560,13 @@ export async function runOptimisticHistory(
       if (!sourceKeys.has(row.id)) inserts.add(row.id)
       sourceKeys.add(row.id)
     }
-    const deletes = (step.deletes ?? []).filter((key) => sourceKeys.has(key))
-    for (const key of deletes) sourceKeys.delete(key)
-    const resolved = { ...step, deletes }
-    sourceInserts.set(resolved, inserts)
-    return resolved
+    const absent = new Set<number>()
+    for (const key of step.deletes ?? []) {
+      if (!sourceKeys.delete(key)) absent.add(key)
+    }
+    sourceInserts.set(step, inserts)
+    absentDeletes.set(step, absent)
+    return step
   }
   function writeSourceBatch(step: SourceBatch) {
     const inserts = sourceInserts.get(step)!
@@ -574,6 +585,7 @@ export async function runOptimisticHistory(
     for (const key of step.deletes ?? []) {
       sync.write({ type: `delete`, key })
       counts.sourceDeletes++
+      if (absentDeletes.get(step)!.has(key)) counts.absentSourceDeletes++
     }
     const receipt = sync.commit()
     if (receipt !== true) {
