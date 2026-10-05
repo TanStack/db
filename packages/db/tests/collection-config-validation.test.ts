@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { createCollection } from '../src/collection/index.js'
 import { BasicIndex } from '../src/indexes/basic-index'
 import {
@@ -8,7 +8,6 @@ import {
   InvalidOptionTypeError,
   InvalidSyncConfigError,
   InvalidSyncFunctionError,
-  UnknownCollectionConfigError,
 } from '../src/collection/config-errors'
 import {
   CollectionRequiresConfigError,
@@ -270,80 +269,94 @@ describe(`createCollection runtime config validation`, () => {
     })
   })
 
-  describe(`unknown property detection`, () => {
-    it(`should throw UnknownCollectionConfigError for unknown properties`, () => {
+  describe(`likely config misspellings`, () => {
+    afterEach(() => vi.restoreAllMocks())
+
+    const baseConfig = {
+      getKey: (item: { id: number }) => item.id,
+      sync: validSync,
+    }
+
+    it.each([
+      [`oninsert`, `onInsert`],
+      [`onUdpate`, `onUpdate`],
+      [`stratSync`, `startSync`],
+      [`syncmode`, `syncMode`],
+      [`defaultIndxeType`, `defaultIndexType`],
+      [`shcema`, `schema`],
+      [`utlis`, `utils`],
+    ])(`warns about %s without rejecting the config`, (unknown, suggestion) => {
+      const warn = vi.spyOn(console, `warn`).mockImplementation(() => {})
+      const config = { ...baseConfig, [unknown]: () => {} }
+      expect(() => createCollection(config)).not.toThrow()
+      expect(warn).toHaveBeenCalledOnce()
+      expect(warn.mock.calls[0]![0]).toContain(`"${unknown}"`)
+      expect(warn.mock.calls[0]![0]).toContain(`"${suggestion}"`)
+    })
+
+    it.each([
+      `adapterMetadata`,
+      `parse`,
+      `serialize`,
+      `serializer`,
+      `rowUpdateMode`,
+      `onLoad`,
+      `onLoadSubset`,
+      `schemas`,
+      `scheme`,
+      `getKeys`,
+      `ids`,
+      `di`,
+      `sycn`,
+      `_oninsert`,
+    ])(`silently accepts the extra property %s`, (key) => {
+      const warn = vi.spyOn(console, `warn`).mockImplementation(() => {})
+      const config = { ...baseConfig, [key]: `adapter value` }
+      expect(() => createCollection(config)).not.toThrow()
+      expect(warn).not.toHaveBeenCalled()
+    })
+
+    it(`does not warn when the correctly named option is also present`, () => {
+      const warn = vi.spyOn(console, `warn`).mockImplementation(() => {})
+      const config = { ...baseConfig, onInsert: async () => {}, oninsert: true }
+      expect(() => createCollection(config)).not.toThrow()
+      expect(warn).not.toHaveBeenCalled()
+    })
+
+    it(`reports a likely typo and still rejects a missing required function`, () => {
+      const warn = vi.spyOn(console, `warn`).mockImplementation(() => {})
       expect(() =>
         createCollection({
-          getKey: (item: any) => item.id,
+          // @ts-expect-error getkey does not supply the required getKey
+          getkey: (item: { id: number }) => item.id,
           sync: validSync,
-          // @ts-expect-error testing runtime behavior
-          unknownProp: true,
         }),
-      ).toThrow(UnknownCollectionConfigError)
+      ).toThrow(CollectionRequiresGetKeyError)
+      expect(warn).toHaveBeenCalledOnce()
+      expect(warn.mock.calls[0]![0]).toContain(`"getKey"`)
     })
 
-    it(`should suggest close matches for typos`, () => {
-      try {
-        createCollection({
-          // @ts-expect-error testing runtime behavior
-          getkey: (item: any) => item.id,
-          sync: validSync,
-        })
-        expect.unreachable()
-      } catch (e: any) {
-        expect(e).toBeInstanceOf(UnknownCollectionConfigError)
-        expect(e.message).toContain(`getkey`)
-        expect(e.message).toContain(`getKey`)
-      }
+    it(`still rejects invalid core options alongside valid adapter metadata`, () => {
+      const warn = vi.spyOn(console, `warn`).mockImplementation(() => {})
+      const config = { ...baseConfig, getKey: 42, adapterMetadata: true }
+      expect(() =>
+        // @ts-expect-error getKey must be a function
+        createCollection(config),
+      ).toThrow(InvalidGetKeyError)
+      expect(warn).not.toHaveBeenCalled()
     })
 
-    it(`should suggest "onInsert" for "oninsert"`, () => {
-      try {
-        createCollection({
-          getKey: (item: any) => item.id,
-          sync: validSync,
-          // @ts-expect-error testing runtime behavior
-          oninsert: async () => {},
-        })
-        expect.unreachable()
-      } catch (e: any) {
-        expect(e).toBeInstanceOf(UnknownCollectionConfigError)
-        expect(e.message).toContain(`onInsert`)
+    it(`reports each likely typo without warning about unrelated metadata`, () => {
+      const warn = vi.spyOn(console, `warn`).mockImplementation(() => {})
+      const config = {
+        ...baseConfig,
+        oninsert: async () => {},
+        onUdpate: async () => {},
+        adapterMetadata: true,
       }
-    })
-
-    it(`should list all valid properties in the error message`, () => {
-      try {
-        createCollection({
-          getKey: (item: any) => item.id,
-          sync: validSync,
-          // @ts-expect-error testing runtime behavior
-          foo: true,
-        })
-        expect.unreachable()
-      } catch (e: any) {
-        expect(e).toBeInstanceOf(UnknownCollectionConfigError)
-        expect(e.message).toContain(`Valid config properties`)
-        expect(e.message).toContain(`getKey`)
-        expect(e.message).toContain(`sync`)
-      }
-    })
-
-    it(`should detect multiple unknown properties at once`, () => {
-      try {
-        createCollection({
-          getKey: (item: any) => item.id,
-          sync: validSync,
-          // @ts-expect-error testing runtime behavior
-          foo: true,
-          bar: false,
-        })
-        expect.unreachable()
-      } catch (e: any) {
-        expect(e).toBeInstanceOf(UnknownCollectionConfigError)
-        expect(e.message).toContain(`foo`)
-        expect(e.message).toContain(`bar`)
-      }
+      expect(() => createCollection(config)).not.toThrow()
+      expect(warn).toHaveBeenCalledTimes(2)
+      expect(warn.mock.calls.flat().join(` `)).not.toContain(`adapterMetadata`)
     })
   })
 

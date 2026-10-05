@@ -72,27 +72,3 @@ export class InvalidOptionTypeError extends CollectionConfigurationError {
     )
   }
 }
-
-export class UnknownCollectionConfigError extends CollectionConfigurationError {
-  constructor(
-    unknownKeys: Array<string>,
-    suggestions: Array<{ unknown: string; suggestion: string }>,
-  ) {
-    const parts: Array<string> = []
-    parts.push(
-      `Unknown config ${unknownKeys.length === 1 ? `property` : `properties`}: ${unknownKeys.map((k) => `"${k}"`).join(`, `)}.`,
-    )
-    if (suggestions.length > 0) {
-      parts.push(
-        `\n\nDid you mean?\n` +
-          suggestions
-            .map((s) => `  "${s.unknown}" → "${s.suggestion}"`)
-            .join(`\n`),
-      )
-    }
-    parts.push(
-      `\n\nValid config properties: id, schema, getKey, sync, gcTime, startSync, autoIndex, defaultIndexType, compare, syncMode, defaultStringCollation, onInsert, onUpdate, onDelete, utils, singleResult, persistence.`,
-    )
-    super(parts.join(``))
-  }
-}

@@ -63,6 +63,10 @@ interface MyCollectionConfig<TItem extends object>
 }
 ```
 
+Adapter-specific properties can be returned alongside the core options. TanStack DB ignores these extra properties. Development builds warn only about likely misspellings of a core option, such as `oninsert` for `onInsert`, when the correctly named option is absent. Missing or invalid required core options still throw.
+
+Keep adapter behavior in the adapter: returning `parse` or `serialize` does not make TanStack DB apply these conversions. Apply `parse` before calling `write` in your sync implementation, and apply `serialize` in mutation handlers. Put `rowUpdateMode` inside the returned `sync` object.
+
 ### 2. Sync Implementation
 
 Each call to the sync function starts a **sync run**. The run owns the callbacks
@@ -285,8 +289,8 @@ For backends with specific storage formats, provide `parse`/`serialize` options 
 // TrailBase example: User specifies field conversions
 export function trailbaseCollectionOptions(config) {
   return {
-    parse: config.parse,      // User provides field conversions
-    serialize: config.serialize,
+    // ... getKey, schema, and sync options
+    // The sync implementation applies config.parse before calling write.
 
     onInsert: async ({ transaction }) => {
       const serialized = transaction.mutations.map(m =>
@@ -405,7 +409,10 @@ export function myCollectionOptions<TItem extends object>(
 ) {
   return {
     // ... other options
-    rowUpdateMode: config.rowUpdateMode || 'partial',
+    sync: {
+      sync: syncFn,
+      rowUpdateMode: config.rowUpdateMode ?? 'partial'
+    },
 
     // Pass through user-provided handlers
     // Users handle sync coordination in their own handlers
@@ -433,7 +440,10 @@ export function myCollectionOptions<TItem extends object>(
 ) {
   return {
     // ... other options
-    rowUpdateMode: config.rowUpdateMode || 'partial',
+    sync: {
+      sync: syncFn,
+      rowUpdateMode: config.rowUpdateMode ?? 'partial'
+    },
 
     // Implement handlers using sync engine APIs
     onInsert: async ({ transaction }) => {

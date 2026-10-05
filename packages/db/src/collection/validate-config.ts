@@ -9,14 +9,13 @@ import {
   InvalidOptionTypeError,
   InvalidSyncConfigError,
   InvalidSyncFunctionError,
-  UnknownCollectionConfigError,
 } from './config-errors'
 
 /**
- * All valid top-level config properties for createCollection.
- * Used for unknown-property detection.
+ * Known top-level config properties for createCollection.
+ * Extra properties are allowed; these names are only used for typo suggestions.
  */
-const VALID_CONFIG_KEYS = new Set([
+const KNOWN_CONFIG_KEYS = new Set([
   `id`,
   `schema`,
   `getKey`,
@@ -37,51 +36,23 @@ const VALID_CONFIG_KEYS = new Set([
   `persistence`,
 ])
 
-/**
- * Compute Levenshtein distance between two strings for typo detection.
- */
-function levenshtein(a: string, b: string): number {
-  const m = a.length
-  const n = b.length
-  const distances: Array<Array<number>> = Array.from({ length: m + 1 }, () =>
-    Array.from({ length: n + 1 }, () => 0),
-  )
-  for (let i = 0; i <= m; i++) distances[i]![0] = i
-  for (let j = 0; j <= n; j++) distances[0]![j] = j
-  for (let i = 1; i <= m; i++) {
-    for (let j = 1; j <= n; j++) {
-      distances[i]![j] =
-        a[i - 1] === b[j - 1]
-          ? distances[i - 1]![j - 1]!
-          : 1 +
-            Math.min(
-              distances[i - 1]![j]!,
-              distances[i]![j - 1]!,
-              distances[i - 1]![j - 1]!,
-            )
-    }
-  }
-  return distances[m]![n]!
-}
+// Limit suggestions to casing mistakes and adjacent swaps in longer names.
+// Broader edit-distance matching can mistake adapter fields for core options.
+function findLikelyTypo(
+  key: string,
+  config: Record<string, unknown>,
+): string | undefined {
+  for (const knownKey of KNOWN_CONFIG_KEYS) {
+    if (knownKey in config) continue
+    if (key.toLowerCase() === knownKey.toLowerCase()) return knownKey
+    if (key.length < 5 || key.length !== knownKey.length) continue
 
-/**
- * Find the closest matching valid config key for an unknown key.
- * Returns the suggestion if within edit distance 3, otherwise undefined.
- */
-function findClosestKey(unknownKey: string): string | undefined {
-  let bestMatch: string | undefined
-  let bestDistance = Infinity
-  for (const validKey of VALID_CONFIG_KEYS) {
-    const distance = levenshtein(
-      unknownKey.toLowerCase(),
-      validKey.toLowerCase(),
-    )
-    if (distance < bestDistance) {
-      bestDistance = distance
-      bestMatch = validKey
+    for (let i = 0; i < key.length - 1; i++) {
+      const swapped = key.slice(0, i) + key[i + 1] + key[i] + key.slice(i + 2)
+      if (swapped === knownKey) return knownKey
     }
   }
-  return bestDistance <= 3 ? bestMatch : undefined
+  return undefined
 }
 
 function describeType(value: unknown): string {
@@ -107,21 +78,16 @@ export function validateCollectionConfig(config: unknown): void {
 
   const configObj = config as Record<string, unknown>
 
-  // Check for unknown properties (typo detection)
-  // Skip properties starting with _ (internal/private convention)
-  const unknownKeys: Array<string> = []
-  const suggestions: Array<{ unknown: string; suggestion: string }> = []
+  // Adapter metadata is valid. Warn only when an extra key is likely a typo.
   for (const key of Object.keys(configObj)) {
-    if (!VALID_CONFIG_KEYS.has(key) && !key.startsWith(`_`)) {
-      unknownKeys.push(key)
-      const suggestion = findClosestKey(key)
+    if (!KNOWN_CONFIG_KEYS.has(key) && !key.startsWith(`_`)) {
+      const suggestion = findLikelyTypo(key, configObj)
       if (suggestion) {
-        suggestions.push({ unknown: key, suggestion })
+        console.warn(
+          `Possible misspelling in collection config: "${key}". Did you mean "${suggestion}"?`,
+        )
       }
     }
-  }
-  if (unknownKeys.length > 0) {
-    throw new UnknownCollectionConfigError(unknownKeys, suggestions)
   }
 
   // Validate getKey

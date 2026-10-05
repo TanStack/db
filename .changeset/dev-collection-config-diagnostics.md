@@ -5,6 +5,6 @@
 '@tanstack/trailbase-db-collection': patch
 ---
 
-Add development-only collection configuration validation with actionable errors and typo suggestions. Keep the validator and its internal diagnostic classes out of production application bundles.
+Add development-only collection configuration diagnostics. Missing or invalid core options throw actionable errors. Extra adapter properties remain accepted without warnings, except for likely misspellings: casing mistakes or adjacent letter swaps in option names with at least five characters. A suggestion is suppressed when the correctly named option is already present. Keep the validator, warnings, and internal diagnostic classes out of production application bundles.
 
-Keep adapter-specific options inside PowerSync, RxDB, and TrailBase so collection configuration validation accepts their returned options.
+Keep adapter-specific options inside PowerSync, RxDB, and TrailBase. Update the adapter guide to keep conversions in adapter code and place rowUpdateMode inside the sync config.
