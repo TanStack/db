@@ -489,7 +489,10 @@ export async function runOptimisticHistory(
     | `backwards-cuts`
     | `previous-value`
     | `update-as-insert`
-    | `retained-default`,
+    | `retained-default`
+    // Writes the partial lane's rows under `rowUpdateMode: 'full'`, so the
+    // Collection replaces the row instead of merging it.
+    | `partial-as-full`,
   options: { insertDefault?: number; partialUpdates?: boolean } = {},
 ) {
   const partialUpdates = options.partialUpdates === true
@@ -511,7 +514,9 @@ export async function runOptimisticHistory(
     onDelete: handler,
     sync: {
       // The partial-update lane keeps the default row update mode.
-      ...(partialUpdates ? {} : { rowUpdateMode: `full` as const }),
+      ...(partialUpdates && mutant !== `partial-as-full`
+        ? {}
+        : { rowUpdateMode: `full` as const }),
       sync: (actions) => {
         sync = actions
         actions.begin()
@@ -563,7 +568,6 @@ export async function runOptimisticHistory(
     sourceInserts: 0,
     sourceDeletes: 0,
     absentSourceDeletes: 0,
-    partialUpdates: 0,
     // Partial updates whose omitted `c` differs from the source's held row,
     // so only a merge keeps the held value.
     distinguishingPartialUpdates: 0,
@@ -590,7 +594,9 @@ export async function runOptimisticHistory(
     absentDeletes.set(step, absent)
     return step
   }
-  // The source's rows in write order, used only to count distinguishing writes.
+  // The source's rows in write order. A partial update needs the held row,
+  // and only one whose omitted `c` differs from it can tell a merge from a
+  // replacement.
   const sourceRows = new Map(initial.map((row) => [row.id, row]))
   function writeSourceBatch(step: SourceBatch) {
     const inserts = sourceInserts.get(step)!
@@ -607,7 +613,6 @@ export async function runOptimisticHistory(
         const held = sourceRows.get(row.id)
         if (type === `update` && partialUpdates && step.partial && held) {
           const { c: _omitted, ...partialRow } = row
-          counts.partialUpdates++
           if (held.c !== row.c) counts.distinguishingPartialUpdates++
           sync.write({ type, value: partialRow as HistoryRow })
           sourceRows.set(row.id, { ...row, c: held.c })

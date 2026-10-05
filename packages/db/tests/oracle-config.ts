@@ -45,6 +45,7 @@ const staticOracleProperties = [
   `collection-state.change-event-history`,
   `collection-state.eager-index-history`,
   `collection-state.optimistic-history`,
+  `collection-state.optimistic-history-partial`,
   `collection-state.truncate-capture-ownership`,
   `collection-state.mixed-transaction`,
   `collection-state.optimistic-outcomes`,

@@ -82,7 +82,7 @@ const ownerGroups: ReadonlyArray<readonly [string, string, string]> = [
   [
     `db/tests/collection-state-retention-oracle.property.test.ts`,
     `collection-state`,
-    `retention optimistic-history accepted-snapshot.before-delete accepted-snapshot.during-delete accepted-snapshot.after-rollback`,
+    `retention optimistic-history optimistic-history-partial accepted-snapshot.before-delete accepted-snapshot.during-delete accepted-snapshot.after-rollback`,
   ],
   [
     `db/tests/change-event-history-oracle.test.ts`,
