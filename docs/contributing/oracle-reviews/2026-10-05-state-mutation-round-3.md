@@ -19,7 +19,7 @@ the cases where the mutant changes a decision.
 | S13 | Default `rowUpdateMode` becomes `full` | Gap. Closed here. |
 | A1 | A sync delete that carries metadata keeps it | Gap. Closed here. |
 | A3 | An insert without metadata no longer clears metadata | Gap. Closed here. |
-| S6 | `markReady` runs before the truncate reapply | Gap. Closed with a fix in a separate pull request. |
+| S6 | `markReady` runs before the truncate reapply | Gap. Closed with a fix in #2033. |
 | S4 | The shared clear skips the pending direct-upsert marker | Equivalent. The later retirement loop removes every confirmed key. |
 | L3 | The commit skips `restoreOrder` | Equivalent. `SortedMap` restores order on the next ordered read or write. |
 | L4 | `reappliedKeys` starts as an empty set | Equivalent. An empty set skips no key. |
@@ -54,9 +54,9 @@ lanes. RB1 fails only the rebuilt lane.
 
 The ready-callback witness in `collection-sync-reentrancy-oracle.test.ts`
 covered only an edit of a replaced key, through a subscriber with initial
-state. Its sent-key filter hides a duplicate message. The fix pull request
+state. Its sent-key filter hides a duplicate message. The fix
 turns the witness into a grid of two hooks, three callback writes, and both
-subscriber modes. The grid kills S6. It also found a bug on `main`: a ready
+subscriber modes in #2033. The grid kills S6. It also found a bug on `main`: a ready
 callback that deletes a replaced key during a truncate publishes the delete,
 and then the truncate prefix deletes the key again.
 
