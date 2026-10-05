@@ -1,31 +1,41 @@
 ---
-id: JoinConditionMustBeEqualityError
-title: JoinConditionMustBeEqualityError
+id: SyncQueueInvariantError
+title: SyncQueueInvariantError
 ---
 
-Defined in: [packages/db/src/errors.ts:481](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L481)
+Defined in: [packages/db/src/errors.ts:425](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L425)
+
+An internal sync-queue invariant failed: a cancel targeted a transaction
+that is not the open last one, or replaying the queue invalidated a
+transaction. No public path should reach this.
 
 ## Extends
 
-- [`QueryBuilderError`](QueryBuilderError.md)
+- [`TransactionError`](TransactionError.md)
 
 ## Constructors
 
 ### Constructor
 
 ```ts
-new JoinConditionMustBeEqualityError(): JoinConditionMustBeEqualityError;
+new SyncQueueInvariantError(detail): SyncQueueInvariantError;
 ```
 
-Defined in: [packages/db/src/errors.ts:482](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L482)
+Defined in: [packages/db/src/errors.ts:426](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L426)
+
+#### Parameters
+
+##### detail
+
+`string`
 
 #### Returns
 
-`JoinConditionMustBeEqualityError`
+`SyncQueueInvariantError`
 
 #### Overrides
 
-[`QueryBuilderError`](QueryBuilderError.md).[`constructor`](QueryBuilderError.md#constructor)
+[`TransactionError`](TransactionError.md).[`constructor`](TransactionError.md#constructor)
 
 ## Properties
 
@@ -39,7 +49,7 @@ Defined in: node\_modules/.pnpm/typescript@5.9.3/node\_modules/typescript/lib/li
 
 #### Inherited from
 
-[`QueryBuilderError`](QueryBuilderError.md).[`cause`](QueryBuilderError.md#cause)
+[`TransactionError`](TransactionError.md).[`cause`](TransactionError.md#cause)
 
 ***
 
@@ -53,7 +63,7 @@ Defined in: node\_modules/.pnpm/typescript@5.9.3/node\_modules/typescript/lib/li
 
 #### Inherited from
 
-[`QueryBuilderError`](QueryBuilderError.md).[`message`](QueryBuilderError.md#message)
+[`TransactionError`](TransactionError.md).[`message`](TransactionError.md#message)
 
 ***
 
@@ -67,7 +77,7 @@ Defined in: node\_modules/.pnpm/typescript@5.9.3/node\_modules/typescript/lib/li
 
 #### Inherited from
 
-[`QueryBuilderError`](QueryBuilderError.md).[`name`](QueryBuilderError.md#name)
+[`TransactionError`](TransactionError.md).[`name`](TransactionError.md#name)
 
 ***
 
@@ -81,7 +91,7 @@ Defined in: node\_modules/.pnpm/typescript@5.9.3/node\_modules/typescript/lib/li
 
 #### Inherited from
 
-[`QueryBuilderError`](QueryBuilderError.md).[`stack`](QueryBuilderError.md#stack)
+[`TransactionError`](TransactionError.md).[`stack`](TransactionError.md#stack)
 
 ***
 
@@ -105,7 +115,7 @@ not capture any frames.
 
 #### Inherited from
 
-[`QueryBuilderError`](QueryBuilderError.md).[`stackTraceLimit`](QueryBuilderError.md#stacktracelimit)
+[`TransactionError`](TransactionError.md).[`stackTraceLimit`](TransactionError.md#stacktracelimit)
 
 ## Methods
 
@@ -177,7 +187,7 @@ a();
 
 #### Inherited from
 
-[`QueryBuilderError`](QueryBuilderError.md).[`captureStackTrace`](QueryBuilderError.md#capturestacktrace)
+[`TransactionError`](TransactionError.md).[`captureStackTrace`](TransactionError.md#capturestacktrace)
 
 ***
 
@@ -209,4 +219,4 @@ https://v8.dev/docs/stack-trace-api#customizing-stack-traces
 
 #### Inherited from
 
-[`QueryBuilderError`](QueryBuilderError.md).[`prepareStackTrace`](QueryBuilderError.md#preparestacktrace)
+[`TransactionError`](TransactionError.md).[`prepareStackTrace`](TransactionError.md#preparestacktrace)

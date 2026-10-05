@@ -7,7 +7,7 @@ title: Select
 type Select = object;
 ```
 
-Defined in: [packages/db/src/query/ir.ts:40](https://github.com/TanStack/db/blob/main/packages/db/src/query/ir.ts#L40)
+Defined in: [packages/db/src/query/ir.ts:37](https://github.com/TanStack/db/blob/main/packages/db/src/query/ir.ts#L37)
 
 ## Index Signature
 

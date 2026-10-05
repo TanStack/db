@@ -7,7 +7,7 @@ title: createLiveQueryObserver
 function createLiveQueryObserver<T, TKey>(collection, options): LiveQueryObserver<T, TKey>;
 ```
 
-Defined in: [packages/db/src/live-query-observer.ts:1166](https://github.com/TanStack/db/blob/main/packages/db/src/live-query-observer.ts#L1166)
+Defined in: [packages/db/src/live-query-observer.ts:1162](https://github.com/TanStack/db/blob/main/packages/db/src/live-query-observer.ts#L1162)
 
 **`Internal`**
 

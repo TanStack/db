@@ -7,4 +7,4 @@ title: SyncMode
 type SyncMode = "eager" | "on-demand";
 ```
 
-Defined in: [packages/db/src/types.ts:716](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L716)
+Defined in: [packages/db/src/types.ts:711](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L711)

@@ -7,7 +7,7 @@ title: subtract
 function subtract<T1, T2>(left, right): BinaryNumericReturnType;
 ```
 
-Defined in: [packages/db/src/query/builder/functions.ts:634](https://github.com/TanStack/db/blob/main/packages/db/src/query/builder/functions.ts#L634)
+Defined in: [packages/db/src/query/builder/functions.ts:617](https://github.com/TanStack/db/blob/main/packages/db/src/query/builder/functions.ts#L617)
 
 ## Type Parameters
 
