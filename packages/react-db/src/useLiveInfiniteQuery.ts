@@ -257,13 +257,16 @@ export function useLiveInfiniteQuery<TContext extends Context>(
 
   // Reuse the previous render's collection when every identity input matches,
   // so a same-identity duplicate render shares its collection rather than
-  // starting a second sync of the source.
+  // starting a second sync of the source. An uncommitted collection has no
+  // subscriber, so GC can clean it up before a suspended update retries; a
+  // cleaned-up collection must be rebuilt, not reused.
   const renderedComparison = compareLiveQueryWindowDependencies(
     rendered?.dependencies,
     identityDeps,
   )
   const canReuseRendered =
     rendered !== null &&
+    rendered.collection.status !== `cleaned-up` &&
     rendered.inputKind === inputKind &&
     rendered.client === dbClient &&
     rendered.pageSize === pageSize &&

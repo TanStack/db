@@ -103,3 +103,12 @@ window loads once. It fails (two loads) when the memo is recorded only at
 commit, and passes with the render-time reuse. This closes the StrictMode part
 of the previously unresolved cell. The pre-created-collection input form and
 Suspense or concurrent first paint remain open under the owner above.
+
+A later review found that the React reuse could bind a collection that GC had
+already cleaned up. A committed component keeps its refs across a suspended
+update, so the update's uncommitted collection survived to the retry, and the
+retry committed an empty `cleaned-up` page before recovering. The reuse now
+requires a collection that is not `cleaned-up`.
+`packages/react-db/tests/infinite-query-stale-reuse.test.tsx` covers both a
+fresh-mount retry and a mounted suspended update after GC. The mounted-update
+case fails without the liveness check and passes with it.

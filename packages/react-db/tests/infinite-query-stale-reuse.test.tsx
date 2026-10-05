@@ -8,7 +8,7 @@
 import { Component, Suspense, useLayoutEffect } from 'react'
 import { act, render } from '@testing-library/react'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
-import { createCollection } from '@tanstack/db'
+import { createCollection, gt } from '@tanstack/db'
 import { mockSyncCollectionOptions } from '../../db/tests/utils'
 import { useLiveInfiniteQuery } from '../src/useLiveInfiniteQuery'
 import type { ReactNode } from 'react'
@@ -101,4 +101,90 @@ it(`shows the ready first page when a Suspense retry follows a GC-collected aban
   // committed paint must already show the ready first page (no returning flash).
   expect(retryCollection).not.toBe(abandonedCollection)
   expect(commits[0]).toEqual({ status: `ready`, len: 3 })
+})
+
+it(`shows the ready first page when a mounted query's suspended update retries after GC`, async () => {
+  // A committed component keeps its hook refs across a suspended update, so the
+  // update's uncommitted collection survives to the retry. If GC cleaned it up
+  // in between, reuse would commit an empty cleaned-up page before recovering.
+  const source = createCollection(
+    mockSyncCollectionOptions<Row>({
+      id: `infinite-stale-reuse-${sequence++}`,
+      getKey: (row) => row.id,
+      autoIndex: `eager`,
+      initialData: Array.from({ length: 10 }, (_, index) => ({
+        id: String(index + 1),
+        rank: 10 - index,
+      })),
+    }),
+  )
+  collections.push(source)
+
+  let suspend = false
+  let release!: () => void
+  const gate = new Promise<void>((resolve) => {
+    release = resolve
+  })
+  const commits: Array<{
+    minimum: number
+    status: string
+    ranks: Array<number>
+  }> = []
+
+  function Query({ minimum }: { minimum: number }): ReactNode {
+    const result = useLiveInfiniteQuery(
+      (q) =>
+        q
+          .from({ items: source })
+          .where(({ items }) => gt(items.rank, minimum))
+          .orderBy(({ items }) => items.rank, `desc`),
+      { pageSize: 3 },
+      [minimum],
+    )
+    useLayoutEffect(() => {
+      commits.push({
+        minimum,
+        status: result.status,
+        ranks: result.data.map((row) => row.rank),
+      })
+    })
+    if (suspend) throw gate
+    return null
+  }
+
+  const view = render(
+    <Suspense fallback={null}>
+      <Query minimum={0} />
+    </Suspense>,
+  )
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(0)
+  })
+
+  suspend = true
+  await act(async () => {
+    view.rerender(
+      <Suspense fallback={null}>
+        <Query minimum={5} />
+      </Suspense>,
+    )
+    await vi.advanceTimersByTimeAsync(0)
+  })
+  // Let the suspended update's unsubscribed collection pass the GC floor.
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(200)
+  })
+
+  suspend = false
+  await act(async () => {
+    release()
+    await vi.advanceTimersByTimeAsync(0)
+  })
+
+  expect(commits.find((commit) => commit.minimum === 5)).toEqual({
+    minimum: 5,
+    status: `ready`,
+    ranks: [10, 9, 8],
+  })
+  view.unmount()
 })
