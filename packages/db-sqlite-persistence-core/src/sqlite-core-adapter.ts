@@ -1251,12 +1251,22 @@ function compileSafeSqlPrefilter(
     expression.name === `in` &&
     expression.args.length === 2 &&
     right?.type === `val` &&
-    Array.isArray(right.value) &&
-    (right.value.length === 0 ||
-      (left?.type === `ref` &&
-        right.value.every((value) => typeof value === `bigint`)))
+    Array.isArray(right.value)
   ) {
-    return compiled
+    if (right.value.length === 0) return compiled
+    if (left?.type === `ref`) {
+      if (right.value.every((value) => typeof value === `bigint`))
+        return compiled
+      if (right.value.every((value) => typeof value === `string`)) {
+        // Both sides pass through SQLite's JSON decoder; one binding keeps
+        // large string scopes within the host parameter limit, even in OR.
+        return {
+          supported: true,
+          sql: `(${compileSqlExpression(left, `index-expression`).sql} IN (SELECT value FROM json_each(?)))`,
+          params: [JSON.stringify(right.value)],
+        }
+      }
+    }
   }
   if (
     expression.name === `like` &&

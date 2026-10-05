@@ -3,7 +3,7 @@ import { DatabaseSync } from 'node:sqlite'
 import { fc } from '@fast-check/vitest'
 import { expect, it } from 'vitest'
 import { IR } from '@tanstack/db'
-import { SQLiteCorePersistenceAdapter } from '../src'
+import { createPersistedTableName, SQLiteCorePersistenceAdapter } from '../src'
 import type { SQLiteDriver } from '../src'
 
 /**
@@ -34,6 +34,9 @@ import type { SQLiteDriver } from '../src'
  * NaN ordering, lone-surrogate equality, and null-vs-missing under NOT
  * challenge SQL equivalence. Fixed mixed AND cases cover child order,
  * nesting, an unsafe OR sibling, and final rejection of an indexed candidate.
+ * A fixed 50,582-string-ID OR scope checks that both indexed branches retain
+ * SQL candidate filtering with two bindings. Lone-surrogate, NUL, and paired
+ * surrogate IDs challenge the JSON boundary used by that large scope.
  * Arity 3 is the upper marginal.
  * Malformed `caseWhen()` with no result arm is excluded because core rejects it.
  * Fixed-seed and unseeded generated campaigns use the same grammar, driver,
@@ -48,13 +51,13 @@ import type { SQLiteDriver } from '../src'
  * but every public match must cross the SQL boundary.
  * A cursor witness checks both receiving SELECTs, and a removed-WHERE mutant
  * proves the work check fails even when final public keys remain correct.
+ * The large string scope checks both named indexes in its SQLite query plan.
  *
  * Limits: simple rows, one SQLite process, ordinary loads and one cursor
  * composition. No native host, OPFS worker, multi-process WAL, ordering
  * comparator, typed bigint/date expression, index-expression, arbitrary
  * depth beyond the fixed 80-level work witness, or unbounded arity claim.
- * Raw-row work is not a SQLite plan or
- * elapsed-time assertion.
+ * Raw-row work and the one named-index plan are not elapsed-time assertions.
  */
 
 type Atom =
@@ -773,4 +776,91 @@ it('refines boolean arity and SQL row work across generated SQLite loads', async
   }
   if (failed) throw primary
   if (cleanupFailed) throw cleanupError
+})
+
+it('keeps large string-ID OR scopes selective at the SQLite boundary', async () => {
+  const driver = new CountingDriver()
+  const adapter = new SQLiteCorePersistenceAdapter({ driver })
+  const collectionId = 'string-id-scope'
+  const scopeRows = Array.from({ length: 20 }, (_, index) => ({
+    issueId: `issue-${index}`,
+    relatedIssueId:
+      ['related-\uD800', 'related-\u0000', 'related-😀'][index] ??
+      `related-${index}`,
+  }))
+  const ids = Array.from({ length: 50_582 }, (_, index) => `other-${index}`)
+  ids[5_001] = 'related-\uD800'
+  ids[25_291] = 'issue-1'
+  ids[35_001] = 'related-\u0000'
+  ids[45_001] = 'related-😀'
+  const allowed = new Set(ids)
+
+  try {
+    await adapter.applyCommittedTx(collectionId, {
+      txId: 'seed-string-scope',
+      term: 1,
+      seq: 1,
+      rowVersion: 1,
+      mutations: scopeRows.map((row) => ({
+        type: 'insert' as const,
+        key: row.issueId,
+        value: structuredClone(row),
+      })),
+    })
+    for (const field of ['issueId', 'relatedIssueId']) {
+      await adapter.ensureIndex(collectionId, field, {
+        expressionSql: [JSON.stringify(new IR.PropRef([field]))],
+      })
+    }
+
+    driver.reads = []
+    const rows = await adapter.loadSubset(collectionId, {
+      where: new IR.Func('and', [
+        new IR.Func('or', [
+          new IR.Func('in', [new IR.PropRef(['issueId']), new IR.Value(ids)]),
+          new IR.Func('in', [
+            new IR.PropRef(['relatedIssueId']),
+            new IR.Value(ids),
+          ]),
+        ]),
+      ]),
+    })
+    const expected = scopeRows
+      .filter(
+        (row) => allowed.has(row.issueId) || allowed.has(row.relatedIssueId),
+      )
+      .map((row) => row.issueId)
+    expect(rows.map((row) => row.key).sort()).toEqual(expected.sort())
+    expect(driver.reads).toHaveLength(1)
+    expect(driver.reads[0]?.rawRows).toBe(expected.length)
+    expect(driver.reads[0]?.parameters).toBe(2)
+    const plan = driver.db
+      .prepare(`EXPLAIN QUERY PLAN ${driver.reads[0]!.sql}`)
+      .all(JSON.stringify(ids), JSON.stringify(ids)) as Array<{
+      detail: string
+    }>
+    const tableName = createPersistedTableName(collectionId, 'c')
+    expect(
+      plan.some(
+        ({ detail }) =>
+          detail.startsWith(`SCAN ${tableName}`) ||
+          detail.startsWith(`SCAN "${tableName}"`),
+      ),
+    ).toBe(false)
+    for (const field of ['issueId', 'relatedIssueId']) {
+      const index = driver.db
+        .prepare(
+          `SELECT index_name FROM persisted_index_registry WHERE collection_id = ? AND signature = ?`,
+        )
+        .get(collectionId, field) as { index_name: string }
+      expect(
+        plan.some(
+          ({ detail }) =>
+            detail.startsWith('SEARCH') && detail.includes(index.index_name),
+        ),
+      ).toBe(true)
+    }
+  } finally {
+    driver.db.close()
+  }
 })

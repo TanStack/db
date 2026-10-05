@@ -542,6 +542,12 @@ A fixed 80-level nested AND witness bounds compiler argument reads to linear
 work. It was RED on the prior quadratic compiler and is GREEN after removing
 the repeated subtree compilation; elapsed latency and arbitrary depth remain
 outside this owner.
+TimFL's 50,582-string-ID `AND(OR(IN, IN))` scope was RED for SQL row work:
+the adapter returned the right public row but read all 20 stored rows. A fixed
+real-SQLite witness now checks the public result, exact candidate count, two
+bound JSON arrays, and use of both named expression indexes. It includes
+lone-surrogate, NUL, and paired-surrogate string members. Mixed-type lists,
+other SQLite hosts, and elapsed-time gains remain outside this witness.
 
 The Node expression-index oracle checks the receiving SQLite query, raw
 candidate keys, public keys, and named-index plan. Its generated indexed
