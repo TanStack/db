@@ -907,8 +907,9 @@ it.each([`hide-acquisition`, `drop-delete`, `wrong-result`] as const)(
  * The grammar varies two/three terms, nested AND, term order, operand reversal,
  * all four join types, scan/index paths, and eager/cold joined sources. Histories put,
  * replace, delete and restore keyed rows; removing an absent key is a no-op in
- * the driver. The cold provider publishes its whole finite table on demand;
- * this proves acquisition and row truth, not demand minimality or real I/O.
+ * the driver. The cold provider applies each direct-field IN request to its
+ * finite table. This proves candidate acquisition and row truth, not globally
+ * minimal demand, provider I/O, eviction, or asynchronous settlement.
  * A positive acquisition witness requires a satisfiable left tuple. A nullish
  * component prevents a match and may require no acquisition, in any term order.
  * Reads and a replica reconstructed from public events are checked after
@@ -1015,6 +1016,43 @@ function compoundPairs(
   return sortJoinPairs(pairs)
 }
 
+// The controlled adapter interprets only the direct-field IN requests in this
+// grammar. It uses the independent atom labels for equality, never the compiler
+// evaluator. A malformed request fails at the adapter boundary; a wrong field
+// or value loads the wrong rows and must fail the public-pair comparison.
+function compoundDemandMatches(
+  where: LoadSubsetOptions[`where`],
+  row: CompoundModelRow,
+  atoms: ReturnType<typeof compoundAtoms>,
+): boolean {
+  if (!where) return true
+  if (where.type !== `func` || where.name !== `in`)
+    throw new Error(`unexpected compound demand predicate`)
+  const [field, values] = where.args
+  if (
+    field?.type !== `ref` ||
+    field.path.length !== 1 ||
+    values?.type !== `val` ||
+    !Array.isArray(values.value)
+  )
+    throw new Error(`unexpected compound demand operands`)
+  const name = field.path[0]
+  if (name === `a`) {
+    const expected = atoms[row.atom]!.group
+    return (
+      expected !== null &&
+      values.value.some(
+        (value: unknown) =>
+          atoms.find((atom) => Object.is(atom.value, value))?.group ===
+          expected,
+      )
+    )
+  }
+  if (name === `b` || name === `c`)
+    return row[name] != null && values.value.includes(row[name])
+  throw new Error(`unexpected compound demand field`)
+}
+
 async function runCompoundHistory(
   scenario: CompoundHistory,
   mutant?: `hide-acquisition`,
@@ -1049,10 +1087,14 @@ async function runCompoundHistory(
       sync: {
         sync: (sync) => {
           actions[side] = sync
-          const publish = () => {
+          const publish = (where?: LoadSubsetOptions[`where`]) => {
             sync.begin()
             for (const row of model[side].values()) {
-              if (installed[side].has(row.id)) continue
+              if (
+                installed[side].has(row.id) ||
+                !compoundDemandMatches(where, row, atoms)
+              )
+                continue
               installed[side].add(row.id)
               sync.write({ type: `insert`, value: toRow(row) })
             }
@@ -1061,9 +1103,9 @@ async function runCompoundHistory(
           if (!(scenario.cold && side === `right`)) publish()
           sync.markReady()
           return {
-            loadSubset: () => {
+            loadSubset: (options) => {
               acquisitions++
-              return publish()
+              return publish(options.where)
             },
           }
         },
@@ -1204,6 +1246,23 @@ const compoundWitness: CompoundHistory = {
 }
 
 describe(`compound join relational oracle`, () => {
+  for (const autoIndex of [`off`, `eager`] as const) {
+    for (const atomFirst of [false, true]) {
+      it(`loads the matching compound tuple: index=${autoIndex}, atomFirst=${atomFirst}`, async () => {
+        await runCompoundHistory({
+          ...compoundWitness,
+          left: [{ id: 1, atom: 10, b: 7, c: 9 }],
+          right: [{ id: 2, atom: 10, b: 7, c: 9 }],
+          steps: [],
+          join: `left`,
+          autoIndex,
+          atomFirst,
+          cold: true,
+        })
+      })
+    }
+  }
+
   // A nullish component makes the whole tuple unsatisfiable, regardless of
   // term order. Such a row may need no acquisition. The nonnull neighbor must
   // acquire even when the empty right source gives the same unmatched output.

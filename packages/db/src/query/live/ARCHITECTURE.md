@@ -175,7 +175,8 @@ A compound match requires every component equality to be TRUE. Any nullish
 operand prevents a match. Each component uses the same graph-scoped equality
 identity as a single-condition join; raw JSON representations do not define
 value equality. Lazy loading may use the first equality to acquire a superset
-of candidate rows, while the compiled join checks the full tuple. A parent
+of candidate rows, while the compiled join checks the full tuple. A tuple with
+any nullish component contributes no keyed lazy demand. A parent
 reference in any joined-side component requires route context before evaluation.
 
 A `CanonicalCorrelationKey` is the canonical tuple of every evaluated

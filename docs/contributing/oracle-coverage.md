@@ -912,6 +912,15 @@ from-QueryRef and joined-QueryRef boundaries. The includes-context-transport
 owner checks parent values used only in a later equality across both operand
 sides and direct/joined-QueryRef sources, in all three materialization forms.
 
+The compiler demand oracle in
+`packages/db/tests/query/compiler/lazy-demand.test.ts` independently recomputes
+active first-key demand from satisfiable rows. Its finite histories cross
+LEFT/RIGHT, two/three fields, both term orders, shared primary keys, nullish
+components, and put/remove/restore. Nullish tuples contribute no keyed demand.
+The controlled cold provider now applies direct-field IN requests using the
+independent value-class labels. Four distinguishing numeric tuples reject
+wrong-field demand that the former whole-table provider missed.
+
 The bounded claim excludes arbitrary expression trees and wider tuples. Real
 provider acquisition, eviction/reentry, and exact lazy-demand minimality need
 receiving witnesses in the cold-join and adapter owners. Compound async,
@@ -924,13 +933,18 @@ identity owner proves the compiler identity boundary and fresh public rows.
 Review follow-ups remain bounded by the evidence above:
 
 - The cold-join owner must distinguish required acquisition from demand
-  minimality. A nullish tuple may need no acquisition; a satisfiable tuple
+  minimality. A nullish tuple contributes no keyed demand; a satisfiable tuple
   still needs a positive witness. Real-provider demand counts remain with
   the receiving adapter owner.
-- Single-equality joins now allocate operand arrays. No performance regression
-  was measured. A future join benchmark must compare allocation/work counts
-  for equal source cardinalities and update histories before changing this
-  representation.
+- A deterministic 10,000-row-per-side probe measured the new operand-array
+  cost and the repair: single equality 20,000 to zero arrays, two equalities
+  40,000 to 20,000. Whole-query runtime and heap impact remain unmeasured.
+  The always-tuple alternative restores single-equality allocation, so its
+  simplification remains a tradeoff for a future measured join benchmark.
+- Builder admission checks Boolean join syntax, while the compiler binds
+  sources and also accepts direct IR. A single-parse representation would need
+  a design for these separate entry points and measured compile-work benefit.
+  No parser state or cached validation is added for an unmeasured saving.
 - The cold-join driver's cleanup callback unsubscribes before cleaning up its
   live query. No legal throwing-unsubscribe witness was found. The owner is
   `checkWithCleanup` in the cold-join oracle; any future cleanup change must

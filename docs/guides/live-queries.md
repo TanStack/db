@@ -963,6 +963,20 @@ Every equality must match. Nested `and()` expressions and reversed equality
 operands are supported. A `null` or `undefined` operand does not match, even
 when the opposite operand is also nullish. Outer joins still retain unmatched
 rows. `or()` and comparisons such as `gt()` are not supported in join conditions.
+Each equality must compare an expression from the joined source with one from
+an available source. A field-to-literal filter such as `eq(stock.active, true)`
+belongs in `.where()`, not the join condition. Invalid source bindings fail
+during query compilation.
+
+For on-demand sources, the first equality controls candidate loading and index
+selection. Later equalities filter those candidates in the join. Put a selective
+equality on a plain field first: starting with a region may load more rows than
+starting with a SKU. A computed joined-side operand such as `lower(stock.code)`
+can disable lazy loading and load the whole joined source, even when a later
+condition uses a plain field. Reordering conditions preserves matching results,
+but can change acquisition work. A tuple with any nullish component contributes
+no keyed demand when lazy loading applies.
+
 
 ### Join Types
 
