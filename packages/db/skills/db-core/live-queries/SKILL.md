@@ -115,7 +115,7 @@ non-null value.
 
 ### 2. Joining two collections
 
-Join conditions **must** use `eq()` (equality only -- IVM constraint). Default join type is `left`. Convenience methods: `leftJoin`, `rightJoin`, `innerJoin`, `fullJoin`.
+Join conditions accept `eq()` or a nonempty, possibly nested `and()` of equalities (equality only -- IVM constraint). Default join type is `left`. Convenience methods: `leftJoin`, `rightJoin`, `innerJoin`, `fullJoin`.
 
 ```ts
 import { eq } from '@tanstack/db'
@@ -527,6 +527,27 @@ q.from({ order: ordersCollection })
   .having(({ order }) => gt(count(order.id), 5))
 ```
 
+### Compound joins and acquisition
+
+```ts
+import { and, eq } from '@tanstack/db'
+
+q.from({ product: productsCollection }).leftJoin(
+  { stock: stockCollection },
+  ({ product, stock }) =>
+    and(eq(product.sku, stock.sku), eq(product.region, stock.region)),
+)
+```
+
+All equalities must match. A nullish component never matches, and outer joins
+retain unmatched rows. For on-demand sources, the first equality supplies
+candidate loading and index selection. Put a selective plain-field equality
+first when creating the live-query Collection. Reordered equalities keep the
+same semantic query identity; a React hook can reuse the existing Collection
+and its original loading plan. Reordering during a rerender does not replan that
+Collection. A computed joined-side operand can disable lazy loading, and a broad
+first field can fetch extra candidates. Later equalities still control matches.
+
 ### HIGH: .limit() / .offset() without .orderBy()
 
 Without deterministic ordering, limit/offset results are non-deterministic and cannot be incrementally maintained. Throws `LimitOffsetRequireOrderByError`.
@@ -541,9 +562,9 @@ q.from({ user: usersCollection })
   .limit(10)
 ```
 
-### HIGH: Join condition using non-eq() operator
+### HIGH: Join condition using OR or a non-equality comparison
 
-The differential dataflow join operator only supports equality joins. Using `gt()`, `like()`, etc. throws `JoinConditionMustBeEqualityError`.
+The differential dataflow join operator supports a single equality or nested `and()` equalities. Using `or()`, `gt()`, `like()`, or empty `and()` throws `JoinConditionMustBeEqualityError`. Each equality must bind the joined source to an available source. Put field-to-literal filters in `.where()`; invalid source bindings fail at compilation.
 
 ```ts
 // WRONG
@@ -581,7 +602,7 @@ this prototype-pollution guard.
 
 The query builder looks like SQL but has constraints that SQL does not:
 
-- **Equality joins only** -- `eq()` is the only allowed join condition operator.
+- **Equality joins only** -- use `eq()` or nonempty nested `and()` equalities. OR and inequalities are unsupported.
 - **orderBy required for limit/offset** -- non-deterministic pagination cannot be incrementally maintained.
 - **distinct requires select** -- deduplication needs an explicit projection.
 - **fn.select() cannot be used with groupBy()** -- the compiler must statically analyze select to discover aggregate functions.

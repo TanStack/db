@@ -1139,12 +1139,27 @@ function createPowerSyncCollectionConfig<
 
   const getKey = (record: OutputType) => asPowerSyncRecord(record).id
 
+  // Keep adapter hooks and serialization options out of the core config.
+  const {
+    onLoad: _onLoad,
+    onLoadSubset: _onLoadSubset,
+    deserializationSchema: _deserializationSchema,
+    serializer: _serializer,
+    onDeserializationError: _onDeserializationError,
+    ...collectionConfig
+  } = {
+    deserializationSchema,
+    serializer,
+    onDeserializationError,
+    ...restConfig,
+  }
+
   const outputConfig: EnhancedPowerSyncCollectionConfig<
     TTable,
     OutputType,
     TSchema
   > = {
-    ...restConfig,
+    ...collectionConfig,
     schema,
     getKey,
     // Syncing should start immediately since we need to monitor the changes for mutations

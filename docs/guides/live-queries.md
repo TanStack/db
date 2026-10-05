@@ -892,7 +892,7 @@ For a complete list of available functions, see the [Expression Functions Refere
 
 ## Joins
 
-Use `join` to combine data from multiple collections. Joins default to `left` join type and only support equality conditions.
+Use `join` to combine data from multiple collections. Joins default to `left` join type and support equality conditions combined with `and()`.
 
 Joins in TanStack DB are a way to combine data from multiple collections, and are conceptually very similar to SQL joins. When two collections are joined, the result is a new collection that contains the combined data as single rows. The new collection is a live query collection, and will automatically update when the underlying data changes.
 
@@ -908,14 +908,14 @@ The result type of a join will take into account the join type, with the optiona
 ```ts
 join(
   { [alias]: Collection | Query },
-  condition: (row: TRow) => Expression<boolean>, // Must be an `eq` condition
+  condition: (row: TRow) => Expression<boolean>, // `eq(...)` or `and(eq(...), ...)`
   joinType?: 'left' | 'right' | 'inner' | 'full'
 ): Query
 ```
 
 **Parameters:**
 - `aliases` - An object where keys are alias names and values are collections or subqueries to join
-- `condition` - A callback function that receives the combined row object and returns an equality condition
+- `condition` - A callback function that receives the combined row object and returns an equality or a conjunction of equalities
 - `joinType` - Optional join type: `'left'` (default), `'right'`, `'inner'`, or `'full'`
 
 ### Basic Joins
@@ -945,6 +945,41 @@ for (const row of userPosts) {
 ```
 */
 ````
+
+### Compound Join Conditions
+
+Use `and()` when rows must match on more than one field:
+
+```ts
+const inventory = createLiveQueryCollection((q) =>
+  q.from({ product: productsCollection })
+    .innerJoin({ stock: inventoryCollection }, ({ product, stock }) =>
+      and(eq(product.sku, stock.sku), eq(product.region, stock.region))
+    )
+)
+```
+
+Every equality must match. Nested `and()` expressions and reversed equality
+operands are supported. A `null` or `undefined` operand does not match, even
+when the opposite operand is also nullish. Outer joins still retain unmatched
+rows. `or()` and comparisons such as `gt()` are not supported in join conditions.
+Each equality must compare an expression from the joined source with one from
+an available source. A field-to-literal filter such as `eq(stock.active, true)`
+belongs in `.where()`, not the join condition. Invalid source bindings fail
+during query compilation.
+
+For on-demand sources, the first equality controls candidate loading and index
+selection. Later equalities filter those candidates in the join. Put a selective
+equality on a plain field first: starting with a region may load more rows than
+starting with a SKU. A computed joined-side operand such as `lower(stock.code)`
+can disable lazy loading and load the whole joined source, even when a later
+condition uses a plain field. Choose this order before creating the live-query
+Collection. Reordered equalities have the same semantic query identity. A React
+hook that reuses an existing Collection keeps that Collection's original loading
+plan, so reordering during a rerender does not replan it. A newly compiled
+Collection uses the supplied order. A tuple with any nullish component contributes
+no keyed demand when lazy loading applies.
+
 
 ### Join Types
 
