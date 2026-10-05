@@ -1692,26 +1692,8 @@ export class CollectionStateManager<
           events.push({ type: `insert`, key, value })
         }
 
-        // A ready callback below can add optimistic upserts that this batch
-        // has not published, so freeze the keys it has.
+        // The changed-key loop below must not publish these keys again.
         reappliedKeys = new Set(this.optimisticUpserts.keys())
-
-        // Ensure listeners are active before emitting this critical batch
-        if (this.lifecycle.status !== `ready`) {
-          const deletesBeforeReady = new Set(this.optimisticDeletes)
-          this.lifecycle.markReady()
-          // A ready callback's optimistic delete already published the
-          // row's removal, so the prefix must not delete it again.
-          for (let index = events.length - 1; index >= 0; index--) {
-            const { type, key } = events[index]!
-            if (
-              type === `delete` &&
-              this.optimisticDeletes.has(key) &&
-              !deletesBeforeReady.has(key)
-            )
-              events.splice(index, 1)
-          }
-        }
       }
 
       // Now check what actually changed in the final visible state
@@ -1790,16 +1772,28 @@ export class CollectionStateManager<
 
       // End batching and emit all events (combines any batched events with sync events)
       let failure: { error: unknown } | undefined
+      // A truncate that makes the Collection ready runs ready callbacks after
+      // this batch is built. Their writes describe the replaced rows, so hold
+      // this batch and publish their messages after it.
+      const becomesReady = hasTruncateSync && this.lifecycle.status !== `ready`
+      const publication = becomesReady
+        ? this.changes.deferPublication()
+        : undefined
       try {
-        const visibleLayoutChanged =
-          previousLayout !== undefined &&
-          (previousLayout.length !== this.size ||
-            [...this.keys()].some(
-              (key, index) => key !== previousLayout[index],
-            ))
-        this.changes.emitEvents(events, true, visibleLayoutChanged)
-      } catch (error) {
-        failure = { error }
+        try {
+          const visibleLayoutChanged =
+            previousLayout !== undefined &&
+            (previousLayout.length !== this.size ||
+              [...this.keys()].some(
+                (key, index) => key !== previousLayout[index],
+              ))
+          this.changes.emitEvents(events, true, visibleLayoutChanged)
+        } catch (error) {
+          failure = { error }
+        }
+        if (becomesReady) this.lifecycle.markReady()
+      } finally {
+        publication?.publish()
       }
 
       if (this.syncRunGeneration === syncRunGeneration) {
