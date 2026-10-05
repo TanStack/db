@@ -120,19 +120,28 @@
  * transformed into a D2Mini pipeline.
  */
 
-import { deepEquals } from "../utils.js"
-import { CannotCombineEmptyExpressionListError } from "../errors.js"
+import { deepEquals } from '../utils.js'
+import { CannotCombineEmptyExpressionListError } from '../errors.js'
+import { containsAggregate } from './compiler/group-by.js'
 import {
-  CollectionRef as CollectionRefClass,
   Func,
   PropRef,
   QueryRef as QueryRefClass,
+  UnionAll as UnionAllClass,
+  UnionFrom as UnionFromClass,
   createResidualWhere,
+  getFromSources,
   getWhereExpression,
   isResidualWhere,
-} from "./ir.js"
-import { isConvertibleToCollectionFilter } from "./compiler/expressions.js"
-import type { BasicExpression, From, QueryIR, Select, Where } from "./ir.js"
+} from './ir.js'
+import type {
+  BasicExpression,
+  CollectionRef as CollectionRefClass,
+  From,
+  QueryIR,
+  Select,
+  Where,
+} from './ir.js'
 
 /**
  * Represents a WHERE clause after source analysis
@@ -190,6 +199,20 @@ export interface OptimizationResult {
  * ```
  */
 export function optimizeQuery(query: QueryIR): OptimizationResult {
+  if (query.from.type === `unionAll`) {
+    return {
+      optimizedQuery: {
+        ...query,
+        from: new UnionAllClass(
+          query.from.queries.map(
+            (branch) => optimizeQuery(branch).optimizedQuery,
+          ),
+        ),
+      },
+      sourceWhereClauses: new Map(),
+    }
+  }
+
   // First, extract source WHERE clauses before optimization
   const sourceWhereClauses = extractSourceWhereClauses(query)
 
@@ -220,14 +243,17 @@ export function optimizeQuery(query: QueryIR): OptimizationResult {
 
 /**
  * Extracts collection-specific WHERE clauses from a query for index optimization.
- * This analyzes the original query to identify WHERE clauses that can be pushed down
- * to specific collections, but only for simple queries without joins.
+ * This analyzes the original query to identify single-source WHERE clauses that
+ * reference collection sources (not subqueries), including joined collections.
+ *
+ * For outer joins, clauses referencing the nullable side are excluded because
+ * using them to pre-filter collection data would change join semantics.
  *
  * @param query - The original QueryIR to analyze
  * @returns Map of source aliases to their WHERE clauses
  */
 function extractSourceWhereClauses(
-  query: QueryIR
+  query: QueryIR,
 ): Map<string, BasicExpression<boolean>> {
   const sourceWhereClauses = new Map<string, BasicExpression<boolean>>()
 
@@ -241,21 +267,26 @@ function extractSourceWhereClauses(
 
   // Analyze each WHERE clause to determine which sources it touches
   const analyzedClauses = splitWhereClauses.map((clause) =>
-    analyzeWhereClause(clause)
+    analyzeWhereClause(clause),
   )
 
   // Group clauses by single-source vs multi-source
   const groupedClauses = groupWhereClauses(analyzedClauses)
 
+  // Determine which source aliases are on the nullable side of outer joins.
+  // WHERE clauses for these sources must not be used for index optimization
+  // because they should filter the final joined result, not the input data.
+  const nullableSources = getNullableJoinSources(query)
+
   // Only include single-source clauses that reference collections directly
-  // and can be converted to BasicExpression format for collection indexes
+  // and are not on the nullable side of an outer join
   for (const [sourceAlias, whereClause] of groupedClauses.singleSource) {
     // Check if this source alias corresponds to a collection reference
-    if (isCollectionReference(query, sourceAlias)) {
-      // Check if the WHERE clause can be converted to collection-compatible format
-      if (isConvertibleToCollectionFilter(whereClause)) {
-        sourceWhereClauses.set(sourceAlias, whereClause)
-      }
+    if (
+      isCollectionReference(query, sourceAlias) &&
+      !nullableSources.has(sourceAlias)
+    ) {
+      sourceWhereClauses.set(sourceAlias, whereClause)
     }
   }
 
@@ -272,8 +303,10 @@ function extractSourceWhereClauses(
  */
 function isCollectionReference(query: QueryIR, sourceAlias: string): boolean {
   // Check the FROM clause
-  if (query.from.alias === sourceAlias) {
-    return query.from.type === `collectionRef`
+  for (const source of getFromSources(query.from)) {
+    if (source.alias === sourceAlias) {
+      return source.type === `collectionRef`
+    }
   }
 
   // Check JOIN clauses
@@ -289,6 +322,41 @@ function isCollectionReference(query: QueryIR, sourceAlias: string): boolean {
 }
 
 /**
+ * Returns the set of source aliases that are on the nullable side of outer joins.
+ *
+ * For a LEFT join the joined (right) side is nullable.
+ * For a RIGHT join the main (left/from) side is nullable.
+ * For a FULL join both sides are nullable.
+ *
+ * WHERE clauses that reference only a nullable source must not be pushed down
+ * into that source's subquery or used for index optimization, because doing so
+ * changes the join semantics: rows that should be excluded by the WHERE become
+ * unmatched outer-join rows (with the nullable side set to undefined) and
+ * incorrectly survive residual filtering.
+ */
+function getNullableJoinSources(query: QueryIR): Set<string> {
+  const nullable = new Set<string>()
+  if (query.join) {
+    const leftAliases = new Set(
+      getFromSources(query.from).map((source) => source.alias),
+    )
+    for (const join of query.join) {
+      const joinedAlias = join.from.alias
+      if (join.type === `left` || join.type === `full`) {
+        nullable.add(joinedAlias)
+      }
+      if (join.type === `right` || join.type === `full`) {
+        for (const leftAlias of leftAliases) {
+          nullable.add(leftAlias)
+        }
+      }
+      leftAliases.add(joinedAlias)
+    }
+  }
+  return nullable
+}
+
+/**
  * Applies recursive predicate pushdown optimization.
  *
  * @param query - The QueryIR to optimize
@@ -298,20 +366,14 @@ function applyRecursiveOptimization(query: QueryIR): QueryIR {
   // First, recursively optimize any existing subqueries
   const subqueriesOptimized = {
     ...query,
-    from:
-      query.from.type === `queryRef`
-        ? new QueryRefClass(
-            applyRecursiveOptimization(query.from.query),
-            query.from.alias
-          )
-        : query.from,
+    from: optimizeNestedFrom(query.from),
     join: query.join?.map((joinClause) => ({
       ...joinClause,
       from:
         joinClause.from.type === `queryRef`
           ? new QueryRefClass(
               applyRecursiveOptimization(joinClause.from.query),
-              joinClause.from.alias
+              joinClause.from.alias,
             )
           : joinClause.from,
     })),
@@ -327,6 +389,13 @@ function applyRecursiveOptimization(query: QueryIR): QueryIR {
 function applySingleLevelOptimization(query: QueryIR): QueryIR {
   // Skip optimization if no WHERE clauses exist
   if (!query.where || query.where.length === 0) {
+    return query
+  }
+
+  // Multi-source FROM predicates are global post-union filters. Keep them
+  // residual in the main query; sourceWhereClauses still captures safe
+  // collection-level filters for loadSubset/index use.
+  if (query.from.type === `unionFrom`) {
     return query
   }
 
@@ -351,7 +420,7 @@ function applySingleLevelOptimization(query: QueryIR): QueryIR {
 
   // Filter out residual WHERE clauses to prevent them from being optimized again
   const nonResidualWhereClauses = query.where.filter(
-    (where) => !isResidualWhere(where)
+    (where) => !isResidualWhere(where),
   )
 
   // Step 1: Split all AND clauses at the root level for granular optimization
@@ -359,27 +428,14 @@ function applySingleLevelOptimization(query: QueryIR): QueryIR {
 
   // Step 2: Analyze each WHERE clause to determine which sources it touches
   const analyzedClauses = splitWhereClauses.map((clause) =>
-    analyzeWhereClause(clause)
+    analyzeWhereClause(clause),
   )
 
   // Step 3: Group clauses by single-source vs multi-source
   const groupedClauses = groupWhereClauses(analyzedClauses)
 
   // Step 4: Apply optimizations by lifting single-source clauses into subqueries
-  const optimizedQuery = applyOptimizations(query, groupedClauses)
-
-  // Add back any residual WHERE clauses that were filtered out
-  const residualWhereClauses = query.where.filter((where) =>
-    isResidualWhere(where)
-  )
-  if (residualWhereClauses.length > 0) {
-    optimizedQuery.where = [
-      ...(optimizedQuery.where || []),
-      ...residualWhereClauses,
-    ]
-  }
-
-  return optimizedQuery
+  return applyOptimizations(query, groupedClauses)
 }
 
 /**
@@ -396,7 +452,7 @@ function removeRedundantSubqueries(query: QueryIR): QueryIR {
     from: removeRedundantFromClause(query.from),
     join: query.join?.map((joinClause) => ({
       ...joinClause,
-      from: removeRedundantFromClause(joinClause.from),
+      from: removeRedundantJoinFromClause(joinClause.from),
     })),
   }
 }
@@ -408,6 +464,18 @@ function removeRedundantSubqueries(query: QueryIR): QueryIR {
  * @returns A FROM clause with redundant subqueries removed
  */
 function removeRedundantFromClause(from: From): From {
+  if (from.type === `unionFrom`) {
+    return new UnionFromClass(
+      from.sources.map((source) => removeRedundantFromClause(source) as any),
+    )
+  }
+
+  if (from.type === `unionAll`) {
+    return new UnionAllClass(
+      from.queries.map((branch) => removeRedundantSubqueries(branch)),
+    )
+  }
+
   if (from.type === `collectionRef`) {
     return from
   }
@@ -415,17 +483,26 @@ function removeRedundantFromClause(from: From): From {
   const processedQuery = removeRedundantSubqueries(from.query)
 
   // Check if this subquery is redundant
-  if (isRedundantSubquery(processedQuery)) {
+  if (
+    isRedundantSubquery(processedQuery) &&
+    from.alias === getFirstFromAlias(processedQuery)
+  ) {
     // Return the inner query's FROM clause with this alias
     const innerFrom = removeRedundantFromClause(processedQuery.from)
     if (innerFrom.type === `collectionRef`) {
-      return new CollectionRefClass(innerFrom.collection, from.alias)
-    } else {
+      return innerFrom
+    } else if (innerFrom.type === `queryRef`) {
       return new QueryRefClass(innerFrom.query, from.alias)
     }
   }
 
   return new QueryRefClass(processedQuery, from.alias)
+}
+
+function removeRedundantJoinFromClause(
+  from: CollectionRefClass | QueryRefClass,
+): CollectionRefClass | QueryRefClass {
+  return removeRedundantFromClause(from) as CollectionRefClass | QueryRefClass
 }
 
 /**
@@ -446,7 +523,9 @@ function isRedundantSubquery(query: QueryIR): boolean {
     query.offset === undefined &&
     !query.fnSelect &&
     (!query.fnWhere || query.fnWhere.length === 0) &&
-    (!query.fnHaving || query.fnHaving.length === 0)
+    (!query.fnHaving || query.fnHaving.length === 0) &&
+    !query.distinct &&
+    !query.singleResult
   )
 }
 
@@ -466,7 +545,7 @@ function isRedundantSubquery(query: QueryIR): boolean {
  * ```
  */
 function splitAndClauses(
-  whereClauses: Array<Where>
+  whereClauses: Array<Where>,
 ): Array<BasicExpression<boolean>> {
   const result: Array<BasicExpression<boolean>> = []
 
@@ -480,7 +559,7 @@ function splitAndClauses(
 
 // Helper function for recursive splitting of BasicExpression arrays
 function splitAndClausesRecursive(
-  clause: BasicExpression<boolean>
+  clause: BasicExpression<boolean>,
 ): Array<BasicExpression<boolean>> {
   if (clause.type === `func` && clause.name === `and`) {
     // Recursively split nested AND clauses to handle complex expressions
@@ -520,7 +599,7 @@ function splitAndClausesRecursive(
  * ```
  */
 function analyzeWhereClause(
-  clause: BasicExpression<boolean>
+  clause: BasicExpression<boolean>,
 ): AnalyzedWhereClause {
   // Track which table aliases this WHERE clause touches
   const touchedSources = new Set<string>()
@@ -585,7 +664,7 @@ function analyzeWhereClause(
  * @returns Grouped clauses ready for optimization
  */
 function groupWhereClauses(
-  analyzedClauses: Array<AnalyzedWhereClause>
+  analyzedClauses: Array<AnalyzedWhereClause>,
 ): GroupedWhereClauses {
   const singleSource = new Map<string, Array<BasicExpression<boolean>>>()
   const multiSource: Array<BasicExpression<boolean>> = []
@@ -599,11 +678,10 @@ function groupWhereClauses(
         singleSource.set(source, [])
       }
       singleSource.get(source)!.push(clause.expression)
-    } else if (clause.touchedSources.size > 1 || clause.hasNamespaceOnlyRef) {
-      // Multi-source clause or namespace-only reference - must stay in main query
+    } else {
+      // Clauses without one pushable source must stay in the main query.
       multiSource.push(clause.expression)
     }
-    // Skip clauses that touch no sources (constants) - they don't need optimization
   }
 
   // Combine multiple clauses for each source with AND
@@ -635,32 +713,48 @@ function groupWhereClauses(
  */
 function applyOptimizations(
   query: QueryIR,
-  groupedClauses: GroupedWhereClauses
+  groupedClauses: GroupedWhereClauses,
 ): QueryIR {
   // Track which single-source clauses were actually optimized
   const actuallyOptimized = new Set<string>()
 
+  // Determine which source aliases are on the nullable side of outer joins.
+  const nullableSources = getNullableJoinSources(query)
+
+  // Build a filtered copy of singleSource that excludes nullable-side clauses.
+  // Pushing a WHERE clause into the nullable side's subquery pre-filters the
+  // data before the join, converting "matched but WHERE-excluded" rows into
+  // "unmatched" outer-join rows.  These are indistinguishable from genuinely
+  // unmatched rows, so the residual WHERE cannot correct the result.
+  const pushableSingleSource = new Map<string, BasicExpression<boolean>>()
+  for (const [source, clause] of groupedClauses.singleSource) {
+    if (!nullableSources.has(source)) {
+      pushableSingleSource.set(source, clause)
+    }
+  }
+
   // Optimize the main FROM clause and track what was optimized
   const optimizedFrom = optimizeFromWithTracking(
     query.from,
-    groupedClauses.singleSource,
-    actuallyOptimized
+    pushableSingleSource,
+    actuallyOptimized,
   )
 
   // Optimize JOIN clauses and track what was optimized
   const optimizedJoins = query.join
     ? query.join.map((joinClause) => ({
         ...joinClause,
-        from: optimizeFromWithTracking(
+        from: optimizeJoinFromWithTracking(
           joinClause.from,
-          groupedClauses.singleSource,
-          actuallyOptimized
+          pushableSingleSource,
+          actuallyOptimized,
         ),
       }))
     : undefined
 
-  // Build the remaining WHERE clauses: multi-source + residual single-source clauses
+  // Keep regular and residual clauses separate so neither loses its marker.
   const remainingWhereClauses: Array<Where> = []
+  const residualWhereClauses = query.where?.filter(isResidualWhere) ?? []
 
   // Add multi-source clauses
   if (groupedClauses.multiSource) {
@@ -668,12 +762,7 @@ function applyOptimizations(
   }
 
   // Determine if we need residual clauses (when query has outer JOINs)
-  const hasOuterJoins =
-    query.join &&
-    query.join.some(
-      (join) =>
-        join.type === `left` || join.type === `right` || join.type === `full`
-    )
+  const hasOuterJoins = nullableSources.size > 0
 
   // Add single-source clauses
   for (const [source, clause] of groupedClauses.singleSource) {
@@ -682,44 +771,39 @@ function applyOptimizations(
       remainingWhereClauses.push(clause)
     } else if (hasOuterJoins) {
       // Was optimized AND query has outer JOINs - keep as residual WHERE clause
-      remainingWhereClauses.push(createResidualWhere(clause))
+      residualWhereClauses.push(createResidualWhere(clause))
     }
     // If optimized and no outer JOINs - don't keep (original behavior)
   }
 
-  // Combine multiple remaining WHERE clauses into a single clause to avoid
-  // multiple filter operations in the pipeline (performance optimization)
-  // First flatten any nested AND expressions to avoid and(and(...), ...)
-  const finalWhere: Array<Where> =
-    remainingWhereClauses.length > 1
-      ? [
-          combineWithAnd(
-            remainingWhereClauses.flatMap((clause) =>
-              splitAndClausesRecursive(getWhereExpression(clause))
-            )
+  // Combine within each group to avoid extra filters and nested ANDs.
+  const combineRemaining = (clauses: Array<Where>): Where | undefined =>
+    clauses.length > 1
+      ? combineWithAnd(
+          clauses.flatMap((clause) =>
+            splitAndClausesRecursive(getWhereExpression(clause)),
           ),
-        ]
-      : remainingWhereClauses
+        )
+      : clauses[0]
+  const regularWhere = combineRemaining(remainingWhereClauses)
+  const residualWhere = combineRemaining(residualWhereClauses)
+  const finalWhere: Array<Where> = [
+    ...(regularWhere ? [regularWhere] : []),
+    ...(residualWhere
+      ? [createResidualWhere(getWhereExpression(residualWhere))]
+      : []),
+  ]
 
-  // Create a completely new query object to ensure immutability
+  // Preserve untouched query options while replacing the optimized clauses.
   const optimizedQuery: QueryIR = {
-    // Copy all non-optimized fields as-is
-    select: query.select,
+    ...query,
     groupBy: query.groupBy ? [...query.groupBy] : undefined,
     having: query.having ? [...query.having] : undefined,
     orderBy: query.orderBy ? [...query.orderBy] : undefined,
-    limit: query.limit,
-    offset: query.offset,
-    distinct: query.distinct,
-    fnSelect: query.fnSelect,
     fnWhere: query.fnWhere ? [...query.fnWhere] : undefined,
     fnHaving: query.fnHaving ? [...query.fnHaving] : undefined,
-
-    // Use the optimized FROM and JOIN clauses
     from: optimizedFrom,
     join: optimizedJoins,
-
-    // Include combined WHERE clauses
     where: finalWhere.length > 0 ? finalWhere : [],
   }
 
@@ -737,47 +821,80 @@ function applyOptimizations(
  */
 function deepCopyQuery(query: QueryIR): QueryIR {
   return {
-    // Recursively copy the FROM clause
-    from:
-      query.from.type === `collectionRef`
-        ? new CollectionRefClass(query.from.collection, query.from.alias)
-        : new QueryRefClass(deepCopyQuery(query.from.query), query.from.alias),
-
-    // Copy all other fields, creating new arrays where necessary
-    select: query.select,
+    ...query,
+    from: deepCopyFrom(query.from),
     join: query.join
       ? query.join.map((joinClause) => ({
           type: joinClause.type,
           left: joinClause.left,
           right: joinClause.right,
-          additionalConditions: joinClause.additionalConditions
-            ? joinClause.additionalConditions.map((cond) => ({
-                left: cond.left,
-                right: cond.right,
-              }))
-            : undefined,
-          from:
-            joinClause.from.type === `collectionRef`
-              ? new CollectionRefClass(
-                  joinClause.from.collection,
-                  joinClause.from.alias
-                )
-              : new QueryRefClass(
-                  deepCopyQuery(joinClause.from.query),
-                  joinClause.from.alias
-                ),
+          additionalConditions: joinClause.additionalConditions?.map(
+            (condition) => ({ ...condition }),
+          ),
+          from: deepCopyJoinFrom(joinClause.from),
         }))
       : undefined,
     where: query.where ? [...query.where] : undefined,
     groupBy: query.groupBy ? [...query.groupBy] : undefined,
     having: query.having ? [...query.having] : undefined,
     orderBy: query.orderBy ? [...query.orderBy] : undefined,
-    limit: query.limit,
-    offset: query.offset,
-    fnSelect: query.fnSelect,
     fnWhere: query.fnWhere ? [...query.fnWhere] : undefined,
     fnHaving: query.fnHaving ? [...query.fnHaving] : undefined,
   }
+}
+
+function deepCopyFrom(from: From): From {
+  // Share the CollectionRef: its SourceId is the compiled input identity.
+  if (from.type === `collectionRef`) {
+    return from
+  }
+
+  if (from.type === `queryRef`) {
+    return new QueryRefClass(deepCopyQuery(from.query), from.alias)
+  }
+
+  if (from.type === `unionAll`) {
+    return new UnionAllClass(
+      from.queries.map((branch) => deepCopyQuery(branch)),
+    )
+  }
+
+  return new UnionFromClass(
+    from.sources.map(
+      (source: CollectionRefClass | QueryRefClass) =>
+        deepCopyFrom(source) as any,
+    ),
+  )
+}
+
+function deepCopyJoinFrom(
+  from: CollectionRefClass | QueryRefClass,
+): CollectionRefClass | QueryRefClass {
+  return deepCopyFrom(from) as CollectionRefClass | QueryRefClass
+}
+
+function optimizeNestedFrom(from: From): From {
+  if (from.type === `queryRef`) {
+    return new QueryRefClass(applyRecursiveOptimization(from.query), from.alias)
+  }
+
+  if (from.type === `unionFrom`) {
+    return new UnionFromClass(
+      from.sources.map((source) => optimizeNestedFrom(source) as any),
+    )
+  }
+
+  if (from.type === `unionAll`) {
+    return new UnionAllClass(
+      from.queries.map((branch) => applyRecursiveOptimization(branch)),
+    )
+  }
+
+  return from
+}
+
+function getFirstFromAlias(query: QueryIR): string | undefined {
+  return getFromSources(query.from)[0]?.alias
 }
 
 /**
@@ -791,14 +908,33 @@ function deepCopyQuery(query: QueryIR): QueryIR {
 function optimizeFromWithTracking(
   from: From,
   singleSourceClauses: Map<string, BasicExpression<boolean>>,
-  actuallyOptimized: Set<string>
+  actuallyOptimized: Set<string>,
 ): From {
+  if (from.type === `unionFrom`) {
+    return new UnionFromClass(
+      from.sources.map((source) =>
+        optimizeJoinFromWithTracking(
+          source,
+          singleSourceClauses,
+          actuallyOptimized,
+        ),
+      ),
+    )
+  }
+
+  if (from.type === `unionAll`) {
+    return new UnionAllClass(
+      from.queries.map((branch) => deepCopyQuery(branch)),
+    )
+  }
+
   const whereClause = singleSourceClauses.get(from.alias)
 
   if (!whereClause) {
-    // No optimization needed, but return a copy to maintain immutability
+    // No optimization needed. Keep the CollectionRef itself: its sourceId is
+    // the compiled input identity, and a copy would lose it.
     if (from.type === `collectionRef`) {
-      return new CollectionRefClass(from.collection, from.alias)
+      return from
     }
     // Must be queryRef due to type system
     return new QueryRefClass(deepCopyQuery(from.query), from.alias)
@@ -808,7 +944,7 @@ function optimizeFromWithTracking(
     // Create a new subquery with the WHERE clause for the collection
     // This is always safe since we're creating a new subquery
     const subQuery: QueryIR = {
-      from: new CollectionRefClass(from.collection, from.alias),
+      from,
       where: [whereClause],
     }
     actuallyOptimized.add(from.alias) // Mark as successfully optimized
@@ -833,23 +969,84 @@ function optimizeFromWithTracking(
   // Add the WHERE clause to the existing subquery
   // Create a deep copy to ensure immutability
   const existingWhere = from.query.where || []
+  const remappedWhere = remapWhereForSubquery(
+    from.query,
+    whereClause,
+    from.alias,
+  )
+  if (remappedWhere === undefined) {
+    return new QueryRefClass(deepCopyQuery(from.query), from.alias)
+  }
   const optimizedSubQuery: QueryIR = {
     ...deepCopyQuery(from.query),
-    where: [...existingWhere, whereClause],
+    where: [...existingWhere, remappedWhere],
   }
   actuallyOptimized.add(from.alias) // Mark as successfully optimized
   return new QueryRefClass(optimizedSubQuery, from.alias)
 }
 
+/**
+ * Rewrites references to an outer QueryRef alias so a pushed predicate can be
+ * evaluated inside the subquery's namespace. Pass-through SELECT fields use
+ * their projected source path; unprojected rows use the first source alias.
+ */
+function remapWhereForSubquery(
+  subquery: QueryIR,
+  whereClause: BasicExpression<boolean>,
+  outerAlias: string,
+): BasicExpression<boolean> | undefined {
+  const firstFromAlias = getFirstFromAlias(subquery)
+  if (firstFromAlias === undefined) return undefined
+
+  const remapExpression = (expression: BasicExpression): BasicExpression => {
+    if (expression instanceof PropRef) {
+      if (expression.path[0] !== outerAlias) return expression
+
+      const field = expression.path[1]
+      const projected = field ? subquery.select?.[field] : undefined
+      const hasNamespacedResult =
+        subquery.join !== undefined || subquery.from.type === `unionFrom`
+      const innerPath =
+        projected instanceof PropRef
+          ? [...projected.path, ...expression.path.slice(2)]
+          : hasNamespacedResult
+            ? expression.path.slice(1)
+            : [firstFromAlias, ...expression.path.slice(1)]
+
+      return new PropRef(innerPath)
+    }
+
+    if (expression instanceof Func) {
+      return new Func(expression.name, expression.args.map(remapExpression))
+    }
+
+    return expression
+  }
+
+  return remapExpression(whereClause) as BasicExpression<boolean>
+}
+
+function optimizeJoinFromWithTracking(
+  from: CollectionRefClass | QueryRefClass,
+  singleSourceClauses: Map<string, BasicExpression<boolean>>,
+  actuallyOptimized: Set<string>,
+): CollectionRefClass | QueryRefClass {
+  return optimizeFromWithTracking(
+    from,
+    singleSourceClauses,
+    actuallyOptimized,
+  ) as CollectionRefClass | QueryRefClass
+}
+
 function unsafeSelect(
   query: QueryIR,
   whereClause: BasicExpression<boolean>,
-  outerAlias: string
+  outerAlias: string,
 ): boolean {
   if (!query.select) return false
 
   return (
-    selectHasAggregates(query.select) ||
+    containsAggregate(query.select) ||
     whereReferencesComputedSelectFields(query.select, whereClause, outerAlias)
   )
 }
@@ -881,35 +1078,16 @@ function unsafeFnSelect(query: QueryIR) {
 function isSafeToPushIntoExistingSubquery(
   query: QueryIR,
   whereClause: BasicExpression<boolean>,
-  outerAlias: string
+  outerAlias: string,
 ): boolean {
   return !(
+    query.distinct ||
     unsafeSelect(query, whereClause, outerAlias) ||
     unsafeGroupBy(query) ||
     unsafeHaving(query) ||
     unsafeOrderBy(query) ||
     unsafeFnSelect(query)
   )
-}
-
-/**
- * Detects whether a SELECT projection contains any aggregate expressions.
- * Recursively traverses nested select objects.
- *
- * @param select - The SELECT object from the IR
- * @returns True if any field is an aggregate, false otherwise
- */
-function selectHasAggregates(select: Select): boolean {
-  for (const value of Object.values(select)) {
-    if (typeof value === `object`) {
-      const v: any = value
-      if (v.type === `agg`) return true
-      if (!(`type` in v)) {
-        if (selectHasAggregates(v as unknown as Select)) return true
-      }
-    }
-  }
-  return false
 }
 
 /**
@@ -956,7 +1134,7 @@ function collectRefs(expr: any): Array<PropRef> {
 function whereReferencesComputedSelectFields(
   select: Select,
   whereClause: BasicExpression<boolean>,
-  outerAlias: string
+  outerAlias: string,
 ): boolean {
   // Build a set of computed field names at the top-level of the subquery output
   const computed = new Set<string>()
@@ -990,7 +1168,7 @@ function whereReferencesComputedSelectFields(
 function referencesAliasWithRemappedSelect(
   subquery: QueryIR,
   whereClause: BasicExpression<boolean>,
-  outerAlias: string
+  outerAlias: string,
 ): boolean {
   const refs = collectRefs(whereClause)
   // Only care about clauses that actually reference the outer alias.
@@ -1008,6 +1186,9 @@ function referencesAliasWithRemappedSelect(
   if (!select) {
     return false
   }
+  const hasSpreadProjection = Object.keys(select).some((key) =>
+    key.startsWith(`__SPREAD_SENTINEL__`),
+  )
 
   for (const ref of refs) {
     const path = ref.path
@@ -1016,8 +1197,12 @@ function referencesAliasWithRemappedSelect(
     if (path[0] !== outerAlias) continue
 
     const projected = select[path[1]!]
-    // Unselected fields can't be remapped, so skip - only care about fields in the SELECT.
-    if (!projected) continue
+    // A spread-selected field has no direct projection entry to remap.
+    // Keep its predicate outside rather than guessing its input source.
+    if (!projected) {
+      if (hasSpreadProjection) return true
+      continue
+    }
 
     // Non-PropRef projections are computed values; cannot push down.
     if (!(projected instanceof PropRef)) {
@@ -1034,7 +1219,8 @@ function referencesAliasWithRemappedSelect(
 
     // Safe only when the projection points straight back to the same alias or the
     // underlying source alias and preserves the field name.
-    if (innerAlias !== outerAlias && innerAlias !== subquery.from.alias) {
+    const firstFromAlias = getFirstFromAlias(subquery)
+    if (innerAlias !== outerAlias && innerAlias !== firstFromAlias) {
       return true
     }
 
@@ -1057,7 +1243,7 @@ function referencesAliasWithRemappedSelect(
  * @throws Error if the expressions array is empty
  */
 function combineWithAnd(
-  expressions: Array<BasicExpression<boolean>>
+  expressions: Array<BasicExpression<boolean>>,
 ): BasicExpression<boolean> {
   if (expressions.length === 0) {
     throw new CannotCombineEmptyExpressionListError()

@@ -1,11 +1,12 @@
-import { describe, expect, it } from "vitest"
-import { CollectionImpl } from "../../../src/collection/index.js"
-import { Query, getQueryIR } from "../../../src/query/builder/index.js"
-import { eq } from "../../../src/query/builder/functions.js"
+import { describe, expect, it } from 'vitest'
+import { CollectionImpl } from '../../../src/collection/index.js'
+import { Query, getQueryIR } from '../../../src/query/builder/index.js'
+import { eq } from '../../../src/query/builder/functions.js'
 import {
+  InvalidSourceTypeError,
   OnlyOneSourceAllowedError,
   QueryMustHaveFromClauseError,
-} from "../../../src/errors"
+} from '../../../src/errors'
 
 // Test schema
 interface Employee {
@@ -16,22 +17,9 @@ interface Employee {
   active: boolean
 }
 
-interface Department {
-  id: number
-  name: string
-  budget: number
-  location: string
-}
-
 // Test collections
 const employeesCollection = new CollectionImpl<Employee>({
   id: `employees`,
-  getKey: (item) => item.id,
-  sync: { sync: () => {} },
-})
-
-const departmentsCollection = new CollectionImpl<Department>({
-  id: `departments`,
   getKey: (item) => item.id,
   sync: { sync: () => {} },
 })
@@ -98,14 +86,80 @@ describe(`QueryBuilder.from`, () => {
     }).toThrow(QueryMustHaveFromClauseError)
   })
 
-  it(`throws error with multiple sources`, () => {
+  it(`rejects multiple sources`, () => {
     const builder = new Query()
 
     expect(() => {
       builder.from({
         employees: employeesCollection,
-        departments: departmentsCollection,
+        otherEmployees: employeesCollection,
       } as any)
     }).toThrow(OnlyOneSourceAllowedError)
+  })
+
+  it(`throws helpful error when passing a string instead of an object`, () => {
+    const builder = new Query()
+
+    expect(() => {
+      builder.from(`employees` as any)
+    }).toThrow(InvalidSourceTypeError)
+
+    expect(() => {
+      builder.from(`employees` as any)
+    }).toThrow(
+      /Invalid source for from clause: Expected an object with a single key-value pair/,
+    )
+  })
+
+  it(`throws helpful error when passing null`, () => {
+    const builder = new Query()
+
+    expect(() => {
+      builder.from(null as any)
+    }).toThrow(InvalidSourceTypeError)
+
+    expect(() => {
+      builder.from(null as any)
+    }).toThrow(
+      /Invalid source for from clause: Expected an object with a single key-value pair/,
+    )
+  })
+
+  it(`throws helpful error when passing an array`, () => {
+    const builder = new Query()
+
+    expect(() => {
+      builder.from([employeesCollection] as any)
+    }).toThrow(InvalidSourceTypeError)
+
+    expect(() => {
+      builder.from([employeesCollection] as any)
+    }).toThrow(
+      /Invalid source for from clause: Expected an object with a single key-value pair/,
+    )
+  })
+
+  it(`throws helpful error when passing undefined`, () => {
+    const builder = new Query()
+
+    expect(() => {
+      builder.from(undefined as any)
+    }).toThrow(InvalidSourceTypeError)
+
+    expect(() => {
+      builder.from(undefined as any)
+    }).toThrow(
+      /Invalid source for from clause: Expected an object with a single key-value pair/,
+    )
+  })
+
+  it(`throws helpful join example when passing invalid join source`, () => {
+    const builder = new Query().from({ employees: employeesCollection })
+
+    expect(() => {
+      builder.join(`departments` as any, () => eq(1, 1))
+    }).toThrow(
+      /Invalid source for join clause: Expected an object with a single key-value pair.*For example: \.join/,
+    )
   })
 })

@@ -1,4 +1,5 @@
-import { BaseLeaderElection } from "./LeaderElection"
+import { safeRandomUUID } from '@tanstack/db'
+import { BaseLeaderElection } from './LeaderElection'
 
 interface LeaderMessage {
   type: `heartbeat` | `election` | `leadership-claim`
@@ -19,7 +20,7 @@ export class BroadcastChannelLeader extends BaseLeaderElection {
   constructor(channelName = `offline-executor-leader`) {
     super()
     this.channelName = channelName
-    this.tabId = crypto.randomUUID()
+    this.tabId = safeRandomUUID()
     this.setupChannel()
   }
 

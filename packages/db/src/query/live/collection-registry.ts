@@ -1,6 +1,6 @@
-import { LIVE_QUERY_INTERNAL } from "./internal.js"
-import type { Collection } from "../../collection/index.js"
-import type { CollectionConfigBuilder } from "./collection-config-builder.js"
+import { LIVE_QUERY_INTERNAL } from './internal.js'
+import type { Collection } from '../../collection/index.js'
+import type { CollectionConfigBuilder } from './collection-config-builder.js'
 
 const collectionBuilderRegistry = new WeakMap<
   Collection<any, any, any>,
@@ -14,7 +14,7 @@ const collectionBuilderRegistry = new WeakMap<
  * @returns The attached builder, or `undefined` if none exists
  */
 export function getBuilderFromConfig(
-  config: object
+  config: object,
 ): CollectionConfigBuilder<any, any> | undefined {
   return (config as any).utils?.[LIVE_QUERY_INTERNAL]?.getBuilder?.()
 }
@@ -29,7 +29,7 @@ export function getBuilderFromConfig(
  */
 export function registerCollectionBuilder(
   collection: Collection<any, any, any>,
-  builder: CollectionConfigBuilder<any, any>
+  builder: CollectionConfigBuilder<any, any>,
 ): void {
   collectionBuilderRegistry.set(collection, builder)
 }
@@ -42,7 +42,7 @@ export function registerCollectionBuilder(
  * @returns The registered builder, or `undefined` if none exists
  */
 export function getCollectionBuilder(
-  collection: Collection<any, any, any>
+  collection: Collection<any, any, any>,
 ): CollectionConfigBuilder<any, any> | undefined {
   return collectionBuilderRegistry.get(collection)
 }

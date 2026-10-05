@@ -48,12 +48,12 @@
  * - **Bag semantics**: Proper multiplicity handling including negatives
  */
 
-import { BinaryOperator, DifferenceStreamWriter } from "../graph.js"
-import { StreamBuilder } from "../d2.js"
-import { MultiSet } from "../multiset.js"
-import { Index } from "../indexes.js"
-import type { DifferenceStreamReader } from "../graph.js"
-import type { IStreamBuilder, KeyValue, PipedOperator } from "../types.js"
+import { BinaryOperator, DifferenceStreamWriter } from '../graph.js'
+import { StreamBuilder } from '../d2.js'
+import { MultiSet } from '../multiset.js'
+import { Index } from '../indexes.js'
+import type { DifferenceStreamReader } from '../graph.js'
+import type { IStreamBuilder, KeyValue, PipedOperator } from '../types.js'
 
 /**
  * Type of join to perform
@@ -75,7 +75,7 @@ export class JoinOperator<K, V1, V2> extends BinaryOperator<
     inputA: DifferenceStreamReader<[K, V1]>,
     inputB: DifferenceStreamReader<[K, V2]>,
     output: DifferenceStreamWriter<any>,
-    mode: JoinType = `inner`
+    mode: JoinType = `inner`,
   ) {
     super(id, inputA, inputB, output)
     this.#mode = mode
@@ -84,10 +84,10 @@ export class JoinOperator<K, V1, V2> extends BinaryOperator<
   run(): void {
     // Build deltas from input messages
     const deltaA = Index.fromMultiSets<K, V1>(
-      this.inputAMessages() as Array<MultiSet<[K, V1]>>
+      this.inputAMessages() as Array<MultiSet<[K, V1]>>,
     )
     const deltaB = Index.fromMultiSets<K, V2>(
-      this.inputBMessages() as Array<MultiSet<[K, V2]>>
+      this.inputBMessages() as Array<MultiSet<[K, V2]>>,
     )
 
     // Early-out if nothing changed
@@ -130,7 +130,7 @@ export class JoinOperator<K, V1, V2> extends BinaryOperator<
   private emitInnerResults(
     deltaA: Index<K, V1>,
     deltaB: Index<K, V2>,
-    results: MultiSet<any>
+    results: MultiSet<any>,
   ): void {
     // Emit the three standard delta terms: ΔA⋈B_old, A_old⋈ΔB, ΔA⋈ΔB
     if (deltaA.size > 0) results.extend(deltaA.join(this.#indexB))
@@ -141,7 +141,7 @@ export class JoinOperator<K, V1, V2> extends BinaryOperator<
   private emitLeftOuterResults(
     deltaA: Index<K, V1>,
     deltaB: Index<K, V2>,
-    results: MultiSet<any>
+    results: MultiSet<any>,
   ): void {
     // Emit unmatched left rows from deltaA
     if (deltaA.size > 0) {
@@ -184,7 +184,7 @@ export class JoinOperator<K, V1, V2> extends BinaryOperator<
           if (multiplicity !== 0) {
             results.add(
               [key, [value, null]],
-              transitioningToMatched ? -multiplicity : +multiplicity
+              transitioningToMatched ? -multiplicity : +multiplicity,
             )
           }
         }
@@ -195,7 +195,7 @@ export class JoinOperator<K, V1, V2> extends BinaryOperator<
   private emitRightOuterResults(
     deltaA: Index<K, V1>,
     deltaB: Index<K, V2>,
-    results: MultiSet<any>
+    results: MultiSet<any>,
   ): void {
     // Emit unmatched right rows from deltaB
     if (deltaB.size > 0) {
@@ -238,7 +238,7 @@ export class JoinOperator<K, V1, V2> extends BinaryOperator<
           if (multiplicity !== 0) {
             results.add(
               [key, [null, value]],
-              transitioningToMatched ? -multiplicity : +multiplicity
+              transitioningToMatched ? -multiplicity : +multiplicity,
             )
           }
         }
@@ -254,29 +254,29 @@ export class JoinOperator<K, V1, V2> extends BinaryOperator<
  */
 export function join<
   K,
-  V1 extends T extends KeyValue<infer _KT, infer VT> ? VT : never,
+  V1 extends (T extends KeyValue<infer _KT, infer VT> ? VT : never),
   V2,
   T,
 >(
   other: IStreamBuilder<KeyValue<K, V2>>,
-  type: JoinType = `inner`
+  type: JoinType = `inner`,
 ): PipedOperator<T, KeyValue<K, [V1 | null, V2 | null]>> {
   return (
-    stream: IStreamBuilder<T>
+    stream: IStreamBuilder<T>,
   ): IStreamBuilder<KeyValue<K, [V1 | null, V2 | null]>> => {
     if (stream.graph !== other.graph) {
       throw new Error(`Cannot join streams from different graphs`)
     }
     const output = new StreamBuilder<KeyValue<K, [V1 | null, V2 | null]>>(
       stream.graph,
-      new DifferenceStreamWriter<KeyValue<K, [V1 | null, V2 | null]>>()
+      new DifferenceStreamWriter<KeyValue<K, [V1 | null, V2 | null]>>(),
     )
     const operator = new JoinOperator<K, V1, V2>(
       stream.graph.getNextOperatorId(),
       stream.connectReader() as DifferenceStreamReader<KeyValue<K, V1>>,
       other.connectReader(),
       output.writer,
-      type
+      type,
     )
     stream.graph.addOperator(operator)
     return output
@@ -289,11 +289,11 @@ export function join<
  */
 export function innerJoin<
   K,
-  V1 extends T extends KeyValue<infer _KT, infer VT> ? VT : never,
+  V1 extends (T extends KeyValue<infer _KT, infer VT> ? VT : never),
   V2,
   T,
 >(
-  other: IStreamBuilder<KeyValue<K, V2>>
+  other: IStreamBuilder<KeyValue<K, V2>>,
 ): PipedOperator<T, KeyValue<K, [V1, V2]>> {
   return join(other, `inner`) as unknown as PipedOperator<
     T,
@@ -307,11 +307,11 @@ export function innerJoin<
  */
 export function antiJoin<
   K,
-  V1 extends T extends KeyValue<infer _KT, infer VT> ? VT : never,
+  V1 extends (T extends KeyValue<infer _KT, infer VT> ? VT : never),
   V2,
   T,
 >(
-  other: IStreamBuilder<KeyValue<K, V2>>
+  other: IStreamBuilder<KeyValue<K, V2>>,
 ): PipedOperator<T, KeyValue<K, [V1, null]>> {
   return join(other, `anti`) as unknown as PipedOperator<
     T,
@@ -325,11 +325,11 @@ export function antiJoin<
  */
 export function leftJoin<
   K,
-  V1 extends T extends KeyValue<infer _KT, infer VT> ? VT : never,
+  V1 extends (T extends KeyValue<infer _KT, infer VT> ? VT : never),
   V2,
   T,
 >(
-  other: IStreamBuilder<KeyValue<K, V2>>
+  other: IStreamBuilder<KeyValue<K, V2>>,
 ): PipedOperator<T, KeyValue<K, [V1, V2 | null]>> {
   return join(other, `left`) as unknown as PipedOperator<
     T,
@@ -343,11 +343,11 @@ export function leftJoin<
  */
 export function rightJoin<
   K,
-  V1 extends T extends KeyValue<infer _KT, infer VT> ? VT : never,
+  V1 extends (T extends KeyValue<infer _KT, infer VT> ? VT : never),
   V2,
   T,
 >(
-  other: IStreamBuilder<KeyValue<K, V2>>
+  other: IStreamBuilder<KeyValue<K, V2>>,
 ): PipedOperator<T, KeyValue<K, [V1 | null, V2]>> {
   return join(other, `right`) as unknown as PipedOperator<
     T,
@@ -361,11 +361,11 @@ export function rightJoin<
  */
 export function fullJoin<
   K,
-  V1 extends T extends KeyValue<infer _KT, infer VT> ? VT : never,
+  V1 extends (T extends KeyValue<infer _KT, infer VT> ? VT : never),
   V2,
   T,
 >(
-  other: IStreamBuilder<KeyValue<K, V2>>
+  other: IStreamBuilder<KeyValue<K, V2>>,
 ): PipedOperator<T, KeyValue<K, [V1 | null, V2 | null]>> {
   return join(other, `full`) as unknown as PipedOperator<
     T,

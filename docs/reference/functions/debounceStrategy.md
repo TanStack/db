@@ -3,8 +3,6 @@ id: debounceStrategy
 title: debounceStrategy
 ---
 
-# Function: debounceStrategy()
-
 ```ts
 function debounceStrategy(options): DebounceStrategy;
 ```
@@ -21,13 +19,13 @@ to wait for the user to stop typing before persisting changes.
 
 ### options
 
-[`DebounceStrategyOptions`](../../interfaces/DebounceStrategyOptions.md)
+[`DebounceStrategyOptions`](../interfaces/DebounceStrategyOptions.md)
 
 Configuration for the debounce behavior
 
 ## Returns
 
-[`DebounceStrategy`](../../interfaces/DebounceStrategy.md)
+[`DebounceStrategy`](../interfaces/DebounceStrategy.md)
 
 A debounce strategy instance
 

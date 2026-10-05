@@ -1,30 +1,43 @@
 import {
   computed,
   getCurrentInstance,
-  nextTick,
   onUnmounted,
   reactive,
   ref,
+  shallowRef,
   toValue,
   watchEffect,
-} from "vue"
-import { createLiveQueryCollection } from "@tanstack/db"
+} from 'vue'
+import {
+  BaseQueryBuilder,
+  createLiveQueryCollection,
+  createLiveQueryObserver,
+  getPublicCollection,
+  isCollection,
+  isSingleResultCollection,
+  resolveLiveQueryValue,
+} from '@tanstack/db'
 import type {
   ChangeMessage,
   Collection,
   CollectionStatus,
   Context,
   GetResult,
+  InferResultType,
   InitialQueryBuilder,
   LiveQueryCollectionConfig,
+  LiveQueryObserver,
+  LiveQueryPersistedStatus,
+  NonSingleResult,
   QueryBuilder,
-} from "@tanstack/db"
-import type { ComputedRef, MaybeRefOrGetter } from "vue"
+  SingleResult,
+} from '@tanstack/db'
+import type { ComputedRef, MaybeRefOrGetter } from 'vue'
 
 /**
  * Return type for useLiveQuery hook
  * @property state - Reactive Map of query results (key → item)
- * @property data - Reactive array of query results in order
+ * @property data - Reactive array of query results in order, or single result for findOne queries
  * @property collection - The underlying query collection instance
  * @property status - Current query status
  * @property isLoading - True while initial query data is loading
@@ -33,16 +46,37 @@ import type { ComputedRef, MaybeRefOrGetter } from "vue"
  * @property isError - True when query encountered an error
  * @property isCleanedUp - True when query has been cleaned up
  */
-export interface UseLiveQueryReturn<T extends object> {
-  state: ComputedRef<Map<string | number, T>>
-  data: ComputedRef<Array<T>>
-  collection: ComputedRef<Collection<T, string | number, {}>>
+export interface UseLiveQueryReturn<TContext extends Context> {
+  state: ComputedRef<Map<string | number, GetResult<TContext>>>
+  data: ComputedRef<InferResultType<TContext>>
+  collection: ComputedRef<Collection<GetResult<TContext>, string | number, {}>>
   status: ComputedRef<CollectionStatus>
   isLoading: ComputedRef<boolean>
   isReady: ComputedRef<boolean>
+  persistedStatus: ComputedRef<LiveQueryPersistedStatus>
+  isPersistedReady: ComputedRef<boolean>
+  persistedError: ComputedRef<unknown | undefined>
   isIdle: ComputedRef<boolean>
   isError: ComputedRef<boolean>
   isCleanedUp: ComputedRef<boolean>
+}
+
+type InferConditionalResultType<TContext extends Context> =
+  TContext extends SingleResult
+    ? InferResultType<TContext> | []
+    : InferResultType<TContext>
+
+export type ConditionalUseLiveQueryReturn<TContext extends Context> = Omit<
+  UseLiveQueryReturn<TContext>,
+  `data` | `collection` | `status`
+> & {
+  data: ComputedRef<InferConditionalResultType<TContext>>
+  collection: ComputedRef<Collection<
+    GetResult<TContext>,
+    string | number,
+    {}
+  > | null>
+  status: ComputedRef<CollectionStatus | `disabled`>
 }
 
 export interface UseLiveQueryReturnWithCollection<
@@ -56,6 +90,28 @@ export interface UseLiveQueryReturnWithCollection<
   status: ComputedRef<CollectionStatus>
   isLoading: ComputedRef<boolean>
   isReady: ComputedRef<boolean>
+  persistedStatus: ComputedRef<LiveQueryPersistedStatus>
+  isPersistedReady: ComputedRef<boolean>
+  persistedError: ComputedRef<unknown | undefined>
+  isIdle: ComputedRef<boolean>
+  isError: ComputedRef<boolean>
+  isCleanedUp: ComputedRef<boolean>
+}
+
+export interface UseLiveQueryReturnWithSingleResultCollection<
+  T extends object,
+  TKey extends string | number,
+  TUtils extends Record<string, any>,
+> {
+  state: ComputedRef<Map<TKey, T>>
+  data: ComputedRef<T | undefined>
+  collection: ComputedRef<Collection<T, TKey, TUtils> & SingleResult>
+  status: ComputedRef<CollectionStatus>
+  isLoading: ComputedRef<boolean>
+  isReady: ComputedRef<boolean>
+  persistedStatus: ComputedRef<LiveQueryPersistedStatus>
+  isPersistedReady: ComputedRef<boolean>
+  persistedError: ComputedRef<unknown | undefined>
   isIdle: ComputedRef<boolean>
   isError: ComputedRef<boolean>
   isCleanedUp: ComputedRef<boolean>
@@ -110,11 +166,19 @@ export interface UseLiveQueryReturnWithCollection<
  * //   <li v-for="todo in data" :key="todo.id">{{ todo.text }}</li>
  * // </ul>
  */
-// Overload 1: Accept just the query function
+// Overload 1: Accept query function that always returns QueryBuilder
 export function useLiveQuery<TContext extends Context>(
   queryFn: (q: InitialQueryBuilder) => QueryBuilder<TContext>,
-  deps?: Array<MaybeRefOrGetter<unknown>>
-): UseLiveQueryReturn<GetResult<TContext>>
+  deps?: Array<MaybeRefOrGetter<unknown>>,
+): UseLiveQueryReturn<TContext>
+
+// Overload 1b: Accept query function that can return undefined/null
+export function useLiveQuery<TContext extends Context>(
+  queryFn: (
+    q: InitialQueryBuilder,
+  ) => QueryBuilder<TContext> | undefined | null,
+  deps?: Array<MaybeRefOrGetter<unknown>>,
+): ConditionalUseLiveQueryReturn<TContext>
 
 /**
  * Create a live query using configuration object
@@ -151,8 +215,8 @@ export function useLiveQuery<TContext extends Context>(
 // Overload 2: Accept config object
 export function useLiveQuery<TContext extends Context>(
   config: LiveQueryCollectionConfig<TContext>,
-  deps?: Array<MaybeRefOrGetter<unknown>>
-): UseLiveQueryReturn<GetResult<TContext>>
+  deps?: Array<MaybeRefOrGetter<unknown>>,
+): UseLiveQueryReturn<TContext>
 
 /**
  * Subscribe to an existing query collection (can be reactive)
@@ -193,43 +257,68 @@ export function useLiveQuery<TContext extends Context>(
  * //   <Item v-for="item in data" :key="item.id" v-bind="item" />
  * // </div>
  */
-// Overload 3: Accept pre-created live query collection (can be reactive)
+// Overload 3: Accept pre-created live query collection (can be reactive) - non-single result
 export function useLiveQuery<
   TResult extends object,
   TKey extends string | number,
   TUtils extends Record<string, any>,
 >(
-  liveQueryCollection: MaybeRefOrGetter<Collection<TResult, TKey, TUtils>>
+  liveQueryCollection: MaybeRefOrGetter<
+    Collection<TResult, TKey, TUtils> & NonSingleResult
+  >,
 ): UseLiveQueryReturnWithCollection<TResult, TKey, TUtils>
+
+// Overload 4: Accept pre-created live query collection with singleResult: true
+export function useLiveQuery<
+  TResult extends object,
+  TKey extends string | number,
+  TUtils extends Record<string, any>,
+>(
+  liveQueryCollection: MaybeRefOrGetter<
+    Collection<TResult, TKey, TUtils> & SingleResult
+  >,
+): UseLiveQueryReturnWithSingleResultCollection<TResult, TKey, TUtils>
 
 // Implementation
 export function useLiveQuery(
   configOrQueryOrCollection: any,
-  deps: Array<MaybeRefOrGetter<unknown>> = []
+  deps: Array<MaybeRefOrGetter<unknown>> = [],
 ): UseLiveQueryReturn<any> | UseLiveQueryReturnWithCollection<any, any, any> {
   const collection = computed(() => {
     // First check if the original parameter might be a ref/getter
     // by seeing if toValue returns something different than the original
+    // NOTE: Don't call toValue on functions - toValue treats functions as getters and calls them!
     let unwrappedParam = configOrQueryOrCollection
-    try {
-      const potentiallyUnwrapped = toValue(configOrQueryOrCollection)
-      if (potentiallyUnwrapped !== configOrQueryOrCollection) {
-        unwrappedParam = potentiallyUnwrapped
+    if (typeof configOrQueryOrCollection !== `function`) {
+      try {
+        const potentiallyUnwrapped = toValue(configOrQueryOrCollection)
+        if (potentiallyUnwrapped !== configOrQueryOrCollection) {
+          unwrappedParam = potentiallyUnwrapped
+        }
+      } catch {
+        // If toValue fails, use original parameter
+        unwrappedParam = configOrQueryOrCollection
       }
-    } catch {
-      // If toValue fails, use original parameter
-      unwrappedParam = configOrQueryOrCollection
     }
 
-    // Check if it's already a collection by checking for specific collection methods
-    const isCollection =
-      unwrappedParam &&
-      typeof unwrappedParam === `object` &&
-      typeof unwrappedParam.subscribeChanges === `function` &&
-      typeof unwrappedParam.startSyncImmediate === `function` &&
-      typeof unwrappedParam.id === `string`
+    // Check if it's already a collection
+    const inputIsCollection = isCollection(unwrappedParam)
 
-    if (isCollection) {
+    if (inputIsCollection) {
+      // Warn when passing a collection directly with on-demand sync mode
+      // In on-demand mode, data is only loaded when queries with predicates request it
+      // Passing the collection directly doesn't provide any predicates, so no data loads
+      const syncMode = (unwrappedParam as { config?: { syncMode?: string } })
+        .config?.syncMode
+      if (syncMode === `on-demand`) {
+        console.warn(
+          `[useLiveQuery] Warning: Passing a collection with syncMode "on-demand" directly to useLiveQuery ` +
+            `will not load any data. In on-demand mode, data is only loaded when queries with predicates request it.\n\n` +
+            `Instead, use a query builder function:\n` +
+            `  const { data } = useLiveQuery((q) => q.from({ c: myCollection }).select(({ c }) => c))\n\n` +
+            `Or switch to syncMode "eager" if you want all data to sync automatically.`,
+        )
+      }
       // It's already a collection, ensure sync is started for Vue hooks
       // Only start sync if the collection is in idle state
       if (unwrappedParam.status === `idle`) {
@@ -243,10 +332,10 @@ export function useLiveQuery(
 
     // Ensure we always start sync for Vue hooks
     if (typeof unwrappedParam === `function`) {
-      return createLiveQueryCollection({
-        query: unwrappedParam,
-        startSync: true,
-      })
+      // A query function returning null or undefined disables the query.
+      return resolveLiveQueryValue(
+        unwrappedParam(new BaseQueryBuilder() as InitialQueryBuilder),
+      )
     } else {
       return createLiveQueryCollection({
         ...unwrappedParam,
@@ -259,114 +348,117 @@ export function useLiveQuery(
   const state = reactive(new Map<string | number, any>())
 
   // Reactive data array that maintains sorted order
-  const internalData = reactive<Array<any>>([])
+  const internalData = ref<Array<any>>([])
 
   // Computed wrapper for the data to match expected return type
-  const data = computed(() => internalData)
+  // Returns single item for singleResult collections, array otherwise
+  const data = computed(() => {
+    const currentCollection = collection.value
+    if (!currentCollection) {
+      return internalData.value
+    }
+    return isSingleResultCollection(currentCollection)
+      ? internalData.value[0]
+      : internalData.value
+  })
 
   // Track collection status reactively
-  const status = ref(collection.value.status)
+  const status = ref(
+    collection.value ? collection.value.status : (`disabled` as const),
+  )
+  const persistedStatus = ref<LiveQueryPersistedStatus>(`unavailable`)
+  const persistedError = shallowRef<unknown>(undefined)
 
-  // Helper to sync data array from collection in correct order
-  const syncDataFromCollection = (
-    currentCollection: Collection<any, any, any>
-  ) => {
-    internalData.length = 0
-    internalData.push(...Array.from(currentCollection.values()))
+  // The shared observer owns subscription, the ready-race, and status; Vue
+  // materializes into its own reactive map (granular) + ordered array.
+  let currentObserver: LiveQueryObserver<any, any> | null = null
+
+  const syncFromObserver = (observer: LiveQueryObserver<any, any>) => {
+    const snapshot = observer.getSnapshot()
+    status.value = snapshot.status as CollectionStatus
+    persistedStatus.value = snapshot.persistedStatus
+    persistedError.value = snapshot.persistedError
+    internalData.value = Array.from(snapshot.state?.values() ?? [])
   }
-
-  // Track current unsubscribe function
-  let currentUnsubscribe: (() => void) | null = null
 
   // Watch for collection changes and subscribe to updates
   watchEffect((onInvalidate) => {
     const currentCollection = collection.value
 
-    // Update status ref whenever the effect runs
-    status.value = currentCollection.status
+    // Tear down any previous observer.
+    currentObserver?.dispose()
+    currentObserver = null
 
-    // Clean up previous subscription
-    if (currentUnsubscribe) {
-      currentUnsubscribe()
+    // Handle null collection (disabled query)
+    if (!currentCollection) {
+      status.value = `disabled` as const
+      persistedStatus.value = `unavailable`
+      persistedError.value = undefined
+      state.clear()
+      internalData.value = []
+      return
     }
 
-    // Initialize state with current collection data
+    const observer = createLiveQueryObserver(currentCollection)
+    currentObserver = observer
+
+    // Initial rows arrive as the observer's first delta (includeInitialState);
+    // apply them and every subsequent delta granularly to the reactive map.
     state.clear()
-    for (const [key, value] of currentCollection.entries()) {
-      state.set(key, value)
-    }
 
-    // Initialize data array in correct order
-    syncDataFromCollection(currentCollection)
-
-    // Listen for the first ready event to catch status transitions
-    // that might not trigger change events (fixes async status transition bug)
-    currentCollection.onFirstReady(() => {
-      // Use nextTick to ensure Vue reactivity updates properly
-      nextTick(() => {
-        status.value = currentCollection.status
-      })
-    })
-
-    // Subscribe to collection changes with granular updates
-    const subscription = currentCollection.subscribeChanges(
-      (changes: Array<ChangeMessage<any>>) => {
-        // Apply each change individually to the reactive state
-        for (const change of changes) {
-          switch (change.type) {
-            case `insert`:
-            case `update`:
-              state.set(change.key, change.value)
-              break
-            case `delete`:
-              state.delete(change.key)
-              break
+    const unsubscribe = observer.subscribe(
+      (changes: Array<ChangeMessage<any>> | undefined) => {
+        if (changes) {
+          for (const change of changes) {
+            switch (change.type) {
+              case `insert`:
+              case `update`:
+                state.set(change.key, change.value)
+                break
+              case `delete`:
+                state.delete(change.key)
+                break
+            }
+          }
+        } else {
+          // Cleanup and other status-only publications carry no row deltas.
+          // Rebuild the keyed view so it cannot diverge from ordered data.
+          state.clear()
+          for (const [key, value] of observer.getSnapshot().state ?? []) {
+            state.set(key, value)
           }
         }
-
-        // Update the data array to maintain sorted order
-        syncDataFromCollection(currentCollection)
-        // Update status ref on every change
-        status.value = currentCollection.status
+        syncFromObserver(observer)
       },
-      {
-        includeInitialState: true,
-      }
     )
-
-    currentUnsubscribe = subscription.unsubscribe.bind(subscription)
-
-    // Preload collection data if not already started
-    if (currentCollection.status === `idle`) {
-      currentCollection.preload().catch(console.error)
-    }
+    syncFromObserver(observer)
 
     // Cleanup when effect is invalidated
     onInvalidate(() => {
-      if (currentUnsubscribe) {
-        currentUnsubscribe()
-        currentUnsubscribe = null
-      }
+      unsubscribe()
+      observer.dispose()
+      currentObserver = null
     })
   })
 
   // Cleanup on unmount (only if we're in a component context)
   const instance = getCurrentInstance()
   if (instance) {
-    onUnmounted(() => {
-      if (currentUnsubscribe) {
-        currentUnsubscribe()
-      }
-    })
+    onUnmounted(() => currentObserver?.dispose())
   }
 
   return {
     state: computed(() => state),
     data,
-    collection: computed(() => collection.value),
+    collection: computed(() => getPublicCollection(collection.value)),
     status: computed(() => status.value),
     isLoading: computed(() => status.value === `loading`),
-    isReady: computed(() => status.value === `ready`),
+    isReady: computed(
+      () => status.value === `ready` || status.value === `disabled`,
+    ),
+    persistedStatus: computed(() => persistedStatus.value),
+    isPersistedReady: computed(() => persistedStatus.value === `ready`),
+    persistedError: computed(() => persistedError.value),
     isIdle: computed(() => status.value === `idle`),
     isError: computed(() => status.value === `error`),
     isCleanedUp: computed(() => status.value === `cleaned-up`),

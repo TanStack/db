@@ -3,13 +3,11 @@ id: PowerSyncCollectionUtils
 title: PowerSyncCollectionUtils
 ---
 
-# Type Alias: PowerSyncCollectionUtils\<TTable\>
-
 ```ts
 type PowerSyncCollectionUtils<TTable> = object;
 ```
 
-Defined in: [definitions.ts:267](https://github.com/TanStack/db/blob/main/packages/powersync-db-collection/src/definitions.ts#L267)
+Defined in: [definitions.ts:321](https://github.com/TanStack/db/blob/main/packages/powersync-db-collection/src/definitions.ts#L321)
 
 Collection-level utilities for PowerSync.
 
@@ -27,8 +25,8 @@ Collection-level utilities for PowerSync.
 getMeta: () => PowerSyncCollectionMeta<TTable>;
 ```
 
-Defined in: [definitions.ts:268](https://github.com/TanStack/db/blob/main/packages/powersync-db-collection/src/definitions.ts#L268)
+Defined in: [definitions.ts:322](https://github.com/TanStack/db/blob/main/packages/powersync-db-collection/src/definitions.ts#L322)
 
 #### Returns
 
-[`PowerSyncCollectionMeta`](../PowerSyncCollectionMeta.md)\<`TTable`\>
+[`PowerSyncCollectionMeta`](PowerSyncCollectionMeta.md)\<`TTable`\>

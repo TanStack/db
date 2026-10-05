@@ -1,16 +1,16 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
-import { createCollection } from "@tanstack/db"
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { createCollection } from '@tanstack/db'
 import {
   IndexedDBAdapter,
   LocalStorageAdapter,
   startOfflineExecutor,
-} from "../src/index"
-import type { OfflineConfig, StorageDiagnostic } from "../src/types"
+} from '../src/index'
+import type { OfflineConfig, StorageDiagnostic } from '../src/types'
 
 const waitUntil = async (
   predicate: () => boolean | Promise<boolean>,
   timeoutMs = 5000,
-  intervalMs = 20
+  intervalMs = 20,
 ) => {
   const deadline = Date.now() + timeoutMs
   while (Date.now() < deadline) {
@@ -40,7 +40,7 @@ describe(`storage failure handling`, () => {
 
     baseConfig = {
       collections: {
-        "test-collection": mockCollection,
+        'test-collection': mockCollection,
       },
       mutationFns: {
         syncData: mockMutationFn,
@@ -71,14 +71,14 @@ describe(`storage failure handling`, () => {
 
     // Wait for initialization to complete
     await waitUntil(
-      () => executor.storageDiagnostic.message !== `Initializing storage...`
+      () => executor.storageDiagnostic.message !== `Initializing storage...`,
     )
 
     // Should be in offline mode using localStorage
     expect(executor.mode).toBe(`offline`)
     expect(executor.storageDiagnostic.code).toBe(`INDEXEDDB_UNAVAILABLE`)
     expect(executor.storageDiagnostic.message).toContain(
-      `localStorage fallback`
+      `localStorage fallback`,
     )
     expect(executor.storageDiagnostic.error).toBe(securityError)
 
@@ -114,7 +114,7 @@ describe(`storage failure handling`, () => {
     const executor = startOfflineExecutor(config)
 
     await waitUntil(
-      () => executor.storageDiagnostic.message !== `Initializing storage...`
+      () => executor.storageDiagnostic.message !== `Initializing storage...`,
     )
 
     // Should be in online-only mode
@@ -159,7 +159,7 @@ describe(`storage failure handling`, () => {
     const executor = startOfflineExecutor(config)
 
     await waitUntil(
-      () => executor.storageDiagnostic.message !== `Initializing storage...`
+      () => executor.storageDiagnostic.message !== `Initializing storage...`,
     )
 
     // Should be in online-only mode with QUOTA_EXCEEDED
@@ -193,7 +193,7 @@ describe(`storage failure handling`, () => {
     const executor = startOfflineExecutor(baseConfig)
 
     await waitUntil(
-      () => executor.storageDiagnostic.message !== `Initializing storage...`
+      () => executor.storageDiagnostic.message !== `Initializing storage...`,
     )
 
     // Should be in online-only mode with UNKNOWN_ERROR
@@ -225,7 +225,7 @@ describe(`storage failure handling`, () => {
     const executor = startOfflineExecutor(config)
 
     await waitUntil(
-      () => executor.storageDiagnostic.message !== `Initializing storage...`
+      () => executor.storageDiagnostic.message !== `Initializing storage...`,
     )
 
     // Should be in offline mode
@@ -375,7 +375,7 @@ describe(`storage failure handling`, () => {
     const executor = startOfflineExecutor(baseConfig)
 
     await waitUntil(
-      () => executor.storageDiagnostic.message !== `Initializing storage...`
+      () => executor.storageDiagnostic.message !== `Initializing storage...`,
     )
 
     // Should detect SecurityError and use STORAGE_BLOCKED

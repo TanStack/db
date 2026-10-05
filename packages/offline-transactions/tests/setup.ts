@@ -1,4 +1,4 @@
-import { vi } from "vitest"
+import { vi } from 'vitest'
 
 // Mock browser APIs that might not be available in test environment
 Object.defineProperty(global, `crypto`, {

@@ -1,7 +1,7 @@
-import { describe, expect, it } from "vitest"
-import { CollectionImpl } from "../../../src/collection/index.js"
-import { Query, getQueryIR } from "../../../src/query/builder/index.js"
-import { eq, upper } from "../../../src/query/builder/functions.js"
+import { describe, expect, it } from 'vitest'
+import { CollectionImpl } from '../../../src/collection/index.js'
+import { Query, getQueryIR } from '../../../src/query/builder/index.js'
+import { eq, upper } from '../../../src/query/builder/functions.js'
 
 // Test schema
 interface Employee {
@@ -162,12 +162,34 @@ describe(`QueryBuilder.orderBy`, () => {
     expect(builtQuery.orderBy![0]!.compareOptions.stringSort).toBe(`locale`)
     expect((builtQuery.orderBy![0]!.compareOptions as any).locale).toBe(`de-DE`)
     expect(
-      (builtQuery.orderBy![0]!.compareOptions as any).localeOptions
+      (builtQuery.orderBy![0]!.compareOptions as any).localeOptions,
     ).toEqual({
       sensitivity: `base`,
     })
     expect(builtQuery.orderBy![0]!.compareOptions.nulls).toBe(`first`)
     expect(builtQuery.orderBy![0]!.compareOptions.direction).toBe(`asc`)
+  })
+
+  it(`preserves a custom string comparator by exact reference`, () => {
+    const compare = (a: string, b: string) => a.length - b.length
+    const query = new Query()
+      .from({ employees: employeesCollection })
+      .orderBy(({ employees }) => employees.name, {
+        direction: `desc`,
+        stringSort: `custom`,
+        compare,
+      })
+
+    const clause = getQueryIR(query).orderBy![0]!
+    expect(clause.compareOptions).toMatchObject({
+      direction: `desc`,
+      nulls: `first`,
+      stringSort: `custom`,
+    })
+    if (clause.compareOptions.stringSort !== `custom`) {
+      throw new Error(`expected custom string collation`)
+    }
+    expect(clause.compareOptions.compare).toBe(compare)
   })
 
   it(`supports simple order by expressions`, () => {

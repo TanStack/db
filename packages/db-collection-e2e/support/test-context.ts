@@ -1,8 +1,8 @@
-import { test, inject } from "vitest"
-import { Client } from "pg"
-import { makePgClient } from "./global-setup"
-import type { SeedDataResult } from "../src/types"
-import { generateSeedData } from "../src/fixtures/seed-data"
+import { inject, test } from 'vitest'
+import { generateSeedData } from '../src/fixtures/seed-data'
+import { makePgClient } from './global-setup'
+import type { Client } from 'pg'
+import type { SeedDataResult } from '../src/types'
 
 /**
  * Base fixture with database client and abort controller
@@ -14,8 +14,9 @@ export const testWithDb = test.extend<{
   testSchema: string
   tableName: (base: string) => string
 }>({
+  // eslint-disable-next-line no-empty-pattern
   dbClient: async ({}, use) => {
-    const schema = inject("testSchema")
+    const schema = inject('testSchema')
     const client = makePgClient({
       options: `-csearch_path=${schema}`,
     })
@@ -28,24 +29,27 @@ export const testWithDb = test.extend<{
     await client.end()
   },
 
+  // eslint-disable-next-line no-empty-pattern
   aborter: async ({}, use) => {
     const controller = new AbortController()
     await use(controller)
-    controller.abort("Test complete")
+    controller.abort('Test complete')
   },
 
+  // eslint-disable-next-line no-empty-pattern
   baseUrl: async ({}, use) => {
-    await use(inject("baseUrl"))
+    await use(inject('baseUrl'))
   },
 
+  // eslint-disable-next-line no-empty-pattern
   testSchema: async ({}, use) => {
-    await use(inject("testSchema"))
+    await use(inject('testSchema'))
   },
 
   tableName: async ({ task }, use) => {
     // Generate unique table names based on task ID and random suffix
     await use((base: string) => {
-      const taskId = task.id.replace(/[^a-zA-Z0-9]/g, "_")
+      const taskId = task.id.replace(/[^a-zA-Z0-9]/g, '_')
       const random = Math.random().toString(16).slice(2, 8)
       return `"${base}_${taskId}_${random}"`
     })
@@ -62,9 +66,9 @@ export const testWithTables = testWithDb.extend<{
   dropTables: () => Promise<void>
 }>({
   usersTable: async ({ dbClient, tableName, task }, use) => {
-    const name = tableName("users")
-    const taskFile = task.file?.name.replace(/'/g, "`") ?? "unknown"
-    const taskName = task.name.replace(/'/g, "`")
+    const name = tableName('users')
+    const taskFile = task.file.name.replace(/'/g, '`')
+    const taskName = task.name.replace(/'/g, '`')
 
     await dbClient.query(`
       DROP TABLE IF EXISTS ${name};
@@ -90,10 +94,11 @@ export const testWithTables = testWithDb.extend<{
     }
   },
 
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   postsTable: async ({ dbClient, tableName, usersTable, task }, use) => {
-    const name = tableName("posts")
-    const taskFile = task.file?.name.replace(/'/g, "`") ?? "unknown"
-    const taskName = task.name.replace(/'/g, "`")
+    const name = tableName('posts')
+    const taskFile = task.file.name.replace(/'/g, '`')
+    const taskName = task.name.replace(/'/g, '`')
 
     await dbClient.query(`
       DROP TABLE IF EXISTS ${name};
@@ -119,12 +124,13 @@ export const testWithTables = testWithDb.extend<{
   },
 
   commentsTable: async (
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
     { dbClient, tableName, postsTable, usersTable, task },
-    use
+    use,
   ) => {
-    const name = tableName("comments")
-    const taskFile = task.file?.name.replace(/'/g, "`") ?? "unknown"
-    const taskName = task.name.replace(/'/g, "`")
+    const name = tableName('comments')
+    const taskFile = task.file.name.replace(/'/g, '`')
+    const taskName = task.name.replace(/'/g, '`')
 
     await dbClient.query(`
       DROP TABLE IF EXISTS ${name};
@@ -150,7 +156,7 @@ export const testWithTables = testWithDb.extend<{
 
   dropTables: async (
     { dbClient, usersTable, postsTable, commentsTable },
-    use
+    use,
   ) => {
     await use(async () => {
       try {
@@ -158,7 +164,7 @@ export const testWithTables = testWithDb.extend<{
         await dbClient.query(`DROP TABLE IF EXISTS ${postsTable}`)
         await dbClient.query(`DROP TABLE IF EXISTS ${usersTable}`)
       } catch (error) {
-        console.error("Error dropping tables:", error)
+        console.error('Error dropping tables:', error)
       }
     })
   },
@@ -171,6 +177,7 @@ export const testWithSeedData = testWithTables.extend<{
   seedData: SeedDataResult
   insertSeedData: () => Promise<void>
 }>({
+  // eslint-disable-next-line no-empty-pattern
   seedData: async ({}, use) => {
     const seed = generateSeedData()
     await use(seed)
@@ -178,7 +185,7 @@ export const testWithSeedData = testWithTables.extend<{
 
   insertSeedData: async (
     { dbClient, usersTable, postsTable, commentsTable, seedData },
-    use
+    use,
   ) => {
     await use(async () => {
       // Insert users
@@ -195,7 +202,7 @@ export const testWithSeedData = testWithTables.extend<{
             user.createdAt,
             user.metadata ? JSON.stringify(user.metadata) : null,
             user.deletedAt,
-          ]
+          ],
         )
       }
 
@@ -212,7 +219,7 @@ export const testWithSeedData = testWithTables.extend<{
             post.viewCount,
             post.publishedAt,
             post.deletedAt,
-          ]
+          ],
         )
       }
 
@@ -228,7 +235,7 @@ export const testWithSeedData = testWithTables.extend<{
             comment.text,
             comment.createdAt,
             comment.deletedAt,
-          ]
+          ],
         )
       }
     })

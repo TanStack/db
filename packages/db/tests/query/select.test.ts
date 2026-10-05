@@ -1,8 +1,9 @@
-import { beforeEach, describe, expect, it } from "vitest"
-import { createCollection } from "../../src/collection/index.js"
-import { createLiveQueryCollection } from "../../src/query/index.js"
-import { mockSyncCollectionOptions } from "../utils.js"
-import { upper } from "../../src/query/builder/functions.js"
+import { beforeEach, describe, expect, it } from 'vitest'
+import { createCollection } from '../../src/collection/index.js'
+import { createLiveQueryCollection, queryOnce } from '../../src/query/index.js'
+import { UnsafeAliasPathError } from '../../src/errors.js'
+import { mockSyncCollectionOptions } from '../utils.js'
+import { upper } from '../../src/query/builder/functions.js'
 
 type User = {
   id: number
@@ -49,7 +50,7 @@ function createUsers() {
       id: `nested-select-users`,
       getKey: (u) => u.id,
       initialData: data,
-    })
+    }),
   )
 }
 
@@ -68,7 +69,7 @@ describe(`nested select projections`, () => {
           city: u.address?.city,
           coords: u.address?.coordinates,
         },
-      }))
+      })),
     )
 
     await collection.preload()
@@ -93,7 +94,7 @@ describe(`nested select projections`, () => {
           // spread all preference fields under preferences
           ...u.profile.preferences,
         },
-      }))
+      })),
     )
 
     await collection.preload()
@@ -115,7 +116,7 @@ describe(`nested select projections`, () => {
             ...u.profile,
           },
         },
-      }))
+      })),
     )
 
     await collection.preload()
@@ -127,5 +128,47 @@ describe(`nested select projections`, () => {
       bio: `Engineer`,
       preferences: { notifications: true, theme: `dark` },
     })
+  })
+})
+
+function prototypeHasOwn(prop: string): boolean {
+  return Object.prototype.hasOwnProperty.call(Object.prototype, prop)
+}
+
+describe(`select() alias prototype pollution`, () => {
+  let users: ReturnType<typeof createUsers>
+
+  beforeEach(() => {
+    users = createUsers()
+  })
+
+  it(`should reject __proto__ in alias path and not pollute Object.prototype`, async () => {
+    const hadBefore = prototypeHasOwn(`polluted`)
+
+    await expect(
+      queryOnce((q) =>
+        q.from({ user: users }).select(({ user }) => ({
+          [`__proto__.polluted`]: user.name,
+        })),
+      ),
+    ).rejects.toThrow(UnsafeAliasPathError)
+
+    expect(prototypeHasOwn(`polluted`)).toBe(hadBefore)
+    expect(prototypeHasOwn(`polluted`)).toBe(false)
+  })
+
+  it(`should reject constructor in alias path and not pollute Object.prototype`, async () => {
+    const hadBefore = prototypeHasOwn(`polluted`)
+
+    await expect(
+      queryOnce((q) =>
+        q.from({ user: users }).select(({ user }) => ({
+          [`constructor.prototype.polluted`]: user.name,
+        })),
+      ),
+    ).rejects.toThrow(UnsafeAliasPathError)
+
+    expect(prototypeHasOwn(`polluted`)).toBe(hadBefore)
+    expect(prototypeHasOwn(`polluted`)).toBe(false)
   })
 })

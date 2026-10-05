@@ -1,6 +1,7 @@
-import { map } from "./map.js"
-import { reduce } from "./reduce.js"
-import type { IStreamBuilder, KeyValue } from "../types.js"
+import { serializeValue } from '../utils.js'
+import { map } from './map.js'
+import { reduce } from './reduce.js'
+import type { IStreamBuilder, KeyValue } from '../types.js'
 
 type GroupKey = Record<string, unknown>
 
@@ -15,8 +16,7 @@ type PipedAggregateFunction<T, R> = {
 }
 
 type AggregateFunction<T, R, V = unknown> =
-  | BasicAggregateFunction<T, R, V>
-  | PipedAggregateFunction<T, R>
+  BasicAggregateFunction<T, R, V> | PipedAggregateFunction<T, R>
 
 type ExtractAggregateReturnType<T, A> =
   A extends AggregateFunction<T, infer R, any> ? R : never
@@ -26,7 +26,7 @@ type AggregatesReturnType<T, A> = {
 }
 
 function isPipedAggregateFunction<T, R>(
-  aggregate: AggregateFunction<T, R>
+  aggregate: AggregateFunction<T, R>,
 ): aggregate is PipedAggregateFunction<T, R> {
   return `pipe` in aggregate
 }
@@ -45,32 +45,32 @@ export function groupBy<
 
   const basicAggregates = Object.fromEntries(
     Object.entries(aggregates).filter(
-      ([_, aggregate]) => !isPipedAggregateFunction(aggregate)
-    )
+      ([_, aggregate]) => !isPipedAggregateFunction(aggregate),
+    ),
   ) as Record<string, BasicAggregateFunction<T, any, any>>
 
   // @ts-expect-error - TODO: we don't use this yet, but we will
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const pipedAggregates = Object.fromEntries(
     Object.entries(aggregates).filter(([_, aggregate]) =>
-      isPipedAggregateFunction(aggregate)
-    )
+      isPipedAggregateFunction(aggregate),
+    ),
   ) as Record<string, PipedAggregateFunction<T, any>>
 
   return (
-    stream: IStreamBuilder<T>
+    stream: IStreamBuilder<T>,
   ): IStreamBuilder<KeyValue<string, ResultType>> => {
     // Special key to store the original key object
-    const KEY_SENTINEL = `__original_key__`
+    const KEY_SENTINEL = Symbol(`original_group_key`)
 
     // First map to extract keys and pre-aggregate values
     const withKeysAndValues = stream.pipe(
       map((data) => {
         const key = keyExtractor(data)
-        const keyString = JSON.stringify(key)
+        const keyString = serializeValue(key)
 
         // Create values object with pre-aggregated values
-        const values: Record<string, unknown> = {}
+        const values: Record<string | symbol, unknown> = {}
 
         // Store the original key object
         values[KEY_SENTINEL] = key
@@ -80,8 +80,11 @@ export function groupBy<
           values[name] = aggregate.preMap(data)
         }
 
-        return [keyString, values] as KeyValue<string, Record<string, unknown>>
-      })
+        return [keyString, values] as KeyValue<
+          string,
+          Record<string | symbol, unknown>
+        >
+      }),
     )
 
     // Then reduce to compute aggregates
@@ -98,7 +101,7 @@ export function groupBy<
           return []
         }
 
-        const result: Record<string, unknown> = {}
+        const result: Record<PropertyKey, unknown> = {}
 
         // Get the original key from first value in group
         const originalKey = values[0]?.[0]?.[KEY_SENTINEL]
@@ -107,13 +110,13 @@ export function groupBy<
         // Apply each aggregate function
         for (const [name, aggregate] of Object.entries(basicAggregates)) {
           const preValues = values.map(
-            ([v, m]) => [v[name], m] as [any, number]
+            ([v, m]) => [v[name], m] as [any, number],
           )
           result[name] = aggregate.reduce(preValues)
         }
 
         return [[result, 1]]
-      })
+      }),
     )
 
     // Finally map to extract the key and include all values
@@ -139,7 +142,7 @@ export function groupBy<
 
         // Return with the string key instead of the object
         return [keyString, result] as KeyValue<string, ResultType>
-      })
+      }),
     )
   }
 }
@@ -148,7 +151,7 @@ export function groupBy<
  * Creates a sum aggregate function
  */
 export function sum<T>(
-  valueExtractor: (value: T) => number = (v) => v as unknown as number
+  valueExtractor: (value: T) => number = (v) => v as unknown as number,
 ): AggregateFunction<T, number, number> {
   return {
     preMap: (data: T) => valueExtractor(data),
@@ -166,7 +169,7 @@ export function sum<T>(
  * Creates a count aggregate function
  */
 export function count<T>(
-  valueExtractor: (value: T) => any = (v) => v
+  valueExtractor: (value: T) => any = (v) => v,
 ): AggregateFunction<T, number, number> {
   return {
     // Count only not-null values (the `== null` comparison gives true for both null and undefined)
@@ -185,7 +188,7 @@ export function count<T>(
  * Creates an average aggregate function
  */
 export function avg<T>(
-  valueExtractor: (value: T) => number = (v) => v as unknown as number
+  valueExtractor: (value: T) => number = (v) => v as unknown as number,
 ): AggregateFunction<T, number, { sum: number; count: number }> {
   return {
     preMap: (data: T) => ({
@@ -210,7 +213,7 @@ export function avg<T>(
   }
 }
 
-type CanMinMax = number | Date | bigint
+type CanMinMax = number | Date | bigint | string
 
 /**
  * Creates a min aggregate function that computes the minimum value in a group
@@ -222,10 +225,10 @@ export function min<T extends CanMinMax>(): AggregateFunction<
   T | undefined
 >
 export function min<T, V extends CanMinMax>(
-  valueExtractor: (value: T) => V
+  valueExtractor: (value: T) => V,
 ): AggregateFunction<T, V | undefined, V | undefined>
 export function min<T, V extends CanMinMax>(
-  valueExtractor?: (value: T) => V
+  valueExtractor?: (value: T) => V,
 ): AggregateFunction<T, V | undefined, V | undefined> {
   const extractor = valueExtractor ?? ((v: T) => v as unknown as V)
   return {
@@ -233,7 +236,10 @@ export function min<T, V extends CanMinMax>(
     reduce: (values) => {
       let minValue: V | undefined
       for (const [value, _multiplicity] of values) {
-        if (!minValue || (value && value < minValue)) {
+        if (
+          value !== undefined &&
+          (minValue === undefined || value < minValue)
+        ) {
           minValue = value
         }
       }
@@ -252,10 +258,10 @@ export function max<T extends CanMinMax>(): AggregateFunction<
   T | undefined
 >
 export function max<T, V extends CanMinMax>(
-  valueExtractor: (value: T) => V
+  valueExtractor: (value: T) => V,
 ): AggregateFunction<T, V | undefined, V | undefined>
 export function max<T, V extends CanMinMax>(
-  valueExtractor?: (value: T) => V
+  valueExtractor?: (value: T) => V,
 ): AggregateFunction<T, V | undefined, V | undefined> {
   const extractor = valueExtractor ?? ((v: T) => v as unknown as V)
   return {
@@ -263,7 +269,10 @@ export function max<T, V extends CanMinMax>(
     reduce: (values) => {
       let maxValue: V | undefined
       for (const [value, _multiplicity] of values) {
-        if (!maxValue || (value && value > maxValue)) {
+        if (
+          value !== undefined &&
+          (maxValue === undefined || value > maxValue)
+        ) {
           maxValue = value
         }
       }
@@ -278,7 +287,7 @@ export function max<T, V extends CanMinMax>(
  * @param valueExtractor Function to extract a numeric value from each data entry
  */
 export function median<T>(
-  valueExtractor: (value: T) => number = (v) => v as unknown as number
+  valueExtractor: (value: T) => number = (v) => v as unknown as number,
 ): AggregateFunction<T, number, Array<number>> {
   return {
     preMap: (data: T) => [valueExtractor(data)],
@@ -326,7 +335,7 @@ export function median<T>(
  * @param valueExtractor Function to extract a value from each data entry
  */
 export function mode<T>(
-  valueExtractor: (value: T) => number = (v) => v as unknown as number
+  valueExtractor: (value: T) => number = (v) => v as unknown as number,
 ): AggregateFunction<T, number, Map<number, number>> {
   return {
     preMap: (data: T) => {

@@ -1,6 +1,6 @@
-import { Debouncer } from "@tanstack/pacer/debouncer"
-import type { DebounceStrategy, DebounceStrategyOptions } from "./types"
-import type { Transaction } from "../transactions"
+import { LiteDebouncer } from '@tanstack/pacer-lite/lite-debouncer'
+import type { DebounceStrategy, DebounceStrategyOptions } from './types'
+import type { Transaction } from '../transactions'
 
 /**
  * Creates a debounce strategy that delays transaction execution until after
@@ -26,23 +26,34 @@ import type { Transaction } from "../transactions"
  * ```
  */
 export function debounceStrategy(
-  options: DebounceStrategyOptions
+  options: DebounceStrategyOptions,
 ): DebounceStrategy {
-  const debouncer = new Debouncer(
+  const trailing = options.trailing ?? true
+  const debouncer = new LiteDebouncer(
     (callback: () => Transaction) => callback(),
-    options
+    {
+      ...options,
+      leading: options.leading ?? false,
+      trailing,
+    },
   )
 
   return {
     _type: `debounce`,
     options,
     execute: <T extends object = Record<string, unknown>>(
-      fn: () => Transaction<T>
+      fn: () => Transaction<T>,
     ) => {
-      debouncer.maybeExecute(fn as () => Transaction)
+      const execution = { happened: false }
+      debouncer.maybeExecute(() => {
+        execution.happened = true
+        return (fn as () => Transaction)()
+      })
+      if (!trailing && !execution.happened) return false
+      return
     },
     cleanup: () => {
-      debouncer.cancel()
+      // Keep pending work scheduled until its quiet-period callback runs.
     },
   }
 }

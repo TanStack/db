@@ -1,4 +1,4 @@
-import type { StorageAdapter } from "../types"
+import type { StorageAdapter } from '../types'
 
 export abstract class BaseStorageAdapter implements StorageAdapter {
   abstract get(key: string): Promise<string | null>

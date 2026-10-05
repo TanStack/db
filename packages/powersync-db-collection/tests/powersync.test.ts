@@ -1,42 +1,75 @@
-import { randomUUID } from "node:crypto"
-import { tmpdir } from "node:os"
-import {
-  CrudEntry,
-  PowerSyncDatabase,
-  Schema,
-  Table,
-  column,
-} from "@powersync/node"
+import { randomUUID } from 'node:crypto'
+import { tmpdir } from 'node:os'
+import { PowerSyncDatabase, Schema, Table, column } from '@powersync/node'
 import {
   createCollection,
   createTransaction,
   eq,
   liveQueryCollectionOptions,
-} from "@tanstack/db"
-import { describe, expect, it, onTestFinished, vi } from "vitest"
-import { powerSyncCollectionOptions } from "../src"
-import { PowerSyncTransactor } from "../src/PowerSyncTransactor"
-import type { AbstractPowerSyncDatabase } from "@powersync/node"
+} from '@tanstack/db'
+import { describe, expect, it, onTestFinished, vi } from 'vitest'
+import { powerSyncCollectionOptions } from '../src'
+import { PowerSyncTransactor } from '../src/PowerSyncTransactor'
+import { TEST_DATABASE_IMPLEMENTATION } from './test-db-implementation'
+import type { LockContext } from '@powersync/node'
+import type { PendingMutation } from '@tanstack/db'
 
 const APP_SCHEMA = new Schema({
   users: new Table({
     name: column.text,
     active: column.integer, // Will be mapped to Boolean
   }),
-  documents: new Table({
-    name: column.text,
-    author: column.text,
-    created_at: column.text, // Will be mapped to Date
-  }),
+  documents: new Table(
+    {
+      name: column.text,
+      author: column.text,
+      created_at: column.text, // Will be mapped to Date
+    },
+    {
+      trackMetadata: true,
+    },
+  ),
 })
 
-describe(`PowerSync Integration`, () => {
+const describePowerSync = TEST_DATABASE_IMPLEMENTATION
+  ? describe
+  : describe.skip
+
+type NativeCrudRow = {
+  id: string | number
+  data: string
+  tx_id: number | null
+}
+
+function expectTransactionCrud(
+  rows: Array<NativeCrudRow>,
+  expected: Array<{ id: string; type: string; name: string }>,
+) {
+  expect(rows).toHaveLength(expected.length)
+  const observations = rows.map((row) => JSON.parse(row.data) as unknown)
+  expect(observations).toEqual(
+    expected.map(({ id, type, name }) => ({
+      id,
+      type,
+      op: `PUT`,
+      data: { name },
+    })),
+  )
+  expect(rows[0]!.tx_id).toEqual(expect.any(Number))
+  expect(rows.every((row) => row.tx_id === rows[0]!.tx_id)).toBe(true)
+}
+
+function sortTransactionRows<T extends { id: string }>(rows: Array<T>) {
+  return [...rows].sort((a, b) => a.id.localeCompare(b.id))
+}
+
+describePowerSync(`PowerSync Integration`, () => {
   async function createDatabase() {
     const db = new PowerSyncDatabase({
       database: {
         dbFilename: `test-${randomUUID()}.sqlite`,
         dbLocation: tmpdir(),
-        implementation: { type: `node:sqlite` },
+        implementation: TEST_DATABASE_IMPLEMENTATION,
       },
       schema: APP_SCHEMA,
     })
@@ -55,13 +88,13 @@ describe(`PowerSync Integration`, () => {
         database: db,
         // We get typing and a default validator from this
         table: APP_SCHEMA.props.documents,
-      })
+      }),
     )
     onTestFinished(() => collection.cleanup())
     return collection
   }
 
-  async function createTestData(db: AbstractPowerSyncDatabase) {
+  async function createTestData(db: PowerSyncDatabase) {
     await db.execute(`
         INSERT into documents (id, name)
         VALUES 
@@ -81,10 +114,11 @@ describe(`PowerSync Integration`, () => {
 
       // Verify the collection state contains our items
       expect(collection.size).toBe(3)
-      expect(collection.toArray.map((entry) => entry.name)).deep.equals([
+      // Sort by name since keys are random UUIDs
+      expect(collection.toArray.map((entry) => entry.name).sort()).deep.equals([
         `one`,
-        `two`,
         `three`,
+        `two`,
       ])
     })
 
@@ -110,14 +144,12 @@ describe(`PowerSync Integration`, () => {
       await vi.waitFor(
         () => {
           expect(collection.size).toBe(4)
-          expect(collection.toArray.map((entry) => entry.name)).deep.equals([
-            `one`,
-            `two`,
-            `three`,
-            `four`,
-          ])
+          // Sort by name since keys are random UUIDs
+          expect(
+            collection.toArray.map((entry) => entry.name).sort(),
+          ).deep.equals([`four`, `one`, `three`, `two`])
         },
-        { timeout: 1000 }
+        { timeout: 1000 },
       )
 
       await db.execute(`
@@ -129,13 +161,12 @@ describe(`PowerSync Integration`, () => {
       await vi.waitFor(
         () => {
           expect(collection.size).toBe(3)
-          expect(collection.toArray.map((entry) => entry.name)).deep.equals([
-            `one`,
-            `three`,
-            `four`,
-          ])
+          // Sort by name since keys are random UUIDs
+          expect(
+            collection.toArray.map((entry) => entry.name).sort(),
+          ).deep.equals([`four`, `one`, `three`])
         },
-        { timeout: 1000 }
+        { timeout: 1000 },
       )
 
       await db.execute(`
@@ -148,13 +179,12 @@ describe(`PowerSync Integration`, () => {
       await vi.waitFor(
         () => {
           expect(collection.size).toBe(3)
-          expect(collection.toArray.map((entry) => entry.name)).deep.equals([
-            `updated`,
-            `three`,
-            `four`,
-          ])
+          // Sort by name since keys are random UUIDs
+          expect(
+            collection.toArray.map((entry) => entry.name).sort(),
+          ).deep.equals([`four`, `three`, `updated`])
         },
-        { timeout: 1000 }
+        { timeout: 1000 },
       )
     })
 
@@ -198,10 +228,8 @@ describe(`PowerSync Integration`, () => {
       await collection.delete(id).isPersisted.promise
 
       // There should be a crud entries for this
-      const _crudEntries = await db.getAll(`
-        SELECT * FROM ps_crud ORDER BY id`)
-
-      const crudEntries = _crudEntries.map((r) => CrudEntry.fromRow(r))
+      const crudEntries = await db.getAll<{ op: string }>(`
+        SELECT data ->> 'op' AS op FROM ps_crud ORDER BY id`)
 
       expect(crudEntries.length).toBe(6)
       // We can only group transactions for similar operations
@@ -224,44 +252,166 @@ describe(`PowerSync Integration`, () => {
 
       expect(collection.size).toBe(3)
 
-      const addTx = createTransaction({
+      const seed = await db.getAll<{ id: string; name: string }>(
+        `SELECT id, name FROM documents`,
+      )
+      const initialCrud = await db.getAll<NativeCrudRow>(
+        `SELECT * FROM ps_crud ORDER BY id`,
+      )
+      const expected = [
+        { id: `transaction-doc-0`, type: `documents`, name: `tx-0` },
+        { id: `transaction-doc-1`, type: `documents`, name: `tx-1` },
+        { id: `transaction-doc-2`, type: `documents`, name: `tx-2` },
+        { id: `transaction-doc-3`, type: `documents`, name: `tx-3` },
+        { id: `transaction-doc-4`, type: `documents`, name: `tx-4` },
+      ]
+      try {
+        const addTx = createTransaction({
+          autoCommit: false,
+          mutationFn: async ({ transaction }) => {
+            await new PowerSyncTransactor({ database: db }).applyTransaction(
+              transaction,
+            )
+          },
+        })
+
+        addTx.mutate(() => {
+          for (let i = 0; i < 5; i++) {
+            collection.insert({ id: `transaction-doc-${i}`, name: `tx-${i}` })
+          }
+        })
+
+        await addTx.commit()
+        await addTx.isPersisted.promise
+
+        expect(collection.size).toBe(8)
+
+        // fetch the ps_crud items
+        // There should be a crud entries for this
+        const crudEntries = await db.getAll<NativeCrudRow>(`
+        SELECT * FROM ps_crud ORDER BY id`)
+        expect(crudEntries.slice(0, initialCrud.length)).toEqual(initialCrud)
+        const newCrud = crudEntries.slice(initialCrud.length)
+        expectTransactionCrud(newCrud, expected)
+        expect(() =>
+          expectTransactionCrud(newCrud.slice(1), expected),
+        ).toThrow()
+        expect(() =>
+          expectTransactionCrud(
+            [...newCrud.slice(0, -1), newCrud[0]!],
+            expected,
+          ),
+        ).toThrow()
+        const expectedRows = sortTransactionRows([
+          ...[`one`, `two`, `three`].map((name) => ({
+            id: seed.find((row) => row.name === name)!.id,
+            name,
+            author: null,
+            created_at: null,
+          })),
+          ...expected.map(({ id, name }) => ({
+            id,
+            name,
+            author: null,
+            created_at: null,
+          })),
+        ])
+        expect(
+          sortTransactionRows(
+            await db.getAll<{ id: string }>(
+              `SELECT id, name, author, created_at FROM documents`,
+            ),
+          ),
+        ).toEqual(expectedRows)
+        expect(
+          sortTransactionRows(
+            collection.toArray.map(({ id, name, author, created_at }) => ({
+              id,
+              name,
+              author,
+              created_at,
+            })),
+          ),
+        ).toEqual(expectedRows)
+
+        const lastTransactionId = crudEntries[crudEntries.length - 1]?.tx_id
+        /**
+         * The last items, created in the same transaction, should be in the same
+         * PowerSync transaction.
+         */
+        expect(
+          crudEntries
+            .reverse()
+            .slice(0, 5)
+            .every((crudEntry) => crudEntry.tx_id == lastTransactionId),
+        ).true
+      } finally {
+        await collection.cleanup()
+      }
+    })
+
+    it(`should complete transactions that delete one key and insert another (same-millisecond tie)`, async () => {
+      const db = await createDatabase()
+
+      const options = powerSyncCollectionOptions({
+        database: db,
+        table: APP_SCHEMA.props.documents,
+      })
+      const collection = createCollection(options)
+      onTestFinished(() => collection.cleanup())
+      await collection.stateWhenReady()
+
+      // Seed the row which will be deleted in the transaction
+      await collection.insert({ id: `a`, name: `row a` }).isPersisted.promise
+
+      const { trackedTableName } = options.utils.getMeta()
+
+      class SameMillisecondTransactor extends PowerSyncTransactor {
+        protected override async handleDelete(
+          mutation: PendingMutation<any>,
+          context: LockContext,
+          waitForCompletion?: boolean,
+        ) {
+          const result = await super.handleDelete(
+            mutation,
+            context,
+            waitForCompletion,
+          )
+          // Simulate the same-millisecond tie: ensure the delete's diff row
+          // wins the `ORDER BY timestamp DESC` readback of the insert below.
+          await context.execute(
+            `UPDATE ${trackedTableName} SET timestamp = '9999-12-31T23:59:59.999Z'`,
+          )
+          return result
+        }
+      }
+
+      const transactor = new SameMillisecondTransactor({ database: db })
+
+      const tx = createTransaction({
         autoCommit: false,
         mutationFn: async ({ transaction }) => {
-          await new PowerSyncTransactor({ database: db }).applyTransaction(
-            transaction
-          )
+          await transactor.applyTransaction(transaction)
         },
       })
 
-      addTx.mutate(() => {
-        for (let i = 0; i < 5; i++) {
-          collection.insert({ id: randomUUID(), name: `tx-${i}` })
-        }
+      tx.mutate(() => {
+        collection.delete(`a`)
+        collection.insert({ id: `b`, name: `row b` })
       })
 
-      await addTx.commit()
-      await addTx.isPersisted.promise
+      const outcome = await Promise.race([
+        tx.commit().then(() => `persisted` as const),
+        new Promise<`timed out`>((resolve) =>
+          setTimeout(() => resolve(`timed out`), 2_000),
+        ),
+      ])
+      expect(outcome).toBe(`persisted`)
 
-      expect(collection.size).toBe(8)
-
-      // fetch the ps_crud items
-      // There should be a crud entries for this
-      const _crudEntries = await db.getAll(`
-        SELECT * FROM ps_crud ORDER BY id`)
-      const crudEntries = _crudEntries.map((r) => CrudEntry.fromRow(r))
-
-      const lastTransactionId =
-        crudEntries[crudEntries.length - 1]?.transactionId
-      /**
-       * The last items, created in the same transaction, should be in the same
-       * PowerSync transaction.
-       */
-      expect(
-        crudEntries
-          .reverse()
-          .slice(0, 5)
-          .every((crudEntry) => crudEntry.transactionId == lastTransactionId)
-      ).true
+      const documents = await db.getAll<{ id: string }>(
+        `SELECT id FROM documents`,
+      )
+      expect(documents.map((doc) => doc.id)).toEqual([`b`])
     })
 
     it(`should handle transactions with multiple collections`, async () => {
@@ -274,7 +424,7 @@ describe(`PowerSync Integration`, () => {
         powerSyncCollectionOptions({
           database: db,
           table: APP_SCHEMA.props.users,
-        })
+        }),
       )
       onTestFinished(() => usersCollection.cleanup())
 
@@ -284,46 +434,190 @@ describe(`PowerSync Integration`, () => {
       expect(documentsCollection.size).toBe(3)
       expect(usersCollection.size).toBe(0)
 
-      const addTx = createTransaction({
-        autoCommit: false,
-        mutationFn: async ({ transaction }) => {
-          await new PowerSyncTransactor({ database: db }).applyTransaction(
-            transaction
-          )
-        },
-      })
+      const seed = await db.getAll<{ id: string; name: string }>(
+        `SELECT id, name FROM documents`,
+      )
+      const initialCrud = await db.getAll<NativeCrudRow>(
+        `SELECT * FROM ps_crud ORDER BY id`,
+      )
+      const expected = [
+        { id: `mixed-doc-0`, type: `documents`, name: `tx-0` },
+        { id: `mixed-user-0`, type: `users`, name: `user` },
+        { id: `mixed-doc-1`, type: `documents`, name: `tx-1` },
+        { id: `mixed-user-1`, type: `users`, name: `user` },
+        { id: `mixed-doc-2`, type: `documents`, name: `tx-2` },
+        { id: `mixed-user-2`, type: `users`, name: `user` },
+        { id: `mixed-doc-3`, type: `documents`, name: `tx-3` },
+        { id: `mixed-user-3`, type: `users`, name: `user` },
+        { id: `mixed-doc-4`, type: `documents`, name: `tx-4` },
+        { id: `mixed-user-4`, type: `users`, name: `user` },
+      ]
+      try {
+        const addTx = createTransaction({
+          autoCommit: false,
+          mutationFn: async ({ transaction }) => {
+            await new PowerSyncTransactor({ database: db }).applyTransaction(
+              transaction,
+            )
+          },
+        })
 
-      addTx.mutate(() => {
-        for (let i = 0; i < 5; i++) {
-          documentsCollection.insert({ id: randomUUID(), name: `tx-${i}` })
-          usersCollection.insert({ id: randomUUID(), name: `user` })
-        }
-      })
+        addTx.mutate(() => {
+          for (let i = 0; i < 5; i++) {
+            documentsCollection.insert({
+              id: `mixed-doc-${i}`,
+              name: `tx-${i}`,
+            })
+            usersCollection.insert({ id: `mixed-user-${i}`, name: `user` })
+          }
+        })
 
-      await addTx.commit()
-      await addTx.isPersisted.promise
+        await addTx.commit()
+        await addTx.isPersisted.promise
 
-      expect(documentsCollection.size).toBe(8)
-      expect(usersCollection.size).toBe(5)
+        expect(documentsCollection.size).toBe(8)
+        expect(usersCollection.size).toBe(5)
 
-      // fetch the ps_crud items
-      // There should be a crud entries for this
-      const _crudEntries = await db.getAll(`
+        // fetch the ps_crud items
+        // There should be a crud entries for this
+        const crudEntries = await db.getAll<NativeCrudRow>(`
         SELECT * FROM ps_crud ORDER BY id`)
-      const crudEntries = _crudEntries.map((r) => CrudEntry.fromRow(r))
+        expect(crudEntries.slice(0, initialCrud.length)).toEqual(initialCrud)
+        const newCrud = crudEntries.slice(initialCrud.length)
+        expectTransactionCrud(newCrud, expected)
+        const corrupted = structuredClone(newCrud)
+        corrupted[0]!.data = JSON.stringify({
+          id: `wrong-row`,
+          type: `documents`,
+          op: `PUT`,
+          data: { name: `tx-0` },
+        })
+        expect(() => expectTransactionCrud(corrupted, expected)).toThrow()
+        const expectedDocuments = sortTransactionRows([
+          ...[`one`, `two`, `three`].map((name) => ({
+            id: seed.find((row) => row.name === name)!.id,
+            name,
+            author: null,
+            created_at: null,
+          })),
+          ...expected
+            .filter((row) => row.type === `documents`)
+            .map(({ id, name }) => ({
+              id,
+              name,
+              author: null,
+              created_at: null,
+            })),
+        ])
+        const expectedUsers = sortTransactionRows(
+          expected
+            .filter((row) => row.type === `users`)
+            .map(({ id, name }) => ({ id, name, active: null })),
+        )
+        expect(
+          sortTransactionRows(
+            await db.getAll<{ id: string }>(
+              `SELECT id, name, author, created_at FROM documents`,
+            ),
+          ),
+        ).toEqual(expectedDocuments)
+        expect(
+          sortTransactionRows(
+            documentsCollection.toArray.map(
+              ({ id, name, author, created_at }) => ({
+                id,
+                name,
+                author,
+                created_at,
+              }),
+            ),
+          ),
+        ).toEqual(expectedDocuments)
+        expect(
+          sortTransactionRows(
+            await db.getAll<{ id: string }>(
+              `SELECT id, name, active FROM users`,
+            ),
+          ),
+        ).toEqual(expectedUsers)
+        expect(
+          sortTransactionRows(
+            usersCollection.toArray.map(({ id, name, active }) => ({
+              id,
+              name,
+              active,
+            })),
+          ),
+        ).toEqual(expectedUsers)
 
-      const lastTransactionId =
-        crudEntries[crudEntries.length - 1]?.transactionId
-      /**
-       * The last items, created in the same transaction, should be in the same
-       * PowerSync transaction.
-       */
-      expect(
-        crudEntries
-          .reverse()
-          .slice(0, 10)
-          .every((crudEntry) => crudEntry.transactionId == lastTransactionId)
-      ).true
+        const lastTransactionId = crudEntries[crudEntries.length - 1]?.tx_id
+        /**
+         * The last items, created in the same transaction, should be in the same
+         * PowerSync transaction.
+         */
+        expect(
+          crudEntries
+            .reverse()
+            .slice(0, 10)
+            .every((crudEntry) => crudEntry.tx_id == lastTransactionId),
+        ).true
+      } finally {
+        await documentsCollection.cleanup()
+        await usersCollection.cleanup()
+      }
+    })
+
+    /**
+     * Metadata provided by the collection operation should be persisted to the database if supported by the SQLite table.
+     */
+    it(`should persist collection operation metadata`, async () => {
+      const db = await createDatabase()
+
+      const collection = createDocumentsCollection(db)
+      await collection.stateWhenReady()
+
+      const metadata = {
+        text: `some text`,
+        number: 123,
+        boolean: true,
+      }
+      const id = randomUUID()
+      await collection.insert(
+        {
+          id,
+          name: `new`,
+          author: `somebody`,
+        },
+        {
+          metadata,
+        },
+      ).isPersisted.promise
+
+      // Now do an update
+      await collection.update(
+        id,
+        { metadata: metadata },
+        (d) => (d.name = `updatedNew`),
+      ).isPersisted.promise
+
+      await collection.delete(id, { metadata }).isPersisted.promise
+
+      // There should be a crud entries for this
+      const crudBatch = await db.getCrudBatch(100)
+      expect(crudBatch).toBeDefined()
+      const crudEntries = crudBatch!.crud
+
+      // The metadata should be available in the CRUD entries for upload
+      const stringifiedMetadata = JSON.stringify(metadata)
+      expect(crudEntries.length).toBe(3)
+      expect(crudEntries[0]!.metadata).toEqual(stringifiedMetadata)
+      expect(crudEntries[1]!.metadata).toEqual(stringifiedMetadata)
+      expect(crudEntries[2]!.metadata).toEqual(stringifiedMetadata)
+
+      // Verify the item is deleted from SQLite
+      const documents = await db.getAll(`
+        SELECT * FROM documents`)
+      expect(documents.length).toBe(0)
     })
   })
 
@@ -340,6 +634,7 @@ describe(`PowerSync Integration`, () => {
       vi.spyOn(options.utils, `getMeta`).mockImplementation(() => ({
         tableName: `fakeTable`,
         trackedTableName: `error`,
+        metadataIsTracked: true,
         serializeValue: () => ({}) as any,
       }))
       // Create two collections for the same table
@@ -350,7 +645,7 @@ describe(`PowerSync Integration`, () => {
         autoCommit: false,
         mutationFn: async ({ transaction }) => {
           await new PowerSyncTransactor({ database: db }).applyTransaction(
-            transaction
+            transaction,
           )
         },
       })
@@ -398,7 +693,7 @@ describe(`PowerSync Integration`, () => {
                 id: document.id,
                 name: document.name,
               })),
-        })
+        }),
       )
 
       expect(liveDocuments.size).eq(0)
@@ -408,6 +703,7 @@ describe(`PowerSync Integration`, () => {
       liveDocuments.subscribeChanges((changes) => {
         changes
           .map((change) => change.value.name)
+          .filter((name): name is string => name !== undefined)
           .forEach((change) => bookNames.add(change))
       })
 
@@ -425,7 +721,7 @@ describe(`PowerSync Integration`, () => {
         () => {
           expect(Array.from(bookNames)).deep.equals([`book`])
         },
-        { timeout: 1000 }
+        { timeout: 1000 },
       )
     })
   })
@@ -449,7 +745,7 @@ describe(`PowerSync Integration`, () => {
           expect(collectionA.size).eq(3)
           expect(collectionB.size).eq(3)
         },
-        { timeout: 1000 }
+        { timeout: 1000 },
       )
     })
   })
@@ -472,7 +768,7 @@ describe(`PowerSync Integration`, () => {
               FROM sqlite_temp_master 
               WHERE type='table' AND name = ?
             `,
-            [meta.trackedTableName]
+            [meta.trackedTableName],
           )
         })
         return result.count > 0
@@ -490,7 +786,7 @@ describe(`PowerSync Integration`, () => {
         async () => {
           expect(await tableExists()).false
         },
-        { timeout: 1000 }
+        { timeout: 1000 },
       )
     })
   })

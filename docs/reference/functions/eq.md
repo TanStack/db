@@ -3,15 +3,13 @@ id: eq
 title: eq
 ---
 
-# Function: eq()
-
 ## Call Signature
 
 ```ts
 function eq<T>(left, right): BasicExpression<boolean>;
 ```
 
-Defined in: [packages/db/src/query/builder/functions.ts:115](https://github.com/TanStack/db/blob/main/packages/db/src/query/builder/functions.ts#L115)
+Defined in: [packages/db/src/query/builder/functions.ts:160](https://github.com/TanStack/db/blob/main/packages/db/src/query/builder/functions.ts#L160)
 
 ### Type Parameters
 
@@ -31,7 +29,7 @@ Defined in: [packages/db/src/query/builder/functions.ts:115](https://github.com/
 
 ### Returns
 
-[`BasicExpression`](../../@tanstack/namespaces/IR/type-aliases/BasicExpression.md)\<`boolean`\>
+[`BasicExpression`](../@tanstack/namespaces/IR/type-aliases/BasicExpression.md)\<`boolean`\>
 
 ## Call Signature
 
@@ -39,7 +37,7 @@ Defined in: [packages/db/src/query/builder/functions.ts:115](https://github.com/
 function eq<T>(left, right): BasicExpression<boolean>;
 ```
 
-Defined in: [packages/db/src/query/builder/functions.ts:119](https://github.com/TanStack/db/blob/main/packages/db/src/query/builder/functions.ts#L119)
+Defined in: [packages/db/src/query/builder/functions.ts:164](https://github.com/TanStack/db/blob/main/packages/db/src/query/builder/functions.ts#L164)
 
 ### Type Parameters
 
@@ -59,7 +57,7 @@ Defined in: [packages/db/src/query/builder/functions.ts:119](https://github.com/
 
 ### Returns
 
-[`BasicExpression`](../../@tanstack/namespaces/IR/type-aliases/BasicExpression.md)\<`boolean`\>
+[`BasicExpression`](../@tanstack/namespaces/IR/type-aliases/BasicExpression.md)\<`boolean`\>
 
 ## Call Signature
 
@@ -67,7 +65,7 @@ Defined in: [packages/db/src/query/builder/functions.ts:119](https://github.com/
 function eq<T>(left, right): BasicExpression<boolean>;
 ```
 
-Defined in: [packages/db/src/query/builder/functions.ts:123](https://github.com/TanStack/db/blob/main/packages/db/src/query/builder/functions.ts#L123)
+Defined in: [packages/db/src/query/builder/functions.ts:168](https://github.com/TanStack/db/blob/main/packages/db/src/query/builder/functions.ts#L168)
 
 ### Type Parameters
 
@@ -79,7 +77,7 @@ Defined in: [packages/db/src/query/builder/functions.ts:123](https://github.com/
 
 #### left
 
-[`Aggregate`](../../@tanstack/namespaces/IR/classes/Aggregate.md)\<`T`\>
+[`Aggregate`](../@tanstack/namespaces/IR/classes/Aggregate.md)\<`T`\>
 
 #### right
 
@@ -87,4 +85,4 @@ Defined in: [packages/db/src/query/builder/functions.ts:123](https://github.com/
 
 ### Returns
 
-[`BasicExpression`](../../@tanstack/namespaces/IR/type-aliases/BasicExpression.md)\<`boolean`\>
+[`BasicExpression`](../@tanstack/namespaces/IR/type-aliases/BasicExpression.md)\<`boolean`\>

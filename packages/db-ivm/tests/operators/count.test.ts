@@ -1,13 +1,13 @@
-import { describe, test } from "vitest"
-import { D2 } from "../../src/d2.js"
-import { MultiSet } from "../../src/multiset.js"
-import { count } from "../../src/operators/count.js"
-import { output } from "../../src/operators/output.js"
+import { describe, test } from 'vitest'
+import { D2 } from '../../src/d2.js'
+import { MultiSet } from '../../src/multiset.js'
+import { count } from '../../src/operators/count.js'
+import { output } from '../../src/operators/output.js'
 import {
   KeyedMessageTracker,
   assertKeyedResults,
   assertOnlyKeysAffected,
-} from "../test-utils.js"
+} from '../test-utils.js'
 
 describe(`Operators`, () => {
   describe(`Count operation`, () => {
@@ -25,7 +25,7 @@ function testCount() {
       count(),
       output((message) => {
         tracker.addMessage(message)
-      })
+      }),
     )
 
     graph.finalize()
@@ -38,7 +38,7 @@ function testCount() {
         [[2, `d`], 1],
         [[3, `x`], 1],
         [[3, `y`], -1],
-      ])
+      ]),
     )
     input.sendData(new MultiSet([[[3, `z`], 1]]))
     graph.run()
@@ -46,7 +46,11 @@ function testCount() {
     const result = tracker.getResult()
 
     // Assert only keys that have values are affected
-    assertOnlyKeysAffected(`basic count operation`, result.messages, [1, 2, 3])
+    assertOnlyKeysAffected(
+      `basic count operation`,
+      result.weightedDeltas,
+      [1, 2, 3],
+    )
 
     // Assert the final materialized results are correct
     assertKeyedResults(
@@ -57,7 +61,7 @@ function testCount() {
         [2, 3], // 3 values for key 2
         [3, 1], // 1 value for key 3 (1 + (-1) + 1 = 1)
       ],
-      6 // Expected message count
+      6, // Expected weighted delta count
     )
   })
 
@@ -70,7 +74,7 @@ function testCount() {
       count(),
       output((message) => {
         tracker.addMessage(message)
-      })
+      }),
     )
 
     graph.finalize()
@@ -79,7 +83,7 @@ function testCount() {
       new MultiSet([
         [[1, `a`], -1],
         [[1, `b`], -2],
-      ])
+      ]),
     )
     graph.run()
 
@@ -88,8 +92,8 @@ function testCount() {
     // Assert only key 1 is affected
     assertOnlyKeysAffected(
       `count with all negative multiplicities`,
-      result.messages,
-      [1]
+      result.weightedDeltas,
+      [1],
     )
 
     // Assert the final materialized results are correct
@@ -99,7 +103,7 @@ function testCount() {
       [
         [1, -3], // -1 + (-2) = -3
       ],
-      2 // Expected message count
+      2, // Expected weighted delta count
     )
   })
 
@@ -112,7 +116,7 @@ function testCount() {
       count(),
       output((message) => {
         tracker.addMessage(message)
-      })
+      }),
     )
 
     graph.finalize()
@@ -121,7 +125,7 @@ function testCount() {
       new MultiSet([
         [[`one`, `a`], 1],
         [[`one`, `b`], 1],
-      ])
+      ]),
     )
     graph.run()
 
@@ -129,17 +133,18 @@ function testCount() {
       new MultiSet([
         [[`one`, `c`], 1],
         [[`two`, `a`], 1],
-      ])
+      ]),
     )
     graph.run()
 
     const result = tracker.getResult()
 
     // Assert only keys 'one' and 'two' are affected
-    assertOnlyKeysAffected(`count with multiple batches`, result.messages, [
-      `one`,
-      `two`,
-    ])
+    assertOnlyKeysAffected(
+      `count with multiple batches`,
+      result.weightedDeltas,
+      [`one`, `two`],
+    )
 
     // Assert the final materialized results are correct
     assertKeyedResults(
@@ -149,11 +154,11 @@ function testCount() {
         [`one`, 3], // 2 + 1 = 3
         [`two`, 1], // 1
       ],
-      5 // Expected message count
+      5, // Expected weighted delta count
     )
   })
 
-  test(`count incremental updates - only affected keys produce messages`, () => {
+  test(`count incremental updates - only affected keys produce weighted deltas`, () => {
     const graph = new D2()
     const input = graph.newInput<[string, string]>()
     const tracker = new KeyedMessageTracker<string, number>()
@@ -162,7 +167,7 @@ function testCount() {
       count(),
       output((message) => {
         tracker.addMessage(message)
-      })
+      }),
     )
 
     graph.finalize()
@@ -176,7 +181,7 @@ function testCount() {
         [[`b`, `item2`], 1],
         [[`b`, `item3`], 1],
         [[`c`, `item1`], 1],
-      ])
+      ]),
     )
     graph.run()
 
@@ -188,14 +193,14 @@ function testCount() {
       new MultiSet([
         [[`a`, `item3`], 1], // Add to 'a' (2 -> 3)
         [[`c`, `item1`], -1], // Remove from 'c' (1 -> 0)
-      ])
+      ]),
     )
     graph.run()
 
     const result = tracker.getResult()
 
     // Assert only keys 'a' and 'c' are affected (NOT 'b')
-    assertOnlyKeysAffected(`count incremental updates`, result.messages, [
+    assertOnlyKeysAffected(`count incremental updates`, result.weightedDeltas, [
       `a`,
       `c`,
     ])
@@ -208,7 +213,7 @@ function testCount() {
         [`a`, 3], // Count increased from 2 to 3
         [`c`, 0], // Count decreased from 1 to 0
       ],
-      4 // Expected message count: remove old 'a', add new 'a', remove old 'c', add new 'c'
+      4, // Expected weighted delta count: remove old 'a', add new 'a', remove old 'c', add new 'c'
     )
   })
 }

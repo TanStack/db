@@ -3,13 +3,11 @@ id: UpdateMutationFn
 title: UpdateMutationFn
 ---
 
-# Type Alias: UpdateMutationFn()\<T, TKey, TUtils, TReturn\>
-
 ```ts
 type UpdateMutationFn<T, TKey, TUtils, TReturn> = (params) => Promise<TReturn>;
 ```
 
-Defined in: [packages/db/src/types.ts:373](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L373)
+Defined in: [packages/db/src/types.ts:671](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L671)
 
 ## Type Parameters
 
@@ -23,17 +21,19 @@ Defined in: [packages/db/src/types.ts:373](https://github.com/TanStack/db/blob/m
 
 ### TUtils
 
-`TUtils` *extends* [`UtilsRecord`](../UtilsRecord.md) = [`UtilsRecord`](../UtilsRecord.md)
+`TUtils` *extends* [`UtilsRecord`](UtilsRecord.md) = [`UtilsRecord`](UtilsRecord.md)
 
 ### TReturn
 
 `TReturn` = `any`
 
+DEPRECATED: Return values are kept for backward compatibility and will be removed in v1.0.
+
 ## Parameters
 
 ### params
 
-[`UpdateMutationFnParams`](../UpdateMutationFnParams.md)\<`T`, `TKey`, `TUtils`\>
+[`UpdateMutationFnParams`](UpdateMutationFnParams.md)\<`T`, `TKey`, `TUtils`\>
 
 ## Returns
 

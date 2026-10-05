@@ -1,4 +1,4 @@
-@import "tailwindcss";
+@import 'tailwindcss';
 
 html,
 body {
@@ -21,7 +21,7 @@ button {
 
 body {
   font:
-    14px "Helvetica Neue",
+    14px 'Helvetica Neue',
     Helvetica,
     Arial,
     sans-serif;

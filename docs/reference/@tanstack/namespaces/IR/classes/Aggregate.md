@@ -3,9 +3,7 @@ id: Aggregate
 title: Aggregate
 ---
 
-# Class: Aggregate\<T\>
-
-Defined in: [packages/db/src/query/ir.ts:125](https://github.com/TanStack/db/blob/main/packages/db/src/query/ir.ts#L125)
+Defined in: [packages/db/src/query/ir.ts:195](https://github.com/TanStack/db/blob/main/packages/db/src/query/ir.ts#L195)
 
 ## Extends
 
@@ -25,7 +23,7 @@ Defined in: [packages/db/src/query/ir.ts:125](https://github.com/TanStack/db/blo
 new Aggregate<T>(name, args): Aggregate<T>;
 ```
 
-Defined in: [packages/db/src/query/ir.ts:127](https://github.com/TanStack/db/blob/main/packages/db/src/query/ir.ts#L127)
+Defined in: [packages/db/src/query/ir.ts:197](https://github.com/TanStack/db/blob/main/packages/db/src/query/ir.ts#L197)
 
 #### Parameters
 
@@ -35,7 +33,7 @@ Defined in: [packages/db/src/query/ir.ts:127](https://github.com/TanStack/db/blo
 
 ##### args
 
-[`BasicExpression`](../../type-aliases/BasicExpression.md)\<`any`\>[]
+[`BasicExpression`](../type-aliases/BasicExpression.md)\<`any`\>[]
 
 #### Returns
 
@@ -55,7 +53,7 @@ BaseExpression<T>.constructor
 readonly __returnType: T;
 ```
 
-Defined in: [packages/db/src/query/ir.ts:69](https://github.com/TanStack/db/blob/main/packages/db/src/query/ir.ts#L69)
+Defined in: [packages/db/src/query/ir.ts:86](https://github.com/TanStack/db/blob/main/packages/db/src/query/ir.ts#L86)
 
 **`Internal`**
 
@@ -75,7 +73,7 @@ BaseExpression.__returnType
 args: BasicExpression<any>[];
 ```
 
-Defined in: [packages/db/src/query/ir.ts:129](https://github.com/TanStack/db/blob/main/packages/db/src/query/ir.ts#L129)
+Defined in: [packages/db/src/query/ir.ts:199](https://github.com/TanStack/db/blob/main/packages/db/src/query/ir.ts#L199)
 
 ***
 
@@ -85,7 +83,7 @@ Defined in: [packages/db/src/query/ir.ts:129](https://github.com/TanStack/db/blo
 name: string;
 ```
 
-Defined in: [packages/db/src/query/ir.ts:128](https://github.com/TanStack/db/blob/main/packages/db/src/query/ir.ts#L128)
+Defined in: [packages/db/src/query/ir.ts:198](https://github.com/TanStack/db/blob/main/packages/db/src/query/ir.ts#L198)
 
 ***
 
@@ -95,7 +93,7 @@ Defined in: [packages/db/src/query/ir.ts:128](https://github.com/TanStack/db/blo
 type: "agg";
 ```
 
-Defined in: [packages/db/src/query/ir.ts:126](https://github.com/TanStack/db/blob/main/packages/db/src/query/ir.ts#L126)
+Defined in: [packages/db/src/query/ir.ts:196](https://github.com/TanStack/db/blob/main/packages/db/src/query/ir.ts#L196)
 
 #### Overrides
 

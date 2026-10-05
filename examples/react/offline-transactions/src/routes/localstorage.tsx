@@ -1,7 +1,7 @@
-import { createFileRoute } from "@tanstack/react-router"
-import { useEffect, useState } from "react"
-import { TodoDemo } from "~/components/TodoDemo"
-import { createLocalStorageOfflineExecutor } from "~/db/todos"
+import { createFileRoute } from '@tanstack/react-router'
+import { useEffect, useState } from 'react'
+import { TodoDemo } from '~/components/TodoDemo'
+import { createLocalStorageOfflineExecutor } from '~/db/todos'
 
 export const Route = createFileRoute(`/localstorage`)({
   component: LocalStorageDemo,

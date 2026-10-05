@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest"
+import { describe, expect, it } from 'vitest'
 import {
   extractFieldPath,
   extractSimpleComparisons,
@@ -7,9 +7,9 @@ import {
   parseOrderByExpression,
   parseWhereExpression,
   walkExpression,
-} from "../../src/query/expression-helpers"
-import { Func, PropRef, Value } from "../../src/query/ir.js"
-import type { IR } from "../../src/index.js"
+} from '../../src/query/expression-helpers'
+import { Func, PropRef, Value } from '../../src/query/ir.js'
+import type { IR } from '../../src/index.js'
 
 type OrderBy = IR.OrderBy
 
@@ -168,7 +168,7 @@ describe(`Expression Helpers`, () => {
           },
         })
       }).toThrow(
-        `No handler provided for operator: customOp. Available handlers: eq`
+        `No handler provided for operator: customOp. Available handlers: eq`,
       )
     })
 
@@ -312,6 +312,30 @@ describe(`Expression Helpers`, () => {
       expect(parseOrderByExpression([])).toEqual([])
     })
 
+    it(`should preserve a custom comparator by exact reference`, () => {
+      const compare = (a: string, b: string) => a.length - b.length
+      const orderBy: OrderBy = [
+        {
+          expression: new PropRef([`label`]),
+          compareOptions: {
+            direction: `asc`,
+            nulls: `first`,
+            stringSort: `custom`,
+            compare,
+          },
+        },
+      ]
+
+      const [parsed] = parseOrderByExpression(orderBy)
+      expect(parsed).toMatchObject({
+        field: [`label`],
+        direction: `asc`,
+        nulls: `first`,
+        stringSort: `custom`,
+      })
+      expect(parsed?.compare).toBe(compare)
+    })
+
     it(`should throw error for non-ref expressions`, () => {
       const orderBy: OrderBy = [
         {
@@ -324,7 +348,7 @@ describe(`Expression Helpers`, () => {
       ]
 
       expect(() => parseOrderByExpression(orderBy)).toThrow(
-        `ORDER BY expression must be a field reference, got: val`
+        `ORDER BY expression must be a field reference, got: val`,
       )
     })
   })
@@ -412,7 +436,7 @@ describe(`Expression Helpers`, () => {
 
       // OR is not supported by extractSimpleComparisons, so it throws
       expect(() => extractSimpleComparisons(expr)).toThrow(
-        `extractSimpleComparisons does not support 'or' operator`
+        `extractSimpleComparisons does not support 'or' operator`,
       )
     })
 
@@ -506,7 +530,7 @@ describe(`Expression Helpers`, () => {
       ])
 
       expect(() => extractSimpleComparisons(expr)).toThrow(
-        `extractSimpleComparisons does not support 'not(and)'`
+        `extractSimpleComparisons does not support 'not(and)'`,
       )
     })
   })

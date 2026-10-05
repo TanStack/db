@@ -1,6 +1,12 @@
-import type { OnlineDetector } from "../types"
+import type { OnlineDetector } from '../types'
 
-export class DefaultOnlineDetector implements OnlineDetector {
+/**
+ * Web-based online detector that uses browser APIs.
+ * Listens for:
+ * - `window.online` event for network connectivity changes
+ * - `document.visibilitychange` event for tab/window focus changes
+ */
+export class WebOnlineDetector implements OnlineDetector {
   private listeners: Set<() => void> = new Set()
   private isListening = false
 
@@ -32,7 +38,7 @@ export class DefaultOnlineDetector implements OnlineDetector {
       window.removeEventListener(`online`, this.handleOnline)
       document.removeEventListener(
         `visibilitychange`,
-        this.handleVisibilityChange
+        this.handleVisibilityChange,
       )
     }
   }
@@ -75,7 +81,12 @@ export class DefaultOnlineDetector implements OnlineDetector {
 
   isOnline(): boolean {
     if (typeof navigator !== `undefined`) {
-      return navigator.onLine
+      // A visible tab may reach the server despite a stale browser hint.
+      return (
+        navigator.onLine ||
+        (typeof document !== `undefined` &&
+          document.visibilityState === `visible`)
+      )
     }
     return true
   }
@@ -85,3 +96,8 @@ export class DefaultOnlineDetector implements OnlineDetector {
     this.listeners.clear()
   }
 }
+
+/**
+ * @deprecated Use `WebOnlineDetector` instead. This alias is kept for backwards compatibility.
+ */
+export const DefaultOnlineDetector = WebOnlineDetector

@@ -3,13 +3,11 @@ id: createArrayChangeProxy
 title: createArrayChangeProxy
 ---
 
-# Function: createArrayChangeProxy()
-
 ```ts
 function createArrayChangeProxy<T>(targets): object;
 ```
 
-Defined in: [packages/db/src/proxy.ts:873](https://github.com/TanStack/db/blob/main/packages/db/src/proxy.ts#L873)
+Defined in: [packages/db/src/proxy.ts:786](https://github.com/TanStack/db/blob/main/packages/db/src/proxy.ts#L786)
 
 Creates proxies for an array of objects and tracks changes to each
 

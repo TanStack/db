@@ -1,13 +1,13 @@
-import { describe, expect, test } from "vitest"
-import { D2 } from "../../src/d2.js"
-import { MultiSet } from "../../src/multiset.js"
-import { join } from "../../src/operators/join.js"
-import { output } from "../../src/operators/output.js"
+import { describe, expect, test } from 'vitest'
+import { D2 } from '../../src/d2.js'
+import { MultiSet } from '../../src/multiset.js'
+import { join } from '../../src/operators/join.js'
+import { output } from '../../src/operators/output.js'
 import {
   KeyedMessageTracker,
   assertKeyedResults,
   assertOnlyKeysAffected,
-} from "../test-utils.js"
+} from '../test-utils.js'
 
 describe(`Operators`, () => {
   describe(`Join operation`, () => {
@@ -26,7 +26,7 @@ function testJoin() {
       join(inputB),
       output((message) => {
         tracker.addMessage(message as MultiSet<[number, [string, string]]>)
-      })
+      }),
     )
 
     graph.finalize()
@@ -35,7 +35,7 @@ function testJoin() {
       new MultiSet([
         [[1, `a`], 1],
         [[2, `b`], 1],
-      ])
+      ]),
     )
 
     inputB.sendData(
@@ -43,7 +43,7 @@ function testJoin() {
         [[1, `x`], 1],
         [[2, `y`], 1],
         [[3, `z`], 1], // key 3 only exists in B, so no join output expected
-      ])
+      ]),
     )
 
     graph.run()
@@ -51,7 +51,11 @@ function testJoin() {
     const result = tracker.getResult()
 
     // Assert only keys that can actually join (1, 2) are affected, not key 3
-    assertOnlyKeysAffected(`basic join operation`, result.messages, [1, 2])
+    assertOnlyKeysAffected(
+      `basic join operation`,
+      result.weightedDeltas,
+      [1, 2],
+    )
 
     // Assert the final materialized results are correct
     assertKeyedResults(
@@ -61,7 +65,7 @@ function testJoin() {
         [1, [`a`, `x`]],
         [2, [`b`, `y`]],
       ],
-      4 // Expected message count
+      4, // Expected weighted delta count
     )
   })
 
@@ -75,7 +79,7 @@ function testJoin() {
       join(inputB),
       output((message) => {
         tracker.addMessage(message as MultiSet<[number, [string, string]]>)
-      })
+      }),
     )
 
     graph.finalize()
@@ -84,7 +88,7 @@ function testJoin() {
       new MultiSet([
         [[1, `a`], 1],
         [[2, `b`], 1],
-      ])
+      ]),
     )
 
     graph.run()
@@ -93,7 +97,7 @@ function testJoin() {
       new MultiSet([
         [[1, `x`], 1],
         [[2, `y`], 1],
-      ])
+      ]),
     )
 
     graph.run()
@@ -103,8 +107,8 @@ function testJoin() {
     // Assert only expected keys (1, 2) are affected in the join output
     assertOnlyKeysAffected(
       `join with late arriving data`,
-      result.messages,
-      [1, 2]
+      result.weightedDeltas,
+      [1, 2],
     )
 
     // Assert the final materialized results are correct
@@ -115,7 +119,7 @@ function testJoin() {
         [1, [`a`, `x`]],
         [2, [`b`, `y`]],
       ],
-      4 // Expected message count
+      4, // Expected weighted delta count
     )
   })
 
@@ -129,7 +133,7 @@ function testJoin() {
       join(inputB),
       output((message) => {
         tracker.addMessage(message as MultiSet<[number, [string, string]]>)
-      })
+      }),
     )
 
     graph.finalize()
@@ -138,13 +142,13 @@ function testJoin() {
       new MultiSet([
         [[1, `a`], 1],
         [[2, `b`], -1], // Negative multiplicity
-      ])
+      ]),
     )
     inputB.sendData(
       new MultiSet([
         [[1, `x`], 1],
         [[2, `y`], 1],
-      ])
+      ]),
     )
 
     graph.run()
@@ -154,16 +158,16 @@ function testJoin() {
     // Assert only keys that participate in join (1, 2) are affected
     assertOnlyKeysAffected(
       `join with negative multiplicities`,
-      result.messages,
-      [1, 2]
+      result.weightedDeltas,
+      [1, 2],
     )
 
     // Verify that key 2 produces a message but with negative multiplicity
-    const key2Messages = result.messages.filter(
-      ([[key, _value], _mult]) => key === 2
+    const key2Deltas = result.weightedDeltas.filter(
+      ([[key, _value], _mult]) => key === 2,
     )
-    expect(key2Messages.length).toBeGreaterThan(0) // Key 2 should produce messages
-    expect(key2Messages[0][1]).toBeLessThan(0) // But with negative multiplicity
+    expect(key2Deltas.length).toBeGreaterThan(0) // Key 2 should produce weighted deltas
+    expect(key2Deltas[0]![1]).toBeLessThan(0) // But with negative multiplicity
 
     // Assert the final materialized results (only positive multiplicities remain)
     assertKeyedResults(
@@ -172,7 +176,7 @@ function testJoin() {
       [
         [1, [`a`, `x`]], // Only key 1 should remain in final results
       ],
-      4 // Expected message count
+      4, // Expected weighted delta count
     )
   })
 
@@ -186,7 +190,7 @@ function testJoin() {
       join(inputB),
       output((message) => {
         tracker.addMessage(message as MultiSet<[string, [string, string]]>)
-      })
+      }),
     )
 
     graph.finalize()
@@ -196,14 +200,14 @@ function testJoin() {
       new MultiSet([
         [[`key1`, `batch1_a`], 1],
         [[`key2`, `batch1_b`], 1],
-      ])
+      ]),
     )
 
     inputA.sendData(
       new MultiSet([
         [[`key3`, `batch2_a`], 1],
         [[`key4`, `batch2_b`], 1],
-      ])
+      ]),
     )
 
     inputA.sendData(new MultiSet([[[`key5`, `batch3_a`], 1]]))
@@ -216,7 +220,7 @@ function testJoin() {
         [[`key3`, `x3`], 1],
         [[`key4`, `x4`], 1],
         [[`key5`, `x5`], 1],
-      ])
+      ]),
     )
 
     // Run the graph - should process all batches
@@ -228,8 +232,8 @@ function testJoin() {
     const expectedKeys = [`key1`, `key2`, `key3`, `key4`, `key5`]
     assertOnlyKeysAffected(
       `join multiple batches`,
-      result.messages,
-      expectedKeys
+      result.weightedDeltas,
+      expectedKeys,
     )
 
     // Assert the final materialized results are correct
@@ -243,7 +247,7 @@ function testJoin() {
         [`key4`, [`batch2_b`, `x4`]],
         [`key5`, [`batch3_a`, `x5`]],
       ],
-      10 // Expected message count
+      10, // Expected weighted delta count
     )
   })
 
@@ -258,7 +262,7 @@ function testJoin() {
       join(inputB1),
       output((message) => {
         stepTracker.addMessage(message as MultiSet<[string, [string, string]]>)
-      })
+      }),
     )
 
     graph1.finalize()
@@ -269,7 +273,7 @@ function testJoin() {
         [[`item1`, `x1`], 1],
         [[`item2`, `x2`], 1],
         [[`item3`, `x3`], 1],
-      ])
+      ]),
     )
 
     // Send and process inputA one batch at a time
@@ -292,7 +296,7 @@ function testJoin() {
       join(inputB2),
       output((message) => {
         batchTracker.addMessage(message as MultiSet<[string, [string, string]]>)
-      })
+      }),
     )
 
     graph2.finalize()
@@ -303,7 +307,7 @@ function testJoin() {
         [[`item1`, `x1`], 1],
         [[`item2`, `x2`], 1],
         [[`item3`, `x3`], 1],
-      ])
+      ]),
     )
 
     // Send all inputA batches then run once
@@ -319,13 +323,13 @@ function testJoin() {
     const expectedKeys = [`item1`, `item2`, `item3`]
     assertOnlyKeysAffected(
       `join step-by-step`,
-      stepResult.messages,
-      expectedKeys
+      stepResult.weightedDeltas,
+      expectedKeys,
     )
     assertOnlyKeysAffected(
       `join batch processing`,
-      batchResult.messages,
-      expectedKeys
+      batchResult.weightedDeltas,
+      expectedKeys,
     )
 
     // Both approaches should produce the same final materialized results

@@ -1,16 +1,18 @@
-import type { AbstractPowerSyncDatabase, Table } from "@powersync/common"
-import type { StandardSchemaV1 } from "@standard-schema/spec"
+import type { CommonPowerSyncDatabase, Table } from '@powersync/common'
+import type { StandardSchemaV1 } from '@standard-schema/spec'
 import type {
   BaseCollectionConfig,
+  CleanupFn,
   CollectionConfig,
   InferSchemaOutput,
-} from "@tanstack/db"
+  LoadSubsetOptions,
+} from '@tanstack/db'
 import type {
   AnyTableColumnType,
   ExtractedTable,
   OptionalExtractedTable,
   PowerSyncRecord,
-} from "./helpers"
+} from './helpers'
 
 /**
  * Small helper which determines the output type if:
@@ -20,7 +22,9 @@ import type {
 export type InferPowerSyncOutputType<
   TTable extends Table = Table,
   TSchema extends StandardSchemaV1<PowerSyncRecord> = never,
-> = TSchema extends never ? ExtractedTable<TTable> : InferSchemaOutput<TSchema>
+> = [TSchema] extends [never]
+  ? ExtractedTable<TTable>
+  : InferSchemaOutput<TSchema>
 
 /**
  * A mapping type for custom serialization of object properties to SQLite-compatible values.
@@ -54,7 +58,7 @@ export type CustomSQLiteSerializer<
   TSQLite extends Record<string, unknown>,
 > = Partial<{
   [Key in keyof TOutput]: (
-    value: TOutput[Key]
+    value: TOutput[Key],
   ) => Key extends keyof TSQLite ? TSQLite[Key] : never
 }>
 
@@ -162,17 +166,57 @@ export type ConfigWithArbitraryCollectionTypes<
     StandardSchemaV1.InferOutput<TSchema>
   >
 }
+/**
+ * Eager sync mode hooks.
+ * Called once when the collection sync starts and stops.
+ */
+export type EagerSyncHooks = {
+  syncMode?: 'eager'
+  /**
+   * Called when the collection sync starts.
+   * Use this to set up external data sources (e.g. subscribing to a sync stream).
+   *
+   * @returns A cleanup function that is called when the collection sync is cleaned up.
+   */
+  onLoad?: () => CleanupFn | void | Promise<CleanupFn | void>
+  onLoadSubset?: never
+}
+
+/**
+ * On-demand sync mode hooks.
+ * Called each time a subset is loaded or unloaded in response to live query changes.
+ */
+export type OnDemandSyncHooks = {
+  syncMode: 'on-demand'
+  onLoad?: never
+  /**
+   * Called when a subset of data is requested by a live query.
+   * Use this to set up external data sources for the requested subset
+   * (e.g. subscribing to a sync stream with parameters derived from the query predicate).
+   *
+   * @returns A cleanup function that is called when the subset is unloaded.
+   */
+
+  onLoadSubset?: (
+    options: LoadSubsetOptions,
+  ) => CleanupFn | void | Promise<CleanupFn | void>
+}
+
 export type BasePowerSyncCollectionConfig<
   TTable extends Table = Table,
-  TSchema extends StandardSchemaV1 = never,
+  TSchema extends StandardSchemaV1<any> = never,
 > = Omit<
-  BaseCollectionConfig<ExtractedTable<TTable>, string, TSchema>,
-  `onInsert` | `onUpdate` | `onDelete` | `getKey`
+  BaseCollectionConfig<
+    InferPowerSyncOutputType<TTable, TSchema>,
+    string,
+    TSchema
+  >,
+  `onInsert` | `onUpdate` | `onDelete` | `getKey` | `syncMode`
 > & {
   /** The PowerSync schema Table definition */
   table: TTable
   /** The PowerSync database instance */
-  database: AbstractPowerSyncDatabase
+  database: CommonPowerSyncDatabase
   /**
    * The maximum number of documents to read from the SQLite table
    * in a single batch during the initial sync between PowerSync and the
@@ -186,7 +230,7 @@ export type BasePowerSyncCollectionConfig<
    *   streaming of initial results, at the cost of more query calls.
    */
   syncBatchSize?: number
-}
+} & (EagerSyncHooks | OnDemandSyncHooks)
 
 /**
  * Configuration interface for PowerSync collection options.
@@ -246,6 +290,11 @@ export type PowerSyncCollectionMeta<TTable extends Table = Table> = {
    * Serializes a collection value to the SQLite type
    */
   serializeValue: (value: any) => ExtractedTable<TTable>
+
+  /**
+   * Whether the PowerSync table tracks metadata.
+   */
+  metadataIsTracked: boolean
 }
 
 /**
@@ -255,7 +304,12 @@ export type EnhancedPowerSyncCollectionConfig<
   TTable extends Table,
   OutputType extends Record<string, unknown> = Record<string, unknown>,
   TSchema extends StandardSchemaV1 = never,
-> = CollectionConfig<OutputType, string, TSchema> & {
+> = CollectionConfig<
+  OutputType,
+  string,
+  TSchema,
+  PowerSyncCollectionUtils<TTable>
+> & {
   id?: string
   utils: PowerSyncCollectionUtils<TTable>
   schema?: TSchema

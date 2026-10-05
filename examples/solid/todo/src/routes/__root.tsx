@@ -1,6 +1,12 @@
-import { Outlet, createRootRoute } from "@tanstack/solid-router"
-
-import appCss from "../styles.css?url"
+import {
+  HeadContent,
+  Outlet,
+  Scripts,
+  createRootRoute,
+} from '@tanstack/solid-router'
+import { HydrationScript } from 'solid-js/web'
+import appCss from '../styles.css?url'
+import type { ParentProps } from 'solid-js'
 
 export const Route = createRootRoute({
   head: () => ({
@@ -23,6 +29,21 @@ export const Route = createRootRoute({
       },
     ],
   }),
-
+  shellComponent: RootDocument,
   component: () => <Outlet />,
 })
+
+function RootDocument(props: ParentProps) {
+  return (
+    <html lang="en">
+      <head>
+        <HeadContent />
+        <HydrationScript />
+      </head>
+      <body>
+        {props.children}
+        <Scripts />
+      </body>
+    </html>
+  )
+}

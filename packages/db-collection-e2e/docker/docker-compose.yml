@@ -1,4 +1,4 @@
-name: "tanstack-db-e2e"
+name: 'tanstack-db-e2e'
 
 services:
   postgres:
@@ -8,7 +8,7 @@ services:
       POSTGRES_USER: postgres
       POSTGRES_PASSWORD: password
     ports:
-      - "54321:5432"
+      - '54321:5432'
     volumes:
       - ./postgres.conf:/etc/postgresql/postgresql.conf:ro
     tmpfs:
@@ -19,7 +19,7 @@ services:
       - -c
       - config_file=/etc/postgresql/postgresql.conf
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      test: ['CMD-SHELL', 'pg_isready -U postgres']
       interval: 2s
       timeout: 10s
       retries: 5
@@ -29,13 +29,14 @@ services:
     environment:
       DATABASE_URL: postgresql://postgres:password@postgres:5432/e2e_test?sslmode=disable
       ELECTRIC_INSECURE: true
+      ELECTRIC_FEATURE_FLAGS: 'allow_subqueries,tagged_subqueries'
     ports:
-      - "3000:3000"
+      - '3000:3000'
     depends_on:
       postgres:
         condition: service_healthy
     healthcheck:
-      test: ["CMD-SHELL", "curl -f http://localhost:3000/v1/health || exit 1"]
+      test: ['CMD-SHELL', 'curl -f http://localhost:3000/v1/health || exit 1']
       interval: 2s
       timeout: 10s
       retries: 5

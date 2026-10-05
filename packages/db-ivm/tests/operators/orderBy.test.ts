@@ -1,8 +1,8 @@
-import { describe, expect, test } from "vitest"
-import { D2 } from "../../src/d2.js"
-import { MultiSet } from "../../src/multiset.js"
-import { orderBy, output } from "../../src/operators/index.js"
-import type { KeyValue } from "../../src/types.js"
+import { describe, expect, test } from 'vitest'
+import { D2 } from '../../src/d2.js'
+import { MultiSet } from '../../src/multiset.js'
+import { orderBy, output } from '../../src/operators/index.js'
+import type { KeyValue } from '../../src/types.js'
 
 describe(`Operators`, () => {
   describe(`OrderBy operation`, () => {
@@ -23,7 +23,7 @@ describe(`Operators`, () => {
         orderBy((item) => item.value),
         output((message) => {
           latestMessage = message
-        })
+        }),
       )
 
       graph.finalize()
@@ -35,7 +35,7 @@ describe(`Operators`, () => {
           [[`key3`, { id: 3, value: `b` }], 1],
           [[`key4`, { id: 4, value: `y` }], 1],
           [[`key5`, { id: 5, value: `c` }], 1],
-        ])
+        ]),
       )
 
       graph.run()
@@ -72,7 +72,7 @@ describe(`Operators`, () => {
         }),
         output((message) => {
           latestMessage = message
-        })
+        }),
       )
 
       graph.finalize()
@@ -84,7 +84,7 @@ describe(`Operators`, () => {
           [[`key3`, { id: 3, value: `b` }], 1],
           [[`key4`, { id: 4, value: `y` }], 1],
           [[`key5`, { id: 5, value: `c` }], 1],
-        ])
+        ]),
       )
 
       graph.run()
@@ -119,7 +119,7 @@ describe(`Operators`, () => {
         orderBy((item) => item.value, { limit: 3 }),
         output((message) => {
           latestMessage = message
-        })
+        }),
       )
 
       graph.finalize()
@@ -131,7 +131,7 @@ describe(`Operators`, () => {
           [[`key3`, { id: 3, value: `b` }], 1],
           [[`key4`, { id: 4, value: `y` }], 1],
           [[`key5`, { id: 5, value: `c` }], 1],
-        ])
+        ]),
       )
 
       graph.run()
@@ -164,7 +164,7 @@ describe(`Operators`, () => {
         orderBy((item) => item.value, { limit: 2, offset: 2 }),
         output((message) => {
           latestMessage = message
-        })
+        }),
       )
 
       graph.finalize()
@@ -176,7 +176,7 @@ describe(`Operators`, () => {
           [[`key3`, { id: 3, value: `b` }], 1],
           [[`key4`, { id: 4, value: `y` }], 1],
           [[`key5`, { id: 5, value: `c` }], 1],
-        ])
+        ]),
       )
 
       graph.run()
@@ -208,7 +208,7 @@ describe(`Operators`, () => {
         orderBy((item) => item.id),
         output((message) => {
           latestMessage = message
-        })
+        }),
       )
 
       graph.finalize()
@@ -220,7 +220,7 @@ describe(`Operators`, () => {
           [[`key3`, { id: 1, value: `b` }], 1],
           [[`key4`, { id: 4, value: `y` }], 1],
           [[`key5`, { id: 2, value: `c` }], 1],
-        ])
+        ]),
       )
 
       graph.run()
@@ -255,7 +255,7 @@ describe(`Operators`, () => {
         orderBy((item) => item.value),
         output((message) => {
           latestMessage = message
-        })
+        }),
       )
 
       graph.finalize()
@@ -266,7 +266,7 @@ describe(`Operators`, () => {
           [[`key1`, { id: 1, value: `c` }], 1],
           [[`key2`, { id: 2, value: `d` }], 1],
           [[`key3`, { id: 3, value: `e` }], 1],
-        ])
+        ]),
       )
       graph.run()
 
@@ -283,7 +283,7 @@ describe(`Operators`, () => {
         new MultiSet([
           [[`key4`, { id: 4, value: `a` }], 1],
           [[`key5`, { id: 5, value: `b` }], 1],
-        ])
+        ]),
       )
       graph.run()
 
@@ -312,7 +312,7 @@ describe(`Operators`, () => {
         orderBy((item) => item.value),
         output((message) => {
           latestMessage = message
-        })
+        }),
       )
 
       graph.finalize()
@@ -324,7 +324,7 @@ describe(`Operators`, () => {
           [[`key2`, { id: 2, value: `b` }], 1],
           [[`key3`, { id: 3, value: `c` }], 1],
           [[`key4`, { id: 4, value: `d` }], 1],
-        ])
+        ]),
       )
       graph.run()
 
@@ -365,7 +365,7 @@ describe(`Operators`, () => {
         orderBy((item) => item.value, { limit: 3 }),
         output((message) => {
           latestMessage = message
-        })
+        }),
       )
 
       graph.finalize()
@@ -376,7 +376,7 @@ describe(`Operators`, () => {
           [[`key1`, { id: 1, value: `c` }], 1],
           [[`key2`, { id: 2, value: `d` }], 1],
           [[`key3`, { id: 3, value: `e` }], 1],
-        ])
+        ]),
       )
       graph.run()
 
@@ -417,7 +417,7 @@ describe(`Operators`, () => {
         orderBy((item) => item.value, { limit: 2, offset: 1 }),
         output((message) => {
           latestMessage = message
-        })
+        }),
       )
 
       graph.finalize()
@@ -429,7 +429,7 @@ describe(`Operators`, () => {
           [[`key2`, { id: 2, value: `b` }], 1],
           [[`key3`, { id: 3, value: `c` }], 1],
           [[`key4`, { id: 4, value: `d` }], 1],
-        ])
+        ]),
       )
       graph.run()
 
@@ -469,7 +469,7 @@ describe(`Operators`, () => {
         orderBy((item) => item.value),
         output((message) => {
           latestMessage = message
-        })
+        }),
       )
 
       graph.finalize()
@@ -480,7 +480,7 @@ describe(`Operators`, () => {
           [[`key1`, { id: 1, value: `a` }], 1],
           [[`key2`, { id: 2, value: `c` }], 1],
           [[`key3`, { id: 3, value: `e` }], 1],
-        ])
+        ]),
       )
       graph.run()
 
@@ -497,7 +497,7 @@ describe(`Operators`, () => {
         new MultiSet([
           [[`key2`, { id: 2, value: `c` }], -1], // Remove old version
           [[`key2`, { id: 2, value: `z` }], 1], // Add new version with different value
-        ])
+        ]),
       )
       graph.run()
 
@@ -518,10 +518,10 @@ function sortResults(results: Array<any>) {
   return [...results]
     .sort(
       ([[_aKey, _aValue], aMultiplicity], [[_bKey, _bValue], bMultiplicity]) =>
-        aMultiplicity - bMultiplicity
+        aMultiplicity - bMultiplicity,
     )
     .sort(
       ([[aKey, _aValue], _aMultiplicity], [[bKey, _bValue], _bMultiplicity]) =>
-        aKey.localeCompare(bKey)
+        aKey.localeCompare(bKey),
     )
 }

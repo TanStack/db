@@ -1,7 +1,4 @@
-import prettierPlugin from "eslint-plugin-prettier"
-import prettierConfig from "eslint-config-prettier"
-import stylisticPlugin from "@stylistic/eslint-plugin"
-import { tanstackConfig } from "@tanstack/config/eslint"
+import { tanstackConfig } from '@tanstack/eslint-config'
 
 export default [
   ...tanstackConfig,
@@ -12,34 +9,32 @@ export default [
       `**/.nitro/**`,
       `**/traildepot/**`,
       `examples/angular/**`,
+      `packages/db-collection-e2e/vite.config.ts`,
+      `packages/capacitor-db-sqlite-persistence/e2e/app/android/**`,
+      `packages/capacitor-db-sqlite-persistence/e2e/app/ios/**`,
+      // Expo expects Metro config in CommonJS format.
+      `packages/expo-db-sqlite-persistence/e2e/expo-runtime-app/metro.config.js`,
     ],
   },
   {
-    plugins: {
-      stylistic: stylisticPlugin,
-      prettier: prettierPlugin,
-    },
     settings: {
       // import-x/* settings required for import/no-cycle.
-      "import-x/resolver": { typescript: true },
-      "import-x/extensions": [".ts", ".tsx", ".js", ".jsx", ".cjs", ".mjs"],
+      'import-x/resolver': { typescript: true },
+      'import-x/extensions': ['.ts', '.tsx', '.js', '.jsx', '.cjs', '.mjs'],
     },
     rules: {
-      "prettier/prettier": `error`,
-      "stylistic/quotes": [`error`, `backtick`],
-      "pnpm/enforce-catalog": `off`,
-      "pnpm/json-enforce-catalog": `off`,
-      ...prettierConfig.rules,
+      'pnpm/enforce-catalog': `off`,
+      'pnpm/json-enforce-catalog': `off`,
     },
   },
   {
     files: [`**/*.ts`, `**/*.tsx`],
     rules: {
-      "@typescript-eslint/no-unused-vars": [
+      '@typescript-eslint/no-unused-vars': [
         `error`,
         { argsIgnorePattern: `^_`, varsIgnorePattern: `^_` },
       ],
-      "@typescript-eslint/naming-convention": [
+      '@typescript-eslint/naming-convention': [
         `error`,
         {
           selector: `typeParameter`,
@@ -47,7 +42,7 @@ export default [
           leadingUnderscore: `allow`,
         },
       ],
-      "import/no-cycle": `error`,
+      'import/no-cycle': `error`,
     },
   },
 ]

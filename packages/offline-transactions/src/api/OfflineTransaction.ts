@@ -1,11 +1,11 @@
-import { createTransaction } from "@tanstack/db"
-import { NonRetriableError } from "../types"
-import type { PendingMutation, Transaction } from "@tanstack/db"
+import { createTransaction, safeRandomUUID } from '@tanstack/db'
+import { NonRetriableError } from '../types'
+import type { PendingMutation, Transaction } from '@tanstack/db'
 import type {
   CreateOfflineTransactionOptions,
   OfflineMutationFn,
   OfflineTransaction as OfflineTransactionType,
-} from "../types"
+} from '../types'
 
 export class OfflineTransaction {
   private offlineId: string
@@ -21,12 +21,12 @@ export class OfflineTransaction {
     options: CreateOfflineTransactionOptions,
     mutationFn: OfflineMutationFn,
     persistTransaction: (tx: OfflineTransactionType) => Promise<void>,
-    executor: any
+    executor: any,
   ) {
-    this.offlineId = crypto.randomUUID()
+    this.offlineId = safeRandomUUID()
     this.mutationFnName = options.mutationFnName
     this.autoCommit = options.autoCommit ?? true
-    this.idempotencyKey = options.idempotencyKey ?? crypto.randomUUID()
+    this.idempotencyKey = options.idempotencyKey ?? safeRandomUUID()
     this.metadata = options.metadata ?? {}
     this.persistTransaction = persistTransaction
     this.executor = executor
@@ -54,12 +54,17 @@ export class OfflineTransaction {
         }
 
         const completionPromise = this.executor.waitForTransactionCompletion(
-          this.offlineId
+          this.offlineId,
         )
 
         try {
-          await this.persistTransaction(offlineTransaction)
-          // Now block and wait for the executor to complete the real mutation
+          // Persistence also drives the shared queue. This transaction can finish
+          // before that queue drains; observe both promises from the outset.
+          await Promise.race([
+            this.persistTransaction(offlineTransaction),
+            completionPromise,
+          ])
+          // A queue pause (offline or retry) is not transaction completion.
           await completionPromise
         } catch (error) {
           const normalizedError =

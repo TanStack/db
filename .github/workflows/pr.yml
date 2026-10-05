@@ -10,66 +10,173 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.event.number || github.ref }}
   cancel-in-progress: true
 
-env:
-  NX_CLOUD_ACCESS_TOKEN: ${{ secrets.NX_CLOUD_ACCESS_TOKEN }}
-
 permissions:
   contents: read
-  pull-requests: write
 
 jobs:
-  test:
-    name: Test
+  minified-db:
+    name: Minified DB public API
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
-        uses: actions/checkout@v5.0.0
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
-          fetch-depth: 0
+          persist-credentials: false
       - name: Setup Tools
-        uses: tanstack/config/.github/setup@main
-      - name: Get base and head commits for `nx affected`
-        uses: nrwl/nx-set-shas@v4.4.0
+        uses: tanstack/config/.github/setup@e4b48f16568324f76f467aa4c2aac2f05db632c3
+      - name: Check private-member mangle cache
+        run: pnpm run check:mangle
+      - name: Build DB packages
+        run: pnpm --filter @tanstack/db-ivm --filter @tanstack/db build
+      - name: Check minified public API
+        run: pnpm run test:minified-db
+      - name: Check DB tests against built dist
+        run: pnpm --filter @tanstack/db test:dist
+  test-db:
+    name: Test (${{ matrix.group }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        group: [db-1, db-2, db-replay]
+    env:
+      TEST_GROUP: ${{ matrix.group }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
-          main-branch-name: main
-      - name: Run Checks
-        run: pnpm run lint && pnpm run build && pnpm run test
+          persist-credentials: false
+      - name: Setup Tools
+        uses: tanstack/config/.github/setup@e4b48f16568324f76f467aa4c2aac2f05db632c3
+      - name: Build dependencies
+        run: node scripts/ci-tests.mjs build "$TEST_GROUP"
+      - name: Run tests
+        run: node scripts/ci-tests.mjs test "$TEST_GROUP"
+      - name: Upload DB report
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: db-report-${{ matrix.group }}
+          path: packages/db/.vitest-reports/*.json
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 1
+  test-packages:
+    name: Test (${{ matrix.group }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        group:
+          [ivm-offline, sqlite-core, sqlite-adapters, frameworks, collections]
+    env:
+      TEST_GROUP: ${{ matrix.group }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+      - name: Setup Tools
+        uses: tanstack/config/.github/setup@e4b48f16568324f76f467aa4c2aac2f05db632c3
+      - name: Build dependencies
+        run: node scripts/ci-tests.mjs build "$TEST_GROUP"
+      - name: Typecheck Test Sources
+        if: matrix.group == 'ivm-offline'
+        run: pnpm run typecheck:tests
+      - name: Run tests
+        run: node scripts/ci-tests.mjs test "$TEST_GROUP"
+      - name: Check dependency versions
+        if: matrix.group == 'ivm-offline'
+        run: |
+          if ! pnpm run test:sherif; then
+            echo ""
+            echo "=========================================="
+            echo "❌ Sherif found dependency version mismatches"
+            echo ""
+            echo "To fix this locally, run:"
+            echo "  pnpm exec sherif --fix -i zod"
+            echo ""
+            echo "Then commit the changes to package.json files."
+            echo "=========================================="
+            exit 1
+          fi
+  test:
+    name: Test
+    if: always()
+    needs: [test-db, test-packages]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Require every test group to succeed
+        env:
+          DB_RESULT: ${{ needs.test-db.result }}
+          PACKAGES_RESULT: ${{ needs.test-packages.result }}
+        run: test "$DB_RESULT" = success && test "$PACKAGES_RESULT" = success
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+      - name: Setup Tools
+        uses: tanstack/config/.github/setup@e4b48f16568324f76f467aa4c2aac2f05db632c3
+      - name: Download DB reports
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          pattern: db-report-*
+          path: packages/db/.vitest-reports
+          merge-multiple: true
+      - name: Merge DB coverage and test reports
+        run: pnpm --dir packages/db exec vitest --mergeReports .vitest-reports
   preview:
     name: Preview
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
     steps:
       - name: Checkout
-        uses: actions/checkout@v5.0.0
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           fetch-depth: 0
+          persist-credentials: false
       - name: Setup Tools
-        uses: tanstack/config/.github/setup@main
+        uses: tanstack/config/.github/setup@e4b48f16568324f76f467aa4c2aac2f05db632c3
       - name: Build Packages
         run: pnpm run build
       - name: Publish Previews
         run: pnpx pkg-pr-new publish --pnpm --compact './packages/*' --template './examples/*/*'
-      - name: Compressed Size Action - DB Package
-        uses: preactjs/compressed-size-action@v2
+  size:
+    name: Compressed size
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
-          repo-token: "${{ secrets.GITHUB_TOKEN }}"
-          pattern: "./packages/db/dist/**/*.{js,mjs}"
-          comment-key: "db-package-size"
-          build-script: "build:minified"
-      - name: Compressed Size Action - React DB Package
-        uses: preactjs/compressed-size-action@v2
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Setup Tools
+        uses: tanstack/config/.github/setup@e4b48f16568324f76f467aa4c2aac2f05db632c3
+      - name: Compare DB and React DB sizes
+        uses: preactjs/compressed-size-action@66325aad6443cb7cf89c4bfcd414aea2367cda94 # 2.9.1
         with:
-          repo-token: "${{ secrets.GITHUB_TOKEN }}"
-          pattern: "./packages/react-db/dist/**/*.{js,mjs}"
-          comment-key: "react-db-package-size"
-          build-script: "build:minified"
+          repo-token: '${{ secrets.GITHUB_TOKEN }}'
+          pattern: './packages/{db,react-db}/dist/**/*.{js,mjs}'
+          comment-key: 'db-and-react-package-size'
+          # The action installs and builds both head and base. Use commands
+          # already present on the base, including the minified build's deps.
+          install-script: bash -c "pnpm install --frozen-lockfile && pnpm --filter @tanstack/react-router-with-db... build"
+          build-script: 'build:minified'
   build-example:
     name: Build Example Site
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
-        uses: actions/checkout@v5.0.0
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
       - name: Setup Tools
-        uses: tanstack/config/.github/setup@main
+        uses: tanstack/config/.github/setup@e4b48f16568324f76f467aa4c2aac2f05db632c3
       - name: Build Packages
         run: pnpm run build
       - name: Build Example Site
@@ -81,12 +188,15 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
-        uses: actions/checkout@v5.0.0
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
       - name: Setup Tools
-        uses: tanstack/config/.github/setup@main
+        uses: tanstack/config/.github/setup@e4b48f16568324f76f467aa4c2aac2f05db632c3
       - name: Build Packages
         run: pnpm run build
       - name: Build Starter Site
         run: |
           cd examples/react/projects
+          cp .env.example .env
           pnpm build

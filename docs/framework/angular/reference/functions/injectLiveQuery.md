@@ -3,15 +3,13 @@ id: injectLiveQuery
 title: injectLiveQuery
 ---
 
-# Function: injectLiveQuery()
-
 ## Call Signature
 
 ```ts
-function injectLiveQuery<TContext, TParams>(options): InjectLiveQueryResult<{ [K in string | number | symbol]: (TContext["result"] extends object ? any[any] : TContext["hasJoins"] extends true ? TContext["schema"] : TContext["schema"][TContext["fromSourceName"]])[K] }>;
+function injectLiveQuery<TContext, TParams>(options): InjectLiveQueryResult<TContext>;
 ```
 
-Defined in: [index.ts:51](https://github.com/TanStack/db/blob/main/packages/angular-db/src/index.ts#L51)
+Defined in: [index.ts:118](https://github.com/TanStack/db/blob/main/packages/angular-db/src/index.ts#L118)
 
 ### Type Parameters
 
@@ -37,15 +35,49 @@ Defined in: [index.ts:51](https://github.com/TanStack/db/blob/main/packages/angu
 
 ### Returns
 
-[`InjectLiveQueryResult`](../../interfaces/InjectLiveQueryResult.md)\<\{ \[K in string \| number \| symbol\]: (TContext\["result"\] extends object ? any\[any\] : TContext\["hasJoins"\] extends true ? TContext\["schema"\] : TContext\["schema"\]\[TContext\["fromSourceName"\]\])\[K\] \}\>
+[`InjectLiveQueryResult`](../interfaces/InjectLiveQueryResult.md)\<`TContext`\>
 
 ## Call Signature
 
 ```ts
-function injectLiveQuery<TContext>(queryFn): InjectLiveQueryResult<{ [K in string | number | symbol]: (TContext["result"] extends object ? any[any] : TContext["hasJoins"] extends true ? TContext["schema"] : TContext["schema"][TContext["fromSourceName"]])[K] }>;
+function injectLiveQuery<TContext, TParams>(options): InjectConditionalLiveQueryResult<TContext>;
 ```
 
-Defined in: [index.ts:61](https://github.com/TanStack/db/blob/main/packages/angular-db/src/index.ts#L61)
+Defined in: [index.ts:128](https://github.com/TanStack/db/blob/main/packages/angular-db/src/index.ts#L128)
+
+### Type Parameters
+
+#### TContext
+
+`TContext` *extends* `Context`
+
+#### TParams
+
+`TParams` *extends* `unknown`
+
+### Parameters
+
+#### options
+
+##### params
+
+() => `TParams`
+
+##### query
+
+(`args`) => `QueryBuilder`\<`TContext`\> \| `null` \| `undefined`
+
+### Returns
+
+[`InjectConditionalLiveQueryResult`](../type-aliases/InjectConditionalLiveQueryResult.md)\<`TContext`\>
+
+## Call Signature
+
+```ts
+function injectLiveQuery<TContext>(queryFn): InjectLiveQueryResult<TContext>;
+```
+
+Defined in: [index.ts:138](https://github.com/TanStack/db/blob/main/packages/angular-db/src/index.ts#L138)
 
 ### Type Parameters
 
@@ -61,15 +93,39 @@ Defined in: [index.ts:61](https://github.com/TanStack/db/blob/main/packages/angu
 
 ### Returns
 
-[`InjectLiveQueryResult`](../../interfaces/InjectLiveQueryResult.md)\<\{ \[K in string \| number \| symbol\]: (TContext\["result"\] extends object ? any\[any\] : TContext\["hasJoins"\] extends true ? TContext\["schema"\] : TContext\["schema"\]\[TContext\["fromSourceName"\]\])\[K\] \}\>
+[`InjectLiveQueryResult`](../interfaces/InjectLiveQueryResult.md)\<`TContext`\>
 
 ## Call Signature
 
 ```ts
-function injectLiveQuery<TContext>(config): InjectLiveQueryResult<{ [K in string | number | symbol]: (TContext["result"] extends object ? any[any] : TContext["hasJoins"] extends true ? TContext["schema"] : TContext["schema"][TContext["fromSourceName"]])[K] }>;
+function injectLiveQuery<TContext>(queryFn): InjectConditionalLiveQueryResult<TContext>;
 ```
 
-Defined in: [index.ts:64](https://github.com/TanStack/db/blob/main/packages/angular-db/src/index.ts#L64)
+Defined in: [index.ts:141](https://github.com/TanStack/db/blob/main/packages/angular-db/src/index.ts#L141)
+
+### Type Parameters
+
+#### TContext
+
+`TContext` *extends* `Context`
+
+### Parameters
+
+#### queryFn
+
+(`q`) => `QueryBuilder`\<`TContext`\> \| `null` \| `undefined`
+
+### Returns
+
+[`InjectConditionalLiveQueryResult`](../type-aliases/InjectConditionalLiveQueryResult.md)\<`TContext`\>
+
+## Call Signature
+
+```ts
+function injectLiveQuery<TContext>(config): InjectLiveQueryResult<TContext>;
+```
+
+Defined in: [index.ts:146](https://github.com/TanStack/db/blob/main/packages/angular-db/src/index.ts#L146)
 
 ### Type Parameters
 
@@ -85,15 +141,15 @@ Defined in: [index.ts:64](https://github.com/TanStack/db/blob/main/packages/angu
 
 ### Returns
 
-[`InjectLiveQueryResult`](../../interfaces/InjectLiveQueryResult.md)\<\{ \[K in string \| number \| symbol\]: (TContext\["result"\] extends object ? any\[any\] : TContext\["hasJoins"\] extends true ? TContext\["schema"\] : TContext\["schema"\]\[TContext\["fromSourceName"\]\])\[K\] \}\>
+[`InjectLiveQueryResult`](../interfaces/InjectLiveQueryResult.md)\<`TContext`\>
 
 ## Call Signature
 
 ```ts
-function injectLiveQuery<TResult, TKey, TUtils>(liveQueryCollection): InjectLiveQueryResult<TResult, TKey, TUtils>;
+function injectLiveQuery<TResult, TKey, TUtils>(liveQueryCollection): InjectLiveQueryResultWithCollection<TResult, TKey, TUtils>;
 ```
 
-Defined in: [index.ts:67](https://github.com/TanStack/db/blob/main/packages/angular-db/src/index.ts#L67)
+Defined in: [index.ts:150](https://github.com/TanStack/db/blob/main/packages/angular-db/src/index.ts#L150)
 
 ### Type Parameters
 
@@ -113,8 +169,40 @@ Defined in: [index.ts:67](https://github.com/TanStack/db/blob/main/packages/angu
 
 #### liveQueryCollection
 
-`Collection`\<`TResult`, `TKey`, `TUtils`\>
+`Collection`\<`TResult`, `TKey`, `TUtils`, `StandardSchemaV1`\<`unknown`, `unknown`\>, `TResult`\> & `NonSingleResult`
 
 ### Returns
 
-[`InjectLiveQueryResult`](../../interfaces/InjectLiveQueryResult.md)\<`TResult`, `TKey`, `TUtils`\>
+[`InjectLiveQueryResultWithCollection`](../interfaces/InjectLiveQueryResultWithCollection.md)\<`TResult`, `TKey`, `TUtils`\>
+
+## Call Signature
+
+```ts
+function injectLiveQuery<TResult, TKey, TUtils>(liveQueryCollection): InjectLiveQueryResultWithSingleResultCollection<TResult, TKey, TUtils>;
+```
+
+Defined in: [index.ts:158](https://github.com/TanStack/db/blob/main/packages/angular-db/src/index.ts#L158)
+
+### Type Parameters
+
+#### TResult
+
+`TResult` *extends* `object`
+
+#### TKey
+
+`TKey` *extends* `string` \| `number`
+
+#### TUtils
+
+`TUtils` *extends* `Record`\<`string`, `any`\>
+
+### Parameters
+
+#### liveQueryCollection
+
+`Collection`\<`TResult`, `TKey`, `TUtils`, `StandardSchemaV1`\<`unknown`, `unknown`\>, `TResult`\> & `SingleResult`
+
+### Returns
+
+[`InjectLiveQueryResultWithSingleResultCollection`](../interfaces/InjectLiveQueryResultWithSingleResultCollection.md)\<`TResult`, `TKey`, `TUtils`\>

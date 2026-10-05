@@ -1,69 +1,68 @@
-import { Func, PropRef, Value } from "../ir.js"
-import type { BasicExpression, OrderBy } from "../ir.js"
+import {
+  Func,
+  PropRef,
+  Value,
+  getPropRefPropertyPath,
+  getPropRefSourceAlias,
+} from '../ir.js'
+import type { BasicExpression, OrderBy } from '../ir.js'
 
-/**
- * Functions supported by the collection index system.
- * These are the only functions that can be used in WHERE clauses
- * that are pushed down to collection subscriptions for index optimization.
- */
-export const SUPPORTED_COLLECTION_FUNCS = new Set([
-  `eq`,
-  `gt`,
-  `lt`,
-  `gte`,
-  `lte`,
-  `and`,
-  `or`,
-  `in`,
-  `isNull`,
-  `isUndefined`,
-  `not`,
-])
-
-/**
- * Determines if a WHERE clause can be converted to collection-compatible BasicExpression format.
- * This checks if the expression only uses functions supported by the collection index system.
- *
- * @param whereClause - The WHERE clause to check
- * @returns True if the clause can be converted for collection index optimization
- */
-export function isConvertibleToCollectionFilter(
-  whereClause: BasicExpression<boolean>
-): boolean {
-  const tpe = whereClause.type
-  if (tpe === `func`) {
-    // Check if this function is supported
-    if (!SUPPORTED_COLLECTION_FUNCS.has(whereClause.name)) {
-      return false
+/** Extracts the source aliases referenced by an expression. */
+export function getSourceAliasesFromExpression(
+  expr: BasicExpression,
+): Set<string> {
+  switch (expr.type) {
+    case `ref`: {
+      const sourceAlias = getPropRefSourceAlias(expr) ?? expr.path[0]
+      return new Set(sourceAlias ? [sourceAlias] : [])
     }
-    // Recursively check all arguments
-    return whereClause.args.every((arg) =>
-      isConvertibleToCollectionFilter(arg as BasicExpression<boolean>)
-    )
+    case `func`: {
+      const sourceAliases = new Set<string>()
+      for (const arg of expr.args) {
+        for (const alias of getSourceAliasesFromExpression(arg)) {
+          sourceAliases.add(alias)
+        }
+      }
+      return sourceAliases
+    }
+    default:
+      return new Set()
   }
-  return [`val`, `ref`].includes(tpe)
 }
 
 /**
- * Converts a WHERE clause to BasicExpression format compatible with collection indexes.
- * This function creates proper BasicExpression class instances that the collection
- * index system can understand.
+ * Normalizes a WHERE clause expression by removing table aliases from property references.
  *
- * @param whereClause - The WHERE clause to convert
- * @param collectionAlias - The alias of the collection being filtered
- * @returns The converted BasicExpression or null if conversion fails
+ * This function recursively traverses an expression tree and creates new BasicExpression
+ * instances with normalized paths. The main transformation is removing the collection alias
+ * from property reference paths (e.g., `['user', 'id']` becomes `['id']` when `collectionAlias`
+ * is `'user'`), which is needed when converting query-level expressions to collection-level
+ * expressions for subscriptions.
+ *
+ * @param whereClause - The WHERE clause expression to normalize
+ * @param collectionAlias - The alias of the collection being filtered (to strip from paths)
+ * @returns A new BasicExpression with normalized paths
+ *
+ * @example
+ * // Input: ref with path ['user', 'id'] where collectionAlias is 'user'
+ * // Output: ref with path ['id']
  */
-export function convertToBasicExpression(
+export function normalizeExpressionPaths(
   whereClause: BasicExpression<boolean>,
-  collectionAlias: string
-): BasicExpression<boolean> | null {
+  collectionAlias: string,
+): BasicExpression<boolean> {
   const tpe = whereClause.type
   if (tpe === `val`) {
     return new Value(whereClause.value)
   } else if (tpe === `ref`) {
     const path = whereClause.path
+    const sourceAlias = getPropRefSourceAlias(whereClause)
     if (Array.isArray(path)) {
-      if (path[0] === collectionAlias && path.length > 1) {
+      if (sourceAlias === collectionAlias) {
+        return new PropRef(getPropRefPropertyPath(whereClause))
+      } else if (sourceAlias !== undefined) {
+        return new PropRef(path, sourceAlias)
+      } else if (path[0] === collectionAlias && path.length > 1) {
         // Remove the table alias from the path for single-collection queries
         return new PropRef(path.slice(1))
       } else if (path.length === 1 && path[0] !== undefined) {
@@ -74,41 +73,28 @@ export function convertToBasicExpression(
     // Fallback for non-array paths
     return new PropRef(Array.isArray(path) ? path : [String(path)])
   } else {
-    // Check if this function is supported
-    if (!SUPPORTED_COLLECTION_FUNCS.has(whereClause.name)) {
-      return null
-    }
     // Recursively convert all arguments
     const args: Array<BasicExpression> = []
     for (const arg of whereClause.args) {
-      const convertedArg = convertToBasicExpression(
+      const convertedArg = normalizeExpressionPaths(
         arg as BasicExpression<boolean>,
-        collectionAlias
+        collectionAlias,
       )
-      if (convertedArg == null) {
-        return null
-      }
       args.push(convertedArg)
     }
     return new Func(whereClause.name, args)
   }
 }
 
-export function convertOrderByToBasicExpression(
+export function normalizeOrderByPaths(
   orderBy: OrderBy,
-  collectionAlias: string
+  collectionAlias: string,
 ): OrderBy {
   const normalizedOrderBy = orderBy.map((clause) => {
-    const basicExp = convertToBasicExpression(
+    const basicExp = normalizeExpressionPaths(
       clause.expression,
-      collectionAlias
+      collectionAlias,
     )
-
-    if (!basicExp) {
-      throw new Error(
-        `Failed to convert orderBy expression to a basic expression: ${clause.expression}`
-      )
-    }
 
     return {
       ...clause,

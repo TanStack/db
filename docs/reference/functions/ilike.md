@@ -3,13 +3,11 @@ id: ilike
 title: ilike
 ---
 
-# Function: ilike()
-
 ```ts
 function ilike(left, right): BasicExpression<boolean>;
 ```
 
-Defined in: [packages/db/src/query/builder/functions.ts:252](https://github.com/TanStack/db/blob/main/packages/db/src/query/builder/functions.ts#L252)
+Defined in: [packages/db/src/query/builder/functions.ts:297](https://github.com/TanStack/db/blob/main/packages/db/src/query/builder/functions.ts#L297)
 
 ## Parameters
 
@@ -23,4 +21,4 @@ Defined in: [packages/db/src/query/builder/functions.ts:252](https://github.com/
 
 ## Returns
 
-[`BasicExpression`](../../@tanstack/namespaces/IR/type-aliases/BasicExpression.md)\<`boolean`\>
+[`BasicExpression`](../@tanstack/namespaces/IR/type-aliases/BasicExpression.md)\<`boolean`\>

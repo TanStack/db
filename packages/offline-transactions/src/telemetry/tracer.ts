@@ -26,7 +26,7 @@ export async function withSpan<T>(
   name: string,
   attrs: SpanAttrs,
   fn: (span: any) => Promise<T>,
-  _options?: WithSpanOptions
+  _options?: WithSpanOptions,
 ): Promise<T> {
   return await fn(noopSpan)
 }
@@ -39,7 +39,7 @@ export async function withNestedSpan<T>(
   name: string,
   attrs: SpanAttrs,
   fn: (span: any) => Promise<T>,
-  _options?: WithSpanOptions
+  _options?: WithSpanOptions,
 ): Promise<T> {
   return await fn(noopSpan)
 }
@@ -52,7 +52,7 @@ export function withSyncSpan<T>(
   name: string,
   attrs: SpanAttrs,
   fn: (span: any) => T,
-  _options?: WithSpanOptions
+  _options?: WithSpanOptions,
 ): T {
   return fn(noopSpan)
 }

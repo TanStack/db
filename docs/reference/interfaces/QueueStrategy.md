@@ -3,8 +3,6 @@ id: QueueStrategy
 title: QueueStrategy
 ---
 
-# Interface: QueueStrategy
-
 Defined in: [packages/db/src/strategies/types.ts:66](https://github.com/TanStack/db/blob/main/packages/db/src/strategies/types.ts#L66)
 
 Queue strategy that processes all executions in order
@@ -13,7 +11,7 @@ LIFO: { addItemsTo: 'back', getItemsFrom: 'back' }
 
 ## Extends
 
-- [`BaseStrategy`](../BaseStrategy.md)\<`"queue"`\>
+- [`BaseStrategy`](BaseStrategy.md)\<`"queue"`\>
 
 ## Properties
 
@@ -29,7 +27,7 @@ Type discriminator for strategy identification
 
 #### Inherited from
 
-[`BaseStrategy`](../BaseStrategy.md).[`_type`](../BaseStrategy.md#_type)
+[`BaseStrategy`](BaseStrategy.md).[`_type`](BaseStrategy.md#_type)
 
 ***
 
@@ -50,19 +48,19 @@ Should be called when the strategy is no longer needed
 
 #### Inherited from
 
-[`BaseStrategy`](../BaseStrategy.md).[`cleanup`](../BaseStrategy.md#cleanup)
+[`BaseStrategy`](BaseStrategy.md).[`cleanup`](BaseStrategy.md#cleanup)
 
 ***
 
 ### execute()
 
 ```ts
-execute: <T>(fn) => void | Promise<void>;
+execute: <T>(fn) => boolean | void | Promise<void>;
 ```
 
-Defined in: [packages/db/src/strategies/types.ts:15](https://github.com/TanStack/db/blob/main/packages/db/src/strategies/types.ts#L15)
+Defined in: [packages/db/src/strategies/types.ts:69](https://github.com/TanStack/db/blob/main/packages/db/src/strategies/types.ts#L69)
 
-Execute a function according to the strategy's timing rules
+Explicit false rejects the transaction; void preserves custom strategies.
 
 #### Type Parameters
 
@@ -74,19 +72,15 @@ Execute a function according to the strategy's timing rules
 
 ##### fn
 
-() => [`Transaction`](../Transaction.md)\<`T`\>
-
-The function to execute
+() => [`Transaction`](Transaction.md)\<`T`\>
 
 #### Returns
 
-`void` \| `Promise`\<`void`\>
+`boolean` \| `void` \| `Promise`\<`void`\>
 
-The result of the function execution (if applicable)
+#### Overrides
 
-#### Inherited from
-
-[`BaseStrategy`](../BaseStrategy.md).[`execute`](../BaseStrategy.md#execute)
+[`BaseStrategy`](BaseStrategy.md).[`execute`](BaseStrategy.md#execute)
 
 ***
 

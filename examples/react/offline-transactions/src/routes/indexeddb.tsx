@@ -1,7 +1,7 @@
-import { createFileRoute } from "@tanstack/react-router"
-import { useEffect, useState } from "react"
-import { TodoDemo } from "~/components/TodoDemo"
-import { createIndexedDBOfflineExecutor } from "~/db/todos"
+import { createFileRoute } from '@tanstack/react-router'
+import { useEffect, useState } from 'react'
+import { TodoDemo } from '~/components/TodoDemo'
+import { createIndexedDBOfflineExecutor } from '~/db/todos'
 
 export const Route = createFileRoute(`/indexeddb`)({
   component: IndexedDBDemo,

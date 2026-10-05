@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, test } from "vitest"
+import { beforeEach, describe, expect, test } from 'vitest'
 import {
   Query,
   and,
@@ -9,10 +9,10 @@ import {
   lt,
   lte,
   upper,
-} from "../../src/query/index.js"
-import { createCollection } from "../../src/collection/index.js"
-import { mockSyncCollectionOptions } from "../utils.js"
-import type { Ref } from "../../src/query/index.js"
+} from '../../src/query/index.js'
+import { createCollection } from '../../src/collection/index.js'
+import { mockSyncCollectionOptions } from '../utils.js'
+import type { Ref } from '../../src/query/index.js'
 
 // Sample user type for tests
 type User = {
@@ -90,7 +90,7 @@ function createUsersCollection() {
       id: `test-users`,
       getKey: (user) => user.id,
       initialData: sampleUsers,
-    })
+    }),
   )
 }
 
@@ -100,7 +100,7 @@ function createPostsCollection() {
       id: `test-posts`,
       getKey: (post) => post.id,
       initialData: samplePosts,
-    })
+    }),
   )
 }
 
@@ -139,10 +139,10 @@ describe(`Composables`, () => {
       // Should return Bob (19) and Dave (22) - both adult, active, and young
       expect(results).toHaveLength(2)
       expect(results.map((u) => u.name)).toEqual(
-        expect.arrayContaining([`Bob`, `Dave`])
+        expect.arrayContaining([`Bob`, `Dave`]),
       )
       expect(results.every((u) => u.age > 18 && u.age < 25 && u.active)).toBe(
-        true
+        true,
       )
     })
 
@@ -224,7 +224,7 @@ describe(`Composables`, () => {
 
       expect(results).toHaveLength(3) // Alice (25), Charlie (30), Dave (22)
       expect(results.map((u) => u.displayName)).toEqual(
-        expect.arrayContaining([`ALICE`, `CHARLIE`, `DAVE`])
+        expect.arrayContaining([`ALICE`, `CHARLIE`, `DAVE`]),
       )
 
       // Test that we can create a new query that combines the components differently
@@ -272,7 +272,7 @@ describe(`Composables`, () => {
             .join(
               { post: postsCollection },
               ({ user, post }) => eq(user.id, post.authorId),
-              `inner`
+              `inner`,
             )
             .where(userIsActive)
             .where(postIsPublished)
@@ -319,8 +319,8 @@ describe(`Composables`, () => {
               and(
                 userIsActive({ user }),
                 userIsAdult({ user }),
-                userIsYoung({ user })
-              )
+                userIsYoung({ user }),
+              ),
             ),
         startSync: true,
       })
@@ -377,7 +377,7 @@ describe(`Composables`, () => {
       expect(results).toHaveLength(3)
       expect(results.every((u) => u.category === `junior`)).toBe(true)
       expect(results.map((u) => u.userName)).toEqual(
-        expect.arrayContaining([`ALICE`, `BOB`, `DAVE`])
+        expect.arrayContaining([`ALICE`, `BOB`, `DAVE`]),
       )
     })
 
@@ -426,7 +426,7 @@ describe(`Composables`, () => {
             .join(
               { p: postsCollection },
               ({ u, p }) => eq(u.id, p.authorId),
-              `inner`
+              `inner`,
             )
             .where(joinedUserPostPredicate)
             .select(joinedSelect),
@@ -477,7 +477,7 @@ describe(`Composables`, () => {
       expect(results.every((u) => typeof u.name === `string`)).toBe(true)
       expect(results.every((u) => typeof u.email === `string`)).toBe(true)
       expect(results.map((u) => u.name)).toEqual(
-        expect.arrayContaining([`Alice`, `Bob`, `Dave`])
+        expect.arrayContaining([`Alice`, `Bob`, `Dave`]),
       )
 
       // Insert a new active user

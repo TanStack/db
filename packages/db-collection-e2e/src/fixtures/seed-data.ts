@@ -1,4 +1,16 @@
-import type { Comment, Post, SeedDataResult, User } from "../types"
+import { reportFixtureCapture } from './fixture-artifact'
+import type { FixtureDiagnostics } from './fixture-artifact'
+import type { Comment, Post, SeedDataResult, User } from '../types'
+
+/** Capture once before driver delivery; each reader owns a detached copy. */
+export function captureSeedData(
+  seedData: SeedDataResult,
+  diagnostics?: FixtureDiagnostics,
+): () => SeedDataResult {
+  const authority = structuredClone(seedData)
+  if (diagnostics) reportFixtureCapture(authority, diagnostics)
+  return () => structuredClone(authority)
+}
 
 // Cache UUIDs for deterministic behavior across test runs
 const uuidCache = new Map<string, string>()
@@ -14,7 +26,7 @@ function generateId(prefix: string, index: number): string {
     // Create a valid UUID v4 format
     uuidCache.set(
       key,
-      `${hex.slice(0, 8)}-0000-4000-8000-${hex.padStart(12, `0`)}`
+      `${hex.slice(0, 8)}-0000-4000-8000-${hex.padStart(12, `0`)}`,
     )
   }
   return uuidCache.get(key)!
@@ -68,6 +80,7 @@ export function generateSeedData(): SeedDataResult {
       `Rose ${i}`,
       `sam ${i}`,
       `Tina ${i}`,
+      `Ursula ${i}\nNewline`,
     ]
     const name = names[i % names.length]
 
@@ -132,6 +145,14 @@ export function generateSeedData(): SeedDataResult {
     // ViewCount: varied distribution
     const viewCount = i === 0 ? 0 : i === 1 ? -10 : i * 42
 
+    // LargeViewCount: BigInt field with values exceeding MAX_SAFE_INTEGER for some posts
+    // This tests BigInt serialization in predicates
+    // Base value: 9007199254740992n (Number.MAX_SAFE_INTEGER + 1)
+    const largeViewCount =
+      i < 10
+        ? BigInt(`9007199254740992`) + BigInt(i) // First 10 posts have very large values
+        : BigInt(i * 1000) // Other posts have smaller bigint values
+
     // PublishedAt: 80% published, 20% null (drafts)
     const publishedAt =
       i % 5 !== 0 ? new Date(now.getTime() - Math.random() * oneYear) : null
@@ -148,6 +169,7 @@ export function generateSeedData(): SeedDataResult {
       title,
       content,
       viewCount,
+      largeViewCount,
       publishedAt,
       deletedAt,
     })

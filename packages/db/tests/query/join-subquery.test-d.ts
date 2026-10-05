@@ -1,7 +1,8 @@
-import { describe, expectTypeOf, test } from "vitest"
-import { createLiveQueryCollection, eq, gt } from "../../src/query/index.js"
-import { createCollection } from "../../src/collection/index.js"
-import { mockSyncCollectionOptions } from "../utils.js"
+import { describe, expectTypeOf, test } from 'vitest'
+import { createLiveQueryCollection, eq, gt } from '../../src/query/index.js'
+import { createCollection } from '../../src/collection/index.js'
+import { mockSyncCollectionOptions } from '../utils.js'
+import type { OutputWithVirtual } from '../utils.js'
 
 // Sample data types for join-subquery testing
 type Issue = {
@@ -67,7 +68,7 @@ function createIssuesCollection() {
       id: `join-subquery-test-issues-types`,
       getKey: (issue) => issue.id,
       initialData: sampleIssues,
-    })
+    }),
   )
 }
 
@@ -77,7 +78,7 @@ function createUsersCollection() {
       id: `join-subquery-test-users-types`,
       getKey: (user) => user.id,
       initialData: sampleUsers,
-    })
+    }),
   )
 }
 
@@ -101,7 +102,7 @@ describe(`Join Subquery Types`, () => {
             .join(
               { user: usersCollection },
               ({ issue, user }) => eq(issue.userId, user.id),
-              `inner`
+              `inner`,
             )
             .select(({ issue, user }) => ({
               issue_title: issue.title,
@@ -113,13 +114,15 @@ describe(`Join Subquery Types`, () => {
       })
 
       // Should infer the correct joined result type
-      expectTypeOf(joinQuery.toArray).toEqualTypeOf<
-        Array<{
-          issue_title: string
-          user_name: string
-          issue_duration: number
-          user_status: `active` | `inactive`
-        }>
+      expectTypeOf(joinQuery.toArray).toMatchTypeOf<
+        Array<
+          OutputWithVirtual<{
+            issue_title: string
+            user_name: string
+            issue_duration: number
+            user_status: `active` | `inactive`
+          }>
+        >
       >()
     })
 
@@ -138,17 +141,19 @@ describe(`Join Subquery Types`, () => {
             .join(
               { activeUser: activeUsers },
               ({ issue, activeUser }) => eq(issue.userId, activeUser.id),
-              `left`
+              `left`,
             )
         },
       })
 
       // Left join should make the joined table optional in namespaced result
-      expectTypeOf(joinQuery.toArray).toEqualTypeOf<
-        Array<{
-          issue: Issue
-          activeUser: User | undefined
-        }>
+      expectTypeOf(joinQuery.toArray).toMatchTypeOf<
+        Array<
+          OutputWithVirtual<{
+            issue: OutputWithVirtual<Issue>
+            activeUser: OutputWithVirtual<User> | undefined
+          }>
+        >
       >()
     })
 
@@ -173,7 +178,7 @@ describe(`Join Subquery Types`, () => {
               { activeUser: activeUsers },
               ({ longIssue, activeUser }) =>
                 eq(longIssue.userId, activeUser.id),
-              `inner`
+              `inner`,
             )
             .select(({ longIssue, activeUser }) => ({
               issue_title: longIssue.title,
@@ -185,13 +190,15 @@ describe(`Join Subquery Types`, () => {
       })
 
       // Should infer the correct result type from both subqueries
-      expectTypeOf(joinQuery.toArray).toEqualTypeOf<
-        Array<{
-          issue_title: string
-          issue_duration: number
-          user_name: string
-          user_email: string
-        }>
+      expectTypeOf(joinQuery.toArray).toMatchTypeOf<
+        Array<
+          OutputWithVirtual<{
+            issue_title: string
+            issue_duration: number
+            user_name: string
+            user_email: string
+          }>
+        >
       >()
     })
   })
@@ -211,7 +218,7 @@ describe(`Join Subquery Types`, () => {
             .join(
               { engUser: engineeringUsers },
               ({ issue, engUser }) => eq(issue.userId, engUser.id),
-              `inner`
+              `inner`,
             )
             .select(({ issue, engUser }) => ({
               issue_title: issue.title,
@@ -222,12 +229,14 @@ describe(`Join Subquery Types`, () => {
       })
 
       // Should infer the correct result type
-      expectTypeOf(joinQuery.toArray).toEqualTypeOf<
-        Array<{
-          issue_title: string
-          user_name: string
-          user_email: string
-        }>
+      expectTypeOf(joinQuery.toArray).toMatchTypeOf<
+        Array<
+          OutputWithVirtual<{
+            issue_title: string
+            user_name: string
+            user_email: string
+          }>
+        >
       >()
     })
 
@@ -245,17 +254,19 @@ describe(`Join Subquery Types`, () => {
             .join(
               { activeUser: activeUsers },
               ({ issue, activeUser }) => eq(issue.userId, activeUser.id),
-              `left`
+              `left`,
             )
         },
       })
 
       // Left join should make the joined subquery optional in namespaced result
-      expectTypeOf(joinQuery.toArray).toEqualTypeOf<
-        Array<{
-          issue: Issue
-          activeUser: User | undefined
-        }>
+      expectTypeOf(joinQuery.toArray).toMatchTypeOf<
+        Array<
+          OutputWithVirtual<{
+            issue: OutputWithVirtual<Issue>
+            activeUser: OutputWithVirtual<User> | undefined
+          }>
+        >
       >()
     })
 
@@ -292,7 +303,7 @@ describe(`Join Subquery Types`, () => {
             .join(
               { profile: userProfiles },
               ({ task, profile }) => eq(task.assigneeId, profile.profileId),
-              `inner`
+              `inner`,
             )
             .select(({ task, profile }) => ({
               id: task.taskId,
@@ -307,16 +318,18 @@ describe(`Join Subquery Types`, () => {
       })
 
       // Should infer the final transformed and joined type
-      expectTypeOf(joinQuery.toArray).toEqualTypeOf<
-        Array<{
-          id: number
-          name: string
-          effort_hours: number
-          is_high_priority: boolean
-          assigned_to: string
-          contact_email: string
-          department: number | undefined
-        }>
+      expectTypeOf(joinQuery.toArray).toMatchTypeOf<
+        Array<
+          OutputWithVirtual<{
+            id: number
+            name: string
+            effort_hours: number
+            is_high_priority: boolean
+            assigned_to: string
+            contact_email: string
+            department: number | undefined
+          }>
+        >
       >()
     })
   })
@@ -336,7 +349,7 @@ describe(`Join Subquery Types`, () => {
             .join(
               { user: usersCollection },
               ({ issue, user }) => eq(issue.userId, user.id),
-              `inner`
+              `inner`,
             )
             .select(({ issue, user }) => ({
               // Should have access to all original Issue properties
@@ -353,17 +366,19 @@ describe(`Join Subquery Types`, () => {
       })
 
       // Should infer types with all original Issue properties available
-      expectTypeOf(joinQuery.toArray).toEqualTypeOf<
-        Array<{
-          issue_id: number
-          issue_title: string
-          issue_status: `open` | `in_progress` | `closed`
-          issue_project_id: number
-          issue_user_id: number
-          issue_duration: number
-          issue_created_at: string
-          user_name: string
-        }>
+      expectTypeOf(joinQuery.toArray).toMatchTypeOf<
+        Array<
+          OutputWithVirtual<{
+            issue_id: number
+            issue_title: string
+            issue_status: `open` | `in_progress` | `closed`
+            issue_project_id: number
+            issue_user_id: number
+            issue_duration: number
+            issue_created_at: string
+            user_name: string
+          }>
+        >
       >()
     })
 
@@ -382,23 +397,25 @@ describe(`Join Subquery Types`, () => {
             .join(
               { activeUser: activeUsers },
               ({ issue, activeUser }) => eq(issue.userId, activeUser.id),
-              `left`
+              `left`,
             )
             .select(({ issue, activeUser }) => ({
               issue_title: issue.title,
-              user_name: activeUser?.name, // Should now be string | undefined
+              user_name: activeUser.name, // Should now be string | undefined
               issue_status: issue.status,
             }))
         },
       })
 
       // With the new approach, this should now correctly infer string | undefined for user_name
-      expectTypeOf(joinQuery.toArray).toEqualTypeOf<
-        Array<{
-          issue_title: string
-          user_name: string | undefined
-          issue_status: `open` | `in_progress` | `closed`
-        }>
+      expectTypeOf(joinQuery.toArray).toMatchTypeOf<
+        Array<
+          OutputWithVirtual<{
+            issue_title: string
+            user_name: string | undefined
+            issue_status: `open` | `in_progress` | `closed`
+          }>
+        >
       >()
     })
   })

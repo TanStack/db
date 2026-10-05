@@ -1,5 +1,5 @@
 ---
-"@tanstack/db": minor
+'@tanstack/db': minor
 ---
 
 Add support for compound join conditions using `and()`

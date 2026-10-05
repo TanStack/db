@@ -1,12 +1,12 @@
-import { createCollection } from "@tanstack/db"
-import { startOfflineExecutor } from "../src/index"
-import type { ChangeMessage, Collection, PendingMutation } from "@tanstack/db"
+import { createCollection } from '@tanstack/db'
+import { startOfflineExecutor } from '../src/index'
+import type { ChangeMessage, Collection, PendingMutation } from '@tanstack/db'
 import type {
   LeaderElection,
   OfflineConfig,
   OfflineMutationFnParams,
   StorageAdapter,
-} from "../src/types"
+} from '../src/types'
 
 export class FakeStorageAdapter implements StorageAdapter {
   private store = new Map<string, string>()
@@ -74,7 +74,7 @@ class FakeLeaderElection implements LeaderElection {
 
   onLeadershipChange(callback: (isLeader: boolean) => void): () => void {
     this.listeners.add(callback)
-    callback(this.leader)
+    // Don't call callback immediately - matches real BaseLeaderElection behavior
     return () => {
       this.listeners.delete(callback)
     }
@@ -93,8 +93,8 @@ class FakeLeaderElection implements LeaderElection {
 }
 
 type TestMutationFn = (
-  params: OfflineMutationFnParams & { attempt: number }
-) => Promise<any>
+  params: OfflineMutationFnParams & { attempt: number },
+) => unknown | Promise<unknown>
 
 interface TestOfflineEnvironmentOptions {
   mutationFnName?: string
@@ -130,7 +130,7 @@ function createDefaultCollection(): {
 }
 
 export function createTestOfflineEnvironment(
-  options: TestOfflineEnvironmentOptions = {}
+  options: TestOfflineEnvironmentOptions = {},
 ): {
   executor: ReturnType<typeof startOfflineExecutor>
   storage: FakeStorageAdapter
@@ -140,7 +140,7 @@ export function createTestOfflineEnvironment(
   waitForLeader: () => Promise<void>
   leader: FakeLeaderElection
   serverState: Map<string, TestItem>
-  applyMutations: (mutations: Array<PendingMutation<TestItem>>) => void
+  applyMutations: (mutations: ReadonlyArray<PendingMutation>) => void
 } {
   const mutationFnName = options.mutationFnName ?? `syncData`
   const storage = options.storage ?? new FakeStorageAdapter()
@@ -150,25 +150,22 @@ export function createTestOfflineEnvironment(
   const { collection, controller } = createDefaultCollection()
   const serverState = new Map<string, TestItem>()
 
-  const applyMutations = (mutations: Array<PendingMutation<TestItem>>) => {
+  const applyMutations = (mutations: ReadonlyArray<PendingMutation>) => {
     controller.begin()
 
     for (const mutation of mutations) {
       switch (mutation.type) {
-        case `insert`: {
-          const value = mutation.modified
-          serverState.set(value.id, value)
-          controller.write({ type: `insert`, value })
-          break
-        }
+        case `insert`:
         case `update`: {
-          const value = mutation.modified
+          const value = requireTestItem(mutation.modified, mutation.globalKey)
           serverState.set(value.id, value)
-          controller.write({ type: `update`, value })
+          controller.write({ type: mutation.type, value })
           break
         }
         case `delete`: {
-          const original = mutation.original as TestItem | undefined
+          const original = isTestItem(mutation.original)
+            ? mutation.original
+            : undefined
           const fallbackIdFromKey =
             (typeof mutation.key === `string` ? mutation.key : undefined) ??
             mutation.globalKey.split(`:`).pop()
@@ -176,7 +173,7 @@ export function createTestOfflineEnvironment(
 
           if (!id) {
             throw new Error(
-              `Unable to determine id for delete mutation ${mutation.globalKey}`
+              `Unable to determine id for delete mutation ${mutation.globalKey}`,
             )
           }
 
@@ -204,9 +201,7 @@ export function createTestOfflineEnvironment(
   }
 
   const defaultMutation: TestMutationFn = (params) => {
-    const mutations = params.transaction.mutations as Array<
-      PendingMutation<TestItem>
-    >
+    const mutations = params.transaction.mutations
 
     applyMutations(mutations)
 
@@ -218,16 +213,17 @@ export function createTestOfflineEnvironment(
   const leader = new FakeLeaderElection()
 
   const wrappedMutation = async (
-    params: OfflineMutationFnParams
-  ): Promise<any> => {
+    params: OfflineMutationFnParams,
+  ): Promise<unknown> => {
     const currentAttempt = (attemptCounter.get(params.idempotencyKey) ?? 0) + 1
     attemptCounter.set(params.idempotencyKey, currentAttempt)
     const extendedParams = { ...params, attempt: currentAttempt }
     mutationCalls.push(extendedParams)
-    return mutationFn(extendedParams)
+    return await mutationFn(extendedParams)
   }
 
   const config: OfflineConfig = {
+    ...options.config,
     collections: {
       ...(options.config?.collections ?? {}),
       [collection.id]: collection,
@@ -237,23 +233,16 @@ export function createTestOfflineEnvironment(
       [mutationFnName]: wrappedMutation,
     },
     storage,
-    maxConcurrency: options.config?.maxConcurrency,
-    jitter: options.config?.jitter,
-    beforeRetry: options.config?.beforeRetry,
-    onUnknownMutationFn: options.config?.onUnknownMutationFn,
-    onLeadershipChange: options.config?.onLeadershipChange,
     leaderElection: options.config?.leaderElection ?? leader,
   }
 
   const executor = startOfflineExecutor(config)
 
   const waitForLeader = async () => {
-    const start = Date.now()
-    while (!executor.isOfflineEnabled) {
-      if (Date.now() - start > 1000) {
-        throw new Error(`Executor did not become leader within timeout`)
-      }
-      await new Promise((resolve) => setTimeout(resolve, 10))
+    // Wait for full initialization including loading pending transactions
+    await executor.waitForInit()
+    if (!executor.isOfflineEnabled) {
+      throw new Error(`Executor did not become leader`)
     }
   }
 
@@ -268,4 +257,26 @@ export function createTestOfflineEnvironment(
     serverState,
     applyMutations,
   }
+}
+
+function isTestItem(value: unknown): value is TestItem {
+  return (
+    typeof value === `object` &&
+    value !== null &&
+    `id` in value &&
+    typeof value.id === `string` &&
+    `value` in value &&
+    typeof value.value === `string` &&
+    `completed` in value &&
+    typeof value.completed === `boolean` &&
+    `updatedAt` in value &&
+    value.updatedAt instanceof Date
+  )
+}
+
+function requireTestItem(value: unknown, mutationKey: string): TestItem {
+  if (!isTestItem(value)) {
+    throw new Error(`Invalid test item in mutation ${mutationKey}`)
+  }
+  return value
 }

@@ -1,2 +1,2 @@
-export * from "./rxdb"
-export * from "./helper"
+export * from './rxdb'
+export * from './helper'

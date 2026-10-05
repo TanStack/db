@@ -1,4 +1,4 @@
-import type { CollectionConfigBuilder } from "./collection-config-builder.js"
+import type { CollectionConfigBuilder } from './collection-config-builder.js'
 
 /**
  * Symbol for accessing internal utilities that should not be part of the public API
@@ -12,4 +12,5 @@ export type LiveQueryInternalUtils = {
   getBuilder: () => CollectionConfigBuilder<any, any>
   hasCustomGetKey: boolean
   hasJoins: boolean
+  hasDistinct: boolean
 }

@@ -41,7 +41,7 @@ export async function createTestTables(
     users: string
     posts: string
     comments: string
-  }
+  },
 ): Promise<void> {
   await dbClient.query(`
     CREATE TABLE IF NOT EXISTS ${tableNames.users} (${USERS_TABLE_SCHEMA});
@@ -65,7 +65,7 @@ export async function dropTestTables(
     users: string
     posts: string
     comments: string
-  }
+  },
 ): Promise<void> {
   await dbClient.query(`DROP TABLE IF EXISTS ${tableNames.comments}`)
   await dbClient.query(`DROP TABLE IF EXISTS ${tableNames.posts}`)

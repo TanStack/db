@@ -3,9 +3,7 @@ id: Func
 title: Func
 ---
 
-# Class: Func\<T\>
-
-Defined in: [packages/db/src/query/ir.ts:110](https://github.com/TanStack/db/blob/main/packages/db/src/query/ir.ts#L110)
+Defined in: [packages/db/src/query/ir.ts:180](https://github.com/TanStack/db/blob/main/packages/db/src/query/ir.ts#L180)
 
 ## Extends
 
@@ -25,7 +23,7 @@ Defined in: [packages/db/src/query/ir.ts:110](https://github.com/TanStack/db/blo
 new Func<T>(name, args): Func<T>;
 ```
 
-Defined in: [packages/db/src/query/ir.ts:112](https://github.com/TanStack/db/blob/main/packages/db/src/query/ir.ts#L112)
+Defined in: [packages/db/src/query/ir.ts:182](https://github.com/TanStack/db/blob/main/packages/db/src/query/ir.ts#L182)
 
 #### Parameters
 
@@ -35,7 +33,7 @@ Defined in: [packages/db/src/query/ir.ts:112](https://github.com/TanStack/db/blo
 
 ##### args
 
-[`BasicExpression`](../../type-aliases/BasicExpression.md)\<`any`\>[]
+[`BasicExpression`](../type-aliases/BasicExpression.md)\<`any`\>[]
 
 #### Returns
 
@@ -55,7 +53,7 @@ BaseExpression<T>.constructor
 readonly __returnType: T;
 ```
 
-Defined in: [packages/db/src/query/ir.ts:69](https://github.com/TanStack/db/blob/main/packages/db/src/query/ir.ts#L69)
+Defined in: [packages/db/src/query/ir.ts:86](https://github.com/TanStack/db/blob/main/packages/db/src/query/ir.ts#L86)
 
 **`Internal`**
 
@@ -75,7 +73,7 @@ BaseExpression.__returnType
 args: BasicExpression<any>[];
 ```
 
-Defined in: [packages/db/src/query/ir.ts:114](https://github.com/TanStack/db/blob/main/packages/db/src/query/ir.ts#L114)
+Defined in: [packages/db/src/query/ir.ts:184](https://github.com/TanStack/db/blob/main/packages/db/src/query/ir.ts#L184)
 
 ***
 
@@ -85,7 +83,7 @@ Defined in: [packages/db/src/query/ir.ts:114](https://github.com/TanStack/db/blo
 name: string;
 ```
 
-Defined in: [packages/db/src/query/ir.ts:113](https://github.com/TanStack/db/blob/main/packages/db/src/query/ir.ts#L113)
+Defined in: [packages/db/src/query/ir.ts:183](https://github.com/TanStack/db/blob/main/packages/db/src/query/ir.ts#L183)
 
 ***
 
@@ -95,7 +93,7 @@ Defined in: [packages/db/src/query/ir.ts:113](https://github.com/TanStack/db/blo
 type: "func";
 ```
 
-Defined in: [packages/db/src/query/ir.ts:111](https://github.com/TanStack/db/blob/main/packages/db/src/query/ir.ts#L111)
+Defined in: [packages/db/src/query/ir.ts:181](https://github.com/TanStack/db/blob/main/packages/db/src/query/ir.ts#L181)
 
 #### Overrides
 

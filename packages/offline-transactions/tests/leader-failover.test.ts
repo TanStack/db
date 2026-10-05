@@ -1,14 +1,12 @@
-import { describe, expect, it } from "vitest"
-import { FakeStorageAdapter, createTestOfflineEnvironment } from "./harness"
-import type { TestItem } from "./harness"
-import type { PendingMutation } from "@tanstack/db"
+import { describe, expect, it } from 'vitest'
+import { FakeStorageAdapter, createTestOfflineEnvironment } from './harness'
 
 const flushMicrotasks = () => new Promise((resolve) => setTimeout(resolve, 0))
 
 const waitUntil = async (
   predicate: () => boolean | Promise<boolean>,
   timeoutMs = 5000,
-  intervalMs = 20
+  intervalMs = 20,
 ) => {
   const deadline = Date.now() + timeoutMs
   while (Date.now() < deadline) {
@@ -62,15 +60,13 @@ describe(`leader failover`, () => {
     // Verify A has the transaction in outbox
     const outboxA = await envA.executor.peekOutbox()
     expect(outboxA).toHaveLength(1)
-    expect(outboxA[0].id).toBe(txA.id)
+    expect(outboxA[0]!.id).toBe(txA.id)
 
     // Now create executor B with same storage, starts as non-leader
     const envB = createTestOfflineEnvironment({
       storage: sharedStorage,
       mutationFn: (params) => {
-        const mutations = params.transaction.mutations as Array<
-          PendingMutation<TestItem>
-        >
+        const mutations = params.transaction.mutations
         envB.applyMutations(mutations)
         return { ok: true, mutations }
       },
@@ -128,9 +124,7 @@ describe(`leader failover`, () => {
     const envB = createTestOfflineEnvironment({
       storage: sharedStorage,
       mutationFn: (params) => {
-        const mutations = params.transaction.mutations as Array<
-          PendingMutation<TestItem>
-        >
+        const mutations = params.transaction.mutations
         envB.applyMutations(mutations)
         return { ok: true, mutations }
       },
@@ -229,9 +223,7 @@ describe(`leader failover`, () => {
     const envC = createTestOfflineEnvironment({
       storage: sharedStorage,
       mutationFn: (params) => {
-        const mutations = params.transaction.mutations as Array<
-          PendingMutation<TestItem>
-        >
+        const mutations = params.transaction.mutations
         envC.applyMutations(mutations)
         return { ok: true, mutations }
       },
@@ -385,5 +377,30 @@ describe(`leader failover`, () => {
 
     envA.executor.dispose()
     envB.executor.dispose()
+  })
+
+  it(`calls onLeadershipChange exactly once during initialization`, async () => {
+    const callbackCalls: Array<boolean> = []
+
+    const env = createTestOfflineEnvironment({
+      config: {
+        onLeadershipChange: (isLeader) => {
+          callbackCalls.push(isLeader)
+        },
+      },
+    })
+
+    await env.waitForLeader()
+
+    // Should be called exactly once with true during initialization
+    expect(callbackCalls).toEqual([true])
+
+    // Wait a bit to ensure no duplicate calls
+    await new Promise((resolve) => setTimeout(resolve, 50))
+
+    // Still should only have one call
+    expect(callbackCalls).toEqual([true])
+
+    env.executor.dispose()
   })
 })

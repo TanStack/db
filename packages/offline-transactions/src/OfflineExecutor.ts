@@ -1,28 +1,33 @@
 // Storage adapters
-import { createOptimisticAction, createTransaction } from "@tanstack/db"
-import { IndexedDBAdapter } from "./storage/IndexedDBAdapter"
-import { LocalStorageAdapter } from "./storage/LocalStorageAdapter"
+import {
+  createOptimisticAction,
+  createTransaction,
+  safeRandomUUID,
+} from '@tanstack/db'
+import { IndexedDBAdapter } from './storage/IndexedDBAdapter'
+import { LocalStorageAdapter } from './storage/LocalStorageAdapter'
 
 // Core components
-import { OutboxManager } from "./outbox/OutboxManager"
-import { KeyScheduler } from "./executor/KeyScheduler"
-import { TransactionExecutor } from "./executor/TransactionExecutor"
+import { OutboxManager } from './outbox/OutboxManager'
+import { KeyScheduler } from './executor/KeyScheduler'
+import { TransactionExecutor } from './executor/TransactionExecutor'
 
 // Coordination
-import { WebLocksLeader } from "./coordination/WebLocksLeader"
-import { BroadcastChannelLeader } from "./coordination/BroadcastChannelLeader"
+import { WebLocksLeader } from './coordination/WebLocksLeader'
+import { BroadcastChannelLeader } from './coordination/BroadcastChannelLeader'
 
 // Connectivity
-import { DefaultOnlineDetector } from "./connectivity/OnlineDetector"
+import { WebOnlineDetector } from './connectivity/OnlineDetector'
 
 // API
-import { OfflineTransaction as OfflineTransactionAPI } from "./api/OfflineTransaction"
-import { createOfflineAction } from "./api/OfflineAction"
+import { OfflineTransaction as OfflineTransactionAPI } from './api/OfflineTransaction'
+import { createOfflineAction } from './api/OfflineAction'
 
 // TanStack DB primitives
 
 // Replay
-import { withNestedSpan, withSpan } from "./telemetry/tracer"
+import { withNestedSpan, withSpan } from './telemetry/tracer'
+import { NonRetriableError } from './types'
 import type {
   CreateOfflineActionOptions,
   CreateOfflineTransactionOptions,
@@ -30,10 +35,11 @@ import type {
   OfflineConfig,
   OfflineMode,
   OfflineTransaction,
+  OnlineDetector,
   StorageAdapter,
   StorageDiagnostic,
-} from "./types"
-import type { Transaction } from "@tanstack/db"
+} from './types'
+import type { Transaction } from '@tanstack/db'
 
 export class OfflineExecutor {
   private config: OfflineConfig
@@ -44,8 +50,9 @@ export class OfflineExecutor {
   private scheduler: KeyScheduler
   private executor: TransactionExecutor | null
   private leaderElection: LeaderElection | null
-  private onlineDetector: DefaultOnlineDetector
+  private onlineDetector: OnlineDetector
   private isLeaderState = false
+  private disposed = false
   private unsubscribeOnline: (() => void) | null = null
   private unsubscribeLeadership: (() => void) | null = null
 
@@ -68,10 +75,13 @@ export class OfflineExecutor {
     }
   > = new Map()
 
+  // Track restoration transactions for cleanup when offline transactions complete
+  private restorationTransactions: Map<string, Transaction> = new Map()
+
   constructor(config: OfflineConfig) {
     this.config = config
     this.scheduler = new KeyScheduler()
-    this.onlineDetector = new DefaultOnlineDetector()
+    this.onlineDetector = config.onlineDetector ?? new WebOnlineDetector()
 
     // Initialize as pending - will be set by async initialization
     this.storage = null
@@ -92,7 +102,8 @@ export class OfflineExecutor {
       this.initResolve = resolve
       this.initReject = reject
     })
-
+    // Handle constructor-started rejection; waitForInit still observes it.
+    void this.initPromise.catch(() => {})
     this.initialize()
   }
 
@@ -201,29 +212,57 @@ export class OfflineExecutor {
     if (this.leaderElection) {
       this.unsubscribeLeadership = this.leaderElection.onLeadershipChange(
         (isLeader) => {
+          // A custom elector may repeat the initial result while replay is active.
+          if (this.disposed || isLeader === this.isLeaderState) return
           this.isLeaderState = isLeader
+          if (!isLeader) this.executor?.pause()
 
           if (this.config.onLeadershipChange) {
             this.config.onLeadershipChange(isLeader)
           }
 
           if (isLeader) {
-            this.loadAndReplayTransactions()
+            this.loadAndReplayTransactions().catch((error) => {
+              console.warn(`Failed to load and replay transactions:`, error)
+            })
           }
-        }
+        },
       )
     }
 
     this.unsubscribeOnline = this.onlineDetector.subscribe(() => {
       if (this.isOfflineEnabled && this.executor) {
-        // Reset retry delays so transactions can execute immediately when back online
         this.executor.resetRetryDelays()
-        this.executor.executeAll().catch((error) => {
-          console.warn(
-            `Failed to execute transactions on connectivity change:`,
-            error
-          )
-        })
+
+        if (this.scheduler.getPendingCount() > 0) {
+          const barrierPromise = this.executor.executeAll()
+
+          for (const collection of Object.values(this.config.collections)) {
+            collection.deferDataRefresh = barrierPromise
+          }
+
+          barrierPromise
+            .catch((error) => {
+              console.warn(
+                `Failed to execute transactions on connectivity change:`,
+                error,
+              )
+            })
+            .finally(() => {
+              for (const collection of Object.values(this.config.collections)) {
+                if (collection.deferDataRefresh === barrierPromise) {
+                  collection.deferDataRefresh = null
+                }
+              }
+            })
+        } else {
+          this.executor.executeAll().catch((error) => {
+            console.warn(
+              `Failed to execute transactions on connectivity change:`,
+              error,
+            )
+          })
+        }
       }
     })
   }
@@ -233,6 +272,10 @@ export class OfflineExecutor {
       try {
         // Probe storage and create adapter
         const { storage, diagnostic } = await this.createStorage()
+        if (this.disposed) {
+          this.initResolve()
+          return
+        }
 
         // Cast to writable to set readonly properties
         ;(this as any).storage = storage
@@ -258,17 +301,30 @@ export class OfflineExecutor {
           this.scheduler,
           this.outbox,
           this.config,
-          this
+          this,
         )
         this.leaderElection = this.createLeaderElection()
 
         // Request leadership first
         const isLeader = await this.leaderElection.requestLeadership()
+        // Disposal may have run while leadership was pending.
+        // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
+        if (this.disposed) {
+          this.leaderElection.releaseLeadership()
+          this.initResolve()
+          return
+        }
+        this.isLeaderState = isLeader
         span.setAttribute(`isLeader`, isLeader)
 
         // Set up event listeners after leadership is established
         // This prevents the callback from being called multiple times
         this.setupEventListeners()
+
+        // Notify initial leadership state
+        if (this.config.onLeadershipChange) {
+          this.config.onLeadershipChange(isLeader)
+        }
 
         if (isLeader) {
           await this.loadAndReplayTransactions()
@@ -279,7 +335,7 @@ export class OfflineExecutor {
         console.warn(`Failed to initialize offline executor:`, error)
         span.setAttribute(`result`, `failed`)
         this.initReject(
-          error instanceof Error ? error : new Error(String(error))
+          error instanceof Error ? error : new Error(String(error)),
         )
       }
     })
@@ -290,20 +346,29 @@ export class OfflineExecutor {
       return
     }
 
-    try {
-      await this.executor.loadPendingTransactions()
-      await this.executor.executeAll()
-    } catch (error) {
-      console.warn(`Failed to load and replay transactions:`, error)
-    }
+    // Startup must observe a failed read instead of reporting an empty outbox.
+    await this.executor.loadPendingTransactions()
+
+    // Replay completion is separate from initialization and durable admission.
+    this.executor.executeAll().catch((error) => {
+      console.warn(`Failed to execute transactions:`, error)
+    })
   }
 
   get isOfflineEnabled(): boolean {
-    return this.mode === `offline` && this.isLeaderState
+    return !this.disposed && this.mode === `offline` && this.isLeaderState
+  }
+
+  /**
+   * Wait for the executor to fully initialize.
+   * This ensures that pending transactions are loaded and optimistic state is restored.
+   */
+  async waitForInit(): Promise<void> {
+    return this.initPromise
   }
 
   createOfflineTransaction(
-    options: CreateOfflineTransactionOptions
+    options: CreateOfflineTransactionOptions,
   ): Transaction | OfflineTransactionAPI {
     const mutationFn = this.config.mutationFns[options.mutationFnName]
 
@@ -320,7 +385,7 @@ export class OfflineExecutor {
         mutationFn: (params) =>
           mutationFn({
             ...params,
-            idempotencyKey: options.idempotencyKey || crypto.randomUUID(),
+            idempotencyKey: options.idempotencyKey || safeRandomUUID(),
           }),
         metadata: options.metadata,
       })
@@ -331,7 +396,7 @@ export class OfflineExecutor {
       options,
       mutationFn,
       this.persistTransaction.bind(this),
-      this
+      this,
     )
   }
 
@@ -352,7 +417,7 @@ export class OfflineExecutor {
             mutationFn({
               ...vars,
               ...params,
-              idempotencyKey: crypto.randomUUID(),
+              idempotencyKey: safeRandomUUID(),
             }),
           onMutate: options.onMutate,
         })
@@ -364,14 +429,14 @@ export class OfflineExecutor {
         options,
         mutationFn,
         this.persistTransaction.bind(this),
-        this
+        this,
       )
       return action(variables)
     }
   }
 
   private async persistTransaction(
-    transaction: OfflineTransaction
+    transaction: OfflineTransaction,
   ): Promise<void> {
     // Wait for initialization to complete
     await this.initPromise
@@ -379,29 +444,33 @@ export class OfflineExecutor {
     return withNestedSpan(
       `executor.persistTransaction`,
       {
-        "transaction.id": transaction.id,
-        "transaction.mutationFnName": transaction.mutationFnName,
+        'transaction.id': transaction.id,
+        'transaction.mutationFnName': transaction.mutationFnName,
       },
       async (span) => {
         if (!this.isOfflineEnabled || !this.outbox || !this.executor) {
-          span.setAttribute(`result`, `skipped_not_leader`)
-          this.resolveTransaction(transaction.id, undefined)
-          return
+          span.setAttribute(`result`, `rejected_not_admitted`)
+          throw new NonRetriableError(`Offline transaction was not admitted`)
         }
 
         try {
+          this.executor.assertHealthy()
           await this.outbox.add(transaction)
-          await this.executor.execute(transaction)
+          // A shared queue error belongs to its execution, not every caller
+          // that durably admitted a transaction. Per-ID signals settle callers.
+          this.executor.execute(transaction).catch((error) => {
+            console.warn(`Failed to execute transactions:`, error)
+          })
           span.setAttribute(`result`, `persisted`)
         } catch (error) {
           console.error(
             `Failed to persist offline transaction ${transaction.id}:`,
-            error
+            error,
           )
           span.setAttribute(`result`, `failed`)
           throw error
         }
-      }
+      },
     )
   }
 
@@ -434,6 +503,9 @@ export class OfflineExecutor {
       deferred.resolve(result)
       this.pendingTransactionPromises.delete(transactionId)
     }
+
+    // Clean up the restoration transaction - the sync will provide authoritative data
+    this.cleanupRestorationTransaction(transactionId)
   }
 
   // Method for TransactionExecutor to signal failure
@@ -442,6 +514,58 @@ export class OfflineExecutor {
     if (deferred) {
       deferred.reject(error)
       this.pendingTransactionPromises.delete(transactionId)
+    }
+
+    // Clean up the restoration transaction and rollback optimistic state
+    this.cleanupRestorationTransaction(transactionId, true)
+  }
+
+  // Method for TransactionExecutor to register restoration transactions
+  registerRestorationTransaction(
+    offlineTransactionId: string,
+    restorationTransaction: Transaction,
+  ): void {
+    this.restorationTransactions.set(
+      offlineTransactionId,
+      restorationTransaction,
+    )
+  }
+
+  private cleanupRestorationTransaction(
+    transactionId: string,
+    shouldRollback = false,
+  ): void {
+    const restorationTx = this.restorationTransactions.get(transactionId)
+    if (!restorationTx) {
+      return
+    }
+
+    this.restorationTransactions.delete(transactionId)
+
+    if (shouldRollback) {
+      restorationTx.rollback()
+      return
+    }
+
+    // Mark as completed so recomputeOptimisticState removes it from consideration.
+    // The actual data will come from the sync.
+    restorationTx.setState(`completed`)
+
+    // Remove from each collection's transaction map and recompute
+    const touchedCollections = new Set<string>()
+    for (const mutation of restorationTx.mutations) {
+      // Defensive check for corrupted deserialized data
+      // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
+      if (!mutation.collection) {
+        continue
+      }
+      const collectionId = mutation.collection.id
+      if (touchedCollections.has(collectionId)) {
+        continue
+      }
+      touchedCollections.add(collectionId)
+      mutation.collection._state.transactions.delete(restorationTx.id)
+      mutation.collection._state.recomputeOptimisticState(false)
     }
   }
 
@@ -467,10 +591,6 @@ export class OfflineExecutor {
     this.executor.clear()
   }
 
-  notifyOnline(): void {
-    this.onlineDetector.notifyOnline()
-  }
-
   getPendingCount(): number {
     if (!this.executor) {
       return 0
@@ -485,11 +605,21 @@ export class OfflineExecutor {
     return this.executor.getRunningCount()
   }
 
-  getOnlineDetector(): DefaultOnlineDetector {
+  getOnlineDetector(): OnlineDetector {
     return this.onlineDetector
   }
 
+  isOnline(): boolean {
+    return this.onlineDetector.isOnline()
+  }
+
   dispose(): void {
+    this.disposed = true
+    this.executor?.pause()
+    for (const collection of Object.values(this.config.collections)) {
+      collection.deferDataRefresh = null
+    }
+
     if (this.unsubscribeOnline) {
       this.unsubscribeOnline()
       this.unsubscribeOnline = null

@@ -1,0 +1,8 @@
+{
+  "expo": {
+    "name": "TanStack DB Expo SQLite E2E",
+    "slug": "tanstack-db-expo-sqlite-e2e",
+    "scheme": "tanstack-db-expo-sqlite-e2e",
+    "platforms": ["ios", "android"]
+  }
+}

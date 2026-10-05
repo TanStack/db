@@ -3,13 +3,11 @@ id: createPacedMutations
 title: createPacedMutations
 ---
 
-# Function: createPacedMutations()
-
 ```ts
 function createPacedMutations<TVariables, T>(config): (variables) => Transaction<T>;
 ```
 
-Defined in: [packages/db/src/paced-mutations.ts:87](https://github.com/TanStack/db/blob/main/packages/db/src/paced-mutations.ts#L87)
+Defined in: [packages/db/src/paced-mutations.ts:93](https://github.com/TanStack/db/blob/main/packages/db/src/paced-mutations.ts#L93)
 
 Creates a paced mutations manager with pluggable timing strategies.
 
@@ -36,7 +34,7 @@ or to handle errors.
 
 ### config
 
-[`PacedMutationsConfig`](../../interfaces/PacedMutationsConfig.md)\<`TVariables`, `T`\>
+[`PacedMutationsConfig`](../interfaces/PacedMutationsConfig.md)\<`TVariables`, `T`\>
 
 Configuration including onMutate, mutationFn and strategy
 
@@ -56,7 +54,7 @@ A function that accepts variables and returns a Transaction
 
 ### Returns
 
-[`Transaction`](../../interfaces/Transaction.md)\<`T`\>
+[`Transaction`](../interfaces/Transaction.md)\<`T`\>
 
 ## Examples
 
@@ -77,7 +75,7 @@ const updateTodo = createPacedMutations<string>({
 const tx = updateTodo('New text')
 
 // Await persistence or handle errors
-await tx.isPersisted.promise
+await tx.when('settled')
 ```
 
 ```ts

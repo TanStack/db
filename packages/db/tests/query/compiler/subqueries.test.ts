@@ -1,10 +1,10 @@
-import { describe, expect, it } from "vitest"
-import { D2, MultiSet, output } from "@tanstack/db-ivm"
-import { Query, getQueryIR } from "../../../src/query/builder/index.js"
-import { compileQuery } from "../../../src/query/compiler/index.js"
-import { CollectionImpl } from "../../../src/collection/index.js"
-import { avg, count, eq } from "../../../src/query/builder/functions.js"
-import type { CollectionSubscription } from "../../../src/collection/subscription.js"
+import { describe, expect, it } from 'vitest'
+import { D2, MultiSet, output } from '@tanstack/db-ivm'
+import { Query, getQueryIR } from '../../../src/query/builder/index.js'
+import { compileQuery } from '../../../src/query/compiler/index.js'
+import { CollectionImpl } from '../../../src/collection/index.js'
+import { avg, count, eq } from '../../../src/query/builder/functions.js'
+import type { CollectionSubscription } from '../../../src/collection/subscription.js'
 
 // Test schema types
 interface Issue {
@@ -105,8 +105,8 @@ const sendIssueData = (input: any, issues: Array<Issue>) => {
       issues.map((issue) => [
         [issue.id, issue as unknown as Record<string, unknown>],
         1,
-      ])
-    )
+      ]),
+    ),
   )
 }
 
@@ -116,8 +116,8 @@ const sendUserData = (input: any, users: Array<User>) => {
       users.map((user) => [
         [user.id, user as unknown as Record<string, unknown>],
         1,
-      ])
-    )
+      ]),
+    ),
   )
 }
 
@@ -178,14 +178,14 @@ describe(`Query2 Subqueries`, () => {
         {},
         new Set(),
         {},
-        () => {}
+        () => {},
       )
 
       const messages: Array<MultiSet<any>> = []
       pipeline.pipe(
         output((message) => {
           messages.push(message)
-        })
+        }),
       )
 
       graph.finalize()
@@ -212,10 +212,7 @@ describe(`Query2 Subqueries`, () => {
   })
 
   describe(`Subqueries in JOIN clause`, () => {
-    const dummyCallbacks = {
-      loadKeys: (_: any) => {},
-      loadInitialState: () => {},
-    }
+    const dummyCallbacks = {}
 
     it(`supports subquery in join clause`, () => {
       // Create a subquery for active users
@@ -227,12 +224,12 @@ describe(`Query2 Subqueries`, () => {
       const query = new Query()
         .from({ issue: issuesCollection })
         .join({ activeUser: activeUsersQuery }, ({ issue, activeUser }) =>
-          eq(issue.userId, activeUser.id)
+          eq(issue.userId, activeUser.id),
         )
         .select(({ issue, activeUser }) => ({
           issueId: issue.id,
           issueTitle: issue.title,
-          userName: activeUser?.name,
+          userName: activeUser.name,
         }))
 
       const builtQuery = getQueryIR(query)
@@ -262,12 +259,12 @@ describe(`Query2 Subqueries`, () => {
       const query = new Query()
         .from({ issue: issuesCollection })
         .join({ activeUser: activeUsersQuery }, ({ issue, activeUser }) =>
-          eq(issue.userId, activeUser.id)
+          eq(issue.userId, activeUser.id),
         )
         .select(({ issue, activeUser }) => ({
           issueId: issue.id,
           issueTitle: issue.title,
-          userName: activeUser?.name,
+          userName: activeUser.name,
         }))
 
       const builtQuery = getQueryIR(query)
@@ -297,20 +294,28 @@ describe(`Query2 Subqueries`, () => {
         { issue: dummyCallbacks, user: dummyCallbacks },
         lazySources,
         {},
-        () => {}
+        () => {},
       )
       const { pipeline } = compilation
 
-      // Since we're doing a left join, the alias on the right (from the subquery) should be handled lazily
-      // The subquery uses 'user' alias, but the join uses 'activeUser' - we expect the lazy alias
-      // to be the one that's marked (which is 'activeUser' since it's the joinedTableAlias)
-      expect(lazySources).contains(`activeUser`)
+      // Since we're doing a left join, the concrete lexical source inside the
+      // right-side subquery should be handled lazily. Aliases are query-language
+      // names; the compiler tracks runtime demand by the source's opaque ID.
+      const activeUserJoin = builtQuery.join![0]!.from
+      expect(activeUserJoin.type).toBe(`queryRef`)
+      if (activeUserJoin.type === `queryRef`) {
+        const activeUserSource = activeUserJoin.query.from
+        expect(activeUserSource.type).toBe(`collectionRef`)
+        if (activeUserSource.type === `collectionRef`) {
+          expect(lazySources).contains(activeUserSource.sourceId)
+        }
+      }
 
       const messages: Array<MultiSet<any>> = []
       pipeline.pipe(
         output((message) => {
           messages.push(message)
-        })
+        }),
       )
 
       graph.finalize()
@@ -358,12 +363,12 @@ describe(`Query2 Subqueries`, () => {
       const outerQuery = new Query()
         .from({ issue: issuesCollection })
         .join({ userInfo: middleQuery }, ({ issue, userInfo }) =>
-          eq(issue.userId, userInfo.id)
+          eq(issue.userId, userInfo.id),
         )
         .select(({ issue, userInfo }) => ({
           issueId: issue.id,
           issueTitle: issue.title,
-          userName: userInfo?.name,
+          userName: userInfo.name,
         }))
 
       const builtQuery = getQueryIR(outerQuery)
@@ -377,10 +382,7 @@ describe(`Query2 Subqueries`, () => {
         user: usersSubscription,
       }
 
-      const dummyCallbacks = {
-        loadKeys: (_: any) => {},
-        loadInitialState: () => {},
-      }
+      const dummyCallbacks = {}
 
       // Compile the query
       const graph = new D2()
@@ -398,7 +400,7 @@ describe(`Query2 Subqueries`, () => {
         { issue: dummyCallbacks, user: dummyCallbacks },
         lazyCollections,
         {},
-        () => {}
+        () => {},
       )
 
       // Verify that alias metadata includes aliases from the query
@@ -443,14 +445,14 @@ describe(`Query2 Subqueries`, () => {
         {},
         new Set(),
         {},
-        () => {}
+        () => {},
       )
 
       const messages: Array<MultiSet<any>> = []
       pipeline.pipe(
         output((message) => {
           messages.push(message)
-        })
+        }),
       )
 
       graph.finalize()

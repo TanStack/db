@@ -3,18 +3,28 @@ id: Subscription
 title: Subscription
 ---
 
-# Interface: Subscription
-
-Defined in: [packages/db/src/types.ts:232](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L232)
+Defined in: [packages/db/src/types.ts:284](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L284)
 
 Public interface for a collection subscription
 Used by sync implementations to track subscription lifecycle
 
 ## Extends
 
-- `EventEmitter`\<[`SubscriptionEvents`](../../type-aliases/SubscriptionEvents.md)\>
+- `EventEmitter`\<[`SubscriptionEvents`](../type-aliases/SubscriptionEvents.md)\>
 
 ## Properties
+
+### lastError
+
+```ts
+readonly lastError: unknown;
+```
+
+Defined in: [packages/db/src/types.ts:288](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L288)
+
+Most recent subset-load failure observed by this subscription.
+
+***
 
 ### status
 
@@ -22,7 +32,7 @@ Used by sync implementations to track subscription lifecycle
 readonly status: SubscriptionStatus;
 ```
 
-Defined in: [packages/db/src/types.ts:234](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L234)
+Defined in: [packages/db/src/types.ts:286](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L286)
 
 Current status of the subscription
 
@@ -34,7 +44,7 @@ Current status of the subscription
 protected clearListeners(): void;
 ```
 
-Defined in: [packages/db/src/event-emitter.ts:115](https://github.com/TanStack/db/blob/main/packages/db/src/event-emitter.ts#L115)
+Defined in: [packages/db/src/event-emitter.ts:156](https://github.com/TanStack/db/blob/main/packages/db/src/event-emitter.ts#L156)
 
 Clear all listeners
 
@@ -56,7 +66,7 @@ EventEmitter.clearListeners
 protected emitInner<T>(event, eventPayload): void;
 ```
 
-Defined in: [packages/db/src/event-emitter.ts:96](https://github.com/TanStack/db/blob/main/packages/db/src/event-emitter.ts#L96)
+Defined in: [packages/db/src/event-emitter.ts:124](https://github.com/TanStack/db/blob/main/packages/db/src/event-emitter.ts#L124)
 
 **`Internal`**
 
@@ -66,7 +76,7 @@ Emit an event to all listeners
 
 ##### T
 
-`T` *extends* keyof [`SubscriptionEvents`](../../type-aliases/SubscriptionEvents.md)
+`T` *extends* keyof [`SubscriptionEvents`](../type-aliases/SubscriptionEvents.md)
 
 #### Parameters
 
@@ -78,7 +88,7 @@ Event name to emit
 
 ##### eventPayload
 
-[`SubscriptionEvents`](../../type-aliases/SubscriptionEvents.md)\[`T`\]
+[`SubscriptionEvents`](../type-aliases/SubscriptionEvents.md)\[`T`\]
 
 Event payload
  For use by subclasses - subclasses should wrap this with a public emit if needed
@@ -95,13 +105,58 @@ EventEmitter.emitInner
 
 ***
 
+### emitInnerWhile()
+
+```ts
+protected emitInnerWhile<T>(
+   event, 
+   eventPayload, 
+   isCurrent): void;
+```
+
+Defined in: [packages/db/src/event-emitter.ts:132](https://github.com/TanStack/db/blob/main/packages/db/src/event-emitter.ts#L132)
+
+Emit until a reentrant callback invalidates the event being delivered.
+
+#### Type Parameters
+
+##### T
+
+`T` *extends* keyof [`SubscriptionEvents`](../type-aliases/SubscriptionEvents.md)
+
+#### Parameters
+
+##### event
+
+`T`
+
+##### eventPayload
+
+[`SubscriptionEvents`](../type-aliases/SubscriptionEvents.md)\[`T`\]
+
+##### isCurrent
+
+() => `boolean`
+
+#### Returns
+
+`void`
+
+#### Inherited from
+
+```ts
+EventEmitter.emitInnerWhile
+```
+
+***
+
 ### off()
 
 ```ts
 off<T>(event, callback): void;
 ```
 
-Defined in: [packages/db/src/event-emitter.ts:53](https://github.com/TanStack/db/blob/main/packages/db/src/event-emitter.ts#L53)
+Defined in: [packages/db/src/event-emitter.ts:72](https://github.com/TanStack/db/blob/main/packages/db/src/event-emitter.ts#L72)
 
 Unsubscribe from an event
 
@@ -109,7 +164,7 @@ Unsubscribe from an event
 
 ##### T
 
-`T` *extends* keyof [`SubscriptionEvents`](../../type-aliases/SubscriptionEvents.md)
+`T` *extends* keyof [`SubscriptionEvents`](../type-aliases/SubscriptionEvents.md)
 
 #### Parameters
 
@@ -143,7 +198,7 @@ EventEmitter.off
 on<T>(event, callback): () => void;
 ```
 
-Defined in: [packages/db/src/event-emitter.ts:17](https://github.com/TanStack/db/blob/main/packages/db/src/event-emitter.ts#L17)
+Defined in: [packages/db/src/event-emitter.ts:21](https://github.com/TanStack/db/blob/main/packages/db/src/event-emitter.ts#L21)
 
 Subscribe to an event
 
@@ -151,7 +206,7 @@ Subscribe to an event
 
 ##### T
 
-`T` *extends* keyof [`SubscriptionEvents`](../../type-aliases/SubscriptionEvents.md)
+`T` *extends* keyof [`SubscriptionEvents`](../type-aliases/SubscriptionEvents.md)
 
 #### Parameters
 
@@ -193,7 +248,7 @@ EventEmitter.on
 once<T>(event, callback): () => void;
 ```
 
-Defined in: [packages/db/src/event-emitter.ts:37](https://github.com/TanStack/db/blob/main/packages/db/src/event-emitter.ts#L37)
+Defined in: [packages/db/src/event-emitter.ts:50](https://github.com/TanStack/db/blob/main/packages/db/src/event-emitter.ts#L50)
 
 Subscribe to an event once (automatically unsubscribes after first emission)
 
@@ -201,7 +256,7 @@ Subscribe to an event once (automatically unsubscribes after first emission)
 
 ##### T
 
-`T` *extends* keyof [`SubscriptionEvents`](../../type-aliases/SubscriptionEvents.md)
+`T` *extends* keyof [`SubscriptionEvents`](../type-aliases/SubscriptionEvents.md)
 
 #### Parameters
 
@@ -243,7 +298,7 @@ EventEmitter.once
 waitFor<T>(event, timeout?): Promise<SubscriptionEvents[T]>;
 ```
 
-Defined in: [packages/db/src/event-emitter.ts:66](https://github.com/TanStack/db/blob/main/packages/db/src/event-emitter.ts#L66)
+Defined in: [packages/db/src/event-emitter.ts:94](https://github.com/TanStack/db/blob/main/packages/db/src/event-emitter.ts#L94)
 
 Wait for an event to be emitted
 
@@ -251,7 +306,7 @@ Wait for an event to be emitted
 
 ##### T
 
-`T` *extends* keyof [`SubscriptionEvents`](../../type-aliases/SubscriptionEvents.md)
+`T` *extends* keyof [`SubscriptionEvents`](../type-aliases/SubscriptionEvents.md)
 
 #### Parameters
 
@@ -269,7 +324,7 @@ Optional timeout in milliseconds
 
 #### Returns
 
-`Promise`\<[`SubscriptionEvents`](../../type-aliases/SubscriptionEvents.md)\[`T`\]\>
+`Promise`\<[`SubscriptionEvents`](../type-aliases/SubscriptionEvents.md)\[`T`\]\>
 
 Promise that resolves with the event payload
 

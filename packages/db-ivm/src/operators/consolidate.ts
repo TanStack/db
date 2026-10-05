@@ -1,7 +1,7 @@
-import { DifferenceStreamWriter, UnaryOperator } from "../graph.js"
-import { StreamBuilder } from "../d2.js"
-import { MultiSet } from "../multiset.js"
-import type { IStreamBuilder, PipedOperator } from "../types.js"
+import { DifferenceStreamWriter, UnaryOperator } from '../graph.js'
+import { StreamBuilder } from '../d2.js'
+import { MultiSet } from '../multiset.js'
+import type { IStreamBuilder, PipedOperator } from '../types.js'
 
 /**
  * Operator that consolidates collections
@@ -36,12 +36,12 @@ export function consolidate<T>(): PipedOperator<T, T> {
   return (stream: IStreamBuilder<T>): IStreamBuilder<T> => {
     const output = new StreamBuilder<T>(
       stream.graph,
-      new DifferenceStreamWriter<T>()
+      new DifferenceStreamWriter<T>(),
     )
     const operator = new ConsolidateOperator<T>(
       stream.graph.getNextOperatorId(),
       stream.connectReader(),
-      output.writer
+      output.writer,
     )
     stream.graph.addOperator(operator)
     return output

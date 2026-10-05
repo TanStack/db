@@ -3,13 +3,11 @@ id: parseLoadSubsetOptions
 title: parseLoadSubsetOptions
 ---
 
-# Function: parseLoadSubsetOptions()
-
 ```ts
 function parseLoadSubsetOptions(options): object;
 ```
 
-Defined in: [packages/db/src/query/expression-helpers.ts:499](https://github.com/TanStack/db/blob/main/packages/db/src/query/expression-helpers.ts#L499)
+Defined in: [packages/db/src/query/expression-helpers.ts:504](https://github.com/TanStack/db/blob/main/packages/db/src/query/expression-helpers.ts#L504)
 
 Convenience function to get all LoadSubsetOptions in a pre-parsed format.
 Good starting point for simple use cases.
@@ -22,7 +20,7 @@ The LoadSubsetOptions from ctx.meta
 
 \{
 `limit?`: `number`;
-`orderBy?`: [`OrderBy`](../../@tanstack/namespaces/IR/type-aliases/OrderBy.md);
+`orderBy?`: [`OrderBy`](../@tanstack/namespaces/IR/type-aliases/OrderBy.md);
 `where?`: `BasicExpression`\<`boolean`\>;
 \} | `null` | `undefined`
 

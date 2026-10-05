@@ -3,13 +3,11 @@ id: like
 title: like
 ---
 
-# Function: like()
-
 ```ts
 function like(left, right): BasicExpression<boolean>;
 ```
 
-Defined in: [packages/db/src/query/builder/functions.ts:244](https://github.com/TanStack/db/blob/main/packages/db/src/query/builder/functions.ts#L244)
+Defined in: [packages/db/src/query/builder/functions.ts:289](https://github.com/TanStack/db/blob/main/packages/db/src/query/builder/functions.ts#L289)
 
 ## Parameters
 
@@ -23,4 +21,4 @@ Defined in: [packages/db/src/query/builder/functions.ts:244](https://github.com/
 
 ## Returns
 
-[`BasicExpression`](../../@tanstack/namespaces/IR/type-aliases/BasicExpression.md)\<`boolean`\>
+[`BasicExpression`](../@tanstack/namespaces/IR/type-aliases/BasicExpression.md)\<`boolean`\>

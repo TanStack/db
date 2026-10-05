@@ -1,9 +1,9 @@
-import { Component, signal } from '@angular/core';
-import { injectLiveQuery } from '@tanstack/angular-db';
-import { eq } from '@tanstack/db';
-import { todosCollection } from '../collections/todos-collection';
-import { FormsModule } from '@angular/forms';
-import { CommonModule } from '@angular/common';
+import { Component, signal } from '@angular/core'
+import { injectLiveQuery } from '@tanstack/angular-db'
+import { eq } from '@tanstack/db'
+import { todosCollection } from '../collections/todos-collection'
+import { FormsModule } from '@angular/forms'
+import { CommonModule } from '@angular/common'
 
 @Component({
   selector: 'app-root',
@@ -140,20 +140,20 @@ export class App {
   projects = [
     { id: 1, name: 'Work' },
     { id: 2, name: 'Home' },
-  ];
+  ]
 
-  selectedProjectId = signal(2);
+  selectedProjectId = signal(2)
 
   todoQuery = injectLiveQuery({
     params: () => ({ projectID: this.selectedProjectId() }),
     query: ({ params, q }) =>
       q.from({ todo: todosCollection }).where(({ todo }) => eq(todo.projectID, params.projectID)),
-  });
+  })
 
-  newTodoText = '';
+  newTodoText = ''
 
   addTodo() {
-    if (!this.newTodoText.trim()) return;
+    if (!this.newTodoText.trim()) return
 
     const newTodo = {
       id: Date.now(),
@@ -161,23 +161,23 @@ export class App {
       projectID: this.selectedProjectId(),
       completed: false,
       created_at: new Date(),
-    };
+    }
 
-    todosCollection.insert(newTodo);
-    this.newTodoText = '';
+    todosCollection.insert(newTodo)
+    this.newTodoText = ''
   }
 
   toggleTodo(id: number) {
     todosCollection.update(id, (draft: any) => {
-      draft.completed = !draft.completed;
-    });
+      draft.completed = !draft.completed
+    })
   }
 
   deleteTodo(id: number) {
-    todosCollection.delete(id);
+    todosCollection.delete(id)
   }
 
   getCompletedCount(): number {
-    return this.todoQuery.data().filter((todo) => todo.completed).length;
+    return this.todoQuery.data().filter((todo) => todo.completed).length
   }
 }

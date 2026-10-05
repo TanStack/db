@@ -3,13 +3,11 @@ id: extractFieldPath
 title: extractFieldPath
 ---
 
-# Function: extractFieldPath()
-
 ```ts
 function extractFieldPath(expr): FieldPath | null;
 ```
 
-Defined in: [packages/db/src/query/expression-helpers.ts:107](https://github.com/TanStack/db/blob/main/packages/db/src/query/expression-helpers.ts#L107)
+Defined in: [packages/db/src/query/expression-helpers.ts:109](https://github.com/TanStack/db/blob/main/packages/db/src/query/expression-helpers.ts#L109)
 
 Extracts the field path from a PropRef expression.
 Returns null for non-ref expressions.
@@ -24,7 +22,7 @@ The expression to extract from
 
 ## Returns
 
-[`FieldPath`](../../type-aliases/FieldPath.md) \| `null`
+[`FieldPath`](../type-aliases/FieldPath.md) \| `null`
 
 The field path array, or null
 

@@ -1,4 +1,4 @@
-import { TanStackDBError } from "@tanstack/db"
+import { TanStackDBError } from '@tanstack/db'
 
 // Query Collection Errors
 export class QueryCollectionError extends TanStackDBError {
@@ -36,10 +36,26 @@ export class GetKeyRequiredError extends QueryCollectionError {
   }
 }
 
+export class InitialDataInOnDemandModeError extends QueryCollectionError {
+  constructor() {
+    super(
+      `[QueryCollection] initialData and initialDataUpdatedAt are only supported when syncMode is 'eager'. Seed or hydrate the exact Query cache key for on-demand subsets instead.`,
+    )
+    this.name = `InitialDataInOnDemandModeError`
+  }
+}
+
+export class InvalidQueryResultError extends QueryCollectionError {
+  constructor(message: string) {
+    super(message)
+    this.name = `InvalidQueryResultError`
+  }
+}
+
 export class SyncNotInitializedError extends QueryCollectionError {
   constructor() {
     super(
-      `Collection must be in 'ready' state for manual sync operations. Sync not initialized yet.`
+      `Collection must be in 'ready' state for manual sync operations. Sync not initialized yet.`,
     )
     this.name = `SyncNotInitializedError`
   }

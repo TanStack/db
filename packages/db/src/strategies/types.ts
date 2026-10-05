@@ -1,4 +1,4 @@
-import type { Transaction } from "../transactions"
+import type { Transaction } from '../transactions'
 
 /**
  * Base strategy interface that all strategy implementations must conform to
@@ -13,8 +13,8 @@ export interface BaseStrategy<TName extends string = string> {
    * @returns The result of the function execution (if applicable)
    */
   execute: <T extends object = Record<string, unknown>>(
-    fn: () => Transaction<T>
-  ) => void | Promise<void>
+    fn: () => Transaction<T>,
+  ) => void | boolean | Promise<void>
 
   /**
    * Clean up any resources held by the strategy
@@ -50,7 +50,7 @@ export interface DebounceStrategy extends BaseStrategy<`debounce`> {
 export interface QueueStrategyOptions {
   /** Wait time between processing queue items (milliseconds) */
   wait?: number
-  /** Maximum queue size (items are dropped if exceeded) */
+  /** Maximum waiting items. Overflow rejects its transaction; 0 rejects every mutation. */
   maxSize?: number
   /** Where to add new items in the queue */
   addItemsTo?: `front` | `back`
@@ -65,6 +65,10 @@ export interface QueueStrategyOptions {
  */
 export interface QueueStrategy extends BaseStrategy<`queue`> {
   options?: QueueStrategyOptions
+  /** Explicit false rejects the transaction; void preserves custom strategies. */
+  execute: <T extends object = Record<string, unknown>>(
+    fn: () => Transaction<T>,
+  ) => boolean | void | Promise<void>
 }
 
 /**
@@ -74,9 +78,9 @@ export interface QueueStrategy extends BaseStrategy<`queue`> {
 export interface ThrottleStrategyOptions {
   /** Minimum wait time between executions (milliseconds) */
   wait: number
-  /** Execute immediately on the first call */
+  /** Execute immediately on the first call. Defaults to true unless trailing is explicitly true. */
   leading?: boolean
-  /** Execute on the last call after wait period */
+  /** Execute on the last call after wait period. Defaults to true. Disabled trailing rejects skipped optimistic calls. */
   trailing?: boolean
 }
 
@@ -111,10 +115,7 @@ export interface BatchStrategy extends BaseStrategy<`batch`> {
  * Union type of all available strategies
  */
 export type Strategy =
-  | DebounceStrategy
-  | QueueStrategy
-  | ThrottleStrategy
-  | BatchStrategy
+  DebounceStrategy | QueueStrategy | ThrottleStrategy | BatchStrategy
 
 /**
  * Extract the options type from a strategy

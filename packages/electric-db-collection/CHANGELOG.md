@@ -1,5 +1,796 @@
 # @tanstack/electric-db-collection
 
+## 0.5.4
+
+### Patch Changes
+
+- Updated dependencies [[`06cab6f`](https://github.com/TanStack/db/commit/06cab6fc7b808acfbfb3af1eb2fc1fdc3c9f0fa8)]:
+  - @tanstack/db@0.11.3
+
+## 0.5.3
+
+### Patch Changes
+
+- Updated dependencies [[`dac687d`](https://github.com/TanStack/db/commit/dac687d4b5cfac11ee93862ba1c781df7c7caf0f), [`dac687d`](https://github.com/TanStack/db/commit/dac687d4b5cfac11ee93862ba1c781df7c7caf0f), [`dac687d`](https://github.com/TanStack/db/commit/dac687d4b5cfac11ee93862ba1c781df7c7caf0f), [`dac687d`](https://github.com/TanStack/db/commit/dac687d4b5cfac11ee93862ba1c781df7c7caf0f), [`7595a2d`](https://github.com/TanStack/db/commit/7595a2d335b646d7913e836342c3ee60716bc875), [`dac687d`](https://github.com/TanStack/db/commit/dac687d4b5cfac11ee93862ba1c781df7c7caf0f), [`dac687d`](https://github.com/TanStack/db/commit/dac687d4b5cfac11ee93862ba1c781df7c7caf0f), [`8be6705`](https://github.com/TanStack/db/commit/8be6705a754b9e3d75d8c88fff88a971de1ce56b)]:
+  - @tanstack/db@0.11.2
+
+## 0.5.2
+
+### Patch Changes
+
+- Updated dependencies [[`a18f63d`](https://github.com/TanStack/db/commit/a18f63d3562c0c9bebccffcdad1785cb5c9cc5f6), [`e706483`](https://github.com/TanStack/db/commit/e7064834f28b065c8bfc9356df61a158d68aab94), [`18abcee`](https://github.com/TanStack/db/commit/18abceee48ebde712e120cbc541289bb83f35d77), [`d2690bf`](https://github.com/TanStack/db/commit/d2690bf570dae1f1b527cf186e03a4f1e81e37ff), [`5b85af0`](https://github.com/TanStack/db/commit/5b85af08f2b02ff675d79c012a858e6b2bea3dbf), [`1dbf5f9`](https://github.com/TanStack/db/commit/1dbf5f9a5d3dee3ea4caec7fe935b3f018ce22c9), [`7ab48d8`](https://github.com/TanStack/db/commit/7ab48d83668b1c8a5051620e3963ccd72896e04f), [`d2690bf`](https://github.com/TanStack/db/commit/d2690bf570dae1f1b527cf186e03a4f1e81e37ff), [`7ca38db`](https://github.com/TanStack/db/commit/7ca38dbb9195ead55e7df60746157779b6d5e65a), [`f2f92c5`](https://github.com/TanStack/db/commit/f2f92c5b2c1500cc7b19c4294039700bb77dd4b3)]:
+  - @tanstack/db@0.11.1
+
+## 0.5.1
+
+### Patch Changes
+
+- Updated dependencies [[`9c62ac3`](https://github.com/TanStack/db/commit/9c62ac3782779dc2a91335dd834ad8eb907db109), [`d5e4732`](https://github.com/TanStack/db/commit/d5e47325a7db907fb2c5f9bb6d1273754bfc4a69), [`0122da8`](https://github.com/TanStack/db/commit/0122da80ae58d8e8e624b460506370a910037c8e), [`f7d96f7`](https://github.com/TanStack/db/commit/f7d96f7e22c8997bca0815521e8e944457c8888a), [`fb509ef`](https://github.com/TanStack/db/commit/fb509efb985f830736389d7ec2b53504c0611395), [`dc4b4e0`](https://github.com/TanStack/db/commit/dc4b4e089a5c5b4b9462fd833ff3c6e0c2f17988), [`f158258`](https://github.com/TanStack/db/commit/f15825858e09914b6b94c4150f77c5137efecdbf), [`c879ba6`](https://github.com/TanStack/db/commit/c879ba6d855914e5c0cac49af7a007eb5cabe7e4), [`b5d92ce`](https://github.com/TanStack/db/commit/b5d92cebd0d951d8a3399618aea4f399915b6ea9)]:
+  - @tanstack/db@0.11.0
+
+## 0.5.0
+
+### Minor Changes
+
+- **Deprecation**: Mutation handler return values and QueryCollection auto-refetch behavior. ([#843](https://github.com/TanStack/db/pull/843))
+
+  **What's changed:**
+  - Handler return values remain type-compatible during the deprecation window
+  - **Deprecation warnings** are logged when deprecated patterns are used
+
+  **QueryCollection changes:**
+  - Auto-refetch after handlers is **deprecated** and will be removed in v1.0
+  - To skip auto-refetch now, return `{ refetch: false }` from your handler
+  - To migrate to explicit refetch now, await `collection.utils.refetch()` and return `{ refetch: false }` to prevent a second fetch; remove the return in v1.0
+  - In v1.0, call `await collection.utils.refetch()` explicitly when needed, or omit it to skip
+
+  **ElectricCollection changes:**
+  - Returning `{ txid }` is deprecated - use `await collection.utils.awaitTxId(txid)` instead
+  - The default `awaitTxId` and `awaitMatch` timeouts increase to 15 seconds
+
+  **Migration guide:**
+
+  ```typescript
+  // QueryCollection - skip refetch (current)
+  onInsert: async ({ transaction }) => {
+    await api.create(transaction.mutations[0].modified)
+    return { refetch: false } // Opt out of auto-refetch
+  }
+
+  // QueryCollection - migrate to explicit refetch now
+  onInsert: async ({ transaction, collection }) => {
+    await api.create(transaction.mutations[0].modified)
+    await collection.utils.refetch() // Explicit refetch
+    return { refetch: false } // Prevent a second pre-1.0 refetch; remove in v1.0
+  }
+
+  // ElectricCollection - before
+  onInsert: async ({ transaction }) => {
+    const result = await api.create(transaction.mutations[0].modified)
+    return { txid: result.txid } // Deprecated
+  }
+
+  // ElectricCollection - after
+  onInsert: async ({ transaction, collection }) => {
+    const result = await api.create(transaction.mutations[0].modified)
+    await collection.utils.awaitTxId(result.txid) // Explicit
+  }
+  ```
+
+- Preserve collection key and adapter utility types throughout mutation handlers and nested transaction mutations. Mutation keys now use the collection's declared key type instead of `any`; collections that use the default key type expose `string | number`. Prevent Query and Electric collections from exposing nonexistent cross-adapter utilities. ([#1849](https://github.com/TanStack/db/pull/1849))
+
+### Patch Changes
+
+- Preserve PostgreSQL semantics for boolean comparisons and array membership, ([#1832](https://github.com/TanStack/db/pull/1832))
+  including nullable values, compatible reference-to-array types, and non-text
+  array elements. Reject nullish membership operands and literal-array left
+  operands, and escape quotes in mapped column names.
+
+- Retain retry-stable Suspense resources and preserve persisted demand readiness across lifecycle transitions. Avoid redundant Electric refreshes when requesting subset snapshots, and declare React 18 as the minimum supported React version. ([#1860](https://github.com/TanStack/db/pull/1860))
+
+- Fail-stop persisted collections when hydration or durability fails, and replay authoritative source transactions through one persistence-owned FIFO. Electric collections keep optimistic state immediate while surfacing durable failures through the collection error state instead of continuing from an incomplete baseline. ([#1853](https://github.com/TanStack/db/pull/1853))
+
+  Query collections retain ownership metadata that the persisted wrapper already published instead of restoring stale ownership after the publication boundary.
+
+- Preserve persisted resume integrity with atomic SQLite baseline evidence and stale-writer rejection, expose persistence sync metadata as one versioned capability, and refresh uncertified Electric baselines before publishing resumed data. ([#1846](https://github.com/TanStack/db/pull/1846))
+
+  This changes the public persistence contracts: custom `PersistenceAdapter` implementations must now implement `loadResumeSnapshot`, and `SyncMetadataApi.persistence` is required with `null` explicitly representing no persistence. Custom sync wrappers that receive metadata must forward `metadata.persistence` unchanged so consumers receive either that sentinel or the complete versioned capability. A direct sync invocation may still omit the optional metadata object entirely, which consumers treat as no persistence. The Electron bridge now transports the atomic resume snapshot through IPC protocol v2; Electron main and renderer integrations must upgrade together because mixed v1/v2 peers fail closed. Node and React Native persistence instances that wrap one database handle now share transaction admission so concurrent collection startup cannot overlap transactions on that connection.
+
+- Updated dependencies [[`2ad6834`](https://github.com/TanStack/db/commit/2ad6834af4b1ddf9d7c0c9c85e25ea8b1aac44e2), [`b528a61`](https://github.com/TanStack/db/commit/b528a610533a083ec909aeca354ff826d76e37e0), [`84fc44b`](https://github.com/TanStack/db/commit/84fc44b559c94139f28b3cec526ebfe05290b95e), [`9351f46`](https://github.com/TanStack/db/commit/9351f46d68853f4e3f5fa3c7e8c9455e798d0171), [`5108acf`](https://github.com/TanStack/db/commit/5108acf47a0724691a06af8a660014776f9cf716), [`afbeb44`](https://github.com/TanStack/db/commit/afbeb44eef48d92b6e30ae5fd2843b938ee9163c), [`2775082`](https://github.com/TanStack/db/commit/27750825e94acaf221c5a3e7a4ed4a735499e9fa), [`fef53f8`](https://github.com/TanStack/db/commit/fef53f8be7f1cb68f00639a4c3206a6598663de4), [`b44a50a`](https://github.com/TanStack/db/commit/b44a50ad8c1ffeced0749dd773dfdc8ca2db8f0a), [`19dd9a2`](https://github.com/TanStack/db/commit/19dd9a2fa580963f4605d3466674db6ec9d3e002), [`3096b8f`](https://github.com/TanStack/db/commit/3096b8f28b7baaa990ec6113175d684191a21954), [`1ab1cd3`](https://github.com/TanStack/db/commit/1ab1cd35d0549735a864e1cd9260f5b1374d8191), [`e5fe2ea`](https://github.com/TanStack/db/commit/e5fe2ea3597faa257d2c5f8cde6f5d17b8893f0f), [`3eb5b2b`](https://github.com/TanStack/db/commit/3eb5b2b387fed4051744ca4787c499e5f3d2f7b2), [`7c62bf5`](https://github.com/TanStack/db/commit/7c62bf5a159480eee0b3da0b526f943db59446a2), [`63362dc`](https://github.com/TanStack/db/commit/63362dc8cbe7f7a63e5e79fdedaed3c31a7fb7af), [`7f6b643`](https://github.com/TanStack/db/commit/7f6b6438cd3a5b2cfc54ea1d8ad8a2102ea9d699), [`c479fdc`](https://github.com/TanStack/db/commit/c479fdc1c2e09d979842210148a08378fb5d71d7), [`91a2cbf`](https://github.com/TanStack/db/commit/91a2cbfb88fccc5f19f864b69632cfb8e95ed449), [`144c6b1`](https://github.com/TanStack/db/commit/144c6b132f65138d9a12321ef62a286f03551d21), [`5218f0c`](https://github.com/TanStack/db/commit/5218f0c385f61ccfa08ff366fb6f487528702017), [`76d766e`](https://github.com/TanStack/db/commit/76d766e84afbfcde2900a661233dd59e1decd5c2), [`1e54c6a`](https://github.com/TanStack/db/commit/1e54c6a2820ef5f1a87c6f4236311259c041fc24), [`d698b90`](https://github.com/TanStack/db/commit/d698b90579fd5ce3a4bf122ddd30fd4fe9f8d2b6), [`04a1a81`](https://github.com/TanStack/db/commit/04a1a81a0f5bd192d63e2ae5987f48aaf2c2a72a), [`3ad64a4`](https://github.com/TanStack/db/commit/3ad64a42a0088e1272176fb33c953526fed9b868), [`4c5a8de`](https://github.com/TanStack/db/commit/4c5a8de61843d6964a2580aded8a2d027b78e135), [`b72b5d1`](https://github.com/TanStack/db/commit/b72b5d1d2fd01df29373099dd50daf2373e3bb8b), [`fc1adde`](https://github.com/TanStack/db/commit/fc1adde85be0ed3570912688712ccc15875be906), [`2781581`](https://github.com/TanStack/db/commit/27815817c56b3bca1823703dbd9893a0ef86f6d2), [`40a5aea`](https://github.com/TanStack/db/commit/40a5aea5637ce4364ff2fc0bc747100f844bcdc2), [`e16d46c`](https://github.com/TanStack/db/commit/e16d46ce5d10c7f895c8abff86da4925f0eda2d1), [`9cbc885`](https://github.com/TanStack/db/commit/9cbc885e826695c5a33c4684f454ce176ad17d2d), [`23ae52d`](https://github.com/TanStack/db/commit/23ae52d7646593e9ddca9875c3c8e38945f8cdf4), [`7917ef9`](https://github.com/TanStack/db/commit/7917ef990deaf308ce7c4bd469707f01cb34746b), [`1ca838b`](https://github.com/TanStack/db/commit/1ca838b408e588ef52a817196d4ea576b1259008), [`34a999d`](https://github.com/TanStack/db/commit/34a999d7a67f6d2c468a5b6c13a29e2b41861a2b), [`825acc5`](https://github.com/TanStack/db/commit/825acc5ff3b703354088e81b3161d0cc830650cf), [`febd4bc`](https://github.com/TanStack/db/commit/febd4bcc3cafa53d552a7724619a513982789b56), [`b7a7d10`](https://github.com/TanStack/db/commit/b7a7d10d7a045614bd78f482f17a7d1ba568f2b5), [`510cb53`](https://github.com/TanStack/db/commit/510cb538c4706e21a4d70046bf2ab2753f47bfa8), [`efb84d8`](https://github.com/TanStack/db/commit/efb84d800fd162842815e872d088d070db5407e3), [`236d77b`](https://github.com/TanStack/db/commit/236d77bcbe2941816c756ea5f9e8db4c77c333f2), [`71ad428`](https://github.com/TanStack/db/commit/71ad4284922c2355eb723fc5a00f26c72296aef9)]:
+  - @tanstack/db@0.10.0
+
+## 0.4.10
+
+### Patch Changes
+
+- Preserve nested boolean predicate grouping when compiling Electric subset SQL, ([#1816](https://github.com/TanStack/db/pull/1816))
+  including comparison results and NOT expressions used inside comparisons,
+  membership checks, and null tests.
+- Updated dependencies [[`3c4c35d`](https://github.com/TanStack/db/commit/3c4c35d5868c908979058c4dbeae7c4ac9eab88b)]:
+  - @tanstack/db@0.9.2
+
+## 0.4.9
+
+### Patch Changes
+
+- Harden Electric resume and lifecycle handling so partial updates cannot materialize unknown or moved-out rows, stale async work and waiters cannot cross cleanup or restart—including automatic garbage collection—and valid batches behave the same across callback partitions and persistence hydration. ([#1785](https://github.com/TanStack/db/pull/1785))
+
+  Preserve hydrated baseline rows during persistence reloads, accept complete-row updates from explicit full-replica resumes, retain committed match evidence until reset, and restart persisted resumes when hydration completion cannot be verified.
+
+  Replace stale cached rows atomically when an invalid resume falls back to a fresh snapshot. Keep subset acquisitions from restoring logically removed rows, and isolate utilities and tag visibility when collection options are reused while preserving compatible same-collection resume state.
+
+  Accept partial updates to complete rows published independently by persistence, while preserving pending removal and reset boundaries. Avoid copying all applied keys at startup or each subset acquisition; presence checks overlay queued writes and buffered messages once per stream callback. Warn once when an older persistence adapter cannot verify hydration for safe resume.
+
+  Keep buffered tag move-outs inside the progressive snapshot's existing transaction so later live updates are not discarded behind an orphaned truncate.
+
+  Keep copied materialized configs and reentrant match callbacks scoped to their owning collection session. Cold tagged or legacy persisted state now recovers with a full snapshot behind cached rows, including in on-demand mode. Keep the reset marker through interrupted recovery and publish the replacement only after the full snapshot completes; known untagged and compatible warm resumes retain their saved offset.
+
+- Updated dependencies [[`a378bd3`](https://github.com/TanStack/db/commit/a378bd3a65f6b9ed0c9a85f793b7dc2e2a59a313), [`ad043b7`](https://github.com/TanStack/db/commit/ad043b7455a5bdc549c36833bc72ddbe9ce8afed), [`025a079`](https://github.com/TanStack/db/commit/025a0799dd7690d892cacff5493b7270c33fdc2c), [`ddc129e`](https://github.com/TanStack/db/commit/ddc129eeab84d7eca4f2972c3dcc37506202a43d)]:
+  - @tanstack/db@0.9.1
+
+## 0.4.8
+
+### Patch Changes
+
+- Fix on-demand load settlement, ordered pagination, and replay to preserve coherent results across cancellation, failure, cleanup, and restart. Preserve subset results and ownership across Electric, PowerSync, Query, and SQLite persistence adapters. Correct live-query grouping, include projections, value identity, and indexed comparisons. D2 hashing now rejects structural cycles and excessive traversal depth or work with an explicit error; Collection handles retain object-reference identity without traversing their mutable contents. ([#1797](https://github.com/TanStack/db/pull/1797))
+
+  Remove the unused public subset-algebra helpers: `isWhereSubset`, `unionWherePredicates`, `minusWherePredicates`, `isOrderBySubset`, `isLimitSubset`, `isOffsetLimitSubset`, `isPredicateSubset`, and `isLoadSubsetRequestSubsumedBy`. Apps that import these helpers must remove those imports; normal queries and adapters are unaffected. `DeduplicatedLoadSubset` remains available and shares only exact demand identities.
+
+  Reject compiled Collection-valued includes as `fn.select()` inputs, including nested descendants, before invoking the callback. Use `toArray()` or `materialize()` in the upstream `.select()` for child-value calculations. To keep live child Collections, use expression `.select()` or perform parent-only functional work before adding the includes. Ordinary Collection-valued includes remain supported.
+
+  Remove proxy `DEBUG` logging and automatic index timing statistics to avoid diagnostic work on reads and writes. Remove `getStats()` and `IndexStats`; use `index.keyCount` for the current entry count, and instrument index methods externally when profiling. Custom index subclasses must remove calls to the retired `trackLookup()` and `updateTimestamp()` helpers.
+
+  Fix mutation drafts so Map/Set `forEach` calls each callback once and read-only iteration reports no changes. Track nested Map `for...of` edits through `collection.update()`. Keep Set entries in place during nested edits, preserving live iteration and usable `has`, `delete`, and `add` handles without duplicate entries or repeated visits. Reverting one entry no longer discards another entry's pending changes.
+
+  Preserve shared values within a row's draft. Newly supplied objects use normal shared references during the update callback, including Map values and Set members; editing through either handle changes the same new object. Copy completed changes at callback return so later caller edits cannot mutate stored data. Existing collection values remain isolated. Copy a new caller-owned value before insertion if it must remain untouched during the callback.
+
+  Keep rejected local-storage mutations out of later successful saves. Stage insert, update, delete, and manual transaction writes before persisting, then promote the shared cache only after storage succeeds.
+
+  Deliver live-query observer publications to peer listeners even when one listener throws. Preserve queued publication order and stop delivery on disposal; report the first listener failure after delivery.
+
+  Wait for PowerSync demands admitted during tracking finalization before reporting them loaded. Preserve untouched object and array key identity when they contain `NaN`. Retire every failed ordered acquisition on explicit retry, while retaining a full-source demand repaired by replay.
+
+  After authoritative ordered recovery succeeds, retire settled page and tie demands so later truncate replay fetches only the full-source replacement. Keep unfinished requests observed until settlement and preserve independent query ownership.
+
+  Remove the live-query `utils.getRunCount()` diagnostic and its runtime counter. Apps that call this diagnostic must remove those calls. Query scheduling and results are unchanged.
+
+  Remove test-only index inspection getters (`indexedKeysSet`, `valueMapData`, `orderedEntriesArray`, and `orderedEntriesArrayReversed`) and unused scheduler diagnostics. `ReverseIndex` now exposes only the `IndexReader` lookup, range, and forward traversal surface returned by `findIndexForField`; mutate the original index instead. Export `IndexReader` for callers that name this return type. Remove the unused subscription `releaseLoadSubset()` method; request owners use the release callback supplied by `onLoadSubsetResult`. Ordinary query and adapter APIs remain unchanged by these removals.
+
+  Remove unused internal helpers and the unused public error classes `WhereClauseConversionError`, `SubscriptionNotFoundError`, and `AggregateNotSupportedError`. These classes have no remaining runtime throw sites; remove any imports of them. Keep the existing query and index behavior and exercise identity/evaluation tests through the production entry points.
+
+  Ensure failed mutations roll back even when their rejection value cannot be converted to a string. Preserve ordinary Error instances; report unprintable rejection values as `Unknown error`.
+
+  Make reentrant effect disposal share the active cleanup result, including calls from abort listeners or source release callbacks. A release failure reaches every waiting disposer while each source still receives one release attempt.
+
+  Reject starting or preloading a collection from inside its active cleanup callbacks with a clear `CollectionStateError`. Nested cleanup cannot admit replacement work that the old teardown would discard. Restart after cleanup completes, or from its final `cleaned-up` status event, remains supported.
+
+  Prevent older page or tie-boundary completions from clearing a newer full-source failure or starting redundant loading. Failed window moves retain their settled public snapshot; an explicit retry releases the failed acquisition once and publishes the completed replacement.
+
+  Restrict direct subscription `requestLimitedSnapshot()` cursor inputs to one order term and one `minValues` entry. Composite and partial-composite cursor inputs now throw before local delivery or adapter work. Use normal live-query ordering and window APIs for multi-column pagination; those remain supported through prefix-and-tie loading. Existing adapters need no changes.
+
+  Treat `LoadSubsetOptions` and their nested request data as immutable from submission onward. Core no longer copies expression trees or mutable constant payloads at the sync and deduplication boundaries. Create a new Date, byte array, membership array, or options object when changing a demand instead of mutating submitted data. Adapters must also leave request data unchanged. Use stable data properties rather than stateful getters. `AbortSignal` cancellation and subscription release remain live.
+
+  Replace replay acquisitions sequentially: release the prior physical lease before starting its replacement. The logical demand and last complete public result remain retained. A failed release prevents replacement startup; failed startup leaves demand available for a later authoritative replay. Custom adapters must support a release/load gap and preserve resources still held by other owners; a sole underlying resource may stop and restart.
+
+- Updated dependencies [[`cfb01ce`](https://github.com/TanStack/db/commit/cfb01cee34de7d0378e008dc8c01c1df5253c1e2)]:
+  - @tanstack/db@0.9.0
+
+## 0.4.7
+
+### Patch Changes
+
+- Updated dependencies [[`bbc9edf`](https://github.com/TanStack/db/commit/bbc9edf28ef707c8fb3c451fe2c4724039a0037a)]:
+  - @tanstack/db@0.8.7
+
+## 0.4.6
+
+### Patch Changes
+
+- Updated dependencies [[`ae2fe74`](https://github.com/TanStack/db/commit/ae2fe74e4cb4e74500a90034e6db7987bbd90bd8)]:
+  - @tanstack/db@0.8.6
+
+## 0.4.5
+
+### Patch Changes
+
+- Settle subset loads only after their committed rows and events are visible. A ([#1769](https://github.com/TanStack/db/pull/1769))
+  commit receipt now rejects with `AbortError` when cancellation wins before
+  application and ignores later aborts. Preserve causal publication,
+  cancellation, persistence, and error handling across the affected sync
+  adapters.
+- Updated dependencies [[`d8defd2`](https://github.com/TanStack/db/commit/d8defd2a8eb96162cbd4e24970d519eac217bb95), [`9ad882f`](https://github.com/TanStack/db/commit/9ad882f71872aa2210b93ea93d084bd08bedb6a4), [`8c5838d`](https://github.com/TanStack/db/commit/8c5838ddd5f08b3c298d4458cae1ce599af80624)]:
+  - @tanstack/db@0.8.5
+
+## 0.4.4
+
+### Patch Changes
+
+- Report incremental subset-load failures through subscriptions, live-query utilities, and effects while keeping cached source rows available. Recover cleanly from failed or overlapping must-refetch replays, collection cleanup, effect teardown errors, and cooperative adapter cancellation. Electric's shared-stream snapshot path still depends on upstream request identity or cancellation support to prevent rows from an aborted request from arriving before the request Promise settles. ([#1756](https://github.com/TanStack/db/pull/1756))
+
+- Updated dependencies [[`3131de1`](https://github.com/TanStack/db/commit/3131de14507006f72631947a61e040b1523d417f), [`8f432ba`](https://github.com/TanStack/db/commit/8f432ba226df2a27d67498ddd1df8468f93ff776)]:
+  - @tanstack/db@0.8.4
+
+## 0.4.3
+
+### Patch Changes
+
+- Updated dependencies [[`99ba511`](https://github.com/TanStack/db/commit/99ba5113b21fd850a8f3e517e5d44ea42ac9f984), [`43cc741`](https://github.com/TanStack/db/commit/43cc741842ae3689128c308be19069b062642f12)]:
+  - @tanstack/db@0.8.3
+
+## 0.4.2
+
+### Patch Changes
+
+- Propagate initial query sync failures through dependent live queries and readiness promises, including recovery and late subscribers, while preserving a ready cached snapshot on later refetch failures. Let sync adapters pass the original failure to `markError(error)` so readiness promises reject with that cause. Isolate adapter callbacks by sync session, preserve synchronous startup errors, and prevent rejected deduplicated subset requests from creating detached promise rejections. ([#1751](https://github.com/TanStack/db/pull/1751))
+
+- Updated dependencies [[`c521b5d`](https://github.com/TanStack/db/commit/c521b5d6503d8fdf03574b9f9791143e59d34204)]:
+  - @tanstack/db@0.8.2
+
+## 0.4.1
+
+### Patch Changes
+
+- Updated dependencies [[`5d9335d`](https://github.com/TanStack/db/commit/5d9335d0d42c1cc1ec2b92be8ce40ae8abe42827), [`a20352a`](https://github.com/TanStack/db/commit/a20352a9a7b64c9708bef9a1dfb90c96426b6730)]:
+  - @tanstack/db@0.8.1
+
+## 0.4.0
+
+### Minor Changes
+
+- Add SSR through request-scoped `DbClient` instances, collection descriptors, ([#1564](https://github.com/TanStack/db/pull/1564))
+  explicit collection-row hydration, live-query result snapshots, adapter sync
+  metadata, and React and Svelte descriptor resolution.
+
+  React live queries now derive identity from structured query IR. Opaque queries
+  can provide `queryKey`; legacy dependency arrays and unkeyed opaque queries keep
+  working with development warnings until 1.0.
+
+  Add TanStack Router integration that streams live queries discovered during a
+  Suspense render as pending promises which resolve to ordered result snapshots.
+  The browser starts normal source sync and atomically replaces the snapshot when
+  its live result is ready.
+
+### Patch Changes
+
+- Updated dependencies [[`4b9e8cd`](https://github.com/TanStack/db/commit/4b9e8cdf79551734cf526e6fa4bbdba42ec94575)]:
+  - @tanstack/db@0.8.0
+
+## 0.3.18
+
+### Patch Changes
+
+- Updated dependencies [[`5f63996`](https://github.com/TanStack/db/commit/5f63996b0febd4775fb641f50975f8f0d442dc00)]:
+  - @tanstack/db@0.7.2
+
+## 0.3.17
+
+### Patch Changes
+
+- Updated dependencies [[`424382b`](https://github.com/TanStack/db/commit/424382b3a80c6b3556701b433c26c8a60fc8d1af)]:
+  - @tanstack/db@0.7.1
+
+## 0.3.16
+
+### Patch Changes
+
+- Updated dependencies [[`ad88d07`](https://github.com/TanStack/db/commit/ad88d0751db9723dfb9f164ebfcef88d52b6efa3), [`7e7abda`](https://github.com/TanStack/db/commit/7e7abda73a7ab313f9ec6a413fad00f300e79fb3), [`dc53f0e`](https://github.com/TanStack/db/commit/dc53f0ecbc38e173af68d829ff2de97531494722)]:
+  - @tanstack/db@0.7.0
+
+## 0.3.15
+
+### Patch Changes
+
+- Updated dependencies [[`8ee783d`](https://github.com/TanStack/db/commit/8ee783d7aed9bd5585c182607581305374b8904f)]:
+  - @tanstack/db@0.6.17
+
+## 0.3.14
+
+### Patch Changes
+
+- Prevent progressive Electric collections from truncating persisted rows when resuming from saved Electric shape metadata. ([#1493](https://github.com/TanStack/db/pull/1493))
+
+- Bound the wait for Electric stream refreshes before loading on-demand subsets so native fetch implementations that do not promptly abort long polls do not keep live queries loading until the poll times out. ([#1575](https://github.com/TanStack/db/pull/1575))
+
+- Updated dependencies [[`8258d09`](https://github.com/TanStack/db/commit/8258d0955ab47c8510bd49ea59bcdbefd2ae054d), [`286964d`](https://github.com/TanStack/db/commit/286964d72612b59e3e427baabd9870f5a71a4281)]:
+  - @tanstack/db@0.6.16
+
+## 0.3.13
+
+### Patch Changes
+
+- Updated dependencies [[`eabcea7`](https://github.com/TanStack/db/commit/eabcea743fdfa045a2db01e12bef87403613102a), [`6d4c096`](https://github.com/TanStack/db/commit/6d4c096395b7ff3f428122ea8842bbead551a8c9)]:
+  - @tanstack/db@0.6.15
+
+## 0.3.12
+
+### Patch Changes
+
+- Updated dependencies [[`397e12a`](https://github.com/TanStack/db/commit/397e12a1224ad563e20a331eebcbe904cd4af948)]:
+  - @tanstack/db@0.6.14
+
+## 0.3.11
+
+### Patch Changes
+
+- Updated dependencies [[`99e9afe`](https://github.com/TanStack/db/commit/99e9afed46ab4083d66609a3e37ee44103c2177f), [`816b667`](https://github.com/TanStack/db/commit/816b6671c2cc9806715f6e6ed4410b3f4efb5afb)]:
+  - @tanstack/db@0.6.13
+
+## 0.3.10
+
+### Patch Changes
+
+- Updated dependencies [[`2b27dd1`](https://github.com/TanStack/db/commit/2b27dd1448da71c78a48e2390cb71b0ada1b1488)]:
+  - @tanstack/db@0.6.12
+
+## 0.3.9
+
+### Patch Changes
+
+- Updated dependencies [[`d79b0cd`](https://github.com/TanStack/db/commit/d79b0cd3fd20c1f7e2525e90121752fb6bee314c), [`36fb29a`](https://github.com/TanStack/db/commit/36fb29ad7e906d39b6afdba2fd31e369c601bbb0), [`d79b0cd`](https://github.com/TanStack/db/commit/d79b0cd3fd20c1f7e2525e90121752fb6bee314c), [`ac09b11`](https://github.com/TanStack/db/commit/ac09b1177a100eafa85cba3cd09dd1f53f933ded)]:
+  - @tanstack/db@0.6.11
+
+## 0.3.8
+
+### Patch Changes
+
+- Updated dependencies [[`307fdf8`](https://github.com/TanStack/db/commit/307fdf80f522a39a50e316316b3b75ba27fd5e84)]:
+  - @tanstack/db@0.6.10
+
+## 0.3.7
+
+### Patch Changes
+
+- Updated dependencies [[`2147345`](https://github.com/TanStack/db/commit/2147345236ceee6e73d9fc6c0cdc2385833199fc), [`00389a4`](https://github.com/TanStack/db/commit/00389a47b258ad58fc3a03c5cc6f66957b9bd2d1)]:
+  - @tanstack/db@0.6.9
+
+## 0.3.6
+
+### Patch Changes
+
+- Updated dependencies [[`3827b62`](https://github.com/TanStack/db/commit/3827b62604bbfc970d80b57479c8da063d78e69d)]:
+  - @tanstack/db@0.6.8
+
+## 0.3.5
+
+### Patch Changes
+
+- Updated dependencies [[`ec59984`](https://github.com/TanStack/db/commit/ec59984dcd8610ad9651c2d32e1361143d44d3c9), [`6238a2d`](https://github.com/TanStack/db/commit/6238a2d80caf4d1cdecaf889fb66bd6ebcc7386a)]:
+  - @tanstack/db@0.6.7
+
+## 0.3.4
+
+### Patch Changes
+
+- Updated dependencies [[`4e9ab39`](https://github.com/TanStack/db/commit/4e9ab39241aae3ba17c8bddf744d566de411f9aa)]:
+  - @tanstack/db@0.6.6
+
+## 0.3.3
+
+### Patch Changes
+
+- Updated dependencies [[`232f228`](https://github.com/TanStack/db/commit/232f22845ddfe179a803a241f95a3375ae63a1fb), [`232f228`](https://github.com/TanStack/db/commit/232f22845ddfe179a803a241f95a3375ae63a1fb)]:
+  - @tanstack/db@0.6.5
+
+## 0.3.2
+
+### Patch Changes
+
+- Updated dependencies [[`1e69dd6`](https://github.com/TanStack/db/commit/1e69dd6fac7c9d8d7314af5ce18c33f2006c96b4)]:
+  - @tanstack/db@0.6.4
+
+## 0.3.1
+
+### Patch Changes
+
+- Updated dependencies [[`e29aab3`](https://github.com/TanStack/db/commit/e29aab3ece4420c6959202294777daa606c4b9e4), [`f4a9bd2`](https://github.com/TanStack/db/commit/f4a9bd28c613dc4757f279f292c9276f6a8e012e)]:
+  - @tanstack/db@0.6.3
+
+## 0.3.0
+
+### Minor Changes
+
+- feat: add DNF/active_conditions support for arbitrary boolean WHERE clauses ([#1270](https://github.com/TanStack/db/pull/1270))
+
+  Support the new Electric server wire protocol (electric-sql/electric#3791). Tags now use `/` delimiter with empty segments for non-participating positions. Shapes with subquery dependencies send `active_conditions` headers and use DNF evaluation for row visibility. Simple shapes without subqueries retain existing empty-tag-set deletion behavior.
+
+### Patch Changes
+
+- Updated dependencies [[`3fe689a`](https://github.com/TanStack/db/commit/3fe689a4444d53a075a0dbe6e2649f8852137fc8), [`c314c36`](https://github.com/TanStack/db/commit/c314c36b8bd02f8be86865c13f31f817ce21dc66)]:
+  - @tanstack/db@0.6.2
+
+## 0.2.43
+
+### Patch Changes
+
+- Updated dependencies [[`8b7fb1a`](https://github.com/TanStack/db/commit/8b7fb1a18522b8d1c2adb46f5917305c7d99fc4a)]:
+  - @tanstack/db@0.6.1
+
+## 0.2.42
+
+### Patch Changes
+
+- fix(persistence): harden persisted startup, truncate metadata semantics, and resume identity matching ([#1380](https://github.com/TanStack/db/pull/1380))
+  - Restore persisted wrapper `markReady` fallback behavior so startup failures do not leave collections stuck in loading state
+  - Replace load cancellation reference identity tracking with deterministic load keys for `loadSubset` / `unloadSubset`
+  - Document intentional truncate behavior where collection-scoped metadata writes are preserved across truncate transactions
+  - Tighten SQLite `applied_tx` migration handling to only ignore duplicate-column add errors
+  - Stabilize Electric shape identity serialization so persisted resume compatibility does not depend on object key insertion order
+
+- Update dependencies across workspace to resolve version mismatches: `@electric-sql/client` ^1.5.13, `@tanstack/store` ^0.9.2, `pg` ^8.20.0. Adapt subscription cleanup to `@tanstack/store` 0.9.x API which returns `Subscription` objects instead of unsubscribe functions. ([#1381](https://github.com/TanStack/db/pull/1381))
+
+- Updated dependencies [[`f60384b`](https://github.com/TanStack/db/commit/f60384b0fbde019865cbac5a7af341ff8a46d483), [`b8abc02`](https://github.com/TanStack/db/commit/b8abc0230096900746f92c51496489460b4d75e1), [`09c7afc`](https://github.com/TanStack/db/commit/09c7afc47a5ef3f3415ae601b6b00155ab64650b), [`bb09eb1`](https://github.com/TanStack/db/commit/bb09eb1eecbf680bb95a0bb08639f337e9982043), [`179d666`](https://github.com/TanStack/db/commit/179d66685449bcdf9f785c8765bc57cc19c2f7bd), [`43ecbfa`](https://github.com/TanStack/db/commit/43ecbfae5be5e59ffdce6c545d90ca5a810159e6), [`055fd94`](https://github.com/TanStack/db/commit/055fd94bd4654d27d5366af12a90da4c0e670fc0), [`055fd94`](https://github.com/TanStack/db/commit/055fd94bd4654d27d5366af12a90da4c0e670fc0), [`055fd94`](https://github.com/TanStack/db/commit/055fd94bd4654d27d5366af12a90da4c0e670fc0), [`055fd94`](https://github.com/TanStack/db/commit/055fd94bd4654d27d5366af12a90da4c0e670fc0), [`85f5435`](https://github.com/TanStack/db/commit/85f54355a426baefc88ccc55179e0cfcb4dac168), [`b65d8f7`](https://github.com/TanStack/db/commit/b65d8f767dafb1aeede26766c644f9ef0694f20c), [`e0df07e`](https://github.com/TanStack/db/commit/e0df07e1eb2eefbc829407f337cee1d443a7e9b6), [`9952921`](https://github.com/TanStack/db/commit/9952921e02ed8bca5653f0afa64862fc22ffbf9d), [`d351c67`](https://github.com/TanStack/db/commit/d351c677d687e667450138f66ab3bd0e11e7e347)]:
+  - @tanstack/db@0.6.0
+
+## 0.2.41
+
+### Patch Changes
+
+- Updated dependencies [[`c3e6a96`](https://github.com/TanStack/db/commit/c3e6a9654004ce53d429e0ec995738078ab93870)]:
+  - @tanstack/db@0.5.33
+
+## 0.2.40
+
+### Patch Changes
+
+- Updated dependencies [[`eeb5321`](https://github.com/TanStack/db/commit/eeb5321c578ffa2fbdfb7b0b3d64f579d1933522), [`495abc2`](https://github.com/TanStack/db/commit/495abc29fe8c088783b43402c7eeed35566d8524), [`a55e2bf`](https://github.com/TanStack/db/commit/a55e2bf54dbe78128adf5ce26d524a13dedf8145), [`41c0ea2`](https://github.com/TanStack/db/commit/41c0ea2d956f9de37d0216af371f58a461be6f1f)]:
+  - @tanstack/db@0.5.32
+
+## 0.2.39
+
+### Patch Changes
+
+- fix(electric-db-collection): Upgrade to latest electric client version ([#1337](https://github.com/TanStack/db/pull/1337))
+
+## 0.2.38
+
+### Patch Changes
+
+- fix(electric-db-collection): Upgrade to latest electric client version ([#1321](https://github.com/TanStack/db/pull/1321))
+
+- Updated dependencies [[`bf1d078`](https://github.com/TanStack/db/commit/bf1d078627de150bfca02e2ae2ad8b0289c19b37)]:
+  - @tanstack/db@0.5.31
+
+## 0.2.37
+
+### Patch Changes
+
+- Updated dependencies [[`e9d0fd8`](https://github.com/TanStack/db/commit/e9d0fd8f0db18a7dc8a0f2b3eacd50a94f6258f7)]:
+  - @tanstack/db@0.5.30
+
+## 0.2.36
+
+### Patch Changes
+
+- Upgrade `@electric-sql/client` dependency from `^1.5.3` to `^1.5.8` ([#1291](https://github.com/TanStack/db/pull/1291))
+
+- Updated dependencies [[`77b815e`](https://github.com/TanStack/db/commit/77b815ee52e91ca8d03110a551a4cb8bab4f2daa), [`ac4ce67`](https://github.com/TanStack/db/commit/ac4ce6790e906f5cfb086b063c8d7daa7681ceb9)]:
+  - @tanstack/db@0.5.29
+
+## 0.2.35
+
+### Patch Changes
+
+- Fix isNull predicate causing LiveQuery to never become ready when offline. Reorder predicate checks in `isWhereSubsetInternal` so OR superset handling runs before AND subset decomposition, allowing `and(eq, isNull)` to match structurally equal disjuncts. Also separate `forceDisconnectAndRefresh` error handling into its own try-catch with correct error attribution. ([#1275](https://github.com/TanStack/db/pull/1275))
+
+- Updated dependencies [[`46450e7`](https://github.com/TanStack/db/commit/46450e73bf78dbdcbef1fb46cb90c6a86b10f6c8)]:
+  - @tanstack/db@0.5.28
+
+## 0.2.34
+
+### Patch Changes
+
+- Make type of collection utils more precise for localOnly, PowerSync, Trailbase, and Electric collections ([#1236](https://github.com/TanStack/db/pull/1236))
+
+- Updated dependencies [[`802550f`](https://github.com/TanStack/db/commit/802550f3c517b8decac273edf9a4a6074fb3526b), [`dc41d7d`](https://github.com/TanStack/db/commit/dc41d7dacc4a70cb62462633a375de823f01b280), [`4ff3da5`](https://github.com/TanStack/db/commit/4ff3da57e095dc17d8585585d7678b9538cf7602), [`2223cd6`](https://github.com/TanStack/db/commit/2223cd6b51ce37f21983302804a75af28b47f2fe)]:
+  - @tanstack/db@0.5.27
+
+## 0.2.33
+
+### Patch Changes
+
+- Updated dependencies [[`85c373e`](https://github.com/TanStack/db/commit/85c373ef892e4080fe86b26e2fcb762181545e3c), [`9184dcc`](https://github.com/TanStack/db/commit/9184dcce62019ea870f968f4a4a5c2428291214d), [`83d5ac8`](https://github.com/TanStack/db/commit/83d5ac82983fb6c244c53d349c83845969473a9b)]:
+  - @tanstack/db@0.5.26
+
+## 0.2.32
+
+### Patch Changes
+
+- Upgrade @electric-sql/client to ^1.5.3 ([#1233](https://github.com/TanStack/db/pull/1233))
+
+## 0.2.31
+
+### Patch Changes
+
+- Updated dependencies [[`43c7c9d`](https://github.com/TanStack/db/commit/43c7c9d5f2b47366a58f87470ac5dca95020ac57), [`284ebcc`](https://github.com/TanStack/db/commit/284ebcc8346bd237c3381de766995b8bda35009a)]:
+  - @tanstack/db@0.5.25
+
+## 0.2.30
+
+### Patch Changes
+
+- Updated dependencies [[`7099459`](https://github.com/TanStack/db/commit/7099459291810b237a9fb24bbfe6e543852a2ab2)]:
+  - @tanstack/db@0.5.24
+
+## 0.2.29
+
+### Patch Changes
+
+- Fix unhandled 409 errors during collection cleanup. When a collection is cleaned up while snapshot requests are in-flight, errors are now properly caught and ignored rather than propagating as unhandled promise rejections. ([#1174](https://github.com/TanStack/db/pull/1174))
+
+## 0.2.28
+
+### Patch Changes
+
+- Updated dependencies [[`05130f2`](https://github.com/TanStack/db/commit/05130f2420eb682f11f099310a0af87afa3f35fe)]:
+  - @tanstack/db@0.5.23
+
+## 0.2.27
+
+### Patch Changes
+
+- Updated dependencies [[`f9b741e`](https://github.com/TanStack/db/commit/f9b741e9fb636be1c9f1502b7e28fe691bae2480)]:
+  - @tanstack/db@0.5.22
+
+## 0.2.26
+
+### Patch Changes
+
+- Updated dependencies [[`6745ed0`](https://github.com/TanStack/db/commit/6745ed003dc25cfd6fa0f7e60f708205a6069ff2), [`1b22e40`](https://github.com/TanStack/db/commit/1b22e40c56323cfa5e7f759272fed53320aa32f7), [`7a2cacd`](https://github.com/TanStack/db/commit/7a2cacd7a426530cb77844a8c2680f6b06e9ce2f), [`bdf9405`](https://github.com/TanStack/db/commit/bdf94059e7ab98b5181e0df7d8d25cd1dbb5ae58)]:
+  - @tanstack/db@0.5.21
+
+## 0.2.25
+
+### Patch Changes
+
+- Fix empty string values being incorrectly omitted from SQL query params. Queries like `eq(column, '')` now correctly include the empty string parameter instead of producing a malformed query with a missing `$1` value. ([#1146](https://github.com/TanStack/db/pull/1146))
+
+## 0.2.24
+
+### Patch Changes
+
+- Updated dependencies []:
+  - @tanstack/db@0.5.20
+
+## 0.2.23
+
+### Patch Changes
+
+- Updated dependencies [[`29033b8`](https://github.com/TanStack/db/commit/29033b8f55b0ba5721371ad761037ec813440aa7), [`888ad6a`](https://github.com/TanStack/db/commit/888ad6afe5932b0467320c04fbd4583469cb9c47)]:
+  - @tanstack/db@0.5.19
+
+## 0.2.22
+
+### Patch Changes
+
+- Updated dependencies [[`c1247e8`](https://github.com/TanStack/db/commit/c1247e816950314da6d201613481577834c1d97a)]:
+  - @tanstack/db@0.5.18
+
+## 0.2.21
+
+### Patch Changes
+
+- Fix orphan transactions after `must-refetch` in progressive sync mode ([#1069](https://github.com/TanStack/db/pull/1069))
+
+  When a `must-refetch` message was received in progressive mode, it started a transaction with `truncate()` but reset `hasReceivedUpToDate`, causing subsequent messages to be buffered instead of written to the existing transaction. On `up-to-date`, the atomic swap code would create a new transaction, leaving the first one uncommitted forever. This caused collections to become corrupted with undefined values.
+
+  The fix ensures that when a transaction is already started (e.g., from must-refetch), messages are written directly to it instead of being buffered for atomic swap.
+
+- Fix duplicate key error when overlapping subset queries return the same row with different values. ([#1070](https://github.com/TanStack/db/pull/1070))
+
+  When multiple subset queries return the same row (e.g., different WHERE clauses that both match the same record), the server sends `insert` operations for each response. If the row's data changed between requests (e.g., timestamp field updated), this caused a `DuplicateKeySyncError`. The adapter now tracks synced keys and converts subsequent inserts to updates.
+
+- Updated dependencies [[`f795a67`](https://github.com/TanStack/db/commit/f795a674f21659ef46ff370d4f3b9903a596bcaf), [`d542667`](https://github.com/TanStack/db/commit/d542667a3440415d8e6cbb449b20abd3cbd6855c), [`6503c09`](https://github.com/TanStack/db/commit/6503c091a259208331f471dca29abf086e881147), [`b1cc4a7`](https://github.com/TanStack/db/commit/b1cc4a7e018ffb6804ae7f1c99e9c6eb4bb22812)]:
+  - @tanstack/db@0.5.17
+
+## 0.2.20
+
+### Patch Changes
+
+- Updated dependencies [[`41308b8`](https://github.com/TanStack/db/commit/41308b8ee914aa467e22842cd454f06d1a60032e)]:
+  - @tanstack/db@0.5.16
+
+## 0.2.19
+
+### Patch Changes
+
+- Fix slow onInsert awaitMatch performance issue ([#1062](https://github.com/TanStack/db/pull/1062))
+
+  The message buffer was being cleared at the start of each new batch, causing messages to be lost when multiple batches (including heartbeats) arrived before `awaitMatch` was called. This resulted in `awaitMatch` timing out (~3-5s per attempt) and transaction rollbacks.
+
+  The fix removes the buffer clearing between batches. Messages are now preserved until the buffer reaches MAX_BATCH_MESSAGES (1000), at which point the oldest messages are dropped. This ensures `awaitMatch` can find messages even when sync activity arrives before the API call completes.
+
+## 0.2.18
+
+### Patch Changes
+
+- Updated dependencies [[`32ec4d8`](https://github.com/TanStack/db/commit/32ec4d8478cca96f76f3a49efc259c95b85baa40)]:
+  - @tanstack/db@0.5.15
+
+## 0.2.17
+
+### Patch Changes
+
+- Updated dependencies [[`26ed0aa`](https://github.com/TanStack/db/commit/26ed0aad2def60e652508a99b2e980e73f70148e)]:
+  - @tanstack/db@0.5.14
+
+## 0.2.16
+
+### Patch Changes
+
+- Adds support for the new subset-end message introduced in Electric. ([#1004](https://github.com/TanStack/db/pull/1004))
+
+- Support tagged rows and move out events in Electric collection. ([#942](https://github.com/TanStack/db/pull/942))
+
+- Updated dependencies [[`8ed7725`](https://github.com/TanStack/db/commit/8ed7725514a6a501482a391162f7792aa8b371e5), [`01452bf`](https://github.com/TanStack/db/commit/01452bfd0d00da8bd52941a4954af73749473651)]:
+  - @tanstack/db@0.5.13
+
+## 0.2.15
+
+### Patch Changes
+
+- Don't pin @electric-sql/client version ([#1031](https://github.com/TanStack/db/pull/1031))
+
+## 0.2.14
+
+### Patch Changes
+
+- Fix awaitMatch race condition on inserts and export isChangeMessage/isControlMessage. ([#1000](https://github.com/TanStack/db/pull/1000))
+
+  **Bug fixes:**
+  - Fixed race condition where `awaitMatch` would timeout on inserts when Electric synced faster than the API call
+  - Messages are now preserved in buffer until next batch arrives, allowing `awaitMatch` to find them
+  - Added `batchCommitted` flag to track commit state, consistent with `awaitTxId` semantics
+  - Fixed `batchCommitted` to also trigger on `snapshot-end` in `on-demand` mode (matching "ready" semantics)
+
+  **Export fixes:**
+  - `isChangeMessage` and `isControlMessage` are now exported from the package index as documented
+
+- Fix invalid Electric proxy queries with missing params for null/undefined values ([#951](https://github.com/TanStack/db/pull/951))
+
+  When comparison operators were used with null/undefined values, the SQL compiler would generate placeholders ($1, $2) in the WHERE clause but skip adding the params to the dictionary. This resulted in invalid queries being sent to Electric.
+
+  Now all comparison operators (eq, gt, lt, gte, lte, like, ilike) throw a clear error when used with null/undefined values, since comparisons with NULL always evaluate to UNKNOWN in SQL. Users should use `isNull()` or `isUndefined()` to check for null values instead.
+
+## 0.2.13
+
+### Patch Changes
+
+- Enhanced LoadSubsetOptions with separate cursor expressions and offset for flexible pagination. ([#960](https://github.com/TanStack/db/pull/960))
+
+  **⚠️ Breaking Change for Custom Sync Layers / Query Collections:**
+
+  `LoadSubsetOptions.where` no longer includes cursor expressions for pagination. If you have a custom sync layer or query collection that implements `loadSubset`, you must now handle pagination separately:
+  - **Cursor-based pagination:** Use the new `cursor` property (`cursor.whereFrom` and `cursor.whereCurrent`) and combine them with `where` yourself
+  - **Offset-based pagination:** Use the new `offset` property
+
+  Previously, cursor expressions were baked into the `where` clause. Now they are passed separately so sync layers can choose their preferred pagination strategy.
+
+  **Changes:**
+  - Added `CursorExpressions` type with `whereFrom`, `whereCurrent`, and optional `lastKey` properties
+  - Added `cursor` to `LoadSubsetOptions` for cursor-based pagination (separate from `where`)
+  - Added `offset` to `LoadSubsetOptions` for offset-based pagination support
+  - Electric sync layer now makes two parallel `requestSnapshot` calls when cursor is present:
+    - One for `whereCurrent` (all ties at boundary, no limit)
+    - One for `whereFrom` (rows after cursor, with limit)
+  - Query collection serialization now includes `offset` for query key generation
+  - Added `truncate` event to collections, emitted when synced data is truncated (e.g., after `must-refetch`)
+  - Fixed `setWindow` pagination: cursor expressions are now correctly built when paging through results
+  - Fixed offset tracking: `loadNextItems` now passes the correct window offset to prevent incorrect deduplication
+  - `CollectionSubscriber` now listens for `truncate` events to reset cursor tracking state
+
+  **Benefits:**
+  - Sync layers can choose between cursor-based or offset-based pagination strategies
+  - Electric can efficiently handle tie-breaking with two targeted requests
+  - Better separation of concerns between filtering (`where`) and pagination (`cursor`/`offset`)
+  - `setWindow` correctly triggers backend loading for subsequent pages in multi-column orderBy queries
+  - Cursor state is properly reset after truncation, preventing stale cursor data from being used
+
+- Updated dependencies [[`b3b1940`](https://github.com/TanStack/db/commit/b3b194000d8efcc2c6cc45a663029dadc26f13f0), [`09da081`](https://github.com/TanStack/db/commit/09da081b420fc915d7f0dc566c6cdbbc78582435), [`86ad40c`](https://github.com/TanStack/db/commit/86ad40c6bc37b2f5d4ad24d06f72168ca4b96161)]:
+  - @tanstack/db@0.5.12
+
+## 0.2.12
+
+### Patch Changes
+
+- Updated dependencies [[`c4b9399`](https://github.com/TanStack/db/commit/c4b93997432743d974749683059bf68a082d3e5b), [`a1a484e`](https://github.com/TanStack/db/commit/a1a484ec4d2331d702ab9c4b7e5b02622c76b3dd)]:
+  - @tanstack/db@0.5.11
+
+## 0.2.11
+
+### Patch Changes
+
+- Type utils in collection options as specific type (e.g. ElectricCollectionUtils) instead of generic UtilsRecord. ([#940](https://github.com/TanStack/db/pull/940))
+
+- fix: Add BigInt support to pg-serializer and fix error message for non-JSON-serializable values ([#932](https://github.com/TanStack/db/pull/932))
+  - Added support for serializing BigInt values to strings in the `serialize` function
+  - Fixed the error message when encountering unsupported types to handle values that cannot be serialized by `JSON.stringify` (like BigInt), preventing a secondary error from masking the original issue
+
+- Updated dependencies [[`1d19d22`](https://github.com/TanStack/db/commit/1d19d2219cbbaef6483845df1c3b078077e4e3bd), [`b3e4e80`](https://github.com/TanStack/db/commit/b3e4e80c4b73d96c15391ac25efb518c7ae7ccbb)]:
+  - @tanstack/db@0.5.10
+
+## 0.2.10
+
+### Patch Changes
+
+- Updated dependencies [[`5f474f1`](https://github.com/TanStack/db/commit/5f474f1eabd57e144ba05b0f33d848f7efc8fb07)]:
+  - @tanstack/db@0.5.9
+
+## 0.2.9
+
+### Patch Changes
+
+- Fix eager mode incorrectly committing data on `snapshot-end` before receiving the first `up-to-date` message. The `snapshot-end` in the Electric log can be from a significant period before the stream is actually up to date, so commits should only occur on `up-to-date` (or on `snapshot-end` after the first `up-to-date` has been received). This change does not affect `on-demand` mode where `snapshot-end` correctly triggers commits, or `progressive` mode which was already protected by its buffering mechanism. ([#924](https://github.com/TanStack/db/pull/924))
+
+## 0.2.8
+
+### Patch Changes
+
+- Updated dependencies [[`954c8fe`](https://github.com/TanStack/db/commit/954c8fed5ed92a348ac8b6d8333bc69c955f4f60), [`51c73aa`](https://github.com/TanStack/db/commit/51c73aaa2b27b27966edb98fb6664beb44eac1ac)]:
+  - @tanstack/db@0.5.8
+
+## 0.2.7
+
+### Patch Changes
+
+- Updated dependencies [[`295cb45`](https://github.com/TanStack/db/commit/295cb45797572b232650eddd3d62ffa937fa2fd7)]:
+  - @tanstack/db@0.5.7
+
+## 0.2.6
+
+### Patch Changes
+
+- Updated dependencies [[`c8a2c16`](https://github.com/TanStack/db/commit/c8a2c16aa528427d5ddd55cda4ee59a5cb369b5f)]:
+  - @tanstack/db@0.5.6
+
+## 0.2.5
+
+### Patch Changes
+
+- Updated dependencies [[`077fc1a`](https://github.com/TanStack/db/commit/077fc1a418ca090d7533115888c09f3f609e36b2)]:
+  - @tanstack/db@0.5.5
+
+## 0.2.4
+
+### Patch Changes
+
+- Fixed bug where `like()` and `ilike()` operators were not working in on-demand mode. The SQL compiler was incorrectly treating these operators as function calls (`LIKE(column, pattern)`) instead of binary operators (`column LIKE pattern`). Now `like()` and `ilike()` correctly compile to SQL binary operator syntax, enabling search queries with pattern matching in on-demand mode. This fix supports patterns like `like(lower(offers.title), '%search%')` and combining multiple conditions with `or()`. ([#884](https://github.com/TanStack/db/pull/884))
+
+- Fix progressive mode to use fetchSnapshot and atomic swap ([#852](https://github.com/TanStack/db/pull/852))
+
+  Progressive mode was broken because `requestSnapshot()` injected snapshots into the stream in causally correct position, which didn't work properly with the `full` mode stream. This release fixes progressive mode by:
+
+  **Core Changes:**
+  - Use `fetchSnapshot()` during initial sync to fetch and apply snapshots immediately in sync transactions
+  - Buffer all stream messages during initial sync (renamed flag to `isBufferingInitialSync`)
+  - Perform atomic swap on first `up-to-date`: truncate snapshot data → apply buffered messages → mark ready
+  - Track txids/snapshots only after atomic swap (enables correct optimistic transaction confirmation)
+
+  **Test Infrastructure:**
+  - Added `ELECTRIC_TEST_HOOKS` symbol for test control (hidden from public API)
+  - Added `progressiveTestControl.releaseInitialSync()` to E2E test config for explicit transition control
+  - Created comprehensive progressive mode E2E test suite (8 tests):
+    - Explicit snapshot phase and atomic swap validation
+    - Txid tracking behavior (Electric-only)
+    - Multiple concurrent snapshots with deduplication
+    - Incremental updates after swap
+    - Predicate handling and resilience tests
+
+  **Bug Fixes:**
+  - Fixed type errors in test files
+  - All 166 unit tests + 95 E2E tests passing
+
+- Updated dependencies [[`acb3e4f`](https://github.com/TanStack/db/commit/acb3e4f1441e6872ca577e74d92ae2d77deb5938), [`464805d`](https://github.com/TanStack/db/commit/464805d96bad6d0fd741e48fbfc98e90dc58bebe), [`2c2e4db`](https://github.com/TanStack/db/commit/2c2e4dbd781d278347d73373f66d3c51c6388116), [`15c772f`](https://github.com/TanStack/db/commit/15c772f5e42e49000a2d775fd8e4cfda3418243f)]:
+  - @tanstack/db@0.5.4
+
+## 0.2.3
+
+### Patch Changes
+
+- Improve type of mutations in transactions ([#854](https://github.com/TanStack/db/pull/854))
+
+- Updated dependencies [[`846a830`](https://github.com/TanStack/db/commit/846a8309a243197245f4400a5d53cef5cec6d5d9), [`8e26dcf`](https://github.com/TanStack/db/commit/8e26dcfde600e4a18cd51fbe524560d60ab98d70)]:
+  - @tanstack/db@0.5.3
+
 ## 0.2.2
 
 ### Patch Changes
@@ -34,7 +825,7 @@
         // Specify custom timeout (in milliseconds)
         return { txid: result.txid, timeout: 10000 }
       },
-    })
+    }),
   )
   ```
 
@@ -159,7 +950,7 @@
   **Example Usage:**
 
   ```typescript
-  import { isChangeMessage } from "@tanstack/electric-db-collection"
+  import { isChangeMessage } from '@tanstack/electric-db-collection'
 
   const todosCollection = createCollection(
     electricCollectionOptions({
@@ -171,12 +962,12 @@
         await collection.utils.awaitMatch(
           (message) =>
             isChangeMessage(message) &&
-            message.headers.operation === "insert" &&
+            message.headers.operation === 'insert' &&
             message.value.text === newItem.text,
-          5000 // timeout in ms (optional, defaults to 5000)
+          5000, // timeout in ms (optional, defaults to 5000)
         )
       },
-    })
+    }),
   )
   ```
 
@@ -508,7 +1299,7 @@
   try {
     collection.insert(data)
   } catch (error) {
-    if (error.message.includes("already exists")) {
+    if (error.message.includes('already exists')) {
       // Handle duplicate key error
     }
   }
@@ -517,7 +1308,7 @@
   **After:**
 
   ```ts
-  import { DuplicateKeyError } from "@tanstack/db"
+  import { DuplicateKeyError } from '@tanstack/db'
 
   try {
     collection.insert(data)
@@ -534,14 +1325,14 @@
 
   ```ts
   // Electric collection errors were imported from @tanstack/db
-  import { ElectricInsertHandlerMustReturnTxIdError } from "@tanstack/db"
+  import { ElectricInsertHandlerMustReturnTxIdError } from '@tanstack/db'
   ```
 
   **After:**
 
   ```ts
   // Now import from the specific adapter package
-  import { ElectricInsertHandlerMustReturnTxIdError } from "@tanstack/electric-db-collection"
+  import { ElectricInsertHandlerMustReturnTxIdError } from '@tanstack/electric-db-collection'
   ```
 
   ### Unified Error Handling
@@ -549,14 +1340,14 @@
   **New:**
 
   ```ts
-  import { TanStackDBError } from "@tanstack/db"
+  import { TanStackDBError } from '@tanstack/db'
 
   try {
     // Any TanStack DB operation
   } catch (error) {
     if (error instanceof TanStackDBError) {
       // Handle all TanStack DB errors uniformly
-      console.log("TanStack DB error:", error.message)
+      console.log('TanStack DB error:', error.message)
     }
   }
   ```
