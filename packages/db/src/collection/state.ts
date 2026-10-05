@@ -1781,20 +1781,24 @@ export class CollectionStateManager<
           failure ??= { error }
         }
       }
-      // A truncate that makes the Collection ready runs ready callbacks after
-      // this batch is built. Their writes describe the replaced rows, so hold
-      // this batch and publish their messages after it.
-      const becomesReady = hasTruncateSync && this.lifecycle.status !== `ready`
-      const publication = becomesReady
-        ? this.changes.deferPublication()
-        : undefined
       const visibleLayoutChanged =
         previousLayout !== undefined &&
         (previousLayout.length !== this.size ||
           [...this.keys()].some((key, index) => key !== previousLayout[index]))
-      capture(() => this.changes.emitEvents(events, true, visibleLayoutChanged))
-      if (becomesReady) capture(() => this.lifecycle.markReady())
-      if (publication) capture(() => publication.publish())
+      // markReady may skip its transition, and then the batch still emits.
+      let emitted = false as boolean
+      const emit = () => {
+        emitted = true
+        capture(() =>
+          this.changes.emitEvents(events, true, visibleLayoutChanged),
+        )
+      }
+      // A truncate that makes the Collection ready publishes its batch after
+      // the status reads ready and before status listeners and ready
+      // callbacks run, so their writes follow the batch they describe.
+      if (hasTruncateSync && this.lifecycle.status !== `ready`)
+        capture(() => this.lifecycle.markReady(emit))
+      if (!emitted) emit()
 
       if (this.syncRunGeneration === syncRunGeneration) {
         this.preSyncVisibleState.clear()
