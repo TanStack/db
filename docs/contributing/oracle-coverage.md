@@ -825,3 +825,14 @@ the issue closeout comment. Keep their exact revision/runtime boundaries;
 historical counts in research notes do not certify later commits. Closing the
 bounded repair means the acceptance map has evidence and each remaining
 question has an owner—not that there can be no more bugs.
+
+## Compound join candidate: open evidence
+
+[PR #861's current-main assessment](oracle-reviews/pr-861-compound-join-relevance.md)
+records confirmed operand-equality and query-identity counterexamples. This
+candidate is not merge-ready. The cold-join reconciliation owner must extend
+its equality/replacement grammar to compound operands and cold acquisition;
+the identity-output-shape owner must distinguish additional conditions and
+exercise subquery reuse. Parent-correlated compound conditions need a receiving
+witness in the includes-context-transport owner. The five original examples
+and passing single-equality oracles do not establish those boundaries.
