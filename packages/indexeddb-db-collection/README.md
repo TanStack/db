@@ -14,7 +14,10 @@ npm install @tanstack/indexeddb-db-collection @tanstack/db
 
 ```typescript
 import { createCollection } from '@tanstack/db'
-import { createIndexedDB, indexedDBCollectionOptions } from '@tanstack/indexeddb-db-collection'
+import {
+  createIndexedDB,
+  indexedDBCollectionOptions,
+} from '@tanstack/indexeddb-db-collection'
 
 interface Todo {
   id: string
@@ -35,7 +38,7 @@ const todosCollection = createCollection(
     db,
     name: 'todos',
     getKey: (todo) => todo.id,
-  })
+  }),
 )
 ```
 
@@ -54,7 +57,10 @@ const todosCollection = createCollection(
 
 ```typescript
 import { createCollection } from '@tanstack/db'
-import { createIndexedDB, indexedDBCollectionOptions } from '@tanstack/indexeddb-db-collection'
+import {
+  createIndexedDB,
+  indexedDBCollectionOptions,
+} from '@tanstack/indexeddb-db-collection'
 
 interface Todo {
   id: string
@@ -85,7 +91,7 @@ const todosCollection = createCollection(
     db,
     name: 'todos',
     getKey: (todo) => todo.id,
-  })
+  }),
 )
 
 const usersCollection = createCollection(
@@ -93,7 +99,7 @@ const usersCollection = createCollection(
     db,
     name: 'users',
     getKey: (user) => user.id,
-  })
+  }),
 )
 
 const settingsCollection = createCollection(
@@ -101,7 +107,7 @@ const settingsCollection = createCollection(
     db,
     name: 'settings',
     getKey: (setting) => setting.key,
-  })
+  }),
 )
 ```
 
@@ -110,7 +116,10 @@ const settingsCollection = createCollection(
 ```typescript
 import { z } from 'zod'
 import { createCollection } from '@tanstack/db'
-import { createIndexedDB, indexedDBCollectionOptions } from '@tanstack/indexeddb-db-collection'
+import {
+  createIndexedDB,
+  indexedDBCollectionOptions,
+} from '@tanstack/indexeddb-db-collection'
 
 const todoSchema = z.object({
   id: z.string(),
@@ -130,7 +139,7 @@ const todosCollection = createCollection(
     name: 'todos',
     schema: todoSchema,
     getKey: (todo) => todo.id,
-  })
+  }),
 )
 ```
 
@@ -221,7 +230,7 @@ transaction across those Collections.
 importData validates schema inputs, applies schema defaults and transformations,
 and rejects duplicate keys before writing. It atomically replaces the store;
 failed validation or persistence preserves the prior rows and versions.
-clearObjectStore removes both durable and public source rows. The _versions
+clearObjectStore removes both durable and public source rows. The \_versions
 store is reserved for adapter metadata.
 
 Initial loading becomes ready only after its read transaction completes. An
