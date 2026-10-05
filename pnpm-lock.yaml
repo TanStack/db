@@ -1713,7 +1713,7 @@ importers:
         version: 3.2.4(vitest@3.2.4)
       uuid:
         specifier: ^13.0.0
-        version: 13.0.0
+        version: 13.0.1
 
   packages/vue-db:
     dependencies:
@@ -12742,8 +12742,8 @@ packages:
     resolution: {integrity: sha512-pMZTvIkT1d+TFGvDOqodOclx0QWkkgi6Tdoa8gC8ffGAAqz9pzPTZWAybbsHHoED/ztMtkv/VoYTYyShUn81hA==}
     engines: {node: '>= 0.4.0'}
 
-  uuid@13.0.0:
-    resolution: {integrity: sha512-XQegIaBTVUjSHliKqcnFqYypAd4S+WCYt5NIeRs6w/UAry7z8Y9j5ZwRRL4kzq9U3sD6v+85er9FvkEaBpji2w==}
+  uuid@13.0.1:
+    resolution: {integrity: sha512-9ezox2roIft6ExBVTVqibSd5dc5/47Sw/uY6b4SjQUT2TzQ0tltNquWA46y4xPQmdZYqvnio22SgWd41M86+jw==}
     hasBin: true
 
   uuid@7.0.3:
@@ -26427,7 +26427,7 @@ snapshots:
       '@ungap/raw-json': 0.4.4
       geojson: 0.5.0
       jwt-decode: 4.0.0
-      uuid: 13.0.0
+      uuid: 13.0.1
 
   tree-kill@1.2.2: {}
 
@@ -26720,7 +26720,7 @@ snapshots:
 
   utils-merge@1.0.1: {}
 
-  uuid@13.0.0: {}
+  uuid@13.0.1: {}
 
   uuid@7.0.3: {}
 
