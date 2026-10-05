@@ -37,20 +37,29 @@ survived the suite and the metadata publication oracle.
 
 **Partial row updates.** The optimistic-history and retention oracles always
 set `rowUpdateMode: 'full'`. No test sent a partial update in the default mode.
-Half the generated optimistic histories now keep the default mode, and a source
-batch may omit `c` from its updates. The model merges such an update into its
-base row. The fixed campaign must write at least one partial update whose
-omitted `c` differs from the source's held row, so only a merge keeps it. Four
-fixed histories also run the partial lane with the schema default on `c`. Under
-S13, the fixed and random campaigns and the four schema histories fail.
+A separate partial lane now keeps the default mode. It reuses the generated
+optimistic histories and marks source batches partial from its own stream, so
+the full-mode campaign's fixed seed 86103 still produces `main`'s histories. A
+partial batch omits `c` from its updates, and the model merges such an update
+into its base row. The lane runs its own fixed (86104) and random campaigns.
+Its fixed campaign must write at least one partial update whose omitted `c`
+differs from the source's held row. Two fixed histories merge a partial update
+while an accepted delete and an accepted schema-default re-insert overlay the
+row. An in-suite wrong-answer witness writes the same rows in `full` mode and
+must be rejected. S13 and MS, a mutant that merges onto the visible row
+instead of the synced row, both fail the partial campaigns and those
+histories.
 
 **Row metadata composition.** No test wrote a row delete that carried metadata,
 or an explicit set followed by an insert without metadata. The new
-`collection-row-metadata-composition-oracle.test.ts` enumerates all 825 legal
-one-key histories of up to three writes, including `truncate`, from three
-starting states. A last-write-wins model predicts the final metadata. Three
-lanes reach the immediate, held, and rebuilt production paths. A1 and A3 fail
-all three lanes. RB1 fails only the rebuilt lane. TR1, a mutant that keeps a
+`collection-row-metadata-composition-oracle.test.ts` enumerates all 1,457
+legal one-key histories of up to three writes, including `truncate` and an
+idempotent re-insert, from three starting states. A last-write-wins model predicts the final metadata. Three
+lanes reach the immediate, held, and rebuilt production paths. The rebuilt lane
+also varies the earlier held transaction over a key-2 update and every key-1
+row write, for 1,767 histories. A1 and A3 fail all three lanes. RB1 fails only
+the rebuilt lane. RI1, a mutant that computes metadata from a re-insert's
+original type, fails all three lanes. TR1, a mutant that keeps a
 transaction's earlier metadata writes through a truncate, passes the rest of
 the suite and fails all three lanes.
 
@@ -59,7 +68,8 @@ metadata. On 2026-10-05 the maintainer adopted the current behavior as the
 contract for the rest: an insert without metadata clears the value, an update
 without metadata keeps it, a row delete or a truncate clears it, and
 `metadata.row.set` after a delete or a truncate keeps metadata for the absent
-row.
+row. A second decision the same day made an insert equal to the held row an
+idempotent re-insert: without metadata it keeps the value.
 
 ## Gap closed by a separate fix
 
@@ -87,6 +97,32 @@ A code review of the first version found six items:
 6. The record said that the counter fails under S13. The counter is computed
    by the driver and cannot fail under a production mutant. Fixed: the claim
    is removed.
+
+## Second review of this record
+
+A high-effort review found nine more items:
+
+1. An insert equal to the held row keeps metadata, against the insert rule.
+   Fixed: the maintainer made it an idempotent re-insert, and the grammar
+   covers it.
+2. The rebuilt lane's earlier transaction never touched key 1. Fixed: the lane
+   varies the earlier write. A mutant that keeps stale automatic writes (RB2)
+   still passes. In legal histories an open write keeps its type through the
+   rebuild, so RB2 is equivalent there. A canceled earlier transaction would
+   reach it, and this grammar does not generate one.
+3. The schema-default histories could not distinguish a merge onto the
+   snapshot. Fixed: the new histories retain a default-carrying snapshot when
+   the partial update arrives, and MS fails them.
+4. The partial field changed every history of the full-mode fixed seed.
+   Fixed: the partial lane has its own campaigns.
+5. The partial lane had no in-suite wrong-answer witness. Fixed: the
+   `partial-as-full` witness.
+6. The `sourceRows` comment was wrong. Fixed.
+7. The `partialUpdates` counter was unused. Removed.
+8. One `it` ran all lifecycles under the default timeout. Fixed: each lane has
+   a timeout.
+9. The immediate lane did not assert its path, and a throw lost its label.
+   Fixed.
 
 ## Open items
 
@@ -117,15 +153,20 @@ This record repairs two grammars and adds one oracle, so ORC-012 applies.
   optimistic-history prose now describes the partial-update lane.
 - **ORC-004: met.** The metadata grammar is exhaustive within its bound. A
   control checks the count, named witnesses, and two excluded illegal
-  histories. The partial-update counter shows that the generator writes
-  partial updates whose omitted `c` differs from the held row.
+  histories. The partial-update counter shows that the partial campaign writes
+  partial updates whose omitted `c` differs from the held row. The rebuilt
+  lane's count control checks the earlier-write dimension.
 - **ORC-005: met.** Both oracles write through a real Collection's sync API and
   read public rows, change messages, and `metadata.row.get`.
-- **ORC-006: met.** S13, A1, A3, RB1, and TR1 each fail the extended oracles
-  and pass the suite without them. The metadata oracle also checks three named wrong
+- **ORC-006: met.** S13, MS, A1, A3, RB1, TR1, and RI1 each fail the extended
+  oracles. The `partial-as-full` witness checks in the suite that the
+  partial lane rejects a replacement. RB2 is equivalent within legal
+  histories. The metadata oracle also checks three named wrong
   answers against its model.
-- **ORC-007: met for the generated property.** The optimistic-history fixed
-  seed 86103 and its random campaign both run the partial lane. The metadata
+- **ORC-007: met for the generated property.** The partial lane runs a fixed
+  seed (86104) and a random campaign under
+  `collection-state.optimistic-history-partial`, which accepts a seed and path
+  for replay. The full-mode campaigns keep seed 86103 and `main`'s histories. The metadata
   oracle enumerates its whole bounded domain, so it has no random campaign.
 - **ORC-008: met.** The optimistic-history model gains one flag. Two histories
   that differ only in that flag can produce different base rows after a
