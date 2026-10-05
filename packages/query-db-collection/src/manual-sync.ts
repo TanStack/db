@@ -221,16 +221,20 @@ export function performWriteOperations<
 
   const applied = ctx.commit()
 
-  const updateCache = () => {
-    const getItems = () => Array.from(ctx.collection._state.syncedData.values())
-    if (ctx.updateCacheData) ctx.updateCacheData(getItems)
-    else ctx.queryClient.setQueryData(ctx.queryKey, getItems())
+  // Update query cache after successful commit
+  if (ctx.updateCacheData) {
+    ctx.updateCacheData(() =>
+      Array.from(ctx.collection._state.syncedData.values()),
+    )
+  } else {
+    // Fallback: directly set the cache with raw array (for non-Query Collection consumers)
+    ctx.queryClient.setQueryData(
+      ctx.queryKey,
+      Array.from(ctx.collection._state.syncedData.values()),
+    )
   }
-  updateCache()
-  const completion = Promise.resolve(applied).then(() => {
-    // A queued write may apply after the first cache snapshot was taken.
-    if (applied !== true) updateCache()
-  })
+
+  const completion = Promise.resolve(applied).then(() => undefined)
   void completion.catch(() => undefined)
   return completion
 }
