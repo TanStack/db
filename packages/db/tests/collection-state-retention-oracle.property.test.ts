@@ -454,6 +454,9 @@ it(`starts a new sync run without retained publication state`, async () => {
 
     sync.begin()
     sync.write({ type: `update`, value: { id: 1, value: 2 } })
+    // Stand in for an accepted transaction held behind a mutation; only
+    // accepted transactions publish in a drain.
+    collection._state.pendingSyncedTransactions.at(-1)!.committed = true
     collection._state.capturePreSyncVisibleState()
     expect(collection._state.preSyncVisibleState.size).toBe(1)
     expect(collection._state.recentlySyncedKeys).toEqual(new Set([1]))
@@ -559,6 +562,8 @@ it(`does not let an old publication microtask clear restarted sync state`, async
     collection.startSyncImmediate()
     sync.begin()
     sync.write({ type: `insert`, value: { id: 2, value: 2 } })
+    // Stand in for an accepted transaction held behind a mutation.
+    collection._state.pendingSyncedTransactions.at(-1)!.committed = true
     collection._state.capturePreSyncVisibleState()
     expect(collection._state.recentlySyncedKeys).toEqual(new Set([2]))
 
@@ -566,6 +571,7 @@ it(`does not let an old publication microtask clear restarted sync state`, async
 
     expect(collection._state.recentlySyncedKeys).toEqual(new Set([2]))
 
+    collection._state.pendingSyncedTransactions.at(-1)!.committed = false
     expect(sync.commit()).toBe(true)
     expect(collection._state.hasReceivedFirstCommit).toBe(true)
     await Promise.resolve()
@@ -861,6 +867,39 @@ async function runImmutablePreviousValuePublication(
     await collection.cleanup()
   }
 }
+
+// Replay of a review probe. A transaction begun inside an open one commits
+// and applies first; replay then invalidates the open transaction's insert.
+// The accepted transaction's receipt resolves, and the open one's commit
+// rejects with DuplicateKeySyncError.
+it(`rejects an open transaction that a later nested commit invalidates`, async () => {
+  let sync!: Parameters<SyncConfig<RetainedRow, number>[`sync`]>[0]
+  const collection = createCollection<RetainedRow, number>({
+    getKey: (row) => row.id,
+    startSync: true,
+    sync: {
+      sync: (actions) => {
+        sync = actions
+        actions.markReady()
+      },
+    },
+  })
+  try {
+    await collection.stateWhenReady()
+    sync.begin()
+    sync.write({ type: `insert`, value: { id: 1, value: 1 } })
+    sync.begin()
+    sync.write({ type: `update`, value: { id: 1, value: 2 } })
+    expect(sync.commit()).toBe(true)
+    const rejected = sync.commit()
+    expect(rejected).toBeInstanceOf(Promise)
+    await expect(rejected).rejects.toBeInstanceOf(DuplicateKeySyncError)
+    expect(collection.get(1)?.value).toBe(2)
+    expect(collection._state.pendingSyncedTransactions).toHaveLength(0)
+  } finally {
+    await collection.cleanup()
+  }
+})
 
 // No public path can make a committed queued transaction invalid on replay:
 // only the open last transaction can be canceled. A replay that finds one is
@@ -2137,6 +2176,83 @@ it(`keeps an unrelated completed key remote while another key's sync is held`, a
     ],
   )
 })
+// Replays of random-campaign counterexamples. A rollback while a sync
+// transaction on its key is still open must publish the drop. When two
+// completed transactions are held on one key, the newer one's row shows.
+it(`publishes a rollback while a sync transaction on its key is open`, async () => {
+  await runOptimisticHistory(
+    [],
+    [
+      {
+        type: `open`,
+        batch: {
+          type: `sync`,
+          rows: [],
+          deletes: [],
+          truncate: false,
+          copies: 1,
+        },
+      },
+      { type: `edit`, key: 2, fields: { c: 0 }, optimistic: true },
+      { type: `close`, commit: true },
+      {
+        type: `open`,
+        batch: {
+          type: `sync`,
+          rows: [{ id: 2, a: 0, b: 0, c: 0 }],
+          deletes: [],
+          truncate: false,
+          copies: 1,
+        },
+      },
+      { type: `settle`, slot: 0, success: false, cascade: false },
+      { type: `sync`, rows: [], deletes: [1], truncate: false, copies: 1 },
+    ],
+  )
+})
+it(`shows the newer of two held completed rows on one key`, async () => {
+  await runOptimisticHistory(
+    [],
+    [
+      {
+        type: `edit`,
+        key: 1,
+        fields: { c: 0 },
+        optimistic: true,
+        inHandler: {
+          type: `sync`,
+          rows: [],
+          deletes: [],
+          truncate: false,
+          copies: 1,
+        },
+      },
+      {
+        type: `delete`,
+        key: 1,
+        optimistic: false,
+        inHandler: {
+          type: `sync`,
+          rows: [],
+          deletes: [1],
+          truncate: false,
+          copies: 1,
+        },
+      },
+      {
+        type: `sync`,
+        rows: [{ id: 1, a: 0, b: 0, c: 0 }],
+        deletes: [1],
+        truncate: false,
+        copies: 1,
+      },
+      { type: `edit`, key: 1, fields: { c: 1 }, optimistic: true },
+      { type: `settle`, slot: 2, success: true, cascade: false },
+      { type: `settle`, slot: 0, success: true, cascade: false },
+      { type: `delete`, key: 1, optimistic: false },
+    ],
+  )
+})
 it(`generates open, committed, and aborted sync transactions`, () => {
   const commands = fc.sample(optimisticStep, { seed: 86104, numRuns: 200 })
   expect(commands.some((step) => step.type === `open`)).toBe(true)
@@ -2411,7 +2527,7 @@ it(`drops a completed direct insert whose handler wrote no sync row`, async () =
     expect(events).toEqual([`insert:1`, `delete:1`, `insert:2`, `delete:2`])
     expect([...collection.state.keys()]).toEqual([])
     expect([...collection._state.syncedData.keys()]).toEqual([])
-    expect([...collection._state.pendingOptimisticUpserts.keys()]).toEqual([])
+    expect([...collection._state.heldOptimisticRows.keys()]).toEqual([])
   } finally {
     subscription.unsubscribe()
     await collection.cleanup()

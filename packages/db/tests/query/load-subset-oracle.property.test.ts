@@ -1125,10 +1125,10 @@ async function expectCanceledReceiptReleasesOnlyItsSuppression() {
     write({ type: `update`, value: { id: `second`, projectId: `new` } })
     expect(source._state.pendingSyncedTransactions).toHaveLength(2)
 
+    // Only the accepted transaction publishes in a drain, so only its key is
+    // suppressed; the open one holds no suppression to release.
     source._state.capturePreSyncVisibleState()
-    expect(source._state.recentlySyncedKeys).toEqual(
-      new Set([`first`, `second`]),
-    )
+    expect(source._state.recentlySyncedKeys).toEqual(new Set([`first`]))
 
     // Only the open last transaction can be canceled.
     expect(() =>

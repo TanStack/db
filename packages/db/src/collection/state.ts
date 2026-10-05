@@ -5,6 +5,7 @@ import {
   SyncQueueInvariantError,
   SyncTransactionAbortedError,
 } from '../errors.js'
+import type { DuplicateKeySyncError } from '../errors.js'
 import type {
   VirtualOrigin,
   VirtualRowProps,
@@ -62,7 +63,13 @@ interface PendingSyncedTransaction<
   /** Resolves after application and rejects if canceled before application. */
   applied: Deferred<void>
   preserveHydrationSeedKeys?: boolean
-  /** Present on adapter transactions that can be revalidated after cancel. */
+  /** Builds the error for an open transaction whose insert a replay invalidates. */
+  duplicateKeyError?: (key: TKey) => DuplicateKeySyncError
+  /**
+   * Set when a replay invalidates an open transaction, which happens when a
+   * later transaction begun inside it commits first. Its commit rejects.
+   */
+  invalidationError?: Error
 }
 
 type PendingMetadataWrite = { type: `set`; value: unknown } | { type: `delete` }
@@ -116,8 +123,11 @@ export class CollectionStateManager<
   // A completed transaction's optimistic row is held only while a queued sync
   // transaction touches its key, so the drop and that sync transaction
   // publish together.
-  public pendingOptimisticUpserts = new Map<TKey, TOutput>()
-  public pendingOptimisticDeletes = new Set<TKey>()
+  // The newest completed transaction owns a held key; no row means a delete.
+  public heldOptimisticRows = new Map<
+    TKey,
+    { owner: Transaction<any>; row?: TOutput }
+  >()
 
   /**
    * Tracks the origin of confirmed changes for each row.
@@ -596,13 +606,14 @@ export class CollectionStateManager<
           continue
         this.pendingLocalOrigins.add(mutation.key)
         if (!mutation.optimistic) continue
-        if (mutation.type === `delete`) {
-          this.pendingOptimisticUpserts.delete(mutation.key)
-          this.pendingOptimisticDeletes.add(mutation.key)
-        } else {
-          this.pendingOptimisticUpserts.set(mutation.key, mutation.modified)
-          this.pendingOptimisticDeletes.delete(mutation.key)
-        }
+        // A completed transaction leaves `transactions` before a newer one
+        // settles, so keep the newest owner's row.
+        const held = this.heldOptimisticRows.get(mutation.key)
+        if (held && held.owner.compareCreatedAt(transaction) > 0) continue
+        this.heldOptimisticRows.set(mutation.key, {
+          owner: transaction,
+          row: mutation.type === `delete` ? undefined : mutation.modified,
+        })
       }
     }
 
@@ -611,29 +622,12 @@ export class CollectionStateManager<
     this.optimisticDeletes.clear()
     this.pendingLocalChanges.clear()
 
-    const staleOptimisticUpserts: Array<TKey> = []
-    for (const [key, value] of this.pendingOptimisticUpserts) {
-      if (pendingSyncKeys.has(key)) {
-        this.optimisticUpserts.set(key, value)
-      } else {
-        staleOptimisticUpserts.push(key)
-      }
-    }
-    for (const key of staleOptimisticUpserts) {
-      this.pendingOptimisticUpserts.delete(key)
-      this.pendingLocalOrigins.delete(key)
-    }
-    const staleOptimisticDeletes: Array<TKey> = []
-    for (const key of this.pendingOptimisticDeletes) {
-      if (pendingSyncKeys.has(key)) {
-        this.optimisticDeletes.add(key)
-      } else {
-        staleOptimisticDeletes.push(key)
-      }
-    }
-    for (const key of staleOptimisticDeletes) {
-      this.pendingOptimisticDeletes.delete(key)
-      this.pendingLocalOrigins.delete(key)
+    for (const [key, { row }] of this.heldOptimisticRows) {
+      if (!pendingSyncKeys.has(key)) {
+        this.heldOptimisticRows.delete(key)
+        this.pendingLocalOrigins.delete(key)
+      } else if (row === undefined) this.optimisticDeletes.add(key)
+      else this.optimisticUpserts.set(key, row)
     }
 
     const activeTransactions: Array<Transaction<any>> = []
@@ -705,8 +699,10 @@ export class CollectionStateManager<
     if (this.changes.shouldBatchEvents && !triggeredByUserAction) {
       const pendingSyncKeysForFilter = new Set<TKey>()
 
-      // Collect keys from pending sync operations
+      // Collect keys from accepted sync operations; an open transaction does
+      // not publish in this drain.
       for (const transaction of this.pendingSyncedTransactions) {
+        if (!transaction.committed) continue
         for (const operation of transaction.operations) {
           pendingSyncKeysForFilter.add(operation.key as TKey)
         }
@@ -1030,9 +1026,11 @@ export class CollectionStateManager<
 
   /**
    * Rebuild the queued projection after truncate, application, or an
-   * accepted seed changes queue history. Only the open last transaction can
-   * be canceled, and every replay keeps each transaction's admission, so a
-   * replay that invalidates a transaction is an invariant failure.
+   * accepted seed changes queue history. An open transaction can become
+   * invalid when a later transaction begun inside it commits first; it then
+   * holds an invalidation error that its commit returns. Only the open last
+   * transaction can be canceled, so a replay that invalidates a committed
+   * transaction is an invariant failure.
    */
   private rebuildPendingSyncedProjection(): void {
     const projection: PendingSyncedProjection<TOutput, TKey> = {
@@ -1041,11 +1039,15 @@ export class CollectionStateManager<
     }
 
     for (const transaction of this.pendingSyncedTransactions) {
+      if (transaction.invalidationError !== undefined) continue
+      const statesBeforeTransaction = new Map(projection.states)
+      const truncatedBeforeTransaction = projection.truncated
       if (transaction.truncate) {
         projection.states = new Map()
         projection.truncated = true
       }
 
+      let invalidKey: TKey | undefined
       for (const operation of transaction.operations) {
         const key = operation.key as TKey
         if (
@@ -1057,13 +1059,25 @@ export class CollectionStateManager<
             key,
             operation.value,
           )
-          if (disposition === `duplicate`)
-            throw new SyncQueueInvariantError(
-              `replay made an admitted insert a duplicate`,
-            )
+          if (disposition === `duplicate`) {
+            invalidKey = key
+            break
+          }
           operation.type = disposition
         }
         this.applyPendingSyncOperation(projection, operation)
+      }
+      if (invalidKey !== undefined) {
+        if (transaction.committed)
+          throw new SyncQueueInvariantError(
+            `replay made an accepted insert a duplicate`,
+          )
+        projection.states = statesBeforeTransaction
+        projection.truncated = truncatedBeforeTransaction
+        transaction.invalidationError =
+          transaction.duplicateKeyError?.(invalidKey) ??
+          new SyncTransactionAbortedError()
+        continue
       }
       this.rebuildAutomaticRowMetadataWrites(transaction)
     }
@@ -1300,8 +1314,7 @@ export class CollectionStateManager<
               // Clear pending local changes now that sync has confirmed
               this.pendingLocalChanges.delete(key)
               this.pendingLocalOrigins.delete(key)
-              this.pendingOptimisticUpserts.delete(key)
-              this.pendingOptimisticDeletes.delete(key)
+              this.heldOptimisticRows.delete(key)
               break
             case `update`: {
               if (rowUpdateMode === `partial`) {
@@ -1317,8 +1330,7 @@ export class CollectionStateManager<
               // Clear pending local changes now that sync has confirmed
               this.pendingLocalChanges.delete(key)
               this.pendingLocalOrigins.delete(key)
-              this.pendingOptimisticUpserts.delete(key)
-              this.pendingOptimisticDeletes.delete(key)
+              this.heldOptimisticRows.delete(key)
               break
             }
             case `delete`:
@@ -1328,8 +1340,7 @@ export class CollectionStateManager<
               this.rowOrigins.delete(key)
               this.pendingLocalChanges.delete(key)
               this.pendingLocalOrigins.delete(key)
-              this.pendingOptimisticUpserts.delete(key)
-              this.pendingOptimisticDeletes.delete(key)
+              this.heldOptimisticRows.delete(key)
               break
           }
           if (!transaction.preserveHydrationSeedKeys) {
@@ -1592,6 +1603,7 @@ export class CollectionStateManager<
    */
   public cancelPendingSyncedTransaction(
     transaction: PendingSyncedTransaction<TOutput, TKey>,
+    reason: Error = new SyncTransactionAbortedError(),
   ): void {
     if (
       transaction.committed ||
@@ -1605,11 +1617,12 @@ export class CollectionStateManager<
     for (const operation of transaction.operations) {
       canceledKeys.add(operation.key as TKey)
     }
-    transaction.applied.reject(new SyncTransactionAbortedError())
+    transaction.applied.reject(reason)
     this.rebuildPendingSyncedProjection()
 
     const remainingPendingKeys = new Set<TKey>()
     for (const pending of this.pendingSyncedTransactions) {
+      if (pending.invalidationError !== undefined) continue
       for (const operation of pending.operations) {
         remainingPendingKeys.add(operation.key as TKey)
       }
@@ -1668,6 +1681,8 @@ export class CollectionStateManager<
     // metadata-only writes, which the drain also compares.
     const syncedKeys = new Set<TKey>()
     for (const transaction of this.pendingSyncedTransactions) {
+      // An open transaction does not publish in this drain.
+      if (!transaction.committed) continue
       for (const operation of transaction.operations) {
         syncedKeys.add(operation.key as TKey)
       }
@@ -1732,8 +1747,7 @@ export class CollectionStateManager<
     this.syncedCollectionMetadata.clear()
     this.optimisticUpserts.clear()
     this.optimisticDeletes.clear()
-    this.pendingOptimisticUpserts.clear()
-    this.pendingOptimisticDeletes.clear()
+    this.heldOptimisticRows.clear()
     this.hydrationSeedKeys.clear()
     this.hydratedKeys.clear()
     this.appliedAdapterDeletedKeys?.clear()
