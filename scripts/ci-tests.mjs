@@ -103,7 +103,6 @@ if (command === `check`) {
       ...packages.flatMap((name) => [`--filter`, name]),
       `run`,
       `test`,
-      `--run`,
       `--maxWorkers=2`,
     ]
   }
