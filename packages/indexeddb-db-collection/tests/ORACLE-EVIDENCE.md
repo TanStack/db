@@ -310,3 +310,119 @@ established by this finite fake-IDB matrix. Raw blockers still have no deadline.
 08dc88ee5d9122d078de0fa0f2c04bca8f7606bfcb656aa2e47df28faaa0517d  packages/indexeddb-db-collection/tests/transport-oracle.test.ts
 22158f29593bd4e57f90fff28876c3ba331569a849079814a3b9028c54c7a67f  packages/indexeddb-db-collection/tests/wrapper.test.ts
 ```
+
+## Concurrent oracle extension — 2026-10-05
+
+This record covers the extension based on PR head
+`2a49f6d67a9f60d7f30bdfab6056ce2e2f5df02a`. The implementation manifest below
+identifies the reviewed source and executable owners. Earlier sections describe
+historical evidence, including the partial-row control that initially survived.
+The new non-truncating omission witness rejects that control.
+
+### Reproductions and repairs
+
+| Subject                                    | RED observation                                                                                                                                                                                      | Repair / GREEN boundary                                                                                                                                               |
+| ------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Redundant import notifications             | Chromium fixed seed 1179, path `1:1:1:1:1:4:4`: write then import published the union of prior and imported rows. Controlled owner failed `atomic publication / imported replacement publication 0`. | One replacement notification. Existing peers, every publication and restore agree in controlled and native histories.                                                 |
+| Insert confirmation after peer persistence | Held insert, peer insert, then handler acceptance persisted successfully but caller rejected with duplicate-key CollectionOperationError.                                                            | Full-row update confirms the accepted `put` snapshot. The 24-case held-action matrix, generated neighboring histories and native accept/reject cases pass.            |
+| Incorrect raw event key                    | Hostile insert and repeated malformed insert were accepted when event.key differed from value.id. The pre-repair negative test failed to throw.                                                      | Strict typed identity before reduction. Wrong string/numeric identity and duplicate malformed inserts now fail `event semantics`; adjacent update control also fails. |
+| Premature reload observation               | With a held native restore, the probe existed but Collection status was loading and rows were empty. Chromium failed the old comparison at `reload before native restore completes`.                 | Generated reload awaits preload. All engines pass the held-restore negative/positive cuts.                                                                            |
+| Cleanup failure masking                    | Inner native cleanup could replace an earlier mismatch or omit later pages.                                                                                                                          | Every cleanup action is attempted, the original is AggregateError.cause, and an injected failure closes both pages while retaining the exact mismatch on all engines. |
+
+The pending reference initially over-attributed later source writes and counted
+unchanged peer updates as new acknowledgements. It now follows the pinned core
+oracle's one-use attribution and Collection no-op admission laws. A retained
+import → identical write → rejection history distinguishes the latter. These
+were reference-model repairs, not new product behavior. Peer actions now use
+`write` rather than two aliases called insert/update. Positive reach assertions
+prove the matrix actually performs all peer CRUD operations.
+
+### Executed validation
+
+- Full package: 149 tests across 11 files, including 23 type tests, passed with
+  coverage enabled. Adapter statement/branch/line coverage: 97.55% / 95.37% /
+  98.67%. Coverage percentages are supplementary, not oracle-law evidence.
+- New controlled campaigns: 30 fixed + 30 fresh histories per transport/pending
+  family. Stress: 300 fixed + 300 fresh per family. Transport stress uses five
+  Collections, up to 100 operations and the large-array generation profile.
+- Bounded enumeration: 16 ordered-writer/delivery schedules, six manual
+  acceptance orders, and 24 held-local/peer-action/decision cases.
+- Native matrix: 48 tests, all passed. Engines: Chromium 148.0.7778.96, Firefox
+  150.0.2 and WebKit 26.4 on macOS. Each engine ran the same 10 fixed + 10 fresh
+  generated-history budget, pinned receiving cases and calibration controls.
+- Package lint, `tsc --noEmit`, ESM/CJS build and published declaration checks
+  passed. CI registration installs all three engines and uploads test-results.
+  CI execution is a separate status, not inferred from these local results.
+- Direct intentional-failure replay used seed 11792026 and path
+  `0:4:3:5:5:8:8:8:8:10:10`. The selected Vitest command exited 1 at
+  `public rows / registered campaign calibration`. Reconstruction, premise reach
+  and same-failure checks were all true. The native split-publication mutant
+  separately reproduced its schedule-dependent failure twice in each engine.
+
+Local dependency infrastructure could not retrieve Rollup 4.64.0 from the
+configured registry. Local validation used cached Rollup 4.59.0 after an isolated
+offline install. The tracked lock retains 4.64.0. No dependency version change
+was included to hide this local infrastructure difference.
+
+### Oracle guide audit
+
+| Requirement                | Outcome and evidence                                                                                                                                                                                                                            |
+| -------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| ORC-001 contract           | Existing core optimistic, lifecycle and package persistence laws; unspecified policy stays in ORACLE.md and coverage map.                                                                                                                       |
+| ORC-002 independence       | Authored row ledger, per-Collection snapshots and independent pending projection. Observed rows/payloads never select expected membership.                                                                                                      |
+| ORC-003 literate owners    | Opening contract, model, grammar, driver, checks and limits in each owner and its explicitly named companion.                                                                                                                                   |
+| ORC-004 grammar            | Every action reconstructed, actual CRUD reach counted, stale-peer admission pair, empty/typed/reused keys, held decisions and finite enumerations.                                                                                              |
+| ORC-005 observations       | Raw event identity/kind/multiplicity/previous value, callback rows, status, base, metadata, caller, durable versions and downstream cuts.                                                                                                       |
+| ORC-006 calibration        | Original import/confirmation RED, partial-row control, serial overlap non-reach, spurious status, partial-publication and raw-key controls.                                                                                                     |
+| ORC-007 campaigns/replay   | Fixed/fresh parity, explicit seed/path selection, failing selected command and three-part replay receipts. No fc.commands replayPath applies.                                                                                                   |
+| ORC-008 minimality         | Stale-peer pair distinguishes durable from public. Held decisions distinguish base/public/queued source. Lifecycle separates old callbacks from current runs.                                                                                   |
+| ORC-009 vocabulary         | Glossary terms retained. Model combinations and one-intent bound are stated beside the reference.                                                                                                                                               |
+| ORC-010 fidelity           | Original/reduced failures and unique per-run reports retained. Native sink survives acknowledged destruction. Cleanup and missing-export controls reject evidence loss.                                                                         |
+| ORC-011 second formulation | No remaining reviewer-named shared semantic fault needs an alternate reference. Exact identity controls repaired the checker itself. Raw IDB and independent fresh restore supply separate receiving observations, not a second semantic model. |
+| ORC-012 review             | Two independent reviewers, eight ledger items: five fixed, one already fixed, two duplicates retaining their additional controls. No unresolved review item.                                                                                    |
+| ORC-013 distinction        | Omission without truncate rejects partial updates; active/obsolete aborts distinguish run authority; split replacement repairs final rows but still fails original publication.                                                                 |
+| ORC-014 handoff            | Controlled-to-native table below. Unsupported premises remain open with owners.                                                                                                                                                                 |
+
+### Controlled-to-native handoff
+
+All listed native witnesses executed on all three engines.
+
+| Controlled premise                                  | Native receiving witness                                                                      | Limit                                                                   |
+| --------------------------------------------------- | --------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------- |
+| Concurrent receiver reads behind a live transaction | Two callbacks and two readonly transactions remain pending behind real native requests        | Writes finish before the read window.                                   |
+| Whole-row omission without replacement              | Delete/reinsert transactions precede reads; ordinary update observed, zero truncate           | Ordered writes only.                                                    |
+| Held local intent with independent peer progress    | Peer persistence and receiver callback finish before held insert settles                      | One local insert in native witness; broader CRUD family controlled.     |
+| Old receiver abort after cleanup                    | Abort old pending read, restart, release storage, restore current run                         | Pending mutation completion is a separate policy boundary.              |
+| Native request progress then abort                  | Read/write abort witnesses observe progress, terminal failure, status/caller and rollback     | Test-owned abort is not quota exhaustion.                               |
+| Managed connection close and unmanaged blocker      | Versionchange with held transaction; blocked deletion remains pending until raw handle closes | Held transaction is test-owned, not an adapter write already in flight. |
+| Subscription acquisition during startup             | Pending startup and pending peer write positively observed before release                     | No framework scheduling claim.                                          |
+| Repaired transient error before page destruction    | Runner retains split-publication evidence with handler pending, then closes page              | Acknowledged destruction only, not an unacknowledged crash.             |
+
+Production weight for this extension is +2/-2 lines (net zero). Test/browser
+code grows by approximately 3,200 lines for the models, drivers, histories and
+controls. Documentation and integration changes are separate. No new runtime
+queue, retry, generation, fallback or dependency is required by the two fixes.
+
+The claim is bounded by law × legal history × adapter path × observation cut.
+The current remaining-boundaries list in ORACLE.md and oracle-coverage.md retains
+unordered read/write overlap, multiple active local intents, pending mutation
+cleanup policy, same-ID ownership, AUX01, suspended delivery, nested identity,
+quota, eviction and physical crash durability. HC005 remains a core-owned
+counterexample. No universal cross-tab bug-freedom claim is made.
+
+### Extension implementation manifest
+
+```text
+94aa4cfc438f175f034e54e3a01faf0fd2a00f15da69cbf83abfa23715dbce62  packages/indexeddb-db-collection/src/indexeddb.ts
+97b7b3691c739de2c52c3aed5e10c4b9b3f32055bc07497c93d846018fd1d29a  packages/indexeddb-db-collection/tests/cross-tab-boundary-oracle.test.ts
+3361b26742495eec6d580331773070e50f8709b3caaf80d77f95f5c1c9e44da8  packages/indexeddb-db-collection/tests/cross-tab-driver.ts
+96c79b747dfd322f1c2ad67ea8b0091094f76c78ab9de14db251c1c28a5c6426  packages/indexeddb-db-collection/tests/cross-tab-history-oracle.test.ts
+3193e9c0ebcbb6e4c6322f630aa43f7eb26abd92eeaaf1a36a69435ddce625dd  packages/indexeddb-db-collection/tests/cross-tab-oracle.ts
+28f3ba9fd3b9485f50e66312c77ef260f50c20b5d19cd426475ea67ddf71c456  packages/indexeddb-db-collection/tests/pending-history-oracle.test.ts
+5cf50fb9f00166b5f203b05bbcbe609cf349c3367ef066f5316a1a7bf6c9e27b  packages/indexeddb-db-collection/tests/campaign.ts
+1371b3b4a6e71fccf4d3207f600f9969e3e9f793cb0f747e0266a0e037fa19f5  packages/indexeddb-db-collection/tests/recorder.ts
+d0c2c3233aacb258d67f9018357846833822f16aca610e4182e714fa129ccf59  packages/indexeddb-db-collection/tests/idb-driver.ts
+ccdaba88a58a378ef57d90b0d295b00ed57a1736c20e479f0ec03e3cfae1a3fc  packages/indexeddb-db-collection/e2e/browser-evidence-oracle.ts
+d461155641e40acaebb3b7b3581440c7ecfa51125adcd94d09619b53d577d96e  packages/indexeddb-db-collection/e2e/browser.ts
+c5ef4c7965a4964dafdd7bc43117b649644900c4e230c5be253a2f4b4eb41e85  packages/indexeddb-db-collection/e2e/cross-tab-oracle.spec.ts
+```

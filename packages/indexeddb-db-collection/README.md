@@ -353,3 +353,16 @@ replay coordinates, fault witnesses, and coverage limits.
 ## License
 
 MIT
+
+### Cross-tab consistency tests
+
+The package tests independently authored rows against durable storage, each
+Collection, raw subscription events and downstream queries. Generated histories
+exercise delayed notifications, held mutation handlers, replacements and cleanup.
+The native browser suite runs same-origin pages in Chromium, Firefox and WebKit,
+including transaction aborts, blocked deletion, connection version changes and
+restore after page close. Run `pnpm test:oracles`, `pnpm test:oracles:stress`, or
+`pnpm test:browser` from this package; browser tests require Playwright's engines.
+See [the oracle contract](./tests/ORACLE.md) for replay commands and scope limits.
+These tests cover stated histories and observation cuts; they do not prove crash
+durability or guarantee delivery to a suspended tab.

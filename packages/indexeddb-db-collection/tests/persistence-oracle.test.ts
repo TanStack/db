@@ -348,3 +348,118 @@ describe('settled histories', () => {
     )
   }
 })
+
+/** Three distinct Collection identities receive one mixed manual payload.
+ * The ledger changes only for the selected owner's acceptance, in each of six
+ * orders. Same-store owners use disjoint keys; the sibling store reuses a key.
+ * No assertion invents atomicity across those three native transactions or a
+ * same-ID Collection policy. A skipped owner must leave its rows/versions alone.
+ */
+it('manual acceptance partitions mixed payloads across three Collections in every order', async () => {
+  for (const order of [
+    [0, 1, 2],
+    [0, 2, 1],
+    [1, 0, 2],
+    [1, 2, 0],
+    [2, 0, 1],
+    [2, 1, 0],
+  ]) {
+    await withHarness(async (h) => {
+      const stores = ['items', 'items', 'other']
+      const removed = [0, 'remove-b', 0]
+      const added = ['a', 3, 'a']
+      const initial: Array<Array<Row>> = [
+        [
+          { id: 0, name: 'remove a' },
+          { id: 'remove-b', name: 'remove b' },
+        ],
+        [{ id: 0, name: 'remove c' }],
+      ]
+      for (const [index, store] of ['items', 'other'].entries())
+        await seed(h.db, store, initial[index]!)
+      const collections = await Promise.all(
+        stores.map(async (store, index) =>
+          h.open(store, { id: `owner-${index}`, db: await h.connect() }),
+        ),
+      )
+      const expected = initial.map((rows) => rows.map((row) => ({ ...row })))
+      const tx = createTransaction({
+        autoCommit: false,
+        mutationFn: async ({ transaction }) => {
+          expect(
+            transaction.mutations.map((mutation) => [
+              mutation.collection.id,
+              mutation.type,
+              mutation.key,
+            ]),
+          ).toEqual(
+            collections.flatMap((collection, index) => [
+              [collection.id, 'delete', removed[index]],
+              [collection.id, 'insert', added[index]],
+            ]),
+          )
+          for (const index of order) {
+            const priorVersions = await readStore<{ versionKey: string }>(
+              h.db,
+              '_versions',
+            )
+            await collections[index]!.utils.acceptMutations(transaction)
+            const store = index === 2 ? 1 : 0
+            expected[store] = [
+              ...expected[store]!.filter((row) => row.id !== removed[index]),
+              { id: added[index]!, name: `owner ${index}` },
+            ]
+            for (const [slot, name] of ['items', 'other'].entries())
+              assertRows(
+                (await readStore<Row>(h.db, name)).rows,
+                expected[slot]!,
+                'only accepted owner durable',
+              )
+            const afterVersions = await readStore<{ versionKey: string }>(
+              h.db,
+              '_versions',
+            )
+            for (const [offset, key] of priorVersions.keys.entries()) {
+              if (
+                JSON.stringify(key) ===
+                JSON.stringify([stores[index], removed[index]])
+              )
+                continue
+              const position = afterVersions.keys.findIndex(
+                (candidate) =>
+                  JSON.stringify(candidate) === JSON.stringify(key),
+              )
+              expect(
+                afterVersions.rows[position],
+                'unrelated version ownership',
+              ).toEqual(priorVersions.rows[offset])
+            }
+          }
+        },
+      })
+      const outcome = tx.isPersisted.promise
+      void outcome.catch(() => undefined)
+      tx.mutate(() => {
+        for (const [index, collection] of collections.entries()) {
+          collection.delete(removed[index]!)
+          collection.insert({ id: added[index]!, name: `owner ${index}` })
+        }
+      })
+      await tx.commit()
+      await outcome
+      await Channel.drain()
+      for (const [index, collection] of collections.entries())
+        assertRows(
+          collection.values(),
+          expected[index === 2 ? 1 : 0]!,
+          'manual peer convergence',
+        )
+      for (const [index, store] of ['items', 'other'].entries())
+        assertRows(
+          (await h.open(store, { db: await h.connect() })).values(),
+          expected[index]!,
+          'manual fresh restore',
+        )
+    })
+  }
+})

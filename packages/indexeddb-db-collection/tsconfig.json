@@ -12,6 +12,13 @@
     "forceConsistentCasingInFileNames": true,
     "jsx": "react"
   },
-  "include": ["src", "tests", "vite.config.ts"],
+  "include": [
+    "src",
+    "tests",
+    "vite.config.ts",
+    "e2e",
+    "playwright.config.ts",
+    "vite.browser.config.ts"
+  ],
   "exclude": ["node_modules", "dist"]
 }

@@ -1014,37 +1014,60 @@ original-source assertion failures and repaired cases distinguish this law from
 the earlier shared-descriptor fixtures. Raw unmanaged blockers keep the wrapper's
 pending-until-terminal law. These controlled cases do not prove browser scheduling.
 
-Remaining package-owned cells and required witnesses:
+The concurrent extension adds independent per-Collection expectations, raw
+publication and Collection-status recording, native transaction gates and
+non-awaiting dispatch. It receives the whole-row omission law and rejects a
+full-to-partial application mutant. It also rejects a spurious Collection error,
+invalid delta semantics and a repaired partial publication. A serial delivery
+fixture fails the overlap reach control. Generated histories use fixed/fresh
+parity, original-failure-preserving reduction and checked direct replay.
 
-- **Connection ownership, CR-02:** transactions already in flight at native
-  `versionchange`, obsolete receivers after later writes, app notification policy,
-  and native page scheduling need receiving witnesses. The adopted policy closes
-  managed connections and requires callers to recreate affected Collections; no
-  new Collection status or notification API is promised.
+Executed coverage and remaining package-owned cells:
 
-- **Persistence owner, PC02:** disjoint keys, mixed deletes, three Collections,
-  and same-ID manual payloads under the core identity contract.
-- **Settlement owner, PC04/PC06:** a middle failure in a batch of at least three
-  rows and multi-row held/resolved/rejected handlers; observe payload, caller
-  outcome, durable rows/versions and successful suffixes.
-- **Transport/settlement owners, PC08/PC10:** broader pending mutations, reused
-  keys and concurrently executing receiver callbacks across replacement.
-- **Transport owner, PC12/CC09:** cleanup/restart at actual write and receiving
-  read awaits, followed by a successful suffix; compare caller outcomes, active
-  public/durable rows, subsequent version-driven changes and channel ownership.
-- **Transport and core optimistic-history owners, PC16:** remote whole-row
-  omission and acknowledgement metadata at legal source/settlement cuts.
-- **Settlement owner, AUX01:** a valid post-durability publication/send failure
-  premise, with caller outcome, durable/source/public rows and successful suffix.
-  This is an unverified investigation, not a confirmed defect or a recovery mandate.
-- **Native receiving and consumer owners, CC10:** real-browser quota/abort,
-  blocked upgrades, versionchange, multi-page scheduling and crash durability;
-  downstream queries and raw event multiplicity/kind/previous-value/transient
-  traces. Controlled fake-IDB/channel witnesses do not prove these host laws.
+- **Connection ownership, CR-02:** native managed versionchange with a held
+  test-owned readwrite transaction and unmanaged deletion blocking, in all three
+  engines. Adapter writes already in flight, abnormal connection close and app
+  notification policy remain open; no new status/restart API is promised.
+- **Persistence, PC02:** all six manual acceptance orders for three distinct
+  Collection identities, two stores, disjoint same-store keys, reused sibling
+  keys, mixed deletes/inserts and unaffected versions. Same-ID ownership still
+  needs the applicable core identity contract and witness.
+- **Settlement, PC04/PC06:** first/middle/last clone failure in a three-row batch
+  for automatic/manual/import; multi-row held CRUD with both decisions and
+  independent peer progress. Raw storage, caller, payload, versions, ordinary
+  suffix and restore cuts remain distinct.
+- **Transport/settlement, PC08/PC10:** two to five independent descriptors,
+  generated read windows across replacement/CRUD, one held whole-row local
+  intent crossed with peer CRUD/clear/import, and downstream query cuts. Native
+  import exposed transient union publication and ordered peer persistence exposed
+  duplicate-insert confirmation; both have source repairs and receiving tests.
+  Several simultaneous local intents and reads straddling unordered writes need
+  a broader independent ordering model and their own positive reach witnesses.
+- **Transport, PC12/CC09:** obsolete receiving read success/abort after cleanup
+  and restart; native obsolete abort and later restore. Pending mutation caller
+  outcome/confirmation into a restarted sync run remains a distinct policy and
+  test obligation; callback invalidation does not specify it.
+- **Transport/core optimistic, PC16:** non-truncating omission via ordered
+  delete/reinsert in controlled and native drivers; active intent, exposed base,
+  public snapshot and one-use acknowledgement metadata at held/settled cuts.
+  Nested values and several overlapping local intents remain with the core owner.
+- **Settlement, AUX01:** valid post-durability send/publication failure still
+  needs a native premise and defined caller/source/public outcome. No retry or
+  rollback-after-commit policy is inferred.
+- **Native/consumer, CC10:** Chromium, Firefox and WebKit receive overlapping
+  callbacks, native read/write abort, startup subscriptions, blockers,
+  versionchange, controlled page close/reload and restore. Raw evidence survives
+  acknowledged page destruction with a held handler. A schedule-dependent mutant
+  reproduces its original law/checkpoint in each engine. The controlled pending
+  companion checks complete downstream live-query snapshots. Real suspension,
+  lost-message recovery, quota/eviction, process-crash durability and evidence
+  lost before runner acknowledgement remain open and require their own premises.
 
-Same-key writer conflict policy, nested input identity and timing guarantees
-remain open. Separate Collection acceptance calls do not promise cross-Collection
-atomicity. These scope limits do not retire valid product obligations.
+Native evidence is per engine. Simulated reverse/duplicate messages do not prove
+browser delivery ordering. The package has no leader election, timeout or
+in-memory fallback. Same-key writers without explicit persistence order, nested
+input identity and timing guarantees remain unresolved; separate Collection
+acceptance calls do not promise cross-Collection atomicity.
 
 **Known pre-existing core counterexample (HC005):** numeric 0 and string "0" in
 one Collection transaction can collapse before the adapter receives its mutation

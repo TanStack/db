@@ -575,6 +575,7 @@ export function indexedDBCollectionOptions(
     if (!activeSync) return
     // Confirmation must drain after optimistic settlement. Applying it
     // immediately would let settlement retain a new, unacknowledged snapshot.
+    // Full-row update confirms put even if a peer inserted during the handler.
     // A replacement's truncate already supplies its own publication boundary.
     activeSync.begin()
     if (replace) activeSync.truncate()
@@ -582,7 +583,7 @@ export function indexedDBCollectionOptions(
       activeSync.write(
         mutation.type === 'delete'
           ? { type: 'delete', key: mutation.key }
-          : { type: mutation.type, value: mutation.modified },
+          : { type: 'update', value: mutation.modified },
       )
     }
     activeSync.commit()
@@ -809,7 +810,6 @@ export function indexedDBCollectionOptions(
     await persist(mutations, true)
     confirm(mutations, true)
     broadcastChange([], 'database-cleared')
-    broadcastChange(mutations.map((m) => m.key))
   }
 
   const utils: IndexedDBCollectionUtils = {

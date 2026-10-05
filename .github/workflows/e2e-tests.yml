@@ -108,6 +108,26 @@ jobs:
           cd examples/react/start-ssr-e2e
           pnpm exec playwright install --with-deps chromium
 
+      - name: Install IndexedDB oracle browsers
+        if: matrix.group == 'browser'
+        working-directory: packages/indexeddb-db-collection
+        run: pnpm exec playwright install --with-deps chromium firefox webkit
+        env:
+          PLAYWRIGHT_SKIP_BROWSER_GC: '1'
+
+      - name: Run IndexedDB native cross-tab oracles
+        if: matrix.group == 'browser'
+        working-directory: packages/indexeddb-db-collection
+        run: pnpm test:browser
+
+      - name: Upload IndexedDB oracle evidence
+        if: always() && matrix.group == 'browser'
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: indexeddb-oracle-evidence
+          path: packages/indexeddb-db-collection/test-results/
+          retention-days: 7
+
       - name: Run Browser SQLite OPFS fairness E2E tests
         if: matrix.group == 'browser'
         run: |

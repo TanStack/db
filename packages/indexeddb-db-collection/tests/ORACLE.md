@@ -68,7 +68,7 @@ Each axis contributes independently:
 Permanent checker controls reject missing/duplicate rows, wrong key types and
 extra user values. Original-source witnesses fail at public/durable checkpoints.
 A per-row-transaction mutant reaches clone failure and fails durable-prefix
-assertions for automatic and manual writes. A partial-row sync mutant survives:
+assertions for automatic and manual writes. An earlier partial-row sync mutant survived:
 Collection edits represent removal with undefined, so partial and full updates
 are equivalent for those bounded inputs. This survival is not proof for arbitrary
 partial-row compatibility. The adapter declares full rows because it reads and
@@ -162,9 +162,9 @@ automatic close fails a deterministic zero-blocked assertion instead of timing o
 Deletion then publishes empty snapshots. Upgrade retains rows/version, rejects
 old-descriptor writes without optimistic leakage, and permits new-descriptor
 restore and writes in retained and added stores. All four histories fail without
-the listener and pass with it. Application notification APIs, transactions already
-in flight, obsolete receivers after later writes, and native page scheduling
-remain separate receiving boundaries. No elapsed-time bound or automatic restart
+the listener and pass with it. Application notification APIs remain unspecified. The extension below receives
+native scheduling and held read transactions; adapter writes already in flight
+at versionchange remain a separate receiving boundary. No elapsed-time bound or automatic restart
 is implied by these controlled histories.
 
 ## Campaigns and direct replay
@@ -216,36 +216,10 @@ the primary as cause.
 These are coverage limits, not retired obligations. No universal bug-class
 closure is claimed. The receiving owners need these distinguishing witnesses:
 
-- **Manual payload ownership (PC02):** persistence-oracle.test.ts needs disjoint
-  keys, mixed deletes, and three Collections. Same-ID cases require the core
-  Collection identity contract before an expected result is chosen.
-- **Failed batches and handlers (PC04/PC06):** settlement-oracle.test.ts needs a
-  middle failure in a batch of at least three rows and multi-row held/accepted/
-  rejected handlers, with exact outcomes, rows, versions and a successful suffix.
-- **Replacement overlaps (PC08/PC10):** transport-oracle.test.ts and
-  settlement-oracle.test.ts need broader pending mutations, reused keys, and
-  overlapping receiver callbacks. The twelve new histories do not establish
-  arbitrary replacement ordering or every transient publication.
-- **Pending cleanup (PC12/CC09):** transport-oracle.test.ts needs cleanup and
-  restart at actual write and remote-read awaits, then a successful suffix.
-  Observe caller settlement, active public rows, durable rows, subsequent
-  version-driven changes and channel ownership. Initial-load cleanup and
-  acceptance after completed cleanup do not cover these pending cuts.
-- **Field and metadata boundaries (PC16):** transport-oracle.test.ts and the
-  core optimistic-history owner need a legal remote whole-row omission witness
-  and explicit acknowledgement-metadata checks. The surviving partial-row
-  mutant proves neither arbitrary equivalence nor a current resurrection bug.
-- **Post-durability failure (AUX01):** settlement-oracle.test.ts needs a valid
-  publication/send failure premise before proposing recovery. Compare caller
-  outcome, durable rows, source/public rows and a later successful suffix.
-  No realistic counterexample was established by the review; contradictory
-  mocks alone do not authorize a new recovery state machine.
-- **Native and consumer handoff (CC10):** a real multi-page browser driver must
-  receive the same quota/abort, blocked/versionchange and scheduling premises
-  at public and durable cuts. Crash durability and timing guarantees remain
-  unproved. Package transport/settlement owners also need downstream consumers
-  and raw event traces for multiplicity, kinds, previous values and transient
-  publications. A Map-folded settled mirror cannot prove those observations.
+The original portfolio's gaps in three-owner acceptance, middle-row failure,
+whole-row omission and raw/downstream observations are addressed by the bounded
+extension below. Its remaining-boundaries section and the repository coverage
+map are the current gap inventory.
 
 Same-key concurrent writers still need an explicit conflict policy and receiving
 witness. Separate per-Collection acceptance calls do not promise cross-Collection
@@ -261,3 +235,109 @@ transaction, exact handler payload multiplicity/keys, and public/durable
 observations through an adapter. The package compatibility owner preserves typed
 keys in restored/imported rows and separate accepted operations; it does not
 claim this same-transaction boundary is closed. No adapter workaround is added.
+
+## Concurrent-history extension
+
+The executable companions keep distinct responsibilities:
+
+| Owner                                                                            | Model and checkpoint                                                                                                                                                                          | Bound                                                                                                                                                                      |
+| -------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `cross-tab-oracle.ts`, `cross-tab-driver.ts`, `cross-tab-history-oracle.test.ts` | Authored durable ledger and independent per-Collection public snapshots; whole read effects explain every raw publication in one increasing history                                           | 30 fixed + 30 fresh histories; three Collections/two stores, 0–20 operations; stress uses 300+300, five Collections, up to 100 operations                                  |
+| `cross-tab-boundary-oracle.test.ts`                                              | Stale-peer admission, genuine optional-field omission, caught/spurious/obsolete status, overlap and atomic replacement                                                                        | Positive boundary witnesses, partial-row and status controls, serial-fixture non-reach; 16 sender/delivery schedules in the history owner                                  |
+| `pending-history-oracle.test.ts`                                                 | One held multi-row intent, durable rows, exposed base, queued source batches and acknowledgement attribution; public/raw/downstream snapshots at handler entry, each peer step and settlement | 24 CRUD × peer action × decision cases, with all actual peer CRUD operations reached; 30+30 generated histories of up to four peer actions, 1–3 local rows; stress 300+300 |
+| `persistence-oracle.test.ts`                                                     | Three distinct Collection owners, mixed deletes/inserts, two stores and version isolation after each acceptance                                                                               | All six acceptance orders; no cross-Collection atomicity or same-ID identity policy                                                                                        |
+| `settlement-oracle.test.ts`                                                      | Failure before, within and after valid rows in a three-row native batch                                                                                                                       | First/middle/last clone failures × automatic/manual/import, with populated replacement rollback                                                                            |
+| `e2e/cross-tab-oracle.spec.ts`                                                   | Native IndexedDB and BroadcastChannel, independent same-origin pages, runner-owned raw evidence                                                                                               | Chromium, Firefox and WebKit; pinned receiving matrix and 10 fixed + 10 fresh histories per engine                                                                         |
+
+The transport model combines exposed base and public rows only when local
+mutations have settled. The pending companion keeps them separate. It adapts
+`packages/db/tests/optimistic-history-oracle.ts`: ordinary source work queues,
+replacement drains, active whole-row intent overlays the source, and a source
+acknowledgement spends row attribution once. An unchanged Collection update
+authors no mutation; it cannot contribute a second acknowledgement. Accepted
+writes in this grammar have an explicit durable order: peer persistence finishes
+before the held local handler is released. This does not assign a winner to
+unordered same-key writers.
+
+A notification starts a new read of current durable values. Expectations use the
+authored ledger at the read window, never observed payloads, versions or returned
+rows. Several whole effects may coalesce. Every raw event must still be valid for
+its subscriber's prior state, including key type, multiplicity, kind, value and
+previous value; callback-time rows must agree. The pure checker rejects transient
+partial publications even when a later publication repairs the final snapshot.
+Collection status is observed independently of receiver promise fulfillment.
+
+The old settled fixture awaited each callback and could not expose concurrent
+readonly completion. `Channel.dispatch` and its completion receipts now separate
+those cuts. A native readwrite transaction issues real requests while held; reads
+queue behind its scope. No IDB transaction waits on an unrelated Promise.
+Retained old callbacks execute after cleanup, so the fixture cannot supply the
+adapter's invalidation guard for it. Failure cleanup retains the primary error.
+
+### Defects exposed by the extension
+
+- Import sent both replacement and targeted notifications. A targeted read could
+  finish first and briefly publish the union of old and imported rows. The
+  controlled publication witness and Chromium generated histories failed before
+  repair. Import now sends one replacement notification.
+- A delayed local insert could persist after a peer inserted the same key, then
+  reject when source confirmation attempted a duplicate insert. The held-intent
+  oracle failed at caller settlement. Confirmation now uses the existing full-row
+  update contract, matching the adapter's accepted `put` snapshot. Controlled
+  neighboring CRUD/replace histories and native ordered-peer witnesses receive
+  the repair.
+
+The first fix removes one notification; the second changes the confirmation
+operation. Neither adds a queue, retry, fallback or lifecycle state.
+
+### Native receiving and evidence
+
+Native tests prove overlap with callback entry/completion and pending readonly
+transactions. Two ordered imports are admitted before a test-owned blocker;
+both notifications start real reads while that blocker remains live. A mutant
+splits a replacement only after this overlap is reached, then repairs it. The
+runner receives immutable raw events with document/instance/sync-run/sequence
+identity before closing the page while its application handler is still pending.
+The checker retains the original atomic-publication failure after page close;
+dropping an export fails the evidence-capture control. Replay checks input
+reconstruction, premise reach and the same law/checkpoint separately.
+
+Other native witnesses cover delete/reinsert omission via an ordinary update,
+startup subscriptions crossed with a peer write, managed versionchange with a
+held test-owned transaction, an unmanaged deletion blocker, active/obsolete read
+aborts, write abort after request progress, fresh restore, and accepted/rejected
+held intent after peer persistence. A test-owned `abort()` exercises a real
+native abort, not quota exhaustion. No public error status is invented for
+versionchange itself. Closing a managed descriptor still requires recreation.
+
+`campaign.ts` records seed/path, original and reduced histories, reached premises,
+expected/actual mismatch, replay outcome, base commit, fast-check version and
+fixture/engine identity in `test-results/oracles`. Reduction retains the original
+law/checkpoint and required premises. A captured native failure remains a failure
+if replay cannot recover its timing. Browser attachments retain raw events and
+cleanup errors outside the page. CI uploads these artifacts even on failure.
+
+```sh
+pnpm test:oracles
+pnpm test:oracles:stress
+pnpm exec playwright install chromium firefox webkit
+pnpm test:browser
+# Direct selected history; fixed/fresh campaigns do not run first:
+TANSTACK_INDEXEDDB_ORACLE_SEED=<seed> TANSTACK_INDEXEDDB_ORACLE_PATH=<path> pnpm test:oracles
+TANSTACK_INDEXEDDB_PENDING_SEED=<seed> TANSTACK_INDEXEDDB_PENDING_PATH=<path> pnpm test:oracles
+TANSTACK_INDEXEDDB_BROWSER_SEED=<seed> TANSTACK_INDEXEDDB_BROWSER_PATH=<path> pnpm test:browser --project=chromium
+```
+
+### Remaining boundaries
+
+These are bounded refinement checks, not a proof against every interleaving.
+The transport grammar completes writes before concurrent read windows; the
+pending grammar has one local intent and ordered peer work. Reads straddling
+unordered writes, several simultaneous local intents, adapter writes in flight
+at versionchange, cleanup's pending mutation caller/confirmation policy, same-ID
+manual ownership, lost notifications after suspension, post-durability send
+failure (AUX01), nested mutable input identity, quota, eviction, physical crash
+durability and uncontrolled page discard remain open. The controlled destruction
+protocol does not observe an unacknowledged last event before a crash. HC005,
+the core typed-key mutation-payload counterexample, remains under its core owner.
+The coverage map names the needed witnesses; none is waived by random green.

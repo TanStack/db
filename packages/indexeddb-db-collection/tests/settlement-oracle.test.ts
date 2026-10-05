@@ -161,18 +161,19 @@ describe('application decision precedes durability', () => {
 
 describe('atomic persistence and truthful settlement', () => {
   for (const entry of ['automatic', 'manual', 'import'] as const) {
-    for (const badIndex of [0, 1]) {
+    for (const badIndex of [0, 1, 2]) {
       it(entry + ' rolls back a clone failure at row ' + badIndex, async () => {
         await withHarness(async (h) => {
-          // Import starts empty here: failure atomicity over a populated
-          // replacement has its own explicit API decision in ORACLE.md.
-          const before = entry === 'import' ? [] : original
+          // The approved import contract retains a populated store on failure.
+          // Three rows distinguish a middle abort from first/terminal failure.
+          const before = original
           await seed(h.db, 'items', before)
           const collection = await h.open()
           const peer = await h.open()
           const rows: Array<Row> = [
             { id: 3, name: 'valid' },
             { id: 4, name: 'valid' },
+            { id: 5, name: 'valid' },
           ]
           rows[badIndex] = { ...rows[badIndex]!, unsupported: () => {} }
           const beforeVersions = await readStore(h.db, '_versions')

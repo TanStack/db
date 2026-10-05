@@ -28,11 +28,20 @@ export function deferred<T = void>() {
 
 // A controlled transport, not an implementation of browser scheduling. Only the
 // sender supplies payloads. Delivery preserves structured cloning and routing;
-// the test controls the handoff and awaits the receiver's work, without sleeps.
+// dispatch starts work without awaiting it; completion is a separate cut.
+// deliver retains the original serial checkpoint for existing settled tests.
+export type Delivery = {
+  peer: Channel
+  status: 'pending' | 'fulfilled' | 'rejected'
+  failure?: unknown
+  completion: Promise<void>
+}
 export class Channel {
   static peers = new Set<Channel>()
   static pending: Array<{ peer: Channel; data: unknown }> = []
   static sent: Array<unknown> = []
+  static inFlight = new Set<Delivery>()
+  static failures: Array<unknown> = []
   onmessage: ((event: MessageEvent) => void | Promise<void>) | null = null
   constructor(readonly name: string) {
     Channel.peers.add(this)
@@ -47,13 +56,50 @@ export class Channel {
   close() {
     Channel.peers.delete(this)
   }
-  static async deliver() {
-    const messages = Channel.pending.splice(0)
-    for (const { peer, data } of messages) {
-      if (Channel.peers.has(peer))
-        await peer.onmessage?.(new MessageEvent('message', { data }))
+  static dispatch(index = 0): Delivery | undefined {
+    const message = Channel.pending.splice(index, 1)[0]
+    if (!message || !Channel.peers.has(message.peer)) return
+    const { peer, data } = message
+    let completion: Promise<void>
+    try {
+      completion = Promise.resolve(
+        peer.onmessage?.(new MessageEvent('message', { data })),
+      )
+    } catch (error) {
+      completion = Promise.reject(error)
     }
-    return messages.length
+    const delivery: Delivery = { peer, status: 'pending', completion }
+    Channel.inFlight.add(delivery)
+    // Observe rejection at dispatch, even if the test awaits a different peer.
+    void completion.then(
+      () => {
+        delivery.status = 'fulfilled'
+        Channel.inFlight.delete(delivery)
+      },
+      (error: unknown) => {
+        delivery.status = 'rejected'
+        delivery.failure = error
+        Channel.failures.push(error)
+        Channel.inFlight.delete(delivery)
+      },
+    )
+    return delivery
+  }
+  static async deliver() {
+    const count = Channel.pending.length
+    for (let index = 0; index < count; index++)
+      await Channel.dispatch()?.completion
+    return count
+  }
+  static async drain() {
+    while (Channel.pending.length || Channel.inFlight.size) {
+      while (Channel.pending.length) Channel.dispatch()
+      await Promise.allSettled(
+        [...Channel.inFlight].map((delivery) => delivery.completion),
+      )
+    }
+    const failures = Channel.failures.splice(0)
+    if (failures.length) throw new AggregateError(failures, 'Receiver failures')
   }
 }
 
@@ -141,6 +187,13 @@ export async function withHarness(
     failed = true
   }
   const cleanupErrors: Array<unknown> = []
+  for (const dispose of harness.disposers) {
+    try {
+      await dispose()
+    } catch (error) {
+      cleanupErrors.push(error)
+    }
+  }
   for (const collection of harness.collections) {
     try {
       await collection.cleanup()
@@ -148,7 +201,12 @@ export async function withHarness(
       cleanupErrors.push(error)
     }
   }
-  harness.db.close()
+  try {
+    await Channel.drain()
+  } catch (error) {
+    cleanupErrors.push(error)
+  }
+  for (const descriptor of harness.descriptors) descriptor.close()
   Channel.peers.clear()
   Channel.pending = []
   Channel.sent = []
@@ -169,6 +227,17 @@ async function createHarness(stores: Array<string>) {
     version: 1,
     stores,
   })
+  const descriptors = [db]
+  const disposers: Array<() => void | Promise<unknown>> = []
+  async function connect() {
+    const descriptor = await createIndexedDB({
+      name: db.name,
+      version: 1,
+      stores,
+    })
+    descriptors.push(descriptor)
+    return descriptor
+  }
   function make(
     name = 'items',
     config: Partial<IndexedDBCollectionConfig<Row>> = {},
@@ -193,5 +262,5 @@ async function createHarness(stores: Array<string>) {
     await collection.preload()
     return collection
   }
-  return { db, collections, make, open }
+  return { db, descriptors, disposers, collections, make, open, connect }
 }
