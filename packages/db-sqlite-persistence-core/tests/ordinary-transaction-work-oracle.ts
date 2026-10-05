@@ -49,7 +49,7 @@ type Observation = {
  * Design grammar: empty/single/boundary/10k distinct keys; existing versus
  * absent row; insert/update/delete; inline versus later row metadata; matching
  * and unmatched metadata; repeated keys; tombstones; collection metadata;
- * 100 versus 999 bound-parameter caps and replay count 128 versus 130.
+ * 100, 500, and 999 bound-parameter caps and replay count 128 versus 130.
  * The fixed cases below reconstruct each axis and its adjacent value. Removing
  * a size boundary loses the chunk-cut witness; removing the seed loses merge
  * and prior metadata; removing repeated keys admits an unsafe reordering.
@@ -85,7 +85,7 @@ type Observation = {
  * expected keys, tombstones, position, and replay. Count calls only between
  * adapter entry and return, after schema setup and before the snapshot reads.
  * The bound is deliberately loose: 12 fixed calls plus six calls per family
- * chunk of at most floor(maxBoundParameters / 4) distinct keys. It rules out
+ * chunk of at most min(125, floor(maxBoundParameters / 4)) distinct keys. It rules out
  * per-action persistence for repeated keys,
  * not every inefficient SQL design. This is a proposed work contract, not a
  * measured browser latency or proof for Cloudflare Workers, OPFS scheduling,
@@ -402,6 +402,14 @@ const workCases: Array<Case> = [0, 1, 24, 25, 26, 99, 100, 101, 205].map(
     candidate: insertRows(size),
     workSize: size,
   }),
+)
+workCases.push(
+  ...[124, 125, 126].map((size) => ({
+    name: `unique-${size}-500-parameter-cap`,
+    cap: 500,
+    candidate: insertRows(size),
+    workSize: size,
+  })),
 )
 function updateRows(count: number): Case {
   const ids = Array.from({ length: count }, (_, i) => `row-${i}`)
@@ -898,7 +906,7 @@ async function assertIndependentWork(
       await observe(host.adapter, host.driver, collectionId),
       'independent-key durable checkpoint',
     ).toEqual(modelAfter(history))
-    const chunk = Math.min(100, Math.floor(input.cap / 4))
+    const chunk = Math.min(125, Math.floor(input.cap / 4))
     const bound = 12 + 6 * Math.ceil(input.size / chunk)
     expect(
       counts.query + counts.run,
@@ -1363,7 +1371,7 @@ export function runOrdinaryTransactionWorkOracle(): void {
             `${item.name}: one SQLite transaction`,
           ).toBe(1)
           if (item.workSize !== undefined) {
-            const chunk = Math.min(100, Math.floor(item.cap / 4))
+            const chunk = Math.min(125, Math.floor(item.cap / 4))
             const bound =
               12 +
               6 * (item.workFamilies ?? 1) * Math.ceil(item.workSize / chunk)
@@ -1392,6 +1400,16 @@ export function runOrdinaryTransactionWorkOracle(): void {
           row.bound,
         )
       }
+      const atSize = (size: number) =>
+        workObservations.find(
+          (row) => row.case === `unique-${size}-500-parameter-cap`,
+        )!
+      expect(atSize(124).calls).toBeLessThanOrEqual(10)
+      expect(atSize(124).maxParams).toBe(496)
+      expect(atSize(125).calls).toBeLessThanOrEqual(10)
+      expect(atSize(125).maxParams).toBe(500)
+      expect(atSize(126).calls).toBeLessThanOrEqual(15)
+      expect(atSize(126).maxParams).toBe(500)
     })
 
     it('rejects a writer that discards existing metadata while batching', async () => {

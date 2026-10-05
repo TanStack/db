@@ -442,7 +442,9 @@ metadata, to reject and roll back. Fixed 25/26 and
 10,000-row cases separately witness the independent-key work boundary. Both
 fixed and generated independent-key work laws were
 RED on `ef1e6a4` and are GREEN with ordinary batching: the 10,000-row insert
-plus metadata takes 505 query/run calls instead of 50,005. A temporary
+plus metadata takes 505 query/run calls instead of 50,005. A later
+125-row-ceiling follow-up checks 124/125/126 rows under a 500-parameter host
+cap; the 10,000-row case now takes 405 calls. A temporary
 repeated-key classifier mutation fails the generated oracle at the candidate
 durable checkpoint, seed 1992, path `2:0:0:2:2:2:2`. A temporary chunk-limit
 mutation passes the Cloudflare 25-row case but fails at 26 rows under the

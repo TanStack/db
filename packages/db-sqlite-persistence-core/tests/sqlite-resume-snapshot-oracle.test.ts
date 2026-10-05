@@ -879,7 +879,7 @@ describe(`SQLite resume snapshots`, () => {
       ])
       // The host-dependent cost is a database call, not the in-process timing.
       expect(replacementCalls).toBeLessThanOrEqual(40)
-      expect(maxReplacementBoundParameters).toBe(400)
+      expect(maxReplacementBoundParameters).toBe(500)
     } catch (error) {
       primaryFailure = error
     } finally {

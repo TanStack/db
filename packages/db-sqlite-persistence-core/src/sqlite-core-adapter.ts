@@ -36,7 +36,7 @@ type SqliteSupportedValue = null | number | string
 
 // The default stays below SQLite's older 999-variable limit. Drivers with a
 // lower binding cap use smaller chunks; each replacement row binds four values.
-const REPLACEMENT_BATCH_SIZE = 100
+const REPLACEMENT_BATCH_SIZE = 125
 
 type CollectionTableMapping = {
   tableName: string
