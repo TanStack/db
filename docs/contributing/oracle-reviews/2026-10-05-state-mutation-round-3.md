@@ -190,3 +190,15 @@ This record repairs two grammars and adds one oracle, so ORC-012 applies.
   after an explicit set.
 - **ORC-014: not applicable.** No controlled provider or host supplies a
   premise.
+
+## Note added 2026-10-05: settlement drop
+
+The settlement-drop change
+([2026-10-03 review](2026-10-03-settlement-drop.md)) removes the retention
+of completed optimistic rows. Under that law, a delete and a re-insert can no
+longer overlay the source row after they settle. The two fixed partial-update
+histories therefore run the partial update while both transactions persist.
+The update is held, and it publishes with the drop at settlement. The row keeps
+the source's merged `c`. The partial-as-full witness is still rejected, now
+by the row observation at settlement. S13 still fails the retention oracle on
+the merged revision, and S6 still fails the reentrancy oracle.

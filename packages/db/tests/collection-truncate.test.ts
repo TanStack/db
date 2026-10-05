@@ -100,7 +100,7 @@ describe(`Collection truncate operations`, () => {
     expect(key3Inserts.length).toBe(1)
   })
 
-  it(`should preserve optimistic inserts when mutation handler completes during truncate processing`, async () => {
+  it(`drops a confirmed insert that a later truncate replacement omits`, async () => {
     const changeEvents: Array<any> = []
     let syncOps:
       | Parameters<SyncConfig<{ id: number; value: string }, number>[`sync`]>[0]
@@ -148,76 +148,11 @@ describe(`Collection truncate operations`, () => {
 
     syncOps!.commit()
 
-    // Both items should be present in final state
-    expect(collection.state.size).toBe(2)
+    // The handler's confirmation applied when it settled, before the truncate
+    // committed. The truncate then replaced the synced rows without it.
+    expect(collection.state.size).toBe(1)
     expect(collection.state.has(1)).toBe(true)
-    expect(collection.state.has(2)).toBe(true)
-    expect(getStateValue(collection, 2)).toEqual({ id: 2, value: `new-item` })
-  })
-
-  it(`restores the captured accepted owner instead of a rolled-back same-key winner`, async () => {
-    let syncOps:
-      | Parameters<SyncConfig<{ id: number; value: string }, number>[`sync`]>[0]
-      | undefined
-    let finishInsert!: () => void
-    let finishUpdate!: () => void
-    const insertGate = new Promise<void>((resolve) => {
-      finishInsert = resolve
-    })
-    const updateGate = new Promise<void>((resolve) => {
-      finishUpdate = resolve
-    })
-    const collection = createCollection<{ id: number; value: string }, number>({
-      id: `truncate-captured-owner`,
-      getKey: (item) => item.id,
-      startSync: true,
-      sync: {
-        sync: (actions) => {
-          syncOps = actions
-          actions.markReady()
-        },
-      },
-      onInsert: () => insertGate,
-      onUpdate: () => updateGate,
-    })
-
-    try {
-      await collection.stateWhenReady()
-      const accepted = collection.insert({ id: 1, value: `accepted` })
-      finishInsert()
-      await accepted.isPersisted.promise
-
-      const rolledBack = collection.update(1, (draft) => {
-        draft.value = `rolled back`
-      })
-      const rolledBackOutcome = rolledBack.isPersisted.promise.catch(
-        (error) => error,
-      )
-      expect(getStateValue(collection, 1)).toEqual({
-        id: 1,
-        value: `rolled back`,
-      })
-
-      syncOps!.begin()
-      syncOps!.truncate()
-      rolledBack.rollback()
-      finishUpdate()
-      await rolledBackOutcome
-      expect(getStateValue(collection, 1)).toEqual({
-        id: 1,
-        value: `accepted`,
-      })
-
-      expect(syncOps!.commit()).toBe(true)
-      expect(getStateValue(collection, 1)).toEqual({
-        id: 1,
-        value: `accepted`,
-      })
-    } finally {
-      finishInsert()
-      finishUpdate()
-      await collection.cleanup()
-    }
+    expect(collection.state.has(2)).toBe(false)
   })
 
   it(`should handle truncate on empty collection followed by mutation sync`, async () => {
@@ -789,10 +724,9 @@ describe(`Collection truncate operations`, () => {
     syncOps!.write({ type: `insert`, value: { id: 1, value: `initial` } })
     syncOps!.commit()
 
-    // Item 2 should still be present (preserved from snapshot)
-    expect(collection.state.size).toBe(2)
-    expect(collection.state.has(2)).toBe(true)
-    expect(getStateValue(collection, 2)).toEqual({ id: 2, value: `optimistic` })
+    // The insert settled without a confirmation, so its row dropped.
+    expect(collection.state.size).toBe(1)
+    expect(collection.state.has(2)).toBe(false)
   })
 
   it(`should buffer subscription changes during truncate until loadSubset refetch completes`, async () => {

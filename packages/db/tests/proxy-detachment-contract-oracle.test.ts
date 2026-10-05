@@ -37,7 +37,10 @@ class Label {
   }
 }
 
+// The handler confirms each update through sync, so the stored row is the
+// update's result once the mutation settles.
 function storedRowOptions<T extends object>(row: T & { id: number }) {
+  let confirm: (rows: Array<T & { id: number }>) => void = () => {}
   return {
     getKey: (value) => value.id,
     startSync: true,
@@ -47,9 +50,17 @@ function storedRowOptions<T extends object>(row: T & { id: number }) {
         write({ type: `insert`, value: row })
         commit()
         markReady()
+        confirm = (rows) => {
+          begin()
+          for (const value of rows) write({ type: `update`, value })
+          commit()
+        }
       },
     },
-    onUpdate: () => Promise.resolve(),
+    onUpdate: ({ transaction }) => {
+      confirm(transaction.mutations.map((mutation) => mutation.modified))
+      return Promise.resolve()
+    },
   } satisfies CollectionConfig<T & { id: number }, number>
 }
 
