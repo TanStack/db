@@ -139,21 +139,6 @@ const schema = z.object({
 // TInput:  { created_at: string | Date }
 // TOutput: { created_at: Date }
 // Success: draft.created_at can be a Date because TInput accepts Date!
-
-// ✅ GOOD: Codecs Allow you to define a Bi-Directional Dataflow. ( Requires zod@4.1 )
-const dateCodec = z.codec(
-    z.union([z.string(), z.date()]), // Input Schema - Input must be a superset of TOutput
-    z.date(),                        // Output Schema 
-    {
-        decode: (val : string | Date ) => (typeof val === 'string' ? new Date(val) : val), 
-        encode: (val : Date ) => val.toISOString()
-    }
-);
-const schema = z.object({
-  created_at: dateCodec
-})
-
-
 ```
 
 **Rule of thumb:** If your schema transforms type A to type B, use `z.union([A, B])` to ensure TInput accepts both.
@@ -180,7 +165,6 @@ const collection = createCollection({
       ...item,
       created_at: item.created_at.toISOString()  // Date → string
     })
-    
   }
 })
 
@@ -195,41 +179,73 @@ collection.insert({
 const todo = collection.get("1")
 console.log(todo.created_at.getFullYear())  // It's a Date!
 ```
-## Codecs ( `zod@4.1` )
 
-Codecs allow you to implicitly define schemas where the input and output types diverge, it also allows you to define how to handle both directions of transformation.
+## Codecs (Zod 4.1+)
 
-This allows you to represent JSON Compatible data coming from the server, and the richer javascript representation for the front end ( Dates, Sets, Maps, etc... ).
+[Zod codecs](https://zod.dev/codecs) define transformations in both directions. For example, a codec can decode an ISO datetime string into a `Date` and encode that `Date` back into a string for your API.
 
-This also allows you to use features like transform, without breaking JSONSchema compatiblity, allowing you to reuse schema definitions in more places. 
-
-If you are building codecs or using codecs from the link below, remember to modify them such that input is a super set of output. 
-
-[ Documentation ]( https://zod.dev/codecs )
-
-[ Common Codecs ](https://zod.dev/codecs#useful-codecs)
+As with other transformations, the codec's input must accept its output values. Include `z.date()` in the input so that updates can validate dates already stored in the collection, even when only an unrelated field changes.
 
 ```typescript
-// ❌ BAD: TInput only accepts strings
-const isoDatetimeToDate = z.codec(z.iso.datetime(), z.date(), {
-  decode: (isoString) => new Date(isoString),
-  encode: (date) => date.toISOString(),
-});
-// ✅ GOOD: Codecs Allow you to define a Bi-Directional Dataflow. ( Requires zod@4.1 )
+import { z } from 'zod'
+
 const dateCodec = z.codec(
-    z.union([z.iso.datetime(), z.date()]), // Input Schema - Input must be a superset of TOutput
-    z.date(),                        // Output Schema 
-    {
-        // Since we have to accept a union type we must also properly handle all input types.
-        decode: (val : string | Date ) => (typeof val === 'string' ? new Date(val) : val), 
-        encode: (val : Date ) => val.toISOString()
-    }
-);
+  z.union([z.iso.datetime(), z.date()]),
+  z.date(),
+  {
+    decode: (value) => typeof value === 'string' ? new Date(value) : value,
+    encode: (value) => value.toISOString(),
+  }
+)
+
+const todoApiSchema = z.object({
+  id: z.string(),
+  text: z.string(),
+  created_at: z.iso.datetime(),
+})
+
+const todoSchema = todoApiSchema.extend({
+  created_at: dateCodec,
+})
+// TInput:  { id: string, text: string, created_at: string | Date }
+// TOutput: { id: string, text: string, created_at: Date }
 ```
 
+TanStack DB uses the codec's forward transformation when validating inserts and updates. It does not automatically decode server data or encode outgoing mutations. For a Query Collection, decode server rows in `queryFn` and call `z.encode()` in your mutation handler:
 
+```typescript
+import { createCollection } from '@tanstack/db'
+import { queryCollectionOptions } from '@tanstack/query-db-collection'
+import { QueryClient } from '@tanstack/query-core'
 
+const collection = createCollection(
+  queryCollectionOptions({
+    schema: todoSchema,
+    queryKey: ['todos'],
+    queryClient: new QueryClient(),
+    queryFn: async () => todoSchema.array().parse(await api.todos.getAll()),
+    getKey: (todo) => todo.id,
+    onInsert: async ({ transaction, collection }) => {
+      for (const mutation of transaction.mutations) {
+        const payload = todoApiSchema.parse(
+          z.encode(todoSchema, mutation.modified)
+        )
+        await api.todos.create(payload)
+      }
+      await collection.utils.refetch()
+      return { refetch: false }
+    },
+  })
+)
+```
 
+`z.encode()` returns the codec's input type, so TypeScript still sees `created_at` as `string | Date`. Parsing the encoded payload with `todoApiSchema` validates the API format and narrows that field to `string`.
+
+Use the same `z.encode(todoSchema, mutation.modified)` call in `onUpdate` when your API accepts a full row. The full schema requires every field, so it cannot encode a partial `mutation.changes` object.
+
+For JSON Schema, export `todoApiSchema` with `z.toJSONSchema(todoApiSchema)`. The collection's date codec contains `z.date()` on both sides, so exporting `todoSchema` throws for both input and output conversion.
+
+See Zod's [codec examples](https://zod.dev/codecs#useful-codecs) for other conversions, and adapt their input schemas to accept the values stored in your collection.
 
 ---
 
