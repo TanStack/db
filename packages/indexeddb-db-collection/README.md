@@ -345,13 +345,11 @@ const db = await createIndexedDB({
 })
 ```
 
-## License
-
-MIT
-
-## Testing
-
 Run the package test script for runtime tests, type assertions, coverage, and
 both oracle campaigns. Run the typecheck script to check all test-driver types
 as well. The [oracle contract and audit](tests/ORACLE.md) describes the model,
 replay coordinates, fault witnesses, and coverage limits.
+
+## License
+
+MIT
