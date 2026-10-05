@@ -1139,26 +1139,19 @@ export class CollectionStateManager<
   private rebuildAutomaticRowMetadataWrites(
     transaction: PendingSyncedTransaction<TOutput, TKey>,
   ): void {
-    // Replay the writes in order. A rebuild can reclassify an operation, so
-    // an explicit write must keep its place among the automatic ones.
+    // A rebuild can reclassify an operation. Last write wins: each key's
+    // last explicit write holds unless a later operation writes the key.
     const explicit = transaction.explicitRowMetadataWrites ?? new Map()
-    const applied = new Set<TKey>()
     const writes = transaction.rowMetadataWrites
     for (const operation of transaction.operations)
       writes.delete(operation.key as TKey)
+    for (const [key, last] of explicit) writes.set(key, last.write)
     transaction.operations.forEach((operation, position) => {
       const key = operation.key as TKey
-      const last = explicit.get(key)
-      if (last && last.position <= position && !applied.has(key)) {
-        applied.add(key)
-        writes.set(key, last.write)
-      }
+      if (position < (explicit.get(key)?.position ?? 0)) return
       const metadataWrite = automaticRowMetadataWrite(operation)
       if (metadataWrite) writes.set(key, metadataWrite)
     })
-    for (const [key, last] of explicit) {
-      if (!applied.has(key)) writes.set(key, last.write)
-    }
   }
 
   private rebuildPendingSyncedProjection(): Array<{

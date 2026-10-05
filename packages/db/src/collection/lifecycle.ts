@@ -179,13 +179,12 @@ export class CollectionLifecycleManager<
    * holding them and returns the first one.
    */
   public deferReadyFailures(): () => { error: unknown } | undefined {
-    const previous = this.readyFailureSink
     let first: { error: unknown } | undefined
     this.readyFailureSink = (failure) => {
       first ??= failure
     }
     return () => {
-      this.readyFailureSink = previous
+      this.readyFailureSink = undefined
       return first
     }
   }
