@@ -103,11 +103,13 @@ Store creation is additive. Omitting an existing store from `stores` preserves t
 | Option                             | Required | Description                                                                   |
 | ---------------------------------- | -------- | ----------------------------------------------------------------------------- |
 | `db`                               | Yes      | Instance returned by `createIndexedDB`.                                       |
-| `name`                             | Yes      | An existing object store in that database.                                    |
+| `name`                             | Yes      | An existing object store with out-of-line keys (`keyPath: null`).             |
 | `getKey`                           | Yes      | Extracts a stable string or number key from each row.                         |
 | `id`                               | No       | Collection identifier. Defaults to `indexeddb-collection:<database>:<store>`. |
 | `schema`                           | No       | A Standard Schema compatible schema for mutation and import validation.       |
 | `onInsert`, `onUpdate`, `onDelete` | No       | Application handlers that must succeed before the adapter persists mutations. |
+
+Collection stores must use out-of-line keys (`keyPath: null`) because persistence passes the value returned by `getKey` as an explicit IndexedDB key. `createIndexedDB` creates stores this way. If you reuse an existing store, check its key mode first. The inline-key examples in the lower-level [`createObjectStore` reference](../reference/indexeddb-db-collection/functions/createObjectStore.md) are not compatible with Collection persistence.
 
 Use values supported by IndexedDB's structured clone algorithm. Functions cannot be stored. Choose a consistent key type for each Collection.
 
