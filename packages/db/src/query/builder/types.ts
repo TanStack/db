@@ -280,8 +280,7 @@ type SelectShape = { [key: string]: SelectValue | SelectShape }
 // Selection inference accepts both row-root refs (with virtual row fields) and
 // nested object refs (without them).
 type AnyRef<T = any, Nullable extends boolean = false> =
-  | Ref<T, Nullable, true>
-  | Ref<T, Nullable, false>
+  Ref<T, Nullable, true> | Ref<T, Nullable, false>
 export type ScalarSelectValue =
   | BasicExpression
   | Aggregate
@@ -356,14 +355,11 @@ export type ResultTypeFromSelectValue<TSelectValue> =
                               ? T | null | undefined
                               : T | null
                             : TSelectValue extends
-                                  | AnyRef<infer _T>
-                                  | null
-                                  | undefined
-                              ?
-                                  | ExtractRef<
-                                      Exclude<TSelectValue, null | undefined>
-                                    >
-                                  | Extract<TSelectValue, null | undefined>
+                                  AnyRef<infer _T> | null | undefined
+                              ? | ExtractRef<
+                                    Exclude<TSelectValue, null | undefined>
+                                  >
+                                | Extract<TSelectValue, null | undefined>
                               : TSelectValue extends Aggregate<infer T>
                                 ? T
                                 : TSelectValue extends
@@ -457,8 +453,7 @@ export type ResultTypeFromSelect<TSelectObject> =
                               : T
                             : // RefLeaf | undefined (schema-optional field)
                               TSelectObject[K] extends
-                                  | RefLeaf<infer T>
-                                  | undefined
+                                  RefLeaf<infer T> | undefined
                               ? T | undefined
                               : // RefLeaf | null (schema-nullable field)
                                 TSelectObject[K] extends RefLeaf<infer T> | null
@@ -469,20 +464,17 @@ export type ResultTypeFromSelect<TSelectObject> =
                                   : T | null
                                 : // Nullable and/or optional object-type schema field
                                   TSelectObject[K] extends
-                                      | AnyRef<infer _T>
-                                      | null
-                                      | undefined
-                                  ?
-                                      | ExtractRef<
-                                          Exclude<
-                                            TSelectObject[K],
-                                            null | undefined
-                                          >
-                                        >
-                                      | Extract<
+                                      AnyRef<infer _T> | null | undefined
+                                  ? | ExtractRef<
+                                        Exclude<
                                           TSelectObject[K],
                                           null | undefined
                                         >
+                                      >
+                                    | Extract<
+                                        TSelectObject[K],
+                                        null | undefined
+                                      >
                                   : TSelectObject[K] extends Aggregate<infer T>
                                     ? T
                                     : TSelectObject[K] extends
@@ -582,11 +574,7 @@ type ExtractExpressionType<T> =
 
 // Helper type to check if a type needs expression type extraction
 type NeedsExtraction<T> = T extends
-  | PropRef<any>
-  | Value<any>
-  | Func<any>
-  | Aggregate<any>
-  | BasicExpression<any>
+  PropRef<any> | Value<any> | Func<any> | Aggregate<any> | BasicExpression<any>
   ? true
   : false
 
@@ -761,8 +749,9 @@ type BranchUnionResultRefs<TContext extends Context> =
 type JoinedRefsForContext<TContext extends Context> =
   TContext[`joinTypes`] extends Record<string, any>
     ? {
-        [K in keyof TContext[`joinTypes`] &
-          keyof TContext[`schema`]]: RefForContextSchemaValue<
+        [
+          K in keyof TContext[`joinTypes`] & keyof TContext[`schema`]
+        ]: RefForContextSchemaValue<
           TContext[`schema`][K],
           IsNullableContextKey<TContext, K>
         >
@@ -770,10 +759,13 @@ type JoinedRefsForContext<TContext extends Context> =
     : object
 
 export type RefsForContext<TContext extends Context> = {
-  [K in Exclude<
-    KeysOfUnion<RefsSchemaForContext<TContext>>,
-    keyof JoinedRefsForContext<TContext> | keyof BranchUnionResultRefs<TContext>
-  >]: RefForContextSchemaValue<
+  [
+    K in Exclude<
+      KeysOfUnion<RefsSchemaForContext<TContext>>,
+      | keyof JoinedRefsForContext<TContext>
+      | keyof BranchUnionResultRefs<TContext>
+    >
+  ]: RefForContextSchemaValue<
     ValueOfUnion<RefsSchemaForContext<TContext>, K>,
     IsNullableContextKey<TContext, K>
   >
@@ -1060,7 +1052,7 @@ export type ApplyJoinOptionalityToMergedSchema<
   // Apply optionality to new schema based on join type
   [K in keyof TNewSchema]: TJoinType extends `left` | `full`
     ? // New table becomes optional for left and full joins
-        TNewSchema[K] | undefined
+      TNewSchema[K] | undefined
     : // New table is required for inner and right joins
       TNewSchema[K]
 }

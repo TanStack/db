@@ -7,4 +7,4 @@ title: SourceClauseContext
 type SourceClauseContext = "from clause" | "unionAll clause" | "join clause";
 ```
 
-Defined in: [packages/db/src/errors.ts:438](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L438)
+Defined in: [packages/db/src/errors.ts:448](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L448)

@@ -113,13 +113,7 @@ describe(`caseWhen types`, () => {
         withDefault: `senior` | `adult` | `minor`
         withoutDefault: `senior` | `adult` | null
         fallbackOverload:
-          | `one`
-          | `two`
-          | `three`
-          | `four`
-          | `five`
-          | `six`
-          | null
+          `one` | `two` | `three` | `four` | `five` | `six` | null
       }>
     >()
   })

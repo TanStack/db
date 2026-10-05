@@ -9,7 +9,7 @@ title: useLiveQuery
 function useLiveQuery<TContext>(queryFn, deps?): UseLiveQueryReturn<TContext>;
 ```
 
-Defined in: [useLiveQuery.ts:167](https://github.com/TanStack/db/blob/main/packages/vue-db/src/useLiveQuery.ts#L167)
+Defined in: [useLiveQuery.ts:170](https://github.com/TanStack/db/blob/main/packages/vue-db/src/useLiveQuery.ts#L170)
 
 Create a live query using a query function
 
@@ -95,7 +95,7 @@ const { data, isLoading, isError, status } = useLiveQuery((q) =>
 function useLiveQuery<TContext>(queryFn, deps?): ConditionalUseLiveQueryReturn<TContext>;
 ```
 
-Defined in: [useLiveQuery.ts:173](https://github.com/TanStack/db/blob/main/packages/vue-db/src/useLiveQuery.ts#L173)
+Defined in: [useLiveQuery.ts:176](https://github.com/TanStack/db/blob/main/packages/vue-db/src/useLiveQuery.ts#L176)
 
 Create a live query using a query function
 
@@ -181,7 +181,7 @@ const { data, isLoading, isError, status } = useLiveQuery((q) =>
 function useLiveQuery<TContext>(config, deps?): UseLiveQueryReturn<TContext>;
 ```
 
-Defined in: [useLiveQuery.ts:213](https://github.com/TanStack/db/blob/main/packages/vue-db/src/useLiveQuery.ts#L213)
+Defined in: [useLiveQuery.ts:216](https://github.com/TanStack/db/blob/main/packages/vue-db/src/useLiveQuery.ts#L216)
 
 Create a live query using configuration object
 
@@ -249,7 +249,7 @@ const { data, isLoading, isReady, isError } = useLiveQuery({
 function useLiveQuery<TResult, TKey, TUtils>(liveQueryCollection): UseLiveQueryReturnWithCollection<TResult, TKey, TUtils>;
 ```
 
-Defined in: [useLiveQuery.ts:258](https://github.com/TanStack/db/blob/main/packages/vue-db/src/useLiveQuery.ts#L258)
+Defined in: [useLiveQuery.ts:261](https://github.com/TanStack/db/blob/main/packages/vue-db/src/useLiveQuery.ts#L261)
 
 Subscribe to an existing query collection (can be reactive)
 
@@ -328,7 +328,7 @@ const { data, isLoading, isError } = useLiveQuery(sharedQuery)
 function useLiveQuery<TResult, TKey, TUtils>(liveQueryCollection): UseLiveQueryReturnWithSingleResultCollection<TResult, TKey, TUtils>;
 ```
 
-Defined in: [useLiveQuery.ts:269](https://github.com/TanStack/db/blob/main/packages/vue-db/src/useLiveQuery.ts#L269)
+Defined in: [useLiveQuery.ts:272](https://github.com/TanStack/db/blob/main/packages/vue-db/src/useLiveQuery.ts#L272)
 
 Create a live query using a query function
 

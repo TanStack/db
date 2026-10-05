@@ -49,10 +49,7 @@ export type ScopedRef = { id: number; partId: number; clientId: number }
  *   alias but not the anchor join alias.
  */
 export type ScopedTopology =
-  | `fromSubquery`
-  | `unionBranch`
-  | `wrapper`
-  | `unionParent`
+  `fromSubquery` | `unionBranch` | `wrapper` | `unionParent`
 
 export type ScopedSubquery = {
   /** Joins of the subquery source: none, refs, or refs then notes. */

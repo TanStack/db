@@ -1,5 +1,33 @@
 # @tanstack/db
 
+## 0.11.3
+
+### Patch Changes
+
+- Fix two cases where a subscriber without initial state got an insert for a row it already held. A sync truncate inserted a re-applied optimistic row twice when the same commit also changed its key. A sync commit inserted a key again when it retired a completed delete that an active optimistic insert covered. ([#2005](https://github.com/TanStack/db/pull/2005))
+
+## 0.11.2
+
+### Patch Changes
+
+- Make updates and query building cheaper. Updates to rows whose fields are all primitives track changes without a proxy, drafts of other rows allocate less, sorted Collections no longer re-sort when an existing row changes value, published rows reuse one cached copy per key, equality checks on flat rows allocate nothing, and query building copies less. Mutation ids are now a random per-runtime prefix plus a counter instead of a random UUID per mutation; they stay unique across tabs and sessions, but are no longer bare UUIDs. ([#1987](https://github.com/TanStack/db/pull/1987))
+
+- Run development-only checks in browser development builds. The duplicate `@tanstack/db` instance check and React's development warnings (deprecated dependency arrays, unhashable query identity) skipped themselves whenever there was no `process` global, which is the case in Vite and other browser bundles even though they inline `process.env.NODE_ENV`. They now read `process.env.NODE_ENV` as bundlers expect, so an app that loads two copies of `@tanstack/db` in development throws `DuplicateDbInstanceError` as documented. Set `process.env.TANSTACK_DB_DISABLE_DUP_CHECK` to `'1'` through your bundler's `define` to turn the check off. ([#1987](https://github.com/TanStack/db/pull/1987))
+
+- Fix an update that drops a field added as `undefined`. When a callback added a field with the value `undefined` and set another field back to its original value, the draft treated every change as reverted and reported nothing. ([#1987](https://github.com/TanStack/db/pull/1987))
+
+- Make `Object.defineProperty` inside an update callback report what assignment would. Defining a field back to its original value is no longer a change, an enumerable getter reports its value, and assigning a field the callback gave only a getter throws as it would on a plain object. Deleting a non-enumerable field the callback had written is no longer reported as a deletion, matching a plain delete. ([#1987](https://github.com/TanStack/db/pull/1987))
+
+- Fix change messages for a row that returns after it was removed. When a sync commit made a row visible again after a completed optimistic request, often a delete, `subscribeChanges` delivered an `update` for a row the subscriber no longer held. It now delivers an `insert`. ([#1995](https://github.com/TanStack/db/pull/1995))
+
+- Local-only Collections apply direct `insert`, `update`, and `delete` calls without an optimistic stage when no user handler is configured for that operation and no other transaction on the Collection is pending or persisting. The write is published once, and the returned transaction is already `completed` with `isPersisted.promise` resolved. Writes inside an ambient transaction, with a handler, or beside another unsettled transaction behave as before. ([#1987](https://github.com/TanStack/db/pull/1987))
+
+- Mount and update many small filtered live queries at Redux-level cost. A live query that reads one eager source Collection, filters it by at least one `eq(field, literal)`, and has no clause besides `where` and an `orderBy` on its own fields is served from an equality partition shared by every query on those fields, in React, Vue, Solid, Svelte, and Angular. Its other `where` conditions on the row, such as `not`, `gt`, or `like`, are evaluated per query over its group. This applies to a query function, a query builder, and a `{ query }` config that sets no other option besides `queryKey` or `gcTime`. Queries with a `DbClient` (React, Svelte) or React Suspense keep a live-query Collection. Each query reads its group of rows instead of compiling a live query and subscribing to the source. With 240 such queries in React, mounting takes about 2.3 ms instead of 8.2 ms, and is the same with or without an index. ([#1987](https://github.com/TanStack/db/pull/1987))
+
+  Results are unchanged: the same rows in the same order with the same values and status, including a terminal error when the source is cleaned up. Two things can differ. Rows are the source Collection's row objects rather than copies. The returned `collection` is built only when your code reads it, so its automatic id may differ, and tools that list live Collections do not see a pooled query until then.
+
+- Throw `SyncRowReusedWithoutPreviousValueError` in development when a sync source changes a top-level field of a row object it already wrote and writes it again without `previousValue`. The collection keeps the written object as the stored row, so the in-place change overwrote the previous value, and live queries could keep the row in a filter it left. The check compares shallow copies, so it does not detect a change inside a nested object. Production builds skip the check. ([#1988](https://github.com/TanStack/db/pull/1988))
+
 ## 0.11.1
 
 ### Patch Changes

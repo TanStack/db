@@ -20,7 +20,7 @@ import {
   createSQLiteCorePersistenceAdapter,
   persistedCollectionOptions,
 } from '../src'
-import { SqliteCliDriver } from './sqlite-core-adapter.test'
+import { SqliteCliDriver } from './sqlite-core-adapter-oracle.test'
 import type { PersistenceAdapter, SQLiteDriver } from '../src'
 
 type Deferred = {

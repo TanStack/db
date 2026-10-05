@@ -31,6 +31,19 @@ export function isCollection(
   )
 }
 
+/**
+ * The Collection an adapter hands users as `collection`. A pooled live query
+ * stands in for its live-query Collection and builds it only when touched.
+ */
+export function getPublicCollection<
+  T extends Collection<any, any, any> | null | undefined,
+>(collection: T): T {
+  return (
+    (collection as { publicCollection?: T } | null | undefined)
+      ?.publicCollection ?? collection
+  )
+}
+
 /** Whether a collection yields a single result (`findOne`) rather than an array. */
 export function isSingleResultCollection(
   collection: Collection<any, any, any>,

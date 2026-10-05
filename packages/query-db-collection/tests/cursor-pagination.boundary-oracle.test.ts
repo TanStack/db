@@ -18,7 +18,7 @@ import { createCursorPager, queryCollectionOptions } from '../src/index.js'
  * cancellation rejects a nested QueryCollection preload. A silent replacement
  * may fulfill it only with replacement rows. Reader abort rejects that reader
  * with its reason and leaves Query's shared transport active. Query's configured
- * retry policy applies to both initial and growth acquisitions.
+ * retry policy applies to both initial and growth Query fetches.
  *
  * Each generated size from one to four creates two pages, so the held second
  * page is always reachable; size zero cannot enter that history. The independent
@@ -80,7 +80,7 @@ const makeClient = () =>
 const rowsFor = (size: number) =>
   Array.from({ length: size * 2 }, (_, id) => ({ id }))
 
-describe(`cursor acquisition boundaries`, () => {
+describe(`cursor Query fetch boundaries`, () => {
   it.each([false, true])(
     `nested row query settles when pages cancel; replacement=%s`,
     async (replace) => {
@@ -228,7 +228,7 @@ describe(`cursor acquisition boundaries`, () => {
     )
   })
 
-  it(`a fresh hit does not inherit another acquisition's same-turn cancellation`, async () => {
+  it(`a fresh hit does not inherit another Query fetch's same-turn cancellation`, async () => {
     const client = makeClient(),
       entered = createDeferred<void>(),
       release = createDeferred<void>()
@@ -268,7 +268,7 @@ describe(`cursor acquisition boundaries`, () => {
   })
 
   it.each([undefined, false, 1] as const)(
-    `browser retry policy is the same across acquisition phases: %s`,
+    `browser retry policy is the same across Query fetch phases: %s`,
     async (retry) => {
       for (const phase of [`initial`, `growth`] as const) {
         const client = new QueryClient({

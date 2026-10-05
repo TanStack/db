@@ -1365,8 +1365,7 @@ export function queryCollectionOptions(
     const getRowMetadata = (rowKey: string | number) => {
       return (metadata?.row.get(rowKey) ??
         collection._state.syncedMetadata.get(rowKey)) as
-        | Record<string, unknown>
-        | undefined
+        Record<string, unknown> | undefined
     }
 
     const getOwnersFromMetadata = (rowMetadata: unknown) => {

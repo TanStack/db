@@ -73,6 +73,13 @@ function FilteredTodos({ minPriority }: { minPriority: number }) {
 }
 ```
 
+For derived-identity queries in one mounted hook and `DbClient` scope, a source
+Collection ID must keep referring to the same Collection object. If a render
+supplies a different source object with a previously used ID, the hook throws
+instead of returning rows from the old source. To reuse an ID within that hook,
+unmount it, clean up its source and client scope, then mount the replacement.
+Separate hooks and independent client scopes can use the same ID.
+
 #### Collection Hooks
 
 `useLiveQuery` resolves collection descriptors from `DbProvider` automatically. Create small collection hooks when components need imperative collection methods like `insert`, `update`, `delete`, or `preload`:
@@ -100,6 +107,10 @@ function SearchTodos({ search }: { search: string }) {
   return <div>{data.length} matching todos</div>
 }
 ```
+
+An explicit `queryKey` is the caller's identity contract. If its source object
+changes, change the key too, even when the source ID stays the same. Use a
+primitive scope token in the key; Collection objects cannot be hashed there.
 
 Before 1.0, an unhashable query warns in development and keeps its legacy
 mount-stable identity. The query still runs, but captured values inside opaque

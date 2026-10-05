@@ -95,11 +95,19 @@ describe(`guarded oracle replay`, () => {
   }, 40_000)
 
   it.each([
-    [`index-update.reference-model`, `tests/index-update.property.test.ts`, 2],
-    [`index-update.exact-identity`, `tests/index-update.property.test.ts`, 2],
+    [
+      `index-update.reference-model`,
+      `tests/index-update-oracle.property.test.ts`,
+      2,
+    ],
+    [
+      `index-update.exact-identity`,
+      `tests/index-update-oracle.property.test.ts`,
+      2,
+    ],
     [
       `index-update.custom-comparator`,
-      `tests/index-update.property.test.ts`,
+      `tests/index-update-oracle.property.test.ts`,
       2,
     ],
     [
@@ -128,17 +136,17 @@ describe(`guarded oracle replay`, () => {
   it.each([
     [
       `sorted-map.key`,
-      `tests/SortedMap.test.ts`,
+      `tests/SortedMap-oracle.test.ts`,
       `SortedMap key history.*seed undefined`,
     ],
     [
       `sorted-map.ascending`,
-      `tests/SortedMap.test.ts`,
+      `tests/SortedMap-oracle.test.ts`,
       `SortedMap ascending history.*seed undefined`,
     ],
     [
       `sorted-map.descending`,
-      `tests/SortedMap.test.ts`,
+      `tests/SortedMap-oracle.test.ts`,
       `SortedMap descending history.*seed undefined`,
     ],
     [

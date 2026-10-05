@@ -9,10 +9,13 @@ import {
   watchEffect,
 } from 'vue'
 import {
+  BaseQueryBuilder,
   createLiveQueryCollection,
   createLiveQueryObserver,
+  getPublicCollection,
   isCollection,
   isSingleResultCollection,
+  resolveLiveQueryValue,
 } from '@tanstack/db'
 import type {
   ChangeMessage,
@@ -329,29 +332,10 @@ export function useLiveQuery(
 
     // Ensure we always start sync for Vue hooks
     if (typeof unwrappedParam === `function`) {
-      // To avoid calling the query function twice, we wrap it to handle null/undefined returns
-      // The wrapper will be called once by createLiveQueryCollection
-      const disabledQuery = Symbol()
-      const wrappedQuery = (q: InitialQueryBuilder) => {
-        const result = unwrappedParam(q)
-        if (result === undefined || result === null) {
-          throw disabledQuery
-        }
-        return result
-      }
-
-      try {
-        return createLiveQueryCollection({
-          query: wrappedQuery,
-          startSync: true,
-        })
-      } catch (error) {
-        if (error === disabledQuery) {
-          return null
-        }
-        // Re-throw other errors
-        throw error
-      }
+      // A query function returning null or undefined disables the query.
+      return resolveLiveQueryValue(
+        unwrappedParam(new BaseQueryBuilder() as InitialQueryBuilder),
+      )
     } else {
       return createLiveQueryCollection({
         ...unwrappedParam,
@@ -389,15 +373,12 @@ export function useLiveQuery(
   // materializes into its own reactive map (granular) + ordered array.
   let currentObserver: LiveQueryObserver<any, any> | null = null
 
-  const syncFromObserver = (
-    observer: LiveQueryObserver<any, any>,
-    currentCollection: Collection<any, any, any>,
-  ) => {
+  const syncFromObserver = (observer: LiveQueryObserver<any, any>) => {
     const snapshot = observer.getSnapshot()
     status.value = snapshot.status as CollectionStatus
     persistedStatus.value = snapshot.persistedStatus
     persistedError.value = snapshot.persistedError
-    internalData.value = Array.from(currentCollection.values())
+    internalData.value = Array.from(snapshot.state?.values() ?? [])
   }
 
   // Watch for collection changes and subscribe to updates
@@ -447,10 +428,10 @@ export function useLiveQuery(
             state.set(key, value)
           }
         }
-        syncFromObserver(observer, currentCollection)
+        syncFromObserver(observer)
       },
     )
-    syncFromObserver(observer, currentCollection)
+    syncFromObserver(observer)
 
     // Cleanup when effect is invalidated
     onInvalidate(() => {
@@ -469,7 +450,7 @@ export function useLiveQuery(
   return {
     state: computed(() => state),
     data,
-    collection: computed(() => collection.value),
+    collection: computed(() => getPublicCollection(collection.value)),
     status: computed(() => status.value),
     isLoading: computed(() => status.value === `loading`),
     isReady: computed(
