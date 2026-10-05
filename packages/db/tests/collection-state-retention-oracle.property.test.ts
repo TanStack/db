@@ -2779,7 +2779,7 @@ it(`writes source inserts and deletes in the fixed campaign`, async () => {
   let inserts = 0
   let deletes = 0
   let absentDeletes = 0
-  let partialUpdates = 0
+  let distinguishingPartialUpdates = 0
   for (const { initial, steps, partialUpdates: partial } of histories) {
     const counts = await runOptimisticHistory(initial, steps, undefined, {
       partialUpdates: partial,
@@ -2787,12 +2787,12 @@ it(`writes source inserts and deletes in the fixed campaign`, async () => {
     inserts += counts.sourceInserts
     deletes += counts.sourceDeletes
     absentDeletes += counts.absentSourceDeletes
-    partialUpdates += counts.partialUpdates
+    distinguishingPartialUpdates += counts.distinguishingPartialUpdates
   }
   expect(inserts).toBeGreaterThan(0)
   expect(deletes).toBeGreaterThan(absentDeletes)
   expect(absentDeletes).toBeGreaterThan(0)
-  expect(partialUpdates).toBeGreaterThan(0)
+  expect(distinguishingPartialUpdates).toBeGreaterThan(0)
 })
 
 // The backend accepted an optimistic insert, then deleted the row before the
@@ -2938,6 +2938,47 @@ it.each(
         undefined,
         { insertDefault },
       )
+  },
+)
+// The schema default applies to inserts. A partial source update omits `c`,
+// so it keeps the source's held value, not the default, whether or not an
+// accepted optimistic insert used the default first.
+it.each(
+  [3, 11].flatMap((insertDefault) =>
+    [false, true].map((acceptedInsert) => ({ insertDefault, acceptedInsert })),
+  ),
+)(
+  `keeps a held field through a partial source update with a schema default: %j`,
+  async ({ insertDefault, acceptedInsert }) => {
+    const counts = await runOptimisticHistory(
+      acceptedInsert ? [] : [{ id: 1, a: 0, b: 0, c: 7 }],
+      [
+        ...(acceptedInsert
+          ? ([
+              { type: `edit`, key: 1, fields: { a: 0 }, optimistic: true },
+              { type: `settle`, slot: 0, success: true, cascade: false },
+              {
+                type: `sync`,
+                rows: [{ id: 1, a: 0, b: 0, c: 7 }],
+                truncate: false,
+                immediate: false,
+                copies: 1,
+              },
+            ] satisfies Array<OptimisticStep>)
+          : []),
+        {
+          type: `sync`,
+          rows: [{ id: 1, a: 1, b: 1, c: 9 }],
+          truncate: false,
+          immediate: false,
+          copies: 1,
+          partial: true,
+        },
+      ],
+      undefined,
+      { insertDefault, partialUpdates: true },
+    )
+    expect(counts.distinguishingPartialUpdates).toBe(1)
   },
 )
 it(`rejects a default lost only after settlement`, async () => {

@@ -564,6 +564,9 @@ export async function runOptimisticHistory(
     sourceDeletes: 0,
     absentSourceDeletes: 0,
     partialUpdates: 0,
+    // Partial updates whose omitted `c` differs from the source's held row,
+    // so only a merge keeps the held value.
+    distinguishingPartialUpdates: 0,
   }
   // The source admits each message against its own rows, including queued
   // batches. An insert names an absent key; an update or delete a present
@@ -587,28 +590,36 @@ export async function runOptimisticHistory(
     absentDeletes.set(step, absent)
     return step
   }
+  // The source's rows in write order, used only to count distinguishing writes.
+  const sourceRows = new Map(initial.map((row) => [row.id, row]))
   function writeSourceBatch(step: SourceBatch) {
     const inserts = sourceInserts.get(step)!
     sync.begin({ immediate: step.immediate })
     if (step.truncate) {
       sync.truncate()
+      sourceRows.clear()
       counts.replacements++
     }
     for (let copy = 0; copy < step.copies; copy++) {
       for (const row of step.rows) {
         const type = copy === 0 && inserts.has(row.id) ? `insert` : `update`
         if (type === `insert`) counts.sourceInserts++
-        if (type === `update` && partialUpdates && step.partial) {
+        const held = sourceRows.get(row.id)
+        if (type === `update` && partialUpdates && step.partial && held) {
           const { c: _omitted, ...partialRow } = row
           counts.partialUpdates++
+          if (held.c !== row.c) counts.distinguishingPartialUpdates++
           sync.write({ type, value: partialRow as HistoryRow })
+          sourceRows.set(row.id, { ...row, c: held.c })
         } else {
           sync.write({ type, value: { ...row } })
+          sourceRows.set(row.id, row)
         }
       }
     }
     for (const key of step.deletes ?? []) {
       sync.write({ type: `delete`, key })
+      sourceRows.delete(key)
       counts.sourceDeletes++
       if (absentDeletes.get(step)!.has(key)) counts.absentSourceDeletes++
     }
