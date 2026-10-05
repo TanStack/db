@@ -1,5 +1,6 @@
 import {
   assertLiveQueryWindowManyResult,
+  canStartLiveQueryWindowSyncInRender,
   compareLiveQueryWindowDependencies,
   createLiveQueryCollection,
   createLiveQueryWindowController,
@@ -20,7 +21,6 @@ import type {
   Context,
   InferResultType,
   InitialQueryBuilder,
-  LiveQueryWindowController,
   NonSingleResult,
   QueryBuilder,
   UtilsRecord,
@@ -32,13 +32,9 @@ type MaybeGetter<T> = T | (() => T)
 
 type InternalCollection = Collection<object, string | number, UtilsRecord>
 
-// The full controller type: the previous one may be reused as-is when nothing
-// that defines it changed, not only read for its committed page count. The
-// generics stay `any` because the derived returns controllers from both the
-// collection and query paths, whose element and key types differ; a precise
-// `<object, string | number>` reintroduces a union that loses the snapshot
-// shape here.
-type PreviousController = LiveQueryWindowController<any, any>
+type PreviousController = {
+  getSnapshot: () => { pages: ReadonlyArray<ReadonlyArray<unknown>> }
+}
 
 type InfiniteQueryOptions = {
   pageSize?: number
@@ -146,18 +142,6 @@ export function useLiveInfiniteQuery<TContext extends Context>(
       input.kind === `collection` &&
       previousInput?.kind === `collection` &&
       previousInput.collection === input.collection
-    // Reuse the current controller when nothing that defines it changed, like
-    // useLiveQuery's instance memo. A bare recompute (a referentially new but
-    // structurally equal dependency) must not build a second collection, which
-    // with startSync would subscribe — and load — the source again.
-    if (
-      previousController !== null &&
-      previousInput?.kind === input.kind &&
-      (input.kind === `collection` ? sameCollection : !dependenciesChanged) &&
-      !pageShapeChanged
-    ) {
-      return previousController
-    }
     const canPreservePageCount = shouldPreserveLiveQueryWindowPageCount({
       hasPreviousController: previousController !== null,
       previousInputKind: previousInput?.kind,
@@ -199,11 +183,12 @@ export function useLiveInfiniteQuery<TContext extends Context>(
 
     const collection = createLiveQueryCollection({
       query: input.query.limit(pageSize + 1).offset(0),
-      // Match useLiveQuery: start sync during construction so a synchronously
-      // loaded source is already published on the first render, rather than
-      // flashing an empty idle snapshot before the subscribing effect attaches.
-      // Renders that never commit are reclaimed by GC (gcTime).
-      startSync: true,
+      // Like useLiveQuery, start sync during construction so a synchronously
+      // loaded source is published on the first render instead of an empty
+      // idle snapshot before the subscribing effect attaches. On-demand
+      // sources wait for the subscription, so a superseded recompute does not
+      // send a page request.
+      startSync: canStartLiveQueryWindowSyncInRender(input.query),
       gcTime: DEFAULT_GC_TIME_MS,
     })
     assertLiveQueryWindowManyResult(collection)

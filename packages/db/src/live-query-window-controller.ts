@@ -9,6 +9,7 @@ import {
 } from './live-query-adapter.js'
 import { createLiveQueryObserver } from './live-query-observer.js'
 import { BaseQueryBuilder } from './query/builder/index.js'
+import { collectCollectionSources } from './query/ir.js'
 import { deepEquals } from './utils.js'
 import type {
   LiveQueryObserver,
@@ -84,6 +85,25 @@ export function resolveLiveQueryWindowInput<TContext extends Context>(
     )
   }
   return { kind: `query`, query: value as QueryBuilder<TContext> }
+}
+
+/**
+ * Whether an adapter may start an infinite query's window collection during
+ * render. Starting early lets a synchronously loaded source publish its first
+ * page on the first paint. An on-demand source loads asynchronously, so it
+ * gains nothing from an early start, and a render that never commits would
+ * still send its page request. Such queries start when the subscription
+ * commits.
+ *
+ * @internal This contract is unstable while RFC #1623 is being implemented.
+ */
+export function canStartLiveQueryWindowSyncInRender(
+  query: QueryBuilder<any>,
+): boolean {
+  const ir = (query as unknown as BaseQueryBuilder)._getQuery()
+  return collectCollectionSources(ir).every(
+    ({ collection }) => collection.config.syncMode !== `on-demand`,
+  )
 }
 
 /** @internal This contract is unstable while RFC #1623 is being implemented. */

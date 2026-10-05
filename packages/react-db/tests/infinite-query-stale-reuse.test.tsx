@@ -1,9 +1,9 @@
 /**
  * Regression: a collection built by an abandoned pre-commit render may be
  * garbage collected (no subscriber, 50 ms unsubscribed floor) before a later
- * Suspense retry commits. The render-time reuse must not bind that cleaned-up
- * collection, or the first committed paint shows an empty/cleaned-up result —
- * the exact flash this feature removes.
+ * Suspense retry commits. The retry must not bind that cleaned-up collection,
+ * or the first committed paint shows an empty cleaned-up result, which is the
+ * flash this feature removes.
  */
 import { Component, Suspense, useLayoutEffect } from 'react'
 import { act, render } from '@testing-library/react'
@@ -104,9 +104,9 @@ it(`shows the ready first page when a Suspense retry follows a GC-collected aban
 })
 
 it(`shows the ready first page when a mounted query's suspended update retries after GC`, async () => {
-  // A committed component keeps its hook refs across a suspended update, so the
-  // update's uncommitted collection survives to the retry. If GC cleaned it up
-  // in between, reuse would commit an empty cleaned-up page before recovering.
+  // A committed component keeps its hook refs across a suspended update. If the
+  // retry bound the update's uncommitted collection after GC cleaned it up, it
+  // would commit an empty cleaned-up page before recovering.
   const source = createCollection(
     mockSyncCollectionOptions<Row>({
       id: `infinite-stale-reuse-${sequence++}`,

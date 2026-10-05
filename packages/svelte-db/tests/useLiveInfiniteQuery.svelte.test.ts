@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { flushSync } from 'svelte'
-import { createCollection, createLiveQueryCollection } from '@tanstack/db'
+import { createCollection, createLiveQueryCollection, lte } from '@tanstack/db'
 import { useLiveInfiniteQuery } from '../src/useLiveInfiniteQuery.svelte.js'
 import { mockSyncCollectionOptions } from '../../db/tests/utils'
 
@@ -134,5 +134,35 @@ describe(`useLiveInfiniteQuery`, () => {
     expect(query.collection).toBe(secondQuery)
     expect(query.pages).toHaveLength(1)
     expect(query.data.map((post) => post.createdAt)).toEqual([4, 3, 2])
+  })
+
+  it(`rebuilds the query when state read inside the query callback changes`, () => {
+    const posts = createPostsCollection(`svelte-infinite-tracked-read`, 8)
+    let query:
+      | ReturnType<typeof useLiveInfiniteQuery<any>>
+      | undefined
+    let setMaximum: ((maximum: number) => void) | undefined
+    cleanup = $effect.root(() => {
+      // No deps array: the derived controller tracks this read directly.
+      let maximum = $state(8)
+      query = useLiveInfiniteQuery(
+        (q) =>
+          q
+            .from({ posts })
+            .where(({ posts: post }) => lte(post.createdAt, maximum))
+            .orderBy(({ posts: post }) => post.createdAt, `desc`),
+        { pageSize: 3 },
+      )
+      setMaximum = (next) => {
+        maximum = next
+      }
+    })
+    flushSync()
+    if (!query || !setMaximum) throw new Error(`Failed to mount infinite query`)
+    expect(query.data.map((post: Post) => post.createdAt)).toEqual([8, 7, 6])
+
+    setMaximum(5)
+    flushSync()
+    expect(query.data.map((post: Post) => post.createdAt)).toEqual([5, 4, 3])
   })
 })

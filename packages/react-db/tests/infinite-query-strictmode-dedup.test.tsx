@@ -1,10 +1,9 @@
 /**
  * Regression: a duplicate pre-commit render must not load an on-demand page
- * twice. React StrictMode renders a component twice before committing. Because
- * the hook now starts sync during render (startSync: true), it must reuse one
- * collection across those renders — like useLiveQuery's instance memo — instead
- * of building a new collection per render. A second collection would subscribe
- * the on-demand source again and fetch the same first page a second time.
+ * twice. React StrictMode renders a component twice before committing, and
+ * each render builds its own window collection. If an on-demand collection
+ * started sync during render, each one would request the same first page.
+ * On-demand queries therefore start sync only when the subscription commits.
  */
 import { StrictMode } from 'react'
 import { renderHook, waitFor } from '@testing-library/react'

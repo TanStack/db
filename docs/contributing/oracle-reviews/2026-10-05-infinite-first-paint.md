@@ -112,3 +112,35 @@ requires a collection that is not `cleaned-up`.
 `packages/react-db/tests/infinite-query-stale-reuse.test.tsx` covers both a
 fresh-mount retry and a mounted suspended update after GC. The mounted-update
 case fails without the liveness check and passes with it.
+
+## Addendum: start-sync gate replaces render-time reuse
+
+A further review found that the two reuse mechanisms above caused new
+defects. In Svelte, the reuse guard returned the previous controller when the
+`deps` getters were unchanged, so the hook ignored reactive state read directly
+inside the query callback. In React, `renderedRef` could keep a stale page
+count. It did not dedupe React 18 StrictMode renders, and it duplicated the
+identity rules.
+
+Both mechanisms are removed. The duplicate page requests came only from
+on-demand sources, which load asynchronously and gain nothing from an early
+start. `canStartLiveQueryWindowSyncInRender` now starts sync during render only
+when no source collection is on-demand. Eager sources keep the ready first
+paint. On-demand queries start when the subscription commits.
+
+Evidence at this change:
+
+- `infinite-query-strictmode-dedup.test.tsx` passes with one first-page load.
+  It fails with two loads when the gate always starts sync.
+- `useLiveInfiniteQuery.svelte.test.ts` adds a test where state read inside the
+  query callback, with no deps, rebuilds the query. It fails with the removed
+  Svelte guard and passes now.
+- `infinite-query-stale-reuse.test.tsx` passes. A retry after GC binds a live
+  collection and shows the ready first page.
+- Local suites passed: react-db 333, vue-db 121, svelte-db 118, and the db
+  infinite calibration 9.
+
+Known limit: an eager collection started during render has only the 50 ms
+unsubscribed GC floor before its commit. If a commit arrives later than that,
+GC may clean the collection up first. `useLiveQuery` shares this exposure. No
+test reaches this case.

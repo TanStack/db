@@ -3,6 +3,7 @@
 import { useCallback, useRef, useSyncExternalStore } from 'react'
 import {
   assertLiveQueryWindowManyResult,
+  canStartLiveQueryWindowSyncInRender,
   compareLiveQueryWindowDependencies,
   createLiveQueryCollection,
   createLiveQueryWindowController,
@@ -169,13 +170,6 @@ export function useLiveInfiniteQuery<TContext extends Context>(
 
   const committedRef = useRef<InfiniteQueryRenderState | null>(null)
   const committed = committedRef.current
-  // The previous render's state. A second pre-commit render (React StrictMode,
-  // a discarded concurrent render, or a Suspense retry) reuses the collection
-  // it already built instead of starting a duplicate sync. Unlike
-  // `committedRef`, an abandoned render may update this; it only ever gates a
-  // same-identity reuse, never page preservation.
-  const renderedRef = useRef<InfiniteQueryRenderState | null>(null)
-  const rendered = renderedRef.current
   const inputKind = inputIsCollection ? `collection` : `query`
   const derivedIdentityProfilerRef = useRef<DerivedIdentityProfiler>({
     renderCount: 0,
@@ -255,33 +249,8 @@ export function useLiveInfiniteQuery<TContext extends Context>(
   const needsNewController =
     committed === null || needsNewCollection || pageShapeChanged
 
-  // Reuse the previous render's collection when every identity input matches,
-  // so a same-identity duplicate render shares its collection rather than
-  // starting a second sync of the source. An uncommitted collection has no
-  // subscriber, so GC can clean it up before a suspended update retries; a
-  // cleaned-up collection must be rebuilt, not reused.
-  const renderedComparison = compareLiveQueryWindowDependencies(
-    rendered?.dependencies,
-    identityDeps,
-  )
-  const canReuseRendered =
-    rendered !== null &&
-    rendered.collection.status !== `cleaned-up` &&
-    rendered.inputKind === inputKind &&
-    rendered.client === dbClient &&
-    rendered.pageSize === pageSize &&
-    rendered.initialPageParam === initialPageParam &&
-    (inputIsCollection
-      ? rendered.inputCollection === queryFnOrCollection
-      : usesLegacyDeps
-        ? !renderedComparison.changed
-        : renderedComparison.structurallyEqual)
-
   let renderState = committed
-  if (needsNewController && canReuseRendered) {
-    // Built earlier this pre-commit render but not yet committed; reuse it.
-    renderState = rendered
-  } else if (needsNewController) {
+  if (needsNewController) {
     let collection = committed?.collection
     let warning: string | null = null
 
@@ -305,11 +274,12 @@ export function useLiveInfiniteQuery<TContext extends Context>(
         // grows the limit from here via setWindow.
         collection = createLiveQueryCollection({
           query: input.query.limit(pageSize + 1).offset(0),
-          // Match useLiveQuery: start sync during render so a synchronously
-          // loaded source is already published on the first commit, rather than
-          // flashing an empty idle commit. Renders that never commit are
-          // reclaimed by GC (gcTime), exactly as useLiveQuery relies on.
-          startSync: true,
+          // Like useLiveQuery, start sync during render so a synchronously
+          // loaded source is published on the first commit instead of an empty
+          // idle commit. GC reclaims a render that never commits. On-demand
+          // sources wait for the subscription, so an abandoned or duplicate
+          // render does not send a page request.
+          startSync: canStartLiveQueryWindowSyncInRender(input.query),
           gcTime: DEFAULT_GC_TIME_MS,
         })
       }
@@ -362,10 +332,6 @@ export function useLiveInfiniteQuery<TContext extends Context>(
   }
   const currentRenderState = renderState!
   const controller = currentRenderState.controller
-  // Record this render's state so a same-identity duplicate render reuses it.
-  // Committed state is recorded separately, at subscribe, so an abandoned
-  // render cannot overwrite the pages a committed render must preserve.
-  renderedRef.current = currentRenderState
 
   const subscribe = useCallback(
     (onStoreChange: () => void) => {
