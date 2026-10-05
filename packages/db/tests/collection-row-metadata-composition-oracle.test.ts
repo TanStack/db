@@ -5,15 +5,21 @@ import type { SyncConfig } from '../src/types.js'
 /**
  * # Which row metadata survives one sync transaction?
  *
- * A sync source writes row metadata two ways inside one transaction: through
- * `metadata.row.set` and `metadata.row.delete`, and through the `metadata`
- * field of a row message. The established contract is last write wins, as
- * `collection.test.ts` pins in "should use last-write-wins for row metadata in
- * sync transactions". A row message that omits `metadata` still writes:
+ * A sync source writes row metadata inside one transaction in three ways:
+ * through `metadata.row.set` and `metadata.row.delete`, through the `metadata`
+ * field of a row message, and through `truncate`. Each write replaces the
+ * current value, last write wins. `collection.test.ts` pins that rule for
+ * writes that carry metadata. A maintainer decision on 2026-10-05 (recorded in
+ * `docs/contributing/oracle-reviews/2026-10-05-state-mutation-round-3.md`)
+ * fixes the writes that carry none:
  *
- * - an insert names the row's whole metadata, so it clears any earlier value;
- * - an update without metadata leaves the current value;
- * - a row delete removes the metadata, even when the message carries some.
+ * - An insert names the row's whole metadata. Without `metadata`, it clears
+ *   any earlier value.
+ * - An update without `metadata` keeps the current value.
+ * - A row delete clears the value, even when the message carries metadata.
+ * - A truncate clears the value.
+ * - `metadata.row.set` after a delete or a truncate keeps metadata for the
+ *   absent row.
  *
  * This oracle covers one key, one transaction of up to three writes, and three
  * production paths. It does not judge collection metadata, metadata-only
@@ -26,6 +32,7 @@ type SyncActions = Parameters<SyncConfig<Row, number>[`sync`]>[0]
 type Write =
   | { kind: `set` }
   | { kind: `unset` }
+  | { kind: `truncate` }
   | { kind: `insert` | `update` | `delete`; metadata: boolean }
 type Start = `absent` | `present-with-metadata` | `present-without-metadata`
 type Lane = `immediate` | `held` | `rebuilt`
@@ -33,6 +40,7 @@ type Lane = `immediate` | `held` | `rebuilt`
 const writes: ReadonlyArray<Write> = [
   { kind: `set` },
   { kind: `unset` },
+  { kind: `truncate` },
   ...([`insert`, `update`, `delete`] as const).flatMap((kind) =>
     [false, true].map((metadata) => ({ kind, metadata })),
   ),
@@ -51,7 +59,11 @@ function expectedMetadata(start: Start, sequence: ReadonlyArray<Write>) {
     start === `present-with-metadata` ? startMetadata : undefined
   sequence.forEach((write, step) => {
     if (write.kind === `set`) current = writeMetadata(step)
-    else if (write.kind === `unset` || write.kind === `delete`)
+    else if (
+      write.kind === `unset` ||
+      write.kind === `truncate` ||
+      write.kind === `delete`
+    )
       current = undefined
     else if (write.metadata) current = writeMetadata(step)
     else if (write.kind === `insert`) current = undefined
@@ -61,13 +73,15 @@ function expectedMetadata(start: Start, sequence: ReadonlyArray<Write>) {
 
 /**
  * Legal histories follow the change-message protocol for the row: an insert
- * names an absent key, and an update or delete names a present one. Metadata
- * API calls are legal in any row state.
+ * names an absent key, and an update or delete names a present one. A
+ * truncate leaves the row absent. Metadata API calls are legal in any row
+ * state.
  */
 function isLegal(start: Start, sequence: ReadonlyArray<Write>): boolean {
   let present = start !== `absent`
   for (const write of sequence) {
-    if (write.kind === `insert`) {
+    if (write.kind === `truncate`) present = false
+    else if (write.kind === `insert`) {
       if (present) return false
       present = true
     } else if (write.kind === `update` || write.kind === `delete`) {
@@ -96,7 +110,7 @@ const histories = starts.flatMap((start) => {
 })
 
 const describeWrite = (write: Write) =>
-  write.kind === `set` || write.kind === `unset`
+  write.kind === `set` || write.kind === `unset` || write.kind === `truncate`
     ? write.kind
     : `${write.kind}${write.metadata ? `+metadata` : ``}`
 
@@ -107,7 +121,7 @@ const describeWrite = (write: Write) =>
  *
  * - `immediate`: the transaction applies at commit.
  * - `held`: a persisting optimistic request holds the transaction until it
- *   settles.
+ *   settles. A transaction with a truncate applies at once instead.
  * - `rebuilt`: an earlier held transaction applies while this one is still
  *   open, so the Collection rebuilds this transaction's automatic metadata
  *   writes before it commits.
@@ -163,6 +177,7 @@ async function observeMetadata(
       const metadata = writeMetadata(step)
       if (write.kind === `set`) sync.metadata!.row.set(1, metadata)
       else if (write.kind === `unset`) sync.metadata!.row.delete(1)
+      else if (write.kind === `truncate`) sync.truncate()
       else if (write.kind === `delete`)
         sync.write({
           type: `delete`,
@@ -184,7 +199,10 @@ async function observeMetadata(
     }
     const receipt = sync.commit()
     if (lane === `held`) {
-      expect(receipt).not.toBe(true)
+      // A truncate applies at once; the request holds every other transaction.
+      if (sequence.some((write) => write.kind === `truncate`))
+        expect(receipt).toBe(true)
+      else expect(receipt).not.toBe(true)
       release()
       await blocker!.isPersisted.promise
     }
@@ -197,7 +215,7 @@ async function observeMetadata(
 
 describe(`row metadata composition oracle`, () => {
   it(`enumerates every legal one-key history of up to three writes`, () => {
-    expect(histories).toHaveLength(540)
+    expect(histories).toHaveLength(825)
     const labels = new Set(
       histories.map(
         ({ start, sequence }) =>
