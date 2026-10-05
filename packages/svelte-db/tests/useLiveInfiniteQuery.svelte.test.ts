@@ -3,6 +3,7 @@ import { flushSync } from 'svelte'
 import { createCollection, createLiveQueryCollection, lte } from '@tanstack/db'
 import { useLiveInfiniteQuery } from '../src/useLiveInfiniteQuery.svelte.js'
 import { mockSyncCollectionOptions } from '../../db/tests/utils'
+import type { InitialQueryBuilder } from '@tanstack/db'
 
 type Post = {
   id: string
@@ -37,6 +38,21 @@ function createPostsLiveQuery(posts: ReturnType<typeof createPostsCollection>) {
         .orderBy(({ posts: post }) => post.createdAt, `desc`)
         .limit(4),
   })
+}
+
+// Reads the maximum inside the query callback, so the hook tracks it directly.
+function usePostsAtMostInfiniteQuery(
+  posts: ReturnType<typeof createPostsCollection>,
+  getMaximum: () => number,
+) {
+  return useLiveInfiniteQuery(
+    (q: InitialQueryBuilder) =>
+      q
+        .from({ posts })
+        .where(({ posts: post }) => lte(post.createdAt, getMaximum()))
+        .orderBy(({ posts: post }) => post.createdAt, `desc`),
+    { pageSize: 3 },
+  )
 }
 
 function usePostsCollectionInfiniteQuery(
@@ -138,29 +154,22 @@ describe(`useLiveInfiniteQuery`, () => {
 
   it(`rebuilds the query when state read inside the query callback changes`, () => {
     const posts = createPostsCollection(`svelte-infinite-tracked-read`, 8)
-    let query: ReturnType<typeof useLiveInfiniteQuery<any>> | undefined
+    let query: ReturnType<typeof usePostsAtMostInfiniteQuery> | undefined
     let setMaximum: ((maximum: number) => void) | undefined
     cleanup = $effect.root(() => {
       // No deps array: the derived controller tracks this read directly.
       let maximum = $state(8)
-      query = useLiveInfiniteQuery(
-        (q) =>
-          q
-            .from({ posts })
-            .where(({ posts: post }) => lte(post.createdAt, maximum))
-            .orderBy(({ posts: post }) => post.createdAt, `desc`),
-        { pageSize: 3 },
-      )
+      query = usePostsAtMostInfiniteQuery(posts, () => maximum)
       setMaximum = (next) => {
         maximum = next
       }
     })
     flushSync()
     if (!query || !setMaximum) throw new Error(`Failed to mount infinite query`)
-    expect(query.data.map((post: Post) => post.createdAt)).toEqual([8, 7, 6])
+    expect(query.data.map((post) => post.createdAt)).toEqual([8, 7, 6])
 
     setMaximum(5)
     flushSync()
-    expect(query.data.map((post: Post) => post.createdAt)).toEqual([5, 4, 3])
+    expect(query.data.map((post) => post.createdAt)).toEqual([5, 4, 3])
   })
 })
