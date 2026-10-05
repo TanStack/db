@@ -179,6 +179,11 @@ jobs:
         uses: tanstack/config/.github/setup@e4b48f16568324f76f467aa4c2aac2f05db632c3
       - name: Build Packages
         run: pnpm run build
+      - name: Check action enforcement example
+        run: |
+          pnpm --filter @tanstack/db-example-react-action-enforcement test
+          pnpm --filter @tanstack/db-example-react-action-enforcement lint
+          pnpm --filter @tanstack/db-example-react-action-enforcement build
       - name: Build Example Site
         run: |
           cd examples/react/todo

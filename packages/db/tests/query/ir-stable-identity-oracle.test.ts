@@ -876,8 +876,10 @@ function createAlphaRenamedJoinQuery(
           >[0],
           postAlias,
         ),
-        left: new PropRef([userAlias, `id`]),
-        right: new PropRef([postAlias, `userId`]),
+        on: new Func('eq', [
+          new PropRef([userAlias, `id`]),
+          new PropRef([postAlias, `userId`]),
+        ]),
       },
     ],
     where: [
@@ -916,8 +918,10 @@ function createAlphaRenamedImplicitJoinQuery(
           >[0],
           postAlias,
         ),
-        left: new PropRef([userAlias, `id`]),
-        right: new PropRef([postAlias, `userId`]),
+        on: new Func('eq', [
+          new PropRef([userAlias, `id`]),
+          new PropRef([postAlias, `userId`]),
+        ]),
       },
     ],
   }

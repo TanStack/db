@@ -108,8 +108,7 @@ export function rxdbCollectionOptions(
   type Row = Record<string, unknown>
   type Key = string // because RxDB primary keys must be strings
 
-  const { ...restConfig } = config
-  const rxCollection = config.rxCollection
+  const { rxCollection, syncBatchSize: _syncBatchSize, ...restConfig } = config
 
   // "getKey"
   const primaryPath = rxCollection.schema.primaryPath

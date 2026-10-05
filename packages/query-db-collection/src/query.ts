@@ -1153,13 +1153,11 @@ export function queryCollectionOptions(
     type ResultApplicationController = AbortController & {
       rollback?: () => void
       settleRefetchAtFetchBoundary?: () => void
-      sourceCommitStarted?: boolean
     }
     const resultApplicationControllers = new Map<
       string,
       ResultApplicationController
     >()
-    const resultSourceCommitControllers = new Map<string, AbortController>()
     const effectivePersistedGcTimes = new Map<string, number>()
     const persistedRetentionTimers = new Map<
       string,
@@ -1167,24 +1165,13 @@ export function queryCollectionOptions(
     >()
     let persistedRetentionMaintenance = Promise.resolve()
 
-    const invalidatePendingResultApplication = (
-      hashedQueryKey: string,
-      superseding = false,
-    ) => {
+    const invalidatePendingResultApplication = (hashedQueryKey: string) => {
       const controller = resultApplicationControllers.get(hashedQueryKey)
-      const shouldCancel =
-        !superseding || !persistence || !controller?.sourceCommitStarted
-      if (shouldCancel) {
-        controller?.rollback?.()
-      }
+      controller?.rollback?.()
       pendingResultApplications.delete(hashedQueryKey)
       failedResultApplications.delete(hashedQueryKey)
       resultApplicationControllers.delete(hashedQueryKey)
       controller?.abort()
-      if (!superseding) {
-        resultSourceCommitControllers.get(hashedQueryKey)?.abort()
-        resultSourceCommitControllers.delete(hashedQueryKey)
-      }
     }
 
     const waitForCurrentResultApplication = async (
@@ -2147,6 +2134,9 @@ export function queryCollectionOptions(
           const oldItem = shouldUsePersistedBaseline
             ? persistedBaseline.get(key)?.value
             : currentSyncedItems.get(key)
+          if (!oldItem) {
+            return
+          }
           const newItem = newItemsMap.get(key)
           if (!newItem) {
             const owners = getPersistedOwners(key)
@@ -2154,9 +2144,9 @@ export function queryCollectionOptions(
             setPersistedOwners(key, owners)
             const needToRemove = removeRowOwner(key, hashedQueryKey)
             if (needToRemove) {
-              write({ type: `delete`, key })
+              write({ type: `delete`, value: oldItem })
             }
-          } else if (oldItem && !deepEquals(oldItem, newItem)) {
+          } else if (!deepEquals(oldItem, newItem)) {
             write({ type: `update`, value: newItem })
           }
         })
@@ -2187,18 +2177,7 @@ export function queryCollectionOptions(
         if (isMutationPublicationBlocked()) {
           applicationToken.settleRefetchAtFetchBoundary?.()
         }
-        applicationToken.sourceCommitStarted = true
-        let commitSignal = signal
-        if (persistence) {
-          let sourceController =
-            resultSourceCommitControllers.get(hashedQueryKey)
-          if (!sourceController) {
-            sourceController = new AbortController()
-            resultSourceCommitControllers.set(hashedQueryKey, sourceController)
-          }
-          commitSignal = sourceController.signal
-        }
-        const applied = commit(commitSignal)
+        const applied = commit(signal)
         transactionActive = false
         retainedQueriesPendingRevalidation.delete(hashedQueryKey)
         cancelPersistedRetentionExpiry(hashedQueryKey)
@@ -2206,13 +2185,7 @@ export function queryCollectionOptions(
         // Readiness is publication: do not expose it until the establishing
         // transaction's rows and events are visible.
         const finishApplication = () => {
-          if (
-            !signal?.aborted &&
-            resultApplicationControllers.get(hashedQueryKey) ===
-              applicationToken
-          ) {
-            markReady()
-          }
+          if (!signal?.aborted) markReady()
         }
         if (applied !== true) {
           return applied.then(finishApplication, failApplication)
@@ -2305,7 +2278,7 @@ export function queryCollectionOptions(
         applicationToken: ResultApplicationController,
       ) => true | Promise<void>,
     ): void => {
-      invalidatePendingResultApplication(hashedQueryKey, true)
+      invalidatePendingResultApplication(hashedQueryKey)
       const currentErrorRevision = errorRevision
       const controller: ResultApplicationController = new AbortController()
       let settleRefetchAtFetchBoundary = () => {}

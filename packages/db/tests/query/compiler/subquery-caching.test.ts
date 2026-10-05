@@ -70,8 +70,10 @@ describe(`Subquery Caching`, () => {
         {
           type: `inner`,
           from: new QueryRef(subquery, `joined_users`), // Same subquery object reference
-          left: new PropRef([`main_users`, `id`]),
-          right: new PropRef([`joined_users`, `id`]),
+          on: new Func('eq', [
+            new PropRef([`main_users`, `id`]),
+            new PropRef([`joined_users`, `id`]),
+          ]),
         },
       ],
       select: {
@@ -344,8 +346,10 @@ describe(`Subquery Caching`, () => {
         {
           type: `left`,
           from: new QueryRef(innerSubquery, `inner2`), // Same innerSubquery
-          left: new PropRef([`inner1`, `id`]),
-          right: new PropRef([`inner2`, `id`]),
+          on: new Func('eq', [
+            new PropRef([`inner1`, `id`]),
+            new PropRef([`inner2`, `id`]),
+          ]),
         },
       ],
     }
@@ -356,8 +360,10 @@ describe(`Subquery Caching`, () => {
         {
           type: `inner`,
           from: new QueryRef(innerSubquery, `direct`), // innerSubquery again at top level
-          left: new PropRef([`middle`, `id`]),
-          right: new PropRef([`direct`, `id`]),
+          on: new Func('eq', [
+            new PropRef([`middle`, `id`]),
+            new PropRef([`direct`, `id`]),
+          ]),
         },
       ],
     }

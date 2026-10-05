@@ -34,6 +34,11 @@ import type { CollectionConfig, SyncConfig } from '../src/types.js'
  * like any ordinary source publication, it retires the snapshot. It removes no
  * base row and acknowledges no active request.
  *
+ * A history can also keep the default `partial` row update mode. There a
+ * source update may omit `c`, and the Collection merges the update into the
+ * source row, so the held `c` remains. The model applies the same merge to its
+ * base. Other histories use `full` mode and always write whole rows.
+ *
  * `runOptimisticHistory` gives the same edit, delete, settle, and sync history
  * to this model and a real Collection. After every step it compares rows,
  * metadata, immutable handler payloads, promise outcomes, downstream query
@@ -55,6 +60,8 @@ type SourceBatch = {
   truncate: boolean
   immediate: boolean
   copies: number
+  // In the partial-update lane, the source's updates omit `c`.
+  partial?: boolean | undefined
 }
 export type OptimisticStep =
   | {
@@ -109,6 +116,7 @@ class HistoryModel {
   constructor(
     rows: Array<HistoryRow>,
     private insertDefault = 0,
+    private partialUpdates = false,
   ) {
     for (const row of rows) {
       this.base.set(row.id, row)
@@ -291,7 +299,15 @@ class HistoryModel {
           this.intents.some(
             (intent) => intent.key === row.id && intent.originPending,
           ) || localKeys.has(row.id)
-        this.base.set(row.id, row)
+        const held = this.base.get(row.id)
+        // The default row update mode merges a partial update into the
+        // source row, so an omitted `c` keeps the held value.
+        this.base.set(
+          row.id,
+          this.partialUpdates && batch.partial && held
+            ? { ...row, c: held.c }
+            : row,
+        )
         this.origins.set(row.id, local ? `local` : `remote`)
         localKeys.delete(row.id)
         for (const intent of this.intents) {
@@ -473,10 +489,14 @@ export async function runOptimisticHistory(
     | `backwards-cuts`
     | `previous-value`
     | `update-as-insert`
-    | `retained-default`,
-  options: { insertDefault?: number } = {},
+    | `retained-default`
+    // Writes the partial lane's rows under `rowUpdateMode: 'full'`, so the
+    // Collection replaces the row instead of merging it.
+    | `partial-as-full`,
+  options: { insertDefault?: number; partialUpdates?: boolean } = {},
 ) {
-  const model = new HistoryModel(initial, options.insertDefault)
+  const partialUpdates = options.partialUpdates === true
+  const model = new HistoryModel(initial, options.insertDefault, partialUpdates)
   let sync!: Parameters<SyncConfig<HistoryRow>[`sync`]>[0]
   let starting: ReturnType<typeof createDeferred<void>> | undefined
   // The next handler call writes this batch synchronously, before it returns.
@@ -493,7 +513,10 @@ export async function runOptimisticHistory(
     onUpdate: handler,
     onDelete: handler,
     sync: {
-      rowUpdateMode: `full`,
+      // The partial-update lane keeps the default row update mode.
+      ...(partialUpdates && mutant !== `partial-as-full`
+        ? {}
+        : { rowUpdateMode: `full` as const }),
       sync: (actions) => {
         sync = actions
         actions.begin()
@@ -545,6 +568,9 @@ export async function runOptimisticHistory(
     sourceInserts: 0,
     sourceDeletes: 0,
     absentSourceDeletes: 0,
+    // Partial updates whose omitted `c` differs from the source's held row,
+    // so only a merge keeps the held value.
+    distinguishingPartialUpdates: 0,
   }
   // The source admits each message against its own rows, including queued
   // batches. An insert names an absent key; an update or delete a present
@@ -568,22 +594,37 @@ export async function runOptimisticHistory(
     absentDeletes.set(step, absent)
     return step
   }
+  // The source's rows in write order. A partial update needs the held row,
+  // and only one whose omitted `c` differs from it can tell a merge from a
+  // replacement.
+  const sourceRows = new Map(initial.map((row) => [row.id, row]))
   function writeSourceBatch(step: SourceBatch) {
     const inserts = sourceInserts.get(step)!
     sync.begin({ immediate: step.immediate })
     if (step.truncate) {
       sync.truncate()
+      sourceRows.clear()
       counts.replacements++
     }
     for (let copy = 0; copy < step.copies; copy++) {
       for (const row of step.rows) {
         const type = copy === 0 && inserts.has(row.id) ? `insert` : `update`
         if (type === `insert`) counts.sourceInserts++
-        sync.write({ type, value: { ...row } })
+        const held = sourceRows.get(row.id)
+        if (type === `update` && partialUpdates && step.partial && held) {
+          const { c: _omitted, ...partialRow } = row
+          if (held.c !== row.c) counts.distinguishingPartialUpdates++
+          sync.write({ type, value: partialRow as HistoryRow })
+          sourceRows.set(row.id, { ...row, c: held.c })
+        } else {
+          sync.write({ type, value: { ...row } })
+          sourceRows.set(row.id, row)
+        }
       }
     }
     for (const key of step.deletes ?? []) {
       sync.write({ type: `delete`, key })
+      sourceRows.delete(key)
       counts.sourceDeletes++
       if (absentDeletes.get(step)!.has(key)) counts.absentSourceDeletes++
     }
@@ -958,7 +999,8 @@ export async function runOptimisticHistory(
           )
         }
       }
-      if (mutant)
+      // A configuration mutant changes production setup, not an observation.
+      if (mutant && mutant !== `partial-as-full`)
         expect(injected, `observation mutant reached its checkpoint`).toBe(true)
       return counts
     },
