@@ -55,8 +55,14 @@ const writeMetadata = (step: number) => ({ m: `w${step}` })
  * as the contract above states.
  */
 function expectedMetadata(start: Start, sequence: ReadonlyArray<Write>) {
-  let current: unknown =
-    start === `present-with-metadata` ? startMetadata : undefined
+  return foldMetadata(
+    start === `present-with-metadata` ? startMetadata : undefined,
+    sequence,
+  )
+}
+
+function foldMetadata(initial: unknown, sequence: ReadonlyArray<Write>) {
+  let current = initial
   sequence.forEach((write, step) => {
     if (write.kind === `set`) current = writeMetadata(step)
     else if (
@@ -109,6 +115,44 @@ const histories = starts.flatMap((start) => {
   return legal
 })
 
+/**
+ * The rebuilt lane also varies the earlier held transaction. It either
+ * updates key 2, or writes key 1 without metadata: an update or a delete when
+ * key 1 is present, an insert when it is absent. A key-1 write changes the
+ * projection that the open transaction rebuilds against, so its sequences are
+ * legal after that write. Sequences stay at two writes to bound the lane.
+ */
+type EarlierWrite = { key: 1 | 2; kind: `insert` | `update` | `delete` }
+const shortSequences = writes.flatMap((first) => [
+  [first],
+  ...writes.map((second) => [first, second]),
+])
+const asWrite = (earlier: EarlierWrite): Write => ({
+  kind: earlier.kind,
+  metadata: false,
+})
+const rebuiltHistories = starts.flatMap((start) => {
+  const present = start !== `absent`
+  const earlierWrites: Array<EarlierWrite> = [
+    { key: 2, kind: `update` },
+    ...(present
+      ? ([
+          { key: 1, kind: `update` },
+          { key: 1, kind: `delete` },
+        ] as const)
+      : ([{ key: 1, kind: `insert` }] as const)),
+  ]
+  return earlierWrites.flatMap((earlier) =>
+    earlier.key === 2
+      ? histories
+          .filter((history) => history.start === start)
+          .map((history) => ({ ...history, earlier }))
+      : shortSequences
+          .filter((sequence) => isLegal(start, [asWrite(earlier), ...sequence]))
+          .map((sequence) => ({ start, sequence, earlier })),
+  )
+})
+
 const describeWrite = (write: Write) =>
   write.kind === `set` || write.kind === `unset` || write.kind === `truncate`
     ? write.kind
@@ -131,6 +175,7 @@ async function observeMetadata(
   start: Start,
   sequence: ReadonlyArray<Write>,
   id: string,
+  earlier: EarlierWrite = { key: 2, kind: `update` },
 ): Promise<unknown> {
   let sync!: SyncActions
   let release!: () => void
@@ -166,11 +211,16 @@ async function observeMetadata(
         : collection.update(2, (draft) => {
             draft.v = 9
           })
-    let earlier: true | Promise<void> = true
+    let earlierReceipt: true | Promise<void> = true
     if (lane === `rebuilt`) {
       sync.begin()
-      sync.write({ type: `update`, value: { id: 2, v: 1 } })
-      earlier = sync.commit()
+      if (earlier.kind === `delete`) sync.write({ type: `delete`, key: 1 })
+      else
+        sync.write({
+          type: earlier.kind,
+          value: { id: earlier.key, v: 100 },
+        })
+      earlierReceipt = sync.commit()
     }
     sync.begin()
     sequence.forEach((write, step) => {
@@ -192,12 +242,13 @@ async function observeMetadata(
         })
     })
     if (lane === `rebuilt`) {
-      expect(earlier).not.toBe(true)
+      expect(earlierReceipt).not.toBe(true)
       release()
       await blocker!.isPersisted.promise
-      await earlier
+      await earlierReceipt
     }
     const receipt = sync.commit()
+    if (lane === `immediate`) expect(receipt).toBe(true)
     if (lane === `held`) {
       // A truncate applies at once; the request holds every other transaction.
       if (sequence.some((write) => write.kind === `truncate`))
@@ -258,21 +309,53 @@ describe(`row metadata composition oracle`, () => {
     ).toEqual(startMetadata)
   })
 
+  it(`enumerates rebuilt histories against every earlier write`, () => {
+    // 825 after a key-2 update, plus 218 after a key-1 write.
+    expect(rebuiltHistories).toHaveLength(1043)
+    expect(
+      rebuiltHistories.some(
+        ({ earlier, sequence }) =>
+          earlier.key === 1 &&
+          earlier.kind === `delete` &&
+          sequence[0]?.kind === `insert`,
+      ),
+    ).toBe(true)
+  })
+
   it.each([`immediate`, `held`, `rebuilt`] as const)(
     `matches last-write-wins metadata on the %s path`,
+    { timeout: 120_000 },
     async (lane) => {
+      const cases =
+        lane === `rebuilt`
+          ? rebuiltHistories
+          : histories.map((history) => ({ ...history, earlier: undefined }))
       const mismatches: Array<string> = []
-      for (const [index, { start, sequence }] of histories.entries()) {
-        const actual = await observeMetadata(
-          lane,
-          start,
-          sequence,
-          `row-metadata-composition-${lane}-${index}`,
-        )
-        const expected = expectedMetadata(start, sequence)
+      for (const [index, { start, sequence, earlier }] of cases.entries()) {
+        const label = `${start}${earlier ? ` after ${earlier.kind} ${earlier.key}` : ``}: ${sequence.map(describeWrite).join(`, `)}`
+        let actual: unknown
+        try {
+          actual = await observeMetadata(
+            lane,
+            start,
+            sequence,
+            `row-metadata-composition-${lane}-${index}`,
+            earlier,
+          )
+        } catch (error) {
+          mismatches.push(`${label} threw ${String(error)}`)
+          continue
+        }
+        const expected =
+          earlier?.key === 1
+            ? foldMetadata(
+                expectedMetadata(start, [asWrite(earlier)]),
+                sequence,
+              )
+            : expectedMetadata(start, sequence)
         if (JSON.stringify(actual) !== JSON.stringify(expected))
           mismatches.push(
-            `${start}: ${sequence.map(describeWrite).join(`, `)} read ${JSON.stringify(actual)}, expected ${JSON.stringify(expected)}`,
+            `${label} read ${JSON.stringify(actual)}, expected ${JSON.stringify(expected)}`,
           )
       }
       expect(mismatches).toEqual([])
