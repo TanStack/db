@@ -1997,6 +1997,22 @@ const optimisticStep: fc.Arbitrary<OptimisticStep> = fc.oneof(
     }),
   },
   { weight: 3, arbitrary: sourceBatch },
+  // A sync transaction can still be open when an optimistic transaction
+  // settles, then commit or abort later.
+  {
+    weight: 1,
+    arbitrary: fc.record({
+      type: fc.constant(`open` as const),
+      batch: sourceBatch,
+    }),
+  },
+  {
+    weight: 1,
+    arbitrary: fc.record({
+      type: fc.constant(`close` as const),
+      commit: fc.boolean(),
+    }),
+  },
 )
 const optimisticHistory = fc.record({
   initial: fc.uniqueArray(historyRow, {
@@ -2061,6 +2077,81 @@ it.each(
     expect(counts.settlements).toBe(reinsert ? 2 : 1)
   },
 )
+
+// Replays of review probes. A sync transaction still open when the mutation
+// settles is not accepted, so it holds nothing and attributes nothing: after
+// it commits or aborts, a later remote write is remote. A completed key that
+// no queued sync touches stays remote while another key's sync is held.
+it.each(
+  [false, true].flatMap((optimistic) =>
+    [false, true].map((commit) => ({ optimistic, commit })),
+  ),
+)(
+  `attributes nothing to a sync transaction open at settlement: %j`,
+  async ({ optimistic, commit }) => {
+    const counts = await runOptimisticHistory(
+      [{ id: 1, a: 0, b: 0, c: 0 }],
+      [
+        { type: `edit`, key: 1, fields: { a: 1 }, optimistic },
+        {
+          type: `open`,
+          batch: {
+            type: `sync`,
+            rows: [{ id: 1, a: 2, b: 0, c: 0 }],
+            truncate: false,
+            copies: 1,
+          },
+        },
+        { type: `settle`, slot: 0, success: true, cascade: false },
+        { type: `close`, commit },
+        {
+          type: `sync`,
+          rows: [{ id: 1, a: 3, b: 0, c: 0 }],
+          truncate: false,
+          copies: 1,
+        },
+      ],
+    )
+    expect(counts.openBatches).toBe(1)
+    expect(counts.abortedBatches).toBe(Number(!commit))
+  },
+)
+it(`keeps an unrelated completed key remote while another key's sync is held`, async () => {
+  await runOptimisticHistory(
+    [
+      { id: 1, a: 0, b: 0, c: 0 },
+      { id: 2, a: 0, b: 0, c: 0 },
+    ],
+    [
+      { type: `edit`, key: 2, fields: { a: 2 }, optimistic: true },
+      { type: `edit`, key: 1, fields: { a: 1 }, optimistic: true },
+      {
+        type: `sync`,
+        rows: [{ id: 2, a: 5, b: 0, c: 0 }],
+        truncate: false,
+        copies: 1,
+      },
+      { type: `settle`, slot: 1, success: true, cascade: false },
+      { type: `settle`, slot: 0, success: true, cascade: false },
+      {
+        type: `sync`,
+        rows: [{ id: 1, a: 9, b: 0, c: 0 }],
+        truncate: false,
+        copies: 1,
+      },
+    ],
+  )
+})
+it(`generates open, committed, and aborted sync transactions`, () => {
+  const commands = fc.sample(optimisticStep, { seed: 86104, numRuns: 200 })
+  expect(commands.some((step) => step.type === `open`)).toBe(true)
+  expect(commands.some((step) => step.type === `close` && step.commit)).toBe(
+    true,
+  )
+  expect(commands.some((step) => step.type === `close` && !step.commit)).toBe(
+    true,
+  )
+})
 
 it(`generates direct delete actions`, () => {
   const commands = fc.sample(optimisticStep, { seed: 86104, numRuns: 100 })

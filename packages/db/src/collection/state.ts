@@ -580,10 +580,12 @@ export class CollectionStateManager<
     const previousRowOrigins = this.rowOrigins
 
     // Hold completed optimistic rows, and their local attribution, only while
-    // a queued sync transaction touches them. That sync was committed before
+    // an accepted, queued sync transaction touches them; an open one is not
+    // accepted yet. That sync was committed before
     // the optimistic state dropped; a later one is remote.
     const pendingSyncKeys = new Set<TKey>()
     for (const transaction of this.pendingSyncedTransactions) {
+      if (!transaction.committed) continue
       for (const operation of transaction.operations) {
         pendingSyncKeys.add(operation.key as TKey)
       }

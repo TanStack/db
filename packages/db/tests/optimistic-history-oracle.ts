@@ -47,6 +47,11 @@ import type { CollectionConfig, SyncConfig } from '../src/types.js'
  * transaction completes while a queued sync transaction touches its key, and
  * the drain that applies that queue clears it.
  *
+ * A sync transaction still open when a transaction settles is not accepted:
+ * it holds no completed row and attributes nothing. If it later commits, its
+ * writes are `'remote'` unless a persisting transaction touches their key; if
+ * it aborts, its writes never apply.
+ *
  * A mutation handler can write a sync transaction before it returns, and can
  * await that write's acceptance. It is the same event as a sync transaction
  * written while the transaction persists: it waits for settlement unless it
@@ -99,6 +104,11 @@ export type OptimisticStep =
       failure?: `rollback` | `reject`
     }
   | SourceBatch
+  // A sync transaction that begins and writes now but commits or aborts at its
+  // `close` step. While it is open, other sync batches are skipped, because the
+  // sync API writes to the most recent open transaction.
+  | { type: `open`; batch: SourceBatch }
+  | { type: `close`; commit: boolean }
 
 type ModelTransaction = {
   key: number
@@ -492,6 +502,8 @@ export async function runOptimisticHistory(
     failures: 0,
     snapshotOverrides: 0,
     handlerBatches: 0,
+    openBatches: 0,
+    abortedBatches: 0,
     awaitedReceipts: 0,
     sourceInserts: 0,
     sourceDeletes: 0,
@@ -500,6 +512,7 @@ export async function runOptimisticHistory(
   // batches. An insert names an absent key; an update or delete a present
   // one. Resolve each batch once, in write order, for the model and driver.
   const sourceKeys = new Set(initial.map((row) => row.id))
+  let open: { batch: SourceBatch; keysBefore: Set<number> } | undefined
   const sourceInserts = new WeakMap<SourceBatch, Set<number>>()
   function resolveSourceBatch(step: SourceBatch): SourceBatch {
     if (step.truncate) sourceKeys.clear()
@@ -514,7 +527,7 @@ export async function runOptimisticHistory(
     sourceInserts.set(resolved, inserts)
     return resolved
   }
-  function writeSourceBatch(step: SourceBatch) {
+  function beginSourceBatch(step: SourceBatch) {
     const inserts = sourceInserts.get(step)!
     sync.begin()
     if (step.truncate) {
@@ -532,6 +545,12 @@ export async function runOptimisticHistory(
       sync.write({ type: `delete`, key })
       counts.sourceDeletes++
     }
+  }
+  function writeSourceBatch(step: SourceBatch) {
+    beginSourceBatch(step)
+    return commitSourceBatch(step)
+  }
+  function commitSourceBatch(step: SourceBatch) {
     const receipt = sync.commit()
     if (receipt !== true)
       receipts.push({ batch: step, outcome: observeHistoryPromise(receipt) })
@@ -796,7 +815,7 @@ export async function runOptimisticHistory(
           if (index === undefined) continue
           const intent = model.transactions[index]!
           cuts = [sorted(model.visible().values())]
-          if (step.inHandler) {
+          if (step.inHandler && !open) {
             const batch: HandlerBatch = resolveSourceBatch(step.inHandler)
             batch.awaitReceipt = step.inHandler.awaitReceipt
             model.sync(batch)
@@ -902,7 +921,36 @@ export async function runOptimisticHistory(
           ).toEqual(cuts[0])
           counts.settlements++
           if (!step.success) counts.failures++
+        } else if (step.type === `open`) {
+          if (open || step.batch.truncate) continue
+          const keysBefore = new Set(sourceKeys)
+          const batch = resolveSourceBatch(step.batch)
+          beginSourceBatch(batch)
+          open = { batch, keysBefore }
+          counts.openBatches++
+        } else if (step.type === `close`) {
+          if (!open) continue
+          const { batch, keysBefore } = open
+          open = undefined
+          if (step.commit) {
+            model.sync(batch)
+            cuts = [sorted(model.visible().values())]
+            commitSourceBatch(batch)
+          } else {
+            // Aborted before acceptance: its writes never apply.
+            sourceKeys.clear()
+            for (const key of keysBefore) sourceKeys.add(key)
+            const controller = new AbortController()
+            controller.abort()
+            const receipt = sync.commit(controller.signal)
+            expect(receipt, `aborted open batch receipt`).toBeInstanceOf(
+              Promise,
+            )
+            await expect(receipt).rejects.toMatchObject({ name: `AbortError` })
+            counts.abortedBatches++
+          }
         } else {
+          if (open) continue
           const batch = resolveSourceBatch(step)
           model.sync(batch)
           cuts = [sorted(model.visible().values())]
