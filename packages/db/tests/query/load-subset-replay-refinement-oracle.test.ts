@@ -7,7 +7,7 @@ import {
   toArray,
 } from '../../src/query/index.js'
 import { BasicIndex } from '../../src/indexes/basic-index.js'
-import { evaluateReferenceExpression } from '../reference-expression.js'
+import { evaluateReferenceExpression } from '../reference-expression-oracle.js'
 import { flushPromises } from '../utils.js'
 import type {
   ChangeMessageOrDeleteKeyMessage,
@@ -593,7 +593,7 @@ describe(`loadSubset replay refinement`, () => {
     }
   })
 
-  it(`publishes a replay replacement before its source reports ready`, async () => {
+  it(`publishes a truncate-replay replacement before its source subscription reports ready`, async () => {
     const replay = createDeferred<void>()
     let loadCount = 0
     let begin!: () => void

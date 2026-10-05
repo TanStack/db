@@ -13,37 +13,20 @@ import type {
 import type { QueryBuilder } from './index.js'
 
 type StringRef =
-  | RefLeaf<string>
-  | RefLeaf<string | null>
-  | RefLeaf<string | undefined>
+  RefLeaf<string> | RefLeaf<string | null> | RefLeaf<string | undefined>
 type StringRefProxy =
-  | RefProxy<string>
-  | RefProxy<string | null>
-  | RefProxy<string | undefined>
+  RefProxy<string> | RefProxy<string | null> | RefProxy<string | undefined>
 type StringBasicExpression =
   | BasicExpression<string>
   | BasicExpression<string | null>
   | BasicExpression<string | undefined>
 type StringLike =
-  | StringRef
-  | StringRefProxy
-  | StringBasicExpression
-  | string
-  | null
-  | undefined
+  StringRef | StringRefProxy | StringBasicExpression | string | null | undefined
 
 type ComparisonOperand<T> =
-  | RefProxy<T>
-  | RefLeaf<T>
-  | T
-  | BasicExpression<T>
-  | undefined
-  | null
+  RefProxy<T> | RefLeaf<T> | T | BasicExpression<T> | undefined | null
 type ComparisonOperandPrimitive<T extends string | number | boolean> =
-  | T
-  | BasicExpression<T>
-  | undefined
-  | null
+  T | BasicExpression<T> | undefined | null
 
 // Helper type for values that can be lowered to expressions.
 type ExpressionLike =

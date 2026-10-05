@@ -236,7 +236,7 @@ const solidDriver: LiveQueryDriver = {
   // gap — the error-status scenario is parametrized to assert it via the boundary.
   errorSurface: `throw`,
   knownGaps: [],
-  features: { serverSnapshot: false, suspense: true },
+  features: { serverSnapshot: false, suspense: true, pooledEqFilters: true },
 }
 
 describe(`owned native scope setup`, () => {

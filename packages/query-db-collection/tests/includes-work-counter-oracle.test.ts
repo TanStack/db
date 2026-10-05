@@ -6,7 +6,7 @@ import {
   eq,
 } from '@tanstack/db'
 import { describe, expect, it } from 'vitest'
-import { evaluateReferenceExpression } from '../../db/tests/reference-expression'
+import { evaluateReferenceExpression } from '../../db/tests/reference-expression-oracle'
 import { queryCollectionOptions } from '../src/query'
 import type { Collection } from '@tanstack/db'
 

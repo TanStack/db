@@ -22,6 +22,7 @@ Defined in: [packages/db/src/errors.ts:308](https://github.com/TanStack/db/blob/
 - [`TransactionNotPendingCommitError`](TransactionNotPendingCommitError.md)
 - [`NoPendingSyncTransactionWriteError`](NoPendingSyncTransactionWriteError.md)
 - [`SyncTransactionAlreadyCommittedWriteError`](SyncTransactionAlreadyCommittedWriteError.md)
+- [`SyncRowReusedWithoutPreviousValueError`](SyncRowReusedWithoutPreviousValueError.md)
 - [`NoPendingSyncTransactionCommitError`](NoPendingSyncTransactionCommitError.md)
 - [`SyncTransactionAlreadyCommittedError`](SyncTransactionAlreadyCommittedError.md)
 

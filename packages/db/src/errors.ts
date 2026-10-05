@@ -393,6 +393,16 @@ export class SyncTransactionAlreadyCommittedWriteError extends TransactionError 
   }
 }
 
+export class SyncRowReusedWithoutPreviousValueError extends TransactionError {
+  constructor(key: string | number) {
+    super(
+      `A sync update for key "${key}" wrote a row object that changed in place since it was last written. ` +
+        `The change overwrote the row's previous value. ` +
+        `Write a new object, or pass the row's previous value as \`previousValue\`.`,
+    )
+  }
+}
+
 export class NoPendingSyncTransactionCommitError extends TransactionError {
   constructor() {
     super(`No pending sync transaction to commit`)
@@ -436,9 +446,7 @@ export class InvalidSourceError extends QueryBuilderError {
 }
 
 export type SourceClauseContext =
-  | `from clause`
-  | `unionAll clause`
-  | `join clause`
+  `from clause` | `unionAll clause` | `join clause`
 
 export class InvalidSourceTypeError extends QueryBuilderError {
   constructor(context: SourceClauseContext, type: string) {

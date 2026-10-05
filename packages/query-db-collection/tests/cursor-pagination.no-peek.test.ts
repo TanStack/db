@@ -2,10 +2,10 @@ import { describe, expect, it } from 'vitest'
 import fc from 'fast-check'
 import { createDeferred } from '../../db/src/deferred.js'
 import { oraclePropertyOptions } from '../../db/tests/oracle-config.js'
-import { expectedWindow } from './cursor-pagination/model.js'
+import { expectedWindow } from './cursor-pagination/model-oracle.js'
 import { createNoPeekDemandModel } from './cursor-pagination/no-peek.js'
 import { createFactTransport } from './cursor-pagination/no-peek-transport.js'
-import type { Row, Scope } from './cursor-pagination/model.js'
+import type { Row, Scope } from './cursor-pagination/model-oracle.js'
 
 const scope: Scope = { group: undefined, descending: false }
 const rowsOf = (count: number): Array<Row> =>
