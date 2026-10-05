@@ -56,6 +56,22 @@ no longer exposed it.
   1 through 4, and three subscribers. Before the truncate the source holds keys
   1 and 4. The replacement holds 1 and 2, so key 4's prefix delete must remain.
 
+## Failure fidelity
+
+CodeRabbit found that the deferral let a subscriber error escape from the
+publication before the commit resolved its applied receipts. A probe showed the
+same hang on `main`, through `markReady`'s empty ready event. When a truncate
+made the Collection ready, a throwing subscriber or `onFirstReady` callback left
+a held receipt pending forever.
+
+The emit, `markReady`, and publication steps now run through one capture that
+keeps the first error. The commit reports that error after its receipts settle,
+as it does when the Collection is already ready. A witness holds a sync
+transaction behind a persisting request, then truncates while a subscriber or a
+ready callback throws, with and without prior readiness. It fails on `main` and
+on the deferral alone, in both not-yet-ready cases. A variant that captures only
+the publication fails both cases.
+
 ## ORC outcomes
 
 - **ORC-001: met.** The law above names its authority and the subscriber
@@ -79,7 +95,9 @@ no longer exposed it.
 - **ORC-009: met.** "Ready callback" means an `onFirstReady` callback or a
   `status:change` listener for `ready`.
 - **ORC-010: met.** Each case unsubscribes, settles its requests, and cleans
-  up the Collection in a `finally` block.
+  up the Collection in a `finally` block. The failure-fidelity witness checks
+  that a thrown subscriber or callback error is reported after every receipt
+  settles.
 - **ORC-011: not applicable.** No reviewer named a fault shared by production
   and the model.
 - **ORC-012: met by this record.**
