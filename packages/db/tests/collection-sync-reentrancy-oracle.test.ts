@@ -985,16 +985,42 @@ describe(`sync publication reentrancy`, () => {
   })
 
   // The truncate marks the Collection ready before it publishes its changed
-  // keys. A ready callback that edits a replaced key adds an optimistic upsert
-  // that the truncate batch has not published, so the batch must still
-  // insert that key.
-  it.each([`onFirstReady`, `status:change`] as const)(
-    `publishes a replaced key that a %s callback edits during truncate`,
-    async (hook) => {
-      const updatePersistence = createDeferred<void>()
+  // keys. A ready callback can write an optimistic request that the truncate
+  // batch has not published: an edit or a delete of a replaced key, or an
+  // insert of a new key. Each subscriber must receive messages that are valid
+  // for the rows it holds, and end with the Collection's rows. A subscriber
+  // without initial state has no sent-key filter to hide a second insert or a
+  // second delete.
+  const readyActions = {
+    edit: [
+      [1, `optimistic-one`],
+      [2, `two`],
+    ],
+    insert: [
+      [1, `one-again`],
+      [2, `two`],
+      [3, `optimistic-three`],
+    ],
+    delete: [[2, `two`]],
+  } as const
+  it.each(
+    ([`onFirstReady`, `status:change`] as const).flatMap((hook) =>
+      (Object.keys(readyActions) as Array<keyof typeof readyActions>).flatMap(
+        (action) =>
+          [true, false].map((includeInitialState) => ({
+            hook,
+            action,
+            includeInitialState,
+          })),
+      ),
+    ),
+  )(
+    `publishes valid truncate messages when a $hook callback runs $action (includeInitialState: $includeInitialState)`,
+    async ({ hook, action, includeInitialState }) => {
+      const persistence = createDeferred<void>()
       let sync!: SyncOps
       const collection = createCollection<Row, number>({
-        id: `truncate-ready-reentrant-${hook}`,
+        id: `truncate-ready-reentrant-${hook}-${action}-${includeInitialState}`,
         getKey: (row) => row.id,
         startSync: true,
         sync: {
@@ -1002,12 +1028,22 @@ describe(`sync publication reentrancy`, () => {
             sync = ops
             ops.begin()
             ops.write({ type: `insert`, value: { id: 1, value: `one` } })
+            // The replacement omits key 4, so its prefix delete must remain.
+            ops.write({ type: `insert`, value: { id: 4, value: `four` } })
             ops.commit()
           },
         },
-        onUpdate: () => updatePersistence.promise,
+        onInsert: () => persistence.promise,
+        onUpdate: () => persistence.promise,
+        onDelete: () => persistence.promise,
       })
-      const mirror = new Map<number, string>()
+      await flushPromises()
+      // The raw subscriber starts from the rows it can see when it subscribes.
+      const mirror = new Map<number, string>(
+        includeInitialState
+          ? []
+          : [...collection.state].map(([key, row]) => [key, row.value]),
+      )
       const violations: Array<string> = []
       const subscription = collection.subscribeChanges(
         (changes) => {
@@ -1018,44 +1054,49 @@ describe(`sync publication reentrancy`, () => {
             else mirror.set(change.key, change.value.value)
           }
         },
-        { includeInitialState: true },
+        { includeInitialState },
       )
-      let update: ReturnType<typeof collection.update> | undefined
-      const edit = () => {
-        update ??= collection.update(1, (draft) => {
-          draft.value = `optimistic-one`
-        })
+      let request:
+        | ReturnType<typeof collection.update>
+        | ReturnType<typeof collection.insert>
+        | undefined
+      const write = () => {
+        request ??=
+          action === `edit`
+            ? collection.update(1, (draft) => {
+                draft.value = `optimistic-one`
+              })
+            : action === `insert`
+              ? collection.insert({ id: 3, value: `optimistic-three` })
+              : collection.delete(1)
       }
-      if (hook === `onFirstReady`) collection.onFirstReady(edit)
+      if (hook === `onFirstReady`) collection.onFirstReady(write)
       else
         collection.on(`status:change`, ({ status }) => {
-          if (status === `ready`) edit()
+          if (status === `ready`) write()
         })
 
       try {
-        await flushPromises()
         sync.begin()
         sync.truncate()
         sync.write({ type: `insert`, value: { id: 1, value: `one-again` } })
         sync.write({ type: `insert`, value: { id: 2, value: `two` } })
         expect(sync.commit()).toBe(true)
 
-        expect(update).toBeDefined()
+        expect(request).toBeDefined()
         expect(violations).toEqual([])
-        expect([...mirror].sort(([a], [b]) => a - b)).toEqual([
-          [1, `optimistic-one`],
-          [2, `two`],
+        const expected = readyActions[action].map(([key, value]) => [
+          key,
+          value,
         ])
+        expect([...mirror].sort(([a], [b]) => a - b)).toEqual(expected)
         expect(
           [...collection.state].map(([key, row]) => [key, row.value]),
-        ).toEqual([
-          [1, `optimistic-one`],
-          [2, `two`],
-        ])
+        ).toEqual(expected)
       } finally {
         subscription.unsubscribe()
-        updatePersistence.resolve()
-        await update?.isPersisted.promise.catch(() => undefined)
+        persistence.resolve()
+        await request?.isPersisted.promise.catch(() => undefined)
         await collection.cleanup()
       }
     },
