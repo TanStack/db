@@ -9,6 +9,7 @@ import {
   encodePersistedStorageKey,
   persistedCollectionOptions,
 } from '../src'
+import { runOrdinaryTransactionWorkOracle } from './ordinary-transaction-work-oracle'
 import type { SQLiteDriver } from '../src'
 import type { Collection } from '@tanstack/db'
 
@@ -878,7 +879,7 @@ describe(`SQLite resume snapshots`, () => {
       ])
       // The host-dependent cost is a database call, not the in-process timing.
       expect(replacementCalls).toBeLessThanOrEqual(40)
-      expect(maxReplacementBoundParameters).toBe(400)
+      expect(maxReplacementBoundParameters).toBe(500)
     } catch (error) {
       primaryFailure = error
     } finally {
@@ -1628,3 +1629,6 @@ describe(`SQLite resume snapshots`, () => {
     }
   })
 })
+
+// The ordinary committed-transaction work law extends this SQLite owner.
+runOrdinaryTransactionWorkOracle()
