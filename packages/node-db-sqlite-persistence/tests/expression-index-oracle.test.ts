@@ -603,8 +603,7 @@ async function observeExpressionIndexScenario({
            WHERE collection_id = ? AND signature = ?`,
       )
       .get(collectionId, signature) as
-      | { index_name: string; expression_sql: string }
-      | undefined
+      { index_name: string; expression_sql: string } | undefined
     if (!registryRow) {
       throw new Error(`expression index registry checkpoint was not reached`)
     }

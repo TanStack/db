@@ -66,9 +66,7 @@ type StoredSqliteRow = {
 }
 
 type SQLiteCoreAdapterSchemaMismatchPolicy =
-  | `sync-present-reset`
-  | `sync-absent-error`
-  | `reset`
+  `sync-present-reset` | `sync-absent-error` | `reset`
 
 export type SQLiteCoreAdapterOptions = {
   driver: SQLiteDriver
