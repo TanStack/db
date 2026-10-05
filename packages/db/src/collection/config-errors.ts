@@ -91,7 +91,7 @@ export class UnknownCollectionConfigError extends CollectionConfigurationError {
       )
     }
     parts.push(
-      `\n\nValid config properties: id, schema, getKey, sync, gcTime, startSync, autoIndex, defaultIndexType, compare, syncMode, defaultStringCollation, onInsert, onUpdate, onDelete, utils, singleResult.`,
+      `\n\nValid config properties: id, schema, getKey, sync, gcTime, startSync, autoIndex, defaultIndexType, compare, syncMode, defaultStringCollation, onInsert, onUpdate, onDelete, utils, singleResult, persistence.`,
     )
     super(parts.join(``))
   }
