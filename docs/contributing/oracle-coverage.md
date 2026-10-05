@@ -299,6 +299,32 @@ remain outside this controlled React driver. A space policy for a mounted hook
 that visits unbounded distinct source IDs remains open; this owner needs a
 bounded-navigation counter witness once that policy is chosen.
 
+The SQLite core binding-capacity oracle in
+`packages/db-sqlite-persistence-core/tests/sqlite-core-adapter-oracle.test.ts` is a
+bounded owner for issue #1993. The
+[review record](oracle-reviews/issue-1993-sqlite-binding-capacity.md) gives the
+exact executable revision and guide audit. It failed on the original 900-item
+chunking and passes with one JSON table binding per runtime `IN` list and a
+statement-total fallback. It compares independently filtered rows and typed
+values with
+`loadSubset` on real Node prepared SQLite statements. Node versions that expose
+the configured 999-parameter limit use that native cap. Older versions use a
+controlled driver that rejects over-cap bindings before SQLite preparation;
+the oracle tests that guard separately. Fixed and generated cases cover empty lists, 998/999/1000
+single lists, 499+500 and 500+500 statement totals, mixed scalar/list and
+nested predicates, root and distinct transaction-driver routes (including an
+omitted transaction cap at the 100/101 driver boundary), signed-64-bit BigInt edges,
+escaped strings, an ordered two-hit list across the old 900-item chunk, both
+cursor SELECTs, and a 1,000-scalar fallback. Both index-definition `IN`
+contexts must remain literal SQL. The existing CLI
+large-list test substitutes values into SQL and cannot witness parameter
+capacity. This new owner does not establish behavior for null, nonfinite,
+container, or structured values; 50,582-ID stress; JSON-function availability;
+the cost of a full-table fallback; concurrent writers; or browser, mobile,
+Tauri, and native-host execution. The core owner needs typed equivalence and
+row-read work witnesses before claiming class closure. Each host driver owns a
+receiving capacity witness for its real SQLite engine.
+
 The Query ownership oracle checks that a direct-write promise stays pending
 while a controlled persisted adapter holds its sync commit and settles after
 the adapter stores the row. It also checks that all five direct-write methods
@@ -416,6 +442,49 @@ public snapshots and change events before release, after release, and after
 rollback. Both use controlled provider timing; real-provider ordering remains
 a separate receiving handoff.
 
+The ordinary committed-transaction companion in the SQLite resume-snapshot
+owner checks durable rows, row and collection metadata, expected-key evidence,
+tombstones, applied position, idempotent reapply, and replay threshold behavior
+for bounded insert, partial-update, delete, metadata-only, and repeated-key
+histories. Its fixed and random generated campaigns cover a two-row seed,
+ordered action prefixes, seven required action/metadata suffixes, optional
+dependent updates, and late-bookkeeping rollback, comparing durable state after
+each settlement. The generated grammar is bounded to two writable string keys,
+one absent metadata key, up to 60 prefix mutations sampled in short, middle,
+and long bands, three row-metadata and
+two collection-metadata prefix actions, and up to three committed positions;
+it does not claim arbitrary histories or concurrent owners. Every generated
+seed, candidate, dependent update, and late rollback must enter exactly one
+SQLite transaction; counters are captured before durable snapshot reads. A
+separate fixed/random generated work grammar covers 0–60 distinct keys, six
+insert/update/delete/row and collection metadata shapes, and 100/999 parameter
+caps. It checks
+durable values before applying the same proposed chunk-bound work law; all
+repeated-key histories now check a distinct-key work bound after both committed
+and rolled-back candidates. A fixed 205-update single-key case drops from 824
+to 8 query/run calls against a bound of 18. Truncate cases require overwritten
+invalid row and metadata values, including unbindable `undefined` collection
+metadata, to reject and roll back. Fixed 25/26 and
+10,000-row cases separately witness the independent-key work boundary. Both
+fixed and generated independent-key work laws were
+RED on `ef1e6a4` and are GREEN with ordinary batching: the 10,000-row insert
+plus metadata takes 505 query/run calls instead of 50,005. A later
+125-row-ceiling follow-up checks 124/125/126 rows under a 500-parameter host
+cap; the 10,000-row case now takes 405 calls. A temporary
+repeated-key classifier mutation fails the generated oracle at the candidate
+durable checkpoint, seed 1992, path `2:0:0:2:2:2:2`. A temporary chunk-limit
+mutation passes the Cloudflare 25-row case but fails at 26 rows under the
+100-parameter guard. A collection-metadata classifier mutation that ignores
+repeated keys fails at the durable checkpoint for a set/delete history. All
+mutations were restored. The Cloudflare receiving driver also persists ordinary
+writes with row and collection metadata at 25, 26, and 205 rows within that
+guard. Its Node SQLite storage seam does not establish Cloudflare
+Worker execution. The synthetic node:sqlite seam does not establish OPFS
+worker scheduling, browser latency, or native-device performance. Tagged-value
+serialization, unavailable key evidence after raw loss, concurrent schema
+migration, WAL across processes, and arbitrary longer transaction histories
+remain with their existing owners or need explicit future witnesses.
+
 The SQLite resume-snapshot owner also checks a cold, unique-key, non-delete
 full replacement with 205 rows. It compares exact durable rows, row metadata,
 key-set evidence, resume metadata, and applied position at transaction return;
@@ -424,10 +493,15 @@ whole transaction. Duplicate-key and delete histories keep their sequential
 semantics. This in-memory driver-call law does not measure Chromium OPFS
 latency, worker scheduling, or an end-to-end Electric snapshot.
 
-The Cloudflare Durable Object replacement test applies 25-, 26-, and 205-row
-full replacements through the actual Cloudflare driver. A storage seam enforces
-Cloudflare's documented 100-bound-parameter query limit and checks the durable
-keys after each transaction. This Node SQLite seam does not execute in Workers.
+The Cloudflare Durable Object test applies 25-, 26-, and 205-row full
+replacements and ordinary writes with row and collection metadata through the
+actual Cloudflare driver. A storage seam enforces Cloudflare's documented
+100-bound-parameter query limit and checks durable keys and metadata after each
+transaction. Its subset receiving witness compares exact rows for 100 and 101
+equality or one-item `IN` clauses through both savepoint and native transaction
+drivers; the same seam rejects a statement above 100 bindings. The original
+transaction driver exceeded the cap at 101. This Node SQLite seam does not
+execute in Workers or prove native JSON-function support.
 
 The browser OPFS lifecycle owner also checks that a silent initialization
 rejects at the default or overridden open deadline, terminates its worker,
