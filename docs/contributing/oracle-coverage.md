@@ -307,11 +307,13 @@ exact executable revision and guide audit. It failed on the original 900-item
 chunking and passes with one JSON table binding per runtime `IN` list and a
 statement-total fallback. It compares independently filtered rows and typed
 values with
-`loadSubset` on a real Node prepared SQLite connection capped at 999
-parameters. Fixed and generated cases cover empty lists, 998/999/1000
+`loadSubset` on real Node prepared SQLite statements. Node versions that expose
+the configured 999-parameter limit use that native cap. Older versions use a
+controlled driver that rejects over-cap bindings before SQLite preparation;
+the oracle tests that guard separately. Fixed and generated cases cover empty lists, 998/999/1000
 single lists, 499+500 and 500+500 statement totals, mixed scalar/list and
 nested predicates, root and distinct transaction-driver routes (including an
-omitted transaction cap at the real 100/101 host boundary), signed-64-bit BigInt edges,
+omitted transaction cap at the 100/101 driver boundary), signed-64-bit BigInt edges,
 escaped strings, an ordered two-hit list across the old 900-item chunk, both
 cursor SELECTs, and a 1,000-scalar fallback. Both index-definition `IN`
 contexts must remain literal SQL. The existing CLI

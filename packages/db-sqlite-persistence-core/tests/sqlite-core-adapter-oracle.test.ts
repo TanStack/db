@@ -2740,13 +2740,14 @@ export function runSQLiteCoreAdapterContractSuite(
  * the three capacity forms. Kind and connective challenge value preservation.
  * The 998/999/1000 margins distinguish a misplaced cap; 499+500 versus
  * 500+500 distinguishes statement-wide counting. A distinct transaction
- * driver without a cap crosses a real 100/101-variable host boundary.
+ * driver without a cap crosses a 100/101-variable host boundary.
  *
- * Production driver: use the real core adapter with an actual prepared SQLite
- * statement and `variableNumber: 999` or `100`. Record every attempted driver
- * statement during `loadSubset`, including a prepare failure. The observation cut is
- * `loadSubset` fulfillment/rejection, typed returned values, ordered keys when
- * requested, and the attempted statements' bind counts.
+ * Production driver: use the real core adapter with prepared SQLite statements.
+ * Newer Node versions apply `variableNumber: 999` or `100` natively; older
+ * versions use a driver boundary that rejects over-cap bindings before prepare.
+ * Record every attempted driver statement, including a capacity failure.
+ * The observation cut is `loadSubset` fulfillment/rejection, typed returned
+ * values, ordered keys when requested, and attempted statement bind counts.
  *
  * Refinement: require the exact rows, reached predicate SELECTs, no
  * SQLite error, and no statement above its declared binding cap. The original 900-item
@@ -2873,9 +2874,18 @@ function preparedDriver(
   withDriver = false,
   cap = BINDING_CAP,
   omitTransactionCap = false,
+  forceControlledCap = false,
 ) {
   let record = false
   let nextSavepoint = 0
+  const nativeCap = (
+    db as DatabaseSync & { limits?: { variableNumber: number } }
+  ).limits?.variableNumber
+  const controlledCap = forceControlledCap || nativeCap === undefined
+  function checkCapacity(bindings: number): void {
+    if (controlledCap && bindings > cap)
+      throw new RangeError(`host parameter limit exceeded: ${bindings} > ${cap}`)
+  }
   const driver: SQLiteDriver & { startObservation: () => void } = {
     maxBoundParameters: cap,
     startObservation() {
@@ -2899,6 +2909,7 @@ function preparedDriver(
       const attempt: Attempt = { method: 'query', sql, bindings: params.length }
       if (record) attempts.push(attempt)
       try {
+        checkCapacity(params.length)
         return Promise.resolve(
           db
             .prepare(sql)
@@ -2915,6 +2926,7 @@ function preparedDriver(
       const attempt: Attempt = { method: 'run', sql, bindings: params.length }
       if (record) attempts.push(attempt)
       try {
+        checkCapacity(params.length)
         db.prepare(sql).run(
           ...(params as Array<null | number | bigint | string>),
         )
@@ -2957,7 +2969,7 @@ function preparedDriver(
 }
 
 function limitedDatabase(cap = BINDING_CAP): DatabaseSync {
-  // Node supports this runtime option before the installed Node types declare it.
+  // Older Node versions ignore this option; preparedDriver then enforces the cap.
   const options = { limits: { variableNumber: cap } }
   const db = new DatabaseSync(
     ':memory:',
@@ -2965,12 +2977,11 @@ function limitedDatabase(cap = BINDING_CAP): DatabaseSync {
       ConstructorParameters<typeof DatabaseSync>[1]
     >,
   )
-  assert.equal(
-    (db as DatabaseSync & { limits?: { variableNumber: number } }).limits
-      ?.variableNumber,
-    cap,
-    'binding-capacity oracle requires the requested SQLite variable limit',
-  )
+  const nativeCap = (
+    db as DatabaseSync & { limits?: { variableNumber: number } }
+  ).limits?.variableNumber
+  if (nativeCap !== undefined)
+    assert.equal(nativeCap, cap, 'SQLite did not apply the requested variable limit')
   return db
 }
 
@@ -3453,6 +3464,22 @@ const bindingFixedIt = bindingReplay ? it.skip : it
 
 export function runSQLiteBindingCapacityOracleSuite(): void {
   describe(`SQLite subset binding-capacity oracle`, () => {
+    bindingFixedIt(
+      `rejects over-cap bindings at the controlled driver boundary`,
+      async () => {
+        const db = limitedDatabase(100)
+        try {
+          const driver = preparedDriver(db, [], false, 100, false, true)
+          const sql = `SELECT ${Array(101).fill('?').join(' + ')}`
+          await expect(driver.query(sql, Array(101).fill(1))).rejects.toThrow(
+            /host parameter limit exceeded: 101 > 100/,
+          )
+        } finally {
+          db.close()
+        }
+      },
+    )
+
     bindingFixedIt(
       `returns exact rows at single-list, statement-total, and typed boundaries`,
       async () => {
