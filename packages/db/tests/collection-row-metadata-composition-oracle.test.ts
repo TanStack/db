@@ -40,7 +40,7 @@ type Write =
       metadata: boolean
     }
 type Start = `absent` | `present-with-metadata` | `present-without-metadata`
-type Lane = `immediate` | `held` | `rebuilt`
+type Lane = `immediate` | `held` | `rebuilt` | `canceled`
 
 const writes: ReadonlyArray<Write> = [
   { kind: `set` },
@@ -163,6 +163,39 @@ const rebuiltHistories = starts.flatMap((start) => {
   )
 })
 
+/**
+ * The canceled lane holds an earlier transaction that deletes key 1, writes
+ * the open transaction against that projection, then cancels the earlier
+ * transaction before the open one commits. The rebuild classifies the open
+ * writes again against the source rows. An insert onto the row the source
+ * still holds becomes an idempotent re-insert, so the model reads the
+ * sequence with that insert as a `reinsert`.
+ */
+const afterCancel = (sequence: ReadonlyArray<Write>): Array<Write> => {
+  let present = true
+  return sequence.map((write) => {
+    const mapped: Write =
+      write.kind === `insert` && present
+        ? { kind: `reinsert`, metadata: write.metadata }
+        : write
+    if (mapped.kind === `insert` || mapped.kind === `reinsert`) present = true
+    else if (mapped.kind === `update`) present = true
+    else if (mapped.kind === `delete` || mapped.kind === `truncate`)
+      present = false
+    return mapped
+  })
+}
+const canceledHistories = starts
+  .filter((start) => start !== `absent`)
+  .flatMap((start) =>
+    shortSequences
+      .filter((sequence) =>
+        isLegal(start, [{ kind: `delete`, metadata: false }, ...sequence]),
+      )
+      .map((sequence) => ({ start, sequence: afterCancel(sequence) }))
+      .filter(({ sequence }) => isLegal(start, sequence)),
+  )
+
 const describeWrite = (write: Write) =>
   write.kind === `set` || write.kind === `unset` || write.kind === `truncate`
     ? write.kind
@@ -222,6 +255,14 @@ async function observeMetadata(
             draft.v = 9
           })
     let earlierReceipt: true | Promise<void> = true
+    const cancel = new AbortController()
+    if (lane === `canceled`) {
+      sync.begin()
+      sync.write({ type: `delete`, key: 1 })
+      earlierReceipt = sync.commit(cancel.signal)
+      // The canceled transaction's receipt rejects by design.
+      if (earlierReceipt !== true) void earlierReceipt.catch(() => undefined)
+    }
     if (lane === `rebuilt`) {
       sync.begin()
       if (earlier.kind === `delete`) sync.write({ type: `delete`, key: 1 })
@@ -269,6 +310,12 @@ async function observeMetadata(
       release()
       await blocker!.isPersisted.promise
       await earlierReceipt
+    }
+    if (lane === `canceled`) {
+      expect(earlierReceipt).not.toBe(true)
+      cancel.abort()
+      release()
+      await blocker!.isPersisted.promise
     }
     const receipt = sync.commit()
     if (lane === `immediate`) expect(receipt).toBe(true)
@@ -354,14 +401,30 @@ describe(`row metadata composition oracle`, () => {
     ).toBe(true)
   })
 
-  it.each([`immediate`, `held`, `rebuilt`] as const)(
+  it(`enumerates canceled-earlier histories`, () => {
+    expect(canceledHistories.length).toBeGreaterThan(0)
+    // An insert written after the earlier delete becomes a re-insert.
+    expect(
+      canceledHistories.some(
+        ({ start, sequence }) =>
+          start === `present-with-metadata` &&
+          sequence.length === 1 &&
+          sequence[0]!.kind === `reinsert` &&
+          !sequence[0]!.metadata,
+      ),
+    ).toBe(true)
+  })
+
+  it.each([`immediate`, `held`, `rebuilt`, `canceled`] as const)(
     `matches last-write-wins metadata on the %s path`,
     { timeout: 120_000 },
     async (lane) => {
       const cases =
         lane === `rebuilt`
           ? rebuiltHistories
-          : histories.map((history) => ({ ...history, earlier: undefined }))
+          : (lane === `canceled` ? canceledHistories : histories).map(
+              (history) => ({ ...history, earlier: undefined }),
+            )
       const mismatches: Array<string> = []
       for (const [index, { start, sequence, earlier }] of cases.entries()) {
         const label = `${start}${earlier ? ` after ${earlier.kind} ${earlier.key}` : ``}: ${sequence.map(describeWrite).join(`, `)}`
