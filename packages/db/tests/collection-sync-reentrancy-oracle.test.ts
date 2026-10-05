@@ -1031,13 +1031,14 @@ describe(`sync publication reentrancy`, () => {
     'insert 3': { type: `insert`, key: 3, value: `prior-three` },
   }
   const callbackIntents = (visible: ReadonlyMap<number, string>) =>
-    [1, 2, 3, 4].flatMap((key): Array<ReadyIntent> =>
-      visible.has(key)
-        ? [
-            { type: `update`, key, value: `callback-${key}` },
-            { type: `delete`, key },
-          ]
-        : [{ type: `insert`, key, value: `callback-${key}` }],
+    [1, 2, 3, 4].flatMap(
+      (key): Array<ReadyIntent> =>
+        visible.has(key)
+          ? [
+              { type: `update`, key, value: `callback-${key}` },
+              { type: `delete`, key },
+            ]
+          : [{ type: `insert`, key, value: `callback-${key}` }],
     )
   const sourceValues = new Set<string>(
     [...sourceBefore, ...replacement].map(([, value]) => value),
@@ -1314,6 +1315,44 @@ describe(`sync publication reentrancy`, () => {
         persistence.resolve()
         await blocker.isPersisted.promise.catch(() => undefined)
         await collection.cleanup()
+      }
+    },
+  )
+
+  // A sync function can make the Collection ready by calling markReady or
+  // by committing a truncate. If a ready callback throws during sync entry,
+  // the error surfaces once the sync function returns: the sync function
+  // finishes, and the Collection stays ready with the rows it committed.
+  it.each([`markReady`, `truncate commit`, `truncate commit, then markReady`])(
+    `defers a ready callback error until sync entry returns: %s`,
+    async (entry) => {
+      const failure = new Error(`ready callback failure`)
+      let finished = false
+      const collection = createCollection<Row, number>({
+        id: `sync-entry-ready-failure-${entry}`,
+        getKey: (row) => row.id,
+        startSync: false,
+        sync: {
+          sync: (ops) => {
+            ops.begin()
+            if (entry !== `markReady`) ops.truncate()
+            ops.write({ type: `insert`, value: { id: 1, value: `one` } })
+            ops.commit()
+            if (entry !== `truncate commit`) ops.markReady()
+            finished = true
+          },
+        },
+      })
+      try {
+        collection.onFirstReady(() => {
+          throw failure
+        })
+        expect(() => collection.startSyncImmediate()).toThrow(failure)
+        expect(finished).toBe(true)
+        expect(collection.status).toBe(`ready`)
+        expect([...collection.state.keys()]).toEqual([1])
+      } finally {
+        await collection.cleanup().catch(() => undefined)
       }
     },
   )
