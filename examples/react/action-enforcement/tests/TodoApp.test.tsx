@@ -1,4 +1,11 @@
-import { act, cleanup, fireEvent, render, screen } from '@testing-library/react'
+import {
+  act,
+  cleanup,
+  fireEvent,
+  render,
+  screen,
+  within,
+} from '@testing-library/react'
 import { afterEach, expect, test, vi } from 'vitest'
 import { TodoApp } from '../src/features/todos/TodoApp'
 import * as actions from '../src/db/actions/todoActions'
@@ -94,12 +101,14 @@ for (const elapsed of [0, 40, 119]) {
       await vi.advanceTimersByTimeAsync(elapsed)
     })
     const row = screen.getByText(text).closest('li')!
-    const button = row.querySelector('button')!
+    const button = within(row).getByRole('button') as HTMLButtonElement
     const settledRow = screen
       .getByText('Review action-only mutation boundaries')
       .closest('li')!
     expect(add.mock.results[0].value.state).toBe('persisting')
-    expect(settledRow.querySelector('button')!.disabled).toBe(false)
+    expect(
+      (within(settledRow).getByRole('button') as HTMLButtonElement).disabled,
+    ).toBe(false)
     expect(button.disabled).toBe(true)
     fireEvent.click(button)
     expect(toggle).not.toHaveBeenCalled()
@@ -228,7 +237,7 @@ test('failed toggles report the error, roll back both directions, and allow retr
     await vi.advanceTimersByTimeAsync(200)
   })
   const row = screen.getByText(text).closest('li')!
-  const button = row.querySelector('button')!
+  const button = within(row).getByRole('button') as HTMLButtonElement
   const toggle = vi.spyOn(actions, 'toggleTodo')
   const persistToggle = vi.spyOn(api, 'toggleTodo')
   for (const completed of [false, true]) {

@@ -774,6 +774,11 @@ injected at the component boundary; it does not claim a real backend emits it.
 The same-path rejection probe found no unhandled rejection: Collection cleanup
 already catches the persistence promise.
 
+Toggle tests select buttons by accessible role. A hidden-toggle mutant passes
+the original tag selector but fails the scoped role query before interaction.
+This checks exposure in the accessibility tree; it does not establish keyboard
+focus or screen-reader behavior.
+
 These 15 focused cases do not establish arbitrary-length form histories,
 remount behavior during pending writes, or browser-native Enter dispatch.
 This component suite owns the first two extensions; a browser form witness
