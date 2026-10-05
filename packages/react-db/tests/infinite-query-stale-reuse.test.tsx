@@ -7,13 +7,7 @@
  */
 import { Component, Suspense, useLayoutEffect } from 'react'
 import { act, render } from '@testing-library/react'
-import {
-  afterEach,
-  beforeEach,
-  expect,
-  it,
-  vi,
-} from 'vitest'
+import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import { createCollection } from '@tanstack/db'
 import { mockSyncCollectionOptions } from '../../db/tests/utils'
 import { useLiveInfiniteQuery } from '../src/useLiveInfiniteQuery'
@@ -27,7 +21,8 @@ const collections: Array<{ cleanup: () => Promise<void> }> = []
 beforeEach(() => vi.useFakeTimers())
 afterEach(async () => {
   vi.useRealTimers()
-  for (const collection of collections.splice(0).reverse()) await collection.cleanup()
+  for (const collection of collections.splice(0).reverse())
+    await collection.cleanup()
 })
 
 class Boundary extends Component<{ children: ReactNode }, { failed: boolean }> {
@@ -65,7 +60,8 @@ it(`shows the ready first page when a Suspense retry follows a GC-collected aban
 
   function Query(): ReactNode {
     const result = useLiveInfiniteQuery(
-      (q) => q.from({ items: source }).orderBy(({ items }) => items.rank, `desc`),
+      (q) =>
+        q.from({ items: source }).orderBy(({ items }) => items.rank, `desc`),
       { pageSize: 3 },
     )
     if (suspend) {
