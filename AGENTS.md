@@ -416,12 +416,30 @@ Use the [coverage map](docs/contributing/oracle-coverage.md) to find an existing
 owner and its limits before adding another model. The guide explains testing
 methods; it does not authorize new product behavior or retire existing laws.
 
-Write every oracle and generated-history test as executable subsystem
-documentation. Follow the guide's section on literate oracle files. Keep the
-contract, model, generated history grammar, production driver, and refinement
-check—including its public observations and checkpoint—visible and close enough
-that a reviewer can compare them directly. A focused regression may remain
-short, but it does not waive this structure for an oracle and cannot replace
+### Write Oracle Tests as Literate Programs
+
+Write every oracle and generated-history test as a literate program.
+Combine explanatory prose with executable code so the file teaches the
+subsystem contract. Follow
+[ORC-003](docs/contributing/oracle-tests.md#orc-003-distinguishable-oracle-responsibilities)
+and the guide's
+[literate-oracle guidance](docs/contributing/oracle-tests.md#write-the-oracle-as-executable-subsystem-documentation).
+
+Start with the promised law and its limits before introducing test mechanics.
+Explain the central law beside the independent model. Describe the legal
+history grammar, production path, public observations, and comparison checkpoint
+beside the relevant code. Keep the contract, model, history grammar, production
+driver, and refinement check distinguishable. Place their explanations close
+enough for a reviewer to compare them directly.
+
+Use the project glossary's terms and clear, direct prose. Explain why each
+observation follows from the model. Update the prose when the executable law
+changes. Code, headings, or a separate review report alone do not satisfy this
+requirement.
+
+Keep the prose proportional to the law. A compact oracle can use one opening
+comment and short explanations beside its code. A focused regression may remain
+short, but it does not waive this requirement for an oracle or replace
 applicable oracle coverage.
 
 ### Always Add Tests for Bugs
