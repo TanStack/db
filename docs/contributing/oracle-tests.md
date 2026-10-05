@@ -73,16 +73,26 @@ presence of a preferred heading, class, comment template, or helper.
 
 ### ORC-003: Distinguishable oracle responsibilities
 
-- **Trigger:** A file owns a reusable law, state machine, lifecycle boundary,
-  or reference model.
-- **Obligation:** The contract, model, history grammar, production driver, and
-  refinement check MUST be visible in the executable oracle or directly named
-  companion modules and remain distinguishable to a reviewer.
-- **Acceptance evidence:** Starting from the oracle file, a reviewer can point
-  to the answer supplied by each responsibility and follow the tested law from
-  authority to observation.
+- **Trigger:** Any oracle or generated-history test.
+- **Obligation:** The oracle MUST combine explanatory prose and executable code
+  as a literate program. Opening prose MUST state the promised law and its
+  limits before test mechanics. Prose beside the model MUST explain why its
+  independent rule predicts the promised result. The oracle MUST explain its
+  legal histories, production path, public observations, and comparison
+  checkpoint beside the relevant code. These explanations and the five
+  responsibilities MUST remain visible in the executable oracle or directly
+  named companion modules. The contract, model, history grammar, production
+  driver, and refinement check MUST remain distinguishable. Changes to the
+  executable law MUST update its prose in the same change.
+- **Acceptance evidence:** A reviewer can learn the subsystem contract by
+  reading the prose and code together. The explanations connect the law to the
+  model and the model to observations at the named checkpoint. A compact oracle
+  may use one opening comment and short explanations beside its code.
+- **Does not satisfy:** Code alone, five headings without explanations, or
+  explanations available only in a pull-request description or separate review
+  record.
 - **Not required:** Five headings, five classes, five files, one fixture per
-  law, or a review card embedded in every oracle.
+  law, a long essay, or a review card embedded in every oracle.
 
 ### ORC-004: Generated-history grammar controls
 
@@ -296,10 +306,10 @@ Some concurrent contracts allow several results. In those cases, the reference m
 
 ## Write the oracle as executable subsystem documentation
 
-A good oracle can do more than catch regressions. Its model can give humans and
-agents a short, executable theory of the subsystem. Production code shows how
-the system works. The oracle should state what the system promises and why each
-observable result follows.
+ORC-003 requires literate programming for every oracle and generated-history
+test. Prose and executable code together teach humans and agents the subsystem
+contract. State what the system promises and explain why each observable result
+follows from the model. The guidance below explains this requirement.
 
 This does not make the model the source of product policy. Derive the contract
 from an approved API, architecture document, established behavior, or design
@@ -333,9 +343,9 @@ separate modules when that makes each layer easier to review.
 
 ### Lead with the law
 
-Start with a question or a direct statement of the problem. Explain why a
-normal example can miss the failure. State the contract before introducing test
-mechanics.
+Under ORC-003, state the contract and its limits before introducing test
+mechanics. Start with a question or a direct statement of the problem. Explain
+why a normal example can miss the failure.
 
 Put the central law beside the model too. The opening comment supplies context.
 The local comment lets a reader check the model without searching the file.
@@ -500,10 +510,9 @@ prose claims more reach than the test has.
 
 ### Keep the prose proportional
 
-Every oracle and generated-history test must make the five layers visible. This
-structure is not optional when the file owns a reusable law, state machine,
-lifecycle boundary, or reference model. A focused regression that is not an
-oracle can remain short when its name and setup already state the whole contract,
+ORC-003 requires explanatory prose and five visible responsibilities in every
+oracle and generated-history test. A focused regression that is not an oracle
+can remain short when its name and setup already state the whole contract,
 but it does not replace applicable oracle coverage.
 
 Mandatory structure does not mean five classes or a long essay. A compact
