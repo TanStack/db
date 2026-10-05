@@ -44,8 +44,7 @@ export type Join = Array<JoinClause>
 export interface JoinClause {
   from: CollectionRef | QueryRef
   type: `left` | `right` | `inner` | `outer` | `full` | `cross`
-  left: BasicExpression
-  right: BasicExpression
+  on: BasicExpression<boolean>
 }
 
 export type Where =

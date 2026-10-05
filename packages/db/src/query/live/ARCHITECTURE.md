@@ -164,6 +164,21 @@ namespace, and the compiler rejects a name that two branches repeat. A union row
 holds the branches' projected fields, so a branch alias is not visible to the
 union's own joins or includes.
 
+Join conditions are an equality or a nonempty, possibly nested conjunction of
+equalities. `JoinClause.on` keeps the complete expression tree. Every equality
+contributes to query identity, optimizer copies, and parent-reference discovery.
+Each operand pair binds the joined source to an available source expression;
+the pairs may reverse operand direction independently. OR and non-equality
+predicates are rejected at join admission.
+
+A compound match requires every component equality to be TRUE. Any nullish
+operand prevents a match. Each component uses the same graph-scoped equality
+identity as a single-condition join; raw JSON representations do not define
+value equality. Lazy loading may use the first equality to acquire a superset
+of candidate rows, while the compiled join checks the full tuple. A tuple with
+any nullish component contributes no keyed lazy demand. A parent
+reference in any joined-side component requires route context before evaluation.
+
 A `CanonicalCorrelationKey` is the canonical tuple of every evaluated
 parent-dependent value that can affect the child plan. This includes values
 used by filters, joins, grouping, aggregates, ordering, projections, limits,
