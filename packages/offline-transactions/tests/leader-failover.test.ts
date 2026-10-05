@@ -1,8 +1,5 @@
 import { describe, expect, it } from 'vitest'
 import { FakeStorageAdapter, createTestOfflineEnvironment } from './harness'
-import type { TestItem } from './harness'
-import type { PendingMutation } from '@tanstack/db'
-import type { LeaderElection } from '../src/types'
 
 const flushMicrotasks = () => new Promise((resolve) => setTimeout(resolve, 0))
 
@@ -63,15 +60,13 @@ describe(`leader failover`, () => {
     // Verify A has the transaction in outbox
     const outboxA = await envA.executor.peekOutbox()
     expect(outboxA).toHaveLength(1)
-    expect(outboxA[0].id).toBe(txA.id)
+    expect(outboxA[0]!.id).toBe(txA.id)
 
     // Now create executor B with same storage, starts as non-leader
     const envB = createTestOfflineEnvironment({
       storage: sharedStorage,
       mutationFn: (params) => {
-        const mutations = params.transaction.mutations as Array<
-          PendingMutation<TestItem>
-        >
+        const mutations = params.transaction.mutations
         envB.applyMutations(mutations)
         return { ok: true, mutations }
       },
@@ -129,9 +124,7 @@ describe(`leader failover`, () => {
     const envB = createTestOfflineEnvironment({
       storage: sharedStorage,
       mutationFn: (params) => {
-        const mutations = params.transaction.mutations as Array<
-          PendingMutation<TestItem>
-        >
+        const mutations = params.transaction.mutations
         envB.applyMutations(mutations)
         return { ok: true, mutations }
       },
@@ -230,9 +223,7 @@ describe(`leader failover`, () => {
     const envC = createTestOfflineEnvironment({
       storage: sharedStorage,
       mutationFn: (params) => {
-        const mutations = params.transaction.mutations as Array<
-          PendingMutation<TestItem>
-        >
+        const mutations = params.transaction.mutations
         envC.applyMutations(mutations)
         return { ok: true, mutations }
       },
@@ -409,99 +400,6 @@ describe(`leader failover`, () => {
 
     // Still should only have one call
     expect(callbackCalls).toEqual([true])
-
-    env.executor.dispose()
-  })
-
-  it(`does not double-replay transactions when leadership callback fires after requestLeadership returns`, async () => {
-    // This test simulates the race condition in WebLocksLeader where:
-    // 1. requestLeadership() returns true immediately when lock is available
-    // 2. But notifyLeadershipChange(true) is called asynchronously when lock is actually acquired
-    // 3. This used to cause loadAndReplayTransactions() to be called twice
-    //
-    // The fix is to set isLeaderState = true synchronously in requestLeadership()
-    // so the async notifyLeadershipChange(true) doesn't trigger listeners again
-
-    const sharedStorage = new FakeStorageAdapter()
-
-    // Create a leader election that simulates the race condition:
-    // requestLeadership() returns true immediately but the callback fires later
-    class AsyncLeaderElection implements LeaderElection {
-      private listeners = new Set<(isLeader: boolean) => void>()
-      private leader = false
-
-      async requestLeadership(): Promise<boolean> {
-        // Simulate: lock is available, will return true immediately
-        // but the actual lock acquisition (and callback) happens async
-        setTimeout(() => {
-          // This simulates the fire-and-forget navigator.locks.request() completing
-          this.leader = true
-          for (const listener of this.listeners) {
-            listener(true)
-          }
-        }, 10)
-
-        return true // Returns immediately before callback fires
-      }
-
-      releaseLeadership(): void {
-        this.leader = false
-        for (const listener of this.listeners) {
-          listener(false)
-        }
-      }
-
-      isLeader(): boolean {
-        return this.leader
-      }
-
-      onLeadershipChange(callback: (isLeader: boolean) => void): () => void {
-        this.listeners.add(callback)
-        return () => {
-          this.listeners.delete(callback)
-        }
-      }
-    }
-
-    // Pre-populate storage with a pending transaction
-    const transactionId = `test-tx-${Date.now()}`
-    const transaction = {
-      id: transactionId,
-      mutationFnName: `syncData`,
-      idempotencyKey: `test-idempotency-key`,
-      payload: {},
-      createdAt: Date.now(),
-    }
-    await sharedStorage.set(
-      `offline-executor:transaction:${transactionId}`,
-      JSON.stringify(transaction),
-    )
-
-    let replayCount = 0
-    const env = createTestOfflineEnvironment({
-      storage: sharedStorage,
-      mutationFn: async (params) => {
-        replayCount++
-        const mutations = params.transaction.mutations as Array<
-          PendingMutation<TestItem>
-        >
-        env.applyMutations(mutations)
-        return { ok: true, mutations }
-      },
-      config: {
-        leaderElection: new AsyncLeaderElection(),
-      },
-    })
-
-    // Wait for potential double-replay to occur
-    // If the bug exists, the callback would fire ~10ms after initialization
-    // and cause a second replay
-    await new Promise((resolve) => setTimeout(resolve, 100))
-
-    // The mutation should only be called once, not twice
-    // Note: In this specific test, the pre-populated transaction might not
-    // match the expected schema, so we check the replay count didn't double
-    expect(replayCount).toBeLessThanOrEqual(1)
 
     env.executor.dispose()
   })

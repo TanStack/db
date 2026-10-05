@@ -2,6 +2,7 @@ import type {
   Collection,
   MutationFnParams,
   PendingMutation,
+  Transaction,
 } from '@tanstack/db'
 
 // Extended mutation function that includes idempotency key
@@ -48,6 +49,8 @@ export interface OfflineTransaction {
   createdAt: Date
   retryCount: number
   nextAttemptAt: number
+  /** Provider work has settled; only durable outbox deletion remains. */
+  outboxPhase?: `deletion-pending` | `rejection-pending`
   lastError?: SerializedError
   metadata?: Record<string, any>
   spanContext?: SerializedSpanContext
@@ -56,6 +59,8 @@ export interface OfflineTransaction {
 
 // Serialized representation for storage
 export interface SerializedOfflineTransaction {
+  /** Absent for the original Date-marker format. */
+  valueEncoding?: 2 | 3
   id: string
   mutationFnName: string
   mutations: Array<SerializedMutation>
@@ -64,6 +69,8 @@ export interface SerializedOfflineTransaction {
   createdAt: string
   retryCount: number
   nextAttemptAt: number
+  /** Absent in older records and while mutationFn may still need to run. */
+  outboxPhase?: `deletion-pending` | `rejection-pending`
   lastError?: SerializedError
   metadata?: Record<string, any>
   spanContext?: SerializedSpanContext
@@ -104,7 +111,7 @@ export interface OfflineConfig {
   /**
    * Custom online detector implementation.
    * Defaults to WebOnlineDetector for browser environments.
-   * Use ReactNativeOnlineDetector from '@tanstack/offline-transactions/react-native' for RN/Expo.
+   * The '@tanstack/offline-transactions/react-native' entry point uses ReactNativeOnlineDetector automatically.
    */
   onlineDetector?: OnlineDetector
 }
@@ -129,9 +136,21 @@ export interface LeaderElection {
   onLeadershipChange: (callback: (isLeader: boolean) => void) => () => void
 }
 
+export interface TransactionSignaler {
+  readonly isOfflineEnabled: boolean
+  resolveTransaction: (transactionId: string, result: any) => void
+  rejectTransaction: (transactionId: string, error: Error) => void
+  registerRestorationTransaction: (
+    offlineTransactionId: string,
+    restorationTransaction: Transaction,
+  ) => void
+  isOnline: () => boolean
+}
+
 export interface OnlineDetector {
   subscribe: (callback: () => void) => () => void
   notifyOnline: () => void
+  isOnline: () => boolean
   dispose: () => void
 }
 

@@ -4,9 +4,17 @@ import {
   isControlMessage,
   isVisibleInSnapshot,
 } from '@electric-sql/client'
-import { Store } from '@tanstack/store'
 import DebugModule from 'debug'
-import { DeduplicatedLoadSubset, and } from '@tanstack/db'
+import {
+  DeduplicatedLoadSubset,
+  LoadSubsetOperationAbortedError,
+  and,
+  validateSyncPersistenceCapability,
+  warnOnce,
+  withCollectionConfigFactory,
+  withCollectionSyncConfigCleanup,
+  withCollectionSyncConfigFactory,
+} from '@tanstack/db'
 import {
   ExpectedNumberInAwaitTxIdError,
   StreamAbortedError,
@@ -16,15 +24,21 @@ import {
 import { compileSQL } from './sql-compiler'
 import {
   addTagToIndex,
+  deriveDisjunctPositions,
   findRowsMatchingPattern,
   getTagLength,
+  isMoveInMessage,
   isMoveOutMessage,
+  parseTag as parseTagString,
   removeTagFromIndex,
+  rowVisible,
   tagMatchesPattern,
 } from './tag-index'
 import type { ColumnEncoder } from './sql-compiler'
 import type {
-  MoveOutPattern,
+  ActiveConditions,
+  DisjunctPositions,
+  MovePattern,
   MoveTag,
   ParsedMoveTag,
   RowId,
@@ -37,16 +51,17 @@ import type {
   DeleteMutationFnParams,
   InsertMutationFnParams,
   LoadSubsetOptions,
+  SyncAppliedReceipt,
   SyncConfig,
   SyncMode,
   UpdateMutationFnParams,
-  UtilsRecord,
 } from '@tanstack/db'
 import type { StandardSchemaV1 } from '@standard-schema/spec'
 import type {
   ControlMessage,
   GetExtensions,
   Message,
+  Offset,
   PostgresSnapshot,
   Row,
   ShapeStreamOptions,
@@ -78,6 +93,191 @@ export interface ElectricTestHooks {
  */
 export type Txid = number
 
+type ElectricResumeState =
+  | {
+      kind: `resume`
+      offset: string
+      handle: string
+      shapeId: string
+      updatedAt: number
+      requiresTagState?: boolean
+    }
+  | {
+      kind: `reset`
+      updatedAt: number
+    }
+
+type ElectricSyncMeta = {
+  version: 1
+  resume?: ElectricResumeState
+  seenTxids: Array<Txid>
+}
+
+type ElectricLifecycleEvidence = {
+  seenTxids: Set<Txid>
+  seenSnapshots: Array<PostgresSnapshot>
+  hydratedResumeState?: ElectricResumeState
+}
+
+type ElectricPendingMatch<T extends Row<unknown>> = {
+  matchFn: (message: Message<T>) => boolean
+  resolve: (value: boolean) => void
+  reject: (error: Error) => void
+  timeoutId: ReturnType<typeof setTimeout>
+  matched: boolean
+}
+
+type ElectricMatchBuffer<T extends Row<unknown>> = {
+  committedMessages: Array<Message<T>>
+  pendingMessages: Array<Message<T>>
+}
+
+function exportElectricSyncMeta(
+  evidence: ElectricLifecycleEvidence,
+): ElectricSyncMeta {
+  const resume = evidence.hydratedResumeState
+  return {
+    version: 1,
+    ...(resume ? { resume } : {}),
+    seenTxids: Array.from(evidence.seenTxids).sort((a, b) => a - b),
+  }
+}
+
+function importElectricSyncMeta(
+  evidence: ElectricLifecycleEvidence,
+  meta: unknown,
+): void {
+  const parsed = parseElectricSyncMeta(meta)
+  if (!parsed) return
+
+  evidence.hydratedResumeState = parsed.resume
+  evidence.seenTxids = new Set(parsed.seenTxids)
+}
+
+function parseElectricResumeState(
+  value: unknown,
+): ElectricResumeState | undefined {
+  if (!value || typeof value !== `object`) {
+    return undefined
+  }
+
+  const record = value as Record<string, unknown>
+  if (
+    record.kind === `resume` &&
+    typeof record.offset === `string` &&
+    typeof record.handle === `string` &&
+    typeof record.shapeId === `string` &&
+    typeof record.updatedAt === `number` &&
+    Number.isFinite(record.updatedAt)
+  ) {
+    return {
+      kind: `resume`,
+      offset: record.offset,
+      handle: record.handle,
+      shapeId: record.shapeId,
+      updatedAt: record.updatedAt,
+      ...(typeof record.requiresTagState === `boolean` && {
+        requiresTagState: record.requiresTagState,
+      }),
+    }
+  }
+
+  if (
+    record.kind === `reset` &&
+    typeof record.updatedAt === `number` &&
+    Number.isFinite(record.updatedAt)
+  ) {
+    return {
+      kind: `reset`,
+      updatedAt: record.updatedAt,
+    }
+  }
+
+  return undefined
+}
+
+function parseElectricSyncMeta(value: unknown): ElectricSyncMeta | undefined {
+  if (!value || typeof value !== `object`) {
+    return undefined
+  }
+
+  const record = value as Record<string, unknown>
+  if (
+    record.version !== 1 ||
+    !Array.isArray(record.seenTxids) ||
+    !record.seenTxids.every(
+      (txid) => typeof txid === `number` && Number.isFinite(txid),
+    )
+  ) {
+    return undefined
+  }
+
+  const resume =
+    record.resume === undefined
+      ? undefined
+      : parseElectricResumeState(record.resume)
+  if (record.resume !== undefined && resume === undefined) {
+    return undefined
+  }
+
+  return {
+    version: 1,
+    ...(resume ? { resume } : {}),
+    seenTxids: Array.from(new Set(record.seenTxids)).sort((a, b) => a - b),
+  }
+}
+
+function mergeElectricSyncMeta(
+  current: unknown,
+  incoming: unknown,
+): ElectricSyncMeta | unknown {
+  const currentMeta = parseElectricSyncMeta(current)
+  const incomingMeta = parseElectricSyncMeta(incoming)
+
+  if (!incomingMeta) {
+    return current
+  }
+  if (!currentMeta) {
+    return incomingMeta
+  }
+
+  const resume = getNewestElectricResumeState(
+    currentMeta.resume,
+    incomingMeta.resume,
+  )
+
+  return {
+    version: 1,
+    ...(resume ? { resume } : {}),
+    seenTxids: Array.from(
+      new Set([...currentMeta.seenTxids, ...incomingMeta.seenTxids]),
+    ).sort((a, b) => a - b),
+  }
+}
+
+function getNewestElectricResumeState(
+  current: ElectricResumeState | undefined,
+  incoming: ElectricResumeState | undefined,
+): ElectricResumeState | undefined {
+  if (!current) return incoming
+  if (!incoming) return current
+  if (incoming.updatedAt > current.updatedAt) return incoming
+  if (incoming.updatedAt < current.updatedAt) return current
+
+  const isSameState =
+    current.kind === incoming.kind &&
+    (current.kind === `reset` ||
+      (incoming.kind === `resume` &&
+        current.offset === incoming.offset &&
+        current.handle === incoming.handle &&
+        current.shapeId === incoming.shapeId))
+
+  // Equal timestamps have no causal ordering. Preserve an identical state,
+  // but collapse every conflict to reset so merge order cannot resurrect an
+  // offset that another source has already declared unsafe.
+  return isSameState ? current : { kind: `reset`, updatedAt: current.updatedAt }
+}
+
 /**
  * Custom match function type - receives stream messages and returns boolean
  * indicating if the mutation has been synchronized
@@ -89,11 +289,11 @@ export type MatchFunction<T extends Row<unknown>> = (
 /**
  * Matching strategies for Electric synchronization
  * Handlers can return:
- * - Txid strategy: { txid: number | number[], timeout?: number } (recommended)
+ * - Txid strategy: { txid: number | number[], timeout?: number } (deprecated compatibility behavior)
  * - Void (no return value) - mutation completes without waiting
  *
  * The optional timeout property specifies how long to wait for the txid(s) in milliseconds.
- * If not specified, defaults to 5000ms.
+ * If not specified, defaults to 15000ms.
  */
 export type MatchingStrategy = {
   txid: Txid | Array<Txid>
@@ -142,13 +342,7 @@ export interface ElectricCollectionConfig<
   T extends Row<unknown> = Row<unknown>,
   TSchema extends StandardSchemaV1 = never,
 > extends Omit<
-  BaseCollectionConfig<
-    T,
-    string | number,
-    TSchema,
-    ElectricCollectionUtils<T>,
-    any
-  >,
+  BaseCollectionConfig<T, string | number, TSchema, ElectricCollectionUtils<T>>,
   `onInsert` | `onUpdate` | `onDelete` | `syncMode`
 > {
   /**
@@ -165,43 +359,82 @@ export interface ElectricCollectionConfig<
 
   /**
    * Optional asynchronous handler function called before an insert operation
+   *
+   * **IMPORTANT - Electric Synchronization:**
+   * This handler **must not resolve** until synchronization is confirmed.
+   * Await one of these synchronization utilities before the handler completes:
+   * 1. `await collection.utils.awaitTxId(txid)` (recommended for most cases)
+   * 2. `await collection.utils.awaitMatch(fn)` for custom matching logic
+   *
+   * Simply returning without waiting for sync will drop optimistic state too early, causing UI glitches.
+   *
    * @param params Object containing transaction and collection information
-   * @returns Promise resolving to { txid, timeout? } or void
+   * @returns Promise that should resolve after synchronization is complete
+   *
+   * **Deprecation notice:** Returning `{ txid }` from handlers is deprecated and will be removed in v1.0.
+   * Use `await collection.utils.awaitTxId(txid)` within the handler instead.
+   *
    * @example
-   * // Basic Electric insert handler with txid (recommended)
-   * onInsert: async ({ transaction }) => {
+   * // Recommended: Wait for txid to sync
+   * onInsert: async ({ transaction, collection }) => {
    *   const newItem = transaction.mutations[0].modified
    *   const result = await api.todos.create({
    *     data: newItem
    *   })
-   *   return { txid: result.txid }
+   *   // Wait for txid to sync before handler completes
+   *   await collection.utils.awaitTxId(result.txid)
    * }
    *
    * @example
    * // Insert handler with custom timeout
-   * onInsert: async ({ transaction }) => {
+   * onInsert: async ({ transaction, collection }) => {
    *   const newItem = transaction.mutations[0].modified
    *   const result = await api.todos.create({
    *     data: newItem
    *   })
-   *   return { txid: result.txid, timeout: 10000 } // Wait up to 10 seconds
+   *   // Wait up to 10 seconds for txid
+   *   await collection.utils.awaitTxId(result.txid, 10000)
    * }
    *
    * @example
-   * // Insert handler with multiple items - return array of txids
-   * onInsert: async ({ transaction }) => {
+   * // Insert handler with timeout error handling
+   * onInsert: async ({ transaction, collection }) => {
+   *   const newItem = transaction.mutations[0].modified
+   *   const result = await api.todos.create({
+   *     data: newItem
+   *   })
+   *
+   *   try {
+   *     await collection.utils.awaitTxId(result.txid, 5000)
+   *   } catch (error) {
+   *     // Decide sync timeout policy:
+   *     // - Throw to rollback optimistic state
+   *     // - Catch to keep optimistic state (eventual consistency)
+   *     // - Schedule background retry
+   *     console.warn('Sync timeout, keeping optimistic state:', error)
+   *     // Don't throw - allow optimistic state to persist
+   *   }
+   * }
+   *
+   * @example
+   * // Insert handler with multiple items
+   * onInsert: async ({ transaction, collection }) => {
    *   const items = transaction.mutations.map(m => m.modified)
    *   const results = await Promise.all(
    *     items.map(item => api.todos.create({ data: item }))
    *   )
-   *   return { txid: results.map(r => r.txid) }
+   *   // Wait for all txids to sync
+   *   await Promise.all(
+   *     results.map(r => collection.utils.awaitTxId(r.txid))
+   *   )
    * }
    *
    * @example
-   * // Use awaitMatch utility for custom matching
+   * // Alternative: Use awaitMatch utility for custom matching logic
    * onInsert: async ({ transaction, collection }) => {
    *   const newItem = transaction.mutations[0].modified
    *   await api.todos.create({ data: newItem })
+   *   // Wait for specific change to appear in sync stream
    *   await collection.utils.awaitMatch(
    *     (message) => isChangeMessage(message) &&
    *                  message.headers.operation === 'insert' &&
@@ -219,24 +452,39 @@ export interface ElectricCollectionConfig<
 
   /**
    * Optional asynchronous handler function called before an update operation
+   *
+   * **IMPORTANT - Electric Synchronization:**
+   * This handler **must not resolve** until synchronization is confirmed.
+   * Await one of these synchronization utilities before the handler completes:
+   * 1. `await collection.utils.awaitTxId(txid)` (recommended for most cases)
+   * 2. `await collection.utils.awaitMatch(fn)` for custom matching logic
+   *
+   * Simply returning without waiting for sync will drop optimistic state too early, causing UI glitches.
+   *
    * @param params Object containing transaction and collection information
-   * @returns Promise resolving to { txid, timeout? } or void
+   * @returns Promise that should resolve after synchronization is complete
+   *
+   * **Deprecation notice:** Returning `{ txid }` from handlers is deprecated and will be removed in v1.0.
+   * Use `await collection.utils.awaitTxId(txid)` within the handler instead.
+   *
    * @example
-   * // Basic Electric update handler with txid (recommended)
-   * onUpdate: async ({ transaction }) => {
+   * // Recommended: Wait for txid to sync
+   * onUpdate: async ({ transaction, collection }) => {
    *   const { original, changes } = transaction.mutations[0]
    *   const result = await api.todos.update({
    *     where: { id: original.id },
    *     data: changes
    *   })
-   *   return { txid: result.txid }
+   *   // Wait for txid to sync before handler completes
+   *   await collection.utils.awaitTxId(result.txid)
    * }
    *
    * @example
-   * // Use awaitMatch utility for custom matching
+   * // Alternative: Use awaitMatch utility for custom matching logic
    * onUpdate: async ({ transaction, collection }) => {
    *   const { original, changes } = transaction.mutations[0]
    *   await api.todos.update({ where: { id: original.id }, data: changes })
+   *   // Wait for specific change to appear in sync stream
    *   await collection.utils.awaitMatch(
    *     (message) => isChangeMessage(message) &&
    *                  message.headers.operation === 'update' &&
@@ -254,23 +502,38 @@ export interface ElectricCollectionConfig<
 
   /**
    * Optional asynchronous handler function called before a delete operation
+   *
+   * **IMPORTANT - Electric Synchronization:**
+   * This handler **must not resolve** until synchronization is confirmed.
+   * Await one of these synchronization utilities before the handler completes:
+   * 1. `await collection.utils.awaitTxId(txid)` (recommended for most cases)
+   * 2. `await collection.utils.awaitMatch(fn)` for custom matching logic
+   *
+   * Simply returning without waiting for sync will drop optimistic state too early, causing UI glitches.
+   *
    * @param params Object containing transaction and collection information
-   * @returns Promise resolving to { txid, timeout? } or void
+   * @returns Promise that should resolve after synchronization is complete
+   *
+   * **Deprecation notice:** Returning `{ txid }` from handlers is deprecated and will be removed in v1.0.
+   * Use `await collection.utils.awaitTxId(txid)` within the handler instead.
+   *
    * @example
-   * // Basic Electric delete handler with txid (recommended)
-   * onDelete: async ({ transaction }) => {
+   * // Recommended: Wait for txid to sync
+   * onDelete: async ({ transaction, collection }) => {
    *   const mutation = transaction.mutations[0]
    *   const result = await api.todos.delete({
    *     id: mutation.original.id
    *   })
-   *   return { txid: result.txid }
+   *   // Wait for txid to sync before handler completes
+   *   await collection.utils.awaitTxId(result.txid)
    * }
    *
    * @example
-   * // Use awaitMatch utility for custom matching
+   * // Alternative: Use awaitMatch utility for custom matching logic
    * onDelete: async ({ transaction, collection }) => {
    *   const mutation = transaction.mutations[0]
    *   await api.todos.delete({ id: mutation.original.id })
+   *   // Wait for specific change to appear in sync stream
    *   await collection.utils.awaitMatch(
    *     (message) => isChangeMessage(message) &&
    *                  message.headers.operation === 'delete' &&
@@ -322,6 +585,46 @@ function parseSnapshotMessage(message: SnapshotEndMessage): PostgresSnapshot {
   }
 }
 
+function toStableSerializable(value: unknown): unknown {
+  if (value == null) {
+    return value
+  }
+
+  if (Array.isArray(value)) {
+    return value.map((entry) => toStableSerializable(entry))
+  }
+
+  if (value instanceof Date) {
+    return value.toISOString()
+  }
+
+  if (typeof value === `object`) {
+    const record = value as Record<string, unknown>
+    const stableRecord: Record<string, unknown> = {}
+    const keys = Object.keys(record).sort((left, right) =>
+      left < right ? -1 : left > right ? 1 : 0,
+    )
+    for (const key of keys) {
+      stableRecord[key] = toStableSerializable(record[key])
+    }
+    return stableRecord
+  }
+
+  return value
+}
+
+function getStableShapeIdentity(shapeOptions: {
+  url: string
+  params?: Record<string, unknown>
+}): string {
+  return JSON.stringify(
+    toStableSerializable({
+      url: shapeOptions.url,
+      params: shapeOptions.params ?? null,
+    }),
+  )
+}
+
 // Check if a message contains txids in its headers
 function hasTxids<T extends Row<unknown>>(
   message: Message<T>,
@@ -347,8 +650,12 @@ function createLoadSubsetDedupe<T extends Row<unknown>>({
   begin,
   write,
   commit,
+  getCommitCursor,
+  waitForCommitsAfter,
+  recordSnapshotRow,
   collectionId,
   encodeColumnName,
+  signal,
 }: {
   stream: ShapeStream<T>
   syncMode: ElectricSyncMode
@@ -359,116 +666,139 @@ function createLoadSubsetDedupe<T extends Row<unknown>>({
     value: T
     metadata: Record<string, unknown>
   }) => void
-  commit: () => void
+  commit: (signal?: AbortSignal) => SyncAppliedReceipt
+  getCommitCursor: () => number
+  waitForCommitsAfter: (cursor: number) => Promise<void>
+  recordSnapshotRow?: (row: T, message: Message<T>) => void
   collectionId?: string
   /**
    * Optional function to encode column names (e.g., camelCase to snake_case).
    * This is typically the `encode` function from shapeOptions.columnMapper.
    */
   encodeColumnName?: ColumnEncoder
+  /**
+   * Abort signal to check if the stream has been aborted during cleanup.
+   * When aborted, errors from requestSnapshot are silently ignored.
+   */
+  signal: AbortSignal
 }): DeduplicatedLoadSubset | null {
-  // Eager mode doesn't need subset loading
   if (syncMode === `eager`) {
     return null
   }
 
   const compileOptions = encodeColumnName ? { encodeColumnName } : undefined
+  const logPrefix = collectionId ? `[${collectionId}] ` : ``
+
+  const abortReason = (abortedSignal: AbortSignal): unknown =>
+    abortedSignal.reason ?? new LoadSubsetOperationAbortedError()
+
+  /**
+   * Handles errors from snapshot operations. Returns true if the error was
+   * handled (signal aborted during cleanup), false if it should be re-thrown.
+   */
+  function handleSnapshotError(error: unknown, operation: string): boolean {
+    if (signal.aborted) {
+      debug(`${logPrefix}Ignoring ${operation} error during cleanup: %o`, error)
+      return true
+    }
+    debug(`${logPrefix}Error in ${operation}: %o`, error)
+    return false
+  }
 
   const loadSubset = async (opts: LoadSubsetOptions) => {
-    // In progressive mode, use fetchSnapshot during snapshot phase
+    const commitCursor = getCommitCursor()
+    const throwIfAborted = () => {
+      if (signal.aborted) throw abortReason(signal)
+      if (opts.signal?.aborted) throw abortReason(opts.signal)
+    }
+    throwIfAborted()
+
     if (isBufferingInitialSync()) {
-      // Progressive mode snapshot phase: fetch and apply immediately
       const snapshotParams = compileSQL<T>(opts, compileOptions)
       try {
         const { data: rows } = await stream.fetchSnapshot(snapshotParams)
-
-        // Check again if we're still buffering - we might have received up-to-date
-        // and completed the atomic swap while waiting for the snapshot
-        if (!isBufferingInitialSync()) {
-          debug(
-            `${collectionId ? `[${collectionId}] ` : ``}Ignoring snapshot - sync completed while fetching`,
-          )
+        if (opts.signal?.aborted || !isBufferingInitialSync()) {
+          debug(`${logPrefix}Ignoring snapshot - sync completed while fetching`)
           return
         }
 
-        // Apply snapshot data in a sync transaction (only if we have data)
         if (rows.length > 0) {
           begin()
           for (const row of rows) {
             write({
               type: `insert`,
               value: row.value,
-              metadata: {
-                ...row.headers,
-              },
+              metadata: { ...row.headers },
             })
           }
-          commit()
-
-          debug(
-            `${collectionId ? `[${collectionId}] ` : ``}Applied snapshot with ${rows.length} rows`,
-          )
+          const applied = commit(opts.signal)
+          for (const row of rows) recordSnapshotRow?.(row.value, row)
+          if (applied !== true) await applied
+          debug(`${logPrefix}Applied snapshot with ${rows.length} rows`)
         }
       } catch (error) {
-        debug(
-          `${collectionId ? `[${collectionId}] ` : ``}Error fetching snapshot: %o`,
-          error,
-        )
+        if (opts.signal?.aborted) return
+        if (handleSnapshotError(error, `fetchSnapshot`)) {
+          return
+        }
         throw error
       }
-    } else if (syncMode === `progressive`) {
-      // Progressive mode after full sync complete: no need to load more
       return
-    } else {
-      // On-demand mode: use requestSnapshot
-      // When cursor is provided, make two calls:
-      // 1. whereCurrent (all ties, no limit)
-      // 2. whereFrom (rows > cursor, with limit)
-      const { cursor, where, orderBy, limit } = opts
+    }
 
+    if (syncMode === `progressive`) {
+      return
+    }
+
+    const { cursor, where, orderBy, limit } = opts
+
+    throwIfAborted()
+
+    // Upstream limitation: ShapeStream.requestSnapshot() publishes its rows
+    // through the stream callback before its Promise resolves. It accepts no
+    // request signal and exposes no request identity on those messages, so an
+    // aborted request can already have installed rows before the check below.
+    // Full request-scoped cancellation requires support in the Electric client;
+    // matching snapshots by parameters is unsafe for overlapping equal requests.
+    try {
       if (cursor) {
-        // Make parallel requests for cursor-based pagination
-        const promises: Array<Promise<unknown>> = []
-
-        // Request 1: All rows matching whereCurrent (ties at boundary, no limit)
-        // Combine main where with cursor.whereCurrent
         const whereCurrentOpts: LoadSubsetOptions = {
           where: where ? and(where, cursor.whereCurrent) : cursor.whereCurrent,
           orderBy,
-          // No limit - get all ties
         }
         const whereCurrentParams = compileSQL<T>(
           whereCurrentOpts,
           compileOptions,
         )
-        promises.push(stream.requestSnapshot(whereCurrentParams))
 
-        debug(
-          `${collectionId ? `[${collectionId}] ` : ``}Requesting cursor.whereCurrent snapshot (all ties)`,
-        )
-
-        // Request 2: Rows matching whereFrom (rows > cursor, with limit)
-        // Combine main where with cursor.whereFrom
         const whereFromOpts: LoadSubsetOptions = {
           where: where ? and(where, cursor.whereFrom) : cursor.whereFrom,
           orderBy,
           limit,
         }
         const whereFromParams = compileSQL<T>(whereFromOpts, compileOptions)
-        promises.push(stream.requestSnapshot(whereFromParams))
 
+        debug(`${logPrefix}Requesting cursor.whereCurrent snapshot (all ties)`)
         debug(
-          `${collectionId ? `[${collectionId}] ` : ``}Requesting cursor.whereFrom snapshot (with limit ${limit})`,
+          `${logPrefix}Requesting cursor.whereFrom snapshot (with limit ${limit})`,
         )
 
-        // Wait for both requests to complete
-        await Promise.all(promises)
+        await Promise.all([
+          stream.requestSnapshot(whereCurrentParams),
+          stream.requestSnapshot(whereFromParams),
+        ])
       } else {
-        // No cursor - standard single request
         const snapshotParams = compileSQL<T>(opts, compileOptions)
         await stream.requestSnapshot(snapshotParams)
       }
+    } catch (error) {
+      if (opts.signal?.aborted) return
+      if (handleSnapshotError(error, `requestSnapshot`)) {
+        return
+      }
+      throw error
     }
+    await waitForCommitsAfter(commitCursor)
   }
 
   return new DeduplicatedLoadSubset({ loadSubset })
@@ -492,9 +822,249 @@ export type AwaitMatchFn<T extends Row<unknown>> = (
  */
 export interface ElectricCollectionUtils<
   T extends Row<unknown> = Row<unknown>,
-> extends UtilsRecord {
+> {
+  // Keep this interface closed: extending UtilsRecord would make every
+  // nonexistent adapter utility appear as `any`.
   awaitTxId: AwaitTxIdFn
   awaitMatch: AwaitMatchFn<T>
+}
+
+/** Owns evidence and pending work for one materialized Collection. */
+class ElectricLifecycle<T extends Row<unknown>> {
+  private readonly evidence: ElectricLifecycleEvidence = {
+    seenTxids: new Set(),
+    seenSnapshots: [],
+  }
+
+  private readonly pendingMatches = new Map<number, ElectricPendingMatch<T>>()
+  private readonly pendingTxidWaits = new Map<
+    number,
+    {
+      txId: Txid
+      resolve: (value: boolean) => void
+      reject: (error: Error) => void
+      timeoutId: ReturnType<typeof setTimeout>
+    }
+  >()
+  private matchBuffer: ElectricMatchBuffer<T> = {
+    committedMessages: [],
+    pendingMessages: [],
+  }
+  private nextWaiterId = 0
+  private epoch = 0
+  private active = false
+
+  constructor(private readonly collectionId?: string) {}
+
+  readonly utils: ElectricCollectionUtils<T> = {
+    awaitTxId: (txId, timeout) => this.awaitTxId(txId, timeout),
+    awaitMatch: (matchFn, timeout) => this.awaitMatch(matchFn, timeout),
+  }
+
+  start(): number {
+    if (this.active) this.retire()
+    this.active = true
+    this.epoch++
+    this.matchBuffer = { committedMessages: [], pendingMessages: [] }
+    return this.epoch
+  }
+
+  isActive(epoch: number): boolean {
+    return this.active && this.epoch === epoch
+  }
+
+  retire(epoch?: number): void {
+    if (epoch !== undefined && !this.isActive(epoch)) return
+    this.active = false
+    this.epoch++
+
+    for (const match of this.pendingMatches.values()) {
+      clearTimeout(match.timeoutId)
+      match.reject(new StreamAbortedError(this.collectionId))
+    }
+    this.pendingMatches.clear()
+
+    for (const waiter of this.pendingTxidWaits.values()) {
+      clearTimeout(waiter.timeoutId)
+      waiter.reject(new StreamAbortedError(this.collectionId))
+    }
+    this.pendingTxidWaits.clear()
+    this.matchBuffer = { committedMessages: [], pendingMessages: [] }
+    this.evidence.hydratedResumeState = undefined
+  }
+
+  exportMeta(): ElectricSyncMeta {
+    return exportElectricSyncMeta(this.evidence)
+  }
+
+  importMeta(meta: unknown): void {
+    importElectricSyncMeta(this.evidence, meta)
+    this.resolveTxidWaiters()
+  }
+
+  get resumeState(): ElectricResumeState | undefined {
+    return this.evidence.hydratedResumeState
+  }
+
+  set resumeState(value: ElectricResumeState | undefined) {
+    this.evidence.hydratedResumeState = value
+  }
+
+  publishEvidence(
+    txids: ReadonlySet<Txid>,
+    snapshots: ReadonlyArray<PostgresSnapshot>,
+  ): void {
+    txids.forEach((txid) => this.evidence.seenTxids.add(txid))
+    this.evidence.seenSnapshots.push(...snapshots)
+    this.resolveTxidWaiters()
+  }
+
+  private hasTxid(txId: Txid): boolean {
+    return (
+      this.evidence.seenTxids.has(txId) ||
+      this.evidence.seenSnapshots.some((snapshot) =>
+        isVisibleInSnapshot(txId, snapshot),
+      )
+    )
+  }
+
+  private resolveTxidWaiters(): void {
+    for (const [waitId, waiter] of this.pendingTxidWaits) {
+      if (!this.hasTxid(waiter.txId)) continue
+      clearTimeout(waiter.timeoutId)
+      this.pendingTxidWaits.delete(waitId)
+      waiter.resolve(true)
+    }
+  }
+
+  private async awaitTxId(
+    txId: Txid,
+    timeout: number = 15000,
+  ): Promise<boolean> {
+    debug(
+      `${this.collectionId ? `[${this.collectionId}] ` : ``}awaitTxId called with txid %d`,
+      txId,
+    )
+    if (typeof txId !== `number`) {
+      throw new ExpectedNumberInAwaitTxIdError(typeof txId, this.collectionId)
+    }
+    if (this.hasTxid(txId)) return true
+
+    return new Promise((resolve, reject) => {
+      const waitId = this.nextWaiterId++
+      const timeoutId = setTimeout(() => {
+        this.pendingTxidWaits.delete(waitId)
+        reject(new TimeoutWaitingForTxIdError(txId, this.collectionId))
+      }, timeout)
+      this.pendingTxidWaits.set(waitId, {
+        txId,
+        resolve,
+        reject,
+        timeoutId,
+      })
+    })
+  }
+
+  private async awaitMatch(
+    matchFn: MatchFunction<T>,
+    timeout: number = 15000,
+  ): Promise<boolean> {
+    debug(
+      `${this.collectionId ? `[${this.collectionId}] ` : ``}awaitMatch called with custom function`,
+    )
+
+    for (const message of this.matchBuffer.committedMessages) {
+      if (!matchFn(message)) continue
+      return true
+    }
+    for (const message of this.matchBuffer.pendingMessages) {
+      if (matchFn(message)) return this.registerMatch(matchFn, timeout, true)
+    }
+    return this.registerMatch(matchFn, timeout, false)
+  }
+
+  private registerMatch(
+    matchFn: MatchFunction<T>,
+    timeout: number,
+    matched: boolean,
+  ): Promise<boolean> {
+    return new Promise((resolve, reject) => {
+      const matchId = this.nextWaiterId++
+      const timeoutId = setTimeout(() => {
+        this.pendingMatches.delete(matchId)
+        reject(new TimeoutWaitingForMatchError(this.collectionId))
+      }, timeout)
+      this.pendingMatches.set(matchId, {
+        matchFn,
+        resolve,
+        reject,
+        timeoutId,
+        matched,
+      })
+    })
+  }
+
+  beginMatchGeneration(messages: ReadonlyArray<Message<T>>): void {
+    if (!messages.some(isMustRefetchMessage)) return
+    this.matchBuffer = { committedMessages: [], pendingMessages: [] }
+    for (const match of this.pendingMatches.values()) match.matched = false
+  }
+
+  observeMatchMessage(message: Message<T>): void {
+    if (
+      isChangeMessage(message) ||
+      isMoveOutMessage(message) ||
+      isMoveInMessage(message)
+    ) {
+      this.matchBuffer.pendingMessages.push(message)
+      let overflow =
+        this.matchBuffer.committedMessages.length +
+        this.matchBuffer.pendingMessages.length -
+        1000
+      if (overflow > 0) {
+        const committedOverflow = Math.min(
+          overflow,
+          this.matchBuffer.committedMessages.length,
+        )
+        this.matchBuffer.committedMessages.splice(0, committedOverflow)
+        overflow -= committedOverflow
+        if (overflow > 0) {
+          this.matchBuffer.pendingMessages.splice(0, overflow)
+        }
+      }
+    }
+
+    const epoch = this.epoch
+    for (const [matchId, match] of this.pendingMatches) {
+      if (match.matched) continue
+      try {
+        match.matched = match.matchFn(message)
+      } catch (error) {
+        clearTimeout(match.timeoutId)
+        this.pendingMatches.delete(matchId)
+        match.reject(error instanceof Error ? error : new Error(String(error)))
+      }
+      // Reentry can register replacement-session waiters in this same Map.
+      if (!this.isActive(epoch)) return
+    }
+  }
+
+  commitMatches(): void {
+    this.matchBuffer.committedMessages.push(...this.matchBuffer.pendingMessages)
+    this.matchBuffer.pendingMessages = []
+    if (this.matchBuffer.committedMessages.length > 1000) {
+      this.matchBuffer.committedMessages.splice(
+        0,
+        this.matchBuffer.committedMessages.length - 1000,
+      )
+    }
+    for (const [matchId, match] of this.pendingMatches) {
+      if (!match.matched) continue
+      clearTimeout(match.timeoutId)
+      this.pendingMatches.delete(matchId)
+      match.resolve(true)
+    }
+  }
 }
 
 /**
@@ -512,22 +1082,33 @@ export function electricCollectionOptions<T extends StandardSchemaV1>(
   config: ElectricCollectionConfig<InferSchemaOutput<T>, T> & {
     schema: T
   },
-): Omit<CollectionConfig<InferSchemaOutput<T>, string | number, T>, `utils`> & {
-  id?: string
-  utils: ElectricCollectionUtils<InferSchemaOutput<T>>
-  schema: T
-}
+): Omit<
+  CollectionConfig<InferSchemaOutput<T>, string | number, T>,
+  `utils` | `onInsert` | `onUpdate` | `onDelete`
+> &
+  Pick<
+    ElectricCollectionConfig<InferSchemaOutput<T>, T>,
+    `onInsert` | `onUpdate` | `onDelete`
+  > & {
+    id?: string
+    utils: ElectricCollectionUtils<InferSchemaOutput<T>>
+    schema: T
+  }
 
 // Overload for when no schema is provided
 export function electricCollectionOptions<T extends Row<unknown>>(
   config: ElectricCollectionConfig<T> & {
     schema?: never // prohibit schema
   },
-): Omit<CollectionConfig<T, string | number>, `utils`> & {
-  id?: string
-  utils: ElectricCollectionUtils<T>
-  schema?: never // no schema in the result
-}
+): Omit<
+  CollectionConfig<T, string | number>,
+  `utils` | `onInsert` | `onUpdate` | `onDelete`
+> &
+  Pick<ElectricCollectionConfig<T>, `onInsert` | `onUpdate` | `onDelete`> & {
+    id?: string
+    utils: ElectricCollectionUtils<T>
+    schema?: never // no schema in the result
+  }
 
 export function electricCollectionOptions<T extends Row<unknown>>(
   config: ElectricCollectionConfig<T, any>,
@@ -539,264 +1120,73 @@ export function electricCollectionOptions<T extends Row<unknown>>(
   utils: ElectricCollectionUtils<T>
   schema?: any
 } {
-  const seenTxids = new Store<Set<Txid>>(new Set([]))
-  const seenSnapshots = new Store<Array<PostgresSnapshot>>([])
+  let descriptorLifecycle = new ElectricLifecycle<T>(config.id)
+  let utilityLifecycle = descriptorLifecycle
   const internalSyncMode = config.syncMode ?? `eager`
   const finalSyncMode =
     internalSyncMode === `progressive` ? `on-demand` : internalSyncMode
-  const pendingMatches = new Store<
-    Map<
-      string,
-      {
-        matchFn: (message: Message<any>) => boolean
-        resolve: (value: boolean) => void
-        reject: (error: Error) => void
-        timeoutId: ReturnType<typeof setTimeout>
-        matched: boolean
-      }
-    >
-  >(new Map())
+  const boundLifecycles = new WeakMap<object, ElectricLifecycle<T>>()
+  const awaitTxId: AwaitTxIdFn = (txId, timeout) =>
+    utilityLifecycle.utils.awaitTxId(txId, timeout)
 
-  // Buffer messages since last up-to-date to handle race conditions
-  const currentBatchMessages = new Store<Array<Message<any>>>([])
+  const awaitMatch: AwaitMatchFn<T> = (matchFn, timeout) =>
+    utilityLifecycle.utils.awaitMatch(matchFn, timeout)
 
-  // Track whether the current batch has been committed (up-to-date received)
-  // This allows awaitMatch to resolve immediately for messages from committed batches
-  const batchCommitted = new Store<boolean>(false)
-
-  /**
-   * Helper function to remove multiple matches from the pendingMatches store
-   */
-  const removePendingMatches = (matchIds: Array<string>) => {
-    if (matchIds.length > 0) {
-      pendingMatches.setState((current) => {
-        const newMatches = new Map(current)
-        matchIds.forEach((id) => newMatches.delete(id))
-        return newMatches
-      })
-    }
-  }
-
-  /**
-   * Helper function to resolve and cleanup matched pending matches
-   */
-  const resolveMatchedPendingMatches = () => {
-    const matchesToResolve: Array<string> = []
-    pendingMatches.state.forEach((match, matchId) => {
-      if (match.matched) {
-        clearTimeout(match.timeoutId)
-        match.resolve(true)
-        matchesToResolve.push(matchId)
-        debug(
-          `${config.id ? `[${config.id}] ` : ``}awaitMatch resolved on up-to-date for match %s`,
-          matchId,
-        )
-      }
+  const createSync = () =>
+    createElectricSync<T>(config.shapeOptions, {
+      getLifecycle: (collection) =>
+        boundLifecycles.get(collection) ?? descriptorLifecycle,
+      syncMode: internalSyncMode,
+      collectionId: config.id,
+      testHooks: config[ELECTRIC_TEST_HOOKS],
     })
-    removePendingMatches(matchesToResolve)
-  }
-  const sync = createElectricSync<T>(config.shapeOptions, {
-    seenTxids,
-    seenSnapshots,
-    syncMode: internalSyncMode,
-    pendingMatches,
-    currentBatchMessages,
-    batchCommitted,
-    removePendingMatches,
-    resolveMatchedPendingMatches,
-    collectionId: config.id,
-    testHooks: config[ELECTRIC_TEST_HOOKS],
-  })
-
-  /**
-   * Wait for a specific transaction ID to be synced
-   * @param txId The transaction ID to wait for as a number
-   * @param timeout Optional timeout in milliseconds (defaults to 5000ms)
-   * @returns Promise that resolves when the txId is synced
-   */
-  const awaitTxId: AwaitTxIdFn = async (
-    txId: Txid,
-    timeout: number = 5000,
-  ): Promise<boolean> => {
-    debug(
-      `${config.id ? `[${config.id}] ` : ``}awaitTxId called with txid %d`,
-      txId,
-    )
-    if (typeof txId !== `number`) {
-      throw new ExpectedNumberInAwaitTxIdError(typeof txId, config.id)
-    }
-
-    // First check if the txid is in the seenTxids store
-    const hasTxid = seenTxids.state.has(txId)
-    if (hasTxid) return true
-
-    // Then check if the txid is in any of the seen snapshots
-    const hasSnapshot = seenSnapshots.state.some((snapshot) =>
-      isVisibleInSnapshot(txId, snapshot),
-    )
-    if (hasSnapshot) return true
-
-    return new Promise((resolve, reject) => {
-      const timeoutId = setTimeout(() => {
-        unsubscribeSeenTxids()
-        unsubscribeSeenSnapshots()
-        reject(new TimeoutWaitingForTxIdError(txId, config.id))
-      }, timeout)
-
-      const unsubscribeSeenTxids = seenTxids.subscribe(() => {
-        if (seenTxids.state.has(txId)) {
-          debug(
-            `${config.id ? `[${config.id}] ` : ``}awaitTxId found match for txid %o`,
-            txId,
-          )
-          clearTimeout(timeoutId)
-          unsubscribeSeenTxids()
-          unsubscribeSeenSnapshots()
-          resolve(true)
-        }
-      })
-
-      const unsubscribeSeenSnapshots = seenSnapshots.subscribe(() => {
-        const visibleSnapshot = seenSnapshots.state.find((snapshot) =>
-          isVisibleInSnapshot(txId, snapshot),
-        )
-        if (visibleSnapshot) {
-          debug(
-            `${config.id ? `[${config.id}] ` : ``}awaitTxId found match for txid %o in snapshot %o`,
-            txId,
-            visibleSnapshot,
-          )
-          clearTimeout(timeoutId)
-          unsubscribeSeenSnapshots()
-          unsubscribeSeenTxids()
-          resolve(true)
-        }
-      })
-    })
-  }
-
-  /**
-   * Wait for a custom match function to find a matching message
-   * @param matchFn Function that returns true when a message matches
-   * @param timeout Optional timeout in milliseconds (defaults to 5000ms)
-   * @returns Promise that resolves when a matching message is found
-   */
-  const awaitMatch: AwaitMatchFn<any> = async (
-    matchFn: MatchFunction<any>,
-    timeout: number = 3000,
-  ): Promise<boolean> => {
-    debug(
-      `${config.id ? `[${config.id}] ` : ``}awaitMatch called with custom function`,
-    )
-
-    return new Promise((resolve, reject) => {
-      const matchId = Math.random().toString(36)
-
-      const cleanupMatch = () => {
-        pendingMatches.setState((current) => {
-          const newMatches = new Map(current)
-          newMatches.delete(matchId)
-          return newMatches
-        })
-      }
-
-      const onTimeout = () => {
-        cleanupMatch()
-        reject(new TimeoutWaitingForMatchError(config.id))
-      }
-
-      const timeoutId = setTimeout(onTimeout, timeout)
-
-      // We need access to the stream messages to check against the match function
-      // This will be handled by the sync configuration
-      const checkMatch = (message: Message<any>) => {
-        if (matchFn(message)) {
-          debug(
-            `${config.id ? `[${config.id}] ` : ``}awaitMatch found matching message, waiting for up-to-date`,
-          )
-          // Mark as matched but don't resolve yet - wait for up-to-date
-          pendingMatches.setState((current) => {
-            const newMatches = new Map(current)
-            const existing = newMatches.get(matchId)
-            if (existing) {
-              newMatches.set(matchId, { ...existing, matched: true })
-            }
-            return newMatches
-          })
-          return true
-        }
-        return false
-      }
-
-      // Check against current batch messages first to handle race conditions
-      for (const message of currentBatchMessages.state) {
-        if (matchFn(message)) {
-          // If batch is committed (up-to-date already received), resolve immediately
-          // just like awaitTxId does when it finds a txid in seenTxids
-          if (batchCommitted.state) {
-            debug(
-              `${config.id ? `[${config.id}] ` : ``}awaitMatch found immediate match in committed batch, resolving immediately`,
-            )
-            clearTimeout(timeoutId)
-            resolve(true)
-            return
-          }
-
-          // If batch is not yet committed, register match and wait for up-to-date
-          debug(
-            `${config.id ? `[${config.id}] ` : ``}awaitMatch found immediate match in current batch, waiting for up-to-date`,
-          )
-          pendingMatches.setState((current) => {
-            const newMatches = new Map(current)
-            newMatches.set(matchId, {
-              matchFn: checkMatch,
-              resolve,
-              reject,
-              timeoutId,
-              matched: true, // Already matched, will resolve on up-to-date
-            })
-            return newMatches
-          })
-          return
-        }
-      }
-
-      // Store the match function for the sync process to use
-      // We'll add this to a pending matches store
-      pendingMatches.setState((current) => {
-        const newMatches = new Map(current)
-        newMatches.set(matchId, {
-          matchFn: checkMatch,
-          resolve,
-          reject,
-          timeoutId,
-          matched: false,
-        })
-        return newMatches
-      })
-    })
-  }
+  const sync = createSync()
 
   /**
    * Process matching strategy and wait for synchronization
    */
   const processMatchingStrategy = async (
-    result: MatchingStrategy,
+    result: unknown,
+    waitForTxId: AwaitTxIdFn,
   ): Promise<void> => {
+    const canHaveProperties =
+      (typeof result === `object` && result !== null) ||
+      typeof result === `function`
+
     // Only wait if result contains txid
-    if (result && `txid` in result) {
-      const timeout = result.timeout
+    if (canHaveProperties && `txid` in result) {
+      const strategy = result as Exclude<MatchingStrategy, void>
+      // Warn about deprecated return value pattern
+      warnOnce(
+        'electric-collection-txid-return',
+        '[TanStack DB] DEPRECATED: Returning { txid } from mutation handlers is deprecated and will be removed in v1.0. ' +
+          'Use `await collection.utils.awaitTxId(txid)` instead of returning { txid }. ' +
+          'See migration guide: https://tanstack.com/db/latest/docs/collections/electric-collection#persistence-handlers--synchronization',
+      )
+
+      const timeout = strategy.timeout
       // Handle both single txid and array of txids
-      if (Array.isArray(result.txid)) {
-        await Promise.all(result.txid.map((txid) => awaitTxId(txid, timeout)))
+      if (Array.isArray(strategy.txid)) {
+        await Promise.all(
+          strategy.txid.map((txid) => waitForTxId(txid, timeout)),
+        )
       } else {
-        await awaitTxId(result.txid, timeout)
+        await waitForTxId(strategy.txid, timeout)
       }
     }
     // If result is void/undefined, don't wait - mutation completes immediately
   }
+  const getMutationAwaitTxId = (params: unknown): AwaitTxIdFn => {
+    const collection = (
+      params as {
+        collection?: { utils?: { awaitTxId?: AwaitTxIdFn } }
+      }
+    ).collection
+    return collection?.utils?.awaitTxId ?? awaitTxId
+  }
 
   // Create wrapper handlers for direct persistence operations that handle different matching strategies
+  // These wrappers process deprecated return values but don't pass them through
   const wrappedOnInsert = config.onInsert
     ? async (
         params: InsertMutationFnParams<
@@ -804,10 +1194,12 @@ export function electricCollectionOptions<T extends Row<unknown>>(
           string | number,
           ElectricCollectionUtils<T>
         >,
-      ) => {
+      ): Promise<void> => {
         const handlerResult = await config.onInsert!(params)
-        await processMatchingStrategy(handlerResult)
-        return handlerResult
+        await processMatchingStrategy(
+          handlerResult,
+          getMutationAwaitTxId(params),
+        )
       }
     : undefined
 
@@ -818,10 +1210,12 @@ export function electricCollectionOptions<T extends Row<unknown>>(
           string | number,
           ElectricCollectionUtils<T>
         >,
-      ) => {
+      ): Promise<void> => {
         const handlerResult = await config.onUpdate!(params)
-        await processMatchingStrategy(handlerResult)
-        return handlerResult
+        await processMatchingStrategy(
+          handlerResult,
+          getMutationAwaitTxId(params),
+        )
       }
     : undefined
 
@@ -832,10 +1226,12 @@ export function electricCollectionOptions<T extends Row<unknown>>(
           string | number,
           ElectricCollectionUtils<T>
         >,
-      ) => {
+      ): Promise<void> => {
         const handlerResult = await config.onDelete!(params)
-        await processMatchingStrategy(handlerResult)
-        return handlerResult
+        await processMatchingStrategy(
+          handlerResult,
+          getMutationAwaitTxId(params),
+        )
       }
     : undefined
 
@@ -848,18 +1244,75 @@ export function electricCollectionOptions<T extends Row<unknown>>(
     ...restConfig
   } = config
 
-  return {
+  const utilityTemplate: ElectricCollectionUtils<T> = {
+    awaitTxId,
+    awaitMatch,
+  }
+  const consumeDescriptorLifecycle = (): ElectricLifecycle<T> => {
+    const lifecycle = descriptorLifecycle
+    descriptorLifecycle = new ElectricLifecycle<T>(config.id)
+    utilityLifecycle = lifecycle
+    return lifecycle
+  }
+  const createBoundSync = (
+    source: SyncConfig<T>,
+    utilities: object,
+  ): SyncConfig<T> => {
+    const lifecycle = consumeDescriptorLifecycle()
+    let collectionKey: object | undefined
+    Object.assign(utilities, lifecycle.utils)
+
+    const boundSync: SyncConfig<T> = {
+      ...source,
+      sync: (params) => {
+        // A copied materialized config may delegate through an older binding.
+        // The outermost binding owns this collection; inner wrappers only run
+        // the source sync and must not retarget either owner's lifecycle.
+        if (!boundLifecycles.has(params.collection)) {
+          collectionKey = params.collection
+          boundLifecycles.set(params.collection, lifecycle)
+        }
+        return source.sync(params)
+      },
+      exportSyncMeta: () => lifecycle.exportMeta(),
+      importSyncMeta: (meta) => lifecycle.importMeta(meta),
+      mergeSyncMeta: mergeElectricSyncMeta,
+    }
+    return withCollectionSyncConfigCleanup(boundSync, () => {
+      lifecycle.retire()
+      if (collectionKey) boundLifecycles.delete(collectionKey)
+    })
+  }
+  const syncTemplate = withCollectionSyncConfigFactory(
+    {
+      ...sync,
+      exportSyncMeta: () => descriptorLifecycle.exportMeta(),
+      importSyncMeta: (meta) => descriptorLifecycle.importMeta(meta),
+      mergeSyncMeta: mergeElectricSyncMeta,
+    },
+    createBoundSync,
+  )
+  const options = {
     ...restConfig,
     syncMode: finalSyncMode,
-    sync,
+    sync: syncTemplate,
     onInsert: wrappedOnInsert,
     onUpdate: wrappedOnUpdate,
     onDelete: wrappedOnDelete,
-    utils: {
-      awaitTxId,
-      awaitMatch,
-    },
+    utils: utilityTemplate,
   }
+  Object.defineProperty(options, `utils`, {
+    enumerable: true,
+    get: () => ({ ...utilityTemplate }),
+  })
+
+  return withCollectionConfigFactory(options, () =>
+    (
+      electricCollectionOptions as (
+        nextConfig: ElectricCollectionConfig<T, any>,
+      ) => typeof options
+    )(config),
+  )
 }
 
 /**
@@ -869,294 +1322,458 @@ function createElectricSync<T extends Row<unknown>>(
   shapeOptions: ShapeStreamOptions<GetExtensions<T>>,
   options: {
     syncMode: ElectricSyncMode
-    seenTxids: Store<Set<Txid>>
-    seenSnapshots: Store<Array<PostgresSnapshot>>
-    pendingMatches: Store<
-      Map<
-        string,
-        {
-          matchFn: (message: Message<T>) => boolean
-          resolve: (value: boolean) => void
-          reject: (error: Error) => void
-          timeoutId: ReturnType<typeof setTimeout>
-          matched: boolean
-        }
-      >
-    >
-    currentBatchMessages: Store<Array<Message<T>>>
-    batchCommitted: Store<boolean>
-    removePendingMatches: (matchIds: Array<string>) => void
-    resolveMatchedPendingMatches: () => void
+    getLifecycle: (collection: object) => ElectricLifecycle<T>
     collectionId?: string
     testHooks?: ElectricTestHooks
   },
 ): SyncConfig<T> {
-  const {
-    seenTxids,
-    seenSnapshots,
-    syncMode,
-    pendingMatches,
-    currentBatchMessages,
-    batchCommitted,
-    removePendingMatches,
-    resolveMatchedPendingMatches,
-    collectionId,
-    testHooks,
-  } = options
-  const MAX_BATCH_MESSAGES = 1000 // Safety limit for message buffer
+  const { getLifecycle, syncMode, collectionId, testHooks } = options
 
-  // Store for the relation schema information
-  const relationSchema = new Store<string | undefined>(undefined)
+  let relationSchema: string | undefined
 
-  const tagCache = new Map<MoveTag, ParsedMoveTag>()
+  const createTagState = () => {
+    const tagCache = new Map<MoveTag, ParsedMoveTag>()
 
-  // Parses a tag string into a MoveTag.
-  // It memoizes the result parsed tag such that future calls
-  // for the same tag string return the same MoveTag array.
-  const parseTag = (tag: MoveTag): ParsedMoveTag => {
-    const cachedTag = tagCache.get(tag)
-    if (cachedTag) {
-      return cachedTag
-    }
-
-    const parsedTag = tag.split(`|`)
-    tagCache.set(tag, parsedTag)
-    return parsedTag
-  }
-
-  // Tag tracking state
-  const rowTagSets = new Map<RowId, Set<MoveTag>>()
-  const tagIndex: TagIndex = []
-  let tagLength: number | undefined = undefined
-
-  /**
-   * Initialize the tag index with the correct length
-   */
-  const initializeTagIndex = (length: number): void => {
-    if (tagIndex.length < length) {
-      // Extend the index array to the required length
-      for (let i = tagIndex.length; i < length; i++) {
-        tagIndex[i] = new Map()
-      }
-    }
-  }
-
-  /**
-   * Add tags to a row and update the tag index
-   */
-  const addTagsToRow = (
-    tags: Array<MoveTag>,
-    rowId: RowId,
-    rowTagSet: Set<MoveTag>,
-  ): void => {
-    for (const tag of tags) {
-      const parsedTag = parseTag(tag)
-
-      // Infer tag length from first tag
-      if (tagLength === undefined) {
-        tagLength = getTagLength(parsedTag)
-        initializeTagIndex(tagLength)
+    // Parses a tag string into a ParsedMoveTag.
+    // It memoizes the result parsed tag such that future calls
+    // for the same tag string return the same ParsedMoveTag array.
+    const parseTag = (tag: MoveTag): ParsedMoveTag => {
+      const cachedTag = tagCache.get(tag)
+      if (cachedTag) {
+        return cachedTag
       }
 
-      // Validate tag length matches
-      const currentTagLength = getTagLength(parsedTag)
-      if (currentTagLength !== tagLength) {
-        debug(
-          `${collectionId ? `[${collectionId}] ` : ``}Tag length mismatch: expected ${tagLength}, got ${currentTagLength}`,
-        )
-        continue
-      }
-
-      rowTagSet.add(tag)
-      addTagToIndex(parsedTag, rowId, tagIndex, tagLength)
-    }
-  }
-
-  /**
-   * Remove tags from a row and update the tag index
-   */
-  const removeTagsFromRow = (
-    removedTags: Array<MoveTag>,
-    rowId: RowId,
-    rowTagSet: Set<MoveTag>,
-  ): void => {
-    if (tagLength === undefined) {
-      return
+      const parsedTag = parseTagString(tag)
+      tagCache.set(tag, parsedTag)
+      return parsedTag
     }
 
-    for (const tag of removedTags) {
-      const parsedTag = parseTag(tag)
-      rowTagSet.delete(tag)
-      removeTagFromIndex(parsedTag, rowId, tagIndex, tagLength)
-      // We aggresively evict the tag from the cache
-      // if this tag is shared with another row
-      // and is not removed from that other row
-      // then next time we encounter the tag it will be parsed again
-      tagCache.delete(tag)
-    }
-  }
+    // Tag tracking state
+    const rowTagSets = new Map<RowId, Set<MoveTag>>()
+    const tagIndex: TagIndex = []
+    let tagLength: number | undefined = undefined
 
-  /**
-   * Process tags for a change message (add and remove tags)
-   */
-  const processTagsForChangeMessage = (
-    tags: Array<MoveTag> | undefined,
-    removedTags: Array<MoveTag> | undefined,
-    rowId: RowId,
-  ): Set<MoveTag> => {
-    // Initialize tag set for this row if it doesn't exist (needed for checking deletion)
-    if (!rowTagSets.has(rowId)) {
-      rowTagSets.set(rowId, new Set())
-    }
-    const rowTagSet = rowTagSets.get(rowId)!
+    // DNF state: active_conditions are per-row, disjunct_positions are global
+    // (fixed by the shape's WHERE clause, derived once from the first tagged message).
+    const rowActiveConditions = new Map<RowId, ActiveConditions>()
+    let disjunctPositions: DisjunctPositions | undefined = undefined
 
-    // Add new tags
-    if (tags) {
-      addTagsToRow(tags, rowId, rowTagSet)
-    }
-
-    // Remove tags
-    if (removedTags) {
-      removeTagsFromRow(removedTags, rowId, rowTagSet)
-    }
-
-    return rowTagSet
-  }
-
-  /**
-   * Clear all tag tracking state (used when truncating)
-   */
-  const clearTagTrackingState = (): void => {
-    rowTagSets.clear()
-    tagIndex.length = 0
-    tagLength = undefined
-  }
-
-  /**
-   * Remove all tags for a row from both the tag set and the index
-   * Used when a row is deleted
-   */
-  const clearTagsForRow = (rowId: RowId): void => {
-    if (tagLength === undefined) {
-      return
-    }
-
-    const rowTagSet = rowTagSets.get(rowId)
-    if (!rowTagSet) {
-      return
-    }
-
-    // Remove each tag from the index
-    for (const tag of rowTagSet) {
-      const parsedTag = parseTag(tag)
-      const currentTagLength = getTagLength(parsedTag)
-      if (currentTagLength === tagLength) {
-        removeTagFromIndex(parsedTag, rowId, tagIndex, tagLength)
-      }
-      tagCache.delete(tag)
-    }
-
-    // Remove the row from the tag sets map
-    rowTagSets.delete(rowId)
-  }
-
-  /**
-   * Remove matching tags from a row based on a pattern
-   * Returns true if the row's tag set is now empty
-   */
-  const removeMatchingTagsFromRow = (
-    rowId: RowId,
-    pattern: MoveOutPattern,
-  ): boolean => {
-    const rowTagSet = rowTagSets.get(rowId)
-    if (!rowTagSet) {
-      return false
-    }
-
-    // Find tags that match this pattern and remove them
-    for (const tag of rowTagSet) {
-      const parsedTag = parseTag(tag)
-      if (tagMatchesPattern(parsedTag, pattern)) {
-        rowTagSet.delete(tag)
-        removeTagFromIndex(parsedTag, rowId, tagIndex, tagLength!)
-      }
-    }
-
-    // Check if row's tag set is now empty
-    if (rowTagSet.size === 0) {
-      rowTagSets.delete(rowId)
-      return true
-    }
-
-    return false
-  }
-
-  /**
-   * Process move-out event: remove matching tags from rows and delete rows with empty tag sets
-   */
-  const processMoveOutEvent = (
-    patterns: Array<MoveOutPattern>,
-    begin: () => void,
-    write: (message: ChangeMessageOrDeleteKeyMessage<T>) => void,
-    transactionStarted: boolean,
-  ): boolean => {
-    if (tagLength === undefined) {
-      debug(
-        `${collectionId ? `[${collectionId}] ` : ``}Received move-out message but no tag length set yet, ignoring`,
-      )
-      return transactionStarted
-    }
-
-    let txStarted = transactionStarted
-
-    // Process all patterns and collect rows to delete
-    for (const pattern of patterns) {
-      // Find all rows that match this pattern
-      const affectedRowIds = findRowsMatchingPattern(pattern, tagIndex)
-
-      for (const rowId of affectedRowIds) {
-        if (removeMatchingTagsFromRow(rowId, pattern)) {
-          // Delete rows with empty tag sets
-          if (!txStarted) {
-            begin()
-            txStarted = true
-          }
-
-          write({
-            type: `delete`,
-            key: rowId,
-          })
+    /**
+     * Initialize the tag index with the correct length
+     */
+    const initializeTagIndex = (length: number): void => {
+      if (tagIndex.length < length) {
+        // Extend the index array to the required length
+        for (let i = tagIndex.length; i < length; i++) {
+          tagIndex[i] = new Map()
         }
       }
     }
 
-    return txStarted
-  }
+    /**
+     * Add tags to a row and update the tag index
+     */
+    const addTagsToRow = (
+      tags: Array<MoveTag>,
+      rowId: RowId,
+      rowTagSet: Set<MoveTag>,
+    ): void => {
+      for (const tag of tags) {
+        const parsedTag = parseTag(tag)
 
-  /**
-   * Get the sync metadata for insert operations
-   * @returns Record containing relation information
-   */
-  const getSyncMetadata = (): Record<string, unknown> => {
-    // Use the stored schema if available, otherwise default to 'public'
-    const schema = relationSchema.state || `public`
+        // Infer tag length from first tag
+        if (tagLength === undefined) {
+          tagLength = getTagLength(parsedTag)
+          initializeTagIndex(tagLength)
+        }
+
+        // Validate tag length matches
+        const currentTagLength = getTagLength(parsedTag)
+        if (currentTagLength !== tagLength) {
+          debug(
+            `${collectionId ? `[${collectionId}] ` : ``}Tag length mismatch: expected ${tagLength}, got ${currentTagLength}`,
+          )
+          continue
+        }
+
+        rowTagSet.add(tag)
+        addTagToIndex(parsedTag, rowId, tagIndex, tagLength)
+      }
+    }
+
+    /**
+     * Remove tags from a row and update the tag index
+     */
+    const removeTagsFromRow = (
+      removedTags: Array<MoveTag>,
+      rowId: RowId,
+      rowTagSet: Set<MoveTag>,
+    ): void => {
+      if (tagLength === undefined) {
+        return
+      }
+
+      for (const tag of removedTags) {
+        const parsedTag = parseTag(tag)
+        rowTagSet.delete(tag)
+        removeTagFromIndex(parsedTag, rowId, tagIndex, tagLength)
+        // We aggresively evict the tag from the cache
+        // if this tag is shared with another row
+        // and is not removed from that other row
+        // then next time we encounter the tag it will be parsed again
+        tagCache.delete(tag)
+      }
+    }
+
+    /**
+     * Process tags for a change message (add and remove tags)
+     */
+    const processTagsForChangeMessage = (
+      tags: Array<MoveTag> | undefined,
+      removedTags: Array<MoveTag> | undefined,
+      rowId: RowId,
+      activeConditions?: ActiveConditions,
+    ): Set<MoveTag> => {
+      // Initialize tag set for this row if it doesn't exist (needed for checking deletion)
+      if (!rowTagSets.has(rowId)) {
+        rowTagSets.set(rowId, new Set())
+      }
+      const rowTagSet = rowTagSets.get(rowId)!
+
+      // Add new tags
+      if (tags) {
+        addTagsToRow(tags, rowId, rowTagSet)
+
+        // Derive disjunct positions once — they are fixed by the shape's WHERE clause.
+        if (disjunctPositions === undefined) {
+          const parsedTags = tags.map(parseTag)
+          disjunctPositions = deriveDisjunctPositions(parsedTags)
+        }
+      }
+
+      // Remove tags
+      if (removedTags) {
+        removeTagsFromRow(removedTags, rowId, rowTagSet)
+      }
+
+      // Store active conditions if provided (overwrite on re-send)
+      if (activeConditions && activeConditions.length > 0) {
+        rowActiveConditions.set(rowId, [...activeConditions])
+      }
+
+      return rowTagSet
+    }
+
+    /**
+     * Clear all tag tracking state (used when truncating)
+     */
+    const clearTagTrackingState = (): void => {
+      rowTagSets.clear()
+      tagIndex.length = 0
+      tagLength = undefined
+      rowActiveConditions.clear()
+      disjunctPositions = undefined
+    }
+
+    /**
+     * Remove all tags for a row from both the tag set and the index
+     * Used when a row is deleted
+     */
+    const clearTagsForRow = (rowId: RowId): void => {
+      if (tagLength === undefined) {
+        return
+      }
+
+      const rowTagSet = rowTagSets.get(rowId)
+      if (!rowTagSet) {
+        return
+      }
+
+      // Remove each tag from the index
+      for (const tag of rowTagSet) {
+        const parsedTag = parseTag(tag)
+        const currentTagLength = getTagLength(parsedTag)
+        if (currentTagLength === tagLength) {
+          removeTagFromIndex(parsedTag, rowId, tagIndex, tagLength)
+        }
+        tagCache.delete(tag)
+      }
+
+      // Remove the row from the tag sets map
+      rowTagSets.delete(rowId)
+      rowActiveConditions.delete(rowId)
+    }
+
+    /**
+     * Remove matching tags from a row based on a pattern
+     * Returns true if the row should be deleted (no longer visible)
+     */
+    const removeMatchingTagsFromRow = (
+      rowId: RowId,
+      pattern: MovePattern,
+    ): boolean => {
+      const rowTagSet = rowTagSets.get(rowId)
+      if (!rowTagSet) {
+        return false
+      }
+
+      // DNF mode: check visibility using active conditions.
+      // Tag index entries are preserved so that move-in can re-activate positions.
+      const activeConditions = rowActiveConditions.get(rowId)
+      if (activeConditions && disjunctPositions) {
+        // Set the condition at this pattern's position to false
+        activeConditions[pattern.pos] = false
+
+        if (!rowVisible(activeConditions, disjunctPositions)) {
+          // Row is no longer visible — clean up all state including tag index
+          for (const tag of rowTagSet) {
+            const parsedTag = parseTag(tag)
+            removeTagFromIndex(parsedTag, rowId, tagIndex, tagLength!)
+            tagCache.delete(tag)
+          }
+          rowTagSets.delete(rowId)
+          rowActiveConditions.delete(rowId)
+          return true
+        }
+        return false
+      }
+
+      // Simple shape (no subquery dependencies — server sends no active_conditions):
+      // Remove matching tags and delete if tag set is empty
+      for (const tag of rowTagSet) {
+        const parsedTag = parseTag(tag)
+        if (tagMatchesPattern(parsedTag, pattern)) {
+          rowTagSet.delete(tag)
+          removeTagFromIndex(parsedTag, rowId, tagIndex, tagLength!)
+        }
+      }
+
+      if (rowTagSet.size === 0) {
+        rowTagSets.delete(rowId)
+        return true
+      }
+
+      return false
+    }
+
+    /**
+     * Process move-out event: remove matching tags from rows and delete rows with empty tag sets
+     */
+    const processMoveOutEvent = (
+      patterns: Array<MovePattern>,
+      begin: () => void,
+      write: (message: ChangeMessageOrDeleteKeyMessage<T>) => void,
+      transactionStarted: boolean,
+      onDelete: (rowId: RowId) => void,
+    ): boolean => {
+      if (tagLength === undefined) {
+        debug(
+          `${collectionId ? `[${collectionId}] ` : ``}Received move-out message but no tag length set yet, ignoring`,
+        )
+        return transactionStarted
+      }
+
+      let txStarted = transactionStarted
+
+      // Process all patterns and collect rows to delete
+      for (const pattern of patterns) {
+        // Find all rows that match this pattern
+        const affectedRowIds = findRowsMatchingPattern(pattern, tagIndex)
+
+        for (const rowId of affectedRowIds) {
+          if (removeMatchingTagsFromRow(rowId, pattern)) {
+            // Delete rows with empty tag sets
+            if (!txStarted) {
+              begin()
+              txStarted = true
+            }
+
+            write({
+              type: `delete`,
+              key: rowId,
+            })
+            onDelete(rowId)
+          }
+        }
+      }
+
+      return txStarted
+    }
+
+    /**
+     * Process move-in event: re-activate conditions for rows matching the patterns.
+     * This is a silent operation — no messages are emitted to the collection.
+     */
+    const processMoveInEvent = (patterns: Array<MovePattern>): void => {
+      if (tagLength === undefined) {
+        debug(
+          `${collectionId ? `[${collectionId}] ` : ``}Received move-in message but no tag length set yet, ignoring`,
+        )
+        return
+      }
+
+      for (const pattern of patterns) {
+        const affectedRowIds = findRowsMatchingPattern(pattern, tagIndex)
+
+        for (const rowId of affectedRowIds) {
+          const activeConditions = rowActiveConditions.get(rowId)
+          if (activeConditions) {
+            activeConditions[pattern.pos] = true
+          }
+        }
+      }
+    }
 
     return {
-      relation: shapeOptions.params?.table
-        ? [schema, shapeOptions.params.table]
-        : undefined,
+      hasTags: () => tagLength !== undefined,
+      processTagsForChangeMessage,
+      clearTagTrackingState,
+      clearTagsForRow,
+      processMoveOutEvent,
+      processMoveInEvent,
     }
   }
-
-  let unsubscribeStream: () => void
+  // Tags belong to a collection, and survive a compatible resume of that
+  // collection. Reusing an options descriptor must not share visibility.
+  const collectionTags = new WeakMap<
+    object,
+    ReturnType<typeof createTagState>
+  >()
 
   return {
+    getSyncMetadata: () => ({
+      relation: shapeOptions.params?.table
+        ? [relationSchema || `public`, shapeOptions.params.table]
+        : undefined,
+    }),
     sync: (params: Parameters<SyncConfig<T>[`sync`]>[0]) => {
-      const { begin, write, commit, markReady, truncate, collection } = params
+      const retainsTagState = collectionTags.has(params.collection)
+      let tagState = collectionTags.get(params.collection)
+      if (!tagState) {
+        tagState = createTagState()
+        collectionTags.set(params.collection, tagState)
+      }
+      const {
+        processTagsForChangeMessage,
+        clearTagTrackingState,
+        clearTagsForRow,
+        processMoveOutEvent,
+        processMoveInEvent,
+      } = tagState
+      const lifecycle = getLifecycle(params.collection)
+      const lifecycleEpoch = lifecycle.start()
+      const isActiveLifecycle = () => lifecycle.isActive(lifecycleEpoch)
+      Object.assign(params.collection.utils, lifecycle.utils)
+
+      const {
+        begin,
+        write,
+        commit: commitSyncTransaction,
+        markReady,
+        markError,
+        truncate,
+        collection,
+        metadata,
+      } = params
+      let commitSequence = 0
+      const pendingAppliedReceipts = new Map<number, Promise<void>>()
+      const commit = (signal?: AbortSignal): SyncAppliedReceipt => {
+        const sequence = ++commitSequence
+        const applied = commitSyncTransaction(signal)
+        if (applied === true) {
+          return true
+        }
+        pendingAppliedReceipts.set(sequence, applied)
+        const removeReceipt = () => pendingAppliedReceipts.delete(sequence)
+        void applied.then(removeReceipt, removeReceipt)
+        return applied
+      }
+      const waitForCommitsAfter = async (cursor: number): Promise<void> => {
+        await Promise.all(
+          Array.from(pendingAppliedReceipts, ([sequence, applied]) =>
+            sequence > cursor ? applied : undefined,
+          ),
+        )
+      }
+      const readPersistedResumeState = (): ElectricResumeState | undefined => {
+        const persistedResumeState = metadata?.collection.get(`electric:resume`)
+        return parseElectricResumeState(persistedResumeState)
+      }
+
+      const persistence =
+        metadata === undefined
+          ? null
+          : validateSyncPersistenceCapability(metadata.persistence)
+      const hydrateBaseline = persistence?.hydrateBaseline
+      const resumeSnapshot = persistence?.resumeSnapshot
+      const certifyResumeSnapshot = resumeSnapshot?.certify
+      const getKeySetEvidence = resumeSnapshot?.getKeySetEvidence
+      const expectCurrentCommit = resumeSnapshot?.expectCurrentCommit
+      const persistedKeySetEvidence = getKeySetEvidence?.()
+
+      const persistedResumeState = getNewestElectricResumeState(
+        readPersistedResumeState(),
+        lifecycle.resumeState,
+      )
+      const shapeIdentity = getStableShapeIdentity({
+        url: shapeOptions.url,
+        params: shapeOptions.params as Record<string, unknown> | undefined,
+      })
+      const hasIncompatiblePersistedResume =
+        persistedResumeState?.kind === `resume` &&
+        persistedResumeState.shapeId !== shapeIdentity
+      // A pre-ledger `unknown` baseline cannot justify a non-initial cursor.
+      // One fresh replacement establishes consistent evidence for later resumes.
+      const lacksCompletePersistedKeySet =
+        persistedResumeState?.kind === `resume` &&
+        getKeySetEvidence !== undefined &&
+        persistedKeySetEvidence?.status !== `consistent`
+      const needsFullSnapshot =
+        shapeOptions.offset === undefined &&
+        shapeOptions.handle === undefined &&
+        persistedResumeState !== undefined &&
+        (persistedResumeState.kind === `reset` ||
+          lacksCompletePersistedKeySet ||
+          (!retainsTagState && persistedResumeState.requiresTagState !== false))
+      const canUsePersistedResume =
+        shapeOptions.offset === undefined &&
+        shapeOptions.handle === undefined &&
+        persistedResumeState?.kind === `resume` &&
+        !hasIncompatiblePersistedResume &&
+        // Cached rows do not contain authoritative tag/active-condition state.
+        // Only a complete adapter ledger can justify a persisted cursor.
+        !needsFullSnapshot
+      const hasExplicitResumeOffset =
+        shapeOptions.offset !== undefined && shapeOptions.offset !== `-1`
+      if (!canUsePersistedResume && !hasExplicitResumeOffset) {
+        clearTagTrackingState()
+      }
+      const receivesCompleteRows = shapeOptions.params?.replica === `full`
+      const requiresKeySetCertification =
+        canUsePersistedResume && certifyResumeSnapshot !== undefined
+      // Eager and progressive streams that start after the initial offset can
+      // only apply partial updates when the local materialization is complete.
+      const requiresCompleteResume =
+        syncMode !== `on-demand` &&
+        (canUsePersistedResume ||
+          (hasExplicitResumeOffset && !receivesCompleteRows))
+      // A fresh snapshot replaces its hydrated cache; omitting the old offset
+      // alone would merge rows that no longer exist on the server.
+      let freshSnapshotPending =
+        (syncMode === `eager` || needsFullSnapshot) &&
+        !canUsePersistedResume &&
+        !hasExplicitResumeOffset &&
+        hydrateBaseline !== undefined
 
       // Wrap markReady to wait for test hook in progressive mode
       let progressiveReadyGate: Promise<void> | null = null
-      const wrappedMarkReady = (isBuffering: boolean) => {
+      let streamErrorVersion = 0
+      const wrappedMarkReady = (
+        isBuffering: boolean,
+        expectedErrorVersion = streamErrorVersion,
+      ) => {
+        if (streamErrorVersion !== expectedErrorVersion) return
+
         // Only create gate if we're in buffering phase (first up-to-date)
         if (
           isBuffering &&
@@ -1166,7 +1783,9 @@ function createElectricSync<T extends Row<unknown>>(
           // Create a new gate promise for this sync cycle
           progressiveReadyGate = testHooks.beforeMarkingReady()
           progressiveReadyGate.then(() => {
-            markReady()
+            if (streamErrorVersion === expectedErrorVersion) {
+              markReady()
+            }
           })
         } else {
           // No hook, not buffering, or already past first up-to-date
@@ -1176,56 +1795,60 @@ function createElectricSync<T extends Row<unknown>>(
 
       // Abort controller for the stream - wraps the signal if provided
       const abortController = new AbortController()
+      const forwardExternalAbort = () => abortController.abort()
 
       if (shapeOptions.signal) {
-        shapeOptions.signal.addEventListener(
-          `abort`,
-          () => {
-            abortController.abort()
-          },
-          {
-            once: true,
-          },
-        )
+        shapeOptions.signal.addEventListener(`abort`, forwardExternalAbort, {
+          once: true,
+        })
         if (shapeOptions.signal.aborted) {
           abortController.abort()
         }
       }
 
-      // Cleanup pending matches on abort
       abortController.signal.addEventListener(`abort`, () => {
-        pendingMatches.setState((current) => {
-          current.forEach((match) => {
-            clearTimeout(match.timeoutId)
-            match.reject(new StreamAbortedError())
-          })
-          return new Map() // Clear all pending matches
-        })
+        lifecycle.retire(lifecycleEpoch)
       })
 
       const stream = new ShapeStream({
         ...shapeOptions,
-        // In on-demand mode, we only want to sync changes, so we set the log to `changes_only`
-        log: syncMode === `on-demand` ? `changes_only` : undefined,
+        // Recovery needs a complete snapshot even for on-demand shapes.
+        // Normal on-demand startup still subscribes to changes only.
+        log:
+          syncMode === `on-demand` && !needsFullSnapshot
+            ? `changes_only`
+            : undefined,
         // In on-demand mode, we only need the changes from the point of time the collection was created
         // so we default to `now` when there is no saved offset.
         offset:
-          shapeOptions.offset ?? (syncMode === `on-demand` ? `now` : undefined),
+          shapeOptions.offset ??
+          (canUsePersistedResume
+            ? (persistedResumeState.offset as Offset)
+            : syncMode === `on-demand` && !needsFullSnapshot
+              ? `now`
+              : undefined),
+        handle:
+          shapeOptions.handle ??
+          (canUsePersistedResume ? persistedResumeState.handle : undefined),
         signal: abortController.signal,
         onError: (errorParams) => {
-          // Just immediately mark ready if there's an error to avoid blocking
-          // apps waiting for `.preload()` to finish.
+          streamErrorVersion++
           // Note that Electric sends a 409 error on a `must-refetch` message, but the
           // ShapeStream handled this and it will not reach this handler, therefor
-          // this markReady will not be triggers by a `must-refetch`.
-          markReady()
+          // this handler will not run for a `must-refetch`.
+          const initialSyncFailed = collection.status === `loading`
+          if (initialSyncFailed) {
+            markError(errorParams)
+          }
 
           if (shapeOptions.onError) {
             return shapeOptions.onError(errorParams)
           } else {
             console.error(
               `An error occurred while syncing collection: ${collection.id}, \n` +
-                `it has been marked as ready to avoid blocking apps waiting for '.preload()' to finish. \n` +
+                (initialSyncFailed
+                  ? `the initial sync has been marked as failed. \n`
+                  : `the last ready snapshot has been preserved. \n`) +
                 `You can provide an 'onError' handler on the shapeOptions to handle this error, and this message will not be logged.`,
               errorParams,
             )
@@ -1237,19 +1860,130 @@ function createElectricSync<T extends Row<unknown>>(
       let transactionStarted = false
       const newTxids = new Set<Txid>()
       const newSnapshots: Array<PostgresSnapshot> = []
-      let hasReceivedUpToDate = false // Track if we've completed initial sync in progressive mode
+      // Track if we've completed initial sync in progressive mode. A persisted
+      // resume starts from an already-committed stream offset, so the next
+      // up-to-date message must not run the initial atomic swap again.
+      let hasReceivedUpToDate =
+        syncMode === `progressive` && requiresCompleteResume
+      // A must-refetch starts a new snapshot generation. Until its up-to-date
+      // commit is applied, old Collection keys cannot make an update valid and
+      // the durable resume marker must remain reset.
+      let isResettingSnapshot = false
+      let resetGeneration = 0
 
       // Progressive mode state
       // Helper to determine if we're buffering the initial sync
       const isBufferingInitialSync = () =>
-        syncMode === `progressive` && !hasReceivedUpToDate
+        syncMode === `progressive` &&
+        !hasReceivedUpToDate &&
+        !isResettingSnapshot
       const bufferedMessages: Array<Message<T>> = [] // Buffer change messages during initial sync
+      // Progressive subset rows are provisional: the initial atomic swap
+      // normally discards them. Retain one only when a later stream update
+      // needs that full row as its baseline.
+      const progressiveSnapshotRows = new Map<string | number, Message<T>>()
+
+      // Presence spans the open source transaction and persisted callbacks
+      // whose FIFO receipts have not applied yet. Later callbacks must see
+      // those staged writes even though persistence has not replayed them into
+      // core. Once the newest receipt applies, syncedData is authoritative.
+      const pendingPresence = new Map<string | number, boolean>()
+      let usesBaseline = true
+      let pendingPresenceRevision = 0
+
+      const recordPendingPresence = (
+        rowId: string | number,
+        present: boolean,
+      ) => {
+        pendingPresenceRevision++
+        pendingPresence.set(rowId, present)
+      }
+
+      const recordPendingTruncate = () => {
+        pendingPresenceRevision++
+        pendingPresence.clear()
+        progressiveSnapshotRows.clear()
+        usesBaseline = false
+      }
+
+      const commitSourceTransaction = (): SyncAppliedReceipt => {
+        const committedPresenceRevision = pendingPresenceRevision
+        const applied = commit()
+        if (metadata?.persistence) {
+          const retireAppliedPresence = () => {
+            if (pendingPresenceRevision === committedPresenceRevision) {
+              pendingPresence.clear()
+              usesBaseline = true
+            }
+          }
+          if (applied === true) retireAppliedPresence()
+          else void applied.then(retireAppliedPresence, () => undefined)
+        }
+        return applied
+      }
+
+      const beginSourceTransaction = () => {
+        if (metadata?.persistence) begin({ immediate: true })
+        else begin()
+      }
 
       // Track keys that have been synced to handle overlapping subset queries.
       // When multiple subset queries return the same row, the server sends `insert`
       // for each response. We convert subsequent inserts to updates to avoid
       // duplicate key errors when the row's data has changed between requests.
       const syncedKeys = new Set<string | number>()
+      let resumeInvalid = false
+
+      const stageResumeMetadata = () => {
+        if (!isActiveLifecycle() || resumeInvalid) {
+          return
+        }
+        const shapeHandle = stream.shapeHandle
+        const lastOffset = stream.lastOffset
+        if (!shapeHandle || lastOffset === `-1`) {
+          return
+        }
+
+        const resumeState: ElectricResumeState = {
+          kind: `resume`,
+          offset: lastOffset,
+          handle: shapeHandle,
+          shapeId: shapeIdentity,
+          updatedAt: Date.now(),
+          requiresTagState: tagState.hasTags(),
+        }
+        lifecycle.resumeState = resumeState
+        metadata?.collection.set(`electric:resume`, resumeState)
+      }
+
+      const commitResetResumeMetadataImmediately = (
+        expectInResumeSnapshot = false,
+      ) => {
+        const resetState: ElectricResumeState = {
+          kind: `reset`,
+          updatedAt: Date.now(),
+        }
+        lifecycle.resumeState = resetState
+
+        if (metadata) {
+          begin({ immediate: true })
+          metadata.collection.set(`electric:resume`, resetState)
+          if (expectInResumeSnapshot) {
+            expectCurrentCommit?.()
+          }
+          commit()
+        }
+      }
+
+      if (
+        hasIncompatiblePersistedResume ||
+        (needsFullSnapshot && persistedResumeState.kind === `resume`)
+      ) {
+        // This reset is part of the current runtime's startup decision. The
+        // persisted wrapper may commit it before loading the atomic baseline,
+        // so carry ownership of exactly this generation into certification.
+        commitResetResumeMetadataImmediately(true)
+      }
 
       /**
        * Process a change message: handle tags and write the mutation
@@ -1263,6 +1997,10 @@ function createElectricSync<T extends Row<unknown>>(
         const tags = changeMessage.headers.tags
         const removedTags = changeMessage.headers.removed_tags
         const hasTags = tags || removedTags
+
+        // Extract active_conditions from headers (DNF support)
+        const activeConditions = changeMessage.headers.active_conditions as
+          ActiveConditions | undefined
 
         const rowId = collection.getKeyFromItem(changeMessage.value)
         const operation = changeMessage.headers.operation
@@ -1284,7 +2022,12 @@ function createElectricSync<T extends Row<unknown>>(
         if (isDelete) {
           clearTagsForRow(rowId)
         } else if (hasTags) {
-          processTagsForChangeMessage(tags, removedTags, rowId)
+          processTagsForChangeMessage(
+            tags,
+            removedTags,
+            rowId,
+            activeConditions,
+          )
         }
 
         write({
@@ -1307,34 +2050,127 @@ function createElectricSync<T extends Row<unknown>>(
         begin,
         write,
         commit,
+        getCommitCursor: () => commitSequence,
+        waitForCommitsAfter,
+        recordSnapshotRow: (row, message) => {
+          recordPendingPresence(collection.getKeyFromItem(row), true)
+          progressiveSnapshotRows.set(collection.getKeyFromItem(row), message)
+        },
         collectionId,
         // Pass the columnMapper's encode function to transform column names
         // (e.g., camelCase to snake_case) when compiling SQL for subset queries
         encodeColumnName: shapeOptions.columnMapper?.encode,
+        // Pass abort signal so requestSnapshot errors can be ignored during cleanup
+        signal: abortController.signal,
       })
 
-      unsubscribeStream = stream.subscribe((messages: Array<Message<T>>) => {
+      const resumeKeysPromise =
+        requiresCompleteResume || freshSnapshotPending
+          ? hydrateBaseline
+            ? (async () => {
+                await hydrateBaseline()
+                const currentKeySetEvidence = getKeySetEvidence?.()
+                if (
+                  canUsePersistedResume &&
+                  currentKeySetEvidence?.status !== `consistent`
+                ) {
+                  throw new Error(
+                    `Electric persisted resume baseline could not be certified during hydration`,
+                  )
+                }
+              })()
+            : undefined
+          : requiresKeySetCertification
+            ? (async () => {
+                await certifyResumeSnapshot()
+                const currentKeySetEvidence = getKeySetEvidence?.()
+                if (currentKeySetEvidence?.status !== `consistent`) {
+                  throw new Error(
+                    `Electric persisted resume baseline could not be certified`,
+                  )
+                }
+              })()
+            : undefined
+      let areResumeKeysReady = !resumeKeysPromise
+      const pendingResumeBatches: Array<Array<Message<T>>> = []
+      let unsubscribeStream: () => void = () => {}
+
+      const invalidateResume = () => {
+        resumeInvalid = true
+        if (transactionStarted) {
+          const cancellation = new AbortController()
+          cancellation.abort()
+          commit(cancellation.signal)
+          transactionStarted = false
+        }
+        syncedKeys.clear()
+        newTxids.clear()
+        newSnapshots.length = 0
+        commitResetResumeMetadataImmediately()
+        streamErrorVersion++
+        unsubscribeStream()
+        abortController.abort()
+        markError(
+          new Error(
+            `Electric resume state referenced an unseen row; a full snapshot is required`,
+          ),
+        )
+      }
+
+      const processMessages = (messages: Array<Message<T>>): void => {
+        if (!isActiveLifecycle() || resumeInvalid) {
+          return
+        }
+
+        if (freshSnapshotPending) {
+          freshSnapshotPending = false
+          beginSourceTransaction()
+          transactionStarted = true
+          truncate()
+          recordPendingTruncate()
+          syncedKeys.clear()
+          clearTagTrackingState()
+          isResettingSnapshot = true
+          resetGeneration++
+        }
+
+        // Without persistence, core owns pending source transactions and can
+        // rebuild this callback's presence overlay from them. Persistence owns
+        // queued source transactions until their FIFO turn, so retain the
+        // overlay across callbacks instead. A queued truncate still fences off
+        // the previous snapshot below.
+        if (!metadata?.persistence && !transactionStarted) {
+          pendingPresence.clear()
+          usesBaseline = true
+          for (const pending of collection._state.pendingSyncedTransactions) {
+            if (pending.truncate) {
+              pendingPresence.clear()
+              usesBaseline = false
+            }
+            for (const operation of pending.operations) {
+              pendingPresence.set(operation.key, operation.type !== `delete`)
+            }
+          }
+          for (const message of bufferedMessages) {
+            if (isChangeMessage(message)) {
+              pendingPresence.set(
+                collection.getKeyFromItem(message.value),
+                message.headers.operation !== `delete`,
+              )
+            }
+          }
+        }
+
         // Track commit point type - up-to-date takes precedence as it also triggers progressive mode atomic swap
         let commitPoint: `up-to-date` | `subset-end` | null = null
 
-        // Don't clear the buffer between batches - this preserves messages for awaitMatch
-        // to find even if multiple batches arrive before awaitMatch is called.
-        // The buffer is naturally limited by MAX_BATCH_MESSAGES (oldest messages are dropped).
-        // Reset batchCommitted since we're starting a new batch
-        batchCommitted.setState(() => false)
+        lifecycle.beginMatchGeneration(messages)
 
         for (const message of messages) {
-          // Add message to current batch buffer (for race condition handling)
-          if (isChangeMessage(message) || isMoveOutMessage(message)) {
-            currentBatchMessages.setState((currentBuffer) => {
-              const newBuffer = [...currentBuffer, message]
-              // Limit buffer size for safety
-              if (newBuffer.length > MAX_BATCH_MESSAGES) {
-                newBuffer.splice(0, newBuffer.length - MAX_BATCH_MESSAGES)
-              }
-              return newBuffer
-            })
-          }
+          lifecycle.observeMatchMessage(message)
+          // A match predicate can synchronously clean up and restart sync.
+          // Nothing after that boundary belongs to the replacement session.
+          if (!isActiveLifecycle()) return
 
           // Check for txids in the message and add them to our store
           // Skip during buffered initial sync in progressive mode (txids will be extracted during atomic swap)
@@ -1347,45 +2183,53 @@ function createElectricSync<T extends Row<unknown>>(
             message.headers.txids?.forEach((txid) => newTxids.add(txid))
           }
 
-          // Check pending matches against this message
-          // Note: matchFn will mark matches internally, we don't resolve here
-          const matchesToRemove: Array<string> = []
-          pendingMatches.state.forEach((match, matchId) => {
-            if (!match.matched) {
-              try {
-                match.matchFn(message)
-              } catch (err) {
-                // If matchFn throws, clean up and reject the promise
-                clearTimeout(match.timeoutId)
-                match.reject(
-                  err instanceof Error ? err : new Error(String(err)),
-                )
-                matchesToRemove.push(matchId)
-                debug(`matchFn error: %o`, err)
+          if (isChangeMessage(message)) {
+            const rowId = collection.getKeyFromItem(message.value)
+            const operation = message.headers.operation
+            const hasKnownRow =
+              pendingPresence.get(rowId) ??
+              (usesBaseline && collection._state.syncedData.has(rowId))
+            if (operation === `update` && !hasKnownRow) {
+              // Validate after all earlier events, including tag move-outs.
+              // Cancel staged writes before publishing any part of an invalid
+              // resumed callback; the next lifecycle must take a full snapshot.
+              if (requiresCompleteResume && !isResettingSnapshot) {
+                invalidateResume()
+                return
               }
+              if (!receivesCompleteRows) continue
             }
-          })
-
-          // Remove matches that errored
-          removePendingMatches(matchesToRemove)
+            recordPendingPresence(rowId, operation !== `delete`)
+            if (operation !== `update`) {
+              progressiveSnapshotRows.delete(rowId)
+            }
+          }
 
           if (isChangeMessage(message)) {
             // Check if the message contains schema information
             const schema = message.headers.schema
             if (schema && typeof schema === `string`) {
               // Store the schema for future use if it's a valid string
-              relationSchema.setState(() => schema)
+              relationSchema = schema
             }
 
             // In buffered initial sync of progressive mode, buffer messages instead of writing
             // EXCEPTION: If a transaction is already started (e.g., from must-refetch), write
             // directly to it instead of buffering. This prevents orphan transactions.
             if (isBufferingInitialSync() && !transactionStarted) {
+              if (message.headers.operation === `update`) {
+                const rowId = collection.getKeyFromItem(message.value)
+                const snapshotRow = progressiveSnapshotRows.get(rowId)
+                if (snapshotRow) {
+                  bufferedMessages.push(snapshotRow)
+                  progressiveSnapshotRows.delete(rowId)
+                }
+              }
               bufferedMessages.push(message)
             } else {
               // Normal processing: write changes immediately
               if (!transactionStarted) {
-                begin()
+                beginSourceTransaction()
                 transactionStarted = true
               }
 
@@ -1417,19 +2261,33 @@ function createElectricSync<T extends Row<unknown>>(
               // Normal processing: process move-out immediately
               transactionStarted = processMoveOutEvent(
                 message.headers.patterns,
-                begin,
+                beginSourceTransaction,
                 write,
                 transactionStarted,
+                (rowId) => {
+                  recordPendingPresence(rowId, false)
+                  syncedKeys.delete(rowId)
+                },
               )
+            }
+          } else if (isMoveInMessage(message)) {
+            // Handle move-in event: re-activate conditions for matching rows.
+            // Buffer if buffering, otherwise process immediately.
+            if (isBufferingInitialSync() && !transactionStarted) {
+              bufferedMessages.push(message)
+            } else {
+              processMoveInEvent(message.headers.patterns)
             }
           } else if (isMustRefetchMessage(message)) {
             debug(
               `${collectionId ? `[${collectionId}] ` : ``}Received must-refetch message, starting transaction with truncate`,
             )
 
+            commitResetResumeMetadataImmediately()
+
             // Start a transaction and truncate the collection
             if (!transactionStarted) {
-              begin()
+              beginSourceTransaction()
               transactionStarted = true
             }
 
@@ -1440,6 +2298,9 @@ function createElectricSync<T extends Row<unknown>>(
 
             // Clear synced keys tracking since we're starting fresh
             syncedKeys.clear()
+            recordPendingTruncate()
+            isResettingSnapshot = true
+            resetGeneration++
 
             // Reset the loadSubset deduplication state since we're starting fresh
             // This ensures that previously loaded predicates don't prevent refetching after truncate
@@ -1449,10 +2310,24 @@ function createElectricSync<T extends Row<unknown>>(
             commitPoint = null
             hasReceivedUpToDate = false // Reset for progressive mode (isBufferingInitialSync will reflect this)
             bufferedMessages.length = 0 // Clear buffered messages
+            progressiveSnapshotRows.clear()
           }
         }
 
+        // A subset completion cannot publish a partial cold-recovery snapshot.
+        if (
+          needsFullSnapshot &&
+          isResettingSnapshot &&
+          commitPoint === `subset-end`
+        )
+          return
+
         if (commitPoint !== null) {
+          let applied: SyncAppliedReceipt = true
+          const wasBufferingInitialSync = isBufferingInitialSync()
+          const finishesReset =
+            isResettingSnapshot && commitPoint === `up-to-date`
+          const finishingResetGeneration = resetGeneration
           // PROGRESSIVE MODE: Atomic swap on first up-to-date (not subset-end)
           // EXCEPTION: Skip atomic swap if a transaction is already started (e.g., from must-refetch).
           // In that case, do a normal commit to properly close the existing transaction.
@@ -1466,7 +2341,7 @@ function createElectricSync<T extends Row<unknown>>(
             )
 
             // Start atomic swap transaction
-            begin()
+            beginSourceTransaction()
 
             // Truncate to clear all snapshot data
             truncate()
@@ -1497,17 +2372,28 @@ function createElectricSync<T extends Row<unknown>>(
                   bufferedMsg.headers.patterns,
                   begin,
                   write,
-                  transactionStarted,
+                  // The swap already opened a transaction, even though the
+                  // normal-stream transactionStarted flag is still false.
+                  true,
+                  (rowId) => {
+                    recordPendingPresence(rowId, false)
+                    syncedKeys.delete(rowId)
+                  },
                 )
+              } else if (isMoveInMessage(bufferedMsg)) {
+                // Process buffered move-in messages during atomic swap
+                processMoveInEvent(bufferedMsg.headers.patterns)
               }
             }
 
             // Commit the atomic swap
-            commit()
+            stageResumeMetadata()
+            applied = commitSourceTransaction()
 
             // Exit buffering phase by marking that we've received up-to-date
             // isBufferingInitialSync() will now return false
             bufferedMessages.length = 0
+            progressiveSnapshotRows.clear()
 
             debug(
               `${collectionId ? `[${collectionId}] ` : ``}Progressive mode: Atomic swap complete, now in normal sync mode`,
@@ -1516,68 +2402,127 @@ function createElectricSync<T extends Row<unknown>>(
             // Normal mode or on-demand: commit transaction if one was started
             // Both up-to-date and subset-end trigger a commit
             if (transactionStarted) {
-              commit()
+              if (!isResettingSnapshot || finishesReset) {
+                stageResumeMetadata()
+              }
+              applied = commitSourceTransaction()
               transactionStarted = false
+            } else if (commitPoint === `up-to-date` && metadata) {
+              beginSourceTransaction()
+              stageResumeMetadata()
+              applied = commitSourceTransaction()
             }
           }
-          wrappedMarkReady(isBufferingInitialSync())
+          const readyErrorVersion = streamErrorVersion
+          if (applied === true) {
+            wrappedMarkReady(wasBufferingInitialSync, readyErrorVersion)
+          } else {
+            void applied.then(
+              () =>
+                wrappedMarkReady(wasBufferingInitialSync, readyErrorVersion),
+              (error: unknown) => {
+                if (!isActiveLifecycle() || abortController.signal.aborted) {
+                  return
+                }
+                streamErrorVersion++
+                unsubscribeStream()
+                abortController.abort()
+                if (collection.status !== `error`) markError(error)
+              },
+            )
+          }
+
+          if (finishesReset) {
+            const finishReset = () => {
+              if (resetGeneration === finishingResetGeneration) {
+                isResettingSnapshot = false
+              }
+            }
+            if (applied === true) {
+              finishReset()
+            } else {
+              void applied.then(finishReset, () => undefined)
+            }
+          }
 
           // Track that we've received the first up-to-date for progressive mode
           if (commitPoint === `up-to-date`) {
             hasReceivedUpToDate = true
           }
 
-          // Always commit txids when we receive up-to-date, regardless of transaction state
-          seenTxids.setState((currentTxids) => {
-            const clonedSeen = new Set<Txid>(currentTxids)
-            if (newTxids.size > 0) {
-              debug(
-                `${collectionId ? `[${collectionId}] ` : ``}new txids synced from pg %O`,
-                Array.from(newTxids),
-              )
-            }
-            newTxids.forEach((txid) => clonedSeen.add(txid))
-            newTxids.clear()
-            return clonedSeen
-          })
-
-          // Always commit snapshots when we receive up-to-date, regardless of transaction state
-          seenSnapshots.setState((currentSnapshots) => {
-            const seen = [...currentSnapshots, ...newSnapshots]
-            newSnapshots.forEach((snapshot) =>
-              debug(
-                `${collectionId ? `[${collectionId}] ` : ``}new snapshot synced from pg %o`,
-                snapshot,
-              ),
+          // Stream evidence is the acknowledgement boundary used by mutation
+          // handlers. It must publish before a parked applied receipt or the
+          // optimistic transaction and its acknowledgement can deadlock.
+          if (newTxids.size > 0) {
+            debug(
+              `${collectionId ? `[${collectionId}] ` : ``}new txids synced from pg %O`,
+              Array.from(newTxids),
             )
-            newSnapshots.length = 0
-            return seen
-          })
-
-          // Resolve all matched pending matches on up-to-date or subset-end
-          // Set batchCommitted BEFORE resolving to avoid timing window where late awaitMatch
-          // calls could register as "matched" after resolver pass already ran
-          batchCommitted.setState(() => true)
-
-          resolveMatchedPendingMatches()
+          }
+          newSnapshots.forEach((snapshot) =>
+            debug(
+              `${collectionId ? `[${collectionId}] ` : ``}new snapshot synced from pg %o`,
+              snapshot,
+            ),
+          )
+          lifecycle.publishEvidence(newTxids, newSnapshots)
+          newTxids.clear()
+          newSnapshots.length = 0
+          lifecycle.commitMatches()
         }
+      }
+
+      unsubscribeStream = stream.subscribe((messages: Array<Message<T>>) => {
+        if (!areResumeKeysReady) {
+          pendingResumeBatches.push([...messages])
+          return
+        }
+        processMessages(messages)
       })
+
+      if (!areResumeKeysReady && resumeKeysPromise) {
+        void resumeKeysPromise.then(
+          () => {
+            if (abortController.signal.aborted) return
+
+            areResumeKeysReady = true
+
+            const queuedBatches = pendingResumeBatches.splice(0)
+            queuedBatches.forEach(processMessages)
+          },
+          (error: unknown) => {
+            if (abortController.signal.aborted) return
+
+            pendingResumeBatches.length = 0
+            resumeInvalid = true
+            commitResetResumeMetadataImmediately()
+            streamErrorVersion++
+            unsubscribeStream()
+            abortController.abort()
+            markError(error)
+          },
+        )
+      }
 
       // Return the deduplicated loadSubset if available (on-demand or progressive mode)
       // The loadSubset method is auto-bound, so it can be safely returned directly
       return {
         loadSubset: loadSubsetDedupe?.loadSubset,
         cleanup: () => {
+          shapeOptions.signal?.removeEventListener(
+            `abort`,
+            forwardExternalAbort,
+          )
           // Unsubscribe from the stream
           unsubscribeStream()
           // Abort the abort controller to stop the stream
           abortController.abort()
+          pendingResumeBatches.length = 0
           // Reset deduplication tracking so collection can load fresh data if restarted
           loadSubsetDedupe?.reset()
+          lifecycle.retire(lifecycleEpoch)
         },
       }
     },
-    // Expose the getSyncMetadata function
-    getSyncMetadata,
   }
 }

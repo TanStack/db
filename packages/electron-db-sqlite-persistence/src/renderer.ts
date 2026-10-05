@@ -1,0 +1,412 @@
+import {
+  InvalidPersistedCollectionConfigError,
+  SingleProcessCoordinator,
+} from '@tanstack/db-sqlite-persistence-core'
+import { ElectronCollectionCoordinator } from './electron-coordinator'
+import {
+  DEFAULT_ELECTRON_PERSISTENCE_CHANNEL,
+  ELECTRON_PERSISTENCE_PROTOCOL_VERSION,
+} from './protocol'
+import type {
+  PersistedCollectionCoordinator,
+  PersistedCollectionMode,
+  PersistedCollectionPersistence,
+  PersistedIndexSpec,
+  PersistedTx,
+  SQLitePullSinceResult,
+} from '@tanstack/db-sqlite-persistence-core'
+import type {
+  ElectronPersistedKey,
+  ElectronPersistedRow,
+  ElectronPersistenceInvoke,
+  ElectronPersistenceMethod,
+  ElectronPersistencePayloadMap,
+  ElectronPersistenceRequest,
+  ElectronPersistenceRequestEnvelope,
+  ElectronPersistenceResolution,
+  ElectronPersistenceResponseEnvelope,
+  ElectronPersistenceResultMap,
+} from './protocol'
+import type { LoadSubsetOptions } from '@tanstack/db'
+
+const DEFAULT_REQUEST_TIMEOUT_MS = 5_000
+let nextRequestId = 1
+
+function createRequestId(): string {
+  const requestId = nextRequestId
+  nextRequestId++
+  return `electron-persistence-${requestId}`
+}
+
+function withTimeout<T>(
+  promise: Promise<T>,
+  timeoutMs: number,
+  timeoutMessage: string,
+): Promise<T> {
+  if (timeoutMs <= 0) {
+    return promise
+  }
+
+  return new Promise<T>((resolve, reject) => {
+    const timer = setTimeout(() => {
+      reject(new InvalidPersistedCollectionConfigError(timeoutMessage))
+    }, timeoutMs)
+
+    promise.then(
+      (value) => {
+        clearTimeout(timer)
+        resolve(value)
+      },
+      (error: unknown) => {
+        clearTimeout(timer)
+        reject(error)
+      },
+    )
+  })
+}
+
+function assertValidResponse(
+  response: ElectronPersistenceResponseEnvelope,
+  request: ElectronPersistenceRequestEnvelope,
+): void {
+  if (response.v !== ELECTRON_PERSISTENCE_PROTOCOL_VERSION) {
+    throw new InvalidPersistedCollectionConfigError(
+      `Unexpected electron persistence protocol version "${response.v}" in response`,
+    )
+  }
+
+  if (response.requestId !== request.requestId) {
+    throw new InvalidPersistedCollectionConfigError(
+      `Mismatched electron persistence response request id. Expected "${request.requestId}", received "${response.requestId}"`,
+    )
+  }
+
+  if (response.method !== request.method) {
+    throw new InvalidPersistedCollectionConfigError(
+      `Mismatched electron persistence response method. Expected "${request.method}", received "${response.method}"`,
+    )
+  }
+}
+
+function createSerializableLoadSubsetOptions(
+  subsetOptions: LoadSubsetOptions,
+): LoadSubsetOptions {
+  const { subscription: _subscription, ...serializableOptions } = subsetOptions
+  return serializableOptions
+}
+
+type RendererRequestExecutor = <TMethod extends ElectronPersistenceMethod>(
+  method: TMethod,
+  collectionId: string,
+  payload: ElectronPersistencePayloadMap[TMethod],
+  resolution?: ElectronPersistenceResolution,
+) => Promise<ElectronPersistenceResultMap[TMethod]>
+
+function createRendererRequestExecutor(options: {
+  invoke: ElectronPersistenceInvoke
+  channel?: string
+  timeoutMs?: number
+}): RendererRequestExecutor {
+  const channel = options.channel ?? DEFAULT_ELECTRON_PERSISTENCE_CHANNEL
+  const timeoutMs = options.timeoutMs ?? DEFAULT_REQUEST_TIMEOUT_MS
+
+  return async <TMethod extends ElectronPersistenceMethod>(
+    method: TMethod,
+    collectionId: string,
+    payload: ElectronPersistencePayloadMap[TMethod],
+    resolution?: ElectronPersistenceResolution,
+  ) => {
+    const request = {
+      v: ELECTRON_PERSISTENCE_PROTOCOL_VERSION,
+      requestId: createRequestId(),
+      collectionId,
+      method,
+      resolution,
+      payload,
+    } as ElectronPersistenceRequest
+
+    const response = await withTimeout(
+      options.invoke(channel, request),
+      timeoutMs,
+      `Electron persistence request timed out (method=${method}, collection=${collectionId}, timeoutMs=${timeoutMs})`,
+    )
+    assertValidResponse(response, request)
+
+    if (!response.ok) {
+      const remoteError = new InvalidPersistedCollectionConfigError(
+        `${response.error.name}: ${response.error.message}`,
+      )
+      if (typeof response.error.stack === `string`) {
+        remoteError.stack = response.error.stack
+      }
+      if (typeof response.error.code === `string`) {
+        ;(remoteError as Error & { code?: string }).code = response.error.code
+      }
+      throw remoteError
+    }
+
+    return response.result as ElectronPersistenceResultMap[TMethod]
+  }
+}
+
+type ElectronRendererResolvedAdapter =
+  PersistedCollectionPersistence[`adapter`] & {
+    loadCollectionMetadata: (
+      collectionId: string,
+    ) => Promise<Array<{ key: string; value: unknown }>>
+    scanRows: (
+      collectionId: string,
+      options?: { metadataOnly?: boolean },
+    ) => Promise<
+      Array<{
+        key: string | number
+        value: Record<string, unknown>
+        metadata?: unknown
+      }>
+    >
+    pullSince: (
+      collectionId: string,
+      fromRowVersion: number,
+    ) => Promise<SQLitePullSinceResult<string | number>>
+    getStreamPosition: (collectionId: string) => Promise<{
+      latestTerm: number
+      latestSeq: number
+      latestRowVersion: number
+    }>
+  }
+
+function createResolvedRendererAdapter(
+  executeRequest: RendererRequestExecutor,
+  resolution?: ElectronPersistenceResolution,
+): ElectronRendererResolvedAdapter {
+  return {
+    loadSubset: async (
+      collectionId: string,
+      subsetOptions: LoadSubsetOptions,
+      ctx?: { requiredIndexSignatures?: ReadonlyArray<string> },
+    ) => {
+      const result = await executeRequest(
+        `loadSubset`,
+        collectionId,
+        {
+          options: createSerializableLoadSubsetOptions(subsetOptions),
+          ctx,
+        },
+        resolution,
+      )
+
+      return result as Array<{
+        key: string | number
+        value: Record<string, unknown>
+      }>
+    },
+    loadResumeSnapshot: async (
+      collectionId: string,
+      ctx?: {
+        requiredIndexSignatures?: ReadonlyArray<string>
+        includeRows?: boolean
+      },
+    ) => {
+      return executeRequest(
+        `loadResumeSnapshot`,
+        collectionId,
+        { ctx },
+        resolution,
+      )
+    },
+    applyCommittedTx: async (
+      collectionId: string,
+      tx: PersistedTx<Record<string, unknown>, string | number>,
+    ): Promise<void> => {
+      await executeRequest(
+        `applyCommittedTx`,
+        collectionId,
+        {
+          tx: tx as PersistedTx<ElectronPersistedRow, ElectronPersistedKey>,
+        },
+        resolution,
+      )
+    },
+    loadCollectionMetadata: async (
+      collectionId: string,
+    ): Promise<Array<{ key: string; value: unknown }>> => {
+      return executeRequest(
+        `loadCollectionMetadata`,
+        collectionId,
+        {},
+        resolution,
+      )
+    },
+    scanRows: async (
+      collectionId: string,
+      options?: { metadataOnly?: boolean },
+    ): Promise<
+      Array<{
+        key: string | number
+        value: Record<string, unknown>
+        metadata?: unknown
+      }>
+    > => {
+      const result = await executeRequest(
+        `scanRows`,
+        collectionId,
+        { options },
+        resolution,
+      )
+      return result as Array<{
+        key: string | number
+        value: Record<string, unknown>
+        metadata?: unknown
+      }>
+    },
+    ensureIndex: async (
+      collectionId: string,
+      signature: string,
+      spec: PersistedIndexSpec,
+    ): Promise<void> => {
+      await executeRequest(
+        `ensureIndex`,
+        collectionId,
+        {
+          signature,
+          spec,
+        },
+        resolution,
+      )
+    },
+    markIndexRemoved: async (
+      collectionId: string,
+      signature: string,
+    ): Promise<void> => {
+      await executeRequest(
+        `markIndexRemoved`,
+        collectionId,
+        {
+          signature,
+        },
+        resolution,
+      )
+    },
+    pullSince: async (
+      collectionId: string,
+      fromRowVersion: number,
+    ): Promise<SQLitePullSinceResult<string | number>> => {
+      const result = await executeRequest(
+        `pullSince`,
+        collectionId,
+        {
+          fromRowVersion,
+        },
+        resolution,
+      )
+      return result as SQLitePullSinceResult<string | number>
+    },
+    getStreamPosition: async (
+      collectionId: string,
+    ): Promise<{
+      latestTerm: number
+      latestSeq: number
+      latestRowVersion: number
+    }> => {
+      return executeRequest(`getStreamPosition`, collectionId, {}, resolution)
+    },
+  }
+}
+
+export type ElectronIpcRendererLike = {
+  invoke: (
+    channel: string,
+    request: ElectronPersistenceRequestEnvelope,
+  ) => Promise<ElectronPersistenceResponseEnvelope>
+}
+
+export type ElectronSQLitePersistenceOptions = {
+  invoke?: ElectronPersistenceInvoke
+  ipcRenderer?: ElectronIpcRendererLike
+  channel?: string
+  timeoutMs?: number
+  coordinator?: PersistedCollectionCoordinator
+}
+
+function resolveInvoke(
+  options: ElectronSQLitePersistenceOptions,
+): ElectronPersistenceInvoke {
+  if (options.invoke) {
+    return options.invoke
+  }
+
+  if (options.ipcRenderer) {
+    return (channel, request) => options.ipcRenderer!.invoke(channel, request)
+  }
+
+  throw new InvalidPersistedCollectionConfigError(
+    `Electron renderer persistence requires either invoke or ipcRenderer`,
+  )
+}
+
+export function createElectronSQLitePersistence(
+  options: ElectronSQLitePersistenceOptions,
+): PersistedCollectionPersistence {
+  const invoke = resolveInvoke(options)
+  const coordinator = options.coordinator ?? new SingleProcessCoordinator()
+  const executeRequest = createRendererRequestExecutor({
+    invoke,
+    channel: options.channel,
+    timeoutMs: options.timeoutMs,
+  })
+  const adapterCache = new Map<string, ElectronRendererResolvedAdapter>()
+
+  const getAdapterForCollection = (
+    mode: PersistedCollectionMode,
+    schemaVersion: number | undefined,
+  ) => {
+    const schemaVersionKey =
+      schemaVersion === undefined ? `schema:default` : `schema:${schemaVersion}`
+    const cacheKey = `mode:${mode}|${schemaVersionKey}`
+    const cachedAdapter = adapterCache.get(cacheKey)
+    if (cachedAdapter) {
+      return cachedAdapter
+    }
+
+    const adapter = createResolvedRendererAdapter(executeRequest, {
+      mode,
+      schemaVersion,
+    })
+    adapterCache.set(cacheKey, adapter)
+    return adapter
+  }
+
+  const createCollectionPersistence = (
+    collectionId: string | undefined,
+    mode: PersistedCollectionMode,
+    schemaVersion: number | undefined,
+  ): PersistedCollectionPersistence => {
+    const adapter = getAdapterForCollection(mode, schemaVersion)
+    if (coordinator instanceof ElectronCollectionCoordinator) {
+      if (collectionId === undefined) {
+        coordinator.setAdapter(adapter)
+      } else {
+        coordinator.setAdapterForCollection(collectionId, adapter)
+      }
+    }
+    return { adapter, coordinator }
+  }
+
+  const defaultPersistence = createCollectionPersistence(
+    undefined,
+    `sync-absent`,
+    undefined,
+  )
+  if (coordinator instanceof ElectronCollectionCoordinator) {
+    coordinator.setAdapter(defaultPersistence.adapter)
+  }
+
+  return {
+    ...defaultPersistence,
+    resolvePersistenceForCollection: ({ collectionId, mode, schemaVersion }) =>
+      createCollectionPersistence(collectionId, mode, schemaVersion),
+    // Backward compatible fallback for older callers.
+    resolvePersistenceForMode: (mode) =>
+      createCollectionPersistence(undefined, mode, undefined),
+  }
+}

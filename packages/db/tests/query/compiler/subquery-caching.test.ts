@@ -1,7 +1,14 @@
 import { describe, expect, it } from 'vitest'
 import { D2 } from '@tanstack/db-ivm'
 import { compileQuery } from '../../../src/query/compiler/index.js'
-import { CollectionRef, PropRef, QueryRef } from '../../../src/query/ir.js'
+import { queriesMatchForCaching } from '../../../src/query/compiler/query-equivalence.js'
+import {
+  CollectionRef,
+  Func,
+  PropRef,
+  QueryRef,
+  Value,
+} from '../../../src/query/ir.js'
 import type { QueryIR } from '../../../src/query/ir.js'
 import type { CollectionImpl } from '../../../src/collection/index.js'
 
@@ -15,11 +22,34 @@ function createMockCollection(id: string): CollectionImpl {
       getKey: (item: any) => item.id,
       sync: { sync: () => {} },
     },
+    indexes: new Map(),
     size: 0,
   } as any
 }
 
 describe(`Subquery Caching`, () => {
+  it(`reuses cache identity only when optimizer copies preserve query meaning`, () => {
+    const usersCollection = createMockCollection(`users`)
+    const original: QueryIR = {
+      from: new CollectionRef(usersCollection, `u`),
+      select: { id: new PropRef([`u`, `id`]) },
+    }
+    const copied: QueryIR = {
+      ...original,
+      join: undefined,
+      where: undefined,
+    }
+    const filtered: QueryIR = {
+      ...copied,
+      where: [
+        new Func(`eq`, [new PropRef([`u`, `status`]), new Value(`active`)]),
+      ],
+    }
+
+    expect(queriesMatchForCaching(copied, original)).toBe(true)
+    expect(queriesMatchForCaching(filtered, original)).toBe(false)
+  })
+
   it(`should cache compiled subqueries and avoid duplicate compilation`, () => {
     // Create a mock collection
     const usersCollection = createMockCollection(`users`)
@@ -261,6 +291,40 @@ describe(`Subquery Caching`, () => {
     // Both should be in the cache
     expect(sharedCache.has(subquery1)).toBe(true)
     expect(sharedCache.has(subquery)).toBe(true)
+  })
+
+  it(`does not reuse a correlated query across parent streams`, () => {
+    const usersCollection = createMockCollection(`users`)
+    const query: QueryIR = {
+      from: new CollectionRef(usersCollection, `u`),
+      select: { id: new PropRef([`u`, `id`]) },
+    }
+    const graph = new D2()
+    const userInput = graph.newInput<[number, any]>()
+    const firstParents = graph.newInput<[number, any]>()
+    const secondParents = graph.newInput<[number, any]>()
+    const cache = new WeakMap()
+    const compileWithParents = (parents: typeof firstParents) =>
+      compileQuery(
+        query,
+        { u: userInput },
+        { users: usersCollection },
+        {},
+        {},
+        new Set(),
+        {},
+        () => {},
+        cache,
+        new WeakMap(),
+        parents,
+        new PropRef([`u`, `id`]),
+      )
+
+    const first = compileWithParents(firstParents)
+    const second = compileWithParents(secondParents)
+
+    expect(second).not.toBe(first)
+    expect(cache.has(query)).toBe(false)
   })
 
   it(`should use cache to avoid recompilation in nested subqueries`, () => {

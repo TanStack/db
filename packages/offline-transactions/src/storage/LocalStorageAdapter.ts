@@ -84,7 +84,7 @@ export class LocalStorageAdapter extends BaseStorageAdapter {
       return Promise.resolve()
     } catch (error) {
       console.warn(`localStorage delete failed:`, error)
-      return Promise.resolve()
+      return Promise.reject(error)
     }
   }
 

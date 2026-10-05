@@ -458,7 +458,7 @@ describe(`createPacedMutations`, () => {
   describe(`error handling`, () => {
     it(`should handle mutationFn errors and set transaction to failed state`, async () => {
       const error = new Error(`Mutation failed`)
-      const mutationFn = vi.fn(async () => {
+      const mutationFn = vi.fn(() => {
         throw error
       })
 
