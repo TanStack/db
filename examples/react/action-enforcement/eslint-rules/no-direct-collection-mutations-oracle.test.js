@@ -9,6 +9,9 @@ import config from '../eslint.config.mjs'
 /**
  * The README permits Collection reads and forbids direct mutation calls in
  * feature code. Lexical shadowing cannot make an unrelated value a Collection.
+ * Equivalent alias, relative, and barrel import spellings preserve that boundary.
+ * Unrelated TypeScript import forms must not abort linting. Static template
+ * member names have the same meaning as quoted string member names.
  * Moving a callback definition before an alias cannot change that alias's value
  * when the callback runs after initialization.
  *
@@ -116,12 +119,13 @@ const operations = [
 const callForms = [
   (receiver, method) => `${receiver}.${method}('id')`,
   (receiver, method) => `${receiver}['${method}']('id')`,
+  (receiver, method) => `${receiver}[\`${method}\`]('id')`,
   (receiver, method) => `${receiver}?.${method}?.('id')`,
   (receiver, method) => `(${receiver} as typeof ${receiver}).${method}('id')`,
   (receiver, method) => `${receiver}!.${method}('id')`,
 ]
 
-// Grammar: all 12 bindings x 6 operations x 5 call forms x 2 callback orders.
+// Grammar: all 12 bindings x 6 operations x 6 call forms x 2 callback orders.
 // Imports and initialization always precede invocation: a temporal-dead-zone
 // call is excluded. Each axis preserves value identity but challenges a
 // different syntax path; removing it loses the corresponding witness above.
@@ -200,6 +204,53 @@ test('keeps mutable aliases classified after a Collection assignment', () => {
   )
 })
 
+// These literals describe the intended import boundary, independently of the
+// rule's regular expressions. Near-neighbor paths must remain unrelated.
+const collectionPaths = [
+  '@/db/collections/todoCollection',
+  '@/db/collections',
+  '@/db/collections/',
+  './db/collections/todoCollection',
+  '../db/collections/todoCollection',
+  '../../db/collections/todoCollection',
+  '../../../db/collections/todoCollection',
+  '../../db/collections',
+]
+const unrelatedPaths = [
+  '@/db/collections-extra/todoCollection',
+  '../../db/collections-extra/todoCollection',
+  '@/other/collections/todoCollection',
+  'other/db/collections/todoCollection',
+]
+
+for (const source of [...collectionPaths, ...unrelatedPaths]) {
+  test(`classifies the import boundary for ${source}`, () => {
+    for (const [method, mutationCount] of operations) {
+      check(
+        `import { todoCollection } from '${source}'; todoCollection.${method}('id');`,
+        collectionPaths.includes(source) ? mutationCount : 0,
+      )
+    }
+  })
+}
+
+test('keeps TypeScript import-equals from aborting unrelated lint diagnostics', () => {
+  for (const imports of [
+    "import fs = require('fs');",
+    "import type fs = require('fs');",
+    'declare namespace library { const fs: Set<string> } import fs = library.fs;',
+  ]) {
+    check(`${imports} fs.delete('id');`, 0)
+    check(`${imports} ${namedImport} source.insert('id');`, 1)
+  }
+})
+
+test('distinguishes escaped static templates from dynamic member names', () => {
+  check(namedImport + ' source[`\\u0069nsert`]({ id: "id" });', 1)
+  check(namedImport + ' const method = "insert"; source[`${method}`]({});', 0)
+  check(namedImport + ' const suffix = ""; source[`insert${suffix}`]({});', 0)
+})
+
 // Receiving boundary: the real example config must enable this rule for features
 // and permit the same write in an action. Unit-rule success alone cannot prove it.
 test('enforces the configured feature boundary and permits action writes', async () => {
@@ -208,22 +259,27 @@ test('enforces the configured feature boundary and permits action writes', async
     overrideConfigFile: true,
     overrideConfig: config,
   })
-  for (const [filename, method, expected] of [
-    [
-      'src/features/todos/probe.ts',
-      'insert',
-      ['tanstack-architecture/no-direct-collection-mutations'],
-    ],
-    ['src/db/actions/probe.ts', 'insert', []],
-    ['src/features/todos/probe.ts', 'get', []],
-  ]) {
-    const [result] = await eslint.lintText(
-      `${namedImport} source.${method}({ id: 'id' });`,
-      { filePath: filename },
-    )
-    assert.deepEqual(
-      result.messages.map(({ ruleId }) => ruleId),
-      expected,
-    )
+  for (const source of [...collectionPaths, ...unrelatedPaths]) {
+    for (const [filename, method, expected] of [
+      [
+        'src/features/todos/probe.ts',
+        'insert',
+        collectionPaths.includes(source)
+          ? ['tanstack-architecture/no-direct-collection-mutations']
+          : [],
+      ],
+      ['src/db/actions/probe.ts', 'insert', []],
+      ['src/features/todos/probe.ts', 'get', []],
+    ]) {
+      const [result] = await eslint.lintText(
+        `import { todoCollection as source } from '${source}'; source.${method}({ id: 'id' });`,
+        { filePath: filename },
+      )
+      assert.deepEqual(
+        result.messages.map(({ ruleId }) => ruleId),
+        expected,
+        `${filename}: ${source}`,
+      )
+    }
   }
 })

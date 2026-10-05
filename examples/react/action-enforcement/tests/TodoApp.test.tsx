@@ -214,3 +214,56 @@ test('synchronous validation failure permits a corrected submission', async () =
   expect(button.disabled).toBe(false)
   expect(screen.queryByText('Todo text is required')).toBeNull()
 })
+
+// Toggle failure follows the add path's error contract: restore the prior row,
+// show the failure, then allow retry. Hold the provider promise so the pending
+// and rejected checkpoints do not depend on elapsed time. The two directions
+// distinguish rollback from an unconditional reset to incomplete.
+test('failed toggles report the error, roll back both directions, and allow retry', async () => {
+  const input = await mount()
+  const text = 'toggle failure and retry'
+  fireEvent.change(input, { target: { value: text } })
+  fireEvent.click(screen.getByRole('button', { name: 'Add' }))
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(200)
+  })
+  const row = screen.getByText(text).closest('li')!
+  const button = row.querySelector('button')!
+  const toggle = vi.spyOn(actions, 'toggleTodo')
+  const persistToggle = vi.spyOn(api, 'toggleTodo')
+  for (const completed of [false, true]) {
+    let rejectToggle!: (error: Error) => void
+    persistToggle.mockReturnValueOnce(
+      new Promise((_resolve, reject) => {
+        rejectToggle = reject
+      }),
+    )
+    expect(row.classList.contains('done')).toBe(completed)
+    fireEvent.click(button)
+    expect(persistToggle).toHaveBeenCalledTimes(completed ? 3 : 1)
+    expect(button.disabled).toBe(true)
+    expect(row.classList.contains('done')).toBe(!completed)
+    await act(async () => {
+      rejectToggle(new Error('Toggle failed'))
+    })
+    expect(toggle.mock.results.at(-1)!.value.state).toBe('failed')
+    expect(row.classList.contains('done')).toBe(completed)
+    expect(button.disabled).toBe(false)
+    expect(screen.getByText('Toggle failed')).toBeDefined()
+    fireEvent.click(button)
+    expect(screen.queryByText('Toggle failed')).toBeNull()
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(160)
+    })
+    expect(toggle.mock.results.at(-1)!.value.state).toBe('completed')
+    expect(row.classList.contains('done')).toBe(!completed)
+    expect(button.disabled).toBe(false)
+    const persisted = api.listTodos()
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(80)
+    })
+    expect(
+      (await persisted).find((todo) => todo.text === text)?.completed,
+    ).toBe(!completed)
+  }
+})

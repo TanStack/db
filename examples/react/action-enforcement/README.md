@@ -18,13 +18,17 @@ The example shares the repository lockfile and uses the workspace DB packages.
 Tests cover the lint boundary and the todo form. The form preserves newer drafts
 while an add settles and disables each row’s toggle while it has pending writes.
 Add stays disabled until its current action settles. The input remains editable,
-and submissions work again after success or failure.
+and submissions work again after success or failure. A failed toggle rolls back,
+shows an error, and permits another attempt.
 
 ## What is enforced
 
 In `src/features/**`, the custom rule rejects direct calls to `insert`, `update`,
-`delete`, and `upsert` on imports from `@/db/collections/*` and their aliases.
-Reads are allowed. Writes go through `src/db/actions/*`.
+`delete`, and `upsert` on ES imports from `@/db/collections`, its subpaths, and
+relative paths such as `../../db/collections/todoCollection`. The default
+patterns match import text: `@/db/collections` or one or more `./` or `../`
+segments followed by `db/collections`, with an optional subpath. Aliases retain
+this classification. Reads are allowed. Writes go through `src/db/actions/*`.
 
 - `src/db/collections/todoCollection.ts` configures the Collection.
 - `src/db/actions/todoActions.ts` defines optimistic actions and waits for server
@@ -34,13 +38,16 @@ Reads are allowed. Writes go through `src/db/actions/*`.
 
 The rule resolves lexical bindings, including aliases created by declarations,
 assignments, and namespace destructuring. A callback can appear before its alias
-is initialized. Unrelated local variables with the same name remain independent.
+is initialized. Dot access, quoted strings, and template literals without
+interpolation identify static method names. Unrelated local variables with the
+same name remain independent.
 A variable assigned a Collection remains classified as a Collection throughout
 its scope, even if another assignment gives it a different value.
 
 This is a static, file-local example. It assumes exports from matching paths are
 Collections or namespaces of Collections. It does not perform type checking or
-follow re-exports, function arguments, factory returns, aliases stored in new
+resolve paths on disk, track CommonJS/import-equals bindings, or follow
+re-exports, function arguments, factory returns, aliases stored in new
 objects/arrays, extracted mutation functions, or dynamic method names. Configure
 `collectionImportPatterns` (regular expressions) for your application's import
 paths and `mutationMethods` for its write API.

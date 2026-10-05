@@ -31,6 +31,15 @@ export function TodoApp() {
     }
   }
 
+  async function handleToggleTodo(id: string) {
+    try {
+      setError(null)
+      await toggleTodo({ id }).when('settled')
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to toggle todo')
+    }
+  }
+
   return (
     <section className="todo-card">
       <form
@@ -67,7 +76,7 @@ export function TodoApp() {
               disabled={todo.$hasPendingWrites}
               type="button"
               onClick={() => {
-                void toggleTodo({ id: todo.id })
+                void handleToggleTodo(todo.id)
               }}
             >
               {todo.completed ? 'Undo' : 'Done'}

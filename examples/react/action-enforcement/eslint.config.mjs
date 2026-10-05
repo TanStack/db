@@ -46,13 +46,7 @@ export default [
     files: ['src/features/**/*.{ts,tsx}'],
     rules: {
       // Features can read from collections, but write operations must go through actions.
-      'tanstack-architecture/no-direct-collection-mutations': [
-        'error',
-        {
-          collectionImportPatterns: ['^@/db/collections/'],
-          mutationMethods: ['insert', 'update', 'delete', 'upsert'],
-        },
-      ],
+      'tanstack-architecture/no-direct-collection-mutations': 'error',
       // Alternative (stricter) approach: ban collection imports in features entirely.
       // This forces all reads/writes through query hooks and action modules.
       // 'no-restricted-imports': [

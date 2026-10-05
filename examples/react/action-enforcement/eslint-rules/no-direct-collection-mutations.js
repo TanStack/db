@@ -1,4 +1,7 @@
-const DEFAULT_IMPORT_PATTERNS = ['^@/db/collections/']
+const DEFAULT_IMPORT_PATTERNS = [
+  '^@/db/collections(?:/|$)',
+  '^(?:\\.\\.?/)+db/collections(?:/|$)',
+]
 const DEFAULT_MUTATION_METHODS = ['insert', 'update', 'delete', 'upsert']
 
 function unwrapExpression(node) {
@@ -24,6 +27,12 @@ function unwrapExpression(node) {
 
 function getPropertyName(memberExpression) {
   const property = memberExpression.property
+  if (
+    property.type === 'TemplateLiteral' &&
+    property.expressions.length === 0
+  ) {
+    return property.quasis[0].value.cooked
+  }
   const name = memberExpression.computed ? property.value : property.name
   return typeof name === 'string' ? name : null
 }
@@ -116,6 +125,7 @@ export default {
               variable.defs.some(
                 ({ type, parent }) =>
                   type === 'ImportBinding' &&
+                  parent.type === 'ImportDeclaration' &&
                   importPatterns.some((pattern) =>
                     pattern.test(parent.source.value),
                   ),

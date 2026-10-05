@@ -707,13 +707,22 @@ does not let the worker process its progress messages.
 
 `examples/react/action-enforcement/eslint-rules/no-direct-collection-mutations-oracle.test.js`
 owns the example's file-local lint boundary. Its finite grammar covers 12 binding
-forms, six methods, five call forms, and two callback definition orders, plus
+forms, six methods, six call forms, and two callback definition orders, plus
 lexical shadowing, sibling scopes, configurable imports/methods, and alias cycles.
 The independent model labels the constructed receiver as a Collection and
 predicts one diagnostic for writes and none for reads. The checkpoint is the
 complete diagnostic list from the real ESLint `Linter.verify` call. A receiving
 check runs the actual ESLint configuration on feature writes, feature reads,
-and action writes.
+and action writes. The import-source dimension checks eight alias/relative/barrel
+spellings against four nearby unrelated paths, including the real configuration.
+Three TypeScript import-equals forms must preserve other diagnostics without
+crashing; static and escaped template members are paired with dynamic names.
+On `7d3a3e85b`, the expanded suite fails 21 of 32 groups: the parser-node witness
+throws while linting; the other failures are missing diagnostics. The repair
+passes all 32 groups. A path-prefix mutant that includes `collections-extra`
+fails three groups. A template-prefix mutant that treats interpolated names as
+static fails the dynamic-name assertion. Both failures reach diagnostic
+comparisons; neither is a setup failure.
 
 The original implementation (`3da274d8a`) failed 11 of the 18 test groups at
 that checkpoint:
@@ -757,7 +766,15 @@ after synchronous validation rejection. The original handler fails all four
 pending-add histories. A guard based only on React state fails the same-render
 histories; a mutant that omits guard cleanup fails subsequent admission.
 
-These 14 focused cases do not establish arbitrary-length form histories,
+A controlled-toggle history also checks failure and retry in both completion
+directions. It observes pending disablement, optimistic state, rollback, visible
+error, retry error clearing, and final provider state. The original component
+rolls back but fails the error-message assertion. This provider rejection is
+injected at the component boundary; it does not claim a real backend emits it.
+The same-path rejection probe found no unhandled rejection: Collection cleanup
+already catches the persistence promise.
+
+These 15 focused cases do not establish arbitrary-length form histories,
 remount behavior during pending writes, or browser-native Enter dispatch.
 This component suite owns the first two extensions; a browser form witness
 is needed for native keyboard dispatch.
