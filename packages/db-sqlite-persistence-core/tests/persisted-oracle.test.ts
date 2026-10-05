@@ -11882,17 +11882,15 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
         ? [`first source value`, `second source value`]
         : [`first source value`]
       const expected = foldDurabilityLedger(
-        sourceTitles.flatMap(
-          (title): Array<DurabilityLedgerEvent> => [
-            { type: `begin`, transactionId: title },
-            {
-              type: `write`,
-              transactionId: title,
-              row: { id: `shared`, title, detail: `retained baseline` },
-            },
-            { type: `commit`, transactionId: title },
-          ],
-        ),
+        sourceTitles.flatMap((title): Array<DurabilityLedgerEvent> => [
+          { type: `begin`, transactionId: title },
+          {
+            type: `write`,
+            transactionId: title,
+            row: { id: `shared`, title, detail: `retained baseline` },
+          },
+          { type: `commit`, transactionId: title },
+        ]),
       )
       const receipts: Array<Promise<true | void>> = []
       let hasPrimaryFailure = false
