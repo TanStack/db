@@ -226,3 +226,97 @@ of the [coverage map](../oracle-coverage.md): candidate-demand minimality,
 single-equality allocation cost, and a hypothetical throwing-unsubscribe path.
 No measured performance regression or reachable cleanup failure was supplied.
 These limits do not establish untested provider or lifecycle cross-products.
+
+
+## External review follow-up: null demand and filtered acquisition
+
+Reviewed head: `ee490df80d200f701df805faf81d8105ba492527`.
+Fix revision: `de61f1dd32737da86a3d1d9503b3134e078b06a9`.
+Comparison base: `84dc899bfc8d6a16487c1584dbb1cb177109aacc`.
+These later receipts supersede the earlier deferral of null-tuple candidate
+demand and operand-array cost. Historical counts above retain their scope.
+
+A LEFT join over `{sku: 1, region: null}` and `{sku: 2, region: null}` requested
+`sku IN (1)`. Deleting the first row left that request active. Public unmatched
+rows were correct, but neither tuple justified keyed acquisition. The shared
+unmatched key kept the first raw demand representative. Both pipelines now
+suppress raw demand whenever their tuple is unsatisfiable.
+
+The compiler demand oracle models a keyed table and recomputes the first-field
+set from nonnull tuples after each graph turn. Its eight histories cross
+LEFT/RIGHT, two/three components, both orders, shared primary keys, null and
+undefined, and put/remove/restore. Before repair six cells failed exact demand
+comparison and two controls passed. All eight now pass. The public adapter
+probe now observes no requests before or after deletion while unmatched rows
+remain correct. Other acquisition-minimality and asynchronous provider claims
+remain outside this finite compiler boundary.
+
+The cold provider now interprets direct-field IN requests using independent
+atom equality labels. Four cold-load witnesses use distinct component values
+1, 7, and 9 across both term orders and index modes. A source mutant that uses
+the last field with the first field's values passes all four with the former
+whole-table provider. With the filtered provider, all four fail at public-pair
+comparison: an unmatched row appears instead of the matching pair. Restoring
+production returns GREEN. An earlier broad mutation run already failed a
+non-cold generated history under the original fixture; the review's blanket
+claim that wrong demand could never be detected was too broad. The missing
+regime was this controlled cold adapter boundary.
+
+The per-row extractor now evaluates the first operand directly and constructs
+one normalized tuple only for multiple equalities. Instrumentation at the
+operand-array creation sites, restored after each run, measured these counts
+with 10,000 input rows on each side and 10,000 matching pairs:
+
+| Representation | Single equality | Two equalities |
+| --- | ---: | ---: |
+| Reviewed head | 20,000 | 40,000 |
+| Fix | 0 | 20,000 |
+| Always construct a tuple alternative | 20,000 | 20,000 |
+
+These counts exclude existing stream/output arrays. They measure allocations,
+not elapsed runtime or retained heap. The always-tuple alternative passed 258
+relevant tests, but restores the single-equality cost. It remains unselected.
+No new production state, dependency, or fallback was added.
+
+At the fix revision, temporary source mutants produced these outcomes:
+
+- Restoring raw demand for unmatched keys: six demand assertion failures.
+- Dropping later equalities: thirteen relational assertion failures.
+- Raw JSON tuple equality: three public-pair assertion failures, plus a BigInt
+  evaluation error before publication. The latter is not an assertion kill.
+
+The observation-level hide-acquisition control remains useful to calibrate the
+positive acquisition assertion. ORC-006 and ORC-013 explicitly do not require
+permanent source mutants. The source mutation receipts above complement that
+control without adding mutation infrastructure to ordinary CI.
+
+The other review outcomes are bounded:
+
+- Field-to-literal equality passes builder syntax checks and fails compilation
+  with `InvalidJoinConditionSourceMismatchError` on both main and the reviewed
+  branch. This is a source-binding error, not a newly accepted valid join.
+  Architecture admission specifically rejects OR and non-equality predicates;
+  it does not promise builder-time source binding. The guide and agent skill
+  now state where literal filters belong and when source binding fails.
+- First-equality planning is intentional. Probes distinguish a full-source
+  request for computed-first, SKU IN for plain-first, and region IN for
+  region-first. The guide and agent skill now explain that work difference.
+- Both builder and compiler use the shared syntax validator. The compiler also
+  accepts direct IR and binds source aliases. Removing a validation boundary
+  would need a separate representation design and measured compile-work benefit.
+- The old assessment already identified itself as superseded. It is now a short
+  historical pointer that preserves access to its exact old diagnostics.
+
+Final validation: **888 tests passed in 20 files** after restoring every source
+variant. DB build/declaration output, DB TypeScript, changed-file ESLint (two
+existing warnings), formatting, and whitespace checks passed. An initial
+wrong-directory test invocation failed before execution and is not RED evidence.
+The first literal probe used the wrong live-query overload; the corrected
+`{query}` probe reaches the compiler and establishes the stated behavior.
+
+Production weight is now **+84 / -74, net +10 source lines** in eight TypeScript
+files against the comparison base. Tests are +1,132 / -127, net +1,005 lines.
+Documentation and executable contract prose are separate from production.
+The previous +281-byte gzip receipt belongs to `ee490df80`; a later CI size
+check must measure this revision. Current provider, temporal, cleanup, and
+performance limits remain owned in the coverage map.
