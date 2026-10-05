@@ -905,6 +905,23 @@ export class CollectionStateManager<
   }
 
   /**
+   * Accept a committed seed transaction, such as a DbClient hydration chunk,
+   * ahead of any still-open source transaction, so that source's `commit()`
+   * still targets its own writes.
+   */
+  acceptSeedTransaction(
+    transaction: PendingSyncedTransaction<TOutput, TKey>,
+  ): void {
+    const open = this.pendingSyncedTransactions.findIndex(
+      (pending) => !pending.committed,
+    )
+    if (open === -1) this.pendingSyncedTransactions.push(transaction)
+    else this.pendingSyncedTransactions.splice(open, 0, transaction)
+    this.refreshPendingSyncedProjection()
+    this.commitPendingTransactions()
+  }
+
+  /**
    * Runs `callback` in the publication that applies the accepted rows, or
    * returns `false` if no accepted transaction with rows is queued.
    */

@@ -872,7 +872,7 @@ export class DbClient {
     }
 
     if (rows.length > 0) {
-      collection._state.pendingSyncedTransactions.push({
+      collection._state.acceptSeedTransaction({
         committed: true,
         applicationStarted: false,
         layoutChanged: false,
@@ -884,11 +884,11 @@ export class DbClient {
           value: row.value,
         })),
         rowMetadataWrites,
+        explicitRowMetadataWriteKeys: new Set(rowMetadataWrites.keys()),
         collectionMetadataWrites: new Map(),
         applied: createDeferred<void>(),
         preserveHydrationSeedKeys: seedKind !== undefined,
       })
-      collection._state.commitPendingTransactions()
     }
 
     if (chunk.syncMeta !== undefined) {

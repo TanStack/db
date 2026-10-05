@@ -318,3 +318,119 @@ describe(`DbClient hydration authority oracle`, () => {
     async ({ decisions, order }) => runHistory(decisions, order),
   )
 })
+
+/**
+ * # Is a hydration chunk accepted while other work is pending?
+ *
+ * A hydration chunk is a sync transaction the client accepts at once. While a
+ * mutation persists, its rows are accepted but held: readers of accepted
+ * rows, such as Query Collection direct writes, see them at once, and they
+ * publish when the mutation settles. A chunk never becomes the target of a
+ * source's still-open transaction: that source's `commit()` commits its own
+ * writes. The reference is the union of seed and source rows, in the order
+ * their transactions were accepted. The bounded grammar crosses an optional
+ * persisting mutation with a source transaction that is absent, opened before
+ * the chunk, or begun after it, and a source write that names the seeded key
+ * or another key. The three review probes are cases of this grammar:
+ * persisting with no source, persisting with a source insert of the seeded
+ * key after the chunk, and persisting with a source transaction open before
+ * the chunk.
+ */
+describe(`DbClient hydration interleaving oracle`, () => {
+  type Interleaving = {
+    persisting: boolean
+    source: `none` | `open-before-chunk` | `after-chunk`
+    sourceKey: `seed` | `other`
+  }
+  const interleavings: Array<Interleaving> = [false, true].flatMap(
+    (persisting) =>
+      ([`none`, `open-before-chunk`, `after-chunk`] as const).flatMap(
+        (source) =>
+          ([`seed`, `other`] as const).map((sourceKey) => ({
+            persisting,
+            source,
+            sourceKey,
+          })),
+      ),
+  )
+
+  // Reference: the seed row, then the source row; a later write to the same
+  // key wins.
+  const expectedRows = ({ source, sourceKey }: Interleaving) => {
+    const rows = new Map<string, Row>([[`seed`, { id: `seed`, name: `seed` }]])
+    if (source !== `none`)
+      rows.set(sourceKey, { id: sourceKey, name: `source` })
+    return [...rows.values()].sort((a, b) => a.id.localeCompare(b.id))
+  }
+
+  it.each(interleavings)(
+    `accepts a chunk with persisting=$persisting and source $source writing $sourceKey`,
+    async (history) => {
+      let sync!: SyncActions
+      let release!: () => void
+      const held = new Promise<void>((resolve) => {
+        release = resolve
+      })
+      const descriptor = collectionOptions<Row, string>({
+        id: `db-client-interleaving-${history.persisting}-${history.source}-${history.sourceKey}`,
+        getKey: (row) => row.id,
+        sync: {
+          sync: (params) => {
+            sync = params
+            params.markReady()
+          },
+        },
+        onInsert: () => held,
+      })
+      const client = new DbClient()
+      const collection = client.collection(descriptor) as Collection<
+        Row,
+        string
+      >
+      try {
+        await collection.preload()
+        const mutation = history.persisting
+          ? collection.insert({ id: `local`, name: `local` })
+          : undefined
+        const sourceRow = {
+          id: history.sourceKey,
+          name: `source`,
+        }
+        if (history.source === `open-before-chunk`) {
+          sync.begin()
+          sync.write({ type: `insert`, value: sourceRow })
+        }
+        client.applyCollectionChunk({
+          collectionId: collection.id,
+          rows: [{ key: `seed`, value: { id: `seed`, name: `seed` } }],
+        })
+        // The accepted-row view also includes an open transaction's staged
+        // writes, which follow the chunk in commit order.
+        expect(
+          collection._state.getAcceptedSyncedRow(`seed`),
+          `accepted readers see the chunk`,
+        ).toEqual(
+          history.source === `open-before-chunk` && history.sourceKey === `seed`
+            ? { id: `seed`, name: `source` }
+            : { id: `seed`, name: `seed` },
+        )
+        if (history.source === `after-chunk`) {
+          sync.begin()
+          sync.write({ type: `insert`, value: sourceRow })
+        }
+        if (history.source !== `none`) {
+          const receipt = sync.commit()
+          void Promise.resolve(receipt).catch(() => undefined)
+        }
+        release()
+        await mutation?.isPersisted.promise.catch(() => undefined)
+        expect(
+          observedRows(collection.values()).filter((row) => row.id !== `local`),
+        ).toEqual(expectedRows(history))
+      } finally {
+        release()
+        await collection.cleanup()
+      }
+    },
+  )
+})
