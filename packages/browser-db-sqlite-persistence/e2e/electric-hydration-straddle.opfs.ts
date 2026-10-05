@@ -24,7 +24,8 @@ export type HydrationStraddleReach = {
   rowCommitParked: boolean
   hydrationScopeExited: boolean
   rowCommitApplied: boolean
-  subsetDemandSettled: boolean
+  // Fixture-only cut after the load, success-path unload, and error handling.
+  subsetLoadAndReleaseChainSettled: boolean
 }
 
 export type HydrationStraddleObservation = {
@@ -101,7 +102,7 @@ const reach: HydrationStraddleReach = {
   rowCommitParked: false,
   hydrationScopeExited: false,
   rowCommitApplied: false,
-  subsetDemandSettled: false,
+  subsetLoadAndReleaseChainSettled: false,
 }
 const events: Array<string> = []
 let phase: HydrationStraddleObservation[`phase`] = `starting`
@@ -321,7 +322,7 @@ try {
         phase = `failed`
       })
       .finally(() => {
-        reach.subsetDemandSettled = true
+        reach.subsetLoadAndReleaseChainSettled = true
       })
   }
 } catch (error) {

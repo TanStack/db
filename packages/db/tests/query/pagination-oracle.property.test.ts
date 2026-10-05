@@ -11,7 +11,7 @@ import {
   oracleRandomParameters,
   readOracleRunConfig,
 } from '../oracle-config.js'
-import { evaluateReferenceExpression } from '../reference-expression.js'
+import { evaluateReferenceExpression } from '../reference-expression-oracle.js'
 import { TraceAssertionError } from '../trace-runner.js'
 import { flushPromises, mockSyncCollectionOptions } from '../utils.js'
 import { withHistoryCleanup } from '../optimistic-history-oracle.js'
@@ -158,10 +158,12 @@ type PaginationStructure = Pick<
   `explicitPublicKeyOrder` | `includeFilter` | `reverseInsertion`
 >
 
+// responseStarted is driver bookkeeping: provider response processing has started (delivery or rejection), although the
+// acquisition promise may remain pending until its writes apply.
 type PendingCursorLoad = {
   options: LoadSubsetOptions
   deferred: ReturnType<typeof createDeferred<void>>
-  settled?: boolean
+  responseStarted?: boolean
 }
 
 type PendingMutation =
@@ -999,7 +1001,7 @@ async function runNullableCursorScenario(
         write({ type: `insert`, value: { ...row } })
       }
       commit()
-      request.settled = true
+      request.responseStarted = true
       request.deferred.resolve()
       await flushPromises()
     }
@@ -1986,8 +1988,8 @@ async function runPendingMutationScenario(
         throw new Error(`Pending mutation exceeded finite provider work bound`)
       }
       const request = pending[index]!
-      if (request.settled) continue
-      request.settled = true
+      if (request.responseStarted) continue
+      request.responseStarted = true
       const orderedRows = [...rows.values()].sort(
         (left, right) =>
           (left.rank - right.rank) * (scenario.direction === `asc` ? 1 : -1) ||
@@ -2081,7 +2083,7 @@ async function runPendingMutationScenario(
         )
         expect(pending).toHaveLength(1)
         if (timing === `before-response`) applyMutation()
-        pending[0]!.settled = true
+        pending[0]!.responseStarted = true
         pending[0]!.deferred.reject(cursorError)
         capture(`provider-reject-call`)
         if (timing === `after-response`) applyMutation()
@@ -2344,7 +2346,7 @@ async function runRejectedCursorRetryAfterMutation(): Promise<void> {
   )
 
   const settle = async (request: PendingCursorLoad): Promise<void> => {
-    request.settled = true
+    request.responseStarted = true
     begin()
     const orderedRows = referenceWindowRows([...rows.values()], `asc`, {
       offset: 0,
@@ -2380,17 +2382,17 @@ async function runRejectedCursorRetryAfterMutation(): Promise<void> {
     write({ type: `update`, value: { id: 1, rank: 3 } })
     commit()
 
-    pending[0]!.settled = true
+    pending[0]!.responseStarted = true
     pending[0]!.deferred.reject(cursorError)
     await flushPromises()
     for (let index = 1; index < pending.length; index++) {
-      if (!pending[index]!.settled) await settle(pending[index]!)
+      if (!pending[index]!.responseStarted) await settle(pending[index]!)
     }
     expect(await observedFailure).toBe(cursorError)
 
     const retry = live.utils.setWindow({ offset: 0, limit: 3 })
     for (let index = 1; index < pending.length; index++) {
-      if (!pending[index]!.settled) await settle(pending[index]!)
+      if (!pending[index]!.responseStarted) await settle(pending[index]!)
     }
     if (retry instanceof Promise) await retry
 
@@ -2532,7 +2534,7 @@ async function runPendingHistoryScenario(
   }
 
   const settle = async (request: PendingCursorLoad): Promise<void> => {
-    request.settled = true
+    request.responseStarted = true
     const orderedRows = referenceWindowRows(
       [...rows.values()],
       scenario.direction,
@@ -4381,7 +4383,7 @@ describe(`pagination recomputation oracle`, () => {
   })
 
   it.each([`return-only`, `write-after-cleanup`])(
-    `does not settle a window move after its sync run is cleaned up: %s`,
+    `rejects a window move when its sync run is cleaned up: %s`,
     async (delivery) => {
       const authoritativeRows: Array<PageRow> = [
         { id: 1, rank: 0 },

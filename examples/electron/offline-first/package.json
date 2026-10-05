@@ -10,7 +10,7 @@
     "dev:server": "tsx server/index.ts",
     "dev:electron": "wait-on http://localhost:5173 && electron .",
     "server": "tsx server/index.ts",
-    "postinstall": "prebuild-install --runtime electron --target 40.2.1 --arch arm64 || echo 'prebuild-install failed, try: npx @electron/rebuild'"
+    "postinstall": "prebuild-install --runtime electron --target 41.0.0 --arch arm64 || echo 'prebuild-install failed, try: npx @electron/rebuild'"
   },
   "dependencies": {
     "@tanstack/electron-db-sqlite-persistence": "^0.2.4",
