@@ -2,7 +2,7 @@ import { fc, test as fcTest } from '@fast-check/vitest'
 import { describe, expect, it, vi } from 'vitest'
 import { CollectionChangesManager } from '../src/collection/changes.js'
 import { createCollection } from '../src/collection/index.js'
-import { eq } from '../src/query/index.js'
+import { createLiveQueryCollection, eq } from '../src/query/index.js'
 import { createDeferred } from '../src/deferred.js'
 import { oracleRandomParameters, readOracleRunConfig } from './oracle-config.js'
 import { flushPromises } from './utils.js'
@@ -992,7 +992,10 @@ describe(`sync publication reentrancy`, () => {
   // active. A subscriber without initial state has no sent-key filter to hide
   // a repeated message. A filtered subscriber keeps only rows whose value is
   // `one`, so a removal must reach it with the row it holds. Subscribers
-  // receive the truncate's messages only after the Collection is ready.
+  // receive the truncate's messages only after the Collection is ready. A
+  // message that carries a source row is synced and remote unless a prior
+  // request owns its key. A subscriber that the callback creates starts from
+  // the rows it sees, and a live query becomes ready showing replaced rows.
   //
   // The model overlays active intents, in order, over source rows. Before the
   // truncate, the source holds keys 1 and 4. The replacement holds 1 and 2, so
@@ -1037,6 +1040,9 @@ describe(`sync publication reentrancy`, () => {
             ]
           : [{ type: `insert`, key, value: `callback-${key}` }],
     )
+  const sourceValues = new Set<string>(
+    [...sourceBefore, ...replacement].map(([, value]) => value),
+  )
   const describeIntent = (intent: ReadyIntent | undefined) =>
     intent ? `${intent.type} ${intent.key}` : `none`
   const readyCases = ([`onFirstReady`, `status:change`] as const).flatMap(
@@ -1131,6 +1137,13 @@ describe(`sync publication reentrancy`, () => {
           for (const change of changes) {
             if (mirror.has(change.key) === (change.type === `insert`))
               violations.push(`${change.type} ${change.key}`)
+            if (
+              change.type !== `delete` &&
+              sourceValues.has(change.value.value) &&
+              prior?.key !== change.key &&
+              (!change.value.$synced || change.value.$origin !== `remote`)
+            )
+              violations.push(`source row ${change.key} published as local`)
             if (change.type === `delete`) mirror.delete(change.key)
             else mirror.set(change.key, change.value.value)
           }
@@ -1143,11 +1156,34 @@ describe(`sync publication reentrancy`, () => {
           : { includeInitialState: subscriber === `initial` },
       )
       let callbackRan = false
+      let callbackSubscription: { unsubscribe: () => void } | undefined
       const write = () => {
         if (callbackRan) return
         callbackRan = true
         apply(callback)
+        const seen = new Set(collection.state.keys())
+        callbackSubscription = collection.subscribeChanges(
+          (changes) => {
+            for (const change of changes) {
+              if (seen.has(change.key) === (change.type === `insert`))
+                violations.push(
+                  `callback subscriber ${change.type} ${change.key}`,
+                )
+              if (change.type === `delete`) seen.delete(change.key)
+              else seen.add(change.key)
+            }
+          },
+          { includeInitialState: false },
+        )
       }
+      const live = createLiveQueryCollection((q) => q.from({ row: collection }))
+      let liveAtReady: Array<readonly [number, string]> | undefined
+      live.onFirstReady(() => {
+        liveAtReady = [...live.state]
+          .map(([key, row]) => [key as number, row.value] as const)
+          .sort(([a], [b]) => a - b)
+      })
+      void live.preload()
       if (hook === `onFirstReady`) collection.onFirstReady(write)
       else
         collection.on(`status:change`, ({ status }) => {
@@ -1168,10 +1204,15 @@ describe(`sync publication reentrancy`, () => {
         expect(sync.commit()).toBe(true)
 
         expect(callbackRan).toBe(true)
+        await flushPromises()
         expect(violations).toEqual([])
         const expected = [...overlay(replacement, [prior, callback])].sort(
           ([a], [b]) => a - b,
         )
+        const replaced = [...overlay(replacement, [prior])].sort(
+          ([a], [b]) => a - b,
+        )
+        expect([replaced, expected]).toContainEqual(liveAtReady)
         expect([...mirror].sort(([a], [b]) => a - b)).toEqual(
           expected.filter(([, value]) => keeps(value)),
         )
@@ -1182,6 +1223,8 @@ describe(`sync publication reentrancy`, () => {
         ).toEqual(expected)
       } finally {
         subscription.unsubscribe()
+        callbackSubscription?.unsubscribe()
+        await live.cleanup()
         persistence.resolve()
         await Promise.all(
           requests.map((request) =>
@@ -1197,12 +1240,13 @@ describe(`sync publication reentrancy`, () => {
   // Collection ready. The commit must still settle every receipt it applied
   // and report the error, as it does when the Collection is already ready.
   it.each(
-    ([false, true] as const).flatMap((alreadyReady) =>
-      ([`subscriber`, `ready callback`] as const).map((thrower) => ({
-        alreadyReady,
-        thrower,
-      })),
-    ),
+    // An already-ready Collection runs no ready callbacks, so only a
+    // subscriber can throw there.
+    [
+      { alreadyReady: false, thrower: `subscriber` },
+      { alreadyReady: false, thrower: `ready callback` },
+      { alreadyReady: true, thrower: `subscriber` },
+    ] as const,
   )(
     `settles applied receipts when a $thrower throws during a truncate (alreadyReady: $alreadyReady)`,
     async ({ alreadyReady, thrower }) => {
@@ -1244,7 +1288,7 @@ describe(`sync publication reentrancy`, () => {
           subscription = collection.subscribeChanges(() => {
             throw failure
           })
-        } else if (!alreadyReady) {
+        } else {
           collection.onFirstReady(() => {
             throw failure
           })
@@ -1253,9 +1297,7 @@ describe(`sync publication reentrancy`, () => {
         sync.begin()
         sync.truncate()
         sync.write({ type: `insert`, value: { id: 3, value: `three` } })
-        const throws = thrower === `subscriber` || !alreadyReady
-        if (throws) expect(() => sync.commit()).toThrow(failure)
-        else expect(sync.commit()).toBe(true)
+        expect(() => sync.commit()).toThrow(failure)
         await flushPromises()
 
         expect(heldSettled).toBe(true)
