@@ -683,6 +683,9 @@ describe(`shared BrowserWASQLiteDriver fairness oracle`, () => {
       }
       expect(generatedPropertyExecutions).toBeGreaterThan(executionsBefore)
     },
+    // Each campaign runs 12 SQLite histories; parallel CI adds I/O contention.
+    // The fairness law above measures logical completions, not elapsed time.
+    30_000,
   )
 
   it(`proves tail-order ablation removes a hydrate-before-later-persist history`, () => {
