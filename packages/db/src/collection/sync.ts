@@ -15,6 +15,7 @@ import { createDeferred } from '../deferred'
 import { withAcceptedReceipt } from '../sync-receipt'
 import { isPromiseLike } from '../utils/type-guards'
 import { LIVE_QUERY_INTERNAL } from '../query/live/internal.js'
+import { automaticRowMetadataWrite } from './state'
 import type { StandardSchemaV1 } from '@standard-schema/spec'
 import type {
   ChangeMessageOrDeleteKeyMessage,
@@ -170,8 +171,7 @@ export class CollectionSyncManager<
 
   private createDuplicateKeyError(key: TKey): DuplicateKeySyncError {
     const utils = this.config.utils as
-      | Partial<LiveQueryCollectionUtils>
-      | undefined
+      Partial<LiveQueryCollectionUtils> | undefined
     const internal = utils?.[LIVE_QUERY_INTERNAL]
     return new DuplicateKeySyncError(key, this.id, {
       hasCustomGetKey: internal?.hasCustomGetKey ?? false,
@@ -241,26 +241,15 @@ export class CollectionSyncManager<
             >,
           ) => {
             if (!isCurrentSync()) return
-            const pendingTransaction =
-              this.state.pendingSyncedTransactions[
-                this.state.pendingSyncedTransactions.length - 1
-              ]
-            if (!pendingTransaction) {
-              throw new NoPendingSyncTransactionWriteError()
-            }
-            if (pendingTransaction.committed) {
-              throw new SyncTransactionAlreadyCommittedWriteError()
-            }
+            const pendingTransaction = this.getActivePendingSyncTransaction()
             // A replay can invalidate an open transaction between writes. Its
             // commit receipt owns that failure; later writes cannot revive it.
             if (pendingTransaction.invalidationError !== undefined) return
 
-            let key: TKey | undefined = undefined
-            if (`key` in messageWithOptionalKey) {
-              key = messageWithOptionalKey.key
-            } else {
-              key = this.config.getKey(messageWithOptionalKey.value)
-            }
+            const key =
+              `key` in messageWithOptionalKey
+                ? messageWithOptionalKey.key
+                : this.config.getKey(messageWithOptionalKey.value)
 
             let messageType = messageWithOptionalKey.type
 
@@ -293,32 +282,15 @@ export class CollectionSyncManager<
             pendingTransaction.operations.push(message)
             this.state.stagePendingSyncOperation(message)
 
-            if (messageType === `delete`) {
-              pendingTransaction.rowMetadataWrites.set(key, { type: `delete` })
-            } else if (messageType === `insert`) {
-              if (message.metadata !== undefined) {
-                pendingTransaction.rowMetadataWrites.set(key, {
-                  type: `set`,
-                  value: message.metadata,
-                })
-              } else {
-                pendingTransaction.rowMetadataWrites.set(key, {
-                  type: `delete`,
-                })
-              }
-            } else if (message.metadata !== undefined) {
-              pendingTransaction.rowMetadataWrites.set(key, {
-                type: `set`,
-                value: message.metadata,
-              })
+            const metadataWrite = automaticRowMetadataWrite(message)
+            if (metadataWrite) {
+              pendingTransaction.rowMetadataWrites.set(key, metadataWrite)
             }
           },
           commit: (signal?: AbortSignal) => {
             if (!isCurrentSync()) return true
             const pendingTransaction =
-              this.state.pendingSyncedTransactions[
-                this.state.pendingSyncedTransactions.length - 1
-              ]
+              this.state.pendingSyncedTransactions.at(-1)
             if (!pendingTransaction) {
               throw new NoPendingSyncTransactionCommitError()
             }
@@ -363,16 +335,7 @@ export class CollectionSyncManager<
           },
           truncate: () => {
             if (!isCurrentSync()) return
-            const pendingTransaction =
-              this.state.pendingSyncedTransactions[
-                this.state.pendingSyncedTransactions.length - 1
-              ]
-            if (!pendingTransaction) {
-              throw new NoPendingSyncTransactionWriteError()
-            }
-            if (pendingTransaction.committed) {
-              throw new SyncTransactionAlreadyCommittedWriteError()
-            }
+            const pendingTransaction = this.getActivePendingSyncTransaction()
 
             // Clear all operations from the current transaction
             pendingTransaction.operations = []
@@ -500,10 +463,7 @@ export class CollectionSyncManager<
   }
 
   private getActivePendingSyncTransaction() {
-    const pendingTransaction =
-      this.state.pendingSyncedTransactions[
-        this.state.pendingSyncedTransactions.length - 1
-      ]
+    const pendingTransaction = this.state.pendingSyncedTransactions.at(-1)
 
     if (!pendingTransaction) {
       throw new NoPendingSyncTransactionWriteError()
@@ -523,10 +483,7 @@ export class CollectionSyncManager<
       row: {
         get: (key) => {
           if (!isCurrentSync()) return undefined
-          const pendingTransaction =
-            this.state.pendingSyncedTransactions[
-              this.state.pendingSyncedTransactions.length - 1
-            ]
+          const pendingTransaction = this.state.pendingSyncedTransactions.at(-1)
           const pendingWrite = pendingTransaction?.rowMetadataWrites.get(key)
           if (pendingWrite) {
             return pendingWrite.type === `delete`
@@ -559,10 +516,7 @@ export class CollectionSyncManager<
       collection: {
         get: (key) => {
           if (!isCurrentSync()) return undefined
-          const pendingTransaction =
-            this.state.pendingSyncedTransactions[
-              this.state.pendingSyncedTransactions.length - 1
-            ]
+          const pendingTransaction = this.state.pendingSyncedTransactions.at(-1)
           const pendingWrite =
             pendingTransaction?.collectionMetadataWrites.get(key)
           if (pendingWrite) {
@@ -590,10 +544,7 @@ export class CollectionSyncManager<
         list: (prefix) => {
           if (!isCurrentSync()) return []
           const merged = new Map(this.state.syncedCollectionMetadata)
-          const pendingTransaction =
-            this.state.pendingSyncedTransactions[
-              this.state.pendingSyncedTransactions.length - 1
-            ]
+          const pendingTransaction = this.state.pendingSyncedTransactions.at(-1)
           if (pendingTransaction) {
             for (const [
               key,
@@ -789,11 +740,7 @@ export class CollectionSyncManager<
   ): true | Promise<void> {
     operation.waiting = true
     if (operation.pending.size === 0) {
-      operation.completed = true
-      this.loadSubsetOperations.delete(operation)
-      if (this.activeLoadSubsetOperation === operation) {
-        this.activeLoadSubsetOperation = undefined
-      }
+      this.completeLoadSubsetOperation(operation)
       return operation.hasError ? Promise.reject(operation.error) : true
     }
     operation.deferred = createDeferred<void>()
@@ -818,16 +765,30 @@ export class CollectionSyncManager<
     // is considered complete.
     queueMicrotask(() => {
       if (operation.completed || operation.pending.size > 0) return
-      operation.completed = true
-      this.loadSubsetOperations.delete(operation)
-      if (this.activeLoadSubsetOperation === operation) {
-        this.activeLoadSubsetOperation = undefined
-      }
+      this.completeLoadSubsetOperation(operation)
       if (operation.hasError) {
         operation.deferred!.reject(operation.error)
       } else {
         operation.deferred!.resolve()
       }
+    })
+  }
+
+  private completeLoadSubsetOperation(operation: LoadSubsetOperation): void {
+    operation.completed = true
+    this.loadSubsetOperations.delete(operation)
+    if (this.activeLoadSubsetOperation === operation) {
+      this.activeLoadSubsetOperation = undefined
+    }
+  }
+
+  private emitLoadingSubsetChange(isLoadingSubset: boolean): void {
+    this._events.emit(`loadingSubset:change`, {
+      type: `loadingSubset:change`,
+      collection: this.collection,
+      isLoadingSubset,
+      previousIsLoadingSubset: !isLoadingSubset,
+      loadingSubsetTransition: isLoadingSubset ? `start` : `end`,
     })
   }
 
@@ -858,13 +819,7 @@ export class CollectionSyncManager<
     this.trackLoadSubsetOperationPromise(promise)
 
     if (loadingStarting) {
-      this._events.emit(`loadingSubset:change`, {
-        type: `loadingSubset:change`,
-        collection: this.collection,
-        isLoadingSubset: true,
-        previousIsLoadingSubset: false,
-        loadingSubsetTransition: `start`,
-      })
+      this.emitLoadingSubsetChange(true)
     }
 
     const finish = () => {
@@ -876,13 +831,7 @@ export class CollectionSyncManager<
       this.pendingLoadSubsetPromises.delete(promise)
 
       if (loadingEnding) {
-        this._events.emit(`loadingSubset:change`, {
-          type: `loadingSubset:change`,
-          collection: this.collection,
-          isLoadingSubset: false,
-          previousIsLoadingSubset: true,
-          loadingSubsetTransition: `end`,
-        })
+        this.emitLoadingSubsetChange(false)
       }
     }
     void promise.then(finish, finish)
@@ -1048,13 +997,7 @@ export class CollectionSyncManager<
     const wasLoadingSubset = this.pendingLoadSubsetPromises.size > 0
     this.pendingLoadSubsetPromises.clear()
     if (wasLoadingSubset) {
-      this._events.emit(`loadingSubset:change`, {
-        type: `loadingSubset:change`,
-        collection: this.collection,
-        isLoadingSubset: false,
-        previousIsLoadingSubset: true,
-        loadingSubsetTransition: `end`,
-      })
+      this.emitLoadingSubsetChange(false)
     }
     this.activeLoadSubsetOperation = undefined
     for (const operation of this.loadSubsetOperations) {

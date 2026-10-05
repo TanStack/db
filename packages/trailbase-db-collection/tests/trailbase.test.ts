@@ -1057,10 +1057,7 @@ describe(`TrailBase Integration`, () => {
  */
 describe(`TrailBase aborted subset loads`, () => {
   type AbortCut =
-    | `before-fetch`
-    | `fetch-rejects`
-    | `before-commit`
-    | `between-pages`
+    `before-fetch` | `fetch-rejects` | `before-commit` | `between-pages`
   const expected = (cut: AbortCut) => ({
     load: `AbortError`,
     acceptedVisible: cut === `between-pages`,

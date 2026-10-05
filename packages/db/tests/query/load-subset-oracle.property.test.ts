@@ -12,7 +12,7 @@ import { Func, PropRef, Value } from '../../src/query/ir.js'
 import { DeduplicatedLoadSubset } from '../../src/query/subset-dedupe.js'
 import { createTransaction } from '../../src/transactions.js'
 import { expectAssertionFailure } from '../expected-failure.js'
-import { evaluateReferenceExpression } from '../reference-expression.js'
+import { evaluateReferenceExpression } from '../reference-expression-oracle.js'
 import {
   oracleRandomParameters,
   readOracleRunConfig,
@@ -34,8 +34,10 @@ import type {
  * `refetch` starts fresh work for the same request data. Requests with separate
  * abort signals cannot share in-flight work.
  *
- * A separate application law says acquisition settlement is not enough. Loaded
- * rows must cross the Collection publication boundary before readiness settles.
+ * A separate application law says provider completion is not enough. Successful
+ * loadSubset results wait for their establishing applied receipts. Loaded rows
+ * must cross the source Collection publication boundary before initial-query
+ * readiness.
  * Abort before that boundary rejects and suppresses the rows. Abort after
  * publication is too late and the applied rows remain visible.
  *
@@ -81,13 +83,15 @@ type ConcurrentExactScenario = {
 const rankRef = new PropRef<number>([`rank`])
 const scoreRef = new PropRef<number>([`score`])
 
-function requirePendingAppliedReceipt(
-  receipt: LoadSubsetRequestResult,
+// A load result may include delivery before it awaits the establishing applied
+// receipt. Only commit() returns that receipt.
+function requirePendingLoadSubsetResult(
+  loadResult: LoadSubsetRequestResult,
 ): Promise<void> {
-  if (receipt === true) {
+  if (loadResult === true) {
     throw new Error(`Expected an asynchronous subset load`)
   }
-  return receipt
+  return loadResult
 }
 
 const exactDemandArbitrary: fc.Arbitrary<ExactDemand> = fc
@@ -473,17 +477,17 @@ async function expectPersistingLoadIsApplied(
     if (persisting) expect(transaction.state).toBe(`persisting`)
     const ready = live.toArrayWhenReady()
     if (persisting) {
-      let settled = false
+      let fulfilled = false
       void ready.then(
         () => {
-          settled = true
+          fulfilled = true
         },
         () => undefined,
       )
       await Promise.resolve()
       await Promise.resolve()
 
-      expect(settled).toBe(false)
+      expect(fulfilled).toBe(false)
       expect(source.get(`r1`)).toBeUndefined()
       expect(source.get(`r2`)).toBeUndefined()
 
@@ -567,43 +571,43 @@ async function expectAppliedReceiptTiming(
       transaction.mutate(() => source.insert({ id: `local`, projectId: `p2` }))
     }
     if (gate === `parked`) expect(transaction.state).toBe(`persisting`)
-    const receipt = source._sync.loadSubset({})
+    const loadResult = source._sync.loadSubset({})
     if (gate === `free` && delivery === `synchronous`) {
-      expect(receipt).toBe(true)
+      expect(loadResult).toBe(true)
       expect(source.get(`remote`)).toEqual(
         expect.objectContaining({ id: `remote`, projectId: `p1` }),
       )
       return
     }
 
-    const pending = requirePendingAppliedReceipt(receipt)
-    let settled = false
-    let visibleWhenSettled = false
+    const pending = requirePendingLoadSubsetResult(loadResult)
+    let fulfilled = false
+    let visibleWhenFulfilled = false
     void pending
       .then(
         () => {
-          settled = true
-          visibleWhenSettled = source.get(`remote`)?.id === `remote`
+          fulfilled = true
+          visibleWhenFulfilled = source.get(`remote`)?.id === `remote`
         },
         () => undefined,
       )
       .catch(() => undefined)
 
-    expect(settled).toBe(false)
+    expect(fulfilled).toBe(false)
     expect(source.get(`remote`)).toBeUndefined()
     await Promise.resolve()
     await Promise.resolve()
 
     if (gate === `parked`) {
-      expect(settled).toBe(false)
+      expect(fulfilled).toBe(false)
       expect(source.get(`remote`)).toBeUndefined()
       persistence.resolve()
       await transaction.isPersisted.promise
     }
 
     await pending
-    expect(settled).toBe(true)
-    expect(visibleWhenSettled).toBe(true)
+    expect(fulfilled).toBe(true)
+    expect(visibleWhenFulfilled).toBe(true)
     expect(source.get(`remote`)).toEqual(
       expect.objectContaining({ id: `remote`, projectId: `p1` }),
     )
@@ -612,7 +616,7 @@ async function expectAppliedReceiptTiming(
     throw error
   } finally {
     await runOracleCleanup(
-      `subset receipt follows applied publication`,
+      `subset load fulfillment follows application`,
       primaryFailure,
       [
         {
@@ -676,17 +680,17 @@ async function expectAppliedLoadDoesNotFlushEarlierParkedSync() {
     cleanupLive = () => live.cleanup()
     expect(transaction.state).toBe(`persisting`)
     const ready = live.toArrayWhenReady()
-    let settled = false
+    let fulfilled = false
     void ready.then(
       () => {
-        settled = true
+        fulfilled = true
       },
       () => undefined,
     )
     await Promise.resolve()
     await Promise.resolve()
 
-    expect(settled).toBe(false)
+    expect(fulfilled).toBe(false)
     expect(source.get(`unrelated`)).toBeUndefined()
 
     persistence.resolve()
@@ -860,21 +864,21 @@ async function expectConcurrentStreamCommitStaysParked(
     })
     settlement = transaction.isPersisted.promise
     transaction.mutate(() => source.insert({ id: `other`, projectId: `p2` }))
-    const load = requirePendingAppliedReceipt(source._sync.loadSubset({}))
+    const load = requirePendingLoadSubsetResult(source._sync.loadSubset({}))
     void load.catch(() => undefined)
     publishUnrelated()
     publishSubset()
-    let settled = false
+    let fulfilled = false
     void load.then(
       () => {
-        settled = true
+        fulfilled = true
       },
       () => undefined,
     )
     await Promise.resolve()
     await Promise.resolve()
 
-    expect(settled).toBe(false)
+    expect(fulfilled).toBe(false)
     expect(source.get(`unrelated`)).toBeUndefined()
     expect(source.get(`r1`)).toBeUndefined()
     if (cancelBeforePersistence) {
@@ -973,7 +977,7 @@ async function expectAbortedReceiptDoesNotSettleDemand(
     })
     settlement = transaction.isPersisted.promise
     transaction.mutate(() => source.insert({ id: `local`, projectId: `p2` }))
-    const first = requirePendingAppliedReceipt(
+    const first = requirePendingLoadSubsetResult(
       source._sync.loadSubset({ signal: controller.signal }),
     )
     if (abortPhase === `while-parked`) {
@@ -1055,7 +1059,7 @@ async function expectAbortDuringPublicationDoesNotCancelReceipt() {
       }
     })
     unsubscribe = () => subscription.unsubscribe()
-    const load = requirePendingAppliedReceipt(
+    const load = requirePendingLoadSubsetResult(
       source._sync.loadSubset({ signal: controller.signal }),
     )
     persistence.resolve()
@@ -1214,7 +1218,7 @@ async function expectCleanupRejectsDemandOnce() {
     })
     settlement = transaction.isPersisted.promise
     transaction.mutate(() => source.insert({ id: `local`, projectId: `p2` }))
-    const load = requirePendingAppliedReceipt(source._sync.loadSubset({}))
+    const load = requirePendingLoadSubsetResult(source._sync.loadSubset({}))
     void load.catch(() => undefined)
     void receipt.then(
       () => {
@@ -1526,17 +1530,17 @@ describe(`loadSubset application and cancellation`, () => {
   it(`releases a pending mutation and source despite a cleanup fault`, async () => {
     const primary = new TraceAssertionError(
       4,
-      new Error(`subset receipt settled before publication`),
+      new Error(`subset load fulfilled before application`),
     )
     const persistence = createDeferred<void>()
     const stillPending = createDeferred<void>()
     const cleanupFault = new Error(`subscription release failed`)
     const released: Array<string> = []
-    let receiptSettled = false
-    let receiptSettledAtCleanup = false
+    let cleanupWaitFulfilled = false
+    let cleanupWaitFulfilledAtCleanup = false
     void stillPending.promise.then(
       () => {
-        receiptSettled = true
+        cleanupWaitFulfilled = true
       },
       () => undefined,
     )
@@ -1544,7 +1548,7 @@ describe(`loadSubset application and cancellation`, () => {
     let failure: unknown
     try {
       await runOracleCleanup(
-        `subset receipt follows applied publication`,
+        `subset load fulfillment follows application`,
         { error: primary },
         [
           {
@@ -1572,7 +1576,7 @@ describe(`loadSubset application and cancellation`, () => {
     } catch (error) {
       failure = error
     } finally {
-      receiptSettledAtCleanup = receiptSettled
+      cleanupWaitFulfilledAtCleanup = cleanupWaitFulfilled
       stillPending.resolve()
     }
 
@@ -1582,7 +1586,7 @@ describe(`loadSubset application and cancellation`, () => {
       `subscription`,
       `source collection`,
     ])
-    expect(receiptSettledAtCleanup).toBe(false)
+    expect(cleanupWaitFulfilledAtCleanup).toBe(false)
     expect(failure).toBeInstanceOf(AggregateError)
     const aggregate = failure as AggregateError
     expect(aggregate.cause).toBe(primary)
@@ -1682,7 +1686,7 @@ describe(`loadSubset application and cancellation`, () => {
     await expectAppliedLoadDoesNotFlushEarlierParkedSync()
   })
 
-  it(`settles a demand only after its rows apply`, async () => {
+  it(`fulfills a subset load only after its rows apply`, async () => {
     await expectCompletionWaitsForAppliedRows()
   })
 

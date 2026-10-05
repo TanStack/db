@@ -49,7 +49,11 @@ import type {
  * and collection metadata. Mutating RPC replay is limited to the same known
  * leader and term, and one envelope id cannot identify two mutation request
  * types. Remote subset request data stays inside the clone-safe wire domain,
- * and each accepted physical acquisition has one acquisition lease.
+ * and each accepted physical acquisition has one acquisition lease. Retained
+ * coordinator demand survives remote-owner replacement; each replacement
+ * acquisition has its own lease and release obligation. The Collection-level
+ * mapping is documented in the Browser
+ * `per-collection-coordinator-oracle.test.ts` companion.
  *
  * Expected transactions, adapter call logs, SQLite rows, metadata, owner
  * callbacks, and coordinator snapshots form the reference observations.
@@ -2775,7 +2779,7 @@ describe(`electron sqlite persistence bridge`, () => {
     }
   })
 
-  it(`replays a held Electron lease after an A to B to A leader cycle`, async () => {
+  it(`establishes replacement Electron acquisitions for retained demand after an A to B to A leader cycle`, async () => {
     const dbName = `electron-subset-a-b-a`
     const leader = new ElectronCollectionCoordinator({
       dbName,
@@ -2915,7 +2919,7 @@ describe(`electron sqlite persistence bridge`, () => {
     }
   })
 
-  it(`rebinds a live Electron acquisition when its owner is replaced`, async () => {
+  it(`establishes a replacement Electron acquisition for retained demand when its owner changes`, async () => {
     const coordinator = new ElectronCollectionCoordinator({
       dbName: `electron-subset-owner-replacement`,
     })
@@ -2971,7 +2975,7 @@ describe(`electron sqlite persistence bridge`, () => {
     }
   })
 
-  it(`rebinds a live remote Electron follower lease when the same leader replaces its owner`, async () => {
+  it(`establishes a replacement remote Electron acquisition for retained follower demand when the same leader changes owners`, async () => {
     const dbName = `electron-remote-owner-replacement`
     const leader = new ElectronCollectionCoordinator({
       dbName,
@@ -3132,7 +3136,7 @@ describe(`electron sqlite persistence bridge`, () => {
     }
   })
 
-  it(`reacquires the same Electron lease after leadership retirement`, async () => {
+  it(`establishes a replacement Electron acquisition for retained demand after leadership retirement`, async () => {
     const coordinator = new ElectronCollectionCoordinator({
       dbName: `electron-subset-leadership-return`,
     })
@@ -3297,7 +3301,7 @@ describe(`electron sqlite persistence bridge`, () => {
     },
   )
 
-  it(`starts independent Electron lease replays without sibling head-of-line blocking`, async () => {
+  it(`starts replacement Electron acquisitions without sibling head-of-line blocking`, async () => {
     const coordinator = new ElectronCollectionCoordinator({
       dbName: `electron-subset-parallel-replay`,
     })

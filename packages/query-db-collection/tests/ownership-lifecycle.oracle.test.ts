@@ -43,8 +43,9 @@ import type { QueryCollectionUtils } from '../src/query.js'
  * Mutation refetches add a second authority path but do not bypass those rules.
  *
  * The reference view is an ownership graph: query scope and demand nodes point
- * to row keys; sync generations order competing results; publication
- * and persistence are separate commit boundaries. Tests use real QueryClient
+ * to row keys. Sync-run lifetime fences, post-write-refetch generations, and
+ * defer-result barriers govern competing results. Publication and persistence
+ * are separate commit boundaries. Tests use real QueryClient
  * observers, cache events, collection metadata, persisted scans, and live
  * queries. They compare source rows, derived rows, cache rows, metadata writes,
  * exact request lifetimes, and bounded refetch work at each boundary.
@@ -100,6 +101,16 @@ type ResultSettlementModelState = ReadonlyMap<
   ResultSettlementOperationState
 >
 
+/**
+ * `query-succeeded` and `refresh-succeeded` compress the result lifecycle.
+ * With an applicable result and no `deferOn`, each action combines Query fetch
+ * fulfillment, completed Collection application and its applied settlement,
+ * and the terminal public-refetch checkpoint.
+ * A `deferOn` action instead records the skipped result and its replacement wait;
+ * a nondeferred `invalid-shape` result records application rejection. The model
+ * omits intermediate application states, which the separate obligation models
+ * below retain.
+ */
 type ResultSettlementModelAction =
   | { type: `start-refetch`; operation: string }
   | {

@@ -106,8 +106,7 @@ export class CollectionConfigBuilder<
   // Current sync run state (set when sync starts, cleared when it stops)
   // Public for testing purposes (CollectionConfigBuilder is internal, not public API)
   public currentSyncConfig:
-    | Parameters<SyncConfig<TResult>[`sync`]>[0]
-    | undefined
+    Parameters<SyncConfig<TResult>[`sync`]>[0] | undefined
   public currentSyncState: FullSyncState | undefined
 
   // Error state tracking
@@ -124,8 +123,7 @@ export class CollectionConfigBuilder<
   private currentWindow: WindowOptions | undefined
   private settledWindow: WindowOptions | undefined
   private activeWindowOperation:
-    | { generation: number; failed: boolean; error?: unknown }
-    | undefined
+    { generation: number; failed: boolean; error?: unknown } | undefined
 
   private maybeRunGraphFn: (() => void) | undefined
   private loadMoreFn: (() => void) | undefined
@@ -137,11 +135,9 @@ export class CollectionConfigBuilder<
   private inputsCache: Record<string, RootStreamBuilder<unknown>> | undefined
   private pipelineCache: ResultStream | undefined
   public sourceWhereClausesCache:
-    | Map<string, BasicExpression<boolean>>
-    | undefined
+    Map<string, BasicExpression<boolean>> | undefined
   private bucketFacadesCache:
-    | ReturnType<typeof materializeCompilation>[`facades`]
-    | undefined
+    ReturnType<typeof materializeCompilation>[`facades`] | undefined
 
   // Map of opaque source ID to subscription
   readonly subscriptions = createSourceRecord<CollectionSubscription>()
@@ -941,11 +937,9 @@ export class CollectionConfigBuilder<
       }
 
       let facadePublication:
-        | ReturnType<BucketFacadeAdapter[`flush`]>
-        | undefined
+        ReturnType<BucketFacadeAdapter[`flush`]> | undefined
       let rootPublication:
-        | ReturnType<Collection[`_deferPublication`]>
-        | undefined
+        ReturnType<Collection[`_deferPublication`]> | undefined
       try {
         facadePublication = bucketFacades?.flush()
         rootPublication = hasParentChanges

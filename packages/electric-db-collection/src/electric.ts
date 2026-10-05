@@ -2008,8 +2008,7 @@ function createElectricSync<T extends Row<unknown>>(
 
         // Extract active_conditions from headers (DNF support)
         const activeConditions = changeMessage.headers.active_conditions as
-          | ActiveConditions
-          | undefined
+          ActiveConditions | undefined
 
         const rowId = collection.getKeyFromItem(changeMessage.value)
         const operation = changeMessage.headers.operation

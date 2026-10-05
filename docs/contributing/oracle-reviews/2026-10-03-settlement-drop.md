@@ -119,6 +119,46 @@ Survivors:
   a persisting mutation and checks visible and synced rows after each refetch,
   including a later empty refetch. The mutant fails there.
 
+### After the merge with the state-stack refactor
+
+Every mutant above, plus five more, ran again on the merged code. The merge
+took #2004's smaller state stack and kept this branch's laws.
+
+| Mutant | Owner | Result |
+| --- | --- | --- |
+| Retention kept | state-retention oracle | killed, 5 failures |
+| Held sync applies before the drop | state-retention oracle | killed, 12 failures |
+| `isPersisted` resolves before publication | state-retention oracle | killed, 44 failures |
+| Handler-facing receipt waits for visibility | state-retention oracle | killed, 5 failures |
+| Load settles at acceptance | load-subset oracle and state retention | killed, 11 and 4 failures |
+| `$origin` marker persists until the next write | state-retention oracle | killed, 11 failures |
+| Held confirmation marked `'remote'` | state-retention oracle | killed, 9 failures |
+| An open sync transaction counts for holds | state-retention oracle | killed, 5 failures |
+| Older held row wins over the newest completed row | state-retention oracle | killed, 1 failure |
+| Pre-sync capture counts an open transaction | state-retention oracle | killed, 1 failure |
+| Replay invalidates a committed transaction instead of throwing | state-retention oracle | killed, 1 failure |
+| DbClient chunk queues after open transactions | DbClient hydration oracle | killed, 2 failures |
+| Core abort listener drops an accepted transaction | load-subset and refinement oracles | killed, 1 and 1 failures |
+| Core abort listener calls the cancel path | load-subset and refinement oracles | survived; see below |
+| Stale eager fetch applies | Query Collection | killed |
+| Query cache reads applied rows | Query Collection | killed |
+| Query Collection passes its signal to `commit()` again | Query Collection | killed, 1 failure |
+| Query Collection rolls back accepted ownership on supersession | ownership oracle | killed |
+| TrailBase aborted load resolves | TrailBase | killed, 5 failures |
+| Electric aborted load resolves | Electric | killed, 1 failure |
+
+Corrections and survivors:
+
+- **Signal passed to `commit()`:** the earlier run selected no test, because
+  its name filter no longer matched the supersession test. With the correct
+  filter, the mutant fails. It is not equivalent, and the earlier note about
+  it is withdrawn.
+- **Core abort calls the cancel path:** `cancelPendingSyncedTransaction` now
+  throws `SyncQueueInvariantError` for a committed transaction. The guard
+  stops the cancellation before it changes state, so the accepted rows still
+  apply. The unguarded variant, which removes the accepted transaction
+  directly, fails in both oracles.
+
 ## Limits
 
 - **On-demand self-load:** a handler that awaits an on-demand load of its own

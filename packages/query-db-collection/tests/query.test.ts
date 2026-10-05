@@ -24,7 +24,7 @@ import {
   mockSyncCollectionOptions,
   stripVirtualProps,
 } from '../../db/tests/utils'
-import { evaluateReferenceExpression } from '../../db/tests/reference-expression'
+import { evaluateReferenceExpression } from '../../db/tests/reference-expression-oracle'
 import { persistedCollectionOptions } from '../../db-sqlite-persistence-core/src'
 import { queryCollectionOptions } from '../src/query'
 import { SyncNotInitializedError } from '../src/errors'

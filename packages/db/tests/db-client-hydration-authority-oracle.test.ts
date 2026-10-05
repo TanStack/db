@@ -183,8 +183,7 @@ async function runHistory(
     publicRows: Array<Row>
   }> = []
   let subscription:
-    | ReturnType<Collection<Row, string>[`subscribeChanges`]>
-    | undefined
+    ReturnType<Collection<Row, string>[`subscribeChanges`]> | undefined
   let primaryFailure: unknown
   let hasPrimaryFailure = false
 
