@@ -1028,14 +1028,13 @@ describe(`sync publication reentrancy`, () => {
     'insert 3': { type: `insert`, key: 3, value: `prior-three` },
   }
   const callbackIntents = (visible: ReadonlyMap<number, string>) =>
-    [1, 2, 3, 4].flatMap(
-      (key): Array<ReadyIntent> =>
-        visible.has(key)
-          ? [
-              { type: `update`, key, value: `callback-${key}` },
-              { type: `delete`, key },
-            ]
-          : [{ type: `insert`, key, value: `callback-${key}` }],
+    [1, 2, 3, 4].flatMap((key): Array<ReadyIntent> =>
+      visible.has(key)
+        ? [
+            { type: `update`, key, value: `callback-${key}` },
+            { type: `delete`, key },
+          ]
+        : [{ type: `insert`, key, value: `callback-${key}` }],
     )
   const describeIntent = (intent: ReadyIntent | undefined) =>
     intent ? `${intent.type} ${intent.key}` : `none`
