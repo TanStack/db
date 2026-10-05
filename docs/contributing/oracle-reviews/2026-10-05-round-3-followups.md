@@ -3,8 +3,8 @@
 Base revision: `cfb03f201` (`main` after #2032 and #2033).
 
 This record closes the four items that the round 3 record and the
-ready-callback truncate record left open. Two are bug fixes, and two delete
-production code that the evidence shows has no effect.
+ready-callback truncate record left open. Two are bug fixes. The other two
+keep their code: review found histories where it still matters.
 
 ## 1. Metadata rebuild after a canceled earlier transaction
 
@@ -55,31 +55,57 @@ enriched row whose fields differed from the stored row. Those came from
 comparing `NaN` with `!==`. With `Object.is`, instrumentation found no such
 read across the `@tanstack/db` suite, with or without the delete.
 
-**Reason.** A changed row always publishes an update. Publishing enriches the
-update's `previousValue` and then its `value`, with or without a subscriber, so
-the key's cache entry is replaced before any later read.
-
-**Change.** The delete is removed. A witness in `virtual-props-cache.test.ts`
-reads a reused row object after an in-place update without a subscriber, with
-one, and with the update's events batched. It passes before and after.
+**Outcome: kept.** A first revision removed the delete. A high-effort review
+then showed that the suite runs only in development builds, where the
+reused-row check rejects an in-place change without `previousValue`. In a
+production build that write is accepted and publishes no update, so only the
+commit's delete keeps reads fresh. A deferred publication also enriches late.
+New cases in `virtual-props-cache.test.ts` stub production mode for that write
+and read inside a deferred publication. Both fail without the delete, so it
+stays.
 
 ## 4. The sync commit's completed optimistic keys
 
 **Finding.** The mutant that ignores `completedOptimisticKeys` changed 191
 decisions, all in the metadata publication oracle, and that oracle's exact
-batch check still passed. Tracing the published `$synced` changes showed why.
-The set matters only when a key's optimistic layer is already gone, which
-happens during a transaction's completion. The recompute that follows the
-completion rebuilds the layers and publishes the same change.
+batch check still passed. The recompute after a transaction's completion
+publishes the same `$synced` change.
 
-**Change.** The set is removed. The `@tanstack/db` suite passes. So do the
-optimistic-history, retention, partial-update, metadata publication,
-optimistic transaction, change-event, subscription publication, and sync
-reentrancy oracles at ten times their run counts.
+**Outcome: kept.** A first revision removed the set, and the stress runs at ten
+times their counts passed. A high-effort review then described a history where
+the set still matters: a sync commit captures a key, the key's transaction
+completes before the capture clears, its recompute drops the layer and filters
+the key's event, and a later sync with an equal value publishes no `$synced`
+change. A probe over several completion orders did not reach it, and passing
+runs cannot rule it out, so the set stays. The coverage map records the needed
+witness.
 
-**Limit.** This is evidence over reached and generated histories, not a proof
-over every history. A history that completes a transaction without the
-following recompute would reach the removed case. No such path was found.
+## Review of this record
+
+A high-effort review found nine items.
+
+1. The cache delete still mattered in production builds. Reverted, with
+   witnesses that fail without it.
+2. Insert-shaped and deferred publications of a reused row read the cache
+   late. The deferred-publication witness covers the second; the delete covers
+   both.
+3. A history may still need `completedOptimisticKeys`. Reverted; open for a
+   witness.
+4. A ready failure held during sync entry is dropped if the sync function then
+   throws. `ops.markReady()` already behaves this way on `main`, so the
+   truncate path now matches it. No change.
+5. The ready failure sink restored an outer sink that cannot exist. Removed.
+6. A cache comment described the removed delete. Resolved by the revert.
+7. The rebuild replay had a simpler equivalent form. Adopted; the two rebuild
+   mutants still fail.
+8. A hydration transaction rebuilt through a cancellation could lose its
+   metadata. A probe of the described route kept the metadata. Open, with no
+   change, until a witness reaches it.
+9. The first reused-row witness had no demonstrated kill. Replaced by the
+   production and deferred cases.
+
+The simplifier pass suggested one helper for the explicit metadata write,
+which `metadata.row.set` and `metadata.row.delete` now share.
 
 ## ORC outcomes
 
@@ -87,7 +113,8 @@ following recompute would reach the removed case. No such path was found.
   2026-10-05 maintainer decisions, and the deferred ready-failure contract of
   `ops.markReady()`. Items 3 and 4 change no contract.
 - **ORC-002: met.** The canceled lane uses the oracle's fold model. The
-  sync-entry witness expects a fixed outcome. Neither reads production state.
+  sync-entry witness and the reused-row witnesses expect fixed outcomes. None
+  reads production state.
 - **ORC-003: met.** The canceled lane's prose explains the cancellation and
   the re-insert mapping. The sync-entry witness and the reused-row witness
   state their laws beside the code.
@@ -97,8 +124,8 @@ following recompute would reach the removed case. No such path was found.
   and observes `metadata.row.get`, `collection.status`, `collection.state`, or
   public reads and change messages.
 - **ORC-006: met.** RB2, the two rebuild mutants above, and `main` fail the
-  canceled lane. `main` fails the sync-entry truncate cases. Items 3 and 4
-  are deletions; their evidence is the instrumentation above.
+  canceled lane. `main` fails the sync-entry truncate cases. Removing the
+  cache delete fails the production and deferred reused-row cases.
 - **ORC-007: met where generated.** The stress runs used the existing fixed
   and random campaigns at ten times their counts. The new lanes are
   enumerations.

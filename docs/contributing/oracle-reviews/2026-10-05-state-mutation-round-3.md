@@ -135,9 +135,11 @@ override removed, the witness fails.
 
 The follow-up record
 [`2026-10-05-round-3-followups.md`](2026-10-05-round-3-followups.md) resolves
-the items this record left open. S3 and S10 were equivalent, and their code is
-removed. RB2 was not equivalent: a canceled earlier transaction reaches it,
-and the canceled lane found a metadata bug on `main` that the follow-up fixes.
+the items this record left open. S3 was not equivalent in production builds,
+which the suite did not exercise, so the delete stays with new witnesses. S10
+stays until a witness decides a history that review described. RB2 was not
+equivalent: a canceled earlier transaction reaches it, and the canceled lane
+found a metadata bug on `main` that the follow-up fixes.
 
 ## ORC outcomes
 
