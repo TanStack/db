@@ -1220,8 +1220,7 @@ function createOwnershipStorage(seed?: StoredOwnership, gatedCommit?: number) {
   let commitCount = 0
   const appliedRowWrites: Array<string> = []
   let gatedTransaction:
-    | Parameters<PersistenceAdapter[`applyCommittedTx`]>[1]
-    | undefined
+    Parameters<PersistenceAdapter[`applyCommittedTx`]>[1] | undefined
   let latestTerm = 0
   let latestSeq = 0
   let latestRowVersion = 0
@@ -1492,8 +1491,7 @@ function expectedPersistedResultOverlap(
  * Core's internal controller implementation.
  */
 type HandlerQueryNotificationPhase =
-  | `held-through-settlement`
-  | `delivered-during-handler`
+  `held-through-settlement` | `delivered-during-handler`
 
 function expectedHandlerMutationSettlement(
   phase: HandlerQueryNotificationPhase,
