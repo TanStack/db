@@ -21,7 +21,7 @@ export function withAcceptedReceipt(
 
 /**
  * The moment a receipt's sync transaction was accepted. Handler-facing writes
- * wait for this, not for visibility: a transaction held by a persisting
+ * and Collection readiness wait for this, not for visibility: a transaction held by a persisting
  * optimistic transaction becomes visible only when that transaction settles,
  * so a handler awaiting visibility would wait for itself. Core accepts at
  * `commit()`. A receipt that carries no acceptance moment is treated as

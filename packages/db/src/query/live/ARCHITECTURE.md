@@ -782,7 +782,8 @@ only if its signal aborted before acceptance or collection cleanup abandons
 the transaction; a later abort cannot withdraw its rows. A source discards a
 stale page by checking the signal before `commit()`, and rejects a load whose
 caller aborted with `AbortError` once its accepted rows apply. The receipt also carries its
-acceptance moment for handler-facing writes (`whenSyncAccepted`): a mutation
+acceptance moment for handler-facing writes and Collection readiness
+(`whenSyncAccepted`): readiness counts accepted rows, and a mutation
 handler waits for acceptance, because a transaction parked behind its own
 persisting optimistic transaction becomes visible only when that transaction
 settles. A successful `loadSubset` implementation must await or return every

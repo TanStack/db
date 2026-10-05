@@ -350,15 +350,8 @@ export class CollectionSyncManager<
           },
           markReady: () => {
             if (!isCurrentSync()) return
-            // Readiness is publication. While a persisting optimistic
-            // transaction holds accepted rows, become ready once they apply,
-            // unless another status transition happens first.
-            const status = this.lifecycle.status
-            const deferred = this.state.deferUntilAcceptedRowsApply(() => {
-              if (isCurrentSync() && this.lifecycle.status === status)
-                this.lifecycle.markReady()
-            })
-            if (deferred) return
+            // Readiness counts accepted rows. Rows a persisting optimistic
+            // transaction holds still publish with the drop of its state.
             if (syncEntryActive) {
               readyEffectFailure ??= this.lifecycle.markReadyDuringSyncStart()
             } else {

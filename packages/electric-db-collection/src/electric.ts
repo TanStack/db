@@ -11,6 +11,7 @@ import {
   and,
   validateSyncPersistenceCapability,
   warnOnce,
+  whenSyncAccepted,
   withCollectionConfigFactory,
   withCollectionSyncConfigCleanup,
   withCollectionSyncConfigFactory,
@@ -2419,12 +2420,20 @@ function createElectricSync<T extends Row<unknown>>(
             }
           }
           const readyErrorVersion = streamErrorVersion
-          if (applied === true) {
+          // Readiness counts accepted rows.
+          const accepted = whenSyncAccepted(applied)
+          if (accepted === true) {
             wrappedMarkReady(wasBufferingInitialSync, readyErrorVersion)
           } else {
-            void applied.then(
+            void accepted.then(
               () =>
                 wrappedMarkReady(wasBufferingInitialSync, readyErrorVersion),
+              () => undefined,
+            )
+          }
+          if (applied !== true) {
+            void applied.then(
+              () => undefined,
               (error: unknown) => {
                 if (!isActiveLifecycle() || abortController.signal.aborted) {
                   return

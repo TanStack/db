@@ -809,7 +809,8 @@ describe(`QueryCollection`, () => {
       }
     })
 
-    it(`keeps an eager result loading until its rows are applied`, async () => {
+    // Readiness counts accepted rows; they publish when the mutation settles.
+    it(`marks an eager result ready once its rows are accepted`, async () => {
       const queryResult = createDeferred<Array<TestItem>>()
       const queryFn = vi.fn(() => queryResult.promise)
       const collection = createCollection(
@@ -837,12 +838,12 @@ describe(`QueryCollection`, () => {
         queryResult.resolve([{ id: `server`, name: `Server` }])
         await flushPromises()
 
-        expect(collection.status).toBe(`loading`)
+        await ready
+        expect(collection.status).toBe(`ready`)
         expect(collection.get(`server`)).toBeUndefined()
 
         persistence.resolve()
         await transaction.isPersisted.promise
-        await ready
 
         expect(collection.status).toBe(`ready`)
         expect(collection.get(`server`)).toEqual(

@@ -120,8 +120,6 @@ export class CollectionStateManager<
   // publish together.
   public pendingOptimisticUpserts = new Map<TKey, TOutput>()
   public pendingOptimisticDeletes = new Set<TKey>()
-  // Readiness transitions waiting for accepted rows to publish.
-  private afterAcceptedApplied: Array<() => void> = []
 
   /**
    * Tracks the origin of confirmed changes for each row.
@@ -921,22 +919,6 @@ export class CollectionStateManager<
     this.commitPendingTransactions()
   }
 
-  /**
-   * Runs `callback` in the publication that applies the accepted rows, or
-   * returns `false` if no accepted transaction with rows is queued.
-   */
-  deferUntilAcceptedRowsApply(callback: () => void): boolean {
-    if (!this.hasAcceptedRows()) return false
-    this.afterAcceptedApplied.push(callback)
-    return true
-  }
-
-  private hasAcceptedRows(): boolean {
-    return this.pendingSyncedTransactions.some(
-      (transaction) => transaction.committed,
-    )
-  }
-
   /** Every synced row once every accepted sync transaction applies. */
   *acceptedSyncedEntries(): IterableIterator<[TKey, TOutput]> {
     const { states, truncated } = this.pendingSyncedProjection
@@ -1682,18 +1664,6 @@ export class CollectionStateManager<
       for (const transaction of committedSyncedTransactions) {
         transaction.applied.resolve()
       }
-      if (!this.hasAcceptedRows()) {
-        const callbacks = this.afterAcceptedApplied
-        this.afterAcceptedApplied = []
-        for (const callback of callbacks) {
-          try {
-            callback()
-          } catch (error) {
-            failure ??= { error }
-          }
-        }
-      }
-
       return { processed: true, failure }
     }
 
@@ -1852,7 +1822,6 @@ export class CollectionStateManager<
    */
   public cleanup(): void {
     this.syncRunGeneration++
-    this.afterAcceptedApplied = []
     for (const transaction of this.pendingSyncedTransactions) {
       transaction.applied.reject(new SyncTransactionAbortedError())
     }

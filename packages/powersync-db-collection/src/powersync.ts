@@ -4,7 +4,7 @@ import { compileSQLite } from './sqlite-compiler'
 import { PendingOperationStore } from './PendingOperationStore'
 import { PowerSyncTransactor } from './PowerSyncTransactor'
 import { DEFAULT_BATCH_SIZE } from './definitions'
-import { asPowerSyncRecord, mapOperation, startupAccepted } from './helpers'
+import { asPowerSyncRecord, mapOperation } from './helpers'
 import { convertTableToSchema } from './schema'
 import { serializeForSQLite } from './serialization'
 import type {
@@ -588,11 +588,6 @@ function createPowerSyncCollectionConfig<
         let onUnload: CleanupFn | void | null = null
         let onUnloadStarted = false
 
-        let acceptStartup!: () => void
-        const accepted = new Promise<void>((resolve) => {
-          acceptStartup = resolve
-        })
-        startupAccepted.set(collection, accepted)
         const startup = start(async () => {
           const cleanup = await restConfig.onLoad?.()
           onUnload = cleanup
@@ -621,9 +616,9 @@ function createPowerSyncCollectionConfig<
             },
             appliedReceipts,
           )
+          // Readiness counts accepted rows. A mutation handler waits for it,
+          // and its own persisting transaction holds the startup rows.
           await Promise.all(appliedReceipts.map(whenSyncAccepted))
-          acceptStartup()
-          await Promise.all(appliedReceipts)
           markReady()
         }).catch((error) => {
           database.logger.log({

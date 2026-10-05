@@ -102,10 +102,3 @@ export function mapOperationToPowerSync(operation: string) {
       throw new Error(`Unknown operation ${operation} received`)
   }
 }
-
-/**
- * Resolves once a collection's eager startup rows are accepted. A mutation
- * handler waits for this, not for readiness: its own persisting transaction
- * holds those rows, which become visible only when it settles.
- */
-export const startupAccepted = new WeakMap<object, Promise<void>>()

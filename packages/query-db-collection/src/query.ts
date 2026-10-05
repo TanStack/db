@@ -10,6 +10,7 @@ import {
   getLoadSubsetDemandKey,
   validateSyncPersistenceCapability,
   warnOnce,
+  whenSyncAccepted,
   withCollectionConfigFactory,
   withCollectionSyncConfigFactory,
 } from '@tanstack/db'
@@ -2200,15 +2201,17 @@ export function queryCollectionOptions(
         retainedQueriesPendingRevalidation.delete(hashedQueryKey)
         cancelPersistedRetentionExpiry(hashedQueryKey)
 
-        // Readiness is publication: do not expose it until the establishing
-        // transaction's rows and events are visible.
+        // Readiness counts accepted rows; the application, which settles a
+        // subset load, waits for them to be visible.
         const finishApplication = () => {
           if (!signal?.aborted) markReady()
         }
+        const accepted = whenSyncAccepted(applied)
+        if (accepted === true) finishApplication()
+        else void accepted.then(finishApplication, () => undefined)
         if (applied !== true) {
-          return applied.then(finishApplication, failApplication)
+          return applied.then(() => undefined, failApplication)
         }
-        finishApplication()
         return true
       } catch (error) {
         return failApplication(error)

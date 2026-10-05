@@ -587,3 +587,100 @@ describe(`Collection mutation startup oracle`, () => {
     },
   )
 })
+
+/**
+ * # When does a Collection become ready during a pending mutation?
+ *
+ * Readiness counts accepted rows. Once the source marks ready, `preload`,
+ * `stateWhenReady`, and `toArrayWhenReady` resolve even if a persisting
+ * mutation holds the startup rows; those rows still publish with the drop of
+ * that mutation's optimistic state. So a mutation handler that awaits its own
+ * Collection's readiness during startup settles. The reference expects every
+ * handler to return and the Collection to end `ready` with the startup and
+ * confirmed rows. The bounded grammar crosses the three readiness waits, a
+ * source that confirms and marks ready inside the handler or outside it while
+ * the mutation persists, and optimistic or non-optimistic inserts. The
+ * review-probe sequences are cases of this grammar.
+ */
+describe(`Collection readiness during a pending mutation`, () => {
+  type ReadyHistory = {
+    wait: `preload` | `stateWhenReady` | `toArrayWhenReady`
+    source: `inside-handler` | `outside-handler`
+    optimistic: boolean
+  }
+  const histories: Array<ReadyHistory> = (
+    [`preload`, `stateWhenReady`, `toArrayWhenReady`] as const
+  ).flatMap((wait) =>
+    ([`inside-handler`, `outside-handler`] as const).flatMap((source) =>
+      [false, true].map((optimistic) => ({ wait, source, optimistic })),
+    ),
+  )
+  const waitFor = (
+    collection: Collection<Row, string>,
+    wait: ReadyHistory[`wait`],
+  ): Promise<unknown> =>
+    wait === `preload`
+      ? collection.preload()
+      : wait === `stateWhenReady`
+        ? collection.stateWhenReady()
+        : collection.toArrayWhenReady()
+
+  it.each(histories)(
+    `settles a handler awaiting $wait with the source marking ready $source, optimistic=$optimistic`,
+    async ({ wait, source, optimistic }) => {
+      let sync!: Parameters<SyncConfig<Row, string>[`sync`]>[0]
+      let entered!: () => void
+      const handlerEntered = new Promise<void>((resolve) => {
+        entered = resolve
+      })
+      const startup = () => {
+        sync.begin()
+        sync.write({ type: `insert`, value: { id: `server`, value: `server` } })
+        sync.write({ type: `insert`, value: { id: `local`, value: `local` } })
+        sync.commit()
+        sync.markReady()
+      }
+      const collection = createCollection<Row, string>({
+        id: `ready-during-mutation-${wait}-${source}-${optimistic}`,
+        getKey: (row) => row.id,
+        startSync: true,
+        sync: {
+          sync: (params) => {
+            sync = params
+          },
+        },
+        onInsert: async () => {
+          entered()
+          if (source === `inside-handler`) startup()
+          await waitFor(collection, wait)
+        },
+      })
+      try {
+        const insert = collection.insert(
+          { id: `local`, value: `local` },
+          { optimistic },
+        )
+        await handlerEntered
+        if (source === `outside-handler`) startup()
+        const settled = await Promise.race([
+          insert.isPersisted.promise.then(() => `settled` as const),
+          new Promise<`pending`>((resolve) =>
+            setTimeout(() => resolve(`pending`), 200),
+          ),
+        ])
+        expect(settled).toBe(`settled`)
+        expect(collection.status).toBe(`ready`)
+        expect(
+          collection.toArray
+            .map(({ id, value }) => ({ id, value }))
+            .sort((a, b) => a.id.localeCompare(b.id)),
+        ).toEqual([
+          { id: `local`, value: `local` },
+          { id: `server`, value: `server` },
+        ])
+      } finally {
+        await collection.cleanup()
+      }
+    },
+  )
+})

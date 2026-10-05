@@ -6218,18 +6218,13 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
         () => ({ status: `fulfilled` as const }),
         (reason: unknown) => ({ status: `rejected` as const, reason }),
       )
-      // The old hook's transaction still persists, so it holds the
-      // replacement's startup rows; readiness waits for their publication.
-      const replacementSettlement = observeSettlement(
-        replacementReady.then(() => undefined),
-      )
-      await flushAsyncWork()
-      expect(replacementSettlement.read()).toEqual({ status: `pending` })
-      releaseHook.resolve()
+      // Readiness counts the replacement's accepted startup rows, which the
+      // old hook's still-persisting transaction holds.
       const replacementOutcome = await atPersistedOracleCheckpoint(
         replacementReady,
         `pending user hook replacement owner ready`,
       )
+      releaseHook.resolve()
       const outcome = await atPersistedOracleCheckpoint(
         transactionOutcome,
         `pending user hook transaction settled`,

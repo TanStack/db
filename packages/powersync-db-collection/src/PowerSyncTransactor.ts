@@ -2,11 +2,7 @@ import { LogLevels, sanitizeSQL } from '@powersync/common'
 import { LoadSubsetOperationAbortedError } from '@tanstack/db'
 import DebugModule from 'debug'
 import { PendingOperationStore } from './PendingOperationStore'
-import {
-  asPowerSyncRecord,
-  mapOperationToPowerSync,
-  startupAccepted,
-} from './helpers'
+import { asPowerSyncRecord, mapOperationToPowerSync } from './helpers'
 import type { CommonPowerSyncDatabase, LockContext } from '@powersync/common'
 import type { PendingMutation, Transaction } from '@tanstack/db'
 import type { PendingOperation } from './PendingOperationStore'
@@ -98,14 +94,12 @@ export class PowerSyncTransactor {
       }
     }
 
-    // Wait until each collection's startup rows are accepted before taking a
-    // lock. Readiness would wait for this transaction to settle.
+    // Check all the observers are ready before taking a lock
     await Promise.all(
       Array.from(collectionsById.values()).map(async (collection) => {
         if (collection.isReady()) {
           return
         }
-        const accepted = startupAccepted.get(collection)
         // Observe this session without starting new demand from mutationFn.
         // Cleanup and startup failure must settle the wait before taking a lock.
         await new Promise<void>((resolve, reject) => {
@@ -127,10 +121,6 @@ export class PowerSyncTransactor {
             }
           }
           const unsubscribe = collection.on(`status:change`, check)
-          void accepted?.then(() => {
-            unsubscribe()
-            resolve()
-          })
           check()
         })
       }),
