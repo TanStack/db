@@ -3,13 +3,11 @@ id: RxDBCollectionConfig
 title: RxDBCollectionConfig
 ---
 
-# Type Alias: RxDBCollectionConfig\<T, TSchema\>
-
 ```ts
 type RxDBCollectionConfig<T, TSchema> = Omit<BaseCollectionConfig<T, string, TSchema>, "onInsert" | "onUpdate" | "onDelete" | "getKey"> & object;
 ```
 
-Defined in: [rxdb.ts:49](https://github.com/TanStack/db/blob/main/packages/rxdb-db-collection/src/rxdb.ts#L49)
+Defined in: [rxdb.ts:50](https://github.com/TanStack/db/blob/main/packages/rxdb-db-collection/src/rxdb.ts#L50)
 
 Configuration interface for RxDB collection options
 

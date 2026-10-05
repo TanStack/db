@@ -23,16 +23,17 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
-        uses: actions/checkout@v6.0.1
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           fetch-depth: 0
+          persist-credentials: true # release job pushes version/docs changes
       - name: Setup Tools
-        uses: tanstack/config/.github/setup@main
+        uses: tanstack/config/.github/setup@e4b48f16568324f76f467aa4c2aac2f05db632c3
       - name: Run Tests
         run: pnpm run lint && pnpm run build && pnpm run test
       - name: Run Changesets (version or publish)
         id: changesets
-        uses: changesets/action@v1.5.3
+        uses: changesets/action@e0145edc7d9d8679003495b11f87bd8ef63c0cba # v1.5.3
         with:
           version: pnpm run changeset:version
           publish: pnpm run changeset:publish
@@ -85,6 +86,6 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - name: Comment on PRs about release
         if: steps.changesets.outputs.published == 'true'
-        uses: tanstack/config/.github/comment-on-release@main
+        uses: tanstack/config/.github/comment-on-release@e4b48f16568324f76f467aa4c2aac2f05db632c3
         with:
           published-packages: ${{ steps.changesets.outputs.publishedPackages }}

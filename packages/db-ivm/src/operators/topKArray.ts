@@ -170,6 +170,8 @@ export class TopKArray<V> implements TopK<V> {
     // Splice is O(n) where n = all elements in the collection (i.e. n >= k) !
     this.#sortedValues.splice(index, 0, val)
 
+    if (this.#topKStart === this.#topKEnd) return result
+
     // Check if the topK changed
     if (index < this.#topKEnd) {
       // The inserted element is either before the top K or within the top K
@@ -208,6 +210,8 @@ export class TopKArray<V> implements TopK<V> {
     const index = this.#findIndex(value)
     // Remove the value at that position
     const [removedElem] = this.#sortedValues.splice(index, 1)
+
+    if (this.#topKStart === this.#topKEnd) return result
 
     // Check if the topK changed
     if (index < this.#topKEnd) {

@@ -3,15 +3,13 @@ id: useLiveQuery
 title: useLiveQuery
 ---
 
-# Function: useLiveQuery()
-
 ## Call Signature
 
 ```ts
 function useLiveQuery<TContext>(queryFn): Accessor<InferResultType<TContext>> & object;
 ```
 
-Defined in: [useLiveQuery.ts:102](https://github.com/TanStack/db/blob/main/packages/solid-db/src/useLiveQuery.ts#L102)
+Defined in: [useLiveQuery.ts:112](https://github.com/TanStack/db/blob/main/packages/solid-db/src/useLiveQuery.ts#L112)
 
 Create a live query using a query function
 
@@ -108,10 +106,10 @@ return (
 ## Call Signature
 
 ```ts
-function useLiveQuery<TContext>(queryFn): Accessor<InferResultType<TContext>> & object;
+function useLiveQuery<TContext>(queryFn): Accessor<InferConditionalResultType<TContext>> & object;
 ```
 
-Defined in: [useLiveQuery.ts:121](https://github.com/TanStack/db/blob/main/packages/solid-db/src/useLiveQuery.ts#L121)
+Defined in: [useLiveQuery.ts:134](https://github.com/TanStack/db/blob/main/packages/solid-db/src/useLiveQuery.ts#L134)
 
 Create a live query using a query function
 
@@ -211,7 +209,7 @@ return (
 function useLiveQuery<TContext>(config): Accessor<InferResultType<TContext>> & object;
 ```
 
-Defined in: [useLiveQuery.ts:182](https://github.com/TanStack/db/blob/main/packages/solid-db/src/useLiveQuery.ts#L182)
+Defined in: [useLiveQuery.ts:198](https://github.com/TanStack/db/blob/main/packages/solid-db/src/useLiveQuery.ts#L198)
 
 Create a live query using configuration object
 
@@ -280,7 +278,7 @@ return (
 function useLiveQuery<TResult, TKey, TUtils>(liveQueryCollection): Accessor<TResult[]> & object;
 ```
 
-Defined in: [useLiveQuery.ts:236](https://github.com/TanStack/db/blob/main/packages/solid-db/src/useLiveQuery.ts#L236)
+Defined in: [useLiveQuery.ts:255](https://github.com/TanStack/db/blob/main/packages/solid-db/src/useLiveQuery.ts#L255)
 
 Subscribe to an existing live query collection
 
@@ -352,7 +350,7 @@ return (
 function useLiveQuery<TResult, TKey, TUtils>(liveQueryCollection): Accessor<TResult | undefined> & object;
 ```
 
-Defined in: [useLiveQuery.ts:261](https://github.com/TanStack/db/blob/main/packages/solid-db/src/useLiveQuery.ts#L261)
+Defined in: [useLiveQuery.ts:283](https://github.com/TanStack/db/blob/main/packages/solid-db/src/useLiveQuery.ts#L283)
 
 Create a live query using a query function
 

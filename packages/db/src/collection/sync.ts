@@ -1,21 +1,28 @@
 import {
   CollectionConfigurationError,
   CollectionIsInErrorStateError,
+  CollectionPreloadAbortedError,
   DuplicateKeySyncError,
+  LoadSubsetOperationAbortedError,
   NoPendingSyncTransactionCommitError,
   NoPendingSyncTransactionWriteError,
   SyncCleanupError,
+  SyncRowReusedWithoutPreviousValueError,
   SyncTransactionAlreadyCommittedError,
   SyncTransactionAlreadyCommittedWriteError,
 } from '../errors'
-import { deepEquals } from '../utils'
+import { createDeferred } from '../deferred'
+import { isPromiseLike } from '../utils/type-guards'
 import { LIVE_QUERY_INTERNAL } from '../query/live/internal.js'
+import { automaticRowMetadataWrite } from './state'
 import type { StandardSchemaV1 } from '@standard-schema/spec'
 import type {
   ChangeMessageOrDeleteKeyMessage,
   CleanupFn,
   CollectionConfig,
+  LoadSubsetFn,
   LoadSubsetOptions,
+  LoadSubsetRequestResult,
   OptimisticChangeMessage,
   SyncConfigRes,
   SyncMetadataApi,
@@ -25,6 +32,42 @@ import type { CollectionStateManager } from './state'
 import type { CollectionLifecycleManager } from './lifecycle'
 import type { CollectionEventsManager } from './events.js'
 import type { LiveQueryCollectionUtils } from '../query/live/collection-config-builder.js'
+import type { Deferred } from '../deferred'
+
+type DeferredLoadSubset = {
+  options: LoadSubsetOptions
+  deferred: Deferred<void>
+}
+
+type LoadSubsetOperation = {
+  pending: Set<Promise<unknown>>
+  waiting: boolean
+  completed: boolean
+  hasError: boolean
+  error?: unknown
+  deferred?: Deferred<void>
+}
+
+function shallowEqual(
+  left: Record<string, unknown>,
+  right: Record<string, unknown>,
+): boolean {
+  const keys = Object.keys(left)
+  return (
+    keys.length === Object.keys(right).length &&
+    keys.every((key) => Object.is(left[key], right[key]))
+  )
+}
+
+// Bundlers inline `process.env.NODE_ENV`; without a bundler or `process`,
+// the development checks stay off.
+function isDevelopment(): boolean {
+  try {
+    return process.env.NODE_ENV !== `production`
+  } catch {
+    return false
+  }
+}
 
 export class CollectionSyncManager<
   TOutput extends object = Record<string, unknown>,
@@ -36,24 +79,46 @@ export class CollectionSyncManager<
   private state!: CollectionStateManager<TOutput, TKey, TSchema, TInput>
   private lifecycle!: CollectionLifecycleManager<TOutput, TKey, TSchema, TInput>
   private _events!: CollectionEventsManager
-  private config!: CollectionConfig<TOutput, TKey, TSchema>
+  private config!: CollectionConfig<TOutput, TKey, TSchema, any>
   private id: string
   private syncMode: `eager` | `on-demand`
+  // Development only: each written row object's fields when it was written.
+  private writtenRows: WeakMap<object, Record<string, unknown>> | undefined
 
   public preloadPromise: Promise<void> | null = null
-  public syncCleanupFn: (() => void) | null = null
-  public syncLoadSubsetFn:
-    | ((options: LoadSubsetOptions) => true | Promise<void>)
-    | null = null
+  private rejectPreload?: (error: unknown) => void
+  public syncCleanupFn: CleanupFn | null = null
+  public syncLoadSubsetFn: LoadSubsetFn | null = null
   public syncUnloadSubsetFn: ((options: LoadSubsetOptions) => void) | null =
     null
 
-  private pendingLoadSubsetPromises: Set<Promise<void>> = new Set()
+  private pendingLoadSubsetPromises: Set<Promise<unknown>> = new Set()
+  private activeLoadSubsetOperation: LoadSubsetOperation | undefined
+  private loadSubsetOperations = new Set<LoadSubsetOperation>()
+  private syncStartDeferred = false
+  private syncStartRequested = false
+  private deferredLoadSubsets: Array<DeferredLoadSubset> = []
+  // Fences callbacks retained across reentrant sync entry and cleanup. This
+  // changes at both boundaries; syncRunGeneration changes only at cleanup.
+  private syncCallbackEpoch = 0
+  private syncRunGeneration = 0
+  private syncEntryActive = false
+  private pendingSyncEntryCleanup:
+    | {
+        tasks: Array<Promise<void>>
+        failure?: { error: unknown }
+        onSettled?: (failure?: { error: unknown }) => void
+        completion?: Deferred<void>
+      }
+    | undefined
 
   /**
    * Creates a new CollectionSyncManager instance
    */
-  constructor(config: CollectionConfig<TOutput, TKey, TSchema>, id: string) {
+  constructor(
+    config: CollectionConfig<TOutput, TKey, TSchema, any>,
+    id: string,
+  ) {
     this.config = config
     this.id = id
     this.syncMode = config.syncMode ?? `eager`
@@ -72,10 +137,59 @@ export class CollectionSyncManager<
   }
 
   /**
+   * Core keeps the object a source writes as the stored row. A source that
+   * changes that object in place and writes it again has already
+   * overwritten the previous value core would publish, unless it passes
+   * `previousValue`. Rewriting an unchanged object stays valid.
+   */
+  private checkReusedRow(
+    key: TKey,
+    type: string,
+    message: { value: TOutput; previousValue?: TOutput },
+  ): void {
+    const value = message.value as Record<string, unknown>
+    const writtenRows = (this.writtenRows ??= new WeakMap())
+    try {
+      const written = writtenRows.get(value)
+      if (
+        written &&
+        type === `update` &&
+        // A write that names its previous value declares the reuse.
+        !(`previousValue` in message) &&
+        !shallowEqual(written, value)
+      ) {
+        throw new SyncRowReusedWithoutPreviousValueError(key)
+      }
+      writtenRows.set(value, { ...value })
+    } catch (error) {
+      if (error instanceof SyncRowReusedWithoutPreviousValueError) throw error
+      // A row that cannot be read reports its failure where it is applied.
+      writtenRows.delete(value)
+    }
+  }
+
+  private createDuplicateKeyError(key: TKey): DuplicateKeySyncError {
+    const utils = this.config.utils as
+      Partial<LiveQueryCollectionUtils> | undefined
+    const internal = utils?.[LIVE_QUERY_INTERNAL]
+    return new DuplicateKeySyncError(key, this.id, {
+      hasCustomGetKey: internal?.hasCustomGetKey ?? false,
+      hasJoins: internal?.hasJoins ?? false,
+      hasDistinct: internal?.hasDistinct ?? false,
+    })
+  }
+
+  /** Mark the active sync transaction as changing collection layout. */
+  public markLayoutChange(): void {
+    this.getActivePendingSyncTransaction().layoutChanged = true
+  }
+
+  /**
    * Start the sync process for this collection
    * This is called when the collection is first accessed or preloaded
    */
   public startSync(): void {
+    this.lifecycle.assertCanStartSync()
     if (
       this.lifecycle.status !== `idle` &&
       this.lifecycle.status !== `cleaned-up`
@@ -83,20 +197,41 @@ export class CollectionSyncManager<
       return // Already started or in progress
     }
 
-    this.lifecycle.setStatus(`loading`)
+    if (this.syncStartDeferred) {
+      this.syncStartRequested = true
+      return
+    }
 
+    const syncCallbackEpoch = ++this.syncCallbackEpoch
+    const isCurrentSync = () => syncCallbackEpoch === this.syncCallbackEpoch
+    this.lifecycle.setStatus(`loading`)
+    if (!isCurrentSync()) return
+    let syncEntryActive = true
+    let readyEffectFailure: { error: unknown } | undefined
+
+    this.syncEntryActive = true
     try {
       const syncRes = normalizeSyncFnResult(
         this.config.sync.sync({
           collection: this.collection,
           begin: (options?: { immediate?: boolean }) => {
+            if (!isCurrentSync()) return
+            const applied = createDeferred<void>()
+            // A source may ignore a stream receipt. Keep cancellation from
+            // becoming an unhandled rejection while preserving the original
+            // promise's rejection for callers that do await it.
+            void applied.promise.catch(() => undefined)
             this.state.pendingSyncedTransactions.push({
               committed: false,
+              applicationStarted: false,
+              layoutChanged: false,
               operations: [],
-              deletedKeys: new Set(),
               rowMetadataWrites: new Map(),
+              explicitRowMetadataWriteKeys: new Set(),
               collectionMetadataWrites: new Map(),
               immediate: options?.immediate,
+              applied,
+              duplicateKeyError: (key) => this.createDuplicateKeyError(key),
             })
           },
           write: (
@@ -105,97 +240,57 @@ export class CollectionSyncManager<
               TKey
             >,
           ) => {
-            const pendingTransaction =
-              this.state.pendingSyncedTransactions[
-                this.state.pendingSyncedTransactions.length - 1
-              ]
-            if (!pendingTransaction) {
-              throw new NoPendingSyncTransactionWriteError()
-            }
-            if (pendingTransaction.committed) {
-              throw new SyncTransactionAlreadyCommittedWriteError()
-            }
+            if (!isCurrentSync()) return
+            const pendingTransaction = this.getActivePendingSyncTransaction()
+            // Cancellation can invalidate an open transaction between writes.
+            // Its commit receipt owns that failure; later writes cannot revive it.
+            if (pendingTransaction.invalidationError !== undefined) return
 
-            let key: TKey | undefined = undefined
-            if (`key` in messageWithOptionalKey) {
-              key = messageWithOptionalKey.key
-            } else {
-              key = this.config.getKey(messageWithOptionalKey.value)
-            }
-
-            if (this.state.pendingLocalChanges.has(key)) {
-              this.state.pendingLocalOrigins.add(key)
-            }
+            const key =
+              `key` in messageWithOptionalKey
+                ? messageWithOptionalKey.key
+                : this.config.getKey(messageWithOptionalKey.value)
 
             let messageType = messageWithOptionalKey.type
 
             // Check if an item with this key already exists when inserting
             if (messageWithOptionalKey.type === `insert`) {
-              const insertingIntoExistingSynced = this.state.syncedData.has(key)
-              const hasPendingDeleteForKey =
-                pendingTransaction.deletedKeys.has(key)
-              const isTruncateTransaction = pendingTransaction.truncate === true
-              // Allow insert after truncate in the same transaction even if it existed in syncedData
-              if (
-                insertingIntoExistingSynced &&
-                !hasPendingDeleteForKey &&
-                !isTruncateTransaction
-              ) {
-                const existingValue = this.state.syncedData.get(key)
-                const valuesEqual =
-                  existingValue !== undefined &&
-                  deepEquals(existingValue, messageWithOptionalKey.value)
-                if (valuesEqual) {
-                  // The "insert" is an echo of a value we already have locally.
-                  // Treat it as an update so we preserve optimistic intent without
-                  // throwing a duplicate-key error during reconciliation.
-                  messageType = `update`
-                } else {
-                  const utils = this.config
-                    .utils as Partial<LiveQueryCollectionUtils>
-                  const internal = utils[LIVE_QUERY_INTERNAL]
-                  throw new DuplicateKeySyncError(key, this.id, {
-                    hasCustomGetKey: internal?.hasCustomGetKey ?? false,
-                    hasJoins: internal?.hasJoins ?? false,
-                    hasDistinct: internal?.hasDistinct ?? false,
-                  })
-                }
-              }
+              const disposition = this.state.classifyPendingSyncedInsert(
+                key,
+                messageWithOptionalKey.value,
+              )
+              if (disposition === `duplicate`)
+                throw this.createDuplicateKeyError(key)
+              messageType = disposition
+            }
+
+            if (`value` in messageWithOptionalKey && isDevelopment()) {
+              this.checkReusedRow(key, messageType, messageWithOptionalKey)
             }
 
             const message = {
               ...messageWithOptionalKey,
               type: messageType,
               key,
-            } as OptimisticChangeMessage<TOutput, TKey>
+              originalSyncType:
+                messageWithOptionalKey.type === `insert`
+                  ? (`insert` as const)
+                  : undefined,
+            } as OptimisticChangeMessage<TOutput, TKey> & {
+              originalSyncType?: `insert`
+            }
             pendingTransaction.operations.push(message)
+            this.state.stagePendingSyncOperation(message)
 
-            if (messageType === `delete`) {
-              pendingTransaction.deletedKeys.add(key)
-              pendingTransaction.rowMetadataWrites.set(key, { type: `delete` })
-            } else if (messageType === `insert`) {
-              if (message.metadata !== undefined) {
-                pendingTransaction.rowMetadataWrites.set(key, {
-                  type: `set`,
-                  value: message.metadata,
-                })
-              } else {
-                pendingTransaction.rowMetadataWrites.set(key, {
-                  type: `delete`,
-                })
-              }
-            } else if (message.metadata !== undefined) {
-              pendingTransaction.rowMetadataWrites.set(key, {
-                type: `set`,
-                value: message.metadata,
-              })
+            const metadataWrite = automaticRowMetadataWrite(message)
+            if (metadataWrite) {
+              pendingTransaction.rowMetadataWrites.set(key, metadataWrite)
             }
           },
-          commit: () => {
+          commit: (signal?: AbortSignal) => {
+            if (!isCurrentSync()) return true
             const pendingTransaction =
-              this.state.pendingSyncedTransactions[
-                this.state.pendingSyncedTransactions.length - 1
-              ]
+              this.state.pendingSyncedTransactions.at(-1)
             if (!pendingTransaction) {
               throw new NoPendingSyncTransactionCommitError()
             }
@@ -203,29 +298,61 @@ export class CollectionSyncManager<
               throw new SyncTransactionAlreadyCommittedError()
             }
 
+            if (signal?.aborted) {
+              this.state.cancelPendingSyncedTransaction(pendingTransaction)
+              return pendingTransaction.applied.promise
+            }
+
+            if (pendingTransaction.invalidationError !== undefined) {
+              this.state.cancelPendingSyncedTransaction(
+                pendingTransaction,
+                pendingTransaction.invalidationError,
+              )
+              return pendingTransaction.applied.promise
+            }
+
             pendingTransaction.committed = true
 
+            const cancel = () => {
+              this.state.cancelPendingSyncedTransaction(pendingTransaction)
+            }
+            signal?.addEventListener(`abort`, cancel, { once: true })
+
             this.state.commitPendingTransactions()
+            if (!pendingTransaction.applied.isPending()) {
+              signal?.removeEventListener(`abort`, cancel)
+              return true
+            }
+
+            const receipt = pendingTransaction.applied.promise
+            if (signal) {
+              const removeAbortListener = () => {
+                signal.removeEventListener(`abort`, cancel)
+              }
+              void receipt.then(removeAbortListener, removeAbortListener)
+            }
+            return receipt
           },
           markReady: () => {
-            this.lifecycle.markReady()
+            if (!isCurrentSync()) return
+            if (syncEntryActive) {
+              readyEffectFailure ??= this.lifecycle.markReadyDuringSyncStart()
+            } else {
+              this.lifecycle.markReady()
+            }
+          },
+          markError: (error?: unknown) => {
+            if (isCurrentSync()) this.lifecycle.markError(error)
           },
           truncate: () => {
-            const pendingTransaction =
-              this.state.pendingSyncedTransactions[
-                this.state.pendingSyncedTransactions.length - 1
-              ]
-            if (!pendingTransaction) {
-              throw new NoPendingSyncTransactionWriteError()
-            }
-            if (pendingTransaction.committed) {
-              throw new SyncTransactionAlreadyCommittedWriteError()
-            }
+            if (!isCurrentSync()) return
+            const pendingTransaction = this.getActivePendingSyncTransaction()
 
             // Clear all operations from the current transaction
             pendingTransaction.operations = []
-            pendingTransaction.deletedKeys.clear()
             pendingTransaction.rowMetadataWrites.clear()
+            pendingTransaction.explicitRowMetadataWriteKeys?.clear()
+            pendingTransaction.invalidationError = undefined
             // Intentionally preserve collectionMetadataWrites across truncate.
             // Collection-scoped metadata (for example persisted resume/reset
             // state) can be staged before truncate and should commit atomically
@@ -237,17 +364,25 @@ export class CollectionSyncManager<
             // - Subsequent synced ops applied on the fresh base
             // - Finally, optimistic mutations re-applied on top (single batch)
             pendingTransaction.truncate = true
+            this.state.refreshPendingSyncedProjection()
 
-            // Capture optimistic state NOW to preserve it even if transactions complete
-            // before this truncate transaction is committed
-            pendingTransaction.optimisticSnapshot = {
-              upserts: new Map(this.state.optimisticUpserts),
-              deletes: new Set(this.state.optimisticDeletes),
-            }
+            pendingTransaction.optimisticSnapshot =
+              this.state.captureTruncateOptimisticSnapshot()
           },
-          metadata: this.createSyncMetadataApi(),
+          metadata: this.createSyncMetadataApi(isCurrentSync),
         }),
       )
+      this.syncEntryActive = false
+      syncEntryActive = false
+
+      if (!isCurrentSync()) {
+        if (syncRes?.cleanup) {
+          this.registerPendingSyncEntryCleanup(syncRes.cleanup)
+        }
+        this.completePendingSyncEntryCleanup()
+        if (readyEffectFailure) throw readyEffectFailure.error
+        return
+      }
 
       // Store cleanup function if provided
       this.syncCleanupFn = syncRes?.cleanup ?? null
@@ -265,17 +400,84 @@ export class CollectionSyncManager<
             `Either provide a loadSubset handler or use syncMode "eager".`,
         )
       }
+
+      // Every route into sync passes through here, so it is the one place
+      // that sees sync start ahead of the subscriber that would justify it.
+      // `addSubscriber` counts itself in before calling us, so a subscription
+      // starting sync leaves the timer alone.
+      this.lifecycle.startGCTimerIfUnsubscribed()
     } catch (error) {
-      this.lifecycle.setStatus(`error`)
+      this.syncEntryActive = false
+      this.completePendingSyncEntryCleanup()
+      syncEntryActive = false
+      if (isCurrentSync()) this.lifecycle.markError(error)
       throw error
+    }
+    if (readyEffectFailure) throw readyEffectFailure.error
+  }
+
+  public deferStart(): boolean {
+    if (
+      this.lifecycle.status !== `idle` &&
+      this.lifecycle.status !== `cleaned-up`
+    ) {
+      return false
+    }
+
+    this.syncStartDeferred = true
+    return true
+  }
+
+  public resumeStart(): void {
+    if (!this.syncStartDeferred) {
+      return
+    }
+
+    this.syncStartDeferred = false
+    const shouldStart =
+      this.syncStartRequested || this.deferredLoadSubsets.length > 0
+    this.syncStartRequested = false
+    const deferredLoadSubsets = this.deferredLoadSubsets
+    this.deferredLoadSubsets = []
+    const syncRunGeneration = this.syncRunGeneration
+
+    try {
+      if (shouldStart) {
+        this.startSync()
+      }
+    } catch (error) {
+      for (const { deferred } of deferredLoadSubsets) {
+        deferred.reject(error)
+      }
+      throw error
+    }
+
+    for (const { options, deferred } of deferredLoadSubsets) {
+      const loadSubset = this.syncLoadSubsetFn
+      try {
+        if (
+          syncRunGeneration !== this.syncRunGeneration ||
+          options.signal?.aborted
+        ) {
+          throw new LoadSubsetOperationAbortedError()
+        }
+        const result = loadSubset?.(options) ?? true
+        if (result instanceof Promise) {
+          void result.then(
+            (sourceResult) => deferred.resolve(sourceResult),
+            (error: unknown) => deferred.reject(error),
+          )
+        } else {
+          deferred.resolve(undefined)
+        }
+      } catch (error) {
+        deferred.reject(error)
+      }
     }
   }
 
   private getActivePendingSyncTransaction() {
-    const pendingTransaction =
-      this.state.pendingSyncedTransactions[
-        this.state.pendingSyncedTransactions.length - 1
-      ]
+    const pendingTransaction = this.state.pendingSyncedTransactions.at(-1)
 
     if (!pendingTransaction) {
       throw new NoPendingSyncTransactionWriteError()
@@ -287,14 +489,15 @@ export class CollectionSyncManager<
     return pendingTransaction
   }
 
-  private createSyncMetadataApi(): SyncMetadataApi<TKey> {
+  private createSyncMetadataApi(
+    isCurrentSync: () => boolean,
+  ): SyncMetadataApi<TKey> {
     return {
+      persistence: null,
       row: {
         get: (key) => {
-          const pendingTransaction =
-            this.state.pendingSyncedTransactions[
-              this.state.pendingSyncedTransactions.length - 1
-            ]
+          if (!isCurrentSync()) return undefined
+          const pendingTransaction = this.state.pendingSyncedTransactions.at(-1)
           const pendingWrite = pendingTransaction?.rowMetadataWrites.get(key)
           if (pendingWrite) {
             return pendingWrite.type === `delete`
@@ -307,14 +510,18 @@ export class CollectionSyncManager<
           return this.state.syncedMetadata.get(key)
         },
         set: (key, metadata) => {
+          if (!isCurrentSync()) return
           const pendingTransaction = this.getActivePendingSyncTransaction()
+          pendingTransaction.explicitRowMetadataWriteKeys?.add(key)
           pendingTransaction.rowMetadataWrites.set(key, {
             type: `set`,
             value: metadata,
           })
         },
         delete: (key) => {
+          if (!isCurrentSync()) return
           const pendingTransaction = this.getActivePendingSyncTransaction()
+          pendingTransaction.explicitRowMetadataWriteKeys?.add(key)
           pendingTransaction.rowMetadataWrites.set(key, {
             type: `delete`,
           })
@@ -322,10 +529,8 @@ export class CollectionSyncManager<
       },
       collection: {
         get: (key) => {
-          const pendingTransaction =
-            this.state.pendingSyncedTransactions[
-              this.state.pendingSyncedTransactions.length - 1
-            ]
+          if (!isCurrentSync()) return undefined
+          const pendingTransaction = this.state.pendingSyncedTransactions.at(-1)
           const pendingWrite =
             pendingTransaction?.collectionMetadataWrites.get(key)
           if (pendingWrite) {
@@ -336,6 +541,7 @@ export class CollectionSyncManager<
           return this.state.syncedCollectionMetadata.get(key)
         },
         set: (key, value) => {
+          if (!isCurrentSync()) return
           const pendingTransaction = this.getActivePendingSyncTransaction()
           pendingTransaction.collectionMetadataWrites.set(key, {
             type: `set`,
@@ -343,17 +549,16 @@ export class CollectionSyncManager<
           })
         },
         delete: (key) => {
+          if (!isCurrentSync()) return
           const pendingTransaction = this.getActivePendingSyncTransaction()
           pendingTransaction.collectionMetadataWrites.set(key, {
             type: `delete`,
           })
         },
         list: (prefix) => {
+          if (!isCurrentSync()) return []
           const merged = new Map(this.state.syncedCollectionMetadata)
-          const pendingTransaction =
-            this.state.pendingSyncedTransactions[
-              this.state.pendingSyncedTransactions.length - 1
-            ]
+          const pendingTransaction = this.state.pendingSyncedTransactions.at(-1)
           if (pendingTransaction) {
             for (const [
               key,
@@ -378,11 +583,27 @@ export class CollectionSyncManager<
     }
   }
 
+  /** Whether a caller is still waiting for the initial sync to finish. */
+  public get hasPendingPreload(): boolean {
+    return this.rejectPreload !== undefined
+  }
+
   /**
    * Preload the collection data by starting sync if not already started
    * Multiple concurrent calls will share the same promise
    */
   public preload(): Promise<void> {
+    try {
+      this.lifecycle.assertCanStartSync()
+    } catch (error) {
+      return Promise.reject(error)
+    }
+    // Warm preloads need the same handoff time as a load that just finished,
+    // including when the previous GC deadline already queued idle cleanup.
+    if (this.lifecycle.status === `ready`) {
+      this.lifecycle.cancelGCTimer()
+      this.lifecycle.startGCTimerIfUnsubscribed()
+    }
     if (this.preloadPromise) {
       return this.preloadPromise
     }
@@ -397,20 +618,54 @@ export class CollectionSyncManager<
       )
     }
 
-    this.preloadPromise = new Promise<void>((resolve, reject) => {
+    const attempt = new Promise<void>((resolve, reject) => {
       if (this.lifecycle.status === `ready`) {
         resolve()
         return
       }
 
       if (this.lifecycle.status === `error`) {
-        reject(new CollectionIsInErrorStateError())
+        reject(this.getPreloadError())
         return
       }
 
-      // Register callback BEFORE starting sync to avoid race condition
-      this.lifecycle.onFirstReady(() => {
+      let settled = false
+      const syncStartState = { active: false, ready: false }
+      let unsubscribeError = () => {}
+      let unsubscribeReady = () => {}
+      const finishPreload = () => {
+        settled = true
+        unsubscribeError()
+        unsubscribeReady()
+        if (this.rejectPreload === rejectError) this.rejectPreload = undefined
+        this.lifecycle.startGCTimerIfUnsubscribed()
+      }
+      const resolveReady = () => {
+        if (syncStartState.active) {
+          syncStartState.ready = true
+          return
+        }
+        if (settled) return
+        finishPreload()
         resolve()
+      }
+      const rejectError = (error: unknown) => {
+        if (settled) return
+        finishPreload()
+        reject(error)
+      }
+
+      // Register callback BEFORE starting sync to avoid race condition
+      this.rejectPreload = rejectError
+      // An awaited preload owns this sync run until it settles, including
+      // when GC has already queued the destructive idle callback.
+      this.lifecycle.cancelGCTimer()
+      unsubscribeReady = this.lifecycle.onFirstReady(resolveReady)
+      unsubscribeError = this.collection.on(`status:error`, () => {
+        if (syncStartState.active) {
+          return
+        }
+        rejectError(this.getPreloadError())
       })
 
       // Start sync if collection hasn't started yet or was cleaned up
@@ -418,16 +673,42 @@ export class CollectionSyncManager<
         this.lifecycle.status === `idle` ||
         this.lifecycle.status === `cleaned-up`
       ) {
+        syncStartState.active = true
+        let startFailure: { error: unknown } | undefined
         try {
           this.startSync()
         } catch (error) {
-          reject(error)
-          return
+          startFailure = { error }
+        } finally {
+          syncStartState.active = false
+        }
+        if (this.collection.status === `error`) {
+          rejectError(this.getPreloadError())
+        } else if (syncStartState.ready) {
+          // A first-ready listener can throw after readiness is established.
+          // That failure still escapes direct startSync(), but preload follows
+          // the final collection state after synchronous adapter entry.
+          resolveReady()
+        } else if (startFailure) {
+          rejectError(startFailure.error)
         }
       }
     })
 
-    return this.preloadPromise
+    this.preloadPromise = attempt
+    void attempt.then(undefined, () => {
+      if (this.preloadPromise === attempt) {
+        this.preloadPromise = null
+      }
+    })
+    return attempt
+  }
+
+  private getPreloadError(): unknown {
+    const syncError = this.lifecycle.getSyncError()
+    return syncError === undefined
+      ? new CollectionIsInErrorStateError()
+      : syncError
   }
 
   /**
@@ -437,40 +718,142 @@ export class CollectionSyncManager<
     return this.pendingLoadSubsetPromises.size > 0
   }
 
+  /** @internal Observe subset requests caused by one imperative operation. */
+  public beginLoadSubsetOperation(): {
+    wait: () => true | Promise<void>
+    cancel: () => void
+  } {
+    const previousOperation = this.activeLoadSubsetOperation
+    const operation: LoadSubsetOperation = {
+      pending: new Set(),
+      waiting: false,
+      completed: false,
+      hasError: false,
+    }
+    // A new imperative operation owns future requests. Older operations keep
+    // waiting for the promises they already acquired, but cannot absorb work
+    // caused by a superseding physical window.
+    this.activeLoadSubsetOperation = operation
+    this.loadSubsetOperations.add(operation)
+    return {
+      wait: () => this.waitForLoadSubsetOperation(operation),
+      cancel: () => {
+        operation.completed = true
+        this.loadSubsetOperations.delete(operation)
+        if (this.activeLoadSubsetOperation === operation) {
+          this.activeLoadSubsetOperation = previousOperation?.completed
+            ? undefined
+            : previousOperation
+        }
+      },
+    }
+  }
+
+  private waitForLoadSubsetOperation(
+    operation: LoadSubsetOperation,
+  ): true | Promise<void> {
+    operation.waiting = true
+    if (operation.pending.size === 0) {
+      this.completeLoadSubsetOperation(operation)
+      return operation.hasError ? Promise.reject(operation.error) : true
+    }
+    operation.deferred = createDeferred<void>()
+    return operation.deferred.promise
+  }
+
+  private settleLoadSubsetOperation(
+    operation: LoadSubsetOperation,
+    promise: Promise<unknown>,
+    outcome: { ok: true } | { ok: false; error: unknown },
+  ): void {
+    if (operation.completed) return
+    operation.pending.delete(promise)
+    if (!outcome.ok && !operation.hasError) {
+      operation.hasError = true
+      operation.error = outcome.error
+    }
+    if (!operation.waiting || operation.pending.size > 0) return
+
+    // A resolved request can synchronously publish source rows that register
+    // follow-up loads. Let those registrations join this operation before it
+    // is considered complete.
+    queueMicrotask(() => {
+      if (operation.completed || operation.pending.size > 0) return
+      this.completeLoadSubsetOperation(operation)
+      if (operation.hasError) {
+        operation.deferred!.reject(operation.error)
+      } else {
+        operation.deferred!.resolve()
+      }
+    })
+  }
+
+  private completeLoadSubsetOperation(operation: LoadSubsetOperation): void {
+    operation.completed = true
+    this.loadSubsetOperations.delete(operation)
+    if (this.activeLoadSubsetOperation === operation) {
+      this.activeLoadSubsetOperation = undefined
+    }
+  }
+
+  private emitLoadingSubsetChange(isLoadingSubset: boolean): void {
+    this._events.emit(`loadingSubset:change`, {
+      type: `loadingSubset:change`,
+      collection: this.collection,
+      isLoadingSubset,
+      previousIsLoadingSubset: !isLoadingSubset,
+      loadingSubsetTransition: isLoadingSubset ? `start` : `end`,
+    })
+  }
+
+  /** @internal Attach a relevant existing request to the active operation. */
+  public trackLoadSubsetOperationPromise(promise: Promise<unknown>): void {
+    const operation = this.activeLoadSubsetOperation
+    if (!operation || operation.pending.has(promise)) return
+
+    operation.pending.add(promise)
+    void promise.then(
+      () => this.settleLoadSubsetOperation(operation, promise, { ok: true }),
+      (error) =>
+        this.settleLoadSubsetOperation(operation, promise, {
+          ok: false,
+          error,
+        }),
+    )
+  }
+
   /**
    * Tracks a load promise for isLoadingSubset state.
    * @internal This is for internal coordination (e.g., live-query glue code), not for general use.
    */
-  public trackLoadPromise(promise: Promise<void>): void {
+  public trackLoadPromise(promise: Promise<unknown>): void {
+    const syncRunGeneration = this.syncRunGeneration
     const loadingStarting = !this.isLoadingSubset
     this.pendingLoadSubsetPromises.add(promise)
+    this.trackLoadSubsetOperationPromise(promise)
 
     if (loadingStarting) {
-      this._events.emit(`loadingSubset:change`, {
-        type: `loadingSubset:change`,
-        collection: this.collection,
-        isLoadingSubset: true,
-        previousIsLoadingSubset: false,
-        loadingSubsetTransition: `start`,
-      })
+      this.emitLoadingSubsetChange(true)
     }
 
-    promise.finally(() => {
+    const finish = () => {
+      if (syncRunGeneration !== this.syncRunGeneration) return
+
       const loadingEnding =
         this.pendingLoadSubsetPromises.size === 1 &&
         this.pendingLoadSubsetPromises.has(promise)
       this.pendingLoadSubsetPromises.delete(promise)
 
       if (loadingEnding) {
-        this._events.emit(`loadingSubset:change`, {
-          type: `loadingSubset:change`,
-          collection: this.collection,
-          isLoadingSubset: false,
-          previousIsLoadingSubset: true,
-          loadingSubsetTransition: `end`,
-        })
+        this.emitLoadingSubsetChange(false)
       }
-    })
+    }
+    void promise.then(finish, finish)
+  }
+
+  /** @internal Generation fence for subscription-owned async work. */
+  public getSyncRunGeneration(): number {
+    return this.syncRunGeneration
   }
 
   /**
@@ -479,10 +862,22 @@ export class CollectionSyncManager<
    * @returns If data loading is asynchronous, this method returns a promise that resolves when the data is loaded.
    *          Returns true if no sync function is configured, if syncMode is 'eager', or if there is no work to do.
    */
-  public loadSubset(options: LoadSubsetOptions): Promise<void> | true {
+  public loadSubset(options: LoadSubsetOptions): LoadSubsetRequestResult {
+    if (options.signal?.aborted) {
+      return Promise.reject(new LoadSubsetOperationAbortedError())
+    }
+
     // Bypass loadSubset when syncMode is 'eager'
     if (this.syncMode === `eager`) {
       return true
+    }
+
+    if (this.syncStartDeferred) {
+      this.syncStartRequested = true
+      const deferred = createDeferred<void>()
+      this.deferredLoadSubsets.push({ options, deferred })
+      this.trackLoadPromise(deferred.promise)
+      return deferred.promise
     }
 
     if (this.syncLoadSubsetFn) {
@@ -502,32 +897,164 @@ export class CollectionSyncManager<
    * @param options Options that identify what data is being unloaded
    */
   public unloadSubset(options: LoadSubsetOptions): void {
+    // Eager loading bypasses subset acquisition, so there is no lease to release.
+    if (this.syncMode === `eager`) return
+
+    if (this.syncStartDeferred) {
+      this.deferredLoadSubsets = this.deferredLoadSubsets.filter((request) => {
+        if (request.options !== options) {
+          return true
+        }
+
+        request.deferred.reject(new LoadSubsetOperationAbortedError())
+        return false
+      })
+      return
+    }
+
     if (this.syncUnloadSubsetFn) {
       this.syncUnloadSubsetFn(options)
     }
   }
 
-  public cleanup(): void {
+  private wrapCleanupError(error: unknown): SyncCleanupError {
+    const wrappedError = new SyncCleanupError(this.id, error as Error | string)
+    wrappedError.cause = error
+    if (error instanceof Error) wrappedError.stack = error.stack
+    return wrappedError
+  }
+
+  private invokeCleanup(cleanup: CleanupFn | null): true | Promise<void> {
+    if (!cleanup) return true
+
     try {
-      if (this.syncCleanupFn) {
-        this.syncCleanupFn()
-        this.syncCleanupFn = null
+      const result = cleanup()
+      if (!isPromiseLike(result)) return true
+      return Promise.resolve(result).then(
+        () => undefined,
+        (error: unknown) => {
+          throw this.wrapCleanupError(error)
+        },
+      )
+    } catch (error) {
+      throw this.wrapCleanupError(error)
+    }
+  }
+
+  private registerPendingSyncEntryCleanup(cleanup: CleanupFn): void {
+    const pending = this.pendingSyncEntryCleanup
+    if (!pending) return
+
+    try {
+      const result = this.invokeCleanup(cleanup)
+      if (result !== true) {
+        pending.tasks.push(result)
+        void result.catch(() => undefined)
       }
     } catch (error) {
-      // Re-throw in a microtask to surface the error after cleanup completes
-      queueMicrotask(() => {
-        if (error instanceof Error) {
-          // Preserve the original error and stack trace
-          const wrappedError = new SyncCleanupError(this.id, error)
-          wrappedError.cause = error
-          wrappedError.stack = error.stack
-          throw wrappedError
-        } else {
-          throw new SyncCleanupError(this.id, error as Error | string)
-        }
-      })
+      pending.failure ??= { error }
     }
+  }
+
+  private completePendingSyncEntryCleanup(): void {
+    const pending = this.pendingSyncEntryCleanup
+    if (!pending) return
+    this.pendingSyncEntryCleanup = undefined
+
+    const settle = (failure?: { error: unknown }) => {
+      const outcome = pending.failure ?? failure
+      pending.onSettled?.(outcome)
+      if (outcome) pending.completion?.reject(outcome.error)
+      else pending.completion?.resolve()
+    }
+
+    if (pending.tasks.length === 0) {
+      settle()
+      return
+    }
+
+    void Promise.allSettled(pending.tasks).then((outcomes) => {
+      const rejected = outcomes.find(
+        (outcome): outcome is PromiseRejectedResult =>
+          outcome.status === `rejected`,
+      )
+      settle(rejected ? { error: rejected.reason } : undefined)
+    })
+  }
+
+  public cleanup(): true | Promise<void>
+  public cleanup(onSettled: (failure?: { error: unknown }) => void): boolean
+  public cleanup(
+    onSettled?: (failure?: { error: unknown }) => void,
+  ): boolean | Promise<void> {
+    // Invalidate callbacks retained by asynchronous work from this sync run
+    // before invoking adapter cleanup or allowing a new sync run to start.
+    ++this.syncCallbackEpoch
+    this.syncRunGeneration++
+    this.rejectPreload?.(new CollectionPreloadAbortedError())
+    const cleanup = this.syncCleanupFn
+    this.syncCleanupFn = null
+    this.syncLoadSubsetFn = null
+    this.syncUnloadSubsetFn = null
+
+    let cleanupResult: true | Promise<void> = true
+    let cleanupFailure: { error: unknown } | undefined
+    try {
+      cleanupResult = this.invokeCleanup(cleanup)
+    } catch (error) {
+      cleanupFailure = { error }
+    }
+
     this.preloadPromise = null
+    this.syncStartDeferred = false
+    this.syncStartRequested = false
+    const wasLoadingSubset = this.pendingLoadSubsetPromises.size > 0
+    this.pendingLoadSubsetPromises.clear()
+    if (wasLoadingSubset) {
+      this.emitLoadingSubsetChange(false)
+    }
+    this.activeLoadSubsetOperation = undefined
+    for (const operation of this.loadSubsetOperations) {
+      if (!operation.completed) {
+        operation.completed = true
+        operation.pending.clear()
+        operation.hasError = true
+        operation.error = new LoadSubsetOperationAbortedError()
+        operation.deferred?.reject(operation.error)
+      }
+    }
+    this.loadSubsetOperations.clear()
+    const deferredLoadSubsets = this.deferredLoadSubsets
+    this.deferredLoadSubsets = []
+    for (const request of deferredLoadSubsets) {
+      request.deferred.reject(new LoadSubsetOperationAbortedError())
+    }
+
+    if (this.syncEntryActive) {
+      const completion = onSettled ? undefined : createDeferred<void>()
+      const pending = {
+        tasks: [] as Array<Promise<void>>,
+        failure: cleanupFailure,
+        onSettled,
+        completion,
+      }
+      if (cleanupResult !== true) {
+        pending.tasks.push(cleanupResult)
+        void cleanupResult.catch(() => undefined)
+      }
+      this.pendingSyncEntryCleanup = pending
+      return onSettled ? false : completion!.promise
+    }
+
+    if (cleanupFailure) throw cleanupFailure.error
+    if (cleanupResult === true) return true
+
+    if (!onSettled) return cleanupResult
+    void cleanupResult.then(
+      () => onSettled(),
+      (error: unknown) => onSettled({ error }),
+    )
+    return false
   }
 }
 

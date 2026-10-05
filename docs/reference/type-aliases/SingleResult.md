@@ -3,13 +3,11 @@ id: SingleResult
 title: SingleResult
 ---
 
-# Type Alias: SingleResult
-
 ```ts
 type SingleResult = object;
 ```
 
-Defined in: [packages/db/src/types.ts:756](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L756)
+Defined in: [packages/db/src/types.ts:1006](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L1006)
 
 ## Properties
 
@@ -19,4 +17,4 @@ Defined in: [packages/db/src/types.ts:756](https://github.com/TanStack/db/blob/m
 singleResult: true;
 ```
 
-Defined in: [packages/db/src/types.ts:757](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L757)
+Defined in: [packages/db/src/types.ts:1007](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L1007)

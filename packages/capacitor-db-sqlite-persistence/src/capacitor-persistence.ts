@@ -1,4 +1,6 @@
 import {
+  DEFAULT_APPLIED_TX_PRUNE_MAX_AGE_SECONDS,
+  DEFAULT_APPLIED_TX_PRUNE_MAX_ROWS,
   SingleProcessCoordinator,
   createSQLiteCorePersistenceAdapter,
 } from '@tanstack/db-sqlite-persistence-core'
@@ -16,13 +18,10 @@ export type { CapacitorSQLiteDatabaseLike } from './capacitor-sqlite-driver'
 export type { SQLiteDBConnection } from '@capacitor-community/sqlite'
 
 type CapacitorSQLiteCoreSchemaMismatchPolicy =
-  | `sync-present-reset`
-  | `sync-absent-error`
-  | `reset`
+  `sync-present-reset` | `sync-absent-error` | `reset`
 
 export type CapacitorSQLiteSchemaMismatchPolicy =
-  | CapacitorSQLiteCoreSchemaMismatchPolicy
-  | `throw`
+  CapacitorSQLiteCoreSchemaMismatchPolicy | `throw`
 
 type CapacitorSQLitePersistenceBaseOptions = Omit<
   SQLiteCoreAdapterOptions,
@@ -81,8 +80,11 @@ function resolveAdapterBaseOptions(
   `driver` | `schemaVersion` | `schemaMismatchPolicy`
 > {
   return {
-    appliedTxPruneMaxRows: options.appliedTxPruneMaxRows,
-    appliedTxPruneMaxAgeSeconds: options.appliedTxPruneMaxAgeSeconds,
+    appliedTxPruneMaxRows:
+      options.appliedTxPruneMaxRows ?? DEFAULT_APPLIED_TX_PRUNE_MAX_ROWS,
+    appliedTxPruneMaxAgeSeconds:
+      options.appliedTxPruneMaxAgeSeconds ??
+      DEFAULT_APPLIED_TX_PRUNE_MAX_AGE_SECONDS,
     pullSinceReloadThreshold: options.pullSinceReloadThreshold,
   }
 }

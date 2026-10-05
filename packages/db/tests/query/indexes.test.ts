@@ -13,7 +13,14 @@ import {
   length,
   or,
 } from '../../src/query/builder/functions'
-import { mockSyncCollectionOptions, stripVirtualProps } from '../utils'
+import {
+  createIndexUsageTracker,
+  expectIndexUsage,
+  mockSyncCollectionOptions,
+  stripVirtualProps,
+  withIndexTracking,
+} from '../utils'
+import type { IndexUsageStats } from '../utils'
 
 interface TestItem {
   id: string
@@ -26,163 +33,6 @@ interface TestItem {
 
 type TestItem2 = Omit<TestItem, `id`> & {
   id2: string
-}
-
-// Index usage tracking utilities (copied from collection-indexes.test.ts)
-interface IndexUsageStats {
-  rangeQueryCalls: number
-  fullScanCalls: number
-  indexesUsed: Array<string>
-  queriesExecuted: Array<{
-    type: `index` | `fullScan`
-    operation?: string
-    field?: string
-    value?: any
-  }>
-}
-
-function createIndexUsageTracker(collection: any): {
-  stats: IndexUsageStats
-  restore: () => void
-} {
-  const stats: IndexUsageStats = {
-    rangeQueryCalls: 0,
-    fullScanCalls: 0,
-    indexesUsed: [],
-    queriesExecuted: [],
-  }
-
-  // Track rangeQuery calls on index objects (index usage)
-  const originalIndexes = new Map()
-
-  // Mock the indexes getter to intercept index access
-  const originalIndexesGetter = Object.getOwnPropertyDescriptor(
-    Object.getPrototypeOf(collection),
-    `indexes`,
-  )?.get
-  Object.defineProperty(collection, `indexes`, {
-    get: function () {
-      const indexes = originalIndexesGetter?.call(collection) || new Map()
-
-      // Mock each index's rangeQuery method
-      for (const [indexId, index] of indexes.entries()) {
-        if (!originalIndexes.has(indexId)) {
-          const originalLookup = index.lookup
-          originalIndexes.set(indexId, originalLookup)
-
-          index.lookup = function (operation: string, value: any) {
-            stats.rangeQueryCalls++
-            stats.indexesUsed.push(indexId)
-            stats.queriesExecuted.push({
-              type: `index`,
-              operation,
-              field: index.expression?.path?.join(`.`),
-              value,
-            })
-            return originalLookup.call(this, operation, value)
-          }
-        }
-      }
-
-      return indexes
-    },
-    configurable: true,
-  })
-
-  // Track full scan calls (entries() iteration)
-  const originalEntries = collection.entries
-  collection.entries = function* () {
-    // Only count as full scan if we're in a filtering context
-    // Check the call stack to see if we're inside createFilterFunction
-    const stack = new Error().stack || ``
-    if (
-      stack.includes(`createFilterFunction`) ||
-      stack.includes(`currentStateAsChanges`)
-    ) {
-      stats.fullScanCalls++
-      stats.queriesExecuted.push({
-        type: `fullScan`,
-      })
-    }
-    yield* originalEntries.call(this)
-  }
-
-  const restore = () => {
-    // Restore original indexes getter
-    if (originalIndexesGetter) {
-      Object.defineProperty(collection, `indexes`, {
-        get: originalIndexesGetter,
-        configurable: true,
-      })
-    }
-
-    // Restore original lookup methods on indexes
-    const indexes = originalIndexesGetter?.call(collection) || new Map()
-    for (const [indexId, originalLookup] of originalIndexes.entries()) {
-      const index = indexes.get(indexId)
-      if (index) {
-        index.lookup = originalLookup
-      }
-    }
-
-    collection.entries = originalEntries
-  }
-
-  return { stats, restore }
-}
-
-// Helper to assert index usage
-function expectIndexUsage(
-  stats: IndexUsageStats,
-  expectations: {
-    shouldUseIndex: boolean
-    shouldUseFullScan?: boolean
-    indexCallCount?: number
-    fullScanCallCount?: number
-  },
-) {
-  if (expectations.shouldUseIndex) {
-    expect(stats.rangeQueryCalls).toBeGreaterThan(0)
-    expect(stats.indexesUsed.length).toBeGreaterThan(0)
-
-    if (expectations.indexCallCount !== undefined) {
-      expect(stats.rangeQueryCalls).toBe(expectations.indexCallCount)
-    }
-  } else {
-    expect(stats.rangeQueryCalls).toBe(0)
-    expect(stats.indexesUsed.length).toBe(0)
-  }
-
-  if (expectations.shouldUseFullScan !== undefined) {
-    if (expectations.shouldUseFullScan) {
-      expect(stats.fullScanCalls).toBeGreaterThan(0)
-
-      if (expectations.fullScanCallCount !== undefined) {
-        expect(stats.fullScanCalls).toBe(expectations.fullScanCallCount)
-      }
-    } else {
-      expect(stats.fullScanCalls).toBe(0)
-    }
-  }
-}
-
-// Helper to run a test with index usage tracking (automatically handles setup/cleanup)
-function withIndexTracking(
-  collection: any,
-  testFn: (tracker: { stats: IndexUsageStats }) => void | Promise<void>,
-): void | Promise<void> {
-  const tracker = createIndexUsageTracker(collection)
-
-  try {
-    const result = testFn(tracker)
-    if (result instanceof Promise) {
-      return result.finally(() => tracker.restore())
-    }
-    tracker.restore()
-  } catch (error) {
-    tracker.restore()
-    throw error
-  }
 }
 
 const testData: Array<TestItem> = [

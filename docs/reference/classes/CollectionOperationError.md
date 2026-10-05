@@ -3,9 +3,7 @@ id: CollectionOperationError
 title: CollectionOperationError
 ---
 
-# Class: CollectionOperationError
-
-Defined in: [packages/db/src/errors.ts:139](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L139)
+Defined in: [packages/db/src/errors.ts:161](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L161)
 
 ## Extends
 
@@ -32,7 +30,7 @@ Defined in: [packages/db/src/errors.ts:139](https://github.com/TanStack/db/blob/
 new CollectionOperationError(message): CollectionOperationError;
 ```
 
-Defined in: [packages/db/src/errors.ts:140](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L140)
+Defined in: [packages/db/src/errors.ts:162](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L162)
 
 #### Parameters
 

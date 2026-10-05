@@ -3,8 +3,6 @@ id: ExpectedDeleteTypeError
 title: ExpectedDeleteTypeError
 ---
 
-# Class: ExpectedDeleteTypeError
-
 Defined in: [packages/trailbase-db-collection/src/errors.ts:32](https://github.com/TanStack/db/blob/main/packages/trailbase-db-collection/src/errors.ts#L32)
 
 ## Extends

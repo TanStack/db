@@ -3,5 +3,9 @@ import { runMobilePersistedCollectionConformanceSuite } from './mobile-persisted
 
 runMobilePersistedCollectionConformanceSuite(
   `expo persisted collection conformance`,
-  (database) => createReactNativeSQLitePersistence({ database }),
+  (database) =>
+    createReactNativeSQLitePersistence({
+      database,
+      arrayResultMode: `statement-results`,
+    }),
 )

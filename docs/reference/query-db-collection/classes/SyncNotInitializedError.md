@@ -3,9 +3,7 @@ id: SyncNotInitializedError
 title: SyncNotInitializedError
 ---
 
-# Class: SyncNotInitializedError
-
-Defined in: [packages/query-db-collection/src/errors.ts:39](https://github.com/TanStack/db/blob/main/packages/query-db-collection/src/errors.ts#L39)
+Defined in: [packages/query-db-collection/src/errors.ts:55](https://github.com/TanStack/db/blob/main/packages/query-db-collection/src/errors.ts#L55)
 
 ## Extends
 
@@ -19,7 +17,7 @@ Defined in: [packages/query-db-collection/src/errors.ts:39](https://github.com/T
 new SyncNotInitializedError(): SyncNotInitializedError;
 ```
 
-Defined in: [packages/query-db-collection/src/errors.ts:40](https://github.com/TanStack/db/blob/main/packages/query-db-collection/src/errors.ts#L40)
+Defined in: [packages/query-db-collection/src/errors.ts:56](https://github.com/TanStack/db/blob/main/packages/query-db-collection/src/errors.ts#L56)
 
 #### Returns
 

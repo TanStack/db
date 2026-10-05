@@ -61,6 +61,7 @@ describe(`WebOnlineDetector`, () => {
     })
 
     afterEach(() => {
+      vi.unstubAllGlobals()
       // Restore originals
       Object.defineProperty(globalThis, `window`, {
         value: originalWindow,
@@ -73,6 +74,26 @@ describe(`WebOnlineDetector`, () => {
         configurable: true,
       })
     })
+
+    it.each([
+      [`visible`, false, true],
+      [`visible`, true, true],
+      [`hidden`, false, false],
+      [`hidden`, true, true],
+    ] as const)(
+      `should report %s with navigator.onLine=%s as %s`,
+      (visibilityState, onLine, expected) => {
+        vi.stubGlobal(`navigator`, { onLine })
+        Object.defineProperty(document, `visibilityState`, {
+          value: visibilityState,
+        })
+        const detector = new WebOnlineDetector()
+
+        expect(detector.isOnline()).toBe(expected)
+
+        detector.dispose()
+      },
+    )
 
     it(`should notify subscribers when online event fires`, () => {
       const detector = new WebOnlineDetector()

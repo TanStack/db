@@ -1,4 +1,5 @@
 import { mkdtempSync, rmSync } from 'node:fs'
+import { createRequire } from 'node:module'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { setTimeout as delay } from 'node:timers/promises'
@@ -17,6 +18,10 @@ type RuntimeProcessHarness = {
   baseUrl: string
   restart: () => Promise<void>
   stop: () => Promise<void>
+  getOutput: () => {
+    stderr: string
+    stdout: string
+  }
 }
 
 type WranglerRuntimeResponse<TPayload> =
@@ -31,6 +36,8 @@ type WranglerRuntimeResponse<TPayload> =
 
 const packageDirectory = dirname(fileURLToPath(import.meta.url))
 const wranglerConfigPath = join(packageDirectory, `fixtures`, `wrangler.toml`)
+const require = createRequire(import.meta.url)
+const wranglerBinPath = require.resolve(`wrangler/bin/wrangler.js`)
 
 async function getAvailablePort(): Promise<number> {
   const netModule = await import('node:net')
@@ -118,8 +125,6 @@ async function startWranglerRuntime(options: {
     ].filter((entry): entry is [string, string] => entry[1] !== undefined)
 
     const wranglerArgs = [
-      `exec`,
-      `wrangler`,
       `dev`,
       `--local`,
       `--ip`,
@@ -136,7 +141,7 @@ async function startWranglerRuntime(options: {
       ]),
     ]
 
-    child = spawn(`pnpm`, wranglerArgs, {
+    child = spawn(process.execPath, [wranglerBinPath, ...wranglerArgs], {
       cwd: packageDirectory,
       env: {
         ...process.env,
@@ -200,21 +205,36 @@ async function startWranglerRuntime(options: {
     stop: async () => {
       await stopWranglerProcess(child)
     },
+    getOutput: () => ({
+      stderr: stderrBuffer,
+      stdout: stdoutBuffer,
+    }),
   }
 }
 
 async function postJson<TPayload>(
-  baseUrl: string,
+  runtime: RuntimeProcessHarness,
   path: string,
   body: unknown,
 ): Promise<WranglerRuntimeResponse<TPayload>> {
-  const response = await fetch(`${baseUrl}${path}`, {
-    method: `POST`,
-    headers: {
-      'content-type': `application/json`,
-    },
-    body: JSON.stringify(body),
-  })
+  let response: Response
+  try {
+    response = await fetch(`${runtime.baseUrl}${path}`, {
+      method: `POST`,
+      headers: {
+        'content-type': `application/json`,
+      },
+      body: JSON.stringify(body),
+      signal: AbortSignal.timeout(30_000),
+    })
+  } catch (error) {
+    const output = runtime.getOutput()
+    throw createRuntimeError(
+      `Timed out waiting for wrangler dev runtime response: ${String(error)}`,
+      output.stderr,
+      output.stdout,
+    )
+  }
 
   const parsed = (await response.json()) as WranglerRuntimeResponse<TPayload>
   return parsed
@@ -252,7 +272,7 @@ const createHarness: RuntimeBridgeE2EContractHarnessFactory = () => {
   const harness: RuntimeBridgeE2EContractHarness = {
     writeTodoFromClient: async (todo: RuntimeBridgeE2EContractTodo) => {
       const runtime = await runtimePromise
-      const result = await postJson<void>(runtime.baseUrl, `/write-todo`, {
+      const result = await postJson<void>(runtime, `/write-todo`, {
         collectionId,
         todo,
         txId: `tx-${nextSequence}`,
@@ -269,7 +289,7 @@ const createHarness: RuntimeBridgeE2EContractHarnessFactory = () => {
       const runtime = await runtimePromise
       const result = await postJson<
         Array<{ key: string; value: RuntimeBridgeE2EContractTodo }>
-      >(runtime.baseUrl, `/load-todos`, {
+      >(runtime, `/load-todos`, {
         collectionId: targetCollectionId ?? collectionId,
       })
       if (!result.ok) {
@@ -281,7 +301,7 @@ const createHarness: RuntimeBridgeE2EContractHarnessFactory = () => {
       async (): Promise<RuntimeBridgeE2EContractError> => {
         const runtime = await runtimePromise
         const result = await postJson<never>(
-          runtime.baseUrl,
+          runtime,
           `/load-unknown-collection-error`,
           {
             collectionId: `missing`,
@@ -334,7 +354,7 @@ describe(`cloudflare durable object schema mismatch behavior (wrangler local)`, 
     })
 
     try {
-      const writeResult = await postJson<void>(runtime.baseUrl, `/write-todo`, {
+      const writeResult = await postJson<void>(runtime, `/write-todo`, {
         collectionId,
         txId: `tx-1`,
         seq: 1,
@@ -359,7 +379,7 @@ describe(`cloudflare durable object schema mismatch behavior (wrangler local)`, 
     try {
       const loadResult = await postJson<
         Array<{ key: string; value: RuntimeBridgeE2EContractTodo }>
-      >(runtime.baseUrl, `/load-todos`, {
+      >(runtime, `/load-todos`, {
         collectionId,
       })
       const runtimeError = assertRuntimeError(loadResult)
@@ -384,7 +404,7 @@ describe(`cloudflare durable object schema mismatch behavior (wrangler local)`, 
     })
 
     try {
-      const writeResult = await postJson<void>(runtime.baseUrl, `/write-todo`, {
+      const writeResult = await postJson<void>(runtime, `/write-todo`, {
         collectionId,
         txId: `tx-1`,
         seq: 1,
@@ -409,7 +429,7 @@ describe(`cloudflare durable object schema mismatch behavior (wrangler local)`, 
     try {
       const loadResult = await postJson<
         Array<{ key: string; value: RuntimeBridgeE2EContractTodo }>
-      >(runtime.baseUrl, `/load-todos`, {
+      >(runtime, `/load-todos`, {
         collectionId,
       })
       const rows = assertRuntimeSuccess(loadResult) ?? []

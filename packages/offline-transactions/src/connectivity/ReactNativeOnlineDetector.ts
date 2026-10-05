@@ -14,7 +14,7 @@ export class ReactNativeOnlineDetector implements OnlineDetector {
   private netInfoUnsubscribe: (() => void) | null = null
   private appStateSubscription: NativeEventSubscription | null = null
   private isListening = false
-  private wasConnected = true
+  private wasConnected = false
 
   constructor() {
     this.startListening()
@@ -26,16 +26,6 @@ export class ReactNativeOnlineDetector implements OnlineDetector {
     }
 
     this.isListening = true
-
-    if (typeof NetInfo.fetch === `function`) {
-      void NetInfo.fetch()
-        .then((state) => {
-          this.wasConnected = this.toConnectivityState(state)
-        })
-        .catch(() => {
-          // Ignore initial fetch failures and rely on subscription updates.
-        })
-    }
 
     // Subscribe to network state changes
     this.netInfoUnsubscribe = NetInfo.addEventListener((state) => {
