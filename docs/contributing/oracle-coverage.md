@@ -300,7 +300,7 @@ that visits unbounded distinct source IDs remains open; this owner needs a
 bounded-navigation counter witness once that policy is chosen.
 
 The SQLite core binding-capacity oracle in
-`packages/db-sqlite-persistence-core/tests/sqlite-core-adapter.test.ts` is a
+`packages/db-sqlite-persistence-core/tests/sqlite-core-adapter-oracle.test.ts` is a
 bounded owner for issue #1993. The
 [review record](oracle-reviews/issue-1993-sqlite-binding-capacity.md) gives the
 exact executable revision and guide audit. It failed on the original 900-item

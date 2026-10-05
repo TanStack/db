@@ -2959,12 +2959,19 @@ function preparedDriver(
 function limitedDatabase(cap = BINDING_CAP): DatabaseSync {
   // Node supports this runtime option before the installed Node types declare it.
   const options = { limits: { variableNumber: cap } }
-  return new DatabaseSync(
+  const db = new DatabaseSync(
     ':memory:',
     options as unknown as NonNullable<
       ConstructorParameters<typeof DatabaseSync>[1]
     >,
   )
+  assert.equal(
+    (db as DatabaseSync & { limits?: { variableNumber: number } }).limits
+      ?.variableNumber,
+    cap,
+    'binding-capacity oracle requires the requested SQLite variable limit',
+  )
+  return db
 }
 
 type Observation = {
