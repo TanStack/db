@@ -472,6 +472,19 @@ export class CollectionSyncManager<
     }
   }
 
+  /** Record an explicit row metadata write and its place among the operations. */
+  private writeExplicitRowMetadata(
+    key: TKey,
+    write: { type: `set`; value: unknown } | { type: `delete` },
+  ): void {
+    const pendingTransaction = this.getActivePendingSyncTransaction()
+    pendingTransaction.explicitRowMetadataWrites?.set(key, {
+      position: pendingTransaction.operations.length,
+      write,
+    })
+    pendingTransaction.rowMetadataWrites.set(key, write)
+  }
+
   private getActivePendingSyncTransaction() {
     const pendingTransaction = this.state.pendingSyncedTransactions.at(-1)
 
@@ -506,24 +519,12 @@ export class CollectionSyncManager<
           return this.state.syncedMetadata.get(key)
         },
         set: (key, metadata) => {
-          if (!isCurrentSync()) return
-          const pendingTransaction = this.getActivePendingSyncTransaction()
-          const write = { type: `set` as const, value: metadata }
-          pendingTransaction.explicitRowMetadataWrites?.set(key, {
-            position: pendingTransaction.operations.length,
-            write,
-          })
-          pendingTransaction.rowMetadataWrites.set(key, write)
+          if (isCurrentSync())
+            this.writeExplicitRowMetadata(key, { type: `set`, value: metadata })
         },
         delete: (key) => {
-          if (!isCurrentSync()) return
-          const pendingTransaction = this.getActivePendingSyncTransaction()
-          const write = { type: `delete` as const }
-          pendingTransaction.explicitRowMetadataWrites?.set(key, {
-            position: pendingTransaction.operations.length,
-            write,
-          })
-          pendingTransaction.rowMetadataWrites.set(key, write)
+          if (isCurrentSync())
+            this.writeExplicitRowMetadata(key, { type: `delete` })
         },
       },
       collection: {
