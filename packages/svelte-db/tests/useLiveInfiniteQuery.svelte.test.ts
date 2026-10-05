@@ -138,9 +138,7 @@ describe(`useLiveInfiniteQuery`, () => {
 
   it(`rebuilds the query when state read inside the query callback changes`, () => {
     const posts = createPostsCollection(`svelte-infinite-tracked-read`, 8)
-    let query:
-      | ReturnType<typeof useLiveInfiniteQuery<any>>
-      | undefined
+    let query: ReturnType<typeof useLiveInfiniteQuery<any>> | undefined
     let setMaximum: ((maximum: number) => void) | undefined
     cleanup = $effect.root(() => {
       // No deps array: the derived controller tracks this read directly.
