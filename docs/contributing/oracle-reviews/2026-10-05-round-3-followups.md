@@ -3,32 +3,27 @@
 Base revision: `cfb03f201` (`main` after #2032 and #2033).
 
 This record closes the four items that the round 3 record and the
-ready-callback truncate record left open. Two are bug fixes. The other two
-keep their code: review found histories where it still matters.
+ready-callback truncate record left open. One is a bug fix. The cache delete
+stays, with witnesses. #2030 on `main` made the other two unnecessary.
 
 ## 1. Metadata rebuild after a canceled earlier transaction
 
 **Gap.** The round 3 record called RB2, a mutant that keeps stale automatic
 metadata writes through a rebuild, equivalent within legal histories. Reaching
-it needs a canceled earlier transaction, which the grammar did not generate.
+it needed a canceled earlier transaction, which the grammar did not generate.
 
-**Witness.** The metadata composition oracle gains a canceled lane. An earlier
-held transaction deletes key 1, the open transaction writes against that
-projection, and the earlier one is canceled before the open one commits. An
-insert onto the row the source still holds then becomes an idempotent
-re-insert, and the model reads it as one. RB2 fails this lane, so it was not
-equivalent.
+**Outcome: made unnecessary by #2030.** A first revision of this branch added a
+canceled lane to the metadata composition oracle. An earlier held transaction
+deleted key 1, the open transaction wrote against that projection, and the
+earlier one was canceled. The lane found that `main` lost an explicit
+`metadata.row.set` when the canceled delete turned the open insert into an
+idempotent re-insert, and the revision fixed the rebuild.
 
-**Bug.** `main` also fails the lane. An explicit `metadata.row.set` followed by
-such an insert read `undefined`, where last write wins keeps the explicit
-value. The rebuild skipped every key with an explicit write, so it kept the
-insert's automatic delete even after the insert became a re-insert.
-
-**Repair.** A transaction records each key's last explicit write with its
-position among the operations, and the rebuild replays the operations in
-order. A rebuild without reclassification gives the same writes as before.
-Mutants that skip clearing stale writes, or that ignore the explicit write's
-position, fail the oracle.
+#2030 then allowed only the open last sync transaction to be canceled. Aborting
+an accepted transaction's signal now has no effect, so a rebuild can no longer
+reclassify an open write. The canceled lane's history no longer exists, and RB2
+is equivalent again. This branch drops the lane and the rebuild change and
+keeps `main`'s rebuild.
 
 ## 2. A ready callback error from a sync-entry truncate
 
@@ -66,19 +61,10 @@ stays.
 
 ## 4. The sync commit's completed optimistic keys
 
-**Finding.** The mutant that ignores `completedOptimisticKeys` changed 191
-decisions, all in the metadata publication oracle, and that oracle's exact
-batch check still passed. The recompute after a transaction's completion
-publishes the same `$synced` change.
-
-**Outcome: kept.** A first revision removed the set, and the stress runs at ten
-times their counts passed. A high-effort review then described a history where
-the set still matters: a sync commit captures a key, the key's transaction
-completes before the capture clears, its recompute drops the layer and filters
-the key's event, and a later sync with an equal value publishes no `$synced`
-change. A probe over several completion orders did not reach it, and passing
-runs cannot rule it out, so the set stays. The coverage map records the needed
-witness.
+**Outcome: removed by #2030.** A first revision of this branch removed the set,
+and review then described a history where it might still matter, so the
+revision restored it. #2030 drops optimistic state at settlement and removed
+the set on `main`.
 
 ## Review of this record
 
@@ -89,18 +75,18 @@ A high-effort review found nine items.
 2. Insert-shaped and deferred publications of a reused row read the cache
    late. The deferred-publication witness covers the second; the delete covers
    both.
-3. A history may still need `completedOptimisticKeys`. Reverted; open for a
-   witness.
+3. A history may still need `completedOptimisticKeys`. Reverted, then
+   removed on `main` by #2030.
 4. A ready failure held during sync entry is dropped if the sync function then
    throws. `ops.markReady()` already behaves this way on `main`, so the
    truncate path now matches it. No change.
 5. The ready failure sink restored an outer sink that cannot exist. Removed.
 6. A cache comment described the removed delete. Resolved by the revert.
-7. The rebuild replay had a simpler equivalent form. Adopted; the two rebuild
-   mutants still fail.
+7. The rebuild replay had a simpler equivalent form. Adopted, then dropped
+   with the rebuild change after #2030.
 8. A hydration transaction rebuilt through a cancellation could lose its
-   metadata. A probe of the described route kept the metadata. Open, with no
-   change, until a witness reaches it.
+   metadata. #2030 marks hydration metadata as explicit, which fixes it on
+   `main`.
 9. The first reused-row witness had no demonstrated kill. Replaced by the
    production and deferred cases.
 
@@ -109,35 +95,27 @@ which `metadata.row.set` and `metadata.row.delete` now share.
 
 ## ORC outcomes
 
-- **ORC-001: met.** Items 1 and 2 cite the last-write-wins contract with the
-  2026-10-05 maintainer decisions, and the deferred ready-failure contract of
-  `ops.markReady()`. Items 3 and 4 change no contract.
-- **ORC-002: met.** The canceled lane uses the oracle's fold model. The
-  sync-entry witness and the reused-row witnesses expect fixed outcomes. None
-  reads production state.
-- **ORC-003: met.** The canceled lane's prose explains the cancellation and
-  the re-insert mapping. The sync-entry witness and the reused-row witness
-  state their laws beside the code.
-- **ORC-004: met.** A control checks that the canceled lane reaches a bare
-  re-insert after the earlier delete.
+- **ORC-001: met.** Item 2 cites the deferred ready-failure contract of
+  `ops.markReady()`. Item 3 cites the reused-row contract: reads return a
+  row's current value. Items 1 and 4 change no code here.
+- **ORC-002: met.** The sync-entry and reused-row witnesses expect fixed
+  outcomes and read no production state.
+- **ORC-003: met.** Each witness states its law beside its code.
+- **ORC-004: not applicable.** No generated grammar changed.
 - **ORC-005: met.** Each witness runs a real Collection through its sync API
-  and observes `metadata.row.get`, `collection.status`, `collection.state`, or
-  public reads and change messages.
-- **ORC-006: met.** RB2, the two rebuild mutants above, and `main` fail the
-  canceled lane. `main` fails the sync-entry truncate cases. Removing the
-  cache delete fails the production and deferred reused-row cases.
-- **ORC-007: met where generated.** The stress runs used the existing fixed
-  and random campaigns at ten times their counts. The new lanes are
-  enumerations.
+  and observes `collection.status`, `collection.state`, and public reads.
+- **ORC-006: met.** `main` fails the two sync-entry truncate cases. Removing
+  the cache delete fails the production and deferred reused-row cases.
+- **ORC-007: not applicable.** The witnesses are fixed cases.
 - **ORC-008: not applicable.** No stateful model changed.
-- **ORC-009: met.** "Canceled earlier transaction" means a sync transaction
-  committed with an abort signal and aborted before application.
+- **ORC-009: met.** "Sync entry" means the synchronous run of the sync
+  function inside `startSync`.
 - **ORC-010: met.** Each witness cleans up its Collection in a `finally`
   block.
 - **ORC-011: not applicable.** No reviewer named a shared fault.
 - **ORC-012: met by this record.**
-- **ORC-013: met.** The canceled lane sits beside the rebuilt lane, which
-  keeps the earlier transaction. The sync-entry witness keeps `markReady` as
-  the control case.
+- **ORC-013: met.** The sync-entry witness keeps `markReady` as the control
+  case. The reused-row witnesses sit beside the existing cases that declare
+  `previousValue` and publish at once.
 - **ORC-014: not applicable.** No controlled provider or host supplies a
   premise.
