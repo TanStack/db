@@ -449,8 +449,7 @@ async function observeConsumer(
   const publications: Array<Array<Row>> = []
   const rawPublications: Array<Array<Row>> = []
   let subscription:
-    | ReturnType<NonNullable<typeof live>[`subscribeChanges`]>
-    | undefined
+    ReturnType<NonNullable<typeof live>[`subscribeChanges`]> | undefined
   const query = (q: InitialQueryBuilder) => {
     const joined = q
       .from({ row: source })

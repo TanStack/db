@@ -82,8 +82,7 @@ let dropNextMessageWhen: ((data: unknown) => boolean) | undefined
 let observePostedMessage: ((data: unknown) => void) | undefined
 let dropNextBroadcastMessage: ((data: unknown) => boolean) | undefined
 let duplicateNextBroadcastMessage:
-  | ((data: unknown) => unknown | undefined)
-  | undefined
+  ((data: unknown) => unknown | undefined) | undefined
 let observeBroadcastMessage: ((data: unknown) => void) | undefined
 
 class MockBroadcastChannel {
@@ -256,8 +255,7 @@ function installGlobals(): void {
   Object.defineProperty(globalThis, `navigator`, {
     value: {
       ...(((globalThis as Record<string, unknown>).navigator as
-        | object
-        | undefined) ?? {}),
+        object | undefined) ?? {}),
       locks: mockNavigatorLocks,
     },
     writable: true,
@@ -436,8 +434,7 @@ const resizableArrayBufferValueCases = createResizableArrayBuffer()
     ] as const)
   : ([] as const)
 const Float16ArrayValue = Reflect.get(globalThis, `Float16Array`) as
-  | Float16ArrayConstructor
-  | undefined
+  Float16ArrayConstructor | undefined
 const float16ArrayValueCases = Float16ArrayValue
   ? ([
       [
@@ -1169,9 +1166,7 @@ describe(`BrowserCollectionCoordinator`, () => {
         let observed: Promise<void> | undefined
         let settled = false
         let response:
-          | ApplyCommittedTxResponse
-          | ApplyLocalMutationsResponse
-          | undefined
+          ApplyCommittedTxResponse | ApplyLocalMutationsResponse | undefined
         let failure: unknown
         const posted: Array<string> = []
 

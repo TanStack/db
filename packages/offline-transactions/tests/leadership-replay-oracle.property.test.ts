@@ -1388,8 +1388,7 @@ it.each(
             return observed
           })
           let replacement:
-            | ReturnType<typeof createTestOfflineEnvironment>
-            | undefined
+            ReturnType<typeof createTestOfflineEnvironment> | undefined
           const expectedCall = ({
             id,
             idempotencyKey,

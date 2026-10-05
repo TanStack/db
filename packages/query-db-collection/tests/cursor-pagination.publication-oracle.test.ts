@@ -164,8 +164,7 @@ describe(`cursor cache publication`, () => {
             const reader = () =>
               sharedPager ? retained : createCursorPager(options)
             let refreshEntered:
-              | ReturnType<typeof createDeferred<void>>
-              | undefined
+              ReturnType<typeof createDeferred<void>> | undefined
             const outer = new QueryObserver(client, {
               queryKey: [`posts`, `rows`],
               queryFn: () => {

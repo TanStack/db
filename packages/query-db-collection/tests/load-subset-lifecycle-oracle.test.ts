@@ -1197,8 +1197,7 @@ async function expectRemountAfterAbortStartsFreshQuery(): Promise<void> {
 }
 
 type RetiredOutcome =
-  | { status: `fulfilled` }
-  | { status: `rejected`; error: unknown }
+  { status: `fulfilled` } | { status: `rejected`; error: unknown }
 type ReplacementSnapshot = {
   source: Array<Row>
   live: Array<Row>

@@ -445,17 +445,15 @@ const classWriteArb: fc.Arbitrary<History> = fc
     between: fc.array(opArb, { maxLength: 2 }),
     revert: fc.boolean(),
   })
-  .map(
-    ({ f, g, first, second, between, revert }): History => ({
-      original: { f, g },
-      ops: [
-        { op: `set`, field: `f`, value: first },
-        ...between,
-        { op: `set`, field: `f`, value: second },
-        ...(revert ? [{ op: `revert` as const, field: `f` as const }] : []),
-      ],
-    }),
-  )
+  .map(({ f, g, first, second, between, revert }): History => ({
+    original: { f, g },
+    ops: [
+      { op: `set`, field: `f`, value: first },
+      ...between,
+      { op: `set`, field: `f`, value: second },
+      ...(revert ? [{ op: `revert` as const, field: `f` as const }] : []),
+    ],
+  }))
 
 // Nested round trips. Either add a key the original object lacks and later
 // delete it, or change an existing key and later write its original value

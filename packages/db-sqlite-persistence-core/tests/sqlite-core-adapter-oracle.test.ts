@@ -1823,9 +1823,12 @@ export function runSQLiteCoreAdapterContractSuite(
      */
     it(`resets collection metadata with its persisted baseline across generated adapter reopen histories`, async () => {
       const historyArbitrary = fc
-        .constantFrom<
-          ResetResumeHistory[`transition`]
-        >(`compatible-reopen`, `schema-reset`, `partial-restore`, `external-row-loss`)
+        .constantFrom<ResetResumeHistory[`transition`]>(
+          `compatible-reopen`,
+          `schema-reset`,
+          `partial-restore`,
+          `external-row-loss`,
+        )
         .chain((transition) =>
           fc.record<ResetResumeHistory>({
             fromSchemaVersion: fc.integer({ min: 1, max: 4 }),

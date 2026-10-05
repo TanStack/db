@@ -318,8 +318,7 @@ test(`an Electric-acknowledged insert survives an immediate reload before its OP
 
 test(`records only insert posts on the observed page`, () => {
   let onRequest:
-    | ((request: { method: () => string; url: () => string }) => void)
-    | undefined
+    ((request: { method: () => string; url: () => string }) => void) | undefined
   const page = {
     on: (
       event: string,

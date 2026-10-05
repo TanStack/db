@@ -39,11 +39,7 @@ type StartReentry =
   | `unsubscribe`
   | `cleanup`
 type RestartReentry =
-  | `none`
-  | `release-self`
-  | `release-peer`
-  | `unsubscribe`
-  | `cleanup`
+  `none` | `release-self` | `release-peer` | `unsubscribe` | `cleanup`
 
 const acquisitionPhases = [
   `deferred`,
@@ -65,8 +61,7 @@ type AcquisitionEntry = (typeof acquisitionEntries)[number]
 type AcquisitionCell = `${AcquisitionPhase}:${AcquisitionEntry}`
 
 type AcquisitionCellDefinition =
-  | { kind: `covered` }
-  | { kind: `excluded`; reason: string }
+  { kind: `covered` } | { kind: `excluded`; reason: string }
 
 const acquisitionCellDefinitions = {
   'deferred:request': { kind: `covered` },

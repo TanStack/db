@@ -59,8 +59,7 @@ async function withSpaceFixture(
 ) {
   const entries = spyFacadeEntries()
   let fixture:
-    | Awaited<ReturnType<typeof createNestedCollectionFixture>>
-    | undefined
+    Awaited<ReturnType<typeof createNestedCollectionFixture>> | undefined
   return withHistoryCleanup(
     async () => {
       fixture = await createNestedCollectionFixture(rootCount, leafCount)

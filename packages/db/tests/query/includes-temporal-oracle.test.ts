@@ -517,9 +517,8 @@ describe(`bounded cold comment request observations`, () => {
           collection.cleanup(),
         ),
       )
-      const failures = results.flatMap(
-        (result): Array<unknown> =>
-          result.status === `rejected` ? [result.reason as unknown] : [],
+      const failures = results.flatMap((result): Array<unknown> =>
+        result.status === `rejected` ? [result.reason as unknown] : [],
       )
       if (failures.length > 0) {
         if (!primaryFailure && failures.length === 1) throw failures[0]
@@ -684,8 +683,7 @@ it.each(
       expect(live.toArray).toHaveLength(1)
       // Observe the runtime boundary: a broken projection can omit this value.
       const publishedComments = live.toArray[0]?.comments as unknown as
-        | Array<Comment>
-        | undefined
+        Array<Comment> | undefined
       expect(
         publishedComments?.map(({ id, postId, body }) => ({
           id,

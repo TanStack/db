@@ -493,8 +493,7 @@ export function processGroupBy(
         $selected: finalResults,
       }
       const virtual = (aggregatedRow as Record<string, any>)[fields.virtual] as
-        | RowVirtualMetadata
-        | undefined
+        RowVirtualMetadata | undefined
       resultRow.$synced = virtual?.synced ?? true
       resultRow.$hasPendingWrites = !resultRow.$synced
       resultRow.$origin = (
