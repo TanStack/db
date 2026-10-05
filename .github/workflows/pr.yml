@@ -188,6 +188,8 @@ jobs:
         run: |
           cd examples/react/todo
           pnpm build
+      - name: Build Angular Todo Example
+        run: pnpm --dir examples/angular/todos build
   build-starter:
     name: Build Example Site
     runs-on: ubuntu-latest
