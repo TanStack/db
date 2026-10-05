@@ -115,7 +115,9 @@ export function openDatabase(
     request.onerror = () => {
       const errorMessage = request.error?.message || 'Unknown error'
       reject(
-        new Error(`Failed to open IndexedDB database "${name}": ${errorMessage}`),
+        new Error(
+          `Failed to open IndexedDB database "${name}": ${errorMessage}`,
+        ),
       )
     }
 
@@ -160,10 +162,7 @@ export function createObjectStore(
     return db.createObjectStore(storeName, options)
   } catch (error) {
     // Check if this is being called outside of a version change transaction
-    if (
-      error instanceof DOMException &&
-      error.name === 'InvalidStateError'
-    ) {
+    if (error instanceof DOMException && error.name === 'InvalidStateError') {
       throw new Error(
         `Cannot create object store "${storeName}": This operation is only allowed during a database upgrade. ` +
           'Ensure you are calling createObjectStore within the onUpgrade callback of openDatabase.',
@@ -171,10 +170,7 @@ export function createObjectStore(
     }
 
     // Check if the object store already exists
-    if (
-      error instanceof DOMException &&
-      error.name === 'ConstraintError'
-    ) {
+    if (error instanceof DOMException && error.name === 'ConstraintError') {
       throw new Error(
         `Object store "${storeName}" already exists in the database. ` +
           'Check the database version and only create stores when needed.',
@@ -230,7 +226,9 @@ export function executeTransaction<T>(
   ) => T | Promise<T>,
 ): Promise<T> {
   return new Promise((resolve, reject) => {
-    const storeNamesArray = Array.isArray(storeNames) ? storeNames : [storeNames]
+    const storeNamesArray = Array.isArray(storeNames)
+      ? storeNames
+      : [storeNames]
     let transaction: IDBTransaction
 
     try {
@@ -260,59 +258,33 @@ export function executeTransaction<T>(
       }
     }
 
-    let callbackResult: T
-    let callbackError: Error | undefined
-
-    // Handle transaction completion
-    transaction.oncomplete = () => {
-      if (callbackError) {
-        reject(callbackError)
-      } else {
-        resolve(callbackResult)
-      }
-    }
-
-    transaction.onerror = () => {
-      const errorMessage = transaction.error?.message || 'Unknown error'
-      reject(new Error(`Transaction failed: ${errorMessage}`))
-    }
-
-    transaction.onabort = () => {
-      const errorMessage = transaction.error?.message || 'Transaction was aborted'
-      reject(new Error(`Transaction aborted: ${errorMessage}`))
-    }
-
-    // Execute the callback
+    // Success requires both obligations: callback result AND transaction
+    // completion. Request success alone is not a durability receipt.
+    const completed = new Promise<void>((complete, abort) => {
+      transaction.oncomplete = () => complete()
+      transaction.onabort = () =>
+        abort(transaction.error ?? new Error('Transaction was aborted'))
+      // Request errors normally bubble before abort. Let abort report the
+      // transaction outcome; callback rejection retains its original cause.
+    })
+    let result: T | Promise<T>
     try {
-      const result = callback(transaction, stores)
-
-      // Handle async callbacks
-      if (result instanceof Promise) {
-        result
-          .then((value) => {
-            callbackResult = value
-          })
-          .catch((error) => {
-            callbackError = error instanceof Error ? error : new Error(String(error))
-            // Abort the transaction on callback error
-            try {
-              transaction.abort()
-            } catch {
-              // Transaction may already be finished
-            }
-          })
-      } else {
-        callbackResult = result
-      }
+      result = callback(transaction, stores)
     } catch (error) {
-      callbackError = error instanceof Error ? error : new Error(String(error))
-      // Abort the transaction on callback error
+      result = Promise.reject(error)
+    }
+    const callbackResult = Promise.resolve(result).catch((error) => {
       try {
         transaction.abort()
       } catch {
-        // Transaction may already be finished
+        // An async callback may settle after the native transaction has ended.
       }
-    }
+      throw error
+    })
+    Promise.all([callbackResult, completed]).then(
+      ([value]) => resolve(value),
+      reject,
+    )
   })
 }
 
@@ -378,7 +350,9 @@ export function getAll<T>(objectStore: IDBObjectStore): Promise<Array<T>> {
  * })
  * ```
  */
-export function getAllKeys(objectStore: IDBObjectStore): Promise<Array<IDBValidKey>> {
+export function getAllKeys(
+  objectStore: IDBObjectStore,
+): Promise<Array<IDBValidKey>> {
   return new Promise((resolve, reject) => {
     let request: IDBRequest<Array<IDBValidKey>>
     try {
@@ -493,7 +467,8 @@ export function put<T>(
     let request: IDBRequest<IDBValidKey>
     try {
       // Use the key parameter if provided, otherwise rely on keyPath
-      request = key !== undefined ? objectStore.put(value, key) : objectStore.put(value)
+      request =
+        key !== undefined ? objectStore.put(value, key) : objectStore.put(value)
     } catch (error) {
       reject(
         new Error(
@@ -655,7 +630,9 @@ export function deleteDatabase(
     request.onerror = () => {
       const errorMessage = request.error?.message || 'Unknown error'
       reject(
-        new Error(`Failed to delete IndexedDB database "${name}": ${errorMessage}`),
+        new Error(
+          `Failed to delete IndexedDB database "${name}": ${errorMessage}`,
+        ),
       )
     }
 

@@ -174,7 +174,7 @@ const info = await todosCollection.utils.getDatabaseInfo()
 // Export all data as an array
 const backup = await todosCollection.utils.exportData()
 
-// Import data (clears existing data first)
+// Import an atomic replacement (validates all inputs before changing data)
 await todosCollection.utils.importData([
   { id: '1', text: 'Buy milk', completed: false },
   { id: '2', text: 'Walk dog', completed: true },
@@ -183,6 +183,27 @@ await todosCollection.utils.importData([
 // Accept mutations from a manual transaction
 await todosCollection.utils.acceptMutations({ mutations })
 ```
+
+### Persistence and failure behavior
+
+Mutation handlers finish before data is persisted. A rejected handler leaves
+durable data unchanged and lets the Collection roll back the optimistic change.
+Each Collection batch writes its rows and version entries in one IndexedDB
+transaction. A failed row aborts that entire batch. Await the transaction's
+isPersisted.promise to observe persistence; the transaction itself is not a Promise.
+
+acceptMutations filters a manual transaction to the receiving Collection.
+Calling it separately for multiple Collections does not provide one atomic
+transaction across those Collections.
+
+importData validates schema inputs, applies schema defaults and transformations,
+and rejects duplicate keys before writing. It atomically replaces the store;
+failed validation or persistence preserves the prior rows and versions.
+clearObjectStore removes both durable and public source rows. The _versions
+store is reserved for adapter metadata.
+
+Initial loading becomes ready only after its read transaction completes. An
+aborted load rejects preload() and reports Collection status error.
 
 ## Low-Level API
 
@@ -264,3 +285,10 @@ const db = await createIndexedDB({
 ## License
 
 MIT
+
+## Testing
+
+Run the package test script for runtime tests, type assertions, coverage, and
+both oracle campaigns. Run the typecheck script to check all test-driver types
+as well. The [oracle contract and audit](tests/ORACLE.md) describes the model,
+replay coordinates, fault witnesses, and coverage limits.

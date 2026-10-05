@@ -6,11 +6,16 @@
  */
 
 import {
+  SchemaMustBeSynchronousError,
+  SchemaValidationError,
+} from '@tanstack/db'
+import {
   clear,
   deleteByKey,
   deleteDatabase as deleteIDBDatabase,
   executeTransaction,
   getAll,
+  getByKey,
   openDatabase,
   put,
 } from './wrapper'
@@ -209,7 +214,7 @@ export interface IndexedDBCollectionUtils<
    * Accepts mutations from a manual transaction and persists to IndexedDB
    */
   acceptMutations: (transaction: {
-    mutations: Array<PendingMutation<TItem>>
+    mutations: Array<PendingMutation>
   }) => Promise<void>
 
   /**
@@ -219,8 +224,8 @@ export interface IndexedDBCollectionUtils<
   exportData: () => Promise<Array<TItem>>
 
   /**
-   * Imports data into the object store
-   * Clears existing data first
+   * Validates input rows and atomically replaces the object store.
+   * Failure preserves the previous rows and versions.
    */
   importData: (items: Array<TInsertInput>) => Promise<void>
 }
@@ -272,6 +277,11 @@ export async function createIndexedDB(
   }
 
   for (const storeName of stores) {
+    if (storeName === VERSIONS_STORE_NAME) {
+      throw new Error(
+        'The "_versions" store is reserved for IndexedDB Collection metadata.',
+      )
+    }
     if (!storeName || typeof storeName !== 'string') {
       throw new Error(
         'createIndexedDB stores array contains invalid store names. ' +
@@ -385,11 +395,11 @@ export function indexedDBCollectionOptions<
 }
 
 export function indexedDBCollectionOptions(
-  config: IndexedDBCollectionConfig<Record<string, unknown>>,
+  config: IndexedDBCollectionConfig<Record<string, unknown>, StandardSchemaV1>,
 ): CollectionConfig<
   Record<string, unknown>,
   string | number,
-  never,
+  StandardSchemaV1,
   IndexedDBCollectionUtils
 > & {
   utils: IndexedDBCollectionUtils
@@ -412,6 +422,11 @@ export function indexedDBCollectionOptions(
   if (!name) {
     throw new NameRequiredError()
   }
+  if (name === VERSIONS_STORE_NAME) {
+    throw new Error(
+      'The "_versions" store is reserved for IndexedDB Collection metadata.',
+    )
+  }
 
   // Validate that the store exists in the database (sync check)
   if (!dbInstance.db.objectStoreNames.contains(name)) {
@@ -424,37 +439,21 @@ export function indexedDBCollectionOptions(
     throw new GetKeyRequiredError()
   }
 
+  type Item = Record<string, unknown>
+  type Mutation = PendingMutation<Item>
+  type Sync = Parameters<SyncConfig<Item>['sync']>[0]
+  const collectionId =
+    baseCollectionConfig.id ?? `indexeddb-collection:${dbInstance.name}:${name}`
   const tabId = crypto.randomUUID()
-
-  // In-memory cache of version entries for change detection
   const versionCache = new Map<string | number, string>()
+  let activeSync: Sync | undefined
+  let broadcastChannel: BroadcastChannel | undefined
 
-  // References to sync protocol functions (set during sync initialization)
-  let syncBegin: ((options?: { immediate?: boolean }) => void) | null = null
-  let syncWrite:
-    | ((message: ChangeMessageOrDeleteKeyMessage<any, string | number>) => void)
-    | null = null
-  let syncCommit: (() => void) | null = null
-
-  // BroadcastChannel for cross-tab sync
-  let broadcastChannel: BroadcastChannel | null = null
-
-  function getDatabase(): IDBDatabase {
-    return dbInstance.db
-  }
-
-  /**
-   * Broadcasts a cross-tab message
-   */
   function broadcastChange(
     changedKeys: Array<string | number>,
     type: CrossTabMessage['type'] = 'data-changed',
   ): void {
-    if (!broadcastChannel) {
-      return
-    }
-
-    const message: CrossTabMessage = {
+    broadcastChannel?.postMessage({
       type,
       database: dbInstance.name,
       name,
@@ -462,550 +461,323 @@ export function indexedDBCollectionOptions(
       changedKeys,
       timestamp: Date.now(),
       tabId,
-    }
-
-    broadcastChannel.postMessage(message)
+    } satisfies CrossTabMessage)
   }
 
-  /**
-   * Generates a new version key (UUID)
-   */
-  function generateVersionKey(): string {
-    return crypto.randomUUID()
-  }
-
-  /**
-   * Writes data and version entry atomically
-   */
-  async function writeWithVersion(
-    key: string | number,
-    value: Record<string, unknown>,
-    _operation: 'insert' | 'update',
+  // Limit cursor work to this store's compound-key prefix. Request errors must
+  // reject the surrounding transaction, including failures while deleting.
+  function visitVersions(
+    store: IDBObjectStore,
+    visit: (cursor: IDBCursorWithValue) => void,
   ): Promise<void> {
-    const db = getDatabase()
-    const versionKey = generateVersionKey()
-
-    await executeTransaction(
-      db,
-      [name, VERSIONS_STORE_NAME],
-      'readwrite',
-      (_, stores) => {
-        // Write data to data store (out-of-line key)
-        put(stores[name]!, value, key as IDBValidKey)
-
-        // Write version entry with array key [name, key]
-        const versionEntry: VersionEntry = {
-          versionKey,
-          updatedAt: Date.now(),
+    return new Promise((resolve, reject) => {
+      const request = store.openCursor(IDBKeyRange.bound([name], [name, []]))
+      request.onerror = () => reject(request.error)
+      request.onsuccess = () => {
+        const cursor = request.result
+        if (!cursor) {
+          resolve()
+          return
         }
-        put(stores[VERSIONS_STORE_NAME]!, versionEntry, [name, key] as IDBValidKey)
-      },
-    )
-
-    // Update in-memory cache
-    versionCache.set(key, versionKey)
-  }
-
-  /**
-   * Deletes data and version entry atomically
-   */
-  async function deleteWithVersion(key: string | number): Promise<void> {
-    const db = getDatabase()
-
-    await executeTransaction(
-      db,
-      [name, VERSIONS_STORE_NAME],
-      'readwrite',
-      (_, stores) => {
-        // Delete from data store
-        deleteByKey(stores[name]!, key as IDBValidKey)
-
-        // Delete version entry
-        deleteByKey(stores[VERSIONS_STORE_NAME]!, [name, key] as IDBValidKey)
-      },
-    )
-
-    // Update in-memory cache
-    versionCache.delete(key)
-  }
-
-  /**
-   * Queues a sync confirmation via microtask
-   */
-  function queueSyncConfirmation(
-    mutations: Array<{ type: OperationType; key: string | number; value: any }>,
-  ): void {
-    queueMicrotask(() => {
-      if (!syncBegin || !syncWrite || !syncCommit) {
-        return
+        try {
+          visit(cursor)
+          cursor.continue()
+        } catch (error) {
+          reject(error)
+        }
       }
-
-      syncBegin({ immediate: true })
-      for (const mutation of mutations) {
-        syncWrite({
-          type: mutation.type,
-          value: mutation.value,
-        })
-      }
-      syncCommit()
     })
   }
 
-  const internalSync: SyncConfig<any>['sync'] = (params) => {
-    const { begin, write, commit, markReady, collection } = params
+  // Stage cache changes until the ONE data-and-version transaction completes.
+  // A failed request, including synchronous structured-clone failure, aborts
+  // every mutation in this Collection's batch.
+  async function persist(
+    mutations: Array<{
+      type: OperationType
+      key: string | number
+      modified: Item
+    }>,
+    replace = false,
+  ): Promise<void> {
+    const versions = new Map<string | number, string>()
+    await executeTransaction(
+      dbInstance.db,
+      [name, VERSIONS_STORE_NAME],
+      'readwrite',
+      async (_, stores) => {
+        if (replace) {
+          await clear(stores[name]!)
+          await visitVersions(stores[VERSIONS_STORE_NAME]!, (cursor) => {
+            cursor.delete()
+          })
+        }
+        for (const mutation of mutations) {
+          const { key } = mutation
+          if (mutation.type === 'delete') {
+            await deleteByKey(stores[name]!, key)
+            await deleteByKey(stores[VERSIONS_STORE_NAME]!, [name, key])
+          } else {
+            const versionKey = crypto.randomUUID()
+            await put(stores[name]!, mutation.modified, key)
+            await put(
+              stores[VERSIONS_STORE_NAME]!,
+              {
+                versionKey,
+                updatedAt: Date.now(),
+              } satisfies VersionEntry,
+              [name, key],
+            )
+            versions.set(key, versionKey)
+          }
+        }
+      },
+    )
+    if (replace) versionCache.clear()
+    for (const mutation of mutations) {
+      const version = versions.get(mutation.key)
+      if (version === undefined) versionCache.delete(mutation.key)
+      else versionCache.set(mutation.key, version)
+    }
+  }
 
-    // Store references for later use in mutation handlers
-    syncBegin = begin
-    syncWrite = write
-    syncCommit = commit
+  function confirm(
+    mutations: Array<{
+      type: OperationType
+      key: string | number
+      modified: Item
+    }>,
+    replace = false,
+  ): void {
+    if (!activeSync) return
+    // Confirmation must drain after optimistic settlement. Applying it
+    // immediately would let settlement retain a new, unacknowledged snapshot.
+    // A replacement's truncate already supplies its own publication boundary.
+    activeSync.begin()
+    if (replace) activeSync.truncate()
+    for (const mutation of mutations) {
+      activeSync.write(
+        mutation.type === 'delete'
+          ? { type: 'delete', key: mutation.key }
+          : { type: mutation.type, value: mutation.modified },
+      )
+    }
+    activeSync.commit()
+  }
 
-    // Initialize BroadcastChannel for cross-tab sync
-    const channelName = `tanstack-db:${dbInstance.name}`
+  const internalSync: SyncConfig<Item>['sync'] = (params) => {
+    const { begin, write, commit, markReady, markError, truncate } = params
+    activeSync = params
+    let channel: BroadcastChannel | undefined
+
     try {
-      broadcastChannel = new BroadcastChannel(channelName)
-
-      // Handle cross-tab messages
-      broadcastChannel.onmessage = async (event: MessageEvent<CrossTabMessage>) => {
+      channel = new BroadcastChannel(`tanstack-db:${dbInstance.name}`)
+      broadcastChannel = channel
+      channel.onmessage = async (event: MessageEvent<CrossTabMessage>) => {
         const message = event.data
-
-        // Skip our own messages
-        if (message.tabId === tabId) {
+        if (
+          activeSync !== params ||
+          message.tabId === tabId ||
+          message.database !== dbInstance.name ||
+          message.name !== name
+        )
           return
-        }
-
-        // Skip messages for other databases/stores
-        if (message.database !== dbInstance.name || message.name !== name) {
-          return
-        }
-
-        // Handle database clear
         if (message.type === 'database-cleared') {
           begin()
-          // Delete all items from collection state
-          for (const key of versionCache.keys()) {
-            const item = collection.get(key)
-            if (item) {
-              write({ type: 'delete', value: item })
-            }
-          }
+          truncate()
           versionCache.clear()
           commit()
           return
         }
-
-        // Handle data changes - load changed items
-        if (message.changedKeys.length > 0) {
-          try {
-            const db = getDatabase()
-
-            await executeTransaction(
-              db,
-              [name, VERSIONS_STORE_NAME],
-              'readonly',
-              async (_, stores) => {
-                const changes: Array<{ type: 'insert' | 'update' | 'delete'; key: string | number; value: any }> = []
-
-                for (const key of message.changedKeys) {
-                  // Load version entry
-                  const versionRequest = stores[VERSIONS_STORE_NAME]!.get([name, key] as IDBValidKey)
-                  const dataRequest = stores[name]!.get(key as IDBValidKey)
-
-                  // Wait for both requests
-                  await new Promise<void>((resolve) => {
-                    let completed = 0
-                    const checkComplete = () => {
-                      completed++
-                      if (completed === 2) resolve()
-                    }
-                    versionRequest.onsuccess = checkComplete
-                    versionRequest.onerror = checkComplete
-                    dataRequest.onsuccess = checkComplete
-                    dataRequest.onerror = checkComplete
-                  })
-
-                  const versionEntry = versionRequest.result as VersionEntry | undefined
-                  const data = dataRequest.result
-
-                  const cachedVersion = versionCache.get(key)
-
-                  if (versionEntry && data) {
-                    if (!cachedVersion) {
-                      // New item - insert
-                      changes.push({ type: 'insert', key, value: data })
-                      versionCache.set(key, versionEntry.versionKey)
-                    } else if (cachedVersion !== versionEntry.versionKey) {
-                      // Changed item - update
-                      changes.push({ type: 'update', key, value: data })
-                      versionCache.set(key, versionEntry.versionKey)
-                    }
-                  } else if (cachedVersion && !versionEntry) {
-                    // Deleted item
-                    const existingItem = collection.get(key)
-                    if (existingItem) {
-                      changes.push({ type: 'delete', key, value: existingItem })
-                    }
-                    versionCache.delete(key)
-                  }
-                }
-
-                // Apply changes via sync protocol
-                if (changes.length > 0) {
-                  begin()
-                  for (const change of changes) {
-                    write({
-                      type: change.type,
-                      value: change.value,
-                    })
-                  }
-                  commit()
-                }
-              },
-            )
-          } catch (error) {
-            console.error('[IndexedDB Collection] Error processing cross-tab message:', error)
+        if (!message.changedKeys.length) return
+        try {
+          const rows = await executeTransaction(
+            dbInstance.db,
+            [name, VERSIONS_STORE_NAME],
+            'readonly',
+            async (_, stores) => {
+              const result = []
+              for (const key of message.changedKeys) {
+                const [version, value] = await Promise.all([
+                  getByKey<VersionEntry>(stores[VERSIONS_STORE_NAME]!, [
+                    name,
+                    key,
+                  ]),
+                  getByKey<Item>(stores[name]!, key),
+                ])
+                result.push({ key, version, value })
+              }
+              return result
+            },
+          )
+          if (activeSync !== params) return
+          const changes: Array<ChangeMessageOrDeleteKeyMessage<Item>> = []
+          for (const { key, version, value } of rows) {
+            const cached = versionCache.get(key)
+            if (version && value) {
+              if (cached !== version.versionKey) {
+                changes.push({
+                  type: cached === undefined ? 'insert' : 'update',
+                  value,
+                })
+                versionCache.set(key, version.versionKey)
+              }
+            } else if (cached !== undefined) {
+              // Source deletion is independent of the optimistic public view.
+              changes.push({ type: 'delete', key })
+              versionCache.delete(key)
+            }
           }
+          if (changes.length) {
+            begin()
+            for (const change of changes) write(change)
+            commit()
+          }
+        } catch (error) {
+          if (activeSync === params) markError(error)
         }
       }
     } catch {
-      // BroadcastChannel not available (e.g., in tests or older browsers)
-      // Cross-tab sync will be disabled but collection still works
+      // Persistence also works in environments without BroadcastChannel.
     }
 
-    // Perform initial load
-    ;(async () => {
+    void (async () => {
       try {
-        const db = getDatabase()
-
-        await executeTransaction(
-          db,
+        const snapshot = await executeTransaction(
+          dbInstance.db,
           [name, VERSIONS_STORE_NAME],
           'readonly',
           async (_, stores) => {
-            // Load all data
-            const items = await getAll<Record<string, unknown>>(stores[name]!)
-
-            // Load version entries for this collection
-            // Use a cursor to get all entries with keys starting with [name, ...]
-            const versionEntries = new Map<string | number, string>()
-
-            await new Promise<void>((resolve) => {
-              const range = IDBKeyRange.bound([name], [name, []])
-              const cursorRequest = stores[VERSIONS_STORE_NAME]!.openCursor(range)
-
-              cursorRequest.onsuccess = () => {
-                const cursor = cursorRequest.result
-                if (cursor) {
-                  const keyArray = cursor.key as [string, string | number]
-                  const itemKey = keyArray[1]
-                  const entry = cursor.value as VersionEntry
-                  versionEntries.set(itemKey, entry.versionKey)
-                  cursor.continue()
-                } else {
-                  resolve()
-                }
-              }
-
-              cursorRequest.onerror = () => {
-                resolve()
-              }
+            const items = await getAll<Item>(stores[name]!)
+            const versions = new Map<string | number, string>()
+            await visitVersions(stores[VERSIONS_STORE_NAME]!, (cursor) => {
+              const [, key] = cursor.key as [string, string | number]
+              versions.set(key, (cursor.value as VersionEntry).versionKey)
             })
-
-            // Build version cache
-            for (const [itemKey, versionKey] of versionEntries) {
-              versionCache.set(itemKey, versionKey)
-            }
-
-            // Write items to collection via sync protocol
-            if (items.length > 0) {
-              begin()
-              for (const item of items) {
-                write({ type: 'insert', value: item })
-              }
-              commit()
-            }
-
-            // Mark collection as ready
-            markReady()
+            return { items, versions }
           },
         )
-      } catch (error) {
-        console.error('[IndexedDB Collection] Error during initial load:', error)
-        // Mark ready even on error to avoid blocking
+        if (activeSync !== params) return
+        versionCache.clear()
+        for (const [key, version] of snapshot.versions)
+          versionCache.set(key, version)
+        begin()
+        for (const item of snapshot.items)
+          write({ type: 'insert', value: item })
+        commit()
         markReady()
+      } catch (error) {
+        if (activeSync === params) markError(error)
       }
     })()
 
-    // Return cleanup function
     return {
       cleanup: () => {
-        if (broadcastChannel) {
-          broadcastChannel.close()
-          broadcastChannel = null
+        channel?.close()
+        if (activeSync === params) {
+          activeSync = undefined
+          broadcastChannel = undefined
+          versionCache.clear()
         }
-        // Database connection managed by caller via dbInstance.close()
-        // We don't close it here as other collections may share the same db
-        syncBegin = null
-        syncWrite = null
-        syncCommit = null
-        versionCache.clear()
       },
     }
   }
 
-  const wrappedOnInsert = async (
-    params: InsertMutationFnParams<any>,
-  ): Promise<any> => {
-    const { transaction } = params
+  const acceptMutations = async (transaction: {
+    mutations: Array<Mutation>
+  }): Promise<void> => {
     const mutations = transaction.mutations
-
-    // Persist to IndexedDB
-    for (const mutation of mutations) {
-      const key = getKey(mutation.modified)
-      await writeWithVersion(key, mutation.modified, 'insert')
-    }
-
-    // Queue sync confirmation
-    const syncMutations = mutations.map((m) => ({
-      type: 'insert' as const,
-      key: getKey(m.modified),
-      value: m.modified,
-    }))
-    queueSyncConfirmation(syncMutations)
-
-    // Broadcast to other tabs
-    const changedKeys = mutations.map((m) => getKey(m.modified))
-    broadcastChange(changedKeys)
-
-    // Call user's onInsert handler if provided
-    if (onInsert) {
-      return onInsert(params)
-    }
+      .filter((m) => m.collection.id === collectionId)
+      .map((m) => ({
+        type: m.type,
+        key: getKey(m.modified),
+        modified: m.modified,
+      }))
+    if (!mutations.length) return
+    await persist(mutations)
+    confirm(mutations)
+    broadcastChange(mutations.map((m) => m.key))
   }
 
-  const wrappedOnUpdate = async (
-    params: UpdateMutationFnParams<any>,
-  ): Promise<any> => {
-    const { transaction } = params
-    const mutations = transaction.mutations
-
-    // Persist to IndexedDB
-    for (const mutation of mutations) {
-      const key = mutation.key
-      await writeWithVersion(key, mutation.modified, 'update')
-    }
-
-    // Queue sync confirmation
-    const syncMutations = mutations.map((m) => ({
-      type: 'update' as const,
-      key: m.key,
-      value: m.modified,
-    }))
-    queueSyncConfirmation(syncMutations)
-
-    // Broadcast to other tabs
-    const changedKeys = mutations.map((m) => m.key)
-    broadcastChange(changedKeys)
-
-    // Call user's onUpdate handler if provided
-    if (onUpdate) {
-      return onUpdate(params)
-    }
+  const wrappedOnInsert = async (params: InsertMutationFnParams<Item>) => {
+    const result = await onInsert?.(params)
+    await acceptMutations(params.transaction)
+    return result
   }
-
-  const wrappedOnDelete = async (
-    params: DeleteMutationFnParams<any>,
-  ): Promise<any> => {
-    const { transaction } = params
-    const mutations = transaction.mutations
-
-    // Persist to IndexedDB
-    for (const mutation of mutations) {
-      const key = mutation.key
-      await deleteWithVersion(key)
-    }
-
-    // Queue sync confirmation
-    const syncMutations = mutations.map((m) => ({
-      type: 'delete' as const,
-      key: m.key,
-      value: m.original,
-    }))
-    queueSyncConfirmation(syncMutations)
-
-    // Broadcast to other tabs
-    const changedKeys = mutations.map((m) => m.key)
-    broadcastChange(changedKeys)
-
-    // Call user's onDelete handler if provided
-    if (onDelete) {
-      return onDelete(params)
-    }
+  const wrappedOnUpdate = async (params: UpdateMutationFnParams<Item>) => {
+    const result = await onUpdate?.(params)
+    await acceptMutations(params.transaction)
+    return result
+  }
+  const wrappedOnDelete = async (params: DeleteMutationFnParams<Item>) => {
+    const result = await onDelete?.(params)
+    await acceptMutations(params.transaction)
+    return result
   }
 
   const clearObjectStore = async (): Promise<void> => {
-    const db = getDatabase()
-
-    await executeTransaction(
-      db,
-      [name, VERSIONS_STORE_NAME],
-      'readwrite',
-      async (_, stores) => {
-        // Clear data store
-        await clear(stores[name]!)
-
-        // Clear version entries for this collection
-        // Use a cursor to delete entries with keys starting with [name, ...]
-        await new Promise<void>((resolve) => {
-          const range = IDBKeyRange.bound([name], [name, []])
-          const cursorRequest = stores[VERSIONS_STORE_NAME]!.openCursor(range)
-
-          cursorRequest.onsuccess = () => {
-            const cursor = cursorRequest.result
-            if (cursor) {
-              cursor.delete()
-              cursor.continue()
-            } else {
-              resolve()
-            }
-          }
-
-          cursorRequest.onerror = () => {
-            resolve()
-          }
-        })
-      },
-    )
-
-    // Clear in-memory cache
-    versionCache.clear()
-
-    // Broadcast clear to other tabs
+    await persist([], true)
+    confirm([], true)
     broadcastChange([], 'database-cleared')
-
-    // Update collection state
-    if (syncBegin && syncCommit) {
-      syncBegin({ immediate: true })
-      // The sync protocol will handle the state update
-      syncCommit()
-    }
   }
 
   const deleteDatabaseUtil = async (): Promise<void> => {
-    // Close the database connection
     dbInstance.close()
-
     await deleteIDBDatabase(dbInstance.name, dbInstance.idbFactory)
-
-    // Clear in-memory cache
     versionCache.clear()
-
-    // Broadcast to other tabs
+    confirm([], true)
     broadcastChange([], 'database-cleared')
   }
 
   const getDatabaseInfo = async (): Promise<DatabaseInfo> => {
-    const db = getDatabase()
-
+    const db = dbInstance.db
     const info: DatabaseInfo = {
       name: db.name,
       version: db.version,
       objectStores: Array.from(db.objectStoreNames),
     }
-
-    // Try to get estimated size via StorageManager API
-    // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- runtime check needed
-    if (typeof navigator !== 'undefined' && navigator.storage) {
+    // Storage estimates are optional diagnostics, not a persistence prerequisite.
+    // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- optional browser API at runtime
+    if (typeof navigator !== 'undefined' && navigator.storage?.estimate) {
       try {
-        const estimate = await navigator.storage.estimate()
-        info.estimatedSize = estimate.usage
-      } catch {
-        // StorageManager not available or estimate failed
-      }
+        info.estimatedSize = (await navigator.storage.estimate()).usage
+      } catch {}
     }
-
     return info
   }
 
-  const acceptMutations = async (transaction: {
-    mutations: Array<PendingMutation<Record<string, unknown>>>
-  }): Promise<void> => {
-    const { mutations } = transaction
-
-    for (const mutation of mutations) {
-      const key = mutation.key
-
-      if (mutation.type === 'insert' || mutation.type === 'update') {
-        await writeWithVersion(key, mutation.modified, mutation.type)
-      } else {
-        await deleteWithVersion(key)
-      }
-    }
-
-    // Queue sync confirmation
-    const syncMutations = mutations.map((m) => ({
-      type: m.type as 'insert' | 'update' | 'delete',
-      key: m.key,
-      value: m.type === 'delete' ? m.original : m.modified,
-    }))
-    queueSyncConfirmation(syncMutations)
-
-    // Broadcast to other tabs
-    const changedKeys = mutations.map((m) => m.key)
-    broadcastChange(changedKeys)
-  }
-
-  const exportData = async (): Promise<Array<Record<string, unknown>>> => {
-    const db = getDatabase()
-
-    return executeTransaction(db, name, 'readonly', async (_, stores) => {
-      return getAll<Record<string, unknown>>(stores[name]!)
-    })
-  }
-
-  const importData = async (
-    items: Array<Record<string, unknown>>,
-  ): Promise<void> => {
-    // Clear existing data first
-    await clearObjectStore()
-
-    const db = getDatabase()
-
-    await executeTransaction(
-      db,
-      [name, VERSIONS_STORE_NAME],
-      'readwrite',
-      (_, stores) => {
-        for (const item of items) {
-          const key = getKey(item)
-          const versionKey = generateVersionKey()
-
-          // Write data
-          put(stores[name]!, item, key as IDBValidKey)
-
-          // Write version entry
-          const versionEntry: VersionEntry = {
-            versionKey,
-            updatedAt: Date.now(),
-          }
-          put(stores[VERSIONS_STORE_NAME]!, versionEntry, [name, key] as IDBValidKey)
-
-          // Update cache
-          versionCache.set(key, versionKey)
-        }
-      },
+  const exportData = (): Promise<Array<Item>> =>
+    executeTransaction(dbInstance.db, name, 'readonly', (_, stores) =>
+      getAll<Item>(stores[name]!),
     )
 
-    // Queue sync confirmation for all imported items
-    const syncMutations = items.map((item) => ({
-      type: 'insert' as const,
-      key: getKey(item),
-      value: item,
-    }))
-    queueSyncConfirmation(syncMutations)
-
-    // Broadcast to other tabs
-    const changedKeys = items.map((item) => getKey(item))
-    broadcastChange(changedKeys)
+  const importData = async (items: Array<Item>): Promise<void> => {
+    const keys = new Set<string | number>()
+    const mutations = items.map((input) => {
+      let item = input
+      if (config.schema) {
+        const result = config.schema['~standard'].validate(input)
+        if (result instanceof Promise) throw new SchemaMustBeSynchronousError()
+        if (result.issues) {
+          throw new SchemaValidationError(
+            'insert',
+            result.issues.map((issue) => ({
+              message: issue.message,
+              path: issue.path?.map(String),
+            })),
+          )
+        }
+        item = result.value as Item
+      }
+      const key = getKey(item)
+      if (keys.has(key)) throw new Error(`Duplicate imported key: ${key}`)
+      keys.add(key)
+      return { type: 'insert' as const, key, modified: item }
+    })
+    await persist(mutations, true)
+    confirm(mutations, true)
+    broadcastChange([], 'database-cleared')
+    broadcastChange(mutations.map((m) => m.key))
   }
 
   const utils: IndexedDBCollectionUtils = {
@@ -1016,16 +788,11 @@ export function indexedDBCollectionOptions(
     exportData,
     importData,
   }
-
-  // Generate default ID if not provided
-  const collectionId =
-    baseCollectionConfig.id ?? `indexeddb-collection:${dbInstance.name}:${name}`
-
   return {
     ...baseCollectionConfig,
     id: collectionId,
     getKey,
-    sync: { sync: internalSync },
+    sync: { sync: internalSync, rowUpdateMode: 'full' },
     onInsert: wrappedOnInsert,
     onUpdate: wrappedOnUpdate,
     onDelete: wrappedOnDelete,

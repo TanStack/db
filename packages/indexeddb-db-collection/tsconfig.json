@@ -10,12 +10,7 @@
     "esModuleInterop": true,
     "skipLibCheck": true,
     "forceConsistentCasingInFileNames": true,
-    "jsx": "react",
-    "paths": {
-      "@tanstack/store": ["../store/src"],
-      "@tanstack/db": ["../db/src"],
-      "@tanstack/db-ivm": ["../db-ivm/src"]
-    }
+    "jsx": "react"
   },
   "include": ["src", "tests", "vite.config.ts"],
   "exclude": ["node_modules", "dist"]

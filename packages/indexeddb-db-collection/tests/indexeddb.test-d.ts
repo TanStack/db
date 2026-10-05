@@ -1,9 +1,7 @@
 import { describe, expectTypeOf, it } from 'vitest'
 import { createCollection } from '@tanstack/db'
 import { z } from 'zod'
-import {
-  indexedDBCollectionOptions,
-} from '../src'
+import { indexedDBCollectionOptions } from '../src'
 import type {
   DatabaseInfo,
   IndexedDBCollectionConfig,
@@ -14,6 +12,7 @@ import type {
   DeleteMutationFnParams,
   InsertMutationFnParams,
   UpdateMutationFnParams,
+  WithVirtualProps,
 } from '@tanstack/db'
 
 // Mock IndexedDBInstance for type testing
@@ -123,7 +122,9 @@ describe(`IndexedDB collection type resolution tests`, () => {
     const usersCollection = createCollection(idbOptions)
 
     // Test that the collection itself has the correct type
-    expectTypeOf(usersCollection.toArray).toEqualTypeOf<Array<UserType>>()
+    expectTypeOf(usersCollection.toArray).toEqualTypeOf<
+      Array<WithVirtualProps<UserType>>
+    >()
 
     // Test that the getKey function has the correct parameter type
     expectTypeOf(idbOptions.getKey).parameters.toEqualTypeOf<[UserType]>()
@@ -153,7 +154,9 @@ describe(`IndexedDB collection type resolution tests`, () => {
     const usersCollection = createCollection(idbOptions)
 
     // Test that the collection itself has the correct type
-    expectTypeOf(usersCollection.toArray).toEqualTypeOf<Array<UserType>>()
+    expectTypeOf(usersCollection.toArray).toEqualTypeOf<
+      Array<WithVirtualProps<UserType, string>>
+    >()
 
     // Test that the getKey function has the correct parameter type
     expectTypeOf(idbOptions.getKey).parameters.toEqualTypeOf<[UserType]>()
@@ -437,9 +440,9 @@ describe(`IndexedDB collection type resolution tests`, () => {
             params.transaction.mutations[0].original,
           ).toEqualTypeOf<Item>()
           // Each mutation should have key
-          expectTypeOf(
-            params.transaction.mutations[0].key,
-          ).toMatchTypeOf<string | number>()
+          expectTypeOf(params.transaction.mutations[0].key).toMatchTypeOf<
+            string | number
+          >()
           // collection should be accessible and have correct type
           expectTypeOf(params.collection.get).toBeFunction()
           return Promise.resolve()

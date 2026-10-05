@@ -7,10 +7,11 @@ const config = defineConfig({
     name: packageJson.name,
     include: [`tests/**/*.test.ts`],
     environment: `jsdom`,
+    setupFiles: [`./tests/setup.ts`],
     coverage: { enabled: true, provider: `istanbul`, include: [`src/**/*`] },
     typecheck: {
       enabled: true,
-      include: [`tests/**/*.test.ts`, `tests/**/*.test-d.ts`],
+      include: [`tests/**/*.test-d.ts`],
     },
   },
 })
@@ -20,5 +21,6 @@ export default mergeConfig(
   tanstackViteConfig({
     entry: `./src/index.ts`,
     srcDir: `./src`,
+    tsconfigPath: `./tsconfig.json`,
   }),
 )

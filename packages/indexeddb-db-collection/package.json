@@ -10,12 +10,20 @@
     "directory": "packages/indexeddb-db-collection"
   },
   "homepage": "https://tanstack.com/db",
-  "keywords": ["indexeddb", "tanstack", "optimistic", "typescript", "offline"],
+  "keywords": [
+    "indexeddb",
+    "tanstack",
+    "optimistic",
+    "typescript",
+    "offline"
+  ],
   "scripts": {
     "build": "vite build",
     "dev": "vite build --watch",
     "lint": "eslint . --fix",
-    "test": "vitest run"
+    "test": "vitest run",
+    "test:oracles": "vitest run tests/persistence-oracle.test.ts tests/settlement-oracle.test.ts tests/transport-oracle.test.ts tests/wrapper.test.ts",
+    "typecheck": "tsc --noEmit"
   },
   "type": "module",
   "main": "dist/cjs/index.cjs",
@@ -35,7 +43,10 @@
     "./package.json": "./package.json"
   },
   "sideEffects": false,
-  "files": ["dist", "src"],
+  "files": [
+    "dist",
+    "src"
+  ],
   "dependencies": {
     "@standard-schema/spec": "^1.1.0",
     "@tanstack/db": "workspace:*"

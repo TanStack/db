@@ -825,3 +825,23 @@ the issue closeout comment. Keep their exact revision/runtime boundaries;
 historical counts in research notes do not certify later commits. Closing the
 bounded repair means the acceptance map has evidence and each remaining
 question has an owner—not that there can be no more bugs.
+
+## IndexedDB Collection persistence
+
+Owner: [IndexedDB oracle portfolio](../../packages/indexeddb-db-collection/tests/ORACLE.md).
+Settled histories compare authored rows with public/subscription/peer snapshots,
+raw durable rows, export and populated restore. Boundary histories cover handler
+decisions, clone/abort failure atomicity, source deletions under optimistic
+deletes, and startup settlement. Wrapper tests separate callback, request and
+native transaction completion. Transport tests cover disjoint writers, duplicate
+and excluded notifications, delayed CRUD and initial-load cleanup/restart.
+Normal package tests run fixed/random campaigns with direct seed/path replay.
+
+Open cells owned by this package: same-key concurrent writers; arbitrary delayed
+clear/import notifications; cleanup during writes or remote reads; downstream
+query and transient publication observations; and real-browser receiving
+witnesses for quota, blocked upgrades, versionchange and crash durability. The
+fake-IDB/controlled transport seam does not establish those host laws. A browser
+owner must supply the same failure/order premises at the public and durable
+cuts. Separate per-Collection acceptance calls do not promise cross-Collection
+atomicity.
