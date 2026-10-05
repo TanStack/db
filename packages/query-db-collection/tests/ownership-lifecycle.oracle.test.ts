@@ -6067,6 +6067,150 @@ describe(`query collection ownership lifecycle`, () => {
     },
   )
 
+  // Law: a fetch that started before a direct write keeps the server's rows
+  // for every key that write did not touch; a key written after the fetch
+  // began keeps its accepted row. Reference: the fetched rows, overlaid by the
+  // direct writes made after the fetch started, in order. Checkpoint: visible
+  // rows and the Query cache after the fetch settles. Cuts: the initial load,
+  // a handler's automatic refetch while another handler writes a different
+  // key or the same key, and a user refetch. The review probes are these cuts.
+  type MergeCut =
+    | `initial-load`
+    | `handler-refetch-other-key`
+    | `handler-refetch-same-key`
+    | `user-refetch`
+  it.each<MergeCut>([
+    `initial-load`,
+    `handler-refetch-other-key`,
+    `handler-refetch-same-key`,
+    `user-refetch`,
+  ])(
+    `keeps server rows a direct write did not touch when an older fetch settles: %s`,
+    async (cut) => {
+      type Row = { id: string; value: string }
+      const id = `older-fetch-merge-${cut}`
+      let server: Array<Row> =
+        cut === `initial-load`
+          ? [
+              { id: `1`, value: `a` },
+              { id: `2`, value: `b` },
+            ]
+          : [
+              { id: `1`, value: `old1` },
+              { id: `2`, value: `old2` },
+            ]
+      const held: Array<ReturnType<typeof createDeferred<void>>> = []
+      let hold = cut === `initial-load`
+      const queryClient = createQueryClient()
+      const writtenKey = cut === `handler-refetch-same-key` ? `1` : `2`
+      const collection = createCollection(
+        queryCollectionOptions<Row>({
+          id,
+          queryClient,
+          queryKey: [id],
+          queryFn: async () => {
+            const snapshot = server.map((row) => ({ ...row }))
+            if (hold) {
+              const gate = createDeferred<void>()
+              held.push(gate)
+              await gate.promise
+            }
+            return snapshot
+          },
+          getKey: (row) => row.id,
+          startSync: true,
+          onUpdate: async ({ transaction, collection: handlerCollection }) => {
+            const modified = transaction.mutations[0].modified
+            if (modified.value === `A`) {
+              // Handler A: the server accepts the change, and the automatic
+              // refetch confirms it.
+              server = server.map((row) =>
+                row.id === `1` ? { id: `1`, value: `A` } : row,
+              )
+              return
+            }
+            server = server.map((row) =>
+              row.id === writtenKey ? { id: writtenKey, value: `B` } : row,
+            )
+            await handlerCollection.utils.writeUpdate({
+              id: writtenKey,
+              value: `B`,
+            })
+            return { refetch: false }
+          },
+        }),
+      )
+      cleanups.push(async () => {
+        held.forEach((gate) => gate.resolve())
+        await collection.cleanup()
+        queryClient.clear()
+      })
+      const merge = (fetched: Array<Row>, writes: Array<Row>) => {
+        const rows = new Map(fetched.map((row) => [row.id, row]))
+        for (const row of writes) rows.set(row.id, row)
+        return Object.fromEntries(
+          [...rows.values()].map((row) => [row.id, row.value]),
+        )
+      }
+      const visible = () =>
+        Object.fromEntries(
+          Array.from(collection.values(), (row) => [row.id, row.value]),
+        )
+      const cached = () =>
+        Object.fromEntries(
+          (queryClient.getQueryData<Array<Row>>([id]) ?? []).map((row) => [
+            row.id,
+            row.value,
+          ]),
+        )
+
+      let expected: Record<string, string>
+      if (cut === `initial-load`) {
+        const fetched = server
+        const ready = collection.preload()
+        await vi.waitFor(() => expect(held).toHaveLength(1))
+        await collection.utils.writeInsert({ id: `3`, value: `c` })
+        held[0]!.resolve()
+        await ready
+        expected = merge(fetched, [{ id: `3`, value: `c` }])
+      } else if (cut === `user-refetch`) {
+        await collection.preload()
+        server = [
+          { id: `1`, value: `new1` },
+          { id: `2`, value: `new2` },
+        ]
+        const fetched = server
+        hold = true
+        const refetch = collection.utils.refetch()
+        await vi.waitFor(() => expect(held).toHaveLength(1))
+        hold = false
+        await collection.utils.writeInsert({ id: `3`, value: `c` })
+        held[0]!.resolve()
+        await refetch
+        expected = merge(fetched, [{ id: `3`, value: `c` }])
+        // The refetch settles only once the merged rows are visible.
+        expect(visible()).toEqual(expected)
+      } else {
+        await collection.preload()
+        hold = true
+        const first = collection.update(`1`, (draft) => {
+          draft.value = `A`
+        })
+        await vi.waitFor(() => expect(held).toHaveLength(1))
+        hold = false
+        const fetched = server
+        await collection.update(writtenKey, (draft) => {
+          draft.value = `B-optimistic`
+        }).isPersisted.promise
+        held[0]!.resolve()
+        await first.isPersisted.promise
+        expected = merge(fetched, [{ id: writtenKey, value: `B` }])
+      }
+      await vi.waitFor(() => expect(visible()).toEqual(expected))
+      expect(cached()).toEqual(expected)
+    },
+  )
+
   it(`settles a direct write only after its persisted commit applies`, async () => {
     const id = `persisted-direct-write-receipt`
     const storage = createOwnershipStorage(undefined, 2)

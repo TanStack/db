@@ -1014,6 +1014,8 @@ export function queryCollectionOptions(
   // data. Count direct writes, and record the count when each fetch starts.
   let directWriteGeneration = 0
   const fetchStartGenerations = new Map<string, number>()
+  // The generation of the latest direct write to each key.
+  const directWriteKeyGenerations = new Map<string | number, number>()
 
   // queryKey → reference count (how many loadSubset calls are active)
   // Reference counting for QueryObserver lifecycle management
@@ -2395,18 +2397,26 @@ export function queryCollectionOptions(
           (fetchStartGenerations.get(hashedQueryKey) ?? directWriteGeneration) <
             directWriteGeneration
         ) {
-          // This fetch started before a direct write, so its rows are older
-          // than the accepted rows. Put the accepted rows back in the cache
-          // instead of applying it.
-          fetchStartGenerations.set(hashedQueryKey, directWriteGeneration)
-          updateCacheDataForKey(
-            queryKey,
-            Array.from(
-              collection._state.acceptedSyncedEntries(),
-              ([, row]) => row,
-            ),
-          )
-          return
+          // This fetch started before a direct write. Its rows are older
+          // than the accepted rows only for the keys written since it
+          // started; take those from the accepted rows and the rest from
+          // the fetch.
+          const validation = validateSuccessfulResultItems(queryKey, result)
+          if (`items` in validation) {
+            const fetchStart = fetchStartGenerations.get(hashedQueryKey) ?? 0
+            const rows = new Map(
+              validation.items.map((row) => [getKey(row), row]),
+            )
+            for (const [key, generation] of directWriteKeyGenerations) {
+              if (generation <= fetchStart) continue
+              const accepted = collection._state.getAcceptedSyncedRow(key)
+              if (accepted === undefined) rows.delete(key)
+              else rows.set(key, accepted)
+            }
+            fetchStartGenerations.set(hashedQueryKey, directWriteGeneration)
+            updateCacheDataForKey(queryKey, Array.from(rows.values()))
+            return
+          }
         }
         if (result.isSuccess) {
           // Skip processing this result while data refreshes are deferred.
@@ -3206,14 +3216,25 @@ export function queryCollectionOptions(
    * and remove every other scoped entry so a later owner fetches it again.
    * Eager collections retain their single full-result cache patch.
    */
-  const updateCacheData = (getItems: () => Array<any>): void => {
+  const updateCacheData = (
+    getItems: () => Array<any>,
+    keys: Array<string | number>,
+  ): void => {
     directWriteGeneration++
     // Only a fetch already in flight can return rows older than this write.
     // On-demand queries revalidate through post-write authority instead.
+    let fetching = false
     for (const [hashedQueryKey, observer] of state.observers) {
-      if (observer.getCurrentQuery().state.fetchStatus !== `fetching`)
-        fetchStartGenerations.set(hashedQueryKey, directWriteGeneration)
+      if (observer.getCurrentQuery().state.fetchStatus === `fetching`)
+        fetching = true
+      else fetchStartGenerations.set(hashedQueryKey, directWriteGeneration)
     }
+    // With no fetch in flight, no older result can arrive, so the per-key
+    // generations are not needed.
+    if (!fetching) directWriteKeyGenerations.clear()
+    else
+      for (const key of keys)
+        directWriteKeyGenerations.set(key, directWriteGeneration)
     if (syncMode === `on-demand`) {
       const deferredRefresh = writeContext?.collection.deferDataRefresh
       const revalidatingQueries = new Set<AnyQuery>()
@@ -3407,7 +3428,7 @@ export function queryCollectionOptions(
     begin: () => void
     write: (message: Omit<ChangeMessage<any>, `key`>) => void
     commit: () => SyncAppliedReceipt
-    updateCacheData?: (getItems: () => Array<any>) => void
+    updateCacheData?: (getItems: () => Array<any>, keys: Array<any>) => void
   } | null = null
 
   // Enhanced internalSync that captures write functions for manual use

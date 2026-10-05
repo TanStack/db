@@ -49,7 +49,7 @@ export interface SyncContext<
    * Handles both direct array caches and wrapped response formats (when `select` is used).
    * If not provided, falls back to directly setting the cache with the raw array.
    */
-  updateCacheData?: (getItems: () => Array<TRow>) => void
+  updateCacheData?: (getItems: () => Array<TRow>, keys: Array<TKey>) => void
 }
 
 interface NormalizedOperation<
@@ -226,7 +226,11 @@ export function performWriteOperations<
         ctx.collection._state.acceptedSyncedEntries(),
         ([, row]) => row,
       )
-    if (ctx.updateCacheData) ctx.updateCacheData(getItems)
+    if (ctx.updateCacheData)
+      ctx.updateCacheData(
+        getItems,
+        normalized.map((op) => op.key),
+      )
     else ctx.queryClient.setQueryData(ctx.queryKey, getItems())
   }
   if (accepted === true) updateCache()
