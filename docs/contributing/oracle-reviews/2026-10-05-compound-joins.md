@@ -153,3 +153,76 @@ net +6 lines in eight files**, including comments and blank lines. Tests are
 of direct IR fixtures. Before this evidence record, docs and the changeset are
 +196 / −3 lines; the architecture document is counted as documentation, not
 production code. These are source-line counts, not bundle-byte measurements.
+
+
+## Review follow-up: acquisition premise and test maintenance
+
+Review started at `cb1262754aecc6ebc8de975f0b2b0581fd29a9ad`. The fixes are
+in `dc78e6947441a51e2317f6fb9bd99232bdcc0ced`. This section is a later receipt;
+the implementation, counts, and environment limits above retain their original
+revision scope. This review changed tests and documentation only. Production
+weight remains net +6 source lines against merged main.
+
+The compound oracle incorrectly required acquisition when the atom component
+was nonnull but the other component was null. A null first demand key can
+correctly produce an unmatched LEFT row without acquiring the right source.
+The violated test law was conditional acquisition: a positive witness requires
+a satisfiable tuple. Result truth does not require minimal candidate demand.
+The original generator already reached this overlap; the assertion premise was
+wrong. The fixed seed had missed it, and an independently generated history
+exposed it.
+
+The exact failing history had left row `{id: 0, atom: 0, b: null, c: 0}`, empty
+right rows and steps, LEFT join, width two, `atomFirst: false`, no nesting or
+reversal, cold source, and indexing off. Public rows, size, and the event
+replica were correct before the acquisition assertion failed.
+
+This guarded replay ran exactly one case and failed before the fix, then
+passed with the corrected premise:
+
+```sh
+cd packages/db
+TANSTACK_DB_ORACLE_PROPERTY=cold-join.compound \
+TANSTACK_DB_ORACLE_SEED=3 \
+TANSTACK_DB_ORACLE_PATH=39:1:1:2:2:2:3 \
+node --import tsx tests/oracle-replay.ts \
+  tests/query/cold-join-reconciliation-oracle.test.ts \
+  --coverage.enabled=false --typecheck.enabled=false --maxWorkers=1
+```
+
+The oracle now pins 16 premise cells: scan/eager indexes, both term orders,
+nonnull/null atoms, and nonnull/null second components. Before the fix, the
+null-first cells failed in both index modes; the other 14 passed. All 16 pass
+after requiring both components to be nonnull for positive acquisition.
+No zero-acquisition assertion was added for unsatisfiable tuples.
+
+Two calibration tests hide acquisition on a satisfiable tuple whose empty
+right source produces the same unmatched output. Both reject the hidden
+observation. A temporary broad waiver of the positive acquisition assertion
+made both calibration tests fail because their checks incorrectly resolved.
+Restoring the assertion made both green. Thus the fix does not waive required
+acquisition merely because row output happens to be correct.
+
+Maintenance changes reuse the existing `createEq` helper in 41 optimizer
+fixtures, attach expected semantics to named identity variants, replace two
+nested grammar ternaries with explicit branches, format the lazy-demand
+fixture, and correct the contradictory coverage-map sentence. No contract was
+changed to fit a production result. Both identity and cache-equivalence source
+mutants still fail all three compound boundary cells at their intended
+assertions; after restoration, those three cells pass.
+
+Validation at the fix revision: **876 tests passed in 20 files**, DB TypeScript
+passed, changed-test ESLint passed with two existing async-without-await
+warnings, formatting passed, and `git diff --check` passed. One intermediate
+type check rejected passing the now-two-parameter history driver directly to
+fast-check; a one-argument callback fixed the inference without changing the
+grammar. The original build receipt remains valid for unchanged production
+sources; no new clean-install or full-monorepo receipt is claimed.
+
+All 26 review items were accounted for: six fixed, eight refuted within their
+stated paths, three deferred, and nine duplicates. The residual measurement
+and evidence questions have durable destinations in the Compound joins section
+of the [coverage map](../oracle-coverage.md): candidate-demand minimality,
+single-equality allocation cost, and a hypothetical throwing-unsubscribe path.
+No measured performance regression or reachable cleanup failure was supplied.
+These limits do not establish untested provider or lifecycle cross-products.
