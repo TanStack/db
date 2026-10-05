@@ -136,8 +136,9 @@ deferral.
 ## Limits
 
 A truncate committed inside the sync function itself, whose ready callback
-throws, still throws from `commit()` and moves the Collection to `error`. A
-separate change will defer that error the way `ops.markReady()` does.
+threw, threw from `commit()` and moved the Collection to `error`. The
+[follow-up record](2026-10-05-round-3-followups.md) defers that error the way
+`ops.markReady()` does.
 
 The grid covers one optimistic callback write per truncate. These histories
 remain outside it:

@@ -133,16 +133,11 @@ override removed, the witness fails.
 
 ## Open items
 
-- **S10.** Instrumentation found 191 commits in the metadata publication oracle
-  where the mutant changes `virtualChanged` from true to false for a
-  virtual-only update. The oracle checks exact batches and still passes, so a
-  later publication carries the same `$synced` change. The full suite also
-  passes without `completedOptimisticKeys`. That set may be removable, but no
-  argument yet covers every history.
-- **S3.** Without any mutant, `main` returns a cached enriched row whose fields
-  differ from the stored row 422 times across the suite, mostly in live-query
-  oracles. This review did not determine whether a public read observes those
-  values. The case needs a probe owner before a verdict.
+The follow-up record
+[`2026-10-05-round-3-followups.md`](2026-10-05-round-3-followups.md) resolves
+the items this record left open. S3 and S10 were equivalent, and their code is
+removed. RB2 was not equivalent: a canceled earlier transaction reaches it,
+and the canceled lane found a metadata bug on `main` that the follow-up fixes.
 
 ## ORC outcomes
 
