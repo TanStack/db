@@ -431,8 +431,15 @@ export function trailBaseCollectionOptions<
       }) as const,
   }
 
+  const {
+    recordApi: _recordApi,
+    parse: _parse,
+    serialize: _serialize,
+    ...collectionConfig
+  } = config
+
   const options = {
-    ...config,
+    ...collectionConfig,
     sync,
     getKey,
     onInsert: async (
