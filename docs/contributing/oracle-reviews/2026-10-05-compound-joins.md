@@ -320,3 +320,62 @@ Documentation and executable contract prose are separate from production.
 The previous +281-byte gzip receipt belongs to `ee490df80`; a later CI size
 check must measure this revision. Current provider, temporal, cleanup, and
 performance limits remain owned in the coverage map.
+
+
+## Second high-effort review: planning and cleanup
+
+Reviewed head: `5bb21151917911510683d6819c8e659e295bac3f`. This follow-up
+preserves matching, loading-plan selection, and semantic identity. It simplifies
+the existing keyed-input construction and corrects documentation.
+
+Eight numbered findings contain nine distinct claims because item 2 combines
+reordered predicates and unary conjunctions. The lossless evaluation retains
+both. Six claims receive fixes here; three planning/normalization proposals
+remain deferred with owners in the coverage map.
+
+| Item | Verified behavior and action |
+| --- | --- |
+| 1 | A computed joined operand first loads the whole source. The plain-field control uses keyed demand. The architecture permits this plan; first-eligible selection remains an optimization proposal. |
+| 2a | Real React rerender keeps the same Collection and region-first demand after reordering to SKU-first. Semantic identity is unchanged. The guide and agent skill now distinguish initial compilation from reuse. Loading-order-sensitive identity requires a separate design decision. |
+| 2b | Public unary `and(eq(...))` rejects because `and` requires two operands. Direct unary AND IR and valid duplicate equality terms produce the same rows as bare EQ but distinct identities and a replacement hook Collection. Join-specific normalization remains deferred. Global Boolean-wrapper removal could change coercion for nonboolean operands. |
+| 3 | Repeated no-match sentinel checks could diverge. The keyed-input helper now owns sentinel selection and raw demand together. Its comment explains why serialized values cannot collide with the raw NUL prefix. |
+| 4 | The helper now evaluates the first expression itself and returns the keyed-stream tuple already needed by `map`. It adds no separate per-row result object. |
+| 5 | First-field demand overfetch is real and permitted. Exact compound acquisition needs tuple-preserving demand, not independent IN sets that admit cross-pairs. The coverage map names the receiving owners. |
+| 6 | `validateJoinConditions` now states the builder call's purpose. The same helper returns source-order operands to the compiler, which still validates direct IR. |
+| 7 | Regenerated the stale `JoinClause` reference with the repository's TypeDoc configuration. Only that page was retained, with correct `on: BasicExpression<boolean>` and source links. |
+| 8 | The historical assessment already exists at the pinned upstream commit. Its link now uses `TanStack/db`, removing dependence on the contributor fork. The upstream API returned blob `cfa6bf850e2ce021c19992b5994df417056a2383`, 5,884 bytes. |
+
+### Executable receipts and limits
+
+The controlled provider has one product `(region=1, sku=7, code='a')` and stock
+rows `(1,7,'A')`, `(1,9,'B')`, `(2,7,'C')`. It applies the received direct-field
+IN predicate before writing rows. A computed `lower(stock.code)` condition first
+acquires three rows; SKU-first acquires two; both publish one exact matching
+pair. Region-first also acquires two and publishes one pair. These are work and
+result observations at initial preload, not a claim of minimal acquisition.
+
+The React probe renders the region-first query and rerenders SKU-first with the
+same source Collections and no explicit query key. Both prepared identities
+match, the Collection reference is unchanged, and the provider receives only
+`region IN (1)`. Separate fresh-query controls receive the SKU request.
+For direct unary AND IR and duplicate EQ, the identity differs from bare EQ,
+the Collection reference changes, and the provider receives a second SKU
+request. Both old and replacement Collections are cleaned up explicitly.
+Five focused probes pass on exact reviewed production and on the cleanup.
+They are evidence for these finite React paths, not every framework cache.
+
+The existing 888 tests in 20 files pass, including all compiler tests, cold
+joins, null-demand histories, identity, optimizer, and includes contracts.
+DB type checking, build and declaration output pass. Regeneration succeeds
+with existing TypeDoc tag warnings. The temporary operand-array counter still
+reports zero arrays for one equality and 20,000 for two equalities at 10,000
+rows per side, with 10,000 output matches in each case. This measures operand
+arrays only, not elapsed runtime or all allocations.
+
+No new product failure was claimed or found in this round, so maintenance and
+documentation findings do not receive invented product RED assertions. The
+previous null-demand and filtered-provider RED/GREEN receipts remain applicable.
+Initial probe setup failures (missing dependency links and an unavailable
+public import) are excluded from behavioral evidence. Missing Expo tsconfig
+warnings are unrelated to the successful React tests. No probe or production
+instrumentation remains in the committed implementation.

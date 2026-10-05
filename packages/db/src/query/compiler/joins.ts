@@ -20,7 +20,7 @@ import {
   getParentContextValue,
 } from '../equality-value-identity.js'
 import { ensureIndexForField } from '../../indexes/auto-index.js'
-import { getJoinConditions } from '../join-conditions.js'
+import { validateJoinConditions } from '../join-conditions.js'
 import { getFromSources } from '../ir.js'
 import { compileExpression } from './evaluators.js'
 import { getSourceAliasesFromExpression } from './expressions.js'
@@ -154,32 +154,40 @@ function getRouteJoinKey(
   ])
 }
 
-function getJoinKey(
+function keyJoinInput(
+  originalKey: unknown,
   row: NamespacedRow,
   source: string,
   side: `main` | `joined`,
-  value: unknown,
   expressions: Array<(row: NamespacedRow) => unknown>,
   routeJoinedSource: boolean,
   valueIdentity: ValueIdentity,
-): string {
-  // Unsatisfiable tuples share a side-local key and contribute no lazy demand.
+): [string, JoinInputValue] {
+  const value = expressions[0]!(row)
+  const input: JoinInputValue = [originalKey, row, undefined]
+  // NUL-prefixed side-local keys cannot collide with serializeValue output.
+  // Unsatisfiable tuples retain their row but contribute no lazy demand.
   const unmatchedKey = side === `main` ? `\0m` : `\0j`
-  if (value == null) return unmatchedKey
+  if (value == null) return [unmatchedKey, input]
   let key = valueIdentity.equality(value)
   // Keep the single-equality path free of temporary operand arrays.
   if (expressions.length > 1) {
     const values = [key]
     for (let index = 1; index < expressions.length; index++) {
       const component = expressions[index]!(row)
-      if (component == null) return unmatchedKey
+      if (component == null) return [unmatchedKey, input]
       values.push(valueIdentity.equality(component))
     }
     key = values
   }
-  return routeJoinedSource
-    ? getRouteJoinKey(row, source, key, valueIdentity)
-    : serializeValue(key)
+  // Demand uses the raw value, while matching uses graph-local equality.
+  input[2] = value
+  return [
+    routeJoinedSource
+      ? getRouteJoinKey(row, source, key, valueIdentity)
+      : serializeValue(key),
+    input,
+  ]
 }
 
 export function registerLazyDemandPlan(
@@ -290,14 +298,15 @@ function processJoin(
 
   const joinedSource = joinClause.from.alias
   const availableSources = [...Object.keys(sources), joinedSource]
-  const conditions = getJoinConditions(joinClause.on).map(([left, right]) =>
-    analyzeJoinExpressions(
-      left,
-      right,
-      availableSources,
-      joinedSource,
-      rawQuery.from.type === `unionAll`,
-    ),
+  const conditions = validateJoinConditions(joinClause.on).map(
+    ([left, right]) =>
+      analyzeJoinExpressions(
+        left,
+        right,
+        availableSources,
+        joinedSource,
+        rawQuery.from.type === `unionAll`,
+      ),
   )
   // The first equality supplies candidate demand; the full tuple decides matches.
   const { mainExpr, joinedExpr } = conditions[0]!
@@ -377,53 +386,33 @@ function processJoin(
     compileExpression(condition.joinedExpr),
   )
 
-  // Prepare the main pipeline for joining
+  // Prepare both sides with the same key and raw-demand rules.
   let mainPipeline = pipeline.pipe(
-    map(([currentKey, namespacedRow]) => {
-      // Extract the join key from the main source expression
-      const value = compiledMainExpressions[0]!(namespacedRow)
-      const mainKey = getJoinKey(
+    map(([currentKey, namespacedRow]) =>
+      keyJoinInput(
+        currentKey,
         namespacedRow,
         mainSource,
         `main`,
-        value,
         compiledMainExpressions,
         routeJoinedSource,
         valueIdentity,
-      )
-
-      // Keep the raw value for lazy demand; the equality key is graph-local.
-      return [
-        mainKey,
-        [currentKey, namespacedRow, mainKey === `\0m` ? undefined : value],
-      ] as [string, JoinInputValue]
-    }),
+      ),
+    ),
   )
 
-  // Prepare the joined pipeline
   let joinedPipeline = joinedInput.pipe(
-    map(([currentKey, row]) => {
-      // Wrap the row in a namespaced structure
-      const namespacedRow = wrapJoinedInputRow(joinedSource, row)
-
-      // Extract the join key from the joined source expression
-      const value = compiledJoinedExpressions[0]!(namespacedRow)
-      const joinedKey = getJoinKey(
-        namespacedRow,
+    map(([currentKey, row]) =>
+      keyJoinInput(
+        currentKey,
+        wrapJoinedInputRow(joinedSource, row),
         joinedSource,
         `joined`,
-        value,
         compiledJoinedExpressions,
         routeJoinedSource,
         valueIdentity,
-      )
-
-      // Keep the raw value for lazy demand; the equality key is graph-local.
-      return [
-        joinedKey,
-        [currentKey, namespacedRow, joinedKey === `\0j` ? undefined : value],
-      ] as [string, JoinInputValue]
-    }),
+      ),
+    ),
   )
 
   // Apply the join operation

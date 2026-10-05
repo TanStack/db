@@ -9,7 +9,7 @@ join conditions from query identity. Its implementation and example tests were
 removed before the replacement. Its readiness verdict does not apply to the
 current branch.
 
-The [archived assessment](https://github.com/lousydropout/tanstack-db/blob/ee490df80d200f701df805faf81d8105ba492527/docs/contributing/oracle-reviews/pr-861-compound-join-relevance.md)
+The [archived assessment](https://github.com/TanStack/db/blob/ee490df80d200f701df805faf81d8105ba492527/docs/contributing/oracle-reviews/pr-861-compound-join-relevance.md)
 preserves the old diagnostics and revision-specific receipts. The
 [replacement evidence](2026-10-05-compound-joins.md) describes the current design,
 oracle owners, replay commands, and coverage limits.

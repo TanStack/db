@@ -542,7 +542,10 @@ q.from({ product: productsCollection }).leftJoin(
 All equalities must match. A nullish component never matches, and outer joins
 retain unmatched rows. For on-demand sources, the first equality supplies
 candidate loading and index selection. Put a selective plain-field equality
-first. A computed joined-side operand can disable lazy loading, and a broad
+first when creating the live-query Collection. Reordered equalities keep the
+same semantic query identity; a React hook can reuse the existing Collection
+and its original loading plan. Reordering during a rerender does not replan that
+Collection. A computed joined-side operand can disable lazy loading, and a broad
 first field can fetch extra candidates. Later equalities still control matches.
 
 ### HIGH: .limit() / .offset() without .orderBy()

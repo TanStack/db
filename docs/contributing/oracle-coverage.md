@@ -950,3 +950,26 @@ Review follow-ups remain bounded by the evidence above:
   `checkWithCleanup` in the cold-join oracle; any future cleanup change must
   demonstrate the throwing path and verify later cleanup plus primary-error
   preservation. This is an evidence gap, not a demonstrated production bug.
+
+### Compound-join planning and identity follow-ups
+
+The second high-effort review at `5bb211519` distinguishes semantic identity
+from physical acquisition. A controlled React `useLiveQuery` rerender keeps
+its Collection and region-first demand when only the equality order changes.
+Freshly compiled controls use the supplied order. The guide now states that
+ordering selects a plan when the Collection is created. This React witness
+does not establish other frameworks' reuse behavior.
+
+- The compiler/lazy-targets and cold-acquisition owners retain the proposed
+  first-eligible-equality optimization. A receiving witness must cross join
+  direction, computed operands, direct and subquery sources, and index modes.
+- The identity owner retains join-specific unary/duplicate equality
+  normalization. Public `and()` requires two operands; direct unary AND IR and
+  `and(eq(...), eq(...))` with duplicate terms currently differ from bare EQ.
+  A change must preserve general Boolean coercion and test actual Collection
+  reuse in the receiving framework. Making loading order part of identity is
+  a separate design choice; current identity remains semantic.
+- Exact compound acquisition needs a tuple-preserving demand model in the
+  compiler/lazy-demand and cold-acquisition owners, plus adapter witnesses.
+  Independent per-field IN sets admit cross-pairs from different parent tuples.
+  Current first-field candidate supersets remain permitted by the architecture.

@@ -973,8 +973,11 @@ selection. Later equalities filter those candidates in the join. Put a selective
 equality on a plain field first: starting with a region may load more rows than
 starting with a SKU. A computed joined-side operand such as `lower(stock.code)`
 can disable lazy loading and load the whole joined source, even when a later
-condition uses a plain field. Reordering conditions preserves matching results,
-but can change acquisition work. A tuple with any nullish component contributes
+condition uses a plain field. Choose this order before creating the live-query
+Collection. Reordered equalities have the same semantic query identity. A React
+hook that reuses an existing Collection keeps that Collection's original loading
+plan, so reordering during a rerender does not replan it. A newly compiled
+Collection uses the supplied order. A tuple with any nullish component contributes
 no keyed demand when lazy loading applies.
 
 

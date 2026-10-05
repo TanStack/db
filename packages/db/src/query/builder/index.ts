@@ -22,7 +22,7 @@ import {
   QueryMustHaveFromClauseError,
   SubQueryMustHaveFromClauseError,
 } from '../../errors.js'
-import { getJoinConditions } from '../join-conditions.js'
+import { validateJoinConditions } from '../join-conditions.js'
 import { getQueryIR } from './query-ir.js'
 import { cloneQueryForPlacement } from './clone-query.js'
 import {
@@ -365,7 +365,7 @@ export class BaseQueryBuilder<TContext extends Context = Context> {
     // Get the join condition expression
     const onExpression = onCallback(refProxy)
 
-    getJoinConditions(onExpression)
+    validateJoinConditions(onExpression)
     const joinClause: JoinClause = { from, type, on: onExpression }
 
     const existingJoins = this.query.join || []
