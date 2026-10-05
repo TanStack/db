@@ -4058,12 +4058,7 @@ function createWrappedSyncConfig<
           return transaction.applicationReceipt
         }
         try {
-          // Commit already checked the open transaction's hydration sequence.
-          // Only hydration-owned replay depends on that cycle at publication;
-          // ordinary committed work may wait behind later subset hydrations.
-          if (transaction.queuedBecauseHydrating) {
-            assertHydrationSequenceCurrent(transaction)
-          }
+          assertHydrationSequenceCurrent(transaction)
           for (const key of transaction.deferredHydrationMetadataDeleteKeys) {
             if (
               !transaction.hydrationContext?.suppliedRowKeys.has(key) &&
@@ -4581,6 +4576,9 @@ function createWrappedSyncConfig<
             return applied
           }
 
+          // Admission is complete. Only queued hydration replay remains tied
+          // to its sequence; retain hydrationContext for row metadata ownership.
+          openTransaction.hydrationSequence = undefined
           let applied: Promise<void>
           try {
             applied = runtime.applyHydrationBufferedTransaction(transaction)

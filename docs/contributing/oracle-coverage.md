@@ -867,19 +867,39 @@ boundary. Track the generalized repairs here instead of accumulating isolated
 regressions. Completion requires an executable owner, a production-path witness,
 a hostile wrong-answer control, and an explicit statement of remaining limits.
 
-- [x] **Accepted source commits behind queued subset hydration.**
-      The persistence-history owner enumerates insert/partial-update,
-      one/two/three queued hydrations, ordinary/immediate commits, and an
-      absent/present dependent successor. These 24 histories check receipt
-      settlement, public/durable rows, metadata, cursor, and durable source FIFO.
-      Publication preserves ordinary accepted commits while open transactions
-      still cannot cross hydration cycles. Hydration-owned replay retains its
-      captured metadata ownership. Owner:
-      `packages/db-sqlite-persistence-core/tests/persisted-oracle.test.ts`.
-      The [review record](oracle-reviews/issue-2036-queued-hydration-publication.md)
-      records RED/GREEN evidence and the oracle-guide loss audit.
-      Further witnesses must compose this accepted-before-hydration schedule
-      with cancellation, cleanup, or hydration failure in the same owner.
+- [ ] **Accepted sync transactions across persistence reads (partial coverage).**
+      The persistence-history owner retains the original 24 histories:
+      insert/partial-update, one/two/three queued reads, ordinary/immediate
+      commits, and an absent/present dependent successor. They check applied
+      receipts, public/durable rows, metadata, cursor, and durable source order.
+      Eight adjacent histories begin during an owning persistence read and commit
+      after it finishes. They vary original key membership, admission mode, and
+      one/two later reads. Captured row metadata ownership survives acceptance.
+      The maintainer specified that persisted rows are an older baseline for
+      newer sync-adapter changes; an internal read cannot revoke an accepted
+      sync transaction. Ninety additional histories compare queued and completed
+      reads against the same independent snapshot algebra. They cross
+      insert/update/delete, no/before/after truncate replay, on-demand subset
+      demand, and coordinator reset/full-reload notifications in eager and
+      on-demand Collections. Exact settled rows, row metadata, opaque cursor
+      metadata, status, applied receipts, loaded rows and durable completion order
+      distinguish source precedence from truncate replay's ordered replacement.
+      The old guard fails all 45 queued cells; serial controls pass. Omitting
+      public truncate fails 60 cells; omitting public delete fails 10.
+      Owner: `packages/db-sqlite-persistence-core/tests/persisted-oracle.test.ts`.
+      The [original review](oracle-reviews/issue-2036-queued-hydration-publication.md)
+      and [admission follow-up](oracle-reviews/issue-2036-admission-follow-up.md)
+      preserve revision receipts, review dispositions and oracle-guide audits.
+      Further witnesses must compose these schedules with cancellation, cleanup,
+      or persistence-read failure. Existing rejection of still-open transactions
+      across persistence reads remains a characterized admission restriction;
+      its independent authority argument is not established by these tests.
+      The notification fixtures assume a compatible persisted baseline. They do
+      not establish behavior after schema changes or invalidated resume points,
+      or each intermediate publication during a multi-transaction truncate replay.
+      The same owner needs those histories before claiming those stronger laws.
+      A claimed leftover-replay/reset failure still needs a concrete schedule;
+      the bounded two-replay-then-reset probe drains replay before reset.
       Live Electric/browser OPFS delivery needs the matching schedule in
       `packages/browser-db-sqlite-persistence/e2e/electric-hydration-straddle.opfs.spec.ts`;
       its current ordering does not establish this handoff.

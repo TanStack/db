@@ -1,5 +1,8 @@
 # Accepted source publication after queued hydration
 
+This is the original 24-case audit. The [admission follow-up](issue-2036-admission-follow-up.md)
+records a subsequently reproduced timing gap and withdraws the merge-ready assessment.
+
 ## Reviewed boundary
 
 Issue #2036 reports a source commit accepted before subset hydration starts,
