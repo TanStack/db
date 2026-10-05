@@ -1470,8 +1470,8 @@ importers:
         specifier: ^3.2.4
         version: 3.2.4(vitest@3.2.4)
       seroval:
-        specifier: 1.5.0
-        version: 1.5.0
+        specifier: 1.5.3
+        version: 1.5.3
 
   packages/react-db:
     dependencies:
@@ -11773,8 +11773,8 @@ packages:
     peerDependencies:
       seroval: ^1.0
 
-  seroval@1.5.0:
-    resolution: {integrity: sha512-OE4cvmJ1uSPrKorFIH9/w/Qwuvi/IMcGbv5RKgcJ/zjA/IohDLU6SVaxFN9FwajbP7nsX0dQqMDes1whk3y+yw==}
+  seroval@1.5.3:
+    resolution: {integrity: sha512-BXe0x4buEeYiIKaRUnth1WqCILQ3k4O67KP/B4pC3pVz0Mv2c96ngA9QDREUYxWY1sb2RZVRqwI9RcpVMyHCVw==}
     engines: {node: '>=10'}
 
   seroval@1.6.8:
@@ -25605,15 +25605,15 @@ snapshots:
       type-fest: 0.13.1
     optional: true
 
-  seroval-plugins@1.5.0(seroval@1.5.0):
+  seroval-plugins@1.5.0(seroval@1.5.3):
     dependencies:
-      seroval: 1.5.0
+      seroval: 1.5.3
 
   seroval-plugins@1.6.8(seroval@1.6.8):
     dependencies:
       seroval: 1.6.8
 
-  seroval@1.5.0: {}
+  seroval@1.5.3: {}
 
   seroval@1.6.8: {}
 
@@ -25964,8 +25964,8 @@ snapshots:
   solid-js@1.9.11:
     dependencies:
       csstype: 3.2.3
-      seroval: 1.5.0
-      seroval-plugins: 1.5.0(seroval@1.5.0)
+      seroval: 1.5.3
+      seroval-plugins: 1.5.0(seroval@1.5.3)
 
   solid-refresh@0.6.3(solid-js@1.9.11):
     dependencies:
