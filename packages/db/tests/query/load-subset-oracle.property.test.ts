@@ -2,7 +2,10 @@ import { fc, test as fcTest } from '@fast-check/vitest'
 import { describe, expect, it } from 'vitest'
 import { createCollection } from '../../src/collection/index.js'
 import { createDeferred } from '../../src/deferred.js'
-import { LoadSubsetOperationAbortedError } from '../../src/errors.js'
+import {
+  LoadSubsetOperationAbortedError,
+  SyncQueueInvariantError,
+} from '../../src/errors.js'
 import { createOptimisticAction } from '../../src/optimistic-action.js'
 import { createLiveQueryCollection, eq } from '../../src/query/index.js'
 import { Func, PropRef, Value } from '../../src/query/ir.js'
@@ -1115,8 +1118,8 @@ async function expectCanceledReceiptReleasesOnlyItsSuppression() {
     expect(transaction.state).toBe(`persisting`)
     begin()
     write({ type: `update`, value: { id: `first`, projectId: `new` } })
-    const canceled = commit()
-    const canceledTransaction = source._state.pendingSyncedTransactions.at(-1)!
+    const accepted = commit()
+    const acceptedTransaction = source._state.pendingSyncedTransactions.at(-1)!
     expect(source._state.pendingSyncedTransactions).toHaveLength(1)
     begin()
     write({ type: `update`, value: { id: `second`, projectId: `new` } })
@@ -1127,14 +1130,19 @@ async function expectCanceledReceiptReleasesOnlyItsSuppression() {
       new Set([`first`, `second`]),
     )
 
-    source._state.cancelPendingSyncedTransaction(canceledTransaction)
+    // Only the open last transaction can be canceled.
+    expect(() =>
+      source._state.cancelPendingSyncedTransaction(acceptedTransaction),
+    ).toThrow(SyncQueueInvariantError)
+    const controller = new AbortController()
+    controller.abort()
+    const canceled = commit(controller.signal)
     expect(source._state.pendingSyncedTransactions).toHaveLength(1)
-    expect(source._state.recentlySyncedKeys).toEqual(new Set([`second`]))
-    expect(source._state.preSyncVisibleState.has(`first`)).toBe(false)
-    expect(source._state.preSyncVisibleState.has(`second`)).toBe(true)
-    if (canceled !== true) {
-      await expect(canceled).rejects.toMatchObject({ name: `AbortError` })
-    }
+    expect(source._state.recentlySyncedKeys).toEqual(new Set([`first`]))
+    expect(source._state.preSyncVisibleState.has(`second`)).toBe(false)
+    expect(source._state.preSyncVisibleState.has(`first`)).toBe(true)
+    await expect(canceled).rejects.toMatchObject({ name: `AbortError` })
+    expect(accepted).not.toBe(true)
   } catch (error) {
     primaryFailure = { error }
     throw error

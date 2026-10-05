@@ -231,7 +231,6 @@ export class CollectionSyncManager<
               explicitRowMetadataWriteKeys: new Set(),
               collectionMetadataWrites: new Map(),
               applied,
-              duplicateKeyError: (key) => this.createDuplicateKeyError(key),
             })
           },
           write: (
@@ -251,9 +250,6 @@ export class CollectionSyncManager<
             if (pendingTransaction.committed) {
               throw new SyncTransactionAlreadyCommittedWriteError()
             }
-            // Cancellation can invalidate an open transaction between writes.
-            // Its commit receipt owns that failure; later writes cannot revive it.
-            if (pendingTransaction.invalidationError !== undefined) return
 
             let key: TKey | undefined = undefined
             if (`key` in messageWithOptionalKey) {
@@ -331,14 +327,6 @@ export class CollectionSyncManager<
               return pendingTransaction.applied.promise
             }
 
-            if (pendingTransaction.invalidationError !== undefined) {
-              this.state.cancelPendingSyncedTransaction(
-                pendingTransaction,
-                pendingTransaction.invalidationError,
-              )
-              return pendingTransaction.applied.promise
-            }
-
             pendingTransaction.committed = true
             // An accepted transaction always applies in commit order. Core
             // accepts it now; the receipt resolves when it is visible. One
@@ -378,7 +366,6 @@ export class CollectionSyncManager<
             pendingTransaction.operations = []
             pendingTransaction.rowMetadataWrites.clear()
             pendingTransaction.explicitRowMetadataWriteKeys?.clear()
-            pendingTransaction.invalidationError = undefined
             // Intentionally preserve collectionMetadataWrites across truncate.
             // Collection-scoped metadata (for example persisted resume/reset
             // state) can be staged before truncate and should commit atomically

@@ -114,7 +114,6 @@
   "isDrainingSyncTransactions": "bU",
   "leaseVersions": "bV",
   "_clone": "bW",
-  "rejectInvalidCommittedTransactions": "bX",
   "requestAndObserve": "bY",
   "syncCallbackEpoch": "bZ",
   "hasAppliedAdapterTruncate": "b_",
@@ -380,7 +379,5 @@
   "compareRows": "gg",
   "sameFields": "gh",
   "dropIfUnused": "gi",
-  "clock": "gj",
-  "afterAcceptedApplied": "a8",
-  "hasAcceptedRows": "c_"
+  "clock": "gj"
 }

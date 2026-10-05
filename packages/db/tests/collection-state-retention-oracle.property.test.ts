@@ -3,6 +3,7 @@ import { expect, it } from 'vitest'
 import { createCollection } from '../src/collection/index.js'
 import {
   DuplicateKeySyncError,
+  SyncQueueInvariantError,
   SyncTransactionAlreadyCommittedWriteError,
 } from '../src/errors.js'
 import { BTreeIndex } from '../src/indexes/btree-index.js'
@@ -861,7 +862,10 @@ async function runImmutablePreviousValuePublication(
   }
 }
 
-it(`retires a committed-invalid transaction found by projection refresh`, async () => {
+// No public path can make a committed queued transaction invalid on replay:
+// only the open last transaction can be canceled. A replay that finds one is
+// an invariant failure, not a recoverable rejection.
+it(`throws an invariant error when replay finds an invalid committed transaction`, async () => {
   // Current callers cannot create this queue state. Exercise the internal
   // recovery boundary so a future refresh caller cannot strand its receipt.
   const collection = createCollection<RetainedRow, number>({
@@ -893,8 +897,6 @@ it(`retires a committed-invalid transaction found by projection refresh`, async 
     rowMetadataWrites: new Map(),
     collectionMetadataWrites: new Map(),
     applied,
-    duplicateKeyError: (key: number) =>
-      new DuplicateKeySyncError(key, collection.id),
   }
   const validApplied = createDeferred<void>()
   void validApplied.promise.catch(() => undefined)
@@ -916,15 +918,8 @@ it(`retires a committed-invalid transaction found by projection refresh`, async 
     await collection.stateWhenReady()
     collection._state.pendingSyncedTransactions.push(valid, pending)
     expect(() => collection._state.refreshPendingSyncedProjection()).toThrow(
-      DuplicateKeySyncError,
+      SyncQueueInvariantError,
     )
-    expect(collection._state.pendingSyncedTransactions).toContain(valid)
-    expect(collection._state.pendingSyncedTransactions).not.toContain(pending)
-    expect(applied.isPending()).toBe(false)
-    await expect(applied.promise).rejects.toBeInstanceOf(DuplicateKeySyncError)
-    expect(
-      collection._state.classifyPendingSyncedInsert(2, { id: 2, value: 3 }),
-    ).toBe(`duplicate`)
     expect(collection.get(1)?.value).toBe(0)
   } catch (error) {
     primaryFailure = error

@@ -1,7 +1,10 @@
 import { deepEquals } from '../utils'
 import { SortedMap } from '../SortedMap'
 import { enrichRowWithVirtualProps } from '../virtual-props.js'
-import { SyncTransactionAbortedError } from '../errors.js'
+import {
+  SyncQueueInvariantError,
+  SyncTransactionAbortedError,
+} from '../errors.js'
 import type {
   VirtualOrigin,
   VirtualRowProps,
@@ -22,7 +25,6 @@ import type { CollectionChangesManager } from './changes'
 import type { CollectionIndexesManager } from './indexes'
 import type { CollectionEventsManager } from './events'
 import type { Deferred } from '../deferred'
-import type { DuplicateKeySyncError } from '../errors.js'
 
 type PendingSyncOperation<
   T extends object,
@@ -31,7 +33,6 @@ type PendingSyncOperation<
   /** Preserve adapter intent when queue changes require reclassification. */
   originalSyncType?: `insert`
   /** A partial update admitted against a row must not become an upsert. */
-  admittedAgainstExistingRow?: boolean
 }
 
 type PendingSyncedKeyState<T extends object> = {
@@ -62,9 +63,6 @@ interface PendingSyncedTransaction<
   applied: Deferred<void>
   preserveHydrationSeedKeys?: boolean
   /** Present on adapter transactions that can be revalidated after cancel. */
-  duplicateKeyError?: (key: TKey) => DuplicateKeySyncError
-  /** Retained until commit so an invalidated active transaction stays addressable. */
-  invalidationError?: Error
 }
 
 type PendingMetadataWrite = { type: `set`; value: unknown } | { type: `delete` }
@@ -984,16 +982,6 @@ export class CollectionStateManager<
   stagePendingSyncOperation(
     operation: PendingSyncOperation<TOutput, TKey>,
   ): void {
-    if (
-      operation.type === `update` &&
-      operation.originalSyncType !== `insert` &&
-      this.config.sync.rowUpdateMode !== `full`
-    ) {
-      operation.admittedAgainstExistingRow = this.getProjectedSyncedKeyState(
-        this.pendingSyncedProjection,
-        operation.key as TKey,
-      ).exists
-    }
     this.applyPendingSyncOperation(this.pendingSyncedProjection, operation)
   }
 
@@ -1040,46 +1028,26 @@ export class CollectionStateManager<
     }
   }
 
-  private rebuildPendingSyncedProjection(): Array<{
-    transaction: PendingSyncedTransaction<TOutput, TKey>
-    key: TKey
-    error: Error
-  }> {
+  /**
+   * Rebuild the queued projection after truncate, application, or an
+   * accepted seed changes queue history. Only the open last transaction can
+   * be canceled, and every replay keeps each transaction's admission, so a
+   * replay that invalidates a transaction is an invariant failure.
+   */
+  private rebuildPendingSyncedProjection(): void {
     const projection: PendingSyncedProjection<TOutput, TKey> = {
       states: new Map(),
       truncated: false,
     }
-    const invalidCommitted: Array<{
-      transaction: PendingSyncedTransaction<TOutput, TKey>
-      key: TKey
-      error: Error
-    }> = []
 
     for (const transaction of this.pendingSyncedTransactions) {
-      // An open transaction invalidated by cancellation remains doomed until
-      // its commit returns the rejected applied receipt. truncate() can reset
-      // it explicitly after clearing its operations.
-      if (transaction.invalidationError !== undefined) continue
-      const wasTruncated = projection.truncated
-      const statesBeforeTruncate = transaction.truncate
-        ? projection.states
-        : undefined
-      const previousStates = new Map<
-        TKey,
-        PendingSyncedKeyState<TOutput> | undefined
-      >()
       if (transaction.truncate) {
         projection.states = new Map()
         projection.truncated = true
       }
 
-      let invalidKey: TKey | undefined
-      let invalidReason: Error | undefined
       for (const operation of transaction.operations) {
         const key = operation.key as TKey
-        if (!previousStates.has(key)) {
-          previousStates.set(key, projection.states.get(key))
-        }
         if (
           operation.originalSyncType === `insert` &&
           operation.type !== `delete`
@@ -1089,76 +1057,23 @@ export class CollectionStateManager<
             key,
             operation.value,
           )
-          if (disposition === `duplicate`) {
-            invalidKey = key
-            break
-          }
+          if (disposition === `duplicate`)
+            throw new SyncQueueInvariantError(
+              `replay made an admitted insert a duplicate`,
+            )
           operation.type = disposition
         }
-        if (
-          operation.admittedAgainstExistingRow === true &&
-          !this.getProjectedSyncedKeyState(projection, key).exists
-        ) {
-          // Cancellation must not turn an admitted dependent update into an
-          // independent missing-key upsert during queue replay.
-          invalidKey = key
-          invalidReason = new SyncTransactionAbortedError()
-          break
-        }
         this.applyPendingSyncOperation(projection, operation)
-      }
-
-      if (invalidKey !== undefined) {
-        if (statesBeforeTruncate !== undefined) {
-          projection.states = statesBeforeTruncate
-        } else {
-          for (const [key, previous] of previousStates) {
-            if (previous === undefined) projection.states.delete(key)
-            else projection.states.set(key, previous)
-          }
-        }
-        projection.truncated = wasTruncated
-        const error =
-          invalidReason ??
-          transaction.duplicateKeyError?.(invalidKey) ??
-          new SyncTransactionAbortedError()
-        if (transaction.committed) {
-          invalidCommitted.push({ transaction, key: invalidKey, error })
-          continue
-        }
-        transaction.invalidationError = error
-        continue
       }
       this.rebuildAutomaticRowMetadataWrites(transaction)
     }
 
     this.pendingSyncedProjection = projection
-    return invalidCommitted
   }
 
-  private rejectInvalidCommittedTransactions(
-    invalid: ReturnType<typeof this.rebuildPendingSyncedProjection>,
-  ): Set<TKey> {
-    const rejected = new Set(invalid.map(({ transaction }) => transaction))
-    this.pendingSyncedTransactions = this.pendingSyncedTransactions.filter(
-      (transaction) => !rejected.has(transaction),
-    )
-    const canceledKeys = new Set<TKey>()
-    for (const { transaction, error } of invalid) {
-      for (const operation of transaction.operations) {
-        canceledKeys.add(operation.key as TKey)
-      }
-      transaction.applied.reject(error)
-    }
-    return canceledKeys
-  }
-
-  /** Rebuild after truncate or application changes queue history. */
+  /** Rebuild after truncate, application, or an accepted seed. */
   refreshPendingSyncedProjection(): void {
-    const invalid = this.rebuildPendingSyncedProjection()
-    if (invalid.length === 0) return
-    this.rejectInvalidCommittedTransactions(invalid)
-    throw invalid[0]!.error
+    this.rebuildPendingSyncedProjection()
   }
 
   /**
@@ -1670,44 +1585,31 @@ export class CollectionStateManager<
     return { processed: false }
   }
 
-  /** Abandons a queued transaction and invalidated dependents before visibility. */
+  /**
+   * Abandons the open last sync transaction before acceptance. Only
+   * `commit(signal)` with an aborted signal reaches this, so no other
+   * transaction can depend on the one canceled.
+   */
   public cancelPendingSyncedTransaction(
     transaction: PendingSyncedTransaction<TOutput, TKey>,
-    reason: Error = new SyncTransactionAbortedError(),
   ): void {
-    if (transaction.applicationStarted) return
-
-    const index = this.pendingSyncedTransactions.indexOf(transaction)
-    if (index === -1) return
-
+    if (
+      transaction.committed ||
+      this.pendingSyncedTransactions.at(-1) !== transaction
+    )
+      throw new SyncQueueInvariantError(
+        `only the open last sync transaction can be canceled`,
+      )
+    this.pendingSyncedTransactions.pop()
     const canceledKeys = new Set<TKey>()
-    const cancel = (
-      pending: PendingSyncedTransaction<TOutput, TKey>,
-      error: Error,
-    ) => {
-      const pendingIndex = this.pendingSyncedTransactions.indexOf(pending)
-      if (pendingIndex === -1 || pending.applicationStarted) return
-      this.pendingSyncedTransactions.splice(pendingIndex, 1)
-      for (const operation of pending.operations) {
-        canceledKeys.add(operation.key as TKey)
-      }
-      pending.applied.reject(error)
+    for (const operation of transaction.operations) {
+      canceledKeys.add(operation.key as TKey)
     }
-
-    cancel(transaction, reason)
-
-    // Admission can depend on earlier queued writes. After cancellation,
-    // replay the queue with the same classifier used by normal admission.
-    // Committed invalid dependents are rejected now. An active invalidated
-    // transaction stays addressable until its caller invokes commit().
-    const invalid = this.rebuildPendingSyncedProjection()
-    for (const key of this.rejectInvalidCommittedTransactions(invalid)) {
-      canceledKeys.add(key)
-    }
+    transaction.applied.reject(new SyncTransactionAbortedError())
+    this.rebuildPendingSyncedProjection()
 
     const remainingPendingKeys = new Set<TKey>()
     for (const pending of this.pendingSyncedTransactions) {
-      if (pending.invalidationError !== undefined) continue
       for (const operation of pending.operations) {
         remainingPendingKeys.add(operation.key as TKey)
       }
