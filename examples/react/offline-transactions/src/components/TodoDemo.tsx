@@ -25,11 +25,12 @@ export function TodoDemo({
   console.log({ offline, actions })
 
   // Use live query to get todos
-  const { data: todoList = [], isLoading } = useLiveQuery((q) =>
-    q
-      .from({ todo: todoCollection })
-      .orderBy(({ todo }) => todo.createdAt, `desc`),
-  )
+  const { data: todoList = [], isLoading } = useLiveQuery({
+    query: (q) =>
+      q
+        .from({ todo: todoCollection })
+        .orderBy(({ todo }) => todo.createdAt, `desc`),
+  })
 
   // Monitor online status
   useEffect(() => {

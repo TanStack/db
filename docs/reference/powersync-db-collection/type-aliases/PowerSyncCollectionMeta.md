@@ -3,13 +3,11 @@ id: PowerSyncCollectionMeta
 title: PowerSyncCollectionMeta
 ---
 
-# Type Alias: PowerSyncCollectionMeta\<TTable\>
-
 ```ts
 type PowerSyncCollectionMeta<TTable> = object;
 ```
 
-Defined in: [definitions.ts:235](https://github.com/TanStack/db/blob/main/packages/powersync-db-collection/src/definitions.ts#L235)
+Defined in: [definitions.ts:279](https://github.com/TanStack/db/blob/main/packages/powersync-db-collection/src/definitions.ts#L279)
 
 Metadata for the PowerSync Collection.
 
@@ -21,13 +19,25 @@ Metadata for the PowerSync Collection.
 
 ## Properties
 
+### metadataIsTracked
+
+```ts
+metadataIsTracked: boolean;
+```
+
+Defined in: [definitions.ts:297](https://github.com/TanStack/db/blob/main/packages/powersync-db-collection/src/definitions.ts#L297)
+
+Whether the PowerSync table tracks metadata.
+
+***
+
 ### serializeValue()
 
 ```ts
 serializeValue: (value) => ExtractedTable<TTable>;
 ```
 
-Defined in: [definitions.ts:248](https://github.com/TanStack/db/blob/main/packages/powersync-db-collection/src/definitions.ts#L248)
+Defined in: [definitions.ts:292](https://github.com/TanStack/db/blob/main/packages/powersync-db-collection/src/definitions.ts#L292)
 
 Serializes a collection value to the SQLite type
 
@@ -49,7 +59,7 @@ Serializes a collection value to the SQLite type
 tableName: string;
 ```
 
-Defined in: [definitions.ts:239](https://github.com/TanStack/db/blob/main/packages/powersync-db-collection/src/definitions.ts#L239)
+Defined in: [definitions.ts:283](https://github.com/TanStack/db/blob/main/packages/powersync-db-collection/src/definitions.ts#L283)
 
 The SQLite table representing the collection.
 
@@ -61,6 +71,6 @@ The SQLite table representing the collection.
 trackedTableName: string;
 ```
 
-Defined in: [definitions.ts:243](https://github.com/TanStack/db/blob/main/packages/powersync-db-collection/src/definitions.ts#L243)
+Defined in: [definitions.ts:287](https://github.com/TanStack/db/blob/main/packages/powersync-db-collection/src/definitions.ts#L287)
 
 The internal table used to track diffs for the collection.

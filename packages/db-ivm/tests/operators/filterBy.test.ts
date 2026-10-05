@@ -41,7 +41,7 @@ describe(`Operators`, () => {
 
       // Check if we got the filtered result
       expect(messages).toHaveLength(1)
-      expect(messages[0].getInner()).toEqual([[[1, `apple`], 1]])
+      expect(messages[0]!.getInner()).toEqual([[[1, `apple`], 1]])
     })
 
     test(`filterBy with empty filter stream`, () => {
@@ -112,7 +112,7 @@ describe(`Operators`, () => {
 
       // Should get items with keys 2 and 3
       expect(messages).toHaveLength(1)
-      const result = messages[0].getInner().sort((a, b) => a[0][0] - b[0][0])
+      const result = messages[0]!.getInner().sort((a, b) => a[0][0] - b[0][0])
       expect(result).toEqual([
         [[2, `banana`], 1],
         [[3, `cherry`], 1],
@@ -156,7 +156,7 @@ describe(`Operators`, () => {
 
       // Should get items with keys 1 and 3
       expect(messages).toHaveLength(1)
-      let result = messages[0].getInner().sort((a, b) => a[0][0] - b[0][0])
+      let result = messages[0]!.getInner().sort((a, b) => a[0][0] - b[0][0])
       expect(result).toEqual([
         [[1, `apple`], 1],
         [[3, `cherry`], 1],
@@ -174,7 +174,7 @@ describe(`Operators`, () => {
 
       // Should get new items with keys 2 and 4
       expect(messages).toHaveLength(2)
-      result = messages[1].getInner().sort((a, b) => a[0][0] - b[0][0])
+      result = messages[1]!.getInner().sort((a, b) => a[0][0] - b[0][0])
       expect(result).toEqual([
         [[2, `banana`], 1],
         [[4, `date`], 1],
@@ -218,7 +218,7 @@ describe(`Operators`, () => {
 
       // Should get filtered results with proper multiplicities
       expect(messages).toHaveLength(1)
-      const result = messages[0].getInner().sort((a, b) => a[0][0] - b[0][0])
+      const result = messages[0]!.getInner().sort((a, b) => a[0][0] - b[0][0])
       expect(result).toEqual([
         [[1, `apple`], 1],
         [[2, `banana`], -1],
@@ -267,7 +267,7 @@ describe(`Operators`, () => {
 
       // Now should get filtered results
       expect(messages).toHaveLength(1)
-      const result = messages[0].getInner().sort((a, b) => a[0][0] - b[0][0])
+      const result = messages[0]!.getInner().sort((a, b) => a[0][0] - b[0][0])
       expect(result).toEqual([
         [[2, `banana`], 1],
         [[3, `cherry`], 1],

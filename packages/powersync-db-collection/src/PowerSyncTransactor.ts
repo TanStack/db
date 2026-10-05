@@ -1,16 +1,20 @@
-import { sanitizeSQL } from '@powersync/common'
+import { LogLevels, sanitizeSQL } from '@powersync/common'
+import { LoadSubsetOperationAbortedError } from '@tanstack/db'
 import DebugModule from 'debug'
-import { asPowerSyncRecord, mapOperationToPowerSync } from './helpers'
 import { PendingOperationStore } from './PendingOperationStore'
-import type { AbstractPowerSyncDatabase, LockContext } from '@powersync/common'
+import { asPowerSyncRecord, mapOperationToPowerSync } from './helpers'
+import type { CommonPowerSyncDatabase, LockContext } from '@powersync/common'
 import type { PendingMutation, Transaction } from '@tanstack/db'
-import type { EnhancedPowerSyncCollectionConfig } from './definitions'
 import type { PendingOperation } from './PendingOperationStore'
+import type {
+  EnhancedPowerSyncCollectionConfig,
+  PowerSyncCollectionMeta,
+} from './definitions'
 
 const debug = DebugModule.debug(`ts/db:powersync`)
 
 export type TransactorOptions = {
-  database: AbstractPowerSyncDatabase
+  database: CommonPowerSyncDatabase
 }
 
 /**
@@ -42,14 +46,14 @@ export type TransactorOptions = {
  * })
  *
  * await addTx.commit()
- * await addTx.isPersisted.promise
+ * await addTx.when('settled')
  * ```
  *
  * @param transaction - The transaction containing mutations to apply
  * @returns A promise that resolves when the mutations have been persisted to PowerSync
  */
 export class PowerSyncTransactor {
-  database: AbstractPowerSyncDatabase
+  database: CommonPowerSyncDatabase
   pendingOperationStore: PendingOperationStore
 
   constructor(options: TransactorOptions) {
@@ -70,28 +74,55 @@ export class PowerSyncTransactor {
      * The transaction might contain operations for different collections.
      * We can do some optimizations for single-collection transactions.
      */
-    const mutationsCollectionIds = mutations.map(
-      (mutation) => mutation.collection.id,
-    )
-    const collectionIds = Array.from(new Set(mutationsCollectionIds))
+    const collectionsById = new Map<
+      string,
+      PendingMutation<any>[`collection`]
+    >()
     const lastCollectionMutationIndexes = new Map<string, number>()
-    const allCollections = collectionIds
-      .map((id) => mutations.find((mutation) => mutation.collection.id == id)!)
-      .map((mutation) => mutation.collection)
-    for (const collectionId of collectionIds) {
-      lastCollectionMutationIndexes.set(
-        collectionId,
-        mutationsCollectionIds.lastIndexOf(collectionId),
-      )
+    for (const [index, mutation] of mutations.entries()) {
+      const collectionId = mutation.collection.id
+      if (!collectionsById.has(collectionId)) {
+        collectionsById.set(collectionId, mutation.collection)
+      }
+      const changesDatabase =
+        mutation.type != `update` ||
+        Object.keys(mutation.changes).some((key) => key != `id`) ||
+        (typeof mutation.metadata != `undefined` &&
+          this.getMutationCollectionMeta(mutation).metadataIsTracked)
+      if (changesDatabase) {
+        lastCollectionMutationIndexes.set(collectionId, index)
+      }
     }
 
     // Check all the observers are ready before taking a lock
     await Promise.all(
-      allCollections.map(async (collection) => {
+      Array.from(collectionsById.values()).map(async (collection) => {
         if (collection.isReady()) {
           return
         }
-        await new Promise<void>((resolve) => collection.onFirstReady(resolve))
+        // Observe this session without starting new demand from mutationFn.
+        // Cleanup and startup failure must settle the wait before taking a lock.
+        await new Promise<void>((resolve, reject) => {
+          const check = () => {
+            if (collection.isReady()) {
+              unsubscribe()
+              resolve()
+            } else if (
+              collection.status === `error` ||
+              collection.status === `cleaned-up`
+            ) {
+              unsubscribe()
+              reject(
+                collection.status === `error`
+                  ? (collection._lifecycle.getSyncError() ??
+                      new Error(`Collection failed before readiness`))
+                  : new LoadSubsetOperationAbortedError(),
+              )
+            }
+          }
+          const unsubscribe = collection.on(`status:change`, check)
+          check()
+        })
       }),
     )
 
@@ -157,18 +188,26 @@ export class PowerSyncTransactor {
       mutation,
       context,
       waitForCompletion,
+      // eslint-disable-next-line no-shadow
       async (tableName, mutation, serializeValue) => {
         const values = serializeValue(mutation.modified)
         const keys = Object.keys(values).map((key) => sanitizeSQL`${key}`)
+        const queryParameters = Object.values(values)
+
+        const metadataValue = this.processMutationMetadata(mutation)
+        if (metadataValue != null) {
+          keys.push(`_metadata`)
+          queryParameters.push(metadataValue)
+        }
 
         await context.execute(
           `
-        INSERT into ${tableName} 
-            (${keys.join(`, `)}) 
-        VALUES 
+        INSERT into ${tableName}
+            (${keys.join(`, `)})
+        VALUES
             (${keys.map((_) => `?`).join(`, `)})
         `,
-          Object.values(values),
+          queryParameters,
         )
       },
     )
@@ -185,18 +224,33 @@ export class PowerSyncTransactor {
       mutation,
       context,
       waitForCompletion,
+      // eslint-disable-next-line no-shadow
       async (tableName, mutation, serializeValue) => {
-        const values = serializeValue(mutation.modified)
+        const { id: _id, ...changes } = mutation.changes
+        const values = serializeValue(changes)
         const keys = Object.keys(values).map((key) => sanitizeSQL`${key}`)
+        const queryParameters = Object.values(values)
+
+        const metadataValue = this.processMutationMetadata(mutation)
+        if (metadataValue != null) {
+          keys.push(`_metadata`)
+          queryParameters.push(metadataValue)
+        }
+
+        if (keys.length == 0) {
+          return false
+        }
 
         await context.execute(
           `
-        UPDATE ${tableName} 
+        UPDATE ${tableName}
         SET ${keys.map((key) => `${key} = ?`).join(`, `)}
         WHERE id = ?
         `,
-          [...Object.values(values), asPowerSyncRecord(mutation.modified).id],
+          [...queryParameters, asPowerSyncRecord(mutation.original).id],
         )
+
+        return
       },
     )
   }
@@ -212,13 +266,28 @@ export class PowerSyncTransactor {
       mutation,
       context,
       waitForCompletion,
+      // eslint-disable-next-line no-shadow
       async (tableName, mutation) => {
-        await context.execute(
-          `
-        DELETE FROM ${tableName} WHERE id = ?
-        `,
-          [asPowerSyncRecord(mutation.original).id],
-        )
+        const metadataValue = this.processMutationMetadata(mutation)
+        if (metadataValue != null) {
+          /**
+           * Delete operations with metadata require a different approach to handle metadata.
+           * This will delete the record.
+           */
+          await context.execute(
+            `
+            UPDATE ${tableName} SET _deleted = TRUE, _metadata = ? WHERE id = ?
+            `,
+            [metadataValue, asPowerSyncRecord(mutation.original).id],
+          )
+        } else {
+          await context.execute(
+            `
+            DELETE FROM ${tableName} WHERE id = ?
+            `,
+            [asPowerSyncRecord(mutation.original).id],
+          )
+        }
       },
     )
   }
@@ -237,21 +306,20 @@ export class PowerSyncTransactor {
       tableName: string,
       mutation: PendingMutation<any>,
       serializeValue: (value: any) => Record<string, unknown>,
-    ) => Promise<void>,
+    ) => Promise<void | false>,
   ): Promise<PendingOperation | null> {
-    if (
-      typeof (mutation.collection.config as any).utils?.getMeta != `function`
-    ) {
-      throw new Error(`Could not get tableName from mutation's collection config.
-        The provided mutation might not have originated from PowerSync.`)
+    const { tableName, trackedTableName, serializeValue } =
+      this.getMutationCollectionMeta(mutation)
+
+    const executed = await handler(
+      sanitizeSQL`${tableName}`,
+      mutation,
+      serializeValue,
+    )
+
+    if (executed === false) {
+      return null
     }
-
-    const { tableName, trackedTableName, serializeValue } = (
-      mutation.collection
-        .config as unknown as EnhancedPowerSyncCollectionConfig<any>
-    ).utils.getMeta()
-
-    await handler(sanitizeSQL`${tableName}`, mutation, serializeValue)
 
     if (!waitForCompletion) {
       return null
@@ -259,13 +327,56 @@ export class PowerSyncTransactor {
 
     // Need to get the operation in order to wait for it
     const diffOperation = await context.get<{ id: string; timestamp: string }>(
-      sanitizeSQL`SELECT id, timestamp FROM ${trackedTableName} ORDER BY timestamp DESC LIMIT 1`,
+      sanitizeSQL`SELECT id, timestamp FROM ${trackedTableName} ORDER BY operation_id DESC LIMIT 1`,
     )
     return {
       tableName,
       id: diffOperation.id,
       operation: mapOperationToPowerSync(mutation.type),
       timestamp: diffOperation.timestamp,
+    }
+  }
+
+  protected getMutationCollectionMeta(
+    mutation: PendingMutation<any>,
+  ): PowerSyncCollectionMeta<any> {
+    if (
+      typeof (mutation.collection.config as any).utils?.getMeta != `function`
+    ) {
+      throw new Error(`Collection is not a PowerSync collection.`)
+    }
+    return (
+      mutation.collection
+        .config as unknown as EnhancedPowerSyncCollectionConfig<any>
+    ).utils.getMeta()
+  }
+
+  /**
+   * Processes collection mutation metadata for persistence to the database.
+   * We only support storing string metadata.
+   * @returns null if no metadata should be stored.
+   */
+  protected processMutationMetadata(
+    mutation: PendingMutation<any>,
+  ): string | null {
+    const { metadataIsTracked } = this.getMutationCollectionMeta(mutation)
+    if (!metadataIsTracked) {
+      // If it's not supported, we don't store metadata.
+      if (typeof mutation.metadata != `undefined`) {
+        // Log a warning if metadata is provided but not tracked.
+        this.database.logger.log({
+          level: LogLevels.warn,
+          message: `Metadata provided for collection ${mutation.collection.id} but the PowerSync table does not track metadata. The PowerSync table should be configured with trackMetadata: true.`,
+          error: mutation.metadata,
+        })
+      }
+      return null
+    } else if (typeof mutation.metadata == `undefined`) {
+      return null
+    } else if (typeof mutation.metadata == `string`) {
+      return mutation.metadata
+    } else {
+      return JSON.stringify(mutation.metadata)
     }
   }
 }

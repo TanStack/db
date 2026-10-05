@@ -1,0 +1,572 @@
+import { describe, expect, it } from 'vitest'
+import { createCollection } from '../src/collection/index.js'
+import { BTreeIndex } from '../src/indexes/btree-index.js'
+import { createLiveQueryCollection, eq } from '../src/query/index.js'
+import { mockSyncCollectionOptions } from './utils.js'
+import type { ChangeMessage } from '../src/types.js'
+
+/**
+ * Tests for duplicate insert prevention in the D2 pipeline.
+ *
+ * The issue: When using live queries with orderBy + limit, the D2 pipeline
+ * uses multiplicity tracking. Each insert adds 1 to multiplicity, each delete
+ * subtracts 1. For an item to disappear, multiplicity must go from 1 to 0.
+ *
+ * If duplicate inserts reach D2, multiplicity becomes > 1, and deletes won't
+ * properly remove items (multiplicity goes from 2 to 1, not triggering removal).
+ *
+ * The source boundary tracks the exact row sent for each key. It filters
+ * duplicate inserts and uses the stored row for later D2 retractions. The
+ * generated reconciliation oracle covers that stateful boundary directly.
+ *
+ * The join example below uses preloaded eager sources. It checks the joined
+ * deletion path, not an on-demand provider's acquisition protocol.
+ */
+
+type TestItem = {
+  id: string
+  value: number
+}
+
+type User = {
+  id: string
+  name: string
+}
+
+type Order = {
+  id: string
+  userId: string
+  amount: number
+}
+
+type JoinedOrder = {
+  orderId: string | undefined
+  userName: string
+  amount: number | undefined
+}
+
+// These fixtures contain only scalar row fields. Keep each complete batch and
+// copy values at delivery so later writes cannot repair a bad observation.
+function recordChanges<T extends object>() {
+  const batches: Array<Array<ChangeMessage<T>>> = []
+  const changes: Array<ChangeMessage<T>> = []
+  return {
+    batches,
+    changes,
+    capture(batch: Array<ChangeMessage<T>>) {
+      const copy = batch.map((change) => ({
+        ...change,
+        value: { ...change.value },
+        ...(change.previousValue && {
+          previousValue: { ...change.previousValue },
+        }),
+      }))
+      batches.push(copy)
+      changes.push(...copy)
+    },
+  }
+}
+
+function expectInitialItems(changes: Array<ChangeMessage<TestItem>>) {
+  expect(
+    changes
+      .filter((change) => change.type === `insert`)
+      .map(({ key, value }) => [key, value.id, value.value])
+      .sort((a, b) => String(a[0]).localeCompare(String(b[0]))),
+  ).toEqual([
+    [`1`, `1`, 100],
+    [`2`, `2`, 90],
+  ])
+}
+
+function expectUpdatedItem(
+  changes: Array<ChangeMessage<TestItem>>,
+  value: number,
+) {
+  expect(
+    changes.some(
+      (change) =>
+        change.type === `update` &&
+        change.key === `1` &&
+        change.value.id === `1` &&
+        change.value.value === value,
+    ),
+    `an update exposing value ${value} must reach the subscriber`,
+  ).toBe(true)
+}
+
+describe(`Subscriber observation controls`, () => {
+  const initial: Array<ChangeMessage<TestItem>> = [
+    { type: `insert`, key: `1`, value: { id: `1`, value: 100 } },
+    { type: `insert`, key: `2`, value: { id: `2`, value: 90 } },
+  ]
+  it.each([`empty`, `missing`, `duplicate`, `value`] as const)(
+    `rejects %s initial delivery rather than checking only observed keys`,
+    (fault) => {
+      expectInitialItems(initial)
+      const bad =
+        fault === `empty`
+          ? []
+          : fault === `missing`
+            ? initial.slice(1)
+            : fault === `duplicate`
+              ? [...initial, initial[0]!]
+              : [initial[0]!, { ...initial[1]!, value: { id: `2`, value: 91 } }]
+      expect(() => expectInitialItems(bad)).toThrowError(
+        expect.objectContaining({ name: `AssertionError` }),
+      )
+    },
+  )
+  it(`rejects missing or stale updates and preserves captured batches`, () => {
+    const record = recordChanges<TestItem>()
+    const row = { id: `1`, value: 104 }
+    record.capture([{ type: `update`, key: `1`, value: row }])
+    expectUpdatedItem(record.changes, 104)
+    row.value = 105
+    expect(record.batches[0]![0]!.value.value).toBe(104)
+    for (const changes of [[], record.changes]) {
+      expect(() => expectUpdatedItem(changes, 105)).toThrowError(
+        expect.objectContaining({ name: `AssertionError` }),
+      )
+    }
+  })
+})
+
+describe(`CollectionSubscriber duplicate insert prevention`, () => {
+  it(`should properly delete items from live query with orderBy + limit`, async () => {
+    // This test verifies that items can be properly deleted from a live query
+    // with orderBy + limit. If duplicate inserts reach D2, the delete won't work.
+
+    const initialData: Array<TestItem> = [
+      { id: `1`, value: 100 },
+      { id: `2`, value: 90 },
+      { id: `3`, value: 80 },
+    ]
+
+    const sourceCollection = createCollection(
+      mockSyncCollectionOptions({
+        id: `duplicate-d2-source`,
+        getKey: (item: TestItem) => item.id,
+        initialData,
+      }),
+    )
+
+    await sourceCollection.preload()
+
+    // Create live query with orderBy + limit (uses TopKWithFractionalIndexOperator)
+    const liveQueryCollection = createLiveQueryCollection((q) =>
+      q
+        .from({ items: sourceCollection })
+        .orderBy(({ items }) => items.value, `desc`)
+        .limit(2)
+        .select(({ items }) => ({
+          id: items.id,
+          value: items.value,
+        })),
+    )
+
+    await liveQueryCollection.preload()
+
+    // Verify initial results
+    const initialResults = Array.from(liveQueryCollection.values())
+    expect(initialResults).toHaveLength(2)
+    expect(initialResults.map((r) => r.id)).toEqual([`1`, `2`])
+
+    // Subscribe to changes to verify events
+    const record = recordChanges<TestItem>()
+    const allChanges = record.changes
+    const subscription = liveQueryCollection.subscribeChanges(
+      (changes) => {
+        record.capture(changes)
+      },
+      { includeInitialState: true },
+    )
+
+    // Wait for initial state
+    await new Promise((resolve) => setTimeout(resolve, 10))
+
+    // Clear changes
+    allChanges.length = 0
+
+    // Delete item 2 (which is in the visible set)
+    sourceCollection.delete(`2`)
+
+    // Wait for delete to propagate
+    await new Promise((resolve) => setTimeout(resolve, 50))
+
+    // Verify delete event was emitted
+    const deleteEvents = allChanges.filter((c) => c.type === `delete`)
+    expect(
+      deleteEvents.some((e) => e.key === `2`),
+      `Expected delete event for key 2, but got: ${JSON.stringify(allChanges.map((c) => ({ type: c.type, key: c.key })))}`,
+    ).toBe(true)
+
+    // Verify item 3 moved into the visible set
+    const insertEvents = allChanges.filter((c) => c.type === `insert`)
+    expect(
+      insertEvents.some((e) => e.key === `3`),
+      `Expected insert event for key 3, but got: ${JSON.stringify(allChanges.map((c) => ({ type: c.type, key: c.key })))}`,
+    ).toBe(true)
+
+    // Verify final state
+    const finalResults = Array.from(liveQueryCollection.values())
+    expect(finalResults).toHaveLength(2)
+    expect(finalResults.map((r) => r.id)).toEqual([`1`, `3`])
+
+    subscription.unsubscribe()
+  })
+
+  it(`should not emit duplicate inserts to live query subscribers`, async () => {
+    // This test checks that live query subscribers don't receive duplicate inserts
+    // which would indicate D2 multiplicity issues
+
+    const initialData: Array<TestItem> = [
+      { id: `1`, value: 100 },
+      { id: `2`, value: 90 },
+    ]
+
+    const sourceCollection = createCollection(
+      mockSyncCollectionOptions({
+        id: `duplicate-d2-count`,
+        getKey: (item: TestItem) => item.id,
+        initialData,
+      }),
+    )
+
+    await sourceCollection.preload()
+
+    const liveQueryCollection = createLiveQueryCollection((q) =>
+      q
+        .from({ items: sourceCollection })
+        .orderBy(({ items }) => items.value, `desc`)
+        .limit(2)
+        .select(({ items }) => ({
+          id: items.id,
+          value: items.value,
+        })),
+    )
+
+    await liveQueryCollection.preload()
+
+    const record = recordChanges<TestItem>()
+    const allChanges = record.changes
+    const subscription = liveQueryCollection.subscribeChanges(
+      (changes) => {
+        record.capture(changes)
+      },
+      { includeInitialState: true },
+    )
+
+    // Wait for initial state
+    await new Promise((resolve) => setTimeout(resolve, 10))
+
+    // Count inserts per key
+    expectInitialItems(record.batches.flat())
+    const insertCounts = new Map<string, number>()
+    for (const change of allChanges) {
+      if (change.type === `insert`) {
+        insertCounts.set(
+          change.key as string,
+          (insertCounts.get(change.key as string) || 0) + 1,
+        )
+      }
+    }
+
+    // Each key should only have ONE insert
+    for (const [key, count] of insertCounts) {
+      expect(
+        count,
+        `Key ${key} should only have 1 insert after initial state, got ${count}. ` +
+          `This indicates duplicate inserts are reaching D2.`,
+      ).toBe(1)
+    }
+
+    subscription.unsubscribe()
+  })
+
+  it(`should handle rapid updates without duplicate inserts`, async () => {
+    // This test simulates rapid updates that could cause race conditions
+    // leading to duplicate inserts
+
+    const initialData: Array<TestItem> = [
+      { id: `1`, value: 100 },
+      { id: `2`, value: 90 },
+    ]
+
+    const sourceCollection = createCollection(
+      mockSyncCollectionOptions({
+        id: `duplicate-d2-rapid`,
+        getKey: (item: TestItem) => item.id,
+        initialData,
+      }),
+    )
+
+    await sourceCollection.preload()
+
+    const liveQueryCollection = createLiveQueryCollection((q) =>
+      q
+        .from({ items: sourceCollection })
+        .orderBy(({ items }) => items.value, `desc`)
+        .limit(2)
+        .select(({ items }) => ({
+          id: items.id,
+          value: items.value,
+        })),
+    )
+
+    await liveQueryCollection.preload()
+
+    const record = recordChanges<TestItem>()
+    const allChanges = record.changes
+    const subscription = liveQueryCollection.subscribeChanges(
+      (changes) => {
+        record.capture(changes)
+      },
+      { includeInitialState: true },
+    )
+
+    // Wait for initial state
+    await new Promise((resolve) => setTimeout(resolve, 10))
+
+    // Clear changes
+    allChanges.length = 0
+
+    // Rapid updates to simulate potential race conditions
+    expectInitialItems(record.batches.flat())
+    for (let i = 0; i < 5; i++) {
+      sourceCollection.update(`1`, (draft) => {
+        draft.value = 100 + i
+      })
+    }
+
+    // Wait for updates to propagate
+    await new Promise((resolve) => setTimeout(resolve, 50))
+
+    // Should have update events, not duplicate inserts
+    expectUpdatedItem(allChanges, 104)
+    expect(Array.from(liveQueryCollection.values())).toMatchObject([
+      { id: `1`, value: 104 },
+      { id: `2`, value: 90 },
+    ])
+    const insertCounts = new Map<string, number>()
+    for (const change of allChanges) {
+      if (change.type === `insert`) {
+        insertCounts.set(
+          change.key as string,
+          (insertCounts.get(change.key as string) || 0) + 1,
+        )
+      }
+    }
+
+    // No duplicate inserts should occur during updates
+    for (const [key, count] of insertCounts) {
+      expect(
+        count,
+        `Key ${key} should not have duplicate inserts during updates, got ${count}.`,
+      ).toBeLessThanOrEqual(1)
+    }
+
+    subscription.unsubscribe()
+  })
+
+  it(`should handle mutation during live query subscription setup`, async () => {
+    // This test checks for race conditions where a mutation occurs
+    // during live query subscription initialization
+
+    const initialData: Array<TestItem> = [
+      { id: `1`, value: 100 },
+      { id: `2`, value: 90 },
+    ]
+
+    const sourceCollection = createCollection(
+      mockSyncCollectionOptions({
+        id: `duplicate-d2-mutation-during-setup`,
+        getKey: (item: TestItem) => item.id,
+        initialData,
+        autoIndex: `eager`,
+        defaultIndexType: BTreeIndex,
+      }),
+    )
+
+    await sourceCollection.preload()
+
+    const liveQueryCollection = createLiveQueryCollection((q) =>
+      q
+        .from({ items: sourceCollection })
+        .orderBy(({ items }) => items.value, `desc`)
+        .limit(2)
+        .select(({ items }) => ({
+          id: items.id,
+          value: items.value,
+        })),
+    )
+
+    await liveQueryCollection.preload()
+
+    const record = recordChanges<TestItem>()
+    const allChanges = record.changes
+    let reentries = 0
+
+    // Subscribe and immediately mutate the source
+    const subscription = liveQueryCollection.subscribeChanges(
+      (changes) => {
+        record.capture(changes)
+
+        // Trigger mutation during callback (similar to race condition test)
+        const firstInsert = changes.find(
+          (c) => c.type === `insert` && c.key === `1`,
+        )
+        if (firstInsert) {
+          reentries++
+          sourceCollection.update(`1`, (draft) => {
+            draft.value = 101
+          })
+        }
+      },
+      { includeInitialState: true },
+    )
+
+    // Wait for everything to settle
+    await new Promise((resolve) => setTimeout(resolve, 50))
+
+    // Count inserts per key
+    expect(reentries).toBe(1)
+    expectInitialItems(record.batches.flat())
+    expect(Array.from(liveQueryCollection.values())).toMatchObject([
+      { id: `1`, value: 101 },
+      { id: `2`, value: 90 },
+    ])
+    const insertCounts = new Map<string, number>()
+    for (const change of allChanges) {
+      if (change.type === `insert`) {
+        insertCounts.set(
+          change.key as string,
+          (insertCounts.get(change.key as string) || 0) + 1,
+        )
+      }
+    }
+
+    // Each key should only have ONE insert initially
+    // (updates after initial insert are ok, but not duplicate inserts)
+    for (const [key, count] of insertCounts) {
+      expect(
+        count,
+        `Key ${key} should only have 1 insert, got ${count}. ` +
+          `Duplicate inserts indicate D2 multiplicity issues.`,
+      ).toBe(1)
+    }
+
+    // Verify we can still delete items (multiplicity is correct)
+    allChanges.length = 0
+    sourceCollection.delete(`2`)
+
+    await new Promise((resolve) => setTimeout(resolve, 50))
+
+    const deleteEvents = allChanges.filter((c) => c.type === `delete`)
+    expect(deleteEvents.some((e) => e.key === `2`)).toBe(true)
+    expect(Array.from(liveQueryCollection.values())).toMatchObject([
+      { id: `1`, value: 101 },
+    ])
+
+    subscription.unsubscribe()
+  })
+
+  it(`should properly handle deletes in join queries with preloaded eager sources`, async () => {
+    const users: Array<User> = [
+      { id: `u1`, name: `Alice` },
+      { id: `u2`, name: `Bob` },
+    ]
+
+    const orders: Array<Order> = [
+      { id: `o1`, userId: `u1`, amount: 100 },
+      { id: `o2`, userId: `u1`, amount: 200 },
+      { id: `o3`, userId: `u2`, amount: 150 },
+    ]
+
+    const usersCollection = createCollection(
+      mockSyncCollectionOptions({
+        id: `join-lazy-users`,
+        getKey: (item: User) => item.id,
+        initialData: users,
+      }),
+    )
+
+    const ordersCollection = createCollection(
+      mockSyncCollectionOptions({
+        id: `join-lazy-orders`,
+        getKey: (item: Order) => item.id,
+        initialData: orders,
+      }),
+    )
+
+    await Promise.all([usersCollection.preload(), ordersCollection.preload()])
+
+    // Both sources are preloaded; this is a joined deletion witness.
+    const liveQueryCollection = createLiveQueryCollection((q) =>
+      q
+        .from({ users: usersCollection })
+        .join({ orders: ordersCollection }, ({ users: u, orders: o }) =>
+          eq(u.id, o.userId),
+        )
+        .select(({ users: u2, orders: o2 }) => ({
+          orderId: o2.id,
+          userName: u2.name,
+          amount: o2.amount,
+        })),
+    )
+
+    await liveQueryCollection.preload()
+
+    // Verify initial results
+    const initialResults = Array.from(liveQueryCollection.values())
+    expect(initialResults).toHaveLength(3)
+    const plainOrders = (rows: Array<JoinedOrder>) =>
+      rows
+        .map(({ orderId, userName, amount }) => ({ orderId, userName, amount }))
+        .sort((a, b) => String(a.orderId).localeCompare(String(b.orderId)))
+    expect(plainOrders(initialResults)).toEqual([
+      { orderId: `o1`, userName: `Alice`, amount: 100 },
+      { orderId: `o2`, userName: `Alice`, amount: 200 },
+      { orderId: `o3`, userName: `Bob`, amount: 150 },
+    ])
+
+    // Subscribe to changes
+    const record = recordChanges<JoinedOrder>()
+    const allChanges = record.changes
+    const subscription = liveQueryCollection.subscribeChanges(
+      (changes) => {
+        record.capture(changes)
+      },
+      { includeInitialState: true },
+    )
+
+    // Wait for initial state
+    await new Promise((resolve) => setTimeout(resolve, 50))
+
+    // Clear changes
+    allChanges.length = 0
+
+    // Delete an order
+    ordersCollection.delete(`o1`)
+
+    // Wait for delete to propagate
+    await new Promise((resolve) => setTimeout(resolve, 50))
+
+    // Verify delete event was emitted
+    const deleteEvents = allChanges.filter((c) => c.type === `delete`)
+    expect(
+      deleteEvents.length,
+      `Expected at least 1 delete event, but got: ${JSON.stringify(allChanges.map((c) => ({ type: c.type, key: c.key })))}`,
+    ).toBeGreaterThan(0)
+
+    // Verify final state
+    const finalResults = Array.from(liveQueryCollection.values())
+    expect(finalResults).toHaveLength(2)
+    expect(plainOrders(finalResults)).toEqual([
+      { orderId: `o2`, userName: `Alice`, amount: 200 },
+      { orderId: `o3`, userName: `Bob`, amount: 150 },
+    ])
+
+    subscription.unsubscribe()
+  })
+})

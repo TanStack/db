@@ -3,13 +3,11 @@ id: NonEmptyArray
 title: NonEmptyArray
 ---
 
-# Type Alias: NonEmptyArray\<T\>
-
 ```ts
 type NonEmptyArray<T> = [T, ...T[]];
 ```
 
-Defined in: [packages/db/src/types.ts:133](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L133)
+Defined in: [packages/db/src/types.ts:150](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L150)
 
 Represents a non-empty array (at least one element)
 

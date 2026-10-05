@@ -2,12 +2,17 @@ import { describe, expectTypeOf, it } from 'vitest'
 import { z } from 'zod'
 import { createCollection } from '../src/index'
 import { localOnlyCollectionOptions } from '../src/local-only'
+import type { OutputWithVirtual } from './utils'
+import type { LocalOnlyCollectionUtils } from '../src/local-only'
 
 interface TestItem extends Record<string, unknown> {
   id: number
   name: string
   completed?: boolean
 }
+
+type TestItemWithVirtual = OutputWithVirtual<TestItem, number>
+type TestItemWithVirtualStringKey = OutputWithVirtual<TestItem, string>
 
 type ItemOf<T> = T extends Array<infer U> ? U : T
 
@@ -62,8 +67,10 @@ describe(`LocalOnly Collection Types`, () => {
     expectTypeOf(collection.insert).toBeFunction()
     expectTypeOf(collection.update).toBeFunction()
     expectTypeOf(collection.delete).toBeFunction()
-    expectTypeOf(collection.get).returns.toEqualTypeOf<TestItem | undefined>()
-    expectTypeOf(collection.toArray).toEqualTypeOf<Array<TestItem>>()
+    expectTypeOf(collection.get).returns.toEqualTypeOf<
+      TestItemWithVirtual | undefined
+    >()
+    expectTypeOf(collection.toArray).toEqualTypeOf<Array<TestItemWithVirtual>>()
 
     // Test insert parameter type
     type InsertParam = Parameters<typeof collection.insert>[0]
@@ -91,8 +98,10 @@ describe(`LocalOnly Collection Types`, () => {
     expectTypeOf(collection.insert).toBeFunction()
     expectTypeOf(collection.update).toBeFunction()
     expectTypeOf(collection.delete).toBeFunction()
-    expectTypeOf(collection.get).returns.toEqualTypeOf<TestItem | undefined>()
-    expectTypeOf(collection.toArray).toEqualTypeOf<Array<TestItem>>()
+    expectTypeOf(collection.get).returns.toEqualTypeOf<
+      TestItemWithVirtual | undefined
+    >()
+    expectTypeOf(collection.toArray).toEqualTypeOf<Array<TestItemWithVirtual>>()
 
     // Test insert parameter type
     type InsertParam2 = Parameters<typeof collection.insert>[0]
@@ -118,8 +127,10 @@ describe(`LocalOnly Collection Types`, () => {
     expectTypeOf(collection.insert).toBeFunction()
     expectTypeOf(collection.update).toBeFunction()
     expectTypeOf(collection.delete).toBeFunction()
-    expectTypeOf(collection.get).returns.toEqualTypeOf<TestItem | undefined>()
-    expectTypeOf(collection.toArray).toEqualTypeOf<Array<TestItem>>()
+    expectTypeOf(collection.get).returns.toEqualTypeOf<
+      TestItemWithVirtual | undefined
+    >()
+    expectTypeOf(collection.toArray).toEqualTypeOf<Array<TestItemWithVirtual>>()
   })
 
   it(`should infer key type from getKey function`, () => {
@@ -135,8 +146,12 @@ describe(`LocalOnly Collection Types`, () => {
     expectTypeOf(collection.insert).toBeFunction()
     expectTypeOf(collection.update).toBeFunction()
     expectTypeOf(collection.delete).toBeFunction()
-    expectTypeOf(collection.get).returns.toEqualTypeOf<TestItem | undefined>()
-    expectTypeOf(collection.toArray).toEqualTypeOf<Array<TestItem>>()
+    expectTypeOf(collection.get).returns.toEqualTypeOf<
+      TestItemWithVirtualStringKey | undefined
+    >()
+    expectTypeOf(collection.toArray).toEqualTypeOf<
+      Array<TestItemWithVirtualStringKey>
+    >()
     expectTypeOf(options.getKey).toBeFunction()
   })
 
@@ -193,7 +208,9 @@ describe(`LocalOnly Collection Types`, () => {
     })
 
     // Test that the collection has the correct inferred type from schema
-    expectTypeOf(collection.toArray).toEqualTypeOf<Array<ExpectedType>>()
+    expectTypeOf(collection.toArray).toEqualTypeOf<
+      Array<OutputWithVirtual<ExpectedType, string>>
+    >()
   })
 
   it(`should work with schema and infer correct types when nested in createCollection`, () => {
@@ -250,6 +267,22 @@ describe(`LocalOnly Collection Types`, () => {
     })
 
     // Test that the collection has the correct inferred type from schema
-    expectTypeOf(collection.toArray).toEqualTypeOf<Array<ExpectedType>>()
+    expectTypeOf(collection.toArray).toEqualTypeOf<
+      Array<OutputWithVirtual<ExpectedType, string>>
+    >()
+  })
+
+  it(`should type collection.utils as LocalOnlyCollectionUtils`, () => {
+    const collection = createCollection(
+      localOnlyCollectionOptions({
+        id: `test-utils-typing`,
+        getKey: (item: TestItem) => item.id,
+      }),
+    )
+
+    // Verify that collection.utils is typed as LocalOnlyCollectionUtils, not UtilsRecord
+    const utils: LocalOnlyCollectionUtils = collection.utils
+    expectTypeOf(utils.acceptMutations).toBeFunction()
+    expectTypeOf(collection.utils.acceptMutations).toBeFunction()
   })
 })

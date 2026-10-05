@@ -3,8 +3,6 @@ title: Overview
 id: overview
 ---
 
-# TanStack DB - Documentation
-
 Welcome to the TanStack DB documentation.
 
 TanStack DB is the reactive client store for your API. It solves the problems of building fast, modern apps, helping you:
@@ -34,10 +32,13 @@ It extends TanStack Query with collections, live queries and optimistic mutation
 
 ## Contents
 
-- [How it works](#how-it-works) &mdash; understand the TanStack DB development model and how the pieces fit together
-- [API reference](#api-reference) &mdash; for the primitives and function interfaces
-- [Usage examples](#usage-examples) &mdash; examples of common usage patterns
-- [More info](#more-info) &mdash; where to find support and more information
+- [How it works](#how-it-works) — understand the TanStack DB development model and how the pieces fit together
+- [SSR and hydration](./guides/ssr.md) — use `DbClient` to transport explicit collection rows or live-query result snapshots
+- [SQLite persistence](./guides/sqlite-persistence.md) — retain Collection rows across restarts and save sync metadata for supported adapters
+- [Offline transactions](./guides/offline-transactions.md) — retain pending mutations and retry them later
+- [API reference](#api-reference) — for the primitives and function interfaces
+- [Usage examples](#usage-examples) — examples of common usage patterns
+- [More info](#more-info) — where to find support and more information
 
 ## How it works
 
@@ -48,21 +49,38 @@ TanStack DB works by:
 - [making optimistic mutations](#making-optimistic-mutations) using transactional mutators
 
 ```tsx
-// Define collections to load data into
-const todoCollection = createCollection({
+import {
+  DbClient,
+  DbProvider,
+  collectionOptions,
+  not,
+  useDbClient,
+  useLiveQuery,
+} from '@tanstack/react-db'
+
+// Define stable collection descriptors to load data into
+const todoCollection = collectionOptions('todos', () => ({
+  id: 'todos',
   // ...your config
   onUpdate: updateMutationFn,
-})
+}))
+
+function useTodoCollection() {
+  return useDbClient().collection(todoCollection)
+}
 
 const Todos = () => {
+  const todosCollection = useTodoCollection()
+
   // Bind data using live queries
-  const { data: todos } = useLiveQuery((q) =>
-    q.from({ todo: todoCollection }).where(({ todo }) => todo.completed)
-  )
+  const { data: todos } = useLiveQuery({
+    query: (q) =>
+      q.from({ todo: todoCollection }).where(({ todo }) => not(todo.completed)),
+  })
 
   const complete = (todo) => {
     // Instantly applies optimistic state
-    todoCollection.update(todo.id, (draft) => {
+    todosCollection.update(todo.id, (draft) => {
       draft.completed = true
     })
   }
@@ -77,6 +95,14 @@ const Todos = () => {
     </ul>
   )
 }
+
+const dbClient = new DbClient()
+
+const App = () => (
+  <DbProvider client={dbClient}>
+    <Todos />
+  </DbProvider>
+)
 ```
 
 ### Defining collections
@@ -86,7 +112,7 @@ Collections are typed sets of objects that can be populated with data. They're d
 Collections can be populated in many ways, including:
 
 - fetching data, for example [from API endpoints using TanStack Query](https://tanstack.com/query/latest)
-- syncing data, for example [using a sync engine like ElectricSQL](https://electric-sql.com/)
+- syncing data, for example [using a sync engine like ElectricSQL](https://electric-sql.com/) or [PowerSync](https://powersync.com)
 - storing local data, for example [using localStorage for user preferences and settings](./collections/local-storage-collection.md) or [in-memory client data or UI state](./collections/local-only-collection.md)
 - from live collection queries, creating [derived collections as materialised views](#using-live-queries)
 
@@ -103,10 +129,11 @@ Collections support three sync modes to optimize data loading:
 With on-demand mode, your component's query becomes the API call:
 
 ```tsx
-const productsCollection = createCollection(
+const productsCollection = collectionOptions('products', (client) =>
   queryCollectionOptions({
-    queryClient: new QueryClient(),
+    id: 'products',
     queryKey: ['products'],
+    queryClient: client.requireDependency<QueryClient>('queryClient'),
     queryFn: async (ctx) => {
       // Query predicates passed automatically in ctx.meta
       const params = parseLoadSubsetOptions(ctx.meta?.loadSubsetOptions)
@@ -145,17 +172,18 @@ Collections support `insert`, `update` and `delete` operations. When called, by 
 
 ```ts
 // Define collection with persistence handlers
-const todoCollection = createCollection({
+const todoCollection = collectionOptions('todos', () => ({
   id: "todos",
   // ... other config
   onUpdate: async ({ transaction }) => {
     const { original, changes } = transaction.mutations[0]
     await api.todos.update(original.id, changes)
   },
-})
+}))
+const todosCollection = dbClient.collection(todoCollection)
 
 // Immediately applies optimistic state
-todoCollection.update(todo.id, (draft) => {
+todosCollection.update(todo.id, (draft) => {
   draft.completed = true
 })
 ```
@@ -188,23 +216,23 @@ TanStack DB provides several built-in collection types for different data source
 
 **Fetch Collections**
 
-- **[QueryCollection](./collections/query-collection.md)** &mdash; Load data into collections using TanStack Query for REST APIs and data fetching.
+- **[QueryCollection](./collections/query-collection.md)** — Load data into collections using TanStack Query for REST APIs and data fetching.
 
 **Sync Collections**
 
-- **[ElectricCollection](./collections/electric-collection.md)** &mdash; Sync data into collections from Postgres using ElectricSQL's real-time sync engine.
+- **[ElectricCollection](./collections/electric-collection.md)** — Sync data into collections from Postgres using ElectricSQL's real-time sync engine.
 
-- **[TrailBaseCollection](./collections/trailbase-collection.md)** &mdash; Sync data into collections using TrailBase's self-hosted backend with real-time subscriptions.
+- **[TrailBaseCollection](./collections/trailbase-collection.md)** — Sync data into collections using TrailBase's self-hosted backend with real-time subscriptions.
 
-- **[RxDBCollection](./collections/rxdb-collection.md)** &mdash; Integrate with RxDB for offline-first local persistence with powerful replication and sync capabilities.
+- **[RxDBCollection](./collections/rxdb-collection.md)** — Integrate with RxDB for offline-first local persistence with powerful replication and sync capabilities.
 
-- **[PowerSyncCollection](./collections/powersync-collection.md)** &mdash; Sync with PowerSync's SQLite-based database for offline-first persistence with real-time synchronization with PostgreSQL, MongoDB, and MySQL backends.
+- **[PowerSyncCollection](./collections/powersync-collection.md)** — Sync with PowerSync's SQLite-based database for offline-first persistence with real-time synchronization with PostgreSQL, MongoDB, and MySQL backends.
 
 **Local Collections**
 
-- **[LocalStorageCollection](./collections/local-storage-collection.md)** &mdash; Store small amounts of local-only state that persists across sessions and syncs across browser tabs.
+- **[LocalStorageCollection](./collections/local-storage-collection.md)** — Store small amounts of local-only state that persists across sessions and syncs across browser tabs.
 
-- **[LocalOnlyCollection](./collections/local-only-collection.md)** &mdash; Manage in-memory client data or UI state that doesn't need persistence or cross-tab sync.
+- **[LocalOnlyCollection](./collections/local-only-collection.md)** — Manage in-memory client data or UI state that doesn't need persistence or cross-tab sync.
 
 #### Collection Schemas
 
@@ -229,12 +257,14 @@ const todoSchema = z.object({
   priority: z.number().default(0)
 })
 
-const collection = createCollection(
+const todoCollection = collectionOptions(
   queryCollectionOptions({
+    id: "todos",
     schema: todoSchema,
     // ...
   })
 )
+const collection = dbClient.collection(todoCollection)
 
 // Users provide simple inputs
 collection.insert({
@@ -258,7 +288,7 @@ The collection will use the schema for its type inference. If you provide a sche
 
 You can create your own collection types by implementing the `Collection` interface found in [`../packages/db/src/collection/index.ts`](https://github.com/TanStack/db/blob/main/packages/db/src/collection/index.ts).
 
-See the existing implementations in [`../packages/db`](https://github.com/TanStack/db/tree/main/packages/db), [`../packages/query-db-collection`](https://github.com/TanStack/db/tree/main/packages/query-db-collection), [`../packages/electric-db-collection`](https://github.com/TanStack/db/tree/main/packages/electric-db-collection) and [`../packages/trailbase-db-collection`](https://github.com/TanStack/db/tree/main/packages/trailbase-db-collection) for reference. Also see the [Collection Options Creator guide](./guides/collection-options-creator.md) for a pattern to create reusable collection configuration factories.
+See the existing implementations in [`../packages/db`](https://github.com/TanStack/db/tree/main/packages/db), [`../packages/query-db-collection`](https://github.com/TanStack/db/tree/main/packages/query-db-collection), [`../packages/electric-db-collection`](https://github.com/TanStack/db/tree/main/packages/electric-db-collection), [`../packages/trailbase-db-collection`](https://github.com/TanStack/db/tree/main/packages/trailbase-db-collection) and [`../packages/powersync-db-collection`](https://github.com/TanStack/db/tree/main/packages/powersync-db-collection) for reference. Also see the [Collection Options Creator guide](./guides/collection-options-creator.md) for a pattern to create reusable collection configuration factories.
 
 ### Live queries
 
@@ -271,16 +301,17 @@ import { useLiveQuery } from '@tanstack/react-db'
 import { eq } from '@tanstack/db'
 
 const Todos = () => {
-  const { data: todos } = useLiveQuery((q) =>
-    q
-      .from({ todo: todoCollection })
-      .where(({ todo }) => eq(todo.completed, false))
-      .orderBy(({ todo }) => todo.created_at, 'asc')
-      .select(({ todo }) => ({
-        id: todo.id,
-        text: todo.text
-      }))
-  )
+  const { data: todos } = useLiveQuery({
+    query: (q) =>
+      q
+        .from({ todo: todoCollection })
+        .where(({ todo }) => eq(todo.completed, false))
+        .orderBy(({ todo }) => todo.created_at, 'asc')
+        .select(({ todo }) => ({
+          id: todo.id,
+          text: todo.text
+        })),
+  })
 
   return <List items={ todos } />
 }
@@ -293,21 +324,22 @@ import { useLiveQuery } from '@tanstack/react-db'
 import { eq } from '@tanstack/db'
 
 const Todos = () => {
-  const { data: todos } = useLiveQuery((q) =>
-    q
-      .from({ todos: todoCollection })
-      .join(
-        { lists: listCollection },
-        ({ todos, lists }) => eq(lists.id, todos.listId),
-        'inner'
-      )
-      .where(({ lists }) => eq(lists.active, true))
-      .select(({ todos, lists }) => ({
-        id: todos.id,
-        title: todos.title,
-        listName: lists.name
-      }))
-  )
+  const { data: todos } = useLiveQuery({
+    query: (q) =>
+      q
+        .from({ todos: todoCollection })
+        .join(
+          { lists: listCollection },
+          ({ todos, lists }) => eq(lists.id, todos.listId),
+          'inner'
+        )
+        .where(({ lists }) => eq(lists.active, true))
+        .select(({ todos, lists }) => ({
+          id: todos.id,
+          title: todos.title,
+          listName: lists.name
+        })),
+  })
 
   return <List items={ todos } />
 }
@@ -323,11 +355,12 @@ import { Suspense } from 'react'
 
 const Todos = () => {
   // data is always defined - no need for optional chaining
-  const { data: todos } = useLiveSuspenseQuery((q) =>
-    q
-      .from({ todo: todoCollection })
-      .where(({ todo }) => eq(todo.completed, false))
-  )
+  const { data: todos } = useLiveSuspenseQuery({
+    query: (q) =>
+      q
+        .from({ todo: todoCollection })
+        .where(({ todo }) => eq(todo.completed, false)),
+  })
 
   return <List items={ todos } />
 }
@@ -384,7 +417,7 @@ See the [Mutations guide](./guides/mutations.md) for comprehensive documentation
 Here we illustrate two common ways of using TanStack DB:
 
 1. [using TanStack Query](#1-tanstack-query) with an existing REST API
-2. [using the ElectricSQL sync engine](#2-electricsql-sync) for real-time sync with your existing API
+2. [using a sync engine](#2-sync-engine) for real-time sync with your backend
 
 > [!TIP]
 > You can combine these patterns. One of the benefits of TanStack DB is that you can integrate different ways of loading data and handling mutations into the same app. Your components don't need to know where the data came from or goes.
@@ -399,40 +432,58 @@ The steps are to:
 2. implement mutation handlers that handle mutations by posting them to your API endpoints
 
 ```tsx
-import { useLiveQuery, createCollection, eq } from "@tanstack/react-db"
+import {
+  DbClient,
+  DbProvider,
+  collectionOptions,
+  eq,
+  useLiveQuery,
+} from "@tanstack/react-db"
 import { queryCollectionOptions } from "@tanstack/query-db-collection"
-import { QueryClient } from "@tanstack/react-query";
+import { QueryClient } from "@tanstack/query-core"
+
+const queryClient = new QueryClient()
+const dbClient = new DbClient({ queryClient })
 
 // Load data into collections using TanStack Query.
 // It's common to define these in a `collections` module.
-const todoCollection = createCollection(
+const todoCollection = collectionOptions("todos", (client) =>
   queryCollectionOptions({
-    queryClient: new QueryClient(),
+    id: "todos",
     queryKey: ["todos"],
-    queryFn: async () => (await fetch("/api/todos")).json(),
+    queryClient: client.requireDependency<QueryClient>("queryClient"),
+    queryFn: async () => fetch("/api/todos").then((response) => response.json()),
     getKey: (item) => item.id,
     schema: todoSchema, // any standard schema
-    onInsert: async ({ transaction }) => {
+    onInsert: async ({ transaction, collection }) => {
       const { changes: newTodo } = transaction.mutations[0]
 
       // Handle the local write by sending it to your API.
       await api.todos.create(newTodo)
+      await collection.utils.refetch()
+      // Prevent the pre-1.0 compatibility wrapper from refetching again.
+      return { refetch: false }
     },
     // also add onUpdate, onDelete as needed.
   })
 )
-const listCollection = createCollection(
+const listCollection = collectionOptions("todo-lists", (client) =>
   queryCollectionOptions({
-    queryClient: new QueryClient(),
+    id: "todo-lists",
     queryKey: ["todo-lists"],
-    queryFn: async () => (await fetch("/api/todo-lists")).json(),
+    queryClient: client.requireDependency<QueryClient>("queryClient"),
+    queryFn: async () =>
+      fetch("/api/todo-lists").then((response) => response.json()),
     getKey: (item) => item.id,
     schema: todoListSchema,
-    onInsert: async ({ transaction }) => {
+    onInsert: async ({ transaction, collection }) => {
       const { changes: newTodo } = transaction.mutations[0]
 
       // Handle the local write by sending it to your API.
       await api.todoLists.create(newTodo)
+      await collection.utils.refetch()
+      // Prevent the pre-1.0 compatibility wrapper from refetching again.
+      return { refetch: false }
     },
     // also add onUpdate, onDelete as needed.
   })
@@ -441,30 +492,37 @@ const listCollection = createCollection(
 const Todos = () => {
   // Read the data using live queries. Here we show a live
   // query that joins across two collections.
-  const { data: todos } = useLiveQuery((q) =>
-    q
-      .from({ todo: todoCollection })
-      .join(
-        { list: listCollection },
-        ({ todo, list }) => eq(list.id, todo.list_id),
-        "inner"
-      )
-      .where(({ list }) => eq(list.active, true))
-      .select(({ todo, list }) => ({
-        id: todo.id,
-        text: todo.text,
-        status: todo.status,
-        listName: list.name,
-      }))
-  )
+  const { data: todos } = useLiveQuery({
+    query: (q) =>
+      q
+        .from({ todo: todoCollection })
+        .join(
+          { list: listCollection },
+          ({ todo, list }) => eq(list.id, todo.list_id),
+          "inner"
+        )
+        .where(({ list }) => eq(list.active, true))
+        .select(({ todo, list }) => ({
+          id: todo.id,
+          text: todo.text,
+          status: todo.status,
+          listName: list.name,
+        })),
+  })
 
   // ...
 }
+
+const App = () => (
+  <DbProvider client={dbClient}>
+    <Todos />
+  </DbProvider>
+)
 ```
 
 This pattern allows you to extend an existing TanStack Query application, or any application built on a REST API, with blazing fast, cross-collection live queries and local optimistic mutations with automatically managed optimistic state.
 
-### 2. ElectricSQL sync
+### 2. Sync Engine
 
 One of the most powerful ways of using TanStack DB is with a sync engine, for a fully local-first experience with real-time sync. This allows you to incrementally adopt sync into an existing app, whilst still handling writes with your existing API.
 
@@ -478,18 +536,17 @@ While TanStack DB works great with REST APIs, sync engines provide powerful bene
 
 This pattern enables the "load everything once" approach that makes apps like Linear and Figma feel instant.
 
-Here, we illustrate this pattern using [ElectricSQL](https://electric-sql.com) as the sync engine.
+Here, we illustrate this pattern using [ElectricSQL](https://electric-sql.com) as the sync engine, but this pattern also works with other sync engines like [PowerSync](https://www.powersync.com/?utm_source=tanstack&utm_campaign=tanstack_partner), [RxDB](https://rxdb.info/), and [TrailBase](https://trailbase.io/).
 
 ```tsx
-import type { Collection } from "@tanstack/db"
 import type {
   MutationFn,
   PendingMutation,
-  createCollection,
 } from "@tanstack/react-db"
+import { collectionOptions, useDbClient } from "@tanstack/react-db"
 import { electricCollectionOptions } from "@tanstack/electric-db-collection"
 
-export const todoCollection = createCollection(
+export const todoCollection = collectionOptions(
   electricCollectionOptions({
     id: "todos",
     schema: todoSchema,
@@ -502,20 +559,22 @@ export const todoCollection = createCollection(
       },
     },
     getKey: (item) => item.id,
-    schema: todoSchema,
-    onInsert: async ({ transaction }) => {
+    onInsert: async ({ transaction, collection }) => {
       const response = await api.todos.create(transaction.mutations[0].modified)
 
-      return { txid: response.txid }
+      // Wait for txid to sync
+      await collection.utils.awaitTxId(response.txid)
     },
     // You can also implement onUpdate, onDelete as needed.
   })
 )
 
 const AddTodo = () => {
+  const todosCollection = useDbClient().collection(todoCollection)
+
   return (
     <Button
-      onClick={() => todoCollection.insert({ text: "🔥 Make app faster" })}
+      onClick={() => todosCollection.insert({ text: "🔥 Make app faster" })}
     />
   )
 }

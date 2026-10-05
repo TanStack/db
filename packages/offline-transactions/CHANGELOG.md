@@ -1,5 +1,482 @@
 # @tanstack/offline-transactions
 
+## 1.0.61
+
+### Patch Changes
+
+- Updated dependencies [[`06cab6f`](https://github.com/TanStack/db/commit/06cab6fc7b808acfbfb3af1eb2fc1fdc3c9f0fa8)]:
+  - @tanstack/db@0.11.3
+
+## 1.0.60
+
+### Patch Changes
+
+- Updated dependencies [[`dac687d`](https://github.com/TanStack/db/commit/dac687d4b5cfac11ee93862ba1c781df7c7caf0f), [`dac687d`](https://github.com/TanStack/db/commit/dac687d4b5cfac11ee93862ba1c781df7c7caf0f), [`dac687d`](https://github.com/TanStack/db/commit/dac687d4b5cfac11ee93862ba1c781df7c7caf0f), [`dac687d`](https://github.com/TanStack/db/commit/dac687d4b5cfac11ee93862ba1c781df7c7caf0f), [`7595a2d`](https://github.com/TanStack/db/commit/7595a2d335b646d7913e836342c3ee60716bc875), [`dac687d`](https://github.com/TanStack/db/commit/dac687d4b5cfac11ee93862ba1c781df7c7caf0f), [`dac687d`](https://github.com/TanStack/db/commit/dac687d4b5cfac11ee93862ba1c781df7c7caf0f), [`8be6705`](https://github.com/TanStack/db/commit/8be6705a754b9e3d75d8c88fff88a971de1ce56b)]:
+  - @tanstack/db@0.11.2
+
+## 1.0.59
+
+### Patch Changes
+
+- Reject offline transactions that lose leadership before outbox admission so optimistic changes roll back instead of reporting false success. ([#1966](https://github.com/TanStack/db/pull/1966))
+
+- Wait for acknowledged outbox deletion before reporting a successful offline transaction. Persist fulfilled and permanently rejected provider outcomes so a fresh executor can remove a marked row without calling the provider again. If a phase write or deletion fails, reject the affected caller, stop the executor, and leave queued work untouched. Keep active callers from hanging after manual outbox removal. ([#1968](https://github.com/TanStack/db/pull/1968))
+
+- Updated dependencies [[`a18f63d`](https://github.com/TanStack/db/commit/a18f63d3562c0c9bebccffcdad1785cb5c9cc5f6), [`e706483`](https://github.com/TanStack/db/commit/e7064834f28b065c8bfc9356df61a158d68aab94), [`18abcee`](https://github.com/TanStack/db/commit/18abceee48ebde712e120cbc541289bb83f35d77), [`d2690bf`](https://github.com/TanStack/db/commit/d2690bf570dae1f1b527cf186e03a4f1e81e37ff), [`5b85af0`](https://github.com/TanStack/db/commit/5b85af08f2b02ff675d79c012a858e6b2bea3dbf), [`1dbf5f9`](https://github.com/TanStack/db/commit/1dbf5f9a5d3dee3ea4caec7fe935b3f018ce22c9), [`7ab48d8`](https://github.com/TanStack/db/commit/7ab48d83668b1c8a5051620e3963ccd72896e04f), [`d2690bf`](https://github.com/TanStack/db/commit/d2690bf570dae1f1b527cf186e03a4f1e81e37ff), [`7ca38db`](https://github.com/TanStack/db/commit/7ca38dbb9195ead55e7df60746157779b6d5e65a), [`f2f92c5`](https://github.com/TanStack/db/commit/f2f92c5b2c1500cc7b19c4294039700bb77dd4b3)]:
+  - @tanstack/db@0.11.1
+
+## 1.0.58
+
+### Patch Changes
+
+- Add browser-first SQLite persistence and offline transaction guides. Explain how Collection storage, sync, and the durable outbox work together. ([#1938](https://github.com/TanStack/db/pull/1938))
+
+- Allow visible web tabs to attempt offline transaction replay even when navigator.onLine reports false, while preserving the connectivity hint for background tabs. ([#1879](https://github.com/TanStack/db/pull/1879))
+
+- Reduce work when bulk retry updates and filtered replay process large offline outboxes. Keep FIFO order and the same retained transactions. ([#1958](https://github.com/TanStack/db/pull/1958))
+
+- Updated dependencies [[`9c62ac3`](https://github.com/TanStack/db/commit/9c62ac3782779dc2a91335dd834ad8eb907db109), [`d5e4732`](https://github.com/TanStack/db/commit/d5e47325a7db907fb2c5f9bb6d1273754bfc4a69), [`0122da8`](https://github.com/TanStack/db/commit/0122da80ae58d8e8e624b460506370a910037c8e), [`f7d96f7`](https://github.com/TanStack/db/commit/f7d96f7e22c8997bca0815521e8e944457c8888a), [`fb509ef`](https://github.com/TanStack/db/commit/fb509efb985f830736389d7ec2b53504c0611395), [`dc4b4e0`](https://github.com/TanStack/db/commit/dc4b4e089a5c5b4b9462fd833ff3c6e0c2f17988), [`f158258`](https://github.com/TanStack/db/commit/f15825858e09914b6b94c4150f77c5137efecdbf), [`c879ba6`](https://github.com/TanStack/db/commit/c879ba6d855914e5c0cac49af7a007eb5cabe7e4), [`b5d92ce`](https://github.com/TanStack/db/commit/b5d92cebd0d951d8a3399618aea4f399915b6ea9)]:
+  - @tanstack/db@0.11.0
+
+## 1.0.57
+
+### Patch Changes
+
+- Fix offline replay filtering so it preserves concurrently admitted and issued transactions, wait for React Native's subscribed connectivity snapshot before reporting online, and preserve Temporal scalar identity through storage and restart when the runtime provides `globalThis.Temporal`. Filtered replay work now settles and rolls back after each successful durable removal even when a sibling removal fails, while a failed filtered-work cleanup no longer aborts unrelated startup replay. Successful and permanently failed provider work settles its own caller even when durable cleanup also fails, retry scheduling remains live when a retry update or permanent-failure removal fails, and metadata keeps standard `toJSON(key)` replacement semantics. Recognized native scalars now fail before storage when the matching global constructor is unavailable. ([#1837](https://github.com/TanStack/db/pull/1837))
+
+  Offline storage compatibility: new records use `valueEncoding: 3`. Older clients cannot read these records, so do not run old and new clients against the same pending outbox or downgrade while new records remain pending.
+
+- Reject cyclic offline transaction values with a bounded error, preserve user objects that only imitate Temporal tags, and avoid allocating an index list for every serialized array. ([#1873](https://github.com/TanStack/db/pull/1873))
+
+- Fence each successful outbox clear deletion from overlapping reads, including when another deletion is still pending or fails. ([#1836](https://github.com/TanStack/db/pull/1836))
+
+- Preserve only captured accepted local inserts across a truncate. Preserve sparse-array length and RegExp state through ordered-query hashing, including hosts without a global File constructor. Prevent delayed replay reads from rerunning any transaction removed while the read was in flight, without rescanning the outbox. ([#1822](https://github.com/TanStack/db/pull/1822))
+
+- Updated dependencies [[`2ad6834`](https://github.com/TanStack/db/commit/2ad6834af4b1ddf9d7c0c9c85e25ea8b1aac44e2), [`b528a61`](https://github.com/TanStack/db/commit/b528a610533a083ec909aeca354ff826d76e37e0), [`84fc44b`](https://github.com/TanStack/db/commit/84fc44b559c94139f28b3cec526ebfe05290b95e), [`9351f46`](https://github.com/TanStack/db/commit/9351f46d68853f4e3f5fa3c7e8c9455e798d0171), [`5108acf`](https://github.com/TanStack/db/commit/5108acf47a0724691a06af8a660014776f9cf716), [`afbeb44`](https://github.com/TanStack/db/commit/afbeb44eef48d92b6e30ae5fd2843b938ee9163c), [`2775082`](https://github.com/TanStack/db/commit/27750825e94acaf221c5a3e7a4ed4a735499e9fa), [`fef53f8`](https://github.com/TanStack/db/commit/fef53f8be7f1cb68f00639a4c3206a6598663de4), [`b44a50a`](https://github.com/TanStack/db/commit/b44a50ad8c1ffeced0749dd773dfdc8ca2db8f0a), [`19dd9a2`](https://github.com/TanStack/db/commit/19dd9a2fa580963f4605d3466674db6ec9d3e002), [`3096b8f`](https://github.com/TanStack/db/commit/3096b8f28b7baaa990ec6113175d684191a21954), [`1ab1cd3`](https://github.com/TanStack/db/commit/1ab1cd35d0549735a864e1cd9260f5b1374d8191), [`e5fe2ea`](https://github.com/TanStack/db/commit/e5fe2ea3597faa257d2c5f8cde6f5d17b8893f0f), [`3eb5b2b`](https://github.com/TanStack/db/commit/3eb5b2b387fed4051744ca4787c499e5f3d2f7b2), [`7c62bf5`](https://github.com/TanStack/db/commit/7c62bf5a159480eee0b3da0b526f943db59446a2), [`63362dc`](https://github.com/TanStack/db/commit/63362dc8cbe7f7a63e5e79fdedaed3c31a7fb7af), [`7f6b643`](https://github.com/TanStack/db/commit/7f6b6438cd3a5b2cfc54ea1d8ad8a2102ea9d699), [`c479fdc`](https://github.com/TanStack/db/commit/c479fdc1c2e09d979842210148a08378fb5d71d7), [`91a2cbf`](https://github.com/TanStack/db/commit/91a2cbfb88fccc5f19f864b69632cfb8e95ed449), [`144c6b1`](https://github.com/TanStack/db/commit/144c6b132f65138d9a12321ef62a286f03551d21), [`5218f0c`](https://github.com/TanStack/db/commit/5218f0c385f61ccfa08ff366fb6f487528702017), [`76d766e`](https://github.com/TanStack/db/commit/76d766e84afbfcde2900a661233dd59e1decd5c2), [`1e54c6a`](https://github.com/TanStack/db/commit/1e54c6a2820ef5f1a87c6f4236311259c041fc24), [`d698b90`](https://github.com/TanStack/db/commit/d698b90579fd5ce3a4bf122ddd30fd4fe9f8d2b6), [`04a1a81`](https://github.com/TanStack/db/commit/04a1a81a0f5bd192d63e2ae5987f48aaf2c2a72a), [`3ad64a4`](https://github.com/TanStack/db/commit/3ad64a42a0088e1272176fb33c953526fed9b868), [`4c5a8de`](https://github.com/TanStack/db/commit/4c5a8de61843d6964a2580aded8a2d027b78e135), [`b72b5d1`](https://github.com/TanStack/db/commit/b72b5d1d2fd01df29373099dd50daf2373e3bb8b), [`fc1adde`](https://github.com/TanStack/db/commit/fc1adde85be0ed3570912688712ccc15875be906), [`2781581`](https://github.com/TanStack/db/commit/27815817c56b3bca1823703dbd9893a0ef86f6d2), [`40a5aea`](https://github.com/TanStack/db/commit/40a5aea5637ce4364ff2fc0bc747100f844bcdc2), [`e16d46c`](https://github.com/TanStack/db/commit/e16d46ce5d10c7f895c8abff86da4925f0eda2d1), [`9cbc885`](https://github.com/TanStack/db/commit/9cbc885e826695c5a33c4684f454ce176ad17d2d), [`23ae52d`](https://github.com/TanStack/db/commit/23ae52d7646593e9ddca9875c3c8e38945f8cdf4), [`7917ef9`](https://github.com/TanStack/db/commit/7917ef990deaf308ce7c4bd469707f01cb34746b), [`1ca838b`](https://github.com/TanStack/db/commit/1ca838b408e588ef52a817196d4ea576b1259008), [`34a999d`](https://github.com/TanStack/db/commit/34a999d7a67f6d2c468a5b6c13a29e2b41861a2b), [`825acc5`](https://github.com/TanStack/db/commit/825acc5ff3b703354088e81b3161d0cc830650cf), [`febd4bc`](https://github.com/TanStack/db/commit/febd4bcc3cafa53d552a7724619a513982789b56), [`b7a7d10`](https://github.com/TanStack/db/commit/b7a7d10d7a045614bd78f482f17a7d1ba568f2b5), [`510cb53`](https://github.com/TanStack/db/commit/510cb538c4706e21a4d70046bf2ab2753f47bfa8), [`efb84d8`](https://github.com/TanStack/db/commit/efb84d800fd162842815e872d088d070db5407e3), [`236d77b`](https://github.com/TanStack/db/commit/236d77bcbe2941816c756ea5f9e8db4c77c333f2), [`71ad428`](https://github.com/TanStack/db/commit/71ad4284922c2355eb723fc5a00f26c72296aef9)]:
+  - @tanstack/db@0.10.0
+
+## 1.0.56
+
+### Patch Changes
+
+- Ignore repeated leadership notifications when the state has not changed to avoid restarting active replay. Settle each transaction's commit when that transaction completes, without waiting for the shared queue to drain. ([#1816](https://github.com/TanStack/db/pull/1816))
+
+  Keep a completed transaction registered until its outbox deletion settles so a leadership change during deletion does not schedule the same mutation again.
+
+- Preserve fractional top-k replacements regardless of delta order, including left-join updates, and honor B-tree lookup fallbacks after node splits. Preserve own JSON data properties such as `__proto__` during mutation detachment and offline transaction serialization. ([#1816](https://github.com/TanStack/db/pull/1816))
+
+  Compare same-key top-k values directly instead of hashing every replacement. This preserves cyclic payloads and avoids unnecessary full-payload traversal for ordinary updates.
+
+  Cancel structurally equal mapped top-k deltas before applying replacements. Escape Date-marker-shaped user objects in new offline records while retaining read support for the original record format.
+
+  Offline storage compatibility: new records use `valueEncoding: 2`. Older clients
+  cannot decode escaped marker-shaped objects correctly, so do not mix old and
+  new clients against the same pending outbox or downgrade while new records
+  remain. New clients still read the original unversioned format. Unknown
+  encodings and corrupt records are reported through warnings and left in
+  storage, not silently discarded; recovery policy is tracked in RFC #1659.
+
+  Reject malformed escaped-object markers rather than inventing empty mutation
+  data. Avoid redundant transfer work for zero-width fractional top-k windows
+  and avoid descriptor writes for ordinary keys during draft copying.
+
+- Updated dependencies [[`3c4c35d`](https://github.com/TanStack/db/commit/3c4c35d5868c908979058c4dbeae7c4ac9eab88b)]:
+  - @tanstack/db@0.9.2
+
+## 1.0.55
+
+### Patch Changes
+
+- Updated dependencies [[`a378bd3`](https://github.com/TanStack/db/commit/a378bd3a65f6b9ed0c9a85f793b7dc2e2a59a313), [`ad043b7`](https://github.com/TanStack/db/commit/ad043b7455a5bdc549c36833bc72ddbe9ce8afed), [`025a079`](https://github.com/TanStack/db/commit/025a0799dd7690d892cacff5493b7270c33fdc2c), [`ddc129e`](https://github.com/TanStack/db/commit/ddc129eeab84d7eca4f2972c3dcc37506202a43d)]:
+  - @tanstack/db@0.9.1
+
+## 1.0.54
+
+### Patch Changes
+
+- Updated dependencies [[`cfb01ce`](https://github.com/TanStack/db/commit/cfb01cee34de7d0378e008dc8c01c1df5253c1e2)]:
+  - @tanstack/db@0.9.0
+
+## 1.0.53
+
+### Patch Changes
+
+- Updated dependencies [[`bbc9edf`](https://github.com/TanStack/db/commit/bbc9edf28ef707c8fb3c451fe2c4724039a0037a)]:
+  - @tanstack/db@0.8.7
+
+## 1.0.52
+
+### Patch Changes
+
+- Updated dependencies [[`ae2fe74`](https://github.com/TanStack/db/commit/ae2fe74e4cb4e74500a90034e6db7987bbd90bd8)]:
+  - @tanstack/db@0.8.6
+
+## 1.0.51
+
+### Patch Changes
+
+- Updated dependencies [[`d8defd2`](https://github.com/TanStack/db/commit/d8defd2a8eb96162cbd4e24970d519eac217bb95), [`9ad882f`](https://github.com/TanStack/db/commit/9ad882f71872aa2210b93ea93d084bd08bedb6a4), [`8c5838d`](https://github.com/TanStack/db/commit/8c5838ddd5f08b3c298d4458cae1ce599af80624)]:
+  - @tanstack/db@0.8.5
+
+## 1.0.50
+
+### Patch Changes
+
+- Updated dependencies [[`3131de1`](https://github.com/TanStack/db/commit/3131de14507006f72631947a61e040b1523d417f), [`8f432ba`](https://github.com/TanStack/db/commit/8f432ba226df2a27d67498ddd1df8468f93ff776)]:
+  - @tanstack/db@0.8.4
+
+## 1.0.49
+
+### Patch Changes
+
+- Updated dependencies [[`99ba511`](https://github.com/TanStack/db/commit/99ba5113b21fd850a8f3e517e5d44ea42ac9f984), [`43cc741`](https://github.com/TanStack/db/commit/43cc741842ae3689128c308be19069b062642f12)]:
+  - @tanstack/db@0.8.3
+
+## 1.0.48
+
+### Patch Changes
+
+- Updated dependencies [[`c521b5d`](https://github.com/TanStack/db/commit/c521b5d6503d8fdf03574b9f9791143e59d34204)]:
+  - @tanstack/db@0.8.2
+
+## 1.0.47
+
+### Patch Changes
+
+- Updated dependencies [[`5d9335d`](https://github.com/TanStack/db/commit/5d9335d0d42c1cc1ec2b92be8ce40ae8abe42827), [`a20352a`](https://github.com/TanStack/db/commit/a20352a9a7b64c9708bef9a1dfb90c96426b6730)]:
+  - @tanstack/db@0.8.1
+
+## 1.0.46
+
+### Patch Changes
+
+- Updated dependencies [[`4b9e8cd`](https://github.com/TanStack/db/commit/4b9e8cdf79551734cf526e6fa4bbdba42ec94575)]:
+  - @tanstack/db@0.8.0
+
+## 1.0.45
+
+### Patch Changes
+
+- Update agent skills to match current APIs and behavior. ([#1696](https://github.com/TanStack/db/pull/1696))
+
+- Updated dependencies [[`5f63996`](https://github.com/TanStack/db/commit/5f63996b0febd4775fb641f50975f8f0d442dc00)]:
+  - @tanstack/db@0.7.2
+
+## 1.0.44
+
+### Patch Changes
+
+- Updated dependencies [[`424382b`](https://github.com/TanStack/db/commit/424382b3a80c6b3556701b433c26c8a60fc8d1af)]:
+  - @tanstack/db@0.7.1
+
+## 1.0.43
+
+### Patch Changes
+
+- Updated dependencies [[`ad88d07`](https://github.com/TanStack/db/commit/ad88d0751db9723dfb9f164ebfcef88d52b6efa3), [`7e7abda`](https://github.com/TanStack/db/commit/7e7abda73a7ab313f9ec6a413fad00f300e79fb3), [`dc53f0e`](https://github.com/TanStack/db/commit/dc53f0ecbc38e173af68d829ff2de97531494722)]:
+  - @tanstack/db@0.7.0
+
+## 1.0.42
+
+### Patch Changes
+
+- Updated dependencies [[`8ee783d`](https://github.com/TanStack/db/commit/8ee783d7aed9bd5585c182607581305374b8904f)]:
+  - @tanstack/db@0.6.17
+
+## 1.0.41
+
+### Patch Changes
+
+- Updated dependencies [[`8258d09`](https://github.com/TanStack/db/commit/8258d0955ab47c8510bd49ea59bcdbefd2ae054d), [`286964d`](https://github.com/TanStack/db/commit/286964d72612b59e3e427baabd9870f5a71a4281)]:
+  - @tanstack/db@0.6.16
+
+## 1.0.40
+
+### Patch Changes
+
+- Updated dependencies [[`eabcea7`](https://github.com/TanStack/db/commit/eabcea743fdfa045a2db01e12bef87403613102a), [`6d4c096`](https://github.com/TanStack/db/commit/6d4c096395b7ff3f428122ea8842bbead551a8c9)]:
+  - @tanstack/db@0.6.15
+
+## 1.0.39
+
+### Patch Changes
+
+- Updated dependencies [[`397e12a`](https://github.com/TanStack/db/commit/397e12a1224ad563e20a331eebcbe904cd4af948)]:
+  - @tanstack/db@0.6.14
+
+## 1.0.38
+
+### Patch Changes
+
+- Updated dependencies [[`99e9afe`](https://github.com/TanStack/db/commit/99e9afed46ab4083d66609a3e37ee44103c2177f), [`816b667`](https://github.com/TanStack/db/commit/816b6671c2cc9806715f6e6ed4410b3f4efb5afb)]:
+  - @tanstack/db@0.6.13
+
+## 1.0.37
+
+### Patch Changes
+
+- Updated dependencies [[`2b27dd1`](https://github.com/TanStack/db/commit/2b27dd1448da71c78a48e2390cb71b0ada1b1488)]:
+  - @tanstack/db@0.6.12
+
+## 1.0.36
+
+### Patch Changes
+
+- Updated dependencies [[`d79b0cd`](https://github.com/TanStack/db/commit/d79b0cd3fd20c1f7e2525e90121752fb6bee314c), [`36fb29a`](https://github.com/TanStack/db/commit/36fb29ad7e906d39b6afdba2fd31e369c601bbb0), [`d79b0cd`](https://github.com/TanStack/db/commit/d79b0cd3fd20c1f7e2525e90121752fb6bee314c), [`ac09b11`](https://github.com/TanStack/db/commit/ac09b1177a100eafa85cba3cd09dd1f53f933ded)]:
+  - @tanstack/db@0.6.11
+
+## 1.0.35
+
+### Patch Changes
+
+- Updated dependencies [[`307fdf8`](https://github.com/TanStack/db/commit/307fdf80f522a39a50e316316b3b75ba27fd5e84)]:
+  - @tanstack/db@0.6.10
+
+## 1.0.34
+
+### Patch Changes
+
+- Use a safe `randomUUID` helper that falls back to `crypto.getRandomValues` when `crypto.randomUUID` is unavailable (non-secure browser contexts such as dev servers reached via a LAN IP over HTTP). Fixes #1541. ([#1593](https://github.com/TanStack/db/pull/1593))
+
+- Updated dependencies [[`2147345`](https://github.com/TanStack/db/commit/2147345236ceee6e73d9fc6c0cdc2385833199fc), [`00389a4`](https://github.com/TanStack/db/commit/00389a47b258ad58fc3a03c5cc6f66957b9bd2d1)]:
+  - @tanstack/db@0.6.9
+
+## 1.0.33
+
+### Patch Changes
+
+- Updated dependencies [[`3827b62`](https://github.com/TanStack/db/commit/3827b62604bbfc970d80b57479c8da063d78e69d)]:
+  - @tanstack/db@0.6.8
+
+## 1.0.32
+
+### Patch Changes
+
+- Updated dependencies [[`ec59984`](https://github.com/TanStack/db/commit/ec59984dcd8610ad9651c2d32e1361143d44d3c9), [`6238a2d`](https://github.com/TanStack/db/commit/6238a2d80caf4d1cdecaf889fb66bd6ebcc7386a)]:
+  - @tanstack/db@0.6.7
+
+## 1.0.31
+
+### Patch Changes
+
+- Updated dependencies [[`4e9ab39`](https://github.com/TanStack/db/commit/4e9ab39241aae3ba17c8bddf744d566de411f9aa)]:
+  - @tanstack/db@0.6.6
+
+## 1.0.30
+
+### Patch Changes
+
+- Updated dependencies [[`232f228`](https://github.com/TanStack/db/commit/232f22845ddfe179a803a241f95a3375ae63a1fb), [`232f228`](https://github.com/TanStack/db/commit/232f22845ddfe179a803a241f95a3375ae63a1fb)]:
+  - @tanstack/db@0.6.5
+
+## 1.0.29
+
+### Patch Changes
+
+- Updated dependencies [[`1e69dd6`](https://github.com/TanStack/db/commit/1e69dd6fac7c9d8d7314af5ce18c33f2006c96b4)]:
+  - @tanstack/db@0.6.4
+
+## 1.0.28
+
+### Patch Changes
+
+- Updated dependencies [[`e29aab3`](https://github.com/TanStack/db/commit/e29aab3ece4420c6959202294777daa606c4b9e4), [`f4a9bd2`](https://github.com/TanStack/db/commit/f4a9bd28c613dc4757f279f292c9276f6a8e012e)]:
+  - @tanstack/db@0.6.3
+
+## 1.0.27
+
+### Patch Changes
+
+- Updated dependencies [[`3fe689a`](https://github.com/TanStack/db/commit/3fe689a4444d53a075a0dbe6e2649f8852137fc8), [`c314c36`](https://github.com/TanStack/db/commit/c314c36b8bd02f8be86865c13f31f817ce21dc66)]:
+  - @tanstack/db@0.6.2
+
+## 1.0.26
+
+### Patch Changes
+
+- Update all SKILL.md files to v0.6.0 with new documentation for persistence, virtual properties, queryOnce, createEffect, includes, indexing, and sync metadata. Add tanstack-intent keyword to all packages with skills. ([#1421](https://github.com/TanStack/db/pull/1421))
+
+- Updated dependencies [[`8b7fb1a`](https://github.com/TanStack/db/commit/8b7fb1a18522b8d1c2adb46f5917305c7d99fc4a)]:
+  - @tanstack/db@0.6.1
+
+## 1.0.25
+
+### Patch Changes
+
+- fix: prevent stale query refreshes from overwriting optimistic offline changes on reconnect ([#1390](https://github.com/TanStack/db/pull/1390))
+
+  When reconnecting with pending offline transactions, query-backed collections now defer processing query refreshes until queued writes finish replaying, avoiding temporary reverts to stale server data.
+
+- Updated dependencies [[`f60384b`](https://github.com/TanStack/db/commit/f60384b0fbde019865cbac5a7af341ff8a46d483), [`b8abc02`](https://github.com/TanStack/db/commit/b8abc0230096900746f92c51496489460b4d75e1), [`09c7afc`](https://github.com/TanStack/db/commit/09c7afc47a5ef3f3415ae601b6b00155ab64650b), [`bb09eb1`](https://github.com/TanStack/db/commit/bb09eb1eecbf680bb95a0bb08639f337e9982043), [`179d666`](https://github.com/TanStack/db/commit/179d66685449bcdf9f785c8765bc57cc19c2f7bd), [`43ecbfa`](https://github.com/TanStack/db/commit/43ecbfae5be5e59ffdce6c545d90ca5a810159e6), [`055fd94`](https://github.com/TanStack/db/commit/055fd94bd4654d27d5366af12a90da4c0e670fc0), [`055fd94`](https://github.com/TanStack/db/commit/055fd94bd4654d27d5366af12a90da4c0e670fc0), [`055fd94`](https://github.com/TanStack/db/commit/055fd94bd4654d27d5366af12a90da4c0e670fc0), [`055fd94`](https://github.com/TanStack/db/commit/055fd94bd4654d27d5366af12a90da4c0e670fc0), [`85f5435`](https://github.com/TanStack/db/commit/85f54355a426baefc88ccc55179e0cfcb4dac168), [`b65d8f7`](https://github.com/TanStack/db/commit/b65d8f767dafb1aeede26766c644f9ef0694f20c), [`e0df07e`](https://github.com/TanStack/db/commit/e0df07e1eb2eefbc829407f337cee1d443a7e9b6), [`9952921`](https://github.com/TanStack/db/commit/9952921e02ed8bca5653f0afa64862fc22ffbf9d), [`d351c67`](https://github.com/TanStack/db/commit/d351c677d687e667450138f66ab3bd0e11e7e347)]:
+  - @tanstack/db@0.6.0
+
+## 1.0.24
+
+### Patch Changes
+
+- Updated dependencies [[`c3e6a96`](https://github.com/TanStack/db/commit/c3e6a9654004ce53d429e0ec995738078ab93870)]:
+  - @tanstack/db@0.5.33
+
+## 1.0.23
+
+### Patch Changes
+
+- Updated dependencies [[`eeb5321`](https://github.com/TanStack/db/commit/eeb5321c578ffa2fbdfb7b0b3d64f579d1933522), [`495abc2`](https://github.com/TanStack/db/commit/495abc29fe8c088783b43402c7eeed35566d8524), [`a55e2bf`](https://github.com/TanStack/db/commit/a55e2bf54dbe78128adf5ce26d524a13dedf8145), [`41c0ea2`](https://github.com/TanStack/db/commit/41c0ea2d956f9de37d0216af371f58a461be6f1f)]:
+  - @tanstack/db@0.5.32
+
+## 1.0.22
+
+### Patch Changes
+
+- Add Intent agent skills (SKILL.md files) to guide AI coding agents. Include skills for core DB concepts, all 5 framework bindings, meta-framework integration, and offline transactions. Also add `export * from '@tanstack/db'` to angular-db for consistency with other framework packages. ([#1330](https://github.com/TanStack/db/pull/1330))
+
+- Updated dependencies [[`bf1d078`](https://github.com/TanStack/db/commit/bf1d078627de150bfca02e2ae2ad8b0289c19b37)]:
+  - @tanstack/db@0.5.31
+
+## 1.0.21
+
+### Patch Changes
+
+- Fix retry behavior to not cap at 10 attempts and not burn retries while offline. Default retry policy now retries indefinitely with exponential backoff. Execution loop and retry timer check online status before attempting transactions. `OnlineDetector.isOnline()` is now a required method on the interface. `OfflineExecutor.notifyOnline()` has been removed — the online detector handles connectivity changes automatically. ([#1301](https://github.com/TanStack/db/pull/1301))
+
+## 1.0.20
+
+### Patch Changes
+
+- Fix KeyScheduler to enforce strict FIFO ordering on retries. Previously, the scheduler could skip past a transaction waiting for retry and execute a later one, causing dependent UPDATE-before-INSERT failures. Also refactored `getNextBatch` to `getNext` to reflect that it always returns at most one transaction. ([#1300](https://github.com/TanStack/db/pull/1300))
+
+- Updated dependencies [[`e9d0fd8`](https://github.com/TanStack/db/commit/e9d0fd8f0db18a7dc8a0f2b3eacd50a94f6258f7)]:
+  - @tanstack/db@0.5.30
+
+## 1.0.19
+
+### Patch Changes
+
+- Updated dependencies [[`77b815e`](https://github.com/TanStack/db/commit/77b815ee52e91ca8d03110a551a4cb8bab4f2daa), [`ac4ce67`](https://github.com/TanStack/db/commit/ac4ce6790e906f5cfb086b063c8d7daa7681ceb9)]:
+  - @tanstack/db@0.5.29
+
+## 1.0.18
+
+### Patch Changes
+
+- Updated dependencies [[`46450e7`](https://github.com/TanStack/db/commit/46450e73bf78dbdcbef1fb46cb90c6a86b10f6c8)]:
+  - @tanstack/db@0.5.28
+
+## 1.0.17
+
+### Patch Changes
+
+- Updated dependencies [[`802550f`](https://github.com/TanStack/db/commit/802550f3c517b8decac273edf9a4a6074fb3526b), [`dc41d7d`](https://github.com/TanStack/db/commit/dc41d7dacc4a70cb62462633a375de823f01b280), [`4ff3da5`](https://github.com/TanStack/db/commit/4ff3da57e095dc17d8585585d7678b9538cf7602), [`2223cd6`](https://github.com/TanStack/db/commit/2223cd6b51ce37f21983302804a75af28b47f2fe)]:
+  - @tanstack/db@0.5.27
+
+## 1.0.16
+
+### Patch Changes
+
+- Updated dependencies [[`85c373e`](https://github.com/TanStack/db/commit/85c373ef892e4080fe86b26e2fcb762181545e3c), [`9184dcc`](https://github.com/TanStack/db/commit/9184dcce62019ea870f968f4a4a5c2428291214d), [`83d5ac8`](https://github.com/TanStack/db/commit/83d5ac82983fb6c244c53d349c83845969473a9b)]:
+  - @tanstack/db@0.5.26
+
+## 1.0.15
+
+### Patch Changes
+
+- Updated dependencies [[`43c7c9d`](https://github.com/TanStack/db/commit/43c7c9d5f2b47366a58f87470ac5dca95020ac57), [`284ebcc`](https://github.com/TanStack/db/commit/284ebcc8346bd237c3381de766995b8bda35009a)]:
+  - @tanstack/db@0.5.25
+
+## 1.0.14
+
+### Patch Changes
+
+- Updated dependencies [[`7099459`](https://github.com/TanStack/db/commit/7099459291810b237a9fb24bbfe6e543852a2ab2)]:
+  - @tanstack/db@0.5.24
+
+## 1.0.13
+
+### Patch Changes
+
+- Fix optimistic state not being restored to collections on page refresh while offline. Pending transactions are now automatically rehydrated from storage and their optimistic mutations applied to the UI immediately on startup, providing a seamless offline experience. ([#1169](https://github.com/TanStack/db/pull/1169))
+
+- Updated dependencies [[`05130f2`](https://github.com/TanStack/db/commit/05130f2420eb682f11f099310a0af87afa3f35fe)]:
+  - @tanstack/db@0.5.23
+
+## 1.0.12
+
+### Patch Changes
+
+- Updated dependencies [[`f9b741e`](https://github.com/TanStack/db/commit/f9b741e9fb636be1c9f1502b7e28fe691bae2480)]:
+  - @tanstack/db@0.5.22
+
+## 1.0.11
+
+### Patch Changes
+
+- Fix date field corruption after app restart. String values matching ISO date format were incorrectly converted to Date objects during deserialization, corrupting user data. Now only explicit Date markers are converted, preserving string values intact. ([#1127](https://github.com/TanStack/db/pull/1127))
+
+- Fix mutation.changes field being lost during offline transaction serialization. Previously, the changes field was not included in serialized mutations, causing it to be empty ({}) after app restart. This led to sync functions receiving incomplete data when using mutation.changes for partial updates. ([#1124](https://github.com/TanStack/db/pull/1124))
+
+- Introduce specialized OnlineDetector for React Native ([#1137](https://github.com/TanStack/db/pull/1137))
+
+- Updated dependencies [[`6745ed0`](https://github.com/TanStack/db/commit/6745ed003dc25cfd6fa0f7e60f708205a6069ff2), [`1b22e40`](https://github.com/TanStack/db/commit/1b22e40c56323cfa5e7f759272fed53320aa32f7), [`7a2cacd`](https://github.com/TanStack/db/commit/7a2cacd7a426530cb77844a8c2680f6b06e9ce2f), [`bdf9405`](https://github.com/TanStack/db/commit/bdf94059e7ab98b5181e0df7d8d25cd1dbb5ae58)]:
+  - @tanstack/db@0.5.21
+
+## 1.0.10
+
+### Patch Changes
+
+- Updated dependencies []:
+  - @tanstack/db@0.5.20
+
+## 1.0.9
+
+### Patch Changes
+
+- Updated dependencies [[`29033b8`](https://github.com/TanStack/db/commit/29033b8f55b0ba5721371ad761037ec813440aa7), [`888ad6a`](https://github.com/TanStack/db/commit/888ad6afe5932b0467320c04fbd4583469cb9c47)]:
+  - @tanstack/db@0.5.19
+
+## 1.0.8
+
+### Patch Changes
+
+- Updated dependencies [[`c1247e8`](https://github.com/TanStack/db/commit/c1247e816950314da6d201613481577834c1d97a)]:
+  - @tanstack/db@0.5.18
+
+## 1.0.7
+
+### Patch Changes
+
+- Fix race condition that caused double replay of offline transactions on page load. The issue occurred when WebLocksLeader's async lock acquisition triggered the leadership callback after requestLeadership() had already returned, causing loadAndReplayTransactions() to be called twice. ([#1046](https://github.com/TanStack/db/pull/1046))
+
+- Updated dependencies [[`f795a67`](https://github.com/TanStack/db/commit/f795a674f21659ef46ff370d4f3b9903a596bcaf), [`d542667`](https://github.com/TanStack/db/commit/d542667a3440415d8e6cbb449b20abd3cbd6855c), [`6503c09`](https://github.com/TanStack/db/commit/6503c091a259208331f471dca29abf086e881147), [`b1cc4a7`](https://github.com/TanStack/db/commit/b1cc4a7e018ffb6804ae7f1c99e9c6eb4bb22812)]:
+  - @tanstack/db@0.5.17
+
+## 1.0.6
+
+### Patch Changes
+
+- Updated dependencies [[`41308b8`](https://github.com/TanStack/db/commit/41308b8ee914aa467e22842cd454f06d1a60032e)]:
+  - @tanstack/db@0.5.16
+
+## 1.0.5
+
+### Patch Changes
+
+- Updated dependencies [[`32ec4d8`](https://github.com/TanStack/db/commit/32ec4d8478cca96f76f3a49efc259c95b85baa40)]:
+  - @tanstack/db@0.5.15
+
+## 1.0.4
+
+### Patch Changes
+
+- Updated dependencies [[`26ed0aa`](https://github.com/TanStack/db/commit/26ed0aad2def60e652508a99b2e980e73f70148e)]:
+  - @tanstack/db@0.5.14
+
+## 1.0.3
+
+### Patch Changes
+
+- Updated dependencies [[`8ed7725`](https://github.com/TanStack/db/commit/8ed7725514a6a501482a391162f7792aa8b371e5), [`01452bf`](https://github.com/TanStack/db/commit/01452bfd0d00da8bd52941a4954af73749473651)]:
+  - @tanstack/db@0.5.13
+
 ## 1.0.2
 
 ### Patch Changes

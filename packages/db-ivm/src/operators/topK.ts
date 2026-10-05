@@ -19,8 +19,8 @@ interface TopKOptions {
  * @returns A piped operator that limits the number of results
  */
 export function topK<
-  KType extends T extends KeyValue<infer K, infer _V> ? K : never,
-  V1Type extends T extends KeyValue<KType, infer V> ? V : never,
+  KType extends (T extends KeyValue<infer K, infer _V> ? K : never),
+  V1Type extends (T extends KeyValue<KType, infer V> ? V : never),
   T,
 >(
   comparator: (a: V1Type, b: V1Type) => number,
@@ -57,8 +57,8 @@ export function topK<
  * @returns A piped operator that orders the elements and limits the number of results
  */
 export function topKWithIndex<
-  KType extends T extends KeyValue<infer K, infer _V> ? K : never,
-  V1Type extends T extends KeyValue<KType, infer V> ? V : never,
+  KType extends (T extends KeyValue<infer K, infer _V> ? K : never),
+  V1Type extends (T extends KeyValue<KType, infer V> ? V : never),
   T,
 >(
   comparator: (a: V1Type, b: V1Type) => number,

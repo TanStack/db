@@ -3,15 +3,13 @@ id: ElectricCollectionConfig
 title: ElectricCollectionConfig
 ---
 
-# Interface: ElectricCollectionConfig\<T, TSchema\>
-
-Defined in: [packages/electric-db-collection/src/electric.ts:124](https://github.com/TanStack/db/blob/main/packages/electric-db-collection/src/electric.ts#L124)
+Defined in: [packages/electric-db-collection/src/electric.ts:341](https://github.com/TanStack/db/blob/main/packages/electric-db-collection/src/electric.ts#L341)
 
 Configuration interface for Electric collection options
 
 ## Extends
 
-- `Omit`\<`BaseCollectionConfig`\<`T`, `string` \| `number`, `TSchema`, [`ElectricCollectionUtils`](ElectricCollectionUtils.md)\<`T`\>, `any`\>, `"onInsert"` \| `"onUpdate"` \| `"onDelete"` \| `"syncMode"`\>
+- `Omit`\<`BaseCollectionConfig`\<`T`, `string` \| `number`, `TSchema`, [`ElectricCollectionUtils`](ElectricCollectionUtils.md)\<`T`\>\>, `"onInsert"` \| `"onUpdate"` \| `"onDelete"` \| `"syncMode"`\>
 
 ## Type Parameters
 
@@ -35,7 +33,7 @@ The schema type for validation
 optional [ELECTRIC_TEST_HOOKS]: ElectricTestHooks;
 ```
 
-Defined in: [packages/electric-db-collection/src/electric.ts:147](https://github.com/TanStack/db/blob/main/packages/electric-db-collection/src/electric.ts#L147)
+Defined in: [packages/electric-db-collection/src/electric.ts:358](https://github.com/TanStack/db/blob/main/packages/electric-db-collection/src/electric.ts#L358)
 
 Internal test hooks (for testing only)
 Hidden via Symbol to prevent accidental usage in production
@@ -48,9 +46,17 @@ Hidden via Symbol to prevent accidental usage in production
 optional onDelete: (params) => Promise<MatchingStrategy>;
 ```
 
-Defined in: [packages/electric-db-collection/src/electric.ts:264](https://github.com/TanStack/db/blob/main/packages/electric-db-collection/src/electric.ts#L264)
+Defined in: [packages/electric-db-collection/src/electric.ts:544](https://github.com/TanStack/db/blob/main/packages/electric-db-collection/src/electric.ts#L544)
 
 Optional asynchronous handler function called before a delete operation
+
+**IMPORTANT - Electric Synchronization:**
+This handler **must not resolve** until synchronization is confirmed.
+Await one of these synchronization utilities before the handler completes:
+1. `await collection.utils.awaitTxId(txid)` (recommended for most cases)
+2. `await collection.utils.awaitMatch(fn)` for custom matching logic
+
+Simply returning without waiting for sync will drop optimistic state too early, causing UI glitches.
 
 #### Parameters
 
@@ -64,26 +70,31 @@ Object containing transaction and collection information
 
 `Promise`\<`MatchingStrategy`\>
 
-Promise resolving to { txid, timeout? } or void
+Promise that should resolve after synchronization is complete
+
+**Deprecation notice:** Returning `{ txid }` from handlers is deprecated and will be removed in v1.0.
+Use `await collection.utils.awaitTxId(txid)` within the handler instead.
 
 #### Examples
 
 ```ts
-// Basic Electric delete handler with txid (recommended)
-onDelete: async ({ transaction }) => {
+// Recommended: Wait for txid to sync
+onDelete: async ({ transaction, collection }) => {
   const mutation = transaction.mutations[0]
   const result = await api.todos.delete({
     id: mutation.original.id
   })
-  return { txid: result.txid }
+  // Wait for txid to sync before handler completes
+  await collection.utils.awaitTxId(result.txid)
 }
 ```
 
 ```ts
-// Use awaitMatch utility for custom matching
+// Alternative: Use awaitMatch utility for custom matching logic
 onDelete: async ({ transaction, collection }) => {
   const mutation = transaction.mutations[0]
   await api.todos.delete({ id: mutation.original.id })
+  // Wait for specific change to appear in sync stream
   await collection.utils.awaitMatch(
     (message) => isChangeMessage(message) &&
                  message.headers.operation === 'delete' &&
@@ -100,9 +111,17 @@ onDelete: async ({ transaction, collection }) => {
 optional onInsert: (params) => Promise<MatchingStrategy>;
 ```
 
-Defined in: [packages/electric-db-collection/src/electric.ts:195](https://github.com/TanStack/db/blob/main/packages/electric-db-collection/src/electric.ts#L195)
+Defined in: [packages/electric-db-collection/src/electric.ts:445](https://github.com/TanStack/db/blob/main/packages/electric-db-collection/src/electric.ts#L445)
 
 Optional asynchronous handler function called before an insert operation
+
+**IMPORTANT - Electric Synchronization:**
+This handler **must not resolve** until synchronization is confirmed.
+Await one of these synchronization utilities before the handler completes:
+1. `await collection.utils.awaitTxId(txid)` (recommended for most cases)
+2. `await collection.utils.awaitMatch(fn)` for custom matching logic
+
+Simply returning without waiting for sync will drop optimistic state too early, causing UI glitches.
 
 #### Parameters
 
@@ -116,48 +135,78 @@ Object containing transaction and collection information
 
 `Promise`\<`MatchingStrategy`\>
 
-Promise resolving to { txid, timeout? } or void
+Promise that should resolve after synchronization is complete
+
+**Deprecation notice:** Returning `{ txid }` from handlers is deprecated and will be removed in v1.0.
+Use `await collection.utils.awaitTxId(txid)` within the handler instead.
 
 #### Examples
 
 ```ts
-// Basic Electric insert handler with txid (recommended)
-onInsert: async ({ transaction }) => {
+// Recommended: Wait for txid to sync
+onInsert: async ({ transaction, collection }) => {
   const newItem = transaction.mutations[0].modified
   const result = await api.todos.create({
     data: newItem
   })
-  return { txid: result.txid }
+  // Wait for txid to sync before handler completes
+  await collection.utils.awaitTxId(result.txid)
 }
 ```
 
 ```ts
 // Insert handler with custom timeout
-onInsert: async ({ transaction }) => {
+onInsert: async ({ transaction, collection }) => {
   const newItem = transaction.mutations[0].modified
   const result = await api.todos.create({
     data: newItem
   })
-  return { txid: result.txid, timeout: 10000 } // Wait up to 10 seconds
+  // Wait up to 10 seconds for txid
+  await collection.utils.awaitTxId(result.txid, 10000)
 }
 ```
 
 ```ts
-// Insert handler with multiple items - return array of txids
-onInsert: async ({ transaction }) => {
+// Insert handler with timeout error handling
+onInsert: async ({ transaction, collection }) => {
+  const newItem = transaction.mutations[0].modified
+  const result = await api.todos.create({
+    data: newItem
+  })
+
+  try {
+    await collection.utils.awaitTxId(result.txid, 5000)
+  } catch (error) {
+    // Decide sync timeout policy:
+    // - Throw to rollback optimistic state
+    // - Catch to keep optimistic state (eventual consistency)
+    // - Schedule background retry
+    console.warn('Sync timeout, keeping optimistic state:', error)
+    // Don't throw - allow optimistic state to persist
+  }
+}
+```
+
+```ts
+// Insert handler with multiple items
+onInsert: async ({ transaction, collection }) => {
   const items = transaction.mutations.map(m => m.modified)
   const results = await Promise.all(
     items.map(item => api.todos.create({ data: item }))
   )
-  return { txid: results.map(r => r.txid) }
+  // Wait for all txids to sync
+  await Promise.all(
+    results.map(r => collection.utils.awaitTxId(r.txid))
+  )
 }
 ```
 
 ```ts
-// Use awaitMatch utility for custom matching
+// Alternative: Use awaitMatch utility for custom matching logic
 onInsert: async ({ transaction, collection }) => {
   const newItem = transaction.mutations[0].modified
   await api.todos.create({ data: newItem })
+  // Wait for specific change to appear in sync stream
   await collection.utils.awaitMatch(
     (message) => isChangeMessage(message) &&
                  message.headers.operation === 'insert' &&
@@ -174,9 +223,17 @@ onInsert: async ({ transaction, collection }) => {
 optional onUpdate: (params) => Promise<MatchingStrategy>;
 ```
 
-Defined in: [packages/electric-db-collection/src/electric.ts:230](https://github.com/TanStack/db/blob/main/packages/electric-db-collection/src/electric.ts#L230)
+Defined in: [packages/electric-db-collection/src/electric.ts:495](https://github.com/TanStack/db/blob/main/packages/electric-db-collection/src/electric.ts#L495)
 
 Optional asynchronous handler function called before an update operation
+
+**IMPORTANT - Electric Synchronization:**
+This handler **must not resolve** until synchronization is confirmed.
+Await one of these synchronization utilities before the handler completes:
+1. `await collection.utils.awaitTxId(txid)` (recommended for most cases)
+2. `await collection.utils.awaitMatch(fn)` for custom matching logic
+
+Simply returning without waiting for sync will drop optimistic state too early, causing UI glitches.
 
 #### Parameters
 
@@ -190,27 +247,32 @@ Object containing transaction and collection information
 
 `Promise`\<`MatchingStrategy`\>
 
-Promise resolving to { txid, timeout? } or void
+Promise that should resolve after synchronization is complete
+
+**Deprecation notice:** Returning `{ txid }` from handlers is deprecated and will be removed in v1.0.
+Use `await collection.utils.awaitTxId(txid)` within the handler instead.
 
 #### Examples
 
 ```ts
-// Basic Electric update handler with txid (recommended)
-onUpdate: async ({ transaction }) => {
+// Recommended: Wait for txid to sync
+onUpdate: async ({ transaction, collection }) => {
   const { original, changes } = transaction.mutations[0]
   const result = await api.todos.update({
     where: { id: original.id },
     data: changes
   })
-  return { txid: result.txid }
+  // Wait for txid to sync before handler completes
+  await collection.utils.awaitTxId(result.txid)
 }
 ```
 
 ```ts
-// Use awaitMatch utility for custom matching
+// Alternative: Use awaitMatch utility for custom matching logic
 onUpdate: async ({ transaction, collection }) => {
   const { original, changes } = transaction.mutations[0]
   await api.todos.update({ where: { id: original.id }, data: changes })
+  // Wait for specific change to appear in sync stream
   await collection.utils.awaitMatch(
     (message) => isChangeMessage(message) &&
                  message.headers.operation === 'update' &&
@@ -227,7 +289,7 @@ onUpdate: async ({ transaction, collection }) => {
 shapeOptions: ShapeStreamOptions<GetExtensions<T>>;
 ```
 
-Defined in: [packages/electric-db-collection/src/electric.ts:140](https://github.com/TanStack/db/blob/main/packages/electric-db-collection/src/electric.ts#L140)
+Defined in: [packages/electric-db-collection/src/electric.ts:351](https://github.com/TanStack/db/blob/main/packages/electric-db-collection/src/electric.ts#L351)
 
 Configuration options for the ElectricSQL ShapeStream
 
@@ -239,4 +301,4 @@ Configuration options for the ElectricSQL ShapeStream
 optional syncMode: ElectricSyncMode;
 ```
 
-Defined in: [packages/electric-db-collection/src/electric.ts:141](https://github.com/TanStack/db/blob/main/packages/electric-db-collection/src/electric.ts#L141)
+Defined in: [packages/electric-db-collection/src/electric.ts:352](https://github.com/TanStack/db/blob/main/packages/electric-db-collection/src/electric.ts#L352)

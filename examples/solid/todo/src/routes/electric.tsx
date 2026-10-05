@@ -1,5 +1,6 @@
 import { createFileRoute } from '@tanstack/solid-router'
 import { useLiveQuery } from '@tanstack/solid-db'
+import { Suspense } from 'solid-js'
 import {
   electricConfigCollection,
   electricTodoCollection,
@@ -21,23 +22,25 @@ export const Route = createFileRoute(`/electric`)({
 
 function ElectricPage() {
   // Get data using live queries with Electric collections
-  const { data: todos } = useLiveQuery((q) =>
+  const todos = useLiveQuery((q) =>
     q
       .from({ todo: electricTodoCollection })
       .orderBy(({ todo }) => todo.created_at, `asc`),
   )
 
-  const { data: configData } = useLiveQuery((q) =>
+  const configData = useLiveQuery((q) =>
     q.from({ config: electricConfigCollection }),
   )
 
   return (
-    <TodoApp
-      todos={todos}
-      configData={configData}
-      todoCollection={electricTodoCollection}
-      configCollection={electricConfigCollection}
-      title="todos (electric)"
-    />
+    <Suspense fallback="Loading...">
+      <TodoApp
+        todos={todos()}
+        configData={configData()}
+        todoCollection={electricTodoCollection}
+        configCollection={electricConfigCollection}
+        title="todos (electric)"
+      />
+    </Suspense>
   )
 }

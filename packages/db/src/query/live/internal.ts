@@ -12,4 +12,5 @@ export type LiveQueryInternalUtils = {
   getBuilder: () => CollectionConfigBuilder<any, any>
   hasCustomGetKey: boolean
   hasJoins: boolean
+  hasDistinct: boolean
 }

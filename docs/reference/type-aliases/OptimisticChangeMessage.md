@@ -1,0 +1,22 @@
+---
+id: OptimisticChangeMessage
+title: OptimisticChangeMessage
+---
+
+```ts
+type OptimisticChangeMessage<T, TKey> = 
+  | ChangeMessage<T> & object
+  | DeleteKeyMessage<TKey> & object;
+```
+
+Defined in: [packages/db/src/types.ts:577](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L577)
+
+## Type Parameters
+
+### T
+
+`T` *extends* `object` = `Record`\<`string`, `unknown`\>
+
+### TKey
+
+`TKey` *extends* `string` \| `number` = `string` \| `number`
