@@ -1771,7 +1771,16 @@ export class CollectionStateManager<
       }
 
       // End batching and emit all events (combines any batched events with sync events)
+      // Subscribers and ready callbacks can throw. Keep the first error so
+      // the applied receipts below still settle.
       let failure: { error: unknown } | undefined
+      const capture = (step: () => void) => {
+        try {
+          step()
+        } catch (error) {
+          failure ??= { error }
+        }
+      }
       // A truncate that makes the Collection ready runs ready callbacks after
       // this batch is built. Their writes describe the replaced rows, so hold
       // this batch and publish their messages after it.
@@ -1779,22 +1788,13 @@ export class CollectionStateManager<
       const publication = becomesReady
         ? this.changes.deferPublication()
         : undefined
-      try {
-        try {
-          const visibleLayoutChanged =
-            previousLayout !== undefined &&
-            (previousLayout.length !== this.size ||
-              [...this.keys()].some(
-                (key, index) => key !== previousLayout[index],
-              ))
-          this.changes.emitEvents(events, true, visibleLayoutChanged)
-        } catch (error) {
-          failure = { error }
-        }
-        if (becomesReady) this.lifecycle.markReady()
-      } finally {
-        publication?.publish()
-      }
+      const visibleLayoutChanged =
+        previousLayout !== undefined &&
+        (previousLayout.length !== this.size ||
+          [...this.keys()].some((key, index) => key !== previousLayout[index]))
+      capture(() => this.changes.emitEvents(events, true, visibleLayoutChanged))
+      if (becomesReady) capture(() => this.lifecycle.markReady())
+      if (publication) capture(() => publication.publish())
 
       if (this.syncRunGeneration === syncRunGeneration) {
         this.preSyncVisibleState.clear()
