@@ -1698,7 +1698,19 @@ export class CollectionStateManager<
 
         // Ensure listeners are active before emitting this critical batch
         if (this.lifecycle.status !== `ready`) {
+          const deletesBeforeReady = new Set(this.optimisticDeletes)
           this.lifecycle.markReady()
+          // A ready callback's optimistic delete already published the
+          // row's removal, so the prefix must not delete it again.
+          for (let index = events.length - 1; index >= 0; index--) {
+            const { type, key } = events[index]!
+            if (
+              type === `delete` &&
+              this.optimisticDeletes.has(key) &&
+              !deletesBeforeReady.has(key)
+            )
+              events.splice(index, 1)
+          }
         }
       }
 
