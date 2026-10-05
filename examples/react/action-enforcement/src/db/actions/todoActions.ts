@@ -1,6 +1,9 @@
 import { createOptimisticAction } from '@tanstack/react-db'
 import { todoCollection } from '@/db/collections/todoCollection'
-import { createTodo, toggleTodo as persistToggleTodo } from '@/db/server/fakeTodoApi'
+import {
+  createTodo,
+  toggleTodo as persistToggleTodo,
+} from '@/db/server/fakeTodoApi'
 
 type AddTodoPayload = {
   id: string
