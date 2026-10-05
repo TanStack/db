@@ -1,5 +1,18 @@
 # @tanstack/rxdb-db-collection
 
+## 0.1.103
+
+### Patch Changes
+
+- Add development-only collection configuration diagnostics. Missing or invalid core options throw actionable errors. Extra adapter properties remain accepted without warnings, except for likely misspellings: casing mistakes or adjacent letter swaps in option names with at least five characters. A suggestion is suppressed when the correctly named option is already present. Keep the validator, warnings, and internal diagnostic classes out of production application bundles. ([#1278](https://github.com/TanStack/db/pull/1278))
+
+  Keep adapter-specific options inside PowerSync, RxDB, and TrailBase. Update the adapter guide to keep conversions in adapter code and place rowUpdateMode inside the sync config.
+
+- Update RxDB to 17.1.0 and require RxDB 17 or newer. Applications using RxDB 16 must upgrade RxDB before updating this adapter. ([#1482](https://github.com/TanStack/db/pull/1482))
+
+- Updated dependencies [[`2806da0`](https://github.com/TanStack/db/commit/2806da0c41ba99ce6aeef70556a8ac2fd66e2295), [`7c516ce`](https://github.com/TanStack/db/commit/7c516ce025cdac8a986a5d11800b06ed554a1a64), [`eac6e8b`](https://github.com/TanStack/db/commit/eac6e8b6a6150b8e48bdbe61365bceec1e768eb1), [`a21f4a4`](https://github.com/TanStack/db/commit/a21f4a4d553514cd694051dfe74e64109c82b146), [`cfb03f2`](https://github.com/TanStack/db/commit/cfb03f201bb21d82b7f537a9fbe59d3623f395d6)]:
+  - @tanstack/db@0.12.0
+
 ## 0.1.102
 
 ### Patch Changes
