@@ -1,4 +1,4 @@
-import { evaluateReferenceExpression } from '../reference-expression.js'
+import { evaluateReferenceExpression } from '../reference-expression-oracle.js'
 import type { Collection, LoadSubsetOptions } from '../../src/index.js'
 import type { BasicExpression } from '../../src/query/ir.js'
 

@@ -625,7 +625,7 @@ describe(`Operators`, () => {
     })
 
     // These are readable replay witnesses. The generated groupBy law lives in
-    // incrementalization-law.property.test.ts.
+    // incrementalization-law-oracle.property.test.ts.
     test(`min and max reduce keep 0, 0n, and empty string as extremes`, () => {
       const minNum = min<number>()
       const maxNum = max<number>()

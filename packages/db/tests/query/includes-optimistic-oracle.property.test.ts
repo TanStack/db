@@ -23,7 +23,8 @@ import type { LoadSubsetOptions, SyncConfig } from '../../src/types.js'
 /**
  * # How should optimistic relationship writes affect a nested result?
  *
- * An optimistic write changes the public relationship tree before sync settles.
+ * An optimistic write changes the public relationship tree before its
+ * optimistic transaction's persistence promise settles.
  * The visible tree follows these laws:
  *
  * 1. A reparent moves the row to its optimistic parent route immediately.
@@ -32,8 +33,8 @@ import type { LoadSubsetOptions, SyncConfig } from '../../src/types.js'
  * 4. Confirmation keeps the overlay until settlement, then reveals the
  *    authoritative row without an intermediate stale route.
  * 5. Pending changes at different levels compose, regardless of settlement
- *    order. The controlled sync cannot settle two changes at one level alone,
- *    so the grammar rejects that unsupported harness state.
+ *    order. The shared mutation-handler gate cannot settle two mutation
+ *    promises at one level independently. The grammar rejects that harness state.
  *
  * The semantic model is small: three Maps hold synced child levels and pending
  * rows overlay them by ID. Full recomputation filters each level by its current

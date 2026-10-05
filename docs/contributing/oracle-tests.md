@@ -320,8 +320,30 @@ Two small examples show the form:
 
 - [`load-subset-transaction-refinement-oracle.test.ts`](https://github.com/TanStack/db/blob/main/packages/db/tests/query/load-subset-transaction-refinement-oracle.test.ts)
   explains when an abort can still cancel an on-demand load.
-- [`fifo-retry.property.test.ts`](https://github.com/TanStack/db/blob/main/packages/offline-transactions/tests/fifo-retry.property.test.ts)
+- [`fifo-retry-oracle.property.test.ts`](https://github.com/TanStack/db/blob/main/packages/offline-transactions/tests/fifo-retry-oracle.property.test.ts)
   explains why a ready transaction waits behind a delayed FIFO head.
+
+### Name oracle files consistently
+
+Use `oracle` in filenames that own an independent expected-result computation,
+state model, differential or metamorphic comparison, or reusable law checker.
+A separate module that defines that model, checker, or its history grammar also
+qualifies. Identify the mechanism in the code before applying the name. A mixed
+test file can qualify through a specific oracle inside it; its other tests do
+not thereby become separate oracles.
+
+An ordinary example or regression does not need this suffix merely because it
+asserts a contract. The same applies to concrete type assertions, fixtures,
+registration wrappers, and generic runner utilities. A driver that only invokes
+production or records observations remains support. Coverage-map inclusion,
+parameterization, and contract prose alone do not establish oracle ownership.
+
+Count owners, model/checker definitions, drivers, and other support separately.
+Several files may execute one shared oracle, and one file may contain several
+oracle mechanisms. A filename is a discovery aid, not evidence of guide
+conformance. Preserve runner suffixes such as `.property.test.ts`, `.test-d.ts`,
+and `.spec.ts`. Update imports, test commands, replay selectors, and current
+coverage links whenever an oracle file moves.
 
 ### Keep five responsibilities distinguishable
 
@@ -637,7 +659,7 @@ observation recorder, refinement check, and run budget. Only their seed source
 may differ. This keeps a random failure eligible for promotion into a pinned
 example or fixed campaign.
 
-[`fifo-retry.property.test.ts`](https://github.com/TanStack/db/blob/main/packages/offline-transactions/tests/fifo-retry.property.test.ts)
+[`fifo-retry-oracle.property.test.ts`](https://github.com/TanStack/db/blob/main/packages/offline-transactions/tests/fifo-retry-oracle.property.test.ts)
 shows this shape. Its fixed run preserves one scheduler campaign. Its second
 campaign uses a random seed by default and accepts `OFFLINE_ORACLE_SEED` with
 `OFFLINE_ORACLE_PATH` for replay.

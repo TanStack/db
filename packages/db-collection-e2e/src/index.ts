@@ -18,12 +18,12 @@ export {
 } from './utils/helpers'
 
 // Export test suite creators
-export { createPredicatesTestSuite } from './suites/predicates.suite'
-export { createPaginationTestSuite } from './suites/pagination.suite'
-export { createJoinsTestSuite } from './suites/joins.suite'
+export { createPredicatesTestSuite } from './suites/predicates-oracle.suite'
+export { createPaginationTestSuite } from './suites/pagination-oracle.suite'
+export { createJoinsTestSuite } from './suites/joins-oracle.suite'
 export { createDeduplicationTestSuite } from './suites/deduplication.suite'
 export { createCollationTestSuite } from './suites/collation.suite'
 export { createMutationsTestSuite } from './suites/mutations.suite'
-export { createLiveUpdatesTestSuite } from './suites/live-updates.suite'
+export { createLiveUpdatesTestSuite } from './suites/live-updates-oracle.suite'
 export { createProgressiveTestSuite } from './suites/progressive.suite'
-export { createMovesTestSuite } from './suites/moves.suite'
+export { createMovesTestSuite } from './suites/moves-oracle.suite'
