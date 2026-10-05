@@ -170,7 +170,8 @@ export class CollectionSyncManager<
 
   private createDuplicateKeyError(key: TKey): DuplicateKeySyncError {
     const utils = this.config.utils as
-      Partial<LiveQueryCollectionUtils> | undefined
+      | Partial<LiveQueryCollectionUtils>
+      | undefined
     const internal = utils?.[LIVE_QUERY_INTERNAL]
     return new DuplicateKeySyncError(key, this.id, {
       hasCustomGetKey: internal?.hasCustomGetKey ?? false,
@@ -227,7 +228,7 @@ export class CollectionSyncManager<
               layoutChanged: false,
               operations: [],
               rowMetadataWrites: new Map(),
-              explicitRowMetadataWriteKeys: new Set(),
+              explicitRowMetadataWrites: new Map(),
               collectionMetadataWrites: new Map(),
               immediate: options?.immediate,
               applied,
@@ -351,7 +352,7 @@ export class CollectionSyncManager<
             // Clear all operations from the current transaction
             pendingTransaction.operations = []
             pendingTransaction.rowMetadataWrites.clear()
-            pendingTransaction.explicitRowMetadataWriteKeys?.clear()
+            pendingTransaction.explicitRowMetadataWrites?.clear()
             pendingTransaction.invalidationError = undefined
             // Intentionally preserve collectionMetadataWrites across truncate.
             // Collection-scoped metadata (for example persisted resume/reset
@@ -512,19 +513,22 @@ export class CollectionSyncManager<
         set: (key, metadata) => {
           if (!isCurrentSync()) return
           const pendingTransaction = this.getActivePendingSyncTransaction()
-          pendingTransaction.explicitRowMetadataWriteKeys?.add(key)
-          pendingTransaction.rowMetadataWrites.set(key, {
-            type: `set`,
-            value: metadata,
+          const write = { type: `set` as const, value: metadata }
+          pendingTransaction.explicitRowMetadataWrites?.set(key, {
+            position: pendingTransaction.operations.length,
+            write,
           })
+          pendingTransaction.rowMetadataWrites.set(key, write)
         },
         delete: (key) => {
           if (!isCurrentSync()) return
           const pendingTransaction = this.getActivePendingSyncTransaction()
-          pendingTransaction.explicitRowMetadataWriteKeys?.add(key)
-          pendingTransaction.rowMetadataWrites.set(key, {
-            type: `delete`,
+          const write = { type: `delete` as const }
+          pendingTransaction.explicitRowMetadataWrites?.set(key, {
+            position: pendingTransaction.operations.length,
+            write,
           })
+          pendingTransaction.rowMetadataWrites.set(key, write)
         },
       },
       collection: {

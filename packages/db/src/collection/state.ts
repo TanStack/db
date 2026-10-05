@@ -57,7 +57,11 @@ interface PendingSyncedTransaction<
   operations: Array<PendingSyncOperation<T, TKey>>
   truncate?: boolean
   rowMetadataWrites: Map<TKey, PendingMetadataWrite>
-  explicitRowMetadataWriteKeys?: Set<TKey>
+  /** The last explicit write per key, after `position` operations. */
+  explicitRowMetadataWrites?: Map<
+    TKey,
+    { position: number; write: PendingMetadataWrite }
+  >
   collectionMetadataWrites: Map<string, PendingMetadataWrite>
   /** Resolves after application and rejects if canceled before application. */
   applied: Deferred<void>
@@ -1135,18 +1139,25 @@ export class CollectionStateManager<
   private rebuildAutomaticRowMetadataWrites(
     transaction: PendingSyncedTransaction<TOutput, TKey>,
   ): void {
-    const explicitKeys = transaction.explicitRowMetadataWriteKeys ?? new Set()
-    const operationKeys = new Set(
-      transaction.operations.map((operation) => operation.key as TKey),
-    )
-    for (const key of operationKeys) {
-      if (!explicitKeys.has(key)) transaction.rowMetadataWrites.delete(key)
-    }
-    for (const operation of transaction.operations) {
+    // Replay the writes in order. A rebuild can reclassify an operation, so
+    // an explicit write must keep its place among the automatic ones.
+    const explicit = transaction.explicitRowMetadataWrites ?? new Map()
+    const applied = new Set<TKey>()
+    const writes = transaction.rowMetadataWrites
+    for (const operation of transaction.operations)
+      writes.delete(operation.key as TKey)
+    transaction.operations.forEach((operation, position) => {
       const key = operation.key as TKey
-      if (explicitKeys.has(key)) continue
+      const last = explicit.get(key)
+      if (last && last.position <= position && !applied.has(key)) {
+        applied.add(key)
+        writes.set(key, last.write)
+      }
       const metadataWrite = automaticRowMetadataWrite(operation)
-      if (metadataWrite) transaction.rowMetadataWrites.set(key, metadataWrite)
+      if (metadataWrite) writes.set(key, metadataWrite)
+    })
+    for (const [key, last] of explicit) {
+      if (!applied.has(key)) writes.set(key, last.write)
     }
   }
 
