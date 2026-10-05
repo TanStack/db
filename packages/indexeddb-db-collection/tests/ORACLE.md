@@ -141,9 +141,31 @@ before deletion is issued preserves rows and sends no success notification.
 These laws transfer the offline IndexedDB settlement distinction and OPFS
 resource-ownership checks to the IDB request boundary. They do not transfer the
 OPFS worker's cancellation mechanism: native IDB open/delete has no cancellation
-API. This adapter has no deadline or automatic in-memory fallback. A blocker
+API. This adapter has no deadline or automatic in-memory fallback. An unmanaged blocker
 that never closes can leave the request pending indefinitely. The receiving
 cases use fake-IDB and controlled notifications, not native-browser lock proof.
+
+## Managed connection ownership
+
+`createIndexedDB` closes its connection on native `versionchange`. This releases
+managed peer connections so another context can upgrade or delete the database.
+The wrapper's raw connections keep the separate blocked-request contract. Closing
+a managed connection does not restart a Collection or invent a new Collection
+status. Further persistence through that descriptor rejects; callers recreate
+Collections with a new descriptor using the current database version.
+
+The transport owner crosses two/three independent descriptors with upgrade/delete.
+Source, same-store peer and sibling-store peer stay active until native completion.
+Exact versionchange recipients establish the reach witness. A native blocked event
+records a violation before fixture rescue closes the owned handles, so missing
+automatic close fails a deterministic zero-blocked assertion instead of timing out.
+Deletion then publishes empty snapshots. Upgrade retains rows/version, rejects
+old-descriptor writes without optimistic leakage, and permits new-descriptor
+restore and writes in retained and added stores. All four histories fail without
+the listener and pass with it. Application notification APIs, transactions already
+in flight, obsolete receivers after later writes, and native page scheduling
+remain separate receiving boundaries. No elapsed-time bound or automatic restart
+is implied by these controlled histories.
 
 ## Campaigns and direct replay
 

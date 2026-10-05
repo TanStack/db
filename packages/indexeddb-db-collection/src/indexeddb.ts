@@ -237,6 +237,9 @@ const VERSIONS_STORE_NAME = '_versions'
 /**
  * Creates or opens an IndexedDB database with the specified stores.
  * Call this once at app startup, then pass the instance to collections.
+ * The connection closes on versionchange so another context can upgrade or
+ * delete the database. Recreate affected Collections with a new instance before
+ * further persistence.
  *
  * All stores are created in a single upgrade transaction, avoiding
  * version race conditions when multiple collections share a database.
@@ -310,6 +313,9 @@ export async function createIndexedDB(
     },
     idbFactory,
   )
+
+  // Other tabs can upgrade or delete once this connection releases its handle.
+  db.addEventListener('versionchange', () => db.close())
 
   // Create frozen stores array for immutability
   const frozenStores = Object.freeze([...stores])

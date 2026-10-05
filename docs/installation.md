@@ -72,6 +72,16 @@ Local storage and in-memory collections are included with the framework packages
 
 Both use `localStorageCollectionOptions` and `localOnlyCollectionOptions` respectively, available from your framework package (e.g., `@tanstack/react-db`).
 
+### IndexedDB Collection
+
+For local browser data stored in IndexedDB:
+
+```sh
+npm install @tanstack/indexeddb-db-collection
+```
+
+Use `createIndexedDB` to open a database, then `indexedDBCollectionOptions` to create Collections for its stores. The [IndexedDB Collection guide](./collections/indexeddb-collection.md) covers setup, mutations, cross-tab synchronization, and connection ownership.
+
 ### SQLite Persistence
 
 Use a runtime package to save Collection rows in SQLite and load them after an app restart. For a browser app, install the OPFS wrapper and its SQLite engine:

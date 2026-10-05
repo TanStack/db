@@ -277,3 +277,36 @@ e2774ae3ae7c2dfb40ade3eae7d50a45a063e5624985a7f2fe4f095d25aef718  packages/index
 22158f29593bd4e57f90fff28876c3ba331569a849079814a3b9028c54c7a67f  packages/indexeddb-db-collection/tests/wrapper.test.ts
 8d1580c27d20d26d08f37e93f72a77a45cfaa5d19d683a4e134aa7fba0481d5e  scripts/ci-tests.mjs
 ```
+
+## Managed versionchange and docs receipt
+
+This receipt adopts the maintainer-approved automatic-close policy and
+supersedes the earlier app-only connection release assumption. The transport
+owner now crosses two/three independent `createIndexedDB` descriptors with
+native upgrade/delete. Its blocked observer records a violation before fixture
+rescue closes owned connections, so native terminal outcomes and all snapshots
+can still be compared. Without the listener, 19 cases passed and all four new
+cases failed at `managed versionchange closes every connection` (one blocked
+event versus zero). Exact versionchange recipients and all remaining snapshot,
+old-descriptor rejection, and fresh-descriptor restore/write assertions passed.
+Adding the versionchange close listener makes all four intended assertions pass.
+
+Current verification uses merged head e3daf0e6feaa4ea234ab8c75e22d8002221b57fa
+plus this repair. Core was rebuilt from that head before package verification.
+**110 tests pass with no type errors**, including 23 transport cases. Fixed
+seed 1179001 and random seed -307492034 each complete 30 generated histories.
+All-driver tsc, package/generator lint, package bundles/declarations, six exact
+guide examples, 27 generated API pages, 53 navigation targets and links across
+705 docs pages are checked. Source changes add one event listener and its
+contract comment; the larger diff is tests and documentation. Browser-native
+scheduling, in-flight native transactions and an app notification API are not
+established by this finite fake-IDB matrix. Raw blockers still have no deadline.
+
+### Current source and owner fingerprints
+
+```text
+3895cb3fd6d4d972386e9c2c87e2e1947f4e0e9cd1416997ca6e09af6bb95345  packages/indexeddb-db-collection/src/indexeddb.ts
+70fa5444a5566d771edaf15ee2573e49af9be08e03e2182764d1d6a087a4fac6  packages/indexeddb-db-collection/src/wrapper.ts
+08dc88ee5d9122d078de0fa0f2c04bca8f7606bfcb656aa2e47df28faaa0517d  packages/indexeddb-db-collection/tests/transport-oracle.test.ts
+22158f29593bd4e57f90fff28876c3ba331569a849079814a3b9028c54c7a67f  packages/indexeddb-db-collection/tests/wrapper.test.ts
+```

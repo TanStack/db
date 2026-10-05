@@ -307,6 +307,8 @@ LocalStorage collections are perfect for:
 
 ## Learn More
 
+- [IndexedDB Collection](./indexeddb-collection.md)
+
 - [Optimistic Mutations](../guides/mutations.md)
 - [Live Queries](../guides/live-queries.md)
 - [LocalOnly Collection](./local-only-collection.md)

@@ -925,7 +925,7 @@ for this oracle repair. Keep these scenarios and decisions with that owner:
   back; retained-leader and before-invocation controls still fulfill. Later
   leadership changes and a held outbox write crossed with loss or regain remain
   for this leadership oracle, using controlled write settlement and caller
-  checkpoints. The [IndexedDB write-settlement owner](../../packages/offline-transactions/tests/indexeddb-write-settlement.test.ts)
+  checkpoints. The [IndexedDB write-settlement owner](https://github.com/TanStack/db/blob/main/packages/offline-transactions/tests/indexeddb-write-settlement.test.ts)
   still needs a browser-host composition with leadership loss across a write.
   These paths are outside this bounded repair. The [review record](oracle-reviews/issue-1939-offline-admission.md)
   preserves the RED/GREEN and checker-calibration evidence.
@@ -974,7 +974,7 @@ question has an owner—not that there can be no more bugs.
 
 ## IndexedDB Collection persistence
 
-Owner: [IndexedDB oracle portfolio](../../packages/indexeddb-db-collection/tests/ORACLE.md).
+Owner: [IndexedDB oracle portfolio](https://github.com/TanStack/db/blob/main/packages/indexeddb-db-collection/tests/ORACLE.md).
 Settled histories compare independently authored scalar rows with public,
 subscription, peer, export, raw durable and fresh-restored snapshots. Imports
 check changed-value versions; detached driver inputs protect authored truth.
@@ -990,7 +990,7 @@ must match authored durable operation order after controlled delivery. A raw
 unseen row makes excluded-notification handling observable. These cases repair
 specific convergence laws; they do not establish arbitrary concurrent receivers.
 
-The [compatibility owner](../../packages/indexeddb-db-collection/tests/compatibility-oracle.test.ts)
+The [compatibility owner](https://github.com/TanStack/db/blob/main/packages/indexeddb-db-collection/tests/compatibility-oracle.test.ts)
 checks full versus getRandomValues-only crypto through write/broadcast, one
 reusable descriptor across independent DbClients and cleanup, and injected
 factories without ambient IndexedDB globals across typed-key multi-store
@@ -1006,7 +1006,21 @@ success; delivered success empties every affected Collection. Failure to issue
 deletion preserves those snapshots. No timeout, cancellation, automatic
 in-memory fallback or real-browser lock scheduling is established.
 
+The transport owner also crosses two/three independent managed descriptors with
+native upgrade/delete. Exact versionchange recipients and zero blocked events
+check automatic close. Deletion publishes empty snapshots; upgrade preserves
+rows, rejects old-descriptor writes, and supports fresh restore/write. The four
+original-source assertion failures and repaired cases distinguish this law from
+the earlier shared-descriptor fixtures. Raw unmanaged blockers keep the wrapper's
+pending-until-terminal law. These controlled cases do not prove browser scheduling.
+
 Remaining package-owned cells and required witnesses:
+
+- **Connection ownership, CR-02:** transactions already in flight at native
+  `versionchange`, obsolete receivers after later writes, app notification policy,
+  and native page scheduling need receiving witnesses. The adopted policy closes
+  managed connections and requires callers to recreate affected Collections; no
+  new Collection status or notification API is promised.
 
 - **Persistence owner, PC02:** disjoint keys, mixed deletes, three Collections,
   and same-ID manual payloads under the core identity contract.
@@ -1035,7 +1049,7 @@ atomicity. These scope limits do not retire valid product obligations.
 **Known pre-existing core counterexample (HC005):** numeric 0 and string "0" in
 one Collection transaction can collapse before the adapter receives its mutation
 payload. Owner:
-[optimistic transaction payload oracle](../../packages/db/tests/optimistic-transaction-oracle.property.test.ts),
+[optimistic transaction payload oracle](https://github.com/TanStack/db/blob/main/packages/db/tests/optimistic-transaction-oracle.property.test.ts),
 whose relevant history grammar uses numeric keys. Needed witness: same-string-
 representation typed keys in one transaction, exact handler payload multiplicity
 and keys, then public and adapter-durable rows. IndexedDB import/restore and

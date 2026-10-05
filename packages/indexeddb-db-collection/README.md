@@ -4,6 +4,8 @@
 
 Persistent local storage with automatic cross-tab synchronization for TanStack DB collections. Data persists across browser sessions and stays in sync across all open tabs.
 
+See the [IndexedDB Collection guide](https://tanstack.com/db/latest/docs/collections/indexeddb-collection) for setup, mutations, and connection ownership.
+
 ## Installation
 
 ```bash
@@ -275,11 +277,16 @@ rejects but cannot roll back the committed data.
 
 ## Blocked database operations
 
-Opening a newer database version or deleting a database can be blocked by an
-open connection in another tab. Close those connections to let the native
-request continue. The promise remains pending until the request succeeds or
-fails. These operations have no deadline or cancellation option. The adapter
-does not switch to in-memory storage when a request is blocked.
+Connections created by createIndexedDB close automatically on the native
+versionchange event so another tab can upgrade or delete the database. Existing
+transactions can finish, but further persistence through that instance rejects.
+Reload the app or recreate affected Collections with a new instance using the
+current database version.
+
+Connections opened outside createIndexedDB can still block these operations.
+Their owner must close them. The promise remains pending until the native
+request succeeds or fails. These operations have no deadline or cancellation
+option. The adapter does not switch to in-memory storage when a request is blocked.
 
 Database deletion closes the supplied descriptor. After deletion succeeds, its
 Collections publish empty snapshots and notify active Collections in every

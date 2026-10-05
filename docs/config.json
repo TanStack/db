@@ -84,6 +84,10 @@
           "to": "collections/powersync-collection"
         },
         {
+          "label": "IndexedDB Collection",
+          "to": "collections/indexeddb-collection"
+        },
+        {
           "label": "LocalStorage Collection",
           "to": "collections/local-storage-collection"
         },
@@ -189,6 +193,18 @@
         {
           "label": "powerSyncCollectionOptions",
           "to": "reference/powersync-db-collection/functions/powerSyncCollectionOptions"
+        },
+        {
+          "label": "IndexedDB Collection",
+          "to": "reference/indexeddb-db-collection/index"
+        },
+        {
+          "label": "createIndexedDB",
+          "to": "reference/indexeddb-db-collection/functions/createIndexedDB"
+        },
+        {
+          "label": "indexedDBCollectionOptions",
+          "to": "reference/indexeddb-db-collection/functions/indexedDBCollectionOptions"
         }
       ],
       "frameworks": [

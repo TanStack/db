@@ -470,3 +470,219 @@ it('preserves durable and public snapshots when deletion cannot be issued', asyn
     }
   })
 })
+
+// Managed connection ownership, approved by the maintainer: createIndexedDB
+// closes its native connection when another request delivers versionchange.
+// Closing permits upgrade/deletion; it does not restart a Collection, invent a
+// Collection status, or convert later persistence into an in-memory success.
+// Upgrade preserves existing durable rows. Deletion publishes empty snapshots
+// after native success. The caller recreates descriptors and Collections for
+// subsequent persistence through the changed database.
+//
+// The reference is authored rows plus the operation's native version: upgrade
+// retains rows at version 2; deletion recreates empty stores at version 1. The
+// finite grammar crosses two/three independent descriptors with upgrade/delete.
+// Source, same-store peer and sibling-store peer stay active through the native
+// operation. With two descriptors, both peers share the second connection; with
+// three, each Collection has its own. These roles expose connection ownership
+// that the shared-descriptor histories above cannot exercise.
+//
+// Native fake-IDB versionchange/blocked events are the reach witnesses. At a
+// blocked event the driver records the violation, then closes fixture-owned
+// descriptors so native completion and the remaining observations can run.
+// The final zero-blocked assertion therefore rejects missing automatic close
+// directly instead of timing out. Raw unmanaged blockers retain the separate
+// pending settlement contract in wrapper.test.ts. Real pages, transactions
+// already in flight, application notification and elapsed-time bounds are outside
+// this finite grammar; controlled Channel delivery is not browser scheduling.
+for (const count of [2, 3]) {
+  for (const operation of ['upgrade', 'delete'] as const) {
+    it(
+      operation + ' releases ' + count + ' independent managed connections',
+      async () => {
+        await withHarness(async (h) => {
+          const item = { id: 'item', name: 'retained by upgrade' }
+          const other = { id: 'other', name: 'sibling retained by upgrade' }
+          await seed(h.db, 'items', [item])
+          await seed(h.db, 'other', [other])
+          const descriptors = [h.db]
+          try {
+            for (let index = 1; index < count; index++)
+              descriptors.push(
+                await createIndexedDB({
+                  name: h.db.name,
+                  version: 1,
+                  stores: ['items', 'other'],
+                }),
+              )
+            expect(
+              new Set(descriptors.map((descriptor) => descriptor.db)).size,
+              'independent native connection premise',
+            ).toBe(count)
+            const source = await h.open()
+            const peer = await h.open('items', { db: descriptors[1]! })
+            const sibling = await h.open('other', {
+              db: descriptors[count - 1]!,
+            })
+            const collections = [source, peer, sibling]
+            const versionchanges = descriptors.map(
+              () =>
+                [] as Array<{ oldVersion: number; newVersion: number | null }>,
+            )
+            descriptors.forEach((descriptor, index) => {
+              descriptor.db.addEventListener('versionchange', (event) => {
+                versionchanges[index]!.push({
+                  oldVersion: event.oldVersion,
+                  newVersion: event.newVersion,
+                })
+              })
+            })
+            let blockedEvents = 0
+            function observe(nativeRequest: IDBOpenDBRequest) {
+              nativeRequest.addEventListener('blocked', () => {
+                blockedEvents++
+                for (const descriptor of descriptors) descriptor.close()
+              })
+              return nativeRequest
+            }
+            const nativeOpen = indexedDB.open.bind(indexedDB)
+            const nativeDelete = indexedDB.deleteDatabase.bind(indexedDB)
+            const openSpy = vi
+              .spyOn(indexedDB, 'open')
+              .mockImplementation((...args) => observe(nativeOpen(...args)))
+            const deleteSpy = vi
+              .spyOn(indexedDB, 'deleteDatabase')
+              .mockImplementation((...args) => observe(nativeDelete(...args)))
+            const fresh =
+              operation === 'upgrade'
+                ? await createIndexedDB({
+                    name: h.db.name,
+                    version: 2,
+                    stores: ['items', 'other', 'added'],
+                  })
+                : await (async () => {
+                    await source.utils.deleteDatabase()
+                    expect(
+                      await Channel.deliver(),
+                      'native deletion notification reaches independent peers',
+                    ).toBe(2)
+                    for (const collection of collections)
+                      assertRows(
+                        collection.values(),
+                        [],
+                        'native deletion published across managed descriptors',
+                      )
+                    return createIndexedDB({
+                      name: h.db.name,
+                      version: 1,
+                      stores: ['items', 'other'],
+                    })
+                  })()
+            descriptors.push(fresh)
+            openSpy.mockRestore()
+            deleteSpy.mockRestore()
+
+            expect(
+              versionchanges,
+              'every open managed connection receives versionchange',
+            ).toEqual(
+              Array.from({ length: count }, (_, index) =>
+                operation === 'delete' && index === 0
+                  ? []
+                  : [
+                      {
+                        oldVersion: 1,
+                        newVersion: operation === 'upgrade' ? 2 : null,
+                      },
+                    ],
+              ),
+            )
+            expect(
+              fresh.version,
+              'native operation reached its terminal version',
+            ).toBe(operation === 'upgrade' ? 2 : 1)
+            for (const [name, before] of [
+              ['items', [item]],
+              ['other', [other]],
+            ] as const) {
+              const expected = operation === 'upgrade' ? before : []
+              assertRows(
+                (await readStore<Row>(fresh, name)).rows,
+                expected,
+                'durable rows after native ' + operation,
+              )
+            }
+            if (operation === 'upgrade') {
+              for (const [index, collection] of collections.entries()) {
+                await expect(
+                  collection.insert({
+                    id: 'closed-' + index,
+                    name: 'must not become durable',
+                  }).isPersisted.promise,
+                ).rejects.toThrow('Failed to create transaction')
+                assertRows(
+                  collection.values(),
+                  index === 2 ? [other] : [item],
+                  'closed-descriptor rejection rolls back its optimistic row',
+                )
+              }
+            }
+            // Recreate consumers explicitly. Delivering a later write into an
+            // obsolete connection would test a different receiving-work contract.
+            for (const collection of collections) await collection.cleanup()
+            const restored = await h.open('items', { db: fresh })
+            const restoredSibling = await h.open('other', { db: fresh })
+            assertRows(
+              restored.values(),
+              operation === 'upgrade' ? [item] : [],
+              'fresh items restore after native ' + operation,
+            )
+            assertRows(
+              restoredSibling.values(),
+              operation === 'upgrade' ? [other] : [],
+              'fresh sibling restore after native ' + operation,
+            )
+            if (operation === 'upgrade') {
+              const added = await h.open('added', { db: fresh })
+              assertRows(added.values(), [], 'new store starts empty')
+              const suffix = {
+                id: 'suffix',
+                name: 'written through new descriptor',
+              }
+              const addedRow = { id: 'added', name: 'written in new store' }
+              await restored.insert({ ...suffix }).isPersisted.promise
+              await added.insert({ ...addedRow }).isPersisted.promise
+              await Channel.deliver()
+              assertRows(
+                restored.values(),
+                [item, suffix],
+                'new descriptor write',
+              )
+              assertRows(
+                (await readStore<Row>(fresh, 'items')).rows,
+                [item, suffix],
+                'new descriptor durable write',
+              )
+              assertRows(
+                (await readStore<Row>(fresh, 'added')).rows,
+                [addedRow],
+                'new store durable write',
+              )
+              assertRows(
+                restoredSibling.values(),
+                [other],
+                'sibling remains intact',
+              )
+            }
+            expect(
+              blockedEvents,
+              'managed versionchange closes every connection',
+            ).toBe(0)
+          } finally {
+            for (const descriptor of descriptors) descriptor.close()
+          }
+        })
+      },
+    )
+  }
+}
