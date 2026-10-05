@@ -3,10 +3,8 @@ import type {
   ExpoSQLiteTestDatabase,
   ExpoSQLiteTestDatabaseFactory,
 } from './expo-sqlite-test-db'
-import type {
-  ExpoSQLiteBindParams,
-  ExpoSQLiteTransaction,
-} from '../../src/expo-sqlite-driver'
+import type { ExpoSQLiteTransaction } from '../../src/expo-sqlite-driver'
+import type { SQLiteBindParams } from 'expo-sqlite'
 
 function resolvePlatform(): `ios` | `android` {
   const platform = process.env.TANSTACK_DB_EXPO_RUNTIME_PLATFORM?.trim()
@@ -16,8 +14,7 @@ function resolvePlatform(): `ios` | `android` {
 export function createMobileSQLiteTestDatabaseFactory(): ExpoSQLiteTestDatabaseFactory {
   const platform = resolvePlatform()
   let runtimePromise:
-    | Promise<Awaited<ReturnType<typeof ensureExpoEmulatorRuntime>>>
-    | undefined
+    Promise<Awaited<ReturnType<typeof ensureExpoEmulatorRuntime>>> | undefined
 
   const getRuntime = () => {
     runtimePromise ??= ensureExpoEmulatorRuntime(platform)
@@ -46,13 +43,17 @@ export function createMobileSQLiteTestDatabaseFactory(): ExpoSQLiteTestDatabaseF
       execAsync: async (sql: string) => {
         await (await getDatabase()).execAsync(sql)
       },
-      getAllAsync: async <T>(sql: string, params?: ExpoSQLiteBindParams) =>
-        (await getDatabase()).getAllAsync<T>(sql, params),
-      runAsync: async (sql: string, params?: ExpoSQLiteBindParams) =>
-        (await getDatabase()).runAsync(sql, params),
-      withExclusiveTransactionAsync: async <T>(
-        task: (transaction: ExpoSQLiteTransaction) => Promise<T>,
-      ): Promise<T> =>
+      getAllAsync: async <T>(sql: string, params?: SQLiteBindParams) =>
+        params === undefined
+          ? (await getDatabase()).getAllAsync<T>(sql)
+          : (await getDatabase()).getAllAsync<T>(sql, params),
+      runAsync: async (sql: string, params?: SQLiteBindParams) =>
+        params === undefined
+          ? (await getDatabase()).runAsync(sql)
+          : (await getDatabase()).runAsync(sql, params),
+      withExclusiveTransactionAsync: async (
+        task: (transaction: ExpoSQLiteTransaction) => Promise<void>,
+      ): Promise<void> =>
         (await getDatabase()).withExclusiveTransactionAsync(task),
       closeAsync: async () => {
         if (!databasePromise) {

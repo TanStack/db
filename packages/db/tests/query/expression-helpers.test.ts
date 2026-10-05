@@ -312,6 +312,30 @@ describe(`Expression Helpers`, () => {
       expect(parseOrderByExpression([])).toEqual([])
     })
 
+    it(`should preserve a custom comparator by exact reference`, () => {
+      const compare = (a: string, b: string) => a.length - b.length
+      const orderBy: OrderBy = [
+        {
+          expression: new PropRef([`label`]),
+          compareOptions: {
+            direction: `asc`,
+            nulls: `first`,
+            stringSort: `custom`,
+            compare,
+          },
+        },
+      ]
+
+      const [parsed] = parseOrderByExpression(orderBy)
+      expect(parsed).toMatchObject({
+        field: [`label`],
+        direction: `asc`,
+        nulls: `first`,
+        stringSort: `custom`,
+      })
+      expect(parsed?.compare).toBe(compare)
+    })
+
     it(`should throw error for non-ref expressions`, () => {
       const orderBy: OrderBy = [
         {

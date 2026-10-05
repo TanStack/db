@@ -11,9 +11,12 @@ export function PersistedTodoDemo({ collection }: PersistedTodoDemoProps) {
   const [newTodoText, setNewTodoText] = useState(``)
   const [error, setError] = useState<string | null>(null)
 
-  const { data: todoList = [] } = useLiveQuery((q) =>
-    q.from({ todo: collection }).orderBy(({ todo }) => todo.createdAt, `desc`),
-  )
+  const { data: todoList = [] } = useLiveQuery({
+    query: (q) =>
+      q
+        .from({ todo: collection })
+        .orderBy(({ todo }) => todo.createdAt, `desc`),
+  })
 
   const handleAddTodo = () => {
     if (!newTodoText.trim()) return

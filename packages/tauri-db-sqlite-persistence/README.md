@@ -2,6 +2,8 @@
 
 Thin SQLite persistence for Tauri apps using `@tauri-apps/plugin-sql`.
 
+Start with the [SQLite Persistence guide](../../docs/guides/sqlite-persistence.md) for Collection setup and lifecycle behavior.
+
 ## Public API
 
 - `createTauriSQLitePersistence(...)`

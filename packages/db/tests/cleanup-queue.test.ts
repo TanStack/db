@@ -1,15 +1,17 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { CleanupQueue } from '../src/collection/cleanup-queue'
+import { resetCleanupQueue } from './utils'
 
 describe('CleanupQueue', () => {
   beforeEach(() => {
     vi.useFakeTimers()
-    CleanupQueue.resetInstance()
+    resetCleanupQueue()
   })
 
   afterEach(() => {
+    resetCleanupQueue()
+    vi.restoreAllMocks()
     vi.useRealTimers()
-    CleanupQueue.resetInstance()
   })
 
   it('batches setTimeout creations across multiple synchronous schedules', async () => {
@@ -48,6 +50,24 @@ describe('CleanupQueue', () => {
     expect(cb1).toHaveBeenCalledTimes(1)
   })
 
+  it('executes callbacks when fake timers are installed again', async () => {
+    const queue = CleanupQueue.getInstance()
+    const first = vi.fn()
+    queue.schedule('first', 1, first)
+    await Promise.resolve()
+    await vi.advanceTimersByTimeAsync(1)
+    expect(first).toHaveBeenCalledOnce()
+
+    vi.useRealTimers()
+    vi.useFakeTimers()
+
+    const second = vi.fn()
+    queue.schedule('second', 1, second)
+    await Promise.resolve()
+    await vi.advanceTimersByTimeAsync(1)
+    expect(second).toHaveBeenCalledOnce()
+  })
+
   it('can cancel tasks before they run', async () => {
     const queue = CleanupQueue.getInstance()
     const cb1 = vi.fn()
@@ -57,6 +77,8 @@ describe('CleanupQueue', () => {
     await Promise.resolve()
 
     queue.cancel('key1')
+
+    expect(vi.getTimerCount()).toBe(0)
 
     vi.advanceTimersByTime(1000)
     expect(cb1).not.toHaveBeenCalled()

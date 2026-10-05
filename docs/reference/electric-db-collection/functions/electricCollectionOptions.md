@@ -3,15 +3,13 @@ id: electricCollectionOptions
 title: electricCollectionOptions
 ---
 
-# Function: electricCollectionOptions()
-
 ## Call Signature
 
 ```ts
 function electricCollectionOptions<T>(config): Omit<CollectionConfig<InferSchemaOutput<T>, string | number, T, UtilsRecord>, "utils" | "onInsert" | "onUpdate" | "onDelete"> & Pick<ElectricCollectionConfig<InferSchemaOutput<T>, T>, "onInsert" | "onUpdate" | "onDelete"> & object;
 ```
 
-Defined in: [packages/electric-db-collection/src/electric.ts:576](https://github.com/TanStack/db/blob/main/packages/electric-db-collection/src/electric.ts#L576)
+Defined in: [packages/electric-db-collection/src/electric.ts:1081](https://github.com/TanStack/db/blob/main/packages/electric-db-collection/src/electric.ts#L1081)
 
 Creates Electric collection options for use with a standard Collection
 
@@ -43,7 +41,7 @@ Collection options with utilities
 function electricCollectionOptions<T>(config): Omit<CollectionConfig<T, string | number, never, UtilsRecord>, "utils" | "onInsert" | "onUpdate" | "onDelete"> & Pick<ElectricCollectionConfig<T, never>, "onInsert" | "onUpdate" | "onDelete"> & object;
 ```
 
-Defined in: [packages/electric-db-collection/src/electric.ts:594](https://github.com/TanStack/db/blob/main/packages/electric-db-collection/src/electric.ts#L594)
+Defined in: [packages/electric-db-collection/src/electric.ts:1099](https://github.com/TanStack/db/blob/main/packages/electric-db-collection/src/electric.ts#L1099)
 
 Creates Electric collection options for use with a standard Collection
 

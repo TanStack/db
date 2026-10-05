@@ -1,0 +1,2740 @@
+import { fc } from '@fast-check/vitest'
+import { describe, expect, it, vi } from 'vitest'
+import { Temporal } from 'temporal-polyfill'
+import { createCollection } from '../src/collection/index'
+import {
+  createArrayChangeProxy,
+  createChangeProxy,
+  withArrayChangeTracking,
+  withChangeTracking,
+} from '../src/proxy'
+
+/**
+ * # Does a draft behave like the native value it represents?
+ *
+ * A mutation draft promises ordinary JavaScript object, array, Map, Set, Date,
+ * RegExp, class, and Temporal behavior while recording the smallest correct
+ * change set. Reads must not create changes. Writes and deletes must preserve
+ * descriptors, keys, iteration, cycles, aliases, and revert-to-original rules.
+ * The input object must remain unchanged.
+ *
+ * Most examples pin individual language operations. The array callback oracle
+ * is differential: it runs the same callback history on a plain native row and
+ * on a draft, then compares callback results, visit order, reconstructed rows,
+ * change records, peers, and the untouched baseline. Generated two-step
+ * histories explore interactions that single method tests cannot reach.
+ *
+ * Detachment and Map/Set iterator identity have deeper contract owners in the
+ * companion files. Keeping those graphs separate prevents this broad language
+ * conformance suite from growing another copy of their models.
+ */
+
+const callbackMethods = [
+  `forEach`,
+  `some`,
+  `every`,
+  `map`,
+  `reduce`,
+  `reduceRight`,
+  `find`,
+  `filter`,
+] as const
+type CallbackMethod = (typeof callbackMethods)[number]
+type CallbackRow = { items: Array<{ id: number; value: number }>; peer: string }
+type CallbackStep = { method: CallbackMethod; target: number; delta: number }
+
+// The same authored operation runs on separate native and draft rows. Neither
+// the native interpreter nor its observations use production tracking helpers.
+function runArrayCallback(row: CallbackRow, step: CallbackStep) {
+  const visits: Array<number> = []
+  const target = step.target % row.items.length
+  const visit = (item: CallbackRow[`items`][number]) => {
+    visits.push(item.id)
+    if (item.id === target) item.value += step.delta
+    return item.id === target
+  }
+  let result: number | boolean | Array<number> | void
+  switch (step.method) {
+    case `forEach`:
+      result = row.items.forEach(visit)
+      break
+    case `some`:
+      result = row.items.some(visit)
+      break
+    case `every`:
+      result = row.items.every((item) => !visit(item))
+      break
+    case `map`:
+      result = row.items.map((item) => {
+        visit(item)
+        return item.value
+      })
+      break
+    case `reduce`:
+      result = row.items.reduce((sum, item) => {
+        visit(item)
+        return sum + item.value
+      }, 0)
+      break
+    case `reduceRight`:
+      result = row.items.reduceRight((sum, item) => {
+        visit(item)
+        return sum + item.value
+      }, 0)
+      break
+    case `find`:
+      result = row.items.find(visit)?.id
+      break
+    case `filter`:
+      result = row.items.filter(visit).map((item) => item.id)
+      break
+  }
+  return { visits, result }
+}
+
+function copyCallbackRow(row: CallbackRow): CallbackRow {
+  return { items: row.items.map((item) => ({ ...item })), peer: row.peer }
+}
+
+function observeArrayCallbacks(
+  values: Array<number>,
+  steps: Array<CallbackStep>,
+) {
+  const initial: CallbackRow = {
+    items: values.map((value, id) => ({ id, value })),
+    peer: `untouched`,
+  }
+  const original = copyCallbackRow(initial)
+  const native = copyCallbackRow(initial)
+  const { proxy, getChanges } = createChangeProxy(original)
+  return steps.map((step) => {
+    const expectedCall = runArrayCallback(native, step)
+    const actualCall = runArrayCallback(proxy, step)
+    const expectedRow = copyCallbackRow(native)
+    const changed = native.items.some(
+      (item, index) => item.value !== values[index],
+    )
+    const changes: Partial<CallbackRow> = getChanges()
+    return {
+      expectedCall,
+      actualCall,
+      expectedRow,
+      actualRow: copyCallbackRow({ ...original, ...changes }),
+      expectedChanges: changed ? { items: expectedRow.items } : {},
+      actualChanges: {
+        ...changes,
+        ...(changes.items !== undefined
+          ? { items: changes.items.map((item) => ({ ...item })) }
+          : {}),
+      },
+      initial,
+      original: copyCallbackRow(original),
+    }
+  })
+}
+
+function assertArrayCallbacks(cuts: ReturnType<typeof observeArrayCallbacks>) {
+  for (const cut of cuts) {
+    expect(cut.actualCall).toStrictEqual(cut.expectedCall)
+    expect(cut.actualRow).toStrictEqual(cut.expectedRow)
+    expect(cut.actualChanges).toStrictEqual(cut.expectedChanges)
+    expect(cut.original).toStrictEqual(cut.initial)
+  }
+}
+
+describe(`native array callback oracle`, () => {
+  it(`keeps the shared baseline independent of every captured actual cut`, () => {
+    const cuts = observeArrayCallbacks(
+      [1, 2],
+      [
+        { method: `forEach`, target: 0, delta: 3 },
+        { method: `forEach`, target: 0, delta: -3 },
+      ],
+    )
+    assertArrayCallbacks(cuts)
+    cuts[0]!.actualRow.items[0]!.value = 99
+    cuts[0]!.original.items[0]!.value = 98
+    expect(cuts[0]!.initial.items[0]!.value).toBe(1)
+    expect(cuts[0]!.expectedRow.items[0]!.value).toBe(4)
+    expect(cuts[1]!.actualRow.items[0]!.value).toBe(1)
+    expect(cuts[1]!.original.items[0]!.value).toBe(1)
+    expect(() => assertArrayCallbacks(cuts)).toThrow()
+  })
+  it.each([`element`, `array`, `accumulator`, `values`, `entries`] as const)(
+    `preserves native writes through the %s access path`,
+    async (path) => {
+      for (const delta of [0, 3, -2]) {
+        const make = () => ({ id: 1, items: [{ value: 1 }, { value: 2 }] })
+        const run = (row: ReturnType<typeof make>) => {
+          if (path === `accumulator`)
+            row.items.reduce((first) => {
+              first.value += delta
+              return first
+            })
+          else if (path === `values`)
+            row.items.values().next().value!.value += delta
+          else if (path === `entries`)
+            row.items.entries().next().value![1].value += delta
+          else
+            row.items.forEach((item, index, array) => {
+              expect(array).toBe(row.items)
+              if (index === 0)
+                (path === `element` ? item : array[index]!).value += delta
+            })
+        }
+        const expected = make()
+        run(expected)
+        const original = make()
+        const changes = withChangeTracking(original, run)
+        expect({ ...original, ...changes }).toStrictEqual(expected)
+        expect(original).toStrictEqual(make())
+        const collection = createCollection({
+          getKey: (row: ReturnType<typeof make>) => row.id,
+          startSync: true,
+          sync: {
+            sync: ({ begin, write, commit, markReady }) => {
+              begin()
+              write({ type: `insert`, value: make() })
+              commit()
+              markReady()
+            },
+          },
+          onUpdate: () => Promise.resolve(),
+        })
+        try {
+          const tx = collection.update(1, run)
+          await tx.isPersisted.promise
+          const saved = collection.get(1)!
+          // This oracle covers row data, not collection-owned virtual fields.
+          expect({ id: saved.id, items: saved.items }).toStrictEqual(expected)
+        } finally {
+          await collection.cleanup()
+        }
+      }
+    },
+  )
+  it.each(callbackMethods)(
+    `matches native %s reads, writes and reverts`,
+    (method) => {
+      for (const target of [0, 1, 2]) {
+        for (const deltas of [
+          [0, 0],
+          [3, 5],
+          [3, -3],
+        ]) {
+          assertArrayCallbacks(
+            observeArrayCallbacks(
+              [4, -2, 7],
+              deltas.map((delta) => ({ method, target, delta })),
+            ),
+          )
+        }
+      }
+    },
+  )
+
+  const step = fc.record({
+    method: fc.constantFrom(...callbackMethods),
+    target: fc.integer({ min: 0, max: 5 }),
+    delta: fc.integer({ min: -5, max: 5 }),
+  })
+  // A fixed and a random campaign. TANSTACK_DB_PROXY_CALLBACK_SEED and
+  // TANSTACK_DB_PROXY_CALLBACK_PATH select a direct replay instead.
+  const callbackHistory = fc.record({
+    values: fc.array(fc.integer({ min: -10, max: 10 }), {
+      minLength: 1,
+      maxLength: 6,
+    }),
+    steps: fc.tuple(step, step),
+  })
+  const replaySeed = process.env.TANSTACK_DB_PROXY_CALLBACK_SEED
+  const replayPath = process.env.TANSTACK_DB_PROXY_CALLBACK_PATH
+  const callbackCampaigns =
+    replaySeed === undefined && replayPath === undefined
+      ? [
+          { name: `2026103`, seed: 2026103 as number | undefined },
+          { name: `random`, seed: undefined },
+        ]
+      : [
+          {
+            name: `replay`,
+            seed: replaySeed === undefined ? undefined : Number(replaySeed),
+          },
+        ]
+  for (const { name, seed } of callbackCampaigns) {
+    it(`matches native two-step callback histories (${name})`, () => {
+      if (replayPath !== undefined && replaySeed === undefined)
+        throw new Error(`TANSTACK_DB_PROXY_CALLBACK_PATH requires a seed`)
+      if (seed !== undefined && !Number.isSafeInteger(seed))
+        throw new Error(`TANSTACK_DB_PROXY_CALLBACK_SEED must be an integer`)
+      fc.assert(
+        fc.property(callbackHistory, ({ values, steps }) => {
+          assertArrayCallbacks(observeArrayCallbacks(values, steps))
+        }),
+        {
+          numRuns: 200,
+          ...(seed === undefined ? {} : { seed }),
+          ...(replayPath === undefined ? {} : { path: replayPath }),
+        },
+      )
+    })
+  }
+
+  it.each([`lost-write`, `extra-visit`, `wrong-peer`] as const)(
+    `rejects a captured %s independently of the native authority`,
+    (fault) => {
+      const cuts = observeArrayCallbacks(
+        [4, -2, 7],
+        [{ method: `forEach`, target: 1, delta: 3 }],
+      )
+      assertArrayCallbacks(cuts)
+      const cut = cuts[0]!
+      if (fault === `lost-write`) cut.actualRow.items[1]!.value = -2
+      if (fault === `extra-visit`) cut.actualCall.visits.push(1)
+      if (fault === `wrong-peer`) cut.actualRow.peer = `corrupted`
+      expect(() => assertArrayCallbacks(cuts)).toThrowError(/expected/)
+    },
+  )
+})
+
+describe(`Proxy Library`, () => {
+  it.each([null, `true`])(
+    `tracks reads, writes and reverts without consulting DEBUG=%s`,
+    (debug) => {
+      const getItem = vi.fn(() => debug)
+      const log = vi.spyOn(console, `log`).mockImplementation(() => {})
+      vi.stubGlobal(`localStorage`, { getItem })
+      try {
+        const original = { value: 1, nested: { value: 2 } }
+        const { proxy, getChanges } = createChangeProxy(original)
+        expect(proxy.value).toBe(1)
+        proxy.value = 3
+        proxy.nested.value = 4
+        expect(getChanges()).toEqual({ value: 3, nested: { value: 4 } })
+        proxy.value = 1
+        proxy.nested.value = 2
+        expect(getChanges()).toEqual({})
+        expect(original).toEqual({ value: 1, nested: { value: 2 } })
+        expect(getItem).not.toHaveBeenCalled()
+        expect(log).not.toHaveBeenCalled()
+      } finally {
+        vi.unstubAllGlobals()
+        log.mockRestore()
+      }
+    },
+  )
+
+  describe(`createChangeProxy`, () => {
+    it(`should track changes to an object`, () => {
+      const obj = { name: `John`, age: 30 }
+      const { proxy, getChanges } = createChangeProxy(obj)
+
+      // Make changes to the proxy
+      proxy.name = `Jane`
+      proxy.age = 31
+
+      // Check that the changes are tracked
+      expect(getChanges()).toEqual({
+        name: `Jane`,
+        age: 31,
+      })
+
+      // Check that the original object is not modified
+      expect(obj).toEqual({
+        name: `John`,
+        age: 30,
+      })
+    })
+
+    it(`should only track properties that actually change`, () => {
+      const obj = { name: `John`, age: 30 }
+      const { proxy, getChanges } = createChangeProxy(obj)
+
+      // Set a property to the same value
+      proxy.name = `John`
+      // Change another property
+      proxy.age = 31
+
+      // Only the changed property should be tracked
+      expect(getChanges()).toEqual({
+        age: 31,
+      })
+    })
+
+    it(`should handle nested property access`, () => {
+      const obj = { user: { name: `John`, age: 30 } }
+      const { proxy, getChanges } = createChangeProxy(obj)
+
+      // Change a nested property
+      proxy.user = { name: `Jane`, age: 31 }
+
+      // The entire user object should be tracked as a change
+      expect(getChanges()).toEqual({
+        user: { name: `Jane`, age: 31 },
+      })
+    })
+
+    it(`should track when object properties are changed`, () => {
+      const obj = { name: `John`, age: 30, active: false }
+      const { proxy, getChanges } = createChangeProxy(obj)
+
+      proxy.name = `Jane`
+      proxy.active = true
+
+      expect(getChanges()).toEqual({
+        name: `Jane`,
+        active: true,
+      })
+      expect(obj.name).toBe(`John`)
+      expect(obj.active).toBe(false)
+    })
+
+    it(`should track changes to properties within nested objects`, () => {
+      const obj = {
+        user: {
+          name: `John`,
+          contact: {
+            email: `john@example.com`,
+            phone: `123-456-7890`,
+          },
+        },
+      }
+      const { proxy, getChanges } = createChangeProxy(obj)
+
+      proxy.user.contact = {
+        email: `john.doe@example.com`,
+        phone: `123-456-7890`,
+      }
+
+      expect(getChanges()).toEqual({
+        user: {
+          name: `John`,
+          contact: {
+            email: `john.doe@example.com`,
+            phone: `123-456-7890`,
+          },
+        },
+      })
+    })
+
+    it(`should track when properties are deleted from objects`, () => {
+      const obj: { name: string; age: number; role?: string } = {
+        name: `John`,
+        age: 30,
+        role: `admin`,
+      }
+      const { proxy, getChanges } = createChangeProxy(obj)
+
+      delete proxy.role
+
+      expect(getChanges()).toStrictEqual({
+        role: undefined,
+      })
+      expect(obj).toEqual({
+        name: `John`,
+        age: 30,
+        role: `admin`,
+      })
+    })
+
+    it(`should not track properties when values remain the same`, () => {
+      const obj = { name: `John`, age: 30, active: true }
+      const { proxy, getChanges } = createChangeProxy(obj)
+
+      proxy.name = `John`
+      proxy.age = 30
+      proxy.active = true
+
+      expect(getChanges()).toEqual({})
+      expect(obj).toEqual({ name: `John`, age: 30, active: true })
+    })
+
+    it(`should properly handle objects with circular references`, () => {
+      const obj: unknown = { name: `John`, age: 30 }
+      // @ts-expect-error ignore for test
+      obj.self = obj // Create circular reference
+
+      const { proxy, getChanges } = createChangeProxy(
+        obj as Record<string | symbol, any>,
+      )
+
+      proxy.name = `Jane`
+
+      expect(getChanges()).toEqual({
+        name: `Jane`,
+      })
+      // @ts-expect-error ignore for test
+      expect(obj.name).toBe(`John`)
+    })
+
+    it(`should properly handle Date object mutations`, () => {
+      const obj = {
+        name: `John`,
+        createdAt: new Date(`2023-01-01`),
+      }
+      const { proxy, getChanges } = createChangeProxy(obj)
+
+      const newDate = new Date(`2023-02-01`)
+      proxy.createdAt = newDate
+
+      expect(getChanges()).toEqual({
+        createdAt: newDate,
+      })
+      expect(obj.createdAt).toEqual(new Date(`2023-01-01`))
+    })
+
+    it(`should track changes to custom class properties`, () => {
+      class Person {
+        name: string
+        age: number
+
+        constructor(name: string, age: number) {
+          this.name = name
+          this.age = age
+        }
+      }
+
+      const obj = {
+        person: new Person(`John`, 30),
+      }
+
+      const { proxy, getChanges } = createChangeProxy(obj)
+      proxy.person = new Person(`Jane`, 25)
+
+      expect(getChanges()).toEqual({
+        person: new Person(`Jane`, 25),
+      })
+      expect(obj.person).toEqual(new Person(`John`, 30))
+    })
+
+    it(`should track changes in deeply nested object structures`, () => {
+      const obj = {
+        company: {
+          department: {
+            team: {
+              lead: {
+                name: `John`,
+                role: `Team Lead`,
+              },
+              members: [`Alice`, `Bob`],
+            },
+          },
+        },
+      }
+
+      const { proxy, getChanges } = createChangeProxy(obj)
+
+      // Access the nested property through the proxy chain
+      const companyProxy = proxy.company
+      const departmentProxy = companyProxy.department
+      const teamProxy = departmentProxy.team
+      const leadProxy = teamProxy.lead
+      leadProxy.name = `Jane`
+
+      expect(getChanges()).toEqual({
+        company: {
+          department: {
+            team: {
+              lead: {
+                name: `Jane`,
+                role: `Team Lead`,
+              },
+              members: [`Alice`, `Bob`],
+            },
+          },
+        },
+      })
+    })
+
+    it(`should handle regular expression mutations`, () => {
+      const obj = {
+        pattern: /test/i,
+      }
+
+      const { proxy, getChanges } = createChangeProxy(obj)
+
+      proxy.pattern = /new-pattern/g
+
+      expect(getChanges()).toEqual({
+        pattern: /new-pattern/g,
+      })
+      expect(obj.pattern).toEqual(/test/i)
+    })
+
+    it(`should properly track BigInt type values`, () => {
+      const obj = {
+        id: BigInt(123456789),
+      }
+
+      const { proxy, getChanges } = createChangeProxy(obj)
+
+      proxy.id = BigInt(987654321)
+
+      expect(getChanges()).toEqual({
+        id: BigInt(987654321),
+      })
+      expect(obj.id).toBe(BigInt(123456789))
+    })
+
+    it(`should handle complex objects with multiple special types`, () => {
+      const obj = {
+        id: BigInt(123),
+        pattern: /test/,
+        date: new Date(`2023-01-01`),
+      }
+
+      const { proxy, getChanges } = createChangeProxy(obj)
+
+      proxy.id = BigInt(456)
+      proxy.pattern = /updated/
+      proxy.date = new Date(`2023-06-01`)
+
+      expect(getChanges()).toEqual({
+        id: BigInt(456),
+        pattern: /updated/,
+        date: new Date(`2023-06-01`),
+      })
+    })
+
+    it(`should handle property descriptors with getters and setters`, () => {
+      const obj = {
+        _name: `John`,
+        get name() {
+          return this._name
+        },
+        set name(value) {
+          this._name = value
+        },
+      }
+
+      const { proxy, getChanges } = createChangeProxy(obj)
+      proxy.name = `Jane`
+
+      expect(getChanges()).toEqual({
+        name: `Jane`,
+      })
+      expect(obj._name).toBe(`John`)
+      expect(obj.name).toBe(`John`)
+    })
+
+    // TODO worth it to make this work?
+    // it(`should handle symbolic properties`, () => {
+    //   const symbolKey = Symbol(`test`)
+    //   const obj = {
+    //     [symbolKey]: `value`,
+    //   }
+    //
+    //   const { proxy, getChanges } = createChangeProxy(obj)
+    //   proxy[symbolKey] = `new value`
+    //
+    //   const changes = getChanges()
+    //   expect(changes[symbolKey]).toBe(`new value`)
+    //   expect(obj[symbolKey]).toBe(`new value`)
+    // })
+
+    it(`should handle non-enumerable properties`, () => {
+      const obj = {}
+      Object.defineProperty(obj, `hidden`, {
+        value: `original`,
+        enumerable: false,
+        writable: true,
+        configurable: true,
+      })
+
+      const { proxy, getChanges } = createChangeProxy(obj)
+      // @ts-expect-error ignore for test
+      proxy.hidden = `modified`
+
+      expect(getChanges()).toEqual({
+        hidden: `modified`,
+      })
+      // @ts-expect-error ignore for test
+      expect(obj.hidden).toBe(`original`)
+    })
+
+    // it(`should prevent prototype pollution`, () => {
+    //   const obj = { constructor: { prototype: {} } }
+    //   const { proxy } = createChangeProxy(obj)
+    //
+    //   // Attempt to modify Object.prototype through the proxy
+    //   // @ts-expect-error ignore for test
+    //   proxy.__proto__ = { malicious: true }
+    //   // @ts-expect-error ignore for test
+    //   proxy.constructor.prototype.malicious = true
+    //
+    //   // Verify that Object.prototype wasn't polluted
+    //   // @ts-expect-error ignore for test
+    //   expect({}.malicious).toBeUndefined()
+    //   // @ts-expect-error ignore for test
+    //   expect(Object.prototype.malicious).toBeUndefined()
+    //
+    //   // The changes should only affect the proxy's own prototype chain
+    //   // @ts-expect-error ignore for test
+    //   expect(proxy.__proto__.malicious).toBe(true)
+    //   // @ts-expect-error ignore for test
+    //   expect(proxy.constructor.prototype.malicious).toBe(true)
+    // })
+  })
+
+  describe(`Frozen object handling`, () => {
+    it(`should handle creating a proxy for an already-frozen object`, () => {
+      const obj = { name: `John`, age: 30 }
+      Object.freeze(obj)
+
+      // This should not throw - the proxy should work with frozen objects
+      const { proxy, getChanges } = createChangeProxy(obj)
+
+      // Modify properties via the proxy
+      proxy.name = `Jane`
+      proxy.age = 31
+
+      // Changes should be tracked
+      expect(getChanges()).toEqual({
+        name: `Jane`,
+        age: 31,
+      })
+
+      // Original frozen object should remain unchanged
+      expect(obj).toEqual({
+        name: `John`,
+        age: 30,
+      })
+      expect(Object.isFrozen(obj)).toBe(true)
+    })
+
+    it(`should handle deeply frozen nested objects`, () => {
+      const obj = {
+        user: {
+          name: `John`,
+          address: {
+            city: `NYC`,
+            zip: `10001`,
+          },
+        },
+      }
+      // Deep freeze the object
+      Object.freeze(obj)
+      Object.freeze(obj.user)
+      Object.freeze(obj.user.address)
+
+      const { proxy, getChanges } = createChangeProxy(obj)
+
+      // Modify nested properties
+      proxy.user.name = `Jane`
+      proxy.user.address.city = `LA`
+
+      // Changes should be tracked
+      expect(getChanges()).toEqual({
+        user: {
+          name: `Jane`,
+          address: {
+            city: `LA`,
+            zip: `10001`,
+          },
+        },
+      })
+
+      // Original should be unchanged
+      expect(obj.user.name).toBe(`John`)
+      expect(obj.user.address.city).toBe(`NYC`)
+    })
+
+    it(`should handle withArrayChangeTracking with frozen objects`, () => {
+      const item1 = { id: 1, name: `Item 1` }
+      const item2 = { id: 2, name: `Item 2` }
+      Object.freeze(item1)
+      Object.freeze(item2)
+      const frozenArray = [item1, item2]
+      Object.freeze(frozenArray)
+
+      // This should not throw - matches the RTK Query adapter use case
+      const changes = withArrayChangeTracking(frozenArray, (drafts) => {
+        if (drafts[0]) {
+          drafts[0].name = `Updated Item 1`
+        }
+      })
+
+      // Changes should be captured
+      expect(changes[0]).toEqual({ name: `Updated Item 1` })
+      expect(changes[1]).toEqual({})
+
+      // Original frozen objects should be unchanged
+      expect(item1.name).toBe(`Item 1`)
+      expect(Object.isFrozen(item1)).toBe(true)
+    })
+
+    it(`should handle withChangeTracking with a frozen object`, () => {
+      const obj = { id: 1, name: `Test`, value: 100 }
+      Object.freeze(obj)
+
+      const changes = withChangeTracking(obj, (draft) => {
+        draft.name = `Updated`
+        draft.value = 200
+      })
+
+      expect(changes).toEqual({
+        name: `Updated`,
+        value: 200,
+      })
+
+      // Original should be unchanged
+      expect(obj.name).toBe(`Test`)
+      expect(obj.value).toBe(100)
+    })
+
+    it(`should handle frozen arrays with nested frozen objects`, () => {
+      const data = [
+        { id: 1, details: { score: 10 } },
+        { id: 2, details: { score: 20 } },
+      ]
+      // Deep freeze everything
+      data.forEach((item) => {
+        Object.freeze(item.details)
+        Object.freeze(item)
+      })
+      Object.freeze(data)
+
+      const changes = withArrayChangeTracking(data, (drafts) => {
+        // Modify nested property
+        if (drafts[0]) {
+          drafts[0].details.score = 100
+        }
+      })
+
+      expect(changes[0]).toEqual({
+        details: { score: 100 },
+      })
+
+      // Original should be unchanged
+      expect(data[0]!.details.score).toBe(10)
+    })
+
+    it(`should handle iteration over frozen array elements`, () => {
+      const items = [
+        { id: 1, name: `A` },
+        { id: 2, name: `B` },
+        { id: 3, name: `C` },
+      ]
+      items.forEach((item) => Object.freeze(item))
+      Object.freeze(items)
+
+      const changes = withArrayChangeTracking(items, (drafts) => {
+        // Use find to locate and modify an item
+        const found = drafts.find((d) => d.id === 2)
+        if (found) {
+          found.name = `Updated B`
+        }
+      })
+
+      expect(changes[1]).toEqual({ name: `Updated B` })
+      expect(items[1]!.name).toBe(`B`) // Original unchanged
+    })
+
+    it(`should handle createArrayChangeProxy with frozen objects`, () => {
+      const items = [
+        { id: 1, status: `pending` },
+        { id: 2, status: `pending` },
+      ]
+      items.forEach((item) => Object.freeze(item))
+
+      const { proxies, getChanges } = createArrayChangeProxy(items)
+
+      proxies[0]!.status = `completed`
+      proxies[1]!.status = `in-progress`
+
+      const changes = getChanges()
+      expect(changes[0]).toEqual({ status: `completed` })
+      expect(changes[1]).toEqual({ status: `in-progress` })
+    })
+  })
+
+  describe(`Object.seal and Object.preventExtensions handling`, () => {
+    it(`should handle Object.seal correctly`, () => {
+      const obj = { name: `John`, age: 30 }
+      const { proxy, getChanges } = createChangeProxy(obj)
+
+      // Seal the proxy
+      Object.seal(proxy)
+
+      // Modify existing property (should work)
+      proxy.name = `Jane`
+
+      // Attempt to add a new property (should throw in strict mode)
+      expect(() => {
+        // @ts-expect-error testing runtime behavior
+        proxy.role = `admin`
+      }).toThrow(/not extensible/)
+
+      // Check that only the name change was tracked
+      expect(getChanges()).toEqual({
+        name: `Jane`,
+      })
+
+      // Original object should be unchanged
+      expect(obj).toEqual({
+        name: `John`,
+        age: 30,
+      })
+    })
+
+    it(`should handle Object.preventExtensions correctly`, () => {
+      const obj = { name: `John`, age: 30 }
+      const { proxy, getChanges } = createChangeProxy(obj)
+
+      // Prevent extensions on the proxy
+      Object.preventExtensions(proxy)
+
+      // Modify existing property (should work)
+      proxy.name = `Jane`
+
+      // Attempt to add a new property (should throw)
+      expect(() => {
+        // @ts-expect-error testing runtime behavior
+        proxy.role = `admin`
+      }).toThrow(/not extensible/)
+
+      // Check that only the name change was tracked
+      expect(getChanges()).toEqual({
+        name: `Jane`,
+      })
+
+      // Original object should be unchanged
+      expect(obj).toEqual({
+        name: `John`,
+        age: 30,
+      })
+    })
+
+    it(`should allow deleting properties with preventExtensions (but not seal)`, () => {
+      const obj = { name: `John`, age: 30 }
+      const { proxy, getChanges } = createChangeProxy(obj)
+
+      // Object.preventExtensions allows deletion of configurable properties
+      // Object.seal makes properties non-configurable, so delete wouldn't work
+      Object.preventExtensions(proxy)
+
+      // Modify and delete
+      proxy.name = `Jane`
+      // @ts-expect-error testing delete on non-optional property
+      delete proxy.age
+
+      // Only the modified property is returned by getChanges
+      // (deleted properties are tracked internally but not in the result)
+      const changes = getChanges()
+      expect(changes.name).toBe(`Jane`)
+    })
+
+    it(`should not allow deleting properties on sealed objects`, () => {
+      const obj = { name: `John`, age: 30 }
+      const { proxy } = createChangeProxy(obj)
+
+      // Object.seal makes properties non-configurable
+      Object.seal(proxy)
+
+      // In strict mode (which Vitest uses), deleting a non-configurable property throws
+      expect(() => {
+        // @ts-expect-error testing delete on non-optional property
+        delete proxy.age
+      }).toThrow()
+
+      // Property should still exist
+      expect(proxy.age).toBe(30)
+    })
+
+    it(`should handle sealing a proxy with nested objects`, () => {
+      const obj = { user: { name: `John` }, count: 0 }
+      const { proxy, getChanges } = createChangeProxy(obj)
+
+      Object.seal(proxy)
+
+      // Modifying nested objects should still work
+      proxy.user.name = `Jane`
+      proxy.count = 5
+
+      expect(getChanges()).toEqual({
+        user: { name: `Jane` },
+        count: 5,
+      })
+    })
+  })
+
+  describe(`Enhanced Iterator Method Tracking`, () => {
+    it(`should track changes when Map values are modified via iterator`, () => {
+      const map = new Map([
+        [`key1`, { count: 1 }],
+        [`key2`, { count: 2 }],
+      ])
+
+      // Wrap the map in an object to track changes to the nested objects
+      const obj = { myMap: map }
+      const { proxy, getChanges } = createChangeProxy(obj)
+
+      // Get an entry via iterator and modify it
+      for (const [key, value] of proxy.myMap.entries()) {
+        if (key === `key1`) {
+          value.count = 10
+        }
+      }
+
+      // Verify the original map was not modified
+      expect(map.get(`key1`)?.count).toBe(1)
+
+      // Check that the change was tracked correctly
+      expect(getChanges()).toEqual({
+        myMap: new Map([
+          [`key1`, { count: 10 }],
+          [`key2`, { count: 2 }],
+        ]),
+      })
+    })
+
+    it(`should track changes when Set object values are modified via iterator`, () => {
+      const set = new Set([
+        { id: 1, value: `one` },
+        { id: 2, value: `two` },
+      ])
+
+      // Wrap the set in an object to track changes to the nested objects
+      const obj = { mySet: set }
+      const { proxy, getChanges } = createChangeProxy(obj)
+
+      // Find and modify an object in the set via iterator
+      for (const item of proxy.mySet.values()) {
+        if (item.id === 1) {
+          item.value = `modified`
+        }
+      }
+
+      // Verify the original set was not modified
+      let found = false
+      for (const item of set) {
+        if (item.id === 1) {
+          expect(item.value).toBe(`one`)
+          found = true
+        }
+      }
+      expect(found).toBe(true)
+
+      // Check that the change was tracked correctly
+      const changes = getChanges()
+      expect(changes.mySet).toBeInstanceOf(Set)
+      const changedItems = Array.from(changes.mySet as Set<any>)
+      expect(changedItems).toEqual(
+        expect.arrayContaining([
+          { id: 1, value: `modified` },
+          { id: 2, value: `two` },
+        ]),
+      )
+      expect(changes).toEqual({
+        mySet: new Set([
+          { id: 1, value: `modified` },
+          { id: 2, value: `two` },
+        ]),
+      })
+      expect(changes.mySet.size).toBe(2)
+      expect([...set]).toEqual([
+        { id: 1, value: `one` },
+        { id: 2, value: `two` },
+      ])
+    })
+
+    it(`should track changes when Map values are modified via forEach`, () => {
+      const map = new Map([
+        [`key1`, { count: 1 }],
+        [`key2`, { count: 2 }],
+      ])
+
+      // Wrap the map in an object to track changes to the nested objects
+      const obj = { myMap: map }
+      const { proxy, getChanges } = createChangeProxy(obj)
+
+      // Modify values using forEach
+      proxy.myMap.forEach((value, key) => {
+        if (key === `key2`) {
+          value.count = 20
+        }
+      })
+
+      // Verify the original map was not modified
+      expect(map.get(`key2`)?.count).toBe(2)
+
+      // Check that the change was tracked correctly
+      expect(getChanges()).toEqual({
+        myMap: new Map([
+          [`key1`, { count: 1 }],
+          [`key2`, { count: 20 }],
+        ]),
+      })
+    })
+
+    it(`should track changes when Set values are modified via forEach`, () => {
+      const set = new Set([
+        { id: 1, value: `one` },
+        { id: 2, value: `two` },
+      ])
+
+      // Wrap the set in an object to track changes to the nested objects
+      const obj = { mySet: set }
+      const { proxy, getChanges } = createChangeProxy(obj)
+
+      // Modify values using forEach
+      proxy.mySet.forEach((item) => {
+        if (item.id === 2) {
+          item.value = `modified two`
+        }
+      })
+
+      // Verify the original set was not modified
+      let found = false
+      for (const item of set) {
+        if (item.id === 2) {
+          expect(item.value).toBe(`two`)
+          found = true
+        }
+      }
+      expect(found).toBe(true)
+
+      // Check that the change was tracked correctly
+      const changes = getChanges()
+      expect(changes.mySet).toBeInstanceOf(Set)
+      const changedItems = Array.from(changes.mySet as Set<any>)
+      expect(changedItems).toEqual(
+        expect.arrayContaining([
+          { id: 1, value: `one` },
+          { id: 2, value: `modified two` },
+        ]),
+      )
+      expect(changes).toEqual({
+        mySet: new Set([
+          { id: 1, value: `one` },
+          { id: 2, value: `modified two` },
+        ]),
+      })
+      expect(changes.mySet.size).toBe(2)
+      expect([...set]).toEqual([
+        { id: 1, value: `one` },
+        { id: 2, value: `two` },
+      ])
+    })
+
+    it(`should handle multiple modifications to the same object via different iterators`, () => {
+      const map = new Map([
+        [`key1`, { count: 1, name: `test` }],
+        [`key2`, { count: 2, name: `test2` }],
+      ])
+      const obj = { myMap: map }
+      const { proxy, getChanges } = createChangeProxy(obj)
+
+      // Modify via entries()
+      for (const [key, value] of proxy.myMap.entries()) {
+        if (key === `key1`) {
+          value.count = 10
+        }
+      }
+
+      // Modify via values()
+      for (const value of proxy.myMap.values()) {
+        if (value.name === `test`) {
+          value.name = `modified`
+        }
+      }
+
+      // Verify the original map was not modified.
+      expect(map.get(`key1`)).toEqual({ count: 1, name: `test` })
+
+      expect(getChanges()).toEqual({
+        myMap: new Map([
+          [`key1`, { count: 10, name: `modified` }],
+          [`key2`, { count: 2, name: `test2` }],
+        ]),
+      })
+    })
+
+    it(`should handle nested object modifications via iterators`, () => {
+      const map = new Map([
+        [`user1`, { profile: { name: `Alice`, settings: { theme: `dark` } } }],
+        [`user2`, { profile: { name: `Bob`, settings: { theme: `light` } } }],
+      ])
+      const obj = { myMap: map }
+      const { proxy, getChanges } = createChangeProxy(obj)
+
+      for (const [key, user] of proxy.myMap.entries()) {
+        if (key === `user1`) {
+          user.profile.settings.theme = `auto`
+        }
+      }
+
+      expect(getChanges()).toEqual({
+        myMap: new Map([
+          [
+            `user1`,
+            { profile: { name: `Alice`, settings: { theme: `auto` } } },
+          ],
+          [`user2`, { profile: { name: `Bob`, settings: { theme: `light` } } }],
+        ]),
+      })
+      expect(map.get(`user1`)?.profile.settings.theme).toBe(`dark`)
+    })
+
+    it(`should handle Set modifications with duplicate objects`, () => {
+      const obj1 = { id: 1, value: `one` }
+      const obj2 = { id: 2, value: `two` }
+      const set = new Set([obj1, obj2, obj1]) // obj1 appears twice but Set deduplicates
+      const obj = { mySet: set }
+      const { proxy, getChanges } = createChangeProxy(obj)
+
+      for (const item of proxy.mySet) {
+        if (item.id === 1) {
+          item.value = `modified`
+        }
+      }
+
+      const changes = getChanges()
+      expect(changes.mySet).toBeInstanceOf(Set)
+      expect(changes.mySet.size).toBe(2)
+      const changedItems = Array.from(changes.mySet as Set<any>)
+      expect(changedItems).toEqual(
+        expect.arrayContaining([
+          { id: 1, value: `modified` },
+          { id: 2, value: `two` },
+        ]),
+      )
+      expect(obj1.value).toBe(`one`) // Original unchanged
+      expect(changes).toEqual({
+        mySet: new Set([
+          { id: 1, value: `modified` },
+          { id: 2, value: `two` },
+        ]),
+      })
+      expect([...set]).toEqual([
+        { id: 1, value: `one` },
+        { id: 2, value: `two` },
+      ])
+    })
+
+    it(`should handle reverting changes made via iterators`, () => {
+      const map = new Map([
+        [`key1`, { count: 5 }],
+        [`key2`, { count: 10 }],
+      ])
+      const obj = { myMap: map }
+      const { proxy, getChanges } = createChangeProxy(obj)
+
+      // Modify via entries()
+      for (const [key, value] of proxy.myMap.entries()) {
+        if (key === `key1`) {
+          value.count = 20 // Change
+          value.count = 5 // Revert to original
+        }
+      }
+
+      // Should have no changes since we reverted
+      expect(getChanges()).toEqual({})
+    })
+
+    it(`should handle mixed Map and Set nested operations`, () => {
+      const data = {
+        userGroups: new Map([
+          [
+            `admins`,
+            {
+              users: new Set([
+                { id: 1, name: `Alice` },
+                { id: 2, name: `Bob` },
+              ]),
+            },
+          ],
+          [
+            `users`,
+            {
+              users: new Set([{ id: 3, name: `Charlie` }]),
+            },
+          ],
+        ]),
+      }
+      const { proxy, getChanges } = createChangeProxy(data)
+
+      // Navigate through Map.values() then Set iteration
+      for (const group of proxy.userGroups.values()) {
+        for (const user of group.users) {
+          if (user.name === `Alice`) {
+            user.name = `Alice Admin`
+          }
+        }
+      }
+
+      const changes = getChanges()
+      expect(changes.userGroups).toBeInstanceOf(Map)
+      const adminGroup = changes.userGroups.get(`admins`)
+      expect(adminGroup?.users).toBeInstanceOf(Set)
+      const users = Array.from(adminGroup?.users as Set<any>)
+      expect(users).toEqual(
+        expect.arrayContaining([
+          { id: 1, name: `Alice Admin` },
+          { id: 2, name: `Bob` },
+        ]),
+      )
+    })
+  })
+
+  describe(`Map and Set Operations`, () => {
+    it(`should track Map clear operations`, () => {
+      const map = new Map([
+        [`key1`, `value1`],
+        [`key2`, `value2`],
+      ])
+      const obj = { myMap: map }
+      const { proxy, getChanges } = createChangeProxy(obj)
+
+      proxy.myMap.clear()
+
+      expect(getChanges()).toEqual({
+        myMap: new Map(),
+      })
+      expect(map.size).toBe(2)
+    })
+
+    it(`should track Map delete operations`, () => {
+      const map = new Map([
+        [`key1`, `value1`],
+        [`key2`, `value2`],
+      ])
+      const obj = { myMap: map }
+      const { proxy, getChanges } = createChangeProxy(obj)
+
+      proxy.myMap.delete(`key1`)
+
+      expect(getChanges()).toEqual({
+        myMap: new Map([[`key2`, `value2`]]),
+      })
+      expect(map.has(`key1`)).toBe(true)
+    })
+
+    it(`should track Map set operations with object keys`, () => {
+      const objKey = { id: 1 }
+      const map = new Map([[objKey, `value1`]])
+      const { proxy, getChanges } = createChangeProxy({ map })
+
+      const newObjKey = { id: 2 }
+      proxy.map.set(newObjKey, `value2`)
+
+      const changes = getChanges()
+      expect(changes.map.get(newObjKey)).toBe(`value2`)
+      expect(map.get(newObjKey)).toBeUndefined()
+    })
+
+    it(`should track Set add and delete operations`, () => {
+      const set = new Set([1, 2, 3])
+      const { proxy, getChanges } = createChangeProxy({ set })
+
+      proxy.set.add(4)
+      proxy.set.delete(2)
+
+      expect(getChanges()).toEqual({
+        set: new Set([1, 3, 4]),
+      })
+      expect(set.has(4)).toBe(false)
+      expect(set.has(2)).toBe(true)
+    })
+
+    it(`should handle iteration over collections during modification`, () => {
+      const map = new Map([
+        [`key1`, `value1`],
+        [`key2`, `value2`],
+      ])
+      const { proxy, getChanges } = createChangeProxy({ map })
+
+      // Modify during iteration
+      for (const [key] of proxy.map) {
+        proxy.map.set(key, `modified`)
+      }
+
+      expect(getChanges()).toEqual({
+        map: new Map([
+          [`key1`, `modified`],
+          [`key2`, `modified`],
+        ]),
+      })
+      expect(map.get(`key1`)).toBe(`value1`)
+      expect(map.get(`key2`)).toBe(`value2`)
+    })
+  })
+
+  describe(`createArrayChangeProxy`, () => {
+    it(`should track changes to an array of objects`, () => {
+      const objs = [
+        { id: 1, name: `John` },
+        { id: 2, name: `Jane` },
+      ]
+      const { proxies, getChanges } = createArrayChangeProxy(objs)
+
+      // Make changes to the proxies
+      // @ts-expect-error ok possibly undefined
+      proxies[0].name = `Johnny`
+      // @ts-expect-error ok possibly undefined
+      proxies[1].name = `Janet`
+
+      // Check that the changes are tracked
+      expect(getChanges()).toEqual([{ name: `Johnny` }, { name: `Janet` }])
+
+      // Check that the original objects are not modified
+      expect(objs).toEqual([
+        { id: 1, name: `John` },
+        { id: 2, name: `Jane` },
+      ])
+    })
+
+    it(`should track when items are added to arrays`, () => {
+      const obj = {
+        items: [`apple`, `banana`],
+      }
+      const { proxy, getChanges } = createChangeProxy(obj)
+
+      proxy.items = [...obj.items, `cherry`]
+
+      expect(getChanges()).toEqual({
+        items: [`apple`, `banana`, `cherry`],
+      })
+      expect(obj.items).toEqual([`apple`, `banana`])
+    })
+
+    it(`should track array pop() operations`, () => {
+      const objs = [{ items: [`apple`, `banana`, `cherry`] }]
+      const { proxies, getChanges } = createArrayChangeProxy(objs)
+
+      // Call pop() method directly
+      // @ts-expect-error ok possibly undefined
+      proxies[0].items.pop()
+
+      expect(getChanges()).toEqual([
+        {
+          items: [`apple`, `banana`],
+        },
+      ])
+      // @ts-expect-error ok possibly undefined
+      expect(objs[0].items).toEqual([`apple`, `banana`, `cherry`])
+    })
+
+    it(`should track array shift() operations`, () => {
+      const objs = [{ items: [`apple`, `banana`, `cherry`] }]
+      const { proxies, getChanges } = createArrayChangeProxy(objs)
+
+      // Call shift() method directly
+      // @ts-expect-error ok possibly undefined
+      proxies[0].items.shift()
+
+      expect(getChanges()).toEqual([
+        {
+          items: [`banana`, `cherry`],
+        },
+      ])
+      // @ts-expect-error ok possibly undefined
+      expect(objs[0].items).toEqual([`apple`, `banana`, `cherry`])
+    })
+
+    it(`should track array unshift() operations`, () => {
+      const objs = [{ items: [`banana`, `cherry`] }]
+      const { proxies, getChanges } = createArrayChangeProxy(objs)
+
+      // Call unshift() method directly
+      // @ts-expect-error ok possibly undefined
+      proxies[0].items.unshift(`apple`)
+
+      expect(getChanges()).toEqual([
+        {
+          items: [`apple`, `banana`, `cherry`],
+        },
+      ])
+      // @ts-expect-error ok possibly undefined
+      expect(objs[0].items).toEqual([`banana`, `cherry`])
+    })
+
+    it(`should track array push() operations`, () => {
+      const obj = { items: [`apple`, `banana`] }
+      const { proxy, getChanges } = createChangeProxy(obj)
+
+      proxy.items.push(`cherry`)
+
+      expect(getChanges()).toEqual({
+        items: [`apple`, `banana`, `cherry`],
+      })
+      expect(obj.items).toEqual([`apple`, `banana`])
+    })
+
+    it(`should track array splice() operations`, () => {
+      const objs = [{ items: [`apple`, `banana`, `cherry`, `date`] }]
+      const { proxies, getChanges } = createArrayChangeProxy(objs)
+
+      // Call splice() method directly
+      // @ts-expect-error ok possibly undefined
+      proxies[0].items.splice(1, 2, `blueberry`, `cranberry`)
+
+      expect(getChanges()).toEqual([
+        {
+          items: [`apple`, `blueberry`, `cranberry`, `date`],
+        },
+      ])
+      // @ts-expect-error ok possibly undefined
+      expect(objs[0].items).toEqual([`apple`, `banana`, `cherry`, `date`])
+    })
+
+    it(`should track array sort() operations`, () => {
+      const objs = [{ items: [`cherry`, `apple`, `banana`] }]
+      const { proxies, getChanges } = createArrayChangeProxy(objs)
+
+      // Call sort() method directly
+      // @ts-expect-error ok possibly undefined
+      proxies[0].items.sort()
+
+      expect(getChanges()).toEqual([
+        {
+          items: [`apple`, `banana`, `cherry`],
+        },
+      ])
+      // @ts-expect-error ok possibly undefined
+      expect(objs[0].items).toEqual([`cherry`, `apple`, `banana`])
+    })
+
+    it(`should track array reverse() operations`, () => {
+      const objs = [{ items: [`apple`, `banana`, `cherry`] }]
+      const { proxies, getChanges } = createArrayChangeProxy(objs)
+
+      // Call reverse() method directly
+      // @ts-expect-error ok possibly undefined
+      proxies[0].items.reverse()
+
+      expect(getChanges()).toEqual([
+        {
+          items: [`cherry`, `banana`, `apple`],
+        },
+      ])
+      // @ts-expect-error ok possibly undefined
+      expect(objs[0].items).toEqual([`apple`, `banana`, `cherry`])
+    })
+
+    it(`should track array fill() operations`, () => {
+      const objs = [{ items: [`apple`, `banana`, `cherry`] }]
+      const { proxies, getChanges } = createArrayChangeProxy(objs)
+
+      // Call fill() method directly
+      // @ts-expect-error ok possibly undefined
+      proxies[0].items.fill(`orange`, 1, 3)
+
+      expect(getChanges()).toEqual([
+        {
+          items: [`apple`, `orange`, `orange`],
+        },
+      ])
+      // @ts-expect-error ok possibly undefined
+      expect(objs[0].items).toEqual([`apple`, `banana`, `cherry`])
+    })
+
+    it(`should track array copyWithin() operations`, () => {
+      const objs = [
+        { items: [`apple`, `banana`, `cherry`, `date`, `elderberry`] },
+      ]
+      const { proxies, getChanges } = createArrayChangeProxy(objs)
+
+      // Call copyWithin() method directly - copy elements from index 3-4 to index 0-1
+      // @ts-expect-error ok possibly undefined
+      proxies[0].items.copyWithin(0, 3, 5)
+
+      expect(getChanges()).toEqual([
+        {
+          items: [`date`, `elderberry`, `cherry`, `date`, `elderberry`],
+        },
+      ])
+      // @ts-expect-error ok possibly undefined
+      expect(objs[0].items).toEqual([
+        `apple`,
+        `banana`,
+        `cherry`,
+        `date`,
+        `elderberry`,
+      ])
+    })
+
+    it(`should track changes in multi-dimensional arrays`, () => {
+      const objs = [
+        {
+          matrix: [
+            [1, 2],
+            [3, 4],
+          ],
+        },
+      ]
+      const { proxies, getChanges } = createArrayChangeProxy(objs)
+
+      // Update a nested array
+      // @ts-expect-error ok possibly undefined
+      const newMatrix = [...proxies[0].matrix]
+      newMatrix[0] = [5, 6]
+      // @ts-expect-error ok possibly undefined
+      proxies[0].matrix = newMatrix
+
+      expect(getChanges()).toEqual([
+        {
+          matrix: [
+            [5, 6],
+            [3, 4],
+          ],
+        },
+      ])
+      if (objs[0]) {
+        expect(objs[0].matrix).toEqual([
+          [1, 2],
+          [3, 4],
+        ])
+      }
+    })
+
+    it(`should handle objects containing arrays as properties`, () => {
+      const objs = [
+        {
+          user: {
+            name: `John`,
+            hobbies: [`reading`, `swimming`],
+          },
+        },
+      ]
+      const { proxies, getChanges } = createArrayChangeProxy(objs)
+
+      // Update the array within the nested object
+      // @ts-expect-error ok for test.
+      const updatedUser = { ...proxies[0].user }
+      updatedUser.hobbies = [...updatedUser.hobbies, `cycling`]
+      // @ts-expect-error ok for test.
+      proxies[0].user = updatedUser
+
+      expect(getChanges()).toEqual([
+        {
+          user: {
+            name: `John`,
+            hobbies: [`reading`, `swimming`, `cycling`],
+          },
+        },
+      ])
+      if (objs[0]) {
+        expect(objs[0].user.hobbies).toEqual([`reading`, `swimming`])
+      }
+    })
+
+    it(`should handle Temporal objects correctly`, () => {
+      const zonedDateTime = Temporal.Now.zonedDateTimeISO()
+      const plainDate = Temporal.PlainDate.from(`2024-01-15`)
+      const duration = Temporal.Duration.from({ hours: 2, minutes: 30 })
+
+      const obj = {
+        appointment: {
+          date: zonedDateTime,
+          reminder: plainDate,
+          duration: duration,
+        },
+      }
+
+      const { proxy, getChanges } = createChangeProxy(obj)
+
+      // Modify the temporal objects
+      proxy.appointment = {
+        date: Temporal.Now.zonedDateTimeISO(),
+        reminder: Temporal.PlainDate.from(`2024-01-16`),
+        duration: Temporal.Duration.from({ hours: 3 }),
+      }
+
+      const changes = getChanges()
+
+      // The changed values should be proper Temporal objects, not empty objects
+      expect(changes.appointment.date).toBeInstanceOf(Temporal.ZonedDateTime)
+      expect(changes.appointment.reminder).toBeInstanceOf(Temporal.PlainDate)
+      expect(changes.appointment.duration).toBeInstanceOf(Temporal.Duration)
+
+      // Original should be unchanged
+      expect(obj.appointment.date).toEqual(zonedDateTime)
+      expect(obj.appointment.reminder).toEqual(plainDate)
+      expect(obj.appointment.duration).toEqual(duration)
+    })
+
+    it(`should handle Set and Map objects`, () => {
+      const set = new Set([1, 2, 3])
+      const map = new Map([
+        [`key1`, `value1`],
+        [`key2`, `value2`],
+      ])
+
+      const objs = [
+        {
+          collections: {
+            set,
+            map,
+          },
+        },
+      ]
+      const { proxies, getChanges } = createArrayChangeProxy(objs)
+
+      // Create new collections with modifications
+      const newSet = new Set([...set, 4])
+      const newMap = new Map([...map, [`key3`, `value3`]])
+
+      if (proxies[0]) {
+        proxies[0].collections = {
+          set: newSet,
+          map: newMap,
+        }
+      }
+
+      expect(getChanges()).toEqual([
+        {
+          collections: {
+            set: newSet,
+            map: newMap,
+          },
+        },
+      ])
+      if (objs[0]) {
+        expect(objs[0].collections.set).toEqual(set)
+        expect(objs[0].collections.map).toEqual(map)
+      }
+    })
+  })
+
+  describe(`withChangeTracking`, () => {
+    it(`should track changes made in the callback`, () => {
+      const obj = { name: `John`, age: 30 }
+
+      const changes = withChangeTracking(obj, (proxy) => {
+        proxy.name = `Jane`
+        proxy.age = 31
+      })
+
+      // Check that the changes are tracked
+      expect(changes).toEqual({
+        name: `Jane`,
+        age: 31,
+      })
+
+      // Check that the original object is not modified
+      expect(obj).toEqual({
+        name: `John`,
+        age: 30,
+      })
+    })
+  })
+
+  describe(`withArrayChangeTracking`, () => {
+    it(`should track changes made to multiple objects in the callback`, () => {
+      const objs = [
+        { id: 1, name: `John` },
+        { id: 2, name: `Jane` },
+      ]
+
+      const changes = withArrayChangeTracking(objs, (proxies) => {
+        if (proxies[0] && proxies[1]) {
+          proxies[0].name = `Johnny`
+          proxies[1].name = `Janet`
+        }
+      })
+
+      // Check that the changes are tracked
+      expect(changes).toEqual([{ name: `Johnny` }, { name: `Janet` }])
+
+      // Check that the original objects are modified
+      expect(objs).toEqual([
+        { id: 1, name: `John` },
+        { id: 2, name: `Jane` },
+      ])
+    })
+
+    it(`should handle empty changes`, () => {
+      const objs = [
+        { id: 1, name: `John` },
+        { id: 2, name: `Jane` },
+      ]
+
+      const changes = withArrayChangeTracking(objs, () => {
+        // No changes made
+      })
+
+      // No changes should be tracked
+      expect(changes).toEqual([{}, {}])
+
+      // Original objects should remain unchanged
+      expect(objs).toEqual([
+        { id: 1, name: `John` },
+        { id: 2, name: `Jane` },
+      ])
+    })
+  })
+
+  describe(`Proxy revocation and cleanup`, () => {
+    it(`should handle accessing proxies after tracking function completes`, () => {
+      const obj = { name: `John`, age: 30 }
+      const changes = withChangeTracking(obj, (proxy) => {
+        proxy.name = `Jane`
+      })
+
+      expect(changes).toEqual({ name: `Jane` })
+      expect(obj.name).toBe(`John`)
+    })
+
+    it(`should handle nested proxy access after tracking`, () => {
+      const obj = { user: { name: `John`, age: 30 } }
+      const changes = withChangeTracking(obj, (proxy) => {
+        proxy.user.name = `Jane`
+      })
+
+      expect(changes).toEqual({
+        user: { name: `Jane`, age: 30 },
+      })
+      expect(obj.user.name).toBe(`John`)
+    })
+  })
+
+  describe(`Advanced Proxy Change Detection`, () => {
+    describe(`Structural Sharing and Equality Detection`, () => {
+      it(`should return the original object when changes are reverted`, () => {
+        const obj = { name: `John`, age: 30 }
+        const { proxy, getChanges } = createChangeProxy(obj)
+
+        // Make changes
+        proxy.name = `Jane`
+        // Revert changes
+        proxy.name = `John`
+
+        // No changes should be tracked
+        expect(getChanges()).toEqual({})
+      })
+
+      it(`should handle Maps that have items added and then removed`, () => {
+        const map = new Map([[`key1`, `value1`]])
+        const obj = { myMap: map }
+        const { proxy, getChanges } = createChangeProxy(obj)
+
+        // Create a new map with an added item
+        const modifiedMap = new Map(map)
+        modifiedMap.set(`key2`, `value2`)
+        proxy.myMap = modifiedMap
+
+        // Create a new map that's identical to the original
+        const revertedMap = new Map([[`key1`, `value1`]])
+        proxy.myMap = revertedMap
+
+        // No changes should be tracked since final state matches initial state
+        expect(getChanges()).toEqual({})
+      })
+
+      it(`should handle restoring original references to nested objects`, () => {
+        const nestedObj = { value: 42 }
+        const obj = { nested: nestedObj, other: `data` }
+        const { proxy, getChanges } = createChangeProxy(obj)
+
+        // Replace with different object
+        proxy.nested = { value: 100 }
+
+        // Restore original reference
+        proxy.nested = nestedObj
+
+        // No changes should be tracked for nested
+        expect(getChanges()).toEqual({})
+      })
+    })
+  })
+
+  describe(`Deep Nested Reverts`, () => {
+    it(`should correctly detect when a deeply nested property is reverted to original value`, () => {
+      const obj = { nested: { count: 10 } }
+      const { proxy, getChanges } = createChangeProxy(obj)
+
+      // Make a change to a deep nested property
+      proxy.nested.count = 5
+
+      expect(proxy.nested.count).toEqual(5)
+      // Verify changes are tracked
+      expect(getChanges()).toEqual({
+        nested: { count: 5 },
+      })
+
+      // Revert back to original value
+      proxy.nested.count = 10
+
+      // Verify no changes are reported
+      expect(getChanges()).toEqual({})
+
+      // Original object should be unchanged
+      expect(obj).toEqual({ nested: { count: 10 } })
+    })
+
+    it(`should correctly handle complex nested object reverts`, () => {
+      const obj = {
+        user: {
+          profile: {
+            name: `John`,
+            settings: {
+              theme: `dark`,
+              notifications: true,
+            },
+          },
+          stats: {
+            visits: 10,
+          },
+        },
+      }
+
+      const { proxy, getChanges } = createChangeProxy(obj)
+
+      // Make changes at different levels
+      proxy.user.profile.name = `Jane`
+      proxy.user.profile.settings.theme = `light`
+      proxy.user.stats.visits = 15
+
+      // Verify all changes are tracked
+      expect(getChanges()).toEqual({
+        user: {
+          profile: {
+            name: `Jane`,
+            settings: {
+              theme: `light`,
+              notifications: true,
+            },
+          },
+          stats: {
+            visits: 15,
+          },
+        },
+      })
+
+      // Revert changes one by one
+      proxy.user.profile.name = `John`
+
+      // Should still show other changes
+      expect(Object.keys(getChanges()).length).toBeGreaterThan(0)
+      expect(getChanges()).toEqual({
+        user: {
+          profile: {
+            name: `John`,
+            settings: { theme: `light`, notifications: true },
+          },
+          stats: { visits: 15 },
+        },
+      })
+
+      proxy.user.profile.settings.theme = `dark`
+
+      // Should still show other changes
+      expect(Object.keys(getChanges()).length).toBeGreaterThan(0)
+      expect(getChanges()).toEqual({
+        user: {
+          profile: {
+            name: `John`,
+            settings: { theme: `dark`, notifications: true },
+          },
+          stats: { visits: 15 },
+        },
+      })
+
+      // Revert final change
+      proxy.user.stats.visits = 10
+
+      // No changes should be reported
+      expect(getChanges()).toEqual({})
+    })
+  })
+
+  describe(`Array Edge Cases`, () => {
+    // it(`should track array length changes through truncation`, () => {
+    //   const arr = [1, 2, 3, 4, 5]
+    //   const { proxy, getChanges } = createChangeProxy({ arr })
+    //
+    //   proxy.arr.length = 3
+    //
+    //   expect(getChanges()).toEqual({
+    //     arr: [1, 2, 3],
+    //   })
+    //   expect(arr.length).toBe(3)
+    //   expect(arr).toEqual([1, 2, 3, 4, 5])
+    // })
+
+    it(`should handle sparse arrays`, () => {
+      const arr = [1, 2, 3, 4, 5]
+      const { proxy, getChanges } = createChangeProxy({ arr })
+
+      delete proxy.arr[2]
+
+      expect(getChanges()).toEqual({
+        // eslint-disable-next-line
+        arr: [1, 2, , 4, 5],
+      })
+      expect(2 in arr).toBe(true)
+      expect(arr.length).toBe(5)
+    })
+
+    it(`should handle out-of-bounds array assignments`, () => {
+      const arr = [1, 2, 3]
+      const { proxy, getChanges } = createChangeProxy({ arr })
+
+      proxy.arr[5] = 6
+
+      expect(getChanges()).toEqual({
+        arr: [1, 2, 3, undefined, undefined, 6],
+      })
+      expect(arr.length).toBe(3)
+    })
+  })
+
+  describe(`Object.defineProperty and Meta Operations`, () => {
+    it(`should track changes made through Object.defineProperty`, () => {
+      const obj: { name: string; age?: number } = { name: `John` }
+      const { proxy, getChanges } = createChangeProxy(obj)
+
+      Object.defineProperty(proxy, `age`, {
+        value: 30,
+        writable: true,
+        enumerable: true,
+        configurable: true,
+      })
+
+      expect(getChanges()).toEqual({
+        age: 30,
+      })
+      expect(obj.age).toBeUndefined()
+    })
+
+    // it.only(`should prevent prototype pollution`, () => {
+    //   const obj = { constructor: { prototype: {} } }
+    //   const { proxy } = createChangeProxy(obj)
+    //
+    //   // Attempt to modify Object.prototype through the proxy
+    //   // @ts-expect-error ignore for test
+    //   proxy.__proto__ = { malicious: true }
+    //   // @ts-expect-error ignore for test
+    //   proxy.constructor.prototype.malicious = true
+    //
+    //   // Verify that Object.prototype wasn't polluted
+    //   // @ts-expect-error ignore for test
+    //   expect({}.malicious).toBeUndefined()
+    //   // @ts-expect-error ignore for test
+    //   expect(Object.prototype.malicious).toBeUndefined()
+    //
+    //   // The changes should only affect the proxy's own prototype chain
+    //   // @ts-expect-error ignore for test
+    //   expect(proxy.__proto__.malicious).toBe(true)
+    //   // @ts-expect-error ignore for test
+    //   expect(proxy.constructor.prototype.malicious).toBe(true)
+    // })
+  })
+
+  describe(`Optimization Cases`, () => {
+    it(`should not track changes when setting to the same value`, () => {
+      const obj = { name: `John`, age: 30, scores: [1, 2, 3] }
+      const { proxy, getChanges } = createChangeProxy(obj)
+
+      // Set to same primitive value
+      proxy.name = `John`
+      proxy.age = 30
+
+      // Set to same array value
+      proxy.scores = [1, 2, 3]
+
+      // Should have no changes
+      expect(getChanges()).toEqual({})
+    })
+
+    it(`should not track changes when modifying and reverting`, () => {
+      const obj = { name: `John`, nested: { count: 5 } }
+      const { proxy, getChanges } = createChangeProxy(obj)
+
+      // Modify and revert primitive
+      proxy.name = `Jane`
+      proxy.name = `John`
+
+      // Modify and revert nested
+      proxy.nested.count = 10
+      proxy.nested.count = 5
+
+      // The object shouldn't be mutated.
+      expect(obj.name).toEqual(`John`)
+      expect(obj.nested.count).toEqual(5)
+
+      // Should have no changes
+      expect(getChanges()).toEqual({})
+    })
+
+    it(`should efficiently handle repeated changes to the same property`, () => {
+      const obj = { count: 0 }
+      const { proxy, getChanges } = createChangeProxy(obj)
+
+      // Make many changes to the same property
+      for (let i = 0; i < 10000; i++) {
+        proxy.count = i
+      }
+
+      // Should only track the final change
+      expect(getChanges()).toEqual({ count: 9999 })
+    })
+  })
+
+  describe(`TypedArray Support`, () => {
+    it(`should track changes to TypedArrays`, () => {
+      const obj = {
+        int8: new Int8Array([1, 2, 3]),
+        uint8: new Uint8Array([4, 5, 6]),
+        float32: new Float32Array([1.1, 2.2, 3.3]),
+      }
+
+      const { proxy, getChanges } = createChangeProxy(obj)
+
+      // Modify values
+      proxy.int8[0] = 10
+      proxy.uint8[1] = 50
+      proxy.float32[2] = 33.3
+
+      const changes = getChanges()
+      expect(changes.int8[0]).toBe(10)
+      expect(changes.uint8[1]).toBe(50)
+      expect(changes.float32[2]).toBeCloseTo(33.3)
+
+      // Verify original object was modified
+      expect(obj.int8[0]).toBe(1)
+      expect(obj.uint8[1]).toBe(5)
+      expect(obj.float32[2]).toBeCloseTo(3.3)
+    })
+
+    it(`should handle replacing entire TypedArrays`, () => {
+      const obj = { data: new Uint8Array([1, 2, 3]) }
+      const { proxy, getChanges } = createChangeProxy(obj)
+
+      // Replace entire array
+      proxy.data = new Uint8Array([4, 5, 6])
+
+      const changes = getChanges()
+      expect(changes.data instanceof Uint8Array).toBe(true)
+      expect(Array.from(changes.data)).toEqual([4, 5, 6])
+
+      // Verify original was not modified
+      expect(Array.from(obj.data)).toEqual([1, 2, 3])
+    })
+
+    it(`should detect when TypedArray values are the same`, () => {
+      const obj = { data: new Uint8Array([1, 2, 3]) }
+      const { proxy, getChanges } = createChangeProxy(obj)
+
+      // Set to same values
+      proxy.data = new Uint8Array([1, 2, 3])
+
+      // Should have no changes
+      expect(getChanges()).toEqual({})
+    })
+  })
+
+  describe(`Shallow Copy Handling`, () => {
+    it(`should properly handle Array shallow copies`, () => {
+      const obj = { items: [1, 2, 3] }
+      const { proxy, getChanges } = createChangeProxy(obj)
+
+      // Replace the array instead of modifying it to ensure changes are tracked
+      proxy.items = [1, 2, 3, 4]
+
+      expect(getChanges()).toEqual({
+        items: [1, 2, 3, 4],
+      })
+      expect(obj.items).toEqual([1, 2, 3])
+    })
+
+    it(`should properly handle RegExp shallow copies`, () => {
+      const obj = { pattern: /test/i }
+      const { proxy, getChanges } = createChangeProxy(obj)
+
+      // Replace with a new RegExp to trigger shallow copy
+      proxy.pattern = /modified/g
+
+      expect(getChanges()).toEqual({
+        pattern: /modified/g,
+      })
+      expect(obj.pattern).toEqual(/test/i)
+      expect(obj.pattern.flags).toBe(`i`)
+      expect(obj.pattern.source).toBe(`test`)
+    })
+
+    it(`should handle primitive values directly`, () => {
+      // Test with a primitive value
+      const primitiveObj = { value: 42 }
+      const { proxy: primitiveProxy, getChanges: getPrimitiveChanges } =
+        createChangeProxy(primitiveObj)
+
+      primitiveProxy.value = 100
+
+      expect(getPrimitiveChanges()).toEqual({
+        value: 100,
+      })
+      expect(primitiveObj.value).toBe(42)
+    })
+
+    it(`should handle Date objects correctly`, () => {
+      const originalDate = new Date(`2023-01-01T00:00:00Z`)
+      const obj = { date: originalDate }
+      const { proxy, getChanges } = createChangeProxy(obj)
+
+      const newDate = new Date(`2024-01-01T00:00:00Z`)
+      proxy.date = newDate
+
+      expect(getChanges()).toEqual({
+        date: newDate,
+      })
+      expect(obj.date).toEqual(originalDate)
+    })
+
+    describe(`array iteration methods`, () => {
+      it(`should track changes when modifying array items retrieved via find()`, () => {
+        const obj = {
+          job: {
+            orders: [
+              { orderId: `order-1`, orderBinInt: 1 },
+              { orderId: `order-2`, orderBinInt: 2 },
+            ],
+          },
+        }
+        const { proxy, getChanges } = createChangeProxy(obj)
+
+        // Use find() to get an array item and modify it
+        const order = proxy.job.orders.find((o) => o.orderId === `order-1`)
+        if (order) {
+          order.orderBinInt = 99
+        }
+
+        const changes = getChanges()
+        expect(Object.keys(changes).length).toBeGreaterThan(0)
+        expect(changes.job?.orders?.[0]?.orderBinInt).toBe(99)
+        expect(changes).toEqual({
+          job: {
+            orders: [
+              { orderId: `order-1`, orderBinInt: 99 },
+              { orderId: `order-2`, orderBinInt: 2 },
+            ],
+          },
+        })
+        expect(obj).toEqual({
+          job: {
+            orders: [
+              { orderId: `order-1`, orderBinInt: 1 },
+              { orderId: `order-2`, orderBinInt: 2 },
+            ],
+          },
+        })
+      })
+
+      it(`should track changes when modifying array items via forEach`, () => {
+        const obj = {
+          items: [
+            { id: 1, value: 10 },
+            { id: 2, value: 20 },
+          ],
+        }
+        const { proxy, getChanges } = createChangeProxy(obj)
+
+        const visits: Array<number> = []
+        const result = proxy.items.forEach((item) => {
+          visits.push(item.id)
+          item.value = item.value * 2
+        })
+
+        const changes = getChanges()
+        expect(Object.keys(changes).length).toBeGreaterThan(0)
+        expect(result).toBeUndefined()
+        expect(visits).toEqual([1, 2])
+        expect(changes).toEqual({
+          items: [
+            { id: 1, value: 20 },
+            { id: 2, value: 40 },
+          ],
+        })
+        expect(obj).toEqual({
+          items: [
+            { id: 1, value: 10 },
+            { id: 2, value: 20 },
+          ],
+        })
+      })
+
+      it(`should track changes when modifying array items via for...of`, () => {
+        const obj = {
+          items: [
+            { id: 1, value: 10 },
+            { id: 2, value: 20 },
+          ],
+        }
+        const { proxy, getChanges } = createChangeProxy(obj)
+
+        for (const item of proxy.items) {
+          item.value = item.value * 2
+        }
+
+        const changes = getChanges()
+        expect(Object.keys(changes).length).toBeGreaterThan(0)
+        expect(changes).toEqual({
+          items: [
+            { id: 1, value: 20 },
+            { id: 2, value: 40 },
+          ],
+        })
+        expect(obj).toEqual({
+          items: [
+            { id: 1, value: 10 },
+            { id: 2, value: 20 },
+          ],
+        })
+      })
+
+      it(`should track changes when modifying array items via index access`, () => {
+        const obj = {
+          items: [
+            { id: 1, value: 10 },
+            { id: 2, value: 20 },
+          ],
+        }
+        const { proxy, getChanges } = createChangeProxy(obj)
+
+        // Direct index access should work
+        const firstItem = proxy.items[0]
+        if (firstItem) {
+          firstItem.value = 100
+        }
+
+        const changes = getChanges()
+        expect(Object.keys(changes).length).toBeGreaterThan(0)
+        expect(changes).toEqual({
+          items: [
+            { id: 1, value: 100 },
+            { id: 2, value: 20 },
+          ],
+        })
+        expect(obj).toEqual({
+          items: [
+            { id: 1, value: 10 },
+            { id: 2, value: 20 },
+          ],
+        })
+      })
+
+      it(`should track changes when modifying items from filter() result`, () => {
+        const obj = {
+          items: [
+            { id: 1, value: 10 },
+            { id: 2, value: 20 },
+          ],
+        }
+        const { proxy, getChanges } = createChangeProxy(obj)
+
+        const filtered = proxy.items.filter((item) => item.id === 1)
+        const first = filtered[0]
+        if (first) {
+          first.value = 42
+        }
+
+        const changes = getChanges()
+        expect(changes.items?.[0]?.value).toBe(42)
+        expect(filtered.map((item) => item.id)).toEqual([1])
+        expect(changes).toEqual({
+          items: [
+            { id: 1, value: 42 },
+            { id: 2, value: 20 },
+          ],
+        })
+        expect(obj).toEqual({
+          items: [
+            { id: 1, value: 10 },
+            { id: 2, value: 20 },
+          ],
+        })
+      })
+
+      it(`should track changes when modifying array items retrieved via findLast()`, () => {
+        const obj = {
+          job: {
+            orders: [
+              { orderId: `order-1`, orderBinInt: 1 },
+              { orderId: `order-2`, orderBinInt: 2 },
+            ],
+          },
+        }
+        const { proxy, getChanges } = createChangeProxy(obj)
+
+        // Use type assertion to call findLast (ES2023 method)
+        type Order = { orderId: string; orderBinInt: number }
+        const orders = proxy.job.orders as unknown as {
+          findLast: (predicate: (o: Order) => boolean) => Order | undefined
+        }
+        const order = orders.findLast((o) => o.orderId.startsWith(`order-`))
+        if (order) {
+          order.orderBinInt = 123
+        }
+
+        const changes = getChanges()
+        expect(changes.job?.orders?.[1]?.orderBinInt).toBe(123)
+        expect(changes).toEqual({
+          job: {
+            orders: [
+              { orderId: `order-1`, orderBinInt: 1 },
+              { orderId: `order-2`, orderBinInt: 123 },
+            ],
+          },
+        })
+        expect(obj).toEqual({
+          job: {
+            orders: [
+              { orderId: `order-1`, orderBinInt: 1 },
+              { orderId: `order-2`, orderBinInt: 2 },
+            ],
+          },
+        })
+      })
+
+      it(`should track changes when modifying array items inside some() callback`, () => {
+        const obj = {
+          items: [
+            { id: 1, value: 10 },
+            { id: 2, value: 20 },
+          ],
+        }
+        const { proxy, getChanges } = createChangeProxy(obj)
+
+        const visits: Array<number> = []
+        const result = proxy.items.some((item) => {
+          visits.push(item.id)
+          item.value = item.value * 2
+          return false
+        })
+
+        const changes = getChanges()
+        expect(changes.items?.[0]?.value).toBe(20)
+        expect(changes.items?.[1]?.value).toBe(40)
+        expect(result).toBe(false)
+        expect(visits).toEqual([1, 2])
+        expect(changes).toEqual({
+          items: [
+            { id: 1, value: 20 },
+            { id: 2, value: 40 },
+          ],
+        })
+        expect(obj).toEqual({
+          items: [
+            { id: 1, value: 10 },
+            { id: 2, value: 20 },
+          ],
+        })
+      })
+
+      it(`should track changes when modifying array items inside reduce() callback`, () => {
+        const obj = {
+          items: [
+            { id: 1, value: 10 },
+            { id: 2, value: 20 },
+          ],
+        }
+        const { proxy, getChanges } = createChangeProxy(obj)
+
+        const visits: Array<number> = []
+        const result = proxy.items.reduce((acc, item) => {
+          visits.push(item.id)
+          item.value = item.value + 1
+          return acc + item.value
+        }, 0)
+
+        const changes = getChanges()
+        expect(changes.items?.[0]?.value).toBe(11)
+        expect(changes.items?.[1]?.value).toBe(21)
+        expect(result).toBe(32)
+        expect(visits).toEqual([1, 2])
+        expect(changes).toEqual({
+          items: [
+            { id: 1, value: 11 },
+            { id: 2, value: 21 },
+          ],
+        })
+        expect(obj).toEqual({
+          items: [
+            { id: 1, value: 10 },
+            { id: 2, value: 20 },
+          ],
+        })
+      })
+    })
+  })
+})
+
+// A function stored as data is a value like any other. Reading it from a draft
+// must give back the stored function, by any read path, as the native row
+// does. Calling a stored method must see the draft as `this`, so its writes are
+// tracked. Inherited methods (Array, Map, and Set methods) are not data and
+// keep their own draft handling.
+describe(`stored functions behave like native values`, () => {
+  type Row = {
+    handler: () => number
+    fns: Array<() => number>
+    obj: { g: () => number; count: number; bump: () => unknown }
+    m: Map<string, () => number>
+    s: Set<() => number>
+  }
+  const make = (f: () => number, f2: () => number): Row => ({
+    handler: f,
+    fns: [f, f2],
+    obj: {
+      g: f,
+      count: 0,
+      bump() {
+        this.count++
+        return this
+      },
+    },
+    m: new Map([[`k`, f]]),
+    s: new Set([f]),
+  })
+
+  // Each probe returns an observation that must be the same for a native row
+  // and for a draft of an equal row.
+  const probes: Array<[string, (row: Row, f: () => number) => unknown]> = [
+    [`field access`, (row, f) => row.handler === f],
+    [`array index`, (row, f) => row.fns[0] === f],
+    [
+      `for...of`,
+      (row, f) => {
+        for (const fn of row.fns) return fn === f
+        return undefined
+      },
+    ],
+    [`spread`, (row, f) => [...row.fns][0] === f],
+    [
+      `includes and indexOf`,
+      (row, f) => [row.fns.includes(f), row.fns.indexOf(f)],
+    ],
+    [`array callback`, (row, f) => row.fns.map((fn) => fn === f)],
+    [`nested field`, (row, f) => row.obj.g === f],
+    [`Object.values`, (row, f) => Object.values(row.obj).includes(f)],
+    [`Map value`, (row, f) => row.m.get(`k`) === f],
+    [`Set member`, (row, f) => [...row.s][0] === f && row.s.has(f)],
+    [`calling a stored function`, (row) => row.handler()],
+    [
+      `a function assigned during the callback`,
+      (row, f) => {
+        const assigned = row as Row & { added?: () => number }
+        assigned.added = f
+        return assigned.added === f
+      },
+    ],
+    [
+      `a stored method sees its object as this`,
+      (row) => row.obj.bump() === row.obj,
+    ],
+    [
+      `a detached stored method has no this`,
+      (row) => {
+        const { bump } = row.obj
+        try {
+          bump()
+          return `returned`
+        } catch (error) {
+          return (error as Error).constructor.name
+        }
+      },
+    ],
+    [
+      `an inherited constructor`,
+      (row) => [
+        row.constructor === Object,
+        row.fns.constructor === Array,
+        row.m.constructor === Map,
+        row.s.constructor === Set,
+      ],
+    ],
+  ]
+
+  it.each(probes)(`%s gives the native result`, (_name, probe) => {
+    const f = () => 1
+    const f2 = () => 2
+    const native = probe(make(f, f2), f)
+    const { proxy } = createChangeProxy(make(f, f2))
+    expect(probe(proxy, f)).toEqual(native)
+  })
+
+  it(`tracks writes a stored method makes through this`, () => {
+    const native = make(
+      () => 1,
+      () => 2,
+    )
+    native.obj.bump()
+    const { proxy, getChanges } = createChangeProxy(
+      make(
+        () => 1,
+        () => 2,
+      ),
+    )
+    proxy.obj.bump()
+    expect(proxy.obj.count).toBe(native.obj.count)
+    const changes = getChanges() as Partial<Row>
+    expect(Object.keys(changes)).toEqual([`obj`])
+    expect(changes.obj?.count).toBe(1)
+  })
+})
+
+/**
+ * `Object.defineProperty` on a draft defines the property as on a native row:
+ * the same result, value, and descriptor. A defined enumerable value is a
+ * change.
+ */
+describe(`defineProperty behaves like on a native row`, () => {
+  type Row = Record<string, unknown>
+  const make = (): Row => ({ a: 1, nested: { b: 2 } })
+  // One getter for both rows, so their descriptors compare equal.
+  const getTwo = () => 2
+  const definitions: Array<
+    [string, (row: Row) => PropertyDescriptor & { key: string }]
+  > = [
+    [`a new key with only a value`, () => ({ key: `k`, value: 5 })],
+    [`an existing key with only a value`, () => ({ key: `a`, value: 5 })],
+    [
+      `an existing key made read-only`,
+      () => ({ key: `a`, value: 6, writable: false }),
+    ],
+    [
+      `a new enumerable writable key`,
+      () => ({
+        key: `k`,
+        value: 7,
+        writable: true,
+        enumerable: true,
+        configurable: true,
+      }),
+    ],
+    [`an object value`, () => ({ key: `a`, value: { c: 3 }, writable: false })],
+    [`a nested key`, () => ({ key: `nested`, value: { b: 3 } })],
+    [
+      `a new key with only an object value`,
+      () => ({ key: `k`, value: { c: 3 } }),
+    ],
+    [`a getter over an existing key`, () => ({ key: `a`, get: getTwo })],
+    [
+      `a new enumerable getter`,
+      () => ({ key: `k`, get: getTwo, enumerable: true, configurable: true }),
+    ],
+  ]
+  const observe = (
+    row: Row,
+    define: (row: Row) => PropertyDescriptor & { key: string },
+  ) => {
+    const { key, ...descriptor } = define(row)
+    const defined = Reflect.defineProperty(row, key, descriptor)
+    const { value, ...rest } = Object.getOwnPropertyDescriptor(row, key) ?? {}
+    // A read-only, non-configurable property must read back as defined.
+    const fixed = rest.configurable === false && rest.writable === false
+    const same = fixed ? row[key] === descriptor.value : undefined
+    return {
+      same,
+      defined,
+      value: JSON.stringify(value),
+      rest,
+      read: JSON.stringify(row[key]),
+    }
+  }
+
+  it.each(definitions)(`%s`, (_name, define) => {
+    const native = make()
+    const expected = observe(native, define)
+    const { proxy, getChanges } = createChangeProxy(make())
+    expect(observe(proxy, define)).toEqual(expected)
+    // Like a clone, changes hold enumerable string keys only, with the value
+    // the native row now reads.
+    const { key } = define(proxy)
+    const enumerable = expected.rest.enumerable === true
+    expect(getChanges()).toEqual(enumerable ? { [key]: native[key] } : {})
+  })
+})
+
+/**
+ * Freezing, sealing, or fixing a key of a draft must not lose a later write
+ * through a nested value. The Proxy invariants make a frozen key return the
+ * raw copy, so the draft counts that key as changed when it reads it. The law
+ * therefore compares rows, not patches: applying `getChanges()` to the
+ * original must give the native row.
+ */
+describe(`frozen and sealed drafts keep nested writes`, () => {
+  type Row = { n: { x: number }; m: number }
+  const make = (): Row => ({ n: { x: 1 }, m: 1 })
+  const histories: Array<[string, (row: Row) => void]> = [
+    [
+      `freeze, then a nested write`,
+      (row) => {
+        Object.freeze(row)
+        row.n.x = 2
+      },
+    ],
+    [`freeze, then a nested read`, (row) => void Object.freeze(row).n.x],
+    [
+      `seal, then a nested write`,
+      (row) => {
+        Object.seal(row)
+        row.n.x = 2
+      },
+    ],
+    [
+      `a fixed key, then a nested write`,
+      (row) => {
+        Object.defineProperty(row, `n`, {
+          writable: false,
+          configurable: false,
+        })
+        row.n.x = 2
+      },
+    ],
+  ]
+
+  it.each(histories)(`%s gives the native row`, (_name, run) => {
+    const native = make()
+    run(native)
+    const { proxy, getChanges } = createChangeProxy(make())
+    run(proxy)
+    expect({ ...make(), ...getChanges() }).toEqual({ ...native })
+  })
+
+  it(`does not count a primitive read under a frozen key`, () => {
+    const { proxy, getChanges } = createChangeProxy(make())
+    void Object.freeze(proxy).m
+    expect(getChanges()).toEqual({})
+  })
+
+  // The boundary is a read-only and non-configurable key. A sealed key is
+  // non-configurable but writable, and a read-only key may stay configurable.
+  // Either way the draft hands out a draft, so a read is no change. These
+  // cases reject a boundary that checks only one of the two attributes.
+  it.each([
+    [`sealed`, (row: Row) => Object.seal(row)],
+    [
+      `read-only but configurable`,
+      (row: Row) =>
+        Object.defineProperty(row, `n`, {
+          writable: false,
+          configurable: true,
+        }),
+    ],
+  ])(`does not count an object read under a %s key`, (_name, fix) => {
+    const { proxy, getChanges } = createChangeProxy(make())
+    fix(proxy)
+    void proxy.n.x
+    expect(getChanges()).toEqual({})
+  })
+
+  it(`does not count writing back the row's own class instance`, () => {
+    class Point {
+      constructor(public x: number) {}
+    }
+    const row = { p: new Point(1) }
+    expect(
+      withChangeTracking(row, (draft) => {
+        draft.p = row.p
+      }),
+    ).toEqual({})
+    expect(
+      withChangeTracking(row, (draft) => {
+        draft.p = new Point(2)
+        draft.p = row.p
+      }),
+    ).toEqual({})
+  })
+})

@@ -291,6 +291,12 @@ function createMainPersistence(input, driver) {
           }
           return adapter.loadSubset(collectionId, options, ctx)
         },
+        loadResumeSnapshot: (collectionId, ctx) => {
+          if (collectionId !== input.collectionId) {
+            throw createUnknownCollectionError(collectionId)
+          }
+          return adapter.loadResumeSnapshot(collectionId, ctx)
+        },
         applyCommittedTx: (collectionId, tx) => {
           if (collectionId !== input.collectionId) {
             throw createUnknownCollectionError(collectionId)

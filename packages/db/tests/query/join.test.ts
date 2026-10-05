@@ -394,7 +394,7 @@ function testJoinType(joinType: JoinType, autoIndex: `off` | `eager`) {
         })
 
         // Initially Dave has null department
-        const daveBefore = joinQuery.get(`[4,undefined]`)
+        const daveBefore = joinQuery.get(`[4,null]`)
         expect(daveBefore).toMatchObject({
           user_name: `Dave`,
           department_name: undefined,
@@ -419,7 +419,7 @@ function testJoinType(joinType: JoinType, autoIndex: `off` | `eager`) {
           department_name: `Engineering`,
         })
 
-        const daveAfter2 = joinQuery.get(`[4,undefined]`)
+        const daveAfter2 = joinQuery.get(`[4,null]`)
         expect(daveAfter2).toBeUndefined()
       })
     }

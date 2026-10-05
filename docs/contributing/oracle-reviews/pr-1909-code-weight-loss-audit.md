@@ -1,0 +1,42 @@
+# PR #1909 code-weight loss audit
+
+Frozen reduction: Retire internal `Scheduler.onClear` notifications and pending-aware dependency objects because production has no callers. Dependencies then wait only for queued jobs. Replace synthetic tests with queued-job cancellation, exact failure identity, and recovery checks. Remove Effect's retained `pipeline` and `tracksPublishedRows` fields because the first is used once and the second duplicates the ordered-loader map. Remove unused `scheduleGraphRun` job ID and dependency overrides.
+
+The before source is commit `80421c8b`. The after source is code commit `b69c189c`. Two agents scanned the source versions separately after reading the field-lab loss-audit card and live-query architecture. The entries below are source-supported omissions from the frozen reduction. They do not decide whether to restore an item or whether a behavior regressed.
+
+| Source | Recovered distinction and pointer | Where dropped | Rule |
+| --- | --- | --- | --- |
+| Before scheduler | A dependency could block through `hasPendingGraphRun(contextId)` even without a queued job. Otherwise an absent dependency was satisfied (`80421c8b:scheduler.ts:126-144`). | Queued-only clause | Explicit rejection |
+| Before scheduler | Rescheduling replaced a callback without moving its queue position; omitted dependencies retained the prior set. A running job left the map before reentrant work (`scheduler.ts:84-101,147-152`). | Cancellation clause | Compression |
+| Before scheduler | `clear()` deleted the context before notifying a listener snapshot; `onClear()` returned an unsubscribe callback (`scheduler.ts:171-183`). | Retire `onClear` clause | Explicit rejection |
+| Before scheduler | Nested publications shared a context. Recorded listener failure preceded later graph failure; clearing could not replace the primary error (`scheduler.ts:188-245`). | Failure-identity clause | Compression |
+| Before Effect | The compiler's pipeline received its output operator before finalization and was cleared with graph/input references on disposal (`effect.ts:386-389,467-503,1096-1101`). | One-use field clause | Compression |
+| Before Effect | `tracksPublishedRows` was set before the ordered loader started and selected callback-visible membership classification rather than immediate delta classification (`effect.ts:571-664,948-968,1156-1197`). | Duplicate-state clause | Explicit rejection |
+| Before Effect | Ordered repair held callback delivery across participants and could transfer that hold to truncate replay. `publishedRows` retained the prior visible values (`effect.ts:409-428,819-861,924-968`). | Field-removal clause | Category mismatch |
+| Before Effect | Source live-query builders became graph dependencies during subscription and were passed to the shared scheduler (`effect.ts:548-553,803-817`). | Queued-only clause | Compression |
+| Before builder | `contextId` remained a live override beside the unused job ID and dependency overrides. The queued callback was fenced by sync-run generation (`collection-config-builder.ts:651-691`). | Override clause | Compression |
+| Before builder | Window moves, demand settlement, ordered-load completion, initial sync, and source recovery each scheduled graph work (`collection-config-builder.ts:336-339,406-416,491-528,762-766,1091-1105`). | Override clause | Low salience |
+| Before builder | Even an initially empty graph turn checked loaders, processed synchronous writes through D2, flushed, then evaluated readiness (`collection-config-builder.ts:571-645`). | Queue clause | Category mismatch |
+| Before builder | Ordered-load settlement checked sync-run identity before changing failure state. Its final success scheduled a publication run (`collection-config-builder.ts:491-528`). | Recovery clause | Compression |
+| Before scheduler test | The dependency matrix crossed source order, pending-aware state, and requeue. It required the dependent to see the final source run (`scheduler.test.ts:132-179`). | Synthetic-test replacement clause | Category mismatch |
+| Before scheduler test | The clear-listener test checked listener snapshot mutation, multiple failures, first-error retention, and the next clear (`scheduler.test.ts:280-313`). | Retire `onClear` clause | Explicit rejection |
+| Before scheduler test | Publication tests checked nested timing, discarded jobs, first-error precedence, thrown `undefined`, later delivery, and coherent dependent state (`scheduler.test.ts:182-278,579-727`). | Failure-identity clause | Compression |
+| Before scheduler test | Collection/Effect cases crossed shared and derived sources plus write order; diamond and hybrid joins required one coherent dependent run (`scheduler.test.ts:1059-1367`). | Synthetic-test replacement clause | Category mismatch |
+| Before scheduler test | Restart cases separated obsolete resolve/reject from replacement state; loader cases checked writes during graph turns (`scheduler.test.ts:1443-1631`). | Recovery clause | Compression |
+| Before scheduler test | Repeated lexical aliases attempted every loader and kept the exact first falsy failure (`scheduler.test.ts:1633-1771`). | Failure-identity clause | Compression |
+| After scheduler | Rescheduling replaces a callback while retaining queue position; omission of new dependencies retains the old set (`scheduler.ts:70-94`). | Queued-only clause | Compression |
+| After scheduler | A running prerequisite leaves the map before its callback; requeueing it blocks its dependent. A no-progress pass throws (`scheduler.ts:98-145`). | Queued-only clause | Compression |
+| After scheduler | Nested publications share the outer context. Graph work flushes afterward; the first listener error has precedence, and failure clears jobs/context (`scheduler.ts:173-226`). | Failure/recovery clause | Compression |
+| After Effect | Compiler closures retain mutable subscriptions. Startup buffers changes until subscriptions exist, drains them to D2, then runs the graph (`effect.ts:389,519-750`). | One-use pipeline clause | Category mismatch |
+| After Effect | The ordered-loader map supplies the tracking condition; the separate `publishedRows` map retains callback-visible membership and values (`effect.ts:405,939-959,1150`). | Duplicate-state clause | Compression |
+| After Effect | Ordered repair and inherited replay holds still gate callbacks across participants. Final success flushes; failure keeps private deltas hidden (`effect.ts:814-861`). | Field-removal clause | Low salience |
+| After builder | `contextId`, builder dependencies, and sync-run fencing remain in `scheduleGraphRun` (`collection-config-builder.ts:651-685`). | Override clause | Compression |
+| After builder | Empty-start graph turns still check loaders and process synchronous writes before publication (`collection-config-builder.ts:571-645`). | Queue clause | Category mismatch |
+| After builder | Ordered-load settlement is sync-run-fenced. Window failures, replay, ordered loads, and joined demand still gate publication (`collection-config-builder.ts:491-528,908-936`). | Recovery clause | Compression |
+| After builder | Child facades prepare before root commit; failure discards them, while root and facade notifications follow state installation (`collection-config-builder.ts:930-981`). | Scheduler-focused reduction | Low salience |
+| After scheduler test | Source/dependent order and prerequisite requeue form a four-case matrix that checks the final source run (`scheduler.test.ts:132-165`). | Cancellation clause | Compression |
+| After scheduler test | Listener snapshot, first-error, later delivery, and falsy-failure matrices remain in public publication-path tests (`scheduler.test.ts:388-727`). | Failure/recovery clause | Compression |
+| After scheduler test | Collection/Effect, shared/derived, write-order, diamond, and hybrid cases check coherent dependent publication (`scheduler.test.ts:1035-1367`). | Synthetic-test replacement clause | Category mismatch |
+| After scheduler test | Restart and repeated-alias cases retain stale-settlement and exact first-failure distinctions (`scheduler.test.ts:1419-1771`). | Recovery clause | Compression |
+
+The before-only scan cannot establish repository-wide caller absence. The separate repository search found no production call to `onClear()` or implementation of `hasPendingGraphRun()` at the code target. The after-only scan found no explicit rejection in the frozen summary. Each scan returned its own source pointers before collation.

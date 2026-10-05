@@ -81,7 +81,12 @@ export class WebOnlineDetector implements OnlineDetector {
 
   isOnline(): boolean {
     if (typeof navigator !== `undefined`) {
-      return navigator.onLine
+      // A visible tab may reach the server despite a stale browser hint.
+      return (
+        navigator.onLine ||
+        (typeof document !== `undefined` &&
+          document.visibilityState === `visible`)
+      )
     }
     return true
   }
