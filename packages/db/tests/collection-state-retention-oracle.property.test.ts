@@ -2609,6 +2609,7 @@ const sourceBatch = fc.record({
   truncate: fc.boolean(),
   immediate: fc.boolean(),
   copies: fc.integer({ min: 1, max: 2 }),
+  partial: fc.boolean(),
 })
 // A mutation handler may write a source batch before it returns.
 const handlerBatch = fc.oneof(
@@ -2661,6 +2662,8 @@ const optimisticHistory = fc.record({
     maxLength: 3,
   }),
   steps: fc.array(optimisticStep, { minLength: 2, maxLength: 24 }),
+  // Half the histories keep the default partial row update mode.
+  partialUpdates: fc.boolean(),
 })
 
 // These are replay programs for the same model and driver as randomized runs,
@@ -2776,15 +2779,20 @@ it(`writes source inserts and deletes in the fixed campaign`, async () => {
   let inserts = 0
   let deletes = 0
   let absentDeletes = 0
-  for (const { initial, steps } of histories) {
-    const counts = await runOptimisticHistory(initial, steps)
+  let partialUpdates = 0
+  for (const { initial, steps, partialUpdates: partial } of histories) {
+    const counts = await runOptimisticHistory(initial, steps, undefined, {
+      partialUpdates: partial,
+    })
     inserts += counts.sourceInserts
     deletes += counts.sourceDeletes
     absentDeletes += counts.absentSourceDeletes
+    partialUpdates += counts.partialUpdates
   }
   expect(inserts).toBeGreaterThan(0)
   expect(deletes).toBeGreaterThan(absentDeletes)
   expect(absentDeletes).toBeGreaterThan(0)
+  expect(partialUpdates).toBeGreaterThan(0)
 })
 
 // The backend accepted an optimistic insert, then deleted the row before the
@@ -3173,8 +3181,8 @@ it.each(
 )
 fcTest.prop([optimisticHistory], { numRuns: oracleRuns(100), seed: 86103 })(
   `matches optimistic ownership and publication histories with a fixed seed`,
-  async ({ initial, steps }) => {
-    await runOptimisticHistory(initial, steps)
+  async ({ initial, steps, partialUpdates }) => {
+    await runOptimisticHistory(initial, steps, undefined, { partialUpdates })
   },
 )
 fcTest.prop(
@@ -3182,7 +3190,7 @@ fcTest.prop(
   oraclePropertyOptions(100, `collection-state.optimistic-history`),
 )(
   `matches optimistic ownership and publication histories with a random or replayed seed`,
-  async ({ initial, steps }) => {
-    await runOptimisticHistory(initial, steps)
+  async ({ initial, steps, partialUpdates }) => {
+    await runOptimisticHistory(initial, steps, undefined, { partialUpdates })
   },
 )
