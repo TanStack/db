@@ -116,11 +116,20 @@ export async function runCampaign<T>(
         replayFailure.checkpoint === original!.checkpoint,
     }
   }
+  let head = 'unknown'
+  let headError: string | undefined
+  try {
+    head = execFileSync('git', ['rev-parse', 'HEAD'], {
+      encoding: 'utf8',
+      stdio: ['ignore', 'pipe', 'pipe'],
+    }).trim()
+  } catch (error) {
+    headError = String(error)
+  }
   const report = {
     name,
-    head: execFileSync('git', ['rev-parse', 'HEAD'], {
-      encoding: 'utf8',
-    }).trim(),
+    head,
+    headError,
     fastCheck: fc.__version,
     environment: options.environment ?? 'fake-indexeddb + controlled Channel',
     seed: result.seed,

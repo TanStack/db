@@ -13,8 +13,11 @@
  * choice within their stated two-operation scope. This is not exhaustive native
  * scheduling, arbitrary optimistic overlap, or a same-key conflict policy.
  */
+import { mkdtemp, readFile, readdir, rm } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import { fc } from '@fast-check/vitest'
-import { expect, it } from 'vitest'
+import { expect, it, vi } from 'vitest'
 import { runCampaign } from './campaign'
 import { runTransportHistory } from './cross-tab-driver'
 import {
@@ -291,4 +294,59 @@ it('replays only the selected history after the original failure is repaired', a
     { runs: 30, seed: original.seed, path: original.counterexamplePath! },
   )
   expect(observed).toEqual([10])
+})
+
+it('preserves campaign outcomes and reports without revision metadata', async () => {
+  // Revision lookup is diagnostic. It cannot turn passing histories red or
+  // replace the original failed law. Both results must retain their reports.
+  const directory = await mkdtemp(join(tmpdir(), 'indexeddb-no-git-'))
+  vi.stubEnv('GIT_DIR', directory)
+  try {
+    for (const fails of [false, true]) {
+      const name = `revision-control-${crypto.randomUUID()}`
+      const outcome = runCampaign(
+        name,
+        fc.constant(0),
+        () => {
+          if (fails)
+            assertSnapshot(
+              [{ id: 0, name: 'wrong' }],
+              [],
+              'revision calibration',
+            )
+          return Promise.resolve()
+        },
+        { runs: 1, seed: 1179 },
+      )
+      if (fails)
+        await expect(outcome).rejects.toThrow(
+          'public rows at revision calibration',
+        )
+      else await outcome
+      const reports = (await readdir('test-results/oracles')).filter((file) =>
+        file.startsWith(name),
+      )
+      expect(reports).toHaveLength(1)
+      const report: unknown = JSON.parse(
+        await readFile(join('test-results/oracles', reports[0]!), 'utf8'),
+      )
+      expect(report).toMatchObject({
+        head: 'unknown',
+        headError: expect.any(String),
+        failed: fails,
+      })
+      if (fails)
+        expect(report).toMatchObject({
+          original: { law: 'public rows', checkpoint: 'revision calibration' },
+          reproduction: {
+            inputReconstructed: true,
+            premiseReached: true,
+            sameFailure: true,
+          },
+        })
+    }
+  } finally {
+    vi.unstubAllEnvs()
+    await rm(directory, { recursive: true, force: true })
+  }
 })

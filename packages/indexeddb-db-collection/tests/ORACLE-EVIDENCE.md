@@ -490,3 +490,19 @@ after this shared-helper change.
 d8e0524335856b41e5dc2ea099e63a66cec5bff9ac4d75e6311a09b7d807018c  packages/indexeddb-db-collection/tests/campaign.ts
 95170172277572e06acdf70577c573878cc33253348488e16d2254649ba80d90  packages/indexeddb-db-collection/tests/cross-tab-history-oracle.test.ts
 ```
+
+### Revision metadata availability
+
+CodeRabbit identified that Git revision lookup could prevent an otherwise
+complete campaign from writing its report. An empty temporary Git directory
+reproduced the failure after a passing history. The revised helper records
+`head: unknown` and the lookup error without replacing the campaign outcome.
+The retained control checks passing and deliberately failing histories, exact
+original law/checkpoint, saved reports and all three replay flags. The focused
+10-test owner passes; the final package suite passes 152 tests in 11 files.
+Type checking and lint pass. This affects test diagnostics only.
+
+```text
+1b6ceefe77649d72d6fa461bc83438a916f3d6cf8527e6b32729c291651e7cb3  packages/indexeddb-db-collection/tests/campaign.ts
+2c36bbfcc66f0c39263b20b99fd48e12f6a3ca65d60cc00df9d26b0e75872fcc  packages/indexeddb-db-collection/tests/cross-tab-history-oracle.test.ts
+```
