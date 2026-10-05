@@ -117,6 +117,7 @@ export class CollectionLifecycleManager<
   public setStatus(
     newStatus: CollectionStatus,
     allowReady: boolean = false,
+    beforeEmit?: () => void,
   ): void {
     if (newStatus === `ready` && !allowReady) {
       // setStatus('ready') is an internal method that should not be called directly
@@ -130,6 +131,7 @@ export class CollectionLifecycleManager<
     const revision = ++this.statusRevision
     const previousStatus = this.status
     this.status = newStatus
+    beforeEmit?.()
 
     // Emit event
     this.events.emitStatusChange(
@@ -159,9 +161,12 @@ export class CollectionLifecycleManager<
    * This is called by sync implementations to explicitly signal that the collection is ready,
    * providing a more intuitive alternative to using commits for readiness signaling
    * @private - Should only be called by sync implementations
+   *
+   * `beforeEffects` runs after the status reads `ready` and before status
+   * listeners and ready callbacks, so their writes follow it.
    */
-  public markReady(): void {
-    const failure = this.applyReadyTransition()
+  public markReady(beforeEffects?: () => void): void {
+    const failure = this.applyReadyTransition(beforeEffects)
     if (failure) throw failure.error
   }
 
@@ -170,13 +175,15 @@ export class CollectionLifecycleManager<
     return this.applyReadyTransition()
   }
 
-  private applyReadyTransition(): { error: unknown } | undefined {
+  private applyReadyTransition(
+    beforeEffects?: () => void,
+  ): { error: unknown } | undefined {
     this.validateStatusTransition(this.status, `ready`)
     // A successful initial sync or recovery establishes a ready snapshot.
     if (this.status === `loading` || this.status === `error`) {
       this.syncError = undefined
       const readyRevision = this.statusRevision + 1
-      this.setStatus(`ready`, true)
+      this.setStatus(`ready`, true, beforeEffects)
 
       // A status listener can synchronously supersede this transition, even
       // when it restarts the Collection back to ready before returning.

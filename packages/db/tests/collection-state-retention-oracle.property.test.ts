@@ -2055,6 +2055,24 @@ const optimisticHistory = fc.record({
   }),
   steps: fc.array(optimisticStep, { minLength: 2, maxLength: 24 }),
 })
+// The partial-update lane reuses those histories and marks source batches
+// partial from a separate stream, so the full-mode campaigns keep their
+// seeded histories. It runs with the default `partial` row update mode.
+const markPartial = (step: OptimisticStep, partial: boolean): OptimisticStep =>
+  step.type === `sync`
+    ? { ...step, partial }
+    : (step.type === `edit` || step.type === `delete`) && step.inHandler
+      ? { ...step, inHandler: { ...step.inHandler, partial } }
+      : step
+const partialHistory = fc
+  .record({
+    history: optimisticHistory,
+    marks: fc.array(fc.boolean(), { minLength: 24, maxLength: 24 }),
+  })
+  .map(({ history, marks }) => ({
+    initial: history.initial,
+    steps: history.steps.map((step, index) => markPartial(step, marks[index]!)),
+  }))
 
 // These are replay programs for the same model and driver as randomized runs,
 // not separate assertions that only know the reported final state.
@@ -2327,6 +2345,18 @@ it(`writes source inserts and deletes in the fixed campaign`, async () => {
   expect(absentDeletes).toBeGreaterThan(0)
 })
 
+it(`writes distinguishing partial updates in the fixed partial campaign`, async () => {
+  const histories = fc.sample(partialHistory, { seed: 86104, numRuns: 40 })
+  let distinguishing = 0
+  for (const { initial, steps } of histories) {
+    const counts = await runOptimisticHistory(initial, steps, undefined, {
+      partialUpdates: true,
+    })
+    distinguishing += counts.distinguishingPartialUpdates
+  }
+  expect(distinguishing).toBeGreaterThan(0)
+})
+
 // Pinned replays for a source delete of a key the source never held. The
 // backend accepted an optimistic insert, then deleted the row before the
 // source streamed it. The model's drain applies the delete to the applied
@@ -2491,6 +2521,58 @@ it.each(
       )
   },
 )
+// A partial source update merges into the source row, not into an optimistic
+// row. Here the source holds key 1 with c = 7. An optimistic delete and a
+// re-insert that took the schema default for `c` both persist when the partial
+// update arrives, so the update is held. When both settle, their optimistic
+// state drops and the held update publishes with the drop. The row keeps
+// c = 7, the source's merged value.
+const partialOverPersistingDefault = (
+  insertDefault: number,
+): Array<OptimisticStep> => [
+  { type: `delete`, key: 1, optimistic: true },
+  { type: `edit`, key: 1, fields: { a: 1 }, optimistic: true },
+  {
+    type: `sync`,
+    rows: [{ id: 1, a: 2, b: 2, c: insertDefault + 5 }],
+    truncate: false,
+    copies: 1,
+    partial: true,
+  },
+  { type: `settle`, slot: 0, success: true, cascade: false },
+  { type: `settle`, slot: 0, success: true, cascade: false },
+]
+it.each([3, 11])(
+  `merges a held partial update into the source row under a persisting schema default (%i)`,
+  async (insertDefault) => {
+    const counts = await runOptimisticHistory(
+      [{ id: 1, a: 0, b: 0, c: 7 }],
+      partialOverPersistingDefault(insertDefault),
+      undefined,
+      { insertDefault, partialUpdates: true },
+    )
+    expect(counts.distinguishingPartialUpdates).toBe(1)
+    expect(counts.queued).toBe(1)
+  },
+)
+it(`rejects a partial update applied as a full replacement`, async () => {
+  const steps = partialOverPersistingDefault(3)
+  await runOptimisticHistory([{ id: 1, a: 0, b: 0, c: 7 }], steps, undefined, {
+    insertDefault: 3,
+    partialUpdates: true,
+  })
+  await expect(
+    runOptimisticHistory(
+      [{ id: 1, a: 0, b: 0, c: 7 }],
+      steps,
+      `partial-as-full`,
+      { insertDefault: 3, partialUpdates: true },
+    ),
+    // A row observation must reject the replaced row, not the mutant checkpoint.
+  ).rejects.toThrow(
+    /whole forward publication|: reads .* expected |rows visible when isPersisted settled/,
+  )
+})
 it(`rejects a default lost only after settlement`, async () => {
   const steps = defaultHistory(true, true)
   await runOptimisticHistory([], steps, undefined, { insertDefault: 3 })
@@ -2737,5 +2819,24 @@ fcTest.prop(
   `matches optimistic ownership and publication histories with a random or replayed seed`,
   async ({ initial, steps }) => {
     await runOptimisticHistory(initial, steps)
+  },
+)
+fcTest.prop([partialHistory], { numRuns: oracleRuns(100), seed: 86104 })(
+  `matches partial-update histories with a fixed seed`,
+  async ({ initial, steps }) => {
+    await runOptimisticHistory(initial, steps, undefined, {
+      partialUpdates: true,
+    })
+  },
+)
+fcTest.prop(
+  [partialHistory],
+  oraclePropertyOptions(100, `collection-state.optimistic-history-partial`),
+)(
+  `matches partial-update histories with a random or replayed seed`,
+  async ({ initial, steps }) => {
+    await runOptimisticHistory(initial, steps, undefined, {
+      partialUpdates: true,
+    })
   },
 )
