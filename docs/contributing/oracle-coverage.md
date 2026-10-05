@@ -850,6 +850,87 @@ project, worker progress RPC starvation produced passing assertions with a
 nonzero process exit. Such a run is not green. Raising a test timeout alone
 does not let the worker process its progress messages.
 
+## Action enforcement example
+
+`examples/react/action-enforcement/eslint-rules/no-direct-collection-mutations-oracle.test.js`
+owns the example's file-local lint boundary. Its finite grammar covers 12 binding
+forms, six methods, six call forms, and two callback definition orders, plus
+lexical shadowing, sibling scopes, configurable imports/methods, and alias cycles.
+The independent model labels the constructed receiver as a Collection and
+predicts one diagnostic for writes and none for reads. The checkpoint is the
+complete diagnostic list from the real ESLint `Linter.verify` call. A receiving
+check runs the actual ESLint configuration on feature writes, feature reads,
+and action writes. The import-source dimension checks eight alias/relative/barrel
+spellings against four nearby unrelated paths, including the real configuration.
+Three TypeScript import-equals forms must preserve other diagnostics without
+crashing; static and escaped template members are paired with dynamic names.
+On `7d3a3e85b`, the expanded suite fails 21 of 32 groups: the parser-node witness
+throws while linting; the other failures are missing diagnostics. The repair
+passes all 32 groups. A path-prefix mutant that includes `collections-extra`
+fails three groups. A template-prefix mutant that treats interpolated names as
+static fails the dynamic-name assertion. Both failures reach diagnostic
+comparisons; neither is a setup failure.
+
+The original implementation (`3da274d8a`) failed 11 of the 18 test groups at
+that checkpoint:
+name-based scope pollution, declaration-order dependence, and missed destructuring.
+The repair passes all groups. The example README states the conservative rule
+for reassigned aliases. This oracle does not establish inter-module or type-based
+tracking, function argument/return propagation, new object/array containers,
+extracted mutation functions, or dynamic method names. Those are outside this
+example's declared static scope; expanding it requires new syntax witnesses here.
+
+Guide evidence: ORC-001–005 and ORC-009 are stated beside the finite grammar,
+model and driver. ORC-006 uses the original production rule as the rejected
+wrong design; failures are diagnostic assertion mismatches, not setup failures.
+ORC-013 pairs writes with reads and imported bindings with shadowing local values.
+ORC-007 does not apply to this bounded enumeration; ORC-008 has no stateful model,
+ORC-010 has no shrinking or resource cleanup, ORC-011 has no named shared semantic
+fault requiring a second formulation, and ORC-014 is witnessed at the real ESLint configuration boundary; no browser
+or backend-provider claim is made.
+These outcomes supply ORC-012 evidence; the executable suite contains the law
+and observations, rather than relying on this record for expected behavior.
+
+`examples/react/action-enforcement/tests/TodoApp.test.tsx` owns the example's
+application input and pending-write controls. Its focused component witnesses
+use real actions and the fake API with a virtual clock. They check unchanged,
+newer, and empty drafts after successful adds; unchanged and newer drafts after
+controlled create rejection; native form submission; and disabled toggles at
+0, 40, and 119 ms during creation. A settled row remains enabled while another
+row is pending, and a newly settled row can toggle and persist its change.
+The original component fails the newer-draft, form, and three pending-row checks.
+The fixed component passes these nine cases. The lint oracle above cannot observe
+these application behaviors, and the shared framework owners do not own form
+state.
+
+The component suite also owns add admission: one add may be pending per mounted
+form, the input stays editable, and settlement permits the next submission.
+Four controlled-create histories cross fulfillment/rejection with repeated
+submits before/after a React render. They assert one action and provider call,
+reject submissions of a newer draft while pending, then admit that draft after
+settlement and check exact persisted counts. A fifth witness checks admission
+after synchronous validation rejection. The original handler fails all four
+pending-add histories. A guard based only on React state fails the same-render
+histories; a mutant that omits guard cleanup fails subsequent admission.
+
+A controlled-toggle history also checks failure and retry in both completion
+directions. It observes pending disablement, optimistic state, rollback, visible
+error, retry error clearing, and final provider state. The original component
+rolls back but fails the error-message assertion. This provider rejection is
+injected at the component boundary; it does not claim a real backend emits it.
+The same-path rejection probe found no unhandled rejection: Collection cleanup
+already catches the persistence promise.
+
+Toggle tests select buttons by accessible role. A hidden-toggle mutant passes
+the original tag selector but fails the scoped role query before interaction.
+This checks exposure in the accessibility tree; it does not establish keyboard
+focus or screen-reader behavior.
+
+These 15 focused cases do not establish arbitrary-length form histories,
+remount behavior during pending writes, or browser-native Enter dispatch.
+This component suite owns the first two extensions; a browser form witness
+is needed for native keyboard dispatch.
+
 ## Reusable-law backlog
 
 RFC #1659 reviews found several green oracles whose stated laws remained valid
@@ -1000,7 +1081,7 @@ for this oracle repair. Keep these scenarios and decisions with that owner:
   back; retained-leader and before-invocation controls still fulfill. Later
   leadership changes and a held outbox write crossed with loss or regain remain
   for this leadership oracle, using controlled write settlement and caller
-  checkpoints. The [IndexedDB write-settlement owner](../../packages/offline-transactions/tests/indexeddb-write-settlement.test.ts)
+  checkpoints. The [IndexedDB write-settlement owner](https://github.com/TanStack/db/blob/main/packages/offline-transactions/tests/indexeddb-write-settlement.test.ts)
   still needs a browser-host composition with leadership loss across a write.
   These paths are outside this bounded repair. The [review record](oracle-reviews/issue-1939-offline-admission.md)
   preserves the RED/GREEN and checker-calibration evidence.
