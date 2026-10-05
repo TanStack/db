@@ -740,11 +740,10 @@ const generatedHistoryArbitrary: fc.Arbitrary<GeneratedHistory> = fc.record({
         key: fc.constantFrom('a', 'b', 'c'),
         version: fc.integer({ min: 0, max: 9 }),
       })
-      .map(
-        ({ type, key, version }): RowMetadataAction =>
-          type === 'set'
-            ? { type, key, value: { source: `prefix-${version}` } }
-            : { type, key },
+      .map(({ type, key, version }): RowMetadataAction =>
+        type === 'set'
+          ? { type, key, value: { source: `prefix-${version}` } }
+          : { type, key },
       ),
     { maxLength: 3 },
   ),
@@ -755,9 +754,8 @@ const generatedHistoryArbitrary: fc.Arbitrary<GeneratedHistory> = fc.record({
         key: fc.constantFrom('cursor', 'mode'),
         version: fc.integer({ min: 0, max: 9 }),
       })
-      .map(
-        ({ type, key, version }): CollectionMetadataAction =>
-          type === 'set' ? { type, key, value: { version } } : { type, key },
+      .map(({ type, key, version }): CollectionMetadataAction =>
+        type === 'set' ? { type, key, value: { version } } : { type, key },
       ),
     { maxLength: 2 },
   ),
