@@ -1222,17 +1222,14 @@ snapshots, including fields they did not change and insert schema defaults.
 Do not merge newer synced fields into those snapshots: that could publish a
 combination neither the mutation nor the server created. This applies to both
 ordinary sync and truncate. The mutation payload stays unchanged as well.
-Active snapshots are selected in transaction order. Completed snapshots remain
-beneath active transactions under the existing retention policy until sync
-retires them. A later snapshot may contain values seen from an earlier sibling;
-rolling back that sibling does not rewrite the later snapshot. Sync publication
-compares actual previous and next visible rows, not just mutation identities.
-An update made over an unconfirmed insert retains that exact insert dependency,
-not just its key. Insert success preserves the later completed snapshot; insert
-failure removes the already-retained dependent row. An independently submitted
-update accepted after that failure still retains its own snapshot. An
-acknowledged insert or a later same-key
-insertion is not the failed insertion. Truncate replay derives events and reads
+Active snapshots are selected in transaction order. A transaction's
+optimistic state drops when its mutation function settles. Sync transactions
+accepted while it persisted are held and publish in the same update as that
+drop. A completed row is held only while an accepted, queued sync transaction
+touches its key; nothing else retains it. A later snapshot may contain values
+seen from an earlier sibling; rolling back that sibling does not rewrite the
+later snapshot. Sync publication compares actual previous and next visible
+rows, not just mutation identities. Truncate replay derives events and reads
 from the same snapshot overlay, without merging in its new authoritative fields.
 
 Installed state, synchronous reads, change-event payloads, and downstream
