@@ -428,9 +428,10 @@ const grammarCells: Array<GrammarCell> = [
       state,
     }),
   ),
-  ...routeContextGrammar.lexicalScope.scopes.map(
-    (scope): LexicalScopeCell => ({ family: `lexical-scope`, scope }),
-  ),
+  ...routeContextGrammar.lexicalScope.scopes.map((scope): LexicalScopeCell => ({
+    family: `lexical-scope`,
+    scope,
+  })),
   ...routeContextGrammar.aggregation.groupings.flatMap((grouping) =>
     routeContextGrammar.aggregation.placements.map(
       (placement): AggregationCell => ({
@@ -458,9 +459,10 @@ const grammarCells: Array<GrammarCell> = [
       }),
     ),
   ),
-  ...routeContextGrammar.unionIdentity.forms.map(
-    (form): UnionIdentityCell => ({ family: `union-identity`, form }),
-  ),
+  ...routeContextGrammar.unionIdentity.forms.map((form): UnionIdentityCell => ({
+    family: `union-identity`,
+    form,
+  })),
   ...routeContextGrammar.derivedResult.boundaries.flatMap((boundary) =>
     routeContextGrammar.derivedResult.selections.flatMap((selection) =>
       routeContextGrammar.derivedResult.domains.map(

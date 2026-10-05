@@ -1,4 +1,4 @@
-import type { Row } from './model.js'
+import type { Row } from './model-oracle.js'
 
 /** Proposed test-only boundary: this packet describes a complete public prefix,
  * not a transport response or merely applied source rows. */

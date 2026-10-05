@@ -3,7 +3,7 @@ id: IncludesSubquery
 title: IncludesSubquery
 ---
 
-Defined in: [packages/db/src/query/ir.ts:206](https://github.com/TanStack/db/blob/main/packages/db/src/query/ir.ts#L206)
+Defined in: [packages/db/src/query/ir.ts:205](https://github.com/TanStack/db/blob/main/packages/db/src/query/ir.ts#L205)
 
 ## Extends
 
@@ -25,7 +25,7 @@ new IncludesSubquery(
    scalarField?): IncludesSubquery;
 ```
 
-Defined in: [packages/db/src/query/ir.ts:208](https://github.com/TanStack/db/blob/main/packages/db/src/query/ir.ts#L208)
+Defined in: [packages/db/src/query/ir.ts:207](https://github.com/TanStack/db/blob/main/packages/db/src/query/ir.ts#L207)
 
 #### Parameters
 
@@ -99,7 +99,7 @@ BaseExpression.__returnType
 childCorrelationField: PropRef;
 ```
 
-Defined in: [packages/db/src/query/ir.ts:211](https://github.com/TanStack/db/blob/main/packages/db/src/query/ir.ts#L211)
+Defined in: [packages/db/src/query/ir.ts:210](https://github.com/TanStack/db/blob/main/packages/db/src/query/ir.ts#L210)
 
 ***
 
@@ -109,7 +109,7 @@ Defined in: [packages/db/src/query/ir.ts:211](https://github.com/TanStack/db/blo
 correlationField: PropRef;
 ```
 
-Defined in: [packages/db/src/query/ir.ts:210](https://github.com/TanStack/db/blob/main/packages/db/src/query/ir.ts#L210)
+Defined in: [packages/db/src/query/ir.ts:209](https://github.com/TanStack/db/blob/main/packages/db/src/query/ir.ts#L209)
 
 ***
 
@@ -119,7 +119,7 @@ Defined in: [packages/db/src/query/ir.ts:210](https://github.com/TanStack/db/blo
 fieldName: string;
 ```
 
-Defined in: [packages/db/src/query/ir.ts:212](https://github.com/TanStack/db/blob/main/packages/db/src/query/ir.ts#L212)
+Defined in: [packages/db/src/query/ir.ts:211](https://github.com/TanStack/db/blob/main/packages/db/src/query/ir.ts#L211)
 
 ***
 
@@ -129,7 +129,7 @@ Defined in: [packages/db/src/query/ir.ts:212](https://github.com/TanStack/db/blo
 materialization: IncludesMaterialization;
 ```
 
-Defined in: [packages/db/src/query/ir.ts:215](https://github.com/TanStack/db/blob/main/packages/db/src/query/ir.ts#L215)
+Defined in: [packages/db/src/query/ir.ts:214](https://github.com/TanStack/db/blob/main/packages/db/src/query/ir.ts#L214)
 
 ***
 
@@ -139,7 +139,7 @@ Defined in: [packages/db/src/query/ir.ts:215](https://github.com/TanStack/db/blo
 optional parentFilters: Where[];
 ```
 
-Defined in: [packages/db/src/query/ir.ts:213](https://github.com/TanStack/db/blob/main/packages/db/src/query/ir.ts#L213)
+Defined in: [packages/db/src/query/ir.ts:212](https://github.com/TanStack/db/blob/main/packages/db/src/query/ir.ts#L212)
 
 ***
 
@@ -149,7 +149,7 @@ Defined in: [packages/db/src/query/ir.ts:213](https://github.com/TanStack/db/blo
 optional parentProjection: PropRef<any>[];
 ```
 
-Defined in: [packages/db/src/query/ir.ts:214](https://github.com/TanStack/db/blob/main/packages/db/src/query/ir.ts#L214)
+Defined in: [packages/db/src/query/ir.ts:213](https://github.com/TanStack/db/blob/main/packages/db/src/query/ir.ts#L213)
 
 ***
 
@@ -159,7 +159,7 @@ Defined in: [packages/db/src/query/ir.ts:214](https://github.com/TanStack/db/blo
 query: QueryIR;
 ```
 
-Defined in: [packages/db/src/query/ir.ts:209](https://github.com/TanStack/db/blob/main/packages/db/src/query/ir.ts#L209)
+Defined in: [packages/db/src/query/ir.ts:208](https://github.com/TanStack/db/blob/main/packages/db/src/query/ir.ts#L208)
 
 ***
 
@@ -169,7 +169,7 @@ Defined in: [packages/db/src/query/ir.ts:209](https://github.com/TanStack/db/blo
 optional scalarField: string;
 ```
 
-Defined in: [packages/db/src/query/ir.ts:216](https://github.com/TanStack/db/blob/main/packages/db/src/query/ir.ts#L216)
+Defined in: [packages/db/src/query/ir.ts:215](https://github.com/TanStack/db/blob/main/packages/db/src/query/ir.ts#L215)
 
 ***
 
@@ -179,7 +179,7 @@ Defined in: [packages/db/src/query/ir.ts:216](https://github.com/TanStack/db/blo
 type: "includesSubquery";
 ```
 
-Defined in: [packages/db/src/query/ir.ts:207](https://github.com/TanStack/db/blob/main/packages/db/src/query/ir.ts#L207)
+Defined in: [packages/db/src/query/ir.ts:206](https://github.com/TanStack/db/blob/main/packages/db/src/query/ir.ts#L206)
 
 #### Overrides
 

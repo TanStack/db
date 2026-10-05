@@ -176,7 +176,7 @@ const pinnedHistories: ReadonlyArray<{
 // Production driver and refinement check
 // ---------------------------------------------------------------------------
 
-function published(
+function observedMultiplicities(
   index: Index<string, Value>,
   key: string,
 ): Map<string, number> {
@@ -195,7 +195,7 @@ function expectRefinement(additions: ReadonlyArray<Addition>): void {
     const model = expectedIndex(additions.slice(0, step + 1))
     for (const key of [`k1`, `k2`]) {
       const checkpoint = `after addition ${step} for ${key}`
-      expect(published(index, key), checkpoint).toEqual(
+      expect(observedMultiplicities(index, key), checkpoint).toEqual(
         model.get(key) ?? new Map(),
       )
       expect(index.has(key), `${checkpoint} has`).toBe(model.has(key))

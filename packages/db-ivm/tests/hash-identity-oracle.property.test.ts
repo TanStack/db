@@ -11,11 +11,11 @@ import {
 import { captureHashSession } from './hash-session'
 
 /**
- * # Which values do structural hashing and structural equality identify?
+ * # Which values share D2 value identity?
  *
  * `hash` fingerprints a value, and `equalHashValues` compares two values
  * without a digest (`topKBatch` uses it to cancel a retraction against its
- * replacement). Both use one value identity:
+ * replacement). Both use D2 value identity:
  *
  * 1. **Primitives** compare by value. `-0` equals `0`, `NaN` equals `NaN`,
  *    and a bigint differs from the number with the same text. Symbols compare
@@ -472,12 +472,10 @@ function nearMiss(spec: Spec, choice: number): [Mutation, Spec] {
             },
           ]
     case `map`: {
-      const pairs = spec.entries.map(
-        ([key, value]): Spec => ({
-          k: `array`,
-          items: [key, value],
-        }),
-      )
+      const pairs = spec.entries.map(([key, value]): Spec => ({
+        k: `array`,
+        items: [key, value],
+      }))
       const [first, second] = spec.entries
       // Repeating a primitive key makes the Map merge the two entries.
       if (choice % 2 === 0 && first && second && MERGING_KINDS.has(first[0].k))

@@ -14,7 +14,7 @@
  * tail-order variation loses hydrate-before-later-persist histories.
  * The shared fixture holds the first `BEGIN IMMEDIATE` while cold `preload()`
  * calls queue. This file supplies BetterSQLite; the receiving witness in
- * `../e2e/shared-driver-fairness.opfs.spec.ts` uses the same fixture with a
+ * `../e2e/shared-driver-fairness-oracle.opfs.spec.ts` uses the same fixture with a
  * Chromium OPFSCoopSyncVFS worker after release. It checks rows and K=1 cuts.
  * Generated failures record the original and reduced histories with their
  * violated laws and checkpoints; the report says whether shrinking retained

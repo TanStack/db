@@ -7,7 +7,7 @@ title: UseLiveQueryConfig
 type UseLiveQueryConfig<TContext> = LiveQueryCollectionConfig<TContext> & object;
 ```
 
-Defined in: [packages/svelte-db/src/useLiveQuery.svelte.ts:98](https://github.com/TanStack/db/blob/main/packages/svelte-db/src/useLiveQuery.svelte.ts#L98)
+Defined in: [packages/svelte-db/src/useLiveQuery.svelte.ts:100](https://github.com/TanStack/db/blob/main/packages/svelte-db/src/useLiveQuery.svelte.ts#L100)
 
 ## Type Declaration
 

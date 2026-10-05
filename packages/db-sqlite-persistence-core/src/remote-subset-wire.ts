@@ -2,12 +2,7 @@ import { IR } from '@tanstack/db'
 import type { LoadSubsetOptions } from '@tanstack/db'
 
 export type RemoteSubsetWirePrimitive =
-  | undefined
-  | null
-  | boolean
-  | string
-  | number
-  | bigint
+  undefined | null | boolean | string | number | bigint
 
 export type RemoteSubsetWireTypedArray =
   | Int8Array

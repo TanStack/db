@@ -8,11 +8,19 @@ import { registeredOracleProperties } from './oracle-config.js'
  * promoted to assertion evidence merely because a process exited cleanly.
  */
 const ownerGroups: ReadonlyArray<readonly [string, string, string]> = [
-  [`db/tests/cleanup-queue.property.test.ts`, `cleanup-queue`, `history`],
-  [`db/tests/SortedMap.test.ts`, `sorted-map`, `key ascending descending`],
+  [
+    `db/tests/cleanup-queue-oracle.property.test.ts`,
+    `cleanup-queue`,
+    `history`,
+  ],
+  [
+    `db/tests/SortedMap-oracle.test.ts`,
+    `sorted-map`,
+    `key ascending descending`,
+  ],
   [`db/tests/oracle-replay.fixture.test.ts`, `oracle-replay`, `calibration`],
   [
-    `db-sqlite-persistence-core/tests/persisted.test.ts`,
+    `db-sqlite-persistence-core/tests/persisted-oracle.test.ts`,
     `sqlite-persistence`,
     `source-fifo-order abort-graph owner-isolation open-transaction-boundary`,
   ],
@@ -22,17 +30,17 @@ const ownerGroups: ReadonlyArray<readonly [string, string, string]> = [
     `mixed-transaction same-key`,
   ],
   [
-    `db/tests/index-update.property.test.ts`,
+    `db/tests/index-update-oracle.property.test.ts`,
     `index-update`,
     `reference-model exact-identity custom-comparator`,
   ],
   [
-    `db/tests/cursor.property.test.ts`,
+    `db/tests/cursor-oracle.property.test.ts`,
     `cursor`,
     `scalar-continuation exact-width exact-local-order partial-width partial-local-order repeat-construction`,
   ],
   [
-    `db/tests/optimistic-history-outcomes.test.ts`,
+    `db/tests/optimistic-history-outcomes-oracle.test.ts`,
     `collection-state`,
     `optimistic-outcomes`,
   ],
@@ -47,7 +55,7 @@ const ownerGroups: ReadonlyArray<readonly [string, string, string]> = [
     `lifecycle`,
   ],
   [
-    `electric-db-collection/tests/electric-descriptor-isolation.test.ts`,
+    `electric-db-collection/tests/electric-descriptor-isolation-oracle.test.ts`,
     `electric`,
     `persisted-tag-history bound-descriptor-history`,
   ],
@@ -62,12 +70,12 @@ const ownerGroups: ReadonlyArray<readonly [string, string, string]> = [
     `publication-stream-convergence`,
   ],
   [
-    `electric-db-collection/tests/electric-sdk-delivery.property.test.ts`,
+    `electric-db-collection/tests/electric-sdk-delivery-oracle.property.test.ts`,
     `electric`,
     `sdk-snapshot-delivery sdk-dnf-membership`,
   ],
   [
-    `db/tests/collection-sync-reentrancy.test.ts`,
+    `db/tests/collection-sync-reentrancy-oracle.test.ts`,
     `collection-sync`,
     `reentrant-drain`,
   ],
@@ -87,12 +95,12 @@ const ownerGroups: ReadonlyArray<readonly [string, string, string]> = [
     `metadata-only metadata-cancellation`,
   ],
   [
-    `db/tests/collection-subscription-lifecycle-publication.property.test.ts`,
+    `db/tests/collection-subscription-lifecycle-publication-oracle.property.test.ts`,
     `subscription-lifecycle`,
     `publication-history`,
   ],
   [
-    `db/tests/collection-subscription-lifecycle-history.property.test.ts`,
+    `db/tests/collection-subscription-lifecycle-history-oracle.property.test.ts`,
     `subscription-lifecycle`,
     `history-statistics async-history sync-history`,
   ],
@@ -117,17 +125,17 @@ const ownerGroups: ReadonlyArray<readonly [string, string, string]> = [
     `reconciliation`,
   ],
   [
-    `db/tests/live-query-observer-history.property.test.ts`,
+    `db/tests/live-query-observer-history-oracle.property.test.ts`,
     `live-query-observer`,
     `granular-history wholesale-history`,
   ],
   [
-    `db-sqlite-persistence-core/tests/sqlite-resume-snapshot.test.ts`,
+    `db-sqlite-persistence-core/tests/sqlite-resume-snapshot-oracle.test.ts`,
     `sqlite-resume`,
     `startup-generation`,
   ],
   [
-    `db/tests/query/derived-delete-reconciliation.test.ts`,
+    `db/tests/query/derived-delete-reconciliation-oracle.test.ts`,
     `derived-publication`,
     `membership-work`,
   ],
@@ -192,7 +200,7 @@ const ownerGroups: ReadonlyArray<readonly [string, string, string]> = [
     `multi-order nullable-cursor pending-mutation pending-history ordered-window window-transition async-cursor`,
   ],
   [
-    `db-sqlite-persistence-core/tests/persisted.test.ts`,
+    `db-sqlite-persistence-core/tests/persisted-oracle.test.ts`,
     `persistence`,
     `retained-demand`,
   ],
