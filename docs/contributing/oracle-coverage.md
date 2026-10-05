@@ -706,6 +706,20 @@ or backend-provider claim is made.
 These outcomes supply ORC-012 evidence; the executable suite contains the law
 and observations, rather than relying on this record for expected behavior.
 
+`examples/react/action-enforcement/tests/TodoApp.test.tsx` owns the example's
+application input and pending-write controls. Its focused component witnesses
+use real actions and the fake API with a virtual clock. They check unchanged,
+newer, and empty drafts after successful adds; unchanged and newer drafts after
+controlled create rejection; native form submission; and disabled toggles at
+0, 40, and 119 ms during creation. A settled row remains enabled while another
+row is pending, and a newly settled row can toggle and persist its change.
+The original component fails the newer-draft, form, and three pending-row checks.
+The fixed component passes all nine cases. The lint oracle above cannot observe
+these application behaviors, and the shared framework owners do not own form
+state. These focused witnesses do not cover arbitrary concurrent submissions or
+browser-native Enter event dispatch. This component suite owns the former
+extension; a browser form witness is needed for the latter.
+
 ## Reusable-law backlog
 
 RFC #1659 reviews found several green oracles whose stated laws remained valid

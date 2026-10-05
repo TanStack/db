@@ -15,6 +15,8 @@ pnpm --filter @tanstack/db-example-react-action-enforcement dev
 
 From this example directory, run `pnpm test`, `pnpm lint`, or `pnpm build`.
 The example shares the repository lockfile and uses the workspace DB packages.
+Tests cover the lint boundary and the todo form. The form preserves newer drafts
+while an add settles and disables each row’s toggle while it has pending writes.
 
 ## What is enforced
 

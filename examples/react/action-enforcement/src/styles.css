@@ -56,7 +56,8 @@ body {
   cursor: pointer;
 }
 
-.todo-button:disabled {
+.todo-button:disabled,
+.todo-toggle:disabled {
   opacity: 0.55;
   cursor: not-allowed;
 }

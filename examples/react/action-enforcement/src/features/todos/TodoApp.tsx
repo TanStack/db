@@ -13,10 +13,11 @@ export function TodoApp() {
   )
 
   async function handleAddTodo() {
+    const submittedText = text
     try {
       setError(null)
-      await addTodo(text).when('settled')
-      setText('')
+      await addTodo(submittedText).when('settled')
+      setText((current) => (current === submittedText ? '' : current))
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to add todo')
     }
@@ -24,22 +25,23 @@ export function TodoApp() {
 
   return (
     <section className="todo-card">
-      <div className="todo-input-row">
+      <form
+        className="todo-input-row"
+        onSubmit={(event) => {
+          event.preventDefault()
+          void handleAddTodo()
+        }}
+      >
         <input
           className="todo-input"
           value={text}
           onChange={(event) => setText(event.target.value)}
           placeholder="Add a todo"
         />
-        <button
-          className="todo-button"
-          type="button"
-          onClick={handleAddTodo}
-          disabled={isLoading}
-        >
+        <button className="todo-button" type="submit" disabled={isLoading}>
           Add
         </button>
-      </div>
+      </form>
 
       <ul className="todo-list">
         {todos.map((todo) => (
@@ -50,6 +52,7 @@ export function TodoApp() {
             <span className="todo-text">{todo.text}</span>
             <button
               className="todo-toggle"
+              disabled={todo.$hasPendingWrites}
               type="button"
               onClick={() => {
                 void toggleTodo({ id: todo.id })
