@@ -21,8 +21,8 @@ import type { ChangeMessage, SyncConfig } from '../src/types.js'
  * subscription contracts supply this law.
  *
  * The model keeps rows and metadata as independent maps. Each round confirms
- * one optimistic row update, then commits or aborts its ordered metadata
- * writes. Repeated metadata writes use the last value; each row publication
+ * one optimistic row update, then commits its ordered metadata writes or
+ * aborts them before acceptance; an accepted commit always applies. Repeated metadata writes use the last value; each row publication
  * has one keyed change message. Structured metadata is cloned once per world.
  * Aliases remain within each world, while production cannot rewrite the model.
  *
@@ -302,7 +302,7 @@ async function applyRound(
   const sync = harness.getSync()
   const transaction = createTransaction({
     mutationFn: async () => {
-      sync.begin({ immediate: true })
+      sync.begin()
       sync.write({ type: `update`, value: { ...next } })
       sync.commit()
 
@@ -317,9 +317,10 @@ async function applyRound(
       if (round.outcome === `commit`) {
         sync.commit()
       } else {
+        // An accepted commit always applies, so abort before acceptance.
         const controller = new AbortController()
-        const receipt = sync.commit(controller.signal)
         controller.abort()
+        const receipt = sync.commit(controller.signal)
         if (receipt !== true) {
           await receipt.catch((error: unknown) => {
             if (!(error instanceof SyncTransactionAbortedError)) throw error
@@ -491,6 +492,9 @@ async function expectMetadataCancellationOwnership(
             sync.metadata!.row.delete(key)
           }
         }
+        // An accepted commit always applies, so a canceled owner aborts
+        // before acceptance.
+        if (signal) canceledController.abort()
         const receipt = sync.commit(signal)
         if (receipt === true) {
           throw new Error(

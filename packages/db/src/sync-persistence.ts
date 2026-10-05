@@ -55,6 +55,7 @@ export function validateSyncPersistenceCapability<
     )
   }
   requireFunction(value, `hydrateBaseline`)
+  requireFunction(value, `reserveCommitTurn`)
   requireFunction(value, `scanPersistedRows`)
 
   const resumeSnapshot = value.resumeSnapshot

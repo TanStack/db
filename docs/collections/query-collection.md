@@ -726,11 +726,12 @@ These operations:
 
 - Write directly to the synced data store
 - Do NOT create optimistic mutations
-- Return a promise that resolves when the sync commit applies, including any configured persistence write. Await it in a mutation handler before returning so the optimistic mutation remains active until the server response is stored.
+- Return a promise that resolves when the sync commit is accepted, including any configured persistence write. Await it in a mutation handler before returning so the server response is stored before the optimistic state drops.
+- While a mutation handler is running, wait behind it and become visible when its optimistic transaction settles, in the same update that drops its optimistic state
 - In eager mode, update the full-result TanStack Query cache in place without refetching
 - In on-demand mode, refetch active enabled queries and remove inactive or disabled cache entries
 
-The promise waits for the sync commit. It does not wait for on-demand Query revalidation or guarantee that a completed optimistic snapshot no longer overlays the row.
+The promise does not wait for on-demand Query revalidation. If a handler returns before it writes the server response, its optimistic state drops and the row shows the previous server value until the response arrives.
 After Collection cleanup starts, direct writes fail with `SyncNotInitializedError` until a new sync run starts.
 
 ### Batch Operations
@@ -1163,7 +1164,7 @@ This pattern allows you to:
 
 ### Direct Writes and Query Sync
 
-Direct writes update the collection immediately. In eager mode, they also patch the full-result TanStack Query cache in place.
+Direct writes update the collection immediately, or when a running mutation handler settles. In eager mode, they also patch the full-result TanStack Query cache in place.
 
 In on-demand mode, each Query cache entry may represent a different predicate, order, limit, or offset. A full collection snapshot cannot safely replace those scoped results. Direct writes therefore refetch active enabled queries and remove inactive or disabled entries. A successful `queryFn` result remains authoritative and may reconcile or replace a direct write.
 

@@ -350,6 +350,7 @@ async function expectDeferredStartupReadyDoesNotOverrideError(): Promise<void> {
       protocol: `@tanstack/db/sync-persistence`,
       version: 1,
       hydrateBaseline: async () => {},
+      reserveCommitTurn: () => {},
       scanPersistedRows,
       resumeSnapshot: {
         certify: async () => {},
