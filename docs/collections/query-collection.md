@@ -1465,26 +1465,26 @@ const comparisons = extractSimpleComparisons(where)
 
 ### Using Query Key Builders
 
-Create different cache entries for different filter combinations:
+With `syncMode: 'on-demand'`, a static key such as `queryKey: ['products']`
+automatically includes the subset demand identity. Filters, ordering, limits,
+offsets, and cursor hints distinguish cache entries when they change the
+requested data. Prefer a static key when you do not need a custom key structure.
+
+A function-based `queryKey` replaces that automatic key construction. Include
+all options that change the requested data; omitting `offset`, for example,
+can make different windows share a cache entry. Use `getLoadSubsetDemandKey`
+from `@tanstack/db` to retain the same subset identity as a static key, including
+`limit: 0`:
 
 ```typescript
+import { getLoadSubsetDemandKey } from '@tanstack/db'
+
 const productsCollection = createCollection(
   queryCollectionOptions({
     id: 'products',
-    // Dynamic query key based on filters
     queryKey: (opts) => {
-      const parsed = parseLoadSubsetOptions(opts)
-      const cacheKey = ['products']
-
-      parsed.filters.forEach(f => {
-        cacheKey.push(`${f.field.join('.')}-${f.operator}-${f.value}`)
-      })
-
-      if (parsed.limit) {
-        cacheKey.push(`limit-${parsed.limit}`)
-      }
-
-      return cacheKey
+      const demandKey = getLoadSubsetDemandKey(opts)
+      return demandKey === undefined ? ['products'] : ['products', demandKey]
     },
     queryClient,
     getKey: (item) => item.id,
@@ -1500,21 +1500,16 @@ When using a function-based `queryKey`, all derived keys **must extend the base 
 
 TanStack Query uses prefix matching for cache operations internally. The query collection relies on this to find all cache entries belonging to a collection — including stale entries from destroyed query observers that are still held in cache due to `gcTime`. If derived keys don't share the base prefix, cache updates may silently miss entries, leading to stale data.
 
-```typescript
-// ✅ Correct: base key ['products'] is a prefix of all derived keys
-queryKey: (opts) => {
-  if (opts.where) {
-    return ['products', JSON.stringify(opts.where)]
-  }
-  return ['products']
-}
+The example above returns `['products']` for `queryKey({})` and keeps it as
+the prefix of every derived key. Avoid changing the prefix for subset demands:
 
+```typescript
 // ❌ Wrong: base key ['products-all'] is NOT a prefix of ['products-filtered', ...]
 queryKey: (opts) => {
-  if (opts.where) {
-    return ['products-filtered', JSON.stringify(opts.where)]
-  }
-  return ['products-all']
+  const demandKey = getLoadSubsetDemandKey(opts)
+  return demandKey === undefined
+    ? ['products-all']
+    : ['products-filtered', demandKey]
 }
 ```
 
