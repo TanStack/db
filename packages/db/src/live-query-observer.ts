@@ -275,7 +275,6 @@ class LiveQueryObserverImpl<
 
     if (this.snapshotDirty) {
       const entries = this.getVisibleEntries(collection)
-      const state = new Map(entries)
       const data = entries.map(([, value]) => value)
       const singleResult = isSingleResultCollection(collection)
       const liveStatus = this.visibleStatus ?? collection.status
@@ -309,8 +308,12 @@ class LiveQueryObserverImpl<
         this.layoutRevision++
       }
 
+      // Most consumers read only `data`; build the keyed view on first read.
+      let state: Map<TKey, T> | undefined
       this.cachedSnapshot = {
-        state,
+        get state() {
+          return (state ??= new Map(entries))
+        },
         data: singleResult ? data[0] : data,
         collection: getPublicCollection(collection),
         layoutRevision: this.layoutRevision,
