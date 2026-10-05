@@ -207,8 +207,8 @@ export class CollectionSyncManager<
     const isCurrentSync = () => syncCallbackEpoch === this.syncCallbackEpoch
     this.lifecycle.setStatus(`loading`)
     if (!isCurrentSync()) return
-    let syncEntryActive = true
-    let readyEffectFailure: { error: unknown } | undefined
+    const finishReadyFailures = this.lifecycle.deferReadyFailures()
+    let readyFailure: { error: unknown } | undefined
 
     this.syncEntryActive = true
     try {
@@ -335,12 +335,7 @@ export class CollectionSyncManager<
             return receipt
           },
           markReady: () => {
-            if (!isCurrentSync()) return
-            if (syncEntryActive) {
-              readyEffectFailure ??= this.lifecycle.markReadyDuringSyncStart()
-            } else {
-              this.lifecycle.markReady()
-            }
+            if (isCurrentSync()) this.lifecycle.markReady()
           },
           markError: (error?: unknown) => {
             if (isCurrentSync()) this.lifecycle.markError(error)
@@ -374,14 +369,14 @@ export class CollectionSyncManager<
         }),
       )
       this.syncEntryActive = false
-      syncEntryActive = false
+      readyFailure = finishReadyFailures()
 
       if (!isCurrentSync()) {
         if (syncRes?.cleanup) {
           this.registerPendingSyncEntryCleanup(syncRes.cleanup)
         }
         this.completePendingSyncEntryCleanup()
-        if (readyEffectFailure) throw readyEffectFailure.error
+        if (readyFailure) throw readyFailure.error
         return
       }
 
@@ -410,11 +405,11 @@ export class CollectionSyncManager<
     } catch (error) {
       this.syncEntryActive = false
       this.completePendingSyncEntryCleanup()
-      syncEntryActive = false
+      finishReadyFailures()
       if (isCurrentSync()) this.lifecycle.markError(error)
       throw error
     }
-    if (readyEffectFailure) throw readyEffectFailure.error
+    if (readyFailure) throw readyFailure.error
   }
 
   public deferStart(): boolean {

@@ -47,6 +47,7 @@ export class CollectionLifecycleManager<
   public status: CollectionStatus = `idle`
   public hasBeenReady = false
   public hasReceivedFirstCommit = false
+  private readyFailureSink: ((failure: { error: unknown }) => void) | undefined
   public onFirstReadyCallbacks: Array<() => void> = []
   private idleCallbackId: number | null = null
   private syncError: unknown
@@ -167,12 +168,26 @@ export class CollectionLifecycleManager<
    */
   public markReady(beforeEffects?: () => void): void {
     const failure = this.applyReadyTransition(beforeEffects)
-    if (failure) throw failure.error
+    if (!failure) return
+    if (this.readyFailureSink) this.readyFailureSink(failure)
+    else throw failure.error
   }
 
-  /** @internal Capture ready-effect failures while the sync entry completes. */
-  public markReadyDuringSyncStart(): { error: unknown } | undefined {
-    return this.applyReadyTransition()
+  /**
+   * @internal Hold ready-effect failures while a sync function runs, whether
+   * it calls markReady or commits a truncate. The returned function stops
+   * holding them and returns the first one.
+   */
+  public deferReadyFailures(): () => { error: unknown } | undefined {
+    const previous = this.readyFailureSink
+    let first: { error: unknown } | undefined
+    this.readyFailureSink = (failure) => {
+      first ??= failure
+    }
+    return () => {
+      this.readyFailureSink = previous
+      return first
+    }
   }
 
   private applyReadyTransition(
