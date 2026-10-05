@@ -3650,7 +3650,7 @@ describe(`QueryCollection`, () => {
 
         // A Query Core `removed` event can arrive before this collection's observer
         // is detached. Existing semantics retain the active rows and observer.
-        queryClient.getQueryCache().remove(subsetQuery)
+        queryClient.getQueryCache().remove(subsetQuery!)
         expect(queryClient.getQueryCache().findAll({ queryKey })).toHaveLength(
           0,
         )

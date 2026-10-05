@@ -19,7 +19,7 @@ earlier one was canceled. The lane found that `main` lost an explicit
 `metadata.row.set` when the canceled delete turned the open insert into an
 idempotent re-insert, and the revision fixed the rebuild.
 
-#2030 then allowed only the open last sync transaction to be canceled. Aborting
+PR #2030 then allowed only the open last sync transaction to be canceled. Aborting
 an accepted transaction's signal now has no effect, so a rebuild can no longer
 reclassify an open write. The canceled lane's history no longer exists, and RB2
 is equivalent again. This branch drops the lane and the rebuild change and
