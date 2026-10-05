@@ -1549,10 +1549,6 @@ export class CollectionStateManager<
               : 'remote'
           if (origin === `local`) localKeys.add(key)
 
-          // A sync source may reuse a live-reading row object, making an
-          // enriched snapshot cached for an earlier publication stale.
-          this.virtualPropsCache.delete(key)
-
           if (operation.type === `delete`) {
             this.syncedData.delete(key, deferOrder)
             this.syncedMetadata.delete(key)
