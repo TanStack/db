@@ -65,7 +65,10 @@ import type {
  * receipt and fail-stop that sync run without admitting a suffix.
  * An immediate source commit queued behind a normal source publication may
  * release that publication while a mutation persists. Both source receipts
- * still settle in durable FIFO order.
+ * still settle in durable FIFO order. An ordinary source transaction committed
+ * before hydration starts may publish after subset hydrations already queued
+ * ahead of it. An open source transaction may not cross a hydration cycle;
+ * hydration-owned replay retains its captured row metadata ownership.
  * If core application fails before receipt settlement, every source receipt
  * claimed by that publication rejects with the original failure. A queued
  * immediate write does not convert the failure into partial success.
@@ -12080,6 +12083,142 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
       )
     }
   })
+
+  it.each([`insert`, `update`] as const)(
+    `publishes a committed source %s queued behind subsequent subset hydrations`,
+    async (type) => {
+      // https://github.com/TanStack/db/issues/2036
+      const adapter = createRecordingAdapter([
+        { id: `shared`, title: `persisted`, detail: `retained baseline` },
+      ])
+      adapter.rowMetadata.set(`shared`, { owner: `persisted` })
+      const persistenceEntered = createEventGate()
+      const releasePersistence = createEventGate()
+      const applyCommittedTx = adapter.applyCommittedTx.bind(adapter)
+      let applyCalls = 0
+      adapter.applyCommittedTx = async (...args) => {
+        if (++applyCalls === 1) {
+          persistenceEntered.resolve()
+          await releasePersistence.promise
+        }
+        await applyCommittedTx(...args)
+      }
+      const hydrationTitles: Array<string | undefined> = []
+      const loadSubset = adapter.loadSubset.bind(adapter)
+      adapter.loadSubset = async (...args) => {
+        hydrationTitles.push(collection.get(`shared`)?.title)
+        return loadSubset(...args)
+      }
+      let sourceParams!: TodoSyncParams
+      const collection = createCollection(
+        persistedCollectionOptions<Todo, string>({
+          id: `committed-source-${type}-queued-behind-hydration`,
+          getKey: (row) => row.id,
+          syncMode: `on-demand`,
+          sync: {
+            sync: (params) => {
+              sourceParams = params
+              params.markReady()
+              return { loadSubset: () => true }
+            },
+          },
+          persistence: { adapter },
+        }),
+      )
+      const options = [{ limit: 1 }, { limit: 2 }]
+      const receipts: Array<Promise<true | void>> = []
+      let hasPrimaryFailure = false
+      try {
+        await collection.stateWhenReady()
+        sourceParams.begin()
+        sourceParams.write({
+          type: `insert`,
+          value: { id: `gate`, title: `holds apply mutex` },
+        })
+        const gateReceipt = Promise.resolve(sourceParams.commit())
+        void gateReceipt.catch(() => undefined)
+        receipts.push(gateReceipt)
+        await atPersistedOracleCheckpoint(
+          persistenceEntered.promise,
+          `predecessor persistence entered`,
+        )
+
+        // Reserve both hydrations while the predecessor holds the mutex.
+        // Neither has started when the source transaction begins and commits.
+        for (const option of options) {
+          const hydration = Promise.resolve(collection._sync.loadSubset(option))
+          void hydration.catch(() => undefined)
+          receipts.push(hydration)
+        }
+        await flushAsyncWork()
+        expect(adapter.loadSubsetCalls).toHaveLength(0)
+        sourceParams.begin()
+        sourceParams.write({
+          type,
+          value: { id: `shared`, title: `first source value` },
+        })
+        sourceParams.metadata!.collection.set(`cursor`, `first`)
+        const firstReceipt = Promise.resolve(sourceParams.commit())
+        void firstReceipt.catch(() => undefined)
+        receipts.push(firstReceipt)
+
+        sourceParams.begin()
+        expect(sourceParams.metadata!.collection.get(`cursor`)).toBe(`first`)
+        sourceParams.write({
+          type: `update`,
+          value: { id: `shared`, title: `second source value` },
+        })
+        sourceParams.metadata!.collection.set(`cursor`, `second`)
+        const secondReceipt = Promise.resolve(sourceParams.commit())
+        void secondReceipt.catch(() => undefined)
+        receipts.push(secondReceipt)
+        expect(collection.get(`shared`)).toBeUndefined()
+
+        releasePersistence.resolve()
+        await atPersistedOracleCheckpoint(
+          Promise.all(receipts),
+          `committed source receipts after two hydrations`,
+        )
+        expect({
+          hydrationTitles,
+          status: collection.status,
+          publicRow: stripVirtualProps(collection.get(`shared`)),
+          durableRow: adapter.rows.get(`shared`),
+          rowMetadata: adapter.rowMetadata.get(`shared`),
+          cursor: adapter.collectionMetadata.get(`cursor`),
+          durableKeys: adapter.applyCommittedTxCalls.map(({ tx }) =>
+            tx.mutations.map(({ key }) => key),
+          ),
+        }).toEqual({
+          hydrationTitles: [undefined, `persisted`],
+          status: `ready`,
+          publicRow: {
+            id: `shared`,
+            title: `second source value`,
+            detail: `retained baseline`,
+          },
+          durableRow: {
+            id: `shared`,
+            title: `second source value`,
+            detail: `retained baseline`,
+          },
+          rowMetadata: type === `insert` ? undefined : { owner: `persisted` },
+          cursor: `second`,
+          durableKeys: [[`gate`], [`shared`], [`shared`]],
+        })
+      } catch (error) {
+        hasPrimaryFailure = true
+        throw error
+      } finally {
+        releasePersistence.resolve()
+        for (const option of options) collection._sync.unloadSubset(option)
+        await cleanupPersistedOracle(
+          [() => Promise.allSettled(receipts), () => collection.cleanup()],
+          hasPrimaryFailure,
+        )
+      }
+    },
+  )
 
   it(`rejects a source transaction that crosses a hydration cycle`, async () => {
     const adapter = createRecordingAdapter()
