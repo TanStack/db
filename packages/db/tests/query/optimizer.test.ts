@@ -50,6 +50,28 @@ function createAgg(name: string, ...args: Array<any>) {
 
 describe(`Query Optimizer`, () => {
   describe(`Basic Optimization`, () => {
+    test(`retains explicit ref qualification while combining predicates`, () => {
+      const department = new PropRef([`u`, `department_id`], `u`)
+      const salary = new PropRef([`u`, `salary`], `u`)
+      const query: QueryIR = {
+        from: new CollectionRef(mockCollection, `u`),
+        where: [
+          createEq(department, createValue(1)),
+          createGt(salary, createValue(50_000)),
+        ],
+      }
+
+      const { optimizedQuery } = optimizeQuery(query)
+      const combined = optimizedQuery.where?.[0] as Func
+
+      expect((combined.args[0] as Func).args[0]).toMatchObject({
+        sourceAlias: `u`,
+      })
+      expect((combined.args[1] as Func).args[0]).toMatchObject({
+        sourceAlias: `u`,
+      })
+    })
+
     test(`should pass through queries without where clauses`, () => {
       const query: QueryIR = {
         from: new CollectionRef(mockCollection, `u`),
@@ -171,6 +193,33 @@ describe(`Query Optimizer`, () => {
   })
 
   describe(`Join Optimization`, () => {
+    test(`preserves single-result and DISTINCT flags across join optimization`, () => {
+      const distinctSource: QueryIR = {
+        from: new CollectionRef(mockCollection, `p`),
+        select: { id: createPropRef(`p`, `id`) },
+        distinct: true,
+      }
+      const query: QueryIR = {
+        from: new CollectionRef(mockCollection, `u`),
+        join: [
+          {
+            from: new QueryRef(distinctSource, `p`),
+            type: `inner`,
+            left: createPropRef(`u`, `id`),
+            right: createPropRef(`p`, `id`),
+          },
+        ],
+        where: [createEq(createPropRef(`u`, `id`), createValue(1))],
+        singleResult: true,
+      }
+
+      const { optimizedQuery } = optimizeQuery(query)
+      expect(optimizedQuery.singleResult).toBe(true)
+      expect(optimizedQuery.join?.[0]?.from.type).toBe(`queryRef`)
+      const joined = optimizedQuery.join?.[0]?.from as QueryRef
+      expect(joined.query.distinct).toBe(true)
+    })
+
     test(`should lift single-source where clauses into join subqueries`, () => {
       const query: QueryIR = {
         from: new CollectionRef(mockCollection, `u`),
@@ -442,8 +491,10 @@ describe(`Query Optimizer`, () => {
 
       const { optimizedQuery: optimized } = optimizeQuery(query)
 
-      // The constant expression should be ignored, single-source clause should be optimized
-      expect(optimized.where).toEqual([])
+      // Source-free clauses still filter the joined result.
+      expect(optimized.where).toEqual([
+        createEq(createValue(1), createValue(1)),
+      ])
       expect(optimized.from.type).toBe(`queryRef`)
       if (optimized.from.type === `queryRef`) {
         expect(optimized.from.query.where).toHaveLength(1)
@@ -612,8 +663,10 @@ describe(`Query Optimizer`, () => {
 
       const { optimizedQuery: optimized } = optimizeQuery(query)
 
-      // The empty path PropRef should be treated as a constant (no sources)
-      expect(optimized.where).toEqual([])
+      // An unqualified reference cannot be pushed to either source.
+      expect(optimized.where).toEqual([
+        createEq(emptyPathPropRef, createValue(1)),
+      ])
       expect(optimized.from.type).toBe(`collectionRef`)
     })
 
@@ -638,10 +691,13 @@ describe(`Query Optimizer`, () => {
 
       const { optimizedQuery: optimized } = optimizeQuery(query)
 
-      // Multi-source clause should remain in main query
+      // Multi-source and source-free clauses should remain in the main query.
       expect(optimized.where).toHaveLength(1)
       expect(optimized.where![0]).toEqual(
-        createEq(createPropRef(`u`, `id`), createPropRef(`p`, `user_id`)),
+        createAnd(
+          createEq(createPropRef(`u`, `id`), createPropRef(`p`, `user_id`)),
+          createEq(createValue(1), createValue(1)),
+        ),
       )
 
       // Single-source clauses should be moved to subqueries
@@ -662,7 +718,7 @@ describe(`Query Optimizer`, () => {
   })
 
   describe(`Error Handling`, () => {
-    test(`should handle malformed expressions gracefully`, () => {
+    test(`does not silently discard a malformed expression`, () => {
       const malformedExpression = {
         type: `unknown`,
         value: `test`,
@@ -683,9 +739,8 @@ describe(`Query Optimizer`, () => {
 
       const { optimizedQuery: optimized } = optimizeQuery(query)
 
-      // Should not crash and should handle the malformed expression gracefully
       expect(optimized).toBeDefined()
-      expect(optimized.where).toEqual([])
+      expect(optimized.where).toEqual([malformedExpression])
     })
 
     test(`should handle PropRef with empty first element`, () => {
@@ -708,8 +763,10 @@ describe(`Query Optimizer`, () => {
 
       const { optimizedQuery: optimized } = optimizeQuery(query)
 
-      // PropRef with empty first element should be ignored, other clause should be optimized
-      expect(optimized.where).toEqual([])
+      // Keep the unqualified clause instead of silently removing a filter.
+      expect(optimized.where).toEqual([
+        createEq(propRefWithEmptyFirst, createValue(1)),
+      ])
       expect(optimized.from.type).toBe(`queryRef`)
       if (optimized.from.type === `queryRef`) {
         expect(optimized.from.query.where).toHaveLength(1)
@@ -739,8 +796,10 @@ describe(`Query Optimizer`, () => {
 
       const { optimizedQuery: optimized } = optimizeQuery(query)
 
-      // PropRef with undefined first element should be ignored, other clause should be optimized
-      expect(optimized.where).toEqual([])
+      // Keep the unqualified clause instead of silently removing a filter.
+      expect(optimized.where).toEqual([
+        createEq(propRefWithUndefinedFirst, createValue(1)),
+      ])
       expect(optimized.from.type).toBe(`queryRef`)
       if (optimized.from.type === `queryRef`) {
         expect(optimized.from.query.where).toHaveLength(1)
@@ -1145,10 +1204,7 @@ describe(`Query Optimizer`, () => {
       expect(optimized.from.type).toBe(`queryRef`)
       if (optimized.from.type === `queryRef`) {
         expect(optimized.from.query.where).toContainEqual(
-          createEq(
-            createPropRef(`main_users`, `department_id`),
-            createValue(1),
-          ),
+          createEq(createPropRef(`u`, `department_id`), createValue(1)),
         )
       }
 
@@ -1159,10 +1215,7 @@ describe(`Query Optimizer`, () => {
         expect(joinClause.from.type).toBe(`queryRef`)
         if (joinClause.from.type === `queryRef`) {
           expect(joinClause.from.query.where).toContainEqual(
-            createEq(
-              createPropRef(`other_users`, `department_id`),
-              createValue(2),
-            ),
+            createEq(createPropRef(`u`, `department_id`), createValue(2)),
           )
         }
       }
@@ -1279,10 +1332,7 @@ describe(`Query Optimizer`, () => {
       expect(optimized.from.type).toBe(`queryRef`)
       if (optimized.from.type === `queryRef`) {
         expect(optimized.from.query.where).toContainEqual(
-          createEq(
-            createPropRef(`filtered_users`, `department_id`),
-            createValue(1),
-          ),
+          createEq(createPropRef(`u`, `department_id`), createValue(1)),
         )
       }
     })
@@ -1407,10 +1457,7 @@ describe(`Query Optimizer`, () => {
       expect(optimized.from.type).toBe(`queryRef`)
       if (optimized.from.type === `queryRef`) {
         expect(optimized.from.query.where).toContainEqual(
-          createEq(
-            createPropRef(`sorted_users`, `department_id`),
-            createValue(1),
-          ),
+          createEq(createPropRef(`u`, `department_id`), createValue(1)),
         )
       }
     })
@@ -1463,7 +1510,7 @@ describe(`Query Optimizer`, () => {
       expect(optimized.from.type).toBe(`queryRef`)
       if (optimized.from.type === `queryRef`) {
         expect(optimized.from.query.where).toContainEqual(
-          createEq(createPropRef(`users`, `department_id`), createValue(1)),
+          createEq(createPropRef(`u`, `department_id`), createValue(1)),
         )
       }
     })
@@ -1649,35 +1696,15 @@ describe(`Query Optimizer`, () => {
       const { optimizedQuery } = optimizeQuery(query)
 
       // The WHERE clause should remain in the main query to preserve LEFT JOIN semantics
-      // It should NOT be completely moved to the subquery
+      // It must NOT be pushed down to the nullable (right) side because that would
+      // pre-filter the right data, converting excluded matches into unmatched rows
       expect(optimizedQuery.where).toHaveLength(1)
-      expect(optimizedQuery.where![0]).toEqual({
-        expression: createEq(
-          createPropRef(`teamMember`, `user_id`),
-          createValue(100),
-        ),
-        residual: true,
-      })
+      expect(optimizedQuery.where![0]).toEqual(
+        createEq(createPropRef(`teamMember`, `user_id`), createValue(100)),
+      )
 
-      // If the optimizer creates a subquery for teamMember, the WHERE clause should also be copied there
-      // but a residual copy must remain in the main query
-      if (
-        optimizedQuery.join &&
-        optimizedQuery.join[0]?.from.type === `queryRef`
-      ) {
-        const teamMemberSubquery = optimizedQuery.join[0].from.query
-        // The subquery may have the WHERE clause for optimization
-        if (teamMemberSubquery.where && teamMemberSubquery.where.length > 0) {
-          // But the main query MUST still have it to preserve semantics
-          expect(optimizedQuery.where).toContainEqual({
-            expression: createEq(
-              createPropRef(`teamMember`, `user_id`),
-              createValue(100),
-            ),
-            residual: true,
-          })
-        }
-      }
+      // The optimizer should NOT create a subquery for the nullable side
+      expect(optimizedQuery.join![0]!.from.type).toBe(`collectionRef`)
     })
 
     test(`should preserve WHERE clause semantics when pushing down to RIGHT JOIN`, () => {
@@ -1715,32 +1742,14 @@ describe(`Query Optimizer`, () => {
       const { optimizedQuery } = optimizeQuery(query)
 
       // The WHERE clause should remain in the main query to preserve RIGHT JOIN semantics
-      // It should NOT be completely moved to the subquery
+      // It must NOT be pushed down to the nullable (left/from) side
       expect(optimizedQuery.where).toHaveLength(1)
-      expect(optimizedQuery.where![0]).toEqual({
-        expression: createEq(
-          createPropRef(`user`, `department_id`),
-          createValue(1),
-        ),
-        residual: true,
-      })
+      expect(optimizedQuery.where![0]).toEqual(
+        createEq(createPropRef(`user`, `department_id`), createValue(1)),
+      )
 
-      // If the optimizer creates a subquery for users, the WHERE clause should also be copied there
-      // but a residual copy must remain in the main query
-      if (optimizedQuery.from.type === `queryRef`) {
-        const userSubquery = optimizedQuery.from.query
-        // The subquery may have the WHERE clause for optimization
-        if (userSubquery.where && userSubquery.where.length > 0) {
-          // But the main query MUST still have it to preserve semantics
-          expect(optimizedQuery.where).toContainEqual({
-            expression: createEq(
-              createPropRef(`user`, `department_id`),
-              createValue(1),
-            ),
-            residual: true,
-          })
-        }
-      }
+      // The optimizer should NOT create a subquery for the nullable side (from)
+      expect(optimizedQuery.from.type).toBe(`collectionRef`)
     })
 
     test(`should preserve WHERE clause semantics when pushing down to FULL JOIN`, () => {
@@ -1778,35 +1787,15 @@ describe(`Query Optimizer`, () => {
       const { optimizedQuery } = optimizeQuery(query)
 
       // The WHERE clause should remain in the main query to preserve FULL JOIN semantics
-      // It should NOT be completely moved to the subquery
+      // It must NOT be pushed down to any nullable side
       expect(optimizedQuery.where).toHaveLength(1)
-      expect(optimizedQuery.where![0]).toEqual({
-        expression: createGt(
-          createPropRef(`payment`, `amount`),
-          createValue(100),
-        ),
-        residual: true,
-      })
+      expect(optimizedQuery.where![0]).toEqual(
+        createGt(createPropRef(`payment`, `amount`), createValue(100)),
+      )
 
-      // If the optimizer creates a subquery for payments, the WHERE clause should also be copied there
-      // but a residual copy must remain in the main query
-      if (
-        optimizedQuery.join &&
-        optimizedQuery.join[0]?.from.type === `queryRef`
-      ) {
-        const paymentSubquery = optimizedQuery.join[0].from.query
-        // The subquery may have the WHERE clause for optimization
-        if (paymentSubquery.where && paymentSubquery.where.length > 0) {
-          // But the main query MUST still have it to preserve semantics
-          expect(optimizedQuery.where).toContainEqual({
-            expression: createGt(
-              createPropRef(`payment`, `amount`),
-              createValue(100),
-            ),
-            residual: true,
-          })
-        }
-      }
+      // The optimizer should NOT create subqueries for nullable sides
+      expect(optimizedQuery.from.type).toBe(`collectionRef`)
+      expect(optimizedQuery.join![0]!.from.type).toBe(`collectionRef`)
     })
 
     test(`should allow WHERE clause pushdown for INNER JOIN (semantics preserved)`, () => {

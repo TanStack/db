@@ -1,18 +1,21 @@
 /* eslint-disable @typescript-eslint/no-unnecessary-condition */
 import { Store } from '@tanstack/store'
+import { withCollectionConfigFactory } from '@tanstack/db'
 import {
   ExpectedDeleteTypeError,
   ExpectedInsertTypeError,
   ExpectedUpdateTypeError,
   TimeoutWaitingForIdsError,
 } from './errors'
-import type { Event, RecordApi } from 'trailbase'
+import type { OrderByClause } from '../../db/dist/esm/query/ir'
+import type { CompareOp, Event, FilterOrComposite, RecordApi } from 'trailbase'
 
 import type {
   BaseCollectionConfig,
   CollectionConfig,
   DeleteMutationFnParams,
   InsertMutationFnParams,
+  LoadSubsetOptions,
   SyncConfig,
   SyncMode,
   UpdateMutationFnParams,
@@ -100,61 +103,6 @@ function convertPartial<
 }
 
 /**
- * Decode a base64-encoded BLOB UUID to a standard UUID string format for proper sorting.
- * TrailBase stores UUIDs as BLOBs and returns them as base64, which doesn't sort correctly.
- * This function decodes the base64 to get the UUID string which sorts lexicographically.
- */
-function decodeIdForSorting(rawId: unknown): string {
-  const idStr = String(rawId ?? ``)
-
-  // Check if it's already a UUID string format - return as-is
-  if (
-    /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(
-      idStr,
-    )
-  ) {
-    return idStr
-  }
-
-  // Check if it's an integer - return as-is
-  if (/^\d+$/.test(idStr)) {
-    return idStr
-  }
-
-  // Try to decode base64 to UUID
-  try {
-    // Convert URL-safe base64 to standard base64
-    const standardBase64 = idStr.replace(/-/g, `+`).replace(/_/g, `/`)
-    // Add padding if needed
-    const padded =
-      standardBase64 + `==`.slice(0, (4 - (standardBase64.length % 4)) % 4)
-
-    // Decode base64 to bytes
-    const binaryString = atob(padded)
-
-    // Only process if it looks like a UUID (16 bytes)
-    if (binaryString.length !== 16) {
-      return idStr
-    }
-
-    const bytes = new Uint8Array(binaryString.length)
-    for (let i = 0; i < binaryString.length; i++) {
-      bytes[i] = binaryString.charCodeAt(i)
-    }
-
-    // Convert bytes to UUID string format
-    const hex = Array.from(bytes)
-      .map((b) => b.toString(16).padStart(2, `0`))
-      .join(``)
-
-    return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20, 32)}`
-  } catch {
-    // If decoding fails, return the original string
-    return idStr
-  }
-}
-
-/**
  * The mode of sync to use for the collection.
  * @default `eager`
  * @description
@@ -235,7 +183,7 @@ export function trailBaseCollectionOptions<
   TKey extends string | number = string | number,
 >(
   config: TrailBaseCollectionConfig<TItem, TRecord, TKey>,
-): CollectionConfig<TItem, TKey> & {
+): CollectionConfig<TItem, TKey, never, TrailBaseCollectionUtils> & {
   utils: TrailBaseCollectionUtils
 } {
   const getKey = config.getKey
@@ -274,7 +222,7 @@ export function trailBaseCollectionOptions<
           // For function serializers, we need to handle partial items carefully
           // We serialize and then extract only the keys that were in the partial
           const keys = Object.keys(item) as Array<keyof TItem>
-          const full = config.serialize(item as TItem) as TRecord
+          const full = serialIns(item as TItem)
           const result: Partial<TRecord> = {}
           for (const key of keys) {
             // Map the key if there's a known mapping (simplified approach)
@@ -293,8 +241,6 @@ export function trailBaseCollectionOptions<
             >,
             item as Partial<TItem & ShapeOf<TRecord>>,
           ) as Partial<TRecord>)
-
-  const abortController = new AbortController()
 
   const seenIds = new Store(new Map<string, number>())
 
@@ -318,130 +264,165 @@ export function trailBaseCollectionOptions<
     }
 
     return new Promise<void>((resolve, reject) => {
-      const onAbort = () => {
-        clearTimeout(timeoutId)
-        reject(new TimeoutWaitingForIdsError(`Aborted while waiting for ids`))
-      }
+      const timeoutId = setTimeout(() => {
+        sub.unsubscribe()
+        reject(new TimeoutWaitingForIdsError(ids.toString()))
+      }, timeout)
 
-      abortController.signal.addEventListener(`abort`, onAbort)
-
-      const timeoutId = setTimeout(
-        () => reject(new TimeoutWaitingForIdsError(ids.toString())),
-        timeout,
-      )
-
-      const unsubscribe = seenIds.subscribe((value) => {
-        if (completed(value.currentVal)) {
+      const sub = seenIds.subscribe((value) => {
+        if (completed(value)) {
           clearTimeout(timeoutId)
-          abortController.signal.removeEventListener(`abort`, onAbort)
-          unsubscribe()
+          sub.unsubscribe()
           resolve()
         }
       })
     })
   }
 
+  let eventReader: ReadableStreamDefaultReader<Event> | undefined
+  const cancelEventReader = () => {
+    if (eventReader) {
+      // An already-errored stream rejects cancellation too. Cleanup still
+      // retires its reader; that rejection must not escape as detached work.
+      void eventReader.cancel().catch(() => undefined)
+      eventReader.releaseLock()
+      eventReader = undefined
+    }
+  }
+
   type SyncParams = Parameters<SyncConfig<TItem, TKey>[`sync`]>[0]
   const sync = {
     sync: (params: SyncParams) => {
-      const { begin, write, commit, markReady } = params
+      const { begin, write, commit, markReady, markError, collection } = params
+      let cancelled = false
+      let periodicCleanupTask: ReturnType<typeof setInterval> | undefined
 
-      // Initial fetch.
-      async function initialFetch() {
-        const limit = 256
-        let response = await config.recordApi.list({
-          pagination: {
-            limit,
-          },
-        })
-        let cursor = response.cursor
+      const cleanup = () => {
+        cancelled = true
+        cancelEventReader()
+        if (periodicCleanupTask !== undefined) {
+          clearInterval(periodicCleanupTask)
+          periodicCleanupTask = undefined
+        }
+      }
 
-        // Collect all records first
-        const allRecords: Array<TRecord> = []
+      // NOTE: We cache cursors from prior fetches. TanStack/db expects that
+      // cursors can be derived from a key, which is not true for TB, since
+      // cursors are encrypted. This is leaky and therefore not ideal.
+      const cursors = new Map<string | number, string>()
+
+      // Load (more) data.
+      async function load(opts: LoadSubsetOptions) {
+        if (cancelled || opts.signal?.aborted) return
+
+        const lastKey = opts.cursor?.lastKey
+        let cursor: string | undefined =
+          lastKey !== undefined ? cursors.get(lastKey) : undefined
+        let offset: number | undefined =
+          cursor === undefined && (opts.offset ?? 0) > 0
+            ? opts.offset
+            : undefined
+
+        const order: Array<string> | undefined = buildOrder(opts)
+        const filters: Array<FilterOrComposite> | undefined = buildFilters(
+          opts,
+          config,
+        )
+
+        let remaining: number = opts.limit ?? Number.MAX_VALUE
+        if (remaining <= 0) {
+          return
+        }
+        const appliedPages: Array<Promise<void>> = []
 
         while (true) {
+          const limit = Math.min(remaining, 256)
+          let response
+          try {
+            response = await config.recordApi.list({
+              pagination: {
+                limit,
+                offset,
+                cursor,
+              },
+              order,
+              filters,
+            })
+          } catch (error) {
+            if (cancelled || opts.signal?.aborted) return
+            throw error
+          }
+          if (cancelled || opts.signal?.aborted) return
+
           const length = response.records.length
-          if (length === 0) break
+          if (length === 0) {
+            // Drained - read everything.
+            break
+          }
 
-          allRecords.push(...response.records)
+          begin()
 
-          if (length < limit) break
+          for (let i = 0; i < Math.min(length, remaining); ++i) {
+            write({
+              type: `insert`,
+              value: parse(response.records[i]!),
+            })
+          }
 
-          response = await config.recordApi.list({
-            pagination: {
-              limit,
-              cursor,
-              offset: cursor === undefined ? allRecords.length : undefined,
-            },
-          })
-          cursor = response.cursor
+          const applied = commit(opts.signal)
+          if (applied !== true) {
+            appliedPages.push(applied)
+          }
+          if (cancelled || opts.signal?.aborted) return
+
+          remaining -= length
+
+          // Drained or read enough.
+          if (length < limit || remaining <= 0) {
+            if (response.cursor) {
+              cursors.set(
+                getKey(parse(response.records.at(-1)!)),
+                response.cursor,
+              )
+            }
+            break
+          }
+
+          // Update params for next iteration.
+          if (offset !== undefined) {
+            offset += length
+          } else {
+            cursor = response.cursor
+          }
         }
 
-        // Sort by ID for consistent insertion order (deterministic tie-breaking)
-        // Decode base64 IDs to UUIDs for proper lexicographic sorting
-        allRecords.sort((a: TRecord, b: TRecord) => {
-          const idA = decodeIdForSorting(a[`id` as keyof TRecord])
-          const idB = decodeIdForSorting(b[`id` as keyof TRecord])
-          return idA.localeCompare(idB)
-        })
-
-        begin()
-        for (const item of allRecords) {
-          write({
-            type: `insert`,
-            value: parse(item),
-          })
-        }
-
-        commit()
+        await Promise.all(appliedPages)
       }
 
       // Afterwards subscribe.
       async function listen(reader: ReadableStreamDefaultReader<Event>) {
-        console.log(`[TrailBase] Subscription listener started`)
         while (true) {
           const { done, value: event } = await reader.read()
 
           if (done || !event) {
-            console.log(`[TrailBase] Subscription stream ended`)
-            try {
-              if ((reader as any).locked) {
-                reader.releaseLock()
-              }
-            } catch {
-              // ignore if already released
-            }
             return
           }
 
-          console.log(
-            `[TrailBase] Received event:`,
-            JSON.stringify(event).slice(0, 200),
-          )
           begin()
           let value: TItem | undefined
           if (`Insert` in event) {
             value = parse(event.Insert as TRecord)
-            console.log(
-              `[TrailBase] Insert event for item with key: ${getKey(value)}`,
-            )
             write({ type: `insert`, value })
           } else if (`Delete` in event) {
             value = parse(event.Delete as TRecord)
-            console.log(
-              `[TrailBase] Delete event for item with key: ${getKey(value)}`,
-            )
             write({ type: `delete`, value })
           } else if (`Update` in event) {
             value = parse(event.Update as TRecord)
-            console.log(
-              `[TrailBase] Update event for item with key: ${getKey(value)}`,
-            )
             write({ type: `update`, value })
           } else {
             console.error(`Error: ${event.Error}`)
           }
-          commit()
+          void commit()
 
           if (value) {
             seenIds.setState((curr: Map<string, number>) => {
@@ -454,64 +435,97 @@ export function trailBaseCollectionOptions<
       }
 
       async function start() {
-        const eventStream = await config.recordApi.subscribe(`*`)
-        const reader = eventStream.getReader()
-
-        // Start listening for subscriptions first. Otherwise, we'd risk a gap
-        // between the initial fetch and starting to listen.
-        listen(reader)
-
+        let reader: ReadableStreamDefaultReader<Event> | undefined
         try {
+          const eventStream = await config.recordApi.subscribe(`*`)
+          if (cancelled) {
+            await eventStream.cancel()
+            return
+          }
+          const subscribedReader = eventStream.getReader()
+          reader = eventReader = subscribedReader
+
+          // Start listening for subscriptions first. Otherwise, we'd risk a gap
+          // between the initial fetch and starting to listen.
+          void listen(subscribedReader)
+            .finally(() => {
+              // A closed stream can still have a final event being processed.
+              // Release only after the listener has finished draining it.
+              // A processing failure can leave the stream open; cancel it too.
+              // Preserve the original failure if the stream already errored.
+              // Error settlement must not wait for transport cleanup.
+              void subscribedReader.cancel().catch(() => undefined)
+              subscribedReader.releaseLock()
+              if (eventReader === subscribedReader) eventReader = undefined
+            })
+            .catch((error: unknown) => {
+              if (!cancelled && collection.status === `loading`) {
+                markError(error)
+              } else if (!cancelled) {
+                console.error(`TrailBase subscription failed`, error)
+              }
+            })
+
           // Eager mode: perform initial fetch to populate everything
           if (internalSyncMode === `eager`) {
-            await initialFetch()
+            // Load everything on initial load.
+            await load({})
+            if (cancelled) return
             fullSyncCompleted = true
           }
-        } catch (e) {
-          abortController.abort()
-          throw e
-        }
-
-        // For progressive mode with test hooks, use non-blocking pattern
-        if (
-          internalSyncMode === `progressive` &&
-          testHooks?.beforeMarkingReady
-        ) {
-          // DON'T start full sync yet - let loadSubset handle data fetching
-          // Wait for the hook to resolve, THEN do full sync and mark ready
-          testHooks.beforeMarkingReady().then(async () => {
-            try {
-              // Now do the full sync
-              await initialFetch()
-              fullSyncCompleted = true
-            } catch (e) {
-              console.error(`TrailBase progressive full sync failed`, e)
+          // For progressive mode with test hooks, use non-blocking pattern
+          if (
+            internalSyncMode === `progressive` &&
+            testHooks?.beforeMarkingReady
+          ) {
+            // DON'T start full sync yet - let loadSubset handle data fetching
+            // Wait for the hook to resolve, THEN do full sync and mark ready
+            testHooks.beforeMarkingReady().then(async () => {
+              try {
+                // Now do the full sync
+                await load({})
+                fullSyncCompleted = true
+              } catch (e) {
+                console.error(`TrailBase progressive full sync failed`, e)
+              }
+              markReady()
+            })
+          } else {
+            // Mark ready immediately for eager/on-demand modes
+            if (!cancelled && collection.status === `loading`) {
+              markReady()
             }
-            markReady()
-          })
-        } else {
-          // Mark ready immediately for eager/on-demand modes
-          markReady()
 
-          // If progressive without test hooks, start background sync
-          if (internalSyncMode === `progressive`) {
-            // Defer background sync to avoid racing with preload assertions
-            setTimeout(() => {
-              void (async () => {
-                try {
-                  await initialFetch()
-                  fullSyncCompleted = true
-                } catch (e) {
-                  console.error(`TrailBase progressive full sync failed`, e)
-                }
-              })()
-            }, 0)
+            // If progressive without test hooks, start background sync
+            if (internalSyncMode === `progressive`) {
+              // Defer background sync to avoid racing with preload assertions
+              setTimeout(() => {
+                void (async () => {
+                  try {
+                    await load({})
+                    fullSyncCompleted = true
+                  } catch (e) {
+                    console.error(`TrailBase progressive full sync failed`, e)
+                  }
+                })()
+              }, 0)
+            }
           }
+        } catch (error) {
+          // An abandoned startup must not cancel a replacement session's reader.
+          if (cancelled) return
+          cancelEventReader()
+          if (collection.status === `loading`) {
+            markError(error)
+          }
+          return
         }
 
         // Lastly, start a periodic cleanup task that will be removed when the
         // reader closes.
-        const periodicCleanupTask = setInterval(() => {
+        if (cancelled || !reader) return
+
+        periodicCleanupTask = setInterval(() => {
           seenIds.setState((curr) => {
             const now = Date.now()
             let anyExpired = false
@@ -529,87 +543,29 @@ export function trailBaseCollectionOptions<
           })
         }, 120 * 1000)
 
-        const onAbort = () => {
-          clearInterval(periodicCleanupTask)
-          // It's safe to call cancel and releaseLock even if the stream is already closed.
-          reader.cancel().catch(() => {
-            /* ignore */
-          })
-          try {
-            reader.releaseLock()
-          } catch {
-            /* ignore */
+        const clearCleanupTask = () => {
+          if (periodicCleanupTask !== undefined) {
+            clearInterval(periodicCleanupTask)
+            periodicCleanupTask = undefined
           }
         }
-
-        abortController.signal.addEventListener(`abort`, onAbort)
-        reader.closed.finally(() => {
-          abortController.signal.removeEventListener(`abort`, onAbort)
-          clearInterval(periodicCleanupTask)
-        })
+        // listen() reports read errors. Observe this separate promise too.
+        void reader.closed.then(clearCleanupTask, clearCleanupTask)
       }
 
-      start()
+      void start()
 
       // Eager mode doesn't need subset loading
       if (internalSyncMode === `eager`) {
-        return
-      }
-
-      // Track if loadSubset has been called to prevent redundant fetches
-      // Using a promise to handle concurrent calls properly
-      let loadSubsetPromise: Promise<void> | null = null
-
-      // On-demand and progressive modes need loadSubset for query-driven data loading
-      const loadSubset = async (
-        opts: { limit?: number } = {},
-      ): Promise<void> => {
-        // If already loading or completed, return the existing promise or resolve immediately
-        if (loadSubsetPromise) {
-          return loadSubsetPromise
-        }
-
-        // In progressive mode after full sync is complete, no need to load more
-        if (internalSyncMode === `progressive` && fullSyncCompleted) {
-          return
-        }
-
-        // Create the promise before any async work to prevent race conditions
-        loadSubsetPromise = (async () => {
-          const limit = opts.limit ?? 256
-          const response = await config.recordApi.list({
-            pagination: { limit },
-          })
-          const records = response?.records ?? []
-
-          if (records.length > 0) {
-            // Sort records by ID to ensure consistent insertion order (for deterministic tie-breaking)
-            // Decode base64 IDs to UUIDs for proper lexicographic sorting
-            const sortedRecords = [...records].sort(
-              (a: TRecord, b: TRecord) => {
-                const idA = decodeIdForSorting(a[`id` as keyof TRecord])
-                const idB = decodeIdForSorting(b[`id` as keyof TRecord])
-                return idA.localeCompare(idB)
-              },
-            )
-
-            begin()
-            for (const item of sortedRecords) {
-              write({ type: `insert`, value: parse(item) })
-            }
-            commit()
-          }
-        })()
-
-        return loadSubsetPromise
+        return { cleanup }
       }
 
       return {
-        loadSubset,
+        cleanup,
+        loadSubset: load,
         getSyncMetadata: () =>
           ({
             syncMode: internalSyncMode,
-            fullSyncComplete: fullSyncCompleted,
           }) as const,
       }
     },
@@ -621,7 +577,7 @@ export function trailBaseCollectionOptions<
       }) as const,
   }
 
-  return {
+  const options = {
     ...config,
     syncMode: finalSyncMode,
     sync,
@@ -684,7 +640,116 @@ export function trailBaseCollectionOptions<
       await awaitIds(ids)
     },
     utils: {
-      cancel: () => abortController.abort(),
+      cancel: cancelEventReader,
     },
   }
+
+  return withCollectionConfigFactory(
+    options,
+    () => trailBaseCollectionOptions(config) as typeof options,
+  )
+}
+
+function buildOrder(opts: LoadSubsetOptions): undefined | Array<string> {
+  return opts.orderBy
+    ?.map((o: OrderByClause) => {
+      switch (o.expression.type) {
+        case 'ref': {
+          const field = o.expression.path[0]
+          if (o.compareOptions.direction == 'asc') {
+            return `+${field}`
+          }
+          return `-${field}`
+        }
+        default: {
+          console.warn(
+            'Skipping unsupported order clause:',
+            JSON.stringify(o.expression),
+          )
+          return undefined
+        }
+      }
+    })
+    .filter((f: string | undefined) => f !== undefined)
+}
+
+function buildCompareOp(name: string): CompareOp | undefined {
+  switch (name) {
+    case 'eq':
+      return 'equal'
+    case 'ne':
+      return 'notEqual'
+    case 'gt':
+      return 'greaterThan'
+    case 'gte':
+      return 'greaterThanEqual'
+    case 'lt':
+      return 'lessThan'
+    case 'lte':
+      return 'lessThanEqual'
+    default:
+      return undefined
+  }
+}
+
+function buildFilters<
+  TItem extends object,
+  TRecord extends object = TItem,
+  TKey extends string | number = string | number,
+>(
+  opts: LoadSubsetOptions,
+  config: TrailBaseCollectionConfig<TItem, TRecord, TKey>,
+): undefined | Array<FilterOrComposite> {
+  const where = opts.where
+  if (where === undefined) {
+    return undefined
+  }
+
+  function serializeValue<T = any>(column: string, value: T): string {
+    const conv = (config.serialize as any)[column]
+    if (conv) {
+      return `${conv(value)}`
+    }
+
+    if (typeof value === 'boolean') {
+      return value ? '1' : '0'
+    }
+
+    return `${value}`
+  }
+
+  switch (where.type) {
+    case 'func': {
+      const field = where.args[0]
+      const val = where.args[1]
+
+      const op = buildCompareOp(where.name)
+      if (op === undefined) {
+        break
+      }
+
+      if (field?.type === 'ref' && val?.type === 'val') {
+        const column = field.path.at(0)
+        if (column) {
+          const f = [
+            {
+              column: field.path.at(0) ?? '',
+              op,
+              value: serializeValue(column, val.value),
+            },
+          ]
+
+          return f
+        }
+      }
+      break
+    }
+    case 'ref':
+    case 'val':
+      break
+  }
+
+  console.warn('where clause which is not (yet) supported', opts.where)
+
+  return undefined
 }

@@ -13,6 +13,7 @@ import {
   not,
   or,
 } from '../../../src/query/builder/functions.js'
+import { InvalidWhereExpressionError } from '../../../src/errors.js'
 
 // Test schema
 interface Employee {
@@ -184,5 +185,58 @@ describe(`QueryBuilder.where`, () => {
     expect(builtQuery.where).toHaveLength(2)
     expect((builtQuery.where as any)[0]?.name).toBe(`eq`)
     expect((builtQuery.where as any)[1]?.name).toBe(`gt`)
+  })
+
+  describe(`error handling`, () => {
+    it(`throws InvalidWhereExpressionError when using JavaScript === operator`, () => {
+      const builder = new Query()
+      expect(() =>
+        builder
+          .from({ employees: employeesCollection })
+          // This is a common mistake - using JavaScript's === instead of eq()
+          .where(({ employees }) => (employees.id as any) === 1),
+      ).toThrow(InvalidWhereExpressionError)
+    })
+
+    it(`throws InvalidWhereExpressionError when callback returns a boolean`, () => {
+      const builder = new Query()
+      expect(() =>
+        builder
+          .from({ employees: employeesCollection })
+          .where(() => true as any),
+      ).toThrow(InvalidWhereExpressionError)
+    })
+
+    it(`throws InvalidWhereExpressionError when callback returns undefined`, () => {
+      const builder = new Query()
+      expect(() =>
+        builder
+          .from({ employees: employeesCollection })
+          .where(() => undefined as any),
+      ).toThrow(InvalidWhereExpressionError)
+    })
+
+    it(`throws InvalidWhereExpressionError when callback returns null`, () => {
+      const builder = new Query()
+      expect(() =>
+        builder
+          .from({ employees: employeesCollection })
+          .where(() => null as any),
+      ).toThrow(InvalidWhereExpressionError)
+    })
+
+    it(`throws InvalidWhereExpressionError with helpful message mentioning eq()`, () => {
+      const builder = new Query()
+      try {
+        builder
+          .from({ employees: employeesCollection })
+          .where(({ employees }) => (employees.id as any) === 1)
+        expect.fail(`Expected error to be thrown`)
+      } catch (e) {
+        expect(e).toBeInstanceOf(InvalidWhereExpressionError)
+        expect((e as Error).message).toContain(`eq(`)
+        expect((e as Error).message).toContain(`===`)
+      }
+    })
   })
 })

@@ -3,12 +3,10 @@ id: SubscriptionStatus
 title: SubscriptionStatus
 ---
 
-# Type Alias: SubscriptionStatus
-
 ```ts
 type SubscriptionStatus = "ready" | "loadingSubset";
 ```
 
-Defined in: [packages/db/src/types.ts:207](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L207)
+Defined in: [packages/db/src/types.ts:231](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L231)
 
 Subscription status values

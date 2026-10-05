@@ -3,15 +3,13 @@ id: useLiveQuery
 title: useLiveQuery
 ---
 
-# Function: useLiveQuery()
-
 ## Call Signature
 
 ```ts
-function useLiveQuery<TContext>(queryFn, deps?): UseLiveQueryReturn<{ [K in string | number | symbol]: (TContext["result"] extends object ? any[any] : TContext["hasJoins"] extends true ? TContext["schema"] : TContext["schema"][TContext["fromSourceName"]])[K] }>;
+function useLiveQuery<TContext>(queryFn, deps?): UseLiveQueryReturn<{ [K in string | number | symbol]: ResultValue<TContext>[K] }, InferResultType<TContext>>;
 ```
 
-Defined in: [useLiveQuery.svelte.ts:155](https://github.com/TanStack/db/blob/main/packages/svelte-db/src/useLiveQuery.svelte.ts#L155)
+Defined in: [packages/svelte-db/src/useLiveQuery.svelte.ts:202](https://github.com/TanStack/db/blob/main/packages/svelte-db/src/useLiveQuery.svelte.ts#L202)
 
 Create a live query using a query function
 
@@ -37,7 +35,7 @@ Array of reactive dependencies that trigger query re-execution when changed
 
 ### Returns
 
-[`UseLiveQueryReturn`](../interfaces/UseLiveQueryReturn.md)\<\{ \[K in string \| number \| symbol\]: (TContext\["result"\] extends object ? any\[any\] : TContext\["hasJoins"\] extends true ? TContext\["schema"\] : TContext\["schema"\]\[TContext\["fromSourceName"\]\])\[K\] \}\>
+[`UseLiveQueryReturn`](../interfaces/UseLiveQueryReturn.md)\<\{ \[K in string \| number \| symbol\]: ResultValue\<TContext\>\[K\] \}, `InferResultType`\<`TContext`\>\>
 
 Reactive object with query data, state, and status information
 
@@ -134,10 +132,10 @@ const todosQuery = useLiveQuery((q) =>
 ## Call Signature
 
 ```ts
-function useLiveQuery<TContext>(queryFn, deps?): UseLiveQueryReturn<{ [K in string | number | symbol]: (TContext["result"] extends object ? any[any] : TContext["hasJoins"] extends true ? TContext["schema"] : TContext["schema"][TContext["fromSourceName"]])[K] }>;
+function useLiveQuery<TContext>(queryFn, deps?): ConditionalUseLiveQueryReturn<{ [K in string | number | symbol]: ResultValue<TContext>[K] }, InferConditionalResultType<TContext>>;
 ```
 
-Defined in: [useLiveQuery.svelte.ts:161](https://github.com/TanStack/db/blob/main/packages/svelte-db/src/useLiveQuery.svelte.ts#L161)
+Defined in: [packages/svelte-db/src/useLiveQuery.svelte.ts:208](https://github.com/TanStack/db/blob/main/packages/svelte-db/src/useLiveQuery.svelte.ts#L208)
 
 Create a live query using a query function
 
@@ -163,7 +161,7 @@ Array of reactive dependencies that trigger query re-execution when changed
 
 ### Returns
 
-[`UseLiveQueryReturn`](../interfaces/UseLiveQueryReturn.md)\<\{ \[K in string \| number \| symbol\]: (TContext\["result"\] extends object ? any\[any\] : TContext\["hasJoins"\] extends true ? TContext\["schema"\] : TContext\["schema"\]\[TContext\["fromSourceName"\]\])\[K\] \}\>
+[`ConditionalUseLiveQueryReturn`](../type-aliases/ConditionalUseLiveQueryReturn.md)\<\{ \[K in string \| number \| symbol\]: ResultValue\<TContext\>\[K\] \}, `InferConditionalResultType`\<`TContext`\>\>
 
 Reactive object with query data, state, and status information
 
@@ -260,10 +258,10 @@ const todosQuery = useLiveQuery((q) =>
 ## Call Signature
 
 ```ts
-function useLiveQuery<TContext>(config, deps?): UseLiveQueryReturn<{ [K in string | number | symbol]: (TContext["result"] extends object ? any[any] : TContext["hasJoins"] extends true ? TContext["schema"] : TContext["schema"][TContext["fromSourceName"]])[K] }>;
+function useLiveQuery<TContext>(config, deps?): UseLiveQueryReturn<{ [K in string | number | symbol]: ResultValue<TContext>[K] }, InferResultType<TContext>>;
 ```
 
-Defined in: [useLiveQuery.svelte.ts:206](https://github.com/TanStack/db/blob/main/packages/svelte-db/src/useLiveQuery.svelte.ts#L206)
+Defined in: [packages/svelte-db/src/useLiveQuery.svelte.ts:256](https://github.com/TanStack/db/blob/main/packages/svelte-db/src/useLiveQuery.svelte.ts#L256)
 
 Create a live query using configuration object
 
@@ -277,7 +275,7 @@ Create a live query using configuration object
 
 #### config
 
-`LiveQueryCollectionConfig`\<`TContext`\>
+[`UseLiveQueryConfig`](../type-aliases/UseLiveQueryConfig.md)\<`TContext`\>
 
 Configuration object with query and options
 
@@ -289,7 +287,7 @@ Array of reactive dependencies that trigger query re-execution when changed
 
 ### Returns
 
-[`UseLiveQueryReturn`](../interfaces/UseLiveQueryReturn.md)\<\{ \[K in string \| number \| symbol\]: (TContext\["result"\] extends object ? any\[any\] : TContext\["hasJoins"\] extends true ? TContext\["schema"\] : TContext\["schema"\]\[TContext\["fromSourceName"\]\])\[K\] \}\>
+[`UseLiveQueryReturn`](../interfaces/UseLiveQueryReturn.md)\<\{ \[K in string \| number \| symbol\]: ResultValue\<TContext\>\[K\] \}, `InferResultType`\<`TContext`\>\>
 
 Reactive object with query data, state, and status information
 
@@ -333,10 +331,10 @@ const itemsQuery = useLiveQuery({
 ## Call Signature
 
 ```ts
-function useLiveQuery<TResult, TKey, TUtils>(liveQueryCollection): UseLiveQueryReturnWithCollection<TResult, TKey, TUtils>;
+function useLiveQuery<TResult, TKey, TUtils>(liveQueryCollection): UseLiveQueryReturnWithCollection<TResult, TKey, TUtils, TResult[]>;
 ```
 
-Defined in: [useLiveQuery.svelte.ts:255](https://github.com/TanStack/db/blob/main/packages/svelte-db/src/useLiveQuery.svelte.ts#L255)
+Defined in: [packages/svelte-db/src/useLiveQuery.svelte.ts:305](https://github.com/TanStack/db/blob/main/packages/svelte-db/src/useLiveQuery.svelte.ts#L305)
 
 Subscribe to an existing query collection (can be reactive)
 
@@ -358,13 +356,13 @@ Subscribe to an existing query collection (can be reactive)
 
 #### liveQueryCollection
 
-`MaybeGetter`\<`Collection`\<`TResult`, `TKey`, `TUtils`, `StandardSchemaV1`\<`unknown`, `unknown`\>, `TResult`\>\>
+`MaybeGetter`\<`Collection`\<`TResult`, `TKey`, `TUtils`, `StandardSchemaV1`\<`unknown`, `unknown`\>, `TResult`\> & `NonSingleResult`\>
 
 Pre-created query collection to subscribe to (can be a getter)
 
 ### Returns
 
-[`UseLiveQueryReturnWithCollection`](../interfaces/UseLiveQueryReturnWithCollection.md)\<`TResult`, `TKey`, `TUtils`\>
+[`UseLiveQueryReturnWithCollection`](../interfaces/UseLiveQueryReturnWithCollection.md)\<`TResult`, `TKey`, `TUtils`, `TResult`[]\>
 
 Reactive object with query data, state, and status information
 
@@ -410,5 +408,131 @@ const queryResult = useLiveQuery(sharedQuery)
 //   {#each queryResult.data as item (item.id)}
 //     <Item {...item} />
 //   {/each}
+// {/if}
+```
+
+## Call Signature
+
+```ts
+function useLiveQuery<TResult, TKey, TUtils>(liveQueryCollection): UseLiveQueryReturnWithCollection<TResult, TKey, TUtils, TResult | undefined>;
+```
+
+Defined in: [packages/svelte-db/src/useLiveQuery.svelte.ts:316](https://github.com/TanStack/db/blob/main/packages/svelte-db/src/useLiveQuery.svelte.ts#L316)
+
+Create a live query using a query function
+
+### Type Parameters
+
+#### TResult
+
+`TResult` *extends* `object`
+
+#### TKey
+
+`TKey` *extends* `string` \| `number`
+
+#### TUtils
+
+`TUtils` *extends* `Record`\<`string`, `any`\>
+
+### Parameters
+
+#### liveQueryCollection
+
+`MaybeGetter`\<`Collection`\<`TResult`, `TKey`, `TUtils`, `StandardSchemaV1`\<`unknown`, `unknown`\>, `TResult`\> & `SingleResult`\>
+
+### Returns
+
+[`UseLiveQueryReturnWithCollection`](../interfaces/UseLiveQueryReturnWithCollection.md)\<`TResult`, `TKey`, `TUtils`, `TResult` \| `undefined`\>
+
+Reactive object with query data, state, and status information
+
+### Remarks
+
+**IMPORTANT - Destructuring in Svelte 5:**
+Direct destructuring breaks reactivity. To destructure, wrap with `$derived`:
+
+❌ **Incorrect** - Loses reactivity:
+```ts
+const { data, isLoading } = useLiveQuery(...)
+```
+
+✅ **Correct** - Maintains reactivity:
+```ts
+// Option 1: Use dot notation (recommended)
+const query = useLiveQuery(...)
+// Access: query.data, query.isLoading
+
+// Option 2: Wrap with $derived for destructuring
+const query = useLiveQuery(...)
+const { data, isLoading } = $derived(query)
+```
+
+This is a fundamental Svelte 5 limitation, not a library bug. See:
+https://github.com/sveltejs/svelte/issues/11002
+
+### Examples
+
+```ts
+// Basic query with object syntax (recommended pattern)
+const todosQuery = useLiveQuery((q) =>
+  q.from({ todos: todosCollection })
+   .where(({ todos }) => eq(todos.completed, false))
+   .select(({ todos }) => ({ id: todos.id, text: todos.text }))
+)
+// Access via: todosQuery.data, todosQuery.isLoading, etc.
+```
+
+```ts
+// With reactive dependencies
+let minPriority = $state(5)
+const todosQuery = useLiveQuery(
+  (q) => q.from({ todos: todosCollection })
+         .where(({ todos }) => gt(todos.priority, minPriority)),
+  [() => minPriority] // Re-run when minPriority changes
+)
+```
+
+```ts
+// Destructuring with $derived (if needed)
+const query = useLiveQuery((q) =>
+  q.from({ todos: todosCollection })
+)
+const { data, isLoading, isError } = $derived(query)
+// Now data, isLoading, and isError maintain reactivity
+```
+
+```ts
+// Join pattern
+const issuesQuery = useLiveQuery((q) =>
+  q.from({ issues: issueCollection })
+   .join({ persons: personCollection }, ({ issues, persons }) =>
+     eq(issues.userId, persons.id)
+   )
+   .select(({ issues, persons }) => ({
+     id: issues.id,
+     title: issues.title,
+     userName: persons.name
+   }))
+)
+```
+
+```ts
+// Handle loading and error states in template
+const todosQuery = useLiveQuery((q) =>
+  q.from({ todos: todoCollection })
+)
+
+// In template:
+// {#if todosQuery.isLoading}
+//   <div>Loading...</div>
+// {:else if todosQuery.isError}
+//   <div>Error: {todosQuery.status}</div>
+// {:else}
+//   <ul>
+//     {#each todosQuery.data as todo (todo.id)}
+//       <li>{todo.text}</li>
+//     {/each}
+//   </ul>
 // {/if}
 ```

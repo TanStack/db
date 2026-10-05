@@ -1,8 +1,4 @@
 import {
-  createSingleRowRefProxy,
-  toExpression,
-} from '../query/builder/ref-proxy'
-import {
   compileSingleRowExpression,
   toBooleanPredicate,
 } from '../query/compiler/evaluators.js'
@@ -11,6 +7,12 @@ import {
   optimizeExpressionWithIndexes,
 } from '../utils/index-optimization.js'
 import { ensureIndexForField } from '../indexes/auto-index.js'
+import { getPropRefPropertyPath } from '../query/ir.js'
+import {
+  equalityConjunct,
+  equalityKey,
+  readPath,
+} from '../query/equality-conjunct.js'
 import { makeComparator } from '../utils/comparison.js'
 import { buildCompareOptions } from '../query/compiler/order-by'
 import type {
@@ -20,8 +22,41 @@ import type {
   SubscribeChangesOptions,
 } from '../types'
 import type { CollectionImpl } from './index.js'
-import type { SingleRowRefProxy } from '../query/builder/ref-proxy'
 import type { BasicExpression, OrderBy } from '../query/ir.js'
+import type { WithVirtualProps } from '../virtual-props.js'
+
+/**
+ * Yields visible entries, enriched with virtual properties, whose stored row
+ * passes `prefilter`.
+ */
+export type StoredRowScan<T extends object, TKey extends string | number> = (
+  prefilter: (row: object) => boolean,
+) => Iterable<[TKey, WithVirtualProps<T, TKey>]>
+
+/**
+ * A test on a stored row that is false only when `expression` must be false
+ * on the row's enriched copy, so a scan can skip enriching rows that fail.
+ * It reads one `eq(field, literal)` conjunct. The copy holds each enumerable
+ * own root field of the stored row and lacks the others, so its field is the
+ * stored value or `undefined`, which matches no literal.
+ */
+export function compileStoredRowPrefilter(
+  expression: BasicExpression<boolean>,
+): ((row: object) => boolean) | undefined {
+  const conjuncts =
+    expression.type === `func` && expression.name === `and`
+      ? expression.args
+      : [expression]
+  for (const conjunct of conjuncts) {
+    const eq = equalityConjunct(conjunct, getPropRefPropertyPath)
+    if (eq) {
+      return (row) =>
+        equalityKey(readPath(row as Record<string, unknown>, eq.path)) ===
+        eq.literalKey
+    }
+  }
+  return undefined
+}
 
 /**
  * Returns the current state of the collection as an array of changes
@@ -58,15 +93,23 @@ export function currentStateAsChanges<
   T extends object,
   TKey extends string | number,
 >(
-  collection: CollectionLike<T, TKey>,
+  collection: CollectionLike<WithVirtualProps<T, TKey>, TKey>,
   options: CurrentStateAsChangesOptions = {},
-): Array<ChangeMessage<T>> | void {
+  scanStoredRows?: StoredRowScan<T, TKey>,
+): Array<ChangeMessage<WithVirtualProps<T, TKey>, TKey>> | void {
   // Helper function to collect filtered results
   const collectFilteredResults = (
-    filterFn?: (value: T) => boolean,
-  ): Array<ChangeMessage<T>> => {
-    const result: Array<ChangeMessage<T>> = []
-    for (const [key, value] of collection.entries()) {
+    filterFn?: (value: WithVirtualProps<T, TKey>) => boolean,
+  ): Array<ChangeMessage<WithVirtualProps<T, TKey>, TKey>> => {
+    const result: Array<ChangeMessage<WithVirtualProps<T, TKey>, TKey>> = []
+    // Reject rows by a stored field before enriching them; survivors still
+    // pass through the full predicate.
+    const prefilter =
+      filterFn && scanStoredRows && options.where
+        ? compileStoredRowPrefilter(options.where)
+        : undefined
+    const rows = prefilter ? scanStoredRows!(prefilter) : collection.entries()
+    for (const [key, value] of rows) {
       // If no filter function is provided, include all items
       if (filterFn?.(value) ?? true) {
         result.push({
@@ -106,7 +149,7 @@ export function currentStateAsChanges<
     }
 
     // Convert keys to change messages
-    const result: Array<ChangeMessage<T>> = []
+    const result: Array<ChangeMessage<WithVirtualProps<T, TKey>, TKey>> = []
     for (const key of orderedKeys) {
       const value = collection.get(key)
       if (value !== undefined) {
@@ -137,11 +180,16 @@ export function currentStateAsChanges<
     )
 
     if (optimizationResult.canOptimize) {
-      // Use index optimization
-      const result: Array<ChangeMessage<T>> = []
+      // Use index optimization. When the index lookup is inexact, the keys
+      // are a superset of the true result (some conditions could not be
+      // served by an index), so re-check each row against the full expression.
+      const filterFn = optimizationResult.isExact
+        ? undefined
+        : createFilterFunctionFromExpression(expression)
+      const result: Array<ChangeMessage<WithVirtualProps<T, TKey>, TKey>> = []
       for (const key of optimizationResult.matchingKeys) {
         const value = collection.get(key)
-        if (value !== undefined) {
+        if (value !== undefined && (filterFn?.(value) ?? true)) {
           result.push({
             type: `insert`,
             key,
@@ -176,44 +224,6 @@ export function currentStateAsChanges<
 }
 
 /**
- * Creates a filter function from a where callback
- * @param whereCallback - The callback function that defines the filter condition
- * @returns A function that takes an item and returns true if it matches the filter
- */
-export function createFilterFunction<T extends object>(
-  whereCallback: (row: SingleRowRefProxy<T>) => any,
-): (item: T) => boolean {
-  return (item: T): boolean => {
-    try {
-      // First try the RefProxy approach for query builder functions
-      const singleRowRefProxy = createSingleRowRefProxy<T>()
-      const whereExpression = whereCallback(singleRowRefProxy)
-      const expression = toExpression(whereExpression)
-      const evaluator = compileSingleRowExpression(expression)
-      const result = evaluator(item as Record<string, unknown>)
-      // WHERE clauses should always evaluate to boolean predicates (Kevin's feedback)
-      return toBooleanPredicate(result)
-    } catch {
-      // If RefProxy approach fails (e.g., arithmetic operations), fall back to direct evaluation
-      try {
-        // Create a simple proxy that returns actual values for arithmetic operations
-        const simpleProxy = new Proxy(item as any, {
-          get(target, prop) {
-            return target[prop]
-          },
-        }) as SingleRowRefProxy<T>
-
-        const result = whereCallback(simpleProxy)
-        return toBooleanPredicate(result)
-      } catch {
-        // If both approaches fail, exclude the item
-        return false
-      }
-    }
-  }
-}
-
-/**
  * Creates a filter function from a pre-compiled expression
  * @param expression - The pre-compiled expression to evaluate
  * @returns A function that takes an item and returns true if it matches the filter
@@ -241,10 +251,13 @@ export function createFilterFunctionFromExpression<T extends object>(
  * @param options - The subscription options containing the where clause
  * @returns A filtered callback function
  */
-export function createFilteredCallback<T extends object>(
+export function createFilteredCallback<
+  T extends object,
+  TKey extends string | number = string | number,
+>(
   originalCallback: (changes: Array<ChangeMessage<T>>) => void,
-  options: SubscribeChangesOptions,
-): (changes: Array<ChangeMessage<T>>) => void {
+  options: SubscribeChangesOptions<T, TKey>,
+): (changes: Array<ChangeMessage<T>>) => boolean {
   const filterFn = createFilterFunctionFromExpression(options.whereExpression!)
 
   return (changes: Array<ChangeMessage<T>>) => {
@@ -294,7 +307,9 @@ export function createFilteredCallback<T extends object>(
     // if the original changes array was empty (which indicates a ready signal)
     if (filteredChanges.length > 0 || changes.length === 0) {
       originalCallback(filteredChanges)
+      return true
     }
+    return false
   }
 }
 
@@ -347,7 +362,7 @@ function getOrderedKeys<T extends object, TKey extends string | number>(
         // Take the keys that match the filter and limit
         // if no limit is provided `index.keyCount` is used,
         // i.e. we will take all keys that match the filter
-        return index.take(limit ?? index.keyCount, undefined, filterFn)
+        return index.takeFromStart(limit ?? index.keyCount, filterFn)
       }
     }
   }
@@ -364,16 +379,17 @@ function getOrderedKeys<T extends object, TKey extends string | number>(
     }
   }
 
-  // Sort using makeComparator
+  const clauses = orderBy.map((clause) => ({
+    expression: clause.expression,
+    compare: makeComparator(buildCompareOptions(clause, collection)),
+  }))
   const compare = (a: { key: TKey; value: T }, b: { key: TKey; value: T }) => {
-    for (const clause of orderBy) {
-      const compareFn = makeComparator(clause.compareOptions)
-
+    for (const clause of clauses) {
       // Extract values for comparison
       const aValue = extractValueFromItem(a.value, clause.expression)
       const bValue = extractValueFromItem(b.value, clause.expression)
 
-      const result = compareFn(aValue, bValue)
+      const result = clause.compare(aValue, bValue)
       if (result !== 0) {
         return result
       }

@@ -5,11 +5,12 @@
  * Uses shared test suites from @tanstack/db-collection-e2e.
  */
 
-import { afterAll, afterEach, beforeAll, describe, inject } from 'vitest'
-import { createCollection } from '@tanstack/db'
+import { afterEach, describe, expect, inject } from 'vitest'
+import { BTreeIndex, createCollection } from '@tanstack/db'
 import { initClient } from 'trailbase'
 import { trailBaseCollectionOptions } from '../src/trailbase'
 import {
+  captureSeedData,
   createCollationTestSuite,
   createDeduplicationTestSuite,
   createJoinsTestSuite,
@@ -20,7 +21,8 @@ import {
   createProgressiveTestSuite,
   generateSeedData,
 } from '../../db-collection-e2e/src/index'
-import { waitFor } from '../../db-collection-e2e/src/utils/helpers'
+import type { Client } from 'trailbase'
+import type { SeedDataResult } from '../../db-collection-e2e/src/index'
 import type { TrailBaseSyncMode } from '../src/trailbase'
 import type {
   Comment,
@@ -36,88 +38,58 @@ declare module 'vitest' {
   }
 }
 
-/**
- * Decode base64-encoded BLOB UUID to standard UUID string format
- * TrailBase stores UUIDs as BLOBs and returns them as base64
- */
-function base64ToUuid(base64: string): string {
-  // Decode base64 to bytes
-  const binaryString = atob(base64)
-  const bytes = new Uint8Array(binaryString.length)
-  for (let i = 0; i < binaryString.length; i++) {
-    bytes[i] = binaryString.charCodeAt(i)
-  }
-
-  // Convert bytes to UUID string format
-  const hex = Array.from(bytes)
-    .map((b) => b.toString(16).padStart(2, '0'))
-    .join('')
-
-  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20, 32)}`
-}
-
-/**
- * Encode UUID string to URL-safe base64 format for TrailBase API calls
- * TrailBase returns standard base64 from create, but API URLs need URL-safe base64
- */
-function uuidToBase64(uuid: string): string {
-  // Remove dashes and convert hex to bytes
+function parseUuid(uuid: string): Uint8Array {
   const hex = uuid.replace(/-/g, '')
-  const bytes = new Uint8Array(16)
-  for (let i = 0; i < 16; i++) {
-    bytes[i] = parseInt(hex.slice(i * 2, i * 2 + 2), 16)
+
+  if (!/^[0-9a-fA-F]{32}$/.test(hex)) {
+    throw new Error(`Invalid UUID: ${uuid}`)
   }
 
-  // Convert bytes to URL-safe base64 (replace + with - and / with _)
-  let binaryString = ''
-  for (const byte of bytes) {
-    binaryString += String.fromCharCode(byte)
-  }
-  return btoa(binaryString).replace(/\+/g, '-').replace(/\//g, '_')
+  return Uint8Array.from(
+    Array.from({ length: 16 }, (_, index) =>
+      Number.parseInt(hex.slice(index * 2, index * 2 + 2), 16),
+    ),
+  )
 }
 
-/**
- * Parse TrailBase ID response - handles various formats:
- * - URL-safe base64 encoded UUID blob
- * - Standard base64 encoded UUID blob
- * - Plain UUID string
- * - Integer (for backwards compatibility)
- */
-function parseTrailBaseId(rawId: unknown): string {
-  const idStr = String(rawId)
-
-  // Check if it's already a UUID string format
-  if (
-    /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(
-      idStr,
-    )
-  ) {
-    return idStr
+function stringifyUuid(bytes: Uint8Array): string {
+  if (bytes.length !== 16) {
+    throw new Error(`UUID bytes must be 16 bytes, got ${bytes.length}`)
   }
 
-  // Check if it's an integer
-  if (/^\d+$/.test(idStr)) {
-    return idStr
-  }
+  const hex = Array.from(bytes, (byte) =>
+    byte.toString(16).padStart(2, '0'),
+  ).join('')
 
-  // Try URL-safe base64 decoding (with - and _ instead of + and /)
-  try {
-    // Convert URL-safe base64 to standard base64
-    const standardBase64 = idStr.replace(/-/g, '+').replace(/_/g, '/')
-    // Add padding if needed
-    const padded =
-      standardBase64 + '=='.slice(0, (4 - (standardBase64.length % 4)) % 4)
-    return base64ToUuid(padded)
-  } catch {
-    // If that fails, try standard base64
-    try {
-      return base64ToUuid(idStr)
-    } catch {
-      // If all else fails, return as-is
-      console.warn(`Could not parse TrailBase ID: ${idStr}`)
-      return idStr
-    }
-  }
+  return [
+    hex.slice(0, 8),
+    hex.slice(8, 12),
+    hex.slice(12, 16),
+    hex.slice(16, 20),
+    hex.slice(20),
+  ].join('-')
+}
+// / Decode a "url-safe" base64 string to bytes.
+function urlSafeBase64Decode(base64: string): Uint8Array {
+  return Uint8Array.from(
+    atob(base64.replace(/_/g, '/').replace(/-/g, '+')),
+    (c) => c.charCodeAt(0),
+  )
+}
+
+// / Encode an arbitrary string input as a "url-safe" base64 string.
+function urlSafeBase64Encode(bytes: Uint8Array): string {
+  return btoa(String.fromCharCode(...bytes))
+    .replace(/\//g, '_')
+    .replace(/\+/g, '-')
+}
+
+function parseTrailBaseId(id: string): string {
+  return stringifyUuid(urlSafeBase64Decode(id))
+}
+
+function toTrailBaseId(id: string): string {
+  return urlSafeBase64Encode(parseUuid(id))
 }
 
 /**
@@ -156,48 +128,11 @@ interface CommentRecord {
 }
 
 /**
- * Parse functions - only transform types that differ between DB and app
- */
-const parseUser = (record: UserRecord): User => ({
-  id: parseTrailBaseId(record.id),
-  name: record.name,
-  email: record.email,
-  age: record.age,
-  isActive: Boolean(record.isActive),
-  createdAt: new Date(record.createdAt),
-  metadata: record.metadata ? JSON.parse(record.metadata) : null,
-  deletedAt: record.deletedAt ? new Date(record.deletedAt) : null,
-})
-
-const parsePost = (record: PostRecord): Post => ({
-  id: parseTrailBaseId(record.id),
-  userId: record.userId,
-  title: record.title,
-  content: record.content,
-  viewCount: record.viewCount,
-  largeViewCount: BigInt(record.largeViewCount),
-  publishedAt: record.publishedAt ? new Date(record.publishedAt) : null,
-  deletedAt: record.deletedAt ? new Date(record.deletedAt) : null,
-})
-
-const parseComment = (record: CommentRecord): Comment => ({
-  id: parseTrailBaseId(record.id),
-  postId: record.postId,
-  userId: record.userId,
-  text: record.text,
-  createdAt: new Date(record.createdAt),
-  deletedAt: record.deletedAt ? new Date(record.deletedAt) : null,
-})
-
-/**
  * Serialize functions - transform app types to DB storage types
  * ID is base64 encoded for TrailBase BLOB storage
  */
 const serializeUser = (user: User): UserRecord => ({
-  id: uuidToBase64(user.id),
-  name: user.name,
-  email: user.email,
-  age: user.age,
+  ...user,
   isActive: user.isActive ? 1 : 0,
   createdAt: user.createdAt.toISOString(),
   metadata: user.metadata ? JSON.stringify(user.metadata) : null,
@@ -205,87 +140,27 @@ const serializeUser = (user: User): UserRecord => ({
 })
 
 const serializePost = (post: Post): PostRecord => ({
-  id: uuidToBase64(post.id),
-  userId: post.userId,
-  title: post.title,
-  content: post.content,
-  viewCount: post.viewCount,
+  ...post,
   largeViewCount: post.largeViewCount.toString(),
   publishedAt: post.publishedAt ? post.publishedAt.toISOString() : null,
   deletedAt: post.deletedAt ? post.deletedAt.toISOString() : null,
 })
 
 const serializeComment = (comment: Comment): CommentRecord => ({
-  id: uuidToBase64(comment.id),
-  postId: comment.postId,
-  userId: comment.userId,
-  text: comment.text,
+  ...comment,
   createdAt: comment.createdAt.toISOString(),
   deletedAt: comment.deletedAt ? comment.deletedAt.toISOString() : null,
 })
 
 /**
- * Partial serializers for updates
- */
-const serializeUserPartial = (user: Partial<User>): Partial<UserRecord> => {
-  const result: Partial<UserRecord> = {}
-  if (user.id !== undefined) result.id = uuidToBase64(user.id)
-  if (user.name !== undefined) result.name = user.name
-  if (user.email !== undefined) result.email = user.email
-  if (user.age !== undefined) result.age = user.age
-  if (user.isActive !== undefined) result.isActive = user.isActive ? 1 : 0
-  if (user.createdAt !== undefined)
-    result.createdAt = user.createdAt.toISOString()
-  if (user.metadata !== undefined)
-    result.metadata = user.metadata ? JSON.stringify(user.metadata) : null
-  if (user.deletedAt !== undefined)
-    result.deletedAt = user.deletedAt ? user.deletedAt.toISOString() : null
-  return result
-}
-
-const serializePostPartial = (post: Partial<Post>): Partial<PostRecord> => {
-  const result: Partial<PostRecord> = {}
-  if (post.id !== undefined) result.id = uuidToBase64(post.id)
-  if (post.userId !== undefined) result.userId = post.userId
-  if (post.title !== undefined) result.title = post.title
-  if (post.content !== undefined) result.content = post.content
-  if (post.viewCount !== undefined) result.viewCount = post.viewCount
-  if (post.largeViewCount !== undefined)
-    result.largeViewCount = post.largeViewCount.toString()
-  if (post.publishedAt !== undefined)
-    result.publishedAt = post.publishedAt
-      ? post.publishedAt.toISOString()
-      : null
-  if (post.deletedAt !== undefined)
-    result.deletedAt = post.deletedAt ? post.deletedAt.toISOString() : null
-  return result
-}
-
-const serializeCommentPartial = (
-  comment: Partial<Comment>,
-): Partial<CommentRecord> => {
-  const result: Partial<CommentRecord> = {}
-  if (comment.id !== undefined) result.id = uuidToBase64(comment.id)
-  if (comment.postId !== undefined) result.postId = comment.postId
-  if (comment.userId !== undefined) result.userId = comment.userId
-  if (comment.text !== undefined) result.text = comment.text
-  if (comment.createdAt !== undefined)
-    result.createdAt = comment.createdAt.toISOString()
-  if (comment.deletedAt !== undefined)
-    result.deletedAt = comment.deletedAt
-      ? comment.deletedAt.toISOString()
-      : null
-  return result
-}
-
-/**
  * Helper to create a set of collections for a given sync mode
  */
 function createCollectionsForSyncMode(
-  client: ReturnType<typeof initClient>,
+  client: Client,
   testId: string,
   syncMode: TrailBaseSyncMode,
   suffix: string,
+  own: (collection: { cleanup: () => Promise<void> }) => void,
 ) {
   const usersRecordApi = client.records<UserRecord>(`users_e2e`)
   const postsRecordApi = client.records<PostRecord>(`posts_e2e`)
@@ -296,39 +171,75 @@ function createCollectionsForSyncMode(
       id: `trailbase-e2e-users-${suffix}-${testId}`,
       recordApi: usersRecordApi,
       getKey: (item: User) => item.id,
-      startSync: true,
+      startSync: syncMode !== `progressive`,
       syncMode,
-      parse: parseUser,
-      serialize: serializeUser,
-      serializePartial: serializeUserPartial,
+      autoIndex: `eager`,
+      defaultIndexType: BTreeIndex,
+      parse: {
+        id: parseTrailBaseId,
+        isActive: (isActive) => Boolean(isActive),
+        createdAt: (createdAt) => new Date(createdAt),
+        metadata: (m) => (m ? JSON.parse(m) : null),
+        deletedAt: (d) => (d ? new Date(d) : null),
+      },
+      serialize: {
+        id: toTrailBaseId,
+        isActive: (a) => (a ? 1 : 0),
+        createdAt: (c) => c.toISOString(),
+        metadata: (m) => (m ? JSON.stringify(m) : null),
+        deletedAt: (d) => (d ? d.toISOString() : null),
+      },
     }),
   )
+  own(usersCollection)
 
   const postsCollection = createCollection(
     trailBaseCollectionOptions({
       id: `trailbase-e2e-posts-${suffix}-${testId}`,
       recordApi: postsRecordApi,
       getKey: (item: Post) => item.id,
-      startSync: true,
+      startSync: syncMode !== `progressive`,
       syncMode,
-      parse: parsePost,
-      serialize: serializePost,
-      serializePartial: serializePostPartial,
+      autoIndex: `eager`,
+      defaultIndexType: BTreeIndex,
+      parse: {
+        id: parseTrailBaseId,
+        largeViewCount: (l) => BigInt(l),
+        publishedAt: (v) => (v ? new Date(v) : null),
+        deletedAt: (d) => (d ? new Date(d) : null),
+      },
+      serialize: {
+        id: toTrailBaseId,
+        largeViewCount: (v) => v.toString(),
+        publishedAt: (v) => (v ? v.toISOString() : null),
+        deletedAt: (d) => (d ? d.toISOString() : null),
+      },
     }),
   )
+  own(postsCollection)
 
   const commentsCollection = createCollection(
     trailBaseCollectionOptions({
       id: `trailbase-e2e-comments-${suffix}-${testId}`,
       recordApi: commentsRecordApi,
       getKey: (item: Comment) => item.id,
-      startSync: true,
+      startSync: syncMode !== `progressive`,
       syncMode,
-      parse: parseComment,
-      serialize: serializeComment,
-      serializePartial: serializeCommentPartial,
+      autoIndex: `eager`,
+      defaultIndexType: BTreeIndex,
+      parse: {
+        id: parseTrailBaseId,
+        createdAt: (v) => new Date(v),
+        deletedAt: (d) => (d ? new Date(d) : null),
+      },
+      serialize: {
+        id: toTrailBaseId,
+        createdAt: (v) => v.toISOString(),
+        deletedAt: (d) => (d ? d.toISOString() : null),
+      },
     }),
   )
+  own(commentsCollection)
 
   return {
     users: usersCollection as Collection<User>,
@@ -337,239 +248,143 @@ function createCollectionsForSyncMode(
   }
 }
 
-describe(`TrailBase Collection E2E Tests`, () => {
-  let config: E2ETestConfig
-  let client: ReturnType<typeof initClient>
-  let testId: string
-  let seedData: ReturnType<typeof generateSeedData>
+async function initialCleanup(client: Client) {
+  console.log(`Cleaning up existing records...`)
 
-  // Collections for each sync mode
-  let eagerCollections: ReturnType<typeof createCollectionsForSyncMode>
-  let onDemandCollections: ReturnType<typeof createCollectionsForSyncMode>
-
-  // Progressive collections with test hooks (created separately)
-  let progressiveUsers: Collection<User>
-  let progressivePosts: Collection<Post>
-  let progressiveComments: Collection<Comment>
-
-  // Control mechanisms for progressive collections test hooks
-  const usersUpToDateControl = {
-    current: null as (() => void) | null,
-    createPromise: () =>
-      new Promise<void>((resolve) => {
-        usersUpToDateControl.current = resolve
-      }),
-  }
-  const postsUpToDateControl = {
-    current: null as (() => void) | null,
-    createPromise: () =>
-      new Promise<void>((resolve) => {
-        postsUpToDateControl.current = resolve
-      }),
-  }
-  const commentsUpToDateControl = {
-    current: null as (() => void) | null,
-    createPromise: () =>
-      new Promise<void>((resolve) => {
-        commentsUpToDateControl.current = resolve
-      }),
-  }
-
-  beforeAll(async () => {
-    const baseUrl = inject(`baseUrl`)
-    seedData = generateSeedData()
-
-    testId = Date.now().toString(16)
-
-    // Initialize TrailBase client
-    client = initClient(baseUrl)
-
-    // Get record APIs for seeding
-    const usersRecordApi = client.records<UserRecord>(`users_e2e`)
-    const postsRecordApi = client.records<PostRecord>(`posts_e2e`)
-    const commentsRecordApi = client.records<CommentRecord>(`comments_e2e`)
-
-    // Clean up any existing records (from previous test runs or mutations)
-    console.log(`Cleaning up existing records...`)
+  const commentsRecordApi = client.records<CommentRecord>(`comments_e2e`)
+  const existingComments = await commentsRecordApi.list({})
+  for (const comment of existingComments.records) {
     try {
-      const existingComments = await commentsRecordApi.list({})
-      for (const comment of existingComments.records) {
-        try {
-          await commentsRecordApi.delete(comment.id)
-        } catch {
-          /* ignore */
-        }
-      }
-      const existingPosts = await postsRecordApi.list({})
-      for (const post of existingPosts.records) {
-        try {
-          await postsRecordApi.delete(post.id)
-        } catch {
-          /* ignore */
-        }
-      }
-      const existingUsers = await usersRecordApi.list({})
-      for (const user of existingUsers.records) {
-        try {
-          await usersRecordApi.delete(user.id)
-        } catch {
-          /* ignore */
-        }
-      }
-      console.log(`Cleanup complete`)
+      await commentsRecordApi.delete(comment.id)
+    } catch {
+      /* ignore */
+    }
+  }
+
+  const postsRecordApi = client.records<PostRecord>(`posts_e2e`)
+  const existingPosts = await postsRecordApi.list({})
+  for (const post of existingPosts.records) {
+    try {
+      await postsRecordApi.delete(post.id)
+    } catch {
+      /* ignore */
+    }
+  }
+
+  const usersRecordApi = client.records<UserRecord>(`users_e2e`)
+  const existingUsers = await usersRecordApi.list({})
+  for (const user of existingUsers.records) {
+    try {
+      await usersRecordApi.delete(user.id)
+    } catch {
+      /* ignore */
+    }
+  }
+
+  console.log(`Cleanup complete`)
+}
+
+async function setupInitialData(client: Client, seedData: SeedDataResult) {
+  const errors: Array<unknown> = []
+  const usersRecordApi = client.records<UserRecord>(`users_e2e`)
+  const postsRecordApi = client.records<PostRecord>(`posts_e2e`)
+  const commentsRecordApi = client.records<CommentRecord>(`comments_e2e`)
+
+  // Insert seed data - we provide the ID so the original UUIDs are preserved
+  console.log(`Inserting ${seedData.users.length} users...`)
+  let userErrors = 0
+  for (const user of seedData.users) {
+    try {
+      const serialized = serializeUser(user)
+      if (userErrors === 0)
+        console.log('First user data:', JSON.stringify(serialized))
+      await usersRecordApi.create(serialized)
     } catch (e) {
-      console.log(`Cleanup skipped (tables might be empty):`, e)
+      errors.push(e)
+      userErrors++
+      if (userErrors <= 3) console.error('User insert error:', e)
     }
+  }
+  console.log(
+    `Inserted users: ${seedData.users.length - userErrors} success, ${userErrors} errors`,
+  )
+  console.log(`First user ID: ${seedData.users.at(0)?.id}`)
 
-    // Insert seed data - we provide the ID so the original UUIDs are preserved
-    console.log(`Inserting ${seedData.users.length} users...`)
-    let userErrors = 0
-    for (const user of seedData.users) {
+  console.log(`Inserting ${seedData.posts.length} posts...`)
+  let postErrors = 0
+  for (const post of seedData.posts) {
+    try {
+      await postsRecordApi.create(serializePost(post))
+    } catch (e) {
+      errors.push(e)
+      postErrors++
+      if (postErrors <= 3) console.error('Post insert error:', e)
+    }
+  }
+  console.log(
+    `Inserted posts: ${seedData.posts.length - postErrors} success, ${postErrors} errors`,
+  )
+
+  console.log(`Inserting ${seedData.comments.length} comments...`)
+  let commentErrors = 0
+  for (const comment of seedData.comments) {
+    try {
+      await commentsRecordApi.create(serializeComment(comment))
+    } catch (e) {
+      errors.push(e)
+      commentErrors++
+      if (commentErrors <= 3) console.error('Comment insert error:', e)
+    }
+  }
+  console.log(
+    `Inserted comments: ${seedData.comments.length - commentErrors} success, ${commentErrors} errors`,
+  )
+  if (errors.length > 0)
+    throw new AggregateError(errors, 'TrailBase fixture insertions failed')
+}
+
+describe(`TrailBase Collection E2E Tests`, async () => {
+  const baseUrl = inject(`baseUrl`)
+  const client = initClient(baseUrl)
+  const cleanups: Array<() => Promise<void>> = []
+  const own = (collection: { cleanup: () => Promise<void> }) => {
+    cleanups.push(() => collection.cleanup())
+  }
+  afterEach(async () => {
+    const errors: Array<unknown> = []
+    for (const cleanup of cleanups.splice(0).reverse()) {
       try {
-        const serialized = serializeUser(user)
-        if (userErrors === 0)
-          console.log('First user data:', JSON.stringify(serialized))
-        await usersRecordApi.create(serialized)
-      } catch (e) {
-        userErrors++
-        if (userErrors <= 3) console.error('User insert error:', e)
+        await cleanup()
+      } catch (error) {
+        errors.push(error)
       }
     }
-    console.log(
-      `Inserted users: ${seedData.users.length - userErrors} success, ${userErrors} errors`,
-    )
-    if (seedData.users.length > 0)
-      console.log(`First user ID: ${seedData.users[0].id}`)
+    if (errors.length === 1) throw errors[0]
+    if (errors.length > 1)
+      throw new AggregateError(errors, 'TrailBase collection cleanup failed')
+  })
 
-    console.log(`Inserting ${seedData.posts.length} posts...`)
-    let postErrors = 0
-    for (const post of seedData.posts) {
-      try {
-        await postsRecordApi.create(serializePost(post))
-      } catch (e) {
-        postErrors++
-        if (postErrors <= 3) console.error('Post insert error:', e)
-      }
-    }
-    console.log(
-      `Inserted posts: ${seedData.posts.length - postErrors} success, ${postErrors} errors`,
-    )
+  // Wipe all pre-existing data, e.g. when using a persistent TB instance.
+  await initialCleanup(client)
 
-    console.log(`Inserting ${seedData.comments.length} comments...`)
-    let commentErrors = 0
-    for (const comment of seedData.comments) {
-      try {
-        await commentsRecordApi.create(serializeComment(comment))
-      } catch (e) {
-        commentErrors++
-        if (commentErrors <= 3) console.error('Comment insert error:', e)
-      }
-    }
-    console.log(
-      `Inserted comments: ${seedData.comments.length - commentErrors} success, ${commentErrors} errors`,
-    )
+  const seedData = generateSeedData()
+  const fixture = captureSeedData(seedData, {
+    registration: 'packages/trailbase-db-collection/e2e/trailbase.e2e.test.ts',
+    provider: 'TrailBase SDK with test service',
+  })
+  await setupInitialData(client, seedData)
 
+  async function getConfig(): Promise<E2ETestConfig> {
     // Create collections with different sync modes
-    eagerCollections = createCollectionsForSyncMode(
-      client,
-      testId,
-      `eager`,
-      `eager`,
-    )
-    onDemandCollections = createCollectionsForSyncMode(
+    const testId = Date.now().toString(16)
+
+    const onDemandCollections = createCollectionsForSyncMode(
       client,
       testId,
       `on-demand`,
       `ondemand`,
+      own,
     )
-
-    // Create progressive collections with test hooks
-    // These use startSync: false so tests can control when sync starts
-    progressiveUsers = createCollection(
-      trailBaseCollectionOptions({
-        id: `trailbase-e2e-users-progressive-${testId}`,
-        recordApi: usersRecordApi,
-        getKey: (item: User) => item.id,
-        startSync: false, // Don't start immediately - tests will start when ready
-        syncMode: `progressive`,
-        parse: parseUser,
-        serialize: serializeUser,
-        serializePartial: serializeUserPartial,
-      }),
-    ) as Collection<User>
-
-    progressivePosts = createCollection(
-      trailBaseCollectionOptions({
-        id: `trailbase-e2e-posts-progressive-${testId}`,
-        recordApi: postsRecordApi,
-        getKey: (item: Post) => item.id,
-        startSync: false,
-        syncMode: `progressive`,
-        parse: parsePost,
-        serialize: serializePost,
-        serializePartial: serializePostPartial,
-      }),
-    ) as Collection<Post>
-
-    progressiveComments = createCollection(
-      trailBaseCollectionOptions({
-        id: `trailbase-e2e-comments-progressive-${testId}`,
-        recordApi: commentsRecordApi,
-        getKey: (item: Comment) => item.id,
-        startSync: false,
-        syncMode: `progressive`,
-        parse: parseComment,
-        serialize: serializeComment,
-        serializePartial: serializeCommentPartial,
-      }),
-    ) as Collection<Comment>
-
-    // Wait for eager collections to sync (they need to fetch all data before marking ready)
-    console.log('Calling preload on eager collections...')
-    await Promise.all([
-      eagerCollections.users.preload(),
-      eagerCollections.posts.preload(),
-      eagerCollections.comments.preload(),
-    ])
-    console.log('Preload complete, checking sizes...')
-    console.log(
-      `Users size: ${eagerCollections.users.size}, expected: ${seedData.users.length}`,
-    )
-    console.log(
-      `Posts size: ${eagerCollections.posts.size}, expected: ${seedData.posts.length}`,
-    )
-    console.log(
-      `Comments size: ${eagerCollections.comments.size}, expected: ${seedData.comments.length}`,
-    )
-
-    // Debug: try direct list API call
-    const testList = await usersRecordApi.list({ pagination: { limit: 10 } })
-    console.log(
-      `Direct list API returned ${testList.records.length} records:`,
-      testList.records.slice(0, 2),
-    )
-
-    // Wait for eager collections to have all data
-    await Promise.all([
-      waitFor(() => eagerCollections.users.size >= seedData.users.length, {
-        timeout: 30000,
-        interval: 500,
-        message: `TrailBase eager sync has not completed for users`,
-      }),
-      waitFor(() => eagerCollections.posts.size >= seedData.posts.length, {
-        timeout: 30000,
-        interval: 500,
-        message: `TrailBase eager sync has not completed for posts`,
-      }),
-      waitFor(
-        () => eagerCollections.comments.size >= seedData.comments.length,
-        {
-          timeout: 30000,
-          interval: 500,
-          message: `TrailBase eager sync has not completed for comments`,
-        },
-      ),
-    ])
 
     // On-demand collections are marked ready immediately
     await Promise.all([
@@ -578,12 +393,44 @@ describe(`TrailBase Collection E2E Tests`, () => {
       onDemandCollections.comments.preload(),
     ])
 
-    // Note: We DON'T call preload() on progressive collections here
-    // because the test hooks will block. Individual progressive tests
-    // will handle preload and release as needed.
+    const progressiveCollections = createCollectionsForSyncMode(
+      client,
+      testId,
+      `progressive`,
+      `progressive`,
+      own,
+    )
 
-    config = {
+    const eagerCollections = createCollectionsForSyncMode(
+      client,
+      testId,
+      `eager`,
+      `eager`,
+      own,
+    )
+
+    // Wait for eager collections to sync (they need to fetch all data before marking ready)
+    // console.log('Calling preload on eager collections...')
+    await Promise.all([
+      eagerCollections.users.preload(),
+      eagerCollections.posts.preload(),
+      eagerCollections.comments.preload(),
+    ])
+    expect(eagerCollections.posts.size).toEqual(seedData.posts.length)
+    expect(eagerCollections.comments.size).toEqual(seedData.comments.length)
+
+    // NOTE: One of the tests deletes a user :/
+    expect(eagerCollections.users.size).toBeGreaterThanOrEqual(
+      seedData.users.length - 1,
+    )
+
+    const usersRecordApi = client.records<UserRecord>(`users_e2e`)
+    const postsRecordApi = client.records<PostRecord>(`posts_e2e`)
+
+    return {
+      fixture,
       collections: {
+        progressive: progressiveCollections,
         eager: {
           users: eagerCollections.users,
           posts: eagerCollections.posts,
@@ -593,11 +440,6 @@ describe(`TrailBase Collection E2E Tests`, () => {
           users: onDemandCollections.users,
           posts: onDemandCollections.posts,
           comments: onDemandCollections.comments,
-        },
-        progressive: {
-          users: progressiveUsers,
-          posts: progressivePosts,
-          comments: progressiveComments,
         },
       },
       hasReplicationLag: true, // TrailBase has async subscription-based sync
@@ -617,22 +459,20 @@ describe(`TrailBase Collection E2E Tests`, () => {
           if (updates.email !== undefined) partialRecord.email = updates.email
           if (updates.isActive !== undefined)
             partialRecord.isActive = updates.isActive ? 1 : 0
-          const encodedId = uuidToBase64(id)
-          await usersRecordApi.update(encodedId, partialRecord)
+          await usersRecordApi.update(id, partialRecord)
         },
         deleteUser: async (id) => {
-          const encodedId = uuidToBase64(id)
-          await usersRecordApi.delete(encodedId)
+          await usersRecordApi.delete(id)
         },
         insertPost: async (post) => {
           // Insert with the provided ID
           await postsRecordApi.create(serializePost(post))
         },
+        deletePost: async (id) => {
+          await postsRecordApi.delete(id)
+        },
       },
       setup: async () => {},
-      afterEach: async () => {
-        // TrailBase doesn't need collection restart like Electric's on-demand mode
-      },
       teardown: async () => {
         await Promise.all([
           eagerCollections.users.cleanup(),
@@ -641,58 +481,9 @@ describe(`TrailBase Collection E2E Tests`, () => {
           onDemandCollections.users.cleanup(),
           onDemandCollections.posts.cleanup(),
           onDemandCollections.comments.cleanup(),
-          progressiveUsers.cleanup(),
-          progressivePosts.cleanup(),
-          progressiveComments.cleanup(),
         ])
       },
     }
-  }, 60000) // 60 second timeout for setup
-
-  afterEach(async () => {
-    if (config.afterEach) {
-      await config.afterEach()
-    }
-  })
-
-  afterAll(async () => {
-    await config.teardown()
-
-    // Clean up seed data
-    const usersRecordApi = client.records<UserRecord>(`users_e2e`)
-    const postsRecordApi = client.records<PostRecord>(`posts_e2e`)
-    const commentsRecordApi = client.records<CommentRecord>(`comments_e2e`)
-
-    // Delete in reverse order due to FK constraints
-    // IDs need to be encoded as base64 for TrailBase API
-    for (const comment of seedData.comments) {
-      try {
-        await commentsRecordApi.delete(uuidToBase64(comment.id))
-      } catch {
-        // Ignore errors
-      }
-    }
-
-    for (const post of seedData.posts) {
-      try {
-        await postsRecordApi.delete(uuidToBase64(post.id))
-      } catch {
-        // Ignore errors
-      }
-    }
-
-    for (const user of seedData.users) {
-      try {
-        await usersRecordApi.delete(uuidToBase64(user.id))
-      } catch {
-        // Ignore errors
-      }
-    }
-  })
-
-  // Helper to get config
-  function getConfig() {
-    return Promise.resolve(config)
   }
 
   // Run all shared test suites

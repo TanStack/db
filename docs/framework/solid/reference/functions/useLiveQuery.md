@@ -3,15 +3,13 @@ id: useLiveQuery
 title: useLiveQuery
 ---
 
-# Function: useLiveQuery()
-
 ## Call Signature
 
 ```ts
-function useLiveQuery<TContext>(queryFn): object;
+function useLiveQuery<TContext>(queryFn): Accessor<InferResultType<TContext>> & object;
 ```
 
-Defined in: [useLiveQuery.ts:84](https://github.com/TanStack/db/blob/main/packages/solid-db/src/useLiveQuery.ts#L84)
+Defined in: [useLiveQuery.ts:112](https://github.com/TanStack/db/blob/main/packages/solid-db/src/useLiveQuery.ts#L112)
 
 Create a live query using a query function
 
@@ -31,64 +29,7 @@ Query function that defines what data to fetch
 
 ### Returns
 
-`object`
-
-Object with reactive data, state, and status information
-
-#### collection
-
-```ts
-collection: Accessor<Collection<{ [K in string | number | symbol]: (TContext["result"] extends object ? any[any] : TContext["hasJoins"] extends true ? TContext["schema"] : TContext["schema"][TContext["fromSourceName"]])[K] }, string | number, {
-}, StandardSchemaV1<unknown, unknown>, { [K in string | number | symbol]: (TContext["result"] extends object ? any[any] : TContext["hasJoins"] extends true ? TContext["schema"] : TContext["schema"][TContext["fromSourceName"]])[K] }>>;
-```
-
-#### data
-
-```ts
-data: { [K in string | number | symbol]: (TContext["result"] extends object ? any[any] : TContext["hasJoins"] extends true ? TContext["schema"] : TContext["schema"][TContext["fromSourceName"]])[K] }[];
-```
-
-#### isCleanedUp
-
-```ts
-isCleanedUp: Accessor<boolean>;
-```
-
-#### isError
-
-```ts
-isError: Accessor<boolean>;
-```
-
-#### isIdle
-
-```ts
-isIdle: Accessor<boolean>;
-```
-
-#### isLoading
-
-```ts
-isLoading: Accessor<boolean>;
-```
-
-#### isReady
-
-```ts
-isReady: Accessor<boolean>;
-```
-
-#### state
-
-```ts
-state: ReactiveMap<string | number, { [K in string | number | symbol]: (TContext["result"] extends object ? any[any] : TContext["hasJoins"] extends true ? TContext["schema"] : TContext["schema"][TContext["fromSourceName"]])[K] }>;
-```
-
-#### status
-
-```ts
-status: Accessor<CollectionStatus>;
-```
+Accessor that returns data with Suspense support, with state and status information as properties
 
 ### Examples
 
@@ -132,14 +73,14 @@ const todosQuery = useLiveQuery((q) =>
 
 return (
   <Switch>
-    <Match when={todosQuery.isLoading()}>
+    <Match when={todosQuery.isLoading}>
       <div>Loading...</div>
     </Match>
-    <Match when={todosQuery.isError()}>
-      <div>Error: {todosQuery.status()}</div>
+    <Match when={todosQuery.isError}>
+      <div>Error: {todosQuery.status}</div>
     </Match>
-    <Match when={todosQuery.isReady()}>
-      <For each={todosQuery.data()}>
+    <Match when={todosQuery.isReady}>
+      <For each={todosQuery()}>
         {(todo) => <li key={todo.id}>{todo.text}</li>}
       </For>
     </Match>
@@ -147,13 +88,28 @@ return (
 )
 ```
 
+```ts
+// Use Suspense boundaries
+const todosQuery = useLiveQuery((q) =>
+  q.from({ todos: todoCollection })
+)
+
+return (
+  <Suspense fallback={<div>Loading...</div>}>
+    <For each={todosQuery()}>
+      {(todo) => <li key={todo.id}>{todo.text}</li>}
+    </For>
+  </Suspense>
+)
+```
+
 ## Call Signature
 
 ```ts
-function useLiveQuery<TContext>(queryFn): object;
+function useLiveQuery<TContext>(queryFn): Accessor<InferConditionalResultType<TContext>> & object;
 ```
 
-Defined in: [useLiveQuery.ts:99](https://github.com/TanStack/db/blob/main/packages/solid-db/src/useLiveQuery.ts#L99)
+Defined in: [useLiveQuery.ts:134](https://github.com/TanStack/db/blob/main/packages/solid-db/src/useLiveQuery.ts#L134)
 
 Create a live query using a query function
 
@@ -173,66 +129,7 @@ Query function that defines what data to fetch
 
 ### Returns
 
-`object`
-
-Object with reactive data, state, and status information
-
-#### collection
-
-```ts
-collection: Accessor<
-  | Collection<{ [K in string | number | symbol]: (TContext["result"] extends object ? any[any] : TContext["hasJoins"] extends true ? TContext["schema"] : TContext["schema"][TContext["fromSourceName"]])[K] }, string | number, {
-}, StandardSchemaV1<unknown, unknown>, { [K in string | number | symbol]: (TContext["result"] extends object ? any[any] : TContext["hasJoins"] extends true ? TContext["schema"] : TContext["schema"][TContext["fromSourceName"]])[K] }>
-| null>;
-```
-
-#### data
-
-```ts
-data: { [K in string | number | symbol]: (TContext["result"] extends object ? any[any] : TContext["hasJoins"] extends true ? TContext["schema"] : TContext["schema"][TContext["fromSourceName"]])[K] }[];
-```
-
-#### isCleanedUp
-
-```ts
-isCleanedUp: Accessor<boolean>;
-```
-
-#### isError
-
-```ts
-isError: Accessor<boolean>;
-```
-
-#### isIdle
-
-```ts
-isIdle: Accessor<boolean>;
-```
-
-#### isLoading
-
-```ts
-isLoading: Accessor<boolean>;
-```
-
-#### isReady
-
-```ts
-isReady: Accessor<boolean>;
-```
-
-#### state
-
-```ts
-state: ReactiveMap<string | number, { [K in string | number | symbol]: (TContext["result"] extends object ? any[any] : TContext["hasJoins"] extends true ? TContext["schema"] : TContext["schema"][TContext["fromSourceName"]])[K] }>;
-```
-
-#### status
-
-```ts
-status: Accessor<CollectionStatus | "disabled">;
-```
+Accessor that returns data with Suspense support, with state and status information as properties
 
 ### Examples
 
@@ -276,14 +173,14 @@ const todosQuery = useLiveQuery((q) =>
 
 return (
   <Switch>
-    <Match when={todosQuery.isLoading()}>
+    <Match when={todosQuery.isLoading}>
       <div>Loading...</div>
     </Match>
-    <Match when={todosQuery.isError()}>
-      <div>Error: {todosQuery.status()}</div>
+    <Match when={todosQuery.isError}>
+      <div>Error: {todosQuery.status}</div>
     </Match>
-    <Match when={todosQuery.isReady()}>
-      <For each={todosQuery.data()}>
+    <Match when={todosQuery.isReady}>
+      <For each={todosQuery()}>
         {(todo) => <li key={todo.id}>{todo.text}</li>}
       </For>
     </Match>
@@ -291,13 +188,28 @@ return (
 )
 ```
 
+```ts
+// Use Suspense boundaries
+const todosQuery = useLiveQuery((q) =>
+  q.from({ todos: todoCollection })
+)
+
+return (
+  <Suspense fallback={<div>Loading...</div>}>
+    <For each={todosQuery()}>
+      {(todo) => <li key={todo.id}>{todo.text}</li>}
+    </For>
+  </Suspense>
+)
+```
+
 ## Call Signature
 
 ```ts
-function useLiveQuery<TContext>(config): object;
+function useLiveQuery<TContext>(config): Accessor<InferResultType<TContext>> & object;
 ```
 
-Defined in: [useLiveQuery.ts:160](https://github.com/TanStack/db/blob/main/packages/solid-db/src/useLiveQuery.ts#L160)
+Defined in: [useLiveQuery.ts:198](https://github.com/TanStack/db/blob/main/packages/solid-db/src/useLiveQuery.ts#L198)
 
 Create a live query using configuration object
 
@@ -311,70 +223,13 @@ Create a live query using configuration object
 
 #### config
 
-`Accessor`\<`LiveQueryCollectionConfig`\<`TContext`, \{ \[K in string \| number \| symbol\]: (TContext\["result"\] extends object ? any\[any\] : TContext\["hasJoins"\] extends true ? TContext\["schema"\] : TContext\["schema"\]\[TContext\["fromSourceName"\]\])\[K\] \} & `object`\>\>
+`Accessor`\<`LiveQueryCollectionConfig`\<`TContext`, `RootQueryResult`\<`TContext`\>\>\>
 
 Configuration object with query and options
 
 ### Returns
 
-`object`
-
-Object with reactive data, state, and status information
-
-#### collection
-
-```ts
-collection: Accessor<Collection<{ [K in string | number | symbol]: (TContext["result"] extends object ? any[any] : TContext["hasJoins"] extends true ? TContext["schema"] : TContext["schema"][TContext["fromSourceName"]])[K] }, string | number, {
-}, StandardSchemaV1<unknown, unknown>, { [K in string | number | symbol]: (TContext["result"] extends object ? any[any] : TContext["hasJoins"] extends true ? TContext["schema"] : TContext["schema"][TContext["fromSourceName"]])[K] }>>;
-```
-
-#### data
-
-```ts
-data: { [K in string | number | symbol]: (TContext["result"] extends object ? any[any] : TContext["hasJoins"] extends true ? TContext["schema"] : TContext["schema"][TContext["fromSourceName"]])[K] }[];
-```
-
-#### isCleanedUp
-
-```ts
-isCleanedUp: Accessor<boolean>;
-```
-
-#### isError
-
-```ts
-isError: Accessor<boolean>;
-```
-
-#### isIdle
-
-```ts
-isIdle: Accessor<boolean>;
-```
-
-#### isLoading
-
-```ts
-isLoading: Accessor<boolean>;
-```
-
-#### isReady
-
-```ts
-isReady: Accessor<boolean>;
-```
-
-#### state
-
-```ts
-state: ReactiveMap<string | number, { [K in string | number | symbol]: (TContext["result"] extends object ? any[any] : TContext["hasJoins"] extends true ? TContext["schema"] : TContext["schema"][TContext["fromSourceName"]])[K] }>;
-```
-
-#### status
-
-```ts
-status: Accessor<CollectionStatus>;
-```
+Accessor that returns data with Suspense support, with state and status information as properties
 
 ### Examples
 
@@ -403,14 +258,14 @@ const itemsQuery = useLiveQuery(() => ({
 }))
 
 return (
-  <Switch fallback={<div>{itemsQuery.data.length} items loaded</div>}>
-    <Match when={itemsQuery.isLoading()}>
+  <Switch fallback={<div>{itemsQuery().length} items loaded</div>}>
+    <Match when={itemsQuery.isLoading}>
       <div>Loading...</div>
     </Match>
-    <Match when={itemsQuery.isError()}>
+    <Match when={itemsQuery.isError}>
       <div>Something went wrong</div>
     </Match>
-    <Match when={!itemsQuery.isReady()}>
+    <Match when={!itemsQuery.isReady}>
       <div>Preparing...</div>
     </Match>
   </Switch>
@@ -420,10 +275,10 @@ return (
 ## Call Signature
 
 ```ts
-function useLiveQuery<TResult, TKey, TUtils>(liveQueryCollection): object;
+function useLiveQuery<TResult, TKey, TUtils>(liveQueryCollection): Accessor<TResult[]> & object;
 ```
 
-Defined in: [useLiveQuery.ts:210](https://github.com/TanStack/db/blob/main/packages/solid-db/src/useLiveQuery.ts#L210)
+Defined in: [useLiveQuery.ts:255](https://github.com/TanStack/db/blob/main/packages/solid-db/src/useLiveQuery.ts#L255)
 
 Subscribe to an existing live query collection
 
@@ -445,69 +300,13 @@ Subscribe to an existing live query collection
 
 #### liveQueryCollection
 
-`Accessor`\<`Collection`\<`TResult`, `TKey`, `TUtils`, `StandardSchemaV1`\<`unknown`, `unknown`\>, `TResult`\>\>
+`Accessor`\<`Collection`\<`TResult`, `TKey`, `TUtils`, `StandardSchemaV1`\<`unknown`, `unknown`\>, `TResult`\> & `NonSingleResult`\>
 
 Pre-created live query collection to subscribe to
 
 ### Returns
 
-`object`
-
-Object with reactive data, state, and status information
-
-#### collection
-
-```ts
-collection: Accessor<Collection<TResult, TKey, TUtils, StandardSchemaV1<unknown, unknown>, TResult>>;
-```
-
-#### data
-
-```ts
-data: TResult[];
-```
-
-#### isCleanedUp
-
-```ts
-isCleanedUp: Accessor<boolean>;
-```
-
-#### isError
-
-```ts
-isError: Accessor<boolean>;
-```
-
-#### isIdle
-
-```ts
-isIdle: Accessor<boolean>;
-```
-
-#### isLoading
-
-```ts
-isLoading: Accessor<boolean>;
-```
-
-#### isReady
-
-```ts
-isReady: Accessor<boolean>;
-```
-
-#### state
-
-```ts
-state: ReactiveMap<TKey, TResult>;
-```
-
-#### status
-
-```ts
-status: Accessor<CollectionStatus>;
-```
+Accessor that returns data with Suspense support, with state and status information as properties
 
 ### Examples
 
@@ -525,7 +324,7 @@ const existingQuery = useLiveQuery(() => existingCollection)
 
 // Use collection for mutations
 const handleToggle = (id) => {
-  existingQuery.collection().update(id, draft => { draft.completed = !draft.completed })
+  existingQuery.collection.update(id, draft => { draft.completed = !draft.completed })
 }
 ```
 
@@ -534,13 +333,119 @@ const handleToggle = (id) => {
 const sharedQuery = useLiveQuery(() => sharedCollection)
 
 return (
- <Switch fallback={<div><For each={sharedQuery.data()}>{(item) => <Item key={item.id} {...item} />}</For></div>}>
-   <Match when={sharedQuery.isLoading()}>
+ <Switch fallback={<div><For each={sharedQuery()}>{(item) => <Item key={item.id} {...item} />}</For></div>}>
+   <Match when={sharedQuery.isLoading}>
      <div>Loading...</div>
    </Match>
-   <Match when={sharedQuery.isError()}>
+   <Match when={sharedQuery.isError}>
      <div>Error loading data</div>
    </Match>
  </Switch>
+)
+```
+
+## Call Signature
+
+```ts
+function useLiveQuery<TResult, TKey, TUtils>(liveQueryCollection): Accessor<TResult | undefined> & object;
+```
+
+Defined in: [useLiveQuery.ts:283](https://github.com/TanStack/db/blob/main/packages/solid-db/src/useLiveQuery.ts#L283)
+
+Create a live query using a query function
+
+### Type Parameters
+
+#### TResult
+
+`TResult` *extends* `object`
+
+#### TKey
+
+`TKey` *extends* `string` \| `number`
+
+#### TUtils
+
+`TUtils` *extends* `Record`\<`string`, `any`\>
+
+### Parameters
+
+#### liveQueryCollection
+
+`Accessor`\<`Collection`\<`TResult`, `TKey`, `TUtils`, `StandardSchemaV1`\<`unknown`, `unknown`\>, `TResult`\> & `SingleResult`\>
+
+### Returns
+
+Accessor that returns data with Suspense support, with state and status information as properties
+
+### Examples
+
+```ts
+// Basic query with object syntax
+const todosQuery = useLiveQuery((q) =>
+  q.from({ todos: todosCollection })
+   .where(({ todos }) => eq(todos.completed, false))
+   .select(({ todos }) => ({ id: todos.id, text: todos.text }))
+)
+```
+
+```ts
+// With dependencies that trigger re-execution
+const todosQuery = useLiveQuery(
+  (q) => q.from({ todos: todosCollection })
+         .where(({ todos }) => gt(todos.priority, minPriority())),
+)
+```
+
+```ts
+// Join pattern
+const personIssues = useLiveQuery((q) =>
+  q.from({ issues: issueCollection })
+   .join({ persons: personCollection }, ({ issues, persons }) =>
+     eq(issues.userId, persons.id)
+   )
+   .select(({ issues, persons }) => ({
+     id: issues.id,
+     title: issues.title,
+     userName: persons.name
+   }))
+)
+```
+
+```ts
+// Handle loading and error states
+const todosQuery = useLiveQuery((q) =>
+  q.from({ todos: todoCollection })
+)
+
+return (
+  <Switch>
+    <Match when={todosQuery.isLoading}>
+      <div>Loading...</div>
+    </Match>
+    <Match when={todosQuery.isError}>
+      <div>Error: {todosQuery.status}</div>
+    </Match>
+    <Match when={todosQuery.isReady}>
+      <For each={todosQuery()}>
+        {(todo) => <li key={todo.id}>{todo.text}</li>}
+      </For>
+    </Match>
+  </Switch>
+)
+```
+
+```ts
+// Use Suspense boundaries
+const todosQuery = useLiveQuery((q) =>
+  q.from({ todos: todoCollection })
+)
+
+return (
+  <Suspense fallback={<div>Loading...</div>}>
+    <For each={todosQuery()}>
+      {(todo) => <li key={todo.id}>{todo.text}</li>}
+    </For>
+  </Suspense>
 )
 ```

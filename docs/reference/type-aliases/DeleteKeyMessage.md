@@ -3,13 +3,11 @@ id: DeleteKeyMessage
 title: DeleteKeyMessage
 ---
 
-# Type Alias: DeleteKeyMessage\<TKey\>
-
 ```ts
 type DeleteKeyMessage<TKey> = Omit<ChangeMessage<any, TKey>, "value" | "previousValue" | "type"> & object;
 ```
 
-Defined in: [packages/db/src/types.ts:364](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L364)
+Defined in: [packages/db/src/types.ts:567](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L567)
 
 ## Type Declaration
 

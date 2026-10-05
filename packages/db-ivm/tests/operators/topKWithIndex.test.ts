@@ -3,11 +3,8 @@ import { D2 } from '../../src/d2.js'
 import { MultiSet } from '../../src/multiset.js'
 import { output } from '../../src/operators/index.js'
 import { topKWithIndex } from '../../src/operators/topK.js'
-import {
-  MessageTracker,
-  assertOnlyKeysAffected,
-  assertResults,
-} from '../test-utils.js'
+import { assertOnlyKeysAffected, assertResults } from '../test-utils.js'
+import { TopKMessageTracker } from './topk-relation-oracle.js'
 
 describe(`Operators`, () => {
   describe(`TopKWithIndex operation`, () => {
@@ -167,9 +164,7 @@ describe(`Operators`, () => {
           },
         ]
       >()
-      const tracker = new MessageTracker<
-        [null, [{ id: number; value: string }, number]]
-      >()
+      const tracker = new TopKMessageTracker<null, number>()
 
       input.pipe(
         topKWithIndex((a, b) => a.value.localeCompare(b.value), { limit: 3 }),
@@ -201,7 +196,7 @@ describe(`Operators`, () => {
           [null, [{ id: 2, value: `b` }, 1]],
           [null, [{ id: 3, value: `c` }, 2]],
         ],
-        4, // Max expected messages for initial data
+        4, // Max expected weighted deltas for initial data
       )
 
       tracker.reset()
@@ -211,19 +206,29 @@ describe(`Operators`, () => {
       graph.run()
 
       // After removing 'b', we should get incremental changes
-      // The important thing is that we get a reasonable number of messages
+      // The important thing is that we get a reasonable number of weighted deltas
       // and that only the affected key (null) produces output
       const updateResult = tracker.getResult()
 
-      // Verify we got a reasonable number of messages (not the entire dataset)
-      expect(updateResult.messageCount).toBeLessThanOrEqual(8) // Should be incremental, not full recompute
-      expect(updateResult.messageCount).toBeGreaterThan(0) // Should have some changes
+      // This is an output-transfer cap, not a measurement of internal recomputation.
+      expect(updateResult.deltaCount).toBeLessThanOrEqual(8)
+      expect(updateResult.deltaCount).toBeGreaterThan(0) // Should have some changes
 
       // The materialized result should have some entries (items with positive multiplicity)
       expect(updateResult.sortedResults.length).toBeGreaterThan(0)
 
-      // Check that the messages only affect the null key (verify incremental processing)
-      assertOnlyKeysAffected(`topK remove row`, updateResult.messages, [null])
+      // Check that the weighted deltas only affect the null key (verify incremental processing)
+      assertOnlyKeysAffected(`topK remove row`, updateResult.weightedDeltas, [
+        null,
+      ])
+      tracker.relation.expectRows(
+        [
+          [null, 1, `a`],
+          [null, 3, `c`],
+          [null, 4, `d`],
+        ],
+        0,
+      )
     })
 
     test(`incremental update - adding rows that push existing rows out of limit window`, () => {

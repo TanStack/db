@@ -28,7 +28,7 @@ import type { LoadSubsetOptions } from '@tanstack/db'
  * ```
  */
 export interface QueryCollectionMeta extends Record<string, unknown> {
-  loadSubsetOptions: LoadSubsetOptions
+  loadSubsetOptions?: LoadSubsetOptions
 }
 
 // Module augmentation to extend TanStack Query's Register interface

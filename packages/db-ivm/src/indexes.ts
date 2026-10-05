@@ -69,7 +69,7 @@ class PrefixMap<TValue, TPrefix> extends Map<
       const [currentValue, currentMultiplicity] = valueMapOrSingleValue
       const currentPrefix = getPrefix<TValue, TPrefix>(currentValue)
 
-      if (currentPrefix !== prefix) {
+      if (!isSamePrefix(currentPrefix, prefix)) {
         throw new Error(`Mismatching prefixes, this should never happen`)
       }
 
@@ -383,7 +383,7 @@ export class Index<TKey, TValue, TPrefix = any> {
 
     // Check if they're the same value by prefix/suffix comparison
     if (
-      currentPrefix === newPrefix &&
+      isSamePrefix(currentPrefix, newPrefix) &&
       (currentValue === newValue || hash(currentValue) === hash(newValue))
     ) {
       const newMultiplicity = currentMultiplicity + multiplicity
@@ -406,7 +406,7 @@ export class Index<TKey, TValue, TPrefix = any> {
       // At least one has a prefix, use PrefixMap
       const prefixMap = new PrefixMap<TValue, TPrefix>()
 
-      if (currentPrefix === newPrefix) {
+      if (isSamePrefix(currentPrefix, newPrefix)) {
         // Same prefix, different suffixes - need ValueMap within PrefixMap
         const valueMap = new ValueMap<TValue>()
         valueMap.set(hash(currentValue), currentSingleValue)
@@ -478,6 +478,11 @@ export class Index<TKey, TValue, TPrefix = any> {
  * @param value - The value to extract the prefix from.
  * @returns The prefix and the suffix.
  */
+// Prefixes are Map keys, so they compare as a Map does: NaN equals NaN.
+function isSamePrefix(a: unknown, b: unknown): boolean {
+  return a === b || (Number.isNaN(a) && Number.isNaN(b))
+}
+
 function getPrefix<TValue, TPrefix>(value: TValue): TPrefix | NO_PREFIX {
   // If the value is an array and the first element is a string or number, then the
   // first element is the prefix. This is used to distinguish between values without

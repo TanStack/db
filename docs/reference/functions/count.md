@@ -3,19 +3,17 @@ id: count
 title: count
 ---
 
-# Function: count()
-
 ```ts
 function count(arg): Aggregate<number>;
 ```
 
-Defined in: [packages/db/src/query/builder/functions.ts:307](https://github.com/TanStack/db/blob/main/packages/db/src/query/builder/functions.ts#L307)
+Defined in: [packages/db/src/query/builder/functions.ts:666](https://github.com/TanStack/db/blob/main/packages/db/src/query/builder/functions.ts#L666)
 
 ## Parameters
 
 ### arg
 
-`any`
+`ExpressionLike`
 
 ## Returns
 

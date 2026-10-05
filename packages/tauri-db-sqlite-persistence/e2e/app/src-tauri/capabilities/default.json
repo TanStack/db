@@ -1,0 +1,6 @@
+{
+  "identifier": "default",
+  "description": "Default capability for the Tauri SQLite e2e harness",
+  "windows": ["main"],
+  "permissions": ["core:default", "sql:default", "sql:allow-execute"]
+}
