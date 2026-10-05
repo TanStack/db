@@ -21,7 +21,7 @@
     "build": "vite build",
     "dev": "vite build --watch",
     "lint": "eslint . --fix",
-    "test": "vitest run",
+    "test": "pnpm --filter @tanstack/indexeddb-db-collection... build && vitest run",
     "test:oracles": "vitest run tests/persistence-oracle.test.ts tests/settlement-oracle.test.ts tests/transport-oracle.test.ts tests/wrapper.test.ts tests/compatibility-oracle.test.ts tests/cross-tab-history-oracle.test.ts tests/cross-tab-boundary-oracle.test.ts tests/pending-history-oracle.test.ts",
     "typecheck": "tsc --noEmit",
     "test:oracles:stress": "TANSTACK_INDEXEDDB_ORACLE_PROFILE=stress vitest run tests/cross-tab-history-oracle.test.ts tests/pending-history-oracle.test.ts",

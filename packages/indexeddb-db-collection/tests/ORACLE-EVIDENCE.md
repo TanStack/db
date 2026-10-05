@@ -426,3 +426,17 @@ ccdaba88a58a378ef57d90b0d295b00ed57a1736c20e479f0ec03e3cfae1a3fc  packages/index
 d461155641e40acaebb3b7b3581440c7ecfa51125adcd94d09619b53d577d96e  packages/indexeddb-db-collection/e2e/browser.ts
 c5ef4c7965a4964dafdd7bc43117b649644900c4e230c5be253a2f4b4eb41e85  packages/indexeddb-db-collection/e2e/cross-tab-oracle.spec.ts
 ```
+
+### Fresh package-test prerequisite review
+
+The published-declaration matrix needs the adapter and both core packages built.
+CodeRabbit identified that a direct package test could run before those artifacts
+exist. With all three generated `dist` directories absent, the original command
+failed all five consumer modes with unresolved package declarations. The seven
+standalone compiler fixtures passed.
+
+The package test script now builds its workspace dependency graph before Vitest.
+The same absent-artifact probe then passed all 12 declaration cases. No compiler
+assertion or package export was relaxed. This verifies artifact prerequisites,
+not a fresh dependency install. The probe used the cached Rollup version described
+above and `pnpm_config_verify_deps_before_run=warn` to prevent an automatic install.

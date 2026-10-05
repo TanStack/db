@@ -350,10 +350,6 @@ both oracle campaigns. Run the typecheck script to check all test-driver types
 as well. The [oracle contract and audit](tests/ORACLE.md) describes the model,
 replay coordinates, fault witnesses, and coverage limits.
 
-## License
-
-MIT
-
 ### Cross-tab consistency tests
 
 The package tests independently authored rows against durable storage, each
@@ -366,3 +362,7 @@ restore after page close. Run `pnpm test:oracles`, `pnpm test:oracles:stress`, o
 See [the oracle contract](./tests/ORACLE.md) for replay commands and scope limits.
 These tests cover stated histories and observation cuts; they do not prove crash
 durability or guarantee delivery to a suspended tab.
+
+## License
+
+MIT
