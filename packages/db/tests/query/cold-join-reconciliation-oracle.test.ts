@@ -904,11 +904,13 @@ it.each([`hide-acquisition`, `drop-delete`, `wrong-result`] as const)(
  * Labels are a test abstraction for values, not production keys. It never
  * calls the evaluator, normalizer, identity encoder, or join compiler.
  *
- * The grammar varies two/three terms, nested AND, term order, operand reversal, all four
- * join types, scan/index paths, and eager/cold joined sources. Histories put,
+ * The grammar varies two/three terms, nested AND, term order, operand reversal,
+ * all four join types, scan/index paths, and eager/cold joined sources. Histories put,
  * replace, delete and restore keyed rows; removing an absent key is a no-op in
  * the driver. The cold provider publishes its whole finite table on demand;
  * this proves acquisition and row truth, not demand minimality or real I/O.
+ * A positive acquisition witness requires a satisfiable left tuple. A nullish
+ * component prevents a match and may require no acquisition, in any term order.
  * Reads and a replica reconstructed from public events are checked after
  * preload and each applied sync transaction. No optimistic or replay law is
  * claimed here. Correlated parent transport has its own includes oracle.
@@ -1013,7 +1015,10 @@ function compoundPairs(
   return sortJoinPairs(pairs)
 }
 
-async function runCompoundHistory(scenario: CompoundHistory): Promise<void> {
+async function runCompoundHistory(
+  scenario: CompoundHistory,
+  mutant?: `hide-acquisition`,
+): Promise<void> {
   const atoms = compoundAtoms()
   const model = {
     left: new Map(scenario.left.map((row) => [row.id, row])),
@@ -1083,11 +1088,9 @@ async function runCompoundHistory(scenario: CompoundHistory): Promise<void> {
               const b = scenario.reversed ? eq(l.b, r.b) : eq(r.b, l.b)
               const c = eq(l.c, r.c)
               const [first, second] = scenario.atomFirst ? [a, b] : [b, a]
-              return scenario.width === 2
-                ? and(first, second)
-                : scenario.nested
-                  ? and(first, and(second, c))
-                  : and(first, second, c)
+              if (scenario.width === 2) return and(first, second)
+              if (scenario.nested) return and(first, and(second, c))
+              return and(first, second, c)
             },
             scenario.join,
           )
@@ -1128,9 +1131,14 @@ async function runCompoundHistory(scenario: CompoundHistory): Promise<void> {
       check()
       if (
         scenario.cold &&
-        scenario.left.some((row) => atoms[row.atom]!.group !== null)
+        scenario.left.some(
+          (row) => atoms[row.atom]!.group !== null && row.b !== null,
+        )
       )
-        expect(acquisitions, `cold source acquisition`).toBeGreaterThan(0)
+        expect(
+          mutant === `hide-acquisition` ? 0 : acquisitions,
+          `cold source acquisition`,
+        ).toBeGreaterThan(0)
       for (const step of scenario.steps) {
         const { side, row, remove } = step
         const sync = actions[side]!
@@ -1196,6 +1204,32 @@ const compoundWitness: CompoundHistory = {
 }
 
 describe(`compound join relational oracle`, () => {
+  // A nullish component makes the whole tuple unsatisfiable, regardless of
+  // term order. Such a row may need no acquisition. The nonnull neighbor must
+  // acquire even when the empty right source gives the same unmatched output.
+  describe(`compound demand premise`, () => {
+    for (const autoIndex of [`off`, `eager`] as const) {
+      for (const atomFirst of [false, true]) {
+        for (const atom of [0, 21]) {
+          for (const b of [null, 0]) {
+            it(`checks nullish and satisfiable tuples: index=${autoIndex}, atomFirst=${atomFirst}, atom=${atom}, b=${b}`, async () => {
+              await runCompoundHistory({
+                ...compoundWitness,
+                left: [{ id: 0, atom, b, c: 0 }],
+                right: [],
+                steps: [],
+                join: `left`,
+                width: 2,
+                atomFirst,
+                autoIndex,
+                cold: true,
+              })
+            })
+          }
+        }
+      }
+    }
+  })
   it.each([
     { name: `distinct objects`, leftAtom: 11, rightAtom: 13 },
     { name: `opposite infinities`, leftAtom: 6, rightAtom: 7 },
@@ -1217,6 +1251,27 @@ describe(`compound join relational oracle`, () => {
       })
     }
   }
+  it.each([`off`, `eager`] as const)(
+    `rejects a hidden acquisition for a satisfiable tuple, index=%s`,
+    async (autoIndex) => {
+      await expect(
+        runCompoundHistory(
+          {
+            ...compoundWitness,
+            left: [{ id: 0, atom: 0, b: 0, c: 0 }],
+            right: [],
+            steps: [],
+            join: `left`,
+            width: 2,
+            atomFirst: false,
+            autoIndex,
+            cold: true,
+          },
+          `hide-acquisition`,
+        ),
+      ).rejects.toThrow(`cold source acquisition`)
+    },
+  )
   const property = `cold-join.compound`
   const config = readOracleRunConfig()
   const seeds =
@@ -1262,7 +1317,7 @@ describe(`compound join relational oracle`, () => {
             autoIndex: fc.constantFrom<EqualityMode>(`off`, `eager`),
             cold: fc.boolean(),
           }),
-          runCompoundHistory,
+          (scenario) => runCompoundHistory(scenario),
         ),
         seed === undefined
           ? oraclePropertyOptions(60, property)

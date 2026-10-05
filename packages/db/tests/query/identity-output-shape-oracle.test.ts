@@ -670,11 +670,10 @@ describe(`compound join identity and output`, () => {
               .innerJoin({ right }, ({ left: l, right: r }) => {
                 const a = eq(l.a, r.a)
                 const b = eq(l.b, variant === `different` ? r.c : r.b)
-                return variant === `reordered`
-                  ? and(eq(r.b, l.b), eq(r.a, l.a))
-                  : variant === `nested`
-                    ? and(b, and(a, b))
-                    : and(a, b)
+                if (variant === `reordered`)
+                  return and(eq(r.b, l.b), eq(r.a, l.a))
+                if (variant === `nested`) return and(b, and(a, b))
+                return and(a, b)
               })
               .select(({ left: l, right: r }) => ({
                 leftId: l.id,
@@ -711,14 +710,21 @@ describe(`compound join identity and output`, () => {
               live: own(createLiveQueryCollection({ query })),
             }
           }
-          const queries = (
-            [`base`, `reordered`, `nested`, `different`] as const
-          ).map((variant) => makeQuery(variant))
-          for (const [index, { live }] of queries.entries()) {
+          const queries = {
+            base: makeQuery(`base`),
+            reordered: makeQuery(`reordered`),
+            nested: makeQuery(`nested`),
+            different: makeQuery(`different`),
+          }
+          for (const [variant, { live }] of Object.entries(queries)) {
             await live.preload()
             const expected = leftRows.flatMap((l) =>
               rightRows
-                .filter((r) => l.a === r.a && l.b === (index === 3 ? r.c : r.b))
+                .filter(
+                  (r) =>
+                    l.a === r.a &&
+                    l.b === (variant === `different` ? r.c : r.b),
+                )
                 .map((r) => ({ leftId: l.id, rightId: r.id })),
             )
             expectBag(
@@ -726,15 +732,15 @@ describe(`compound join identity and output`, () => {
               expected,
             )
           }
-          const ir = queries.map((entry) => entry.ir)
-          expect(getQueryIdentity(ir[0]!)).toBe(getQueryIdentity(ir[1]!))
-          expect(getQueryIdentity(ir[0]!)).toBe(getQueryIdentity(ir[2]!))
+          const { base, reordered, nested, different } = queries
+          expect(getQueryIdentity(base.ir)).toBe(getQueryIdentity(reordered.ir))
+          expect(getQueryIdentity(base.ir)).toBe(getQueryIdentity(nested.ir))
           expect(
-            getQueryIdentity(ir[0]!),
+            getQueryIdentity(base.ir),
             `different later operand changes identity`,
-          ).not.toBe(getQueryIdentity(ir[3]!))
+          ).not.toBe(getQueryIdentity(different.ir))
           expect(
-            queriesMatchForCaching(ir[0]!, ir[3]!),
+            queriesMatchForCaching(base.ir, different.ir),
             `different later operand cannot reuse a subquery`,
           ).toBe(false)
         },
