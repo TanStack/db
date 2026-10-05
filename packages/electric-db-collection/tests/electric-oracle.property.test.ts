@@ -653,10 +653,7 @@ function rowsFromMap(
  * owner does not establish live-service framing or native-host scheduling.
  */
 type QueuedPresenceHistory =
-  | `insert-update`
-  | `update-update`
-  | `delete-update`
-  | `truncate-update`
+  `insert-update` | `update-update` | `delete-update` | `truncate-update`
 
 type QueuedPresenceCampaign = {
   histories: Array<QueuedPresenceHistory>
@@ -925,8 +922,7 @@ async function runQueuedPresenceHistory(
 }
 
 type PersistenceInterleavingKind =
-  | `open-transaction-hydration`
-  | `subset-supersedes-absence`
+  `open-transaction-hydration` | `subset-supersedes-absence`
 
 type PersistenceInterleavingCampaign = {
   histories: Array<PersistenceInterleavingKind>
@@ -1529,8 +1525,7 @@ async function runPersistedTrace(
         expect(rows).toEqual(expectedRows)
         expect(durableRows).toEqual(expectedRows)
         const exported = collection.config.sync.exportSyncMeta?.() as
-          | { resume?: unknown }
-          | undefined
+          { resume?: unknown } | undefined
         const resume = observableResume(exported?.resume)
         const durableResume = observableResume(
           persistedMetadata.get(`electric:resume`),
@@ -1782,8 +1777,7 @@ type ProcessRuntime = {
 }
 
 type PreloadOutcome =
-  | { status: `fulfilled` }
-  | { status: `rejected`; reason: unknown }
+  { status: `fulfilled` } | { status: `rejected`; reason: unknown }
 
 function observePreload(promise: Promise<void>) {
   const observed: {
