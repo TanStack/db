@@ -5885,10 +5885,10 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
           let collectionMetadataKeys: Array<string> = []
           return baseSync({
             ...params,
-            begin: (options) => {
+            begin: () => {
               rowMetadataKeys = []
               collectionMetadataKeys = []
-              return params.begin(options)
+              return params.begin()
             },
             metadata: {
               persistence: params.metadata!.persistence,
@@ -8580,7 +8580,7 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
     })
   })
 
-  it(`queues an immediate source write behind its owning hydration baseline`, async () => {
+  it(`queues a source write behind its owning hydration baseline`, async () => {
     const adapter = createRecordingAdapter([
       { id: `shared`, title: `Persisted baseline` },
     ])
@@ -8599,7 +8599,7 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
     let sourceParams!: TodoSyncParams
     const collection = createCollection(
       persistedCollectionOptions<Todo, string>({
-        id: `immediate-during-hydration`,
+        id: `source-write-during-hydration`,
         getKey: (row) => row.id,
         sync: {
           sync: (params) => {
@@ -8617,12 +8617,12 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
     try {
       await atPersistedOracleCheckpoint(
         hydrationEntered.promise,
-        `immediate hydration entered`,
+        `source write hydration entered`,
       )
-      sourceParams.begin({ immediate: true })
+      sourceParams.begin()
       sourceParams.write({
         type: `update`,
-        value: { id: `shared`, title: `Newer immediate source value` },
+        value: { id: `shared`, title: `Newer source value` },
       })
       receipt = Promise.resolve(sourceParams.commit()).then(() => undefined)
       const settlement = observeSettlement(receipt)
@@ -8639,18 +8639,18 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
       })
 
       hydration.resolve()
-      await atPersistedOracleCheckpoint(ready, `immediate hydration ready`)
+      await atPersistedOracleCheckpoint(ready, `source write hydration ready`)
       await atPersistedOracleCheckpoint(
         receipt,
-        `immediate hydration source receipt`,
+        `source write hydration receipt`,
       )
       expect({
         publicRow: stripVirtualProps(collection.get(`shared`)),
         durableRow: adapter.rows.get(`shared`),
         status: collection.status,
       }).toEqual({
-        publicRow: { id: `shared`, title: `Newer immediate source value` },
-        durableRow: { id: `shared`, title: `Newer immediate source value` },
+        publicRow: { id: `shared`, title: `Newer source value` },
+        durableRow: { id: `shared`, title: `Newer source value` },
         status: `ready`,
       })
     } catch (error) {
@@ -10039,12 +10039,14 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
       })
       remoteReceipt = sourceParams.commit()
       await atPersistedOracleCheckpoint(
-        Promise.resolve(whenSyncAccepted(remoteReceipt)),
+        Promise.resolve(whenSyncAccepted(remoteReceipt)).then(() => undefined),
         `source commit accepted before local settlement`,
       )
-      expect(observeSettlement(Promise.resolve(remoteReceipt)).read()).toEqual({
-        status: `pending`,
-      })
+      // Accepted, but held: it becomes visible when the mutation settles.
+      expect(remoteReceipt).not.toBe(true)
+      const remoteSettlement = observeSettlement(remoteReceipt as Promise<void>)
+      await new Promise((resolve) => setTimeout(resolve, 0))
+      expect(remoteSettlement.read()).toEqual({ status: `pending` })
       expect({
         localState: localTransaction.state,
         remoteVisible: collection.has(`remote`),
@@ -10441,7 +10443,7 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
     }
   })
 
-  it(`queues reentrant immediate replay before its later normal sibling`, async () => {
+  it(`stores reentrant source commits from a publication callback in staging order`, async () => {
     const adapter = createRecordingAdapter()
     const applyCommittedTx = adapter.applyCommittedTx.bind(adapter)
     const persistedTitles: Array<string> = []
@@ -10467,8 +10469,8 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
         persistence: { adapter },
       }),
     )
-    let immediateReceipt: Promise<void> | undefined
-    let normalReceipt: Promise<void> | undefined
+    let earlierReceipt: Promise<void> | undefined
+    let laterReceipt: Promise<void> | undefined
     let callbackCount = 0
     const publication = collection.subscribeChanges((changes) => {
       if (
@@ -10476,25 +10478,25 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
         changes.some((change) => change.key === `trigger`)
       ) {
         callbackCount++
-        sourceParams.begin({ immediate: true })
+        sourceParams.begin()
         sourceParams.write({
           type: `update`,
-          value: { id: `shared`, title: `earlier immediate` },
+          value: { id: `shared`, title: `earlier` },
         })
-        immediateReceipt = Promise.resolve(sourceParams.commit()).then(
+        earlierReceipt = Promise.resolve(sourceParams.commit()).then(
           () => undefined,
         )
-        void immediateReceipt.catch(() => undefined)
+        void earlierReceipt.catch(() => undefined)
 
         sourceParams.begin()
         sourceParams.write({
           type: `update`,
-          value: { id: `shared`, title: `later normal` },
+          value: { id: `shared`, title: `later` },
         })
-        normalReceipt = Promise.resolve(sourceParams.commit()).then(
+        laterReceipt = Promise.resolve(sourceParams.commit()).then(
           () => undefined,
         )
-        void normalReceipt.catch(() => undefined)
+        void laterReceipt.catch(() => undefined)
       }
     })
     let hasPrimaryFailure = false
@@ -10511,15 +10513,15 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
       })
       await Promise.resolve(sourceParams.commit())
       await vi.waitFor(() => expect(callbackCount).toBe(1))
-      expect(immediateReceipt).toBeInstanceOf(Promise)
-      expect(normalReceipt).toBeInstanceOf(Promise)
+      expect(earlierReceipt).toBeInstanceOf(Promise)
+      expect(laterReceipt).toBeInstanceOf(Promise)
       await atPersistedOracleCheckpoint(
-        immediateReceipt!,
-        `core-publication immediate receipt`,
+        earlierReceipt!,
+        `core-publication earlier receipt`,
       )
       await atPersistedOracleCheckpoint(
-        normalReceipt!,
-        `core-publication normal receipt`,
+        laterReceipt!,
+        `core-publication later receipt`,
       )
 
       expect({
@@ -10528,9 +10530,9 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
         persistedTitles,
         status: collection.status,
       }).toEqual({
-        publicRow: { id: `shared`, title: `later normal` },
-        durableRow: { id: `shared`, title: `later normal` },
-        persistedTitles: [`earlier immediate`, `later normal`],
+        publicRow: { id: `shared`, title: `later` },
+        durableRow: { id: `shared`, title: `later` },
+        persistedTitles: [`earlier`, `later`],
         status: `ready`,
       })
     } catch (error) {
@@ -10540,8 +10542,8 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
       publication.unsubscribe()
       await cleanupPersistedOracle(
         [
-          () => immediateReceipt?.catch(() => undefined),
-          () => normalReceipt?.catch(() => undefined),
+          () => earlierReceipt?.catch(() => undefined),
+          () => laterReceipt?.catch(() => undefined),
           () => collection.cleanup(),
         ],
         hasPrimaryFailure,
@@ -10768,7 +10770,7 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
     }
   })
 
-  it(`queues an immediate suffix behind held durability and fails it with the prefix`, async () => {
+  it(`queues a source suffix behind held durability and fails it with the prefix`, async () => {
     const adapter = createRecordingAdapter()
     const coordinator = createCoordinatorHarness()
     const firstDurabilityEntered = createEventGate()
@@ -10803,7 +10805,7 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
     let sourceParams!: TodoSyncParams
     const collection = createCollection(
       persistedCollectionOptions<Todo, string>({
-        id: `immediate-prefix-fail-stop`,
+        id: `source-prefix-fail-stop`,
         getKey: (row) => row.id,
         sync: {
           sync: (params) => {
@@ -10821,9 +10823,9 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
     try {
       await atPersistedOracleCheckpoint(
         collection.stateWhenReady(),
-        `immediate prefix fail-stop collection ready`,
+        `source prefix fail-stop collection ready`,
       )
-      sourceParams.begin({ immediate: true })
+      sourceParams.begin()
       sourceParams.write({
         type: `insert`,
         value: { id: `prefix`, title: `fails durability` },
@@ -10834,10 +10836,10 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
       void prefixReceipt.catch(() => undefined)
       await atPersistedOracleCheckpoint(
         firstDurabilityEntered.promise,
-        `failed immediate prefix entered durability`,
+        `failed source prefix entered durability`,
       )
 
-      sourceParams.begin({ immediate: true })
+      sourceParams.begin()
       sourceParams.write({
         type: `insert`,
         value: { id: `suffix`, title: `must not become durable` },
@@ -10874,14 +10876,14 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
           () => ({ status: `fulfilled` as const }),
           (reason: unknown) => ({ status: `rejected` as const, reason }),
         ),
-        `failed immediate prefix receipt`,
+        `failed source prefix receipt`,
       )
       const suffixOutcome = await atPersistedOracleCheckpoint(
         suffixReceipt.then(
           () => ({ status: `fulfilled` as const }),
           (reason: unknown) => ({ status: `rejected` as const, reason }),
         ),
-        `failed immediate suffix receipt`,
+        `failed source suffix receipt`,
       )
       const terminalError =
         prefixOutcome.status === `rejected` ? prefixOutcome.reason : undefined
