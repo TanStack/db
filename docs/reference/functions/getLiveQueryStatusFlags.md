@@ -7,7 +7,7 @@ title: getLiveQueryStatusFlags
 function getLiveQueryStatusFlags(status): LiveQueryStatusFlags;
 ```
 
-Defined in: [packages/db/src/live-query-adapter.ts:58](https://github.com/TanStack/db/blob/main/packages/db/src/live-query-adapter.ts#L58)
+Defined in: [packages/db/src/live-query-adapter.ts:71](https://github.com/TanStack/db/blob/main/packages/db/src/live-query-adapter.ts#L71)
 
 Derive the boolean status flags from a collection status. Adapters represent
 a disabled query separately (with `isReady: true`); this covers the real

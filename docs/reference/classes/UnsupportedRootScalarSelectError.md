@@ -3,7 +3,7 @@ id: UnsupportedRootScalarSelectError
 title: UnsupportedRootScalarSelectError
 ---
 
-Defined in: [packages/db/src/errors.ts:532](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L532)
+Defined in: [packages/db/src/errors.ts:542](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L542)
 
 ## Extends
 
@@ -17,7 +17,7 @@ Defined in: [packages/db/src/errors.ts:532](https://github.com/TanStack/db/blob/
 new UnsupportedRootScalarSelectError(): UnsupportedRootScalarSelectError;
 ```
 
-Defined in: [packages/db/src/errors.ts:533](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L533)
+Defined in: [packages/db/src/errors.ts:543](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L543)
 
 #### Returns
 

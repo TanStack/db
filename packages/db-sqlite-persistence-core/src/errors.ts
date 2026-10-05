@@ -90,8 +90,7 @@ export function toPersistedCollectionDurabilityError(
 }
 
 export type IndeterminateCommitRequestType =
-  | `rpc:applyLocalMutations:req`
-  | `rpc:applyCommittedTx:req`
+  `rpc:applyLocalMutations:req` | `rpc:applyCommittedTx:req`
 
 export type IndeterminateCommitErrorOptions = {
   collectionId: string

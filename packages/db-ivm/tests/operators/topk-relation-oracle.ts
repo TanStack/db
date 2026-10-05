@@ -70,8 +70,8 @@ export class TopKRelation<
   }
 }
 
-// MessageTracker measures transfer work and can reset. The semantic relation
-// must persist across that reset so later checks still include earlier changes.
+// MessageTracker counts transferred weighted deltas and can reset. The semantic
+// relation must persist across that reset so later checks include earlier changes.
 export class TopKMessageTracker<
   K extends string | number | null,
   I extends number | string,

@@ -111,8 +111,7 @@ describe(`useLiveInfiniteQuery`, () => {
 
     let query: ReturnType<typeof usePostsCollectionInfiniteQuery> | undefined
     let replaceCollection:
-      | ((collection: typeof secondQuery) => void)
-      | undefined
+      ((collection: typeof secondQuery) => void) | undefined
     cleanup = $effect.root(() => {
       let selectedQuery = $state(firstQuery)
       query = usePostsCollectionInfiniteQuery(() => selectedQuery)

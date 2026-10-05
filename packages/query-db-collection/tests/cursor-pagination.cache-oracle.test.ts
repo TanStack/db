@@ -8,9 +8,9 @@ import {
 } from '../../db/tests/oracle-config.js'
 import { createCursorPager } from '../src/index.js'
 import { createBackend } from './cursor-pagination/backend.js'
-import { expectedRows } from './cursor-pagination/model.js'
+import { expectedRows } from './cursor-pagination/model-oracle.js'
 import type { CursorPager } from '../src/index.js'
-import type { Row } from './cursor-pagination/model.js'
+import type { Row } from './cursor-pagination/model-oracle.js'
 
 /**
  * # When may cached cursor pages answer a later read?
@@ -28,7 +28,7 @@ import type { Row } from './cursor-pagination/model.js'
  * The cache contract comes from cursor-pagination/README.md and QueryClient's
  * public cache operations. The controlled backend holds each sequence stable;
  * this oracle does not establish snapshot behavior for changing HTTP endpoints.
- * Window values, cache publication, browser acquisition, and QueryCollection
+ * Window values, cache publication, browser Query fetches, and QueryCollection
  * integration have separate owners in oracle-coverage.md.
  */
 
@@ -140,7 +140,7 @@ describe(`cursor cache lifecycle`, () => {
   )
 
   it.each([`initial`, `growth`, `refresh`] as const)(
-    `cancellation stops a held %s acquisition and permits later recovery`,
+    `cancellation stops a held %s Query fetch and permits later recovery`,
     async (phase) => {
       await assertCacheProperty(
         fc.asyncProperty(
@@ -203,7 +203,7 @@ describe(`cursor cache lifecycle`, () => {
               const signal = await started.promise
               if (phase === `growth`) {
                 // A reader whose whole window is cached need not wait for a
-                // peer's deeper acquisition, even though they share a key.
+                // peer's deeper Query fetch, even though they share a key.
                 await checkWindow(createCursorPager(options), rows, size)
               }
               const query = client
@@ -228,7 +228,7 @@ describe(`cursor cache lifecycle`, () => {
                   }),
                 )
               // Observe the real fetch join instead of guessing how many
-              // microtasks the peer takes to reach the acquisition boundary.
+              // microtasks the peer takes to reach the Query fetch boundary.
               await joined.promise
               joinWitness.mockRestore()
               await client.cancelQueries({ queryKey: key, exact: true })
@@ -460,7 +460,7 @@ describe(`cursor cache lifecycle`, () => {
                 const window = { offset: 0, limit: width }
                 await checkWindow(pager, expectedSource, width)
                 expect(starts - beforeStarts).toBe(refresh ? 1 : 0)
-                // Query dates the cache from its latest successful acquisition,
+                // Cache freshness starts at the latest successful Query fetch,
                 // including fetchNextPage, rather than aging each page separately.
                 if (calls !== beforeCalls) deadline = now + 100
                 cached = true
@@ -572,7 +572,7 @@ describe(`cursor cache lifecycle`, () => {
     },
   )
 
-  it(`shares acquisitions across readers without letting one abort cancel its peer`, async () => {
+  it(`shares Query fetches across readers without letting one abort cancel its peer`, async () => {
     const client = new QueryClient({
       defaultOptions: {
         queries: { retry: false, gcTime: Infinity, staleTime: Infinity },

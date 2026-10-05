@@ -60,9 +60,7 @@ type StoredSqliteRow = {
 }
 
 type SQLiteCoreAdapterSchemaMismatchPolicy =
-  | `sync-present-reset`
-  | `sync-absent-error`
-  | `reset`
+  `sync-present-reset` | `sync-absent-error` | `reset`
 
 export type SQLiteCoreAdapterOptions = {
   driver: SQLiteDriver
@@ -261,11 +259,7 @@ const SAFE_IDENTIFIER_PATTERN = /^[a-zA-Z_][a-zA-Z0-9_]*$/
 const FORBIDDEN_SQL_FRAGMENT_PATTERN = /(;|--|\/\*)/
 type CompiledValueKind = `unknown` | `bigint` | `date` | `datetime`
 type PersistedTaggedValueType =
-  | `bigint`
-  | `date`
-  | `nan`
-  | `infinity`
-  | `-infinity`
+  `bigint` | `date` | `nan` | `infinity` | `-infinity`
 type PersistedTaggedValue = {
   [PERSISTED_TYPE_TAG]: PersistedTaggedValueType
   [PERSISTED_VALUE_TAG]: string

@@ -134,10 +134,7 @@ async function runRace(
   startupReset: `none` | `tag-state` | `shape-identity` = `none`,
   metadataWrapper: `none` | `shallow-persistence` = `none`,
   laterKeySetEvidence:
-    | `unchanged`
-    | `unknown`
-    | `missing`
-    | `incompatible` = `unchanged`,
+    `unchanged` | `unknown` | `missing` | `incompatible` = `unchanged`,
   forwardHydrationScope = false,
 ): Promise<void> {
   const database = new DatabaseSync(`:memory:`)
@@ -148,8 +145,7 @@ async function runRace(
   const laterSnapshotEntered = deferred()
   const releaseLaterSnapshot = deferred()
   let collection:
-    | Collection<Item, string | number, ElectricCollectionUtils<Item>>
-    | undefined
+    Collection<Item, string | number, ElectricCollectionUtils<Item>> | undefined
   let unsubscribe: (() => void) | undefined
   let receivedPersistenceCapability: unknown
   let forwardedPersistenceCapability: unknown
@@ -651,8 +647,7 @@ async function observeLegacyUnknownResume(): Promise<LegacyUnknownResumeObservat
     postOffsetRow,
   ]
   let collection:
-    | Collection<Item, string | number, ElectricCollectionUtils<Item>>
-    | undefined
+    Collection<Item, string | number, ElectricCollectionUtils<Item>> | undefined
   let unsubscribe: (() => void) | undefined
   let observation: LegacyUnknownResumeObservation | undefined
   let primaryFailure: unknown

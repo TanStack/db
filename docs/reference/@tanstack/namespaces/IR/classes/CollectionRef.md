@@ -81,18 +81,6 @@ Defined in: [packages/db/src/query/ir.ts:94](https://github.com/TanStack/db/blob
 
 ***
 
-### sourceId
-
-```ts
-readonly sourceId: string;
-```
-
-Defined in: [packages/db/src/query/ir.ts:92](https://github.com/TanStack/db/blob/main/packages/db/src/query/ir.ts#L92)
-
-Opaque runtime identity; aliases are lexical names only.
-
-***
-
 ### type
 
 ```ts
@@ -106,3 +94,21 @@ Defined in: [packages/db/src/query/ir.ts:90](https://github.com/TanStack/db/blob
 ```ts
 BaseExpression.type
 ```
+
+## Accessors
+
+### sourceId
+
+#### Get Signature
+
+```ts
+get sourceId(): string;
+```
+
+Defined in: [packages/db/src/query/ir.ts:101](https://github.com/TanStack/db/blob/main/packages/db/src/query/ir.ts#L101)
+
+Opaque runtime identity; aliases are lexical names only.
+
+##### Returns
+
+`string`

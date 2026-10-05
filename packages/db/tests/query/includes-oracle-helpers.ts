@@ -4,7 +4,14 @@ import type { Collection } from '../../src/collection/index.js'
 
 /**
  * A controlled include source exposes only the environment operations the
- * oracle grammar needs: atomic source batches and explicit startup settlement.
+ * oracle grammar needs: atomic source batches and explicit optimistic
+ * mutation-handler fulfillment or rejection. Startup synchronously publishes
+ * the initial rows and marks the Collection ready.
+ *
+ * The inherited `resolveSync` and `rejectSync` names fulfill or reject the
+ * shared mutation-handler gate. They do not settle startup, end the sync run,
+ * acknowledge source rows, or settle a sync transaction's applied receipt.
+ *
  * Each write snapshots the row before it enters production, so later test code
  * cannot mutate both the stimulus and an expected value through one reference.
  * Query shape, route state, and expected nested results remain in the owning

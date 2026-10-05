@@ -7,7 +7,7 @@ title: ConditionalUseLiveQueryReturn
 type ConditionalUseLiveQueryReturn<T, TData> = Omit<UseLiveQueryReturn<T, TData>, "collection" | "status"> & object;
 ```
 
-Defined in: [packages/svelte-db/src/useLiveQuery.svelte.ts:68](https://github.com/TanStack/db/blob/main/packages/svelte-db/src/useLiveQuery.svelte.ts#L68)
+Defined in: [packages/svelte-db/src/useLiveQuery.svelte.ts:70](https://github.com/TanStack/db/blob/main/packages/svelte-db/src/useLiveQuery.svelte.ts#L70)
 
 ## Type Declaration
 

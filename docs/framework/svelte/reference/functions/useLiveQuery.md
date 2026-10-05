@@ -9,7 +9,7 @@ title: useLiveQuery
 function useLiveQuery<TContext>(queryFn, deps?): UseLiveQueryReturn<{ [K in string | number | symbol]: ResultValue<TContext>[K] }, InferResultType<TContext>>;
 ```
 
-Defined in: [packages/svelte-db/src/useLiveQuery.svelte.ts:200](https://github.com/TanStack/db/blob/main/packages/svelte-db/src/useLiveQuery.svelte.ts#L200)
+Defined in: [packages/svelte-db/src/useLiveQuery.svelte.ts:202](https://github.com/TanStack/db/blob/main/packages/svelte-db/src/useLiveQuery.svelte.ts#L202)
 
 Create a live query using a query function
 
@@ -135,7 +135,7 @@ const todosQuery = useLiveQuery((q) =>
 function useLiveQuery<TContext>(queryFn, deps?): ConditionalUseLiveQueryReturn<{ [K in string | number | symbol]: ResultValue<TContext>[K] }, InferConditionalResultType<TContext>>;
 ```
 
-Defined in: [packages/svelte-db/src/useLiveQuery.svelte.ts:206](https://github.com/TanStack/db/blob/main/packages/svelte-db/src/useLiveQuery.svelte.ts#L206)
+Defined in: [packages/svelte-db/src/useLiveQuery.svelte.ts:208](https://github.com/TanStack/db/blob/main/packages/svelte-db/src/useLiveQuery.svelte.ts#L208)
 
 Create a live query using a query function
 
@@ -261,7 +261,7 @@ const todosQuery = useLiveQuery((q) =>
 function useLiveQuery<TContext>(config, deps?): UseLiveQueryReturn<{ [K in string | number | symbol]: ResultValue<TContext>[K] }, InferResultType<TContext>>;
 ```
 
-Defined in: [packages/svelte-db/src/useLiveQuery.svelte.ts:254](https://github.com/TanStack/db/blob/main/packages/svelte-db/src/useLiveQuery.svelte.ts#L254)
+Defined in: [packages/svelte-db/src/useLiveQuery.svelte.ts:256](https://github.com/TanStack/db/blob/main/packages/svelte-db/src/useLiveQuery.svelte.ts#L256)
 
 Create a live query using configuration object
 
@@ -334,7 +334,7 @@ const itemsQuery = useLiveQuery({
 function useLiveQuery<TResult, TKey, TUtils>(liveQueryCollection): UseLiveQueryReturnWithCollection<TResult, TKey, TUtils, TResult[]>;
 ```
 
-Defined in: [packages/svelte-db/src/useLiveQuery.svelte.ts:303](https://github.com/TanStack/db/blob/main/packages/svelte-db/src/useLiveQuery.svelte.ts#L303)
+Defined in: [packages/svelte-db/src/useLiveQuery.svelte.ts:305](https://github.com/TanStack/db/blob/main/packages/svelte-db/src/useLiveQuery.svelte.ts#L305)
 
 Subscribe to an existing query collection (can be reactive)
 
@@ -417,7 +417,7 @@ const queryResult = useLiveQuery(sharedQuery)
 function useLiveQuery<TResult, TKey, TUtils>(liveQueryCollection): UseLiveQueryReturnWithCollection<TResult, TKey, TUtils, TResult | undefined>;
 ```
 
-Defined in: [packages/svelte-db/src/useLiveQuery.svelte.ts:314](https://github.com/TanStack/db/blob/main/packages/svelte-db/src/useLiveQuery.svelte.ts#L314)
+Defined in: [packages/svelte-db/src/useLiveQuery.svelte.ts:316](https://github.com/TanStack/db/blob/main/packages/svelte-db/src/useLiveQuery.svelte.ts#L316)
 
 Create a live query using a query function
 

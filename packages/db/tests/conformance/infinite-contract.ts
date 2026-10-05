@@ -2,11 +2,13 @@
  * Cross-adapter contract for `useLiveInfiniteQuery`.
  *
  * The model is an ordered source plus a visible prefix split into pages. A
- * fetch may extend that prefix; changing the query, collection, or page shape
- * creates a new demand generation. The public observation includes flattened
- * rows, page boundaries and params, continuation, in-flight state, errors, and
- * the backing collection. Those facts must agree; final rows alone cannot show
- * a stale page ledger or a duplicate request.
+ * fetch may extend that prefix. Changing the query or input Collection identity
+ * replaces the live-query binding. Changing page shape updates the requested
+ * window and page labels while retaining committed page depth. The model tracks
+ * these input changes directly. The public observation includes flattened rows,
+ * page boundaries and params, continuation, in-flight state, errors, and the
+ * backing Collection. Those facts must agree; final rows alone cannot show a
+ * stale page ledger or a duplicate request.
  *
  * Drivers preserve native framework scheduling and package-realm details.
  * Controllable handles allow setter-to-fetch calls without an explicit driver

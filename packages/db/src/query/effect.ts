@@ -87,8 +87,7 @@ export interface EffectContext {
 
 /** Query input - can be a builder function or a prebuilt query */
 export type EffectQueryInput<TContext extends Context> =
-  | ((q: InitialQueryBuilder) => QueryBuilder<TContext>)
-  | QueryBuilder<TContext>
+  ((q: InitialQueryBuilder) => QueryBuilder<TContext>) | QueryBuilder<TContext>
 
 type EffectEventHandler<
   TRow extends object = Record<string, unknown>,

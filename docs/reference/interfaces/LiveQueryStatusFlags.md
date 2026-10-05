@@ -3,7 +3,7 @@ id: LiveQueryStatusFlags
 title: LiveQueryStatusFlags
 ---
 
-Defined in: [packages/db/src/live-query-adapter.ts:45](https://github.com/TanStack/db/blob/main/packages/db/src/live-query-adapter.ts#L45)
+Defined in: [packages/db/src/live-query-adapter.ts:58](https://github.com/TanStack/db/blob/main/packages/db/src/live-query-adapter.ts#L58)
 
 The derived boolean status flags every adapter exposes for a query.
 
@@ -15,7 +15,7 @@ The derived boolean status flags every adapter exposes for a query.
 isCleanedUp: boolean;
 ```
 
-Defined in: [packages/db/src/live-query-adapter.ts:50](https://github.com/TanStack/db/blob/main/packages/db/src/live-query-adapter.ts#L50)
+Defined in: [packages/db/src/live-query-adapter.ts:63](https://github.com/TanStack/db/blob/main/packages/db/src/live-query-adapter.ts#L63)
 
 ***
 
@@ -25,7 +25,7 @@ Defined in: [packages/db/src/live-query-adapter.ts:50](https://github.com/TanSta
 isError: boolean;
 ```
 
-Defined in: [packages/db/src/live-query-adapter.ts:49](https://github.com/TanStack/db/blob/main/packages/db/src/live-query-adapter.ts#L49)
+Defined in: [packages/db/src/live-query-adapter.ts:62](https://github.com/TanStack/db/blob/main/packages/db/src/live-query-adapter.ts#L62)
 
 ***
 
@@ -35,7 +35,7 @@ Defined in: [packages/db/src/live-query-adapter.ts:49](https://github.com/TanSta
 isIdle: boolean;
 ```
 
-Defined in: [packages/db/src/live-query-adapter.ts:48](https://github.com/TanStack/db/blob/main/packages/db/src/live-query-adapter.ts#L48)
+Defined in: [packages/db/src/live-query-adapter.ts:61](https://github.com/TanStack/db/blob/main/packages/db/src/live-query-adapter.ts#L61)
 
 ***
 
@@ -45,7 +45,7 @@ Defined in: [packages/db/src/live-query-adapter.ts:48](https://github.com/TanSta
 isLoading: boolean;
 ```
 
-Defined in: [packages/db/src/live-query-adapter.ts:46](https://github.com/TanStack/db/blob/main/packages/db/src/live-query-adapter.ts#L46)
+Defined in: [packages/db/src/live-query-adapter.ts:59](https://github.com/TanStack/db/blob/main/packages/db/src/live-query-adapter.ts#L59)
 
 ***
 
@@ -55,4 +55,4 @@ Defined in: [packages/db/src/live-query-adapter.ts:46](https://github.com/TanSta
 isReady: boolean;
 ```
 
-Defined in: [packages/db/src/live-query-adapter.ts:47](https://github.com/TanStack/db/blob/main/packages/db/src/live-query-adapter.ts#L47)
+Defined in: [packages/db/src/live-query-adapter.ts:60](https://github.com/TanStack/db/blob/main/packages/db/src/live-query-adapter.ts#L60)
