@@ -9,7 +9,7 @@ import {
   normalizeLiveQueryWindowPageSize,
 } from '../src/live-query-window-controller.js'
 import { mockSyncCollectionOptions } from './utils.js'
-import { evaluateReferenceExpression } from './reference-expression.js'
+import { evaluateReferenceExpression } from './reference-expression-oracle.js'
 import type { Collection } from '../src/collection/index.js'
 
 interface Row {

@@ -43,8 +43,9 @@ import type { QueryCollectionUtils } from '../src/query.js'
  * Mutation refetches add a second authority path but do not bypass those rules.
  *
  * The reference view is an ownership graph: query scope and demand nodes point
- * to row keys; sync generations order competing results; publication
- * and persistence are separate commit boundaries. Tests use real QueryClient
+ * to row keys. Sync-run lifetime fences, post-write-refetch generations, and
+ * defer-result barriers govern competing results. Publication and persistence
+ * are separate commit boundaries. Tests use real QueryClient
  * observers, cache events, collection metadata, persisted scans, and live
  * queries. They compare source rows, derived rows, cache rows, metadata writes,
  * exact request lifetimes, and bounded refetch work at each boundary.
@@ -84,6 +85,11 @@ import type { QueryCollectionUtils } from '../src/query.js'
  * Direct writes belong to the current sync run. Cleanup start invalidates that
  * run, so later writes must fail without changing storage. Restart admits
  * writes through a new run. The fixed history below checks each boundary.
+ * Two mutation handlers on the same row have a separate FIFO law. Their
+ * accepted revisions come from user action order, independent of Query cache
+ * notifications. A held first durable commit keeps all four public receipts
+ * pending. After release, the storage history, Query cache, and Collection
+ * must agree on the second revision, including after an explicit refetch.
  */
 
 type ResultSettlementOperationState =
@@ -100,6 +106,16 @@ type ResultSettlementModelState = ReadonlyMap<
   ResultSettlementOperationState
 >
 
+/**
+ * `query-succeeded` and `refresh-succeeded` compress the result lifecycle.
+ * With an applicable result and no `deferOn`, each action combines Query fetch
+ * fulfillment, completed Collection application and its applied settlement,
+ * and the terminal public-refetch checkpoint.
+ * A `deferOn` action instead records the skipped result and its replacement wait;
+ * a nondeferred `invalid-shape` result records application rejection. The model
+ * omits intermediate application states, which the separate obligation models
+ * below retain.
+ */
 type ResultSettlementModelAction =
   | { type: `start-refetch`; operation: string }
   | {
@@ -1202,6 +1218,9 @@ function createOwnershipStorage(seed?: StoredOwnership, gatedCommit?: number) {
   const entered = createDeferred<void>()
   const released = createDeferred<void>()
   let commitCount = 0
+  const appliedRowWrites: Array<string> = []
+  let gatedTransaction:
+    Parameters<PersistenceAdapter[`applyCommittedTx`]>[1] | undefined
   let latestTerm = 0
   let latestSeq = 0
   let latestRowVersion = 0
@@ -1254,6 +1273,7 @@ function createOwnershipStorage(seed?: StoredOwnership, gatedCommit?: number) {
       const tx = structuredClone(transaction)
       commitCount++
       if (commitCount === gatedCommit) {
+        gatedTransaction = tx
         entered.resolve()
         await released.promise
       }
@@ -1275,6 +1295,7 @@ function createOwnershipStorage(seed?: StoredOwnership, gatedCommit?: number) {
             throw new Error(`Ownership fixture received an invalid row`)
           }
           state.rows.set(mutation.key, { id, category, name })
+          appliedRowWrites.push(name)
           if (mutation.metadataChanged) {
             state.rowMetadata.set(
               mutation.key,
@@ -1306,6 +1327,12 @@ function createOwnershipStorage(seed?: StoredOwnership, gatedCommit?: number) {
     adapter,
     entered: entered.promise,
     release: () => released.resolve(),
+    commitCount: () => commitCount,
+    durableRevisions: () =>
+      appliedRowWrites.filter(
+        (name, index) => index === 0 || name !== appliedRowWrites[index - 1],
+      ),
+    gatedTransaction: () => gatedTransaction,
     snapshot: (): StoredOwnership => structuredClone(state),
   }
 }
@@ -1375,6 +1402,247 @@ function expectedDirectWriteReceipt(applied: boolean) {
 // that admission; restart creates a new current run.
 function expectedDirectWriteAdmission(syncRun: `current` | `invalidated`) {
   return syncRun === `current` ? `fulfilled` : `rejected`
+}
+
+/**
+ * A committed Query result can wait before Collection publication or after
+ * publication but before durability. A later valid result for the same active
+ * query remains authoritative at its applied receipt in either schedule.
+ * A direct `writeUpsert` started afterward has the same applied-receipt and
+ * row-authority obligation. A mutation-handler write is checked only before
+ * publication, where its predecessor's source commit has already been accepted.
+ * The authority is the result-settlement law at the top of this file and the
+ * persisted source FIFO/applied-receipt contract. Supersession may retire the
+ * older caller; it cannot invalidate the newer caller's accepted application.
+ * `durableWrites` is the order of distinct durable revisions: adjacent repeats
+ * of the same revision may result from Query notifications and do not change
+ * the durable value. This model predicts public and durable rows, not Query observer scheduling or
+ * the superseded caller's cancellation outcome. `heldPhase` is a test-only
+ * adapter gate; it maps to the wrapper's publication and durability cuts.
+ * The two phases are distinct because public row 2 exists at only one held
+ * checkpoint. The grammar is bounded: preload row 1, start refetch for row 2,
+ * hold one committed application cut, start a row-3 successor, then release.
+ * It covers all three successors before publication and refetch or direct
+ * write during row durability. The handler-write durability cell has its own
+ * two-case Query notification grammar below: holding adapter commit #3 does
+ * not determine when the predecessor controller retires or when the accepted
+ * optimistic snapshot leaves the public view. Cleanup and precommit
+ * cancellation are adjacent controls.
+ * An invalid Query result is not a legal member of this grammar.
+ */
+type PersistedResultOverlapHistory = {
+  heldPhase: `before-publication` | `before-durability`
+  gatedCommit: number
+  successor: `refetch` | `direct-write` | `handler-write`
+}
+
+const persistedResultOverlapHistories: ReadonlyArray<PersistedResultOverlapHistory> =
+  [
+    { heldPhase: `before-publication`, gatedCommit: 2, successor: `refetch` },
+    {
+      heldPhase: `before-publication`,
+      gatedCommit: 2,
+      successor: `direct-write`,
+    },
+    {
+      heldPhase: `before-publication`,
+      gatedCommit: 2,
+      successor: `handler-write`,
+    },
+    { heldPhase: `before-durability`, gatedCommit: 3, successor: `refetch` },
+    {
+      heldPhase: `before-durability`,
+      gatedCommit: 3,
+      successor: `direct-write`,
+    },
+  ]
+
+function expectedPersistedResultOverlap(
+  history: PersistedResultOverlapHistory,
+) {
+  return {
+    held: {
+      publicName: history.heldPhase === `before-publication` ? `one` : `two`,
+      durableName: `one`,
+      latestReceipt: `pending`,
+    },
+    final: {
+      publicName: `three`,
+      durableName: `three`,
+      durableWrites: [`one`, `two`, `three`],
+      latestReceipt: `fulfilled`,
+      status: `ready`,
+      lastError: undefined,
+      errorCount: 0,
+    },
+  } as const
+}
+
+/**
+ * The optimistic-history owner specifies that a successful mutation keeps its
+ * authored snapshot until a source publication acknowledges it. The handler's
+ * direct write uses an immediate sync transaction while the mutation is still
+ * active, so its applied receipt and durable row do not alone retire that
+ * snapshot. A later Query result admitted during the handler waits for the
+ * mutation and then publishes row 3, retiring the accepted snapshot. Holding
+ * that Query notification leaves the optimistic row public at mutation
+ * settlement. This two-case model observes public rows and receipts at those
+ * checkpoints, not intermediate notifications after the gate opens or Query
+ * Core's internal controller implementation.
+ */
+type HandlerQueryNotificationPhase =
+  `held-through-settlement` | `delivered-during-handler`
+
+function expectedHandlerMutationSettlement(
+  phase: HandlerQueryNotificationPhase,
+) {
+  return {
+    receipts: [`fulfilled`, `fulfilled`, `fulfilled`],
+    publicName: phase === `held-through-settlement` ? `optimistic` : `three`,
+    durableName: `three`,
+  } as const
+}
+
+function createPersistedOverlapFixture(
+  id: string,
+  gatedCommit: number | undefined,
+  handlerWrite = false,
+  holdQueryResult = false,
+  syncMode: `eager` | `on-demand` = `eager`,
+) {
+  const storage = createOwnershipStorage(undefined, gatedCommit)
+  const queryClient = createQueryClient()
+  let serverRows: Array<Item> = [{ id: `row`, category: `group`, name: `one` }]
+  const queryResultEntered = createDeferred<void>()
+  const releaseQueryResult = createDeferred<void>()
+  const queryFn = vi.fn(async () => {
+    const result = structuredClone(serverRows)
+    if (holdQueryResult && result.some((row) => row.name === `two`)) {
+      queryResultEntered.resolve()
+      await releaseQueryResult.promise
+    }
+    return result
+  })
+  const handlerEntered = createDeferred<void>()
+  const handlerBeforeWrite = createDeferred<void>()
+  const handlerWriteGate = createDeferred<void>()
+  let holdHandlerWrite = false
+  let handlerWriteReceipt: Promise<unknown> | undefined
+  const handlerWriteReceipts: Array<Promise<unknown>> = []
+  const options = queryCollectionOptions<Item>({
+    id,
+    queryClient,
+    queryKey: [id],
+    queryFn,
+    getKey: (item) => item.id,
+    syncMode,
+    startSync: true,
+    onUpdate: async ({ collection: handlerCollection }) => {
+      if (!handlerWrite) throw new Error(`No handler write in this history`)
+      if (holdHandlerWrite) {
+        handlerBeforeWrite.resolve()
+        await handlerWriteGate.promise
+      }
+      handlerWriteReceipt = Promise.resolve(
+        handlerCollection.utils.writeUpsert(structuredClone(serverRows[0]!)),
+      )
+      handlerWriteReceipts.push(handlerWriteReceipt)
+      handlerEntered.resolve()
+      await handlerWriteReceipt
+      return { refetch: false }
+    },
+  })
+  const sourceSync = options.sync.sync
+  const sourceCommits: Array<{
+    signal: AbortSignal | undefined
+    settled: boolean
+    outcome: `pending` | `fulfilled` | `rejected`
+    error?: unknown
+    writes: Array<string>
+  }> = []
+  let writes: Array<string> = []
+  const collection = createCollection(
+    persistedCollectionOptions<
+      Item,
+      string | number,
+      never,
+      QueryCollectionUtils<Item, string | number, Item, unknown>
+    >({
+      ...options,
+      sync: {
+        ...options.sync,
+        sync: (params) =>
+          sourceSync({
+            ...params,
+            begin: (beginOptions) => {
+              writes = []
+              params.begin(beginOptions)
+            },
+            write: (message) => {
+              if (`value` in message) {
+                writes.push(message.value.name)
+              }
+              params.write(message)
+            },
+            commit: (signal) => {
+              const applied = params.commit(signal)
+              const record: (typeof sourceCommits)[number] = {
+                signal,
+                settled: applied === true,
+                outcome: applied === true ? `fulfilled` : `pending`,
+                writes: [...writes],
+              }
+              sourceCommits.push(record)
+              if (applied !== true) {
+                void applied.then(
+                  () => {
+                    record.settled = true
+                    record.outcome = `fulfilled`
+                  },
+                  (error: unknown) => {
+                    record.settled = true
+                    record.outcome = `rejected`
+                    record.error = error
+                  },
+                )
+              }
+              return applied
+            },
+          }),
+      },
+      persistence: { adapter: storage.adapter },
+    }),
+  )
+  cleanups.push(async () => {
+    storage.release()
+    releaseQueryResult.resolve()
+    handlerWriteGate.resolve()
+    await collection.cleanup()
+    queryClient.clear()
+  })
+  return {
+    collection,
+    queryClient,
+    storage,
+    queryFn,
+    sourceCommits,
+    handlerEntered: handlerEntered.promise,
+    handlerBeforeWrite: handlerBeforeWrite.promise,
+    holdHandlerWrite: () => {
+      holdHandlerWrite = true
+    },
+    releaseHandlerWrite: () => handlerWriteGate.resolve(),
+    handlerWriteReceipt: () => handlerWriteReceipt,
+    handlerWriteReceipts: () => [...handlerWriteReceipts],
+    queryResultEntered: queryResultEntered.promise,
+    releaseQueryResult: () => releaseQueryResult.resolve(),
+    setServer: (name: string) => {
+      serverRows = [{ ...serverRows[0]!, name }]
+    },
+    setServerRows: (nextRows: Array<Item>) => {
+      serverRows = structuredClone(nextRows)
+    },
+  }
 }
 
 type ColdOwnershipObservation = { stored: Array<Item>; visible: Array<Item> }
@@ -1456,6 +1724,595 @@ function expectColdOwnerRevalidation(
 describe(`query collection ownership lifecycle`, () => {
   afterEach(async () => {
     await runCleanups()
+  })
+
+  it.each(persistedResultOverlapHistories)(
+    `keeps a $successor authoritative when an earlier result waits $heldPhase`,
+    async (history) => {
+      const expected = expectedPersistedResultOverlap(history)
+      const {
+        collection,
+        storage,
+        queryFn,
+        sourceCommits,
+        handlerEntered,
+        handlerWriteReceipt,
+        setServer,
+      } = createPersistedOverlapFixture(
+        `persisted-overlap-${history.heldPhase}-${history.successor}`,
+        history.gatedCommit,
+        history.successor === `handler-write`,
+      )
+
+      await collection.preload()
+      expect(storage.commitCount()).toBe(1)
+      expect(collection.get(`row`)?.name).toBe(`one`)
+      const commitsBeforeFirstRefetch = sourceCommits.length
+      setServer(`two`)
+      const first = collection.utils.refetch({ throwOnError: true })
+      void first.catch(() => undefined)
+      await storage.entered
+      expect(storage.commitCount()).toBe(history.gatedCommit)
+      await vi.waitFor(() =>
+        expect(
+          sourceCommits
+            .slice(commitsBeforeFirstRefetch)
+            .some((commit) => commit.writes.includes(`two`)),
+        ).toBe(true),
+      )
+      const committedResult = sourceCommits
+        .slice(commitsBeforeFirstRefetch)
+        .filter((commit) => commit.writes.includes(`two`))
+        .at(-1)
+      expect(committedResult?.signal).toBeDefined()
+      expect(committedResult?.settled).toBe(false)
+      expect(committedResult?.writes).toContain(`two`)
+      const held = storage.gatedTransaction()
+      expect(held).toBeDefined()
+      if (history.heldPhase === `before-publication`) {
+        expect(held?.mutations).toHaveLength(0)
+        expect(
+          held?.collectionMetadataMutations?.some(
+            (mutation) =>
+              mutation.type === `delete` &&
+              String(mutation.key).startsWith(`queryCollection:gc:`),
+          ),
+        ).toBe(true)
+      } else {
+        expect(held?.mutations.map((mutation) => mutation.type)).toContain(
+          `update`,
+        )
+      }
+      expect({
+        publicName: collection.get(`row`)?.name,
+        durableName: storage.snapshot().rows.get(`row`)?.name,
+      }).toEqual({
+        publicName: expected.held.publicName,
+        durableName: expected.held.durableName,
+      })
+      setServer(`three`)
+      let second: Promise<unknown>
+      let handlerReceipts: [Promise<unknown>, Promise<unknown>] | undefined
+      if (history.successor === `refetch`) {
+        second = collection.utils.refetch({ throwOnError: true })
+        await vi.waitFor(() => expect(queryFn).toHaveBeenCalledTimes(3))
+      } else if (history.successor === `direct-write`) {
+        second = Promise.resolve(
+          collection.utils.writeUpsert({
+            id: `row`,
+            category: `group`,
+            name: `three`,
+          }),
+        )
+      } else {
+        const mutation = collection.update(`row`, (draft) => {
+          draft.name = `optimistic`
+        })
+        await handlerEntered
+        const writeReceipt = handlerWriteReceipt()
+        if (!writeReceipt) throw new Error(`Handler did not start a write`)
+        handlerReceipts = [mutation.isPersisted.promise, writeReceipt]
+        second = Promise.all(handlerReceipts)
+      }
+      void second.catch(() => undefined)
+      const latestReceipt = { settled: false }
+      void second.then(
+        () => {
+          latestReceipt.settled = true
+        },
+        () => {
+          latestReceipt.settled = true
+        },
+      )
+      await Promise.resolve()
+      expect(latestReceipt.settled).toBe(false)
+      storage.release()
+      if (history.successor === `handler-write`) {
+        await vi.waitFor(() => expect(latestReceipt.settled).toBe(true), {
+          timeout: 750,
+        })
+      }
+      const outcomes = await Promise.allSettled([first, second])
+      const handlerReceiptOutcomes = handlerReceipts
+        ? (await Promise.allSettled(handlerReceipts)).map(
+            (outcome) => outcome.status,
+          )
+        : undefined
+      expect({
+        publicName: collection.get(`row`)?.name,
+        durableName: storage.snapshot().rows.get(`row`)?.name,
+        durableWrites: storage.durableRevisions(),
+        latestReceipt: outcomes[1].status,
+        handlerReceiptOutcomes,
+        status: collection.status,
+        lastError: collection.utils.lastError,
+        errorCount: collection.utils.errorCount,
+      }).toEqual({
+        ...expected.final,
+        handlerReceiptOutcomes:
+          history.successor === `handler-write`
+            ? [`fulfilled`, `fulfilled`]
+            : undefined,
+      })
+    },
+  )
+
+  it(`settles an awaited handler write that starts after an earlier core publication waits`, async () => {
+    const {
+      collection,
+      storage,
+      handlerBeforeWrite,
+      handlerEntered,
+      handlerWriteReceipt,
+      holdHandlerWrite,
+      releaseHandlerWrite,
+      setServer,
+    } = createPersistedOverlapFixture(`persisted-overlap-late-handler`, 2, true)
+    await collection.preload()
+    setServer(`two`)
+    const first = collection.utils.refetch({ throwOnError: true })
+    void first.catch(() => undefined)
+    await storage.entered
+
+    holdHandlerWrite()
+    setServer(`three`)
+    const mutation = collection.update(`row`, (draft) => {
+      draft.name = `optimistic`
+    })
+    void mutation.isPersisted.promise.catch(() => undefined)
+    await handlerBeforeWrite
+    storage.release()
+    await vi.waitFor(() =>
+      expect(
+        collection._state.pendingSyncedTransactions.some(
+          (transaction) =>
+            transaction.committed &&
+            !transaction.applicationStarted &&
+            transaction.operations.some((operation) => operation.key === `row`),
+        ),
+      ).toBe(true),
+    )
+
+    releaseHandlerWrite()
+    await handlerEntered
+    const writeReceipt = handlerWriteReceipt()
+    if (!writeReceipt) throw new Error(`Handler did not start a write`)
+    const settled = { value: false }
+    const receipts = Promise.all([
+      first,
+      mutation.isPersisted.promise,
+      writeReceipt,
+    ])
+    void receipts.then(
+      () => {
+        settled.value = true
+      },
+      () => {
+        settled.value = true
+      },
+    )
+    await vi.waitFor(() => expect(settled.value).toBe(true), { timeout: 750 })
+    await expect(receipts).resolves.toHaveLength(3)
+    expect(storage.durableRevisions()).toEqual([`one`, `two`, `three`])
+    expect(storage.snapshot().rows.get(`row`)?.name).toBe(`three`)
+  })
+
+  it.each([`middle`, `newest`] as const)(
+    `retains the latest $0 row when a committed persisted result is superseded`,
+    async (successorKey) => {
+      const { collection, storage, sourceCommits, setServerRows } =
+        createPersistedOverlapFixture(`persisted-overlap-row-turnover`, 2)
+      await collection.preload()
+      setServerRows([{ id: `middle`, category: `group`, name: `two` }])
+      const first = collection.utils.refetch({ throwOnError: true })
+      void first.catch(() => undefined)
+      await storage.entered
+      await vi.waitFor(() =>
+        expect(
+          sourceCommits.some((commit) => commit.writes.includes(`two`)),
+        ).toBe(true),
+      )
+      expect(collection.toArray.map((row) => row.id)).toEqual([`row`])
+      setServerRows([{ id: successorKey, category: `group`, name: `three` }])
+      const second = collection.utils.refetch({ throwOnError: true })
+      void second.catch(() => undefined)
+      storage.release()
+      await second
+      await Promise.allSettled([first])
+      expect(collection.toArray.map((row) => [row.id, row.name])).toEqual([
+        [successorKey, `three`],
+      ])
+      expect(Array.from(storage.snapshot().rows.values())).toEqual([
+        { id: successorKey, category: `group`, name: `three` },
+      ])
+      expect(collection.utils.lastError).toBeUndefined()
+    },
+  )
+
+  it.each([`held-through-settlement`, `delivered-during-handler`] as const)(
+    `observes the handler snapshot with Query notification $0`,
+    async (queryPhase) => {
+      const expected = expectedHandlerMutationSettlement(queryPhase)
+      const id = `persisted-overlap-handler-query-phase-${queryPhase}`
+      const {
+        collection,
+        queryClient,
+        storage,
+        sourceCommits,
+        handlerEntered,
+        handlerWriteReceipt,
+        setServer,
+      } = createPersistedOverlapFixture(id, 3, true)
+      await collection.preload()
+      setServer(`two`)
+      const first = collection.utils.refetch({ throwOnError: true })
+      void first.catch(() => undefined)
+      await storage.entered
+      await vi.waitFor(() =>
+        expect(
+          sourceCommits.some((commit) => commit.writes.includes(`two`)),
+        ).toBe(true),
+      )
+      const predecessor = sourceCommits.find((commit) =>
+        commit.writes.includes(`two`),
+      )
+      expect(collection.get(`row`)?.name).toBe(`two`)
+
+      const observer = queryClient.getQueryCache().find({
+        queryKey: [id],
+        exact: true,
+      })?.observers[0]
+      if (!observer) throw new Error(`Query observer was not installed`)
+      const originalUpdate = observer.onQueryUpdate.bind(observer)
+      const queuedUpdates: Array<() => void> = []
+      const gate = vi
+        .spyOn(observer, `onQueryUpdate`)
+        .mockImplementation(() => {
+          queuedUpdates.push(originalUpdate)
+        })
+      try {
+        setServer(`three`)
+        const mutation = collection.update(`row`, (draft) => {
+          draft.name = `optimistic`
+        })
+        await handlerEntered
+        const writeReceipt = handlerWriteReceipt()
+        if (!writeReceipt) throw new Error(`Handler did not start a write`)
+        expect(queuedUpdates.length).toBeGreaterThan(0)
+        if (queryPhase === `delivered-during-handler`) {
+          gate.mockRestore()
+          queuedUpdates.splice(0).forEach((update) => update())
+          queryClient.setQueryData(
+            [id],
+            [{ id: `row`, category: `group`, name: `three` }],
+          )
+        }
+        expect(collection.get(`row`)?.name).toBe(`optimistic`)
+        storage.release()
+        const outcomes = await Promise.allSettled([
+          first,
+          mutation.isPersisted.promise,
+          writeReceipt,
+        ])
+        expect(predecessor?.outcome).toBe(`fulfilled`)
+        expect({
+          receipts: outcomes.map((outcome) => outcome.status),
+          publicName: collection.get(`row`)?.name,
+          durableName: storage.snapshot().rows.get(`row`)?.name,
+        }).toEqual(expected)
+      } finally {
+        gate.mockRestore()
+        queuedUpdates.forEach((update) => update())
+      }
+      await collection.utils.refetch({ throwOnError: true })
+      expect(collection.get(`row`)?.name).toBe(`three`)
+    },
+  )
+
+  // Two user actions may persist the same row at once. The source commits are
+  // accepted in handler order; storage must keep that order even when the first
+  // commit is held and both optimistic transactions remain active.
+  it(`settles parallel mutation handlers in accepted durable order`, async () => {
+    const {
+      collection,
+      queryClient,
+      storage,
+      sourceCommits,
+      handlerWriteReceipts,
+      setServer,
+    } = createPersistedOverlapFixture(`parallel-handler-writes`, 2, true)
+    await collection.preload()
+    expect(storage.durableRevisions()).toEqual([`one`])
+
+    setServer(`two`)
+    const first = collection.update(`row`, (draft) => {
+      draft.name = `optimistic-two`
+    })
+    void first.isPersisted.promise.catch(() => undefined)
+    await storage.entered
+    expect(
+      storage.gatedTransaction()?.mutations.map(({ value }) => value.name),
+    ).toContain(`two`)
+    await vi.waitFor(() => expect(handlerWriteReceipts()).toHaveLength(1))
+
+    setServer(`three`)
+    const second = collection.update(`row`, (draft) => {
+      draft.name = `optimistic-three`
+    })
+    void second.isPersisted.promise.catch(() => undefined)
+    await vi.waitFor(() => expect(handlerWriteReceipts()).toHaveLength(2))
+    await vi.waitFor(() =>
+      expect(sourceCommits.some(({ writes }) => writes.includes(`three`))).toBe(
+        true,
+      ),
+    )
+    const writeReceipts = handlerWriteReceipts()
+    const outcomes = [
+      first.isPersisted.promise,
+      second.isPersisted.promise,
+      ...writeReceipts,
+    ]
+    const settled = outcomes.map(() => false)
+    outcomes.forEach((outcome, index) => {
+      void outcome.then(
+        () => {
+          settled[index] = true
+        },
+        () => {
+          settled[index] = true
+        },
+      )
+    })
+    await Promise.resolve()
+    expect(settled).toEqual([false, false, false, false])
+    expect(storage.durableRevisions()).toEqual([`one`])
+
+    storage.release()
+    expect(
+      (await Promise.allSettled(outcomes)).map(({ status }) => status),
+    ).toEqual([`fulfilled`, `fulfilled`, `fulfilled`, `fulfilled`])
+    const expectedDurableOrder = [`one`, `two`, `three`]
+    const assertDurableOrder = (revisions: Array<string>) =>
+      expect(revisions).toEqual(expectedDurableOrder)
+    expect(() => assertDurableOrder([`one`, `three`, `two`])).toThrow()
+    assertDurableOrder(storage.durableRevisions())
+    expect(storage.snapshot().rows.get(`row`)?.name).toBe(`three`)
+    expect(collection.get(`row`)?.name).toBe(`three`)
+    expect(queryClient.getQueryData([`parallel-handler-writes`])).toEqual([
+      { id: `row`, category: `group`, name: `three` },
+    ])
+    await collection.utils.refetch({ throwOnError: true })
+    expect(collection.get(`row`)?.name).toBe(`three`)
+    expect(storage.snapshot().rows.get(`row`)?.name).toBe(`three`)
+    expect(collection.utils.lastError).toBeUndefined()
+  })
+
+  it(`cancels a superseded result before its source commit`, async () => {
+    const {
+      collection,
+      storage,
+      sourceCommits,
+      queryResultEntered,
+      releaseQueryResult,
+      setServer,
+    } = createPersistedOverlapFixture(
+      `persisted-overlap-precommit-cancellation`,
+      undefined,
+      false,
+      true,
+    )
+    await collection.preload()
+    expect(storage.commitCount()).toBe(1)
+    const commitsBeforeFirstRefetch = sourceCommits.length
+    setServer(`two`)
+    const first = collection.utils.refetch({ throwOnError: true })
+    void first.catch(() => undefined)
+    await queryResultEntered
+    expect(storage.commitCount()).toBe(2)
+    expect(
+      sourceCommits
+        .slice(commitsBeforeFirstRefetch)
+        .filter((commit) => commit.writes.includes(`two`)),
+    ).toHaveLength(0)
+
+    setServer(`three`)
+    const second = collection.utils.refetch({ throwOnError: true })
+    void second.catch(() => undefined)
+    releaseQueryResult()
+    const outcomes = await Promise.allSettled([first, second])
+    expect({
+      latestReceipt: outcomes[1].status,
+      publicName: collection.get(`row`)?.name,
+      durableName: storage.snapshot().rows.get(`row`)?.name,
+      status: collection.status,
+      lastError: collection.utils.lastError,
+    }).toEqual({
+      latestReceipt: `fulfilled`,
+      publicName: `three`,
+      durableName: `three`,
+      status: `ready`,
+      lastError: undefined,
+    })
+  })
+
+  // The documented refetch application barrier rejects cancellation with an
+  // AbortError. Cleanup retires this accepted result before publication.
+  it(`rejects a committed but unpublished refetch on cleanup`, async () => {
+    const { collection, storage, sourceCommits, setServer } =
+      createPersistedOverlapFixture(`persisted-overlap-cleanup`, 2)
+    await collection.preload()
+    expect(storage.commitCount()).toBe(1)
+    let model: ExplicitRefetchApplicationModel = {
+      calls: new Map(),
+      publicValues: new Map([[`query`, `one`]]),
+    }
+    model = reduceExplicitRefetchApplication(model, {
+      type: `start-call`,
+      callId: 1,
+      resultIds: [`query`],
+      throwOnError: true,
+    })
+    const commitsBeforeRefetch = sourceCommits.length
+    setServer(`two`)
+    let refetchOutcome: RefetchApplicationOutcome = `pending`
+    const refetch = collection.utils.refetch({ throwOnError: true }).then(
+      (results) => {
+        refetchOutcome = `resolved`
+        return results
+      },
+      (error: unknown) => {
+        refetchOutcome = `rejected`
+        throw error
+      },
+    )
+    void refetch.catch(() => undefined)
+    await storage.entered
+    expect(storage.commitCount()).toBe(2)
+    expect(
+      storage
+        .gatedTransaction()
+        ?.collectionMetadataMutations?.some(
+          (mutation) =>
+            mutation.type === `delete` &&
+            String(mutation.key).startsWith(`queryCollection:gc:`),
+        ),
+    ).toBe(true)
+    await vi.waitFor(() =>
+      expect(
+        sourceCommits
+          .slice(commitsBeforeRefetch)
+          .some((commit) => commit.writes.includes(`two`)),
+      ).toBe(true),
+    )
+    const committedResult = sourceCommits
+      .slice(commitsBeforeRefetch)
+      .filter((commit) => commit.writes.includes(`two`))
+      .at(-1)
+    expect(committedResult?.signal).toBeDefined()
+    expect(committedResult?.settled).toBe(false)
+    model = reduceExplicitRefetchApplication(model, {
+      type: `accept-result`,
+      callId: 1,
+      resultId: `query`,
+      value: `two`,
+    })
+    expectExplicitRefetchObservation(
+      {
+        publicValues: { query: collection.get(`row`)?.name },
+        refetch: refetchOutcome,
+      },
+      observeExplicitRefetchApplication(model, 1),
+    )
+
+    const cleanup = collection.cleanup()
+    void cleanup.catch(() => undefined)
+    await vi.waitFor(() => expect(committedResult?.signal?.aborted).toBe(true))
+    model = reduceExplicitRefetchApplication(model, {
+      type: `retire-application`,
+      callId: 1,
+      resultId: `query`,
+    })
+    storage.release()
+    const outcomes = await Promise.allSettled([refetch, cleanup])
+    expect({
+      refetch: refetchOutcome,
+      sourceOutcome: committedResult?.outcome,
+      cleanup: outcomes[1].status,
+      status: collection.status,
+      durableName: storage.snapshot().rows.get(`row`)?.name,
+    }).toEqual({
+      refetch: observeExplicitRefetchApplication(model, 1).refetch,
+      sourceOutcome: `rejected`,
+      cleanup: `fulfilled`,
+      status: `cleaned-up`,
+      durableName: `one`,
+    })
+    expect(outcomes[0]).toMatchObject({
+      status: `rejected`,
+      reason: { name: `AbortError` },
+    })
+    expect(committedResult?.error).toMatchObject({ name: `AbortError` })
+    expect(() =>
+      collection.utils.writeUpsert({
+        id: `row`,
+        category: `group`,
+        name: `late`,
+      }),
+    ).toThrow(SyncNotInitializedError)
+  })
+
+  // Releasing a demand retires every unpublished result it accepted, including
+  // one superseded after source commit but before Collection publication.
+  it(`does not publish a superseded persisted result after subset release`, async () => {
+    const id = `persisted-overlap-subset-release`
+    const { collection, queryClient, storage, sourceCommits } =
+      createPersistedOverlapFixture(id, undefined, false, false, `on-demand`)
+
+    const persistence = createDeferred<void>()
+    const mutation = createTransaction({
+      mutationFn: () => persistence.promise,
+    })
+    mutation.mutate(() =>
+      collection.insert({ id: `local`, category: `group`, name: `Local` }),
+    )
+
+    try {
+      const subset: LoadSubsetOptions = {}
+      const load = collection._sync.loadSubset(subset)
+      if (load !== true) void load.catch(() => undefined)
+      await vi.waitFor(() =>
+        expect(
+          sourceCommits.some((commit) => commit.writes.includes(`one`)),
+        ).toBe(true),
+      )
+      const first = sourceCommits.find((commit) =>
+        commit.writes.includes(`one`),
+      )!
+      expect(first.settled).toBe(false)
+
+      queryClient.setQueryData(
+        [id],
+        [{ id: `second`, category: `group`, name: `Second` }],
+      )
+      await vi.waitFor(() =>
+        expect(
+          sourceCommits.some((commit) => commit.writes.includes(`Second`)),
+        ).toBe(true),
+      )
+      collection._sync.unloadSubset(subset)
+      persistence.resolve()
+      await mutation.isPersisted.promise
+      await vi.waitFor(() => expect(first.settled).toBe(true))
+
+      expect(first.signal?.aborted).toBe(true)
+      expect(first.outcome).toBe(`rejected`)
+      expect(collection.has(`row`)).toBe(false)
+      expect(collection.has(`second`)).toBe(false)
+      expect(storage.snapshot().rows.size).toBe(0)
+    } finally {
+      persistence.resolve()
+      await mutation.isPersisted.promise.catch(() => undefined)
+    }
   })
 
   it(`keeps an accepted empty-diff result pending until application`, () => {

@@ -10,8 +10,10 @@ import {
   BaseQueryBuilder,
   createLiveQueryCollection,
   createLiveQueryObserver,
+  getPublicCollection,
   isCollection,
   isSingleResultCollection,
+  resolveLiveQueryValue,
 } from '@tanstack/db'
 import type {
   Collection,
@@ -180,11 +182,7 @@ export function injectLiveQuery(opts: any) {
         return null
       }
 
-      return createLiveQueryCollection({
-        query: opts,
-        startSync: true,
-        gcTime: 0,
-      })
+      return resolveLiveQueryValue(result, { gcTime: 0 })
     }
 
     // Check if it's reactive query options
@@ -207,11 +205,7 @@ export function injectLiveQuery(opts: any) {
         return null
       }
 
-      return createLiveQueryCollection({
-        query: () => result,
-        startSync: true,
-        gcTime: 0,
-      })
+      return resolveLiveQueryValue(result, { gcTime: 0 })
     }
 
     // Handle LiveQueryCollectionConfig objects. Default startSync/gcTime to
@@ -250,7 +244,7 @@ export function injectLiveQuery(opts: any) {
     observer: LiveQueryObserver<any, any>,
   ) => {
     const newState = new Map(currentCollection.entries())
-    const newData = Array.from(currentCollection.values())
+    const newData = Array.from(newState.values())
 
     state.set(newState)
     internalData.set(newData)
@@ -312,7 +306,9 @@ export function injectLiveQuery(opts: any) {
     data,
     // Loosely typed so the impl return stays compatible with every overload
     // (the shared `isCollection` guard narrows the computed to `Collection | null`).
-    collection: collection as Signal<any>,
+    collection: computed(() =>
+      getPublicCollection(collection()),
+    ) as Signal<any>,
     status,
     isLoading: computed(() => status() === `loading`),
     isReady: computed(() => status() === `ready` || status() === `disabled`),

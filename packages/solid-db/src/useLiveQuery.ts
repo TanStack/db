@@ -11,8 +11,10 @@ import {
   BaseQueryBuilder,
   createLiveQueryCollection,
   createLiveQueryObserver,
+  getPublicCollection,
   isCollection,
   isSingleResultCollection,
+  resolveLiveQueryValue,
 } from '@tanstack/db'
 import { createStore, reconcile } from 'solid-js/store'
 import type { Accessor } from 'solid-js'
@@ -321,10 +323,7 @@ export function useLiveQuery(
           return null
         }
 
-        return createLiveQueryCollection({
-          query: configOrQueryOrCollection,
-          startSync: true,
-        })
+        return resolveLiveQueryValue(result)
       }
 
       const innerCollection = configOrQueryOrCollection()
@@ -558,7 +557,7 @@ export function useLiveQuery(
     },
     collection: {
       get() {
-        return collection()
+        return getPublicCollection(collection())
       },
     },
     state: {

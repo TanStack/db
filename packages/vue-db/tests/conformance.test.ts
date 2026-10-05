@@ -229,7 +229,7 @@ const vueDriver: LiveQueryDriver = {
   mountConfig,
   mountDisabled,
   knownGaps: [],
-  features: { serverSnapshot: false, suspense: false },
+  features: { serverSnapshot: false, suspense: false, pooledEqFilters: true },
 }
 
 describe(`owned native scope setup`, () => {

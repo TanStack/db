@@ -17,13 +17,10 @@ import type { TauriSQLiteDatabaseLike } from './tauri-sql-driver'
 export type { TauriSQLiteDatabaseLike } from './tauri-sql-driver'
 
 type TauriSQLiteCoreSchemaMismatchPolicy =
-  | `sync-present-reset`
-  | `sync-absent-error`
-  | `reset`
+  `sync-present-reset` | `sync-absent-error` | `reset`
 
 export type TauriSQLiteSchemaMismatchPolicy =
-  | TauriSQLiteCoreSchemaMismatchPolicy
-  | `throw`
+  TauriSQLiteCoreSchemaMismatchPolicy | `throw`
 
 type TauriSQLitePersistenceBaseOptions = Omit<
   SQLiteCoreAdapterOptions,

@@ -1,4 +1,4 @@
 export {
   runSQLiteCoreAdapterContractSuite,
   type SQLiteCoreAdapterHarnessFactory,
-} from '../sqlite-core-adapter.test'
+} from '../sqlite-core-adapter-oracle.test'

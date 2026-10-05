@@ -859,6 +859,37 @@ function mutateGeneratedScenarioQuery(
     throw new Error(`${kind} SQL/compiler fault did not reach ${detail}`)
   }
 
+  const numericInList = (
+    query: CapturedQuery,
+    length: number,
+  ): Array<number> => {
+    const boundList = query.params[0]
+    if (
+      !query.sql.includes(` IN (SELECT value FROM json_each(?))`) ||
+      query.params.length !== 1 ||
+      typeof boundList !== `string`
+    ) {
+      return unreached(`the ${length}-member IN list binding`)
+    }
+    let values: unknown
+    try {
+      values = JSON.parse(boundList) as unknown
+    } catch {
+      return unreached(`a JSON IN list binding`)
+    }
+    if (
+      !Array.isArray(values) ||
+      values.length !== length ||
+      !values.every(
+        (value: unknown) =>
+          typeof value === `number` && Number.isSafeInteger(value),
+      )
+    ) {
+      return unreached(`a ${length}-member numeric IN list binding`)
+    }
+    return values as Array<number>
+  }
+
   switch (kind) {
     case `eq`:
       return (query) => {
@@ -868,29 +899,15 @@ function mutateGeneratedScenarioQuery(
       }
     case `in`:
       return (query) => {
-        if (!query.sql.includes(` IN (`) || query.params.length !== 2) {
-          return unreached(`the ordinary IN bindings`)
-        }
-        const first = query.params[0]
-        if (typeof first !== `string`) {
-          return unreached(`a BigInt ordinary IN binding`)
-        }
-        const params = [...query.params]
-        params[0] = (BigInt(first) + 2n).toString()
-        return { sql: query.sql, params }
+        const values = numericInList(query, 2)
+        values[0] = values[0]! + 2
+        return { sql: query.sql, params: [JSON.stringify(values)] }
       }
     case `batched-in`:
       return (query) => {
-        if (!query.sql.includes(` IN (`) || query.params.length !== 901) {
-          return unreached(`the 901 batched IN bindings`)
-        }
-        const first = query.params[0]
-        if (typeof first !== `string`) {
-          return unreached(`a BigInt batched IN binding`)
-        }
-        const params = [...query.params]
-        params[params.length - 1] = (BigInt(first) - 1n).toString()
-        return { sql: query.sql, params }
+        const values = numericInList(query, 901)
+        values[values.length - 1] = values[0]! - 1
+        return { sql: query.sql, params: [JSON.stringify(values)] }
       }
     case `range`:
       return (query) => {
@@ -1471,7 +1488,7 @@ describe(`SQLite expression-index oracle`, () => {
         },
       ],
       expectedKeys: [`included-high`, `included-low`],
-      expectedQueryParams: [`9007199254740992`, `9007199254740997`],
+      expectedQueryParams: [`[9007199254740992,9007199254740997]`],
     },
     {
       label: `bigint-field-batched-in`,
@@ -1500,9 +1517,11 @@ describe(`SQLite expression-index oracle`, () => {
         },
       ],
       expectedKeys: [`included-first`, `included-last`],
-      expectedQueryParams: Array.from({ length: 901 }, (_unused, index) =>
-        (BigInt(`9007199254740992`) + BigInt(index)).toString(),
-      ),
+      expectedQueryParams: [
+        `[${Array.from({ length: 901 }, (_unused, index) =>
+          (BigInt(`9007199254740992`) + BigInt(index)).toString(),
+        ).join(`,`)}]`,
+      ],
     },
   ])(
     `uses the raw $label field expression index`,

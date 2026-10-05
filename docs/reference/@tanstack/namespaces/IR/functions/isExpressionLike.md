@@ -7,7 +7,7 @@ title: isExpressionLike
 function isExpressionLike(value): boolean;
 ```
 
-Defined in: [packages/db/src/query/ir.ts:256](https://github.com/TanStack/db/blob/main/packages/db/src/query/ir.ts#L256)
+Defined in: [packages/db/src/query/ir.ts:255](https://github.com/TanStack/db/blob/main/packages/db/src/query/ir.ts#L255)
 
 ## Parameters
 

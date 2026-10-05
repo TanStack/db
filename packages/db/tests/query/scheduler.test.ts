@@ -504,7 +504,7 @@ describe(`live query scheduler`, () => {
     }
   })
 
-  it(`settles a dependent live query when an earlier source listener throws`, async () => {
+  it(`publishes dependent live-query rows before reporting an earlier source listener failure`, async () => {
     let begin!: () => void
     let write!: (message: { type: `insert`; value: User }) => void
     let commit!: () => void
@@ -633,8 +633,7 @@ describe(`live query scheduler`, () => {
             .select(({ user }) => ({ id: user.id, name: user.name })),
       })
       let dependentSubscription:
-        | ReturnType<typeof live.subscribeChanges>
-        | undefined
+        ReturnType<typeof live.subscribeChanges> | undefined
 
       try {
         await live.preload()
@@ -1049,7 +1048,7 @@ describe(`live query scheduler`, () => {
       ),
     ),
   )(
-    `publishes settled dependencies once: $consumer shared=$sharedSource derivedRight=$derivedRight reverse=$reverseWrites`,
+    `publishes both updated dependencies together: $consumer shared=$sharedSource derivedRight=$derivedRight reverse=$reverseWrites`,
     async ({ consumer, sharedSource, derivedRight, reverseWrites }) => {
       type Row = { id: number; left: string; right: string }
       const makeSource = (id: string) =>
@@ -1156,7 +1155,7 @@ describe(`live query scheduler`, () => {
     },
   )
 
-  it(`runs join live queries once after their parent queries settle`, async () => {
+  it(`runs the joined graph once after both parent graphs publish in the same scheduler context`, async () => {
     const collectionA = createCollection<{ id: number; value: string }>({
       id: `diamond-A`,
       getKey: (row) => row.id,

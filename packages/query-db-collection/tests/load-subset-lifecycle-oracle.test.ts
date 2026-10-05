@@ -600,9 +600,9 @@ async function expectDeferredRefetchWaitsForApplication(
     const result = collection._sync.loadSubset({ refetch: true })
     expect(result).not.toBe(true)
     refetch = result as Promise<void>
-    let settled = false
+    let fulfilled = false
     void refetch.then(() => {
-      settled = true
+      fulfilled = true
     })
 
     const callsBeforeBarrier = demand === `existing` ? 2 : 1
@@ -611,7 +611,7 @@ async function expectDeferredRefetchWaitsForApplication(
     )
     await new Promise<void>((resolve) => setTimeout(resolve, 0))
 
-    expect(settled).toBe(false)
+    expect(fulfilled).toBe(false)
     expect(collection.has(`fresh`)).toBe(false)
 
     collection.deferDataRefresh = null
@@ -668,9 +668,9 @@ async function expectRefetchWaitsForPostWriteAuthority(): Promise<void> {
     refetchDemand = collection._sync.loadSubset({
       refetch: true,
     }) as Promise<void>
-    let refetchSettled = false
+    let refetchFulfilled = false
     void refetchDemand.then(() => {
-      refetchSettled = true
+      refetchFulfilled = true
     })
 
     initialResult.resolve([{ id: `stale` }])
@@ -678,7 +678,7 @@ async function expectRefetchWaitsForPostWriteAuthority(): Promise<void> {
     await new Promise<void>((resolve) => setTimeout(resolve, 0))
 
     expect(queryFn).toHaveBeenCalledTimes(2)
-    expect(refetchSettled).toBe(false)
+    expect(refetchFulfilled).toBe(false)
     expect(collection.has(`stale`)).toBe(false)
 
     authoritativeResult.resolve([{ id: `authoritative` }])
@@ -1197,8 +1197,7 @@ async function expectRemountAfterAbortStartsFreshQuery(): Promise<void> {
 }
 
 type RetiredOutcome =
-  | { status: `fulfilled` }
-  | { status: `rejected`; error: unknown }
+  { status: `fulfilled` } | { status: `rejected`; error: unknown }
 type ReplacementSnapshot = {
   source: Array<Row>
   live: Array<Row>

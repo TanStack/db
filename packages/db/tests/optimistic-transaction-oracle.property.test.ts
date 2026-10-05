@@ -79,9 +79,14 @@ const sameKeySequences = [
   `insert-delete`,
   `update-update`,
   `update-delete`,
+  `delete-insert`,
 ] as const
 // The bounded history grammar is two authored operations on one numeric key:
-// insert/update followed by update/delete. Each of the four sequences and both
+// insert/update followed by update/delete, or a delete followed by a reinsert.
+// The applyMutations truth table gives the net request: a reinsert that
+// restores the original row cancels the pair; otherwise it is an update from
+// the original row whose changes hold exactly the differing fields. Each of
+// the five sequences and both
 // handler outcomes runs in the fixed matrix. The generated campaign varies
 // the changed number (1..50) and nonempty note (1..8 chars). Sequence is needed
 // to distinguish cancellation from a delivered net request; outcome separates
@@ -101,9 +106,16 @@ async function runSameKey(
   const { sequence, value, note, success } = scenario
   const startsAbsent = sequence.startsWith(`insert`)
   const endsAbsent = sequence.endsWith(`delete`)
+  const reinserts = sequence === `delete-insert`
   const original = { id: 1, value: 0, note: `original` }
   const first = { id: 1, value, note: startsAbsent ? `created` : original.note }
   const final = { ...first, note }
+  // Fields of the reinserted row that differ from the original row.
+  const reinsertChanges = Object.fromEntries(
+    ([`value`, `note`] as const)
+      .filter((field) => final[field] !== original[field])
+      .map((field) => [field, final[field]]),
+  )
   let sync!: Parameters<SyncConfig<Row>[`sync`]>[0]
   const source = createCollection<Row>({
     getKey: (row) => row.id,
@@ -145,12 +157,18 @@ async function runSameKey(
       await source.preload()
       tx.mutate(() => {
         if (startsAbsent) source.insert(first)
+        else if (reinserts) source.delete(1)
         else
           source.update(1, (draft) => {
             draft.value = value
           })
-        expectRows(source.values(), [first], `first authored prefix`)
+        expectRows(
+          source.values(),
+          reinserts ? [] : [first],
+          `first authored prefix`,
+        )
         if (endsAbsent) source.delete(1)
+        else if (reinserts) source.insert(final)
         else
           source.update(1, (draft) => {
             draft.note = note
@@ -163,7 +181,9 @@ async function runSameKey(
       })
       committed = observeHistoryPromise(tx.commit())
       await Promise.resolve()
-      const canceled = sequence === `insert-delete`
+      const canceled =
+        sequence === `insert-delete` ||
+        (reinserts && Object.keys(reinsertChanges).length === 0)
       if (fault === `dropped-field`)
         request = request.map((mutation) => ({
           ...mutation,
@@ -184,7 +204,9 @@ async function runSameKey(
                 ? first
                 : startsAbsent
                   ? final
-                  : { value, note },
+                  : reinserts
+                    ? reinsertChanges
+                    : { value, note },
             },
           ]
       expect(request, `net authored payload`).toStrictEqual(expected)
@@ -232,6 +254,19 @@ async function runSameKey(
 }
 
 describe(`Same-key transaction laws`, () => {
+  // A reinsert of the original row restores it, so the pair cancels: no net
+  // request and no persistence call. Generation never restores (value >= 1).
+  it.each([true, false])(
+    `cancels a delete and a reinsert that restores the row (success=%s)`,
+    async (success) => {
+      await runSameKey({
+        sequence: `delete-insert`,
+        value: 0,
+        note: `original`,
+        success,
+      })
+    },
+  )
   it.each(sameKeySequences)(
     `preserves authored sequence %s`,
     async (sequence) => {

@@ -16,8 +16,7 @@ type PipedAggregateFunction<T, R> = {
 }
 
 type AggregateFunction<T, R, V = unknown> =
-  | BasicAggregateFunction<T, R, V>
-  | PipedAggregateFunction<T, R>
+  BasicAggregateFunction<T, R, V> | PipedAggregateFunction<T, R>
 
 type ExtractAggregateReturnType<T, A> =
   A extends AggregateFunction<T, infer R, any> ? R : never

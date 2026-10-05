@@ -610,8 +610,7 @@ async function observePersistedRestart(
       await vi.waitFor(() => expect(subscribers).toHaveLength(1))
       streamSubscriber = subscribers[0]
       const request = vi.mocked(ShapeStream).mock.calls[0]?.[0] as
-        | { offset?: string; handle?: string }
-        | undefined
+        { offset?: string; handle?: string } | undefined
       if (!streamSubscriber || !request) {
         throw new Error(`Persisted Electric stream did not reach subscription`)
       }

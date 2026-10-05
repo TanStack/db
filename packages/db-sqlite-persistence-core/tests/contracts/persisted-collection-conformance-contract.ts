@@ -1,11 +1,11 @@
 import { describe } from 'vitest'
 import { createCollationTestSuite } from '../../../db-collection-e2e/src/suites/collation.suite'
 import { createDeduplicationTestSuite } from '../../../db-collection-e2e/src/suites/deduplication.suite'
-import { createJoinsTestSuite } from '../../../db-collection-e2e/src/suites/joins.suite'
-import { createLiveUpdatesTestSuite } from '../../../db-collection-e2e/src/suites/live-updates.suite'
+import { createJoinsTestSuite } from '../../../db-collection-e2e/src/suites/joins-oracle.suite'
+import { createLiveUpdatesTestSuite } from '../../../db-collection-e2e/src/suites/live-updates-oracle.suite'
 import { createMutationsTestSuite } from '../../../db-collection-e2e/src/suites/mutations.suite'
-import { createPaginationTestSuite } from '../../../db-collection-e2e/src/suites/pagination.suite'
-import { createPredicatesTestSuite } from '../../../db-collection-e2e/src/suites/predicates.suite'
+import { createPaginationTestSuite } from '../../../db-collection-e2e/src/suites/pagination-oracle.suite'
+import { createPredicatesTestSuite } from '../../../db-collection-e2e/src/suites/predicates-oracle.suite'
 import type { E2ETestConfig } from '../../../db-collection-e2e/src/types'
 
 /**

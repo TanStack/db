@@ -28,12 +28,21 @@ import type { CollectionConfig, SyncConfig } from '../src/types.js'
  * is active: it waits for settlement unless it is immediate or a truncate. The
  * Collection must already own the request when its handler starts.
  *
+ * The source may delete a key it does not hold, for example after its backend
+ * accepted an optimistic insert and deleted the row before the source streamed
+ * it. That delete is the source's answer for an accepted snapshot of the key:
+ * like any ordinary source publication, it retires the snapshot. It removes no
+ * base row and acknowledges no active request.
+ *
  * `runOptimisticHistory` gives the same edit, delete, settle, and sync history
  * to this model and a real Collection. After every step it compares rows,
  * metadata, immutable handler payloads, promise outcomes, downstream query
- * state, and complete publication cuts. Fault injection proves those
- * observations can reject wrong keys, partial batches, stale previous values,
- * and transient fields.
+ * state, and complete publication cuts. A second subscriber starts without
+ * initial state, so no sent-key filter can hide an invalid message. Each of
+ * its batches must be valid for its replica: an insert names an absent key,
+ * and an update or delete names a present one. Wrong-answer mutants prove
+ * these observations reject wrong keys, partial batches, stale previous
+ * values, and transient fields.
  */
 
 export type HistoryRow = { id: number; a: number; b: number; c: number }
@@ -41,7 +50,7 @@ type Fields = Partial<Omit<HistoryRow, `id`>>
 type SourceBatch = {
   type: `sync`
   rows: Array<HistoryRow>
-  // Keys the source deletes after writing its rows. Only present keys apply.
+  // Keys the source deletes after writing its rows, held or not.
   deletes?: Array<number> | undefined
   truncate: boolean
   immediate: boolean
@@ -457,7 +466,7 @@ export async function withHistoryCleanup<T>(
 export async function runOptimisticHistory(
   initial: Array<HistoryRow>,
   steps: ReadonlyArray<OptimisticStep>,
-  fault?:
+  mutant?:
     | `wrong-key`
     | `transient-field`
     | `partial-batch`
@@ -512,6 +521,7 @@ export async function runOptimisticHistory(
     query: (q) => q.from({ row: collection }),
   })
   let sub: ReturnType<typeof collection.subscribeChanges> | undefined
+  let rawSub: ReturnType<typeof collection.subscribeChanges> | undefined
   const operations: Array<{
     tx:
       | ReturnType<typeof collection.update>
@@ -534,12 +544,15 @@ export async function runOptimisticHistory(
     handlerBatches: 0,
     sourceInserts: 0,
     sourceDeletes: 0,
+    absentSourceDeletes: 0,
   }
   // The source admits each message against its own rows, including queued
   // batches. An insert names an absent key; an update or delete a present
-  // one. Resolve each batch once, in write order, for the model and driver.
+  // one, except that the source may delete a key it does not hold. Resolve
+  // each batch once, in write order, for the model and driver.
   const sourceKeys = new Set(initial.map((row) => row.id))
   const sourceInserts = new WeakMap<SourceBatch, Set<number>>()
+  const absentDeletes = new WeakMap<SourceBatch, Set<number>>()
   function resolveSourceBatch(step: SourceBatch): SourceBatch {
     if (step.truncate) sourceKeys.clear()
     const inserts = new Set<number>()
@@ -547,11 +560,13 @@ export async function runOptimisticHistory(
       if (!sourceKeys.has(row.id)) inserts.add(row.id)
       sourceKeys.add(row.id)
     }
-    const deletes = (step.deletes ?? []).filter((key) => sourceKeys.has(key))
-    for (const key of deletes) sourceKeys.delete(key)
-    const resolved = { ...step, deletes }
-    sourceInserts.set(resolved, inserts)
-    return resolved
+    const absent = new Set<number>()
+    for (const key of step.deletes ?? []) {
+      if (!sourceKeys.delete(key)) absent.add(key)
+    }
+    sourceInserts.set(step, inserts)
+    absentDeletes.set(step, absent)
+    return step
   }
   function writeSourceBatch(step: SourceBatch) {
     const inserts = sourceInserts.get(step)!
@@ -570,6 +585,7 @@ export async function runOptimisticHistory(
     for (const key of step.deletes ?? []) {
       sync.write({ type: `delete`, key })
       counts.sourceDeletes++
+      if (absentDeletes.get(step)!.has(key)) counts.absentSourceDeletes++
     }
     const receipt = sync.commit()
     if (receipt !== true) {
@@ -632,12 +648,12 @@ export async function runOptimisticHistory(
               source: sorted([...collection.values()].map(observed)),
             })
           }
-          // Faults act on a copy of a real callback, never on production state.
+          // Observation mutants alter a copy of a real callback.
           if (initialPublication) {
             record(captured)
             return
           }
-          if (!injected && fault === `wrong-key` && captured.length) {
+          if (!injected && mutant === `wrong-key` && captured.length) {
             injected = true
             record(
               captured.map((change) => ({
@@ -647,7 +663,7 @@ export async function runOptimisticHistory(
             )
           } else if (
             !injected &&
-            fault === `transient-field` &&
+            mutant === `transient-field` &&
             captured.length
           ) {
             injected = true
@@ -660,7 +676,7 @@ export async function runOptimisticHistory(
             record(captured)
           } else if (
             !injected &&
-            fault === `partial-batch` &&
+            mutant === `partial-batch` &&
             captured.length > 1
           ) {
             injected = true
@@ -668,7 +684,7 @@ export async function runOptimisticHistory(
             record(captured)
           } else if (
             !injected &&
-            (fault === `previous-value` || fault === `update-as-insert`) &&
+            (mutant === `previous-value` || mutant === `update-as-insert`) &&
             captured.some((change) => change.type === `update`)
           ) {
             injected = true
@@ -676,7 +692,7 @@ export async function runOptimisticHistory(
               captured.map((change) =>
                 change.type !== `update`
                   ? change
-                  : fault === `previous-value`
+                  : mutant === `previous-value`
                     ? {
                         ...change,
                         previousValue: { ...change.previousValue!, c: 999999 },
@@ -688,10 +704,45 @@ export async function runOptimisticHistory(
         },
         { includeInitialState: true },
       )
+      // A raw subscriber starts from the visible rows and receives only later
+      // changes. It has no sent-key filter to hide an invalid message.
+      const rawReplica = new Map(
+        [...model.visible()].map(([key, row]) => [key as unknown, row]),
+      )
+      let rawPublications: Array<{
+        before: Map<unknown, ObservedRow>
+        batch: Array<{ key: unknown; type: string; value: ObservedRow }>
+      }> = []
+      rawSub = collection.subscribeChanges(
+        (batch) => {
+          const before = new Map(rawReplica)
+          const captured = batch.map((change) => ({
+            ...change,
+            value: observed(change.value),
+            ...(change.previousValue === undefined
+              ? {}
+              : { previousValue: observed(change.previousValue) }),
+          }))
+          for (const change of captured) {
+            if (change.type === `delete`) rawReplica.delete(change.key)
+            else rawReplica.set(change.key, change.value)
+          }
+          rawPublications.push({ before, batch: captured })
+        },
+        { includeInitialState: false },
+      )
       const check = (label: string) => {
+        for (const publication of rawPublications) {
+          expectHistoryEventSemantics(
+            publication.before,
+            publication.batch,
+            `${label}: raw subscriber`,
+          )
+        }
+        rawPublications = []
         if (
           !injected &&
-          fault === `backwards-cuts` &&
+          mutant === `backwards-cuts` &&
           settling &&
           initialFrame &&
           publications.length > 0 &&
@@ -760,7 +811,7 @@ export async function runOptimisticHistory(
         const expected = sorted(model.visible().values())
         const actual = sorted([...collection.values()].map(observed))
         if (
-          fault === `retained-default` &&
+          mutant === `retained-default` &&
           settling &&
           !injected &&
           actual.length
@@ -775,6 +826,10 @@ export async function runOptimisticHistory(
         expect(sorted(replica.values()), `${label}: event replica`).toEqual(
           expected,
         )
+        expect(
+          sorted(rawReplica.values()),
+          `${label}: raw event replica`,
+        ).toEqual(expected)
         expect(
           sorted([...downstream.values()].map(plain)),
           `${label}: downstream`,
@@ -903,8 +958,8 @@ export async function runOptimisticHistory(
           )
         }
       }
-      if (fault)
-        expect(injected, `fault reached an actual publication`).toBe(true)
+      if (mutant)
+        expect(injected, `observation mutant reached its checkpoint`).toBe(true)
       return counts
     },
     () => [
@@ -926,6 +981,7 @@ export async function runOptimisticHistory(
         },
       ]),
       () => sub?.unsubscribe(),
+      () => rawSub?.unsubscribe(),
       () => downstream.cleanup(),
       () => collection.cleanup(),
       ...receipts.map((receipt, index) => async () => {

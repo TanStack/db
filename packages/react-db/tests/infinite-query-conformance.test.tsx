@@ -17,7 +17,7 @@ import {
   gt,
 } from '@tanstack/db'
 import { mockSyncCollectionOptions } from '../../db/tests/utils'
-import { runInfiniteQuerySuite } from '../../db/tests/conformance/infinite-suite'
+import { runInfiniteQuerySuite } from '../../db/tests/conformance/infinite-suite-oracle'
 import { makeInfiniteOnDemandSource } from '../../db/tests/conformance/infinite-on-demand'
 import { useLiveInfiniteQuery } from '../src/useLiveInfiniteQuery'
 import type { RenderHookResult } from '@testing-library/react'

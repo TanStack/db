@@ -33,8 +33,7 @@ type CloudflareDOProvidedStorageOptions = {
 }
 
 export type CloudflareDOSQLiteDriverOptions =
-  | CloudflareDOProvidedSqlOptions
-  | CloudflareDOProvidedStorageOptions
+  CloudflareDOProvidedSqlOptions | CloudflareDOProvidedStorageOptions
 
 function assertTransactionCallbackHasDriverArg(
   fn: (transactionDriver: SQLiteDriver) => Promise<unknown>,
@@ -206,6 +205,7 @@ export class CloudflareDOSQLiteDriver implements SQLiteDriver {
 
   private createTransactionDriver(): SQLiteDriver {
     const transactionDriver: SQLiteDriver = {
+      maxBoundParameters: this.maxBoundParameters,
       exec: (sql) => {
         this.execute(sql)
         return Promise.resolve()

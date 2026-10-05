@@ -28,10 +28,7 @@ export interface QueryIR {
 }
 
 export type IncludesMaterialization =
-  | `collection`
-  | `array`
-  | `singleton`
-  | `concat`
+  `collection` | `array` | `singleton` | `concat`
 
 export const INCLUDES_SCALAR_FIELD = `__includes_scalar__`
 
@@ -39,11 +36,7 @@ export type From = CollectionRef | QueryRef | UnionFrom | UnionAll
 
 export type Select = {
   [alias: string]:
-    | BasicExpression
-    | Aggregate
-    | Select
-    | IncludesSubquery
-    | ConditionalSelect
+    BasicExpression | Aggregate | Select | IncludesSubquery | ConditionalSelect
 }
 
 export type Join = Array<JoinClause>
@@ -88,17 +81,18 @@ abstract class BaseExpression<T = any> {
 
 export class CollectionRef extends BaseExpression {
   public type = `collectionRef` as const
-  /** Opaque runtime identity; aliases are lexical names only. */
-  public readonly sourceId!: string
+  // Not an own property, so structural identity and hashing ignore it.
+  readonly #sourceId = `source-${++nextCollectionSourceId}`
   constructor(
     public collection: CollectionImpl,
     public alias: string,
   ) {
     super()
-    Object.defineProperty(this, `sourceId`, {
-      value: `source-${++nextCollectionSourceId}`,
-      enumerable: false,
-    })
+  }
+
+  /** Opaque runtime identity; aliases are lexical names only. */
+  get sourceId(): string {
+    return this.#sourceId
   }
 }
 
@@ -148,11 +142,9 @@ export class PropRef<T = any> extends BaseExpression<T> {
     sourceAlias?: string,
   ) {
     super()
+    // Present only when given, so unqualified refs keep their shape.
     if (sourceAlias !== undefined) {
-      Object.defineProperty(this, `sourceAlias`, {
-        value: sourceAlias,
-        enumerable: true,
-      })
+      ;(this as { sourceAlias?: string }).sourceAlias = sourceAlias
     }
   }
 }
@@ -225,11 +217,7 @@ export type ConditionalSelectBranch = {
 }
 
 export type SelectValueExpression =
-  | BasicExpression
-  | Aggregate
-  | Select
-  | IncludesSubquery
-  | ConditionalSelect
+  BasicExpression | Aggregate | Select | IncludesSubquery | ConditionalSelect
 
 export class ConditionalSelect extends BaseExpression {
   public type = `conditionalSelect` as const
