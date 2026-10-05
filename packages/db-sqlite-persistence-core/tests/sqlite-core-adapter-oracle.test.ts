@@ -2884,7 +2884,9 @@ function preparedDriver(
   const controlledCap = forceControlledCap || nativeCap === undefined
   function checkCapacity(bindings: number): void {
     if (controlledCap && bindings > cap)
-      throw new RangeError(`host parameter limit exceeded: ${bindings} > ${cap}`)
+      throw new RangeError(
+        `host parameter limit exceeded: ${bindings} > ${cap}`,
+      )
   }
   const driver: SQLiteDriver & { startObservation: () => void } = {
     maxBoundParameters: cap,
@@ -2981,7 +2983,11 @@ function limitedDatabase(cap = BINDING_CAP): DatabaseSync {
     db as DatabaseSync & { limits?: { variableNumber: number } }
   ).limits?.variableNumber
   if (nativeCap !== undefined)
-    assert.equal(nativeCap, cap, 'SQLite did not apply the requested variable limit')
+    assert.equal(
+      nativeCap,
+      cap,
+      'SQLite did not apply the requested variable limit',
+    )
   return db
 }
 
