@@ -302,6 +302,14 @@ type MockSyncCollectionConfig<T extends object = Record<string, unknown>> = {
   defaultIndexType?: IndexConstructor
 }
 
+/**
+ * Both mock sync helpers retain legacy mutation-gate names: `resolveSync`
+ * fulfills the shared promise awaited by the optimistic mutation handlers,
+ * and `rejectSync` rejects it. `awaitSync` and the `syncPending*` locals own
+ * that gate. They do not end a sync run, acknowledge source rows, or settle a
+ * sync transaction's applied receipt. Source writes and Collection readiness
+ * use the separate sync callbacks.
+ */
 type MockSyncCollectionUtils<T extends object> = {
   begin: () => void
   write: Parameters<SyncConfig<T>[`sync`]>[0][`write`]
@@ -414,6 +422,7 @@ type MockSyncCollectionConfigNoInitialState<T> = {
   defaultIndexType?: IndexConstructor
 }
 
+/** Uses the same legacy mutation-gate mapping as MockSyncCollectionUtils. */
 export function mockSyncCollectionOptionsNoInitialState<
   T extends object = Record<string, unknown>,
 >(config: MockSyncCollectionConfigNoInitialState<T>) {

@@ -16,7 +16,7 @@ import type { LoadSubsetOptions, SyncConfig } from '../src/types.js'
 /**
  * This is the boundary matrix for subscription acquisition and retirement.
  *
- * The model is a product of a small physical-acquisition state, logical owners,
+ * The model is a product of a small acquisition lifecycle state, logical owners,
  * sync run, and callback entry point. The explicit cell table names every
  * legal phase/entry pair and gives a reason for every excluded pair. Scenario
  * drivers then add sync return/throw/resolve/reject, abort, release, peer loss,
@@ -177,36 +177,50 @@ function acquisitionCase(
   )
 }
 
-const physicalAcquisitionStates = [
+/**
+ * Model-only lifecycle projection spanning attempts and accepted acquisitions:
+ * `none` has no accepted work; `starting` is a tentative acquisition attempt;
+ * `active` has an accepted physical acquisition and its acquisition lease;
+ * `obsolete` has retired acquisition ownership; `failed-release` has attempted
+ * acquisition release and must not retry it.
+ */
+const acquisitionLifecycleStates = [
   `none`,
   `starting`,
   `active`,
   `obsolete`,
   `failed-release`,
 ] as const
-const physicalInteractionCauses = [
+const acquisitionInteractionCauses = [
   `release`,
   `abort`,
   `truncate`,
   `cleanup`,
   `unsubscribe`,
 ] as const
-type PhysicalAcquisitionState = (typeof physicalAcquisitionStates)[number]
-type PhysicalInteractionCause = (typeof physicalInteractionCauses)[number]
-type PhysicalInteractionCell =
-  `${PhysicalAcquisitionState}:${PhysicalInteractionCause}`
-type PhysicalInteraction =
+type AcquisitionLifecycleState = (typeof acquisitionLifecycleStates)[number]
+type AcquisitionInteractionCause = (typeof acquisitionInteractionCauses)[number]
+type AcquisitionInteractionCell =
+  `${AcquisitionLifecycleState}:${AcquisitionInteractionCause}`
+// `retire` projects the end of ownership, not necessarily acquisition release.
+// During `starting`, a synchronous throw fails the attempt before acceptance.
+// Cleanup invalidation cancels a returned tentative acquisition before activation
+// without retaining its lease. An accepted acquisition instead releases its lease.
+// Logical demand can survive this boundary, as it does during truncate replay.
+// An `active` interaction ends accepted ownership through acquisition release
+// or enclosing sync-run cleanup.
+type AcquisitionInteraction =
   | `no-acquisition`
   | `abort-only`
   | `retire`
   | `no-repeat-on-truncate`
   | `no-repeat-on-cleanup`
   | `no-repeat-on-unsubscribe`
-type PhysicalInteractionCellDefinition =
-  | { kind: `covered`; interaction: PhysicalInteraction }
+type AcquisitionInteractionCellDefinition =
+  | { kind: `covered`; interaction: AcquisitionInteraction }
   | { kind: `excluded`; reason: string }
 
-const physicalInteractionCellDefinitions = {
+const acquisitionInteractionCellDefinitions = {
   'none:release': {
     kind: `covered`,
     interaction: `no-acquisition`,
@@ -280,29 +294,32 @@ const physicalInteractionCellDefinitions = {
     kind: `covered`,
     interaction: `no-repeat-on-unsubscribe`,
   },
-} satisfies Record<PhysicalInteractionCell, PhysicalInteractionCellDefinition>
+} satisfies Record<
+  AcquisitionInteractionCell,
+  AcquisitionInteractionCellDefinition
+>
 
-const requiredPhysicalInteractions = new Map<
-  PhysicalInteractionCell,
-  PhysicalInteraction
+const requiredAcquisitionInteractions = new Map<
+  AcquisitionInteractionCell,
+  AcquisitionInteraction
 >(
-  Object.entries(physicalInteractionCellDefinitions).flatMap(
+  Object.entries(acquisitionInteractionCellDefinitions).flatMap(
     ([cell, definition]) =>
       definition.kind === `covered`
-        ? [[cell as PhysicalInteractionCell, definition.interaction]]
+        ? [[cell as AcquisitionInteractionCell, definition.interaction]]
         : [],
   ),
 )
-const observedPhysicalInteractions = new Map<
-  PhysicalInteractionCell,
-  PhysicalInteraction
+const observedAcquisitionInteractions = new Map<
+  AcquisitionInteractionCell,
+  AcquisitionInteraction
 >()
 
-function observePhysicalInteraction(
-  cell: PhysicalInteractionCell,
-  interaction: PhysicalInteraction,
+function observeAcquisitionInteraction(
+  cell: AcquisitionInteractionCell,
+  interaction: AcquisitionInteraction,
 ): void {
-  observedPhysicalInteractions.set(cell, interaction)
+  observedAcquisitionInteractions.set(cell, interaction)
 }
 
 const requiredSyncRunBoundaries = new Set([
@@ -1006,13 +1023,15 @@ describe(`CollectionSubscription demand lifecycle oracle`, () => {
     ).toEqual(allCells)
   })
 
-  it(`accounts for every physical acquisition state and interaction cause`, () => {
-    const allCells = new Set<PhysicalInteractionCell>(
-      physicalAcquisitionStates.flatMap((state) =>
-        physicalInteractionCauses.map((cause) => `${state}:${cause}` as const),
+  it(`accounts for every acquisition lifecycle state and interaction cause`, () => {
+    const allCells = new Set<AcquisitionInteractionCell>(
+      acquisitionLifecycleStates.flatMap((state) =>
+        acquisitionInteractionCauses.map(
+          (cause) => `${state}:${cause}` as const,
+        ),
       ),
     )
-    expect(new Set(Object.keys(physicalInteractionCellDefinitions))).toEqual(
+    expect(new Set(Object.keys(acquisitionInteractionCellDefinitions))).toEqual(
       allCells,
     )
   })
@@ -1021,7 +1040,9 @@ describe(`CollectionSubscription demand lifecycle oracle`, () => {
     // A direct property replay may select only that test by name.
     if (replay.replayPath !== undefined) return
     expect(observedAcquisitionCells).toEqual(legalAcquisitionCells)
-    expect(observedPhysicalInteractions).toEqual(requiredPhysicalInteractions)
+    expect(observedAcquisitionInteractions).toEqual(
+      requiredAcquisitionInteractions,
+    )
     expect(observedSyncRunBoundaries).toEqual(requiredSyncRunBoundaries)
     expect(observedFailureDeliverySuffixes).toEqual(
       requiredFailureDeliverySuffixes,
@@ -1150,7 +1171,7 @@ describe(`CollectionSubscription demand lifecycle oracle`, () => {
                     ? `starting:cleanup`
                     : undefined
       if (interaction) {
-        observePhysicalInteraction(
+        observeAcquisitionInteraction(
           interaction,
           reentry === `abort-self` ? `abort-only` : `retire`,
         )
@@ -1505,9 +1526,9 @@ describe(`CollectionSubscription demand lifecycle oracle`, () => {
       } catch (error) {
         thrown = error
       }
-      observePhysicalInteraction(`active:release`, `retire`)
+      observeAcquisitionInteraction(`active:release`, `retire`)
       if (reentry === `unsubscribe`) {
-        observePhysicalInteraction(`active:unsubscribe`, `retire`)
+        observeAcquisitionInteraction(`active:unsubscribe`, `retire`)
       }
 
       expect(thrown).toBe(outcome === `throw` ? releaseFailure : undefined)
@@ -1540,7 +1561,7 @@ describe(`CollectionSubscription demand lifecycle oracle`, () => {
       ).toHaveLength(Number(reentry === `reacquire-self`))
       expect(unloads.filter((options) => options === peerLoad)).toHaveLength(1)
       if (outcome === `throw` && reentry === `unsubscribe`) {
-        observePhysicalInteraction(
+        observeAcquisitionInteraction(
           `failed-release:unsubscribe`,
           `no-repeat-on-unsubscribe`,
         )
@@ -2173,7 +2194,7 @@ describe(`CollectionSubscription demand lifecycle oracle`, () => {
       subscription.requestSnapshot()
       reach(`eager:request`)
       subscription.unsubscribe()
-      observePhysicalInteraction(`none:unsubscribe`, `no-acquisition`)
+      observeAcquisitionInteraction(`none:unsubscribe`, `no-acquisition`)
 
       expect(loads).toBe(0)
       expect(unloads).toBe(0)
@@ -2210,7 +2231,7 @@ describe(`CollectionSubscription demand lifecycle oracle`, () => {
 
     subscription.requestSnapshot({ where })
     subscription.releaseSnapshot(where)
-    observePhysicalInteraction(`none:release`, `no-acquisition`)
+    observeAcquisitionInteraction(`none:release`, `no-acquisition`)
 
     expect(loads).toBe(0)
     expect(unloads).toBe(0)
@@ -2255,7 +2276,7 @@ describe(`CollectionSubscription demand lifecycle oracle`, () => {
     truncate()
     commit()
     await flushPromises()
-    observePhysicalInteraction(`none:truncate`, `no-acquisition`)
+    observeAcquisitionInteraction(`none:truncate`, `no-acquisition`)
 
     expect.soft(loads).toEqual([])
     expect.soft(unloads).toEqual([])
@@ -2300,7 +2321,7 @@ describe(`CollectionSubscription demand lifecycle oracle`, () => {
       await flushPromises()
       reach(`on-demand:request`)
       subscription.unsubscribe()
-      observePhysicalInteraction(`none:unsubscribe`, `no-acquisition`)
+      observeAcquisitionInteraction(`none:unsubscribe`, `no-acquisition`)
 
       expect(loads).toBe(0)
       expect(unloads).toBe(0)
@@ -2344,7 +2365,7 @@ describe(`CollectionSubscription demand lifecycle oracle`, () => {
     })
     await flushPromises()
     subscription.releaseSnapshot(where)
-    observePhysicalInteraction(`none:release`, `no-acquisition`)
+    observeAcquisitionInteraction(`none:release`, `no-acquisition`)
 
     expect(loads).toBe(0)
     expect(unloads).toBe(0)
@@ -2442,7 +2463,7 @@ describe(`CollectionSubscription demand lifecycle oracle`, () => {
     subscription.requestSnapshot({ where, signal: controller.signal })
     controller.abort()
     await flushPromises()
-    observePhysicalInteraction(`none:abort`, `no-acquisition`)
+    observeAcquisitionInteraction(`none:abort`, `no-acquisition`)
 
     expect(loads).toEqual([])
     expect(unloads).toEqual([])
@@ -2480,7 +2501,7 @@ describe(`CollectionSubscription demand lifecycle oracle`, () => {
     const acquisition = loads[0]!
     controller.abort()
     await flushPromises()
-    observePhysicalInteraction(`active:abort`, `abort-only`)
+    observeAcquisitionInteraction(`active:abort`, `abort-only`)
 
     expect(loads).toEqual([acquisition])
     expect(acquisition.signal?.aborted).toBe(true)
@@ -2633,7 +2654,7 @@ describe(`CollectionSubscription demand lifecycle oracle`, () => {
       else collection._resumeSyncStart()
       await flushPromises()
       if (action === `cleanup`) {
-        observePhysicalInteraction(`none:cleanup`, `no-acquisition`)
+        observeAcquisitionInteraction(`none:cleanup`, `no-acquisition`)
       }
 
       expect(loads).toBe(action === `resume` ? 1 : 0)
@@ -3491,7 +3512,10 @@ describe(`CollectionSubscription demand lifecycle oracle`, () => {
     await collection.cleanup()
     expect(unloads).toBe(1)
     expect(sourceCleanups).toBe(1)
-    observePhysicalInteraction(`failed-release:cleanup`, `no-repeat-on-cleanup`)
+    observeAcquisitionInteraction(
+      `failed-release:cleanup`,
+      `no-repeat-on-cleanup`,
+    )
     subscription.unsubscribe()
   })
 
@@ -3682,7 +3706,7 @@ describe(`CollectionSubscription demand lifecycle oracle`, () => {
 
     subscription.unsubscribe()
     expect(unloads).toBe(1)
-    observePhysicalInteraction(
+    observeAcquisitionInteraction(
       `failed-release:truncate`,
       `no-repeat-on-truncate`,
     )
@@ -3806,7 +3830,7 @@ describe(`CollectionSubscription demand lifecycle oracle`, () => {
 
       await collection.cleanup()
       expect(sourceCleanups).toEqual([0])
-      observePhysicalInteraction(`active:cleanup`, `retire`)
+      observeAcquisitionInteraction(`active:cleanup`, `retire`)
       collection.startSyncImmediate()
       observeSyncRunBoundary(`restart-installed`)
       await flushPromises()
@@ -4236,7 +4260,7 @@ describe(`CollectionSubscription demand lifecycle oracle`, () => {
     begin()
     truncate()
     commit()
-    observePhysicalInteraction(`active:truncate`, `retire`)
+    observeAcquisitionInteraction(`active:truncate`, `retire`)
 
     expect(loads).toHaveLength(1)
     expect(subscription.status).toBe(`loadingSubset`)

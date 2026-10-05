@@ -41,9 +41,9 @@ import type { SyncConfig } from '../../src/types.js'
  * A bare child query materializes as a public Collection facade. That facade
  * has lifecycle and identity rules that inline arrays do not have:
  *
- * 1. Parents on the same active route share one facade.
+ * 1. Parents routed to the same active bucket share one facade.
  * 2. Child changes update the facade without forcing a parent value change.
- * 3. Moving a parent route gives it the destination route's facade.
+ * 3. Moving a parent route gives it the destination bucket's facade.
  * 4. A held facade becomes empty and ready when its last route retires.
  * 5. A later active interval gets a new facade instead of retargeting the old
  *    facade.
@@ -56,7 +56,7 @@ import type { SyncConfig } from '../../src/types.js'
  * snapshots.
  *
  * The history grammar varies parent and child writes, route movement, shared
- * routes, dormant buckets, ordering, parent-dependent filters, and joins. It
+ * buckets, dormant buckets, ordering, parent-dependent filters, and joins. It
  * also varies optimistic confirmation and rollback. A bounded exhaustive lane covers every
  * two-step history in the smallest relationship domain. Random histories add
  * longer combinations and shrink failures.
@@ -66,7 +66,7 @@ import type { SyncConfig } from '../../src/types.js'
  * does not model acquisition ownership or publication scheduling. Callback
  * snapshots and change messages are separate public observations.
  *
- * Grammar controls: the fixed route-retirement, dormant-bucket, shared-route,
+ * Grammar controls: the fixed route-retirement, dormant-bucket, shared-bucket,
  * and child-order witnesses reconstruct the key relationship histories. The
  * generated action lane needs both parent and child writes: removing either
  * loses route transitions or child-only facade changes. Its IDs (parents 0–3,

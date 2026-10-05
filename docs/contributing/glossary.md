@@ -20,7 +20,7 @@ production queues, caches, or semantic helpers merely to share their names.
 | source Collection | A Collection read by a query or adapter. | Source relation when the value is a public Collection. |
 | live-query Collection | A Collection whose rows are produced by a live query. | Query, observer, or result set. |
 | pooled live query | A live query on one source Collection whose `where` has at least one `eq(field, literal)` conjunct and otherwise reads only the row, optionally ordered by the row's own fields without a limit, served from an equality partition; its live-query Collection is built only when read. | Cached query or shared live-query Collection. |
-| equality partition | Source rows grouped by the `eq`-normalized values of one set of fields, shared by every pooled live query that filters on those fields. | Index or bucket relation. |
+| equality partition | Source rows grouped by the `eq`-normalized values of one set of fields, shared by pooled live queries on the same source Collection with the same equality fields and order terms, including resolved comparison options. | Index or bucket relation. |
 | partition group | The rows of an equality partition whose fields equal one tuple of literals. | Bucket or active bucket. |
 | relation | An internal weighted multiset maintained by D2. | Collection. |
 | row | One keyed public Collection value or one relation value. Qualify source row, relation row, or public row when more than one kind appears. | Event or transaction. |
@@ -57,8 +57,10 @@ and a provider-qualified `provider session` for a remote lifecycle.
 
 | Term | Meaning |
 | --- | --- |
-| `deletion-pending` | The mutation function fulfilled; only acknowledged outbox deletion remains before caller success. A restart must not call the mutation function again. |
-| `rejection-pending` | The mutation function failed permanently; the caller rejects with that failure. A restart removes the marked row without calling the mutation function again or restoring its optimistic state. |
+| offline executor restart | Replacing an executor with a fresh one over retained durable outbox state. This does not restart a Collection sync run. |
+| outbox replay | Resuming unfinished durable offline transaction work, including outbox reconciliation and permitted mutation execution or terminal-phase deletion. This is separate from truncate replay and oracle replay. |
+| `deletion-pending` | The mutation function fulfilled; only acknowledged outbox deletion remains before caller success. An offline executor restart must not call the mutation function again. |
+| `rejection-pending` | The mutation function failed permanently; the caller rejects with that failure. An offline executor restart removes the marked row without calling the mutation function again or restoring its optimistic state. |
 
 ## Demand and pagination terms
 
@@ -129,6 +131,17 @@ See
 [`packages/db/src/query/live/ARCHITECTURE.md`](https://github.com/TanStack/db/blob/main/packages/db/src/query/live/ARCHITECTURE.md)
 for bucket relations, bucket values, arrangements, reductions, and the normative
 materialization laws.
+
+## Value comparison terms
+
+Equality depends on the declared comparison domain. Qualify the term when
+crossing subsystem boundaries; these comparisons are not interchangeable.
+
+| Term | Meaning |
+| --- | --- |
+| D2 value identity | The value domain compared by `hash` and `equalHashValues`, including their documented reference leaves. A matching hash digest alone does not establish identity. The [identity oracle](https://github.com/TanStack/db/blob/main/packages/db-ivm/tests/hash-identity-oracle.property.test.ts) defines its bounded value rules. Map/Set insertion-order sensitivity is pinned current behavior, not a universal D2 operator contract. |
+| change-event equality | The `deepEquals` comparison used for Collection change-event suppression. Its supported domain ignores Map/Set insertion order, RegExp `lastIndex`, and array holes versus `undefined`. The [change-event equality oracle](https://github.com/TanStack/db/blob/main/packages/db/tests/utils-oracle.property.test.ts) defines its value-class rules. |
+| draft equality | The comparison that recognizes a reverted draft value. Its [revert oracle](https://github.com/TanStack/db/blob/main/packages/db/tests/proxy-revert-oracle.property.test.ts) preserves Map/Set insertion order, RegExp `lastIndex`, and array holes, with explicit snapshot rules for class instances. Native mutator methods have separate change-tracking laws. |
 
 ## Oracle and model terms
 

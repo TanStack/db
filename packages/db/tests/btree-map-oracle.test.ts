@@ -32,7 +32,7 @@ import { BTree } from '../src/utils/btree.js'
 
 // The tree trusts its comparator to return a valid order; BTreeIndex rejects
 // invalid custom-comparator results before they reach the tree, so that law
-// lives in index-update.property.test.ts.
+// lives in index-update-oracle.property.test.ts.
 
 // Splitting already determines the new child's position from the insertion
 // index. A redundant comparison after mutation must not misplace it. Each
