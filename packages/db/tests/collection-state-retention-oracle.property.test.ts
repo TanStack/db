@@ -2823,6 +2823,28 @@ it.each([
   },
 )
 
+// The nearby boundary: an immediate delete reaches the source while the insert
+// is still active. It acknowledges no request, so the row stays visible
+// through settlement.
+it(`keeps an active insert when the source deletes a key it never held`, async () => {
+  const counts = await runOptimisticHistory(
+    [{ id: 2, a: 0, b: 0, c: 0 }],
+    [
+      { type: `edit`, key: 1, fields: { a: 1 }, optimistic: true },
+      {
+        type: `sync`,
+        rows: [],
+        deletes: [1],
+        truncate: false,
+        immediate: true,
+        copies: 1,
+      },
+      { type: `settle`, slot: 0, success: true, cascade: false },
+    ],
+  )
+  expect(counts.absentSourceDeletes).toBe(1)
+})
+
 it(`generates source batches inside insert, update, and delete handlers`, () => {
   const histories = fc.sample(optimisticHistory, { seed: 86103, numRuns: 100 })
   const inHandler = histories.flatMap(({ steps }) =>
