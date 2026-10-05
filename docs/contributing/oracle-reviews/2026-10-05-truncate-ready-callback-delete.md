@@ -1,7 +1,8 @@
 # Ready-callback writes during a truncate
 
-Base revision: `931e8346f` (`main`). Grid revision: `4c338ddbd`. Repair
-revision: `79c7786b4`.
+Base revision: `931e8346f` (`main`). Grid revision: `4c338ddbd`. First
+repair revision: `79c7786b4` (deferral). Split-transition revision:
+`9bbeb1063`.
 
 ## Law
 
@@ -46,15 +47,39 @@ no longer exposed it.
 
 ## Repair and witnesses
 
-- The commit now marks the Collection ready at the emit point, inside a
-  publication deferral. Subscribers receive the truncate batch, then the
-  callbacks' messages, after the Collection is ready. Every truncate event is
-  built before any callback runs.
+- The ready transition takes a step that runs after the status reads `ready`
+  and before status listeners, ready callbacks, and the empty ready event. A
+  truncate that makes the Collection ready emits its batch in that step. So
+  the batch is built and enriched before any callback runs, subscribers
+  receive it while the Collection is ready, and every ready effect follows it.
+- An earlier revision held the batch in a publication deferral around
+  `markReady`. A high-effort review found side effects of that design, listed
+  below, and the maintainer chose to split the ready transition instead.
 - The grid in `collection-sync-reentrancy-oracle.test.ts` derives expected
   rows from a model that overlays active intents, in order, on the source rows.
   It crosses two hooks, four prior requests, every legal callback write to keys
   1 through 4, and three subscribers. Before the truncate the source holds keys
   1 and 4. The replacement holds 1 and 2, so key 4's prefix delete must remain.
+- Each grid case also checks three observations. A message that carries a
+  source row is synced and remote unless a prior request owns its key. A live
+  query over the Collection becomes ready showing replaced rows. A raw
+  subscriber that the ready callback creates receives messages that are valid
+  for the rows it saw.
+
+## High-effort review of the deferral
+
+| Item | Finding | Outcome |
+| --- | --- | --- |
+| 1 | The deferral enriched the batch at publication, so a source row could go out as local. | Fixed by the split. 48 grid cases fail with the deferral. |
+| 2 | The empty ready event skipped the deferral, so a live query became ready with pre-truncate rows. | Fixed by the split. All 144 cases fail with the deferral. |
+| 3 | A truncate committed inside the sync function, with a throwing `onFirstReady`, throws from `commit()` and moves the Collection to `error`. `ops.markReady()` defers the same error. | Confirmed on `main` too. Open, for a separate fix. |
+| 4 | A subscriber that a ready callback creates received the whole batch. | Fixed by the split. 120 cases fail with the deferral. |
+| 5 | The deferral delivered the batch and the callbacks' messages as one uncomposed batch. | Fixed by the split: they are separate publications. |
+| 6 | The deferral is a truncate-only special case. Split the ready transition. | Adopted. |
+| 7 | One failure-fidelity case was vacuous. | Fixed: an already-ready Collection runs no ready callbacks, so the case is removed. |
+| 8 | The grid did not check virtual props, live queries, or callback subscribers. | Fixed: see the witnesses above. |
+| 9 | The two guards for the deferral encoded one condition. | Gone with the deferral. |
+| 10 | A cleanup inside a ready listener dropped the deferred batch. | Fixed by the split: the batch emits before listeners run. |
 
 ## Failure fidelity
 
@@ -64,13 +89,13 @@ same hang on `main`, through `markReady`'s empty ready event. When a truncate
 made the Collection ready, a throwing subscriber or `onFirstReady` callback left
 a held receipt pending forever.
 
-The emit, `markReady`, and publication steps now run through one capture that
-keeps the first error. The commit reports that error after its receipts settle,
-as it does when the Collection is already ready. A witness holds a sync
-transaction behind a persisting request, then truncates while a subscriber or a
-ready callback throws, with and without prior readiness. It fails on `main` and
-on the deferral alone, in both not-yet-ready cases. A variant that captures only
-the publication fails both cases.
+The emit and the ready transition now run through one capture that keeps the
+first error. The commit reports that error after its receipts settle, as it
+does when the Collection is already ready. A witness holds a sync transaction
+behind a persisting request, then truncates while a subscriber or a ready
+callback throws. A third case throws from a subscriber on an already-ready
+Collection. The two not-yet-ready cases fail on `main` and on the uncaptured
+deferral.
 
 ## ORC outcomes
 
@@ -87,9 +112,10 @@ the publication fails both cases.
   at delivery, and `collection.state`.
 - **ORC-006: met.**
   - `main` and the first repair each fail 54 of 144 cases.
-  - A variant that marks the Collection ready after emitting, without the
-    deferral, fails 122 cases, because subscribers then receive the batch
-    while the Collection is loading.
+  - A variant that marks the Collection ready after emitting fails 122 cases,
+    because subscribers then receive the batch while the Collection is loading.
+  - The publication deferral fails all 144 cases on the live-query check, 120
+    on the callback-subscriber check, and 48 on the virtual-props check.
 - **ORC-007: not applicable.** The grid is a fixed enumeration.
 - **ORC-008: not applicable.** No stateful model changed.
 - **ORC-009: met.** "Ready callback" means an `onFirstReady` callback or a
@@ -108,6 +134,10 @@ the publication fails both cases.
   premise.
 
 ## Limits
+
+A truncate committed inside the sync function itself, whose ready callback
+throws, still throws from `commit()` and moves the Collection to `error`. A
+separate change will defer that error the way `ops.markReady()` does.
 
 The grid covers one optimistic callback write per truncate. These histories
 remain outside it:
