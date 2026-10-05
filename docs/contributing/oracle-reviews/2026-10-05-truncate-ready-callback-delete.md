@@ -1,7 +1,7 @@
-# A ready callback's delete during a truncate
+# Ready-callback writes during a truncate
 
-Base revision: `931e8346f` (`main`). Pre-repair revision: `83ca40509`.
-Repair revision: `7331f25aa`.
+Base revision: `931e8346f` (`main`). Grid revision: `4c338ddbd`. Repair
+revision: `79c7786b4`.
 
 ## Law
 
@@ -10,66 +10,92 @@ earlier message: an insert names an absent key, and an update or delete names
 a present one. Authority: the change-message contract in
 `packages/db/tests/change-event-history-oracle.test.ts` and issue #1901.
 
-A truncate commit marks the Collection ready before it publishes its batch. A
-ready callback may write in that window. The callback's messages and the
-truncate batch together must stay valid, and each subscriber must end with the
-Collection's rows.
+A truncate commit that makes the Collection ready runs ready callbacks
+(`onFirstReady` and `status:change` listeners) during the commit, and a
+callback may write. The truncate's messages and the callback's messages
+together must be valid for every subscriber, with or without initial state and
+with or without a filter. Each subscriber must end at the Collection's rows.
+Subscribers receive the truncate's messages only after the Collection is ready.
 
 ## Gap and bug
 
 State mutation round 3 found that a mutant which ran `markReady` before the
 truncate reapply survived the suite. The ready-callback witness covered only an
-edit of a replaced key, through a subscriber with initial state. That
-subscription filters keys it already sent, so it hides a duplicate message.
+edit of a replaced key, through a subscriber with initial state, whose sent-key
+filter hides a repeated message.
 
-The extended witness found a bug on `main`. The truncate builds its delete
-prefix from the rows visible before the replacement. A ready callback that
-deletes a replaced key publishes its optimistic delete at once. The prefix
-then deleted the key again, and a subscriber without initial state got a
-delete for a row it no longer held.
+The bug on `main`: the truncate built its batch from the replaced rows, then
+called `markReady` before it published. A callback's messages describe the
+replaced rows, but they reached subscribers before the batch that moves
+subscribers to those rows. Reachable failures:
+
+- A callback deletes a replaced key. The callback publishes the delete, and
+  then the prefix deletes the key again.
+- A callback deletes a key that only the replacement holds. The subscriber
+  gets a delete for a row it never held.
+- A callback changes a key that has an active prior request. The batch's
+  re-applied insert still carries the prior value.
+- A filtered subscriber holds the pre-truncate row. The callback's delete
+  carries the replaced value, so the filter drops it, and the subscriber keeps
+  a row that the Collection removed.
+
+The first repair (`7331f25aa`) dropped prefix deletes for keys a callback
+deleted. Code review and CodeRabbit showed the other three failures. That
+repair also made the stale re-applied row silent, because the repeated delete
+no longer exposed it.
 
 ## Repair and witnesses
 
-- The witness in `collection-sync-reentrancy-oracle.test.ts` is now a grid of
-  two hooks (`onFirstReady`, `status:change`), three callback writes (edit or
-  delete a replaced key, insert a new key), and both subscriber modes. The
-  starting rows include key 4, which the replacement omits, so its prefix
-  delete must remain.
-- The commit snapshots the optimistic deletes before `markReady`. After the
-  callbacks run, it drops prefix deletes for keys that a callback deleted.
+- The commit now marks the Collection ready at the emit point, inside a
+  publication deferral. Subscribers receive the truncate batch, then the
+  callbacks' messages, after the Collection is ready. Every truncate event is
+  built before any callback runs.
+- The grid in `collection-sync-reentrancy-oracle.test.ts` derives expected
+  rows from a model that overlays active intents, in order, on the source rows.
+  It crosses two hooks, four prior requests, every legal callback write to keys
+  1 through 4, and three subscribers. Before the truncate the source holds keys
+  1 and 4. The replacement holds 1 and 2, so key 4's prefix delete must remain.
 
 ## ORC outcomes
 
-- **ORC-001: met.** The law above names its authority. The grid covers one
-  truncate commit with one callback write.
-- **ORC-002: met.** Each case expects a fixed table of final rows. The checker
-  validates each message against the subscriber's own replica. Neither reads
-  production state.
-- **ORC-003: met.** The prose above the grid states the law, the subscriber
-  modes, and why key 4 is in the starting rows.
-- **ORC-004: met.** The grid enumerates its 12 cases. Each callback write
-  appears with both hooks and both subscriber modes.
-- **ORC-005: met.** Each case writes through a real Collection's sync API and
-  observes `subscribeChanges` batches and `collection.state`.
-- **ORC-006: met.** On `83ca40509`, the two delete cases without initial state
-  fail. The round 3 mutant that runs `markReady` before the reapply fails both
-  insert cases without initial state. A wrong repair that drops every prefix
-  delete for a key no longer visible fails all 12 cases.
-- **ORC-007: not applicable.** The grid is a fixed enumeration, not a generated
-  property.
+- **ORC-001: met.** The law above names its authority and the subscriber
+  modes it covers.
+- **ORC-002: met.** The overlay model reads no production state. The checker
+  validates each message against the subscriber's own replica.
+- **ORC-003: met.** The prose above the grid states the law, the model, and
+  why keys 2 and 4 are in the grid.
+- **ORC-004: met.** The enumeration control checks the case count, five named
+  witnesses, and two excluded illegal writes.
+- **ORC-005: met.** Each case writes through a real Collection's sync and
+  mutation APIs. It observes `subscribeChanges` batches, `collection.status`
+  at delivery, and `collection.state`.
+- **ORC-006: met.**
+  - `main` and the first repair each fail 54 of 144 cases.
+  - A variant that marks the Collection ready after emitting, without the
+    deferral, fails 122 cases, because subscribers then receive the batch
+    while the Collection is loading.
+- **ORC-007: not applicable.** The grid is a fixed enumeration.
 - **ORC-008: not applicable.** No stateful model changed.
 - **ORC-009: met.** "Ready callback" means an `onFirstReady` callback or a
   `status:change` listener for `ready`.
-- **ORC-010: met.** Each case unsubscribes, settles its request, and cleans up
-  the Collection in a `finally` block.
-- **ORC-011: not applicable.** No reviewer named a shared fault.
+- **ORC-010: met.** Each case unsubscribes, settles its requests, and cleans
+  up the Collection in a `finally` block.
+- **ORC-011: not applicable.** No reviewer named a fault shared by production
+  and the model.
 - **ORC-012: met by this record.**
-- **ORC-013: met.** The delete case has a nearby witness: key 4's prefix
-  delete must remain while key 1's repeated delete is dropped.
+- **ORC-013: met.** Each callback write appears beside its neighbors: the same
+  key with and without a prior request, and a replaced key beside a
+  replacement-only key and an omitted key.
 - **ORC-014: not applicable.** No controlled provider or host supplies a
   premise.
 
 ## Limits
 
-The grid covers one callback write per truncate. Generated histories with
-ready callbacks remain outside the optimistic-history grammar.
+The grid covers one optimistic callback write per truncate. These histories
+remain outside it:
+
+- a callback that rolls back an existing request;
+- a non-optimistic callback write;
+- several callbacks that write;
+- generated histories that combine ready callbacks with the optimistic-history
+  grammar.
