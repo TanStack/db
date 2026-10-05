@@ -13,8 +13,10 @@ import type { SyncConfig } from '../src/types.js'
  * `docs/contributing/oracle-reviews/2026-10-05-state-mutation-round-3.md`)
  * fixes the writes that carry none:
  *
- * - An insert names the row's whole metadata. Without `metadata`, it clears
- *   any earlier value.
+ * - An insert of an absent key names the row's whole metadata. Without
+ *   `metadata`, it clears any earlier value.
+ * - An insert equal to the held row is an idempotent re-insert. Without
+ *   `metadata`, it keeps the current value, like an update.
  * - An update without `metadata` keeps the current value.
  * - A row delete clears the value, even when the message carries metadata.
  * - A truncate clears the value.
@@ -33,7 +35,10 @@ type Write =
   | { kind: `set` }
   | { kind: `unset` }
   | { kind: `truncate` }
-  | { kind: `insert` | `update` | `delete`; metadata: boolean }
+  | {
+      kind: `insert` | `reinsert` | `update` | `delete`
+      metadata: boolean
+    }
 type Start = `absent` | `present-with-metadata` | `present-without-metadata`
 type Lane = `immediate` | `held` | `rebuilt`
 
@@ -41,7 +46,7 @@ const writes: ReadonlyArray<Write> = [
   { kind: `set` },
   { kind: `unset` },
   { kind: `truncate` },
-  ...([`insert`, `update`, `delete`] as const).flatMap((kind) =>
+  ...([`insert`, `reinsert`, `update`, `delete`] as const).flatMap((kind) =>
     [false, true].map((metadata) => ({ kind, metadata })),
   ),
 ]
@@ -73,6 +78,7 @@ function foldMetadata(initial: unknown, sequence: ReadonlyArray<Write>) {
       current = undefined
     else if (write.metadata) current = writeMetadata(step)
     else if (write.kind === `insert`) current = undefined
+    // A re-insert or an update without metadata keeps the current value.
   })
   return current
 }
@@ -90,9 +96,13 @@ function isLegal(start: Start, sequence: ReadonlyArray<Write>): boolean {
     else if (write.kind === `insert`) {
       if (present) return false
       present = true
-    } else if (write.kind === `update` || write.kind === `delete`) {
+    } else if (
+      write.kind === `reinsert` ||
+      write.kind === `update` ||
+      write.kind === `delete`
+    ) {
       if (!present) return false
-      present = write.kind === `update`
+      present = write.kind !== `delete`
     }
   }
   return true
@@ -222,9 +232,16 @@ async function observeMetadata(
         })
       earlierReceipt = sync.commit()
     }
+    // A re-insert writes the row exactly as the source holds it.
+    let held: number | undefined = start === `absent` ? undefined : 0
+    if (lane === `rebuilt` && earlier.key === 1)
+      held = earlier.kind === `delete` ? undefined : 100
     sync.begin()
     sequence.forEach((write, step) => {
       const metadata = writeMetadata(step)
+      if (write.kind === `insert` || write.kind === `update`) held = step + 1
+      else if (write.kind === `delete` || write.kind === `truncate`)
+        held = undefined
       if (write.kind === `set`) sync.metadata!.row.set(1, metadata)
       else if (write.kind === `unset`) sync.metadata!.row.delete(1)
       else if (write.kind === `truncate`) sync.truncate()
@@ -232,6 +249,12 @@ async function observeMetadata(
         sync.write({
           type: `delete`,
           key: 1,
+          ...(write.metadata ? { metadata } : {}),
+        })
+      else if (write.kind === `reinsert`)
+        sync.write({
+          type: `insert`,
+          value: { id: 1, v: held! },
           ...(write.metadata ? { metadata } : {}),
         })
       else
@@ -266,7 +289,7 @@ async function observeMetadata(
 
 describe(`row metadata composition oracle`, () => {
   it(`enumerates every legal one-key history of up to three writes`, () => {
-    expect(histories).toHaveLength(825)
+    expect(histories).toHaveLength(1457)
     const labels = new Set(
       histories.map(
         ({ start, sequence }) =>
@@ -281,9 +304,12 @@ describe(`row metadata composition oracle`, () => {
       `absent: insert+metadata, set`,
       `present-with-metadata: update`,
       `present-without-metadata: delete, set`,
+      `present-with-metadata: reinsert`,
+      `absent: insert+metadata, reinsert`,
     ])
       expect(labels).toContain(witness)
     expect(labels).not.toContain(`absent: update`)
+    expect(labels).not.toContain(`absent: reinsert`)
     expect(labels).not.toContain(`present-with-metadata: insert`)
   })
 
@@ -301,6 +327,12 @@ describe(`row metadata composition oracle`, () => {
         { kind: `insert`, metadata: false },
       ]),
     ).toBeUndefined()
+    // An equal re-insert without metadata keeps the current value.
+    expect(
+      expectedMetadata(`present-with-metadata`, [
+        { kind: `reinsert`, metadata: false },
+      ]),
+    ).toEqual(startMetadata)
     // An update without metadata keeps the current value.
     expect(
       expectedMetadata(`present-with-metadata`, [
@@ -310,8 +342,8 @@ describe(`row metadata composition oracle`, () => {
   })
 
   it(`enumerates rebuilt histories against every earlier write`, () => {
-    // 825 after a key-2 update, plus 218 after a key-1 write.
-    expect(rebuiltHistories).toHaveLength(1043)
+    // 1457 after a key-2 update, plus 310 after a key-1 write.
+    expect(rebuiltHistories).toHaveLength(1767)
     expect(
       rebuiltHistories.some(
         ({ earlier, sequence }) =>
