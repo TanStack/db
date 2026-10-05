@@ -8,28 +8,19 @@
 // You should NOT make any changes in this file as it will be overwritten.
 // Additionally, you should also exclude this file from your linter and/or formatter to prevent it from being checked or modified.
 
-import { createServerRootRoute } from '@tanstack/solid-start/server'
-
 import { Route as rootRouteImport } from './routes/__root'
-import { Route as TrailbaseRouteImport } from './routes/trailbase'
-import { Route as QueryRouteImport } from './routes/query'
-import { Route as ElectricRouteImport } from './routes/electric'
 import { Route as IndexRouteImport } from './routes/index'
-import { ServerRoute as ApiTodosServerRouteImport } from './routes/api/todos'
-import { ServerRoute as ApiConfigServerRouteImport } from './routes/api/config'
-import { ServerRoute as ApiTodosIdServerRouteImport } from './routes/api/todos.$id'
-import { ServerRoute as ApiConfigIdServerRouteImport } from './routes/api/config.$id'
+import { Route as ElectricRouteImport } from './routes/electric'
+import { Route as QueryRouteImport } from './routes/query'
+import { Route as TrailbaseRouteImport } from './routes/trailbase'
+import { Route as ApiConfigRouteImport } from './routes/api/config'
+import { Route as ApiTodosRouteImport } from './routes/api/todos'
+import { Route as ApiConfigIdRouteImport } from './routes/api/config.$id'
+import { Route as ApiTodosIdRouteImport } from './routes/api/todos.$id'
 
-const rootServerRouteImport = createServerRootRoute()
-
-const TrailbaseRoute = TrailbaseRouteImport.update({
-  id: '/trailbase',
-  path: '/trailbase',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const QueryRoute = QueryRouteImport.update({
-  id: '/query',
-  path: '/query',
+const IndexRoute = IndexRouteImport.update({
+  id: '/',
+  path: '/',
   getParentRoute: () => rootRouteImport,
 } as any)
 const ElectricRoute = ElectricRouteImport.update({
@@ -37,30 +28,35 @@ const ElectricRoute = ElectricRouteImport.update({
   path: '/electric',
   getParentRoute: () => rootRouteImport,
 } as any)
-const IndexRoute = IndexRouteImport.update({
-  id: '/',
-  path: '/',
+const QueryRoute = QueryRouteImport.update({
+  id: '/query',
+  path: '/query',
   getParentRoute: () => rootRouteImport,
 } as any)
-const ApiTodosServerRoute = ApiTodosServerRouteImport.update({
-  id: '/api/todos',
-  path: '/api/todos',
-  getParentRoute: () => rootServerRouteImport,
+const TrailbaseRoute = TrailbaseRouteImport.update({
+  id: '/trailbase',
+  path: '/trailbase',
+  getParentRoute: () => rootRouteImport,
 } as any)
-const ApiConfigServerRoute = ApiConfigServerRouteImport.update({
+const ApiConfigRoute = ApiConfigRouteImport.update({
   id: '/api/config',
   path: '/api/config',
-  getParentRoute: () => rootServerRouteImport,
+  getParentRoute: () => rootRouteImport,
 } as any)
-const ApiTodosIdServerRoute = ApiTodosIdServerRouteImport.update({
+const ApiTodosRoute = ApiTodosRouteImport.update({
+  id: '/api/todos',
+  path: '/api/todos',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ApiConfigIdRoute = ApiConfigIdRouteImport.update({
   id: '/$id',
   path: '/$id',
-  getParentRoute: () => ApiTodosServerRoute,
+  getParentRoute: () => ApiConfigRoute,
 } as any)
-const ApiConfigIdServerRoute = ApiConfigIdServerRouteImport.update({
+const ApiTodosIdRoute = ApiTodosIdRouteImport.update({
   id: '/$id',
   path: '/$id',
-  getParentRoute: () => ApiConfigServerRoute,
+  getParentRoute: () => ApiTodosRoute,
 } as any)
 
 export interface FileRoutesByFullPath {
@@ -68,12 +64,20 @@ export interface FileRoutesByFullPath {
   '/electric': typeof ElectricRoute
   '/query': typeof QueryRoute
   '/trailbase': typeof TrailbaseRoute
+  '/api/config': typeof ApiConfigRouteWithChildren
+  '/api/todos': typeof ApiTodosRouteWithChildren
+  '/api/config/$id': typeof ApiConfigIdRoute
+  '/api/todos/$id': typeof ApiTodosIdRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/electric': typeof ElectricRoute
   '/query': typeof QueryRoute
   '/trailbase': typeof TrailbaseRoute
+  '/api/config': typeof ApiConfigRouteWithChildren
+  '/api/todos': typeof ApiTodosRouteWithChildren
+  '/api/config/$id': typeof ApiConfigIdRoute
+  '/api/todos/$id': typeof ApiTodosIdRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
@@ -81,13 +85,42 @@ export interface FileRoutesById {
   '/electric': typeof ElectricRoute
   '/query': typeof QueryRoute
   '/trailbase': typeof TrailbaseRoute
+  '/api/config': typeof ApiConfigRouteWithChildren
+  '/api/todos': typeof ApiTodosRouteWithChildren
+  '/api/config/$id': typeof ApiConfigIdRoute
+  '/api/todos/$id': typeof ApiTodosIdRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
-  fullPaths: '/' | '/electric' | '/query' | '/trailbase'
+  fullPaths:
+    | '/'
+    | '/electric'
+    | '/query'
+    | '/trailbase'
+    | '/api/config'
+    | '/api/todos'
+    | '/api/config/$id'
+    | '/api/todos/$id'
   fileRoutesByTo: FileRoutesByTo
-  to: '/' | '/electric' | '/query' | '/trailbase'
-  id: '__root__' | '/' | '/electric' | '/query' | '/trailbase'
+  to:
+    | '/'
+    | '/electric'
+    | '/query'
+    | '/trailbase'
+    | '/api/config'
+    | '/api/todos'
+    | '/api/config/$id'
+    | '/api/todos/$id'
+  id:
+    | '__root__'
+    | '/'
+    | '/electric'
+    | '/query'
+    | '/trailbase'
+    | '/api/config'
+    | '/api/todos'
+    | '/api/config/$id'
+    | '/api/todos/$id'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
@@ -95,58 +128,17 @@ export interface RootRouteChildren {
   ElectricRoute: typeof ElectricRoute
   QueryRoute: typeof QueryRoute
   TrailbaseRoute: typeof TrailbaseRoute
-}
-export interface FileServerRoutesByFullPath {
-  '/api/config': typeof ApiConfigServerRouteWithChildren
-  '/api/todos': typeof ApiTodosServerRouteWithChildren
-  '/api/config/$id': typeof ApiConfigIdServerRoute
-  '/api/todos/$id': typeof ApiTodosIdServerRoute
-}
-export interface FileServerRoutesByTo {
-  '/api/config': typeof ApiConfigServerRouteWithChildren
-  '/api/todos': typeof ApiTodosServerRouteWithChildren
-  '/api/config/$id': typeof ApiConfigIdServerRoute
-  '/api/todos/$id': typeof ApiTodosIdServerRoute
-}
-export interface FileServerRoutesById {
-  __root__: typeof rootServerRouteImport
-  '/api/config': typeof ApiConfigServerRouteWithChildren
-  '/api/todos': typeof ApiTodosServerRouteWithChildren
-  '/api/config/$id': typeof ApiConfigIdServerRoute
-  '/api/todos/$id': typeof ApiTodosIdServerRoute
-}
-export interface FileServerRouteTypes {
-  fileServerRoutesByFullPath: FileServerRoutesByFullPath
-  fullPaths: '/api/config' | '/api/todos' | '/api/config/$id' | '/api/todos/$id'
-  fileServerRoutesByTo: FileServerRoutesByTo
-  to: '/api/config' | '/api/todos' | '/api/config/$id' | '/api/todos/$id'
-  id:
-    | '__root__'
-    | '/api/config'
-    | '/api/todos'
-    | '/api/config/$id'
-    | '/api/todos/$id'
-  fileServerRoutesById: FileServerRoutesById
-}
-export interface RootServerRouteChildren {
-  ApiConfigServerRoute: typeof ApiConfigServerRouteWithChildren
-  ApiTodosServerRoute: typeof ApiTodosServerRouteWithChildren
+  ApiConfigRoute: typeof ApiConfigRouteWithChildren
+  ApiTodosRoute: typeof ApiTodosRouteWithChildren
 }
 
 declare module '@tanstack/solid-router' {
   interface FileRoutesByPath {
-    '/trailbase': {
-      id: '/trailbase'
-      path: '/trailbase'
-      fullPath: '/trailbase'
-      preLoaderRoute: typeof TrailbaseRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/query': {
-      id: '/query'
-      path: '/query'
-      fullPath: '/query'
-      preLoaderRoute: typeof QueryRouteImport
+    '/': {
+      id: '/'
+      path: '/'
+      fullPath: '/'
+      preLoaderRoute: typeof IndexRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/electric': {
@@ -156,70 +148,73 @@ declare module '@tanstack/solid-router' {
       preLoaderRoute: typeof ElectricRouteImport
       parentRoute: typeof rootRouteImport
     }
-    '/': {
-      id: '/'
-      path: '/'
-      fullPath: '/'
-      preLoaderRoute: typeof IndexRouteImport
+    '/query': {
+      id: '/query'
+      path: '/query'
+      fullPath: '/query'
+      preLoaderRoute: typeof QueryRouteImport
       parentRoute: typeof rootRouteImport
     }
-  }
-}
-declare module '@tanstack/solid-start/server' {
-  interface ServerFileRoutesByPath {
-    '/api/todos': {
-      id: '/api/todos'
-      path: '/api/todos'
-      fullPath: '/api/todos'
-      preLoaderRoute: typeof ApiTodosServerRouteImport
-      parentRoute: typeof rootServerRouteImport
+    '/trailbase': {
+      id: '/trailbase'
+      path: '/trailbase'
+      fullPath: '/trailbase'
+      preLoaderRoute: typeof TrailbaseRouteImport
+      parentRoute: typeof rootRouteImport
     }
     '/api/config': {
       id: '/api/config'
       path: '/api/config'
       fullPath: '/api/config'
-      preLoaderRoute: typeof ApiConfigServerRouteImport
-      parentRoute: typeof rootServerRouteImport
+      preLoaderRoute: typeof ApiConfigRouteImport
+      parentRoute: typeof rootRouteImport
     }
-    '/api/todos/$id': {
-      id: '/api/todos/$id'
-      path: '/$id'
-      fullPath: '/api/todos/$id'
-      preLoaderRoute: typeof ApiTodosIdServerRouteImport
-      parentRoute: typeof ApiTodosServerRoute
+    '/api/todos': {
+      id: '/api/todos'
+      path: '/api/todos'
+      fullPath: '/api/todos'
+      preLoaderRoute: typeof ApiTodosRouteImport
+      parentRoute: typeof rootRouteImport
     }
     '/api/config/$id': {
       id: '/api/config/$id'
       path: '/$id'
       fullPath: '/api/config/$id'
-      preLoaderRoute: typeof ApiConfigIdServerRouteImport
-      parentRoute: typeof ApiConfigServerRoute
+      preLoaderRoute: typeof ApiConfigIdRouteImport
+      parentRoute: typeof ApiConfigRoute
+    }
+    '/api/todos/$id': {
+      id: '/api/todos/$id'
+      path: '/$id'
+      fullPath: '/api/todos/$id'
+      preLoaderRoute: typeof ApiTodosIdRouteImport
+      parentRoute: typeof ApiTodosRoute
     }
   }
 }
 
-interface ApiConfigServerRouteChildren {
-  ApiConfigIdServerRoute: typeof ApiConfigIdServerRoute
+interface ApiConfigRouteChildren {
+  ApiConfigIdRoute: typeof ApiConfigIdRoute
 }
 
-const ApiConfigServerRouteChildren: ApiConfigServerRouteChildren = {
-  ApiConfigIdServerRoute: ApiConfigIdServerRoute,
+const ApiConfigRouteChildren: ApiConfigRouteChildren = {
+  ApiConfigIdRoute: ApiConfigIdRoute,
 }
 
-const ApiConfigServerRouteWithChildren = ApiConfigServerRoute._addFileChildren(
-  ApiConfigServerRouteChildren,
+const ApiConfigRouteWithChildren = ApiConfigRoute._addFileChildren(
+  ApiConfigRouteChildren,
 )
 
-interface ApiTodosServerRouteChildren {
-  ApiTodosIdServerRoute: typeof ApiTodosIdServerRoute
+interface ApiTodosRouteChildren {
+  ApiTodosIdRoute: typeof ApiTodosIdRoute
 }
 
-const ApiTodosServerRouteChildren: ApiTodosServerRouteChildren = {
-  ApiTodosIdServerRoute: ApiTodosIdServerRoute,
+const ApiTodosRouteChildren: ApiTodosRouteChildren = {
+  ApiTodosIdRoute: ApiTodosIdRoute,
 }
 
-const ApiTodosServerRouteWithChildren = ApiTodosServerRoute._addFileChildren(
-  ApiTodosServerRouteChildren,
+const ApiTodosRouteWithChildren = ApiTodosRoute._addFileChildren(
+  ApiTodosRouteChildren,
 )
 
 const rootRouteChildren: RootRouteChildren = {
@@ -227,14 +222,19 @@ const rootRouteChildren: RootRouteChildren = {
   ElectricRoute: ElectricRoute,
   QueryRoute: QueryRoute,
   TrailbaseRoute: TrailbaseRoute,
+  ApiConfigRoute: ApiConfigRouteWithChildren,
+  ApiTodosRoute: ApiTodosRouteWithChildren,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)
   ._addFileTypes<FileRouteTypes>()
-const rootServerRouteChildren: RootServerRouteChildren = {
-  ApiConfigServerRoute: ApiConfigServerRouteWithChildren,
-  ApiTodosServerRoute: ApiTodosServerRouteWithChildren,
+
+import type { getRouter } from './router.tsx'
+import type { startInstance } from './start.tsx'
+declare module '@tanstack/solid-start' {
+  interface Register {
+    ssr: true
+    router: Awaited<ReturnType<typeof getRouter>>
+    config: Awaited<ReturnType<typeof startInstance.getOptions>>
+  }
 }
-export const serverRouteTree = rootServerRouteImport
-  ._addFileChildren(rootServerRouteChildren)
-  ._addFileTypes<FileServerRouteTypes>()

@@ -13,11 +13,9 @@ export default defineConfig({
     }),
     tailwindcss(),
     tanstackStart({
-      customViteSolidPlugin: true,
-      spa: {
-        prerender: { enabled: false },
-        enabled: true,
-      },
+      srcDirectory: `src`,
+      start: { entry: `./start.tsx` },
+      server: { entry: `./server.ts` },
     }),
     solid({ ssr: true }),
   ],

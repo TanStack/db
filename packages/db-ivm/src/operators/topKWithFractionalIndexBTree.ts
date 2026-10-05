@@ -1,19 +1,11 @@
 import { generateKeyBetween } from 'fractional-indexing'
 import { DifferenceStreamWriter } from '../graph.js'
 import { StreamBuilder } from '../d2.js'
-import {
-  TopKWithFractionalIndexOperator,
-  getIndex,
-  getValue,
-  indexedValue,
-} from './topKWithFractionalIndex.js'
+import { TopKWithFractionalIndexOperator } from './topKWithFractionalIndex.js'
+import { getIndex, getValue, indexedValue } from './topKArray.js'
+import type { IndexedValue, TopK, TopKChanges } from './topKArray.js'
 import type { IStreamBuilder, PipedOperator } from '../types.js'
-import type {
-  IndexedValue,
-  TopK,
-  TopKChanges,
-  TopKWithFractionalIndexOptions,
-} from './topKWithFractionalIndex.js'
+import type { TopKWithFractionalIndexOptions } from './topKWithFractionalIndex.js'
 
 interface BTree<Key, Value> {
   nextLowerPair: (key: Key) => [Key, Value] | undefined
@@ -114,9 +106,11 @@ class TopKTree<V> implements TopK<V> {
       return result
     }
 
-    if (this.#tree.size - 1 < this.#topKStart) {
-      // We don't have a topK yet
-      // so we don't need to do anything
+    if (
+      this.#topKStart === this.#topKEnd ||
+      this.#tree.size - 1 < this.#topKStart
+    ) {
+      // The window is empty, or there aren't enough rows to reach its offset.
       return result
     }
 
@@ -186,11 +180,8 @@ class TopKTree<V> implements TopK<V> {
       return result
     }
 
-    if (this.#comparator(value, getValue(this.#topKFirstElem)) < 0) {
-      // We deleted an element that was before the topK
-      // so the topK has shifted one position to the left
-
-      // the old first element moves out of the topK
+    if (this.#comparator(value, getValue(this.#topKFirstElem)) <= 0) {
+      // Deleting at or before the first selected value advances that boundary.
       result.moveOut = this.#topKFirstElem
       // the element that was right after the first element of the topK
       // is now the new first element of the topK

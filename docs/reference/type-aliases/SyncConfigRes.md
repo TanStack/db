@@ -3,13 +3,11 @@ id: SyncConfigRes
 title: SyncConfigRes
 ---
 
-# Type Alias: SyncConfigRes
-
 ```ts
 type SyncConfigRes = object;
 ```
 
-Defined in: [packages/db/src/types.ts:319](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L319)
+Defined in: [packages/db/src/types.ts:417](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L417)
 
 ## Properties
 
@@ -19,7 +17,7 @@ Defined in: [packages/db/src/types.ts:319](https://github.com/TanStack/db/blob/m
 optional cleanup: CleanupFn;
 ```
 
-Defined in: [packages/db/src/types.ts:320](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L320)
+Defined in: [packages/db/src/types.ts:418](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L418)
 
 ***
 
@@ -29,7 +27,7 @@ Defined in: [packages/db/src/types.ts:320](https://github.com/TanStack/db/blob/m
 optional loadSubset: LoadSubsetFn;
 ```
 
-Defined in: [packages/db/src/types.ts:321](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L321)
+Defined in: [packages/db/src/types.ts:419](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L419)
 
 ***
 
@@ -39,4 +37,4 @@ Defined in: [packages/db/src/types.ts:321](https://github.com/TanStack/db/blob/m
 optional unloadSubset: UnloadSubsetFn;
 ```
 
-Defined in: [packages/db/src/types.ts:322](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L322)
+Defined in: [packages/db/src/types.ts:420](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L420)

@@ -3,15 +3,13 @@ id: useLiveSuspenseQuery
 title: useLiveSuspenseQuery
 ---
 
-# Function: useLiveSuspenseQuery()
-
 ## Call Signature
 
 ```ts
 function useLiveSuspenseQuery<TContext>(queryFn, deps?): object;
 ```
 
-Defined in: [useLiveSuspenseQuery.ts:76](https://github.com/TanStack/db/blob/main/packages/react-db/src/useLiveSuspenseQuery.ts#L76)
+Defined in: [useLiveSuspenseQuery.ts:151](https://github.com/TanStack/db/blob/main/packages/react-db/src/useLiveSuspenseQuery.ts#L151)
 
 Create a live query with React Suspense support
 
@@ -33,7 +31,7 @@ Query function that defines what data to fetch
 
 `unknown`[]
 
-Array of dependencies that trigger query re-execution when changed
+Deprecated array of dependencies that trigger query re-execution when changed
 
 ### Returns
 
@@ -44,7 +42,7 @@ Object with reactive data and state - data is guaranteed to be defined
 #### collection
 
 ```ts
-collection: Collection<{ [K in string | number | symbol]: (TContext["result"] extends object ? any[any] : TContext["hasJoins"] extends true ? TContext["schema"] : TContext["schema"][TContext["fromSourceName"]])[K] }, string | number, {
+collection: Collection<{ [K in string | number | symbol]: ResultValue<TContext>[K] }, string | number, {
 }>;
 ```
 
@@ -57,7 +55,7 @@ data: InferResultType<TContext>;
 #### state
 
 ```ts
-state: Map<string | number, { [K in string | number | symbol]: (TContext["result"] extends object ? any[any] : TContext["hasJoins"] extends true ? TContext["schema"] : TContext["schema"][TContext["fromSourceName"]])[K] }>;
+state: Map<string | number, { [K in string | number | symbol]: ResultValue<TContext>[K] }>;
 ```
 
 ### Throws
@@ -73,11 +71,12 @@ Error when collection fails (caught by Error boundary)
 ```ts
 // Basic usage with Suspense
 function TodoList() {
-  const { data } = useLiveSuspenseQuery((q) =>
-    q.from({ todos: todosCollection })
-     .where(({ todos }) => eq(todos.completed, false))
-     .select(({ todos }) => ({ id: todos.id, text: todos.text }))
-  )
+  const { data } = useLiveSuspenseQuery({
+    query: (q) =>
+      q.from({ todos: todosCollection })
+       .where(({ todos }) => eq(todos.completed, false))
+       .select(({ todos }) => ({ id: todos.id, text: todos.text }))
+  })
 
   return (
     <ul>
@@ -106,12 +105,11 @@ const { data } = useLiveSuspenseQuery(
 ```
 
 ```ts
-// With dependencies that trigger re-suspension
-const { data } = useLiveSuspenseQuery(
-  (q) => q.from({ todos: todosCollection })
+// Structured captured values are included in derived query identity and trigger re-suspension
+const { data } = useLiveSuspenseQuery({
+  query: (q) => q.from({ todos: todosCollection })
          .where(({ todos }) => gt(todos.priority, minPriority)),
-  [minPriority] // Re-suspends when minPriority changes
-)
+})
 ```
 
 ```ts
@@ -127,13 +125,189 @@ function App() {
 }
 ```
 
+### Remarks
+
+**Important:** This hook does NOT support disabled queries (returning undefined/null).
+Following TanStack Query's useSuspenseQuery design, the query callback must always
+return a valid query, collection, or config object.
+
+❌ **This will cause a type error:**
+```ts
+useLiveSuspenseQuery(
+  (q) => userId ? q.from({ users }) : undefined  // ❌ Error!
+)
+```
+
+✅ **Use conditional rendering instead:**
+```ts
+function Profile({ userId }: { userId: string }) {
+  const { data } = useLiveSuspenseQuery({
+    query: (q) => q.from({ users }).where(({ users }) => eq(users.id, userId)),
+  })
+  return <div>{data.name}</div>
+}
+
+// In parent component:
+{userId ? <Profile userId={userId} /> : <div>No user</div>}
+```
+
+✅ **For optional inputs, conditionally render a component with complete query inputs:**
+```ts
+{userId ? <Profile userId={userId} /> : <div>No user</div>}
+```
+
+## Call Signature
+
+```ts
+function useLiveSuspenseQuery<TContext>(config): object;
+```
+
+Defined in: [useLiveSuspenseQuery.ts:161](https://github.com/TanStack/db/blob/main/packages/react-db/src/useLiveSuspenseQuery.ts#L161)
+
+Create a live query with React Suspense support
+
+### Type Parameters
+
+#### TContext
+
+`TContext` *extends* `Context`
+
+### Parameters
+
+#### config
+
+[`UseLiveQueryConfig`](../type-aliases/UseLiveQueryConfig.md)\<`TContext`\>
+
+### Returns
+
+`object`
+
+Object with reactive data and state - data is guaranteed to be defined
+
+#### collection
+
+```ts
+collection: Collection<{ [K in string | number | symbol]: ResultValue<TContext>[K] }, string | number, {
+}>;
+```
+
+#### data
+
+```ts
+data: InferResultType<TContext>;
+```
+
+#### state
+
+```ts
+state: Map<string | number, { [K in string | number | symbol]: ResultValue<TContext>[K] }>;
+```
+
+### Throws
+
+Promise when data is loading (caught by Suspense boundary)
+
+### Throws
+
+Error when collection fails (caught by Error boundary)
+
+### Examples
+
+```ts
+// Basic usage with Suspense
+function TodoList() {
+  const { data } = useLiveSuspenseQuery({
+    query: (q) =>
+      q.from({ todos: todosCollection })
+       .where(({ todos }) => eq(todos.completed, false))
+       .select(({ todos }) => ({ id: todos.id, text: todos.text }))
+  })
+
+  return (
+    <ul>
+      {data.map(todo => <li key={todo.id}>{todo.text}</li>)}
+    </ul>
+  )
+}
+
+function App() {
+  return (
+    <Suspense fallback={<div>Loading...</div>}>
+      <TodoList />
+    </Suspense>
+  )
+}
+```
+
+```ts
+// Single result query
+const { data } = useLiveSuspenseQuery(
+  (q) => q.from({ todos: todosCollection })
+         .where(({ todos }) => eq(todos.id, 1))
+         .findOne()
+)
+// data is guaranteed to be the single item (or undefined if not found)
+```
+
+```ts
+// Structured captured values are included in derived query identity and trigger re-suspension
+const { data } = useLiveSuspenseQuery({
+  query: (q) => q.from({ todos: todosCollection })
+         .where(({ todos }) => gt(todos.priority, minPriority)),
+})
+```
+
+```ts
+// With Error boundary
+function App() {
+  return (
+    <ErrorBoundary fallback={<div>Error loading data</div>}>
+      <Suspense fallback={<div>Loading...</div>}>
+        <TodoList />
+      </Suspense>
+    </ErrorBoundary>
+  )
+}
+```
+
+### Remarks
+
+**Important:** This hook does NOT support disabled queries (returning undefined/null).
+Following TanStack Query's useSuspenseQuery design, the query callback must always
+return a valid query, collection, or config object.
+
+❌ **This will cause a type error:**
+```ts
+useLiveSuspenseQuery(
+  (q) => userId ? q.from({ users }) : undefined  // ❌ Error!
+)
+```
+
+✅ **Use conditional rendering instead:**
+```ts
+function Profile({ userId }: { userId: string }) {
+  const { data } = useLiveSuspenseQuery({
+    query: (q) => q.from({ users }).where(({ users }) => eq(users.id, userId)),
+  })
+  return <div>{data.name}</div>
+}
+
+// In parent component:
+{userId ? <Profile userId={userId} /> : <div>No user</div>}
+```
+
+✅ **For optional inputs, conditionally render a component with complete query inputs:**
+```ts
+{userId ? <Profile userId={userId} /> : <div>No user</div>}
+```
+
 ## Call Signature
 
 ```ts
 function useLiveSuspenseQuery<TContext>(config, deps?): object;
 ```
 
-Defined in: [useLiveSuspenseQuery.ts:86](https://github.com/TanStack/db/blob/main/packages/react-db/src/useLiveSuspenseQuery.ts#L86)
+Defined in: [useLiveSuspenseQuery.ts:170](https://github.com/TanStack/db/blob/main/packages/react-db/src/useLiveSuspenseQuery.ts#L170)
 
 Create a live query with React Suspense support
 
@@ -153,7 +327,7 @@ Create a live query with React Suspense support
 
 `unknown`[]
 
-Array of dependencies that trigger query re-execution when changed
+Deprecated array of dependencies that trigger query re-execution when changed
 
 ### Returns
 
@@ -164,7 +338,7 @@ Object with reactive data and state - data is guaranteed to be defined
 #### collection
 
 ```ts
-collection: Collection<{ [K in string | number | symbol]: (TContext["result"] extends object ? any[any] : TContext["hasJoins"] extends true ? TContext["schema"] : TContext["schema"][TContext["fromSourceName"]])[K] }, string | number, {
+collection: Collection<{ [K in string | number | symbol]: ResultValue<TContext>[K] }, string | number, {
 }>;
 ```
 
@@ -177,7 +351,7 @@ data: InferResultType<TContext>;
 #### state
 
 ```ts
-state: Map<string | number, { [K in string | number | symbol]: (TContext["result"] extends object ? any[any] : TContext["hasJoins"] extends true ? TContext["schema"] : TContext["schema"][TContext["fromSourceName"]])[K] }>;
+state: Map<string | number, { [K in string | number | symbol]: ResultValue<TContext>[K] }>;
 ```
 
 ### Throws
@@ -193,11 +367,12 @@ Error when collection fails (caught by Error boundary)
 ```ts
 // Basic usage with Suspense
 function TodoList() {
-  const { data } = useLiveSuspenseQuery((q) =>
-    q.from({ todos: todosCollection })
-     .where(({ todos }) => eq(todos.completed, false))
-     .select(({ todos }) => ({ id: todos.id, text: todos.text }))
-  )
+  const { data } = useLiveSuspenseQuery({
+    query: (q) =>
+      q.from({ todos: todosCollection })
+       .where(({ todos }) => eq(todos.completed, false))
+       .select(({ todos }) => ({ id: todos.id, text: todos.text }))
+  })
 
   return (
     <ul>
@@ -226,12 +401,11 @@ const { data } = useLiveSuspenseQuery(
 ```
 
 ```ts
-// With dependencies that trigger re-suspension
-const { data } = useLiveSuspenseQuery(
-  (q) => q.from({ todos: todosCollection })
+// Structured captured values are included in derived query identity and trigger re-suspension
+const { data } = useLiveSuspenseQuery({
+  query: (q) => q.from({ todos: todosCollection })
          .where(({ todos }) => gt(todos.priority, minPriority)),
-  [minPriority] // Re-suspends when minPriority changes
-)
+})
 ```
 
 ```ts
@@ -247,13 +421,44 @@ function App() {
 }
 ```
 
+### Remarks
+
+**Important:** This hook does NOT support disabled queries (returning undefined/null).
+Following TanStack Query's useSuspenseQuery design, the query callback must always
+return a valid query, collection, or config object.
+
+❌ **This will cause a type error:**
+```ts
+useLiveSuspenseQuery(
+  (q) => userId ? q.from({ users }) : undefined  // ❌ Error!
+)
+```
+
+✅ **Use conditional rendering instead:**
+```ts
+function Profile({ userId }: { userId: string }) {
+  const { data } = useLiveSuspenseQuery({
+    query: (q) => q.from({ users }).where(({ users }) => eq(users.id, userId)),
+  })
+  return <div>{data.name}</div>
+}
+
+// In parent component:
+{userId ? <Profile userId={userId} /> : <div>No user</div>}
+```
+
+✅ **For optional inputs, conditionally render a component with complete query inputs:**
+```ts
+{userId ? <Profile userId={userId} /> : <div>No user</div>}
+```
+
 ## Call Signature
 
 ```ts
 function useLiveSuspenseQuery<TResult, TKey, TUtils>(liveQueryCollection): object;
 ```
 
-Defined in: [useLiveSuspenseQuery.ts:96](https://github.com/TanStack/db/blob/main/packages/react-db/src/useLiveSuspenseQuery.ts#L96)
+Defined in: [useLiveSuspenseQuery.ts:180](https://github.com/TanStack/db/blob/main/packages/react-db/src/useLiveSuspenseQuery.ts#L180)
 
 Create a live query with React Suspense support
 
@@ -314,11 +519,12 @@ Error when collection fails (caught by Error boundary)
 ```ts
 // Basic usage with Suspense
 function TodoList() {
-  const { data } = useLiveSuspenseQuery((q) =>
-    q.from({ todos: todosCollection })
-     .where(({ todos }) => eq(todos.completed, false))
-     .select(({ todos }) => ({ id: todos.id, text: todos.text }))
-  )
+  const { data } = useLiveSuspenseQuery({
+    query: (q) =>
+      q.from({ todos: todosCollection })
+       .where(({ todos }) => eq(todos.completed, false))
+       .select(({ todos }) => ({ id: todos.id, text: todos.text }))
+  })
 
   return (
     <ul>
@@ -347,12 +553,11 @@ const { data } = useLiveSuspenseQuery(
 ```
 
 ```ts
-// With dependencies that trigger re-suspension
-const { data } = useLiveSuspenseQuery(
-  (q) => q.from({ todos: todosCollection })
+// Structured captured values are included in derived query identity and trigger re-suspension
+const { data } = useLiveSuspenseQuery({
+  query: (q) => q.from({ todos: todosCollection })
          .where(({ todos }) => gt(todos.priority, minPriority)),
-  [minPriority] // Re-suspends when minPriority changes
-)
+})
 ```
 
 ```ts
@@ -368,13 +573,44 @@ function App() {
 }
 ```
 
+### Remarks
+
+**Important:** This hook does NOT support disabled queries (returning undefined/null).
+Following TanStack Query's useSuspenseQuery design, the query callback must always
+return a valid query, collection, or config object.
+
+❌ **This will cause a type error:**
+```ts
+useLiveSuspenseQuery(
+  (q) => userId ? q.from({ users }) : undefined  // ❌ Error!
+)
+```
+
+✅ **Use conditional rendering instead:**
+```ts
+function Profile({ userId }: { userId: string }) {
+  const { data } = useLiveSuspenseQuery({
+    query: (q) => q.from({ users }).where(({ users }) => eq(users.id, userId)),
+  })
+  return <div>{data.name}</div>
+}
+
+// In parent component:
+{userId ? <Profile userId={userId} /> : <div>No user</div>}
+```
+
+✅ **For optional inputs, conditionally render a component with complete query inputs:**
+```ts
+{userId ? <Profile userId={userId} /> : <div>No user</div>}
+```
+
 ## Call Signature
 
 ```ts
 function useLiveSuspenseQuery<TResult, TKey, TUtils>(liveQueryCollection): object;
 ```
 
-Defined in: [useLiveSuspenseQuery.ts:109](https://github.com/TanStack/db/blob/main/packages/react-db/src/useLiveSuspenseQuery.ts#L109)
+Defined in: [useLiveSuspenseQuery.ts:193](https://github.com/TanStack/db/blob/main/packages/react-db/src/useLiveSuspenseQuery.ts#L193)
 
 Create a live query with React Suspense support
 
@@ -435,11 +671,12 @@ Error when collection fails (caught by Error boundary)
 ```ts
 // Basic usage with Suspense
 function TodoList() {
-  const { data } = useLiveSuspenseQuery((q) =>
-    q.from({ todos: todosCollection })
-     .where(({ todos }) => eq(todos.completed, false))
-     .select(({ todos }) => ({ id: todos.id, text: todos.text }))
-  )
+  const { data } = useLiveSuspenseQuery({
+    query: (q) =>
+      q.from({ todos: todosCollection })
+       .where(({ todos }) => eq(todos.completed, false))
+       .select(({ todos }) => ({ id: todos.id, text: todos.text }))
+  })
 
   return (
     <ul>
@@ -468,12 +705,11 @@ const { data } = useLiveSuspenseQuery(
 ```
 
 ```ts
-// With dependencies that trigger re-suspension
-const { data } = useLiveSuspenseQuery(
-  (q) => q.from({ todos: todosCollection })
+// Structured captured values are included in derived query identity and trigger re-suspension
+const { data } = useLiveSuspenseQuery({
+  query: (q) => q.from({ todos: todosCollection })
          .where(({ todos }) => gt(todos.priority, minPriority)),
-  [minPriority] // Re-suspends when minPriority changes
-)
+})
 ```
 
 ```ts
@@ -487,4 +723,35 @@ function App() {
     </ErrorBoundary>
   )
 }
+```
+
+### Remarks
+
+**Important:** This hook does NOT support disabled queries (returning undefined/null).
+Following TanStack Query's useSuspenseQuery design, the query callback must always
+return a valid query, collection, or config object.
+
+❌ **This will cause a type error:**
+```ts
+useLiveSuspenseQuery(
+  (q) => userId ? q.from({ users }) : undefined  // ❌ Error!
+)
+```
+
+✅ **Use conditional rendering instead:**
+```ts
+function Profile({ userId }: { userId: string }) {
+  const { data } = useLiveSuspenseQuery({
+    query: (q) => q.from({ users }).where(({ users }) => eq(users.id, userId)),
+  })
+  return <div>{data.name}</div>
+}
+
+// In parent component:
+{userId ? <Profile userId={userId} /> : <div>No user</div>}
+```
+
+✅ **For optional inputs, conditionally render a component with complete query inputs:**
+```ts
+{userId ? <Profile userId={userId} /> : <div>No user</div>}
 ```

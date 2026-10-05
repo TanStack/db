@@ -75,6 +75,16 @@ export class CollectionConfigurationError extends TanStackDBError {
   }
 }
 
+export class InvalidSyncPersistenceCapabilityError extends CollectionConfigurationError {
+  constructor(reason: string) {
+    super(
+      `Invalid sync persistence capability at metadata.persistence: ${reason}. ` +
+        `Custom sync wrappers must forward metadata.persistence unchanged.`,
+    )
+    this.name = `InvalidSyncPersistenceCapabilityError`
+  }
+}
+
 export class CollectionRequiresConfigError extends CollectionConfigurationError {
   constructor() {
     super(`Collection requires a config`)
@@ -135,6 +145,18 @@ export class NegativeActiveSubscribersError extends CollectionStateError {
   }
 }
 
+export class LiveQueryObserverDisposedError extends CollectionStateError {
+  constructor() {
+    super(`Cannot subscribe to a disposed LiveQueryObserver`)
+  }
+}
+
+export class LiveQueryWindowControllerDisposedError extends CollectionStateError {
+  constructor() {
+    super(`Cannot subscribe to a disposed LiveQueryWindowController`)
+  }
+}
+
 // Collection Operation Errors
 export class CollectionOperationError extends TanStackDBError {
   constructor(message: string) {
@@ -172,12 +194,28 @@ export class DuplicateKeySyncError extends CollectionOperationError {
   constructor(
     key: string | number,
     collectionId: string,
-    options?: { hasCustomGetKey?: boolean; hasJoins?: boolean },
+    options?: {
+      hasCustomGetKey?: boolean
+      hasJoins?: boolean
+      hasDistinct?: boolean
+    },
   ) {
     const baseMessage = `Cannot insert document with key "${key}" from sync because it already exists in the collection "${collectionId}"`
 
-    // Provide enhanced guidance when custom getKey is used with joins
-    if (options?.hasCustomGetKey && options.hasJoins) {
+    // Provide enhanced guidance when custom getKey is used with distinct
+    if (options?.hasCustomGetKey && options.hasDistinct) {
+      super(
+        `${baseMessage}. ` +
+          `This collection uses a custom getKey with .distinct(). ` +
+          `The .distinct() operator deduplicates by the ENTIRE selected object (standard SQL behavior), ` +
+          `but your custom getKey extracts only a subset of fields. This causes multiple distinct rows ` +
+          `(with different values in non-key fields) to receive the same key. ` +
+          `To fix this, either: (1) ensure your SELECT only includes fields that uniquely identify each row, ` +
+          `(2) use .groupBy() with min()/max() aggregates to select one value per group, or ` +
+          `(3) remove the custom getKey to use the default key behavior.`,
+      )
+    } else if (options?.hasCustomGetKey && options.hasJoins) {
+      // Provide enhanced guidance when custom getKey is used with joins
       super(
         `${baseMessage}. ` +
           `This collection uses a custom getKey with joined queries. ` +
@@ -274,6 +312,34 @@ export class TransactionError extends TanStackDBError {
   }
 }
 
+export class QueueCapacityExceededError extends TransactionError {
+  constructor() {
+    super(`Queue capacity exceeded; the mutation was not admitted`)
+    this.name = `QueueCapacityExceededError`
+  }
+}
+
+export class QueueDisposedError extends TransactionError {
+  constructor() {
+    super(`Queue has been cleaned up; the mutation was not admitted`)
+    this.name = `QueueDisposedError`
+  }
+}
+
+export class ThrottleCallDroppedError extends TransactionError {
+  constructor() {
+    super(`Throttle call was dropped because trailing execution is disabled`)
+    this.name = `ThrottleCallDroppedError`
+  }
+}
+
+export class DebounceCallDroppedError extends TransactionError {
+  constructor() {
+    super(`Debounce call was dropped because trailing execution is disabled`)
+    this.name = `DebounceCallDroppedError`
+  }
+}
+
 export class MissingMutationFunctionError extends TransactionError {
   constructor() {
     super(`mutationFn is required when creating a transaction`)
@@ -327,6 +393,16 @@ export class SyncTransactionAlreadyCommittedWriteError extends TransactionError 
   }
 }
 
+export class SyncRowReusedWithoutPreviousValueError extends TransactionError {
+  constructor(key: string | number) {
+    super(
+      `A sync update for key "${key}" wrote a row object that changed in place since it was last written. ` +
+        `The change overwrote the row's previous value. ` +
+        `Write a new object, or pass the row's previous value as \`previousValue\`.`,
+    )
+  }
+}
+
 export class NoPendingSyncTransactionCommitError extends TransactionError {
   constructor() {
     super(`No pending sync transaction to commit`)
@@ -369,11 +445,24 @@ export class InvalidSourceError extends QueryBuilderError {
   }
 }
 
+export type SourceClauseContext =
+  `from clause` | `unionAll clause` | `join clause`
+
 export class InvalidSourceTypeError extends QueryBuilderError {
-  constructor(context: string, type: string) {
+  constructor(context: SourceClauseContext, type: string) {
+    const expected =
+      context === `unionAll clause`
+        ? `an object with one or more key-value pairs like { alias: collection }`
+        : `an object with a single key-value pair like { alias: collection }`
+    const example =
+      context === `unionAll clause`
+        ? `.unionAll({ todos: todosCollection, events: eventsCollection })`
+        : context === `join clause`
+          ? `.join({ todos: todosCollection }, ({ todo, todos }) => eq(todo.id, todos.id))`
+          : `.from({ todos: todosCollection })`
     super(
-      `Invalid source for ${context}: Expected an object with a single key-value pair like { alias: collection }. ` +
-        `For example: .from({ todos: todosCollection }). Got: ${type}`,
+      `Invalid source for ${context}: Expected ${expected}. ` +
+        `For example: ${example}. Got: ${type}`,
     )
   }
 }
@@ -390,6 +479,19 @@ export class QueryMustHaveFromClauseError extends QueryBuilderError {
   }
 }
 
+export class InvalidWhereExpressionError extends QueryBuilderError {
+  constructor(valueType: string) {
+    super(
+      `Invalid where() expression: Expected a query expression, but received a ${valueType}. ` +
+        `This usually happens when using JavaScript's comparison operators (===, !==, <, >, etc.) directly. ` +
+        `Instead, use the query builder functions:\n\n` +
+        `  ❌ .where(({ user }) => user.id === 'abc')\n` +
+        `  ✅ .where(({ user }) => eq(user.id, 'abc'))\n\n` +
+        `Available comparison functions: eq, gt, gte, lt, lte, and, or, not, like, ilike, isNull, isUndefined`,
+    )
+  }
+}
+
 // Query Compilation Errors
 export class QueryCompilationError extends TanStackDBError {
   constructor(message: string) {
@@ -398,9 +500,49 @@ export class QueryCompilationError extends TanStackDBError {
   }
 }
 
+export class UnsafeAliasPathError extends QueryCompilationError {
+  constructor(segment: string) {
+    super(
+      `Unsafe alias path segment "${segment}" is not allowed in .select(). ` +
+        `Aliases must not contain "__proto__", "prototype", or "constructor".`,
+    )
+    this.name = `UnsafeAliasPathError`
+  }
+}
+
 export class DistinctRequiresSelectError extends QueryCompilationError {
   constructor() {
     super(`DISTINCT requires a SELECT clause.`)
+  }
+}
+
+export class FnSelectWithGroupByError extends QueryCompilationError {
+  constructor() {
+    super(
+      `fn.select() cannot be used with groupBy(). ` +
+        `groupBy requires the compiler to statically analyze aggregate functions (count, sum, max, etc.) in the SELECT clause, ` +
+        `which is not possible with fn.select() since it is an opaque function. ` +
+        `Use .select() instead of .fn.select() when combining with groupBy().`,
+    )
+  }
+}
+
+export class UnsupportedFnSelectResultError extends QueryCompilationError {
+  constructor(valueDescription: string) {
+    super(
+      `fn.select() cannot return ${valueDescription}. ` +
+        `Child query builders, query expressions, and helpers such as eq(), toArray(), materialize(), concat(toArray()), and caseWhen() are query-construction values. ` +
+        `Use them as direct fields in .select() instead.`,
+    )
+  }
+}
+
+export class UnsupportedRootScalarSelectError extends QueryCompilationError {
+  constructor() {
+    super(
+      `Top-level scalar select() is not supported by createLiveQueryCollection() or queryOnce(). ` +
+        `Return an object from .select(), or use the scalar query inside toArray(...) or concat(toArray(...)).`,
+    )
   }
 }
 
@@ -633,6 +775,30 @@ export class SyncCleanupError extends TanStackDBError {
   }
 }
 
+/** A sync transaction was canceled before its writes became visible. */
+export class SyncTransactionAbortedError extends Error {
+  constructor() {
+    super(`Sync transaction was aborted before application`)
+    this.name = `AbortError`
+  }
+}
+
+/** A collection was cleaned up before its initial preload became ready. */
+export class CollectionPreloadAbortedError extends Error {
+  constructor() {
+    super(`Collection preload was abandoned during cleanup`)
+    this.name = `AbortError`
+  }
+}
+
+/** A subset operation was canceled before its result became visible. */
+export class LoadSubsetOperationAbortedError extends Error {
+  constructor() {
+    super(`Load subset operation was aborted before its result became visible`)
+    this.name = `AbortError`
+  }
+}
+
 // Query Optimizer Errors
 export class QueryOptimizerError extends TanStackDBError {
   constructor(message: string) {
@@ -644,45 +810,6 @@ export class QueryOptimizerError extends TanStackDBError {
 export class CannotCombineEmptyExpressionListError extends QueryOptimizerError {
   constructor() {
     super(`Cannot combine empty expression list`)
-  }
-}
-
-/**
- * Internal error when the query optimizer fails to convert a WHERE clause to a collection filter.
- */
-export class WhereClauseConversionError extends QueryOptimizerError {
-  constructor(collectionId: string, alias: string) {
-    super(
-      `Failed to convert WHERE clause to collection filter for collection '${collectionId}' alias '${alias}'. This indicates a bug in the query optimization logic.`,
-    )
-  }
-}
-
-/**
- * Error when a subscription cannot be found during lazy join processing.
- * For subqueries, aliases may be remapped (e.g., 'activeUser' → 'user').
- */
-export class SubscriptionNotFoundError extends QueryCompilationError {
-  constructor(
-    resolvedAlias: string,
-    originalAlias: string,
-    collectionId: string,
-    availableAliases: Array<string>,
-  ) {
-    super(
-      `Internal error: subscription for alias '${resolvedAlias}' (remapped from '${originalAlias}', collection '${collectionId}') is missing in join pipeline. Available aliases: ${availableAliases.join(`, `)}. This indicates a bug in alias tracking.`,
-    )
-  }
-}
-
-/**
- * Error thrown when aggregate expressions are used outside of a GROUP BY context.
- */
-export class AggregateNotSupportedError extends QueryCompilationError {
-  constructor() {
-    super(
-      `Aggregate expressions are not supported in this context. Use GROUP BY clause for aggregates.`,
-    )
   }
 }
 
@@ -708,5 +835,15 @@ export class SetWindowRequiresOrderByError extends QueryCompilationError {
       `setWindow() can only be called on collections with an ORDER BY clause. ` +
         `Add .orderBy() to your query to enable window movement.`,
     )
+  }
+}
+
+/** Error thrown when setWindow is called from inside another setWindow call. */
+export class SetWindowReentrancyError extends TanStackDBError {
+  constructor() {
+    super(
+      `setWindow() cannot run reentrantly. Wait for the current window operation to return before starting another one.`,
+    )
+    this.name = `SetWindowReentrancyError`
   }
 }

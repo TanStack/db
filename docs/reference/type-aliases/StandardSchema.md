@@ -3,13 +3,11 @@ id: StandardSchema
 title: StandardSchema
 ---
 
-# Type Alias: StandardSchema\<T\>
-
 ```ts
 type StandardSchema<T> = StandardSchemaV1 & object;
 ```
 
-Defined in: [packages/db/src/types.ts:391](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L391)
+Defined in: [packages/db/src/types.ts:594](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L594)
 
 The Standard Schema interface.
 This follows the standard-schema specification: https://github.com/standard-schema/standard-schema

@@ -5,45 +5,84 @@ on:
     branches: [main]
   pull_request:
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.number || github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
 jobs:
-  e2e-tests:
-    name: Run E2E Tests
+  e2e-group:
+    name: E2E (${{ matrix.group }})
+    strategy:
+      fail-fast: false
+      matrix:
+        group: [browser, desktop, cloud-mobile]
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 35
+    env:
+      # Since 2026-10-01 Docker Hub rejects anonymous pulls of
+      # electricsql/electric (401 "authentication required"). The Docker
+      # services and the suites that need Electric are skipped until the
+      # image can be pulled again. Set this back to 'true' then.
+      ELECTRIC_E2E: 'false'
 
     steps:
       - name: Checkout code
-        uses: actions/checkout@v6.0.1
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
 
       - name: Setup pnpm
-        uses: pnpm/action-setup@v4
+        uses: pnpm/action-setup@739bfe42ca9233c5e6aca07c1a25a9d34aca49b0 # v6.0.7
         with:
-          version: 10.26.2
+          cache: false
 
       - name: Setup Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
-          node-version: '20'
+          node-version: '22.13'
           cache: 'pnpm'
 
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
       - name: Start Docker services
+        if: matrix.group == 'browser' && env.ELECTRIC_E2E == 'true'
         run: |
           cd packages/db-collection-e2e/docker
           docker compose up -d
           echo "Waiting for services to be healthy..."
           timeout 60 bash -c 'until docker compose ps | grep -q "healthy"; do sleep 2; done'
 
-      - name: Build packages
-        run: |
-          pnpm --filter @tanstack/db-ivm build
-          pnpm --filter @tanstack/db build
-          pnpm --filter @tanstack/electric-db-collection build
-          pnpm --filter @tanstack/query-db-collection build
+      - name: Build browser dependencies
+        if: matrix.group == 'browser'
+        run: >-
+          pnpm
+          --filter '@tanstack/react-router-with-db...'
+          --filter '@tanstack/electric-db-collection...'
+          --filter '@tanstack/query-db-collection...'
+          build
+
+      - name: Build desktop dependencies
+        if: matrix.group == 'desktop'
+        run: >-
+          pnpm
+          --filter '@tanstack/node-db-sqlite-persistence...'
+          --filter '@tanstack/electron-db-sqlite-persistence...'
+          build
+
+      - name: Build cloud and mobile dependencies
+        if: matrix.group == 'cloud-mobile'
+        run: >-
+          pnpm
+          --filter '@tanstack/cloudflare-durable-objects-db-sqlite-persistence...'
+          --filter '@tanstack/react-native-db-sqlite-persistence...'
+          build
 
       - name: Run Electric E2E tests
+        if: matrix.group == 'browser' && env.ELECTRIC_E2E == 'true'
         run: |
           cd packages/electric-db-collection
           pnpm test:e2e
@@ -56,22 +95,123 @@ jobs:
           POSTGRES_DB: e2e_test
 
       - name: Run Query E2E tests
+        if: matrix.group == 'browser'
         run: |
           cd packages/query-db-collection
           pnpm test:e2e
         env:
           ELECTRIC_URL: http://localhost:3000
 
+      - name: Install Playwright browsers
+        if: matrix.group == 'browser'
+        run: |
+          cd examples/react/start-ssr-e2e
+          pnpm exec playwright install --with-deps chromium
+
+      - name: Run Browser SQLite OPFS fairness E2E tests
+        if: matrix.group == 'browser'
+        run: |
+          cd packages/browser-db-sqlite-persistence
+          pnpm test:opfs-fairness
+
+      - name: Run Browser SQLite OPFS with live Electric E2E tests
+        if: matrix.group == 'browser' && env.ELECTRIC_E2E == 'true'
+        run: |
+          cd packages/browser-db-sqlite-persistence
+          pnpm test:opfs-electric
+        env:
+          ELECTRIC_URL: http://localhost:3000
+
+      - name: Run React Start SSR E2E tests
+        if: matrix.group == 'browser'
+        run: |
+          cd examples/react/start-ssr-e2e
+          pnpm exec playwright test
+
+      - name: Run Next.js SSR E2E tests
+        if: matrix.group == 'browser'
+        run: |
+          cd examples/react/next-ssr-e2e
+          pnpm exec playwright test
+
+      - name: Run Node SQLite persisted collection E2E tests
+        if: matrix.group == 'desktop'
+        run: |
+          cd packages/node-db-sqlite-persistence
+          pnpm exec vitest --config vitest.e2e.config.ts --run
+
+      - name: Run Electron SQLite persisted collection E2E tests
+        if: matrix.group == 'desktop'
+        run: |
+          cd packages/electron-db-sqlite-persistence
+          pnpm exec vitest --config vitest.e2e.config.ts --run
+
+      - name: Run Cloudflare Durable Object persisted collection E2E tests
+        if: matrix.group == 'cloud-mobile'
+        run: |
+          cd packages/cloudflare-durable-objects-db-sqlite-persistence
+          pnpm exec vitest --config vitest.e2e.config.ts --run
+
+      - name: Run React Native/Expo persisted collection E2E tests
+        if: matrix.group == 'cloud-mobile'
+        run: |
+          cd packages/react-native-db-sqlite-persistence
+          pnpm exec vitest --config vitest.e2e.config.ts --run
+
+      - name: Run React Native/Expo runtime E2E lane
+        if: matrix.group == 'cloud-mobile'
+        run: |
+          is_fork_pr=false
+          require_runtime_lane=${TANSTACK_DB_REQUIRE_MOBILE_RUNTIME_LANE:-0}
+          if [ "${GITHUB_EVENT_NAME}" = "pull_request" ]; then
+            is_fork_pr=$(jq -r '.pull_request.head.repo.fork' "${GITHUB_EVENT_PATH}")
+          fi
+
+          if [ "${is_fork_pr}" = "true" ]; then
+            echo "Skipping runtime mobile lane for fork PR (repo vars are unavailable)."
+            exit 0
+          fi
+
+          if [ -z "${TANSTACK_DB_MOBILE_SQLITE_FACTORY_MODULE}" ]; then
+            if [ "${require_runtime_lane}" = "1" ]; then
+              echo "::error::Missing repository variable TANSTACK_DB_MOBILE_SQLITE_FACTORY_MODULE while TANSTACK_DB_REQUIRE_MOBILE_RUNTIME_LANE=1."
+              echo "::error::Set TANSTACK_DB_MOBILE_SQLITE_FACTORY_MODULE (and optional TANSTACK_DB_MOBILE_SQLITE_FACTORY_EXPORT)."
+              exit 1
+            fi
+
+            echo "Skipping runtime mobile lane (no TANSTACK_DB_MOBILE_SQLITE_FACTORY_MODULE configured)."
+            echo "Set TANSTACK_DB_REQUIRE_MOBILE_RUNTIME_LANE=1 to enforce this lane."
+            exit 0
+          fi
+
+          cd packages/react-native-db-sqlite-persistence
+          TANSTACK_DB_MOBILE_REQUIRE_RUNTIME_FACTORY=1 pnpm exec vitest --config vitest.e2e.config.ts --run
+        env:
+          TANSTACK_DB_MOBILE_SQLITE_FACTORY_MODULE: ${{ vars.TANSTACK_DB_MOBILE_SQLITE_FACTORY_MODULE }}
+          TANSTACK_DB_MOBILE_SQLITE_FACTORY_EXPORT: ${{ vars.TANSTACK_DB_MOBILE_SQLITE_FACTORY_EXPORT }}
+          TANSTACK_DB_REQUIRE_MOBILE_RUNTIME_LANE: ${{ vars.TANSTACK_DB_REQUIRE_MOBILE_RUNTIME_LANE }}
+
       - name: Stop Docker services
-        if: always()
+        if: always() && matrix.group == 'browser' && env.ELECTRIC_E2E == 'true'
         run: |
           cd packages/db-collection-e2e/docker
           docker compose down -v
 
       - name: Upload test results
         if: failure()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
-          name: test-results
+          name: test-results-${{ matrix.group }}
           path: packages/db-collection-e2e/junit/
           retention-days: 7
+
+  e2e-tests:
+    name: Run E2E Tests
+    if: always()
+    needs: [e2e-group]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Require every E2E group to succeed
+        env:
+          E2E_RESULT: ${{ needs.e2e-group.result }}
+        run: test "$E2E_RESULT" = success

@@ -11,7 +11,7 @@ Each supported framework comes with its own package. Each framework package re-e
 npm install @tanstack/react-db
 ```
 
-TanStack DB is compatible with React v16.8+
+TanStack DB is compatible with React v18+
 
 ## Solid
 
@@ -72,6 +72,26 @@ Local storage and in-memory collections are included with the framework packages
 
 Both use `localStorageCollectionOptions` and `localOnlyCollectionOptions` respectively, available from your framework package (e.g., `@tanstack/react-db`).
 
+### SQLite Persistence
+
+Use a runtime package to save Collection rows in SQLite and load them after an app restart. For a browser app, install the OPFS wrapper and its SQLite engine:
+
+```sh
+npm install @tanstack/browser-db-sqlite-persistence @journeyapps/wa-sqlite
+```
+
+The [SQLite Persistence guide](./guides/sqlite-persistence.md) shows the browser setup and lists the mobile, desktop, server, and Durable Object packages. It also explains how to wrap an existing sync adapter.
+
+### Offline Transactions
+
+Use `@tanstack/offline-transactions` to retain pending mutations and retry them when the server is available:
+
+```sh
+npm install @tanstack/offline-transactions
+```
+
+The [Offline Transactions guide](./guides/offline-transactions.md) covers web and React Native setup. It also shows how to use the outbox with a SQLite-persisted Collection.
+
 ### Sync Engines
 
 #### Electric Collection
@@ -93,6 +113,28 @@ npm install @tanstack/trailbase-db-collection
 ```
 
 Use `trailBaseCollectionOptions` to sync records from TrailBase's Record APIs with built-in subscription support.
+
+#### PowerSync Collection
+
+For offline-first sync with [PowerSync](https://powersync.com):
+
+Use `powerSyncCollectionOptions` to sync data via PowerSync's SQLite-based database with real-time synchronization to PostgreSQL, MongoDB, and MySQL backends. Install the collection package plus the platform-specific PowerSync SDK and SQLite adapter:
+
+**Web**
+
+```sh
+npm install @tanstack/powersync-db-collection @powersync/web @journeyapps/wa-sqlite
+```
+
+**React Native**
+
+```sh
+npm install @tanstack/powersync-db-collection @powersync/react-native @powersync/op-sqlite @op-engineering/op-sqlite
+```
+
+Or use `@journeyapps/react-native-quick-sqlite` as an alternative SQLite adapter.
+
+See the [PowerSync Collection documentation](./collections/powersync-collection.md) for setup details.
 
 ### RxDB Collection
 
