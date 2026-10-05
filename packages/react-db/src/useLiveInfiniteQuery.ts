@@ -273,9 +273,11 @@ export function useLiveInfiniteQuery<TContext extends Context>(
         // grows the limit from here via setWindow.
         collection = createLiveQueryCollection({
           query: input.query.limit(pageSize + 1).offset(0),
-          // Construction happens during render. Synchronization starts only when
-          // useSyncExternalStore commits the controller subscription.
-          startSync: false,
+          // Match useLiveQuery: start sync during render so a synchronously
+          // loaded source is already published on the first commit, rather than
+          // flashing an empty idle commit. Renders that never commit are
+          // reclaimed by GC (gcTime), exactly as useLiveQuery relies on.
+          startSync: true,
           gcTime: DEFAULT_GC_TIME_MS,
         })
       }

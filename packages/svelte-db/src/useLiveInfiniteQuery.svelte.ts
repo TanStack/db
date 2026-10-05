@@ -182,7 +182,11 @@ export function useLiveInfiniteQuery<TContext extends Context>(
 
     const collection = createLiveQueryCollection({
       query: input.query.limit(pageSize + 1).offset(0),
-      startSync: false,
+      // Match useLiveQuery: start sync during construction so a synchronously
+      // loaded source is already published on the first render, rather than
+      // flashing an empty idle snapshot before the subscribing effect attaches.
+      // Renders that never commit are reclaimed by GC (gcTime).
+      startSync: true,
       gcTime: DEFAULT_GC_TIME_MS,
     })
     assertLiveQueryWindowManyResult(collection)

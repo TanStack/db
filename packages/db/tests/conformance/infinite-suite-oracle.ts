@@ -116,6 +116,8 @@ export function runInfiniteQuerySuite(rawDriver: InfiniteQueryDriver): void {
       sources!.track(rawDriver.makeOnDemandSource(data, delay)),
     makePrecreated: (build) => sources!.track(rawDriver.makePrecreated(build)),
     mount: (build, config) => track(rawDriver.mount(build, config)),
+    mountObserved: (build, config) =>
+      track(rawDriver.mountObserved(build, config)),
     mountControllable: (build, initial, config) =>
       track(rawDriver.mountControllable(build, initial, config)),
     mountCollection: (collection, config) =>
@@ -157,6 +159,32 @@ export function runInfiniteQuerySuite(rawDriver: InfiniteQueryDriver): void {
   }
 
   describe(`infinite-query conformance :: ${driver.name}`, () => {
+    scenario(
+      `first-paint-ready`,
+      `publishes the ready first page on the first paint for a synchronous source`,
+      async () => {
+        // Independent model: a synchronously loaded source is already complete,
+        // so the first page is ready at the first paint. An empty idle paint
+        // before data is the "flash of no content" this law forbids; the
+        // framework must not commit one. Reading only the final settled state
+        // would hide such a flash, so this asserts the first recorded paint.
+        const source = driver.makeSource(rows(8))
+        const handle = driver.mountObserved(
+          (q) =>
+            q
+              .from({ items: source.collection })
+              .orderBy(({ items }: any) => items.rank, `desc`),
+          { pageSize: 3 },
+        )
+        await handle.flush()
+
+        expect(handle.firstPaint()).toEqual({
+          status: `ready`,
+          ids: [`1`, `2`, `3`],
+        })
+      },
+    )
+
     scenario(
       `page-expansion`,
       `loads the initial page and expands through the final partial page`,
@@ -1376,7 +1404,7 @@ export function runInfiniteQuerySuite(rawDriver: InfiniteQueryDriver): void {
     )
 
     it(`registers every distinct scenario without whole-test waivers`, () => {
-      expect(registry.size).toBe(34)
+      expect(registry.size).toBe(35)
     })
   })
 }

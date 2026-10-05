@@ -122,6 +122,21 @@ function mount(build: QueryBuild, config: InfiniteQueryConfig = {}) {
   return makeHandle(result, scope)
 }
 
+function mountObserved(build: QueryBuild, config: InfiniteQueryConfig = {}) {
+  // Vue renders after setup; its sync watchEffect has already produced the
+  // first paint value by the time the hook returns.
+  let firstPaint: { status: string; ids: Array<string> }
+  const { result, scope } = runInScope(() => {
+    const r = useLiveInfiniteQuery(build as any, config as any)
+    firstPaint = {
+      status: r.status.value,
+      ids: r.data.value.map((row: any) => row.id),
+    }
+    return r
+  })
+  return { ...makeHandle(result, scope), firstPaint: () => firstPaint }
+}
+
 function mountControllable<P>(
   build: (q: any, param: P) => any,
   initial: P,
@@ -216,6 +231,7 @@ const vueInfiniteDriver: InfiniteQueryDriver = {
   makePrecreated,
   makeWindowController: createLiveQueryWindowController,
   mount,
+  mountObserved,
   mountControllable,
   mountCollection,
   mountCollectionControllable,

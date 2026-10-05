@@ -103,6 +103,29 @@ function mount(build: QueryBuild, config: InfiniteQueryConfig = {}) {
   )
 }
 
+function mountObserved(build: QueryBuild, config: InfiniteQueryConfig = {}) {
+  // React can coalesce an intermediate commit before renderHook returns, so the
+  // first paint is only visible from inside a layout effect, not from current().
+  let firstPaint: { status: string; ids: Array<string> } | undefined
+  const hook = renderHook(() => {
+    const result = useLiveInfiniteQuery(build as any, config as any)
+    useLayoutEffect(() => {
+      firstPaint ??= {
+        status: result.status,
+        ids: result.data.map((row: any) => row.id),
+      }
+    })
+    return result
+  })
+  return {
+    ...makeHandle(hook),
+    firstPaint: () => {
+      if (!firstPaint) throw new Error(`No commit observed before first paint`)
+      return firstPaint
+    },
+  }
+}
+
 function mountControllable<P>(
   build: (q: any, param: P) => any,
   initial: P,
@@ -199,6 +222,7 @@ const reactInfiniteDriver: InfiniteQueryDriver = {
   makePrecreated,
   makeWindowController: createLiveQueryWindowController,
   mount,
+  mountObserved,
   mountControllable,
   mountCollection,
   mountCollectionControllable,
@@ -209,7 +233,7 @@ const reactInfiniteDriver: InfiniteQueryDriver = {
 
 runInfiniteQuerySuite(reactInfiniteDriver)
 
-it(`publishes query-function pages in the first non-idle layout commit after mount and dependency replacement`, async () => {
+it(`publishes query-function pages on the first layout commit after mount and dependency replacement`, async () => {
   const source = makeSource(
     Array.from({ length: 10 }, (_, index) => ({
       id: String(index + 1),
@@ -246,7 +270,9 @@ it(`publishes query-function pages in the first non-idle layout commit after mou
 
   try {
     await waitFor(() => expect(hook.result.current.status).toBe(`ready`))
-    expect(commits.find(({ status }) => status !== `idle`)).toEqual({
+    // The very first commit already carries data: no empty idle flash precedes
+    // it, matching useLiveQuery for a synchronously loaded source.
+    expect(commits[0]).toEqual({
       ranks: [10, 9, 8],
       status: `ready`,
     })
@@ -255,7 +281,9 @@ it(`publishes query-function pages in the first non-idle layout commit after mou
     await waitFor(() =>
       expect(hook.result.current.data.map(({ rank }) => rank)).toEqual([10, 9]),
     )
-    expect(commits.find(({ status }) => status !== `idle`)).toEqual({
+    // Replacing the dependency builds a fresh eager collection, so its first
+    // commit is ready too — no idle flash on re-query.
+    expect(commits[0]).toEqual({
       ranks: [10, 9],
       status: `ready`,
     })

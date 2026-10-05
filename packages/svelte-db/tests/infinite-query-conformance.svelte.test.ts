@@ -110,6 +110,25 @@ function mount(build: QueryBuild, config: InfiniteQueryConfig = {}) {
   return makeHandle(() => result, dispose)
 }
 
+function mountObserved(build: QueryBuild, config: InfiniteQueryConfig = {}) {
+  // Svelte's first render reads the construction snapshot, before the
+  // subscribing $effect attaches on flush. Capture that first paint now.
+  let firstPaint: { status: string; ids: Array<string> }
+  let result: any
+  const dispose = $effect.root(() => {
+    result = useLiveInfiniteQuery(build as any, config as any)
+    firstPaint = {
+      status: result.status,
+      ids: result.data.map((row: any) => row.id),
+    }
+  })
+  finishSetup(dispose)
+  return {
+    ...makeHandle(() => result, dispose),
+    firstPaint: () => firstPaint,
+  }
+}
+
 function mountControllable<P>(
   build: (q: any, param: P) => any,
   initial: P,
@@ -213,6 +232,7 @@ const svelteInfiniteDriver: InfiniteQueryDriver = {
   makePrecreated,
   makeWindowController: createLiveQueryWindowController,
   mount,
+  mountObserved,
   mountControllable,
   mountCollection,
   mountCollectionControllable,

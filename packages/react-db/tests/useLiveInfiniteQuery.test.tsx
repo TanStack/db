@@ -34,7 +34,7 @@ function createMockPosts(count: number): Array<Post> {
 }
 
 describe(`useLiveInfiniteQuery`, () => {
-  it(`does not activate a query-function collection for an abandoned render`, async () => {
+  it(`reclaims a query-function collection abandoned before it commits`, async () => {
     const source = createCollection(
       mockSyncCollectionOptions<Post>({
         id: `abandoned-infinite-query`,
@@ -60,9 +60,12 @@ describe(`useLiveInfiniteQuery`, () => {
         <AbandonedQuery />
       </Suspense>,
     )
-    await new Promise((resolve) => setTimeout(resolve, 0))
 
-    expect(source.subscriberCount).toBe(0)
+    // Like useLiveQuery, the hook starts sync during render so a synchronously
+    // loaded source is ready on first commit; a render that never commits is
+    // then reclaimed by GC rather than kept out of the source entirely.
+    expect(source.subscriberCount).toBeGreaterThan(0)
+    await waitFor(() => expect(source.subscriberCount).toBe(0))
     rendered.unmount()
   })
 

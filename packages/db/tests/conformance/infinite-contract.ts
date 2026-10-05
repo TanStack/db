@@ -49,6 +49,22 @@ export interface InfiniteQueryHandle {
   unmount: () => void
 }
 
+/** One published view of the hook, reduced to what the first-paint law reads. */
+export interface InfiniteQueryObservation {
+  status: string
+  ids: Array<string>
+}
+
+export interface InfiniteQueryObservedHandle extends InfiniteQueryHandle {
+  /**
+   * The binding's first paint. `current()` cannot serve this law: a framework
+   * may coalesce an intermediate commit before `mount` returns (React) or
+   * expose only its construction snapshot (Vue, Svelte), so each driver records
+   * this through its own native commit hook.
+   */
+  firstPaint: () => InfiniteQueryObservation
+}
+
 export interface InfiniteQueryControllableHandle<
   P,
 > extends InfiniteQueryHandle {
@@ -94,6 +110,11 @@ export interface InfiniteQueryDriver {
     build: QueryBuild,
     config?: InfiniteQueryConfig,
   ) => InfiniteQueryHandle
+  /** Mount while recording each published observation via the native commit hook. */
+  mountObserved: (
+    build: QueryBuild,
+    config?: InfiniteQueryConfig,
+  ) => InfiniteQueryObservedHandle
   mountControllable: <P>(
     build: (q: any, param: P) => any,
     initial: P,
