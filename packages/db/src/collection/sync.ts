@@ -169,8 +169,7 @@ export class CollectionSyncManager<
 
   private createDuplicateKeyError(key: TKey): DuplicateKeySyncError {
     const utils = this.config.utils as
-      | Partial<LiveQueryCollectionUtils>
-      | undefined
+      Partial<LiveQueryCollectionUtils> | undefined
     const internal = utils?.[LIVE_QUERY_INTERNAL]
     return new DuplicateKeySyncError(key, this.id, {
       hasCustomGetKey: internal?.hasCustomGetKey ?? false,

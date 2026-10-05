@@ -74,9 +74,7 @@ const cleanupError = {
 }
 
 type CleanupBoundary =
-  | `cleanup-start`
-  | `terminal-publication`
-  | `cleanup-settlement`
+  `cleanup-start` | `terminal-publication` | `cleanup-settlement`
 type CleanupBoundaryObservation<TStatus extends string> = {
   restartAdmission: `closed` | `open`
   collectionStatus: TStatus | `cleaned-up`
