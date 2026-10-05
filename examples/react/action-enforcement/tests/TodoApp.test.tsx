@@ -120,3 +120,97 @@ for (const elapsed of [0, 40, 119]) {
     expect(row.classList.contains('done')).toBe(true)
   })
 }
+
+// Admission law: one add may be pending per mounted form. Repeated submit
+// events cannot create another action until that add fulfills or rejects.
+// The create barrier controls settlement independently of React's render cut.
+for (const outcome of ['success', 'failure'] as const) {
+  for (const burst of ['same render', 'separate renders'] as const) {
+    test(`add admission reopens after ${outcome} with submits in ${burst}`, async () => {
+      const input = await mount()
+      const form = input.form!
+      const button = screen.getByRole('button', {
+        name: 'Add',
+      }) as HTMLButtonElement
+      const add = vi.spyOn(actions, 'addTodo')
+      const createTodo = api.createTodo
+      let finishCreate!: () => void
+      let rejectCreate!: (error: Error) => void
+      const barrier = new Promise<void>((resolve, reject) => {
+        finishCreate = resolve
+        rejectCreate = reject
+      })
+      const create = vi
+        .spyOn(api, 'createTodo')
+        .mockImplementationOnce(async (payload) => {
+          await barrier
+          return createTodo(payload)
+        })
+      const submitted = `admission ${outcome} ${burst}`
+      const nextDraft = `${submitted} next`
+      fireEvent.change(input, { target: { value: submitted } })
+      if (burst === 'same render') {
+        act(() => {
+          fireEvent.submit(form)
+          fireEvent.submit(form)
+        })
+      } else {
+        fireEvent.submit(form)
+        fireEvent.submit(form)
+      }
+      expect(add).toHaveBeenCalledTimes(1)
+      expect(create).toHaveBeenCalledTimes(1)
+      expect(button.disabled).toBe(true)
+      expect(input.disabled).toBe(false)
+      fireEvent.change(input, { target: { value: nextDraft } })
+      fireEvent.submit(form)
+      expect(add).toHaveBeenCalledTimes(1)
+      await act(async () => {
+        if (outcome === 'success') finishCreate()
+        else rejectCreate(new Error('Create failed'))
+        await vi.advanceTimersByTimeAsync(200)
+      })
+      expect(button.disabled).toBe(false)
+      expect(input.value).toBe(nextDraft)
+      if (outcome === 'failure')
+        expect(screen.getByText('Create failed')).toBeDefined()
+      fireEvent.click(button)
+      expect(add).toHaveBeenCalledTimes(2)
+      expect(add).toHaveBeenLastCalledWith(nextDraft)
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(200)
+      })
+      expect(add.mock.results[1].value.state).toBe('completed')
+      expect(button.disabled).toBe(false)
+      expect(input.value).toBe('')
+      const persisted = api.listTodos()
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(80)
+      })
+      const texts = (await persisted).map((todo) => todo.text)
+      expect(texts.filter((text) => text === submitted)).toHaveLength(
+        outcome === 'success' ? 1 : 0,
+      )
+      expect(texts.filter((text) => text === nextDraft)).toHaveLength(1)
+    })
+  }
+}
+
+test('synchronous validation failure permits a corrected submission', async () => {
+  const input = await mount()
+  const button = screen.getByRole('button', {
+    name: 'Add',
+  }) as HTMLButtonElement
+  fireEvent.change(input, { target: { value: '   ' } })
+  fireEvent.submit(input.form!)
+  expect(screen.getByText('Todo text is required')).toBeDefined()
+  expect(button.disabled).toBe(false)
+  fireEvent.change(input, { target: { value: 'corrected submission' } })
+  fireEvent.click(button)
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(200)
+  })
+  expect(input.value).toBe('')
+  expect(button.disabled).toBe(false)
+  expect(screen.queryByText('Todo text is required')).toBeNull()
+})

@@ -743,11 +743,24 @@ controlled create rejection; native form submission; and disabled toggles at
 0, 40, and 119 ms during creation. A settled row remains enabled while another
 row is pending, and a newly settled row can toggle and persist its change.
 The original component fails the newer-draft, form, and three pending-row checks.
-The fixed component passes all nine cases. The lint oracle above cannot observe
+The fixed component passes these nine cases. The lint oracle above cannot observe
 these application behaviors, and the shared framework owners do not own form
-state. These focused witnesses do not cover arbitrary concurrent submissions or
-browser-native Enter event dispatch. This component suite owns the former
-extension; a browser form witness is needed for the latter.
+state.
+
+The component suite also owns add admission: one add may be pending per mounted
+form, the input stays editable, and settlement permits the next submission.
+Four controlled-create histories cross fulfillment/rejection with repeated
+submits before/after a React render. They assert one action and provider call,
+reject submissions of a newer draft while pending, then admit that draft after
+settlement and check exact persisted counts. A fifth witness checks admission
+after synchronous validation rejection. The original handler fails all four
+pending-add histories. A guard based only on React state fails the same-render
+histories; a mutant that omits guard cleanup fails subsequent admission.
+
+These 14 focused cases do not establish arbitrary-length form histories,
+remount behavior during pending writes, or browser-native Enter dispatch.
+This component suite owns the first two extensions; a browser form witness
+is needed for native keyboard dispatch.
 
 ## Reusable-law backlog
 

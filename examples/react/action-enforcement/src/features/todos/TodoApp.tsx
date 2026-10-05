@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useRef, useState } from 'react'
 import { useLiveQuery } from '@tanstack/react-db'
 import { addTodo, toggleTodo } from '@/db/actions/todoActions'
 import { todoCollection } from '@/db/collections/todoCollection'
@@ -6,6 +6,8 @@ import { todoCollection } from '@/db/collections/todoCollection'
 export function TodoApp() {
   const [text, setText] = useState('')
   const [error, setError] = useState<string | null>(null)
+  const [isAdding, setIsAdding] = useState(false)
+  const addPending = useRef(false)
   const { data: todos = [], isLoading } = useLiveQuery((q) =>
     q
       .from({ todo: todoCollection })
@@ -13,6 +15,9 @@ export function TodoApp() {
   )
 
   async function handleAddTodo() {
+    if (addPending.current) return
+    addPending.current = true
+    setIsAdding(true)
     const submittedText = text
     try {
       setError(null)
@@ -20,6 +25,9 @@ export function TodoApp() {
       setText((current) => (current === submittedText ? '' : current))
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to add todo')
+    } finally {
+      addPending.current = false
+      setIsAdding(false)
     }
   }
 
@@ -38,7 +46,11 @@ export function TodoApp() {
           onChange={(event) => setText(event.target.value)}
           placeholder="Add a todo"
         />
-        <button className="todo-button" type="submit" disabled={isLoading}>
+        <button
+          className="todo-button"
+          type="submit"
+          disabled={isLoading || isAdding}
+        >
           Add
         </button>
       </form>
