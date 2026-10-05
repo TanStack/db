@@ -81,3 +81,25 @@ Out-of-scope cells, where an empty or loading first paint is correct:
   sandbox npm proxy returned 403 for unrelated security-bumped dependencies. CI
   runs every package suite.
 - This record does not mark any CI check green.
+
+## Addendum: duplicate pre-commit render fix
+
+A follow-up review found a regression from `startSync: true`: because the hooks
+built a new collection per render and only recorded it at commit, a duplicate
+pre-commit render (React StrictMode, a discarded concurrent render, or a
+Suspense retry) started a second collection and loaded an on-demand source's
+first page twice. `useLiveQuery` avoids this with a render-time instance memo
+(its pool excludes window and on-demand queries, so the pool is not the cause).
+
+Fix: React now records each render's state in a render-time ref and reuses it
+when every identity input matches, while committed state is still recorded at
+subscribe so an abandoned render cannot overwrite preserved pages. Svelte's
+`$derived` controller now reuses the previous controller when nothing that
+defines it changed, instead of rebuilding on every recompute.
+
+Regression: `packages/react-db/tests/infinite-query-strictmode-dedup.test.tsx`
+mounts an on-demand source under StrictMode and asserts the first peek-ahead
+window loads once. It fails (two loads) when the memo is recorded only at
+commit, and passes with the render-time reuse. This closes the StrictMode part
+of the previously unresolved cell. The pre-created-collection input form and
+Suspense or concurrent first paint remain open under the owner above.

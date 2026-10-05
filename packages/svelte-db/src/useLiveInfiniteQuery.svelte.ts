@@ -20,6 +20,7 @@ import type {
   Context,
   InferResultType,
   InitialQueryBuilder,
+  LiveQueryWindowController,
   NonSingleResult,
   QueryBuilder,
   UtilsRecord,
@@ -31,9 +32,9 @@ type MaybeGetter<T> = T | (() => T)
 
 type InternalCollection = Collection<object, string | number, UtilsRecord>
 
-type PreviousController = {
-  getSnapshot: () => { pages: ReadonlyArray<ReadonlyArray<unknown>> }
-}
+// The full controller type: the previous one may be reused as-is when nothing
+// that defines it changed, not only read for its committed page count.
+type PreviousController = LiveQueryWindowController<any, any>
 
 type InfiniteQueryOptions = {
   pageSize?: number
@@ -141,6 +142,18 @@ export function useLiveInfiniteQuery<TContext extends Context>(
       input.kind === `collection` &&
       previousInput?.kind === `collection` &&
       previousInput.collection === input.collection
+    // Reuse the current controller when nothing that defines it changed, like
+    // useLiveQuery's instance memo. A bare recompute (a referentially new but
+    // structurally equal dependency) must not build a second collection, which
+    // with startSync would subscribe — and load — the source again.
+    if (
+      previousController !== null &&
+      previousInput?.kind === input.kind &&
+      (input.kind === `collection` ? sameCollection : !dependenciesChanged) &&
+      !pageShapeChanged
+    ) {
+      return previousController
+    }
     const canPreservePageCount = shouldPreserveLiveQueryWindowPageCount({
       hasPreviousController: previousController !== null,
       previousInputKind: previousInput?.kind,
