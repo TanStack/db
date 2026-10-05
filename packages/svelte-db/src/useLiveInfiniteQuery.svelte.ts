@@ -33,7 +33,11 @@ type MaybeGetter<T> = T | (() => T)
 type InternalCollection = Collection<object, string | number, UtilsRecord>
 
 // The full controller type: the previous one may be reused as-is when nothing
-// that defines it changed, not only read for its committed page count.
+// that defines it changed, not only read for its committed page count. The
+// generics stay `any` because the derived returns controllers from both the
+// collection and query paths, whose element and key types differ; a precise
+// `<object, string | number>` reintroduces a union that loses the snapshot
+// shape here.
 type PreviousController = LiveQueryWindowController<any, any>
 
 type InfiniteQueryOptions = {
