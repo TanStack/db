@@ -2,6 +2,7 @@ import { fc, test as fcTest } from '@fast-check/vitest'
 import { describe, expect, it, vi } from 'vitest'
 import { CollectionChangesManager } from '../src/collection/changes.js'
 import { createCollection } from '../src/collection/index.js'
+import { eq } from '../src/query/index.js'
 import { createDeferred } from '../src/deferred.js'
 import { oracleRandomParameters, readOracleRunConfig } from './oracle-config.js'
 import { flushPromises } from './utils.js'
@@ -984,52 +985,113 @@ describe(`sync publication reentrancy`, () => {
     }
   })
 
-  // The truncate marks the Collection ready before it publishes its changed
-  // keys. A ready callback can write an optimistic request that the truncate
-  // batch has not published: an edit or a delete of a replaced key, or an
-  // insert of a new key. Each subscriber must receive messages that are valid
-  // for the rows it holds, and end with the Collection's rows. A subscriber
-  // without initial state has no sent-key filter to hide a second insert or a
-  // second delete.
-  const readyActions = {
-    edit: [
-      [1, `optimistic-one`],
-      [2, `two`],
-    ],
-    insert: [
-      [1, `one-again`],
-      [2, `two`],
-      [3, `optimistic-three`],
-    ],
-    delete: [[2, `two`]],
-  } as const
-  it.each(
-    ([`onFirstReady`, `status:change`] as const).flatMap((hook) =>
-      (Object.keys(readyActions) as Array<keyof typeof readyActions>).flatMap(
-        (action) =>
-          [true, false].map((includeInitialState) => ({
+  // A truncate marks the Collection ready before it publishes its batch, and a
+  // ready callback can write in that window. The callback's messages and the
+  // truncate batch together must be valid for every subscriber, and must end
+  // at the Collection's rows, whatever optimistic requests were already
+  // active. A subscriber without initial state has no sent-key filter to hide
+  // a repeated message. A filtered subscriber keeps only rows whose value is
+  // `one`, so a removal must reach it with the row it holds. Subscribers
+  // receive the truncate's messages only after the Collection is ready.
+  //
+  // The model overlays active intents, in order, over source rows. Before the
+  // truncate, the source holds keys 1 and 4. The replacement holds 1 and 2, so
+  // key 4's prefix delete must remain. A prior request is active before the
+  // truncate. The callback then writes once against the rows it can see.
+  type ReadyIntent =
+    | { type: `update` | `insert`; key: number; value: string }
+    | { type: `delete`; key: number }
+  const overlay = (
+    rows: ReadonlyArray<readonly [number, string]>,
+    intents: ReadonlyArray<ReadyIntent | undefined>,
+  ) => {
+    const visible = new Map(rows)
+    for (const intent of intents) {
+      if (!intent) continue
+      if (intent.type === `delete`) visible.delete(intent.key)
+      else visible.set(intent.key, intent.value)
+    }
+    return visible
+  }
+  const sourceBefore = [
+    [1, `one`],
+    [4, `four`],
+  ] as const
+  const replacement = [
+    [1, `one-again`],
+    [2, `two`],
+  ] as const
+  const priorIntents: Record<string, ReadyIntent | undefined> = {
+    none: undefined,
+    'update 1': { type: `update`, key: 1, value: `prior-one` },
+    'delete 1': { type: `delete`, key: 1 },
+    'insert 3': { type: `insert`, key: 3, value: `prior-three` },
+  }
+  const callbackIntents = (visible: ReadonlyMap<number, string>) =>
+    [1, 2, 3, 4].flatMap(
+      (key): Array<ReadyIntent> =>
+        visible.has(key)
+          ? [
+              { type: `update`, key, value: `callback-${key}` },
+              { type: `delete`, key },
+            ]
+          : [{ type: `insert`, key, value: `callback-${key}` }],
+    )
+  const describeIntent = (intent: ReadyIntent | undefined) =>
+    intent ? `${intent.type} ${intent.key}` : `none`
+  const readyCases = ([`onFirstReady`, `status:change`] as const).flatMap(
+    (hook) =>
+      Object.entries(priorIntents).flatMap(([priorName, prior]) =>
+        callbackIntents(overlay(replacement, [prior])).flatMap((callback) =>
+          ([`initial`, `raw`, `filtered`] as const).map((subscriber) => ({
             hook,
-            action,
-            includeInitialState,
+            priorName,
+            prior,
+            callback,
+            callbackName: describeIntent(callback),
+            subscriber,
           })),
+        ),
       ),
-    ),
-  )(
-    `publishes valid truncate messages when a $hook callback runs $action (includeInitialState: $includeInitialState)`,
-    async ({ hook, action, includeInitialState }) => {
+  )
+
+  it(`enumerates prior requests and legal ready-callback writes`, () => {
+    // none and update 1 allow 6 writes, delete 1 allows 5, insert 3 allows 7.
+    expect(readyCases).toHaveLength(2 * 24 * 3)
+    const labels = new Set(
+      readyCases.map(
+        ({ priorName, callbackName }) => `${priorName} / ${callbackName}`,
+      ),
+    )
+    for (const witness of [
+      `none / delete 1`,
+      `none / delete 2`,
+      `none / insert 4`,
+      `update 1 / delete 1`,
+      `none / insert 3`,
+      `insert 3 / delete 3`,
+      `delete 1 / insert 1`,
+    ])
+      expect(labels).toContain(witness)
+    expect(labels).not.toContain(`delete 1 / delete 1`)
+    expect(labels).not.toContain(`insert 3 / insert 3`)
+  })
+
+  it.each(readyCases)(
+    `publishes valid truncate messages when a $hook callback runs $callbackName after prior $priorName ($subscriber subscriber)`,
+    async ({ hook, prior, callback, subscriber }) => {
       const persistence = createDeferred<void>()
       let sync!: SyncOps
       const collection = createCollection<Row, number>({
-        id: `truncate-ready-reentrant-${hook}-${action}-${includeInitialState}`,
+        id: `truncate-ready-${hook}-${describeIntent(prior)}-${describeIntent(callback)}-${subscriber}`,
         getKey: (row) => row.id,
         startSync: true,
         sync: {
           sync: (ops) => {
             sync = ops
             ops.begin()
-            ops.write({ type: `insert`, value: { id: 1, value: `one` } })
-            // The replacement omits key 4, so its prefix delete must remain.
-            ops.write({ type: `insert`, value: { id: 4, value: `four` } })
+            for (const [id, value] of sourceBefore)
+              ops.write({ type: `insert`, value: { id, value } })
             ops.commit()
           },
         },
@@ -1037,16 +1099,35 @@ describe(`sync publication reentrancy`, () => {
         onUpdate: () => persistence.promise,
         onDelete: () => persistence.promise,
       })
+      const requests: Array<{ isPersisted: { promise: Promise<unknown> } }> = []
+      const apply = (intent: ReadyIntent) => {
+        requests.push(
+          intent.type === `delete`
+            ? collection.delete(intent.key)
+            : intent.type === `insert`
+              ? collection.insert({ id: intent.key, value: intent.value })
+              : collection.update(intent.key, (draft) => {
+                  draft.value = intent.value
+                }),
+        )
+      }
       await flushPromises()
-      // The raw subscriber starts from the rows it can see when it subscribes.
+      const keeps = (value: string) =>
+        subscriber !== `filtered` || value === `one`
+      // A subscriber without initial state starts from the rows it can see.
       const mirror = new Map<number, string>(
-        includeInitialState
+        subscriber === `initial`
           ? []
-          : [...collection.state].map(([key, row]) => [key, row.value]),
+          : [...collection.state]
+              .map(([key, row]) => [key, row.value] as const)
+              .filter(([, value]) => keeps(value)),
       )
       const violations: Array<string> = []
+      let truncating = false
       const subscription = collection.subscribeChanges(
         (changes) => {
+          if (truncating && collection.status !== `ready`)
+            violations.push(`delivered while ${collection.status}`)
           for (const change of changes) {
             if (mirror.has(change.key) === (change.type === `insert`))
               violations.push(`${change.type} ${change.key}`)
@@ -1054,21 +1135,18 @@ describe(`sync publication reentrancy`, () => {
             else mirror.set(change.key, change.value.value)
           }
         },
-        { includeInitialState },
+        subscriber === `filtered`
+          ? {
+              includeInitialState: false,
+              where: (row) => eq(row.value, `one`),
+            }
+          : { includeInitialState: subscriber === `initial` },
       )
-      let request:
-        | ReturnType<typeof collection.update>
-        | ReturnType<typeof collection.insert>
-        | undefined
+      let callbackRan = false
       const write = () => {
-        request ??=
-          action === `edit`
-            ? collection.update(1, (draft) => {
-                draft.value = `optimistic-one`
-              })
-            : action === `insert`
-              ? collection.insert({ id: 3, value: `optimistic-three` })
-              : collection.delete(1)
+        if (callbackRan) return
+        callbackRan = true
+        apply(callback)
       }
       if (hook === `onFirstReady`) collection.onFirstReady(write)
       else
@@ -1077,26 +1155,39 @@ describe(`sync publication reentrancy`, () => {
         })
 
       try {
-        sync.begin()
-        sync.truncate()
-        sync.write({ type: `insert`, value: { id: 1, value: `one-again` } })
-        sync.write({ type: `insert`, value: { id: 2, value: `two` } })
-        expect(sync.commit()).toBe(true)
-
-        expect(request).toBeDefined()
-        expect(violations).toEqual([])
-        const expected = readyActions[action].map(([key, value]) => [
-          key,
-          value,
-        ])
-        expect([...mirror].sort(([a], [b]) => a - b)).toEqual(expected)
+        if (prior) apply(prior)
         expect(
           [...collection.state].map(([key, row]) => [key, row.value]),
+        ).toEqual([...overlay(sourceBefore, [prior])])
+
+        sync.begin()
+        sync.truncate()
+        for (const [id, value] of replacement)
+          sync.write({ type: `insert`, value: { id, value } })
+        truncating = true
+        expect(sync.commit()).toBe(true)
+
+        expect(callbackRan).toBe(true)
+        expect(violations).toEqual([])
+        const expected = [...overlay(replacement, [prior, callback])].sort(
+          ([a], [b]) => a - b,
+        )
+        expect([...mirror].sort(([a], [b]) => a - b)).toEqual(
+          expected.filter(([, value]) => keeps(value)),
+        )
+        expect(
+          [...collection.state]
+            .map(([key, row]) => [key, row.value] as const)
+            .sort(([a], [b]) => a - b),
         ).toEqual(expected)
       } finally {
         subscription.unsubscribe()
         persistence.resolve()
-        await request?.isPersisted.promise.catch(() => undefined)
+        await Promise.all(
+          requests.map((request) =>
+            request.isPersisted.promise.catch(() => undefined),
+          ),
+        )
         await collection.cleanup()
       }
     },
