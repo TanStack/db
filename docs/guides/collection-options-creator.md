@@ -63,6 +63,10 @@ interface MyCollectionConfig<TItem extends object>
 }
 ```
 
+Adapter-specific properties can be returned alongside the core options. TanStack DB ignores these extra properties. Development builds warn only about likely misspellings of a core option, such as `oninsert` for `onInsert`, when the correctly named option is absent. Missing or invalid required core options still throw.
+
+Keep adapter behavior in the adapter: returning `parse` or `serialize` does not make TanStack DB apply these conversions. Apply `parse` before calling `write` in your sync implementation, and apply `serialize` in mutation handlers. Put `rowUpdateMode` inside the returned `sync` object.
+
 ### 2. Sync Implementation
 
 Each call to the sync function starts a **sync run**. The run owns the callbacks
@@ -173,12 +177,14 @@ The sync process follows this lifecycle:
 4. **markReady()** - Signal that a usable initial or recovered snapshot exists
 5. **markError(error?)** - Signal that initial sync failed before producing a usable snapshot; pass the cause so readiness waits reject with it
 
-`commit()` returns `true` if its writes and events are already visible, or a
-promise that resolves when they become visible. A commit can wait behind a
-pending optimistic transaction; receiving a server response is not the same as
-applying its rows. A successful `loadSubset` must await or return every commit
-receipt that establishes its result. Do not use `begin({ immediate: true })` to
-bypass that ordering just to settle a load.
+`commit()` accepts the transaction and returns `true`. An accepted transaction
+always applies, in commit order. While an optimistic transaction is persisting,
+the accepted transaction waits. It becomes visible when that optimistic
+transaction settles, in the same publication that drops its optimistic state.
+A mutation handler can therefore await its own write without waiting for
+itself. A wrapping sync, such as persistence, returns a promise that resolves
+after its durable step. A successful `loadSubset` must await or return every
+commit receipt that establishes its result.
 
 The collection keeps the object you pass to `write()` as the row's stored
 value. Pass a new object for each update. If your source changes a row object
@@ -198,8 +204,11 @@ write({ type: `update`, value: row, previousValue })
 ```
 
 For request-scoped writes, pass the request's abort signal to `commit(signal)`.
-Cancellation before application rejects the receipt with `AbortError`; aborting
-after application does not undo published rows. Do not attach one request's
+If the signal has already aborted, the transaction is abandoned and the receipt
+rejects with `AbortError`. An accepted transaction ignores a later abort: its
+rows apply. To discard a stale page, check the signal before `commit()`. If the
+caller aborted after the page was accepted, the rows still apply, but reject the
+load with `AbortError` once its receipt resolves. Do not attach one request's
 signal to a shared stream transaction.
 
 If an adapter supplies `unloadSubset`, release only the acquisition belonging to
@@ -285,8 +294,8 @@ For backends with specific storage formats, provide `parse`/`serialize` options 
 // TrailBase example: User specifies field conversions
 export function trailbaseCollectionOptions(config) {
   return {
-    parse: config.parse,      // User provides field conversions
-    serialize: config.serialize,
+    // ... getKey, schema, and sync options
+    // The sync implementation applies config.parse before calling write.
 
     onInsert: async ({ transaction }) => {
       const serialized = transaction.mutations.map(m =>
@@ -405,7 +414,10 @@ export function myCollectionOptions<TItem extends object>(
 ) {
   return {
     // ... other options
-    rowUpdateMode: config.rowUpdateMode || 'partial',
+    sync: {
+      sync: syncFn,
+      rowUpdateMode: config.rowUpdateMode ?? 'partial'
+    },
 
     // Pass through user-provided handlers
     // Users handle sync coordination in their own handlers
@@ -433,7 +445,10 @@ export function myCollectionOptions<TItem extends object>(
 ) {
   return {
     // ... other options
-    rowUpdateMode: config.rowUpdateMode || 'partial',
+    sync: {
+      sync: syncFn,
+      rowUpdateMode: config.rowUpdateMode ?? 'partial'
+    },
 
     // Implement handlers using sync engine APIs
     onInsert: async ({ transaction }) => {

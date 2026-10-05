@@ -398,7 +398,8 @@ All listed native witnesses executed on all three engines.
 | Subscription acquisition during startup             | Pending startup and pending peer write positively observed before release                     | No framework scheduling claim.                                          |
 | Repaired transient error before page destruction    | Runner retains split-publication evidence with handler pending, then closes page              | Acknowledged destruction only, not an unacknowledged crash.             |
 
-Production weight for this extension is +2/-2 lines (net zero). Test/browser
+Production weight for this extension is +3/-4 lines (net -1), including an
+obsolete comment removed after the main-branch merge. Test/browser
 code grows by approximately 3,200 lines for the models, drivers, histories and
 controls. Documentation and integration changes are separate. No new runtime
 queue, retry, generation, fallback or dependency is required by the two fixes.
@@ -440,3 +441,52 @@ The same absent-artifact probe then passed all 12 declaration cases. No compiler
 assertion or package export was relaxed. This verifies artifact prerequisites,
 not a fresh dependency install. The probe used the cached Rollup version described
 above and `pnpm_config_verify_deps_before_run=warn` to prevent an automatic install.
+
+### Integration with the current core settlement contract
+
+Merged `origin/main` at `49abb32ff`. Its `eac6e8b6a` core change drops optimistic
+state at settlement and removes the `begin` argument. The original pending
+model failed the authored insert → same-key import → accept history at settled
+`$origin`: expected remote, actual local. Direct replay retained seed 11792027,
+path `20:1:4`, and all three replay checks. The core oracle and glossary now
+require local attribution for the confirmation queued at settlement, regardless
+of the earlier replacement. The adapter model removes its old lifetime
+acknowledgement set and retains one attribution per drain. The browser wrapper
+uses the current argument-free `begin()` API. No adapter runtime policy changed.
+
+The pending driver now captures public rows, exposed base and metadata inside
+both `isPersisted` continuations, before peer delivery. A same-history control
+corrupts the saved origin, and another corrupts the saved rows while final
+production rows remain correct. Both fail at their intended settlement checks.
+Restoring late resampling lets the corrupt observation pass, so the permanent
+negative control fails as intended. This repairs an observation gap rather than
+claiming a new production bug.
+
+After this integration, the complete package suite passes 151 tests in 11 files,
+including 23 type tests. The 1,200 stress histories and all 48 native browser
+cases also pass against this core revision. Type checking and lint pass. The
+original implementation manifest above identifies
+the pre-merge receipt. The changed integration files have these hashes:
+
+```text
+3a5a6a6396e36be784c2f2178a1b92b3b299034d6af1fb0b08bceb07da7a9dd2  packages/indexeddb-db-collection/src/indexeddb.ts
+ba4323544b32b9b4f528b3e6c40a7a60e753d07eb2e758206a4a28038893f9c0  packages/indexeddb-db-collection/tests/pending-history-oracle.test.ts
+6bae0f4c99cf3977c3891452fb5d17f6be2b1398acc140db510779b04a2271e7  packages/indexeddb-db-collection/e2e/browser.ts
+```
+
+The post-repair replay check exposed a separate runner defect: fast-check can
+visit later shrink siblings when a selected input now passes. The original
+runner then rejected its own one-history budget. A retained scalar control
+replays seed 11792027/path `0:1:0:0:1`: the old runner visited 10 and 12; the
+corrected runner visits only 10. Replay now samples one tuple from the original
+grammar at the requested coordinates, then checks that one example with the
+same property and recorder. The reported path retains the original coordinates.
+The captured pending replay `20:1:4` now passes directly. The registered
+intentional-failure replay still exits 1 with reconstruction, reach and
+same-failure checks all true. The six native generated campaigns also rerun
+after this shared-helper change.
+
+```text
+d8e0524335856b41e5dc2ea099e63a66cec5bff9ac4d75e6311a09b7d807018c  packages/indexeddb-db-collection/tests/campaign.ts
+95170172277572e06acdf70577c573878cc33253348488e16d2254649ba80d90  packages/indexeddb-db-collection/tests/cross-tab-history-oracle.test.ts
+```

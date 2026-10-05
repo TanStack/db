@@ -4,7 +4,9 @@
  * Authority: optimistic-history-oracle.ts. An active intent overlays whole
  * authored rows. Ordinary source batches queue until settlement; replacement
  * drains the source queue but preserves that overlay. Failure removes intent;
- * success persists and acknowledges it. Native storage follows authored order.
+ * success persists and confirms it before settlement. A queued confirmation
+ * can receive local origin at settlement even after an earlier replacement
+ * touched that key. Native storage follows authored order.
  *
  * The reference is two row arrays (durable and exposed base), a source queue,
  * one authored Change and row origins. It deliberately combines the rows of one
@@ -72,7 +74,11 @@ const histories = fc.record({
   peer: fc.array(peerStep, { maxLength: 4 }),
 })
 
-async function run(history: History, reach = new Set<string>()) {
+async function run(
+  history: History,
+  reach = new Set<string>(),
+  corruptSettlement?: 'origin' | 'rows',
+) {
   await withHarness(async (h) => {
     const localRows = Array.from({ length: history.count }, (_, id) => ({
       id,
@@ -97,24 +103,16 @@ async function run(history: History, reach = new Set<string>()) {
     const origins = new Map<string | number, 'local' | 'remote'>(
       initial.map((row) => [row.id, 'remote']),
     )
-    const acknowledged = new Set<string | number>()
     function drain(active: boolean, accepted = false) {
-      const localOrigins = new Set(
-        [...keys].filter(
-          (key) =>
-            active ||
-            (accepted &&
-              !(history.local === 'insert' && acknowledged.has(key))),
-        ),
-      )
+      // Core's settlement-drop contract attributes the queued confirmation at
+      // this boundary. Earlier replacements do not spend a lifetime allowance.
+      const localOrigins = new Set(active || accepted ? keys : [])
       for (const change of queue) {
         base = apply(base, change)
         if (change.replace) origins.clear()
         for (const row of change.rows) {
           origins.set(row.id, localOrigins.has(row.id) ? 'local' : 'remote')
           localOrigins.delete(row.id)
-          if (active && history.local === 'insert' && keys.has(row.id))
-            acknowledged.add(row.id)
         }
         for (const key of change.deletes) {
           origins.delete(key)
@@ -166,7 +164,29 @@ async function run(history: History, reach = new Set<string>()) {
     let visible = snapshot(initial)
     let offset = 0,
       queryOffset = 0
-    function check(next: Array<OracleRow>, label: string, active: boolean) {
+    function observe() {
+      const rows = [...subject.values()]
+      return {
+        rows: snapshot(rows),
+        base: snapshot(subject.base.values()),
+        metadata: new Map(
+          rows.map((row) => [
+            row.id,
+            {
+              pending: row.$hasPendingWrites,
+              synced: row.$synced,
+              origin: row.$origin,
+            },
+          ]),
+        ),
+      }
+    }
+    function check(
+      next: Array<OracleRow>,
+      label: string,
+      active: boolean,
+      observation = observe(),
+    ) {
       // Each declared cut admits one whole snapshot change. Metadata-only
       // publications may repeat it; no partial batch is an admissible state.
       const effect = { rows: next, deletes: [], replace: true }
@@ -182,21 +202,14 @@ async function run(history: History, reach = new Set<string>()) {
         [effect],
         `${label} downstream`,
       )
-      assertSnapshot(subject.values(), next, label)
+      assertSnapshot(observation.rows, next, label)
       assertSnapshot(query.values(), next, `${label} downstream`)
-      assertSnapshot(subject.base.values(), base, `${label} exposed base`)
+      assertSnapshot(observation.base, base, `${label} exposed base`)
       assertStatuses(record.statuses, ['ready'], label)
       for (const row of next) {
-        const actual = subject.get(row.id)!
         const pending = active && keys.has(row.id)
-        expect(
-          {
-            pending: actual.$hasPendingWrites,
-            synced: actual.$synced,
-            origin: actual.$origin,
-          },
-          `${label} metadata ${row.id}`,
-        ).toEqual({
+        const metadata = observation.metadata.get(row.id)!
+        expect(metadata, `${label} metadata ${row.id}`).toEqual({
           pending,
           synced: !pending,
           origin: pending ? 'local' : origins.get(row.id),
@@ -218,13 +231,24 @@ async function run(history: History, reach = new Set<string>()) {
             )
           : subject.delete(localRows.map((row) => row.id))
     let settled = false
+    let settlementObservation: ReturnType<typeof observe> | undefined
+    function captureSettlement() {
+      settled = true
+      settlementObservation = observe()
+      if (corruptSettlement === 'rows') settlementObservation.rows = []
+      if (corruptSettlement === 'origin')
+        for (const key of keys) {
+          const metadata = settlementObservation.metadata.get(key)
+          if (metadata) metadata.origin = 'remote'
+        }
+    }
     const outcome = tx.isPersisted.promise.then(
       () => {
-        settled = true
+        captureSettlement()
         return undefined
       },
       (error: unknown) => {
-        settled = true
+        captureSettlement()
         return error
       },
     )
@@ -331,8 +355,11 @@ async function run(history: History, reach = new Set<string>()) {
       queue.push(intent)
     }
     drain(false, history.accept)
+    // Observe inside the caller's continuation. Later peer work cannot repair
+    // a wrong snapshot before the settlement comparison.
+    expect(settlementObservation).toBeDefined()
+    check(base, 'settlement', false, settlementObservation)
     await Channel.drain()
-    check(base, 'settlement', false)
     assertSnapshot(peer.values(), durable, 'settled peer')
     assertSnapshot(
       (await readStore<OracleRow>(h.db, 'items')).rows,
@@ -369,6 +396,26 @@ it('reconstructs held multi-row CRUD crossed with every peer action and decision
   for (const operation of ['insert', 'update', 'delete', 'clear', 'import'])
     expect(reach.has(`peer ${operation}`), operation).toBe(true)
 }, 60_000)
+it('attributes the queued confirmation after an earlier replacement', async () => {
+  const history: History = {
+    local: 'insert',
+    accept: true,
+    count: 1,
+    peer: [{ kind: 'import', overlap: true, value: 0 }],
+  }
+  await run(history)
+  // Same production path, deliberately wrong observation at settlement. The
+  // old lifetime-acknowledgement model accepted this remote origin instead.
+  await expect(run(history, new Set(), 'origin')).rejects.toThrow(
+    'settlement metadata 0',
+  )
+  // Final production rows remain correct while the captured promise cut is
+  // wrong. Sampling after peer delivery must not erase this failure.
+  await expect(run(history, new Set(), 'rows')).rejects.toThrow(
+    'public rows at settlement',
+  )
+})
+
 it('a peer no-op cannot spend another source acknowledgement', async () => {
   await run({
     local: 'insert',

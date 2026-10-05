@@ -70,13 +70,28 @@ export async function runCampaign<T>(
         throw error
     }
   })
-  const result = await fc.check(property, {
-    numRuns: options.path === undefined ? options.runs : 1,
-    ...(options.seed === undefined ? {} : { seed: options.seed }),
-    ...(options.path === undefined
-      ? {}
-      : { path: options.path, endOnFailure: true }),
-  })
+  function replayOnce(seed: number | undefined, path: string) {
+    if (seed === undefined) throw new Error('Replay requires an explicit seed')
+    // check() can visit the remaining shrink siblings after a repaired input
+    // passes. sample() selects exactly one value at the requested coordinates;
+    // the one-example check invokes the same recorder and refinement check.
+    const examples = fc.sample(fc.tuple(arbitrary), { seed, path, numRuns: 1 })
+    if (examples.length !== 1) throw new Error('Replay selected no history')
+    return fc.check(property, {
+      seed,
+      examples,
+      numRuns: 1,
+      endOnFailure: true,
+    })
+  }
+  const result =
+    options.path === undefined
+      ? await fc.check(property, {
+          numRuns: options.runs,
+          ...(options.seed === undefined ? {} : { seed: options.seed }),
+        })
+      : await replayOnce(options.seed, options.path)
+  const selectedPath = options.path ?? result.counterexamplePath
   let reproduction:
     | {
         inputReconstructed: boolean
@@ -86,12 +101,7 @@ export async function runCampaign<T>(
     | undefined
   if (result.failed) {
     const replayOffset = failures.length
-    const replay = await fc.check(property, {
-      seed: result.seed,
-      path: result.counterexamplePath!,
-      endOnFailure: true,
-      numRuns: 1,
-    })
+    const replay = await replayOnce(result.seed, selectedPath!)
     const replayFailure = failures[replayOffset]
     reproduction = {
       inputReconstructed: equal(result.counterexample, replay.counterexample),
@@ -114,7 +124,7 @@ export async function runCampaign<T>(
     fastCheck: fc.__version,
     environment: options.environment ?? 'fake-indexeddb + controlled Channel',
     seed: result.seed,
-    path: result.counterexamplePath,
+    path: selectedPath,
     runs: result.numRuns,
     failed: result.failed,
     original,
@@ -129,7 +139,7 @@ export async function runCampaign<T>(
   )
   if (result.failed)
     throw new Error(
-      `${name} failed: seed=${result.seed} path=${result.counterexamplePath}; replay=${JSON.stringify(reproduction)}\n${result.error}`,
+      `${name} failed: seed=${result.seed} path=${selectedPath}; replay=${JSON.stringify(reproduction)}\n${result.error}`,
     )
   if (result.numRuns !== (options.path === undefined ? options.runs : 1))
     throw new Error('Campaign did not execute its declared budget')

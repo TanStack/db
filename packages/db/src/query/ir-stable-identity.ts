@@ -404,18 +404,11 @@ function canonicalizeJoin(
   return {
     type: join.type,
     from: canonicalizeSource(join.from, `${path}.from`, seen, scope),
-    left: canonicalizeExpression(
-      join.left,
-      `${path}.left`,
+    on: canonicalizeExpression(
+      join.on,
+      `${path}.on`,
       seen,
-      `equality-operand`,
-      scope,
-    ),
-    right: canonicalizeExpression(
-      join.right,
-      `${path}.right`,
-      seen,
-      `equality-operand`,
+      `exact-output`,
       scope,
     ),
   }

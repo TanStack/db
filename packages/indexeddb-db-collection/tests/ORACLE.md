@@ -252,8 +252,9 @@ The executable companions keep distinct responsibilities:
 The transport model combines exposed base and public rows only when local
 mutations have settled. The pending companion keeps them separate. It adapts
 `packages/db/tests/optimistic-history-oracle.ts`: ordinary source work queues,
-replacement drains, active whole-row intent overlays the source, and a source
-acknowledgement spends row attribution once. An unchanged Collection update
+replacement drains, active whole-row intent overlays the source, and source
+confirmation receives row attribution once per drain. A confirmation queued at
+settlement remains eligible after an earlier replacement touched the key. An unchanged Collection update
 authors no mutation; it cannot contribute a second acknowledgement. Accepted
 writes in this grammar have an explicit durable order: peer persistence finishes
 before the held local handler is released. This does not assign a winner to

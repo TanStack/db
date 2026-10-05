@@ -269,3 +269,26 @@ it('rejects wrong raw event keys before folding including duplicate malformed in
     ),
   ).toThrow('event semantics')
 })
+
+it('replays only the selected history after the original failure is repaired', async () => {
+  // This shrink path has a later sibling. fast-check check() continues into
+  // that sibling when the selected counterexample passes, despite numRuns: 1.
+  const arbitrary = fc.integer({ min: 0, max: 100 })
+  const original = fc.check(
+    fc.property(arbitrary, (value) => value < 10),
+    { seed: 11792027, numRuns: 30 },
+  )
+  expect(original.counterexample).toEqual([10])
+  expect(original.counterexamplePath).toBe('0:1:0:0:1')
+  const observed: Array<number> = []
+  await runCampaign(
+    'repaired-replay-control',
+    arbitrary,
+    (value) => {
+      observed.push(value)
+      return Promise.resolve()
+    },
+    { runs: 30, seed: original.seed, path: original.counterexamplePath! },
+  )
+  expect(observed).toEqual([10])
+})

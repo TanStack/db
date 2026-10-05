@@ -2,7 +2,11 @@ import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import BetterSqlite3 from 'better-sqlite3'
-import { createCollection, createTransaction } from '@tanstack/db'
+import {
+  createCollection,
+  createTransaction,
+  whenSyncAccepted,
+} from '@tanstack/db'
 import { describe, expect, it } from 'vitest'
 import { createNodeSQLitePersistence, persistedCollectionOptions } from '../src'
 import { BetterSqlite3SQLiteDriver } from '../src/node-driver'
@@ -55,9 +59,12 @@ runRuntimePersistenceContractSuite(`node runtime persistence helpers`, {
 })
 
 describe(`node persistence helpers`, () => {
-  it(`persists an awaited immediate write behind a pending source write`, async () => {
+  // Ported from TanStack/db#2002. A handler awaits the acceptance of its own
+  // source write, which queues behind an earlier source write. Both are
+  // stored in commit order, and the later row is visible once it settles.
+  it(`stores an awaited handler write behind a pending source write`, async () => {
     const database = new BetterSqlite3(`:memory:`)
-    const id = `awaited-immediate-source`
+    const id = `awaited-handler-source`
     const persistence = createNodeSQLitePersistence({ database })
     type Row = { id: string; title: string }
     let source!: Parameters<SyncConfig<Row, string>[`sync`]>[0]
@@ -86,15 +93,11 @@ describe(`node persistence helpers`, () => {
       mutationFn: async () => {
         handlerEntered()
         await handlerGate
-        source.begin({ immediate: true })
-        source.write({
-          type: `update`,
-          value: { id: `row`, title: `three` },
-        })
-        await source.commit()
+        source.begin()
+        source.write({ type: `update`, value: { id: `row`, title: `three` } })
+        await whenSyncAccepted(source.commit())
       },
     })
-    const abort = new AbortController()
     try {
       await collection.stateWhenReady()
       source.begin()
@@ -107,10 +110,10 @@ describe(`node persistence helpers`, () => {
       await entered
       source.begin()
       source.write({ type: `update`, value: { id: `row`, title: `two` } })
-      const predecessor = Promise.resolve(source.commit(abort.signal))
-      void predecessor.catch(() => undefined)
+      const predecessor = Promise.resolve(source.commit())
       releaseHandler()
-      await Promise.all([predecessor, mutation.isPersisted.promise])
+      await mutation.isPersisted.promise
+      await predecessor
 
       expect(collection.get(`row`)?.title).toBe(`three`)
       expect(
@@ -120,7 +123,6 @@ describe(`node persistence helpers`, () => {
       ).toEqual({ id: `row`, title: `three` })
     } finally {
       releaseHandler()
-      abort.abort()
       await collection.cleanup()
       database.close()
     }

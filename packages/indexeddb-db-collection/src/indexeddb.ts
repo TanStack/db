@@ -573,8 +573,7 @@ export function indexedDBCollectionOptions(
 
   function confirm(mutations: Array<Mutation>, replace = false): void {
     if (!activeSync) return
-    // Confirmation must drain after optimistic settlement. Applying it
-    // immediately would let settlement retain a new, unacknowledged snapshot.
+    // Core queues ordinary confirmation until optimistic settlement.
     // Full-row update confirms put even if a peer inserted during the handler.
     // A replacement's truncate already supplies its own publication boundary.
     activeSync.begin()

@@ -27,6 +27,9 @@ production queues, caches, or semantic helpers merely to share their names.
 | change message | One insert, update, or delete delivered through the Collection sync boundary. | Transaction or publication. |
 | sync transaction | The changes between one `begin()` and `commit()` pair. | Optimistic transaction or publication. |
 | optimistic transaction | A local mutation transaction whose intent may later complete or roll back. | Sync transaction. |
+| optimistic state | The rows an optimistic transaction overlays on the applied synced rows while its mutation function runs. It drops when the mutation function settles, whether it fulfills or rejects. | Retained snapshot or accepted local snapshot. |
+| accepted sync transaction | A committed sync transaction that core, or a wrapping sync after its durable step, has taken. It always applies, in commit order. While an optimistic transaction is persisting it is held, and it applies in the publication that drops that transaction's optimistic state. Handler-facing writes and Collection readiness wait for acceptance; commit receipts and subset loads wait for visibility. | Visible or applied sync transaction. |
+| held optimistic row | A completed transaction's optimistic row kept only while a queued sync transaction touches its key, so the drop and that sync transaction publish together. A sync write committed while the transaction persisted is attributed `$origin: 'local'`; one committed after settlement is `'remote'`. | Retained or accepted snapshot. |
 | Collection status | One public Collection lifecycle value: `idle`, `loading`, `ready`, `error`, or `cleaned-up`. | Subscription status. |
 | subscription status | One subscription value: `ready` or `loadingSubset`. | Collection status. |
 | subscription | A consumer of Collection changes with its own subset demands and lifecycle. | Collection, query, or transport. |
@@ -183,6 +186,8 @@ Use nouns for state and verbs for transitions:
 - An abort signal **requests cancellation**; transport **stops** only when the
   provider does so.
 - A promise **settles**; it **fulfills** or **rejects**.
+- Core **accepts** a sync transaction at `commit()`; a wrapping sync accepts
+  it after its durable step. An accepted sync transaction always applies.
 - A sync transaction **applies** when its writes and events become visible.
 - A replay or repair **publishes** one coherent public snapshot.
 - Cleanup start **invalidates** a sync run and **closes** restart admission.

@@ -2,6 +2,10 @@ import { fc, test as fcTest } from '@fast-check/vitest'
 import { describe, expect, it } from 'vitest'
 import { createCollection } from '../../src/collection/index.js'
 import { createDeferred } from '../../src/deferred.js'
+import {
+  LoadSubsetOperationAbortedError,
+  SyncQueueInvariantError,
+} from '../../src/errors.js'
 import { createOptimisticAction } from '../../src/optimistic-action.js'
 import { createLiveQueryCollection, eq } from '../../src/query/index.js'
 import { Func, PropRef, Value } from '../../src/query/ir.js'
@@ -916,106 +920,7 @@ async function expectConcurrentStreamCommitStaysParked(
   }
 }
 
-async function expectLaterImmediateCommitSettlesAppliedSubset() {
-  let publishLater!: () => SyncAppliedReceipt
-  const source = createCollection<PersistedLoadRow>({
-    id: `load-subset-applied-priority-${collectionSequence++}`,
-    getKey: (row) => row.id,
-    syncMode: `on-demand`,
-    sync: {
-      sync: ({ begin, write, commit, markReady }) => {
-        begin()
-        write({
-          type: `insert`,
-          value: { id: `initial`, projectId: `p0` },
-        })
-        void commit()
-        publishLater = () => {
-          begin({ immediate: true })
-          write({
-            type: `insert`,
-            value: { id: `later`, projectId: `p2` },
-          })
-          return commit()
-        }
-        markReady()
-        return {
-          loadSubset: () => {
-            begin()
-            write({
-              type: `insert`,
-              value: { id: `subset`, projectId: `p1` },
-            })
-            return commit()
-          },
-        }
-      },
-    },
-  })
-  const persistence = createDeferred<void>()
-  let settlement: Promise<unknown> | undefined
-  let primaryFailure: { error: unknown } | undefined
-  try {
-    source.startSyncImmediate()
-    const transaction = createTransaction({
-      mutationFn: () => persistence.promise,
-    })
-    settlement = transaction.isPersisted.promise
-    transaction.mutate(() => source.insert({ id: `local`, projectId: `p3` }))
-    const load = requirePendingLoadSubsetResult(source._sync.loadSubset({}))
-    const later = publishLater()
-    let loadFulfilled = false
-    let subsetVisibleWhenFulfilled = false
-    void load
-      .then(
-        () => {
-          loadFulfilled = true
-          subsetVisibleWhenFulfilled = source.get(`subset`)?.id === `subset`
-        },
-        () => undefined,
-      )
-      .catch(() => undefined)
-    await later
-    await load
-
-    expect(loadFulfilled).toBe(true)
-    expect(subsetVisibleWhenFulfilled).toBe(true)
-    expect(source.get(`subset`)).toEqual(
-      expect.objectContaining({ id: `subset` }),
-    )
-    expect(source.get(`later`)).toEqual(
-      expect.objectContaining({ id: `later` }),
-    )
-    expect(source.get(`initial`)).toEqual(
-      expect.objectContaining({ id: `initial` }),
-    )
-
-    persistence.resolve()
-    await transaction.isPersisted.promise
-    await Promise.all([load, later])
-
-    expect(source.get(`subset`)).toEqual(
-      expect.objectContaining({ id: `subset` }),
-    )
-  } catch (error) {
-    primaryFailure = { error }
-    throw error
-  } finally {
-    await runOracleCleanup(
-      `later immediate commit applies subset`,
-      primaryFailure,
-      [
-        {
-          label: `persistence gate`,
-          run: () => releasePersistingMutation(persistence, settlement),
-        },
-        { label: `source collection`, run: () => source.cleanup() },
-      ],
-    )
-  }
-}
-
-async function expectAbortedLoadDoesNotEstablishCoverage(
+async function expectAbortedReceiptDoesNotSettleDemand(
   abortPhase: `before-commit` | `while-parked`,
 ) {
   let transportCalls = 0
@@ -1039,6 +944,9 @@ async function expectAbortedLoadDoesNotEstablishCoverage(
       const applied = commit(signal)
       committed.resolve()
       if (applied !== true) await applied
+      // Source contract: accepted rows apply, but a caller that aborted sees
+      // `AbortError`.
+      if (signal?.aborted) throw new LoadSubsetOperationAbortedError()
     },
   })
   let begin!: () => void
@@ -1078,13 +986,15 @@ async function expectAbortedLoadDoesNotEstablishCoverage(
     controller.abort()
     persistence.resolve()
     await transaction.isPersisted.promise
-    if (abortPhase === `while-parked`) {
+    // An accepted transaction always applies, so the row publishes when the
+    // mutation settles. A caller that aborted still sees `AbortError`.
+    if (abortPhase === `while-parked`)
       await expect(first).rejects.toMatchObject({ name: `AbortError` })
-    } else {
-      await first
-    }
+    else await first
     expect(transportCalls).toBe(1)
-    expect(source.get(`row`)).toBeUndefined()
+    if (abortPhase === `while-parked`)
+      expect(source.get(`row`)).toEqual(expect.objectContaining({ id: `row` }))
+    else expect(source.get(`row`)).toBeUndefined()
 
     const retry = source._sync.loadSubset({})
     if (retry !== true) await retry
@@ -1212,26 +1122,31 @@ async function expectCanceledReceiptReleasesOnlyItsSuppression() {
     expect(transaction.state).toBe(`persisting`)
     begin()
     write({ type: `update`, value: { id: `first`, projectId: `new` } })
-    const canceled = commit()
-    const canceledTransaction = source._state.pendingSyncedTransactions.at(-1)!
+    const accepted = commit()
+    const acceptedTransaction = source._state.pendingSyncedTransactions.at(-1)!
     expect(source._state.pendingSyncedTransactions).toHaveLength(1)
     begin()
     write({ type: `update`, value: { id: `second`, projectId: `new` } })
     expect(source._state.pendingSyncedTransactions).toHaveLength(2)
 
+    // Only the accepted transaction publishes in a drain, so only its key is
+    // suppressed; the open one holds no suppression to release.
     source._state.capturePreSyncVisibleState()
-    expect(source._state.recentlySyncedKeys).toEqual(
-      new Set([`first`, `second`]),
-    )
+    expect(source._state.recentlySyncedKeys).toEqual(new Set([`first`]))
 
-    source._state.cancelPendingSyncedTransaction(canceledTransaction)
+    // Only the open last transaction can be canceled.
+    expect(() =>
+      source._state.cancelPendingSyncedTransaction(acceptedTransaction),
+    ).toThrow(SyncQueueInvariantError)
+    const controller = new AbortController()
+    controller.abort()
+    const canceled = commit(controller.signal)
     expect(source._state.pendingSyncedTransactions).toHaveLength(1)
-    expect(source._state.recentlySyncedKeys).toEqual(new Set([`second`]))
-    expect(source._state.preSyncVisibleState.has(`first`)).toBe(false)
-    expect(source._state.preSyncVisibleState.has(`second`)).toBe(true)
-    if (canceled !== true) {
-      await expect(canceled).rejects.toMatchObject({ name: `AbortError` })
-    }
+    expect(source._state.recentlySyncedKeys).toEqual(new Set([`first`]))
+    expect(source._state.preSyncVisibleState.has(`second`)).toBe(false)
+    expect(source._state.preSyncVisibleState.has(`first`)).toBe(true)
+    await expect(canceled).rejects.toMatchObject({ name: `AbortError` })
+    expect(accepted).not.toBe(true)
   } catch (error) {
     primaryFailure = { error }
     throw error
@@ -1783,13 +1698,9 @@ describe(`loadSubset application and cancellation`, () => {
     await expectConcurrentStreamCommitStaysParked(true)
   })
 
-  it(`fulfills a subset load after a later immediate commit applies its rows`, async () => {
-    await expectLaterImmediateCommitSettlesAppliedSubset()
-  })
-
   it.each([`before-commit`, `while-parked`] as const)(
-    `establishes no subset coverage when the load is aborted %s`,
-    expectAbortedLoadDoesNotEstablishCoverage,
+    `rejects an aborted demand and keeps its accepted rows when aborted %s`,
+    expectAbortedReceiptDoesNotSettleDemand,
   )
 
   it(`ignores an abort raised after application starts publishing`, async () => {

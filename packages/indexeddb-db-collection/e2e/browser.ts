@@ -173,10 +173,10 @@ async function setup() {
         let writes: Array<Parameters<typeof params.write>[0]> = []
         return sync({
           ...params,
-          begin: (value) => {
+          begin: () => {
             replace = false
             writes = []
-            return params.begin(value)
+            return params.begin()
           },
           truncate: () => {
             truncates++

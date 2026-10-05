@@ -557,7 +557,7 @@ describe(`change-event history oracle`, () => {
       async () => {
         await collection.stateWhenReady()
         for (const round of rounds) {
-          sync.begin({ immediate: true })
+          sync.begin()
           for (const op of round) {
             if (op.kind === `delete`) {
               sync.write({ type: `delete`, key: op.key })
