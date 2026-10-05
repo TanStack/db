@@ -3007,7 +3007,8 @@ it(`rejects a partial update applied as a full replacement`, async () => {
       `partial-as-full`,
       { insertDefault: 3, partialUpdates: true },
     ),
-  ).rejects.toMatchObject({ name: `AssertionError` })
+    // A row observation must reject the replaced row, not the mutant checkpoint.
+  ).rejects.toThrow(/whole forward publication|: reads .* expected /)
 })
 it(`rejects a default lost only after settlement`, async () => {
   const steps = defaultHistory(true, true)

@@ -124,6 +124,13 @@ A high-effort review found nine more items:
 9. The immediate lane did not assert its path, and a throw lost its label.
    Fixed.
 
+CodeRabbit then found that the `partial-as-full` witness was vacuous. The
+driver's "observation mutant reached its checkpoint" assertion always failed
+for it, and the witness accepted any assertion error, so it passed even with
+the `full` override removed. The configuration mutant is now exempt from that
+assertion, and the witness requires a row observation to reject it. With the
+override removed, the witness fails.
+
 ## Open items
 
 - **S10.** Instrumentation found 191 commits in the metadata publication oracle

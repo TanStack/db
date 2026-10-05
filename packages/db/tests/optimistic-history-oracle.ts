@@ -999,7 +999,8 @@ export async function runOptimisticHistory(
           )
         }
       }
-      if (mutant)
+      // A configuration mutant changes production setup, not an observation.
+      if (mutant && mutant !== `partial-as-full`)
         expect(injected, `observation mutant reached its checkpoint`).toBe(true)
       return counts
     },
