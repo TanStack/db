@@ -3,17 +3,15 @@ id: useLiveQuery
 title: useLiveQuery
 ---
 
-# Function: useLiveQuery()
-
 ## Call Signature
 
 ```ts
 function useLiveQuery<TContext>(queryFn, deps?): object;
 ```
 
-Defined in: [useLiveQuery.ts:84](https://github.com/TanStack/db/blob/main/packages/react-db/src/useLiveQuery.ts#L84)
+Defined in: [useLiveQuery.ts:400](https://github.com/TanStack/db/blob/main/packages/react-db/src/useLiveQuery.ts#L400)
 
-Create a live query using a query function
+Create a live query using a query function.
 
 ### Type Parameters
 
@@ -33,7 +31,7 @@ Query function that defines what data to fetch
 
 `unknown`[]
 
-Array of dependencies that trigger query re-execution when changed
+Deprecated array of dependencies that trigger query re-execution when changed
 
 ### Returns
 
@@ -44,7 +42,7 @@ Object with reactive data, state, and status information
 #### collection
 
 ```ts
-collection: Collection<{ [K in string | number | symbol]: (TContext["result"] extends object ? any[any] : TContext["hasJoins"] extends true ? TContext["schema"] : TContext["schema"][TContext["fromSourceName"]])[K] }, string | number, {
+collection: Collection<{ [K in string | number | symbol]: ResultValue<TContext>[K] }, string | number, {
 }>;
 ```
 
@@ -84,16 +82,34 @@ isIdle: boolean;
 isLoading: boolean;
 ```
 
+#### isPersistedReady
+
+```ts
+isPersistedReady: boolean;
+```
+
 #### isReady
 
 ```ts
 isReady: boolean;
 ```
 
+#### persistedError
+
+```ts
+persistedError: unknown;
+```
+
+#### persistedStatus
+
+```ts
+persistedStatus: LiveQueryPersistedStatus;
+```
+
 #### state
 
 ```ts
-state: Map<string | number, { [K in string | number | symbol]: (TContext["result"] extends object ? any[any] : TContext["hasJoins"] extends true ? TContext["schema"] : TContext["schema"][TContext["fromSourceName"]])[K] }>;
+state: Map<string | number, { [K in string | number | symbol]: ResultValue<TContext>[K] }>;
 ```
 
 #### status
@@ -105,52 +121,64 @@ status: CollectionStatus;
 ### Examples
 
 ```ts
-// Basic query with object syntax
-const { data, isLoading } = useLiveQuery((q) =>
-  q.from({ todos: todosCollection })
-   .where(({ todos }) => eq(todos.completed, false))
-   .select(({ todos }) => ({ id: todos.id, text: todos.text }))
-)
+// Prefer config object syntax
+const { data, isLoading } = useLiveQuery({
+  query: (q) =>
+    q.from({ todos: todosCollection })
+     .where(({ todos }) => eq(todos.completed, false))
+     .select(({ todos }) => ({ id: todos.id, text: todos.text }))
+})
 ```
 
 ```ts
 // Single result query
-const { data } = useLiveQuery(
-  (q) => q.from({ todos: todosCollection })
+const { data } = useLiveQuery({
+  query: (q) => q.from({ todos: todosCollection })
          .where(({ todos }) => eq(todos.id, 1))
          .findOne()
-)
+})
 ```
 
 ```ts
-// With dependencies that trigger re-execution
-const { data, state } = useLiveQuery(
-  (q) => q.from({ todos: todosCollection })
+// Structured captured values are included in derived query identity
+const { data, state } = useLiveQuery({
+  query: (q) => q.from({ todos: todosCollection })
          .where(({ todos }) => gt(todos.priority, minPriority)),
-  [minPriority] // Re-run when minPriority changes
-)
+})
+```
+
+```ts
+// Return undefined or null to disable a query
+const { data, isEnabled } = useLiveQuery({
+  query: (q) => {
+    if (!userId) return undefined
+    return q.from({ todos: todosCollection })
+            .where(({ todos }) => eq(todos.userId, userId))
+  },
+})
 ```
 
 ```ts
 // Join pattern
-const { data } = useLiveQuery((q) =>
-  q.from({ issues: issueCollection })
-   .join({ persons: personCollection }, ({ issues, persons }) =>
-     eq(issues.userId, persons.id)
-   )
-   .select(({ issues, persons }) => ({
-     id: issues.id,
-     title: issues.title,
-     userName: persons.name
-   }))
-)
+const { data } = useLiveQuery({
+  query: (q) =>
+    q.from({ issues: issueCollection })
+     .join({ persons: personCollection }, ({ issues, persons }) =>
+       eq(issues.userId, persons.id)
+     )
+     .select(({ issues, persons }) => ({
+       id: issues.id,
+       title: issues.title,
+       userName: persons.name
+     }))
+})
 ```
 
 ```ts
 // Handle loading and error states
-const { data, isLoading, isError, status } = useLiveQuery((q) =>
-  q.from({ todos: todoCollection })
-)
+const { data, isLoading, isError, status } = useLiveQuery({
+  query: (q) => q.from({ todos: todoCollection })
+})
 
 if (isLoading) return <div>Loading...</div>
 if (isError) return <div>Error: {status}</div>
@@ -168,9 +196,9 @@ return (
 function useLiveQuery<TContext>(queryFn, deps?): object;
 ```
 
-Defined in: [useLiveQuery.ts:101](https://github.com/TanStack/db/blob/main/packages/react-db/src/useLiveQuery.ts#L101)
+Defined in: [useLiveQuery.ts:420](https://github.com/TanStack/db/blob/main/packages/react-db/src/useLiveQuery.ts#L420)
 
-Create a live query using a query function
+Create a live query using a query function.
 
 ### Type Parameters
 
@@ -190,7 +218,7 @@ Query function that defines what data to fetch
 
 `unknown`[]
 
-Array of dependencies that trigger query re-execution when changed
+Deprecated array of dependencies that trigger query re-execution when changed
 
 ### Returns
 
@@ -202,8 +230,8 @@ Object with reactive data, state, and status information
 
 ```ts
 collection: 
-  | Collection<{ [K in string | number | symbol]: (TContext["result"] extends object ? any[any] : TContext["hasJoins"] extends true ? TContext["schema"] : TContext["schema"][TContext["fromSourceName"]])[K] }, string | number, {
-}, StandardSchemaV1<unknown, unknown>, { [K in string | number | symbol]: (TContext["result"] extends object ? any[any] : TContext["hasJoins"] extends true ? TContext["schema"] : TContext["schema"][TContext["fromSourceName"]])[K] }>
+  | Collection<{ [K in string | number | symbol]: ResultValue<TContext>[K] }, string | number, {
+}, StandardSchemaV1<unknown, unknown>, { [K in string | number | symbol]: ResultValue<TContext>[K] }>
   | undefined;
 ```
 
@@ -243,17 +271,35 @@ isIdle: boolean;
 isLoading: boolean;
 ```
 
+#### isPersistedReady
+
+```ts
+isPersistedReady: boolean;
+```
+
 #### isReady
 
 ```ts
 isReady: boolean;
 ```
 
+#### persistedError
+
+```ts
+persistedError: unknown;
+```
+
+#### persistedStatus
+
+```ts
+persistedStatus: LiveQueryPersistedStatus;
+```
+
 #### state
 
 ```ts
 state: 
-  | Map<string | number, { [K in string | number | symbol]: (TContext["result"] extends object ? any[any] : TContext["hasJoins"] extends true ? TContext["schema"] : TContext["schema"][TContext["fromSourceName"]])[K] }>
+  | Map<string | number, { [K in string | number | symbol]: ResultValue<TContext>[K] }>
   | undefined;
 ```
 
@@ -266,52 +312,64 @@ status: UseLiveQueryStatus;
 ### Examples
 
 ```ts
-// Basic query with object syntax
-const { data, isLoading } = useLiveQuery((q) =>
-  q.from({ todos: todosCollection })
-   .where(({ todos }) => eq(todos.completed, false))
-   .select(({ todos }) => ({ id: todos.id, text: todos.text }))
-)
+// Prefer config object syntax
+const { data, isLoading } = useLiveQuery({
+  query: (q) =>
+    q.from({ todos: todosCollection })
+     .where(({ todos }) => eq(todos.completed, false))
+     .select(({ todos }) => ({ id: todos.id, text: todos.text }))
+})
 ```
 
 ```ts
 // Single result query
-const { data } = useLiveQuery(
-  (q) => q.from({ todos: todosCollection })
+const { data } = useLiveQuery({
+  query: (q) => q.from({ todos: todosCollection })
          .where(({ todos }) => eq(todos.id, 1))
          .findOne()
-)
+})
 ```
 
 ```ts
-// With dependencies that trigger re-execution
-const { data, state } = useLiveQuery(
-  (q) => q.from({ todos: todosCollection })
+// Structured captured values are included in derived query identity
+const { data, state } = useLiveQuery({
+  query: (q) => q.from({ todos: todosCollection })
          .where(({ todos }) => gt(todos.priority, minPriority)),
-  [minPriority] // Re-run when minPriority changes
-)
+})
+```
+
+```ts
+// Return undefined or null to disable a query
+const { data, isEnabled } = useLiveQuery({
+  query: (q) => {
+    if (!userId) return undefined
+    return q.from({ todos: todosCollection })
+            .where(({ todos }) => eq(todos.userId, userId))
+  },
+})
 ```
 
 ```ts
 // Join pattern
-const { data } = useLiveQuery((q) =>
-  q.from({ issues: issueCollection })
-   .join({ persons: personCollection }, ({ issues, persons }) =>
-     eq(issues.userId, persons.id)
-   )
-   .select(({ issues, persons }) => ({
-     id: issues.id,
-     title: issues.title,
-     userName: persons.name
-   }))
-)
+const { data } = useLiveQuery({
+  query: (q) =>
+    q.from({ issues: issueCollection })
+     .join({ persons: personCollection }, ({ issues, persons }) =>
+       eq(issues.userId, persons.id)
+     )
+     .select(({ issues, persons }) => ({
+       id: issues.id,
+       title: issues.title,
+       userName: persons.name
+     }))
+})
 ```
 
 ```ts
 // Handle loading and error states
-const { data, isLoading, isError, status } = useLiveQuery((q) =>
-  q.from({ todos: todoCollection })
-)
+const { data, isLoading, isError, status } = useLiveQuery({
+  query: (q) => q.from({ todos: todoCollection })
+})
 
 if (isLoading) return <div>Loading...</div>
 if (isError) return <div>Error: {status}</div>
@@ -329,9 +387,9 @@ return (
 function useLiveQuery<TContext>(queryFn, deps?): object;
 ```
 
-Defined in: [useLiveQuery.ts:120](https://github.com/TanStack/db/blob/main/packages/react-db/src/useLiveQuery.ts#L120)
+Defined in: [useLiveQuery.ts:442](https://github.com/TanStack/db/blob/main/packages/react-db/src/useLiveQuery.ts#L442)
 
-Create a live query using a query function
+Create a live query using a query function.
 
 ### Type Parameters
 
@@ -344,7 +402,7 @@ Create a live query using a query function
 #### queryFn
 
 (`q`) => 
-  \| `LiveQueryCollectionConfig`\<`TContext`, \{ \[K in string \| number \| symbol\]: (TContext\["result"\] extends object ? any\[any\] : TContext\["hasJoins"\] extends true ? TContext\["schema"\] : TContext\["schema"\]\[TContext\["fromSourceName"\]\])\[K\] \} & `object`\>
+  \| `LiveQueryCollectionConfig`\<`TContext`, `RootQueryResult`\<`TContext`\>\>
   \| `null`
   \| `undefined`
 
@@ -354,7 +412,7 @@ Query function that defines what data to fetch
 
 `unknown`[]
 
-Array of dependencies that trigger query re-execution when changed
+Deprecated array of dependencies that trigger query re-execution when changed
 
 ### Returns
 
@@ -366,8 +424,8 @@ Object with reactive data, state, and status information
 
 ```ts
 collection: 
-  | Collection<{ [K in string | number | symbol]: (TContext["result"] extends object ? any[any] : TContext["hasJoins"] extends true ? TContext["schema"] : TContext["schema"][TContext["fromSourceName"]])[K] }, string | number, {
-}, StandardSchemaV1<unknown, unknown>, { [K in string | number | symbol]: (TContext["result"] extends object ? any[any] : TContext["hasJoins"] extends true ? TContext["schema"] : TContext["schema"][TContext["fromSourceName"]])[K] }>
+  | Collection<{ [K in string | number | symbol]: ResultValue<TContext>[K] }, string | number, {
+}, StandardSchemaV1<unknown, unknown>, { [K in string | number | symbol]: ResultValue<TContext>[K] }>
   | undefined;
 ```
 
@@ -407,17 +465,35 @@ isIdle: boolean;
 isLoading: boolean;
 ```
 
+#### isPersistedReady
+
+```ts
+isPersistedReady: boolean;
+```
+
 #### isReady
 
 ```ts
 isReady: boolean;
 ```
 
+#### persistedError
+
+```ts
+persistedError: unknown;
+```
+
+#### persistedStatus
+
+```ts
+persistedStatus: LiveQueryPersistedStatus;
+```
+
 #### state
 
 ```ts
 state: 
-  | Map<string | number, { [K in string | number | symbol]: (TContext["result"] extends object ? any[any] : TContext["hasJoins"] extends true ? TContext["schema"] : TContext["schema"][TContext["fromSourceName"]])[K] }>
+  | Map<string | number, { [K in string | number | symbol]: ResultValue<TContext>[K] }>
   | undefined;
 ```
 
@@ -430,52 +506,64 @@ status: UseLiveQueryStatus;
 ### Examples
 
 ```ts
-// Basic query with object syntax
-const { data, isLoading } = useLiveQuery((q) =>
-  q.from({ todos: todosCollection })
-   .where(({ todos }) => eq(todos.completed, false))
-   .select(({ todos }) => ({ id: todos.id, text: todos.text }))
-)
+// Prefer config object syntax
+const { data, isLoading } = useLiveQuery({
+  query: (q) =>
+    q.from({ todos: todosCollection })
+     .where(({ todos }) => eq(todos.completed, false))
+     .select(({ todos }) => ({ id: todos.id, text: todos.text }))
+})
 ```
 
 ```ts
 // Single result query
-const { data } = useLiveQuery(
-  (q) => q.from({ todos: todosCollection })
+const { data } = useLiveQuery({
+  query: (q) => q.from({ todos: todosCollection })
          .where(({ todos }) => eq(todos.id, 1))
          .findOne()
-)
+})
 ```
 
 ```ts
-// With dependencies that trigger re-execution
-const { data, state } = useLiveQuery(
-  (q) => q.from({ todos: todosCollection })
+// Structured captured values are included in derived query identity
+const { data, state } = useLiveQuery({
+  query: (q) => q.from({ todos: todosCollection })
          .where(({ todos }) => gt(todos.priority, minPriority)),
-  [minPriority] // Re-run when minPriority changes
-)
+})
+```
+
+```ts
+// Return undefined or null to disable a query
+const { data, isEnabled } = useLiveQuery({
+  query: (q) => {
+    if (!userId) return undefined
+    return q.from({ todos: todosCollection })
+            .where(({ todos }) => eq(todos.userId, userId))
+  },
+})
 ```
 
 ```ts
 // Join pattern
-const { data } = useLiveQuery((q) =>
-  q.from({ issues: issueCollection })
-   .join({ persons: personCollection }, ({ issues, persons }) =>
-     eq(issues.userId, persons.id)
-   )
-   .select(({ issues, persons }) => ({
-     id: issues.id,
-     title: issues.title,
-     userName: persons.name
-   }))
-)
+const { data } = useLiveQuery({
+  query: (q) =>
+    q.from({ issues: issueCollection })
+     .join({ persons: personCollection }, ({ issues, persons }) =>
+       eq(issues.userId, persons.id)
+     )
+     .select(({ issues, persons }) => ({
+       id: issues.id,
+       title: issues.title,
+       userName: persons.name
+     }))
+})
 ```
 
 ```ts
 // Handle loading and error states
-const { data, isLoading, isError, status } = useLiveQuery((q) =>
-  q.from({ todos: todoCollection })
-)
+const { data, isLoading, isError, status } = useLiveQuery({
+  query: (q) => q.from({ todos: todoCollection })
+})
 
 if (isLoading) return <div>Loading...</div>
 if (isError) return <div>Error: {status}</div>
@@ -493,9 +581,9 @@ return (
 function useLiveQuery<TResult, TKey, TUtils>(queryFn, deps?): object;
 ```
 
-Defined in: [useLiveQuery.ts:139](https://github.com/TanStack/db/blob/main/packages/react-db/src/useLiveQuery.ts#L139)
+Defined in: [useLiveQuery.ts:464](https://github.com/TanStack/db/blob/main/packages/react-db/src/useLiveQuery.ts#L464)
 
-Create a live query using a query function
+Create a live query using a query function.
 
 ### Type Parameters
 
@@ -526,7 +614,7 @@ Query function that defines what data to fetch
 
 `unknown`[]
 
-Array of dependencies that trigger query re-execution when changed
+Deprecated array of dependencies that trigger query re-execution when changed
 
 ### Returns
 
@@ -578,10 +666,28 @@ isIdle: boolean;
 isLoading: boolean;
 ```
 
+#### isPersistedReady
+
+```ts
+isPersistedReady: boolean;
+```
+
 #### isReady
 
 ```ts
 isReady: boolean;
+```
+
+#### persistedError
+
+```ts
+persistedError: unknown;
+```
+
+#### persistedStatus
+
+```ts
+persistedStatus: LiveQueryPersistedStatus;
 ```
 
 #### state
@@ -599,52 +705,64 @@ status: UseLiveQueryStatus;
 ### Examples
 
 ```ts
-// Basic query with object syntax
-const { data, isLoading } = useLiveQuery((q) =>
-  q.from({ todos: todosCollection })
-   .where(({ todos }) => eq(todos.completed, false))
-   .select(({ todos }) => ({ id: todos.id, text: todos.text }))
-)
+// Prefer config object syntax
+const { data, isLoading } = useLiveQuery({
+  query: (q) =>
+    q.from({ todos: todosCollection })
+     .where(({ todos }) => eq(todos.completed, false))
+     .select(({ todos }) => ({ id: todos.id, text: todos.text }))
+})
 ```
 
 ```ts
 // Single result query
-const { data } = useLiveQuery(
-  (q) => q.from({ todos: todosCollection })
+const { data } = useLiveQuery({
+  query: (q) => q.from({ todos: todosCollection })
          .where(({ todos }) => eq(todos.id, 1))
          .findOne()
-)
+})
 ```
 
 ```ts
-// With dependencies that trigger re-execution
-const { data, state } = useLiveQuery(
-  (q) => q.from({ todos: todosCollection })
+// Structured captured values are included in derived query identity
+const { data, state } = useLiveQuery({
+  query: (q) => q.from({ todos: todosCollection })
          .where(({ todos }) => gt(todos.priority, minPriority)),
-  [minPriority] // Re-run when minPriority changes
-)
+})
+```
+
+```ts
+// Return undefined or null to disable a query
+const { data, isEnabled } = useLiveQuery({
+  query: (q) => {
+    if (!userId) return undefined
+    return q.from({ todos: todosCollection })
+            .where(({ todos }) => eq(todos.userId, userId))
+  },
+})
 ```
 
 ```ts
 // Join pattern
-const { data } = useLiveQuery((q) =>
-  q.from({ issues: issueCollection })
-   .join({ persons: personCollection }, ({ issues, persons }) =>
-     eq(issues.userId, persons.id)
-   )
-   .select(({ issues, persons }) => ({
-     id: issues.id,
-     title: issues.title,
-     userName: persons.name
-   }))
-)
+const { data } = useLiveQuery({
+  query: (q) =>
+    q.from({ issues: issueCollection })
+     .join({ persons: personCollection }, ({ issues, persons }) =>
+       eq(issues.userId, persons.id)
+     )
+     .select(({ issues, persons }) => ({
+       id: issues.id,
+       title: issues.title,
+       userName: persons.name
+     }))
+})
 ```
 
 ```ts
 // Handle loading and error states
-const { data, isLoading, isError, status } = useLiveQuery((q) =>
-  q.from({ todos: todoCollection })
-)
+const { data, isLoading, isError, status } = useLiveQuery({
+  query: (q) => q.from({ todos: todoCollection })
+})
 
 if (isLoading) return <div>Loading...</div>
 if (isError) return <div>Error: {status}</div>
@@ -662,9 +780,9 @@ return (
 function useLiveQuery<TContext, TResult, TKey, TUtils>(queryFn, deps?): object;
 ```
 
-Defined in: [useLiveQuery.ts:162](https://github.com/TanStack/db/blob/main/packages/react-db/src/useLiveQuery.ts#L162)
+Defined in: [useLiveQuery.ts:490](https://github.com/TanStack/db/blob/main/packages/react-db/src/useLiveQuery.ts#L490)
 
-Create a live query using a query function
+Create a live query using a query function.
 
 ### Type Parameters
 
@@ -690,7 +808,7 @@ Create a live query using a query function
 
 (`q`) => 
   \| `QueryBuilder`\<`TContext`\>
-  \| `LiveQueryCollectionConfig`\<`TContext`, \{ \[K in string \| number \| symbol\]: (TContext\["result"\] extends object ? any\[any\] : TContext\["hasJoins"\] extends true ? TContext\["schema"\] : TContext\["schema"\]\[TContext\["fromSourceName"\]\])\[K\] \} & `object`\>
+  \| `LiveQueryCollectionConfig`\<`TContext`, `RootQueryResult`\<`TContext`\>\>
   \| `Collection`\<`TResult`, `TKey`, `TUtils`, `StandardSchemaV1`\<`unknown`, `unknown`\>, `TResult`\>
   \| `null`
   \| `undefined`
@@ -701,7 +819,7 @@ Query function that defines what data to fetch
 
 `unknown`[]
 
-Array of dependencies that trigger query re-execution when changed
+Deprecated array of dependencies that trigger query re-execution when changed
 
 ### Returns
 
@@ -714,8 +832,8 @@ Object with reactive data, state, and status information
 ```ts
 collection: 
   | Collection<TResult, TKey, TUtils, StandardSchemaV1<unknown, unknown>, TResult>
-  | Collection<{ [K in string | number | symbol]: (TContext["result"] extends object ? any[any] : TContext["hasJoins"] extends true ? TContext["schema"] : TContext["schema"][TContext["fromSourceName"]])[K] }, string | number, {
-}, StandardSchemaV1<unknown, unknown>, { [K in string | number | symbol]: (TContext["result"] extends object ? any[any] : TContext["hasJoins"] extends true ? TContext["schema"] : TContext["schema"][TContext["fromSourceName"]])[K] }>
+  | Collection<{ [K in string | number | symbol]: ResultValue<TContext>[K] }, string | number, {
+}, StandardSchemaV1<unknown, unknown>, { [K in string | number | symbol]: ResultValue<TContext>[K] }>
   | undefined;
 ```
 
@@ -755,17 +873,35 @@ isIdle: boolean;
 isLoading: boolean;
 ```
 
+#### isPersistedReady
+
+```ts
+isPersistedReady: boolean;
+```
+
 #### isReady
 
 ```ts
 isReady: boolean;
 ```
 
+#### persistedError
+
+```ts
+persistedError: unknown;
+```
+
+#### persistedStatus
+
+```ts
+persistedStatus: LiveQueryPersistedStatus;
+```
+
 #### state
 
 ```ts
 state: 
-  | Map<string | number, { [K in string | number | symbol]: (TContext["result"] extends object ? any[any] : TContext["hasJoins"] extends true ? TContext["schema"] : TContext["schema"][TContext["fromSourceName"]])[K] }>
+  | Map<string | number, { [K in string | number | symbol]: ResultValue<TContext>[K] }>
   | Map<TKey, TResult>
   | undefined;
 ```
@@ -779,52 +915,64 @@ status: UseLiveQueryStatus;
 ### Examples
 
 ```ts
-// Basic query with object syntax
-const { data, isLoading } = useLiveQuery((q) =>
-  q.from({ todos: todosCollection })
-   .where(({ todos }) => eq(todos.completed, false))
-   .select(({ todos }) => ({ id: todos.id, text: todos.text }))
-)
+// Prefer config object syntax
+const { data, isLoading } = useLiveQuery({
+  query: (q) =>
+    q.from({ todos: todosCollection })
+     .where(({ todos }) => eq(todos.completed, false))
+     .select(({ todos }) => ({ id: todos.id, text: todos.text }))
+})
 ```
 
 ```ts
 // Single result query
-const { data } = useLiveQuery(
-  (q) => q.from({ todos: todosCollection })
+const { data } = useLiveQuery({
+  query: (q) => q.from({ todos: todosCollection })
          .where(({ todos }) => eq(todos.id, 1))
          .findOne()
-)
+})
 ```
 
 ```ts
-// With dependencies that trigger re-execution
-const { data, state } = useLiveQuery(
-  (q) => q.from({ todos: todosCollection })
+// Structured captured values are included in derived query identity
+const { data, state } = useLiveQuery({
+  query: (q) => q.from({ todos: todosCollection })
          .where(({ todos }) => gt(todos.priority, minPriority)),
-  [minPriority] // Re-run when minPriority changes
-)
+})
+```
+
+```ts
+// Return undefined or null to disable a query
+const { data, isEnabled } = useLiveQuery({
+  query: (q) => {
+    if (!userId) return undefined
+    return q.from({ todos: todosCollection })
+            .where(({ todos }) => eq(todos.userId, userId))
+  },
+})
 ```
 
 ```ts
 // Join pattern
-const { data } = useLiveQuery((q) =>
-  q.from({ issues: issueCollection })
-   .join({ persons: personCollection }, ({ issues, persons }) =>
-     eq(issues.userId, persons.id)
-   )
-   .select(({ issues, persons }) => ({
-     id: issues.id,
-     title: issues.title,
-     userName: persons.name
-   }))
-)
+const { data } = useLiveQuery({
+  query: (q) =>
+    q.from({ issues: issueCollection })
+     .join({ persons: personCollection }, ({ issues, persons }) =>
+       eq(issues.userId, persons.id)
+     )
+     .select(({ issues, persons }) => ({
+       id: issues.id,
+       title: issues.title,
+       userName: persons.name
+     }))
+})
 ```
 
 ```ts
 // Handle loading and error states
-const { data, isLoading, isError, status } = useLiveQuery((q) =>
-  q.from({ todos: todoCollection })
-)
+const { data, isLoading, isError, status } = useLiveQuery({
+  query: (q) => q.from({ todos: todoCollection })
+})
 
 if (isLoading) return <div>Loading...</div>
 if (isError) return <div>Error: {status}</div>
@@ -839,10 +987,10 @@ return (
 ## Call Signature
 
 ```ts
-function useLiveQuery<TContext>(config, deps?): object;
+function useLiveQuery<TContext>(config): object;
 ```
 
-Defined in: [useLiveQuery.ts:230](https://github.com/TanStack/db/blob/main/packages/react-db/src/useLiveQuery.ts#L230)
+Defined in: [useLiveQuery.ts:563](https://github.com/TanStack/db/blob/main/packages/react-db/src/useLiveQuery.ts#L563)
 
 Create a live query using configuration object
 
@@ -856,15 +1004,9 @@ Create a live query using configuration object
 
 #### config
 
-`LiveQueryCollectionConfig`\<`TContext`\>
+[`UseLiveQueryConfig`](../type-aliases/UseLiveQueryConfig.md)\<`TContext`\>
 
 Configuration object with query and options
-
-#### deps?
-
-`unknown`[]
-
-Array of dependencies that trigger query re-execution when changed
 
 ### Returns
 
@@ -875,7 +1017,7 @@ Object with reactive data, state, and status information
 #### collection
 
 ```ts
-collection: Collection<{ [K in string | number | symbol]: (TContext["result"] extends object ? any[any] : TContext["hasJoins"] extends true ? TContext["schema"] : TContext["schema"][TContext["fromSourceName"]])[K] }, string | number, {
+collection: Collection<{ [K in string | number | symbol]: ResultValue<TContext>[K] }, string | number, {
 }>;
 ```
 
@@ -915,16 +1057,34 @@ isIdle: boolean;
 isLoading: boolean;
 ```
 
+#### isPersistedReady
+
+```ts
+isPersistedReady: boolean;
+```
+
 #### isReady
 
 ```ts
 isReady: boolean;
 ```
 
+#### persistedError
+
+```ts
+persistedError: unknown;
+```
+
+#### persistedStatus
+
+```ts
+persistedStatus: LiveQueryPersistedStatus;
+```
+
 #### state
 
 ```ts
-state: Map<string | number, { [K in string | number | symbol]: (TContext["result"] extends object ? any[any] : TContext["hasJoins"] extends true ? TContext["schema"] : TContext["schema"][TContext["fromSourceName"]])[K] }>;
+state: Map<string | number, { [K in string | number | symbol]: ResultValue<TContext>[K] }>;
 ```
 
 #### status
@@ -950,7 +1110,9 @@ const queryBuilder = new Query()
   .where(({ persons }) => gt(persons.age, 30))
   .select(({ persons }) => ({ id: persons.id, name: persons.name }))
 
-const { data, isReady } = useLiveQuery({ query: queryBuilder })
+const { data, isReady } = useLiveQuery({
+  query: queryBuilder,
+})
 ```
 
 ```ts
@@ -969,10 +1131,567 @@ return <div>{data.length} items loaded</div>
 ## Call Signature
 
 ```ts
+function useLiveQuery<TContext>(config): object;
+```
+
+Defined in: [useLiveQuery.ts:582](https://github.com/TanStack/db/blob/main/packages/react-db/src/useLiveQuery.ts#L582)
+
+Create a live query using a query function.
+
+### Type Parameters
+
+#### TContext
+
+`TContext` *extends* `Context`
+
+### Parameters
+
+#### config
+
+[`ConditionalUseLiveQueryConfig`](../type-aliases/ConditionalUseLiveQueryConfig.md)\<`TContext`\>
+
+### Returns
+
+`object`
+
+Object with reactive data, state, and status information
+
+#### collection
+
+```ts
+collection: 
+  | Collection<{ [K in string | number | symbol]: ResultValue<TContext>[K] }, string | number, {
+}, StandardSchemaV1<unknown, unknown>, { [K in string | number | symbol]: ResultValue<TContext>[K] }>
+  | undefined;
+```
+
+#### data
+
+```ts
+data: InferResultType<TContext> | undefined;
+```
+
+#### isCleanedUp
+
+```ts
+isCleanedUp: boolean;
+```
+
+#### isEnabled
+
+```ts
+isEnabled: boolean;
+```
+
+#### isError
+
+```ts
+isError: boolean;
+```
+
+#### isIdle
+
+```ts
+isIdle: boolean;
+```
+
+#### isLoading
+
+```ts
+isLoading: boolean;
+```
+
+#### isPersistedReady
+
+```ts
+isPersistedReady: boolean;
+```
+
+#### isReady
+
+```ts
+isReady: boolean;
+```
+
+#### persistedError
+
+```ts
+persistedError: unknown;
+```
+
+#### persistedStatus
+
+```ts
+persistedStatus: LiveQueryPersistedStatus;
+```
+
+#### state
+
+```ts
+state: 
+  | Map<string | number, { [K in string | number | symbol]: ResultValue<TContext>[K] }>
+  | undefined;
+```
+
+#### status
+
+```ts
+status: UseLiveQueryStatus;
+```
+
+### Examples
+
+```ts
+// Prefer config object syntax
+const { data, isLoading } = useLiveQuery({
+  query: (q) =>
+    q.from({ todos: todosCollection })
+     .where(({ todos }) => eq(todos.completed, false))
+     .select(({ todos }) => ({ id: todos.id, text: todos.text }))
+})
+```
+
+```ts
+// Single result query
+const { data } = useLiveQuery({
+  query: (q) => q.from({ todos: todosCollection })
+         .where(({ todos }) => eq(todos.id, 1))
+         .findOne()
+})
+```
+
+```ts
+// Structured captured values are included in derived query identity
+const { data, state } = useLiveQuery({
+  query: (q) => q.from({ todos: todosCollection })
+         .where(({ todos }) => gt(todos.priority, minPriority)),
+})
+```
+
+```ts
+// Return undefined or null to disable a query
+const { data, isEnabled } = useLiveQuery({
+  query: (q) => {
+    if (!userId) return undefined
+    return q.from({ todos: todosCollection })
+            .where(({ todos }) => eq(todos.userId, userId))
+  },
+})
+```
+
+```ts
+// Join pattern
+const { data } = useLiveQuery({
+  query: (q) =>
+    q.from({ issues: issueCollection })
+     .join({ persons: personCollection }, ({ issues, persons }) =>
+       eq(issues.userId, persons.id)
+     )
+     .select(({ issues, persons }) => ({
+       id: issues.id,
+       title: issues.title,
+       userName: persons.name
+     }))
+})
+```
+
+```ts
+// Handle loading and error states
+const { data, isLoading, isError, status } = useLiveQuery({
+  query: (q) => q.from({ todos: todoCollection })
+})
+
+if (isLoading) return <div>Loading...</div>
+if (isError) return <div>Error: {status}</div>
+
+return (
+  <ul>
+    {data.map(todo => <li key={todo.id}>{todo.text}</li>)}
+  </ul>
+)
+```
+
+## Call Signature
+
+```ts
+function useLiveQuery<TContext>(config, deps?): object;
+```
+
+Defined in: [useLiveQuery.ts:601](https://github.com/TanStack/db/blob/main/packages/react-db/src/useLiveQuery.ts#L601)
+
+Create a live query using a query function.
+
+### Type Parameters
+
+#### TContext
+
+`TContext` *extends* `Context`
+
+### Parameters
+
+#### config
+
+`LiveQueryCollectionConfig`\<`TContext`\>
+
+#### deps?
+
+`unknown`[]
+
+Deprecated array of dependencies that trigger query re-execution when changed
+
+### Returns
+
+`object`
+
+Object with reactive data, state, and status information
+
+#### collection
+
+```ts
+collection: Collection<{ [K in string | number | symbol]: ResultValue<TContext>[K] }, string | number, {
+}>;
+```
+
+#### data
+
+```ts
+data: InferResultType<TContext>;
+```
+
+#### isCleanedUp
+
+```ts
+isCleanedUp: boolean;
+```
+
+#### isEnabled
+
+```ts
+isEnabled: true;
+```
+
+#### isError
+
+```ts
+isError: boolean;
+```
+
+#### isIdle
+
+```ts
+isIdle: boolean;
+```
+
+#### isLoading
+
+```ts
+isLoading: boolean;
+```
+
+#### isPersistedReady
+
+```ts
+isPersistedReady: boolean;
+```
+
+#### isReady
+
+```ts
+isReady: boolean;
+```
+
+#### persistedError
+
+```ts
+persistedError: unknown;
+```
+
+#### persistedStatus
+
+```ts
+persistedStatus: LiveQueryPersistedStatus;
+```
+
+#### state
+
+```ts
+state: Map<string | number, { [K in string | number | symbol]: ResultValue<TContext>[K] }>;
+```
+
+#### status
+
+```ts
+status: CollectionStatus;
+```
+
+### Examples
+
+```ts
+// Prefer config object syntax
+const { data, isLoading } = useLiveQuery({
+  query: (q) =>
+    q.from({ todos: todosCollection })
+     .where(({ todos }) => eq(todos.completed, false))
+     .select(({ todos }) => ({ id: todos.id, text: todos.text }))
+})
+```
+
+```ts
+// Single result query
+const { data } = useLiveQuery({
+  query: (q) => q.from({ todos: todosCollection })
+         .where(({ todos }) => eq(todos.id, 1))
+         .findOne()
+})
+```
+
+```ts
+// Structured captured values are included in derived query identity
+const { data, state } = useLiveQuery({
+  query: (q) => q.from({ todos: todosCollection })
+         .where(({ todos }) => gt(todos.priority, minPriority)),
+})
+```
+
+```ts
+// Return undefined or null to disable a query
+const { data, isEnabled } = useLiveQuery({
+  query: (q) => {
+    if (!userId) return undefined
+    return q.from({ todos: todosCollection })
+            .where(({ todos }) => eq(todos.userId, userId))
+  },
+})
+```
+
+```ts
+// Join pattern
+const { data } = useLiveQuery({
+  query: (q) =>
+    q.from({ issues: issueCollection })
+     .join({ persons: personCollection }, ({ issues, persons }) =>
+       eq(issues.userId, persons.id)
+     )
+     .select(({ issues, persons }) => ({
+       id: issues.id,
+       title: issues.title,
+       userName: persons.name
+     }))
+})
+```
+
+```ts
+// Handle loading and error states
+const { data, isLoading, isError, status } = useLiveQuery({
+  query: (q) => q.from({ todos: todoCollection })
+})
+
+if (isLoading) return <div>Loading...</div>
+if (isError) return <div>Error: {status}</div>
+
+return (
+  <ul>
+    {data.map(todo => <li key={todo.id}>{todo.text}</li>)}
+  </ul>
+)
+```
+
+## Call Signature
+
+```ts
+function useLiveQuery<TContext>(config, deps): object;
+```
+
+Defined in: [useLiveQuery.ts:621](https://github.com/TanStack/db/blob/main/packages/react-db/src/useLiveQuery.ts#L621)
+
+Create a live query using a query function.
+
+### Type Parameters
+
+#### TContext
+
+`TContext` *extends* `Context`
+
+### Parameters
+
+#### config
+
+[`ConditionalUseLiveQueryConfig`](../type-aliases/ConditionalUseLiveQueryConfig.md)\<`TContext`\>
+
+#### deps
+
+`unknown`[]
+
+Deprecated array of dependencies that trigger query re-execution when changed
+
+### Returns
+
+`object`
+
+Object with reactive data, state, and status information
+
+#### collection
+
+```ts
+collection: 
+  | Collection<{ [K in string | number | symbol]: ResultValue<TContext>[K] }, string | number, {
+}, StandardSchemaV1<unknown, unknown>, { [K in string | number | symbol]: ResultValue<TContext>[K] }>
+  | undefined;
+```
+
+#### data
+
+```ts
+data: InferResultType<TContext> | undefined;
+```
+
+#### isCleanedUp
+
+```ts
+isCleanedUp: boolean;
+```
+
+#### isEnabled
+
+```ts
+isEnabled: boolean;
+```
+
+#### isError
+
+```ts
+isError: boolean;
+```
+
+#### isIdle
+
+```ts
+isIdle: boolean;
+```
+
+#### isLoading
+
+```ts
+isLoading: boolean;
+```
+
+#### isPersistedReady
+
+```ts
+isPersistedReady: boolean;
+```
+
+#### isReady
+
+```ts
+isReady: boolean;
+```
+
+#### persistedError
+
+```ts
+persistedError: unknown;
+```
+
+#### persistedStatus
+
+```ts
+persistedStatus: LiveQueryPersistedStatus;
+```
+
+#### state
+
+```ts
+state: 
+  | Map<string | number, { [K in string | number | symbol]: ResultValue<TContext>[K] }>
+  | undefined;
+```
+
+#### status
+
+```ts
+status: UseLiveQueryStatus;
+```
+
+### Examples
+
+```ts
+// Prefer config object syntax
+const { data, isLoading } = useLiveQuery({
+  query: (q) =>
+    q.from({ todos: todosCollection })
+     .where(({ todos }) => eq(todos.completed, false))
+     .select(({ todos }) => ({ id: todos.id, text: todos.text }))
+})
+```
+
+```ts
+// Single result query
+const { data } = useLiveQuery({
+  query: (q) => q.from({ todos: todosCollection })
+         .where(({ todos }) => eq(todos.id, 1))
+         .findOne()
+})
+```
+
+```ts
+// Structured captured values are included in derived query identity
+const { data, state } = useLiveQuery({
+  query: (q) => q.from({ todos: todosCollection })
+         .where(({ todos }) => gt(todos.priority, minPriority)),
+})
+```
+
+```ts
+// Return undefined or null to disable a query
+const { data, isEnabled } = useLiveQuery({
+  query: (q) => {
+    if (!userId) return undefined
+    return q.from({ todos: todosCollection })
+            .where(({ todos }) => eq(todos.userId, userId))
+  },
+})
+```
+
+```ts
+// Join pattern
+const { data } = useLiveQuery({
+  query: (q) =>
+    q.from({ issues: issueCollection })
+     .join({ persons: personCollection }, ({ issues, persons }) =>
+       eq(issues.userId, persons.id)
+     )
+     .select(({ issues, persons }) => ({
+       id: issues.id,
+       title: issues.title,
+       userName: persons.name
+     }))
+})
+```
+
+```ts
+// Handle loading and error states
+const { data, isLoading, isError, status } = useLiveQuery({
+  query: (q) => q.from({ todos: todoCollection })
+})
+
+if (isLoading) return <div>Loading...</div>
+if (isError) return <div>Error: {status}</div>
+
+return (
+  <ul>
+    {data.map(todo => <li key={todo.id}>{todo.text}</li>)}
+  </ul>
+)
+```
+
+## Call Signature
+
+```ts
 function useLiveQuery<TResult, TKey, TUtils>(liveQueryCollection): object;
 ```
 
-Defined in: [useLiveQuery.ts:276](https://github.com/TanStack/db/blob/main/packages/react-db/src/useLiveQuery.ts#L276)
+Defined in: [useLiveQuery.ts:670](https://github.com/TanStack/db/blob/main/packages/react-db/src/useLiveQuery.ts#L670)
 
 Subscribe to an existing live query collection
 
@@ -1046,10 +1765,28 @@ isIdle: boolean;
 isLoading: boolean;
 ```
 
+#### isPersistedReady
+
+```ts
+isPersistedReady: boolean;
+```
+
 #### isReady
 
 ```ts
 isReady: boolean;
+```
+
+#### persistedError
+
+```ts
+persistedError: unknown;
+```
+
+#### persistedStatus
+
+```ts
+persistedStatus: LiveQueryPersistedStatus;
 ```
 
 #### state
@@ -1100,9 +1837,9 @@ return <div>{data.map(item => <Item key={item.id} {...item} />)}</div>
 function useLiveQuery<TResult, TKey, TUtils>(liveQueryCollection): object;
 ```
 
-Defined in: [useLiveQuery.ts:296](https://github.com/TanStack/db/blob/main/packages/react-db/src/useLiveQuery.ts#L296)
+Defined in: [useLiveQuery.ts:693](https://github.com/TanStack/db/blob/main/packages/react-db/src/useLiveQuery.ts#L693)
 
-Create a live query using a query function
+Create a live query using a query function.
 
 ### Type Parameters
 
@@ -1172,10 +1909,28 @@ isIdle: boolean;
 isLoading: boolean;
 ```
 
+#### isPersistedReady
+
+```ts
+isPersistedReady: boolean;
+```
+
 #### isReady
 
 ```ts
 isReady: boolean;
+```
+
+#### persistedError
+
+```ts
+persistedError: unknown;
+```
+
+#### persistedStatus
+
+```ts
+persistedStatus: LiveQueryPersistedStatus;
 ```
 
 #### state
@@ -1193,52 +1948,64 @@ status: CollectionStatus;
 ### Examples
 
 ```ts
-// Basic query with object syntax
-const { data, isLoading } = useLiveQuery((q) =>
-  q.from({ todos: todosCollection })
-   .where(({ todos }) => eq(todos.completed, false))
-   .select(({ todos }) => ({ id: todos.id, text: todos.text }))
-)
+// Prefer config object syntax
+const { data, isLoading } = useLiveQuery({
+  query: (q) =>
+    q.from({ todos: todosCollection })
+     .where(({ todos }) => eq(todos.completed, false))
+     .select(({ todos }) => ({ id: todos.id, text: todos.text }))
+})
 ```
 
 ```ts
 // Single result query
-const { data } = useLiveQuery(
-  (q) => q.from({ todos: todosCollection })
+const { data } = useLiveQuery({
+  query: (q) => q.from({ todos: todosCollection })
          .where(({ todos }) => eq(todos.id, 1))
          .findOne()
-)
+})
 ```
 
 ```ts
-// With dependencies that trigger re-execution
-const { data, state } = useLiveQuery(
-  (q) => q.from({ todos: todosCollection })
+// Structured captured values are included in derived query identity
+const { data, state } = useLiveQuery({
+  query: (q) => q.from({ todos: todosCollection })
          .where(({ todos }) => gt(todos.priority, minPriority)),
-  [minPriority] // Re-run when minPriority changes
-)
+})
+```
+
+```ts
+// Return undefined or null to disable a query
+const { data, isEnabled } = useLiveQuery({
+  query: (q) => {
+    if (!userId) return undefined
+    return q.from({ todos: todosCollection })
+            .where(({ todos }) => eq(todos.userId, userId))
+  },
+})
 ```
 
 ```ts
 // Join pattern
-const { data } = useLiveQuery((q) =>
-  q.from({ issues: issueCollection })
-   .join({ persons: personCollection }, ({ issues, persons }) =>
-     eq(issues.userId, persons.id)
-   )
-   .select(({ issues, persons }) => ({
-     id: issues.id,
-     title: issues.title,
-     userName: persons.name
-   }))
-)
+const { data } = useLiveQuery({
+  query: (q) =>
+    q.from({ issues: issueCollection })
+     .join({ persons: personCollection }, ({ issues, persons }) =>
+       eq(issues.userId, persons.id)
+     )
+     .select(({ issues, persons }) => ({
+       id: issues.id,
+       title: issues.title,
+       userName: persons.name
+     }))
+})
 ```
 
 ```ts
 // Handle loading and error states
-const { data, isLoading, isError, status } = useLiveQuery((q) =>
-  q.from({ todos: todoCollection })
-)
+const { data, isLoading, isError, status } = useLiveQuery({
+  query: (q) => q.from({ todos: todoCollection })
+})
 
 if (isLoading) return <div>Loading...</div>
 if (isError) return <div>Error: {status}</div>

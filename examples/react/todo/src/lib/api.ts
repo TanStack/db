@@ -1,4 +1,4 @@
-import type { SelectConfig, SelectTodo } from "../db/validation"
+import type { SelectConfig, SelectTodo } from '../db/validation'
 
 // API helper for todos and config
 const API_BASE_URL = `/api`
@@ -19,11 +19,11 @@ export const api = {
       return response.json()
     },
     create: async (
-      todo: Partial<SelectTodo>
+      todo: Partial<SelectTodo>,
     ): Promise<{ todo: SelectTodo; txid: number }> => {
       const response = await fetch(`${API_BASE_URL}/todos`, {
         method: `POST`,
-        headers: { "Content-Type": `application/json` },
+        headers: { 'Content-Type': `application/json` },
         body: JSON.stringify(todo),
       })
       if (!response.ok)
@@ -32,11 +32,11 @@ export const api = {
     },
     update: async (
       id: unknown,
-      changes: Partial<SelectTodo>
+      changes: Partial<SelectTodo>,
     ): Promise<{ todo: SelectTodo; txid: number }> => {
       const response = await fetch(`${API_BASE_URL}/todos/${id}`, {
         method: `PUT`,
-        headers: { "Content-Type": `application/json` },
+        headers: { 'Content-Type': `application/json` },
         body: JSON.stringify(changes),
       })
       if (!response.ok)
@@ -44,7 +44,7 @@ export const api = {
       return response.json()
     },
     delete: async (
-      id: unknown
+      id: unknown,
     ): Promise<{ success: boolean; txid: number }> => {
       const response = await fetch(`${API_BASE_URL}/todos/${id}`, {
         method: `DELETE`,
@@ -70,11 +70,11 @@ export const api = {
       return response.json()
     },
     create: async (
-      config: Partial<SelectConfig>
+      config: Partial<SelectConfig>,
     ): Promise<{ config: SelectConfig; txid: number }> => {
       const response = await fetch(`${API_BASE_URL}/config`, {
         method: `POST`,
-        headers: { "Content-Type": `application/json` },
+        headers: { 'Content-Type': `application/json` },
         body: JSON.stringify(config),
       })
       if (!response.ok)
@@ -83,11 +83,11 @@ export const api = {
     },
     update: async (
       id: number,
-      changes: Partial<SelectConfig>
+      changes: Partial<SelectConfig>,
     ): Promise<{ config: SelectConfig; txid: number }> => {
       const response = await fetch(`${API_BASE_URL}/config/${id}`, {
         method: `PUT`,
-        headers: { "Content-Type": `application/json` },
+        headers: { 'Content-Type': `application/json` },
         body: JSON.stringify(changes),
       })
       if (!response.ok)

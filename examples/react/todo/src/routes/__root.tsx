@@ -1,12 +1,12 @@
-import * as React from "react"
+import * as React from 'react'
 import {
   HeadContent,
   Outlet,
   Scripts,
   createRootRoute,
-} from "@tanstack/react-router"
+} from '@tanstack/react-router'
 
-import appCss from "../styles.css?url"
+import appCss from '../styles.css?url'
 
 export const Route = createRootRoute({
   head: () => ({

@@ -3,8 +3,6 @@ id: createOptimisticAction
 title: createOptimisticAction
 ---
 
-# Function: createOptimisticAction()
-
 ```ts
 function createOptimisticAction<TVariables>(options): (variables) => Transaction;
 ```
@@ -35,7 +33,7 @@ The type of variables that will be passed to the action function
 
 ### options
 
-[`CreateOptimisticActionsOptions`](../../interfaces/CreateOptimisticActionsOptions.md)\<`TVariables`\>
+[`CreateOptimisticActionsOptions`](../interfaces/CreateOptimisticActionsOptions.md)\<`TVariables`\>
 
 Configuration options for the optimistic action
 
@@ -55,7 +53,7 @@ A function that accepts variables of type TVariables and returns a Transaction
 
 ### Returns
 
-[`Transaction`](../../interfaces/Transaction.md)
+[`Transaction`](../interfaces/Transaction.md)
 
 ## Example
 

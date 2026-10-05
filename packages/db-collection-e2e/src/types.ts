@@ -1,4 +1,4 @@
-import type { Collection } from "@tanstack/db"
+import type { Collection } from '@tanstack/db'
 
 /**
  * Test data schema types
@@ -20,6 +20,7 @@ export interface Post {
   title: string
   content: string | null
   viewCount: number
+  largeViewCount: bigint // BIGINT field for testing large number serialization
   publishedAt: Date | null
   deletedAt: Date | null
 }
@@ -49,6 +50,8 @@ export interface SeedDataResult {
  * Test configuration for e2e tests
  */
 export interface E2ETestConfig {
+  // Exact initial test input, detached on every read; never collection output.
+  fixture: () => SeedDataResult
   collections: {
     eager: {
       users: Collection<User>
@@ -56,6 +59,11 @@ export interface E2ETestConfig {
       comments: Collection<Comment>
     }
     onDemand: {
+      users: Collection<User>
+      posts: Collection<Post>
+      comments: Collection<Comment>
+    }
+    progressive?: {
       users: Collection<User>
       posts: Collection<Post>
       comments: Collection<Comment>
@@ -69,11 +77,21 @@ export interface E2ETestConfig {
     updateUser: (id: string, updates: Partial<User>) => Promise<void>
     deleteUser: (id: string) => Promise<void>
     insertPost: (post: Post) => Promise<void>
+    deletePost: (id: string) => Promise<void>
   }
+
+  // Helper to get txid for Electric txid tracking tests (Electric only)
+  getTxid?: () => Promise<number | null>
 
   // Indicates if the backend has replication lag (e.g., Electric sync)
   // When true, tests will wait for mutations to propagate before proceeding
   hasReplicationLag?: boolean
+
+  // Test control for progressive mode (Electric only)
+  // Allows explicit control over when initial sync completes for deterministic testing
+  progressiveTestControl?: {
+    releaseInitialSync: () => void
+  }
 
   // Lifecycle hooks
   setup: () => Promise<void>
@@ -90,6 +108,6 @@ export interface DbClient {
   end: () => Promise<void>
   query: (
     sql: string,
-    values?: Array<unknown>
+    values?: Array<unknown>,
   ) => Promise<{ rows: Array<unknown> }>
 }

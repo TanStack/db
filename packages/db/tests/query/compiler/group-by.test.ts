@@ -1,11 +1,11 @@
-import { describe, expect, it } from "vitest"
-import { Aggregate, Func, PropRef, Value } from "../../../src/query/ir.js"
+import { describe, expect, it } from 'vitest'
+import { Aggregate, Func, PropRef, Value } from '../../../src/query/ir.js'
 
 // Import the validation function that we want to test directly
 // Since we can't easily mock the D2 streams, we'll test the validation logic separately
 function validateSelectAgainstGroupBy(
   groupByClause: Array<any>,
-  selectClause: any
+  selectClause: any,
 ): void {
   // This is the same validation logic from group-by.ts
   for (const [alias, expr] of Object.entries(selectClause)) {
@@ -16,12 +16,12 @@ function validateSelectAgainstGroupBy(
 
     // Non-aggregate expression must be in GROUP BY
     const groupIndex = groupByClause.findIndex((groupExpr) =>
-      expressionsEqual(expr, groupExpr)
+      expressionsEqual(expr, groupExpr),
     )
 
     if (groupIndex === -1) {
       throw new Error(
-        `Non-aggregate expression '${alias}' in SELECT must also appear in GROUP BY clause`
+        `Non-aggregate expression '${alias}' in SELECT must also appear in GROUP BY clause`,
       )
     }
   }
@@ -44,7 +44,7 @@ function expressionsEqual(expr1: any, expr2: any): boolean {
       expr1.name === expr2.name &&
       expr1.args.length === expr2.args.length &&
       expr1.args.every((arg: any, i: number) =>
-        expressionsEqual(arg, expr2.args[i])
+        expressionsEqual(arg, expr2.args[i]),
       )
     )
   }
@@ -65,7 +65,7 @@ describe(`group-by compiler`, () => {
         expect(() => {
           validateSelectAgainstGroupBy(groupByClause, selectClause)
         }).toThrow(
-          `Non-aggregate expression 'invalidField' in SELECT must also appear in GROUP BY clause`
+          `Non-aggregate expression 'invalidField' in SELECT must also appear in GROUP BY clause`,
         )
       })
 

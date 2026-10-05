@@ -3,20 +3,20 @@ id: BasePowerSyncCollectionConfig
 title: BasePowerSyncCollectionConfig
 ---
 
-# Type Alias: BasePowerSyncCollectionConfig\<TTable, TSchema\>
-
 ```ts
-type BasePowerSyncCollectionConfig<TTable, TSchema> = Omit<BaseCollectionConfig<ExtractedTable<TTable>, string, TSchema>, "onInsert" | "onUpdate" | "onDelete" | "getKey"> & object;
+type BasePowerSyncCollectionConfig<TTable, TSchema> = Omit<BaseCollectionConfig<InferPowerSyncOutputType<TTable, TSchema>, string, TSchema>, "onInsert" | "onUpdate" | "onDelete" | "getKey" | "syncMode"> & object & 
+  | EagerSyncHooks
+  | OnDemandSyncHooks;
 ```
 
-Defined in: [definitions.ts:165](https://github.com/TanStack/db/blob/main/packages/powersync-db-collection/src/definitions.ts#L165)
+Defined in: [definitions.ts:205](https://github.com/TanStack/db/blob/main/packages/powersync-db-collection/src/definitions.ts#L205)
 
 ## Type Declaration
 
 ### database
 
 ```ts
-database: AbstractPowerSyncDatabase;
+database: CommonPowerSyncDatabase;
 ```
 
 The PowerSync database instance
@@ -33,7 +33,7 @@ in-memory TanStack DB collection.
 
 #### Remarks
 
-- Defaults to [DEFAULT\_BATCH\_SIZE](../../variables/DEFAULT_BATCH_SIZE.md) if not specified.
+- Defaults to [DEFAULT\_BATCH\_SIZE](../variables/DEFAULT_BATCH_SIZE.md) if not specified.
 - Larger values reduce the number of round trips to the storage
   engine but increase memory usage per batch.
 - Smaller values may lower memory usage and allow earlier
@@ -55,4 +55,4 @@ The PowerSync schema Table definition
 
 ### TSchema
 
-`TSchema` *extends* `StandardSchemaV1` = `never`
+`TSchema` *extends* `StandardSchemaV1`\<`any`\> = `never`

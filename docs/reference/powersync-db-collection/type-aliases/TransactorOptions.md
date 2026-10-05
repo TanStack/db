@@ -3,20 +3,18 @@ id: TransactorOptions
 title: TransactorOptions
 ---
 
-# Type Alias: TransactorOptions
-
 ```ts
 type TransactorOptions = object;
 ```
 
-Defined in: [PowerSyncTransactor.ts:12](https://github.com/TanStack/db/blob/main/packages/powersync-db-collection/src/PowerSyncTransactor.ts#L12)
+Defined in: [PowerSyncTransactor.ts:16](https://github.com/TanStack/db/blob/main/packages/powersync-db-collection/src/PowerSyncTransactor.ts#L16)
 
 ## Properties
 
 ### database
 
 ```ts
-database: AbstractPowerSyncDatabase;
+database: CommonPowerSyncDatabase;
 ```
 
-Defined in: [PowerSyncTransactor.ts:13](https://github.com/TanStack/db/blob/main/packages/powersync-db-collection/src/PowerSyncTransactor.ts#L13)
+Defined in: [PowerSyncTransactor.ts:17](https://github.com/TanStack/db/blob/main/packages/powersync-db-collection/src/PowerSyncTransactor.ts#L17)

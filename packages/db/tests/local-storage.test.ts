@@ -1,10 +1,15 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
-import superjson from "superjson"
-import { createCollection } from "../src/index"
-import { localStorageCollectionOptions } from "../src/local-storage"
-import { createTransaction } from "../src/transactions"
-import { StorageKeyRequiredError } from "../src/errors"
-import type { StorageEventApi } from "../src/local-storage"
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import superjson from 'superjson'
+import { createCollection } from '../src/index'
+import { localStorageCollectionOptions } from '../src/local-storage'
+import { createTransaction } from '../src/transactions'
+import { StorageKeyRequiredError } from '../src/errors'
+import {
+  expectHistoryOutcome,
+  observeHistoryPromise,
+  withHistoryCleanup,
+} from './optimistic-history-oracle'
+import type { StorageEventApi } from '../src/local-storage'
 
 // Mock storage implementation for testing that properly implements Storage interface
 class MockStorage implements Storage {
@@ -42,14 +47,14 @@ class MockStorageEventApi implements StorageEventApi {
 
   addEventListener(
     type: `storage`,
-    listener: (event: StorageEvent) => void
+    listener: (event: StorageEvent) => void,
   ): void {
     this.listeners.push(listener)
   }
 
   removeEventListener(
     type: `storage`,
-    listener: (event: StorageEvent) => void
+    listener: (event: StorageEvent) => void,
   ): void {
     const index = this.listeners.indexOf(listener)
     if (index > -1) {
@@ -69,6 +74,82 @@ interface Todo {
   title: string
   completed: boolean
   createdAt: Date
+}
+
+// A literal JSON wire row: default JSON parsing does not restore Date objects.
+const remoteTodo = {
+  id: `remote`,
+  title: `From Another Tab`,
+  completed: false,
+  createdAt: `2024-01-02T00:00:00.000Z`,
+}
+const publicRemoteTodo = {
+  ...remoteTodo,
+  $collectionId: `local-collection:todos`,
+  $key: `remote`,
+  $origin: `remote`,
+  $hasPendingWrites: false,
+  $synced: true,
+}
+
+function installRemoteTodo(storage: Storage): StorageEvent {
+  const newValue = JSON.stringify({
+    's:remote': { versionKey: `remote-version`, data: remoteTodo },
+  })
+  storage.setItem(`todos`, newValue)
+  return {
+    type: `storage`,
+    key: `todos`,
+    oldValue: null,
+    newValue,
+    url: `http://localhost`,
+    storageArea: storage,
+  } as StorageEvent
+}
+
+type StoredTodo = Omit<Todo, `createdAt`> & { createdAt: Date | string }
+
+function assertStoredTodos(
+  serialized: string | null,
+  publicRows: Array<unknown>,
+  expected: Array<StoredTodo>,
+) {
+  expect(serialized).not.toBeNull()
+  const stored = JSON.parse(serialized!) as Record<
+    string,
+    { versionKey: unknown; data: unknown }
+  >
+  expect(Object.keys(stored).sort()).toEqual(
+    expected.map(({ id }) => `s:${id}`).sort(),
+  )
+  for (const row of expected) {
+    const entry = stored[`s:${row.id}`]!
+    expect(entry).toStrictEqual({
+      versionKey: expect.any(String),
+      data: {
+        ...row,
+        createdAt:
+          row.createdAt instanceof Date
+            ? row.createdAt.toISOString()
+            : row.createdAt,
+      },
+    })
+    expect(entry.versionKey).not.toBe(``)
+  }
+  // This durable-content law owns every user field, not virtual metadata.
+  // Preserve symbols and other dollar-prefixed fields rather than filtering
+  // arbitrary keys. Native Date fields stay distinct from reopened JSON strings.
+  expect(
+    publicRows.map((row) => {
+      const userRow = { ...(row as Record<PropertyKey, unknown>) }
+      delete userRow.$collectionId
+      delete userRow.$key
+      delete userRow.$origin
+      delete userRow.$hasPendingWrites
+      delete userRow.$synced
+      return userRow
+    }),
+  ).toStrictEqual(expected)
 }
 
 describe(`localStorage collection`, () => {
@@ -93,7 +174,7 @@ describe(`localStorage collection`, () => {
           storage: mockStorage,
           storageEventApi: mockStorageEventApi,
           getKey: (todo) => todo.id,
-        })
+        }),
       )
 
       expect(collection).toBeDefined()
@@ -131,7 +212,7 @@ describe(`localStorage collection`, () => {
           storage: mockStorage,
           storageEventApi: mockStorageEventApi,
           getKey: (item: any) => item.id,
-        })
+        }),
       ).toThrow(StorageKeyRequiredError)
     })
 
@@ -185,7 +266,7 @@ describe(`localStorage collection`, () => {
           storageEventApi: mockStorageEventApi,
           getKey: (item) => item.id,
           parser: superjson,
-        })
+        }),
       )
 
       const todo: Todo = {
@@ -203,12 +284,12 @@ describe(`localStorage collection`, () => {
       expect(storedData).toBeDefined()
 
       const parsed = superjson.parse<Record<string, { data: Todo }>>(
-        storedData!
+        storedData!,
       )
 
-      expect(parsed[`1`]?.data.title).toBe(`superjson`)
-      expect(parsed[`1`]?.data.completed).toBe(false)
-      expect(parsed[`1`]?.data.createdAt).toBeInstanceOf(Date)
+      expect(parsed[`s:1`]?.data.title).toBe(`superjson`)
+      expect(parsed[`s:1`]?.data.completed).toBe(false)
+      expect(parsed[`s:1`]?.data.createdAt).toBeInstanceOf(Date)
     })
   })
 
@@ -216,7 +297,7 @@ describe(`localStorage collection`, () => {
     it(`should load existing data from storage on initialization`, () => {
       // Pre-populate storage with new versioned format
       const existingTodos = {
-        "1": {
+        's:1': {
           versionKey: `test-version-1`,
           data: {
             id: `1`,
@@ -235,7 +316,7 @@ describe(`localStorage collection`, () => {
           storage: mockStorage,
           storageEventApi: mockStorageEventApi,
           getKey: (todo) => todo.id,
-        })
+        }),
       )
 
       // Subscribe to trigger sync
@@ -248,7 +329,7 @@ describe(`localStorage collection`, () => {
       subscription.unsubscribe()
     })
 
-    it(`should handle corrupted storage data gracefully`, () => {
+    it(`should handle corrupted storage data gracefully`, async () => {
       // Set invalid JSON data
       mockStorage.setItem(`todos`, `invalid json data`)
 
@@ -258,25 +339,57 @@ describe(`localStorage collection`, () => {
           storage: mockStorage,
           storageEventApi: mockStorageEventApi,
           getKey: (todo) => todo.id,
-        })
+        }),
       )
 
-      // Should initialize with empty collection
-      expect(collection.size).toBe(0)
+      const reads = vi.spyOn(mockStorage, `getItem`)
+      const warnings = vi.spyOn(console, `warn`).mockImplementation(() => {})
+      try {
+        await collection.preload()
+        expect(reads).toHaveBeenCalledWith(`todos`)
+        expect(warnings).toHaveBeenCalledExactlyOnceWith(
+          `[LocalStorageCollection] Error loading data from storage key "todos":`,
+          expect.any(SyntaxError),
+        )
+        expect(collection.isReady()).toBe(true)
+        expect([...collection.values()]).toEqual([])
+        mockStorageEventApi.triggerStorageEvent(installRemoteTodo(mockStorage))
+        expect([...collection.values()]).toEqual([publicRemoteTodo])
+      } finally {
+        try {
+          await collection.cleanup()
+        } finally {
+          reads.mockRestore()
+          warnings.mockRestore()
+        }
+      }
     })
 
-    it(`should handle empty storage gracefully`, () => {
+    it(`should handle empty storage gracefully`, async () => {
       const collection = createCollection(
         localStorageCollectionOptions<Todo>({
           storageKey: `todos`,
           storage: mockStorage,
           storageEventApi: mockStorageEventApi,
           getKey: (todo) => todo.id,
-        })
+        }),
       )
 
-      // Should initialize with empty collection
-      expect(collection.size).toBe(0)
+      const reads = vi.spyOn(mockStorage, `getItem`)
+      try {
+        await collection.preload()
+        expect(reads).toHaveBeenCalledWith(`todos`)
+        expect(collection.isReady()).toBe(true)
+        expect([...collection.values()]).toEqual([])
+        mockStorageEventApi.triggerStorageEvent(installRemoteTodo(mockStorage))
+        expect([...collection.values()]).toEqual([publicRemoteTodo])
+      } finally {
+        try {
+          await collection.cleanup()
+        } finally {
+          reads.mockRestore()
+        }
+      }
     })
   })
 
@@ -289,7 +402,7 @@ describe(`localStorage collection`, () => {
           storageEventApi: mockStorageEventApi,
           getKey: (todo) => todo.id,
           // No onInsert, onUpdate, or onDelete handlers provided
-        })
+        }),
       )
 
       // Subscribe to trigger sync
@@ -310,7 +423,7 @@ describe(`localStorage collection`, () => {
       let storedData = mockStorage.getItem(`todos`)
       expect(storedData).toBeDefined()
       let parsed = JSON.parse(storedData!)
-      expect(parsed[`1`].data.title).toBe(`Test Todo Without Handlers`)
+      expect(parsed[`s:1`].data.title).toBe(`Test Todo Without Handlers`)
 
       // Update without handlers should still persist
       const updateTx = collection.update(`1`, (draft) => {
@@ -322,7 +435,7 @@ describe(`localStorage collection`, () => {
       storedData = mockStorage.getItem(`todos`)
       expect(storedData).toBeDefined()
       parsed = JSON.parse(storedData!)
-      expect(parsed[`1`].data.title).toBe(`Updated Without Handlers`)
+      expect(parsed[`s:1`].data.title).toBe(`Updated Without Handlers`)
 
       // Delete without handlers should still persist
       const deleteTx = collection.delete(`1`)
@@ -332,7 +445,7 @@ describe(`localStorage collection`, () => {
       storedData = mockStorage.getItem(`todos`)
       expect(storedData).toBeDefined()
       parsed = JSON.parse(storedData!)
-      expect(parsed[`1`]).toBeUndefined()
+      expect(parsed[`s:1`]).toBeUndefined()
 
       subscription.unsubscribe()
     })
@@ -351,7 +464,7 @@ describe(`localStorage collection`, () => {
           onInsert: insertSpy,
           onUpdate: updateSpy,
           onDelete: deleteSpy,
-        })
+        }),
       )
 
       // Subscribe to trigger sync
@@ -372,7 +485,7 @@ describe(`localStorage collection`, () => {
       let storedData = mockStorage.getItem(`todos`)
       expect(storedData).toBeDefined()
       let parsed = JSON.parse(storedData!)
-      expect(parsed[`1`].data.title).toBe(`Test Todo With Handlers`)
+      expect(parsed[`s:1`].data.title).toBe(`Test Todo With Handlers`)
 
       // Update should call handler AND persist
       const updateTx = collection.update(`1`, (draft) => {
@@ -384,7 +497,7 @@ describe(`localStorage collection`, () => {
       storedData = mockStorage.getItem(`todos`)
       expect(storedData).toBeDefined()
       parsed = JSON.parse(storedData!)
-      expect(parsed[`1`].data.title).toBe(`Updated With Handlers`)
+      expect(parsed[`s:1`].data.title).toBe(`Updated With Handlers`)
 
       // Delete should call handler AND persist
       const deleteTx = collection.delete(`1`)
@@ -394,7 +507,7 @@ describe(`localStorage collection`, () => {
       storedData = mockStorage.getItem(`todos`)
       expect(storedData).toBeDefined()
       parsed = JSON.parse(storedData!)
-      expect(parsed[`1`]).toBeUndefined()
+      expect(parsed[`s:1`]).toBeUndefined()
 
       subscription.unsubscribe()
     })
@@ -407,7 +520,7 @@ describe(`localStorage collection`, () => {
           storageEventApi: mockStorageEventApi,
           getKey: (todo) => todo.id,
           onInsert: () => Promise.resolve({ success: true }),
-        })
+        }),
       )
 
       const todo: Todo = {
@@ -428,17 +541,17 @@ describe(`localStorage collection`, () => {
 
       const parsed = JSON.parse(storedData!)
       expect(typeof parsed).toBe(`object`)
-      expect(parsed[`1`]).toBeDefined()
-      expect(parsed[`1`].versionKey).toBeDefined()
-      expect(typeof parsed[`1`].versionKey).toBe(`string`)
-      expect(parsed[`1`].data.id).toBe(`1`)
-      expect(parsed[`1`].data.title).toBe(`Test Todo`)
+      expect(parsed[`s:1`]).toBeDefined()
+      expect(parsed[`s:1`].versionKey).toBeDefined()
+      expect(typeof parsed[`s:1`].versionKey).toBe(`string`)
+      expect(parsed[`s:1`].data.id).toBe(`1`)
+      expect(parsed[`s:1`].data.title).toBe(`Test Todo`)
     })
 
     it(`should perform update operations and update storage`, async () => {
       // Pre-populate storage
       const initialData = {
-        "1": {
+        's:1': {
           versionKey: `initial-version`,
           data: {
             id: `1`,
@@ -457,7 +570,7 @@ describe(`localStorage collection`, () => {
           storageEventApi: mockStorageEventApi,
           getKey: (todo) => todo.id,
           onUpdate: () => Promise.resolve({ success: true }),
-        })
+        }),
       )
 
       // Subscribe to trigger sync
@@ -474,8 +587,8 @@ describe(`localStorage collection`, () => {
       expect(storedData).toBeDefined()
 
       const parsed = JSON.parse(storedData!)
-      expect(parsed[`1`].versionKey).not.toBe(`initial-version`) // Should have new version key
-      expect(parsed[`1`].data.title).toBe(`Updated Todo`)
+      expect(parsed[`s:1`].versionKey).not.toBe(`initial-version`) // Should have new version key
+      expect(parsed[`s:1`].data.title).toBe(`Updated Todo`)
 
       subscription.unsubscribe()
     })
@@ -483,7 +596,7 @@ describe(`localStorage collection`, () => {
     it(`should perform delete operations and update storage`, async () => {
       // Pre-populate storage
       const initialData = {
-        "1": {
+        's:1': {
           versionKey: `test-version`,
           data: {
             id: `1`,
@@ -502,7 +615,7 @@ describe(`localStorage collection`, () => {
           storageEventApi: mockStorageEventApi,
           getKey: (todo) => todo.id,
           onDelete: () => Promise.resolve({ success: true }),
-        })
+        }),
       )
 
       // Subscribe to trigger sync
@@ -517,7 +630,7 @@ describe(`localStorage collection`, () => {
       expect(storedData).toBeDefined()
 
       const parsed = JSON.parse(storedData!)
-      expect(parsed[`1`]).toBeUndefined()
+      expect(parsed[`s:1`]).toBeUndefined()
 
       subscription.unsubscribe()
     })
@@ -531,7 +644,7 @@ describe(`localStorage collection`, () => {
           storage: mockStorage,
           storageEventApi: mockStorageEventApi,
           getKey: (todo) => todo.id,
-        })
+        }),
       )
 
       // Subscribe to trigger sync
@@ -539,7 +652,7 @@ describe(`localStorage collection`, () => {
 
       // Simulate data being added from another tab
       const newTodoData = {
-        "1": {
+        '1': {
           versionKey: `from-other-tab`,
           data: {
             id: `1`,
@@ -573,34 +686,49 @@ describe(`localStorage collection`, () => {
       subscription.unsubscribe()
     })
 
-    it(`should ignore storage events for different keys`, () => {
+    it(`should ignore storage events for different keys`, async () => {
       const collection = createCollection(
         localStorageCollectionOptions<Todo>({
           storageKey: `todos`,
           storage: mockStorage,
           storageEventApi: mockStorageEventApi,
           getKey: (todo) => todo.id,
-        })
+        }),
       )
 
-      // Create a mock storage event for different key
-      const storageEvent = {
-        type: `storage`,
-        key: `other-key`,
-        oldValue: null,
-        newValue: JSON.stringify({ test: `data` }),
-        url: `http://localhost`,
-        storageArea: mockStorage,
-      } as unknown as StorageEvent
+      const publications = vi.fn()
+      const subscription = collection.subscribeChanges(publications)
+      try {
+        expect(collection.isReady()).toBe(true)
+        publications.mockClear()
+        const matchingEvent = installRemoteTodo(mockStorage)
+        mockStorageEventApi.triggerStorageEvent({
+          ...matchingEvent,
+          key: `other-key`,
+        })
+        expect([...collection.values()]).toEqual([])
+        expect(publications).not.toHaveBeenCalled()
 
-      // Trigger the storage event
-      mockStorageEventApi.triggerStorageEvent(storageEvent)
-
-      // Collection should remain empty
-      expect(collection.size).toBe(0)
+        mockStorageEventApi.triggerStorageEvent(matchingEvent)
+        expect([...collection.values()]).toEqual([publicRemoteTodo])
+        expect(publications).toHaveBeenCalledTimes(1)
+        expect(publications.mock.calls[0]![0]).toEqual([
+          expect.objectContaining({
+            type: `insert`,
+            key: `remote`,
+            value: publicRemoteTodo,
+          }),
+        ])
+      } finally {
+        try {
+          subscription.unsubscribe()
+        } finally {
+          await collection.cleanup()
+        }
+      }
     })
 
-    it(`should ignore storage events from different storage areas`, () => {
+    it(`should ignore storage events from different storage areas`, async () => {
       const otherStorage = new MockStorage()
 
       const collection = createCollection(
@@ -609,24 +737,39 @@ describe(`localStorage collection`, () => {
           storage: mockStorage,
           storageEventApi: mockStorageEventApi,
           getKey: (todo) => todo.id,
-        })
+        }),
       )
 
-      // Create a mock storage event from different storage area
-      const storageEvent = {
-        type: `storage`,
-        key: `todos`,
-        oldValue: null,
-        newValue: JSON.stringify({ test: `data` }),
-        url: `http://localhost`,
-        storageArea: otherStorage,
-      } as unknown as StorageEvent
+      const publications = vi.fn()
+      const subscription = collection.subscribeChanges(publications)
+      try {
+        expect(collection.isReady()).toBe(true)
+        publications.mockClear()
+        const matchingEvent = installRemoteTodo(mockStorage)
+        mockStorageEventApi.triggerStorageEvent({
+          ...matchingEvent,
+          storageArea: otherStorage,
+        })
+        expect([...collection.values()]).toEqual([])
+        expect(publications).not.toHaveBeenCalled()
 
-      // Trigger the storage event
-      mockStorageEventApi.triggerStorageEvent(storageEvent)
-
-      // Collection should remain empty
-      expect(collection.size).toBe(0)
+        mockStorageEventApi.triggerStorageEvent(matchingEvent)
+        expect([...collection.values()]).toEqual([publicRemoteTodo])
+        expect(publications).toHaveBeenCalledTimes(1)
+        expect(publications.mock.calls[0]![0]).toEqual([
+          expect.objectContaining({
+            type: `insert`,
+            key: `remote`,
+            value: publicRemoteTodo,
+          }),
+        ])
+      } finally {
+        try {
+          subscription.unsubscribe()
+        } finally {
+          await collection.cleanup()
+        }
+      }
     })
   })
 
@@ -640,7 +783,7 @@ describe(`localStorage collection`, () => {
           storage: mockStorage,
           storageEventApi: mockStorageEventApi,
           getKey: (todo) => todo.id,
-        })
+        }),
       )
 
       collection.utils.clearStorage()
@@ -655,7 +798,7 @@ describe(`localStorage collection`, () => {
           storage: mockStorage,
           storageEventApi: mockStorageEventApi,
           getKey: (todo) => todo.id,
-        })
+        }),
       )
 
       expect(collection.utils.getStorageSize()).toBe(0)
@@ -689,7 +832,7 @@ describe(`localStorage collection`, () => {
     it(`should detect version key changes for updates`, () => {
       // Pre-populate storage
       const initialData = {
-        "1": {
+        's:1': {
           versionKey: `version-1`,
           data: {
             id: `1`,
@@ -707,7 +850,7 @@ describe(`localStorage collection`, () => {
           storage: mockStorage,
           storageEventApi: mockStorageEventApi,
           getKey: (todo) => todo.id,
-        })
+        }),
       )
 
       // Subscribe to trigger sync
@@ -718,7 +861,7 @@ describe(`localStorage collection`, () => {
 
       // Simulate change from another tab with different version key but same data
       const updatedData = {
-        "1": {
+        's:1': {
           versionKey: `version-2`, // Different version key
           data: {
             id: `1`,
@@ -755,7 +898,7 @@ describe(`localStorage collection`, () => {
 
       // Pre-populate storage
       const initialData = {
-        "1": {
+        's:1': {
           versionKey: `version-1`,
           data: {
             id: `1`,
@@ -773,7 +916,7 @@ describe(`localStorage collection`, () => {
           storage: mockStorage,
           storageEventApi: mockStorageEventApi,
           getKey: (todo) => todo.id,
-        })
+        }),
       )
 
       // Subscribe to changes to monitor
@@ -781,7 +924,7 @@ describe(`localStorage collection`, () => {
 
       // Simulate "change" from another tab with same version key
       const sameData = {
-        "1": {
+        's:1': {
           versionKey: `version-1`, // Same version key
           data: {
             id: `1`,
@@ -819,7 +962,7 @@ describe(`localStorage collection`, () => {
           storage: mockStorage,
           storageEventApi: mockStorageEventApi,
           getKey: (todo) => todo.id,
-        })
+        }),
       )
 
       // Subscribe to trigger sync
@@ -869,10 +1012,74 @@ describe(`localStorage collection`, () => {
       const storedData = mockStorage.getItem(`todos`)
       expect(storedData).toBeDefined()
       const parsed = JSON.parse(storedData!)
-      expect(parsed[`tx-1`].data.title).toBe(`Manual Tx Insert`)
-      expect(parsed[`tx-2`].data.title).toBe(`Manual Tx Insert 2`)
+      expect(parsed[`s:tx-1`].data.title).toBe(`Manual Tx Insert`)
+      expect(parsed[`s:tx-2`].data.title).toBe(`Manual Tx Insert 2`)
 
       subscription.unsubscribe()
+    })
+
+    it(`keeps replacement fields absent in memory, storage, and reload`, async () => {
+      type ReplacementRow = {
+        id: string
+        title: string
+        removed?: string
+      }
+      const createReplacementCollection = () =>
+        createCollection(
+          localStorageCollectionOptions<ReplacementRow>({
+            storageKey: `replacement-rows`,
+            storage: mockStorage,
+            storageEventApi: mockStorageEventApi,
+            getKey: (row) => row.id,
+          }),
+        )
+      const collection = createReplacementCollection()
+      let reopened: typeof collection | undefined
+      const transaction = createTransaction({
+        autoCommit: false,
+        mutationFn: ({ transaction: committed }: any) =>
+          Promise.resolve(collection.utils.acceptMutations(committed)),
+      })
+
+      try {
+        await collection.preload()
+        const insert = collection.insert({
+          id: `row`,
+          title: `replacement`,
+          removed: `old`,
+        })
+        await insert.isPersisted.promise
+
+        transaction.mutate(() => {
+          collection.delete(`row`)
+          collection.insert({ id: `row`, title: `replacement` })
+        })
+        await transaction.commit()
+
+        const memoryRow = collection.get(`row`)!
+        const stored = JSON.parse(
+          mockStorage.getItem(`replacement-rows`)!,
+        ) as Record<string, { data: ReplacementRow }>
+        await collection.cleanup()
+        reopened = createReplacementCollection()
+        await reopened.preload()
+        const reloadedRow = reopened.get(`row`)!
+
+        expect({
+          memory: Object.hasOwn(memoryRow, `removed`),
+          storage: Object.hasOwn(stored[`s:row`]!.data, `removed`),
+          reload: Object.hasOwn(reloadedRow, `removed`),
+        }).toStrictEqual({ memory: false, storage: false, reload: false })
+      } finally {
+        if (
+          transaction.state === `pending` ||
+          transaction.state === `persisting`
+        )
+          transaction.rollback()
+        await transaction.isPersisted.promise.catch(() => undefined)
+        await reopened?.cleanup()
+        await collection.cleanup()
+      }
     })
 
     it(`should only accept mutations for the specific collection`, async () => {
@@ -882,7 +1089,7 @@ describe(`localStorage collection`, () => {
           storage: mockStorage,
           storageEventApi: mockStorageEventApi,
           getKey: (todo) => todo.id,
-        })
+        }),
       )
 
       const collection2 = createCollection(
@@ -891,7 +1098,7 @@ describe(`localStorage collection`, () => {
           storage: mockStorage,
           storageEventApi: mockStorageEventApi,
           getKey: (todo) => todo.id,
-        })
+        }),
       )
 
       const subscription1 = collection1.subscribeChanges(() => {})
@@ -927,7 +1134,7 @@ describe(`localStorage collection`, () => {
       const stored1 = mockStorage.getItem(`todos-1`)
       expect(stored1).toBeDefined()
       const parsed1 = JSON.parse(stored1!)
-      expect(parsed1[`c1-item`].data.title).toBe(`Collection 1`)
+      expect(parsed1[`s:c1-item`].data.title).toBe(`Collection 1`)
 
       // Second collection mutations should NOT be in storage (remains optimistic)
       const stored2 = mockStorage.getItem(`todos-2`)
@@ -944,7 +1151,7 @@ describe(`localStorage collection`, () => {
           storage: mockStorage,
           storageEventApi: mockStorageEventApi,
           getKey: (todo) => todo.id,
-        })
+        }),
       )
 
       const subscription = collection.subscribeChanges(() => {})
@@ -988,9 +1195,9 @@ describe(`localStorage collection`, () => {
       const parsed = JSON.parse(storedData!)
 
       // Updated item should be in storage with new title
-      expect(parsed[`existing`].data.title).toBe(`Updated Item`)
+      expect(parsed[`s:existing`].data.title).toBe(`Updated Item`)
       // Deleted item should not be in storage
-      expect(parsed[`new`]).toBeUndefined()
+      expect(parsed[`s:new`]).toBeUndefined()
 
       subscription.unsubscribe()
     })
@@ -1002,7 +1209,7 @@ describe(`localStorage collection`, () => {
           storage: mockStorage,
           storageEventApi: mockStorageEventApi,
           getKey: (todo) => todo.id,
-        })
+        }),
       )
 
       const subscription = collection.subscribeChanges(() => {})
@@ -1035,7 +1242,7 @@ describe(`localStorage collection`, () => {
       const storedData = mockStorage.getItem(`todos`)
       expect(storedData).toBeDefined()
       const parsed = JSON.parse(storedData!)
-      expect(parsed[`to-delete`]).toBeUndefined()
+      expect(parsed[`s:to-delete`]).toBeUndefined()
 
       // Collection should also not have the item
       expect(collection.has(`to-delete`)).toBe(false)
@@ -1050,51 +1257,91 @@ describe(`localStorage collection`, () => {
           storage: mockStorage,
           storageEventApi: mockStorageEventApi,
           getKey: (todo) => todo.id,
-        })
+        }),
       )
 
       const subscription = collection.subscribeChanges(() => {})
-
+      const failure = new Error(`API failed`)
+      const writes = vi.spyOn(mockStorage, `setItem`)
+      let reopened: typeof collection | undefined
       const tx = createTransaction({
         mutationFn: async () => {
           await Promise.resolve()
-          throw new Error(`API failed`)
+          throw failure
         },
         autoCommit: false,
       })
+      const persisted = observeHistoryPromise(tx.isPersisted.promise)
+      await withHistoryCleanup(
+        async () => {
+          tx.mutate(() => {
+            collection.insert({
+              id: `rollback-test`,
+              title: `Should Rollback`,
+              completed: false,
+              createdAt: new Date(`2024-01-02T00:00:00.000Z`),
+            })
+          })
+          expect(collection.has(`rollback-test`)).toBe(true)
+          const commit = observeHistoryPromise(tx.commit())
+          await Promise.all([commit.settled, persisted.settled])
+          expectHistoryOutcome(
+            commit.read(),
+            { status: `rejected`, reason: failure },
+            `commit`,
+          )
+          expectHistoryOutcome(
+            persisted.read(),
+            { status: `rejected`, reason: failure },
+            `persistence`,
+          )
+          expect(collection.has(`rollback-test`)).toBe(false)
+          expect([...collection.values()]).toEqual([])
+          expect(mockStorage.getItem(`todos`)).toBeNull()
+          expect(writes).not.toHaveBeenCalled()
 
-      tx.mutate(() => {
-        collection.insert({
-          id: `rollback-test`,
-          title: `Should Rollback`,
-          completed: false,
-          createdAt: new Date(),
-        })
-      })
-
-      // Item should be present optimistically
-      expect(collection.has(`rollback-test`)).toBe(true)
-
-      try {
-        await tx.commit()
-      } catch {
-        // Expected to fail
-      }
-
-      // Catch the rejected promise to avoid unhandled rejection
-      tx.isPersisted.promise.catch(() => {})
-
-      // Item should be rolled back from collection
-      expect(collection.has(`rollback-test`)).toBe(false)
-
-      // Item should not be in storage
-      const storedData = mockStorage.getItem(`todos`)
-      if (storedData) {
-        const parsed = JSON.parse(storedData)
-        expect(parsed[`rollback-test`]).toBeUndefined()
-      }
-
-      subscription.unsubscribe()
+          const next: Todo = {
+            id: `next`,
+            title: `Accepted later`,
+            completed: false,
+            createdAt: new Date(`2024-01-03T00:00:00.000Z`),
+          }
+          const accepted = collection.insert({
+            ...next,
+            createdAt: new Date(next.createdAt),
+          })
+          await accepted.isPersisted.promise
+          const storedData = mockStorage.getItem(`todos`)
+          assertStoredTodos(storedData, [...collection.values()], [next])
+          expect(JSON.parse(storedData!)[`s:rollback-test`]).toBeUndefined()
+          expect(JSON.parse(storedData!)[`rollback-test`]).toBeUndefined()
+          reopened = createCollection(
+            localStorageCollectionOptions<Todo>({
+              storageKey: `todos`,
+              storage: mockStorage,
+              storageEventApi: mockStorageEventApi,
+              getKey: (todo) => todo.id,
+            }),
+          )
+          await reopened.preload()
+          assertStoredTodos(
+            storedData,
+            [...reopened.values()],
+            [{ ...next, createdAt: `2024-01-03T00:00:00.000Z` }],
+          )
+        },
+        () => [
+          () => {
+            if (tx.state === `pending` || tx.state === `persisting`)
+              tx.rollback()
+          },
+          () => persisted.settled,
+          () => subscription.unsubscribe(),
+          () => reopened?.cleanup(),
+          () => collection.cleanup(),
+          () => writes.mockRestore(),
+        ],
+      )
     })
 
     it(`should work when called after API operations (recommended pattern)`, async () => {
@@ -1104,7 +1351,7 @@ describe(`localStorage collection`, () => {
           storage: mockStorage,
           storageEventApi: mockStorageEventApi,
           getKey: (todo) => todo.id,
-        })
+        }),
       )
 
       const subscription = collection.subscribeChanges(() => {})
@@ -1137,7 +1384,7 @@ describe(`localStorage collection`, () => {
       const storedData = mockStorage.getItem(`todos`)
       expect(storedData).toBeDefined()
       const parsed = JSON.parse(storedData!)
-      expect(parsed[`after-api`].data.title).toBe(`After API`)
+      expect(parsed[`s:after-api`].data.title).toBe(`After API`)
 
       subscription.unsubscribe()
     })
@@ -1152,7 +1399,7 @@ describe(`localStorage collection`, () => {
             storage: mockStorage,
             storageEventApi: mockStorageEventApi,
             getKey: (todo) => todo.id,
-          })
+          }),
         )
 
         const subscription = collection.subscribeChanges(() => {})
@@ -1197,9 +1444,9 @@ describe(`localStorage collection`, () => {
         const parsed = JSON.parse(storedData!)
 
         // Item 1 should have the last update
-        expect(parsed[`1`].data.title).toBe(`Fourth`)
+        expect(parsed[`s:1`].data.title).toBe(`Fourth`)
         // Item 2 should be deleted
-        expect(parsed[`2`]).toBeUndefined()
+        expect(parsed[`s:2`]).toBeUndefined()
 
         // Verify collection matches storage
         expect(collection.get(`1`)?.title).toBe(`Fourth`)
@@ -1215,7 +1462,7 @@ describe(`localStorage collection`, () => {
             storage: mockStorage,
             storageEventApi: mockStorageEventApi,
             getKey: (todo) => todo.id,
-          })
+          }),
         )
 
         const subscription = collection.subscribeChanges(() => {})
@@ -1257,8 +1504,8 @@ describe(`localStorage collection`, () => {
         const storedData = mockStorage.getItem(`todos`)
         const parsed = JSON.parse(storedData!)
 
-        expect(parsed[`1`].data.title).toBe(`C`)
-        expect(parsed[`2`]).toBeUndefined()
+        expect(parsed[`s:1`].data.title).toBe(`C`)
+        expect(parsed[`s:2`]).toBeUndefined()
 
         subscription.unsubscribe()
       })
@@ -1272,7 +1519,7 @@ describe(`localStorage collection`, () => {
             storage: mockStorage,
             storageEventApi: mockStorageEventApi,
             getKey: (todo) => todo.id,
-          })
+          }),
         )
 
         const subscription = collection.subscribeChanges(() => {})
@@ -1287,7 +1534,7 @@ describe(`localStorage collection`, () => {
 
         // Simulate another tab making a change while local mutation is in progress
         const remoteData = {
-          local: {
+          's:local': {
             versionKey: `local-version`,
             data: {
               id: `local`,
@@ -1296,7 +1543,7 @@ describe(`localStorage collection`, () => {
               createdAt: new Date(),
             },
           },
-          remote: {
+          's:remote': {
             versionKey: `remote-version`,
             data: {
               id: `remote`,
@@ -1337,7 +1584,7 @@ describe(`localStorage collection`, () => {
             storage: mockStorage,
             storageEventApi: mockStorageEventApi,
             getKey: (todo) => todo.id,
-          })
+          }),
         )
 
         const subscription = collection.subscribeChanges(() => {})
@@ -1353,7 +1600,7 @@ describe(`localStorage collection`, () => {
 
         // Simulate another tab updating the item
         const remoteData = {
-          "1": {
+          's:1': {
             versionKey: `remote-version-1`,
             data: {
               id: `1`,
@@ -1387,8 +1634,8 @@ describe(`localStorage collection`, () => {
         const storedData = mockStorage.getItem(`todos`)
         const parsed = JSON.parse(storedData!)
 
-        expect(parsed[`1`].data.title).toBe(`Local Update After Remote`)
-        expect(parsed[`1`].data.completed).toBe(true) // Should preserve remote's completed state
+        expect(parsed[`s:1`].data.title).toBe(`Local Update After Remote`)
+        expect(parsed[`s:1`].data.completed).toBe(true) // Should preserve remote's completed state
 
         subscription.unsubscribe()
       })
@@ -1402,7 +1649,7 @@ describe(`localStorage collection`, () => {
             storage: mockStorage,
             storageEventApi: mockStorageEventApi,
             getKey: (todo) => todo.id,
-          })
+          }),
         )
 
         // Don't subscribe - collection sync may not be initialized yet
@@ -1437,7 +1684,7 @@ describe(`localStorage collection`, () => {
         const storedData = mockStorage.getItem(`todos`)
         expect(storedData).toBeDefined()
         const parsed = JSON.parse(storedData!)
-        expect(parsed[`early`].data.title).toBe(`Early Mutation`)
+        expect(parsed[`s:early`].data.title).toBe(`Early Mutation`)
 
         subscription.unsubscribe()
       })
@@ -1449,7 +1696,7 @@ describe(`localStorage collection`, () => {
             storage: mockStorage,
             storageEventApi: mockStorageEventApi,
             getKey: (todo) => todo.id,
-          })
+          }),
         )
 
         const subscription = collection.subscribeChanges(() => {})
@@ -1499,9 +1746,9 @@ describe(`localStorage collection`, () => {
         const storedData = mockStorage.getItem(`todos`)
         const parsed = JSON.parse(storedData!)
 
-        expect(parsed[`auto1`].data.title).toBe(`Auto 1 Updated`)
-        expect(parsed[`manual1`].data.title).toBe(`Manual 1`)
-        expect(parsed[`auto2`].data.title).toBe(`Auto 2`)
+        expect(parsed[`s:auto1`].data.title).toBe(`Auto 1 Updated`)
+        expect(parsed[`s:manual1`].data.title).toBe(`Manual 1`)
+        expect(parsed[`s:auto2`].data.title).toBe(`Auto 2`)
 
         subscription.unsubscribe()
       })
@@ -1528,7 +1775,7 @@ describe(`localStorage collection`, () => {
             storage: failingStorage,
             storageEventApi: mockStorageEventApi,
             getKey: (todo) => todo.id,
-          })
+          }),
         )
 
         const subscription = collection.subscribeChanges(() => {})
@@ -1556,62 +1803,564 @@ describe(`localStorage collection`, () => {
             storage: mockStorage,
             storageEventApi: mockStorageEventApi,
             getKey: (todo) => todo.id,
-          })
+          }),
         )
 
         const subscription = collection.subscribeChanges(() => {})
 
-        // Helper to verify lastKnownData matches storage
-        const verifyConsistency = () => {
-          const storedData = mockStorage.getItem(`todos`)
-          if (!storedData) return true
-
-          const parsed = JSON.parse(storedData)
-
-          // Check that collection has all items from storage
-          for (const key of Object.keys(parsed)) {
-            if (!collection.has(key)) {
-              return false
-            }
-          }
-
-          return true
-        }
-
-        // Insert
-        const tx1 = collection.insert({
+        const first: Todo = {
           id: `1`,
           title: `First`,
           completed: false,
-          createdAt: new Date(),
-        })
-        await tx1.isPersisted.promise
-        expect(verifyConsistency()).toBe(true)
-
-        // Update
-        const tx2 = collection.update(`1`, (draft) => {
-          draft.title = `Updated`
-        })
-        await tx2.isPersisted.promise
-        expect(verifyConsistency()).toBe(true)
-
-        // Insert another
-        const tx3 = collection.insert({
+          createdAt: new Date(`2024-01-02T00:00:00.000Z`),
+        }
+        const second: Todo = {
           id: `2`,
           title: `Second`,
           completed: false,
-          createdAt: new Date(),
-        })
-        await tx3.isPersisted.promise
-        expect(verifyConsistency()).toBe(true)
+          createdAt: new Date(`2024-01-03T00:00:00.000Z`),
+        }
+        const verifyConsistency = (expected: Array<Todo>) => {
+          assertStoredTodos(
+            mockStorage.getItem(`todos`),
+            [...collection.values()],
+            expected,
+          )
+          expect([...collection.keys()]).toEqual(expected.map(({ id }) => id))
+        }
+        await withHistoryCleanup(
+          async () => {
+            const tx1 = collection.insert({
+              ...first,
+              createdAt: new Date(first.createdAt),
+            })
+            await tx1.isPersisted.promise
+            verifyConsistency([first])
+            const tx2 = collection.update(`1`, (draft) => {
+              draft.title = `Updated`
+            })
+            await tx2.isPersisted.promise
+            const updated = { ...first, title: `Updated` }
+            verifyConsistency([updated])
+            const tx3 = collection.insert({
+              ...second,
+              createdAt: new Date(second.createdAt),
+            })
+            await tx3.isPersisted.promise
+            verifyConsistency([updated, second])
+            const tx4 = collection.delete(`1`)
+            await tx4.isPersisted.promise
+            verifyConsistency([second])
 
-        // Delete
-        const tx4 = collection.delete(`1`)
-        await tx4.isPersisted.promise
-        expect(verifyConsistency()).toBe(true)
-
-        subscription.unsubscribe()
+            // Test the exact checker, not membership in the production cache.
+            const serialized = mockStorage.getItem(`todos`)!
+            const rows = [...collection.values()]
+            expect(() =>
+              assertStoredTodos(
+                serialized,
+                rows.map((row) => ({ ...row, $unexpected: undefined })),
+                [second],
+              ),
+            ).toThrowError(/expected/)
+            expect(() => assertStoredTodos(`{}`, rows, [second])).toThrowError(
+              /expected/,
+            )
+            expect(() =>
+              assertStoredTodos(
+                serialized,
+                [...rows, { extra: true }],
+                [second],
+              ),
+            ).toThrowError(/expected/)
+            const wrong = JSON.parse(serialized)
+            wrong[`s:2`].data.title = `wrong same-key value`
+            expect(() =>
+              assertStoredTodos(JSON.stringify(wrong), rows, [second]),
+            ).toThrowError(/expected/)
+          },
+          () => [() => subscription.unsubscribe(), () => collection.cleanup()],
+        )
       })
+    })
+  })
+
+  describe(`numeric and string ID handling`, () => {
+    it(`should update the correct item when multiple items exist (direct operations)`, async () => {
+      const collection = createCollection(
+        localStorageCollectionOptions<Todo>({
+          storageKey: `todos`,
+          storage: mockStorage,
+          storageEventApi: mockStorageEventApi,
+          getKey: (todo) => todo.id,
+        }),
+      )
+
+      const subscription = collection.subscribeChanges(() => {})
+
+      // Insert multiple items
+      const tx1 = collection.insert({
+        id: `first`,
+        title: `First Todo`,
+        completed: false,
+        createdAt: new Date(),
+      })
+      await tx1.isPersisted.promise
+
+      const tx2 = collection.insert({
+        id: `second`,
+        title: `Second Todo`,
+        completed: false,
+        createdAt: new Date(),
+      })
+      await tx2.isPersisted.promise
+
+      const tx3 = collection.insert({
+        id: `third`,
+        title: `Third Todo`,
+        completed: false,
+        createdAt: new Date(),
+      })
+      await tx3.isPersisted.promise
+
+      // Update the FIRST item specifically
+      const updateTx = collection.update(`first`, (draft) => {
+        draft.completed = true
+      })
+      await updateTx.isPersisted.promise
+
+      // Verify that the FIRST item was updated, not the last one
+      expect(collection.get(`first`)?.completed).toBe(true)
+      expect(collection.get(`second`)?.completed).toBe(false)
+      expect(collection.get(`third`)?.completed).toBe(false)
+
+      // Verify in storage
+      const storedData = mockStorage.getItem(`todos`)
+      expect(storedData).toBeDefined()
+      const parsed = JSON.parse(storedData!)
+      expect(parsed[`s:first`].data.completed).toBe(true)
+      expect(parsed[`s:second`].data.completed).toBe(false)
+      expect(parsed[`s:third`].data.completed).toBe(false)
+
+      subscription.unsubscribe()
+    })
+
+    it(`should delete the correct item when multiple items exist`, async () => {
+      const collection = createCollection(
+        localStorageCollectionOptions<Todo>({
+          storageKey: `todos`,
+          storage: mockStorage,
+          storageEventApi: mockStorageEventApi,
+          getKey: (todo) => todo.id,
+        }),
+      )
+
+      const subscription = collection.subscribeChanges(() => {})
+
+      // Insert multiple items
+      const tx1 = collection.insert({
+        id: `first`,
+        title: `First Todo`,
+        completed: false,
+        createdAt: new Date(),
+      })
+      await tx1.isPersisted.promise
+
+      const tx2 = collection.insert({
+        id: `second`,
+        title: `Second Todo`,
+        completed: false,
+        createdAt: new Date(),
+      })
+      await tx2.isPersisted.promise
+
+      const tx3 = collection.insert({
+        id: `third`,
+        title: `Third Todo`,
+        completed: false,
+        createdAt: new Date(),
+      })
+      await tx3.isPersisted.promise
+
+      // Delete the FIRST item specifically
+      const deleteTx = collection.delete(`first`)
+      await deleteTx.isPersisted.promise
+
+      // Verify that the FIRST item was deleted, not the last one
+      expect(collection.has(`first`)).toBe(false)
+      expect(collection.has(`second`)).toBe(true)
+      expect(collection.has(`third`)).toBe(true)
+
+      // Verify in storage
+      const storedData = mockStorage.getItem(`todos`)
+      expect(storedData).toBeDefined()
+      const parsed = JSON.parse(storedData!)
+      expect(parsed[`s:first`]).toBeUndefined()
+      expect(parsed[`s:second`]).toBeDefined()
+      expect(parsed[`s:third`]).toBeDefined()
+
+      subscription.unsubscribe()
+    })
+
+    it(`should update the correct item when using numeric IDs`, async () => {
+      interface NumericTodo {
+        id: number
+        title: string
+        completed: boolean
+      }
+
+      const collection = createCollection(
+        localStorageCollectionOptions<NumericTodo>({
+          storageKey: `numeric-todos`,
+          storage: mockStorage,
+          storageEventApi: mockStorageEventApi,
+          getKey: (todo) => todo.id,
+        }),
+      )
+
+      const subscription = collection.subscribeChanges(() => {})
+
+      // Insert multiple items with numeric IDs
+      const tx1 = collection.insert({
+        id: 1,
+        title: `First Todo`,
+        completed: false,
+      })
+      await tx1.isPersisted.promise
+
+      const tx2 = collection.insert({
+        id: 2,
+        title: `Second Todo`,
+        completed: false,
+      })
+      await tx2.isPersisted.promise
+
+      const tx3 = collection.insert({
+        id: 3,
+        title: `Third Todo`,
+        completed: false,
+      })
+      await tx3.isPersisted.promise
+
+      // Update the FIRST item (id: 1) specifically
+      const updateTx = collection.update(1, (draft) => {
+        draft.completed = true
+      })
+      await updateTx.isPersisted.promise
+
+      // Verify that item with id:1 was updated, not the last one
+      expect(collection.get(1)?.completed).toBe(true)
+      expect(collection.get(2)?.completed).toBe(false)
+      expect(collection.get(3)?.completed).toBe(false)
+
+      // Verify in storage - numeric keys are encoded with "n:" prefix
+      const storedData = mockStorage.getItem(`numeric-todos`)
+      expect(storedData).toBeDefined()
+      const parsed = JSON.parse(storedData!)
+      expect(parsed[`n:1`].data.completed).toBe(true)
+      expect(parsed[`n:2`].data.completed).toBe(false)
+      expect(parsed[`n:3`].data.completed).toBe(false)
+
+      subscription.unsubscribe()
+    })
+
+    it(`should delete the correct item when using numeric IDs`, async () => {
+      interface NumericTodo {
+        id: number
+        title: string
+        completed: boolean
+      }
+
+      const collection = createCollection(
+        localStorageCollectionOptions<NumericTodo>({
+          storageKey: `numeric-todos-delete`,
+          storage: mockStorage,
+          storageEventApi: mockStorageEventApi,
+          getKey: (todo) => todo.id,
+        }),
+      )
+
+      const subscription = collection.subscribeChanges(() => {})
+
+      // Insert multiple items with numeric IDs
+      const tx1 = collection.insert({
+        id: 1,
+        title: `First Todo`,
+        completed: false,
+      })
+      await tx1.isPersisted.promise
+
+      const tx2 = collection.insert({
+        id: 2,
+        title: `Second Todo`,
+        completed: false,
+      })
+      await tx2.isPersisted.promise
+
+      const tx3 = collection.insert({
+        id: 3,
+        title: `Third Todo`,
+        completed: false,
+      })
+      await tx3.isPersisted.promise
+
+      // Delete the FIRST item (id: 1) specifically
+      const deleteTx = collection.delete(1)
+      await deleteTx.isPersisted.promise
+
+      // Verify that item with id:1 was deleted, not the last one
+      expect(collection.has(1)).toBe(false)
+      expect(collection.has(2)).toBe(true)
+      expect(collection.has(3)).toBe(true)
+
+      // Verify in storage - numeric keys are encoded with "n:" prefix
+      const storedData = mockStorage.getItem(`numeric-todos-delete`)
+      expect(storedData).toBeDefined()
+      const parsed = JSON.parse(storedData!)
+      expect(parsed[`n:1`]).toBeUndefined()
+      expect(parsed[`n:2`]).toBeDefined()
+      expect(parsed[`n:3`]).toBeDefined()
+
+      subscription.unsubscribe()
+    })
+
+    it(`should update items with numeric IDs after loading from storage`, async () => {
+      interface NumericTodo {
+        id: number
+        title: string
+        completed: boolean
+      }
+
+      // Pre-populate storage with numeric IDs (simulating existing data)
+      // Numeric keys are stored with "n:" prefix
+      const existingData = {
+        'n:1': {
+          versionKey: `version-1`,
+          data: { id: 1, title: `First Todo`, completed: false },
+        },
+        'n:2': {
+          versionKey: `version-2`,
+          data: { id: 2, title: `Second Todo`, completed: false },
+        },
+        'n:3': {
+          versionKey: `version-3`,
+          data: { id: 3, title: `Third Todo`, completed: false },
+        },
+      }
+      mockStorage.setItem(`numeric-todos-reload`, JSON.stringify(existingData))
+
+      // Create collection - this will load the existing data
+      const collection = createCollection(
+        localStorageCollectionOptions<NumericTodo>({
+          storageKey: `numeric-todos-reload`,
+          storage: mockStorage,
+          storageEventApi: mockStorageEventApi,
+          getKey: (todo) => todo.id,
+        }),
+      )
+
+      const subscription = collection.subscribeChanges(() => {})
+
+      // Wait for initial sync
+      await new Promise((resolve) => setTimeout(resolve, 10))
+
+      // Verify items were loaded
+      expect(collection.size).toBe(3)
+
+      // Now try to update item with numeric id 1
+      const updateTx = collection.update(1, (draft) => {
+        draft.completed = true
+      })
+      await updateTx.isPersisted.promise
+
+      // Verify the correct item was updated
+      expect(collection.get(1)?.completed).toBe(true)
+      expect(collection.get(2)?.completed).toBe(false)
+      expect(collection.get(3)?.completed).toBe(false)
+
+      // Verify in storage - numeric keys are encoded with "n:" prefix
+      const storedData = mockStorage.getItem(`numeric-todos-reload`)
+      expect(storedData).toBeDefined()
+      const parsed = JSON.parse(storedData!)
+      expect(parsed[`n:1`].data.completed).toBe(true)
+      expect(parsed[`n:2`].data.completed).toBe(false)
+      expect(parsed[`n:3`].data.completed).toBe(false)
+
+      subscription.unsubscribe()
+    })
+
+    it(`should delete items with numeric IDs after loading from storage`, async () => {
+      interface NumericTodo {
+        id: number
+        title: string
+        completed: boolean
+      }
+
+      // Pre-populate storage with numeric IDs (simulating existing data)
+      // Numeric keys are stored with "n:" prefix
+      const existingData = {
+        'n:1': {
+          versionKey: `version-1`,
+          data: { id: 1, title: `First Todo`, completed: false },
+        },
+        'n:2': {
+          versionKey: `version-2`,
+          data: { id: 2, title: `Second Todo`, completed: false },
+        },
+        'n:3': {
+          versionKey: `version-3`,
+          data: { id: 3, title: `Third Todo`, completed: false },
+        },
+      }
+      mockStorage.setItem(
+        `numeric-todos-reload-delete`,
+        JSON.stringify(existingData),
+      )
+
+      // Create collection - this will load the existing data
+      const collection = createCollection(
+        localStorageCollectionOptions<NumericTodo>({
+          storageKey: `numeric-todos-reload-delete`,
+          storage: mockStorage,
+          storageEventApi: mockStorageEventApi,
+          getKey: (todo) => todo.id,
+        }),
+      )
+
+      const subscription = collection.subscribeChanges(() => {})
+
+      // Wait for initial sync
+      await new Promise((resolve) => setTimeout(resolve, 10))
+
+      // Verify items were loaded
+      expect(collection.size).toBe(3)
+
+      // Now try to delete item with numeric id 1
+      const deleteTx = collection.delete(1)
+      await deleteTx.isPersisted.promise
+
+      // Verify the correct item was deleted
+      expect(collection.has(1)).toBe(false)
+      expect(collection.has(2)).toBe(true)
+      expect(collection.has(3)).toBe(true)
+
+      // Verify in storage - numeric keys are encoded with "n:" prefix
+      const storedData = mockStorage.getItem(`numeric-todos-reload-delete`)
+      expect(storedData).toBeDefined()
+      const parsed = JSON.parse(storedData!)
+      expect(parsed[`n:1`]).toBeUndefined()
+      expect(parsed[`n:2`]).toBeDefined()
+      expect(parsed[`n:3`]).toBeDefined()
+
+      subscription.unsubscribe()
+    })
+
+    it(`should handle numeric and string keys as distinct (no collision)`, async () => {
+      interface MixedIdTodo {
+        id: string | number
+        title: string
+      }
+
+      const collection = createCollection(
+        localStorageCollectionOptions<MixedIdTodo>({
+          storageKey: `mixed-id-todos`,
+          storage: mockStorage,
+          storageEventApi: mockStorageEventApi,
+          getKey: (todo) => todo.id,
+        }),
+      )
+
+      const subscription = collection.subscribeChanges(() => {})
+
+      // Insert item with numeric ID
+      const tx1 = collection.insert({
+        id: 1,
+        title: `Numeric ID`,
+      })
+      await tx1.isPersisted.promise
+
+      // Insert item with string ID "1"
+      // With prefixing, these won't collide:
+      // numeric 1 => "__number__1"
+      // string "1" => "1"
+      const tx2 = collection.insert({
+        id: `1`,
+        title: `String ID`,
+      })
+      await tx2.isPersisted.promise
+
+      // Both should exist in collection state
+      expect(collection.has(1)).toBe(true)
+      expect(collection.has(`1`)).toBe(true)
+
+      // Both should exist in localStorage with different keys
+      const storedData = mockStorage.getItem(`mixed-id-todos`)
+      expect(storedData).toBeDefined()
+      const parsed = JSON.parse(storedData!)
+
+      // There should be TWO entries in storage
+      expect(Object.keys(parsed).length).toBe(2)
+      // Numeric ID 1 is stored with key "n:1"
+      expect(parsed[`n:1`]).toBeDefined()
+      expect(parsed[`n:1`].data.title).toBe(`Numeric ID`)
+      // String ID "1" is stored with key "s:1"
+      expect(parsed[`s:1`]).toBeDefined()
+      expect(parsed[`s:1`].data.title).toBe(`String ID`)
+
+      subscription.unsubscribe()
+    })
+
+    it(`should prevent collision between numeric key and string key that matches the encoding pattern`, async () => {
+      interface MixedIdTodo {
+        id: string | number
+        title: string
+      }
+
+      const collection = createCollection(
+        localStorageCollectionOptions<MixedIdTodo>({
+          storageKey: `collision-test-todos`,
+          storage: mockStorage,
+          storageEventApi: mockStorageEventApi,
+          getKey: (todo) => todo.id,
+        }),
+      )
+
+      const subscription = collection.subscribeChanges(() => {})
+
+      // Insert item with numeric ID 1
+      const tx1 = collection.insert({
+        id: 1,
+        title: `Numeric 1`,
+      })
+      await tx1.isPersisted.promise
+
+      // Insert item with string ID "n:1" (which would collide with old "__number__1" approach)
+      const tx2 = collection.insert({
+        id: `n:1`,
+        title: `String n:1`,
+      })
+      await tx2.isPersisted.promise
+
+      // Both should exist in collection
+      expect(collection.has(1)).toBe(true)
+      expect(collection.has(`n:1`)).toBe(true)
+      expect(collection.get(1)?.title).toBe(`Numeric 1`)
+      expect(collection.get(`n:1`)?.title).toBe(`String n:1`)
+
+      // Verify in storage - they should have different encoded keys
+      const storedData = mockStorage.getItem(`collision-test-todos`)
+      expect(storedData).toBeDefined()
+      const parsed = JSON.parse(storedData!)
+
+      // There should be TWO distinct entries
+      expect(Object.keys(parsed).length).toBe(2)
+      // Numeric 1 → "n:1"
+      expect(parsed[`n:1`]).toBeDefined()
+      expect(parsed[`n:1`].data.title).toBe(`Numeric 1`)
+      // String "n:1" → "s:n:1"
+      expect(parsed[`s:n:1`]).toBeDefined()
+      expect(parsed[`s:n:1`].data.title).toBe(`String n:1`)
+
+      subscription.unsubscribe()
     })
   })
 })

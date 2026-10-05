@@ -3,8 +3,6 @@ title: Error Handling
 id: error-handling
 ---
 
-# Error Handling
-
 TanStack DB provides comprehensive error handling capabilities to ensure robust data synchronization and state management. This guide covers the built-in error handling mechanisms and how to work with them effectively.
 
 ## Error Types
@@ -91,9 +89,11 @@ const syncedCollection = createCollection(
 
 // Component can check error state
 function DataList() {
-  const { data } = useLiveQuery((q) => q.from({ item: syncedCollection }))
-  const isError = syncedCollection.utils.isError()
-  const errorCount = syncedCollection.utils.errorCount()
+  const { data } = useLiveQuery({
+    query: (q) => q.from({ item: syncedCollection }),
+  })
+  const isError = syncedCollection.utils.isError
+  const errorCount = syncedCollection.utils.errorCount
   
   return (
     <>
@@ -112,10 +112,74 @@ function DataList() {
 ```
 
 Error tracking methods:
-- **`lastError()`**: Returns the most recent error encountered by the query, or `undefined` if no errors have occurred:
-- **`isError()`**: Returns a boolean indicating whether the collection is currently in an error state:
-- **`errorCount()`**: Returns the number of consecutive sync failures. This counter is incremented only when queries fail completely (not per retry attempt) and is reset on successful queries:
-- **`clearError()`**: Clears the error state and triggers a refetch of the query. This method resets both `lastError` and `errorCount`:
+- **`lastError`**: Returns the most recent error encountered by the query, or `undefined` if no errors have occurred since a successful result applied:
+- **`isError`**: Returns a boolean indicating whether the collection is currently in an error state:
+- **`errorCount`**: Returns the number of consecutive sync failures. This counter is incremented only when queries fail completely (not per retry attempt) and is reset after a successful result applies:
+- **`clearError()`**: Triggers a refetch. The current error remains visible until a successful result applies to the Collection. An applied result clears `lastError` and resets `errorCount`; a failed retry records another consecutive failure and rejects the returned promise. During a mutation handler, the promise can resolve at the fetch boundary before application clears the error:
+
+  ```text
+  error visible → clearError() → retry pending, error still visible
+                                   ├─ applied success → error cleared
+                                   └─ failure → new error visible, count increased
+  ```
+
+## Incremental Subset Load Errors
+
+An incremental `loadSubset` failure does not discard rows that are already
+available or put the shared source collection into `error`. The failure belongs
+to the subscription that requested that subset:
+
+```ts
+const subscription = todoCollection.subscribeChanges(handleChanges, {
+  includeInitialState: false,
+})
+
+subscription.on('loadSubset:error', ({ error, options }) => {
+  console.error('Subset failed', options, error)
+})
+
+subscription.requestSnapshot()
+
+// The most recent failure remains available for diagnostics.
+console.log(subscription.lastError)
+```
+
+For ordered live queries, `utils.setWindow()` rejects with the same error. The
+last failure is also available as `utils.lastSubsetError`, while the last
+successful snapshot remains readable:
+
+```ts
+try {
+  await liveTodos.utils.setWindow({ offset: 0, limit: 100 })
+} catch (error) {
+  console.error(liveTodos.utils.lastSubsetError)
+}
+```
+
+Effects report subset failures through `onSourceError` and dispose because
+their incremental result can no longer be kept complete.
+
+When a source change invalidates an ordered window, automatic full-source
+repair keeps the last complete snapshot visible. A failed repair exposes
+`utils.lastSubsetError` and retries at most twice, after 250 ms and 500 ms.
+Exhausting those retries does not put an already-ready query into a terminal
+error state or clear its rows. The app can show the error and explicitly retry
+with `setWindow()`. Cleanup or truncate cancels the old repair timer. Failed
+imperative window moves and initial loads do not use this background retry.
+
+For SQLite-persisted on-demand collections, a failed upstream `loadSubset`
+rejects even when hydration succeeded. Cached rows remain readable; their
+availability does not mean the remote request succeeded. Background coordinator
+retry, where supported, does not change the failed caller's outcome.
+
+When a must-refetch truncate cannot reload every active subset, a subscription
+keeps its last successful snapshot and reports the subset error. It discards
+the incomplete replay batch and keeps later source changes private because they
+cannot prove a complete replacement. The next truncate retries every active
+subset. Overlapping truncates form one atomic replay: all in-flight requests
+settle, the newest attempt decides the result, and subscribers receive the
+replacement only when that attempt succeeds. Cleanup rejects window moves that
+are waiting for replay with `AbortError`.
 
 ## Collection Status and Error States
 
@@ -177,7 +241,9 @@ const App = () => (
 )
 ```
 
-With this approach, loading states are handled by `<Suspense>` and error states are handled by `<ErrorBoundary>` instead of within your component logic. See the [React Suspense section in Live Queries](../live-queries#using-with-react-suspense) for more details.
+With this approach, loading states are handled by `<Suspense>` and error states are handled by `<ErrorBoundary>` instead of within your component logic. See the [React Suspense section in Live Queries](./live-queries#using-with-react-suspense) for more details.
+
+When every eager SQLite persisted source opts in, a failed client query stream can produce a different initial result. React waits for every persisted restore. If each restore succeeds, React renders the query result. A derived-query failure still reaches the Error Boundary. See [Render after SQLite restore](./sqlite-persistence.md#render-after-sqlite-restore) for the option and its limits.
 
 ## Transaction Error Handling
 
@@ -209,7 +275,7 @@ try {
     completed: false,
   })
   
-  await tx.isPersisted.promise
+  await tx.when('settled')
 } catch (error) {
   // The optimistic update has been automatically rolled back
   console.error("Failed to create todo:", error)
@@ -246,7 +312,7 @@ try {
     draft.completed = true
   })
   
-  await tx.isPersisted.promise
+  await tx.when('settled')
 } catch (error) {
   // Transaction has been rolled back
   console.log(tx.state) // "failed"
@@ -276,6 +342,18 @@ try {
 }
 ```
 
+Explicit cancellation is different from a mutation failure. If you call
+`tx.rollback()` while `mutationFn` is pending, the rollback settles
+`tx.when('settled')` as rejected. A later result or rejection from that
+mutation function is ignored: the outstanding `commit()` call resolves and
+`tx.error` is not populated by that late rejection. Observe `tx.when('settled')`
+when you need the transaction's outcome, including explicit cancellation.
+
+After the mutation function succeeds, a publication listener can still throw
+while the completed transaction updates its collections. In that case
+`commit()` rejects with the listener error, but `tx.when('settled')` resolves
+and the transaction remains completed. This is not a persistence failure.
+
 ## Collection Operation Errors
 
 ### Invalid Collection State
@@ -291,12 +369,16 @@ try {
   if (error instanceof CollectionInErrorStateError) {
     // Collection needs to be cleaned up and restarted
     await todoCollection.cleanup()
+    await todoCollection.preload()
     
     // Now retry the operation
     todoCollection.insert(newTodo)
   }
 }
 ```
+
+If a live query depends on this Collection, restart both Collections as shown
+in [Collection Cleanup and Restart](#collection-cleanup-and-restart).
 
 ### Missing Mutation Handlers
 
@@ -418,7 +500,7 @@ try {
 
 ### Query Collection Sync Errors
 
-Query collections handle sync errors gracefully and mark the collection as ready even on error to avoid blocking applications:
+Query collections distinguish an initial load failure from a later refetch failure:
 
 ```ts
 import { queryCollectionOptions } from "@tanstack/query-db-collection"
@@ -445,9 +527,11 @@ const todoCollection = createCollection(
 
 When sync errors occur:
 - Error is logged to console: `[QueryCollection] Error observing query...`
-- Collection is marked as ready to prevent blocking the application
-- Cached data remains available
+- An initial failure marks the collection as `error` because no usable snapshot exists
+- Readiness waits such as `preload()` and `toArrayWhenReady()` reject with the cause passed to `markError(error)` while the collection is in that initial error state
+- A later refetch failure keeps the collection `ready` and preserves its cached data
 - Error tracking counters are updated (`lastError`, `errorCount`)
+- A later successful refetch recovers an initial `error` collection to `ready`; a new readiness wait then resolves normally
 
 ### Sync Write Errors
 
@@ -504,17 +588,45 @@ await collection.cleanup() // Resolves successfully
 
 ### Collection Cleanup and Restart
 
-Clean up collections in error states:
+Cleanup ends the current sync run and releases the resources installed by its
+`sync()` call. A later access can start a new sync run. If no live query or
+Effect depends on the source Collection, restart it like this:
 
 ```ts
 if (todoCollection.status === "error") {
-  // Cleanup will stop sync and reset the collection
+  // Cleanup ends the current sync run and resets the collection
   await todoCollection.cleanup()
   
-  // Collection will automatically restart on next access
-  todoCollection.preload() // Or any other operation
+  // Start a new sync run and wait for readiness
+  await todoCollection.preload()
 }
 ```
+
+Cleaning up a source Collection while a live-query Collection depends on it
+puts that live query in a terminal error state. Restarting the source alone
+does not revive the live query. If you own both Collections, clean up the
+dependent live query first. Preloading it after source cleanup starts fresh
+sync runs for both Collections and waits for the query's required data:
+
+```ts
+const todosQuery = createLiveQueryCollection((q) =>
+  q.from({ todos: todoCollection }),
+)
+await todosQuery.preload()
+
+// Later, if todoCollection enters an error state:
+await todosQuery.cleanup()
+await todoCollection.cleanup()
+await todosQuery.preload()
+```
+
+The same `todosQuery` object and its subscribers can receive later source
+updates after this sequence. A framework hook that creates its own live-query
+Collection may retain it across renders or remounts. Use a pre-created
+live-query Collection when you need to control this cleanup and restart
+sequence. A successful preload establishes Collection readiness; whether the
+source has caught up with a remote service depends on its sync adapter.
+Cleanup also disposes dependent Effects; recreate them after the source restarts.
 
 ### Graceful Degradation
 
@@ -703,13 +815,14 @@ Thrown when calling `commit()` on a sync transaction that's already committed.
 2. **Import specific error types** - Import only the error classes you need for better tree-shaking
 3. **Always handle SchemaValidationError** - Provide clear feedback for validation failures
 4. **Check collection status** - Use `isError`, `isLoading`, `isReady` flags in React components
-5. **Handle transaction promises** - Always handle `isPersisted.promise` rejections
+5. **Handle transaction promises** - Always handle `when('settled')` rejections
 
 ## Example: Complete Error Handling
 
 ```tsx
 import {
   createCollection,
+  createLiveQueryCollection,
   SchemaValidationError,
   DuplicateKeyError,
   UpdateKeyNotFoundError,
@@ -736,19 +849,22 @@ const todoCollection = createCollection({
     return response.json()
   },
   sync: {
-    sync: ({ begin, write, commit }) => {
+    sync: ({ begin, write, commit, markReady }) => {
       // Your sync implementation
       begin()
       // ... sync logic
       commit()
+      markReady()
     }
   }
 })
 
+const todosQuery = createLiveQueryCollection((query) =>
+  query.from({ todos: todoCollection })
+)
+
 const TodoApp = () => {
-  const { data, status, isError, isLoading } = useLiveQuery(
-    (query) => query.from({ todos: todoCollection })
-  )
+  const { data, isError, isLoading } = useLiveQuery(todosQuery)
 
   const handleAddTodo = async (text: string) => {
     try {
@@ -759,7 +875,7 @@ const TodoApp = () => {
       })
       
       // Wait for persistence
-      await tx.isPersisted.promise
+      await tx.when('settled')
     } catch (error) {
       if (error instanceof SchemaValidationError) {
         alert(`Validation error: ${error.issues[0]?.message}`)
@@ -771,12 +887,13 @@ const TodoApp = () => {
     }
   }
 
-  const handleCleanup = async () => {
+  const handleRestart = async () => {
     try {
+      await todosQuery.cleanup()
       await todoCollection.cleanup()
-      // Collection will restart on next access
+      await todosQuery.preload()
     } catch (error) {
-      console.error("Cleanup failed:", error)
+      alert(`Failed to restart todos: ${String(error)}`)
     }
   }
 
@@ -784,9 +901,7 @@ const TodoApp = () => {
     return (
       <div>
         <div>Collection error - data may be stale</div>
-        <button onClick={handleCleanup}>
-          Restart Collection
-        </button>
+        <button onClick={handleRestart}>Restart Collections</button>
       </div>
     )
   }
@@ -810,6 +925,6 @@ const TodoApp = () => {
 
 ## See Also
 
-- [API Reference](../../overview.md#api-reference) - Detailed API documentation
-- [Mutations Guide](../../overview.md#making-optimistic-mutations) - Learn about optimistic updates and rollbacks
+- [API Reference](../overview.md#api-reference) - Detailed API documentation
+- [Mutations Guide](../overview.md#making-optimistic-mutations) - Learn about optimistic updates and rollbacks
 - [TanStack Query Error Handling](https://tanstack.com/query/latest/docs/react/guides/error-handling) - Query-specific error handling

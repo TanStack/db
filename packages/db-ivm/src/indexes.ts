@@ -33,9 +33,9 @@
  * Prefixes extracted from array values: `['prefix', 'suffix']` → prefix='prefix'
  */
 
-import { MultiSet } from "./multiset.js"
-import { hash } from "./hashing/index.js"
-import type { Hash } from "./hashing/index.js"
+import { MultiSet } from './multiset.js'
+import { hash } from './hashing/index.js'
+import type { Hash } from './hashing/index.js'
 
 // We use a symbol to represent the absence of a prefix, unprefixed values a stored
 // against this key.
@@ -69,7 +69,7 @@ class PrefixMap<TValue, TPrefix> extends Map<
       const [currentValue, currentMultiplicity] = valueMapOrSingleValue
       const currentPrefix = getPrefix<TValue, TPrefix>(currentValue)
 
-      if (currentPrefix !== prefix) {
+      if (!isSamePrefix(currentPrefix, prefix)) {
         throw new Error(`Mismatching prefixes, this should never happen`)
       }
 
@@ -183,7 +183,7 @@ export class Index<TKey, TValue, TPrefix = any> {
     return `Index(${JSON.stringify(
       [...this.entries()],
       undefined,
-      indent ? 2 : undefined
+      indent ? 2 : undefined,
     )})`
   }
 
@@ -325,7 +325,7 @@ export class Index<TKey, TValue, TPrefix = any> {
         key,
         mapOrSingleValue,
         value,
-        multiplicity
+        multiplicity,
       )
       return
     }
@@ -362,7 +362,7 @@ export class Index<TKey, TValue, TPrefix = any> {
     key: TKey,
     currentSingleValue: SingleValue<TValue>,
     newValue: TValue,
-    multiplicity: number
+    multiplicity: number,
   ) {
     const [currentValue, currentMultiplicity] = currentSingleValue
 
@@ -383,7 +383,7 @@ export class Index<TKey, TValue, TPrefix = any> {
 
     // Check if they're the same value by prefix/suffix comparison
     if (
-      currentPrefix === newPrefix &&
+      isSamePrefix(currentPrefix, newPrefix) &&
       (currentValue === newValue || hash(currentValue) === hash(newValue))
     ) {
       const newMultiplicity = currentMultiplicity + multiplicity
@@ -406,7 +406,7 @@ export class Index<TKey, TValue, TPrefix = any> {
       // At least one has a prefix, use PrefixMap
       const prefixMap = new PrefixMap<TValue, TPrefix>()
 
-      if (currentPrefix === newPrefix) {
+      if (isSamePrefix(currentPrefix, newPrefix)) {
         // Same prefix, different suffixes - need ValueMap within PrefixMap
         const valueMap = new ValueMap<TValue>()
         valueMap.set(hash(currentValue), currentSingleValue)
@@ -438,7 +438,7 @@ export class Index<TKey, TValue, TPrefix = any> {
    * @returns A multiset of the joined values.
    */
   join<TValue2>(
-    other: Index<TKey, TValue2>
+    other: Index<TKey, TValue2>,
   ): MultiSet<[TKey, [TValue, TValue2]]> {
     const result: Array<[[TKey, [TValue, TValue2]], number]> = []
     // We want to iterate over the smaller of the two indexes to reduce the
@@ -478,6 +478,11 @@ export class Index<TKey, TValue, TPrefix = any> {
  * @param value - The value to extract the prefix from.
  * @returns The prefix and the suffix.
  */
+// Prefixes are Map keys, so they compare as a Map does: NaN equals NaN.
+function isSamePrefix(a: unknown, b: unknown): boolean {
+  return a === b || (Number.isNaN(a) && Number.isNaN(b))
+}
+
 function getPrefix<TValue, TPrefix>(value: TValue): TPrefix | NO_PREFIX {
   // If the value is an array and the first element is a string or number, then the
   // first element is the prefix. This is used to distinguish between values without
@@ -499,7 +504,7 @@ function getPrefix<TValue, TPrefix>(value: TValue): TPrefix | NO_PREFIX {
  * @returns True if the value is a single value, false otherwise.
  */
 function isSingleValue<TValue>(
-  value: SingleValue<TValue> | unknown
+  value: SingleValue<TValue> | unknown,
 ): value is SingleValue<TValue> {
   return Array.isArray(value)
 }

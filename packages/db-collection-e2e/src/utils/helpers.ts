@@ -1,4 +1,4 @@
-import type { Collection } from "@tanstack/db"
+import type { Collection } from '@tanstack/db'
 
 /**
  * Wait for a condition to be true with timeout
@@ -9,7 +9,7 @@ export async function waitFor(
     timeout?: number
     interval?: number
     message?: string
-  } = {}
+  } = {},
 ): Promise<void> {
   const {
     timeout = 5000,
@@ -39,7 +39,7 @@ export function sleep(ms: number): Promise<void> {
  * Get all loaded item IDs from a collection
  */
 export function getLoadedIds<T extends { id: string }>(
-  collection: Collection<T>
+  collection: Collection<T>,
 ): Array<string> {
   return Array.from(collection.state.values()).map((item) => item.id)
 }
@@ -48,7 +48,7 @@ export function getLoadedIds<T extends { id: string }>(
  * Get count of loaded items in a collection
  */
 export function getLoadedCount<T extends object>(
-  collection: Collection<T>
+  collection: Collection<T>,
 ): number {
   return collection.size
 }
@@ -58,7 +58,7 @@ export function getLoadedCount<T extends object>(
  */
 export function hasLoadedIds<T extends { id: string }>(
   collection: Collection<T>,
-  ids: Array<string>
+  ids: Array<string>,
 ): boolean {
   const loadedIds = getLoadedIds(collection)
   return ids.every((id) => loadedIds.includes(id))
@@ -69,7 +69,7 @@ export function hasLoadedIds<T extends { id: string }>(
  */
 export function hasOnlyLoadedIds<T extends { id: string }>(
   collection: Collection<T>,
-  ids: Array<string>
+  ids: Array<string>,
 ): boolean {
   const loadedIds = getLoadedIds(collection)
   const idsSet = new Set(ids)
@@ -93,7 +93,7 @@ export function hasOnlyLoadedIds<T extends { id: string }>(
 export async function waitForCollectionSize<T extends object>(
   collection: Collection<T>,
   expectedSize: number,
-  timeout = 5000
+  timeout = 5000,
 ): Promise<void> {
   await waitFor(() => collection.size === expectedSize, {
     timeout,
@@ -106,7 +106,7 @@ export async function waitForCollectionSize<T extends object>(
  */
 export async function waitForCollectionReady<T extends object>(
   collection: Collection<T>,
-  timeout = 5000
+  timeout = 5000,
 ): Promise<void> {
   await waitFor(() => collection.status === `ready`, {
     timeout,
@@ -124,7 +124,7 @@ export async function waitForQueryData<T extends object>(
   options: {
     minSize?: number
     timeout?: number
-  } = {}
+  } = {},
 ): Promise<void> {
   const { minSize = 1, timeout = 2000 } = options
 
@@ -165,7 +165,7 @@ export function createDeduplicationCounter() {
 export function sortBy<T, K extends keyof T>(
   array: Array<T>,
   field: K,
-  direction: `asc` | `desc` = `asc`
+  direction: `asc` | `desc` = `asc`,
 ): Array<T> {
   return [...array].sort((a, b) => {
     const aVal = a[field]
@@ -182,7 +182,7 @@ export function sortBy<T, K extends keyof T>(
  */
 export function filterBy<T>(
   array: Array<T>,
-  predicate: (item: T) => boolean
+  predicate: (item: T) => boolean,
 ): Array<T> {
   return array.filter(predicate)
 }
@@ -192,7 +192,7 @@ export function filterBy<T>(
  */
 export function paginate<T>(
   array: Array<T>,
-  options: { limit?: number; offset?: number } = {}
+  options: { limit?: number; offset?: number } = {},
 ): Array<T> {
   const { limit, offset = 0 } = options
 

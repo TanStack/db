@@ -3,10 +3,8 @@ id: TransactionState
 title: TransactionState
 ---
 
-# Type Alias: TransactionState
-
 ```ts
 type TransactionState = "pending" | "persisting" | "completed" | "failed";
 ```
 
-Defined in: [packages/db/src/types.ts:61](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L61)
+Defined in: [packages/db/src/types.ts:70](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L70)

@@ -1,6 +1,6 @@
-import { defineConfig, mergeConfig } from "vitest/config"
-import { tanstackViteConfig } from "@tanstack/config/vite"
-import packageJson from "./package.json"
+import { defineConfig, mergeConfig } from 'vitest/config'
+import { tanstackViteConfig } from '@tanstack/vite-config'
+import packageJson from './package.json'
 
 const config = defineConfig({
   test: {
@@ -15,7 +15,8 @@ const config = defineConfig({
 export default mergeConfig(
   config,
   tanstackViteConfig({
-    entry: `./src/index.ts`,
+    entry: [`./src/index.ts`, `./src/react-native/index.ts`],
     srcDir: `./src`,
-  })
+    externalDeps: [`react-native`, `@react-native-community/netinfo`],
+  }),
 )

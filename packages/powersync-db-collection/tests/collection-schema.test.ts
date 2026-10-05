@@ -1,11 +1,12 @@
-import { randomUUID } from "node:crypto"
-import { tmpdir } from "node:os"
-import { PowerSyncDatabase, Schema, Table, column } from "@powersync/node"
-import { SchemaValidationError, createCollection } from "@tanstack/db"
-import { describe, expect, it, onTestFinished, vi } from "vitest"
-import { z } from "zod"
-import { powerSyncCollectionOptions } from "../src"
-import type { StandardSchemaV1 } from "@standard-schema/spec"
+import { randomUUID } from 'node:crypto'
+import { tmpdir } from 'node:os'
+import { PowerSyncDatabase, Schema, Table, column } from '@powersync/node'
+import { SchemaValidationError, createCollection } from '@tanstack/db'
+import { describe, expect, it, onTestFinished, vi } from 'vitest'
+import { z } from 'zod'
+import { powerSyncCollectionOptions } from '../src'
+import { TEST_DATABASE_IMPLEMENTATION } from './test-db-implementation'
+import type { StandardSchemaV1 } from '@standard-schema/spec'
 
 const APP_SCHEMA = new Schema({
   documents: new Table({
@@ -16,13 +17,17 @@ const APP_SCHEMA = new Schema({
   }),
 })
 
-describe(`PowerSync Schema Integration`, () => {
+const describePowerSyncSchema = TEST_DATABASE_IMPLEMENTATION
+  ? describe
+  : describe.skip
+
+describePowerSyncSchema(`PowerSync Schema Integration`, () => {
   async function createDatabase() {
     const db = new PowerSyncDatabase({
       database: {
         dbFilename: `test.sqlite`,
         dbLocation: tmpdir(),
-        implementation: { type: `node:sqlite` },
+        implementation: TEST_DATABASE_IMPLEMENTATION,
       },
       schema: APP_SCHEMA,
     })
@@ -41,13 +46,32 @@ describe(`PowerSync Schema Integration`, () => {
         database: db,
         // We get typing and a default validator from this
         table: APP_SCHEMA.props.documents,
-      })
+      }),
     )
     onTestFinished(() => collection.cleanup())
     return collection
   }
 
   describe(`schema`, () => {
+    function expectInsertValidation(
+      action: () => unknown,
+      message: string,
+      issue: { message: string; path: Array<string> },
+    ) {
+      let error: unknown
+      try {
+        action()
+      } catch (caught) {
+        error = caught
+      }
+      expect(error).toBeInstanceOf(SchemaValidationError)
+      expect(error).toMatchObject({
+        type: `insert`,
+        message: expect.stringContaining(message),
+        issues: expect.arrayContaining([issue]),
+      })
+    }
+
     /**
      * When using the SQLite types for TInput and TOutput, we provide a basic schema validator.
      */
@@ -56,28 +80,24 @@ describe(`PowerSync Schema Integration`, () => {
 
       // the collection should infer types and validate with the schema
       const collection = createDocumentsCollection(db)
-      await collection.stateWhenReady()
-
-      collection.insert({
-        id: randomUUID(),
-        name: `aname`,
-      })
-
-      collection.insert({
-        id: randomUUID(),
-        name: null,
-      })
-
-      expect(collection.size).eq(2)
-
-      // should validate inputs
       try {
-        collection.insert({} as any)
-      } catch (ex) {
-        expect(ex instanceof SchemaValidationError).true
-        if (ex instanceof SchemaValidationError) {
-          expect(ex.message).contains(`id field must be a string`)
-        }
+        await collection.stateWhenReady()
+        const first = collection.insert({ id: randomUUID(), name: `aname` })
+        const second = collection.insert({ id: randomUUID(), name: null })
+        expect(collection.size).eq(2)
+        await Promise.all([
+          first.isPersisted.promise,
+          second.isPersisted.promise,
+        ])
+
+        expectInsertValidation(
+          () => collection.insert({} as any),
+          `id field must be a string`,
+          { message: `id field must be a string`, path: [`id`] },
+        )
+        expect(collection.size).eq(2)
+      } finally {
+        await collection.cleanup()
       }
     })
 
@@ -110,36 +130,30 @@ describe(`PowerSync Schema Integration`, () => {
           table: APP_SCHEMA.props.documents,
           schema,
           onDeserializationError: () => {},
-        })
+        }),
       )
-      onTestFinished(() => collection.cleanup())
-
       try {
-        collection.insert({
-          id: randomUUID(),
-          name: `2`,
-          author: `name`,
-          created_at: new Date().toISOString(),
-          archived: 0,
-        })
-        expect.fail(`Should throw a validation error`)
-      } catch (ex) {
-        expect(ex instanceof SchemaValidationError).true
-        if (ex instanceof SchemaValidationError) {
-          expect(ex.message).contains(errorMessage)
-        }
-      }
-
-      expect(collection.size).eq(0)
-
-      // should validate inputs
-      try {
-        collection.insert({} as any)
-      } catch (ex) {
-        expect(ex instanceof SchemaValidationError).true
-        if (ex instanceof SchemaValidationError) {
-          expect(ex.message).contains(`Required - path: id`)
-        }
+        expectInsertValidation(
+          () =>
+            collection.insert({
+              id: randomUUID(),
+              name: `2`,
+              author: `name`,
+              created_at: new Date().toISOString(),
+              archived: 0,
+            }),
+          errorMessage,
+          { message: errorMessage, path: [`name`] },
+        )
+        expect(collection.size).eq(0)
+        expectInsertValidation(
+          () => collection.insert({} as any),
+          `Required - path: id`,
+          { message: `Required`, path: [`id`] },
+        )
+        expect(collection.size).eq(0)
+      } finally {
+        await collection.cleanup()
       }
     })
 
@@ -170,24 +184,63 @@ describe(`PowerSync Schema Integration`, () => {
           table: APP_SCHEMA.props.documents,
           schema,
           onDeserializationError: () => {},
-        })
+        }),
       )
-      onTestFinished(() => collection.cleanup())
-
-      const testDate = new Date()
+      const testDate = new Date(`2024-03-14T01:59:26.535Z`)
       const id = randomUUID()
-      collection.insert({
-        id,
-        name: `document`,
-        author: `nanme`,
-        created_at: testDate.toISOString(),
-        archived: 0,
-      })
+      try {
+        const result = collection.insert({
+          id,
+          name: `document`,
+          author: `nanme`,
+          created_at: testDate.toISOString(),
+          archived: 0,
+        })
+        const item = collection.get(id)
+        expect(item?.created_at instanceof Date).true
+        expect(
+          item?.created_at instanceof Date
+            ? item.created_at.getTime()
+            : undefined,
+        ).eq(1710381566535)
+        await result.isPersisted.promise
+        expect(
+          await db.getAll(
+            `SELECT id, name, author, created_at, archived FROM documents WHERE id = ?`,
+            [id],
+          ),
+        ).toEqual([
+          {
+            id,
+            name: `document`,
+            author: `nanme`,
+            created_at: `2024-03-14T01:59:26.535Z`,
+            archived: 0,
+          },
+        ])
 
-      const item = collection.get(id)
-
-      expect(item?.created_at instanceof Date).true
-      expect(item?.created_at?.toLocaleString()).eq(testDate.toLocaleString())
+        await db.execute(
+          `INSERT INTO documents (id, name, author, created_at, archived) VALUES (?, ?, ?, ?, ?)`,
+          [`inbound-sqlite`, `inbound`, `peer`, `2025-06-07T08:09:10.123Z`, 1],
+        )
+        await vi.waitFor(() => {
+          const inbound = collection.get(`inbound-sqlite`)
+          expect(inbound?.created_at).toBeInstanceOf(Date)
+          expect(inbound).toMatchObject({
+            id: `inbound-sqlite`,
+            name: `inbound`,
+            author: `peer`,
+            archived: 1,
+          })
+          expect(
+            inbound?.created_at instanceof Date
+              ? inbound.created_at.getTime()
+              : undefined,
+          ).toBe(1749283750123)
+        })
+      } finally {
+        await collection.cleanup()
+      }
     })
 
     /**
@@ -234,24 +287,57 @@ describe(`PowerSync Schema Integration`, () => {
               .transform((val) => (val ? new Date(val) : null)),
           }),
           onDeserializationError: () => {},
-        })
+        }),
       )
-      onTestFinished(() => collection.cleanup())
-
-      const testDate = new Date()
+      const testDate = new Date(`2024-03-14T01:59:26.535Z`)
       const id = randomUUID()
-      collection.insert({
-        id,
-        name: `document`,
-        author: `nanme`,
-        created_at: new Date(),
-        archived: false,
-      })
+      try {
+        const result = collection.insert({
+          id,
+          name: `document`,
+          author: `nanme`,
+          created_at: testDate,
+          archived: false,
+        })
+        const item = collection.get(id)
+        expect(item?.created_at instanceof Date).true
+        expect(item?.created_at?.getTime()).eq(1710381566535)
+        expect(item?.archived).toBe(false)
+        await result.isPersisted.promise
+        expect(
+          await db.getAll(
+            `SELECT id, name, author, created_at, archived FROM documents WHERE id = ?`,
+            [id],
+          ),
+        ).toEqual([
+          {
+            id,
+            name: `document`,
+            author: `nanme`,
+            created_at: `2024-03-14T01:59:26.535Z`,
+            archived: 0,
+          },
+        ])
 
-      const item = collection.get(id)
-
-      expect(item?.created_at instanceof Date).true
-      expect(item?.created_at?.toLocaleString()).eq(testDate.toLocaleString())
+        await db.execute(
+          `INSERT INTO documents (id, name, author, created_at, archived) VALUES (?, ?, ?, ?, ?)`,
+          [`inbound-custom`, `inbound`, `peer`, `2025-06-07T08:09:10.123Z`, 0],
+        )
+        await vi.waitFor(() => {
+          const inbound = collection.get(`inbound-custom`)
+          expect(inbound?.created_at).toBeInstanceOf(Date)
+          // This fixture's configured transform maps SQLite zero to null.
+          expect(inbound).toMatchObject({
+            id: `inbound-custom`,
+            name: `inbound`,
+            author: `peer`,
+            archived: null,
+          })
+          expect(inbound?.created_at?.getTime()).toBe(1749283750123)
+        })
+      } finally {
+        await collection.cleanup()
+      }
     })
 
     /**
@@ -290,24 +376,54 @@ describe(`PowerSync Schema Integration`, () => {
           },
           deserializationSchema: schema,
           onDeserializationError: () => {},
-        })
+        }),
       )
-      onTestFinished(() => collection.cleanup())
-
       const id = randomUUID()
+      try {
+        const result = collection.insert({
+          id,
+          name: `document`,
+          author: `name`,
+          created_at: `2024-03-14T01:59:26.535Z`,
+          archived: 0,
+        })
+        const item = collection.get(id)
+        await result.isPersisted.promise
+        expect(item?.name instanceof MyDataClass).true
+        expect(item?.name?.options.value).eq(`document`)
+        expect(
+          await db.getAll(
+            `SELECT id, name, author, created_at, archived FROM documents WHERE id = ?`,
+            [id],
+          ),
+        ).toEqual([
+          {
+            id,
+            name: `document`,
+            author: `name`,
+            created_at: `2024-03-14T01:59:26.535Z`,
+            archived: 0,
+          },
+        ])
 
-      const result = collection.insert({
-        id,
-        name: `document`,
-        author: `name`,
-        created_at: new Date().toISOString(),
-        archived: 0,
-      })
-
-      const item = collection.get(id)
-      await result.isPersisted.promise
-      expect(item?.name instanceof MyDataClass).true
-      expect(item?.name?.options.value).eq(`document`)
+        await db.execute(
+          `INSERT INTO documents (id, name, author, created_at, archived) VALUES (?, ?, ?, ?, ?)`,
+          [`inbound-class`, `from-sql`, `peer`, `2025-06-07T08:09:10.123Z`, 1],
+        )
+        await vi.waitFor(() => {
+          const inbound = collection.get(`inbound-class`)
+          expect(inbound?.name).toBeInstanceOf(MyDataClass)
+          expect(inbound?.name?.options.value).toBe(`from-sql`)
+          expect(inbound).toMatchObject({
+            id: `inbound-class`,
+            author: `peer`,
+            created_at: `2025-06-07T08:09:10.123Z`,
+            archived: 1,
+          })
+        })
+      } finally {
+        await collection.cleanup()
+      }
     })
 
     /**
@@ -329,7 +445,7 @@ describe(`PowerSync Schema Integration`, () => {
       })
 
       const onError = vi.fn((() => {}) as (
-        error: StandardSchemaV1.FailureResult
+        error: StandardSchemaV1.FailureResult,
       ) => void)
 
       const collection = createCollection(
@@ -338,7 +454,7 @@ describe(`PowerSync Schema Integration`, () => {
           table: APP_SCHEMA.props.documents,
           schema,
           onDeserializationError: onError,
-        })
+        }),
       )
       onTestFinished(() => collection.cleanup())
 
@@ -355,7 +471,7 @@ describe(`PowerSync Schema Integration`, () => {
           // Each column which should have been defined
           expect(issues?.length).eq(4)
         },
-        { timeout: 1000 }
+        { timeout: 1000 },
       )
     })
   })

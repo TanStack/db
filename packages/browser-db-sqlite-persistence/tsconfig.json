@@ -1,0 +1,37 @@
+{
+  "extends": "../../tsconfig.json",
+  "compilerOptions": {
+    "target": "ES2020",
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "declaration": true,
+    "outDir": "dist",
+    "strict": true,
+    "esModuleInterop": true,
+    "skipLibCheck": true,
+    "forceConsistentCasingInFileNames": true,
+    "jsx": "react",
+    "paths": {
+      "@tanstack/db": ["../db/src"],
+      "@tanstack/db-ivm": ["../db-ivm/src"],
+      "@tanstack/db-sqlite-persistence-core": [
+        "../db-sqlite-persistence-core/src"
+      ],
+      "@tanstack/db-sqlite-persistence-core/*": [
+        "../db-sqlite-persistence-core/src/*"
+      ],
+      "@tanstack/query-db-collection": ["../query-db-collection/src"]
+    }
+  },
+  "include": [
+    "src",
+    "tests",
+    "e2e",
+    "vite.config.ts",
+    "vite.opfs.config.ts",
+    "vitest.e2e.config.ts",
+    "playwright.opfs.config.ts",
+    "playwright.opfs-electric.config.ts"
+  ],
+  "exclude": ["node_modules", "dist"]
+}

@@ -1,4 +1,4 @@
-import { BaseLeaderElection } from "./LeaderElection"
+import { BaseLeaderElection } from './LeaderElection'
 
 export class WebLocksLeader extends BaseLeaderElection {
   private lockName: string
@@ -28,12 +28,18 @@ export class WebLocksLeader extends BaseLeaderElection {
         },
         (lock) => {
           return lock !== null
-        }
+        },
       )
 
       if (!available) {
         return false
       }
+
+      // Set state immediately to prevent duplicate notifications
+      // when the async lock acquisition calls notifyLeadershipChange(true).
+      // The guard in notifyLeadershipChange checks `isLeaderState !== isLeader`,
+      // so setting this to true here prevents the callback from firing again.
+      this.isLeaderState = true
 
       // Lock is available, now acquire it for real and hold it
       navigator.locks.request(
@@ -52,7 +58,7 @@ export class WebLocksLeader extends BaseLeaderElection {
               }
             })
           }
-        }
+        },
       )
 
       return true

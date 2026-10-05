@@ -1,13 +1,13 @@
-import { beforeEach, describe, expect, test } from "vitest"
+import { beforeEach, describe, expect, test } from 'vitest'
 import {
   concat,
   createLiveQueryCollection,
   eq,
   gt,
   upper,
-} from "../../src/query/index.js"
-import { createCollection } from "../../src/collection/index.js"
-import { mockSyncCollectionOptions } from "../utils.js"
+} from '../../src/query/index.js'
+import { createCollection } from '../../src/collection/index.js'
+import { mockSyncCollectionOptions, stripVirtualProps } from '../utils.js'
 
 // Sample user type for tests
 type User = {
@@ -102,7 +102,7 @@ function createUsersCollection(autoIndex: `off` | `eager` = `eager`) {
       getKey: (user) => user.id,
       initialData: sampleUsers,
       autoIndex,
-    })
+    }),
   )
 }
 
@@ -131,7 +131,7 @@ function createBasicTests(autoIndex: `off` | `eager`) {
 
       expect(results).toHaveLength(4)
       expect(results.map((u) => u.name)).toEqual(
-        expect.arrayContaining([`Alice`, `Bob`, `Charlie`, `Dave`])
+        expect.arrayContaining([`Alice`, `Bob`, `Charlie`, `Dave`]),
       )
 
       // Insert a new user
@@ -184,7 +184,7 @@ function createBasicTests(autoIndex: `off` | `eager`) {
           age: user.age,
           email: user.email,
           active: user.active,
-        }))
+        })),
       )
 
       await liveCollection.preload()
@@ -193,7 +193,7 @@ function createBasicTests(autoIndex: `off` | `eager`) {
 
       expect(results).toHaveLength(4)
       expect(results.map((u) => u.name)).toEqual(
-        expect.arrayContaining([`Alice`, `Bob`, `Charlie`, `Dave`])
+        expect.arrayContaining([`Alice`, `Bob`, `Charlie`, `Dave`]),
       )
 
       // Insert a new user
@@ -257,7 +257,7 @@ function createBasicTests(autoIndex: `off` | `eager`) {
       expect(results).toHaveLength(3)
       expect(results.every((u) => u.active)).toBe(true)
       expect(results.map((u) => u.name)).toEqual(
-        expect.arrayContaining([`Alice`, `Bob`, `Dave`])
+        expect.arrayContaining([`Alice`, `Bob`, `Dave`]),
       )
 
       // Insert a new active user
@@ -354,7 +354,7 @@ function createBasicTests(autoIndex: `off` | `eager`) {
       })
 
       expect(results.map((u) => u.name)).toEqual(
-        expect.arrayContaining([`Alice`, `Charlie`, `Dave`])
+        expect.arrayContaining([`Alice`, `Charlie`, `Dave`]),
       )
 
       // Insert a new user over 20 (should be included)
@@ -546,7 +546,9 @@ function createBasicTests(autoIndex: `off` | `eager`) {
       expect(results[0]).toHaveProperty(`active`)
 
       // Verify the data matches exactly
-      expect(results).toEqual(expect.arrayContaining(sampleUsers))
+      expect(results.map((row) => stripVirtualProps(row))).toEqual(
+        expect.arrayContaining(sampleUsers),
+      )
 
       // Insert a new user
       const newUser = {
@@ -564,7 +566,7 @@ function createBasicTests(autoIndex: `off` | `eager`) {
       usersCollection.utils.commit()
 
       expect(liveCollection.size).toBe(5)
-      expect(liveCollection.get(5)).toEqual(newUser)
+      expect(stripVirtualProps(liveCollection.get(5))).toEqual(newUser)
 
       // Update the new user
       const updatedUser = { ...newUser, name: `Eve Updated` }
@@ -576,7 +578,7 @@ function createBasicTests(autoIndex: `off` | `eager`) {
       usersCollection.utils.commit()
 
       expect(liveCollection.size).toBe(5)
-      expect(liveCollection.get(5)).toEqual(updatedUser)
+      expect(stripVirtualProps(liveCollection.get(5))).toEqual(updatedUser)
 
       // Delete the new user
       usersCollection.utils.begin()
@@ -615,7 +617,7 @@ function createBasicTests(autoIndex: `off` | `eager`) {
       })
 
       expect(results.map((u) => u.name)).toEqual(
-        expect.arrayContaining([`Alice`, `Bob`, `Dave`])
+        expect.arrayContaining([`Alice`, `Bob`, `Dave`]),
       )
 
       // Insert a new active user
@@ -634,7 +636,7 @@ function createBasicTests(autoIndex: `off` | `eager`) {
       usersCollection.utils.commit()
 
       expect(activeLiveCollection.size).toBe(4) // Should include the new active user
-      expect(activeLiveCollection.get(5)).toEqual(newUser)
+      expect(stripVirtualProps(activeLiveCollection.get(5))).toEqual(newUser)
 
       // Update the new user to inactive (should remove from active collection)
       const inactiveUser = { ...newUser, active: false }
@@ -659,7 +661,7 @@ function createBasicTests(autoIndex: `off` | `eager`) {
 
     test(`should return original collection type with query function syntax and no select`, async () => {
       const liveCollection = createLiveQueryCollection((q) =>
-        q.from({ user: usersCollection }).where(({ user }) => gt(user.age, 20))
+        q.from({ user: usersCollection }).where(({ user }) => gt(user.age, 20)),
       )
 
       await liveCollection.preload()
@@ -679,7 +681,7 @@ function createBasicTests(autoIndex: `off` | `eager`) {
       })
 
       expect(results.map((u) => u.name)).toEqual(
-        expect.arrayContaining([`Alice`, `Charlie`, `Dave`])
+        expect.arrayContaining([`Alice`, `Charlie`, `Dave`]),
       )
     })
 
@@ -712,12 +714,12 @@ function createBasicTests(autoIndex: `off` | `eager`) {
 
       // Verify that the computed field is correctly applied
       expect(results.map((u) => u.name_upper)).toEqual(
-        expect.arrayContaining([`ALICE`, `CHARLIE`, `DAVE`])
+        expect.arrayContaining([`ALICE`, `CHARLIE`, `DAVE`]),
       )
 
       // Verify original names are preserved
       expect(results.map((u) => u.name)).toEqual(
-        expect.arrayContaining([`Alice`, `Charlie`, `Dave`])
+        expect.arrayContaining([`Alice`, `Charlie`, `Dave`]),
       )
 
       // Test specific user data
@@ -787,7 +789,10 @@ function createBasicTests(autoIndex: `off` | `eager`) {
           q
             .from({ user: usersCollection })
             .where(({ user }) =>
-              eq(user.profile?.bio, `Software engineer with 5 years experience`)
+              eq(
+                user.profile?.bio,
+                `Software engineer with 5 years experience`,
+              ),
             )
             .select(({ user }) => ({
               id: user.id,

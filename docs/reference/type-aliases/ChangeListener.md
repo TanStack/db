@@ -3,15 +3,15 @@ id: ChangeListener
 title: ChangeListener
 ---
 
-# Type Alias: ChangeListener()\<T, TKey\>
-
 ```ts
 type ChangeListener<T, TKey> = (changes) => void;
 ```
 
-Defined in: [packages/db/src/types.ts:756](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L756)
+Defined in: [packages/db/src/types.ts:1178](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L1178)
 
 Function type for listening to collection changes
+Changes to the same key retain their causal order within a callback.
+Changes to different keys have no promised order within a callback.
 
 ## Type Parameters
 
@@ -27,7 +27,7 @@ Function type for listening to collection changes
 
 ### changes
 
-[`ChangeMessage`](../../interfaces/ChangeMessage.md)\<`T`, `TKey`\>[]
+[`ChangeMessage`](../interfaces/ChangeMessage.md)\<[`WithVirtualProps`](WithVirtualProps.md)\<`T`, `TKey`\>, `TKey`\>[]
 
 Array of change messages describing what happened
 

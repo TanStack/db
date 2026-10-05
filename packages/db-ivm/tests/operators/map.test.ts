@@ -1,7 +1,7 @@
-import { describe, expect, test } from "vitest"
-import { D2 } from "../../src/d2.js"
-import { MultiSet } from "../../src/multiset.js"
-import { map, output } from "../../src/operators/index.js"
+import { describe, expect, test } from 'vitest'
+import { D2 } from '../../src/d2.js'
+import { MultiSet } from '../../src/multiset.js'
+import { map, output } from '../../src/operators/index.js'
 
 describe(`Operators`, () => {
   describe(`Map operation`, () => {
@@ -14,7 +14,7 @@ describe(`Operators`, () => {
         map((x) => x + 5),
         output((message) => {
           messages.push(message)
-        })
+        }),
       )
 
       graph.finalize()
@@ -24,7 +24,7 @@ describe(`Operators`, () => {
           [1, 1],
           [2, 1],
           [3, 1],
-        ])
+        ]),
       )
 
       graph.run()
@@ -48,7 +48,7 @@ describe(`Operators`, () => {
         map((x) => x + 1),
         output((message) => {
           messages.push(message)
-        })
+        }),
       )
 
       graph.finalize()
@@ -58,7 +58,7 @@ describe(`Operators`, () => {
           [1, 1],
           [2, 1],
           [3, 1],
-        ])
+        ]),
       )
 
       graph.run()
@@ -81,7 +81,7 @@ describe(`Operators`, () => {
         map((x) => x + 1),
         output((message) => {
           messages.push(message)
-        })
+        }),
       )
 
       graph.finalize()
@@ -91,7 +91,7 @@ describe(`Operators`, () => {
           [1, -1],
           [2, -2],
           [3, 1],
-        ])
+        ]),
       )
 
       graph.run()

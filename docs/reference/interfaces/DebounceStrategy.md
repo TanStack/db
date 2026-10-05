@@ -3,15 +3,13 @@ id: DebounceStrategy
 title: DebounceStrategy
 ---
 
-# Interface: DebounceStrategy
-
 Defined in: [packages/db/src/strategies/types.ts:42](https://github.com/TanStack/db/blob/main/packages/db/src/strategies/types.ts#L42)
 
 Debounce strategy that delays execution until activity stops
 
 ## Extends
 
-- [`BaseStrategy`](../BaseStrategy.md)\<`"debounce"`\>
+- [`BaseStrategy`](BaseStrategy.md)\<`"debounce"`\>
 
 ## Properties
 
@@ -27,7 +25,7 @@ Type discriminator for strategy identification
 
 #### Inherited from
 
-[`BaseStrategy`](../BaseStrategy.md).[`_type`](../BaseStrategy.md#_type)
+[`BaseStrategy`](BaseStrategy.md).[`_type`](BaseStrategy.md#_type)
 
 ***
 
@@ -48,14 +46,14 @@ Should be called when the strategy is no longer needed
 
 #### Inherited from
 
-[`BaseStrategy`](../BaseStrategy.md).[`cleanup`](../BaseStrategy.md#cleanup)
+[`BaseStrategy`](BaseStrategy.md).[`cleanup`](BaseStrategy.md#cleanup)
 
 ***
 
 ### execute()
 
 ```ts
-execute: <T>(fn) => void | Promise<void>;
+execute: <T>(fn) => boolean | void | Promise<void>;
 ```
 
 Defined in: [packages/db/src/strategies/types.ts:15](https://github.com/TanStack/db/blob/main/packages/db/src/strategies/types.ts#L15)
@@ -72,19 +70,19 @@ Execute a function according to the strategy's timing rules
 
 ##### fn
 
-() => [`Transaction`](../Transaction.md)\<`T`\>
+() => [`Transaction`](Transaction.md)\<`T`\>
 
 The function to execute
 
 #### Returns
 
-`void` \| `Promise`\<`void`\>
+`boolean` \| `void` \| `Promise`\<`void`\>
 
 The result of the function execution (if applicable)
 
 #### Inherited from
 
-[`BaseStrategy`](../BaseStrategy.md).[`execute`](../BaseStrategy.md#execute)
+[`BaseStrategy`](BaseStrategy.md).[`execute`](BaseStrategy.md#execute)
 
 ***
 

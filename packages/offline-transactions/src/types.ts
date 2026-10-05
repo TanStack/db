@@ -2,7 +2,8 @@ import type {
   Collection,
   MutationFnParams,
   PendingMutation,
-} from "@tanstack/db"
+  Transaction,
+} from '@tanstack/db'
 
 // Extended mutation function that includes idempotency key
 export type OfflineMutationFnParams<
@@ -12,7 +13,7 @@ export type OfflineMutationFnParams<
 }
 
 export type OfflineMutationFn<T extends object = Record<string, unknown>> = (
-  params: OfflineMutationFnParams<T>
+  params: OfflineMutationFnParams<T>,
 ) => Promise<any>
 
 // Simplified mutation structure for serialization
@@ -21,6 +22,7 @@ export interface SerializedMutation {
   type: string
   modified: any
   original: any
+  changes: any
   collectionId: string
 }
 
@@ -47,6 +49,8 @@ export interface OfflineTransaction {
   createdAt: Date
   retryCount: number
   nextAttemptAt: number
+  /** Provider work has settled; only durable outbox deletion remains. */
+  outboxPhase?: `deletion-pending` | `rejection-pending`
   lastError?: SerializedError
   metadata?: Record<string, any>
   spanContext?: SerializedSpanContext
@@ -55,14 +59,18 @@ export interface OfflineTransaction {
 
 // Serialized representation for storage
 export interface SerializedOfflineTransaction {
+  /** Absent for the original Date-marker format. */
+  valueEncoding?: 2 | 3
   id: string
   mutationFnName: string
   mutations: Array<SerializedMutation>
   keys: Array<string>
   idempotencyKey: string
-  createdAt: Date
+  createdAt: string
   retryCount: number
   nextAttemptAt: number
+  /** Absent in older records and while mutationFn may still need to run. */
+  outboxPhase?: `deletion-pending` | `rejection-pending`
   lastError?: SerializedError
   metadata?: Record<string, any>
   spanContext?: SerializedSpanContext
@@ -88,19 +96,24 @@ export interface StorageDiagnostic {
 }
 
 export interface OfflineConfig {
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   collections: Record<string, Collection<any, any, any, any, any>>
   mutationFns: Record<string, OfflineMutationFn>
   storage?: StorageAdapter
   maxConcurrency?: number
   jitter?: boolean
   beforeRetry?: (
-    transactions: Array<OfflineTransaction>
+    transactions: Array<OfflineTransaction>,
   ) => Array<OfflineTransaction>
   onUnknownMutationFn?: (name: string, tx: OfflineTransaction) => void
   onLeadershipChange?: (isLeader: boolean) => void
   onStorageFailure?: (diagnostic: StorageDiagnostic) => void
   leaderElection?: LeaderElection
+  /**
+   * Custom online detector implementation.
+   * Defaults to WebOnlineDetector for browser environments.
+   * The '@tanstack/offline-transactions/react-native' entry point uses ReactNativeOnlineDetector automatically.
+   */
+  onlineDetector?: OnlineDetector
 }
 
 export interface StorageAdapter {
@@ -123,9 +136,22 @@ export interface LeaderElection {
   onLeadershipChange: (callback: (isLeader: boolean) => void) => () => void
 }
 
+export interface TransactionSignaler {
+  readonly isOfflineEnabled: boolean
+  resolveTransaction: (transactionId: string, result: any) => void
+  rejectTransaction: (transactionId: string, error: Error) => void
+  registerRestorationTransaction: (
+    offlineTransactionId: string,
+    restorationTransaction: Transaction,
+  ) => void
+  isOnline: () => boolean
+}
+
 export interface OnlineDetector {
   subscribe: (callback: () => void) => () => void
   notifyOnline: () => void
+  isOnline: () => boolean
+  dispose: () => void
 }
 
 export interface CreateOfflineTransactionOptions {

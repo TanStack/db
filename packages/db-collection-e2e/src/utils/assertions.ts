@@ -1,6 +1,6 @@
-import { expect } from "vitest"
-import { getLoadedIds } from "./helpers"
-import type { Collection } from "@tanstack/db"
+import { expect } from 'vitest'
+import { getLoadedIds } from './helpers'
+import type { Collection } from '@tanstack/db'
 
 /**
  * Assert that a collection has loaded exactly the expected items (no more, no less)
@@ -8,7 +8,7 @@ import type { Collection } from "@tanstack/db"
 export function assertLoadedExactly<T extends { id: string }>(
   collection: Collection<T>,
   expectedIds: Array<string>,
-  message?: string
+  message?: string,
 ) {
   const loadedIds = getLoadedIds(collection)
   const loadedSet = new Set(loadedIds)
@@ -19,7 +19,7 @@ export function assertLoadedExactly<T extends { id: string }>(
   if (extraIds.length > 0) {
     throw new Error(
       message ??
-        `Collection has extra items: ${extraIds.join(`, `)} (expected only: ${expectedIds.join(`, `)})`
+        `Collection has extra items: ${extraIds.join(`, `)} (expected only: ${expectedIds.join(`, `)})`,
     )
   }
 
@@ -28,7 +28,7 @@ export function assertLoadedExactly<T extends { id: string }>(
   if (missingIds.length > 0) {
     throw new Error(
       message ??
-        `Collection is missing items: ${missingIds.join(`, `)} (loaded: ${loadedIds.join(`, `)})`
+        `Collection is missing items: ${missingIds.join(`, `)} (loaded: ${loadedIds.join(`, `)})`,
     )
   }
 }
@@ -39,7 +39,7 @@ export function assertLoadedExactly<T extends { id: string }>(
 export function assertLoadedAtLeast<T extends { id: string }>(
   collection: Collection<T>,
   expectedIds: Array<string>,
-  message?: string
+  message?: string,
 ) {
   const loadedIds = getLoadedIds(collection)
   const loadedSet = new Set(loadedIds)
@@ -48,7 +48,7 @@ export function assertLoadedAtLeast<T extends { id: string }>(
   if (missingIds.length > 0) {
     throw new Error(
       message ??
-        `Collection is missing items: ${missingIds.join(`, `)} (loaded: ${loadedIds.join(`, `)})`
+        `Collection is missing items: ${missingIds.join(`, `)} (loaded: ${loadedIds.join(`, `)})`,
     )
   }
 }
@@ -59,7 +59,7 @@ export function assertLoadedAtLeast<T extends { id: string }>(
 export function assertNotLoaded<T extends { id: string }>(
   collection: Collection<T>,
   forbiddenIds: Array<string>,
-  message?: string
+  message?: string,
 ) {
   const loadedIds = getLoadedIds(collection)
   const loadedSet = new Set(loadedIds)
@@ -67,7 +67,7 @@ export function assertNotLoaded<T extends { id: string }>(
   const foundIds = forbiddenIds.filter((id) => loadedSet.has(id))
   if (foundIds.length > 0) {
     throw new Error(
-      message ?? `Collection should not have loaded: ${foundIds.join(`, `)}`
+      message ?? `Collection should not have loaded: ${foundIds.join(`, `)}`,
     )
   }
 }
@@ -78,7 +78,7 @@ export function assertNotLoaded<T extends { id: string }>(
 export function assertCollectionSize<T extends object>(
   collection: Collection<T>,
   expectedSize: number,
-  message?: string
+  message?: string,
 ) {
   expect(collection.size, message).toBe(expectedSize)
 }
@@ -89,7 +89,7 @@ export function assertCollectionSize<T extends object>(
 export function assertAllItemsMatch<T extends object>(
   collection: Collection<T>,
   predicate: (item: T) => boolean,
-  message?: string
+  message?: string,
 ) {
   const items = Array.from(collection.state.values())
   const failingItems = items.filter((item) => !predicate(item))
@@ -97,7 +97,7 @@ export function assertAllItemsMatch<T extends object>(
   if (failingItems.length > 0) {
     throw new Error(
       message ??
-        `${failingItems.length} item(s) did not match predicate: ${JSON.stringify(failingItems[0])}`
+        `${failingItems.length} item(s) did not match predicate: ${JSON.stringify(failingItems[0])}`,
     )
   }
 }
@@ -109,7 +109,7 @@ export function assertSorted<T, K extends keyof T>(
   items: Array<T>,
   field: K,
   direction: `asc` | `desc` = `asc`,
-  message?: string
+  message?: string,
 ) {
   for (let i = 1; i < items.length; i++) {
     const prev = items[i - 1]![field]
@@ -119,14 +119,14 @@ export function assertSorted<T, K extends keyof T>(
       if (prev > curr) {
         throw new Error(
           message ??
-            `Items not sorted ascending by ${String(field)}: ${prev} > ${curr} at index ${i}`
+            `Items not sorted ascending by ${String(field)}: ${prev} > ${curr} at index ${i}`,
         )
       }
     } else {
       if (prev < curr) {
         throw new Error(
           message ??
-            `Items not sorted descending by ${String(field)}: ${prev} < ${curr} at index ${i}`
+            `Items not sorted descending by ${String(field)}: ${prev} < ${curr} at index ${i}`,
         )
       }
     }
@@ -140,7 +140,7 @@ export function assertSorted<T, K extends keyof T>(
 export function assertNoPushdownViolation<T extends { id: string }>(
   collection: Collection<T>,
   expectedMaxIds: Array<string>,
-  message?: string
+  message?: string,
 ) {
   const loadedIds = getLoadedIds(collection)
   const expectedSet = new Set(expectedMaxIds)
@@ -151,7 +151,7 @@ export function assertNoPushdownViolation<T extends { id: string }>(
   if (extraIds.length > 0) {
     throw new Error(
       message ??
-        `Predicate pushdown violation: Collection loaded ${extraIds.length} extra item(s) that don't match the predicate`
+        `Predicate pushdown violation: Collection loaded ${extraIds.length} extra item(s) that don't match the predicate`,
     )
   }
 }
@@ -163,7 +163,7 @@ export function assertDeduplicationOccurred(
   actualLoads: number,
   deduplicatedLoads: number,
   expectedActualLoads: number,
-  message?: string
+  message?: string,
 ) {
   expect(actualLoads, message ?? `Actual loads`).toBe(expectedActualLoads)
   expect(deduplicatedLoads, message ?? `Deduplicated loads`).toBeGreaterThan(0)
@@ -175,7 +175,7 @@ export function assertDeduplicationOccurred(
 export function assertNoDeduplication(
   actualLoads: number,
   deduplicatedLoads: number,
-  message?: string
+  message?: string,
 ) {
   expect(deduplicatedLoads, message ?? `Deduplicated loads`).toBe(0)
   expect(actualLoads, message ?? `Actual loads`).toBeGreaterThan(0)

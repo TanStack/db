@@ -3,9 +3,7 @@ id: QueryRef
 title: QueryRef
 ---
 
-# Class: QueryRef
-
-Defined in: [packages/db/src/query/ir.ts:82](https://github.com/TanStack/db/blob/main/packages/db/src/query/ir.ts#L82)
+Defined in: [packages/db/src/query/ir.ts:106](https://github.com/TanStack/db/blob/main/packages/db/src/query/ir.ts#L106)
 
 ## Extends
 
@@ -19,13 +17,13 @@ Defined in: [packages/db/src/query/ir.ts:82](https://github.com/TanStack/db/blob
 new QueryRef(query, alias): QueryRef;
 ```
 
-Defined in: [packages/db/src/query/ir.ts:84](https://github.com/TanStack/db/blob/main/packages/db/src/query/ir.ts#L84)
+Defined in: [packages/db/src/query/ir.ts:108](https://github.com/TanStack/db/blob/main/packages/db/src/query/ir.ts#L108)
 
 #### Parameters
 
 ##### query
 
-[`QueryIR`](../../interfaces/QueryIR.md)
+[`QueryIR`](../interfaces/QueryIR.md)
 
 ##### alias
 
@@ -49,7 +47,7 @@ BaseExpression.constructor
 readonly __returnType: any;
 ```
 
-Defined in: [packages/db/src/query/ir.ts:69](https://github.com/TanStack/db/blob/main/packages/db/src/query/ir.ts#L69)
+Defined in: [packages/db/src/query/ir.ts:86](https://github.com/TanStack/db/blob/main/packages/db/src/query/ir.ts#L86)
 
 **`Internal`**
 
@@ -69,7 +67,7 @@ BaseExpression.__returnType
 alias: string;
 ```
 
-Defined in: [packages/db/src/query/ir.ts:86](https://github.com/TanStack/db/blob/main/packages/db/src/query/ir.ts#L86)
+Defined in: [packages/db/src/query/ir.ts:110](https://github.com/TanStack/db/blob/main/packages/db/src/query/ir.ts#L110)
 
 ***
 
@@ -79,7 +77,7 @@ Defined in: [packages/db/src/query/ir.ts:86](https://github.com/TanStack/db/blob
 query: QueryIR;
 ```
 
-Defined in: [packages/db/src/query/ir.ts:85](https://github.com/TanStack/db/blob/main/packages/db/src/query/ir.ts#L85)
+Defined in: [packages/db/src/query/ir.ts:109](https://github.com/TanStack/db/blob/main/packages/db/src/query/ir.ts#L109)
 
 ***
 
@@ -89,7 +87,7 @@ Defined in: [packages/db/src/query/ir.ts:85](https://github.com/TanStack/db/blob
 type: "queryRef";
 ```
 
-Defined in: [packages/db/src/query/ir.ts:83](https://github.com/TanStack/db/blob/main/packages/db/src/query/ir.ts#L83)
+Defined in: [packages/db/src/query/ir.ts:107](https://github.com/TanStack/db/blob/main/packages/db/src/query/ir.ts#L107)
 
 #### Overrides
 

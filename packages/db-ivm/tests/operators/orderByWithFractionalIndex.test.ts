@@ -1,14 +1,23 @@
-import { beforeAll, describe, expect, test } from "vitest"
-import { D2 } from "../../src/d2.js"
-import { MultiSet } from "../../src/multiset.js"
+import { beforeAll, describe, expect, test } from 'vitest'
+import { D2 } from '../../src/d2.js'
+import { MultiSet } from '../../src/multiset.js'
 import {
   orderByWithFractionalIndex,
   output,
-} from "../../src/operators/index.js"
-import { orderByWithFractionalIndexBTree } from "../../src/operators/orderByBTree.js"
-import { loadBTree } from "../../src/operators/topKWithFractionalIndexBTree.js"
-import { MessageTracker, compareFractionalIndex } from "../test-utils.js"
-import type { KeyValue } from "../../src/types.js"
+} from '../../src/operators/index.js'
+import { orderByWithFractionalIndexBase } from '../../src/operators/orderBy.js'
+import {
+  loadBTree,
+  topKWithFractionalIndexBTree,
+} from '../../src/operators/topKWithFractionalIndexBTree.js'
+import { MessageTracker, compareFractionalIndex } from '../test-utils.js'
+import type { KeyValue } from '../../src/types.js'
+
+const orderByWithBTree: typeof orderByWithFractionalIndex = (
+  extract,
+  options,
+) =>
+  orderByWithFractionalIndexBase(topKWithFractionalIndexBTree, extract, options)
 
 const stripFractionalIndex = ([[key, [value, _index]], multiplicity]: any) => [
   key,
@@ -17,7 +26,7 @@ const stripFractionalIndex = ([[key, [value, _index]], multiplicity]: any) => [
 ]
 
 const stripFractionalIndexWithoutMultiplicity = (
-  r: [string, [{ id: number; value: string }, string]]
+  r: [string, [{ id: number; value: string }, string]],
 ) => [r[0], r[1][0]]
 
 beforeAll(async () => {
@@ -27,7 +36,7 @@ beforeAll(async () => {
 describe(`Operators`, () => {
   describe.each([
     [`with array`, { orderBy: orderByWithFractionalIndex }],
-    [`with B+ tree`, { orderBy: orderByWithFractionalIndexBTree }],
+    [`with B+ tree`, { orderBy: orderByWithBTree }],
   ])(`OrderByWithFractionalIndex operator %s`, (_, { orderBy }) => {
     test(`initial results with default comparator`, () => {
       const graph = new D2()
@@ -46,7 +55,7 @@ describe(`Operators`, () => {
         orderBy((item) => item.value),
         output((message) => {
           latestMessage = message
-        })
+        }),
       )
 
       graph.finalize()
@@ -58,7 +67,7 @@ describe(`Operators`, () => {
           [[`key3`, { id: 3, value: `b` }], 1],
           [[`key4`, { id: 4, value: `y` }], 1],
           [[`key5`, { id: 5, value: `c` }], 1],
-        ])
+        ]),
       )
 
       graph.run()
@@ -96,7 +105,7 @@ describe(`Operators`, () => {
         }),
         output((message) => {
           latestMessage = message
-        })
+        }),
       )
 
       graph.finalize()
@@ -108,7 +117,7 @@ describe(`Operators`, () => {
           [[`key3`, { id: 3, value: `b` }], 1],
           [[`key4`, { id: 4, value: `y` }], 1],
           [[`key5`, { id: 5, value: `c` }], 1],
-        ])
+        ]),
       )
 
       graph.run()
@@ -144,7 +153,7 @@ describe(`Operators`, () => {
         orderBy((item) => item.value, { limit: 3 }),
         output((message) => {
           latestMessage = message
-        })
+        }),
       )
 
       graph.finalize()
@@ -156,7 +165,7 @@ describe(`Operators`, () => {
           [[`key3`, { id: 3, value: `b` }], 1],
           [[`key4`, { id: 4, value: `y` }], 1],
           [[`key5`, { id: 5, value: `c` }], 1],
-        ])
+        ]),
       )
 
       graph.run()
@@ -193,7 +202,7 @@ describe(`Operators`, () => {
         }),
         output((message) => {
           latestMessage = message
-        })
+        }),
       )
 
       graph.finalize()
@@ -205,7 +214,7 @@ describe(`Operators`, () => {
           [[`key3`, { id: 3, value: `b` }], 1],
           [[`key4`, { id: 4, value: `y` }], 1],
           [[`key5`, { id: 5, value: `c` }], 1],
-        ])
+        ]),
       )
 
       graph.run()
@@ -238,7 +247,7 @@ describe(`Operators`, () => {
         orderBy((item) => item.id),
         output((message) => {
           latestMessage = message
-        })
+        }),
       )
 
       graph.finalize()
@@ -250,7 +259,7 @@ describe(`Operators`, () => {
           [[`key1`, { id: 1, value: `a` }], 1],
           [[`key4`, { id: 4, value: `d` }], 1],
           [[`key2`, { id: 2, value: `b` }], 1],
-        ])
+        ]),
       )
 
       graph.run()
@@ -286,7 +295,7 @@ describe(`Operators`, () => {
         orderBy((item) => item.value, { limit: 3 }),
         output((message) => {
           latestMessage = message
-        })
+        }),
       )
 
       graph.finalize()
@@ -297,7 +306,7 @@ describe(`Operators`, () => {
           [[`key1`, { id: 1, value: `a` }], 1],
           [[`key3`, { id: 3, value: `c` }], 1],
           [[`key2`, { id: 2, value: `b` }], 1],
-        ])
+        ]),
       )
       graph.run()
 
@@ -317,7 +326,7 @@ describe(`Operators`, () => {
       input.sendData(
         new MultiSet([
           [[`key4`, { id: 4, value: `aa` }], 1], // Should be second in order
-        ])
+        ]),
       )
       graph.run()
 
@@ -352,7 +361,7 @@ describe(`Operators`, () => {
         orderBy((item) => item.value, { limit: 3 }),
         output((message) => {
           tracker.addMessage(message)
-        })
+        }),
       )
 
       graph.finalize()
@@ -364,17 +373,19 @@ describe(`Operators`, () => {
           [[`key3`, { id: 3, value: `c` }], 1],
           [[`key2`, { id: 2, value: `b` }], 1],
           [[`key4`, { id: 4, value: `d` }], 1],
-        ])
+        ]),
       )
       graph.run()
 
       const initialResult = tracker.getResult(compareFractionalIndex)
       // Should have the top 3 items by value
       expect(initialResult.sortedResults.length).toBe(3)
-      expect(initialResult.messageCount).toBeLessThanOrEqual(4) // Should be efficient
+      expect(initialResult.deltaCount).toBeLessThanOrEqual(4) // Should be efficient
 
       expect(
-        initialResult.sortedResults.map(stripFractionalIndexWithoutMultiplicity)
+        initialResult.sortedResults.map(
+          stripFractionalIndexWithoutMultiplicity,
+        ),
       ).toEqual([
         [`key1`, { id: 1, value: `a` }],
         [`key2`, { id: 2, value: `b` }],
@@ -387,16 +398,16 @@ describe(`Operators`, () => {
       input.sendData(
         new MultiSet([
           [[`key1`, { id: 1, value: `a` }], -1], // Remove the first item
-        ])
+        ]),
       )
       graph.run()
 
       const updateResult = tracker.getResult(compareFractionalIndex)
 
-      // The incremental messages should tell us that key1 is no longer in the top K
+      // The incremental weighted deltas should tell us that key1 is no longer in the top K
       // and that key4 entered the top K
-      expect(updateResult.messages.length).toBe(2)
-      const sortedKeysAndMultiplicities = updateResult.messages
+      expect(updateResult.weightedDeltas.length).toBe(2)
+      const sortedKeysAndMultiplicities = updateResult.weightedDeltas
         .map(([[key, _v], multiplicity]) => [key, multiplicity])
         .sort((a, b) => (a[0]! < b[0]! ? -1 : a[0]! > b[0]! ? 1 : 0))
       expect(sortedKeysAndMultiplicities).toEqual([
@@ -424,7 +435,7 @@ describe(`Operators`, () => {
         orderBy((item) => item.value, { limit: 3 }),
         output((message) => {
           tracker.addMessage(message)
-        })
+        }),
       )
 
       graph.finalize()
@@ -436,20 +447,22 @@ describe(`Operators`, () => {
           [[`key2`, { id: 2, value: `c` }], 1],
           [[`key3`, { id: 3, value: `b` }], 1],
           [[`key4`, { id: 4, value: `d` }], 1],
-        ])
+        ]),
       )
       graph.run()
 
       // Should have the top 3 items by value
       const initialResult = tracker.getResult(compareFractionalIndex)
       expect(
-        initialResult.sortedResults.map(stripFractionalIndexWithoutMultiplicity)
+        initialResult.sortedResults.map(
+          stripFractionalIndexWithoutMultiplicity,
+        ),
       ).toEqual([
         [`key1`, { id: 1, value: `a` }],
         [`key3`, { id: 3, value: `b` }],
         [`key2`, { id: 2, value: `c` }],
       ])
-      expect(initialResult.messageCount).toBeLessThanOrEqual(4) // Should be efficient
+      expect(initialResult.deltaCount).toBeLessThanOrEqual(4) // Should be efficient
 
       tracker.reset()
 
@@ -458,19 +471,19 @@ describe(`Operators`, () => {
         new MultiSet([
           [[`key2`, { id: 2, value: `c` }], -1], // Remove old version
           [[`key2`, { id: 2, value: `z` }], 1], // Add new version with different value
-        ])
+        ]),
       )
       graph.run()
 
       const updateResult = tracker.getResult(compareFractionalIndex)
       // Should have efficient incremental update
-      expect(updateResult.messageCount).toBeLessThanOrEqual(6) // Should be incremental (modify operation)
-      expect(updateResult.messageCount).toBeGreaterThan(0) // Should have changes
+      expect(updateResult.deltaCount).toBeLessThanOrEqual(6) // Should be incremental (modify operation)
+      expect(updateResult.deltaCount).toBeGreaterThan(0) // Should have changes
 
-      // The incremental messages should tell us that key2 is no longer in the top K
+      // The incremental weighted deltas should tell us that key2 is no longer in the top K
       // and that key4 entered the top K
-      expect(updateResult.messages.length).toBe(2)
-      const sortedKeysAndMultiplicities = updateResult.messages
+      expect(updateResult.weightedDeltas.length).toBe(2)
+      const sortedKeysAndMultiplicities = updateResult.weightedDeltas
         .map(([[key, _v], multiplicity]) => [key, multiplicity])
         .sort((a, b) => (a[0]! < b[0]! ? -1 : a[0]! > b[0]! ? 1 : 0))
       expect(sortedKeysAndMultiplicities).toEqual([
@@ -497,8 +510,7 @@ describe(`Operators`, () => {
       >()
 
       let windowFn:
-        | ((options: { offset?: number; limit?: number }) => void)
-        | undefined
+        ((options: { offset?: number; limit?: number }) => void) | undefined
 
       input.pipe(
         orderByWithFractionalIndex((item) => item.value, {
@@ -510,7 +522,7 @@ describe(`Operators`, () => {
         }),
         output((message) => {
           tracker.addMessage(message)
-        })
+        }),
       )
 
       graph.finalize()
@@ -524,18 +536,18 @@ describe(`Operators`, () => {
           [[`key4`, { id: 4, value: `d` }], 1],
           [[`key5`, { id: 5, value: `e` }], 1],
           [[`key6`, { id: 6, value: `f` }], 1],
-        ])
+        ]),
       )
       graph.run()
 
       // Initial result should have first 3 elements (a, b, c)
       const initialResult = tracker.getResult(compareFractionalIndex)
       expect(initialResult.sortedResults.length).toBe(3)
-      expect(initialResult.messageCount).toBeLessThanOrEqual(6)
+      expect(initialResult.deltaCount).toBeLessThanOrEqual(6)
 
       // Verify initial order
       const initialSortedValues = initialResult.sortedResults.map(
-        ([_key, [value, _index]]) => value.value
+        ([_key, [value, _index]]) => value.value,
       )
       expect(initialSortedValues).toEqual([`a`, `b`, `c`])
 
@@ -550,7 +562,7 @@ describe(`Operators`, () => {
 
       // Should now show d, e, f
       const moveSortedValues = moveResult.sortedResults.map(
-        ([_key, [value, _index]]) => value.value
+        ([_key, [value, _index]]) => value.value,
       )
       expect(moveSortedValues).toEqual([`d`, `e`, `f`])
     })
@@ -571,8 +583,7 @@ describe(`Operators`, () => {
       >()
 
       let windowFn:
-        | ((options: { offset?: number; limit?: number }) => void)
-        | undefined
+        ((options: { offset?: number; limit?: number }) => void) | undefined
 
       input.pipe(
         orderByWithFractionalIndex((item) => item.value, {
@@ -584,7 +595,7 @@ describe(`Operators`, () => {
         }),
         output((message) => {
           tracker.addMessage(message)
-        })
+        }),
       )
 
       graph.finalize()
@@ -598,18 +609,18 @@ describe(`Operators`, () => {
           [[`key4`, { id: 4, value: `d` }], 1],
           [[`key5`, { id: 5, value: `e` }], 1],
           [[`key6`, { id: 6, value: `f` }], 1],
-        ])
+        ]),
       )
       graph.run()
 
       // Initial result should have elements d, e, f
       const initialResult = tracker.getResult(compareFractionalIndex)
       expect(initialResult.sortedResults.length).toBe(3)
-      expect(initialResult.messageCount).toBeLessThanOrEqual(6)
+      expect(initialResult.deltaCount).toBeLessThanOrEqual(6)
 
       // Verify initial order
       const initialSortedValues = initialResult.sortedResults.map(
-        ([_key, [value, _index]]) => value.value
+        ([_key, [value, _index]]) => value.value,
       )
       expect(initialSortedValues).toEqual([`d`, `e`, `f`])
 
@@ -624,7 +635,7 @@ describe(`Operators`, () => {
 
       // Should now show a, b, c
       const moveSortedValues = moveResult.sortedResults.map(
-        ([_key, [value, _index]]) => value.value
+        ([_key, [value, _index]]) => value.value,
       )
       expect(moveSortedValues).toEqual([`a`, `b`, `c`])
     })
@@ -645,8 +656,7 @@ describe(`Operators`, () => {
       >()
 
       let windowFn:
-        | ((options: { offset?: number; limit?: number }) => void)
-        | null = null
+        ((options: { offset?: number; limit?: number }) => void) | null = null
 
       input.pipe(
         orderByWithFractionalIndex((item) => item.value, {
@@ -658,7 +668,7 @@ describe(`Operators`, () => {
         }),
         output((message) => {
           tracker.addMessage(message)
-        })
+        }),
       )
 
       graph.finalize()
@@ -671,7 +681,7 @@ describe(`Operators`, () => {
           [[`key3`, { id: 3, value: `c` }], 1],
           [[`key4`, { id: 4, value: `d` }], 1],
           [[`key5`, { id: 5, value: `e` }], 1],
-        ])
+        ]),
       )
       graph.run()
 
@@ -680,7 +690,7 @@ describe(`Operators`, () => {
       expect(initialResult.sortedResults.length).toBe(2)
 
       const initialSortedValues = initialResult.sortedResults.map(
-        ([_key, [value, _index]]) => value.value
+        ([_key, [value, _index]]) => value.value,
       )
       expect(initialSortedValues).toEqual([`a`, `b`])
 
@@ -691,7 +701,7 @@ describe(`Operators`, () => {
       const moveResult = tracker.getResult(compareFractionalIndex)
 
       const moveSortedValues = moveResult.sortedResults.map(
-        ([_key, [value, _index]]) => value.value
+        ([_key, [value, _index]]) => value.value,
       )
       expect(moveSortedValues).toEqual([`b`, `c`])
 
@@ -702,7 +712,7 @@ describe(`Operators`, () => {
       const moveResult2 = tracker.getResult(compareFractionalIndex)
 
       const moveSortedValues2 = moveResult2.sortedResults.map(
-        ([_key, [value, _index]]) => value.value
+        ([_key, [value, _index]]) => value.value,
       )
       expect(moveSortedValues2).toEqual([`c`, `d`])
 
@@ -713,7 +723,7 @@ describe(`Operators`, () => {
       const moveResult3 = tracker.getResult(compareFractionalIndex)
 
       const moveSortedValues3 = moveResult3.sortedResults.map(
-        ([_key, [value, _index]]) => value.value
+        ([_key, [value, _index]]) => value.value,
       )
       expect(moveSortedValues3).toEqual([`a`, `b`])
     })
@@ -734,8 +744,7 @@ describe(`Operators`, () => {
       >()
 
       let windowFn:
-        | ((options: { offset?: number; limit?: number }) => void)
-        | null = null
+        ((options: { offset?: number; limit?: number }) => void) | null = null
 
       input.pipe(
         orderByWithFractionalIndex((item) => item.value, {
@@ -747,7 +756,7 @@ describe(`Operators`, () => {
         }),
         output((message) => {
           tracker.addMessage(message)
-        })
+        }),
       )
 
       graph.finalize()
@@ -761,7 +770,7 @@ describe(`Operators`, () => {
           [[`key4`, { id: 4, value: `d` }], 1],
           [[`key5`, { id: 5, value: `e` }], 1],
           [[`key6`, { id: 6, value: `f` }], 1],
-        ])
+        ]),
       )
       graph.run()
 
@@ -770,7 +779,7 @@ describe(`Operators`, () => {
       expect(initialResult.sortedResults.length).toBe(2)
 
       const initialSortedValues = initialResult.sortedResults.map(
-        ([_key, [value, _index]]) => value.value
+        ([_key, [value, _index]]) => value.value,
       )
       expect(initialSortedValues).toEqual([`b`, `c`])
 
@@ -781,7 +790,7 @@ describe(`Operators`, () => {
       const moveResult = tracker.getResult(compareFractionalIndex)
 
       const moveSortedValues = moveResult.sortedResults.map(
-        ([_key, [value, _index]]) => value.value
+        ([_key, [value, _index]]) => value.value,
       )
       expect(moveSortedValues).toEqual([`b`, `c`, `d`])
 
@@ -792,7 +801,7 @@ describe(`Operators`, () => {
       const moveResult2 = tracker.getResult(compareFractionalIndex)
 
       const moveSortedValues2 = moveResult2.sortedResults.map(
-        ([_key, [value, _index]]) => value.value
+        ([_key, [value, _index]]) => value.value,
       )
       expect(moveSortedValues2).toEqual([`b`])
     })
@@ -813,8 +822,7 @@ describe(`Operators`, () => {
       >()
 
       let windowFn:
-        | ((options: { offset?: number; limit?: number }) => void)
-        | null = null
+        ((options: { offset?: number; limit?: number }) => void) | null = null
 
       input.pipe(
         orderByWithFractionalIndex((item) => item.value, {
@@ -826,7 +834,7 @@ describe(`Operators`, () => {
         }),
         output((message) => {
           tracker.addMessage(message)
-        })
+        }),
       )
 
       graph.finalize()
@@ -837,7 +845,7 @@ describe(`Operators`, () => {
           [[`key1`, { id: 1, value: `a` }], 1],
           [[`key2`, { id: 2, value: `b` }], 1],
           [[`key3`, { id: 3, value: `c` }], 1],
-        ])
+        ]),
       )
       graph.run()
 
@@ -846,7 +854,7 @@ describe(`Operators`, () => {
       expect(initialResult.sortedResults.length).toBe(2)
 
       const initialSortedValues = initialResult.sortedResults.map(
-        ([_key, [value, _index]]) => value.value
+        ([_key, [value, _index]]) => value.value,
       )
       expect(initialSortedValues).toEqual([`a`, `b`])
 
@@ -857,7 +865,7 @@ describe(`Operators`, () => {
       const moveResult = tracker.getResult(compareFractionalIndex)
 
       const moveSortedValues = moveResult.sortedResults.map(
-        ([_key, [value, _index]]) => value.value
+        ([_key, [value, _index]]) => value.value,
       )
       expect(moveSortedValues).toEqual([`c`]) // Only 1 element available at offset 2
 
@@ -868,7 +876,7 @@ describe(`Operators`, () => {
       const moveResult2 = tracker.getResult(compareFractionalIndex)
 
       const moveSortedValues2 = moveResult2.sortedResults.map(
-        ([_key, [value, _index]]) => value.value
+        ([_key, [value, _index]]) => value.value,
       )
       expect(moveSortedValues2).toEqual([]) // No elements available at offset 5
 
@@ -879,7 +887,7 @@ describe(`Operators`, () => {
       const moveResult3 = tracker.getResult(compareFractionalIndex)
 
       const moveSortedValues3 = moveResult3.sortedResults.map(
-        ([_key, [value, _index]]) => value.value
+        ([_key, [value, _index]]) => value.value,
       )
       expect(moveSortedValues3).toEqual([])
 
@@ -890,7 +898,7 @@ describe(`Operators`, () => {
       const moveResult4 = tracker.getResult(compareFractionalIndex)
 
       const moveSortedValues4 = moveResult4.sortedResults.map(
-        ([_key, [value, _index]]) => value.value
+        ([_key, [value, _index]]) => value.value,
       )
       expect(moveSortedValues4).toEqual([`a`, `b`])
     })
@@ -905,23 +913,23 @@ function sortByKeyAndIndex(results: Array<any>) {
     .sort(
       (
         [[_aKey, [_aValue, _aIndex]], aMultiplicity],
-        [[_bKey, [_bValue, _bIndex]], bMultiplicity]
-      ) => aMultiplicity - bMultiplicity
+        [[_bKey, [_bValue, _bIndex]], bMultiplicity],
+      ) => aMultiplicity - bMultiplicity,
     )
     .sort(
       (
         [[aKey, [_aValue, _aIndex]], _aMultiplicity],
-        [[bKey, [_bValue, _bIndex]], _bMultiplicity]
-      ) => aKey - bKey
+        [[bKey, [_bValue, _bIndex]], _bMultiplicity],
+      ) => aKey - bKey,
     )
     .sort(
       (
         [[_aKey, [_aValue, aIndex]], _aMultiplicity],
-        [[_bKey, [_bValue, bIndex]], _bMultiplicity]
+        [[_bKey, [_bValue, bIndex]], _bMultiplicity],
       ) => {
         // lexically compare the index
         // return aIndex.localeCompare(bIndex)
         return aIndex < bIndex ? -1 : aIndex > bIndex ? 1 : 0
-      }
+      },
     )
 }

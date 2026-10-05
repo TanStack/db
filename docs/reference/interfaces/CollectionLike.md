@@ -3,16 +3,14 @@ id: CollectionLike
 title: CollectionLike
 ---
 
-# Interface: CollectionLike\<T, TKey\>
-
-Defined in: [packages/db/src/types.ts:12](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L12)
+Defined in: [packages/db/src/types.ts:15](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L15)
 
 Interface for a collection-like object that provides the necessary methods
 for the change events system to work
 
 ## Extends
 
-- `Pick`\<[`Collection`](../Collection.md)\<`T`, `TKey`\>, `"get"` \| `"has"` \| `"entries"` \| `"indexes"` \| `"id"` \| `"compareOptions"`\>
+- `Pick`\<[`Collection`](Collection.md)\<`T`, `TKey`\>, `"get"` \| `"has"` \| `"entries"` \| `"indexes"` \| `"id"` \| `"compareOptions"`\>
 
 ## Type Parameters
 
@@ -32,11 +30,11 @@ for the change events system to work
 compareOptions: StringCollationConfig;
 ```
 
-Defined in: [packages/db/src/collection/index.ts:516](https://github.com/TanStack/db/blob/main/packages/db/src/collection/index.ts#L516)
+Defined in: [packages/db/src/collection/index.ts:828](https://github.com/TanStack/db/blob/main/packages/db/src/collection/index.ts#L828)
 
 #### Inherited from
 
-[`CollectionImpl`](../../classes/CollectionImpl.md).[`compareOptions`](../../classes/CollectionImpl.md#compareoptions)
+[`CollectionImpl`](../classes/CollectionImpl.md).[`compareOptions`](../classes/CollectionImpl.md#compareoptions)
 
 ***
 
@@ -46,11 +44,11 @@ Defined in: [packages/db/src/collection/index.ts:516](https://github.com/TanStac
 id: string;
 ```
 
-Defined in: [packages/db/src/collection/index.ts:210](https://github.com/TanStack/db/blob/main/packages/db/src/collection/index.ts#L210)
+Defined in: [packages/db/src/collection/index.ts:374](https://github.com/TanStack/db/blob/main/packages/db/src/collection/index.ts#L374)
 
 #### Inherited from
 
-[`CollectionImpl`](../../classes/CollectionImpl.md).[`id`](../../classes/CollectionImpl.md#id)
+[`CollectionImpl`](../classes/CollectionImpl.md).[`id`](../classes/CollectionImpl.md#id)
 
 ***
 
@@ -60,7 +58,7 @@ Defined in: [packages/db/src/collection/index.ts:210](https://github.com/TanStac
 indexes: Map<number, BaseIndex<TKey>>;
 ```
 
-Defined in: [packages/db/src/collection/index.ts:501](https://github.com/TanStack/db/blob/main/packages/db/src/collection/index.ts#L501)
+Defined in: [packages/db/src/collection/index.ts:813](https://github.com/TanStack/db/blob/main/packages/db/src/collection/index.ts#L813)
 
 #### Inherited from
 
@@ -73,16 +71,16 @@ Pick.indexes
 ### entries()
 
 ```ts
-entries(): IterableIterator<[TKey, T]>;
+entries(): IterableIterator<[TKey, WithVirtualProps<T, TKey>]>;
 ```
 
-Defined in: [packages/db/src/collection/index.ts:425](https://github.com/TanStack/db/blob/main/packages/db/src/collection/index.ts#L425)
+Defined in: [packages/db/src/collection/index.ts:704](https://github.com/TanStack/db/blob/main/packages/db/src/collection/index.ts#L704)
 
 Get all entries (virtual derived state)
 
 #### Returns
 
-`IterableIterator`\<\[`TKey`, `T`\]\>
+`IterableIterator`\<\[`TKey`, [`WithVirtualProps`](../type-aliases/WithVirtualProps.md)\<`T`, `TKey`\>\]\>
 
 #### Inherited from
 
@@ -95,10 +93,12 @@ Pick.entries
 ### get()
 
 ```ts
-get(key): T | undefined;
+get(key): 
+  | WithVirtualProps<T, TKey>
+  | undefined;
 ```
 
-Defined in: [packages/db/src/collection/index.ts:390](https://github.com/TanStack/db/blob/main/packages/db/src/collection/index.ts#L390)
+Defined in: [packages/db/src/collection/index.ts:664](https://github.com/TanStack/db/blob/main/packages/db/src/collection/index.ts#L664)
 
 Get the current value for a key (virtual derived state)
 
@@ -110,7 +110,8 @@ Get the current value for a key (virtual derived state)
 
 #### Returns
 
-`T` \| `undefined`
+  \| [`WithVirtualProps`](../type-aliases/WithVirtualProps.md)\<`T`, `TKey`\>
+  \| `undefined`
 
 #### Inherited from
 
@@ -126,7 +127,7 @@ Pick.get
 has(key): boolean;
 ```
 
-Defined in: [packages/db/src/collection/index.ts:397](https://github.com/TanStack/db/blob/main/packages/db/src/collection/index.ts#L397)
+Defined in: [packages/db/src/collection/index.ts:671](https://github.com/TanStack/db/blob/main/packages/db/src/collection/index.ts#L671)
 
 Check if a key exists in the collection (virtual derived state)
 

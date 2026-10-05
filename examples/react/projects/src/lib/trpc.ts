@@ -1,6 +1,6 @@
-import { initTRPC, TRPCError } from "@trpc/server"
-import { auth } from "@/lib/auth"
-import { db } from "@/db/connection"
+import { initTRPC, TRPCError } from '@trpc/server'
+import { auth } from '@/lib/auth'
+import { db } from '@/db/connection'
 
 export type Context = {
   session: Awaited<ReturnType<typeof auth.api.getSession>>
@@ -15,7 +15,7 @@ export const middleware = t.middleware
 
 export const isAuthed = middleware(async ({ ctx, next }) => {
   if (!ctx.session?.user) {
-    throw new TRPCError({ code: "UNAUTHORIZED" })
+    throw new TRPCError({ code: 'UNAUTHORIZED' })
   }
   return next({
     ctx: {

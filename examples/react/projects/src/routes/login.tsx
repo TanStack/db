@@ -1,7 +1,7 @@
-import { useState } from "react"
-import { createFileRoute } from "@tanstack/react-router"
-import type { FormEvent } from "react"
-import { authClient } from "@/lib/auth-client"
+import { useState } from 'react'
+import { createFileRoute } from '@tanstack/react-router'
+import type { FormEvent } from 'react'
+import { authClient } from '@/lib/auth-client'
 
 export const Route = createFileRoute(`/login`)({
   component: Layout,

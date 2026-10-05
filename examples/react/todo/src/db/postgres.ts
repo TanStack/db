@@ -1,4 +1,4 @@
-import postgres from "postgres"
+import postgres from 'postgres'
 
 // Create a postgres instance
 export const sql = postgres({

@@ -3,13 +3,11 @@ id: throttleStrategy
 title: throttleStrategy
 ---
 
-# Function: throttleStrategy()
-
 ```ts
 function throttleStrategy(options): ThrottleStrategy;
 ```
 
-Defined in: [packages/db/src/strategies/throttleStrategy.ts:48](https://github.com/TanStack/db/blob/main/packages/db/src/strategies/throttleStrategy.ts#L48)
+Defined in: [packages/db/src/strategies/throttleStrategy.ts:47](https://github.com/TanStack/db/blob/main/packages/db/src/strategies/throttleStrategy.ts#L47)
 
 Creates a throttle strategy that ensures transactions are evenly spaced
 over time.
@@ -22,13 +20,13 @@ execution timing.
 
 ### options
 
-[`ThrottleStrategyOptions`](../../interfaces/ThrottleStrategyOptions.md)
+[`ThrottleStrategyOptions`](../interfaces/ThrottleStrategyOptions.md)
 
 Configuration for throttle behavior
 
 ## Returns
 
-[`ThrottleStrategy`](../../interfaces/ThrottleStrategy.md)
+[`ThrottleStrategy`](../interfaces/ThrottleStrategy.md)
 
 A throttle strategy instance
 

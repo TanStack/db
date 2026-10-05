@@ -1,4 +1,4 @@
-import type { IStreamBuilder, PipedOperator } from "../types.js"
+import type { IStreamBuilder, PipedOperator } from '../types.js'
 
 // Don't judge, this is the only way to type this function.
 // rxjs has very similar code to type its pipe function

@@ -1,7 +1,8 @@
-import { describe, expectTypeOf, test } from "vitest"
-import { createLiveQueryCollection, eq } from "../../src/query/index.js"
-import { createCollection } from "../../src/collection/index.js"
-import { mockSyncCollectionOptions } from "../utils.js"
+import { describe, expectTypeOf, test } from 'vitest'
+import { createLiveQueryCollection, eq } from '../../src/query/index.js'
+import { createCollection } from '../../src/collection/index.js'
+import { mockSyncCollectionOptions } from '../utils.js'
+import type { OutputWithVirtual } from '../utils.js'
 
 type Todo = {
   id: string
@@ -15,12 +16,17 @@ type TodoOption = {
   optionText: string
 }
 
+type OutputWithVirtualKeyed<T extends object> = OutputWithVirtual<
+  T,
+  string | number
+>
+
 const todoCollection = createCollection(
   mockSyncCollectionOptions<Todo>({
     id: `test-todos-findone-joins`,
     getKey: (todo) => todo.id,
     initialData: [],
-  })
+  }),
 )
 
 const todoOptionsCollection = createCollection(
@@ -28,7 +34,7 @@ const todoOptionsCollection = createCollection(
     id: `test-todo-options-findone-joins`,
     getKey: (opt) => opt.id,
     initialData: [],
-  })
+  }),
 )
 
 describe(`findOne() with joins`, () => {
@@ -41,16 +47,18 @@ describe(`findOne() with joins`, () => {
           .orderBy(({ todo }) => todo.order, `asc`)
           .leftJoin(
             { todoOptions: todoOptionsCollection },
-            ({ todo, todoOptions }) => eq(todo.id, todoOptions.todoId)
+            ({ todo, todoOptions }) => eq(todo.id, todoOptions.todoId),
           )
           .findOne(),
     })
 
-    expectTypeOf(query.toArray).toEqualTypeOf<
-      Array<{
-        todo: Todo
-        todoOptions: TodoOption | undefined
-      }>
+    expectTypeOf(query.toArray).toMatchTypeOf<
+      Array<
+        OutputWithVirtualKeyed<{
+          todo: OutputWithVirtualKeyed<Todo>
+          todoOptions: OutputWithVirtualKeyed<TodoOption> | undefined
+        }>
+      >
     >()
   })
 
@@ -62,16 +70,18 @@ describe(`findOne() with joins`, () => {
           .where(({ todo }) => eq(todo.id, `test-id`))
           .innerJoin(
             { todoOptions: todoOptionsCollection },
-            ({ todo, todoOptions }) => eq(todo.id, todoOptions.todoId)
+            ({ todo, todoOptions }) => eq(todo.id, todoOptions.todoId),
           )
           .findOne(),
     })
 
-    expectTypeOf(query.toArray).toEqualTypeOf<
-      Array<{
-        todo: Todo
-        todoOptions: TodoOption
-      }>
+    expectTypeOf(query.toArray).toMatchTypeOf<
+      Array<
+        OutputWithVirtualKeyed<{
+          todo: OutputWithVirtualKeyed<Todo>
+          todoOptions: OutputWithVirtualKeyed<TodoOption>
+        }>
+      >
     >()
   })
 
@@ -84,15 +94,17 @@ describe(`findOne() with joins`, () => {
           .findOne()
           .leftJoin(
             { todoOptions: todoOptionsCollection },
-            ({ todo, todoOptions }) => eq(todo.id, todoOptions.todoId)
+            ({ todo, todoOptions }) => eq(todo.id, todoOptions.todoId),
           ),
     })
 
-    expectTypeOf(query.toArray).toEqualTypeOf<
-      Array<{
-        todo: Todo
-        todoOptions: TodoOption | undefined
-      }>
+    expectTypeOf(query.toArray).toMatchTypeOf<
+      Array<
+        OutputWithVirtualKeyed<{
+          todo: OutputWithVirtualKeyed<Todo>
+          todoOptions: OutputWithVirtualKeyed<TodoOption> | undefined
+        }>
+      >
     >()
   })
 
@@ -104,16 +116,18 @@ describe(`findOne() with joins`, () => {
           .where(({ todo }) => eq(todo.id, `test-id`))
           .rightJoin(
             { todoOptions: todoOptionsCollection },
-            ({ todo, todoOptions }) => eq(todo.id, todoOptions.todoId)
+            ({ todo, todoOptions }) => eq(todo.id, todoOptions.todoId),
           )
           .findOne(),
     })
 
-    expectTypeOf(query.toArray).toEqualTypeOf<
-      Array<{
-        todo: Todo | undefined
-        todoOptions: TodoOption
-      }>
+    expectTypeOf(query.toArray).toMatchTypeOf<
+      Array<
+        OutputWithVirtualKeyed<{
+          todo: OutputWithVirtualKeyed<Todo> | undefined
+          todoOptions: OutputWithVirtualKeyed<TodoOption>
+        }>
+      >
     >()
   })
 
@@ -125,16 +139,18 @@ describe(`findOne() with joins`, () => {
           .where(({ todo }) => eq(todo.id, `test-id`))
           .fullJoin(
             { todoOptions: todoOptionsCollection },
-            ({ todo, todoOptions }) => eq(todo.id, todoOptions.todoId)
+            ({ todo, todoOptions }) => eq(todo.id, todoOptions.todoId),
           )
           .findOne(),
     })
 
-    expectTypeOf(query.toArray).toEqualTypeOf<
-      Array<{
-        todo: Todo | undefined
-        todoOptions: TodoOption | undefined
-      }>
+    expectTypeOf(query.toArray).toMatchTypeOf<
+      Array<
+        OutputWithVirtualKeyed<{
+          todo: OutputWithVirtualKeyed<Todo> | undefined
+          todoOptions: OutputWithVirtualKeyed<TodoOption> | undefined
+        }>
+      >
     >()
   })
 
@@ -150,7 +166,7 @@ describe(`findOne() with joins`, () => {
         id: `test-todo-tags-findone-multi`,
         getKey: (tag) => tag.id,
         initialData: [],
-      })
+      }),
     )
 
     const query = createLiveQueryCollection({
@@ -159,20 +175,22 @@ describe(`findOne() with joins`, () => {
           .from({ todo: todoCollection })
           .leftJoin(
             { todoOptions: todoOptionsCollection },
-            ({ todo, todoOptions }) => eq(todo.id, todoOptions.todoId)
+            ({ todo, todoOptions }) => eq(todo.id, todoOptions.todoId),
           )
           .innerJoin({ tag: todoTagsCollection }, ({ todo, tag }) =>
-            eq(todo.id, tag.todoId)
+            eq(todo.id, tag.todoId),
           )
           .findOne(),
     })
 
-    expectTypeOf(query.toArray).toEqualTypeOf<
-      Array<{
-        todo: Todo
-        todoOptions: TodoOption | undefined
-        tag: TodoTag
-      }>
+    expectTypeOf(query.toArray).toMatchTypeOf<
+      Array<
+        OutputWithVirtualKeyed<{
+          todo: OutputWithVirtualKeyed<Todo>
+          todoOptions: OutputWithVirtualKeyed<TodoOption> | undefined
+          tag: OutputWithVirtualKeyed<TodoTag>
+        }>
+      >
     >()
   })
 
@@ -183,20 +201,22 @@ describe(`findOne() with joins`, () => {
           .from({ todo: todoCollection })
           .leftJoin(
             { todoOptions: todoOptionsCollection },
-            ({ todo, todoOptions }) => eq(todo.id, todoOptions.todoId)
+            ({ todo, todoOptions }) => eq(todo.id, todoOptions.todoId),
           )
           .select(({ todo, todoOptions }) => ({
             todoText: todo.text,
-            optionText: todoOptions?.optionText,
+            optionText: todoOptions.optionText,
           }))
           .findOne(),
     })
 
-    expectTypeOf(query.toArray).toEqualTypeOf<
-      Array<{
-        todoText: string
-        optionText: string | undefined
-      }>
+    expectTypeOf(query.toArray).toMatchTypeOf<
+      Array<
+        OutputWithVirtualKeyed<{
+          todoText: string
+          optionText: string | undefined
+        }>
+      >
     >()
   })
 
@@ -207,20 +227,22 @@ describe(`findOne() with joins`, () => {
           .from({ todo: todoCollection })
           .leftJoin(
             { todoOptions: todoOptionsCollection },
-            ({ todo, todoOptions }) => eq(todo.id, todoOptions.todoId)
+            ({ todo, todoOptions }) => eq(todo.id, todoOptions.todoId),
           )
           .findOne()
           .select(({ todo, todoOptions }) => ({
             todoText: todo.text,
-            optionText: todoOptions?.optionText,
+            optionText: todoOptions.optionText,
           })),
     })
 
-    expectTypeOf(query.toArray).toEqualTypeOf<
-      Array<{
-        todoText: string
-        optionText: string | undefined
-      }>
+    expectTypeOf(query.toArray).toMatchTypeOf<
+      Array<
+        OutputWithVirtualKeyed<{
+          todoText: string
+          optionText: string | undefined
+        }>
+      >
     >()
   })
 
@@ -233,16 +255,18 @@ describe(`findOne() with joins`, () => {
           .orderBy(({ todo }) => todo.order, `asc`)
           .leftJoin(
             { todoOptions: todoOptionsCollection },
-            ({ todo, todoOptions }) => eq(todo.id, todoOptions.todoId)
+            ({ todo, todoOptions }) => eq(todo.id, todoOptions.todoId),
           )
           .limit(1),
     })
 
-    expectTypeOf(query.toArray).toEqualTypeOf<
-      Array<{
-        todo: Todo
-        todoOptions: TodoOption | undefined
-      }>
+    expectTypeOf(query.toArray).toMatchTypeOf<
+      Array<
+        OutputWithVirtualKeyed<{
+          todo: OutputWithVirtualKeyed<Todo>
+          todoOptions: OutputWithVirtualKeyed<TodoOption> | undefined
+        }>
+      >
     >()
   })
 })

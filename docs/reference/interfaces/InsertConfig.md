@@ -3,9 +3,7 @@ id: InsertConfig
 title: InsertConfig
 ---
 
-# Interface: InsertConfig
-
-Defined in: [packages/db/src/types.ts:334](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L334)
+Defined in: [packages/db/src/types.ts:614](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L614)
 
 ## Properties
 
@@ -15,7 +13,7 @@ Defined in: [packages/db/src/types.ts:334](https://github.com/TanStack/db/blob/m
 optional metadata: Record<string, unknown>;
 ```
 
-Defined in: [packages/db/src/types.ts:335](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L335)
+Defined in: [packages/db/src/types.ts:615](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L615)
 
 ***
 
@@ -25,6 +23,6 @@ Defined in: [packages/db/src/types.ts:335](https://github.com/TanStack/db/blob/m
 optional optimistic: boolean;
 ```
 
-Defined in: [packages/db/src/types.ts:337](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L337)
+Defined in: [packages/db/src/types.ts:617](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L617)
 
 Whether to apply optimistic updates immediately. Defaults to true.

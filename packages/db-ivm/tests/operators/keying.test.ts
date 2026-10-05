@@ -1,8 +1,8 @@
-import { describe, expect, it } from "vitest"
-import { D2 } from "../../src/d2.js"
-import { keyBy, rekey, unkey } from "../../src/operators/keying.js"
-import { output } from "../../src/operators/index.js"
-import { MultiSet } from "../../src/multiset.js"
+import { describe, expect, it } from 'vitest'
+import { D2 } from '../../src/d2.js'
+import { keyBy, rekey, unkey } from '../../src/operators/keying.js'
+import { output } from '../../src/operators/index.js'
+import { MultiSet } from '../../src/multiset.js'
 
 interface TestItem {
   id: number

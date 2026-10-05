@@ -1,4 +1,4 @@
-import { BaseStorageAdapter } from "./StorageAdapter"
+import { BaseStorageAdapter } from './StorageAdapter'
 
 export class IndexedDBAdapter extends BaseStorageAdapter {
   private dbName: string
@@ -82,11 +82,28 @@ export class IndexedDBAdapter extends BaseStorageAdapter {
   }
 
   private async getStore(
-    mode: IDBTransactionMode = `readonly`
+    mode: IDBTransactionMode = `readonly`,
   ): Promise<IDBObjectStore> {
     const db = await this.openDB()
     const transaction = db.transaction([this.storeName], mode)
     return transaction.objectStore(this.storeName)
+  }
+
+  private waitForWrite(
+    store: IDBObjectStore,
+    write: () => void,
+  ): Promise<void> {
+    const transaction = store.transaction
+    return new Promise((resolve, reject) => {
+      // A successful request can still be rolled back by its transaction.
+      transaction.oncomplete = () => resolve()
+      transaction.onabort = () =>
+        reject(
+          transaction.error ??
+            new DOMException(`IndexedDB transaction aborted`, `AbortError`),
+        )
+      write()
+    })
   }
 
   async get(key: string): Promise<string | null> {
@@ -106,10 +123,8 @@ export class IndexedDBAdapter extends BaseStorageAdapter {
   async set(key: string, value: string): Promise<void> {
     try {
       const store = await this.getStore(`readwrite`)
-      return new Promise((resolve, reject) => {
-        const request = store.put(value, key)
-        request.onerror = () => reject(request.error)
-        request.onsuccess = () => resolve()
+      return this.waitForWrite(store, () => {
+        store.put(value, key)
       })
     } catch (error) {
       if (
@@ -117,7 +132,7 @@ export class IndexedDBAdapter extends BaseStorageAdapter {
         error.name === `QuotaExceededError`
       ) {
         throw new Error(
-          `Storage quota exceeded. Consider clearing old transactions.`
+          `Storage quota exceeded. Consider clearing old transactions.`,
         )
       }
       throw error
@@ -127,13 +142,12 @@ export class IndexedDBAdapter extends BaseStorageAdapter {
   async delete(key: string): Promise<void> {
     try {
       const store = await this.getStore(`readwrite`)
-      return new Promise((resolve, reject) => {
-        const request = store.delete(key)
-        request.onerror = () => reject(request.error)
-        request.onsuccess = () => resolve()
+      return this.waitForWrite(store, () => {
+        store.delete(key)
       })
     } catch (error) {
       console.warn(`IndexedDB delete failed:`, error)
+      throw error
     }
   }
 
@@ -154,10 +168,8 @@ export class IndexedDBAdapter extends BaseStorageAdapter {
   async clear(): Promise<void> {
     try {
       const store = await this.getStore(`readwrite`)
-      return new Promise((resolve, reject) => {
-        const request = store.clear()
-        request.onerror = () => reject(request.error)
-        request.onsuccess = () => resolve()
+      return this.waitForWrite(store, () => {
+        store.clear()
       })
     } catch (error) {
       console.warn(`IndexedDB clear failed:`, error)

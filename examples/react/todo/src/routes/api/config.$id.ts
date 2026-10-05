@@ -1,8 +1,8 @@
-import { createFileRoute } from "@tanstack/react-router"
-import { json } from "@tanstack/react-start"
-import { sql } from "../../db/postgres"
-import { validateUpdateConfig } from "../../db/validation"
-import type { Txid } from "@tanstack/electric-db-collection"
+import { createFileRoute } from '@tanstack/react-router'
+import { json } from '@tanstack/react-start'
+import { sql } from '../../db/postgres'
+import { validateUpdateConfig } from '../../db/validation'
+import type { Txid } from '@tanstack/electric-db-collection'
 
 // Generate a transaction ID
 async function generateTxId(tx: any): Promise<Txid> {
@@ -36,7 +36,7 @@ export const Route = createFileRoute(`/api/config/$id`)({
               error: `Failed to fetch config`,
               details: error instanceof Error ? error.message : String(error),
             },
-            { status: 500 }
+            { status: 500 },
           )
         }
       },
@@ -76,7 +76,7 @@ export const Route = createFileRoute(`/api/config/$id`)({
               error: `Failed to update config`,
               details: error instanceof Error ? error.message : String(error),
             },
-            { status: 500 }
+            { status: 500 },
           )
         }
       },
@@ -111,7 +111,7 @@ export const Route = createFileRoute(`/api/config/$id`)({
               error: `Failed to delete config`,
               details: error instanceof Error ? error.message : String(error),
             },
-            { status: 500 }
+            { status: 500 },
           )
         }
       },

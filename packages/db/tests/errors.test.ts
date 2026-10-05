@@ -1,5 +1,5 @@
-import { describe, expect, it } from "vitest"
-import { NonRetriableError } from "../src/errors"
+import { describe, expect, it } from 'vitest'
+import { NonRetriableError } from '../src/errors'
 
 describe(`Errors`, () => {
   it(`should create a NonRetriableError with the correct name and message`, () => {

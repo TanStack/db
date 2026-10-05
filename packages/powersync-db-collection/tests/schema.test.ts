@@ -1,7 +1,7 @@
-import { Schema, Table, column } from "@powersync/common"
-import { describe, expect, it } from "vitest"
-import { convertTableToSchema } from "../src/schema"
-import type { StandardSchemaV1 } from "@standard-schema/spec"
+import { Schema, Table, column } from '@powersync/common'
+import { describe, expect, it } from 'vitest'
+import { convertTableToSchema } from '../src/schema'
+import type { StandardSchemaV1 } from '@standard-schema/spec'
 
 describe(`Schema Conversion`, () => {
   describe(`convertTableToSchema`, () => {

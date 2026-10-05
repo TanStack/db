@@ -3,9 +3,7 @@ id: SortedMap
 title: SortedMap
 ---
 
-# Class: SortedMap\<TKey, TValue\>
-
-Defined in: [packages/db/src/SortedMap.ts:6](https://github.com/TanStack/db/blob/main/packages/db/src/SortedMap.ts#L6)
+Defined in: [packages/db/src/SortedMap.ts:8](https://github.com/TanStack/db/blob/main/packages/db/src/SortedMap.ts#L8)
 
 A Map implementation that keeps its entries sorted based on a comparator function
 
@@ -13,9 +11,9 @@ A Map implementation that keeps its entries sorted based on a comparator functio
 
 ### TKey
 
-`TKey`
+`TKey` *extends* `string` \| `number`
 
-The type of keys in the map
+The type of keys in the map (must be string | number)
 
 ### TValue
 
@@ -31,7 +29,7 @@ The type of values in the map
 new SortedMap<TKey, TValue>(comparator?): SortedMap<TKey, TValue>;
 ```
 
-Defined in: [packages/db/src/SortedMap.ts:16](https://github.com/TanStack/db/blob/main/packages/db/src/SortedMap.ts#L16)
+Defined in: [packages/db/src/SortedMap.ts:21](https://github.com/TanStack/db/blob/main/packages/db/src/SortedMap.ts#L21)
 
 Creates a new SortedMap instance
 
@@ -41,7 +39,8 @@ Creates a new SortedMap instance
 
 (`a`, `b`) => `number`
 
-Optional function to compare values for sorting
+Optional function to compare values for sorting.
+                    If not provided, entries are sorted by key only.
 
 #### Returns
 
@@ -57,7 +56,7 @@ Optional function to compare values for sorting
 get size(): number;
 ```
 
-Defined in: [packages/db/src/SortedMap.ts:138](https://github.com/TanStack/db/blob/main/packages/db/src/SortedMap.ts#L138)
+Defined in: [packages/db/src/SortedMap.ts:201](https://github.com/TanStack/db/blob/main/packages/db/src/SortedMap.ts#L201)
 
 Gets the number of key-value pairs in the map
 
@@ -73,7 +72,7 @@ Gets the number of key-value pairs in the map
 iterator: IterableIterator<[TKey, TValue]>;
 ```
 
-Defined in: [packages/db/src/SortedMap.ts:147](https://github.com/TanStack/db/blob/main/packages/db/src/SortedMap.ts#L147)
+Defined in: [packages/db/src/SortedMap.ts:210](https://github.com/TanStack/db/blob/main/packages/db/src/SortedMap.ts#L210)
 
 Default iterator that returns entries in sorted order
 
@@ -91,7 +90,7 @@ An iterator for the map's entries
 clear(): void;
 ```
 
-Defined in: [packages/db/src/SortedMap.ts:130](https://github.com/TanStack/db/blob/main/packages/db/src/SortedMap.ts#L130)
+Defined in: [packages/db/src/SortedMap.ts:191](https://github.com/TanStack/db/blob/main/packages/db/src/SortedMap.ts#L191)
 
 Removes all key-value pairs from the map
 
@@ -104,10 +103,10 @@ Removes all key-value pairs from the map
 ### delete()
 
 ```ts
-delete(key): boolean;
+delete(key, deferOrder): boolean;
 ```
 
-Defined in: [packages/db/src/SortedMap.ts:106](https://github.com/TanStack/db/blob/main/packages/db/src/SortedMap.ts#L106)
+Defined in: [packages/db/src/SortedMap.ts:158](https://github.com/TanStack/db/blob/main/packages/db/src/SortedMap.ts#L158)
 
 Removes a key-value pair from the map
 
@@ -118,6 +117,12 @@ Removes a key-value pair from the map
 `TKey`
 
 The key to remove
+
+##### deferOrder
+
+`boolean` = `false`
+
+Defer ordering until restoreOrder or the next ordered read
 
 #### Returns
 
@@ -133,7 +138,7 @@ True if the key was found and removed, false otherwise
 entries(): IterableIterator<[TKey, TValue]>;
 ```
 
-Defined in: [packages/db/src/SortedMap.ts:158](https://github.com/TanStack/db/blob/main/packages/db/src/SortedMap.ts#L158)
+Defined in: [packages/db/src/SortedMap.ts:222](https://github.com/TanStack/db/blob/main/packages/db/src/SortedMap.ts#L222)
 
 Returns an iterator for the map's entries in sorted order
 
@@ -151,7 +156,7 @@ An iterator for the map's entries
 forEach(callbackfn): void;
 ```
 
-Defined in: [packages/db/src/SortedMap.ts:189](https://github.com/TanStack/db/blob/main/packages/db/src/SortedMap.ts#L189)
+Defined in: [packages/db/src/SortedMap.ts:253](https://github.com/TanStack/db/blob/main/packages/db/src/SortedMap.ts#L253)
 
 Executes a callback function for each key-value pair in the map in sorted order
 
@@ -175,7 +180,7 @@ Function to execute for each entry
 get(key): TValue | undefined;
 ```
 
-Defined in: [packages/db/src/SortedMap.ts:96](https://github.com/TanStack/db/blob/main/packages/db/src/SortedMap.ts#L96)
+Defined in: [packages/db/src/SortedMap.ts:147](https://github.com/TanStack/db/blob/main/packages/db/src/SortedMap.ts#L147)
 
 Gets a value by its key
 
@@ -201,7 +206,7 @@ The value associated with the key, or undefined if not found
 has(key): boolean;
 ```
 
-Defined in: [packages/db/src/SortedMap.ts:123](https://github.com/TanStack/db/blob/main/packages/db/src/SortedMap.ts#L123)
+Defined in: [packages/db/src/SortedMap.ts:184](https://github.com/TanStack/db/blob/main/packages/db/src/SortedMap.ts#L184)
 
 Checks if a key exists in the map
 
@@ -227,7 +232,7 @@ True if the key exists, false otherwise
 keys(): IterableIterator<TKey>;
 ```
 
-Defined in: [packages/db/src/SortedMap.ts:167](https://github.com/TanStack/db/blob/main/packages/db/src/SortedMap.ts#L167)
+Defined in: [packages/db/src/SortedMap.ts:231](https://github.com/TanStack/db/blob/main/packages/db/src/SortedMap.ts#L231)
 
 Returns an iterator for the map's keys in sorted order
 
@@ -239,13 +244,32 @@ An iterator for the map's keys
 
 ***
 
+### restoreOrder()
+
+```ts
+restoreOrder(): void;
+```
+
+Defined in: [packages/db/src/SortedMap.ts:88](https://github.com/TanStack/db/blob/main/packages/db/src/SortedMap.ts#L88)
+
+Restore the ordered view after a synchronous batch of deferred writes.
+
+#### Returns
+
+`void`
+
+***
+
 ### set()
 
 ```ts
-set(key, value): this;
+set(
+   key, 
+   value, 
+   deferOrder): this;
 ```
 
-Defined in: [packages/db/src/SortedMap.ts:73](https://github.com/TanStack/db/blob/main/packages/db/src/SortedMap.ts#L73)
+Defined in: [packages/db/src/SortedMap.ts:108](https://github.com/TanStack/db/blob/main/packages/db/src/SortedMap.ts#L108)
 
 Sets a key-value pair in the map and maintains sort order
 
@@ -263,6 +287,12 @@ The key to set
 
 The value to associate with the key
 
+##### deferOrder
+
+`boolean` = `false`
+
+Defer ordering until restoreOrder or the next ordered read
+
 #### Returns
 
 `this`
@@ -277,7 +307,7 @@ This SortedMap instance for chaining
 values(): IterableIterator<TValue>;
 ```
 
-Defined in: [packages/db/src/SortedMap.ts:176](https://github.com/TanStack/db/blob/main/packages/db/src/SortedMap.ts#L176)
+Defined in: [packages/db/src/SortedMap.ts:241](https://github.com/TanStack/db/blob/main/packages/db/src/SortedMap.ts#L241)
 
 Returns an iterator for the map's values in sorted order
 

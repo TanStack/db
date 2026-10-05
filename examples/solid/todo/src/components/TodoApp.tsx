@@ -1,8 +1,8 @@
-import { Link } from "@tanstack/solid-router"
-import { For, Show, createSignal } from "solid-js"
-import type { JSX } from "solid-js"
-import type { Collection } from "@tanstack/solid-db"
-import type { SelectConfig, SelectTodo } from "../db/validation"
+import { Link } from '@tanstack/solid-router'
+import { For, Show, createSignal } from 'solid-js'
+import type { JSX } from 'solid-js'
+import type { Collection } from '@tanstack/solid-db'
+import type { SelectConfig, SelectTodo } from '../db/validation'
 
 interface TodoAppProps {
   todos: Array<SelectTodo>
@@ -121,7 +121,7 @@ export function TodoApp(props: TodoAppProps) {
   return (
     <div
       class="min-h-screen flex items-start justify-center overflow-auto py-8"
-      style={{ "background-color": backgroundColor }}
+      style={{ 'background-color': backgroundColor }}
     >
       <div style={{ width: `550px` }} class="mx-auto relative">
         <div class="text-center mb-8">
@@ -193,9 +193,9 @@ export function TodoApp(props: TodoAppProps) {
                     todosToToggle.map((todo) => todo.id),
                     (drafts) => {
                       drafts.forEach(
-                        (draft) => (draft.completed = !allCompleted)
+                        (draft) => (draft.completed = !allCompleted),
                       )
-                    }
+                    },
                   )
                 }}
               >
@@ -262,7 +262,7 @@ export function TodoApp(props: TodoAppProps) {
                   <button
                     onClick={() => {
                       props.todoCollection.delete(
-                        completedTodos.map((todo) => todo.id)
+                        completedTodos.map((todo) => todo.id),
                       )
                     }}
                     class="text-inherit hover:underline"

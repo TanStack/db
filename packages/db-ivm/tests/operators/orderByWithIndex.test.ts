@@ -1,8 +1,8 @@
-import { describe, expect, test } from "vitest"
-import { D2 } from "../../src/d2.js"
-import { MultiSet } from "../../src/multiset.js"
-import { orderByWithIndex, output } from "../../src/operators/index.js"
-import type { KeyValue } from "../../src/types.js"
+import { describe, expect, test } from 'vitest'
+import { D2 } from '../../src/d2.js'
+import { MultiSet } from '../../src/multiset.js'
+import { orderByWithIndex, output } from '../../src/operators/index.js'
+import type { KeyValue } from '../../src/types.js'
 
 describe(`Operators`, () => {
   describe(`OrderByWithIndex operation`, () => {
@@ -23,7 +23,7 @@ describe(`Operators`, () => {
         orderByWithIndex((item) => item.value),
         output((message) => {
           latestMessage = message
-        })
+        }),
       )
 
       graph.finalize()
@@ -35,7 +35,7 @@ describe(`Operators`, () => {
           [[`key3`, { id: 3, value: `b` }], 1],
           [[`key4`, { id: 4, value: `y` }], 1],
           [[`key5`, { id: 5, value: `c` }], 1],
-        ])
+        ]),
       )
 
       graph.run()
@@ -73,7 +73,7 @@ describe(`Operators`, () => {
         }),
         output((message) => {
           latestMessage = message
-        })
+        }),
       )
 
       graph.finalize()
@@ -85,7 +85,7 @@ describe(`Operators`, () => {
           [[`key3`, { id: 3, value: `b` }], 1],
           [[`key4`, { id: 4, value: `y` }], 1],
           [[`key5`, { id: 5, value: `c` }], 1],
-        ])
+        ]),
       )
 
       graph.run()
@@ -121,7 +121,7 @@ describe(`Operators`, () => {
         orderByWithIndex((item) => item.value, { limit: 3 }),
         output((message) => {
           latestMessage = message
-        })
+        }),
       )
 
       graph.finalize()
@@ -133,7 +133,7 @@ describe(`Operators`, () => {
           [[`key3`, { id: 3, value: `b` }], 1],
           [[`key4`, { id: 4, value: `y` }], 1],
           [[`key5`, { id: 5, value: `c` }], 1],
-        ])
+        ]),
       )
 
       graph.run()
@@ -167,7 +167,7 @@ describe(`Operators`, () => {
         orderByWithIndex((item) => item.value, { limit: 2, offset: 2 }),
         output((message) => {
           latestMessage = message
-        })
+        }),
       )
 
       graph.finalize()
@@ -179,7 +179,7 @@ describe(`Operators`, () => {
           [[`key3`, { id: 3, value: `b` }], 1],
           [[`key4`, { id: 4, value: `y` }], 1],
           [[`key5`, { id: 5, value: `c` }], 1],
-        ])
+        ]),
       )
 
       graph.run()
@@ -212,7 +212,7 @@ describe(`Operators`, () => {
         orderByWithIndex((item) => item.id),
         output((message) => {
           latestMessage = message
-        })
+        }),
       )
 
       graph.finalize()
@@ -224,7 +224,7 @@ describe(`Operators`, () => {
           [[`key1`, { id: 1, value: `a` }], 1],
           [[`key4`, { id: 4, value: `d` }], 1],
           [[`key2`, { id: 2, value: `b` }], 1],
-        ])
+        ]),
       )
 
       graph.run()
@@ -260,7 +260,7 @@ describe(`Operators`, () => {
         orderByWithIndex((item) => item.value, { limit: 3 }),
         output((message) => {
           latestMessage = message
-        })
+        }),
       )
 
       graph.finalize()
@@ -271,7 +271,7 @@ describe(`Operators`, () => {
           [[`key1`, { id: 1, value: `a` }], 1],
           [[`key3`, { id: 3, value: `c` }], 1],
           [[`key2`, { id: 2, value: `b` }], 1],
-        ])
+        ]),
       )
       graph.run()
 
@@ -290,7 +290,7 @@ describe(`Operators`, () => {
       input.sendData(
         new MultiSet([
           [[`key4`, { id: 4, value: `aa` }], 1], // Should be second in order
-        ])
+        ]),
       )
       graph.run()
 
@@ -325,7 +325,7 @@ describe(`Operators`, () => {
         orderByWithIndex((item) => item.value, { limit: 3 }),
         output((message) => {
           latestMessage = message
-        })
+        }),
       )
 
       graph.finalize()
@@ -337,7 +337,7 @@ describe(`Operators`, () => {
           [[`key3`, { id: 3, value: `c` }], 1],
           [[`key2`, { id: 2, value: `b` }], 1],
           [[`key4`, { id: 4, value: `d` }], 1],
-        ])
+        ]),
       )
       graph.run()
 
@@ -345,7 +345,7 @@ describe(`Operators`, () => {
       input.sendData(
         new MultiSet([
           [[`key1`, { id: 1, value: `a` }], -1], // Remove the first item
-        ])
+        ]),
       )
       graph.run()
 
@@ -383,7 +383,7 @@ describe(`Operators`, () => {
         orderByWithIndex((item) => item.value, { limit: 3 }),
         output((message) => {
           latestMessage = message
-        })
+        }),
       )
 
       graph.finalize()
@@ -395,7 +395,7 @@ describe(`Operators`, () => {
           [[`key2`, { id: 2, value: `c` }], 1],
           [[`key3`, { id: 3, value: `b` }], 1],
           [[`key4`, { id: 4, value: `d` }], 1],
-        ])
+        ]),
       )
       graph.run()
 
@@ -415,7 +415,7 @@ describe(`Operators`, () => {
         new MultiSet([
           [[`key2`, { id: 2, value: `c` }], -1], // Remove old version
           [[`key2`, { id: 2, value: `z` }], 1], // Add new version with different value
-        ])
+        ]),
       )
       graph.run()
 
@@ -440,19 +440,19 @@ function sortByKeyAndIndex(results: Array<any>) {
     .sort(
       (
         [[_aKey, [_aValue, _aIndex]], aMultiplicity],
-        [[_bKey, [_bValue, _bIndex]], bMultiplicity]
-      ) => aMultiplicity - bMultiplicity
+        [[_bKey, [_bValue, _bIndex]], bMultiplicity],
+      ) => aMultiplicity - bMultiplicity,
     )
     .sort(
       (
         [[aKey, [_aValue, _aIndex]], _aMultiplicity],
-        [[bKey, [_bValue, _bIndex]], _bMultiplicity]
-      ) => aKey - bKey
+        [[bKey, [_bValue, _bIndex]], _bMultiplicity],
+      ) => aKey - bKey,
     )
     .sort(
       (
         [[_aKey, [_aValue, _aIndex]], _aMultiplicity],
-        [[_bKey, [_bValue, _bIndex]], _bMultiplicity]
-      ) => _aIndex - _bIndex
+        [[_bKey, [_bValue, _bIndex]], _bMultiplicity],
+      ) => _aIndex - _bIndex,
     )
 }

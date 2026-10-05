@@ -1,10 +1,10 @@
-import { MultiSet } from "./multiset.js"
-import type { MultiSetArray } from "./multiset.js"
+import { MultiSet } from './multiset.js'
+import type { MultiSetArray } from './multiset.js'
 import type {
   IDifferenceStreamReader,
   IDifferenceStreamWriter,
   IOperator,
-} from "./types.js"
+} from './types.js'
 
 /**
  * A read handle to a dataflow edge that receives data from a writer.
@@ -61,7 +61,7 @@ export abstract class Operator<T> implements IOperator<T> {
   constructor(
     public id: number,
     inputs: Array<DifferenceStreamReader<T>>,
-    output: DifferenceStreamWriter<T>
+    output: DifferenceStreamWriter<T>,
   ) {
     this.inputs = inputs
     this.output = output
@@ -84,7 +84,7 @@ export abstract class UnaryOperator<Tin, Tout = Tin> extends Operator<
   constructor(
     public id: number,
     inputA: DifferenceStreamReader<Tin>,
-    output: DifferenceStreamWriter<Tout>
+    output: DifferenceStreamWriter<Tout>,
   ) {
     super(id, [inputA], output)
   }
@@ -103,7 +103,7 @@ export abstract class BinaryOperator<T> extends Operator<T> {
     public id: number,
     inputA: DifferenceStreamReader<T>,
     inputB: DifferenceStreamReader<T>,
-    output: DifferenceStreamWriter<T>
+    output: DifferenceStreamWriter<T>,
   ) {
     super(id, [inputA, inputB], output)
   }

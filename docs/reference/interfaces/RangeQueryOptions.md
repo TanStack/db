@@ -3,9 +3,7 @@ id: RangeQueryOptions
 title: RangeQueryOptions
 ---
 
-# Interface: RangeQueryOptions
-
-Defined in: [packages/db/src/indexes/btree-index.ts:19](https://github.com/TanStack/db/blob/main/packages/db/src/indexes/btree-index.ts#L19)
+Defined in: [packages/db/src/indexes/basic-index.ts:14](https://github.com/TanStack/db/blob/main/packages/db/src/indexes/basic-index.ts#L14)
 
 Options for range queries
 
@@ -17,7 +15,7 @@ Options for range queries
 optional from: any;
 ```
 
-Defined in: [packages/db/src/indexes/btree-index.ts:20](https://github.com/TanStack/db/blob/main/packages/db/src/indexes/btree-index.ts#L20)
+Defined in: [packages/db/src/indexes/basic-index.ts:15](https://github.com/TanStack/db/blob/main/packages/db/src/indexes/basic-index.ts#L15)
 
 ***
 
@@ -27,7 +25,7 @@ Defined in: [packages/db/src/indexes/btree-index.ts:20](https://github.com/TanSt
 optional fromInclusive: boolean;
 ```
 
-Defined in: [packages/db/src/indexes/btree-index.ts:22](https://github.com/TanStack/db/blob/main/packages/db/src/indexes/btree-index.ts#L22)
+Defined in: [packages/db/src/indexes/basic-index.ts:17](https://github.com/TanStack/db/blob/main/packages/db/src/indexes/basic-index.ts#L17)
 
 ***
 
@@ -37,7 +35,7 @@ Defined in: [packages/db/src/indexes/btree-index.ts:22](https://github.com/TanSt
 optional to: any;
 ```
 
-Defined in: [packages/db/src/indexes/btree-index.ts:21](https://github.com/TanStack/db/blob/main/packages/db/src/indexes/btree-index.ts#L21)
+Defined in: [packages/db/src/indexes/basic-index.ts:16](https://github.com/TanStack/db/blob/main/packages/db/src/indexes/basic-index.ts#L16)
 
 ***
 
@@ -47,4 +45,4 @@ Defined in: [packages/db/src/indexes/btree-index.ts:21](https://github.com/TanSt
 optional toInclusive: boolean;
 ```
 
-Defined in: [packages/db/src/indexes/btree-index.ts:23](https://github.com/TanStack/db/blob/main/packages/db/src/indexes/btree-index.ts#L23)
+Defined in: [packages/db/src/indexes/basic-index.ts:18](https://github.com/TanStack/db/blob/main/packages/db/src/indexes/basic-index.ts#L18)

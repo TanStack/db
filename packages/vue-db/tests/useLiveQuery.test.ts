@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest"
+import { describe, expect, it } from 'vitest'
 import {
   count,
   createCollection,
@@ -6,10 +6,10 @@ import {
   createOptimisticAction,
   eq,
   gt,
-} from "@tanstack/db"
-import { nextTick, ref, watchEffect } from "vue"
-import { useLiveQuery } from "../src/useLiveQuery"
-import { mockSyncCollectionOptions } from "../../db/tests/utils"
+} from '@tanstack/db'
+import { nextTick, ref, watchEffect } from 'vue'
+import { useLiveQuery } from '../src/useLiveQuery'
+import { mockSyncCollectionOptions } from '../../db/tests/utils'
 
 type Person = {
   id: string
@@ -99,13 +99,34 @@ async function waitFor(fn: () => void, timeout = 2000, interval = 20) {
 }
 
 describe(`Query Collections`, () => {
+  it(`keeps data and keyed state aligned after collection cleanup`, async () => {
+    const collection = createCollection(
+      mockSyncCollectionOptions<Person>({
+        id: `cleanup-alignment-vue`,
+        getKey: (person) => person.id,
+        initialData: initialPersons,
+      }),
+    )
+    const result = useLiveQuery(collection)
+
+    await waitForVueUpdate()
+    expect(result.data.value).toHaveLength(3)
+    expect(result.state.value.size).toBe(3)
+
+    await collection.cleanup()
+    await nextTick()
+
+    expect(result.data.value).toHaveLength(0)
+    expect(result.state.value.size).toBe(0)
+  })
+
   it(`should work with basic collection and select`, async () => {
     const collection = createCollection(
       mockSyncCollectionOptions<Person>({
         id: `test-persons`,
         getKey: (person: Person) => person.id,
         initialData: initialPersons,
-      })
+      }),
     )
 
     const { state, data } = useLiveQuery((q) =>
@@ -116,7 +137,7 @@ describe(`Query Collections`, () => {
           id: persons.id,
           name: persons.name,
           age: persons.age,
-        }))
+        })),
     )
 
     // Wait for Vue reactivity to update
@@ -139,7 +160,7 @@ describe(`Query Collections`, () => {
         id: `test-persons-2`,
         getKey: (person: Person) => person.id,
         initialData: initialPersons,
-      })
+      }),
     )
 
     const { state, data } = useLiveQuery((q) =>
@@ -150,7 +171,7 @@ describe(`Query Collections`, () => {
           id: c.id,
           name: c.name,
         }))
-        .orderBy(({ collection: c }) => c.id, `asc`)
+        .orderBy(({ collection: c }) => c.id, `asc`),
     )
 
     // Wait for collection to sync
@@ -206,7 +227,7 @@ describe(`Query Collections`, () => {
           id: `4`,
           name: `Kyle Doe`,
         }),
-      ])
+      ]),
     )
 
     // Update the person
@@ -243,7 +264,7 @@ describe(`Query Collections`, () => {
           id: `4`,
           name: `Kyle Doe 2`,
         }),
-      ])
+      ]),
     )
 
     // Delete the person
@@ -280,7 +301,7 @@ describe(`Query Collections`, () => {
         id: `person-collection-test`,
         getKey: (person: Person) => person.id,
         initialData: initialPersons,
-      })
+      }),
     )
 
     // Create issue collection
@@ -289,20 +310,20 @@ describe(`Query Collections`, () => {
         id: `issue-collection-test`,
         getKey: (issue: Issue) => issue.id,
         initialData: initialIssues,
-      })
+      }),
     )
 
     const { state } = useLiveQuery((q) =>
       q
         .from({ issues: issueCollection })
         .join({ persons: personCollection }, ({ issues, persons }) =>
-          eq(issues.userId, persons.id)
+          eq(issues.userId, persons.id),
         )
         .select(({ issues, persons }) => ({
           id: issues.id,
           title: issues.title,
           name: persons.name,
-        }))
+        })),
     )
 
     // Wait for collections to sync
@@ -311,19 +332,19 @@ describe(`Query Collections`, () => {
     // Verify that we have the expected joined results
     expect(state.value.size).toBe(3)
 
-    expect(state.value.get(`[1,1]`)).toMatchObject({
+    expect(state.value.get(`["1","1"]`)).toMatchObject({
       id: `1`,
       name: `John Doe`,
       title: `Issue 1`,
     })
 
-    expect(state.value.get(`[2,2]`)).toMatchObject({
+    expect(state.value.get(`["2","2"]`)).toMatchObject({
       id: `2`,
       name: `Jane Doe`,
       title: `Issue 2`,
     })
 
-    expect(state.value.get(`[3,1]`)).toMatchObject({
+    expect(state.value.get(`["3","1"]`)).toMatchObject({
       id: `3`,
       name: `John Doe`,
       title: `Issue 3`,
@@ -345,7 +366,7 @@ describe(`Query Collections`, () => {
     await waitForVueUpdate()
 
     expect(state.value.size).toBe(4)
-    expect(state.value.get(`[4,2]`)).toMatchObject({
+    expect(state.value.get(`["4","2"]`)).toMatchObject({
       id: `4`,
       name: `Jane Doe`,
       title: `Issue 4`,
@@ -367,7 +388,7 @@ describe(`Query Collections`, () => {
     await waitForVueUpdate()
 
     // The updated title should be reflected in the joined results
-    expect(state.value.get(`[2,2]`)).toMatchObject({
+    expect(state.value.get(`["2","2"]`)).toMatchObject({
       id: `2`,
       name: `Jane Doe`,
       title: `Updated Issue 2`,
@@ -389,7 +410,7 @@ describe(`Query Collections`, () => {
     await waitForVueUpdate()
 
     // After deletion, issue 3 should no longer have a joined result
-    expect(state.value.get(`[3,1]`)).toBeUndefined()
+    expect(state.value.get(`["3","1"]`)).toBeUndefined()
     expect(state.value.size).toBe(3)
   })
 
@@ -399,7 +420,7 @@ describe(`Query Collections`, () => {
         id: `params-change-test`,
         getKey: (person: Person) => person.id,
         initialData: initialPersons,
-      })
+      }),
     )
 
     const minAge = ref(30)
@@ -414,7 +435,7 @@ describe(`Query Collections`, () => {
             name: c.name,
             age: c.age,
           })),
-      [minAge]
+      [minAge],
     )
 
     // Wait for collection to sync
@@ -466,7 +487,7 @@ describe(`Query Collections`, () => {
         id: `optimistic-changes-test`,
         getKey: (person: Person) => person.id,
         initialData: initialPersons,
-      })
+      }),
     )
 
     // Initial query
@@ -480,7 +501,7 @@ describe(`Query Collections`, () => {
             name: c.name,
             team: c.team,
           }))
-          .orderBy(({ collection: c }) => c.id, `asc`)
+          .orderBy(({ collection: c }) => c.id, `asc`),
       )
 
     // Wait for collection to sync
@@ -494,7 +515,7 @@ describe(`Query Collections`, () => {
         .select(({ queryResult }) => ({
           team: queryResult.team,
           count: count(queryResult.id),
-        }))
+        })),
     )
 
     // Wait for grouped query to sync
@@ -568,7 +589,7 @@ describe(`Query Collections`, () => {
         id: `person-collection-test-bug`,
         getKey: (person: Person) => person.id,
         initialData: initialPersons,
-      })
+      }),
     )
 
     // Create issue collection
@@ -577,7 +598,7 @@ describe(`Query Collections`, () => {
         id: `issue-collection-test-bug`,
         getKey: (issue: Issue) => issue.id,
         initialData: initialIssues,
-      })
+      }),
     )
 
     // Render the hook with a query that joins persons and issues
@@ -585,13 +606,13 @@ describe(`Query Collections`, () => {
       q
         .from({ issues: issueCollection })
         .join({ persons: personCollection }, ({ issues, persons }) =>
-          eq(issues.userId, persons.id)
+          eq(issues.userId, persons.id),
         )
         .select(({ issues, persons }) => ({
           id: issues.id,
           title: issues.title,
           name: persons.name,
-        }))
+        })),
     )
 
     const { state } = queryResult
@@ -600,8 +621,8 @@ describe(`Query Collections`, () => {
     watchEffect(() => {
       renderStates.push({
         stateSize: state.value.size,
-        hasTempKey: state.value.has(`[temp-key,1]`),
-        hasPermKey: state.value.has(`[4,1]`),
+        hasTempKey: state.value.has(`["temp-key","1"]`),
+        hasPermKey: state.value.has(`["4","1"]`),
         timestamp: Date.now(),
       })
     })
@@ -673,12 +694,12 @@ describe(`Query Collections`, () => {
 
     // Verify optimistic state is immediately reflected (should be synchronous)
     expect(state.value.size).toBe(4)
-    expect(state.value.get(`[temp-key,1]`)).toMatchObject({
+    expect(state.value.get(`["temp-key","1"]`)).toMatchObject({
       id: `temp-key`,
       name: `John Doe`,
       title: `New Issue`,
     })
-    expect(state.value.get(`[4,1]`)).toBeUndefined()
+    expect(state.value.get(`["4","1"]`)).toBeUndefined()
 
     // Wait for the transaction to be committed
     await transaction.isPersisted.promise
@@ -687,8 +708,8 @@ describe(`Query Collections`, () => {
 
     // Verify the temporary key is replaced by the permanent one
     expect(state.value.size).toBe(4)
-    expect(state.value.get(`[temp-key,1]`)).toBeUndefined()
-    expect(state.value.get(`[4,1]`)).toMatchObject({
+    expect(state.value.get(`["temp-key","1"]`)).toBeUndefined()
+    expect(state.value.get(`["4","1"]`)).toMatchObject({
       id: `4`,
       name: `John Doe`,
       title: `New Issue`,
@@ -701,7 +722,7 @@ describe(`Query Collections`, () => {
         id: `pre-created-collection-test-vue`,
         getKey: (person: Person) => person.id,
         initialData: initialPersons,
-      })
+      }),
     )
 
     // Create a live query collection beforehand
@@ -747,7 +768,7 @@ describe(`Query Collections`, () => {
         id: `collection-1-vue`,
         getKey: (person: Person) => person.id,
         initialData: initialPersons,
-      })
+      }),
     )
 
     const collection2 = createCollection(
@@ -772,7 +793,7 @@ describe(`Query Collections`, () => {
             team: `team3`,
           },
         ],
-      })
+      }),
     )
 
     // Create two different live query collections
@@ -867,7 +888,7 @@ describe(`Query Collections`, () => {
           .select(({ persons }) => ({
             id: persons.id,
             name: persons.name,
-          }))
+          })),
       )
 
       // Initially isReady should be false (collection is in idle state)
@@ -902,7 +923,7 @@ describe(`Query Collections`, () => {
           id: `pre-created-is-ready-test`,
           getKey: (person: Person) => person.id,
           initialData: initialPersons,
-        })
+        }),
       )
 
       // Create a live query collection that's already syncing
@@ -984,7 +1005,7 @@ describe(`Query Collections`, () => {
           .select(({ persons }) => ({
             id: persons.id,
             name: persons.name,
-          }))
+          })),
       )
 
       expect(isReady.value).toBe(false)
@@ -1034,7 +1055,7 @@ describe(`Query Collections`, () => {
           .select(({ persons }) => ({
             id: persons.id,
             name: persons.name,
-          }))
+          })),
       )
 
       // Initially should be true
@@ -1078,7 +1099,7 @@ describe(`Query Collections`, () => {
           id: `live-updates-is-ready-test`,
           getKey: (person: Person) => person.id,
           initialData: initialPersons,
-        })
+        }),
       )
 
       const { isReady } = useLiveQuery((q) =>
@@ -1088,7 +1109,7 @@ describe(`Query Collections`, () => {
           .select(({ persons }) => ({
             id: persons.id,
             name: persons.name,
-          }))
+          })),
       )
 
       await waitForVueUpdate()
@@ -1157,13 +1178,13 @@ describe(`Query Collections`, () => {
         q
           .from({ issues: issueCollection })
           .join({ persons: personCollection }, ({ issues, persons }) =>
-            eq(issues.userId, persons.id)
+            eq(issues.userId, persons.id),
           )
           .select(({ issues, persons }) => ({
             id: issues.id,
             title: issues.title,
             name: persons.name,
-          }))
+          })),
       )
 
       expect(isReady.value).toBe(false)
@@ -1229,7 +1250,7 @@ describe(`Query Collections`, () => {
               id: c.id,
               name: c.name,
             })),
-        [minAge]
+        [minAge],
       )
 
       expect(isReady.value).toBe(false)
@@ -1288,7 +1309,7 @@ describe(`Query Collections`, () => {
           .select(({ collection: c }) => ({
             id: c.id,
             name: c.name,
-          }))
+          })),
       )
 
       // Initially should be loading
@@ -1357,7 +1378,7 @@ describe(`Query Collections`, () => {
           .select(({ collection: c }) => ({
             id: c.id,
             name: c.name,
-          }))
+          })),
       )
 
       // Initially should be loading
@@ -1402,7 +1423,7 @@ describe(`Query Collections`, () => {
         id: `config-querybuilder-test-vue`,
         getKey: (person: Person) => person.id,
         initialData: initialPersons,
-      })
+      }),
     )
 
     // Create a pre-built QueryBuilder instance
@@ -1465,7 +1486,7 @@ describe(`Query Collections`, () => {
           .select(({ persons }) => ({
             id: persons.id,
             name: persons.name,
-          }))
+          })),
       )
 
       // Initially isLoading should be true
@@ -1571,7 +1592,7 @@ describe(`Query Collections`, () => {
             id: persons.id,
             name: persons.name,
             team: persons.team,
-          }))
+          })),
       )
 
       // Start sync
@@ -1684,13 +1705,13 @@ describe(`Query Collections`, () => {
         q
           .from({ issues: issueCollection })
           .join({ persons: personCollection }, ({ issues, persons }) =>
-            eq(issues.userId, persons.id)
+            eq(issues.userId, persons.id),
           )
           .select(({ issues, persons }) => ({
             id: issues.id,
             title: issues.title,
             userName: persons.name,
-          }))
+          })),
       )
 
       // Start sync for both
@@ -1781,7 +1802,7 @@ describe(`Query Collections`, () => {
           .select(({ persons }) => ({
             id: persons.id,
             name: persons.name,
-          }))
+          })),
       )
 
       // Initially isLoading should be true
@@ -1810,6 +1831,157 @@ describe(`Query Collections`, () => {
       expect(state.value.size).toBe(0) // Still no data
       expect(data.value).toEqual([]) // Empty array
       expect(status.value).toBe(`ready`)
+    })
+  })
+
+  describe(`Disabled queries`, () => {
+    it(`propagates a query error whose text matches the disabled marker`, () => {
+      const failure = new Error(`__DISABLED_QUERY__`)
+      expect(() =>
+        useLiveQuery(() => {
+          throw failure
+        }),
+      ).toThrow(failure)
+    })
+
+    it(`should handle callback returning undefined with proper state`, async () => {
+      const collection = createCollection(
+        mockSyncCollectionOptions<Person>({
+          id: `disabled-undefined-test`,
+          getKey: (person: Person) => person.id,
+          initialData: initialPersons,
+        }),
+      )
+
+      const enabled = ref(false)
+      const result = useLiveQuery(
+        (q) => {
+          if (!enabled.value) return undefined
+          return q
+            .from({ persons: collection })
+            .where(({ persons }) => gt(persons.age, 30))
+            .select(({ persons }) => ({
+              id: persons.id,
+              name: persons.name,
+              age: persons.age,
+            }))
+        },
+        [() => enabled.value],
+      )
+
+      // When callback returns undefined, should return disabled state
+      expect(result.state.value.size).toBe(0)
+      expect(result.data.value).toEqual([])
+      expect(result.collection.value).toBeNull()
+      expect(result.status.value).toBe(`disabled`)
+      expect(result.isLoading.value).toBe(false)
+      expect(result.isReady.value).toBe(true)
+
+      // Enable the query
+      enabled.value = true
+      await waitFor(() => {
+        expect(result.collection.value).not.toBeNull()
+      })
+
+      await waitFor(() => {
+        expect(result.state.value.size).toBe(1) // Only John Smith (age 35)
+      })
+      expect(result.data.value).toHaveLength(1)
+      expect(result.isReady.value).toBe(true)
+
+      // Disable the query again
+      enabled.value = false
+      await waitFor(() => {
+        expect(result.status.value).toBe(`disabled`)
+      })
+      expect(result.isReady.value).toBe(true)
+    })
+
+    it(`should handle callback returning null with proper state`, async () => {
+      const collection = createCollection(
+        mockSyncCollectionOptions<Person>({
+          id: `disabled-null-test`,
+          getKey: (person: Person) => person.id,
+          initialData: initialPersons,
+        }),
+      )
+
+      const enabled = ref(false)
+      const result = useLiveQuery(
+        (q) => {
+          if (!enabled.value) return null
+          return q
+            .from({ persons: collection })
+            .where(({ persons }) => gt(persons.age, 30))
+            .select(({ persons }) => ({
+              id: persons.id,
+              name: persons.name,
+              age: persons.age,
+            }))
+        },
+        [() => enabled.value],
+      )
+
+      // When callback returns null, should return disabled state
+      expect(result.state.value.size).toBe(0)
+      expect(result.data.value).toEqual([])
+      expect(result.collection.value).toBeNull()
+      expect(result.status.value).toBe(`disabled`)
+      expect(result.isLoading.value).toBe(false)
+      expect(result.isReady.value).toBe(true)
+
+      // Enable the query
+      enabled.value = true
+      await waitFor(() => {
+        expect(result.collection.value).not.toBeNull()
+      })
+
+      await waitFor(() => {
+        expect(result.state.value.size).toBe(1)
+      })
+      expect(result.data.value).toHaveLength(1)
+      expect(result.isReady.value).toBe(true)
+    })
+
+    /**
+     * Driver: public `useLiveQuery` with a Vue ref. The initial read and each
+     * `waitFor` completion are observation cuts for disabled, enabled, and
+     * disabled-again public results. Collection/state behavior remains in
+     * shared conformance; this test isolates conditional `findOne` data.
+     */
+    it(`keeps conditional findOne data empty while disabled`, async () => {
+      const collection = createCollection(
+        mockSyncCollectionOptions<Person>({
+          id: `disabled-find-one-vue`,
+          getKey: (person: Person) => person.id,
+          initialData: initialPersons,
+        }),
+      )
+      const enabled = ref(false)
+      const result = useLiveQuery(
+        (q) =>
+          enabled.value
+            ? q
+                .from({ collection })
+                .where(({ collection: person }) => eq(person.id, `3`))
+                .findOne()
+            : null,
+        [() => enabled.value],
+      )
+
+      expect(result.status.value).toBe(`disabled`)
+      expect(result.data.value).toEqual([])
+
+      enabled.value = true
+      await waitFor(() => {
+        expect(result.data.value).toMatchObject({ id: `3` })
+      })
+
+      enabled.value = false
+      await waitFor(() => {
+        expect(result.status.value).toBe(`disabled`)
+      })
+      expect(result.data.value).toEqual([])
     })
   })
 })

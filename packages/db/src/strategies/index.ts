@@ -1,7 +1,7 @@
 // Export all strategy factories
-export { debounceStrategy } from "./debounceStrategy"
-export { queueStrategy } from "./queueStrategy"
-export { throttleStrategy } from "./throttleStrategy"
+export { debounceStrategy } from './debounceStrategy'
+export { queueStrategy } from './queueStrategy'
+export { throttleStrategy } from './throttleStrategy'
 
 // Export strategy types
 export type {
@@ -14,4 +14,4 @@ export type {
   ThrottleStrategy,
   ThrottleStrategyOptions,
   StrategyOptions,
-} from "./types"
+} from './types'

@@ -1,8 +1,8 @@
-import { defineConfig } from "vite"
-import solid from "vite-plugin-solid"
-import tailwindcss from "@tailwindcss/vite"
-import { tanstackStart } from "@tanstack/solid-start/plugin/vite"
-import viteTsConfigPaths from "vite-tsconfig-paths"
+import { defineConfig } from 'vite'
+import solid from 'vite-plugin-solid'
+import tailwindcss from '@tailwindcss/vite'
+import { tanstackStart } from '@tanstack/solid-start/plugin/vite'
+import viteTsConfigPaths from 'vite-tsconfig-paths'
 
 // https://vitejs.dev/config/
 export default defineConfig({
@@ -13,11 +13,9 @@ export default defineConfig({
     }),
     tailwindcss(),
     tanstackStart({
-      customViteSolidPlugin: true,
-      spa: {
-        prerender: { enabled: false },
-        enabled: true,
-      },
+      srcDirectory: `src`,
+      start: { entry: `./start.tsx` },
+      server: { entry: `./server.ts` },
     }),
     solid({ ssr: true }),
   ],

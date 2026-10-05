@@ -1,9 +1,16 @@
-import { describe, expect, it } from "vitest"
-import { D2 } from "@tanstack/db-ivm"
-import { compileQuery } from "../../../src/query/compiler/index.js"
-import { CollectionRef, PropRef, QueryRef } from "../../../src/query/ir.js"
-import type { QueryIR } from "../../../src/query/ir.js"
-import type { CollectionImpl } from "../../../src/collection/index.js"
+import { describe, expect, it } from 'vitest'
+import { D2 } from '@tanstack/db-ivm'
+import { compileQuery } from '../../../src/query/compiler/index.js'
+import { queriesMatchForCaching } from '../../../src/query/compiler/query-equivalence.js'
+import {
+  CollectionRef,
+  Func,
+  PropRef,
+  QueryRef,
+  Value,
+} from '../../../src/query/ir.js'
+import type { QueryIR } from '../../../src/query/ir.js'
+import type { CollectionImpl } from '../../../src/collection/index.js'
 
 // Helper to create a minimal mock collection for compiler tests
 function createMockCollection(id: string): CollectionImpl {
@@ -15,11 +22,34 @@ function createMockCollection(id: string): CollectionImpl {
       getKey: (item: any) => item.id,
       sync: { sync: () => {} },
     },
+    indexes: new Map(),
     size: 0,
   } as any
 }
 
 describe(`Subquery Caching`, () => {
+  it(`reuses cache identity only when optimizer copies preserve query meaning`, () => {
+    const usersCollection = createMockCollection(`users`)
+    const original: QueryIR = {
+      from: new CollectionRef(usersCollection, `u`),
+      select: { id: new PropRef([`u`, `id`]) },
+    }
+    const copied: QueryIR = {
+      ...original,
+      join: undefined,
+      where: undefined,
+    }
+    const filtered: QueryIR = {
+      ...copied,
+      where: [
+        new Func(`eq`, [new PropRef([`u`, `status`]), new Value(`active`)]),
+      ],
+    }
+
+    expect(queriesMatchForCaching(copied, original)).toBe(true)
+    expect(queriesMatchForCaching(filtered, original)).toBe(false)
+  })
+
   it(`should cache compiled subqueries and avoid duplicate compilation`, () => {
     // Create a mock collection
     const usersCollection = createMockCollection(`users`)
@@ -70,7 +100,7 @@ describe(`Subquery Caching`, () => {
       {},
       () => {},
       cache1,
-      queryMapping1
+      queryMapping1,
     )
 
     // Verify subquery is in first cache
@@ -90,7 +120,7 @@ describe(`Subquery Caching`, () => {
       {},
       () => {},
       cache2,
-      queryMapping2
+      queryMapping2,
     )
 
     // Results should be different objects (different compilation)
@@ -111,7 +141,7 @@ describe(`Subquery Caching`, () => {
       {},
       () => {},
       cache2,
-      new WeakMap()
+      new WeakMap(),
     )
 
     // Result should be the same object as #2 (reused from cache)
@@ -132,7 +162,7 @@ describe(`Subquery Caching`, () => {
       {},
       () => {},
       cache2,
-      new WeakMap()
+      new WeakMap(),
     )
     const subqueryResult2 = compileQuery(
       subquery,
@@ -144,7 +174,7 @@ describe(`Subquery Caching`, () => {
       {},
       () => {},
       cache2,
-      new WeakMap()
+      new WeakMap(),
     )
 
     // Both subquery compilations should return the same cached result
@@ -180,7 +210,7 @@ describe(`Subquery Caching`, () => {
       {},
       () => {},
       sharedCache,
-      new WeakMap()
+      new WeakMap(),
     )
     expect(sharedCache.has(subquery)).toBe(true)
 
@@ -195,7 +225,7 @@ describe(`Subquery Caching`, () => {
       {},
       () => {},
       sharedCache,
-      new WeakMap()
+      new WeakMap(),
     )
     expect(result1).toBe(result2) // Should be the exact same object reference
   })
@@ -240,7 +270,7 @@ describe(`Subquery Caching`, () => {
       {},
       () => {},
       sharedCache,
-      new WeakMap()
+      new WeakMap(),
     )
     const result2 = compileQuery(
       subquery,
@@ -252,7 +282,7 @@ describe(`Subquery Caching`, () => {
       {},
       () => {},
       sharedCache,
-      new WeakMap()
+      new WeakMap(),
     )
 
     // Should have different results since they are different objects
@@ -261,6 +291,40 @@ describe(`Subquery Caching`, () => {
     // Both should be in the cache
     expect(sharedCache.has(subquery1)).toBe(true)
     expect(sharedCache.has(subquery)).toBe(true)
+  })
+
+  it(`does not reuse a correlated query across parent streams`, () => {
+    const usersCollection = createMockCollection(`users`)
+    const query: QueryIR = {
+      from: new CollectionRef(usersCollection, `u`),
+      select: { id: new PropRef([`u`, `id`]) },
+    }
+    const graph = new D2()
+    const userInput = graph.newInput<[number, any]>()
+    const firstParents = graph.newInput<[number, any]>()
+    const secondParents = graph.newInput<[number, any]>()
+    const cache = new WeakMap()
+    const compileWithParents = (parents: typeof firstParents) =>
+      compileQuery(
+        query,
+        { u: userInput },
+        { users: usersCollection },
+        {},
+        {},
+        new Set(),
+        {},
+        () => {},
+        cache,
+        new WeakMap(),
+        parents,
+        new PropRef([`u`, `id`]),
+      )
+
+    const first = compileWithParents(firstParents)
+    const second = compileWithParents(secondParents)
+
+    expect(second).not.toBe(first)
+    expect(cache.has(query)).toBe(false)
   })
 
   it(`should use cache to avoid recompilation in nested subqueries`, () => {
@@ -315,7 +379,7 @@ describe(`Subquery Caching`, () => {
       {},
       () => {},
       sharedCache,
-      new WeakMap()
+      new WeakMap(),
     )
     expect(result).toBeDefined()
 

@@ -27,7 +27,7 @@
  * ```
  */
 
-import type { IR, OperatorName } from "../index.js"
+import type { IR, OperatorName } from '../index.js'
 
 type BasicExpression<T = any> = IR.BasicExpression<T>
 type OrderBy = IR.OrderBy
@@ -83,12 +83,14 @@ export interface ParsedOrderBy {
   field: FieldPath
   direction: `asc` | `desc`
   nulls: `first` | `last`
-  /** String sorting method: 'lexical' (default) or 'locale' (locale-aware) */
-  stringSort?: `lexical` | `locale`
+  /** String sorting method. */
+  stringSort?: `lexical` | `locale` | `custom`
   /** Locale for locale-aware string sorting (e.g., 'en-US') */
   locale?: string
   /** Additional options for locale-aware sorting */
   localeOptions?: object
+  /** Exact local comparator used by custom string sorting. */
+  compare?: (a: string, b: string) => number
 }
 
 /**
@@ -149,7 +151,7 @@ export function extractValue(expr: BasicExpression): any {
  */
 export function walkExpression(
   expr: BasicExpression | undefined | null,
-  visitor: (node: BasicExpression) => void
+  visitor: (node: BasicExpression) => void,
 ): void {
   if (!expr) return
 
@@ -200,7 +202,7 @@ export function walkExpression(
  */
 export function parseWhereExpression<T = any>(
   expr: BasicExpression<boolean> | undefined | null,
-  options: ParseWhereOptions<T>
+  options: ParseWhereOptions<T>,
 ): T | null {
   if (!expr) return null
 
@@ -226,7 +228,7 @@ export function parseWhereExpression<T = any>(
       return onUnknownOperator(name, args)
     }
     throw new Error(
-      `No handler provided for operator: ${name}. Available handlers: ${Object.keys(handlers).join(`, `)}`
+      `No handler provided for operator: ${name}. Available handlers: ${Object.keys(handlers).join(`, `)}`,
     )
   }
 
@@ -263,7 +265,7 @@ export function parseWhereExpression<T = any>(
  * ```
  */
 export function parseOrderByExpression(
-  orderBy: OrderBy | undefined | null
+  orderBy: OrderBy | undefined | null,
 ): Array<ParsedOrderBy> {
   if (!orderBy || orderBy.length === 0) {
     return []
@@ -274,7 +276,7 @@ export function parseOrderByExpression(
 
     if (!field) {
       throw new Error(
-        `ORDER BY expression must be a field reference, got: ${clause.expression.type}`
+        `ORDER BY expression must be a field reference, got: ${clause.expression.type}`,
       )
     }
 
@@ -294,6 +296,9 @@ export function parseOrderByExpression(
     }
     if (`localeOptions` in clause.compareOptions) {
       result.localeOptions = clause.compareOptions.localeOptions
+    }
+    if (`compare` in clause.compareOptions) {
+      result.compare = clause.compareOptions.compare
     }
 
     return result
@@ -325,7 +330,7 @@ export function parseOrderByExpression(
  * ```
  */
 export function extractSimpleComparisons(
-  expr: BasicExpression<boolean> | undefined | null
+  expr: BasicExpression<boolean> | undefined | null,
 ): Array<SimpleComparison> {
   if (!expr) return []
 
@@ -344,7 +349,7 @@ export function extractSimpleComparisons(
         const [arg] = e.args
         if (!arg || arg.type !== `func`) {
           throw new Error(
-            `extractSimpleComparisons requires a comparison or null check inside 'not' operator.`
+            `extractSimpleComparisons requires a comparison or null check inside 'not' operator.`,
           )
         }
 
@@ -362,7 +367,7 @@ export function extractSimpleComparisons(
             })
           } else {
             throw new Error(
-              `extractSimpleComparisons requires a field reference for '${arg.name}' operator.`
+              `extractSimpleComparisons requires a field reference for '${arg.name}' operator.`,
             )
           }
           return
@@ -383,7 +388,7 @@ export function extractSimpleComparisons(
             })
           } else {
             throw new Error(
-              `extractSimpleComparisons requires simple field-value comparisons. Found complex expression for 'not(${arg.name})' operator.`
+              `extractSimpleComparisons requires simple field-value comparisons. Found complex expression for 'not(${arg.name})' operator.`,
             )
           }
           return
@@ -391,7 +396,7 @@ export function extractSimpleComparisons(
 
         // NOT can only wrap simple comparisons or null checks
         throw new Error(
-          `extractSimpleComparisons does not support 'not(${arg.name})'. NOT can only wrap comparison operators (eq, gt, gte, lt, lte, in) or null checks (isNull, isUndefined).`
+          `extractSimpleComparisons does not support 'not(${arg.name})'. NOT can only wrap comparison operators (eq, gt, gte, lt, lte, in) or null checks (isNull, isUndefined).`,
         )
       }
 
@@ -414,7 +419,7 @@ export function extractSimpleComparisons(
       ]
       if (unsupportedOps.includes(e.name)) {
         throw new Error(
-          `extractSimpleComparisons does not support '${e.name}' operator. Use parseWhereExpression with custom handlers for complex expressions.`
+          `extractSimpleComparisons does not support '${e.name}' operator. Use parseWhereExpression with custom handlers for complex expressions.`,
         )
       }
 
@@ -434,7 +439,7 @@ export function extractSimpleComparisons(
           })
         } else {
           throw new Error(
-            `extractSimpleComparisons requires a field reference for '${e.name}' operator.`
+            `extractSimpleComparisons requires a field reference for '${e.name}' operator.`,
           )
         }
         return
@@ -457,13 +462,13 @@ export function extractSimpleComparisons(
           })
         } else {
           throw new Error(
-            `extractSimpleComparisons requires simple field-value comparisons. Found complex expression for '${e.name}' operator.`
+            `extractSimpleComparisons requires simple field-value comparisons. Found complex expression for '${e.name}' operator.`,
           )
         }
       } else {
         // Unknown operator
         throw new Error(
-          `extractSimpleComparisons encountered unknown operator: '${e.name}'`
+          `extractSimpleComparisons encountered unknown operator: '${e.name}'`,
         )
       }
     }
@@ -504,7 +509,7 @@ export function parseLoadSubsetOptions(
         limit?: number
       }
     | undefined
-    | null
+    | null,
 ): {
   filters: Array<SimpleComparison>
   sorts: Array<ParsedOrderBy>

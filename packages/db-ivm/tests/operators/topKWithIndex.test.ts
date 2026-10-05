@@ -1,13 +1,10 @@
-import { describe, expect, test } from "vitest"
-import { D2 } from "../../src/d2.js"
-import { MultiSet } from "../../src/multiset.js"
-import { output } from "../../src/operators/index.js"
-import { topKWithIndex } from "../../src/operators/topK.js"
-import {
-  MessageTracker,
-  assertOnlyKeysAffected,
-  assertResults,
-} from "../test-utils.js"
+import { describe, expect, test } from 'vitest'
+import { D2 } from '../../src/d2.js'
+import { MultiSet } from '../../src/multiset.js'
+import { output } from '../../src/operators/index.js'
+import { topKWithIndex } from '../../src/operators/topK.js'
+import { assertOnlyKeysAffected, assertResults } from '../test-utils.js'
+import { TopKMessageTracker } from './topk-relation-oracle.js'
 
 describe(`Operators`, () => {
   describe(`TopKWithIndex operation`, () => {
@@ -28,7 +25,7 @@ describe(`Operators`, () => {
         topKWithIndex((a, b) => a.value.localeCompare(b.value), { limit: 3 }),
         output((message) => {
           latestMessage = message
-        })
+        }),
       )
 
       graph.finalize()
@@ -40,7 +37,7 @@ describe(`Operators`, () => {
           [[null, { id: 3, value: `b` }], 1],
           [[null, { id: 4, value: `y` }], 1],
           [[null, { id: 5, value: `c` }], 1],
-        ])
+        ]),
       )
       graph.run()
 
@@ -75,7 +72,7 @@ describe(`Operators`, () => {
         }),
         output((message) => {
           latestMessage = message
-        })
+        }),
       )
 
       graph.finalize()
@@ -87,7 +84,7 @@ describe(`Operators`, () => {
           [[null, { id: 3, value: `b` }], 1],
           [[null, { id: 4, value: `y` }], 1],
           [[null, { id: 5, value: `c` }], 1],
-        ])
+        ]),
       )
       graph.run()
 
@@ -120,7 +117,7 @@ describe(`Operators`, () => {
         topKWithIndex((a, b) => a.value.localeCompare(b.value), { limit: 3 }),
         output((message) => {
           latestMessage = message
-        })
+        }),
       )
 
       graph.finalize()
@@ -137,7 +134,7 @@ describe(`Operators`, () => {
           [[`two`, { id: 8, value: `2` }], 1],
           [[`two`, { id: 9, value: `1` }], 1],
           [[`two`, { id: 10, value: `0` }], 1],
-        ])
+        ]),
       )
       graph.run()
 
@@ -167,15 +164,13 @@ describe(`Operators`, () => {
           },
         ]
       >()
-      const tracker = new MessageTracker<
-        [null, [{ id: number; value: string }, number]]
-      >()
+      const tracker = new TopKMessageTracker<null, number>()
 
       input.pipe(
         topKWithIndex((a, b) => a.value.localeCompare(b.value), { limit: 3 }),
         output((message) => {
           tracker.addMessage(message)
-        })
+        }),
       )
 
       graph.finalize()
@@ -187,7 +182,7 @@ describe(`Operators`, () => {
           [[null, { id: 2, value: `b` }], 1],
           [[null, { id: 3, value: `c` }], 1],
           [[null, { id: 4, value: `d` }], 1],
-        ])
+        ]),
       )
       graph.run()
 
@@ -201,7 +196,7 @@ describe(`Operators`, () => {
           [null, [{ id: 2, value: `b` }, 1]],
           [null, [{ id: 3, value: `c` }, 2]],
         ],
-        4 // Max expected messages for initial data
+        4, // Max expected weighted deltas for initial data
       )
 
       tracker.reset()
@@ -211,19 +206,29 @@ describe(`Operators`, () => {
       graph.run()
 
       // After removing 'b', we should get incremental changes
-      // The important thing is that we get a reasonable number of messages
+      // The important thing is that we get a reasonable number of weighted deltas
       // and that only the affected key (null) produces output
       const updateResult = tracker.getResult()
 
-      // Verify we got a reasonable number of messages (not the entire dataset)
-      expect(updateResult.messageCount).toBeLessThanOrEqual(8) // Should be incremental, not full recompute
-      expect(updateResult.messageCount).toBeGreaterThan(0) // Should have some changes
+      // This is an output-transfer cap, not a measurement of internal recomputation.
+      expect(updateResult.deltaCount).toBeLessThanOrEqual(8)
+      expect(updateResult.deltaCount).toBeGreaterThan(0) // Should have some changes
 
       // The materialized result should have some entries (items with positive multiplicity)
       expect(updateResult.sortedResults.length).toBeGreaterThan(0)
 
-      // Check that the messages only affect the null key (verify incremental processing)
-      assertOnlyKeysAffected(`topK remove row`, updateResult.messages, [null])
+      // Check that the weighted deltas only affect the null key (verify incremental processing)
+      assertOnlyKeysAffected(`topK remove row`, updateResult.weightedDeltas, [
+        null,
+      ])
+      tracker.relation.expectRows(
+        [
+          [null, 1, `a`],
+          [null, 3, `c`],
+          [null, 4, `d`],
+        ],
+        0,
+      )
     })
 
     test(`incremental update - adding rows that push existing rows out of limit window`, () => {
@@ -243,7 +248,7 @@ describe(`Operators`, () => {
         topKWithIndex((a, b) => a.value.localeCompare(b.value), { limit: 3 }),
         output((message) => {
           latestMessage = message
-        })
+        }),
       )
 
       graph.finalize()
@@ -254,7 +259,7 @@ describe(`Operators`, () => {
           [[null, { id: 1, value: `c` }], 1],
           [[null, { id: 2, value: `d` }], 1],
           [[null, { id: 3, value: `e` }], 1],
-        ])
+        ]),
       )
       graph.run()
 
@@ -272,7 +277,7 @@ describe(`Operators`, () => {
         new MultiSet([
           [[null, { id: 4, value: `a` }], 1],
           [[null, { id: 5, value: `b` }], 1],
-        ])
+        ]),
       )
       graph.run()
 
@@ -310,7 +315,7 @@ describe(`Operators`, () => {
         topKWithIndex((a, b) => a.value.localeCompare(b.value), { limit: 3 }),
         output((message) => {
           latestMessage = message
-        })
+        }),
       )
 
       graph.finalize()
@@ -321,7 +326,7 @@ describe(`Operators`, () => {
           [[null, { id: 1, value: `a` }], 1],
           [[null, { id: 2, value: `b` }], 1],
           [[null, { id: 3, value: `c` }], 1],
-        ])
+        ]),
       )
       graph.run()
 
@@ -339,7 +344,7 @@ describe(`Operators`, () => {
         new MultiSet([
           [[null, { id: 1, value: `a` }], -1],
           [[null, { id: 1, value: `z` }], 1],
-        ])
+        ]),
       )
       graph.run()
 
@@ -381,7 +386,7 @@ describe(`Operators`, () => {
         }),
         output((message) => {
           latestMessage = message
-        })
+        }),
       )
 
       graph.finalize()
@@ -394,7 +399,7 @@ describe(`Operators`, () => {
           [[null, { id: 3, value: `c` }], 1],
           [[null, { id: 4, value: `d` }], 1],
           [[null, { id: 5, value: `e` }], 1],
-        ])
+        ]),
       )
       graph.run()
 
@@ -434,7 +439,7 @@ function sortByIndexAndId(results: Array<any>) {
   return [...results].sort(
     (
       [[_aKey, [aValue, aIndex]], _aMultiplicity],
-      [[_bKey, [bValue, bIndex]], _bMultiplicity]
+      [[_bKey, [bValue, bIndex]], _bMultiplicity],
     ) => {
       // First sort by index
       if (aIndex !== bIndex) {
@@ -442,7 +447,7 @@ function sortByIndexAndId(results: Array<any>) {
       }
       // Then by id if indices are the same
       return aValue.id - bValue.id
-    }
+    },
   )
 }
 
@@ -453,7 +458,7 @@ function sortByKeyIndexAndId(results: Array<any>) {
   return [...results].sort(
     (
       [[aKey, [aValue, aIndex]], _aMultiplicity],
-      [[bKey, [bValue, bIndex]], _bMultiplicity]
+      [[bKey, [bValue, bIndex]], _bMultiplicity],
     ) => {
       // First sort by key
       if (aKey !== bKey) {
@@ -465,7 +470,7 @@ function sortByKeyIndexAndId(results: Array<any>) {
       }
       // Then by id if indices are the same
       return aValue.id - bValue.id
-    }
+    },
   )
 }
 
@@ -476,7 +481,7 @@ function sortByMultiplicityIndexAndId(results: Array<any>) {
   return [...results].sort(
     (
       [[_aKey, [aValue, aIndex]], aMultiplicity],
-      [[_bKey, [bValue, bIndex]], bMultiplicity]
+      [[_bKey, [bValue, bIndex]], bMultiplicity],
     ) => {
       // First sort by multiplicity
       if (aMultiplicity !== bMultiplicity) {
@@ -488,6 +493,6 @@ function sortByMultiplicityIndexAndId(results: Array<any>) {
       }
       // Then by id if indices are the same
       return aValue.id - bValue.id
-    }
+    },
   )
 }
