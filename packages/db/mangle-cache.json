@@ -141,7 +141,6 @@
   "completePendingSyncEntryCleanup": "ck",
   "normalizeLoadSubsetPromiseError": "cl",
   "deliveredLayoutRevision": "cm",
-  "markPendingLocalChanges": "cn",
   "observeLoadSubsetResult": "co",
   "ssrServerCleanupEnabled": "cp",
   "endTransition": "cq",
@@ -382,5 +381,9 @@
   "compareRows": "gg",
   "sameFields": "gh",
   "dropIfUnused": "gi",
-  "clock": "gj"
+  "clock": "gj",
+  "collectPendingSyncKeys": "cn",
+  "emitLoadingSubsetChange": "gk",
+  "overlayActiveTransactions": "gl",
+  "completeLoadSubsetOperation": "gm"
 }

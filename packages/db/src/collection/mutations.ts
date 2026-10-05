@@ -193,16 +193,6 @@ export class CollectionMutationsManager<
     return `KEY::${this.id}/${key}`
   }
 
-  private markPendingLocalChanges(
-    mutations: Array<PendingMutation<TOutput>>,
-  ): void {
-    for (const mutation of mutations) {
-      // The handler can sync synchronously before its transaction is registered.
-      // This is provisional; only completed mutations retain a local origin.
-      this.state.pendingLocalChanges.add(mutation.key as TKey)
-    }
-  }
-
   /**
    * A local-only Collection confirms its own writes. Without a user handler
    * for this operation type, and with no other transaction unsettled, write
@@ -339,7 +329,6 @@ export class CollectionMutationsManager<
 
       // Apply mutations to the new transaction
       directOpTransaction.applyMutations(mutations)
-      this.markPendingLocalChanges(mutations)
       // The Collection owns the request before its handler can write through
       // sync, so a confirmation written by the handler waits for settlement.
       state.transactions.set(directOpTransaction.id, directOpTransaction)
@@ -553,7 +542,6 @@ export class CollectionMutationsManager<
 
     // Apply mutations to the new transaction
     directOpTransaction.applyMutations(mutations)
-    this.markPendingLocalChanges(mutations)
     // Own the request before its handler runs; see insert.
     state.transactions.set(directOpTransaction.id, directOpTransaction)
     state.scheduleTransactionCleanup(directOpTransaction)
@@ -666,7 +654,6 @@ export class CollectionMutationsManager<
 
     // Apply mutations to the new transaction
     directOpTransaction.applyMutations(mutations)
-    this.markPendingLocalChanges(mutations)
     // Own the request before its handler runs; see insert.
     state.transactions.set(directOpTransaction.id, directOpTransaction)
     state.scheduleTransactionCleanup(directOpTransaction)

@@ -16,7 +16,7 @@ import {
   oracleRandomParameters,
   readOracleRunConfig,
 } from '../oracle-config.js'
-import { evaluateReferenceExpression } from '../reference-expression.js'
+import { evaluateReferenceExpression } from '../reference-expression-oracle.js'
 import { flushPromises } from '../utils.js'
 import { withHistoryCleanup } from '../optimistic-history-oracle.js'
 import type { InitialQueryBuilder } from '../../src/query/builder/index.js'
@@ -50,7 +50,8 @@ import type { LoadSubsetOptions, SyncConfig } from '../../src/types.js'
  * remote relation-hint evaluation, or arbitrary source scheduling.
  *
  * The value model is a plain sorted array. The work recorder captures normalized
- * page and boundary requests, graph schedules, publications, and errors.
+ * request shapes with and without order hints, graph schedules, publications,
+ * and errors.
  * Live Collections and Effects receive the same scenario and must agree with
  * each other and the model. Exhaustive small domains cover ties, eligibility,
  * direction, and middle-row count; generated runs vary the same grammar.
@@ -85,8 +86,12 @@ type Scenario = {
 
 type JoinFilter = `two-alias` | `joined-only` | `some` | `none` | `to-one`
 
+// These recorder categories describe only the presence of adapter orderBy.
+// With-order combines indexed pages and unindexed prefixes. Without-order
+// combines tie-boundary requests and filtered or unfiltered full-source loads;
+// it does not describe the local query order.
 type RequestObservation = {
-  kind: `page` | `boundary`
+  kind: `with-order` | `without-order`
   key: string | undefined
   fingerprint: string
   hasCursor: boolean
@@ -345,9 +350,9 @@ async function observeConsumer(
         operations.markReady()
         return {
           loadSubset: async (options) => {
-            const isPage = options.orderBy !== undefined
+            const hasOrderHint = options.orderBy !== undefined
             requests.push({
-              kind: isPage ? `page` : `boundary`,
+              kind: hasOrderHint ? `with-order` : `without-order`,
               key: getLoadSubsetDemandKey(options),
               fingerprint: requestFingerprint(options),
               hasCursor: options.cursor !== undefined,
@@ -366,7 +371,7 @@ async function observeConsumer(
                 )
               : truth
 
-            if (!isPage) {
+            if (!hasOrderHint) {
               await apply(matching.filter((row) => !delivered.has(row.id)))
               return
             }
@@ -519,7 +524,9 @@ async function observeConsumer(
         }
         if (loadingMode === `indexed`)
           expect(
-            requests.filter(({ kind: requestKind }) => requestKind === `page`),
+            requests.filter(
+              ({ kind: requestKind }) => requestKind === `with-order`,
+            ),
           ).toHaveLength(1)
         else if (loadingMode === `custom`) expect(requests).toHaveLength(1)
         else
@@ -631,7 +638,7 @@ async function observeConsumer(
       expect(
         requests.every(
           (request) =>
-            request.kind === `boundary` || request.limit !== undefined,
+            request.kind === `without-order` || request.limit !== undefined,
         ),
       ).toBe(true)
 
@@ -3445,7 +3452,7 @@ describe(`ordered source work oracle`, () => {
     for (const scenario of exhaustiveScenarios) {
       const observed = await observeConsumer(`collection`, scenario, `none`)
       expect(observed.requests.length).toBeGreaterThan(0)
-      expect(observed.requests[0]?.kind).toBe(`page`)
+      expect(observed.requests[0]?.kind).toBe(`with-order`)
       expect(observed.requests[0]?.limit).toBeGreaterThan(0)
     }
   })
@@ -3465,7 +3472,7 @@ describe(`ordered source work oracle`, () => {
         // A direct LEFT-joined filter retains finite root acquisition.
         for (const observation of [collection, effect]) {
           expect(observation.requests.length).toBeGreaterThan(0)
-          expect(observation.requests[0]?.kind).toBe(`page`)
+          expect(observation.requests[0]?.kind).toBe(`with-order`)
           expect(observation.requests[0]?.limit).toBeGreaterThan(0)
         }
       }
@@ -3499,13 +3506,14 @@ describe(`ordered source work oracle`, () => {
       expect(observed.rows.map(({ id }) => id)).toEqual([3])
       expect(observed.errors).toEqual([])
       if (loadingMode === `custom`) {
+        // The full-source acquisition uses the without-order request shape.
         expect(observed.requests).toHaveLength(1)
-        expect(observed.requests[0]?.kind).toBe(`boundary`)
+        expect(observed.requests[0]?.kind).toBe(`without-order`)
         expect(observed.requests[0]?.limit).toBeUndefined()
         expect(observed.requests[0]?.hasCursor).toBe(false)
         expect(observed.requests[0]?.offset).toBeUndefined()
       } else {
-        expect(observed.requests[0]?.kind).toBe(`page`)
+        expect(observed.requests[0]?.kind).toBe(`with-order`)
         expect(observed.requests.some(({ limit }) => limit === undefined)).toBe(
           true,
         )
@@ -3536,7 +3544,7 @@ describe(`ordered source work oracle`, () => {
         true,
       )
       expect(observed.errors).toEqual([])
-      expect(observed.requests[0]?.kind).toBe(`page`)
+      expect(observed.requests[0]?.kind).toBe(`with-order`)
     },
   )
 
@@ -3578,7 +3586,7 @@ describe(`ordered source work oracle`, () => {
       expect(observed.requests.length).toBeLessThan(10)
       expect(
         observed.requests.every(
-          ({ kind, key }) => kind === `page` || key !== undefined,
+          ({ kind, key }) => kind === `with-order` || key !== undefined,
         ),
       ).toBe(true)
     },
@@ -3620,10 +3628,12 @@ describe(`ordered source work oracle`, () => {
           JSON.stringify(observation.requests),
         ).toBeLessThanOrEqual(2 * sourceSize)
         expect(
-          observation.requests.filter(({ kind }) => kind === `page`).length,
+          observation.requests.filter(({ kind }) => kind === `with-order`)
+            .length,
         ).toBeLessThanOrEqual(sourceSize)
         expect(
-          observation.requests.filter(({ kind }) => kind === `boundary`).length,
+          observation.requests.filter(({ kind }) => kind === `without-order`)
+            .length,
         ).toBeLessThanOrEqual(sourceSize)
         expect(
           new Set(observation.requests.map(({ key }) => key)).size,

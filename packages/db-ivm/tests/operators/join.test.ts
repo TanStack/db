@@ -51,7 +51,11 @@ function testJoin() {
     const result = tracker.getResult()
 
     // Assert only keys that can actually join (1, 2) are affected, not key 3
-    assertOnlyKeysAffected(`basic join operation`, result.messages, [1, 2])
+    assertOnlyKeysAffected(
+      `basic join operation`,
+      result.weightedDeltas,
+      [1, 2],
+    )
 
     // Assert the final materialized results are correct
     assertKeyedResults(
@@ -61,7 +65,7 @@ function testJoin() {
         [1, [`a`, `x`]],
         [2, [`b`, `y`]],
       ],
-      4, // Expected message count
+      4, // Expected weighted delta count
     )
   })
 
@@ -103,7 +107,7 @@ function testJoin() {
     // Assert only expected keys (1, 2) are affected in the join output
     assertOnlyKeysAffected(
       `join with late arriving data`,
-      result.messages,
+      result.weightedDeltas,
       [1, 2],
     )
 
@@ -115,7 +119,7 @@ function testJoin() {
         [1, [`a`, `x`]],
         [2, [`b`, `y`]],
       ],
-      4, // Expected message count
+      4, // Expected weighted delta count
     )
   })
 
@@ -154,16 +158,16 @@ function testJoin() {
     // Assert only keys that participate in join (1, 2) are affected
     assertOnlyKeysAffected(
       `join with negative multiplicities`,
-      result.messages,
+      result.weightedDeltas,
       [1, 2],
     )
 
     // Verify that key 2 produces a message but with negative multiplicity
-    const key2Messages = result.messages.filter(
+    const key2Deltas = result.weightedDeltas.filter(
       ([[key, _value], _mult]) => key === 2,
     )
-    expect(key2Messages.length).toBeGreaterThan(0) // Key 2 should produce messages
-    expect(key2Messages[0]![1]).toBeLessThan(0) // But with negative multiplicity
+    expect(key2Deltas.length).toBeGreaterThan(0) // Key 2 should produce weighted deltas
+    expect(key2Deltas[0]![1]).toBeLessThan(0) // But with negative multiplicity
 
     // Assert the final materialized results (only positive multiplicities remain)
     assertKeyedResults(
@@ -172,7 +176,7 @@ function testJoin() {
       [
         [1, [`a`, `x`]], // Only key 1 should remain in final results
       ],
-      4, // Expected message count
+      4, // Expected weighted delta count
     )
   })
 
@@ -228,7 +232,7 @@ function testJoin() {
     const expectedKeys = [`key1`, `key2`, `key3`, `key4`, `key5`]
     assertOnlyKeysAffected(
       `join multiple batches`,
-      result.messages,
+      result.weightedDeltas,
       expectedKeys,
     )
 
@@ -243,7 +247,7 @@ function testJoin() {
         [`key4`, [`batch2_b`, `x4`]],
         [`key5`, [`batch3_a`, `x5`]],
       ],
-      10, // Expected message count
+      10, // Expected weighted delta count
     )
   })
 
@@ -319,12 +323,12 @@ function testJoin() {
     const expectedKeys = [`item1`, `item2`, `item3`]
     assertOnlyKeysAffected(
       `join step-by-step`,
-      stepResult.messages,
+      stepResult.weightedDeltas,
       expectedKeys,
     )
     assertOnlyKeysAffected(
       `join batch processing`,
-      batchResult.messages,
+      batchResult.weightedDeltas,
       expectedKeys,
     )
 

@@ -56,22 +56,20 @@ const suspenseCollectionsByClient = new WeakMap<
   DbClient,
   Map<string, SuspenseCollectionEntry>
 >()
-const suspenseSourceIds = new WeakMap<object, number>()
-let nextSuspenseSourceId = 0
+const sourceObjectTokens = new WeakMap<object, number>()
+let nextSourceObjectToken = 0
 
-function getSuspenseSourceId(source: object): number {
-  let id = suspenseSourceIds.get(source)
+function getSourceObjectToken(source: object): number {
+  let id = sourceObjectTokens.get(source)
   if (id === undefined) {
-    id = ++nextSuspenseSourceId
-    suspenseSourceIds.set(source, id)
+    id = ++nextSourceObjectToken
+    sourceObjectTokens.set(source, id)
   }
   return id
 }
 
-function getUnscopedSuspenseKey(
-  preparedValue: unknown,
-  queryHash: string,
-): string {
+function getPreparedSources(preparedValue: unknown): Array<{ id: string }> {
+  if (isCollection(preparedValue)) return [preparedValue]
   const query =
     preparedValue instanceof BaseQueryBuilder
       ? preparedValue
@@ -81,10 +79,19 @@ function getUnscopedSuspenseKey(
           preparedValue.query instanceof BaseQueryBuilder
         ? preparedValue.query
         : undefined
-  if (!query) return queryHash
-  const sourceIds = IR.collectCollectionSources(query._getQuery()).map(
-    ({ collection }) => getSuspenseSourceId(collection),
-  )
+  return query
+    ? IR.collectCollectionSources(query._getQuery()).map(
+        ({ collection }) => collection,
+      )
+    : []
+}
+
+function getSourceQualifiedSuspenseKey(
+  preparedValue: unknown,
+  queryHash: string,
+): string {
+  const sourceIds = getPreparedSources(preparedValue).map(getSourceObjectToken)
+  if (sourceIds.length === 0) return queryHash
   return `${sourceIds.join(`,`)}:${queryHash}`
 }
 
@@ -744,6 +751,10 @@ function createHookInstance(dbClient: DbClient | undefined) {
     deferredCollections: new Set<
       CollectionImpl<any, string | number, any, any, any>
     >(),
+    sourceIds: {
+      unscoped: new Map<string, number>(),
+      byClient: new WeakMap<DbClient, Map<string, number>>(),
+    },
     observer: null as LiveQueryObserver<object, string | number> | null,
     queryHash: undefined as string | undefined,
     suspenseKey: undefined as string | undefined,
@@ -767,6 +778,19 @@ function useLiveQueryImpl(
 
   const instanceRef = useRef<ReturnType<typeof createHookInstance> | null>(null)
   const instance = (instanceRef.current ??= createHookInstance(dbClient))
+  const resumeDeferredCollections = () => {
+    const collections = Array.from(instance.deferredCollections)
+    instance.deferredCollections.clear()
+    const errors: Array<unknown> = []
+    for (const collection of collections) {
+      try {
+        collection._resumeSyncStart()
+      } catch (error) {
+        errors.push(error)
+      }
+    }
+    if (errors.length) throw errors[0]
+  }
 
   const queryKey = !inputIsCollection
     ? getExplicitQueryKey(configOrQueryOrCollection)
@@ -844,11 +868,36 @@ function useLiveQueryImpl(
     warnDeprecatedDepsArray()
   }
 
+  if (
+    queryKey === undefined &&
+    deps === undefined &&
+    preparedQueryValue !== unpreparedQueryValue
+  ) {
+    const prior = dbClient
+      ? instance.sourceIds.byClient.get(dbClient)
+      : instance.sourceIds.unscoped
+    const seen = new Map<string, number>()
+    for (const source of getPreparedSources(preparedQueryValue)) {
+      const token = getSourceObjectToken(source)
+      const previous = seen.get(source.id) ?? prior?.get(source.id)
+      if (previous !== undefined && previous !== token) {
+        // The rejected render must not retain a shared Collection's sync deferral.
+        resumeDeferredCollections()
+        throw new Error(
+          `[useLiveQuery] Source Collection "${source.id}" was replaced by a different Collection with the same ID while this hook is mounted. Unmount the hook and clean up its previous source and client scope before reusing the ID.`,
+        )
+      }
+      seen.set(source.id, token)
+    }
+    const bindings = prior ?? new Map<string, number>()
+    for (const [id, token] of seen) bindings.set(id, token)
+    if (dbClient) instance.sourceIds.byClient.set(dbClient, bindings)
+  }
+
   const canReuseSuspenseKey =
     forSuspense &&
     !inputIsCollection &&
     queryHash !== undefined &&
-    !dbClient &&
     instance.collection !== null &&
     instance.client === dbClient &&
     instance.queryHash === queryHash &&
@@ -858,7 +907,6 @@ function useLiveQueryImpl(
     forSuspense &&
     !inputIsCollection &&
     queryHash &&
-    !dbClient &&
     !canReuseSuspenseKey &&
     preparedQueryValue === unpreparedQueryValue
   ) {
@@ -870,10 +918,10 @@ function useLiveQueryImpl(
   }
 
   const suspenseKey =
-    queryHash && !dbClient
+    queryHash && forSuspense && !inputIsCollection
       ? canReuseSuspenseKey
         ? instance.suspenseKey
-        : getUnscopedSuspenseKey(preparedQueryValue, queryHash)
+        : getSourceQualifiedSuspenseKey(preparedQueryValue, queryHash)
       : queryHash
 
   const suspenseCollections =
@@ -897,14 +945,6 @@ function useLiveQueryImpl(
     !instance.collection ||
     (inputIsCollection && instance.config !== configOrQueryOrCollection) ||
     (!inputIsCollection && (instance.client !== dbClient || identityChanged))
-
-  const resumeDeferredCollections = () => {
-    if (instance.deferredCollections.size === 0) return
-    for (const collection of instance.deferredCollections) {
-      collection._resumeSyncStart()
-    }
-    instance.deferredCollections.clear()
-  }
 
   if (needsNewCollection) {
     if (inputIsCollection) {

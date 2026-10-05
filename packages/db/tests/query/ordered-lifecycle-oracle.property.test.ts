@@ -5,7 +5,7 @@ import { createCollection } from '../../src/collection/index.js'
 import { createDeferred } from '../../src/deferred.js'
 import { BTreeIndex } from '../../src/indexes/btree-index.js'
 import { createLiveQueryCollection, eq } from '../../src/query/index.js'
-import { evaluateReferenceExpression } from '../reference-expression.js'
+import { evaluateReferenceExpression } from '../reference-expression-oracle.js'
 import { flushPromises } from '../utils.js'
 import {
   oracleRandomParameters,
@@ -27,7 +27,7 @@ import type { LoadSubsetOptions, SyncConfig } from '../../src/types.js'
  * render-time contracts.
  *
  * Ordered acquisition has six independent control dimensions: acquisition
- * path, delivery time, window change, acquisition outcome, sync run, and
+ * path, delivery time, window change, provider-response outcome, sync run, and
  * initial-versus-replay barrier. Their 192-cell product is small enough to
  * enumerate. A constrained initial-success grammar separately crosses
  * synchronous versus Promise settlement with indexed versus prefix loading.
@@ -56,7 +56,7 @@ import type { LoadSubsetOptions, SyncConfig } from '../../src/types.js'
  * request. `boundary` and `full-source` retain the production names.
  *
  * Grammar controls: the 192-cell product reconstructs each path with an
- * applied-before-settlement and a deferred-write witness, a retained and a
+ * applied-before-response and a deferred-write witness, a retained and a
  * restarted sync run, and an initial and a truncate-replay barrier. Removing
  * path loses a distinct provider request; removing delivery loses the held
  * applied-receipt cut; removing window loses the pending move; removing outcome
@@ -86,9 +86,12 @@ type Row = {
 type OrderTerm = { direction: `asc` | `desc`; nulls: `first` | `last` }
 type AcquisitionPath = `page` | `prefix` | `boundary` | `full-source`
 type InitialSettlementShape = `synchronous` | `promise`
+// The controlled providerResponse gate models a provider response, not the
+// loadSubset result. Both delivery schedules await establishing applied receipts
+// before acquisition fulfillment; only their order around this response differs.
 type Scenario = {
   acquisitionPath: AcquisitionPath
-  delivery: `before-settlement` | `after-success`
+  delivery: `before-provider-response` | `after-provider-response`
   window: `keep` | `widen`
   outcome: `resolve` | `reject` | `abort-error`
   syncRun: `retain` | `restart`
@@ -223,7 +226,7 @@ async function observeHistory(
           a.id - b.id,
       )
       .slice(0, limit)
-  const gate = createDeferred<void>()
+  const providerResponse = createDeferred<void>()
   const failure =
     scenario.outcome === `abort-error`
       ? Object.assign(new Error(`target canceled`), { name: `AbortError` })
@@ -245,7 +248,7 @@ async function observeHistory(
   let targetOutcome: string | undefined
   let target: (typeof requests)[number] | undefined
   let targetWrites = 0
-  let appliedBeforeSettlement = false
+  let appliedBeforeResponse = false
   let replayStarted = false
   let repaired = false
   let allowTarget = scenario.barrier === `initial`
@@ -331,10 +334,10 @@ async function observeHistory(
               if (receipt !== true) await receipt
             }
             return (async () => {
-              if (gated && scenario.delivery === `before-settlement`)
+              if (gated && scenario.delivery === `before-provider-response`)
                 await apply()
               if (gated)
-                await gate.promise.then(
+                await providerResponse.promise.then(
                   () => {
                     targetOutcome = `resolve`
                   },
@@ -344,7 +347,8 @@ async function observeHistory(
                     throw error
                   },
                 )
-              if (!gated || scenario.delivery === `after-success`) await apply()
+              if (!gated || scenario.delivery === `after-provider-response`)
+                await apply()
             })()
           },
           unloadSubset: (options) => {
@@ -486,9 +490,11 @@ async function observeHistory(
     expect(read()).toEqual(baseline)
     check(`pending-window`, live.utils.getWindow(), { offset: 0, limit: 1 })
     expect(publications).toEqual([])
-    expect(target!.applied).toBe(scenario.delivery === `before-settlement`)
-    appliedBeforeSettlement = target!.applied
-    if (scenario.delivery === `before-settlement`) {
+    expect(target!.applied).toBe(
+      scenario.delivery === `before-provider-response`,
+    )
+    appliedBeforeResponse = target!.applied
+    if (scenario.delivery === `before-provider-response`) {
       // A replay peer may have installed the same rows already. The provider
       // still completed this read; its whole selected subset must be present.
       expect(target!.ids.every((id) => source.has(id))).toBe(true)
@@ -539,15 +545,15 @@ async function observeHistory(
     const prior = read()
     const priorStatus = live.status
     const priorError = live.utils.lastSubsetError
-    const callbacksBeforeSettlement = publications.length
-    if (scenario.outcome === `resolve`) gate.resolve()
-    else gate.reject(failure)
+    const callbacksBeforeResponse = publications.length
+    if (scenario.outcome === `resolve`) providerResponse.resolve()
+    else providerResponse.reject(failure)
     for (let turn = 0; turn < 8; turn++) await flushPromises()
     expect(targetOutcome).toBe(scenario.outcome)
-    // Deferred application happens only after a live attempt succeeds. Failure
-    // and old-sync-run success must not apply its rows through this provider.
+    // Deferred application follows provider-response fulfillment in the current
+    // sync run. A failed or obsolete response must not apply rows.
     expect(target!.applied).toBe(
-      scenario.delivery === `before-settlement` ||
+      scenario.delivery === `before-provider-response` ||
         (scenario.outcome === `resolve` && scenario.syncRun === `retain`),
     )
     if (scenario.syncRun === `restart`) {
@@ -557,7 +563,7 @@ async function observeHistory(
       check(
         `obsolete-publication`,
         publications.length,
-        callbacksBeforeSettlement,
+        callbacksBeforeResponse,
       )
       const first = referenceWindow(1)[0]!
       const firstIndex = truth.findIndex((row) => row.id === first.id)
@@ -572,7 +578,7 @@ async function observeHistory(
       check(
         `restart-callback`,
         publications.length,
-        callbacksBeforeSettlement + 1,
+        callbacksBeforeResponse + 1,
       )
     } else if (scenario.outcome === `resolve`) {
       check(`success-preload`, preload.state, { settled: true })
@@ -700,7 +706,7 @@ async function observeHistory(
   await finishOracleCleanup(
     primaryFailure,
     [
-      () => gate.resolve(),
+      () => providerResponse.resolve(),
       () => subscription.unsubscribe(),
       () => live.cleanup(),
       () => source.cleanup(),
@@ -745,7 +751,9 @@ async function observeHistory(
     ).length,
     coordinates: [
       acquisitionPath,
-      appliedBeforeSettlement ? `before-settlement` : `after-success`,
+      appliedBeforeResponse
+        ? `before-provider-response`
+        : `after-provider-response`,
       move ? `widen` : `keep`,
       targetOutcome,
       syncRunGeneration === 2 ? `restart` : `retain`,
@@ -1128,21 +1136,22 @@ describe(`synchronous initial settlement refinement`, () => {
 describe(`ordered lifecycle product`, () => {
   const observed = new Set<string>()
   const cells: Array<Scenario> = acquisitionPaths.flatMap((acquisitionPath) =>
-    ([`before-settlement`, `after-success`] as const).flatMap((delivery) =>
-      ([`keep`, `widen`] as const).flatMap((window) =>
-        ([`resolve`, `reject`, `abort-error`] as const).flatMap((outcome) =>
-          ([`retain`, `restart`] as const).flatMap((syncRun) =>
-            ([`initial`, `replay`] as const).map((barrier) => ({
-              acquisitionPath,
-              delivery,
-              window,
-              outcome,
-              syncRun,
-              barrier,
-            })),
+    ([`before-provider-response`, `after-provider-response`] as const).flatMap(
+      (delivery) =>
+        ([`keep`, `widen`] as const).flatMap((window) =>
+          ([`resolve`, `reject`, `abort-error`] as const).flatMap((outcome) =>
+            ([`retain`, `restart`] as const).flatMap((syncRun) =>
+              ([`initial`, `replay`] as const).map((barrier) => ({
+                acquisitionPath,
+                delivery,
+                window,
+                outcome,
+                syncRun,
+                barrier,
+              })),
+            ),
           ),
         ),
-      ),
     ),
   )
   it(`keeps all 192 declared histories distinct`, () => {
@@ -1162,8 +1171,8 @@ describe(`ordered lifecycle product`, () => {
   const arbitrary = fc.record({
     acquisitionPath: fc.constantFrom(...acquisitionPaths),
     delivery: fc.constantFrom(
-      `before-settlement` as const,
-      `after-success` as const,
+      `before-provider-response` as const,
+      `after-provider-response` as const,
     ),
     window: fc.constantFrom(`keep` as const, `widen` as const),
     outcome: fc.constantFrom(
@@ -1423,7 +1432,7 @@ describe(`nullable multi-term lifecycle product`, () => {
                   acquisitionPath === `boundary` && primaryNulls === `first`
                     ? `full-source`
                     : acquisitionPath,
-                delivery: `before-settlement`,
+                delivery: `before-provider-response`,
                 window: `widen`,
                 outcome: mode === `repair` ? `reject` : `resolve`,
                 syncRun: mode === `restart` ? `restart` : `retain`,
