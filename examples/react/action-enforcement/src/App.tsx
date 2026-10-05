@@ -5,8 +5,8 @@ export function App() {
     <main className="app-shell">
       <h1>TanStack DB: Enforce Actions for Mutations</h1>
       <p className="subtitle">
-        This example only allows writes through actions. Feature code cannot
-        import collections directly.
+        Feature code reads collections directly and writes through actions.
+        ESLint checks the mutation boundary.
       </p>
       <TodoApp />
     </main>

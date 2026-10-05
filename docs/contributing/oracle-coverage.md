@@ -629,6 +629,38 @@ project, worker progress RPC starvation produced passing assertions with a
 nonzero process exit. Such a run is not green. Raising a test timeout alone
 does not let the worker process its progress messages.
 
+## Action enforcement example
+
+`examples/react/action-enforcement/eslint-rules/no-direct-collection-mutations-oracle.test.js`
+owns the example's file-local lint boundary. Its finite grammar covers 12 binding
+forms, six methods, five call forms, and two callback definition orders, plus
+lexical shadowing, sibling scopes, configurable imports/methods, and alias cycles.
+The independent model labels the constructed receiver as a Collection and
+predicts one diagnostic for writes and none for reads. The checkpoint is the
+complete diagnostic list from the real ESLint `Linter.verify` call. A receiving
+check runs the actual ESLint configuration on feature writes, feature reads,
+and action writes.
+
+The original implementation (`3da274d8a`) failed 11 of the 18 test groups at
+that checkpoint:
+name-based scope pollution, declaration-order dependence, and missed destructuring.
+The repair passes all groups. The example README states the conservative rule
+for reassigned aliases. This oracle does not establish inter-module or type-based
+tracking, function argument/return propagation, new object/array containers,
+extracted mutation functions, or dynamic method names. Those are outside this
+example's declared static scope; expanding it requires new syntax witnesses here.
+
+Guide evidence: ORC-001–005 and ORC-009 are stated beside the finite grammar,
+model and driver. ORC-006 uses the original production rule as the rejected
+wrong design; failures are diagnostic assertion mismatches, not setup failures.
+ORC-013 pairs writes with reads and imported bindings with shadowing local values.
+ORC-007 does not apply to this bounded enumeration; ORC-008 has no stateful model,
+ORC-010 has no shrinking or resource cleanup, ORC-011 has no named shared semantic
+fault requiring a second formulation, and ORC-014 is witnessed at the real ESLint configuration boundary; no browser
+or backend-provider claim is made.
+These outcomes supply ORC-012 evidence; the executable suite contains the law
+and observations, rather than relying on this record for expected behavior.
+
 ## Reusable-law backlog
 
 RFC #1659 reviews found several green oracles whose stated laws remained valid

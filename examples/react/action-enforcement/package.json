@@ -7,12 +7,13 @@
     "dev": "vite",
     "build": "tsc -b && vite build",
     "preview": "vite preview",
-    "lint": "eslint ."
+    "lint": "eslint .",
+    "test": "node --test eslint-rules/*test.js"
   },
   "dependencies": {
     "@tanstack/query-core": "^5.90.20",
-    "@tanstack/query-db-collection": "npm:@tanstack/query-db-collection@^1.0.26",
-    "@tanstack/react-db": "npm:@tanstack/react-db@^0.1.73",
+    "@tanstack/query-db-collection": "^1.3.4",
+    "@tanstack/react-db": "^0.5.3",
     "react": "^19.2.4",
     "react-dom": "^19.2.4"
   },

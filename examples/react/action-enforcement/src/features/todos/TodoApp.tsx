@@ -15,16 +15,7 @@ export function TodoApp() {
   async function handleAddTodo() {
     try {
       setError(null)
-      // Valid
-      await addTodo(text)
-
-      // Invalid: direct mutation from feature code (intentional lint violation).
-      todoCollection.insert({
-        id: crypto.randomUUID(),
-        text: 'this should fail lint',
-        completed: false,
-        createdAt: new Date(),
-      })
+      await addTodo(text).when('settled')
       setText('')
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to add todo')

@@ -23,40 +23,17 @@ function unwrapExpression(node) {
 }
 
 function getPropertyName(memberExpression) {
-  if (
-    !memberExpression.computed &&
-    memberExpression.property.type === 'Identifier'
-  ) {
-    return memberExpression.property.name
-  }
-
-  if (
-    memberExpression.computed &&
-    memberExpression.property.type === 'Literal' &&
-    typeof memberExpression.property.value === 'string'
-  ) {
-    return memberExpression.property.value
-  }
-
-  return null
+  const property = memberExpression.property
+  const name = memberExpression.computed ? property.value : property.name
+  return typeof name === 'string' ? name : null
 }
 
-function getRootIdentifierName(node) {
-  const expression = unwrapExpression(node)
-
-  if (!expression) {
-    return null
+function getRootIdentifier(node) {
+  let current = unwrapExpression(node)
+  while (current?.type === 'MemberExpression') {
+    current = unwrapExpression(current.object)
   }
-
-  if (expression.type === 'Identifier') {
-    return expression.name
-  }
-
-  if (expression.type === 'MemberExpression') {
-    return getRootIdentifierName(expression.object)
-  }
-
-  return null
+  return current?.type === 'Identifier' ? current : null
 }
 
 export default {
@@ -103,75 +80,83 @@ export default {
     const mutationMethods = new Set(
       options.mutationMethods ?? DEFAULT_MUTATION_METHODS,
     )
-    const trackedCollectionIdentifiers = new Set()
+    const sourceCode = context.sourceCode
+    const calls = []
 
-    function trackImportedIdentifier(localName) {
-      trackedCollectionIdentifiers.add(localName)
-    }
-
-    function trackAlias(aliasName, sourceExpression) {
-      const sourceRootName = getRootIdentifierName(sourceExpression)
-
-      if (sourceRootName && trackedCollectionIdentifiers.has(sourceRootName)) {
-        trackedCollectionIdentifiers.add(aliasName)
+    function resolveVariable(expression) {
+      const identifier = getRootIdentifier(expression)
+      if (!identifier) return null
+      for (
+        let scope = sourceCode.getScope(identifier);
+        scope;
+        scope = scope.upper
+      ) {
+        const variable = scope.set.get(identifier.name)
+        if (variable) return variable
       }
+      return null
     }
 
     return {
-      ImportDeclaration(node) {
-        if (
-          typeof node.source.value !== 'string' ||
-          !importPatterns.some((pattern) => pattern.test(node.source.value))
-        ) {
-          return
-        }
-
-        for (const specifier of node.specifiers) {
-          trackImportedIdentifier(specifier.local.name)
-        }
-      },
-      VariableDeclarator(node) {
-        if (node.id.type !== 'Identifier' || !node.init) {
-          return
-        }
-
-        trackAlias(node.id.name, node.init)
-      },
-      AssignmentExpression(node) {
-        if (node.operator !== '=' || node.left.type !== 'Identifier') {
-          return
-        }
-
-        trackAlias(node.left.name, node.right)
-      },
       CallExpression(node) {
         const callee = unwrapExpression(node.callee)
-
-        if (!callee || callee.type !== 'MemberExpression') {
-          return
-        }
-
-        const methodName = getPropertyName(callee)
-        if (!methodName || !mutationMethods.has(methodName)) {
-          return
-        }
-
-        const rootIdentifierName = getRootIdentifierName(callee.object)
         if (
-          !rootIdentifierName ||
-          !trackedCollectionIdentifiers.has(rootIdentifierName)
+          callee?.type === 'MemberExpression' &&
+          mutationMethods.has(getPropertyName(callee))
         ) {
-          return
+          calls.push(callee)
+        }
+      },
+      'Program:exit'() {
+        const collections = new Set()
+        const aliases = new Map()
+        for (const scope of sourceCode.scopeManager.scopes) {
+          for (const variable of scope.variables) {
+            if (
+              variable.defs.some(
+                ({ type, parent }) =>
+                  type === 'ImportBinding' &&
+                  importPatterns.some((pattern) =>
+                    pattern.test(parent.source.value),
+                  ),
+              )
+            ) {
+              collections.add(variable)
+            }
+            // ESLint supplies write expressions for both simple and destructured
+            // bindings. Edges use lexical variables, never their spelling.
+            for (const reference of variable.references) {
+              const source = resolveVariable(reference.writeExpr)
+              if (!source) continue
+              if (!aliases.has(source)) aliases.set(source, new Set())
+              aliases.get(source).add(variable)
+            }
+          }
         }
 
-        context.report({
-          node: callee.property,
-          messageId: 'noDirectMutation',
-          data: {
-            method: methodName,
-            collection: rootIdentifierName,
-          },
-        })
+        // Resolve the full graph before reporting. Each binding is visited once,
+        // including cycles and aliases assigned inside later function bodies.
+        const pending = [...collections]
+        for (const source of pending) {
+          for (const alias of aliases.get(source) ?? []) {
+            if (collections.has(alias)) continue
+            collections.add(alias)
+            pending.push(alias)
+          }
+        }
+        for (const callee of calls) {
+          const variable = resolveVariable(callee.object)
+          if (collections.has(variable)) {
+            context.report({
+              node: callee.property,
+              messageId: 'noDirectMutation',
+              data: {
+                method: getPropertyName(callee),
+                collection: variable.name,
+              },
+            })
+          }
+        }
       },
     }
   },
