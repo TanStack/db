@@ -1,4 +1,5 @@
-import type { CollectionImpl } from '../../collection/index.js'
+import type { Collection, CollectionImpl } from '../../collection/index.js'
+import type { CollectionOptionsIdentity } from '../../collection-options.js'
 import type { SingleResult, StringCollationConfig } from '../../types.js'
 import type {
   Aggregate,
@@ -8,7 +9,17 @@ import type {
   PropRef,
   Value,
 } from '../ir.js'
-import type { QueryBuilder } from './index.js'
+import type { InitialQueryBuilder, QueryBuilder } from './index.js'
+import type {
+  PublishedVirtualRowProps,
+  WithVirtualProps,
+} from '../../virtual-props.js'
+import type {
+  CaseWhenWrapper,
+  ConcatToArrayWrapper,
+  MaterializeWrapper,
+  ToArrayWrapper,
+} from './functions.js'
 
 /**
  * Context - The central state container for query builder operations
@@ -20,7 +31,8 @@ import type { QueryBuilder } from './index.js'
  * - `schema`: Current available tables (expands with joins, contracts with subqueries)
  *
  * **Query State**:
- * - `fromSourceName`: Which table was used in `from()` - needed for optionality logic
+ * - `fromSourceName`: Which table was used in `from()` or the first
+ *   `unionAll()` source - needed for optionality logic
  * - `hasJoins`: Whether any joins have been added (affects result type inference)
  * - `joinTypes`: Maps table aliases to their join types for optionality calculations
  *
@@ -37,8 +49,14 @@ export interface Context {
   baseSchema: ContextSchema
   // The current schema available (includes joined collections)
   schema: ContextSchema
+  // Optional exact schema for ref callbacks when `schema` must be widened for compatibility
+  refsSchema?: ContextSchema
   // the name of the source that was used in the from clause
   fromSourceName: string
+  // the source names used in a source-level unionAll clause
+  fromSourceNames?: ReadonlyArray<string>
+  // Whether this query started with a source-level unionAll
+  hasUnionFrom?: true
   // Whether this query has joins
   hasJoins?: boolean
   // Mapping of table alias to join type for easy lookup
@@ -48,6 +66,8 @@ export interface Context {
   >
   // The result type after select (if select has been called)
   result?: any
+  // Whether select/fn.select has been called
+  hasResult?: true
   // Single result only (if findOne has been called)
   singleResult?: boolean
 }
@@ -64,16 +84,19 @@ export interface Context {
 export type ContextSchema = Record<string, unknown>
 
 /**
- * Source - Input definition for query builder `from()` clause
+ * Source - Input definition for query builder `from()` and `unionAll()` clauses
  *
  * Maps table aliases to either:
  * - `CollectionImpl`: A database collection/table
  * - `QueryBuilder`: A subquery that can be used as a table
  *
- * Example: `{ users: usersCollection, orders: ordersCollection }`
+ * Example: `{ users: usersCollection }`
  */
 export type Source = {
-  [alias: string]: CollectionImpl<any, any> | QueryBuilder<Context>
+  [alias: string]:
+    | CollectionImpl<any, any, any, any, any>
+    | CollectionOptionsIdentity<any, any, any, any, any>
+    | QueryBuilder<any>
 }
 
 /**
@@ -83,7 +106,17 @@ export type Source = {
  * This can be an explicit type passed by the user or the schema output type.
  */
 export type InferCollectionType<T> =
-  T extends CollectionImpl<infer TOutput, any, any, any, any> ? TOutput : never
+  T extends CollectionImpl<infer TOutput, infer TKey, any, any, any>
+    ? WithVirtualProps<TOutput, TKey>
+    : T extends CollectionOptionsIdentity<
+          infer TOutput,
+          infer TKey,
+          any,
+          any,
+          any
+        >
+      ? WithVirtualProps<TOutput, TKey>
+      : never
 
 /**
  * SchemaFromSource - Converts a Source definition into a ContextSchema
@@ -98,10 +131,72 @@ export type InferCollectionType<T> =
 export type SchemaFromSource<T extends Source> = Prettify<{
   [K in keyof T]: T[K] extends CollectionImpl<any, any, any, any, any>
     ? InferCollectionType<T[K]>
-    : T[K] extends QueryBuilder<infer TContext>
-      ? GetResult<TContext>
-      : never
+    : T[K] extends CollectionOptionsIdentity<any, any, any, any, any>
+      ? InferCollectionType<T[K]>
+      : T[K] extends QueryBuilder<infer TContext>
+        ? GetRawResult<TContext>
+        : never
 }>
+
+export type UnionRefsSchema<TSchema extends ContextSchema> = Prettify<{
+  [K in keyof TSchema]: TSchema[K] | undefined
+}>
+
+type IsUnion<T, U = T> = T extends unknown
+  ? [U] extends [T]
+    ? false
+    : true
+  : false
+
+export type SingleSource<TSource extends Source> =
+  IsUnion<keyof TSource & string> extends true ? never : TSource
+
+export type ContextFromSource<TSource extends Source> = {
+  baseSchema: SchemaFromSource<TSource>
+  schema: SchemaFromSource<TSource>
+  fromSourceName: keyof TSource & string
+  hasJoins: false
+}
+
+export type ContextFromUnionSource<TSource extends Source> =
+  IsUnion<keyof TSource & string> extends true
+    ? {
+        baseSchema: SchemaFromSource<TSource>
+        schema: UnionRefsSchema<SchemaFromSource<TSource>>
+        fromSourceName: keyof TSource & string
+        fromSourceNames: ReadonlyArray<keyof TSource & string>
+        hasUnionFrom: true
+        hasJoins: false
+      }
+    : ContextFromSource<TSource>
+
+type ResultFromBranch<TBranch> =
+  TBranch extends QueryBuilder<infer TContext> ? GetRawResult<TContext> : never
+
+type UnionBranchResult<TBranches extends ReadonlyArray<QueryBuilder<any>>> =
+  ResultFromBranch<TBranches[number]>
+
+declare const BranchUnionRefs: unique symbol
+
+type UnionBranchSchema<TBranches extends ReadonlyArray<QueryBuilder<any>>> =
+  UnionBranchResult<TBranches> extends infer TResult
+    ? {
+        [K in KeysOfUnion<TResult>]: ValueOfUnion<TResult, K>
+      }
+    : never
+
+export type ContextFromUnionBranches<
+  TBranches extends readonly [QueryBuilder<any>, ...Array<QueryBuilder<any>>],
+> = {
+  baseSchema: UnionBranchSchema<TBranches>
+  schema: UnionBranchSchema<TBranches>
+  refsSchema: UnionBranchSchema<TBranches>
+  fromSourceName: keyof UnionBranchSchema<TBranches> & string
+  hasJoins: false
+  result: PrettifyIfPlainObject<UnionBranchResult<TBranches>>
+  hasResult: true
+  [BranchUnionRefs]: UnionBranchResult<TBranches>
+}
 
 /**
  * GetAliases - Extracts all table aliases available in a query context
@@ -174,9 +269,29 @@ type SelectValue =
   | undefined // Optional values
   | { [key: string]: SelectValue }
   | Array<RefLeaf<any>>
+  | ToArrayWrapper // toArray() wrapped subquery
+  | ConcatToArrayWrapper // concat(toArray(...)) wrapped subquery
+  | CaseWhenWrapper // conditional projection
+  | MaterializeWrapper // materialize() wrapped subquery (Array<T> or T | undefined)
+  | QueryBuilder<any> // includes subquery (produces a child Collection)
 
 // Recursive shape for select objects allowing nested projections
 type SelectShape = { [key: string]: SelectValue | SelectShape }
+// Selection inference accepts both row-root refs (with virtual row fields) and
+// nested object refs (without them).
+type AnyRef<T = any, Nullable extends boolean = false> =
+  Ref<T, Nullable, true> | Ref<T, Nullable, false>
+export type ScalarSelectValue =
+  | BasicExpression
+  | Aggregate
+  | Ref
+  | RefLeaf<any>
+  | string
+  | number
+  | boolean
+  | null
+  | undefined
+export type StringifiableScalar = string | number | boolean | null | undefined
 
 /**
  * SelectObject - Wrapper type for select clause objects
@@ -186,6 +301,78 @@ type SelectShape = { [key: string]: SelectValue | SelectShape }
  * messages when invalid selections are attempted.
  */
 export type SelectObject<T extends SelectShape = SelectShape> = T
+type RefBrandKeys = typeof RefBrand | typeof NullableBrand
+type HasNamedSelectKeys<T> =
+  Exclude<keyof T, RefBrandKeys> extends never ? false : true
+type IsScalarSelectLike<T> = T extends BasicExpression | Aggregate
+  ? true
+  : T extends string | number | boolean | null | undefined
+    ? true
+    : typeof RefBrand extends keyof T
+      ? HasNamedSelectKeys<T> extends true
+        ? false
+        : true
+      : false
+export type NonScalarSelectObject<T> = T extends SelectObject
+  ? IsScalarSelectLike<T> extends true
+    ? never
+    : T
+  : never
+
+export type ResultTypeFromSelectValue<TSelectValue> =
+  IsAny<TSelectValue> extends true
+    ? any
+    : WithoutRefBrand<
+        NeedsExtraction<TSelectValue> extends true
+          ? ExtractExpressionType<TSelectValue>
+          : TSelectValue extends ToArrayWrapper<infer T>
+            ? Array<T>
+            : TSelectValue extends ConcatToArrayWrapper<any>
+              ? string
+              : TSelectValue extends MaterializeWrapper<infer T, infer IsSingle>
+                ? IsSingle extends true
+                  ? T | undefined
+                  : Array<T>
+                : TSelectValue extends {
+                      readonly __brand: `CaseWhenWrapper`
+                      readonly _result?: infer T
+                    }
+                  ? ResultTypeFromCaseWhen<T>
+                  : TSelectValue extends QueryBuilder<infer TChildContext>
+                    ? Collection<GetResult<TChildContext>>
+                    : TSelectValue extends AnyRef<infer _T>
+                      ? ExtractRef<TSelectValue>
+                      : TSelectValue extends RefLeaf<infer T>
+                        ? IsNullableRef<TSelectValue> extends true
+                          ? T | undefined
+                          : T
+                        : TSelectValue extends RefLeaf<infer T> | undefined
+                          ? T | undefined
+                          : TSelectValue extends RefLeaf<infer T> | null
+                            ? IsNullableRef<
+                                Exclude<TSelectValue, null>
+                              > extends true
+                              ? T | null | undefined
+                              : T | null
+                            : TSelectValue extends
+                                  AnyRef<infer _T> | null | undefined
+                              ? | ExtractRef<
+                                    Exclude<TSelectValue, null | undefined>
+                                  >
+                                | Extract<TSelectValue, null | undefined>
+                              : TSelectValue extends Aggregate<infer T>
+                                ? T
+                                : TSelectValue extends
+                                      | string
+                                      | number
+                                      | boolean
+                                      | null
+                                      | undefined
+                                  ? TSelectValue
+                                  : TSelectValue extends Record<string, any>
+                                    ? ResultTypeFromSelect<TSelectValue>
+                                    : never
+      >
 
 /**
  * ResultTypeFromSelect - Infers the result type from a select object
@@ -223,39 +410,153 @@ export type SelectObject<T extends SelectShape = SelectShape> = T
  * { id: number, name: string, status: 'active', count: 42, profile: { bio: string } }
  * ```
  */
-export type ResultTypeFromSelect<TSelectObject> = WithoutRefBrand<
-  Prettify<{
-    [K in keyof TSelectObject]: NeedsExtraction<TSelectObject[K]> extends true
-      ? ExtractExpressionType<TSelectObject[K]>
-      : TSelectObject[K] extends Ref<infer _T>
-        ? ExtractRef<TSelectObject[K]>
-        : TSelectObject[K] extends RefLeaf<infer T>
-          ? T
-          : TSelectObject[K] extends RefLeaf<infer T> | undefined
-            ? T | undefined
-            : TSelectObject[K] extends RefLeaf<infer T> | null
-              ? T | null
-              : TSelectObject[K] extends Ref<infer _T> | undefined
-                ? ExtractRef<TSelectObject[K]> | undefined
-                : TSelectObject[K] extends Ref<infer _T> | null
-                  ? ExtractRef<TSelectObject[K]> | null
-                  : TSelectObject[K] extends Aggregate<infer T>
-                    ? T
-                    : TSelectObject[K] extends
-                          | string
-                          | number
-                          | boolean
-                          | null
-                          | undefined
-                      ? TSelectObject[K]
-                      : TSelectObject[K] extends Record<string, any>
-                        ? ResultTypeFromSelect<TSelectObject[K]>
-                        : never
-  }>
->
+export type ResultTypeFromSelect<TSelectObject> =
+  IsAny<TSelectObject> extends true
+    ? any
+    : IsTrueRef<TSelectObject> extends true
+      ? ExtractDirectSelectRef<TSelectObject>
+      : WithoutRefBrand<
+          Prettify<{
+            [K in keyof TSelectObject]: NeedsExtraction<
+              TSelectObject[K]
+            > extends true
+              ? ExtractExpressionType<TSelectObject[K]>
+              : TSelectObject[K] extends ToArrayWrapper<infer T>
+                ? Array<T>
+                : TSelectObject[K] extends ConcatToArrayWrapper<any>
+                  ? string
+                  : // materialize() — Array<T> for multi-row, T | undefined for findOne()
+                    TSelectObject[K] extends MaterializeWrapper<
+                        infer T,
+                        infer IsSingle
+                      >
+                    ? IsSingle extends true
+                      ? T | undefined
+                      : Array<T>
+                    : TSelectObject[K] extends {
+                          readonly __brand: `CaseWhenWrapper`
+                          readonly _result?: infer T
+                        }
+                      ? ResultTypeFromCaseWhen<T>
+                      : // includes subquery (bare QueryBuilder) — produces a child Collection
+                        TSelectObject[K] extends QueryBuilder<
+                            infer TChildContext
+                          >
+                        ? Collection<GetResult<TChildContext>>
+                        : // Ref (full object ref or spread with RefBrand) - recursively process properties
+                          TSelectObject[K] extends AnyRef<infer _T>
+                          ? ExtractRef<TSelectObject[K]>
+                          : // RefLeaf (simple property ref like user.name)
+                            TSelectObject[K] extends RefLeaf<infer T>
+                            ? IsNullableRef<TSelectObject[K]> extends true
+                              ? T | undefined
+                              : T
+                            : // RefLeaf | undefined (schema-optional field)
+                              TSelectObject[K] extends
+                                  RefLeaf<infer T> | undefined
+                              ? T | undefined
+                              : // RefLeaf | null (schema-nullable field)
+                                TSelectObject[K] extends RefLeaf<infer T> | null
+                                ? IsNullableRef<
+                                    Exclude<TSelectObject[K], null>
+                                  > extends true
+                                  ? T | null | undefined
+                                  : T | null
+                                : // Nullable and/or optional object-type schema field
+                                  TSelectObject[K] extends
+                                      AnyRef<infer _T> | null | undefined
+                                  ? | ExtractRef<
+                                        Exclude<
+                                          TSelectObject[K],
+                                          null | undefined
+                                        >
+                                      >
+                                    | Extract<
+                                        TSelectObject[K],
+                                        null | undefined
+                                      >
+                                  : TSelectObject[K] extends Aggregate<infer T>
+                                    ? T
+                                    : TSelectObject[K] extends
+                                          | string
+                                          | number
+                                          | boolean
+                                          | null
+                                          | undefined
+                                      ? TSelectObject[K]
+                                      : TSelectObject[K] extends Record<
+                                            string,
+                                            any
+                                          >
+                                        ? ResultTypeFromSelect<TSelectObject[K]>
+                                        : never
+          }>
+        >
 
-// Extract Ref or subobject with a spread or a Ref
-type ExtractRef<T> = Prettify<ResultTypeFromSelect<WithoutRefBrand<T>>>
+// Distribute over caseWhen branch unions so projection branches remain a union
+// of branch result shapes instead of being merged as one object type.
+type ResultTypeFromCaseWhen<T> = T extends unknown
+  ? ResultTypeFromSelectValue<T>
+  : never
+
+// Extract Ref or subobject with a spread or a Ref.
+type ExtractRef<T> = T extends unknown
+  ? IsTrueRef<T> extends true
+    ? T extends RefLeaf<infer U>
+      ? IsNullableRef<T> extends true
+        ? U | undefined
+        : U
+      : never
+    : Prettify<ResultTypeFromSelect<WithoutRefBrand<T>>>
+  : never
+
+// A direct selection merges a row ref into a new result object. An unmatched
+// nullable join therefore produces an empty object instead of `undefined`.
+// Keep the row's keys available while making every value optional for that
+// unmatched branch.
+type ExtractDirectSelectRef<T> =
+  IsNullableRef<T> extends true
+    ? NonNullable<ExtractRef<T>> | EmptySelectedRef<NonNullable<ExtractRef<T>>>
+    : ExtractRef<T>
+
+type EmptySelectedRef<T> = T extends object ? { [K in keyof T]?: never } : never
+
+// A "true" Ref is one that is structurally equivalent to the canonical
+// `Ref<U>` shape the query builder produces for its underlying user type
+// `U` (taking the ref's own nullability into account). When `T` is a true
+// ref, `ExtractRef` can safely return `U` directly; otherwise it must fall
+// through to the recursive projection.
+//
+// Checking only that `T` has "no extra keys" beyond `keyof U` (plus the
+// brand/virtual props) is not sufficient. A spread-derived object can keep
+// exactly the keys of `U` while:
+//   - changing a field's type, e.g. `{ ...u, code: u.slug }`, or
+//   - dropping an optional key, e.g. `const { nickname, ...rest } = u`.
+// Both must be recursively projected, not collapsed back to `U`. We
+// therefore require strict structural equivalence against the canonical ref
+// shape rather than a one-directional key-subset check.
+type IsTrueRef<T> =
+  T extends RefLeaf<infer U>
+    ? RefShapeMatches<T, Ref<U, IsNullableRef<T>, true>> extends true
+      ? true
+      : RefShapeMatches<T, Ref<U, IsNullableRef<T>, false>> extends true
+        ? true
+        : false
+    : false
+
+// Strict structural equivalence between two ref shapes. Unlike plain
+// bidirectional assignability, this is sensitive to *key presence* — an
+// object that drops an optional key (e.g. `const { nickname, ...rest } = u`)
+// is not considered equal to one that keeps `nickname?`, even though the two
+// remain mutually assignable. A direct ref (`u.document`, a union member,
+// etc.) is exactly the canonical `Ref` shape and matches here, so it returns
+// `U` via the fast path; any spread-derived object differs (changed field
+// types, dropped keys, or stripped `readonly` modifiers) and instead falls
+// through to the recursive projection, which reconstructs the correct type.
+type RefShapeMatches<A, B> =
+  (<G>() => G extends A ? 1 : 2) extends <G>() => G extends B ? 1 : 2
+    ? true
+    : false
 
 // Helper type to extract the underlying type from various expression types
 type ExtractExpressionType<T> =
@@ -273,11 +574,7 @@ type ExtractExpressionType<T> =
 
 // Helper type to check if a type needs expression type extraction
 type NeedsExtraction<T> = T extends
-  | PropRef<any>
-  | Value<any>
-  | Func<any>
-  | Aggregate<any>
-  | BasicExpression<any>
+  PropRef<any> | Value<any> | Func<any> | Aggregate<any> | BasicExpression<any>
   ? true
   : false
 
@@ -297,8 +594,8 @@ export type OrderByCallback<TContext extends Context> = (
  * OrderByOptions - Configuration for orderBy operations
  *
  * Combines direction and null handling with string-specific sorting options.
- * The intersection with StringSortOpts allows for either simple lexical sorting
- * or locale-aware sorting with customizable options.
+ * The intersection with StringCollationConfig allows lexical, locale-aware,
+ * or custom local string sorting.
  */
 export type OrderByOptions = {
   direction?: OrderByDirection
@@ -363,52 +660,120 @@ export type JoinOnCallback<TContext extends Context> = (
  * Example (no GROUP BY): `(row) => row.user.salary > 70000 && row.$selected.user_count > 2`
  */
 export type FunctionalHavingRow<TContext extends Context> = TContext[`schema`] &
-  (TContext[`result`] extends object ? { $selected: TContext[`result`] } : {})
+  (TContext[`hasResult`] extends true ? { $selected: TContext[`result`] } : {})
 
 /**
- * RefProxyForContext - Creates ref proxies for all tables/collections in a query context
+ * RefsForContext - Creates ref proxies for all tables/collections in a query context
  *
  * This is the main entry point for creating ref objects in query builder callbacks.
- * It handles optionality by placing undefined/null OUTSIDE the RefProxy to enable
- * JavaScript's optional chaining operator (?.):
+ * For nullable join sides (left/right/full joins), it produces `Ref<T, true>` instead
+ * of `Ref<T> | undefined`. This accurately reflects that the proxy object is always
+ * present at build time (it's a truthy proxy that records property access paths),
+ * while the `Nullable` flag ensures the result type correctly includes `| undefined`.
  *
  * Examples:
- * - Required field: `RefProxy<User>` → user.name works
- * - Optional field: `RefProxy<User> | undefined` → user?.name works
- * - Nullable field: `RefProxy<User> | null` → user?.name works
- * - Both optional and nullable: `RefProxy<User> | undefined` → user?.name works
- *
- * The key insight is that `RefProxy<User | undefined>` would NOT allow `user?.name`
- * because the undefined is "inside" the proxy, but `RefProxy<User> | undefined`
- * does allow it because the undefined is "outside" the proxy.
- *
- * The logic prioritizes optional chaining by always placing `undefined` outside when
- * a type is both optional and nullable (e.g., `string | null | undefined`).
+ * - Required field: `Ref<User>` → user.name works, result is T
+ * - Nullable join side: `Ref<User, true>` → user.name works, result is T | undefined
  *
  * After `select()` is called, this type also includes `$selected` which provides access
  * to the SELECT result fields via `$selected.fieldName` syntax.
  */
+type KeysOfUnion<T> = T extends unknown ? keyof T : never
+type ValueOfUnion<T, K extends PropertyKey> = T extends unknown
+  ? K extends keyof T
+    ? T[K]
+    : never
+  : never
+type RefForContextValue<T, Nullable extends boolean = false> = T extends unknown
+  ? IsPlainObject<T> extends true
+    ? Ref<T, Nullable, true>
+    : RefLeaf<T, Nullable>
+  : never
+type RefsSchemaForContext<TContext extends Context> =
+  `refsSchema` extends keyof TContext
+    ? IsExactlyUndefined<TContext[`refsSchema`]> extends true
+      ? TContext[`schema`]
+      : NonUndefined<TContext[`refsSchema`]>
+    : TContext[`schema`]
+
+type IsNullableContextKey<TContext extends Context, K extends PropertyKey> =
+  TContext[`joinTypes`] extends Record<string, any>
+    ? K extends keyof TContext[`joinTypes`]
+      ? Extract<TContext[`joinTypes`][K], `left` | `full`> extends never
+        ? false
+        : true
+      : K extends FromSourceNamesForOptionality<TContext>
+        ? TContext[`hasUnionFrom`] extends true
+          ? true
+          : HasRightOrFullJoin<TContext>
+        : false
+    : K extends FromSourceNamesForOptionality<TContext>
+      ? TContext[`hasUnionFrom`] extends true
+        ? true
+        : HasRightOrFullJoin<TContext>
+      : false
+
+type RefForContextSchemaValue<
+  T,
+  ForceNullable extends boolean,
+> = ForceNullable extends true
+  ? RefForContextValue<NonNullable<T>, true>
+  : IsNonExactOptional<T> extends true
+    ? IsNonExactNullable<T> extends true
+      ? RefForOptionalNullableContextValue<NonUndefined<T>>
+      : RefForContextValue<NonUndefined<T>, true>
+    : IsNonExactNullable<T> extends true
+      ? RefForContextValue<NonNull<T>, true> | Extract<T, null>
+      : RefForContextValue<T>
+
+type RefForOptionalNullableContextValue<T> = T extends null
+  ? null
+  : RefForContextValue<T, true>
+
+type RefsForBranchResult<T, ForceNullable extends boolean> = T extends unknown
+  ? {
+      [K in keyof T]: ForceNullable extends true
+        ? RefForContextValue<T[K], true>
+        : RefForContextSchemaValue<T[K], false>
+    }
+  : never
+
+type BranchUnionResultRefs<TContext extends Context> =
+  typeof BranchUnionRefs extends keyof TContext
+    ? RefsForBranchResult<
+        TContext[typeof BranchUnionRefs],
+        HasRightOrFullJoin<TContext>
+      >
+    : object
+
+type JoinedRefsForContext<TContext extends Context> =
+  TContext[`joinTypes`] extends Record<string, any>
+    ? {
+        [
+          K in keyof TContext[`joinTypes`] & keyof TContext[`schema`]
+        ]: RefForContextSchemaValue<
+          TContext[`schema`][K],
+          IsNullableContextKey<TContext, K>
+        >
+      }
+    : object
+
 export type RefsForContext<TContext extends Context> = {
-  [K in keyof TContext[`schema`]]: IsNonExactOptional<
-    TContext[`schema`][K]
-  > extends true
-    ? IsNonExactNullable<TContext[`schema`][K]> extends true
-      ? // T is both non-exact optional and non-exact nullable (e.g., string | null | undefined)
-          // Extract the non-undefined and non-null part and place undefined outside
-          Ref<NonNullable<TContext[`schema`][K]>> | undefined
-      : // T is optional (T | undefined) but not exactly undefined, and not nullable
-          // Extract the non-undefined part and place undefined outside
-          Ref<NonUndefined<TContext[`schema`][K]>> | undefined
-    : IsNonExactNullable<TContext[`schema`][K]> extends true
-      ? // T is nullable (T | null) but not exactly null, and not optional
-        // Extract the non-null part and place null outside
-        Ref<NonNull<TContext[`schema`][K]>> | null
-      : // T is exactly undefined, exactly null, or neither optional nor nullable
-        // Wrap in RefProxy as-is (includes exact undefined, exact null, and normal types)
-        Ref<TContext[`schema`][K]>
-} & (TContext[`result`] extends object
-  ? { $selected: Ref<TContext[`result`]> }
-  : {})
+  [
+    K in Exclude<
+      KeysOfUnion<RefsSchemaForContext<TContext>>,
+      | keyof JoinedRefsForContext<TContext>
+      | keyof BranchUnionResultRefs<TContext>
+    >
+  ]: RefForContextSchemaValue<
+    ValueOfUnion<RefsSchemaForContext<TContext>, K>,
+    IsNullableContextKey<TContext, K>
+  >
+} & (TContext[`hasResult`] extends true
+  ? { $selected: Ref<TContext[`result`], false, true> }
+  : {}) &
+  BranchUnionResultRefs<TContext> &
+  JoinedRefsForContext<TContext>
 
 /**
  * Type Detection Helpers
@@ -472,6 +837,31 @@ type NonUndefined<T> = T extends undefined ? never : T
 type NonNull<T> = T extends null ? never : T
 
 /**
+ * Virtual properties available on row-root Ref types in query builders.
+ * These allow querying on sync status, origin, key, and collection ID.
+ *
+ * @example
+ * ```typescript
+ * // Filter by sync status
+ * .where(({ user }) => eq(user.$hasPendingWrites, false))
+ *
+ * // Filter by origin
+ * .where(({ order }) => eq(order.$origin, 'local'))
+ *
+ * // Access key in select
+ * .select(({ user }) => ({
+ *   key: user.$key,
+ *   collectionId: user.$collectionId,
+ * }))
+ * ```
+ */
+type VirtualPropsRef<TKey extends string | number = string | number> = {
+  readonly [K in keyof PublishedVirtualRowProps<TKey>]: RefLeaf<
+    PublishedVirtualRowProps<TKey>[K]
+  >
+}
+
+/**
  * Ref - The user-facing ref interface for the query builder
  *
  * This is a clean type that represents a reference to a value in the query,
@@ -479,8 +869,16 @@ type NonNull<T> = T extends null ? never : T
  * It provides a recursive interface that allows nested property access while
  * preserving optionality and nullability correctly.
  *
- * When spread in select clauses, it correctly produces the underlying data type
- * without Ref wrappers, enabling clean spread operations.
+ * The `Nullable` parameter indicates whether this ref comes from a nullable
+ * join side (left/right/full). When `true`, the `Nullable` flag propagates
+ * through all nested property accesses, ensuring the result type includes
+ * `| undefined` for all fields accessed through this ref.
+ *
+ * Inferred row-root refs include virtual properties ($hasPendingWrites, $origin,
+ * $key, $collectionId) for querying on row metadata. The default exported `Ref<T>`
+ * shape is suitable for reusable helpers that can accept either a row root or
+ * a recursively traversed user object, so it does not require those fields.
+ * Use `Ref<T, false, true>` when a helper specifically requires a row root.
  *
  * Example usage:
  * ```typescript
@@ -488,32 +886,48 @@ type NonNull<T> = T extends null ? never : T
  * const users: Ref<{ id: number; profile?: { bio: string } }> = { ... }
  * users.id // Ref<number> - clean display
  * users.profile?.bio // Ref<string> - nested optional access works
+ * const rootUsers: Ref<{ id: number }, false, true> = { ... }
+ * rootUsers.$hasPendingWrites // RefLeaf<boolean> - row-root virtual property access
+ *
+ * // Nullable ref (left/right/full join side):
+ * select(({ dept }) => ({ name: dept.name })) // result: string | undefined
  *
  * // Spread operations work cleanly:
  * select(({ user }) => ({ ...user })) // Returns User type, not Ref types
  * ```
  */
-export type Ref<T = any> = {
+export type Ref<
+  T = any,
+  Nullable extends boolean = false,
+  IncludeVirtualProps extends boolean = false,
+> = T extends unknown ? RefBranch<T, Nullable, IncludeVirtualProps> : never
+
+type RefBranch<
+  T,
+  Nullable extends boolean,
+  IncludeVirtualProps extends boolean,
+> = {
   [K in keyof T]: IsNonExactOptional<T[K]> extends true
     ? IsNonExactNullable<T[K]> extends true
       ? // Both optional and nullable
         IsPlainObject<NonNullable<T[K]>> extends true
-        ? Ref<NonNullable<T[K]>> | undefined
-        : RefLeaf<NonNullable<T[K]>> | undefined
+        ? Ref<NonNullable<T[K]>, Nullable, false> | null | undefined
+        : RefLeaf<NonUndefined<T[K]>, Nullable> | undefined
       : // Optional only
         IsPlainObject<NonUndefined<T[K]>> extends true
-        ? Ref<NonUndefined<T[K]>> | undefined
-        : RefLeaf<NonUndefined<T[K]>> | undefined
+        ? Ref<NonUndefined<T[K]>, Nullable, false> | undefined
+        : RefLeaf<NonUndefined<T[K]>, Nullable> | undefined
     : IsNonExactNullable<T[K]> extends true
       ? // Nullable only
         IsPlainObject<NonNull<T[K]>> extends true
-        ? Ref<NonNull<T[K]>> | null
-        : RefLeaf<NonNull<T[K]>> | null
+        ? Ref<NonNull<T[K]>, Nullable, false> | null
+        : RefLeaf<NonNull<T[K]>, Nullable> | null
       : // Required
         IsPlainObject<T[K]> extends true
-        ? Ref<T[K]>
-        : RefLeaf<T[K]>
-} & RefLeaf<T>
+        ? Ref<T[K], Nullable, false>
+        : RefLeaf<T[K], Nullable>
+} & RefLeaf<T, Nullable> &
+  (IncludeVirtualProps extends true ? VirtualPropsRef : {})
 
 /**
  * Ref - The user-facing ref type with clean IDE display
@@ -527,25 +941,21 @@ export type Ref<T = any> = {
  * - No internal properties like __refProxy, __path, __type are visible
  */
 declare const RefBrand: unique symbol
-export type RefLeaf<T = any> = { readonly [RefBrand]?: T }
+declare const NullableBrand: unique symbol
+export type RefLeaf<T = any, Nullable extends boolean = false> = {
+  readonly [RefBrand]?: T
+} & ([Nullable] extends [true] ? { readonly [NullableBrand]?: true } : {})
 
-// Helper type to remove RefBrand from objects
+// Detect NullableBrand by checking for the key's presence
+type IsNullableRef<T> = typeof NullableBrand extends keyof T ? true : false
+
+// Helper type to remove RefBrand and NullableBrand from objects
 type WithoutRefBrand<T> =
-  T extends Record<string, any> ? Omit<T, typeof RefBrand> : T
-
-/**
- * PreserveSingleResultFlag - Conditionally includes the singleResult flag
- *
- * This helper type ensures the singleResult flag is only added to the context when it's
- * explicitly true. It uses a non-distributive conditional (tuple wrapper) to prevent
- * unexpected behavior when TFlag is a union type.
- *
- * @template TFlag - The singleResult flag value to check
- * @returns { singleResult: true } if TFlag is true, otherwise {}
- */
-type PreserveSingleResultFlag<TFlag> = [TFlag] extends [true]
-  ? { singleResult: true }
-  : {}
+  IsPlainObject<T> extends true
+    ? Extract<keyof T, RefBrandKeys> extends never
+      ? T
+      : Omit<T, RefBrandKeys>
+    : T
 
 /**
  * MergeContextWithJoinType - Creates a new context after a join operation
@@ -568,20 +978,26 @@ type PreserveSingleResultFlag<TFlag> = [TFlag] extends [true]
  * - `hasJoins`: Set to true
  * - `joinTypes`: Updated to track this join type
  * - `result`: Preserved from previous operations
- * - `singleResult`: Preserved only if already true (via PreserveSingleResultFlag)
+ * - All other context state is preserved
  */
 export type MergeContextWithJoinType<
   TContext extends Context,
   TNewSchema extends ContextSchema,
   TJoinType extends `inner` | `left` | `right` | `full` | `outer` | `cross`,
-> = {
+> = Omit<TContext, `schema` | `refsSchema` | `hasJoins` | `joinTypes`> & {
   baseSchema: TContext[`baseSchema`]
   // Apply optionality immediately to the schema
   schema: ApplyJoinOptionalityToMergedSchema<
     TContext[`schema`],
     TNewSchema,
     TJoinType,
-    TContext[`fromSourceName`]
+    FromSourceNamesForOptionality<TContext>
+  >
+  refsSchema: ApplyJoinOptionalityToMergedSchema<
+    RefsSchemaForContext<TContext>,
+    TNewSchema,
+    TJoinType,
+    FromSourceNamesForOptionality<TContext>
   >
   fromSourceName: TContext[`fromSourceName`]
   hasJoins: true
@@ -591,8 +1007,7 @@ export type MergeContextWithJoinType<
     : {}) & {
     [K in keyof TNewSchema & string]: TJoinType
   }
-  result: TContext[`result`]
-} & PreserveSingleResultFlag<TContext[`singleResult`]>
+}
 
 /**
  * ApplyJoinOptionalityToMergedSchema - Applies optionality rules when merging schemas
@@ -623,10 +1038,10 @@ export type ApplyJoinOptionalityToMergedSchema<
   TExistingSchema extends ContextSchema,
   TNewSchema extends ContextSchema,
   TJoinType extends `inner` | `left` | `right` | `full` | `outer` | `cross`,
-  TFromSourceName extends string,
+  TFromSourceNames extends string,
 > = {
   // Apply optionality to existing schema based on new join type
-  [K in keyof TExistingSchema]: K extends TFromSourceName
+  [K in keyof TExistingSchema]: K extends TFromSourceNames
     ? // Main table becomes optional if the new join is a right or full join
       TJoinType extends `right` | `full`
       ? TExistingSchema[K] | undefined
@@ -637,7 +1052,7 @@ export type ApplyJoinOptionalityToMergedSchema<
   // Apply optionality to new schema based on join type
   [K in keyof TNewSchema]: TJoinType extends `left` | `full`
     ? // New table becomes optional for left and full joins
-        TNewSchema[K] | undefined
+      TNewSchema[K] | undefined
     : // New table is required for inner and right joins
       TNewSchema[K]
 }
@@ -649,6 +1064,75 @@ export type InferResultType<TContext extends Context> =
   TContext extends SingleResult
     ? GetResult<TContext> | undefined
     : Array<GetResult<TContext>>
+
+type WithVirtualPropsIfAttachable<TResult> = TResult extends unknown
+  ? TResult extends object
+    ? IsPlainObject<TResult> extends true
+      ? WithVirtualProps<TResult, string | number>
+      : TResult
+    : TResult
+  : never
+
+type OptionalKeys<T> = {
+  [K in keyof T]-?: {} extends Pick<T, K> ? K : never
+}[keyof T]
+
+type PrettifyIfPlainObject<T> =
+  IsPlainObject<T> extends true
+    ? OptionalKeys<T> extends never
+      ? Prettify<T>
+      : T
+    : T
+type FromSourceNamesForOptionality<TContext extends Context> =
+  TContext[`fromSourceNames`] extends ReadonlyArray<infer TName>
+    ? TName & string
+    : TContext[`fromSourceName`]
+type HasRightOrFullJoin<TContext extends Context> =
+  TContext[`joinTypes`] extends Record<string, infer TJoinType>
+    ? Extract<TJoinType, `right` | `full`> extends never
+      ? false
+      : true
+    : false
+type JoinedOnlyUnionFromResult<
+  TBaseSchema extends ContextSchema,
+  TSchema extends ContextSchema,
+> = Prettify<
+  {
+    [P in keyof TBaseSchema]?: undefined
+  } & {
+    [P in Exclude<keyof TSchema, keyof TBaseSchema>]: TSchema[P]
+  }
+>
+type UnionFromResult<
+  TBaseSchema extends ContextSchema,
+  TSchema extends ContextSchema,
+  THasJoinedOnlyBranch extends boolean = false,
+> =
+  | {
+      [K in keyof TBaseSchema]: Prettify<
+        {
+          [P in K]: NonUndefined<TSchema[Extract<P, keyof TSchema>]>
+        } & {
+          [P in Exclude<keyof TBaseSchema, K>]?: undefined
+        } & {
+          [P in Exclude<keyof TSchema, keyof TBaseSchema>]: TSchema[P]
+        }
+      >
+    }[keyof TBaseSchema]
+  | (THasJoinedOnlyBranch extends true
+      ? JoinedOnlyUnionFromResult<TBaseSchema, TSchema>
+      : never)
+type ResultValue<TContext extends Context> = TContext[`hasResult`] extends true
+  ? WithVirtualPropsIfAttachable<TContext[`result`]>
+  : TContext[`hasUnionFrom`] extends true
+    ? UnionFromResult<
+        TContext[`baseSchema`],
+        TContext[`schema`],
+        HasRightOrFullJoin<TContext>
+      >
+    : TContext[`hasJoins`] extends true
+      ? TContext[`schema`]
+      : TContext[`schema`][TContext[`fromSourceName`]]
 
 /**
  * GetResult - Determines the final result type of a query
@@ -675,15 +1159,52 @@ export type InferResultType<TContext extends Context> =
  * The `Prettify` wrapper ensures clean type display in IDEs by flattening
  * complex intersection types into readable object types.
  */
-export type GetResult<TContext extends Context> = Prettify<
-  TContext[`result`] extends object
+export type GetRawResult<TContext extends Context> = ResultValue<TContext>
+
+// Inline materialization bypasses a child Collection, so selected child values
+// do not pass through Collection enrichment and must keep their runtime shape.
+export type GetInlineResult<TContext extends Context> =
+  TContext[`hasResult`] extends true
     ? TContext[`result`]
-    : TContext[`hasJoins`] extends true
-      ? // Optionality is already applied in the schema, just return it
-        TContext[`schema`]
-      : // Single table query - return the specific table
-        TContext[`schema`][TContext[`fromSourceName`]]
+    : GetRawResult<TContext>
+
+export type GetResult<TContext extends Context> = Prettify<
+  ResultValue<TContext>
 >
+
+type IsExactlyContext<TContext extends Context> = [Context] extends [TContext]
+  ? [TContext] extends [Context]
+    ? true
+    : false
+  : false
+
+type RootScalarResultError = {
+  readonly __tanstackDbRootQueryError__: `Top-level scalar results are not supported by createLiveQueryCollection() or queryOnce(). Return an object, or use the scalar query inside toArray(...) or concat(toArray(...)).`
+}
+
+export type RootObjectResultConstraint<TContext extends Context> =
+  IsExactlyContext<TContext> extends true
+    ? unknown
+    : GetResult<TContext> extends object
+      ? unknown
+      : RootScalarResultError
+
+type ContextFromQueryBuilder<TQuery extends QueryBuilder<any>> =
+  TQuery extends QueryBuilder<infer TContext> ? TContext : never
+
+export type RootQueryBuilder<TQuery extends QueryBuilder<any>> = TQuery &
+  RootObjectResultConstraint<ContextFromQueryBuilder<TQuery>>
+
+export type RootQueryFn<TQuery extends QueryBuilder<any>> = (
+  q: InitialQueryBuilder,
+) => RootQueryBuilder<TQuery>
+
+export type RootQueryResult<TContext extends Context> =
+  IsExactlyContext<TContext> extends true
+    ? any
+    : GetResult<TContext> extends object
+      ? GetResult<TContext>
+      : never
 
 /**
  * ApplyJoinOptionalityToSchema - Legacy helper for complex join scenarios
@@ -807,16 +1328,18 @@ export type HasJoinType<
 export type MergeContextForJoinCallback<
   TContext extends Context,
   TNewSchema extends ContextSchema,
-> = {
+> = Omit<TContext, `schema` | `refsSchema` | `hasJoins` | `joinTypes`> & {
   baseSchema: TContext[`baseSchema`]
   // Merge schemas without applying join optionality - both are non-optional in join condition
   schema: TContext[`schema`] & TNewSchema
+  refsSchema: RefsSchemaForContext<TContext> & TNewSchema
   fromSourceName: TContext[`fromSourceName`]
   hasJoins: true
-  joinTypes: TContext[`joinTypes`] extends Record<string, any>
+  joinTypes: (TContext[`joinTypes`] extends Record<string, any>
     ? TContext[`joinTypes`]
-    : {}
-  result: TContext[`result`]
+    : {}) & {
+    [K in keyof TNewSchema & string]: `inner`
+  }
 }
 
 /**
@@ -834,9 +1357,11 @@ export type MergeContextForJoinCallback<
  * result type display cleanly in IDEs.
  */
 export type WithResult<TContext extends Context, TResult> = Prettify<
-  Omit<TContext, `result`> & {
-    result: Prettify<TResult>
-  }
+  Omit<TContext, `result` | `hasResult`> &
+    Pick<TContext, `baseSchema` | `schema` | `fromSourceName`> & {
+      result: PrettifyIfPlainObject<TResult>
+      hasResult: true
+    }
 >
 
 /**
@@ -848,16 +1373,26 @@ export type Prettify<T> = {
 
 /**
  * IsPlainObject - Utility type to check if T is a plain object
+ *
+ * Returns `false` for:
+ * - Arrays (ReadonlyArray)
+ * - JavaScript built-ins (Date, Map, Set, etc.)
+ * - Objects with `Symbol.toStringTag` (class instances like Temporal types,
+ *   TypedArrays not already in JsBuiltIns, etc.) — these are not plain data objects
  */
-type IsPlainObject<T> = T extends unknown
+export type IsPlainObject<T> = T extends unknown
   ? T extends object
     ? T extends ReadonlyArray<any>
       ? false
       : T extends JsBuiltIns
         ? false
-        : true
+        : T extends { readonly [Symbol.toStringTag]: string }
+          ? false
+          : true
     : false
   : false
+
+type IsAny<T> = 0 extends 1 & T ? true : false
 
 /**
  * JsBuiltIns - List of JavaScript built-ins

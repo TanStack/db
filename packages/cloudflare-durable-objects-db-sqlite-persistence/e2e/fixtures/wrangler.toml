@@ -1,0 +1,11 @@
+name = "tanstack-db-cloudflare-do-e2e"
+main = "./worker.mjs"
+compatibility_date = "2026-02-11"
+
+[[durable_objects.bindings]]
+name = "PERSISTENCE"
+class_name = "PersistenceObject"
+
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["PersistenceObject"]

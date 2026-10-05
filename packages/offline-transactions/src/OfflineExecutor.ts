@@ -1,5 +1,9 @@
 // Storage adapters
-import { createOptimisticAction, createTransaction } from '@tanstack/db'
+import {
+  createOptimisticAction,
+  createTransaction,
+  safeRandomUUID,
+} from '@tanstack/db'
 import { IndexedDBAdapter } from './storage/IndexedDBAdapter'
 import { LocalStorageAdapter } from './storage/LocalStorageAdapter'
 
@@ -23,6 +27,7 @@ import { createOfflineAction } from './api/OfflineAction'
 
 // Replay
 import { withNestedSpan, withSpan } from './telemetry/tracer'
+import { NonRetriableError } from './types'
 import type {
   CreateOfflineActionOptions,
   CreateOfflineTransactionOptions,
@@ -47,6 +52,7 @@ export class OfflineExecutor {
   private leaderElection: LeaderElection | null
   private onlineDetector: OnlineDetector
   private isLeaderState = false
+  private disposed = false
   private unsubscribeOnline: (() => void) | null = null
   private unsubscribeLeadership: (() => void) | null = null
 
@@ -96,7 +102,8 @@ export class OfflineExecutor {
       this.initResolve = resolve
       this.initReject = reject
     })
-
+    // Handle constructor-started rejection; waitForInit still observes it.
+    void this.initPromise.catch(() => {})
     this.initialize()
   }
 
@@ -205,14 +212,19 @@ export class OfflineExecutor {
     if (this.leaderElection) {
       this.unsubscribeLeadership = this.leaderElection.onLeadershipChange(
         (isLeader) => {
+          // A custom elector may repeat the initial result while replay is active.
+          if (this.disposed || isLeader === this.isLeaderState) return
           this.isLeaderState = isLeader
+          if (!isLeader) this.executor?.pause()
 
           if (this.config.onLeadershipChange) {
             this.config.onLeadershipChange(isLeader)
           }
 
           if (isLeader) {
-            this.loadAndReplayTransactions()
+            this.loadAndReplayTransactions().catch((error) => {
+              console.warn(`Failed to load and replay transactions:`, error)
+            })
           }
         },
       )
@@ -220,14 +232,37 @@ export class OfflineExecutor {
 
     this.unsubscribeOnline = this.onlineDetector.subscribe(() => {
       if (this.isOfflineEnabled && this.executor) {
-        // Reset retry delays so transactions can execute immediately when back online
         this.executor.resetRetryDelays()
-        this.executor.executeAll().catch((error) => {
-          console.warn(
-            `Failed to execute transactions on connectivity change:`,
-            error,
-          )
-        })
+
+        if (this.scheduler.getPendingCount() > 0) {
+          const barrierPromise = this.executor.executeAll()
+
+          for (const collection of Object.values(this.config.collections)) {
+            collection.deferDataRefresh = barrierPromise
+          }
+
+          barrierPromise
+            .catch((error) => {
+              console.warn(
+                `Failed to execute transactions on connectivity change:`,
+                error,
+              )
+            })
+            .finally(() => {
+              for (const collection of Object.values(this.config.collections)) {
+                if (collection.deferDataRefresh === barrierPromise) {
+                  collection.deferDataRefresh = null
+                }
+              }
+            })
+        } else {
+          this.executor.executeAll().catch((error) => {
+            console.warn(
+              `Failed to execute transactions on connectivity change:`,
+              error,
+            )
+          })
+        }
       }
     })
   }
@@ -237,6 +272,10 @@ export class OfflineExecutor {
       try {
         // Probe storage and create adapter
         const { storage, diagnostic } = await this.createStorage()
+        if (this.disposed) {
+          this.initResolve()
+          return
+        }
 
         // Cast to writable to set readonly properties
         ;(this as any).storage = storage
@@ -268,6 +307,13 @@ export class OfflineExecutor {
 
         // Request leadership first
         const isLeader = await this.leaderElection.requestLeadership()
+        // Disposal may have run while leadership was pending.
+        // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
+        if (this.disposed) {
+          this.leaderElection.releaseLeadership()
+          this.initResolve()
+          return
+        }
         this.isLeaderState = isLeader
         span.setAttribute(`isLeader`, isLeader)
 
@@ -300,22 +346,17 @@ export class OfflineExecutor {
       return
     }
 
-    try {
-      // Load pending transactions and restore optimistic state
-      await this.executor.loadPendingTransactions()
+    // Startup must observe a failed read instead of reporting an empty outbox.
+    await this.executor.loadPendingTransactions()
 
-      // Start execution in the background - don't await to avoid blocking initialization
-      // The transactions will execute and complete asynchronously
-      this.executor.executeAll().catch((error) => {
-        console.warn(`Failed to execute transactions:`, error)
-      })
-    } catch (error) {
-      console.warn(`Failed to load and replay transactions:`, error)
-    }
+    // Replay completion is separate from initialization and durable admission.
+    this.executor.executeAll().catch((error) => {
+      console.warn(`Failed to execute transactions:`, error)
+    })
   }
 
   get isOfflineEnabled(): boolean {
-    return this.mode === `offline` && this.isLeaderState
+    return !this.disposed && this.mode === `offline` && this.isLeaderState
   }
 
   /**
@@ -344,7 +385,7 @@ export class OfflineExecutor {
         mutationFn: (params) =>
           mutationFn({
             ...params,
-            idempotencyKey: options.idempotencyKey || crypto.randomUUID(),
+            idempotencyKey: options.idempotencyKey || safeRandomUUID(),
           }),
         metadata: options.metadata,
       })
@@ -376,7 +417,7 @@ export class OfflineExecutor {
             mutationFn({
               ...vars,
               ...params,
-              idempotencyKey: crypto.randomUUID(),
+              idempotencyKey: safeRandomUUID(),
             }),
           onMutate: options.onMutate,
         })
@@ -408,14 +449,18 @@ export class OfflineExecutor {
       },
       async (span) => {
         if (!this.isOfflineEnabled || !this.outbox || !this.executor) {
-          span.setAttribute(`result`, `skipped_not_leader`)
-          this.resolveTransaction(transaction.id, undefined)
-          return
+          span.setAttribute(`result`, `rejected_not_admitted`)
+          throw new NonRetriableError(`Offline transaction was not admitted`)
         }
 
         try {
+          this.executor.assertHealthy()
           await this.outbox.add(transaction)
-          await this.executor.execute(transaction)
+          // A shared queue error belongs to its execution, not every caller
+          // that durably admitted a transaction. Per-ID signals settle callers.
+          this.executor.execute(transaction).catch((error) => {
+            console.warn(`Failed to execute transactions:`, error)
+          })
           span.setAttribute(`result`, `persisted`)
         } catch (error) {
           console.error(
@@ -546,10 +591,6 @@ export class OfflineExecutor {
     this.executor.clear()
   }
 
-  notifyOnline(): void {
-    this.onlineDetector.notifyOnline()
-  }
-
   getPendingCount(): number {
     if (!this.executor) {
       return 0
@@ -568,7 +609,17 @@ export class OfflineExecutor {
     return this.onlineDetector
   }
 
+  isOnline(): boolean {
+    return this.onlineDetector.isOnline()
+  }
+
   dispose(): void {
+    this.disposed = true
+    this.executor?.pause()
+    for (const collection of Object.values(this.config.collections)) {
+      collection.deferDataRefresh = null
+    }
+
     if (this.unsubscribeOnline) {
       this.unsubscribeOnline()
       this.unsubscribeOnline = null

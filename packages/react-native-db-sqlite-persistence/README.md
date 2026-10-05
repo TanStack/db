@@ -1,0 +1,60 @@
+# @tanstack/react-native-db-sqlite-persistence
+
+Thin SQLite persistence for React Native apps (including Expo runtime).
+
+Start with the [SQLite Persistence guide](../../docs/guides/sqlite-persistence.md) for Collection setup and lifecycle behavior.
+For pending server mutations, see the [React Native recipe with offline transactions](../../docs/guides/offline-transactions.md#use-sqlite-persistence-with-the-outbox).
+
+## Public API
+
+- `createReactNativeSQLitePersistence(...)`
+- `persistedCollectionOptions(...)` (re-exported from core)
+
+## Quick start
+
+```ts
+import { open } from '@op-engineering/op-sqlite'
+import { createCollection } from '@tanstack/db'
+import {
+  createReactNativeSQLitePersistence,
+  persistedCollectionOptions,
+} from '@tanstack/react-native-db-sqlite-persistence'
+
+type Todo = {
+  id: string
+  title: string
+  completed: boolean
+}
+
+const database = open({
+  name: `tanstack-db.sqlite`,
+  location: `default`,
+})
+
+// One shared persistence instance for the whole database.
+const persistence = createReactNativeSQLitePersistence({
+  database,
+})
+
+export const todosCollection = createCollection(
+  persistedCollectionOptions<Todo, string>({
+    id: `todos`,
+    getKey: (todo) => todo.id,
+    persistence,
+    schemaVersion: 1, // Per-collection schema version
+  }),
+)
+```
+
+## Notes
+
+- The same API is used for React Native and Expo runtimes.
+- `createReactNativeSQLitePersistence` is shared across collections.
+- Mode defaults (`sync-present` vs `sync-absent`) are inferred from whether a
+  `sync` config is present in `persistedCollectionOptions`.
+- Published OP-SQLite methods return self-describing object envelopes and need
+  no result-shape option. If a custom database wrapper instead returns a bare
+  array, set `arrayResultMode: 'rows'` for an array of data rows or
+  `arrayResultMode: 'statement-results'` for an array containing one statement
+  result. Undeclared arrays that also look like statement envelopes are rejected
+  rather than being reshaped heuristically.

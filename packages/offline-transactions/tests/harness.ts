@@ -94,7 +94,7 @@ class FakeLeaderElection implements LeaderElection {
 
 type TestMutationFn = (
   params: OfflineMutationFnParams & { attempt: number },
-) => Promise<any>
+) => unknown | Promise<unknown>
 
 interface TestOfflineEnvironmentOptions {
   mutationFnName?: string
@@ -140,7 +140,7 @@ export function createTestOfflineEnvironment(
   waitForLeader: () => Promise<void>
   leader: FakeLeaderElection
   serverState: Map<string, TestItem>
-  applyMutations: (mutations: Array<PendingMutation<TestItem>>) => void
+  applyMutations: (mutations: ReadonlyArray<PendingMutation>) => void
 } {
   const mutationFnName = options.mutationFnName ?? `syncData`
   const storage = options.storage ?? new FakeStorageAdapter()
@@ -150,25 +150,22 @@ export function createTestOfflineEnvironment(
   const { collection, controller } = createDefaultCollection()
   const serverState = new Map<string, TestItem>()
 
-  const applyMutations = (mutations: Array<PendingMutation<TestItem>>) => {
+  const applyMutations = (mutations: ReadonlyArray<PendingMutation>) => {
     controller.begin()
 
     for (const mutation of mutations) {
       switch (mutation.type) {
-        case `insert`: {
-          const value = mutation.modified
-          serverState.set(value.id, value)
-          controller.write({ type: `insert`, value })
-          break
-        }
+        case `insert`:
         case `update`: {
-          const value = mutation.modified
+          const value = requireTestItem(mutation.modified, mutation.globalKey)
           serverState.set(value.id, value)
-          controller.write({ type: `update`, value })
+          controller.write({ type: mutation.type, value })
           break
         }
         case `delete`: {
-          const original = mutation.original as TestItem | undefined
+          const original = isTestItem(mutation.original)
+            ? mutation.original
+            : undefined
           const fallbackIdFromKey =
             (typeof mutation.key === `string` ? mutation.key : undefined) ??
             mutation.globalKey.split(`:`).pop()
@@ -204,9 +201,7 @@ export function createTestOfflineEnvironment(
   }
 
   const defaultMutation: TestMutationFn = (params) => {
-    const mutations = params.transaction.mutations as Array<
-      PendingMutation<TestItem>
-    >
+    const mutations = params.transaction.mutations
 
     applyMutations(mutations)
 
@@ -219,15 +214,16 @@ export function createTestOfflineEnvironment(
 
   const wrappedMutation = async (
     params: OfflineMutationFnParams,
-  ): Promise<any> => {
+  ): Promise<unknown> => {
     const currentAttempt = (attemptCounter.get(params.idempotencyKey) ?? 0) + 1
     attemptCounter.set(params.idempotencyKey, currentAttempt)
     const extendedParams = { ...params, attempt: currentAttempt }
     mutationCalls.push(extendedParams)
-    return mutationFn(extendedParams)
+    return await mutationFn(extendedParams)
   }
 
   const config: OfflineConfig = {
+    ...options.config,
     collections: {
       ...(options.config?.collections ?? {}),
       [collection.id]: collection,
@@ -237,11 +233,6 @@ export function createTestOfflineEnvironment(
       [mutationFnName]: wrappedMutation,
     },
     storage,
-    maxConcurrency: options.config?.maxConcurrency,
-    jitter: options.config?.jitter,
-    beforeRetry: options.config?.beforeRetry,
-    onUnknownMutationFn: options.config?.onUnknownMutationFn,
-    onLeadershipChange: options.config?.onLeadershipChange,
     leaderElection: options.config?.leaderElection ?? leader,
   }
 
@@ -266,4 +257,26 @@ export function createTestOfflineEnvironment(
     serverState,
     applyMutations,
   }
+}
+
+function isTestItem(value: unknown): value is TestItem {
+  return (
+    typeof value === `object` &&
+    value !== null &&
+    `id` in value &&
+    typeof value.id === `string` &&
+    `value` in value &&
+    typeof value.value === `string` &&
+    `completed` in value &&
+    typeof value.completed === `boolean` &&
+    `updatedAt` in value &&
+    value.updatedAt instanceof Date
+  )
+}
+
+function requireTestItem(value: unknown, mutationKey: string): TestItem {
+  if (!isTestItem(value)) {
+    throw new Error(`Invalid test item in mutation ${mutationKey}`)
+  }
+  return value
 }

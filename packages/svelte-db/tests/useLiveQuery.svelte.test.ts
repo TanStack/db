@@ -1,9 +1,13 @@
 import { afterEach, describe, expect, it } from 'vitest'
 import {
+  BaseQueryBuilder,
+  DbClient,
   count,
   createCollection,
   createLiveQueryCollection,
   eq,
+  getLiveQueryHash,
+  getStableValueHash,
   gt,
 } from '@tanstack/db'
 import { flushSync } from 'svelte'
@@ -75,10 +79,104 @@ const initialIssues: Array<Issue> = [
 ]
 
 describe(`Query Collections`, () => {
+  it(`includes the query in legacy dependency-array SSR identity`, () => {
+    const client = new DbClient()
+    const collection = createCollection<Person>({
+      id: `svelte-legacy-query-identity`,
+      getKey: (person) => person.id,
+      startSync: false,
+      sync: { sync: () => {} },
+    })
+    const firstPrepared = new BaseQueryBuilder().from({ people: collection })
+    const secondPrepared = new BaseQueryBuilder()
+      .from({ people: collection })
+      .where(({ people }) => gt(people.age, 30))
+    const firstHash = getStableValueHash(
+      [`deps`, [1], getLiveQueryHash({ query: firstPrepared })],
+      `queryKey`,
+    )
+    const secondHash = getStableValueHash(
+      [`deps`, [1], getLiveQueryHash({ query: secondPrepared })],
+      `queryKey`,
+    )
+    client.hydrate({
+      collections: [],
+      liveQueries: [
+        {
+          queryHash: firstHash,
+          dehydratedAt: 1,
+          snapshot: {
+            rows: [
+              { key: `first`, value: { ...initialPersons[0]!, id: `first` } },
+            ],
+          },
+        },
+        {
+          queryHash: secondHash,
+          dehydratedAt: 1,
+          snapshot: {
+            rows: [
+              { key: `second`, value: { ...initialPersons[2]!, id: `second` } },
+            ],
+          },
+        },
+      ],
+    })
+    let firstId: string | undefined
+    let secondId: string | undefined
+
+    cleanup = $effect.root(() => {
+      const first = useLiveQuery(
+        { client, query: (q) => q.from({ people: collection }) },
+        [() => 1],
+      )
+      const second = useLiveQuery(
+        {
+          client,
+          query: (q) =>
+            q
+              .from({ people: collection })
+              .where(({ people }) => gt(people.age, 30)),
+        },
+        [() => 1],
+      )
+      flushSync()
+      firstId = first.data[0]?.id
+      secondId = second.data[0]?.id
+    })
+
+    expect(firstId).toBe(`first`)
+    expect(secondId).toBe(`second`)
+  })
+
   let cleanup: (() => void) | null = null
 
   afterEach(() => {
     cleanup?.()
+  })
+
+  it(`keeps data and keyed state aligned after collection cleanup`, () => {
+    const collection = createCollection(
+      mockSyncCollectionOptions<Person>({
+        id: `cleanup-alignment-svelte`,
+        getKey: (person) => person.id,
+        initialData: initialPersons,
+      }),
+    )
+
+    cleanup = $effect.root(() => {
+      const query = useLiveQuery(collection)
+      flushSync()
+
+      expect(query.data).toHaveLength(3)
+      expect(query.state.size).toBe(3)
+
+      void collection.cleanup()
+      flushSync()
+
+      expect(query.data).toHaveLength(0)
+      expect(query.state.size).toBe(0)
+    })
   })
 
   it(`should work with basic collection and select`, () => {
@@ -114,6 +212,26 @@ describe(`Query Collections`, () => {
         age: 35,
       })
     })
+  })
+
+  it(`throws when an explicit queryKey cannot be stably hashed`, () => {
+    const collection = createCollection(
+      mockSyncCollectionOptions<Person>({
+        id: `unhashable-explicit-query-key-svelte`,
+        getKey: (person) => person.id,
+        initialData: initialPersons,
+      }),
+    )
+
+    expect(() => {
+      cleanup = $effect.root(() => {
+        useLiveQuery({
+          queryKey: [collection.id, () => `opaque`],
+          query: (q) => q.from({ people: collection }),
+        })
+        flushSync()
+      })
+    }).toThrow(/queryKey.*function value/)
   })
 
   it(`should maintain reactivity when destructuring return values with $derived`, () => {
@@ -387,19 +505,19 @@ describe(`Query Collections`, () => {
       // Verify that we have the expected joined results
       expect(query.state.size).toBe(3)
 
-      expect(query.state.get(`[1,1]`)).toMatchObject({
+      expect(query.state.get(`["1","1"]`)).toMatchObject({
         id: `1`,
         name: `John Doe`,
         title: `Issue 1`,
       })
 
-      expect(query.state.get(`[2,2]`)).toMatchObject({
+      expect(query.state.get(`["2","2"]`)).toMatchObject({
         id: `2`,
         name: `Jane Doe`,
         title: `Issue 2`,
       })
 
-      expect(query.state.get(`[3,1]`)).toMatchObject({
+      expect(query.state.get(`["3","1"]`)).toMatchObject({
         id: `3`,
         name: `John Doe`,
         title: `Issue 3`,
@@ -421,7 +539,7 @@ describe(`Query Collections`, () => {
       flushSync()
 
       expect(query.state.size).toBe(4)
-      expect(query.state.get(`[4,2]`)).toMatchObject({
+      expect(query.state.get(`["4","2"]`)).toMatchObject({
         id: `4`,
         name: `Jane Doe`,
         title: `Issue 4`,
@@ -443,7 +561,7 @@ describe(`Query Collections`, () => {
       flushSync()
 
       // The updated title should be reflected in the joined results
-      expect(query.state.get(`[2,2]`)).toMatchObject({
+      expect(query.state.get(`["2","2"]`)).toMatchObject({
         id: `2`,
         name: `Jane Doe`,
         title: `Updated Issue 2`,
@@ -465,7 +583,7 @@ describe(`Query Collections`, () => {
       flushSync()
 
       // After deletion, issue 3 should no longer have a joined result
-      expect(query.state.get(`[3,1]`)).toBeUndefined()
+      expect(query.state.get(`["3","1"]`)).toBeUndefined()
       expect(query.state.size).toBe(3)
     })
   })
@@ -689,7 +807,7 @@ describe(`Query Collections`, () => {
 
       // Verify the new issue is reflected in the query
       expect(queryResult.state.size).toBe(4)
-      expect(queryResult.state.get(`[4,1]`)).toMatchObject({
+      expect(queryResult.state.get(`["4","1"]`)).toMatchObject({
         id: `4`,
         name: `John Doe`,
         title: `New Issue`,
@@ -2066,6 +2184,49 @@ describe(`Query Collections`, () => {
 
         expect(query.data).toBeUndefined()
         expect(query.state.size).toBe(0)
+      })
+    })
+
+    /**
+     * Driver: public `useLiveQuery` with Svelte state. Each `flushSync` is the
+     * observation cut after disabled, enabled, and disabled-again updates. This
+     * test observes conditional `findOne` data and status; shared conformance
+     * owns array-query Collection/state behavior.
+     */
+    it(`keeps conditional findOne data empty while disabled`, () => {
+      const collection = createCollection(
+        mockSyncCollectionOptions<Person>({
+          id: `disabled-find-one-svelte`,
+          getKey: (person: Person) => person.id,
+          initialData: initialPersons,
+        }),
+      )
+
+      cleanup = $effect.root(() => {
+        let enabled = $state(false)
+        const query = useLiveQuery(
+          (q) =>
+            enabled
+              ? q
+                  .from({ collection })
+                  .where(({ collection: person }) => eq(person.id, `3`))
+                  .findOne()
+              : null,
+          [() => enabled],
+        )
+
+        flushSync()
+        expect(query.status).toBe(`disabled`)
+        expect(query.data).toEqual([])
+
+        enabled = true
+        flushSync()
+        expect(query.data).toMatchObject({ id: `3` })
+
+        enabled = false
+        flushSync()
+        expect(query.status).toBe(`disabled`)
+        expect(query.data).toEqual([])
       })
     })
   })

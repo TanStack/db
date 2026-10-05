@@ -1,0 +1,183 @@
+import BetterSqlite3 from 'better-sqlite3'
+import type { OpSQLiteDatabaseLike } from '../../src/op-sqlite-driver'
+
+const QUERY_SQL_PATTERN = /^\s*(SELECT|WITH|PRAGMA|EXPLAIN)\b/i
+
+export type OpSQLiteTestResultShape =
+  | `rows-array`
+  | `rows-object`
+  | `rows-list`
+  | `statement-array`
+  | `execute-rows-with-column-names`
+  | `execute-async-columnar`
+
+type OpSQLiteRowsListLike<T> = {
+  length: number
+  item: (index: number) => T | null
+  _array: Array<T>
+}
+
+export type OpSQLiteTestDatabase = OpSQLiteDatabaseLike & {
+  close: () => void | Promise<void>
+  getNativeDatabase?: () => InstanceType<typeof BetterSqlite3>
+}
+
+export type MobileSQLiteTestDatabaseFactory = (options: {
+  filename: string
+  resultShape?: OpSQLiteTestResultShape
+}) => OpSQLiteTestDatabase
+
+declare global {
+  var __tanstackDbCreateMobileSQLiteTestDatabase:
+    MobileSQLiteTestDatabaseFactory | undefined
+}
+
+function createRowsList<T>(rows: Array<T>): OpSQLiteRowsListLike<T> {
+  return {
+    length: rows.length,
+    item: (index) => rows[index] ?? null,
+    _array: rows,
+  }
+}
+
+function formatQueryRows<T>(
+  rows: Array<T>,
+  resultShape: OpSQLiteTestResultShape,
+): unknown {
+  switch (resultShape) {
+    case `rows-array`:
+      return rows
+    case `rows-object`:
+      return { rows }
+    case `rows-list`:
+      return {
+        rows: createRowsList(rows),
+      }
+    case `statement-array`:
+      return [{ rows, rowsAffected: 0 }]
+    case `execute-rows-with-column-names`:
+      throw new Error(`Rows with metadata require statement column metadata`)
+    case `execute-async-columnar`:
+      throw new Error(`Columnar query rows require statement column metadata`)
+    default:
+      return { rows }
+  }
+}
+
+function formatWriteResult(
+  rowsAffected: number,
+  resultShape: OpSQLiteTestResultShape,
+  insertId?: number,
+): unknown {
+  switch (resultShape) {
+    case `rows-array`:
+      return []
+    case `rows-object`:
+      return {
+        rows: [],
+        rowsAffected,
+      }
+    case `rows-list`:
+      return {
+        rows: createRowsList([]),
+        rowsAffected,
+      }
+    case `statement-array`:
+      return [
+        {
+          rows: [],
+          rowsAffected,
+        },
+      ]
+    case `execute-async-columnar`:
+      return {
+        rowsAffected,
+        insertId,
+        rows: [],
+      }
+    default:
+      return {
+        rows: [],
+        rowsAffected,
+      }
+  }
+}
+
+export function createOpSQLiteTestDatabase(options: {
+  filename: string
+  resultShape?: OpSQLiteTestResultShape
+}): OpSQLiteTestDatabase {
+  if (
+    typeof globalThis.__tanstackDbCreateMobileSQLiteTestDatabase === `function`
+  ) {
+    return globalThis.__tanstackDbCreateMobileSQLiteTestDatabase(options)
+  }
+
+  const nativeDatabase = new BetterSqlite3(options.filename)
+  const resultShape = options.resultShape ?? `rows-object`
+
+  const execute = (sql: string, params: ReadonlyArray<unknown> = []) => {
+    const statement = nativeDatabase.prepare(sql)
+    const parameterValues = [...params]
+
+    if (QUERY_SQL_PATTERN.test(sql)) {
+      if (resultShape === `execute-async-columnar`) {
+        const columnNames = statement
+          .columns()
+          .map((column: { name: string }) => column.name)
+        const rawRows =
+          parameterValues.length > 0
+            ? statement.raw(true).all(...parameterValues)
+            : statement.raw(true).all()
+        return {
+          rowsAffected: 0,
+          rawRows,
+          columnNames,
+        }
+      }
+
+      if (resultShape === `execute-rows-with-column-names`) {
+        const columnNames = statement
+          .columns()
+          .map((column: { name: string }) => column.name)
+        const rows =
+          parameterValues.length > 0
+            ? statement.all(...parameterValues)
+            : statement.all()
+        return { rowsAffected: 0, rows, columnNames }
+      }
+
+      const rows =
+        parameterValues.length > 0
+          ? statement.all(...parameterValues)
+          : statement.all()
+      return formatQueryRows(rows, resultShape)
+    }
+
+    const runResult =
+      parameterValues.length > 0
+        ? statement.run(...parameterValues)
+        : statement.run()
+    return formatWriteResult(
+      runResult.changes,
+      resultShape,
+      Number(runResult.lastInsertRowid),
+    )
+  }
+
+  const database: OpSQLiteTestDatabase = {
+    close: () => {
+      nativeDatabase.close()
+    },
+    getNativeDatabase: () => nativeDatabase,
+  }
+
+  if (resultShape === `execute-async-columnar`) {
+    database.executeAsync = (sql, params) =>
+      Promise.resolve(execute(sql, params))
+  } else {
+    database.execute = execute
+  }
+
+  return database
+}

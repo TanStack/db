@@ -3,17 +3,25 @@ id: SubscriptionEvents
 title: SubscriptionEvents
 ---
 
-# Type Alias: SubscriptionEvents
-
 ```ts
 type SubscriptionEvents = object;
 ```
 
-Defined in: [packages/db/src/types.ts:241](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L241)
+Defined in: [packages/db/src/types.ts:272](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L272)
 
 All subscription events
 
 ## Properties
+
+### loadSubset:error
+
+```ts
+loadSubset:error: SubscriptionLoadSubsetErrorEvent;
+```
+
+Defined in: [packages/db/src/types.ts:276](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L276)
+
+***
 
 ### status:change
 
@@ -21,7 +29,7 @@ All subscription events
 status:change: SubscriptionStatusChangeEvent;
 ```
 
-Defined in: [packages/db/src/types.ts:242](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L242)
+Defined in: [packages/db/src/types.ts:273](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L273)
 
 ***
 
@@ -31,7 +39,7 @@ Defined in: [packages/db/src/types.ts:242](https://github.com/TanStack/db/blob/m
 status:loadingSubset: SubscriptionStatusEvent<"loadingSubset">;
 ```
 
-Defined in: [packages/db/src/types.ts:244](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L244)
+Defined in: [packages/db/src/types.ts:275](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L275)
 
 ***
 
@@ -41,7 +49,7 @@ Defined in: [packages/db/src/types.ts:244](https://github.com/TanStack/db/blob/m
 status:ready: SubscriptionStatusEvent<"ready">;
 ```
 
-Defined in: [packages/db/src/types.ts:243](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L243)
+Defined in: [packages/db/src/types.ts:274](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L274)
 
 ***
 
@@ -51,4 +59,4 @@ Defined in: [packages/db/src/types.ts:243](https://github.com/TanStack/db/blob/m
 unsubscribed: SubscriptionUnsubscribedEvent;
 ```
 
-Defined in: [packages/db/src/types.ts:245](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L245)
+Defined in: [packages/db/src/types.ts:277](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L277)

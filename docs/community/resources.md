@@ -3,8 +3,6 @@ title: Community Resources
 id: community-resources
 ---
 
-# Community Resources
-
 This page contains a curated list of community-created packages, tools, and resources that extend or complement TanStack DB.
 
 ## Community Packages

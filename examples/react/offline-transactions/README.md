@@ -1,72 +1,34 @@
-# Welcome to TanStack.com!
+# Offline Transactions Example
 
-This site is built with TanStack Router!
+A todo app demonstrating `@tanstack/offline-transactions` with three different browser storage backends:
 
-- [TanStack Router Docs](https://tanstack.com/router)
+- **IndexedDB** — persistent structured storage via `IndexedDBAdapter`
+- **localStorage** — simple key-value fallback via `LocalStorageAdapter`
+- **wa-sqlite OPFS** — full SQLite database in the browser via `@tanstack/browser-db-sqlite-persistence`
 
-It's deployed automagically with Netlify!
+The app uses TanStack Start in SPA mode with an in-memory server-side todo store. The server simulates network delays and random failures to demonstrate offline resilience.
 
-- [Netlify](https://netlify.com/)
+## How to run
 
-## Development
-
-From your terminal:
+From the root of the repository:
 
 ```sh
 pnpm install
+pnpm build
+```
+
+Then from this directory:
+
+```sh
 pnpm dev
 ```
 
-This starts your app in development mode, rebuilding assets on file changes.
+The app runs at http://localhost:3000.
 
-## Editing and previewing the docs of TanStack projects locally
+## What it demonstrates
 
-The documentations for all TanStack projects except for `React Charts` are hosted on [https://tanstack.com](https://tanstack.com), powered by this TanStack Router app.
-In production, the markdown doc pages are fetched from the GitHub repos of the projects, but in development they are read from the local file system.
-
-Follow these steps if you want to edit the doc pages of a project (in these steps we'll assume it's [`TanStack/form`](https://github.com/tanstack/form)) and preview them locally :
-
-1. Create a new directory called `tanstack`.
-
-```sh
-mkdir tanstack
-```
-
-2. Enter the directory and clone this repo and the repo of the project there.
-
-```sh
-cd tanstack
-git clone git@github.com:TanStack/tanstack.com.git
-git clone git@github.com:TanStack/form.git
-```
-
-> [!NOTE]
-> Your `tanstack` directory should look like this:
->
-> ```
-> tanstack/
->    |
->    +-- form/
->    |
->    +-- tanstack.com/
-> ```
-
-> [!WARNING]
-> Make sure the name of the directory in your local file system matches the name of the project's repo. For example, `tanstack/form` must be cloned into `form` (this is the default) instead of `some-other-name`, because that way, the doc pages won't be found.
-
-3. Enter the `tanstack/tanstack.com` directory, install the dependencies and run the app in dev mode:
-
-```sh
-cd tanstack.com
-pnpm i
-# The app will run on https://localhost:3000 by default
-pnpm dev
-```
-
-4. Now you can visit http://localhost:3000/form/latest/docs/overview in the browser and see the changes you make in `tanstack/form/docs`.
-
-> [!NOTE]
-> The updated pages need to be manually reloaded in the browser.
-
-> [!WARNING]
-> You will need to update the `docs/config.json` file (in the project's repo) if you add a new doc page!
+- **Outbox pattern** — mutations are persisted locally before syncing to the server
+- **Automatic retry** — failed operations retry with exponential backoff when connectivity returns
+- **Multi-tab coordination** — leader election ensures only one tab manages offline storage
+- **Optimistic updates** — UI updates immediately while mutations sync in the background
+- **Collection-level persistence** (wa-sqlite route) — data stored in a real SQLite database in the browser via OPFS, surviving page reloads without server sync

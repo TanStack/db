@@ -3,9 +3,7 @@ id: SubscriptionStatusChangeEvent
 title: SubscriptionStatusChangeEvent
 ---
 
-# Interface: SubscriptionStatusChangeEvent
-
-Defined in: [packages/db/src/types.ts:213](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L213)
+Defined in: [packages/db/src/types.ts:236](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L236)
 
 Event emitted when subscription status changes
 
@@ -17,7 +15,7 @@ Event emitted when subscription status changes
 previousStatus: SubscriptionStatus;
 ```
 
-Defined in: [packages/db/src/types.ts:216](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L216)
+Defined in: [packages/db/src/types.ts:239](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L239)
 
 ***
 
@@ -27,7 +25,7 @@ Defined in: [packages/db/src/types.ts:216](https://github.com/TanStack/db/blob/m
 status: SubscriptionStatus;
 ```
 
-Defined in: [packages/db/src/types.ts:217](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L217)
+Defined in: [packages/db/src/types.ts:240](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L240)
 
 ***
 
@@ -37,7 +35,7 @@ Defined in: [packages/db/src/types.ts:217](https://github.com/TanStack/db/blob/m
 subscription: Subscription;
 ```
 
-Defined in: [packages/db/src/types.ts:215](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L215)
+Defined in: [packages/db/src/types.ts:238](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L238)
 
 ***
 
@@ -47,4 +45,4 @@ Defined in: [packages/db/src/types.ts:215](https://github.com/TanStack/db/blob/m
 type: "status:change";
 ```
 
-Defined in: [packages/db/src/types.ts:214](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L214)
+Defined in: [packages/db/src/types.ts:237](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L237)

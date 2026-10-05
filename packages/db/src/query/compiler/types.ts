@@ -7,7 +7,11 @@ import type { CompilationResult } from './index.js'
 export type QueryCache = WeakMap<QueryIR, CompilationResult>
 
 /**
- * Mapping from optimized queries back to their original queries for caching
+ * Lineage from optimized queries back to their user-defined queries.
+ *
+ * When optimization only copies a query, its user-defined identity remains a
+ * valid cache key. When optimization changes the query, compilation must use
+ * the optimized IR so pushed predicates are not lost.
  */
 export type QueryMapping = WeakMap<QueryIR, QueryIR>
 
