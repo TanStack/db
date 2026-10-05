@@ -108,6 +108,38 @@ in-scope counterexample would keep the broader class open.
 
 Production diff against `origin/main` at `14c0e4efc`: SQLite core `+18/-37`
 lines; Cloudflare driver `+1/-0`; combined `+19/-37`, net **18 fewer**
+
+## Node 24.8 CI follow-up (`f9161a617`)
+
+The original native-limit claim above applies to the earlier local Node run,
+not to every Node version. The repository pins Node 24.8.0. On that version,
+`DatabaseSync` does not expose `limits.variableNumber`, and the new fail-fast
+assertion at `20a1d77d0` rejected eight oracle cases before `loadSubset` ran.
+That RED was a setup failure, not a product counterexample.
+
+Revision `f9161a617` keeps real Node prepared SQLite execution for accepted
+statements. When Node exposes the configured limit, the fixture checks it and
+lets SQLite reject excess bindings. When Node does not expose it, the controlled
+driver rejects a statement above its declared cap before preparation. A fixed
+control forces that branch and checks rejection at 101 bindings with cap 100.
+The existing observation recorder still records attempted bind counts before
+either host rejects them, so an over-cap production statement fails the oracle
+at `capacity@predicate-select` rather than passing because the driver rejects.
+
+The contract, independent row model, input grammar, replay campaigns, and
+public-result checks remain unchanged (ORC-001, 002, 004, 007, 008, 009, 010,
+and 011). The driver and prose now distinguish native and controlled limits
+(ORC-003, 005). The original OR-chunk RED remains a reached capacity failure
+under either driver (ORC-006). The 100/101 and 999/1000 margins still challenge
+the bounded threshold (ORC-013). This section records the revised claim for
+ORC-012. On Node 24.8, the core oracle establishes the declared driver boundary,
+not a native SQLite limit. The Cloudflare and other host receiving witnesses
+remain separately owned as stated above (ORC-014).
+
+Local Node 24.19 probes verified native caps 100 and 999 and rejection of
+cap-plus-one statements. The local package suite and commit hook could not run:
+the configured package proxy returned HTTP 403 for Rollup. Current-head CI is
+the verification gate for the controlled Node 24.8 path.
 production lines. Test and documentation growth is reported separately in the
 branch diff.
 
