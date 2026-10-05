@@ -19,4 +19,4 @@ Query Collection direct writes read and validate the accepted rows and update th
 
 A DbClient hydration chunk is accepted ahead of a still-open source transaction, so readers of accepted rows see it and the source's `commit()` still commits its own writes.
 
-Partial sync updates now keep an own `__proto__` field. Metadata-only sync writes no longer publish a spurious insert when they apply with a held transaction. Canceling any sync transaction other than the open last one throws `SyncQueueInvariantError`.
+Partial sync updates now keep an own `__proto__` field. Metadata-only sync writes no longer publish a spurious insert when they apply with a held transaction. A rollback keeps its delete event when a sync transaction for the same key is still open. When two completed transactions hold one key, the newer transaction's row stays visible. Canceling any sync transaction other than the open last one throws `SyncQueueInvariantError`.
