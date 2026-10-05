@@ -3,13 +3,11 @@ id: ContextSchema
 title: ContextSchema
 ---
 
-# Type Alias: ContextSchema
-
 ```ts
 type ContextSchema = Record<string, unknown>;
 ```
 
-Defined in: [packages/db/src/query/builder/types.ts:64](https://github.com/TanStack/db/blob/main/packages/db/src/query/builder/types.ts#L64)
+Defined in: [packages/db/src/query/builder/types.ts:84](https://github.com/TanStack/db/blob/main/packages/db/src/query/builder/types.ts#L84)
 
 ContextSchema - The shape of available tables/collections in a query context
 

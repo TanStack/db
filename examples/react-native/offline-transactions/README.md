@@ -2,6 +2,8 @@
 
 This example demonstrates offline-first transactions using TanStack DB on React Native / Expo.
 
+The [combined SQLite and outbox recipe](../../../docs/guides/offline-transactions.md#use-sqlite-persistence-with-the-outbox) explains the two stores and the server's idempotency requirement.
+
 <video width="400" controls>
   <source src="https://github.com/user-attachments/assets/c73450c6-27e1-49a7-9174-413177f5e37e" type="video/mp4">
   Your browser does not support the video tag.

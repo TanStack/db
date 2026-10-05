@@ -3,13 +3,11 @@ id: ResultTypeFromSelect
 title: ResultTypeFromSelect
 ---
 
-# Type Alias: ResultTypeFromSelect\<TSelectObject\>
-
 ```ts
-type ResultTypeFromSelect<TSelectObject> = WithoutRefBrand<Prettify<{ [K in keyof TSelectObject]: NeedsExtraction<TSelectObject[K]> extends true ? ExtractExpressionType<TSelectObject[K]> : TSelectObject[K] extends Ref<infer _T> ? ExtractRef<TSelectObject[K]> : TSelectObject[K] extends RefLeaf<infer T> ? T : TSelectObject[K] extends RefLeaf<infer T> | undefined ? T | undefined : TSelectObject[K] extends RefLeaf<infer T> | null ? T | null : TSelectObject[K] extends Ref<(...)> | undefined ? ExtractRef<(...)> | undefined : (...)[(...)] extends (...) | (...) ? (...) | (...) : (...) extends (...) ? (...) : (...) }>>;
+type ResultTypeFromSelect<TSelectObject> = IsAny<TSelectObject> extends true ? any : IsTrueRef<TSelectObject> extends true ? ExtractDirectSelectRef<TSelectObject> : WithoutRefBrand<Prettify<{ [K in keyof TSelectObject]: NeedsExtraction<TSelectObject[K]> extends true ? ExtractExpressionType<TSelectObject[K]> : TSelectObject[K] extends ToArrayWrapper<infer T> ? T[] : TSelectObject[K] extends ConcatToArrayWrapper<any> ? string : TSelectObject[K] extends MaterializeWrapper<infer T, infer IsSingle> ? IsSingle extends true ? (...) | (...) : (...)[] : (...)[(...)] extends { __brand: ...; _result?: ... } ? ResultTypeFromCaseWhen<(...)> : (...) extends (...) ? (...) : (...) }>>;
 ```
 
-Defined in: [packages/db/src/query/builder/types.ts:226](https://github.com/TanStack/db/blob/main/packages/db/src/query/builder/types.ts#L226)
+Defined in: [packages/db/src/query/builder/types.ts:417](https://github.com/TanStack/db/blob/main/packages/db/src/query/builder/types.ts#L417)
 
 ResultTypeFromSelect - Infers the result type from a select object
 

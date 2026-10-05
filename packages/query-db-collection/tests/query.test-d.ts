@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/require-await */
 import { describe, expectTypeOf, it } from 'vitest'
 import {
   and,
@@ -15,13 +16,18 @@ import type {
   QueryFunctionContext,
   QueryObserverOptions,
 } from '@tanstack/query-core'
-import type { QueryCollectionConfig, QueryCollectionUtils } from '../src/query'
+import type {
+  QueryCollectionConfig,
+  QueryCollectionUtils,
+  RefetchFn,
+} from '../src/query'
 import type {
   DeleteMutationFnParams,
   InsertMutationFnParams,
   LoadSubsetOptions,
   UpdateMutationFnParams,
 } from '@tanstack/db'
+import type { OutputWithVirtual } from '../../db/tests/utils'
 
 describe(`Query collection type resolution tests`, () => {
   // Define test types
@@ -29,6 +35,30 @@ describe(`Query collection type resolution tests`, () => {
 
   // Create a mock QueryClient for tests
   const queryClient = new QueryClient()
+
+  it(`should type supported top-level Query observer options and reject adapter-owned fields`, () => {
+    queryCollectionOptions<ExplicitType>({
+      id: `query-options-types`,
+      queryClient,
+      queryKey: [`query-options-types`],
+      queryFn: () => Promise.resolve([]),
+      getKey: (item) => item.id,
+      refetchOnWindowFocus: true,
+      refetchOnReconnect: true,
+      refetchOnMount: `always`,
+      networkMode: `online`,
+    })
+
+    queryCollectionOptions<ExplicitType>({
+      id: `query-options-subscribed-owned`,
+      queryClient,
+      queryKey: [`query-options-subscribed-owned`],
+      queryFn: () => Promise.resolve([]),
+      getKey: (item) => item.id,
+      // @ts-expect-error Query Collection owns observer subscription lifecycle.
+      subscribed: false,
+    })
+  })
 
   it(`should prioritize explicit type in QueryCollectionConfig`, () => {
     const options = queryCollectionOptions<ExplicitType>({
@@ -55,6 +85,14 @@ describe(`Query collection type resolution tests`, () => {
         expectTypeOf(
           params.transaction.mutations[0].modified,
         ).toEqualTypeOf<ExplicitType>()
+        expectTypeOf(params.transaction.mutations[0].key).toEqualTypeOf<
+          string | number
+        >()
+        expectTypeOf(
+          params.transaction.mutations[0].collection.utils.refetch,
+        ).toEqualTypeOf<RefetchFn>()
+        // @ts-expect-error Query Collection does not expose Electric acknowledgement helpers
+        params.transaction.mutations[0].collection.utils.awaitTxId(1)
         return Promise.resolve()
       },
       onUpdate: (params) => {
@@ -62,6 +100,12 @@ describe(`Query collection type resolution tests`, () => {
         expectTypeOf(
           params.transaction.mutations[0].modified,
         ).toEqualTypeOf<ExplicitType>()
+        expectTypeOf(params.transaction.mutations[0].key).toEqualTypeOf<
+          string | number
+        >()
+        expectTypeOf(
+          params.transaction.mutations[0].collection.utils.refetch,
+        ).toEqualTypeOf<RefetchFn>()
         return Promise.resolve()
       },
       onDelete: (params) => {
@@ -69,6 +113,12 @@ describe(`Query collection type resolution tests`, () => {
         expectTypeOf(
           params.transaction.mutations[0].original,
         ).toEqualTypeOf<ExplicitType>()
+        expectTypeOf(params.transaction.mutations[0].key).toEqualTypeOf<
+          string | number
+        >()
+        expectTypeOf(
+          params.transaction.mutations[0].collection.utils.refetch,
+        ).toEqualTypeOf<RefetchFn>()
         return Promise.resolve()
       },
     })
@@ -128,7 +178,9 @@ describe(`Query collection type resolution tests`, () => {
     const usersCollection = createCollection(queryOptions)
 
     // Test that the collection itself has the correct type
-    expectTypeOf(usersCollection.toArray).toEqualTypeOf<Array<UserType>>()
+    expectTypeOf(usersCollection.toArray).toMatchTypeOf<
+      Array<OutputWithVirtual<UserType>>
+    >()
 
     // Test that the getKey function has the correct parameter type
     expectTypeOf(queryOptions.getKey).parameters.toEqualTypeOf<[UserType]>()
@@ -175,18 +227,22 @@ describe(`Query collection type resolution tests`, () => {
 
     // Test that the query results have the correct inferred types
     const results = activeUsersQuery.toArray
-    expectTypeOf(results).toEqualTypeOf<
-      Array<{
-        id: string
-        name: string
-        age: number
-        email: string
-        isActive: boolean
-      }>
+    expectTypeOf(results).toMatchTypeOf<
+      Array<
+        OutputWithVirtual<{
+          id: string
+          name: string
+          age: number
+          email: string
+          isActive: boolean
+        }>
+      >
     >()
 
     // Test that the collection itself has the correct type
-    expectTypeOf(usersCollection.toArray).toEqualTypeOf<Array<UserType>>()
+    expectTypeOf(usersCollection.toArray).toMatchTypeOf<
+      Array<OutputWithVirtual<UserType>>
+    >()
 
     // Test that we can access schema-inferred fields in the query with WHERE conditions
     const ageFilterQuery = createLiveQueryCollection({
@@ -202,12 +258,14 @@ describe(`Query collection type resolution tests`, () => {
     })
 
     const ageFilterResults = ageFilterQuery.toArray
-    expectTypeOf(ageFilterResults).toEqualTypeOf<
-      Array<{
-        id: string
-        name: string
-        age: number
-      }>
+    expectTypeOf(ageFilterResults).toMatchTypeOf<
+      Array<
+        OutputWithVirtual<{
+          id: string
+          name: string
+          age: number
+        }>
+      >
     >()
 
     // Test that the getKey function has the correct parameter type
@@ -324,7 +382,9 @@ describe(`Query collection type resolution tests`, () => {
       })
 
       const collection = createCollection(options)
-      expectTypeOf(collection.toArray).toEqualTypeOf<Array<TodoType>>()
+      expectTypeOf(collection.toArray).toEqualTypeOf<
+        Array<OutputWithVirtual<TodoType, string>>
+      >()
     })
   })
 
@@ -427,6 +487,97 @@ describe(`Query collection type resolution tests`, () => {
 
       // Should infer ResponseType as select parameter type
       expectTypeOf(selectUserData).parameters.toEqualTypeOf<[ResponseType]>()
+    })
+
+    /**
+     * Law and source: The public schema-plus-select overload maps the `queryFn`
+     * result through `select` into materialized schema output rows. Collection
+     * mutations still accept schema input. Here, the schema relation is
+     * `createdAt: string` input -> `createdAt: Date` output.
+     *
+     * Production path and checkpoint: Infer options through
+     * `queryCollectionOptions`, create the Collection, then inspect the public
+     * types at compile time.
+     *
+     * Observations: `select` input, output-row keys, delete keys, collection
+     * reads, and mutation inputs. The paired configs are the hostile control:
+     * they differ only in whether `select` returns schema output or input.
+     * Runtime schema parsing and result publication are outside this oracle.
+     */
+    it(`preserves schema output rows selected from a wrapped response`, () => {
+      const rowSchema = z.object({
+        id: z.string(),
+        createdAt: z.string().transform((value) => new Date(value)),
+      })
+
+      type RowInput = z.input<typeof rowSchema>
+      type RowOutput = z.output<typeof rowSchema>
+      type WrappedResponse = {
+        rows: Array<RowOutput>
+        total: number
+      }
+
+      const options = queryCollectionOptions({
+        queryClient,
+        queryKey: [`wrapped-transformed-schema`],
+        queryFn: async (): Promise<WrappedResponse> => ({
+          rows: [{ id: `1`, createdAt: new Date(0) }],
+          total: 1,
+        }),
+        select: (response) => {
+          expectTypeOf(response).toEqualTypeOf<WrappedResponse>()
+          return response.rows
+        },
+        schema: rowSchema,
+        getKey: (item) => item.id,
+      })
+
+      expectTypeOf(options.getKey).parameters.toEqualTypeOf<[RowOutput]>()
+      expectTypeOf(options.getKey).returns.toEqualTypeOf<string>()
+      expectTypeOf(options.utils.writeDelete).parameters.toEqualTypeOf<
+        [string | Array<string>]
+      >()
+
+      const collection = createCollection(options)
+      collection.insert({ id: `2`, createdAt: `2026-09-20T00:00:00.000Z` })
+
+      const selected = collection.get(`1`)
+      if (selected) {
+        expectTypeOf(selected.createdAt).toEqualTypeOf<Date>()
+      }
+
+      // @ts-expect-error schema mutation inputs have not been materialized yet
+      collection.insert({ id: `3`, createdAt: new Date(0) })
+
+      type HostileResponse = {
+        inputRows: Array<RowInput>
+        outputRows: Array<RowOutput>
+      }
+
+      // Keep every option shared so unrelated config errors cannot satisfy the
+      // negative assertion at the public overload.
+      const schemaOutputSelectConfig = {
+        queryClient,
+        queryKey: [`wrapped-schema-output-control`],
+        queryFn: async (): Promise<HostileResponse> => ({
+          inputRows: [{ id: `1`, createdAt: `1970-01-01T00:00:00.000Z` }],
+          outputRows: [{ id: `1`, createdAt: new Date(0) }],
+        }),
+        select: (response: HostileResponse): Array<RowOutput> =>
+          response.outputRows,
+        schema: rowSchema,
+        getKey: (item: RowOutput) => item.id,
+      }
+      queryCollectionOptions(schemaOutputSelectConfig)
+
+      const schemaInputSelectConfig = {
+        ...schemaOutputSelectConfig,
+        select: (response: HostileResponse): Array<RowInput> =>
+          response.inputRows,
+      }
+
+      // @ts-expect-error select must return materialized schema output rows
+      queryCollectionOptions(schemaInputSelectConfig)
     })
   })
 
@@ -740,5 +891,8 @@ describe(`Query collection type resolution tests`, () => {
     expectTypeOf(collection.utils.writeDelete).toBeFunction()
     expectTypeOf(collection.utils.isFetching).toBeBoolean()
     expectTypeOf(collection.utils.isLoading).toBeBoolean()
+    expectTypeOf(collection.utils.fetchStatus).toEqualTypeOf<
+      `fetching` | `paused` | `idle`
+    >()
   })
 })

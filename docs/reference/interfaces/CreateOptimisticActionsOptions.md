@@ -3,9 +3,7 @@ id: CreateOptimisticActionsOptions
 title: CreateOptimisticActionsOptions
 ---
 
-# Interface: CreateOptimisticActionsOptions\<TVars, T\>
-
-Defined in: [packages/db/src/types.ts:179](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L179)
+Defined in: [packages/db/src/types.ts:202](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L202)
 
 Options for the createOptimisticAction helper
 
@@ -31,7 +29,7 @@ Options for the createOptimisticAction helper
 optional autoCommit: boolean;
 ```
 
-Defined in: [packages/db/src/types.ts:170](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L170)
+Defined in: [packages/db/src/types.ts:193](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L193)
 
 #### Inherited from
 
@@ -45,7 +43,7 @@ Defined in: [packages/db/src/types.ts:170](https://github.com/TanStack/db/blob/m
 optional id: string;
 ```
 
-Defined in: [packages/db/src/types.ts:168](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L168)
+Defined in: [packages/db/src/types.ts:191](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L191)
 
 Unique identifier for the transaction
 
@@ -61,7 +59,7 @@ Unique identifier for the transaction
 optional metadata: Record<string, unknown>;
 ```
 
-Defined in: [packages/db/src/types.ts:173](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L173)
+Defined in: [packages/db/src/types.ts:196](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L196)
 
 Custom metadata to associate with the transaction
 
@@ -77,7 +75,7 @@ Custom metadata to associate with the transaction
 mutationFn: (vars, params) => Promise<any>;
 ```
 
-Defined in: [packages/db/src/types.ts:186](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L186)
+Defined in: [packages/db/src/types.ts:209](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L209)
 
 Function to execute the mutation on the server
 
@@ -103,7 +101,7 @@ Function to execute the mutation on the server
 onMutate: (vars) => void;
 ```
 
-Defined in: [packages/db/src/types.ts:184](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L184)
+Defined in: [packages/db/src/types.ts:207](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L207)
 
 Function to apply optimistic updates locally before the mutation completes
 

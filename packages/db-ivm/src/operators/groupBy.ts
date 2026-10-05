@@ -16,8 +16,7 @@ type PipedAggregateFunction<T, R> = {
 }
 
 type AggregateFunction<T, R, V = unknown> =
-  | BasicAggregateFunction<T, R, V>
-  | PipedAggregateFunction<T, R>
+  BasicAggregateFunction<T, R, V> | PipedAggregateFunction<T, R>
 
 type ExtractAggregateReturnType<T, A> =
   A extends AggregateFunction<T, infer R, any> ? R : never
@@ -62,7 +61,7 @@ export function groupBy<
     stream: IStreamBuilder<T>,
   ): IStreamBuilder<KeyValue<string, ResultType>> => {
     // Special key to store the original key object
-    const KEY_SENTINEL = `__original_key__`
+    const KEY_SENTINEL = Symbol(`original_group_key`)
 
     // First map to extract keys and pre-aggregate values
     const withKeysAndValues = stream.pipe(
@@ -71,7 +70,7 @@ export function groupBy<
         const keyString = serializeValue(key)
 
         // Create values object with pre-aggregated values
-        const values: Record<string, unknown> = {}
+        const values: Record<string | symbol, unknown> = {}
 
         // Store the original key object
         values[KEY_SENTINEL] = key
@@ -81,7 +80,10 @@ export function groupBy<
           values[name] = aggregate.preMap(data)
         }
 
-        return [keyString, values] as KeyValue<string, Record<string, unknown>>
+        return [keyString, values] as KeyValue<
+          string,
+          Record<string | symbol, unknown>
+        >
       }),
     )
 
@@ -99,7 +101,7 @@ export function groupBy<
           return []
         }
 
-        const result: Record<string, unknown> = {}
+        const result: Record<PropertyKey, unknown> = {}
 
         // Get the original key from first value in group
         const originalKey = values[0]?.[0]?.[KEY_SENTINEL]
@@ -234,7 +236,10 @@ export function min<T, V extends CanMinMax>(
     reduce: (values) => {
       let minValue: V | undefined
       for (const [value, _multiplicity] of values) {
-        if (!minValue || (value && value < minValue)) {
+        if (
+          value !== undefined &&
+          (minValue === undefined || value < minValue)
+        ) {
           minValue = value
         }
       }
@@ -264,7 +269,10 @@ export function max<T, V extends CanMinMax>(
     reduce: (values) => {
       let maxValue: V | undefined
       for (const [value, _multiplicity] of values) {
-        if (!maxValue || (value && value > maxValue)) {
+        if (
+          value !== undefined &&
+          (maxValue === undefined || value > maxValue)
+        ) {
           maxValue = value
         }
       }

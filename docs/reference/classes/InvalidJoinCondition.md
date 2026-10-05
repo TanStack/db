@@ -3,9 +3,7 @@ id: InvalidJoinCondition
 title: InvalidJoinCondition
 ---
 
-# Class: InvalidJoinCondition
-
-Defined in: [packages/db/src/errors.ts:560](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L560)
+Defined in: [packages/db/src/errors.ts:675](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L675)
 
 ## Extends
 
@@ -19,7 +17,7 @@ Defined in: [packages/db/src/errors.ts:560](https://github.com/TanStack/db/blob/
 new InvalidJoinCondition(): InvalidJoinCondition;
 ```
 
-Defined in: [packages/db/src/errors.ts:561](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L561)
+Defined in: [packages/db/src/errors.ts:676](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L676)
 
 #### Returns
 

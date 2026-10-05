@@ -3,27 +3,15 @@ id: ElectricCollectionUtils
 title: ElectricCollectionUtils
 ---
 
-# Interface: ElectricCollectionUtils\<T\>
-
-Defined in: [packages/electric-db-collection/src/electric.ts:511](https://github.com/TanStack/db/blob/main/packages/electric-db-collection/src/electric.ts#L511)
+Defined in: [packages/electric-db-collection/src/electric.ts:823](https://github.com/TanStack/db/blob/main/packages/electric-db-collection/src/electric.ts#L823)
 
 Electric collection utilities type
-
-## Extends
-
-- `UtilsRecord`
 
 ## Type Parameters
 
 ### T
 
 `T` *extends* `Row`\<`unknown`\> = `Row`\<`unknown`\>
-
-## Indexable
-
-```ts
-[key: string]: any
-```
 
 ## Properties
 
@@ -33,7 +21,7 @@ Electric collection utilities type
 awaitMatch: AwaitMatchFn<T>;
 ```
 
-Defined in: [packages/electric-db-collection/src/electric.ts:515](https://github.com/TanStack/db/blob/main/packages/electric-db-collection/src/electric.ts#L515)
+Defined in: [packages/electric-db-collection/src/electric.ts:829](https://github.com/TanStack/db/blob/main/packages/electric-db-collection/src/electric.ts#L829)
 
 ***
 
@@ -43,4 +31,4 @@ Defined in: [packages/electric-db-collection/src/electric.ts:515](https://github
 awaitTxId: AwaitTxIdFn;
 ```
 
-Defined in: [packages/electric-db-collection/src/electric.ts:514](https://github.com/TanStack/db/blob/main/packages/electric-db-collection/src/electric.ts#L514)
+Defined in: [packages/electric-db-collection/src/electric.ts:828](https://github.com/TanStack/db/blob/main/packages/electric-db-collection/src/electric.ts#L828)

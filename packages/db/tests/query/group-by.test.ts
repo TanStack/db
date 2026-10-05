@@ -1,11 +1,13 @@
 import { beforeEach, describe, expect, test } from 'vitest'
+import { Temporal } from 'temporal-polyfill'
 import { createLiveQueryCollection } from '../../src/query/index.js'
 import { createCollection } from '../../src/collection/index.js'
-import { mockSyncCollectionOptions } from '../utils.js'
+import { mockSyncCollectionOptions, stripVirtualProps } from '../utils.js'
 import {
   add,
   and,
   avg,
+  caseWhen,
   coalesce,
   count,
   eq,
@@ -221,8 +223,221 @@ function createOrdersCollection(autoIndex: `off` | `eager` = `eager`) {
   )
 }
 
+const equalityEquivalentGroupValues: Array<
+  [string, () => readonly [unknown, unknown]]
+> = [
+  [`a Date and its timestamp`, () => [new Date(0), 0]],
+  [`an invalid Date and NaN`, () => [new Date(Number.NaN), Number.NaN]],
+  [`signed zero`, () => [-0, 0]],
+  [
+    `binary values with the same bytes`,
+    () => [Buffer.from([1, 2, 3]), new Uint8Array([1, 2, 3])],
+  ],
+  [
+    `equivalent Temporal values`,
+    () => [
+      Temporal.PlainDate.from(`2024-04-05`),
+      Temporal.PlainDate.from(`2024-04-05`),
+    ],
+  ],
+  [
+    `the same symbol reference`,
+    () => {
+      const value = Symbol(`group`)
+      return [value, value]
+    },
+  ],
+  [
+    `the same cyclic object`,
+    () => {
+      const value: { self?: unknown } = {}
+      value.self = value
+      return [value, value]
+    },
+  ],
+]
+
+function representativeSignature(value: unknown): string {
+  if (value instanceof Date) return `date`
+  if (Buffer.isBuffer(value)) return `buffer`
+  if (value instanceof Uint8Array) return `uint8array`
+  if (typeof value === `number` && Object.is(value, -0)) return `negative-zero`
+  if (typeof value === `number` && Number.isNaN(value)) return `nan`
+  if (typeof value === `number`) return `number`
+  if (typeof value === `symbol`) return `symbol`
+  if (
+    typeof value === `object` &&
+    value !== null &&
+    (value as { self?: unknown }).self === value
+  ) {
+    return `cyclic-object`
+  }
+  return `${typeof value}:${String(value)}`
+}
+
 function createGroupByTests(autoIndex: `off` | `eager`): void {
   describe(`with autoIndex ${autoIndex}`, () => {
+    test(`keeps opaque public group keys stable across graph scopes`, async () => {
+      const symbol = Symbol(`group`)
+      const otherSymbol = Symbol(`group`)
+      const valuesCollection = createCollection(
+        mockSyncCollectionOptions<{ id: number; value: symbol }>({
+          id: `scoped-group-symbol-${autoIndex}`,
+          getKey: (row) => row.id,
+          initialData: [
+            { id: 1, value: symbol },
+            { id: 2, value: otherSymbol },
+          ],
+          autoIndex,
+        }),
+      )
+      const createSummary = () =>
+        createLiveQueryCollection({
+          startSync: true,
+          query: (q) =>
+            q
+              .from({ value: valuesCollection })
+              .groupBy(({ value }) => value.value)
+              .select(({ value }) => ({
+                value: value.value,
+                count: count(value.id),
+              })),
+        })
+
+      const first = createSummary()
+      const second = createSummary()
+
+      try {
+        const firstKeys = [...first.keys()]
+        const secondKeys = [...second.keys()]
+        expect(firstKeys).toHaveLength(2)
+        expect(firstKeys.every((key) => typeof key === `string`)).toBe(true)
+        expect(new Set(firstKeys).size).toBe(2)
+        expect(secondKeys).toEqual(firstKeys)
+
+        const symbolKey = first.toArray.find(
+          (row) => row.value === symbol,
+        )!.$key
+        valuesCollection.utils.begin()
+        valuesCollection.utils.write({
+          type: `delete`,
+          value: { id: 1, value: symbol },
+        })
+        valuesCollection.utils.commit()
+        expect(first.get(symbolKey)).toBeUndefined()
+
+        valuesCollection.utils.begin()
+        valuesCollection.utils.write({
+          type: `insert`,
+          value: { id: 1, value: symbol },
+        })
+        valuesCollection.utils.commit()
+        expect(first.get(symbolKey)?.value).toBe(symbol)
+      } finally {
+        await Promise.all([
+          first.cleanup(),
+          second.cleanup(),
+          valuesCollection.cleanup(),
+        ])
+      }
+    })
+
+    test.each(equalityEquivalentGroupValues)(
+      `groups %s by query equality`,
+      (_name, createValues) => {
+        const [left, right] = createValues()
+        const valuesCollection = createCollection(
+          mockSyncCollectionOptions<{ id: number; value: unknown }>({
+            id: `equality-group-values-${autoIndex}`,
+            getKey: (row) => row.id,
+            initialData: [
+              { id: 1, value: left },
+              { id: 2, value: right },
+            ],
+            autoIndex,
+          }),
+        )
+
+        const summary = createLiveQueryCollection({
+          startSync: true,
+          query: (q) =>
+            q
+              .from({ value: valuesCollection })
+              .groupBy(({ value }) => value.value)
+              .select(({ value }) => ({
+                value: value.value,
+                count: count(value.id),
+              })),
+        })
+
+        const expectSingleGroup = (
+          expectedCount: number,
+          representative: unknown,
+        ) => {
+          expect(summary.toArray).toHaveLength(1)
+          expect(summary.toArray[0]?.count).toBe(expectedCount)
+          expect(representativeSignature(summary.toArray[0]?.value)).toBe(
+            representativeSignature(representative),
+          )
+        }
+
+        expectSingleGroup(2, left)
+
+        valuesCollection.utils.begin()
+        valuesCollection.utils.write({
+          type: `delete`,
+          value: { id: 1, value: left },
+        })
+        valuesCollection.utils.commit()
+        expectSingleGroup(1, right)
+
+        valuesCollection.utils.begin()
+        valuesCollection.utils.write({
+          type: `insert`,
+          value: { id: 1, value: left },
+        })
+        valuesCollection.utils.commit()
+        expectSingleGroup(2, left)
+      },
+    )
+
+    test.each([
+      `__group_value_0`,
+      `__key_0`,
+      `__tanstack_group_value_0`,
+      `__tanstack_group_key_0`,
+    ])(
+      `keeps the grouped value when an aggregate uses internal-looking alias %s`,
+      (alias) => {
+        const valuesCollection = createCollection(
+          mockSyncCollectionOptions<{ id: number; value: string }>({
+            id: `group-alias-collision-${autoIndex}-${alias}`,
+            getKey: (row) => row.id,
+            initialData: [
+              { id: 1, value: `x` },
+              { id: 2, value: `x` },
+            ],
+            autoIndex,
+          }),
+        )
+        const summary = createLiveQueryCollection({
+          startSync: true,
+          query: (q) =>
+            q
+              .from({ value: valuesCollection })
+              .groupBy(({ value }) => value.value)
+              .select(({ value }) => ({
+                value: value.value,
+                [alias]: count(value.id),
+              })),
+        })
+
+        expect(summary.toArray.map(stripVirtualProps)).toEqual([
+          { value: `x`, [alias]: 2 },
+        ])
+      },
+    )
+
     describe(`Single Column Grouping`, () => {
       let ordersCollection: ReturnType<typeof createOrdersCollection>
 
@@ -863,6 +1078,52 @@ function createGroupByTests(autoIndex: `off` | `eager`): void {
 
         // No customer has total > 1000 (max is 700)
         expect(impossibleFilter.size).toBe(0)
+      })
+
+      test(`having with bare boolean selected field`, () => {
+        // Select a computed boolean into the result, then use it directly in having
+        const highVolumeCustomers = createLiveQueryCollection({
+          startSync: true,
+          query: (q) =>
+            q
+              .from({ orders: ordersCollection })
+              .groupBy(({ orders }) => orders.customer_id)
+              .select(({ orders }) => ({
+                customer_id: orders.customer_id,
+                order_count: count(orders.id),
+                is_high_volume: gt(count(orders.id), 2),
+              }))
+              .having(({ $selected }) => $selected.is_high_volume),
+        })
+
+        // Only customer 1 has more than 2 orders (3 orders)
+        expect(highVolumeCustomers.size).toBe(1)
+        expect(highVolumeCustomers.get(1)?.customer_id).toBe(1)
+        expect(highVolumeCustomers.get(1)?.is_high_volume).toBe(true)
+      })
+
+      test(`having with negated boolean selected field`, () => {
+        // Using not() with a bare boolean selected field
+        const lowVolumeCustomers = createLiveQueryCollection({
+          startSync: true,
+          query: (q) =>
+            q
+              .from({ orders: ordersCollection })
+              .groupBy(({ orders }) => orders.customer_id)
+              .select(({ orders }) => ({
+                customer_id: orders.customer_id,
+                order_count: count(orders.id),
+                is_high_volume: gt(count(orders.id), 2),
+              }))
+              .having(({ $selected }) => not($selected.is_high_volume)),
+        })
+
+        // Customers 2 and 3 have 2 orders each (not > 2)
+        expect(lowVolumeCustomers.size).toBe(2)
+        expect(lowVolumeCustomers.get(2)?.customer_id).toBe(2)
+        expect(lowVolumeCustomers.get(3)?.customer_id).toBe(3)
+        expect(lowVolumeCustomers.get(2)?.is_high_volume).toBe(false)
+        expect(lowVolumeCustomers.get(3)?.is_high_volume).toBe(false)
       })
     })
 
@@ -1786,17 +2047,45 @@ function createGroupByTests(autoIndex: `off` | `eager`): void {
         })
 
         expect(customerSummary.size).toBe(3)
-        expect(customerSummary.get(1)).toEqual({
+        expect(stripVirtualProps(customerSummary.get(1))).toEqual({
           customer_id: 1,
           order_count: 3,
         })
-        expect(customerSummary.get(2)).toEqual({
+        expect(stripVirtualProps(customerSummary.get(2))).toEqual({
           customer_id: 2,
           order_count: 2,
         })
-        expect(customerSummary.get(3)).toEqual({
+        expect(stripVirtualProps(customerSummary.get(3))).toEqual({
           customer_id: 3,
           order_count: 2,
+        })
+      })
+
+      test(`caseWhen wrapping count can reference grouped columns`, () => {
+        const customerSummary = createLiveQueryCollection({
+          startSync: true,
+          query: (q) =>
+            q
+              .from({ orders: ordersCollection })
+              .groupBy(({ orders }) => orders.customer_id)
+              .select(({ orders }) => ({
+                customer_id: orders.customer_id,
+                first_customer_count: caseWhen(
+                  eq(orders.customer_id, 1),
+                  count(orders.id),
+                  0,
+                ),
+              })),
+        })
+
+        expect(customerSummary.size).toBe(3)
+        expect(stripVirtualProps(customerSummary.get(1))).toEqual({
+          customer_id: 1,
+          first_customer_count: 3,
+        })
+        expect(stripVirtualProps(customerSummary.get(2))).toEqual({
+          customer_id: 2,
+          first_customer_count: 0,
         })
       })
 
@@ -1814,7 +2103,7 @@ function createGroupByTests(autoIndex: `off` | `eager`): void {
         })
 
         expect(customerSummary.size).toBe(3)
-        expect(customerSummary.get(1)).toEqual({
+        expect(stripVirtualProps(customerSummary.get(1))).toEqual({
           customer_id: 1,
           total_amount: 700,
         })
@@ -1835,7 +2124,7 @@ function createGroupByTests(autoIndex: `off` | `eager`): void {
 
         expect(customerSummary.size).toBe(3)
         // Customer 1: sum(amount)=700, count(id)=3 => 703
-        expect(customerSummary.get(1)).toEqual({
+        expect(stripVirtualProps(customerSummary.get(1))).toEqual({
           customer_id: 1,
           amount_plus_count: 703,
         })
@@ -1856,7 +2145,7 @@ function createGroupByTests(autoIndex: `off` | `eager`): void {
         })
 
         expect(customerSummary.size).toBe(3)
-        expect(customerSummary.get(1)).toEqual({
+        expect(stripVirtualProps(customerSummary.get(1))).toEqual({
           customer_id: 1,
           order_count: 3,
           safe_total: 700,
@@ -1898,22 +2187,28 @@ function createGroupByTests(autoIndex: `off` | `eager`): void {
               )
               .select(({ customer, oc }) => ({
                 name: customer.name,
-                orderCount: oc?.orderCount,
+                orderCount: oc.orderCount,
               }))
           },
         })
 
         const results = result.toArray
         expect(results).toHaveLength(3)
-        expect(results.find((r) => r.name === `John`)).toEqual({
+        expect(
+          stripVirtualProps(results.find((r) => r.name === `John`)),
+        ).toEqual({
           name: `John`,
           orderCount: 3,
         })
-        expect(results.find((r) => r.name === `Jane`)).toEqual({
+        expect(
+          stripVirtualProps(results.find((r) => r.name === `Jane`)),
+        ).toEqual({
           name: `Jane`,
           orderCount: 2,
         })
-        expect(results.find((r) => r.name === `Bob`)).toEqual({
+        expect(
+          stripVirtualProps(results.find((r) => r.name === `Bob`)),
+        ).toEqual({
           name: `Bob`,
           orderCount: 2,
         })
@@ -1944,7 +2239,9 @@ function createGroupByTests(autoIndex: `off` | `eager`): void {
               .orderBy(({ $selected }) => $selected.latestActivity),
         })
 
-        expect(sessionStats.toArray).toEqual([
+        expect(
+          sessionStats.toArray.map((row) => stripVirtualProps(row)),
+        ).toEqual([
           {
             taskId: 2,
             latestActivity: new Date(`2023-02-01`),
@@ -1976,7 +2273,9 @@ function createGroupByTests(autoIndex: `off` | `eager`): void {
               }),
         })
 
-        expect(sessionStats.toArray).toEqual([
+        expect(
+          sessionStats.toArray.map((row) => stripVirtualProps(row)),
+        ).toEqual([
           {
             taskId: 2,
             latestActivity: new Date(`2023-02-01`),
@@ -2006,7 +2305,9 @@ function createGroupByTests(autoIndex: `off` | `eager`): void {
               .having(({ $selected }) => gt($selected.sessionCount, 2)),
         })
 
-        expect(sessionStats.toArray).toEqual([
+        expect(
+          sessionStats.toArray.map((row) => stripVirtualProps(row)),
+        ).toEqual([
           {
             taskId: 1,
             latestActivity: new Date(`2023-03-01`),
@@ -2119,6 +2420,34 @@ function createGroupByTests(autoIndex: `off` | `eager`): void {
         expect(result?.taskId).toBe(1)
         expect(result?.sessionCount).toBe(3)
         expect(result?.totalAmount).toBe(700)
+      })
+    })
+
+    describe(`fn.select with groupBy throws error`, () => {
+      let ordersCollection: ReturnType<typeof createOrdersCollection>
+
+      beforeEach(() => {
+        ordersCollection = createOrdersCollection(autoIndex)
+      })
+
+      test(`fn.select with groupBy should throw FnSelectWithGroupByError`, () => {
+        expect(() =>
+          createLiveQueryCollection({
+            startSync: true,
+            query: (q) =>
+              q
+                .from({ orders: ordersCollection })
+                .groupBy(({ orders }) => orders.customer_id)
+                .fn.select(
+                  (row) =>
+                    ({
+                      customerId: row.orders.customer_id,
+                      totalAmount: sum(row.orders.amount),
+                      orderCount: count(row.orders.id),
+                    }) as any,
+                ),
+          }),
+        ).toThrow(`fn.select() cannot be used with groupBy()`)
       })
     })
   })

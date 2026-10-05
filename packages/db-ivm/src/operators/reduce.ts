@@ -101,8 +101,8 @@ export class ReduceOperator<K, V1, V2> extends UnaryOperator<[K, V1], [K, V2]> {
  * Reduces the elements in the stream by key (version-free)
  */
 export function reduce<
-  KType extends T extends KeyValue<infer K, infer _V> ? K : never,
-  V1Type extends T extends KeyValue<KType, infer V> ? V : never,
+  KType extends (T extends KeyValue<infer K, infer _V> ? K : never),
+  V1Type extends (T extends KeyValue<KType, infer V> ? V : never),
   R,
   T,
 >(f: (values: Array<[V1Type, number]>) => Array<[R, number]>) {

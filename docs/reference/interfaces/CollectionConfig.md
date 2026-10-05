@@ -3,9 +3,7 @@ id: CollectionConfig
 title: CollectionConfig
 ---
 
-# Interface: CollectionConfig\<T, TKey, TSchema, TUtils\>
-
-Defined in: [packages/db/src/types.ts:710](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L710)
+Defined in: [packages/db/src/types.ts:997](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L997)
 
 ## Extends
 
@@ -37,7 +35,7 @@ Defined in: [packages/db/src/types.ts:710](https://github.com/TanStack/db/blob/m
 optional autoIndex: "off" | "eager";
 ```
 
-Defined in: [packages/db/src/types.ts:548](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L548)
+Defined in: [packages/db/src/types.ts:772](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L772)
 
 Auto-indexing mode for the collection.
 When enabled, indexes will be automatically created for simple where expressions.
@@ -45,13 +43,14 @@ When enabled, indexes will be automatically created for simple where expressions
 #### Default
 
 ```ts
-"eager"
+"off"
 ```
 
 #### Description
 
-- "off": No automatic indexing
-- "eager": Automatically create indexes for simple where expressions in subscribeChanges (default)
+- "off": No automatic indexing (default). Use explicit indexes for better bundle size.
+- "eager": Automatically create indexes for simple where expressions in subscribeChanges.
+           Requires setting defaultIndexType.
 
 #### Inherited from
 
@@ -65,7 +64,7 @@ When enabled, indexes will be automatically created for simple where expressions
 optional compare: (x, y) => number;
 ```
 
-Defined in: [packages/db/src/types.ts:559](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L559)
+Defined in: [packages/db/src/types.ts:797](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L797)
 
 Optional function to compare two items.
 This is used to order the items in the collection.
@@ -103,13 +102,41 @@ compare: (x, y) => x.createdAt.getTime() - y.createdAt.getTime()
 
 ***
 
+### defaultIndexType?
+
+```ts
+optional defaultIndexType: IndexConstructor<TKey>;
+```
+
+Defined in: [packages/db/src/types.ts:786](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L786)
+
+Default index type to use when creating indexes without an explicit type.
+Required for auto-indexing. Import from '@tanstack/db'.
+
+#### Example
+
+```ts
+import { BasicIndex } from '@tanstack/db'
+const collection = createCollection({
+  defaultIndexType: BasicIndex,
+  autoIndex: 'eager',
+  // ...
+})
+```
+
+#### Inherited from
+
+[`BaseCollectionConfig`](BaseCollectionConfig.md).[`defaultIndexType`](BaseCollectionConfig.md#defaultindextype)
+
+***
+
 ### defaultStringCollation?
 
 ```ts
 optional defaultStringCollation: StringCollationConfig;
 ```
 
-Defined in: [packages/db/src/types.ts:705](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L705)
+Defined in: [packages/db/src/types.ts:992](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L992)
 
 Specifies how to compare data in the collection.
 This should be configured to match data ordering on the backend.
@@ -128,10 +155,14 @@ E.g., when using the Electric DB collection these options
 optional gcTime: number;
 ```
 
-Defined in: [packages/db/src/types.ts:528](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L528)
+Defined in: [packages/db/src/types.ts:751](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L751)
 
 Time in milliseconds after which the collection will be garbage collected
 when it has no active subscribers. Defaults to 5 minutes (300000ms).
+Sync started without subscribers gets a minimum 50ms grace period.
+Pending preloads retain the collection until they settle. Preloading ready
+data refreshes the retention period. A non-positive or non-finite value
+disables automatic garbage collection.
 
 #### Inherited from
 
@@ -145,7 +176,7 @@ when it has no active subscribers. Defaults to 5 minutes (300000ms).
 getKey: (item) => TKey;
 ```
 
-Defined in: [packages/db/src/types.ts:523](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L523)
+Defined in: [packages/db/src/types.ts:742](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L742)
 
 Function to extract the ID from an object
 This is required for update/delete operations which now only accept IDs
@@ -183,7 +214,7 @@ getKey: (item) => item.uuid
 optional id: string;
 ```
 
-Defined in: [packages/db/src/types.ts:512](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L512)
+Defined in: [packages/db/src/types.ts:731](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L731)
 
 #### Inherited from
 
@@ -194,20 +225,15 @@ Defined in: [packages/db/src/types.ts:512](https://github.com/TanStack/db/blob/m
 ### onDelete?
 
 ```ts
-optional onDelete: DeleteMutationFn<T, TKey, TUtils, any>;
+optional onDelete: 
+  | DeleteMutationFn<T, TKey, TUtils, void>
+| DeleteMutationFn<T, TKey, TUtils, any>;
 ```
 
-Defined in: [packages/db/src/types.ts:697](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L697)
+Defined in: [packages/db/src/types.ts:981](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L981)
 
 Optional asynchronous handler function called before a delete operation
-
-#### Param
-
-Object containing transaction and collection information
-
-#### Returns
-
-Promise resolving to any value
+Returning a value is deprecated; coordinate synchronization through collection utilities instead.
 
 #### Examples
 
@@ -220,10 +246,24 @@ onDelete: async ({ transaction, collection }) => {
 ```
 
 ```ts
-// Delete handler with multiple items
+// Delete handler with refetch (Query Collection)
 onDelete: async ({ transaction, collection }) => {
   const keysToDelete = transaction.mutations.map(m => m.key)
   await api.deleteTodos(keysToDelete)
+  // Trigger refetch to sync server state
+  await collection.utils.refetch()
+  // Prevent the pre-1.0 compatibility wrapper from refetching again.
+  return { refetch: false }
+}
+```
+
+```ts
+// Delete handler with sync wait (Electric Collection)
+onDelete: async ({ transaction, collection }) => {
+  const mutation = transaction.mutations[0]
+  const result = await api.deleteTodo(mutation.original.id)
+  // Wait for txid to sync
+  await collection.utils.awaitTxId(result.txid)
 }
 ```
 
@@ -262,20 +302,15 @@ onDelete: async ({ transaction, collection }) => {
 ### onInsert?
 
 ```ts
-optional onInsert: InsertMutationFn<T, TKey, TUtils, any>;
+optional onInsert: 
+  | InsertMutationFn<T, TKey, TUtils, void>
+| InsertMutationFn<T, TKey, TUtils, any>;
 ```
 
-Defined in: [packages/db/src/types.ts:610](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L610)
+Defined in: [packages/db/src/types.ts:860](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L860)
 
 Optional asynchronous handler function called before an insert operation
-
-#### Param
-
-Object containing transaction and collection information
-
-#### Returns
-
-Promise resolving to any value
+Returning a value is deprecated; coordinate synchronization through collection utilities instead.
 
 #### Examples
 
@@ -288,10 +323,35 @@ onInsert: async ({ transaction, collection }) => {
 ```
 
 ```ts
+// Insert handler with refetch (Query Collection)
+onInsert: async ({ transaction, collection }) => {
+  const newItem = transaction.mutations[0].modified
+  await api.createTodo(newItem)
+  // Trigger refetch to sync server state
+  await collection.utils.refetch()
+  // Prevent the pre-1.0 compatibility wrapper from refetching again.
+  return { refetch: false }
+}
+```
+
+```ts
+// Insert handler with sync wait (Electric Collection)
+onInsert: async ({ transaction, collection }) => {
+  const newItem = transaction.mutations[0].modified
+  const result = await api.createTodo(newItem)
+  // Wait for txid to sync
+  await collection.utils.awaitTxId(result.txid)
+}
+```
+
+```ts
 // Insert handler with multiple items
 onInsert: async ({ transaction, collection }) => {
   const items = transaction.mutations.map(m => m.modified)
   await api.createTodos(items)
+  // Refetch to get updated data from server
+  await collection.utils.refetch()
+  return { refetch: false }
 }
 ```
 
@@ -300,23 +360,11 @@ onInsert: async ({ transaction, collection }) => {
 onInsert: async ({ transaction, collection }) => {
   try {
     const newItem = transaction.mutations[0].modified
-    const result = await api.createTodo(newItem)
-    return result
+    await api.createTodo(newItem)
   } catch (error) {
     console.error('Insert failed:', error)
-    throw error // This will cause the transaction to fail
+    throw error // This will cause the transaction to rollback
   }
-}
-```
-
-```ts
-// Insert handler with metadata
-onInsert: async ({ transaction, collection }) => {
-  const mutation = transaction.mutations[0]
-  await api.createTodo(mutation.modified, {
-    source: mutation.metadata?.source,
-    timestamp: mutation.createdAt
-  })
 }
 ```
 
@@ -329,20 +377,15 @@ onInsert: async ({ transaction, collection }) => {
 ### onUpdate?
 
 ```ts
-optional onUpdate: UpdateMutationFn<T, TKey, TUtils, any>;
+optional onUpdate: 
+  | UpdateMutationFn<T, TKey, TUtils, void>
+| UpdateMutationFn<T, TKey, TUtils, any>;
 ```
 
-Defined in: [packages/db/src/types.ts:654](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L654)
+Defined in: [packages/db/src/types.ts:922](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L922)
 
 Optional asynchronous handler function called before an update operation
-
-#### Param
-
-Object containing transaction and collection information
-
-#### Returns
-
-Promise resolving to any value
+Returning a value is deprecated; coordinate synchronization through collection utilities instead.
 
 #### Examples
 
@@ -355,11 +398,25 @@ onUpdate: async ({ transaction, collection }) => {
 ```
 
 ```ts
-// Update handler with partial updates
+// Update handler with refetch (Query Collection)
 onUpdate: async ({ transaction, collection }) => {
   const mutation = transaction.mutations[0]
   const changes = mutation.changes // Only the changed fields
   await api.updateTodo(mutation.original.id, changes)
+  // Trigger refetch to sync server state
+  await collection.utils.refetch()
+  // Prevent the pre-1.0 compatibility wrapper from refetching again.
+  return { refetch: false }
+}
+```
+
+```ts
+// Update handler with sync wait (Electric Collection)
+onUpdate: async ({ transaction, collection }) => {
+  const mutation = transaction.mutations[0]
+  const result = await api.updateTodo(mutation.original.id, mutation.changes)
+  // Wait for txid to sync
+  await collection.utils.awaitTxId(result.txid)
 }
 ```
 
@@ -371,6 +428,8 @@ onUpdate: async ({ transaction, collection }) => {
     changes: m.changes
   }))
   await api.updateTodos(updates)
+  await collection.utils.refetch()
+  return { refetch: false }
 }
 ```
 
@@ -400,7 +459,7 @@ onUpdate: async ({ transaction, collection }) => {
 optional schema: TSchema;
 ```
 
-Defined in: [packages/db/src/types.ts:513](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L513)
+Defined in: [packages/db/src/types.ts:732](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L732)
 
 #### Inherited from
 
@@ -414,7 +473,7 @@ Defined in: [packages/db/src/types.ts:513](https://github.com/TanStack/db/blob/m
 optional startSync: boolean;
 ```
 
-Defined in: [packages/db/src/types.ts:539](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L539)
+Defined in: [packages/db/src/types.ts:762](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L762)
 
 Whether to eagerly start syncing on collection creation.
 When true, syncing begins immediately. When false, syncing starts when the first subscriber attaches.
@@ -441,7 +500,7 @@ false
 sync: SyncConfig<T, TKey>;
 ```
 
-Defined in: [packages/db/src/types.ts:716](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L716)
+Defined in: [packages/db/src/types.ts:1003](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L1003)
 
 ***
 
@@ -451,7 +510,7 @@ Defined in: [packages/db/src/types.ts:716](https://github.com/TanStack/db/blob/m
 optional syncMode: SyncMode;
 ```
 
-Defined in: [packages/db/src/types.ts:568](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L568)
+Defined in: [packages/db/src/types.ts:806](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L806)
 
 The mode of sync to use for the collection.
 
@@ -477,7 +536,7 @@ The exact implementation of the sync mode is up to the sync implementation.
 optional utils: TUtils;
 ```
 
-Defined in: [packages/db/src/types.ts:707](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L707)
+Defined in: [packages/db/src/types.ts:994](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L994)
 
 #### Inherited from
 

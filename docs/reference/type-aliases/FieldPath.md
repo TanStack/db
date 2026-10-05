@@ -3,8 +3,6 @@ id: FieldPath
 title: FieldPath
 ---
 
-# Type Alias: FieldPath
-
 ```ts
 type FieldPath = (string | number)[];
 ```

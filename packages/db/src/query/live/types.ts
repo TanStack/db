@@ -5,13 +5,23 @@ import type {
   StringCollationConfig,
 } from '../../types.js'
 import type { InitialQueryBuilder, QueryBuilder } from '../builder/index.js'
-import type { Context, GetResult } from '../builder/types.js'
+import type {
+  Context,
+  RootObjectResultConstraint,
+  RootQueryResult,
+} from '../builder/types.js'
 
 export type Changes<T> = {
   deletes: number
   inserts: number
   value: T
   orderByIndex: string | undefined
+  // Captured from the retract side of a change so the flush can detect an
+  // "order-only move": a row whose projected value is unchanged but whose
+  // `orderByIndex` moved. Such a move is swallowed by the collection's
+  // value-diff, so it needs an explicit layout notification.
+  previousValue?: T
+  previousOrderByIndex?: string | undefined
 }
 
 export type SyncState = {
@@ -54,7 +64,7 @@ export type FullSyncState = Required<Omit<SyncState, `flushPendingChanges`>> &
  */
 export interface LiveQueryCollectionConfig<
   TContext extends Context,
-  TResult extends object = GetResult<TContext> & object,
+  TResult extends object = RootQueryResult<TContext>,
 > {
   /**
    * Unique identifier for the collection
@@ -66,8 +76,10 @@ export interface LiveQueryCollectionConfig<
    * Query builder function that defines the live query
    */
   query:
-    | ((q: InitialQueryBuilder) => QueryBuilder<TContext>)
-    | QueryBuilder<TContext>
+    | ((
+        q: InitialQueryBuilder,
+      ) => QueryBuilder<TContext> & RootObjectResultConstraint<TContext>)
+    | (QueryBuilder<TContext> & RootObjectResultConstraint<TContext>)
 
   /**
    * Function to extract the key from result items
