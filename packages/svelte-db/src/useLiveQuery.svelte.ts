@@ -35,6 +35,12 @@ import type {
   SingleResult,
 } from '@tanstack/db'
 
+/** Copy a snapshot's ordered rows; a single-result query's `data` is one row. */
+function snapshotRows(data: unknown): Array<any> {
+  if (Array.isArray(data)) return [...data]
+  return data === undefined ? [] : [data]
+}
+
 /**
  * Return type for useLiveQuery hook
  * @property state - Reactive Map of query results (key → item)
@@ -451,9 +457,7 @@ export function useLiveQuery(
   const state = new SvelteMap<string | number, any>(initialSnapshot.state ?? [])
 
   // Reactive data array that maintains sorted order
-  let internalData = $state<Array<any>>(
-    Array.from(initialSnapshot.state?.values() ?? []),
-  )
+  let internalData = $state<Array<any>>(snapshotRows(initialSnapshot.data))
 
   // Track collection status reactively
   let status = $state(initialSnapshot.status)
@@ -487,7 +491,7 @@ export function useLiveQuery(
           state.set(key, value)
         }
       }
-      internalData = Array.from(snapshot.state?.values() ?? [])
+      internalData = snapshotRows(snapshot.data)
     })
   }
 
