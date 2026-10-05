@@ -3402,6 +3402,32 @@ describe(`Temporal expression-index refinement`, () => {
             )
           }
         }
+        // A string can equal a native SQL order key without equaling the native
+        // value. The scalar candidate uses one binding and residual cleanup owns
+        // that distinction; persisted Boolean expressions still retain identity.
+        const orderKey = `10000000000000000000001`
+        const stringEquality = new IR.Func<boolean>(`eq`, [
+          ref,
+          new IR.Value(orderKey),
+        ])
+        const scalar = await observeExpressionIndexScenario({
+          label: `string-native-order-key`,
+          indexExpression: stringEquality,
+          where: stringEquality,
+          rows,
+          observeIndexValues: true,
+        })
+        expect(scalar.adapterKeys).toEqual([`other-4`])
+        expect(scalar.directSqlKeys).toEqual(
+          expect.arrayContaining([`other-4`]),
+        )
+        expect(scalar.predicateQuery.params).toEqual([orderKey])
+        expect(
+          scalar.indexValues
+            ?.filter((row) => row.value === 1)
+            .map((row) => row.key),
+        ).toEqual([`other-4`])
+
         const selected = new IR.Func(`coalesce`, [ref, literal])
         const equality = new IR.Func<boolean>(`eq`, [selected, literal])
         const fallback = await observeExpressionIndexScenario({

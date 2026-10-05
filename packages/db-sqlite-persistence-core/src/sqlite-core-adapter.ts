@@ -1025,29 +1025,23 @@ function compileSqlExpression(
         getCompiledValueKind(compiledArgs[0]),
         getCompiledValueKind(compiledArgs[1]),
       )
-      // An order tie can contain unequal calendars. Keep the indexed order-key
-      // restriction and additionally compare equality identity, including NOT.
+      // Native order ties need canonical identity, including in persisted
+      // expressions. Ordinary string predicates keep one binding; residual
+      // filtering removes native order-key collisions from their candidate set.
       const needsIdentity =
         expression.name === `eq` &&
         expression.args.every(
           (arg) =>
             arg.type !== `val` ||
-            typeof arg.value === `string` ||
-            sqliteTemporalKind(arg.value),
+            sqliteTemporalKind(arg.value) ||
+            (context === `index-expression` && typeof arg.value === `string`),
         )
       return {
         supported: true,
         sql: needsIdentity
           ? `(${comparison} AND (${compiledArgs[0].identitySql ?? argSql[0]} = ${compiledArgs[1].identitySql ?? argSql[1]}))`
           : comparison,
-        params: needsIdentity
-          ? [
-              ...params,
-              ...compiledArgs.flatMap((arg) =>
-                arg.identitySql ? [] : arg.params,
-              ),
-            ]
-          : params,
+        params,
       }
     }
     case `and`:

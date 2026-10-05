@@ -210,3 +210,31 @@ This closes the reached native preservation/query and admission traces only.
 Engine-native/mobile receiving behavior, wider ownership histories and old-byte
 migration remain bounded by the explicit owner limits. Rebuild is the selected
 policy for ambiguous old marker records and already-erased values.
+
+## CI binding-capacity follow-up — 2026-10-05
+
+At formatter commit `9fa641974`, CI's broader core suite found one additional
+work regression. The existing root/transaction-driver capacity witness uses
+100 ordinary string equalities with a 100-binding cap. The added identity
+conjunct doubled them to 200 bindings and forced a full read. The returned rows
+were correct, but the existing 100/101 boundary assertion failed: expected 100
+bindings, observed zero. The earlier seven-file local run omitted this owner.
+
+The unchanged receiving test reproduced locally. Ordinary string predicates now
+retain their original one-binding candidate comparison. Residual filtering
+removes native order-key collisions. Persisted Boolean expressions and native
+predicates still compare canonical identity. This also removes the redundant
+parameter-duplication branch; no assertion or cap changed.
+
+The binding-capacity campaign, NUL cases and six mixed-domain families pass
+(18 selected tests). The new scalar/native collision observation checks the one
+runtime binding, exact public keys, candidate containment and exact stored
+Boolean expression values separately. TypeScript and changed-file ESLint pass.
+Receipts: `/private/tmp/temporal-ci-binding-red.json` and
+`/private/tmp/temporal-ci-binding-green.json`. Production change: +6/-12 lines;
+receiving observations: +26 lines. The bounded binding-capacity owner now joins
+the affected local suite.
+
+The expanded eight-file suite passes **559 tests, 0 failures, 1 existing TODO**
+after the repair (`/private/tmp/temporal-ci-binding-surrounding.json`). This
+includes the complete CLI adapter contract and prepared-statement capacity owner.
