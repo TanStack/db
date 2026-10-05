@@ -811,7 +811,7 @@ for this oracle repair. Keep these scenarios and decisions with that owner:
   back; retained-leader and before-invocation controls still fulfill. Later
   leadership changes and a held outbox write crossed with loss or regain remain
   for this leadership oracle, using controlled write settlement and caller
-  checkpoints. The [IndexedDB write-settlement owner](../../packages/offline-transactions/tests/indexeddb-write-settlement.test.ts)
+  checkpoints. The [IndexedDB write-settlement owner](https://github.com/TanStack/db/blob/main/packages/offline-transactions/tests/indexeddb-write-settlement.test.ts)
   still needs a browser-host composition with leadership loss across a write.
   These paths are outside this bounded repair. The [review record](oracle-reviews/issue-1939-offline-admission.md)
   preserves the RED/GREEN and checker-calibration evidence.
