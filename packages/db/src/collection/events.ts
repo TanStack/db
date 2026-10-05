@@ -64,6 +64,7 @@ export type CollectionIndexSerializableValue =
 
 export interface CollectionIndexResolverMetadata {
   kind: `constructor` | `async`
+  /** Stable for built-in indexes; diagnostic and build-dependent for custom constructors. */
   name?: string
 }
 
@@ -107,15 +108,6 @@ export type AllCollectionEvents = {
   [K in CollectionStatus as `status:${K}`]: CollectionStatusEvent<K>
 }
 
-export type CollectionEvent =
-  | AllCollectionEvents[keyof AllCollectionEvents]
-  | CollectionStatusChangeEvent
-  | CollectionSubscribersChangeEvent
-  | CollectionLoadingSubsetChangeEvent
-  | CollectionTruncateEvent
-  | CollectionIndexAddedEvent
-  | CollectionIndexRemovedEvent
-
 export type CollectionEventHandler<T extends keyof AllCollectionEvents> = (
   event: AllCollectionEvents[T],
 ) => void
@@ -145,22 +137,32 @@ export class CollectionEventsManager extends EventEmitter<AllCollectionEvents> {
   emitStatusChange<T extends CollectionStatus>(
     status: T,
     previousStatus: CollectionStatus,
+    isCurrent: () => boolean,
   ) {
-    this.emit(`status:change`, {
-      type: `status:change`,
-      collection: this.collection,
-      previousStatus,
-      status,
-    })
+    this.emitInnerWhile(
+      `status:change`,
+      {
+        type: `status:change`,
+        collection: this.collection,
+        previousStatus,
+        status,
+      },
+      isCurrent,
+    )
+    if (!isCurrent()) return
 
     // Emit specific status event using type assertion
     const eventKey: `status:${T}` = `status:${status}`
-    this.emit(eventKey, {
-      type: eventKey,
-      collection: this.collection,
-      previousStatus,
-      status,
-    } as AllCollectionEvents[`status:${T}`])
+    this.emitInnerWhile(
+      eventKey,
+      {
+        type: eventKey,
+        collection: this.collection,
+        previousStatus,
+        status,
+      } as AllCollectionEvents[`status:${T}`],
+      isCurrent,
+    )
   }
 
   emitSubscribersChange(

@@ -3,13 +3,11 @@ id: SelectObject
 title: SelectObject
 ---
 
-# Type Alias: SelectObject\<T\>
-
 ```ts
 type SelectObject<T> = T;
 ```
 
-Defined in: [packages/db/src/query/builder/types.ts:208](https://github.com/TanStack/db/blob/main/packages/db/src/query/builder/types.ts#L208)
+Defined in: [packages/db/src/query/builder/types.ts:304](https://github.com/TanStack/db/blob/main/packages/db/src/query/builder/types.ts#L304)
 
 SelectObject - Wrapper type for select clause objects
 

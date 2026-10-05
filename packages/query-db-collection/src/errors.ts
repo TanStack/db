@@ -36,6 +36,22 @@ export class GetKeyRequiredError extends QueryCollectionError {
   }
 }
 
+export class InitialDataInOnDemandModeError extends QueryCollectionError {
+  constructor() {
+    super(
+      `[QueryCollection] initialData and initialDataUpdatedAt are only supported when syncMode is 'eager'. Seed or hydrate the exact Query cache key for on-demand subsets instead.`,
+    )
+    this.name = `InitialDataInOnDemandModeError`
+  }
+}
+
+export class InvalidQueryResultError extends QueryCollectionError {
+  constructor(message: string) {
+    super(message)
+    this.name = `InvalidQueryResultError`
+  }
+}
+
 export class SyncNotInitializedError extends QueryCollectionError {
   constructor() {
     super(

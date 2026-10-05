@@ -5,10 +5,19 @@ import {
   orderByWithFractionalIndex,
   output,
 } from '../../src/operators/index.js'
-import { orderByWithFractionalIndexBTree } from '../../src/operators/orderByBTree.js'
-import { loadBTree } from '../../src/operators/topKWithFractionalIndexBTree.js'
+import { orderByWithFractionalIndexBase } from '../../src/operators/orderBy.js'
+import {
+  loadBTree,
+  topKWithFractionalIndexBTree,
+} from '../../src/operators/topKWithFractionalIndexBTree.js'
 import { MessageTracker, compareFractionalIndex } from '../test-utils.js'
 import type { KeyValue } from '../../src/types.js'
+
+const orderByWithBTree: typeof orderByWithFractionalIndex = (
+  extract,
+  options,
+) =>
+  orderByWithFractionalIndexBase(topKWithFractionalIndexBTree, extract, options)
 
 const stripFractionalIndex = ([[key, [value, _index]], multiplicity]: any) => [
   key,
@@ -27,7 +36,7 @@ beforeAll(async () => {
 describe(`Operators`, () => {
   describe.each([
     [`with array`, { orderBy: orderByWithFractionalIndex }],
-    [`with B+ tree`, { orderBy: orderByWithFractionalIndexBTree }],
+    [`with B+ tree`, { orderBy: orderByWithBTree }],
   ])(`OrderByWithFractionalIndex operator %s`, (_, { orderBy }) => {
     test(`initial results with default comparator`, () => {
       const graph = new D2()
@@ -371,7 +380,7 @@ describe(`Operators`, () => {
       const initialResult = tracker.getResult(compareFractionalIndex)
       // Should have the top 3 items by value
       expect(initialResult.sortedResults.length).toBe(3)
-      expect(initialResult.messageCount).toBeLessThanOrEqual(4) // Should be efficient
+      expect(initialResult.deltaCount).toBeLessThanOrEqual(4) // Should be efficient
 
       expect(
         initialResult.sortedResults.map(
@@ -395,10 +404,10 @@ describe(`Operators`, () => {
 
       const updateResult = tracker.getResult(compareFractionalIndex)
 
-      // The incremental messages should tell us that key1 is no longer in the top K
+      // The incremental weighted deltas should tell us that key1 is no longer in the top K
       // and that key4 entered the top K
-      expect(updateResult.messages.length).toBe(2)
-      const sortedKeysAndMultiplicities = updateResult.messages
+      expect(updateResult.weightedDeltas.length).toBe(2)
+      const sortedKeysAndMultiplicities = updateResult.weightedDeltas
         .map(([[key, _v], multiplicity]) => [key, multiplicity])
         .sort((a, b) => (a[0]! < b[0]! ? -1 : a[0]! > b[0]! ? 1 : 0))
       expect(sortedKeysAndMultiplicities).toEqual([
@@ -453,7 +462,7 @@ describe(`Operators`, () => {
         [`key3`, { id: 3, value: `b` }],
         [`key2`, { id: 2, value: `c` }],
       ])
-      expect(initialResult.messageCount).toBeLessThanOrEqual(4) // Should be efficient
+      expect(initialResult.deltaCount).toBeLessThanOrEqual(4) // Should be efficient
 
       tracker.reset()
 
@@ -468,13 +477,13 @@ describe(`Operators`, () => {
 
       const updateResult = tracker.getResult(compareFractionalIndex)
       // Should have efficient incremental update
-      expect(updateResult.messageCount).toBeLessThanOrEqual(6) // Should be incremental (modify operation)
-      expect(updateResult.messageCount).toBeGreaterThan(0) // Should have changes
+      expect(updateResult.deltaCount).toBeLessThanOrEqual(6) // Should be incremental (modify operation)
+      expect(updateResult.deltaCount).toBeGreaterThan(0) // Should have changes
 
-      // The incremental messages should tell us that key2 is no longer in the top K
+      // The incremental weighted deltas should tell us that key2 is no longer in the top K
       // and that key4 entered the top K
-      expect(updateResult.messages.length).toBe(2)
-      const sortedKeysAndMultiplicities = updateResult.messages
+      expect(updateResult.weightedDeltas.length).toBe(2)
+      const sortedKeysAndMultiplicities = updateResult.weightedDeltas
         .map(([[key, _v], multiplicity]) => [key, multiplicity])
         .sort((a, b) => (a[0]! < b[0]! ? -1 : a[0]! > b[0]! ? 1 : 0))
       expect(sortedKeysAndMultiplicities).toEqual([
@@ -501,8 +510,7 @@ describe(`Operators`, () => {
       >()
 
       let windowFn:
-        | ((options: { offset?: number; limit?: number }) => void)
-        | undefined
+        ((options: { offset?: number; limit?: number }) => void) | undefined
 
       input.pipe(
         orderByWithFractionalIndex((item) => item.value, {
@@ -535,7 +543,7 @@ describe(`Operators`, () => {
       // Initial result should have first 3 elements (a, b, c)
       const initialResult = tracker.getResult(compareFractionalIndex)
       expect(initialResult.sortedResults.length).toBe(3)
-      expect(initialResult.messageCount).toBeLessThanOrEqual(6)
+      expect(initialResult.deltaCount).toBeLessThanOrEqual(6)
 
       // Verify initial order
       const initialSortedValues = initialResult.sortedResults.map(
@@ -575,8 +583,7 @@ describe(`Operators`, () => {
       >()
 
       let windowFn:
-        | ((options: { offset?: number; limit?: number }) => void)
-        | undefined
+        ((options: { offset?: number; limit?: number }) => void) | undefined
 
       input.pipe(
         orderByWithFractionalIndex((item) => item.value, {
@@ -609,7 +616,7 @@ describe(`Operators`, () => {
       // Initial result should have elements d, e, f
       const initialResult = tracker.getResult(compareFractionalIndex)
       expect(initialResult.sortedResults.length).toBe(3)
-      expect(initialResult.messageCount).toBeLessThanOrEqual(6)
+      expect(initialResult.deltaCount).toBeLessThanOrEqual(6)
 
       // Verify initial order
       const initialSortedValues = initialResult.sortedResults.map(
@@ -649,8 +656,7 @@ describe(`Operators`, () => {
       >()
 
       let windowFn:
-        | ((options: { offset?: number; limit?: number }) => void)
-        | null = null
+        ((options: { offset?: number; limit?: number }) => void) | null = null
 
       input.pipe(
         orderByWithFractionalIndex((item) => item.value, {
@@ -738,8 +744,7 @@ describe(`Operators`, () => {
       >()
 
       let windowFn:
-        | ((options: { offset?: number; limit?: number }) => void)
-        | null = null
+        ((options: { offset?: number; limit?: number }) => void) | null = null
 
       input.pipe(
         orderByWithFractionalIndex((item) => item.value, {
@@ -817,8 +822,7 @@ describe(`Operators`, () => {
       >()
 
       let windowFn:
-        | ((options: { offset?: number; limit?: number }) => void)
-        | null = null
+        ((options: { offset?: number; limit?: number }) => void) | null = null
 
       input.pipe(
         orderByWithFractionalIndex((item) => item.value, {

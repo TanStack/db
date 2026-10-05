@@ -57,8 +57,21 @@ export class D2 implements ID2 {
   }
 
   run(): void {
-    while (this.pendingWork()) {
-      this.step()
+    if (!this.#finalized) {
+      throw new Error(`Graph not finalized`)
+    }
+
+    // A later registered operator can send work to an earlier one. Continue
+    // until a complete pass runs none.
+    let ran = true
+    while (ran) {
+      ran = false
+      for (const op of this.#operators) {
+        if (op.hasPendingWork()) {
+          op.run()
+          ran = true
+        }
+      }
     }
   }
 }

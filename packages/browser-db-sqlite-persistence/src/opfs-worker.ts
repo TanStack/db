@@ -23,12 +23,7 @@ const SQLITE_ROW = 100
 const SQLITE_DONE = 101
 
 type SQLiteCompatibleBinding =
-  | null
-  | string
-  | number
-  | bigint
-  | Uint8Array
-  | Array<number>
+  null | string | number | bigint | Uint8Array | Array<number>
 
 type WorkerOPFSGlobal = {
   navigator?: {
@@ -161,11 +156,22 @@ async function initializeWorkerDatabase(request: {
     SQLite.SQLITE_OPEN_READWRITE |
     SQLite.SQLITE_OPEN_URI
   const databaseFileUri = `file:${request.databaseName}?vfs=${encodeURIComponent(request.vfsName)}`
-  const dbHandle = await sqlite3.open_v2(
-    databaseFileUri,
-    openFlags,
-    request.vfsName,
-  )
+  let dbHandle: number
+  try {
+    dbHandle = await sqlite3.open_v2(
+      databaseFileUri,
+      openFlags,
+      request.vfsName,
+    )
+  } catch (error) {
+    const cause = opfsVfs.lastError
+    if (error instanceof Error && cause instanceof Error) {
+      throw new Error(`${error.message}: ${cause.name}: ${cause.message}`, {
+        cause,
+      })
+    }
+    throw error
+  }
 
   sqlite3Instance = sqlite3
   sqliteDatabaseHandle = dbHandle

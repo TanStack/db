@@ -267,7 +267,7 @@ The e2e tests will run alongside your regular tests.
 
 All test suites are implemented in `src/suites/*.suite.ts` files and exported as factory functions.
 
-### Predicates Suite (`predicates.suite.ts`)
+### Predicates Suite (`predicates-oracle.suite.ts`)
 
 Tests basic where clause functionality with ~20 test scenarios:
 
@@ -293,7 +293,7 @@ it('should filter with eq() on number field', async () => {
 - Complex boolean logic with `and()`, `or()`, `not()`
 - Predicate pushdown verification
 
-### Pagination Suite (`pagination.suite.ts`)
+### Pagination Suite (`pagination-oracle.suite.ts`)
 
 Tests ordering and pagination with ~15 test scenarios:
 
@@ -319,7 +319,7 @@ it('should sort ascending by single field', async () => {
 - Edge cases (limit=0, offset beyond dataset)
 - Performance verification (only requested page loaded)
 
-### Joins Suite (`joins.suite.ts`)
+### Joins Suite (`joins-oracle.suite.ts`)
 
 Tests multi-collection joins with ~12 test scenarios:
 

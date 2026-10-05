@@ -1,7 +1,5 @@
 export type BrowserOPFSWorkerErrorCode =
-  | `INVALID_CONFIG`
-  | `PERSISTENCE_UNAVAILABLE`
-  | `INTERNAL`
+  `INVALID_CONFIG` | `PERSISTENCE_UNAVAILABLE` | `INTERNAL`
 
 export type BrowserOPFSWorkerInitRequest = {
   type: `init`
@@ -43,5 +41,4 @@ export type BrowserOPFSWorkerErrorResponse = {
 }
 
 export type BrowserOPFSWorkerResponse =
-  | BrowserOPFSWorkerSuccessResponse
-  | BrowserOPFSWorkerErrorResponse
+  BrowserOPFSWorkerSuccessResponse | BrowserOPFSWorkerErrorResponse

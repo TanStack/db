@@ -2,11 +2,12 @@ import type { LoadSubsetOptions } from '@tanstack/db'
 import type {
   PersistedCollectionMode,
   PersistedIndexSpec,
+  PersistedKeySetEvidence,
   PersistedTx,
   SQLitePullSinceResult,
 } from '@tanstack/db-sqlite-persistence-core'
 
-export const ELECTRON_PERSISTENCE_PROTOCOL_VERSION = 1 as const
+export const ELECTRON_PERSISTENCE_PROTOCOL_VERSION = 2 as const
 export const DEFAULT_ELECTRON_PERSISTENCE_CHANNEL = `tanstack-db:sqlite-persistence`
 
 export type ElectronPersistedRow = Record<string, unknown>
@@ -19,6 +20,7 @@ export type ElectronPersistenceResolution = {
 
 export type ElectronPersistenceMethod =
   | `loadSubset`
+  | `loadResumeSnapshot`
   | `loadCollectionMetadata`
   | `scanRows`
   | `applyCommittedTx`
@@ -31,6 +33,12 @@ export type ElectronPersistencePayloadMap = {
   loadSubset: {
     options: LoadSubsetOptions
     ctx?: { requiredIndexSignatures?: ReadonlyArray<string> }
+  }
+  loadResumeSnapshot: {
+    ctx?: {
+      requiredIndexSignatures?: ReadonlyArray<string>
+      includeRows?: boolean
+    }
   }
   loadCollectionMetadata: {}
   scanRows: {
@@ -56,6 +64,19 @@ export type ElectronPersistencePayloadMap = {
 
 export type ElectronPersistenceResultMap = {
   loadSubset: Array<{ key: ElectronPersistedKey; value: ElectronPersistedRow }>
+  loadResumeSnapshot: {
+    rows: Array<{
+      key: ElectronPersistedKey
+      value: ElectronPersistedRow
+      metadata?: unknown
+    }>
+    keySet?: PersistedKeySetEvidence
+    collectionMetadata: Array<{ key: string; value: unknown }>
+    latestTerm: number
+    latestSeq: number
+    latestRowVersion: number
+    resetEpoch: number
+  }
   loadCollectionMetadata: Array<{ key: string; value: unknown }>
   scanRows: Array<{
     key: ElectronPersistedKey

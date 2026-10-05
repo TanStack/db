@@ -3,13 +3,11 @@ id: WithVirtualProps
 title: WithVirtualProps
 ---
 
-# Type Alias: WithVirtualProps\<T, TKey\>
-
 ```ts
-type WithVirtualProps<T, TKey> = T & VirtualRowProps<TKey>;
+type WithVirtualProps<T, TKey> = T & PublishedVirtualRowProps<TKey>;
 ```
 
-Defined in: [packages/db/src/virtual-props.ts:112](https://github.com/TanStack/db/blob/main/packages/db/src/virtual-props.ts#L112)
+Defined in: [packages/db/src/virtual-props.ts:141](https://github.com/TanStack/db/blob/main/packages/db/src/virtual-props.ts#L141)
 
 Adds virtual properties to a row type.
 
@@ -32,5 +30,6 @@ The type of the row's key
 ```typescript
 type User = { id: string; name: string }
 type UserWithVirtual = WithVirtualProps<User, string>
-// { id: string; name: string; $synced: boolean; $origin: 'local' | 'remote'; $key: string; $collectionId: string }
+// { id: string; name: string; $hasPendingWrites: boolean; $synced: boolean; $origin: 'local' | 'remote'; $key: string; $collectionId: string }
+// $synced is deprecated; use !$hasPendingWrites instead.
 ```

@@ -1,7 +1,19 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { createCollection } from '../src/collection/index.js'
-import type { Collection } from '../src/collection/index.js'
+import { EventEmitter } from '../src/event-emitter.js'
+import { BasicIndex } from '../src/indexes/basic-index.js'
 import { BTreeIndex } from '../src/indexes/btree-index.js'
+import type { Collection } from '../src/collection/index.js'
+
+class TestEventEmitter extends EventEmitter<{ event: { id: number } }> {
+  emit(id: number): void {
+    this.emitInner(`event`, { id })
+  }
+
+  clear(): void {
+    this.clearListeners()
+  }
+}
 
 describe(`Collection Events System`, () => {
   let collection: Collection
@@ -47,6 +59,88 @@ describe(`Collection Events System`, () => {
         status: `loading`,
       })
     })
+
+    it(`stops an obsolete status event after a listener changes status`, () => {
+      const genericEvents: Array<{
+        previousStatus: string
+        status: string
+        current: string
+      }> = []
+      const loadingEvents: Array<string> = []
+      collection.on(`status:change`, ({ status }) => {
+        if (status === `loading`) collection._lifecycle.markReady()
+      })
+      collection.on(`status:change`, ({ previousStatus, status }) => {
+        genericEvents.push({
+          previousStatus,
+          status,
+          current: collection.status,
+        })
+      })
+      collection.on(`status:loading`, ({ status }) => {
+        loadingEvents.push(status)
+      })
+
+      collection.startSyncImmediate()
+
+      expect(genericEvents).toEqual([
+        {
+          previousStatus: `loading`,
+          status: `ready`,
+          current: `ready`,
+        },
+      ])
+      expect(loadingEvents).toEqual([])
+    })
+
+    it.each([`generic`, `specific`] as const)(
+      `keeps cross-channel order under %s-listener ABA reentry`,
+      (reentryEvent) => {
+        const trace: Array<string> = []
+        let reentered = false
+        const reenter = () => {
+          if (reentered) return
+          reentered = true
+          collection._lifecycle.setStatus(`error`)
+          collection._lifecycle.setStatus(`idle`)
+          collection._lifecycle.setStatus(`loading`)
+        }
+        if (reentryEvent === `generic`) {
+          collection.on(`status:change`, ({ status }) => {
+            if (status === `loading`) reenter()
+          })
+        } else {
+          collection.on(`status:loading`, reenter)
+        }
+        collection.on(`status:change`, ({ previousStatus, status }) => {
+          trace.push(
+            `generic:${previousStatus}->${status}:${collection.status}`,
+          )
+        })
+        collection.on(`status:loading`, () => {
+          trace.push(`specific:loading:${collection.status}`)
+        })
+
+        collection.startSyncImmediate()
+
+        expect(trace).toEqual(
+          reentryEvent === `generic`
+            ? [
+                `generic:loading->error:error`,
+                `generic:error->idle:idle`,
+                `generic:idle->loading:loading`,
+                `specific:loading:loading`,
+              ]
+            : [
+                `generic:idle->loading:loading`,
+                `generic:loading->error:error`,
+                `generic:error->idle:idle`,
+                `generic:idle->loading:loading`,
+                `specific:loading:loading`,
+              ],
+        )
+      },
+    )
   })
 
   describe(`Subscriber Count Change Events`, () => {
@@ -68,6 +162,67 @@ describe(`Collection Events System`, () => {
   })
 
   describe(`Index Lifecycle Events`, () => {
+    it(`keeps built-in resolver names stable when constructor names change`, () => {
+      class CustomBasicIndex extends BasicIndex {}
+      const basicName = Object.getOwnPropertyDescriptor(BasicIndex, `name`)!
+      const btreeName = Object.getOwnPropertyDescriptor(BTreeIndex, `name`)!
+      const added: Array<string | undefined> = []
+      collection.on(`index:added`, (event) => {
+        added.push(event.index.resolver.name)
+      })
+
+      try {
+        Object.defineProperty(BasicIndex, `name`, {
+          value: `a`,
+          configurable: true,
+        })
+        Object.defineProperty(BTreeIndex, `name`, {
+          value: `b`,
+          configurable: true,
+        })
+
+        collection.createIndex((row: any) => row.id, {
+          indexType: BasicIndex,
+        })
+        collection.createIndex((row: any) => row.id, {
+          indexType: BTreeIndex,
+        })
+        collection.createIndex((row: any) => row.id, {
+          indexType: CustomBasicIndex,
+        })
+
+        expect(added).toEqual([`BasicIndex`, `BTreeIndex`, `CustomBasicIndex`])
+        expect(
+          collection.getIndexMetadata().map(({ resolver }) => resolver.name),
+        ).toEqual(added)
+      } finally {
+        Object.defineProperty(BasicIndex, `name`, basicName)
+        Object.defineProperty(BTreeIndex, `name`, btreeName)
+      }
+    })
+
+    it(`uses custom resolver names without inspecting constructor descriptors`, () => {
+      const CustomIndex = new Proxy(BasicIndex, {
+        getOwnPropertyDescriptor(target, key) {
+          if (key === `resolverMetadataName`) {
+            throw new Error(`descriptor denied`)
+          }
+          return Reflect.getOwnPropertyDescriptor(target, key)
+        },
+      })
+      const added = vi.fn()
+      collection.on(`index:added`, added)
+
+      collection.createIndex((row) => row.id, {
+        indexType: CustomIndex,
+      })
+
+      expect(collection.indexes.size).toBe(1)
+      expect(collection.getIndexMetadata()[0]?.resolver.name).toBe(`BasicIndex`)
+      expect(added).toHaveBeenCalledOnce()
+      expect(added.mock.calls[0]?.[0].index.resolver.name).toBe(`BasicIndex`)
+    })
+
     it(`should emit index:added with stable serializable metadata`, () => {
       const indexAddedListener = vi.fn()
       collection.on(`index:added`, indexAddedListener)
@@ -255,6 +410,169 @@ describe(`Collection Events System`, () => {
       expect(listener).toHaveBeenCalledTimes(1) // Still only called once
 
       unsubscribe()
+    })
+
+    it(`removes a once listener before invoking a throwing callback`, () => {
+      const emitter = new TestEventEmitter()
+      const failure = new Error(`once listener failed`)
+      const deferredMicrotasks: Array<VoidFunction> = []
+      const queueMicrotaskSpy = vi
+        .spyOn(globalThis, `queueMicrotask`)
+        .mockImplementation((callback) => deferredMicrotasks.push(callback))
+      const listener = vi.fn(() => {
+        throw failure
+      })
+
+      try {
+        emitter.once(`event`, listener)
+        emitter.emit(1)
+        emitter.emit(2)
+
+        expect(listener).toHaveBeenCalledTimes(1)
+        expect(deferredMicrotasks).toHaveLength(1)
+        expect(() => deferredMicrotasks[0]!()).toThrow(failure)
+      } finally {
+        queueMicrotaskSpy.mockRestore()
+      }
+    })
+
+    it(`removes a pending once listener through off`, () => {
+      const emitter = new TestEventEmitter()
+      const calls: Array<string> = []
+      const onceListener = vi.fn(() => calls.push(`once`))
+      emitter.on(`event`, () => {
+        calls.push(`off`)
+        emitter.off(`event`, onceListener)
+      })
+      emitter.once(`event`, onceListener)
+
+      emitter.emit(1)
+
+      expect(calls).toEqual([`off`])
+      expect(onceListener).not.toHaveBeenCalled()
+    })
+
+    it(`removes a pending once listener through its returned unsubscribe`, () => {
+      const emitter = new TestEventEmitter()
+      const onceListener = vi.fn()
+      const unsubscribe = emitter.once(`event`, onceListener)
+
+      unsubscribe()
+      emitter.emit(1)
+
+      expect(onceListener).not.toHaveBeenCalled()
+    })
+
+    it(`removes every pending once registration for the same callback`, () => {
+      const emitter = new TestEventEmitter()
+      const onceListener = vi.fn()
+      emitter.once(`event`, onceListener)
+      emitter.once(`event`, onceListener)
+
+      emitter.off(`event`, onceListener)
+      emitter.emit(1)
+
+      expect(onceListener).not.toHaveBeenCalled()
+    })
+
+    it(`does not treat an ordinary callback property as a once registration`, () => {
+      const emitter = new TestEventEmitter()
+      const claimedOnceCallback = vi.fn()
+      const ordinaryListener = Object.assign(vi.fn(), {
+        onceCallback: claimedOnceCallback,
+      })
+      emitter.on(`event`, ordinaryListener)
+
+      emitter.off(`event`, claimedOnceCallback)
+      emitter.emit(1)
+
+      expect(ordinaryListener).toHaveBeenCalledOnce()
+    })
+
+    it(`removes a once listener before a reentrant emission`, () => {
+      const emitter = new TestEventEmitter()
+      const observed: Array<number> = []
+      emitter.once(`event`, ({ id }) => {
+        observed.push(id)
+        emitter.emit(2)
+      })
+
+      emitter.emit(1)
+
+      expect(observed).toEqual([1])
+    })
+
+    it(`visits a listener once when it removes and re-adds itself`, () => {
+      const emitter = new TestEventEmitter()
+      const observed: Array<number> = []
+      let readded = false
+      let unsubscribe = () => {}
+      const listener = ({ id }: { id: number }) => {
+        observed.push(id)
+        unsubscribe()
+        if (!readded) {
+          readded = true
+          unsubscribe = emitter.on(`event`, listener)
+        }
+      }
+      unsubscribe = emitter.on(`event`, listener)
+
+      emitter.emit(1)
+
+      expect(observed).toEqual([1])
+    })
+
+    it(`defers a pending listener that is removed and re-added`, () => {
+      const emitter = new TestEventEmitter()
+      const observed: Array<string> = []
+      let replaced = false
+      const pending = ({ id }: { id: number }) => {
+        observed.push(`pending:${id}`)
+      }
+      let unsubscribePending = () => {}
+      emitter.on(`event`, ({ id }) => {
+        observed.push(`first:${id}`)
+        if (replaced) return
+        replaced = true
+        unsubscribePending()
+        unsubscribePending = emitter.on(`event`, pending)
+      })
+      unsubscribePending = emitter.on(`event`, pending)
+
+      emitter.emit(1)
+      expect(observed).toEqual([`first:1`])
+
+      emitter.emit(2)
+      expect(observed).toEqual([`first:1`, `first:2`, `pending:2`])
+    })
+
+    it(`clears ordinary and once listeners together`, () => {
+      const emitter = new TestEventEmitter()
+      const ordinaryListener = vi.fn()
+      const onceListener = vi.fn()
+      emitter.on(`event`, ordinaryListener)
+      emitter.once(`event`, onceListener)
+
+      emitter.clear()
+      emitter.emit(1)
+
+      expect(ordinaryListener).not.toHaveBeenCalled()
+      expect(onceListener).not.toHaveBeenCalled()
+    })
+
+    it(`exposes the same pending-once removal law through Collection`, () => {
+      const calls: Array<string> = []
+      const onceListener = vi.fn(() => calls.push(`once`))
+      collection.on(`status:change`, () => {
+        calls.push(`off`)
+        collection.off(`status:change`, onceListener)
+      })
+      collection.once(`status:change`, onceListener)
+
+      collection.startSyncImmediate()
+
+      expect(calls).toEqual([`off`])
+      expect(onceListener).not.toHaveBeenCalled()
     })
   })
 

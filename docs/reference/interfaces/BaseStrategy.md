@@ -3,8 +3,6 @@ id: BaseStrategy
 title: BaseStrategy
 ---
 
-# Interface: BaseStrategy\<TName\>
-
 Defined in: [packages/db/src/strategies/types.ts:6](https://github.com/TanStack/db/blob/main/packages/db/src/strategies/types.ts#L6)
 
 Base strategy interface that all strategy implementations must conform to
@@ -55,7 +53,7 @@ Should be called when the strategy is no longer needed
 ### execute()
 
 ```ts
-execute: <T>(fn) => void | Promise<void>;
+execute: <T>(fn) => boolean | void | Promise<void>;
 ```
 
 Defined in: [packages/db/src/strategies/types.ts:15](https://github.com/TanStack/db/blob/main/packages/db/src/strategies/types.ts#L15)
@@ -78,6 +76,6 @@ The function to execute
 
 #### Returns
 
-`void` \| `Promise`\<`void`\>
+`boolean` \| `void` \| `Promise`\<`void`\>
 
 The result of the function execution (if applicable)

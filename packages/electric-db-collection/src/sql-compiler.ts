@@ -88,7 +88,7 @@ function quoteIdentifier(
   encodeColumnName?: ColumnEncoder,
 ): string {
   const columnName = encodeColumnName ? encodeColumnName(name) : name
-  return `"${columnName}"`
+  return `"${columnName.replace(/"/g, `""`)}"`
 }
 
 /**
@@ -108,7 +108,6 @@ function compileBasicExpression(
       params.push(exp.value)
       return `$${params.length}`
     case `ref`:
-      // TODO: doesn't yet support JSON(B) values which could be accessed with nested props
       if (exp.path.length !== 1) {
         throw new Error(
           `Compiler can't handle nested properties: ${exp.path.join(`.`)}`,
@@ -194,9 +193,68 @@ function compileFunction(
     }
   }
 
-  const compiledArgs = args.map((arg: IR.BasicExpression) =>
-    compileBasicExpression(arg, params, encodeColumnName),
+  if (name === `not`) {
+    if (args.length !== 1) throw new Error(`NOT expects 1 argument`)
+    const arg = args[0]
+    if (
+      arg?.type === `func` &&
+      (arg.name === `isNull` || arg.name === `isUndefined`)
+    ) {
+      if (arg.args.length !== 1) {
+        throw new Error(`${arg.name} expects 1 argument`)
+      }
+      const innerArg = arg.args[0]!
+      const compiled = compileBasicExpression(
+        innerArg,
+        params,
+        encodeColumnName,
+      )
+      return `${innerArg.type === `func` ? `(${compiled})` : compiled} IS NOT NULL`
+    }
+  }
+
+  const booleanLiteralIndex = args.findIndex(
+    (arg) => arg.type === `val` && typeof arg.value === `boolean`,
   )
+  if (
+    args.length === 2 &&
+    isBooleanComparisonOp(name) &&
+    booleanLiteralIndex !== -1
+  ) {
+    const literalValue = (args[booleanLiteralIndex] as IR.Value<boolean>).value
+    const valueArg = args[booleanLiteralIndex === 0 ? 1 : 0]!
+    const compiled = compileBasicExpression(valueArg, params, encodeColumnName)
+    const value = `(${compiled})`
+    const lessThan =
+      (name === `lt` || name === `lte`) === (booleanLiteralIndex === 1)
+    const inclusive = name === `lte` || name === `gte`
+
+    if (inclusive && literalValue === lessThan) {
+      return `${value} = ${value}`
+    }
+    if (!inclusive && literalValue !== lessThan) {
+      return `${value} <> ${value}`
+    }
+    return `${value} = ${lessThan ? `FALSE` : `TRUE`}`
+  }
+
+  const compiledArgs = args.map((arg: IR.BasicExpression) => {
+    const compiled = compileBasicExpression(arg, params, encodeColumnName)
+    // AND/OR group their children by precedence; NOT already wraps its operand.
+    // In value positions, preserve any nested operator as a single expression.
+    return arg.type === `func` &&
+      (arg.name === `and` ||
+        arg.name === `or` ||
+        (name !== `and` &&
+          name !== `or` &&
+          name !== `not` &&
+          (isBinaryOp(arg.name) ||
+            arg.name === `not` ||
+            arg.name === `isNull` ||
+            arg.name === `isUndefined`)))
+      ? `(${compiled})`
+      : compiled
+  })
 
   // Special case for IS NULL / IS NOT NULL - these are postfix operators
   if (name === `isNull` || name === `isUndefined`) {
@@ -208,22 +266,6 @@ function compileFunction(
 
   // Special case for NOT - unary prefix operator
   if (name === `not`) {
-    if (compiledArgs.length !== 1) {
-      throw new Error(`NOT expects 1 argument`)
-    }
-    // Check if the argument is IS NULL to generate IS NOT NULL
-    const arg = args[0]
-    if (arg && arg.type === `func`) {
-      const funcArg = arg
-      if (funcArg.name === `isNull` || funcArg.name === `isUndefined`) {
-        const innerArg = compileBasicExpression(
-          funcArg.args[0]!,
-          params,
-          encodeColumnName,
-        )
-        return `${innerArg} IS NOT NULL`
-      }
-    }
     return `${opName} (${compiledArgs[0]})`
   }
 
@@ -231,7 +273,7 @@ function compileFunction(
     // Special handling for AND/OR which can be variadic
     if ((name === `and` || name === `or`) && compiledArgs.length > 2) {
       // Chain multiple arguments: (a AND b AND c) or (a OR b OR c)
-      return compiledArgs.map((arg) => `(${arg})`).join(` ${opName} `)
+      return compiledArgs.join(` ${opName} `)
     }
 
     if (compiledArgs.length !== 2) {
@@ -239,125 +281,20 @@ function compileFunction(
     }
     const [lhs, rhs] = compiledArgs
 
-    // Special case for comparison operators with boolean values
-    // PostgreSQL doesn't support < > <= >= on booleans
-    // Transform to equivalent equality checks or constant expressions
-    if (isBooleanComparisonOp(name)) {
-      const lhsArg = args[0]
-      const rhsArg = args[1]
-
-      // Check if RHS is a boolean literal value
-      if (
-        rhsArg &&
-        rhsArg.type === `val` &&
-        typeof rhsArg.value === `boolean`
-      ) {
-        const boolValue = rhsArg.value
-        // Remove the boolean param we just added since we'll transform the expression
-        params.pop()
-
-        // Transform based on operator and boolean value
-        // Boolean ordering: false < true
-        if (name === `lt`) {
-          if (boolValue === true) {
-            // lt(col, true) → col = false (only false is less than true)
-            params.push(false)
-            return `${lhs} = $${params.length}`
-          } else {
-            // lt(col, false) → nothing is less than false
-            return `false`
-          }
-        } else if (name === `gt`) {
-          if (boolValue === false) {
-            // gt(col, false) → col = true (only true is greater than false)
-            params.push(true)
-            return `${lhs} = $${params.length}`
-          } else {
-            // gt(col, true) → nothing is greater than true
-            return `false`
-          }
-        } else if (name === `lte`) {
-          if (boolValue === true) {
-            // lte(col, true) → everything is ≤ true
-            return `true`
-          } else {
-            // lte(col, false) → col = false
-            params.push(false)
-            return `${lhs} = $${params.length}`
-          }
-        } else if (name === `gte`) {
-          if (boolValue === false) {
-            // gte(col, false) → everything is ≥ false
-            return `true`
-          } else {
-            // gte(col, true) → col = true
-            params.push(true)
-            return `${lhs} = $${params.length}`
-          }
-        }
-      }
-
-      // Check if LHS is a boolean literal value (less common but handle it)
-      if (
-        lhsArg &&
-        lhsArg.type === `val` &&
-        typeof lhsArg.value === `boolean`
-      ) {
-        const boolValue = lhsArg.value
-        // Remove params for this expression and rebuild
-        params.pop() // remove RHS
-        params.pop() // remove LHS (boolean)
-
-        // Recompile RHS to get fresh param
-        const rhsCompiled = compileBasicExpression(
-          rhsArg!,
-          params,
-          encodeColumnName,
-        )
-
-        // Transform: flip the comparison (val op col → col flipped_op val)
-        if (name === `lt`) {
-          // lt(true, col) → gt(col, true) → col > true → nothing is greater than true
-          if (boolValue === true) {
-            return `false`
-          } else {
-            // lt(false, col) → gt(col, false) → col = true
-            params.push(true)
-            return `${rhsCompiled} = $${params.length}`
-          }
-        } else if (name === `gt`) {
-          // gt(true, col) → lt(col, true) → col = false
-          if (boolValue === true) {
-            params.push(false)
-            return `${rhsCompiled} = $${params.length}`
-          } else {
-            // gt(false, col) → lt(col, false) → nothing is less than false
-            return `false`
-          }
-        } else if (name === `lte`) {
-          if (boolValue === false) {
-            // lte(false, col) → gte(col, false) → everything
-            return `true`
-          } else {
-            // lte(true, col) → gte(col, true) → col = true
-            params.push(true)
-            return `${rhsCompiled} = $${params.length}`
-          }
-        } else if (name === `gte`) {
-          if (boolValue === true) {
-            // gte(true, col) → lte(col, true) → everything
-            return `true`
-          } else {
-            // gte(false, col) → lte(col, false) → col = false
-            params.push(false)
-            return `${rhsCompiled} = $${params.length}`
-          }
-        }
-      }
-    }
-
-    // Special case for = ANY operator which needs parentheses around the array parameter
     if (name === `in`) {
+      const valueArg = args[0]!
+      const arrayArg = args[1]!
+
+      if (valueArg.type === `val` && Array.isArray(valueArg.value)) {
+        throw new Error(`Array-valued 'in' left operand; expected a scalar`)
+      }
+
+      if (arrayArg.type === `ref` && valueArg.type === `val`) {
+        // Resolve literal parameters from the array element type before containment.
+        return `${lhs} = ANY(${rhs}) AND ${rhs} @> ARRAY[${lhs}] AND ${rhs} IS NOT NULL`
+      }
+
+      // Literal value lists and ref/ref membership retain the original = ANY form.
       return `${lhs} ${opName}(${rhs})`
     }
     return `${lhs} ${opName} ${rhs}`
@@ -388,7 +325,7 @@ function isBinaryOp(name: string): boolean {
  * (null comparisons in SQL always evaluate to UNKNOWN)
  */
 function isComparisonOp(name: string): boolean {
-  const comparisonOps = [`eq`, `gt`, `gte`, `lt`, `lte`, `like`, `ilike`]
+  const comparisonOps = [`eq`, `gt`, `gte`, `lt`, `lte`, `like`, `ilike`, `in`]
   return comparisonOps.includes(name)
 }
 
