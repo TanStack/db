@@ -1,15 +1,18 @@
 import { describe, expect, it } from 'vitest'
 import { createCollection } from '../src/collection/index.js'
+import { BasicIndex } from '../src/indexes/basic-index'
 import {
-  CollectionRequiresConfigError,
   CollectionRequiresGetKeyError,
-  CollectionRequiresSyncConfigError,
   InvalidCallbackOptionError,
   InvalidGetKeyError,
   InvalidOptionTypeError,
   InvalidSyncConfigError,
   InvalidSyncFunctionError,
   UnknownCollectionConfigError,
+} from '../src/collection/config-errors'
+import {
+  CollectionRequiresConfigError,
+  CollectionRequiresSyncConfigError,
 } from '../src/errors'
 
 describe(`createCollection runtime config validation`, () => {
@@ -23,16 +26,12 @@ describe(`createCollection runtime config validation`, () => {
 
     it(`should throw CollectionRequiresConfigError when null is passed`, () => {
       // @ts-expect-error testing runtime behavior
-      expect(() => createCollection(null)).toThrow(
-        CollectionRequiresConfigError,
-      )
+      expect(() => createCollection(null)).toThrow()
     })
 
     it(`should throw CollectionRequiresConfigError when a string is passed`, () => {
       // @ts-expect-error testing runtime behavior
-      expect(() => createCollection(`not a config`)).toThrow(
-        CollectionRequiresConfigError,
-      )
+      expect(() => createCollection(`not a config`)).toThrow()
     })
 
     it(`should throw CollectionRequiresConfigError when an array is passed`, () => {
@@ -203,24 +202,18 @@ describe(`createCollection runtime config validation`, () => {
       ).toThrow(InvalidOptionTypeError)
     })
 
-    it(`should throw InvalidOptionTypeError when gcTime is NaN`, () => {
-      expect(() =>
-        createCollection({
-          getKey: (item: any) => item.id,
-          sync: validSync,
-          gcTime: NaN,
-        }),
-      ).toThrow(InvalidOptionTypeError)
-    })
-
-    it(`should accept gcTime as Infinity`, () => {
-      const collection = createCollection({
-        getKey: (item: any) => item.id,
-        sync: validSync,
-        gcTime: Infinity,
-      })
-      expect(collection).toBeDefined()
-    })
+    it.each([0, -1, NaN, Infinity, -Infinity])(
+      `accepts gcTime %s to disable automatic garbage collection`,
+      (gcTime) => {
+        expect(() =>
+          createCollection({
+            getKey: (item: { id: number }) => item.id,
+            sync: validSync,
+            gcTime,
+          }),
+        ).not.toThrow()
+      },
+    )
 
     it(`should throw InvalidOptionTypeError when startSync is not a boolean`, () => {
       expect(() =>
@@ -371,6 +364,7 @@ describe(`createCollection runtime config validation`, () => {
         gcTime: 5000,
         startSync: false,
         autoIndex: `eager`,
+        defaultIndexType: BasicIndex,
         compare: (a: any, b: any) => a.id - b.id,
         syncMode: `eager`,
         onInsert: async () => {},

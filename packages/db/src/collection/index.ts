@@ -347,13 +347,18 @@ export function createCollection(
     schema?: StandardSchemaV1
   },
 ): Collection<any, string | number, UtilsRecord, any, any> {
-  // Validate config at runtime to produce clear error messages (dev only).
-  // TypeScript's type errors for createCollection overloads can be extremely
-  // hard to read due to deeply nested generics. This catches common mistakes
-  // early with actionable messages.
-  // Bundlers replace process.env.NODE_ENV with "production" in prod builds,
-  // making this entire block (and the imported validate-config module) tree-shakeable.
-  if (typeof process !== `undefined` && process.env.NODE_ENV !== `production`) {
+  // The pure probe supports unbundled browsers. Keep the literal comparison
+  // outside it so production bundlers can erase the entire check and import.
+  if (
+    /* @__PURE__ */ (() => {
+      try {
+        return process.env.NODE_ENV !== `production`
+      } catch {
+        return false
+      }
+    })() &&
+    process.env.NODE_ENV !== `production`
+  ) {
     validateCollectionConfig(options)
   }
 

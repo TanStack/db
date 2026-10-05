@@ -1,14 +1,16 @@
 import {
   CollectionRequiresConfigError,
-  CollectionRequiresGetKeyError,
   CollectionRequiresSyncConfigError,
+} from '../errors'
+import {
+  CollectionRequiresGetKeyError,
   InvalidCallbackOptionError,
   InvalidGetKeyError,
   InvalidOptionTypeError,
   InvalidSyncConfigError,
   InvalidSyncFunctionError,
   UnknownCollectionConfigError,
-} from '../errors'
+} from './config-errors'
 
 /**
  * All valid top-level config properties for createCollection.
@@ -22,6 +24,7 @@ const VALID_CONFIG_KEYS = new Set([
   `gcTime`,
   `startSync`,
   `autoIndex`,
+  `defaultIndexType`,
   `compare`,
   `syncMode`,
   `defaultStringCollation`,
@@ -167,10 +170,7 @@ export function validateCollectionConfig(config: unknown): void {
 
   // Validate gcTime
   if (`gcTime` in configObj && configObj.gcTime !== undefined) {
-    if (
-      typeof configObj.gcTime !== `number` ||
-      Number.isNaN(configObj.gcTime)
-    ) {
+    if (typeof configObj.gcTime !== `number`) {
       throw new InvalidOptionTypeError(
         `gcTime`,
         `a number`,
