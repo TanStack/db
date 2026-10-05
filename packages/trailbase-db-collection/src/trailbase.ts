@@ -204,8 +204,11 @@ export function trailBaseCollectionOptions<
       const cursors = new Map<string | number, string>()
 
       // Load (more) data.
+      // A caller that aborts sees `AbortError`. Pages a commit accepted still
+      // apply, and the load waits until they are visible; cleanup is quiet.
       async function load(opts: LoadSubsetOptions) {
-        if (cancelled || opts.signal?.aborted) return
+        if (cancelled) return
+        if (opts.signal?.aborted) throw new LoadSubsetOperationAbortedError()
 
         const lastKey = opts.cursor?.lastKey
         let cursor: string | undefined =
@@ -241,10 +244,13 @@ export function trailBaseCollectionOptions<
               filters,
             })
           } catch (error) {
-            if (cancelled || opts.signal?.aborted) return
+            if (cancelled) return
+            if (opts.signal?.aborted) break
             throw error
           }
-          if (cancelled || opts.signal?.aborted) return
+          if (cancelled) return
+          // Check the signal before commit to discard a stale page.
+          if (opts.signal?.aborted) break
 
           const length = response.records.length
           if (length === 0) {
@@ -261,8 +267,7 @@ export function trailBaseCollectionOptions<
             })
           }
 
-          // Check the signal before commit to discard a stale page: an
-          // accepted page always applies.
+          // An accepted page always applies.
           const applied = commit(opts.signal)
           if (applied !== true) {
             appliedPages.push(applied)

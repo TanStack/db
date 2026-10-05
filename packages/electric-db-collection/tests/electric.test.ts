@@ -3242,7 +3242,9 @@ describe(`Electric Integration`, () => {
       })
     })
 
-    it(`ignores a progressive snapshot after its subset request is aborted`, async () => {
+    // A caller that aborts sees `AbortError` at every cut: here, after the
+    // fetch but before its commit, so the snapshot is discarded.
+    it(`discards a progressive snapshot after its subset request is aborted, and rejects the load`, async () => {
       mockFetchSnapshot.mockReset()
       let resolveSnapshot!: (value: {
         metadata: Record<string, never>
@@ -3291,11 +3293,44 @@ describe(`Electric Integration`, () => {
             },
           ],
         })
-        if (load instanceof Promise) await load
+        if (load === true) throw new Error(`Expected a pending subset load`)
+        await expect(load).rejects.toMatchObject({ name: `AbortError` })
 
         expect(testCollection.has(2)).toBe(false)
       } finally {
         resolveSnapshot({ metadata: {}, data: [] })
+        await testCollection.cleanup()
+      }
+    })
+
+    it(`rejects a progressive subset load whose fetch fails because it was aborted`, async () => {
+      mockFetchSnapshot.mockReset()
+      const abortController = new AbortController()
+      mockFetchSnapshot.mockImplementation(async () => {
+        abortController.abort()
+        throw new DOMException(`aborted`, `AbortError`)
+      })
+      mockSubscribe.mockImplementation(() => () => {})
+      const testCollection = createCollection(
+        electricCollectionOptions({
+          id: `progressive-aborted-fetch-test`,
+          shapeOptions: {
+            url: `http://test-url`,
+            params: { table: `test_table` },
+          },
+          syncMode: `progressive`,
+          getKey: (item: Row) => item.id as number,
+          startSync: true,
+        }),
+      )
+      try {
+        const load = testCollection._sync.loadSubset({
+          limit: 1,
+          signal: abortController.signal,
+        })
+        if (load === true) throw new Error(`Expected a pending subset load`)
+        await expect(load).rejects.toMatchObject({ name: `AbortError` })
+      } finally {
         await testCollection.cleanup()
       }
     })

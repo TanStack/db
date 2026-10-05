@@ -459,7 +459,7 @@ describe(`TrailBase Integration`, () => {
     })
   })
 
-  it(`ignores a subset page that resolves after its request is aborted`, async () => {
+  it(`discards a subset page that resolves after its request is aborted, and rejects the load`, async () => {
     const recordApi = new MockRecordApi<Data>()
     let resolveList!: (response: ListResponse<Data>) => void
     recordApi.list.mockReturnValue(
@@ -490,7 +490,8 @@ describe(`TrailBase Integration`, () => {
       resolveList({
         records: [{ id: 1, updated: 0, data: `obsolete` }],
       })
-      if (load instanceof Promise) await load
+      if (load instanceof Promise)
+        await expect(load).rejects.toMatchObject({ name: `AbortError` })
 
       expect(stripState(collection.state)).toEqual(new Map())
     } finally {
@@ -1039,6 +1040,110 @@ describe(`TrailBase Integration`, () => {
       process.off(`unhandledRejection`, recordUnhandled)
       expect(errors).toEqual([])
       expect(stream.locked).toBe(false)
+    }
+  })
+})
+
+/**
+ * # What does an aborted subset load return?
+ *
+ * A caller that aborts its load sees `AbortError`, whatever point the load
+ * had reached. Rows a commit already accepted still apply; rows never
+ * committed are discarded. A load does not settle before its accepted pages
+ * are visible. The reference below states the expected outcome for each cut
+ * from those rules: before the fetch, a fetch rejected by the abort, after
+ * the fetch but before its commit, and between pages after page one was
+ * accepted. The review probes are these four cuts.
+ */
+describe(`TrailBase aborted subset loads`, () => {
+  type AbortCut =
+    | `before-fetch`
+    | `fetch-rejects`
+    | `before-commit`
+    | `between-pages`
+  const expected = (cut: AbortCut) => ({
+    load: `AbortError`,
+    acceptedVisible: cut === `between-pages`,
+    uncommittedVisible: false,
+  })
+  const pageOne = Array.from({ length: 256 }, (_, index) => ({
+    id: index + 1,
+    updated: 0,
+    data: `p1`,
+  }))
+
+  it.each<AbortCut>([
+    `before-fetch`,
+    `fetch-rejects`,
+    `before-commit`,
+    `between-pages`,
+  ])(`rejects a load aborted at %s`, async (cut) => {
+    const recordApi = new MockRecordApi<Data>()
+    recordApi.subscribe.mockResolvedValue(new TransformStream<Event>().readable)
+    const controller = new AbortController()
+    let calls = 0
+    recordApi.list.mockImplementation(async () => {
+      calls++
+      if (cut === `fetch-rejects`) {
+        controller.abort()
+        throw new Error(`network aborted`)
+      }
+      if (cut === `between-pages` && calls === 1)
+        return { records: pageOne, cursor: `c1` }
+      controller.abort()
+      return { records: [{ id: 1000, updated: 0, data: `uncommitted` }] }
+    })
+    const collection = createCollection(
+      trailBaseCollectionOptions({
+        recordApi,
+        getKey: (item: Data) => item.id ?? -1,
+        startSync: true,
+        syncMode: `on-demand`,
+        parse: {},
+        serialize: {},
+      }),
+    )
+    let release!: () => void
+    const persistence = new Promise<void>((resolve) => {
+      release = resolve
+    })
+    const transaction = createTransaction({ mutationFn: () => persistence })
+    try {
+      await vi.waitFor(() => expect(collection.status).toBe(`ready`))
+      // Hold accepted pages behind a persisting mutation.
+      transaction.mutate(() =>
+        collection.insert({ id: 5000, updated: 0, data: `local` }),
+      )
+      if (cut === `before-fetch`) controller.abort()
+      const load = Promise.resolve(
+        collection._sync.loadSubset({ limit: 512, signal: controller.signal }),
+      )
+      let settled = false
+      void load.then(
+        () => (settled = true),
+        () => (settled = true),
+      )
+      if (cut === `between-pages`) {
+        await vi.waitFor(() => expect(calls).toBe(2))
+        await new Promise((resolve) => setTimeout(resolve, 0))
+        expect(settled, `load waits for its accepted page`).toBe(false)
+      }
+      release()
+      await transaction.isPersisted.promise
+      const outcome = await load.then(
+        () => `resolved`,
+        (error: { name?: string }) => error.name,
+      )
+      expect({
+        load: outcome,
+        acceptedVisible: collection.has(1),
+        uncommittedVisible: collection.has(1000),
+      }).toEqual(expected(cut))
+    } finally {
+      controller.abort()
+      release()
+      await transaction.isPersisted.promise.catch(() => undefined)
+      await collection.cleanup()
     }
   })
 })

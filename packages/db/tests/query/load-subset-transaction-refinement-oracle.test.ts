@@ -19,7 +19,9 @@ import { LoadSubsetOperationAbortedError } from '../../src/errors.js'
  * the row. A later abort, while the batch waits or after publication starts,
  * keeps the row. In every phase the aborted load rejects with `AbortError`;
  * a source that wants to discard a stale page checks the signal before
- * `commit()`.
+ * `commit()`. Adapters extend the same law to every cut of their own loads
+ * (before the fetch, a fetch rejected by the abort, after the fetch but before
+ * the commit, and between pages); their test suites own those drivers.
  *
  * `expectedOutcome` states this rule from public facts. It does not copy the
  * production queue. The test creates each timing phase in production. It then
@@ -57,6 +59,39 @@ function expectedOutcome(
 }
 
 describe(`loadSubset transaction refinement`, () => {
+  // A load aborted before it starts rejects with `AbortError` and never
+  // reaches the source.
+  it(`rejects a load aborted before it reaches the source`, async () => {
+    let loadSubsetCalls = 0
+    const source = createCollection<Row>({
+      id: `transaction-refinement-before-load`,
+      getKey: (row) => row.id,
+      syncMode: `on-demand`,
+      sync: {
+        sync: ({ markReady }) => {
+          markReady()
+          return {
+            loadSubset: () => {
+              loadSubsetCalls++
+              return true
+            },
+          }
+        },
+      },
+    })
+    source.startSyncImmediate()
+    try {
+      const controller = new AbortController()
+      controller.abort()
+      const load = source._sync.loadSubset({ signal: controller.signal })
+      if (load === true) throw new Error(`Expected a rejected load`)
+      await expect(load).rejects.toMatchObject({ name: `AbortError` })
+      expect(loadSubsetCalls).toBe(0)
+    } finally {
+      await source.cleanup()
+    }
+  })
+
   // These three phases cover the contract:
   // - The caller aborts during commit.
   // - The caller aborts after commit while publication waits.

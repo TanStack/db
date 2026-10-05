@@ -718,10 +718,12 @@ function createLoadSubsetDedupe<T extends Row<unknown>>({
       const snapshotParams = compileSQL<T>(opts, compileOptions)
       try {
         const { data: rows } = await stream.fetchSnapshot(snapshotParams)
-        if (opts.signal?.aborted || !isBufferingInitialSync()) {
+        if (!isBufferingInitialSync()) {
           debug(`${logPrefix}Ignoring snapshot - sync completed while fetching`)
           return
         }
+        // Check the signal before commit to discard a stale snapshot.
+        throwIfAborted()
 
         if (rows.length > 0) {
           begin()
@@ -738,15 +740,16 @@ function createLoadSubsetDedupe<T extends Row<unknown>>({
           debug(`${logPrefix}Applied snapshot with ${rows.length} rows`)
         }
       } catch (error) {
-        if (opts.signal?.aborted) return
+        // Cleanup is quiet; a caller that aborted sees `AbortError`.
         if (handleSnapshotError(error, `fetchSnapshot`)) {
           return
         }
+        if (opts.signal?.aborted) throw abortReason(opts.signal)
         throw error
       }
       // Rows accepted before an abort still apply, but the caller that
       // aborted sees `AbortError`.
-      throwIfAborted()
+      if (opts.signal?.aborted) throw abortReason(opts.signal)
       return
     }
 
