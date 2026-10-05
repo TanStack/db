@@ -1692,14 +1692,8 @@ export class CollectionStateManager<
           events.push({ type: `insert`, key, value })
         }
 
-        // A ready callback below can add optimistic upserts that this batch
-        // has not published, so freeze the keys it has.
+        // The changed-key loop below must not publish these keys again.
         reappliedKeys = new Set(this.optimisticUpserts.keys())
-
-        // Ensure listeners are active before emitting this critical batch
-        if (this.lifecycle.status !== `ready`) {
-          this.lifecycle.markReady()
-        }
       }
 
       // Now check what actually changed in the final visible state
@@ -1777,18 +1771,34 @@ export class CollectionStateManager<
       }
 
       // End batching and emit all events (combines any batched events with sync events)
+      // Subscribers and ready callbacks can throw. Keep the first error so
+      // the applied receipts below still settle.
       let failure: { error: unknown } | undefined
-      try {
-        const visibleLayoutChanged =
-          previousLayout !== undefined &&
-          (previousLayout.length !== this.size ||
-            [...this.keys()].some(
-              (key, index) => key !== previousLayout[index],
-            ))
-        this.changes.emitEvents(events, true, visibleLayoutChanged)
-      } catch (error) {
-        failure = { error }
+      const capture = (step: () => void) => {
+        try {
+          step()
+        } catch (error) {
+          failure ??= { error }
+        }
       }
+      const visibleLayoutChanged =
+        previousLayout !== undefined &&
+        (previousLayout.length !== this.size ||
+          [...this.keys()].some((key, index) => key !== previousLayout[index]))
+      // markReady may skip its transition, and then the batch still emits.
+      let emitted = false as boolean
+      const emit = () => {
+        emitted = true
+        capture(() =>
+          this.changes.emitEvents(events, true, visibleLayoutChanged),
+        )
+      }
+      // A truncate that makes the Collection ready publishes its batch after
+      // the status reads ready and before status listeners and ready
+      // callbacks run, so their writes follow the batch they describe.
+      if (hasTruncateSync && this.lifecycle.status !== `ready`)
+        capture(() => this.lifecycle.markReady(emit))
+      if (!emitted) emit()
 
       if (this.syncRunGeneration === syncRunGeneration) {
         this.preSyncVisibleState.clear()
