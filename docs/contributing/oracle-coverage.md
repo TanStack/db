@@ -867,6 +867,24 @@ boundary. Track the generalized repairs here instead of accumulating isolated
 regressions. Completion requires an executable owner, a production-path witness,
 a hostile wrong-answer control, and an explicit statement of remaining limits.
 
+- [x] **Accepted source commits behind queued subset hydration.**
+      The persistence-history owner enumerates insert/partial-update,
+      one/two/three queued hydrations, ordinary/immediate commits, and an
+      absent/present dependent successor. These 24 histories check receipt
+      settlement, public/durable rows, metadata, cursor, and durable source FIFO.
+      Publication preserves ordinary accepted commits while open transactions
+      still cannot cross hydration cycles. Hydration-owned replay retains its
+      captured metadata ownership. Owner:
+      `packages/db-sqlite-persistence-core/tests/persisted-oracle.test.ts`.
+      The [review record](oracle-reviews/issue-2036-queued-hydration-publication.md)
+      records RED/GREEN evidence and the oracle-guide loss audit.
+      Further witnesses must compose this accepted-before-hydration schedule
+      with cancellation, cleanup, or hydration failure in the same owner.
+      Live Electric/browser OPFS delivery needs the matching schedule in
+      `packages/browser-db-sqlite-persistence/e2e/electric-hydration-straddle.opfs.spec.ts`;
+      its current ordering does not establish this handoff.
+      These are bounded witnesses, not closure of arbitrary interleavings.
+
 - [ ] **Optimizer residual convergence beyond the checked paths.** The
       optimizer-semantics owner now checks `sourceWhereClauses`, source-free
       predicates, namespace-only predicates, later RIGHT/FULL join nullability,

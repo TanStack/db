@@ -11805,9 +11805,29 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
     }
   })
 
-  it.each([`insert`, `update`] as const)(
-    `publishes a committed source %s queued behind subsequent subset hydrations`,
-    async (type) => {
+  // Commit acceptance creates a source obligation. Successful subset hydration
+  // queued ahead of publication cannot revoke it. This finite grammar crosses
+  // one/two/three queued hydrations, ordinary/immediate commits, insert/update,
+  // and absent/present dependent successors. The two-hydration ordinary case
+  // reconstructs the report; one and three distinguish a misplaced threshold.
+  // Open transactions crossing hydration are excluded here and rejected below.
+  // This driver supplies adapter scheduling, not live Electric or OPFS delivery.
+  it.each(
+    ([`insert`, `update`] as const).flatMap((type) =>
+      [1, 2, 3].flatMap((hydrationCount) =>
+        [false, true].flatMap((immediate) =>
+          [false, true].map((hasSuccessor) => ({
+            type,
+            hydrationCount,
+            immediate,
+            hasSuccessor,
+          })),
+        ),
+      ),
+    ),
+  )(
+    `publishes committed source $type after $hydrationCount queued hydrations (immediate=$immediate, successor=$hasSuccessor)`,
+    async ({ type, hydrationCount, immediate, hasSuccessor }) => {
       // https://github.com/TanStack/db/issues/2036
       const adapter = createRecordingAdapter([
         { id: `shared`, title: `persisted`, detail: `retained baseline` },
@@ -11822,8 +11842,14 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
           persistenceEntered.resolve()
           await releasePersistence.promise
         }
+        for (const mutation of args[1].mutations) {
+          if (mutation.type !== `delete` && mutation.key === `shared`) {
+            durableSourceTitles.push((mutation.value as Todo).title)
+          }
+        }
         await applyCommittedTx(...args)
       }
+      const durableSourceTitles: Array<string> = []
       const hydrationTitles: Array<string | undefined> = []
       const loadSubset = adapter.loadSubset.bind(adapter)
       adapter.loadSubset = async (...args) => {
@@ -11846,7 +11872,28 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
           persistence: { adapter },
         }),
       )
-      const options = [{ limit: 1 }, { limit: 2 }]
+      const options = Array.from({ length: hydrationCount }, (_, index) => ({
+        limit: index + 1,
+      }))
+      // Model complete source obligations independently of production queues.
+      // Hydration establishes the baseline first; source patches retain detail.
+      // Fresh inserts reset metadata, while updates keep baseline ownership.
+      const sourceTitles = hasSuccessor
+        ? [`first source value`, `second source value`]
+        : [`first source value`]
+      const expected = foldDurabilityLedger(
+        sourceTitles.flatMap(
+          (title): Array<DurabilityLedgerEvent> => [
+            { type: `begin`, transactionId: title },
+            {
+              type: `write`,
+              transactionId: title,
+              row: { id: `shared`, title, detail: `retained baseline` },
+            },
+            { type: `commit`, transactionId: title },
+          ],
+        ),
+      )
       const receipts: Array<Promise<true | void>> = []
       let hasPrimaryFailure = false
       try {
@@ -11864,8 +11911,8 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
           `predecessor persistence entered`,
         )
 
-        // Reserve both hydrations while the predecessor holds the mutex.
-        // Neither has started when the source transaction begins and commits.
+        // Reserve hydrations while the predecessor holds the mutex.
+        // None has started when the source transaction begins and commits.
         for (const option of options) {
           const hydration = Promise.resolve(collection._sync.loadSubset(option))
           void hydration.catch(() => undefined)
@@ -11873,7 +11920,7 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
         }
         await flushAsyncWork()
         expect(adapter.loadSubsetCalls).toHaveLength(0)
-        sourceParams.begin()
+        sourceParams.begin({ immediate })
         sourceParams.write({
           type,
           value: { id: `shared`, title: `first source value` },
@@ -11883,25 +11930,31 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
         void firstReceipt.catch(() => undefined)
         receipts.push(firstReceipt)
 
-        sourceParams.begin()
-        expect(sourceParams.metadata!.collection.get(`cursor`)).toBe(`first`)
-        sourceParams.write({
-          type: `update`,
-          value: { id: `shared`, title: `second source value` },
-        })
-        sourceParams.metadata!.collection.set(`cursor`, `second`)
-        const secondReceipt = Promise.resolve(sourceParams.commit())
-        void secondReceipt.catch(() => undefined)
-        receipts.push(secondReceipt)
+        if (hasSuccessor) {
+          sourceParams.begin({ immediate })
+          expect(sourceParams.metadata!.collection.get(`cursor`)).toBe(`first`)
+          sourceParams.write({
+            type: `update`,
+            value: { id: `shared`, title: `second source value` },
+          })
+          sourceParams.metadata!.collection.set(`cursor`, `second`)
+          const secondReceipt = Promise.resolve(sourceParams.commit())
+          void secondReceipt.catch(() => undefined)
+          receipts.push(secondReceipt)
+        }
         expect(collection.get(`shared`)).toBeUndefined()
 
         releasePersistence.resolve()
-        await atPersistedOracleCheckpoint(
-          Promise.all(receipts),
-          `committed source receipts after two hydrations`,
+        // Observe every receipt before cleanup. allSettled preserves rejection
+        // identity alongside the wrong public/durable snapshot on main.
+        const outcomes = await atPersistedOracleCheckpoint(
+          Promise.allSettled(receipts),
+          `committed source receipts after queued hydrations`,
         )
         expect({
+          outcomes,
           hydrationTitles,
+          durableSourceTitles,
           status: collection.status,
           publicRow: stripVirtualProps(collection.get(`shared`)),
           durableRow: adapter.rows.get(`shared`),
@@ -11911,30 +11964,34 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
             tx.mutations.map(({ key }) => key),
           ),
         }).toEqual({
-          hydrationTitles: [undefined, `persisted`],
+          outcomes: receipts.map(() => ({
+            status: `fulfilled`,
+            value: undefined,
+          })),
+          hydrationTitles: options.map((_, index) =>
+            index === 0 ? undefined : `persisted`,
+          ),
+          durableSourceTitles: expected.commitOrder,
           status: `ready`,
-          publicRow: {
-            id: `shared`,
-            title: `second source value`,
-            detail: `retained baseline`,
-          },
-          durableRow: {
-            id: `shared`,
-            title: `second source value`,
-            detail: `retained baseline`,
-          },
+          publicRow: expected.committedRows.get(`shared`),
+          durableRow: expected.committedRows.get(`shared`),
           rowMetadata: type === `insert` ? undefined : { owner: `persisted` },
-          cursor: `second`,
-          durableKeys: [[`gate`], [`shared`], [`shared`]],
+          cursor: hasSuccessor ? `second` : `first`,
+          durableKeys: [[`gate`], ...sourceTitles.map(() => [`shared`])],
         })
       } catch (error) {
         hasPrimaryFailure = true
         throw error
       } finally {
         releasePersistence.resolve()
-        for (const option of options) collection._sync.unloadSubset(option)
         await cleanupPersistedOracle(
-          [() => Promise.allSettled(receipts), () => collection.cleanup()],
+          [
+            ...options.map(
+              (option) => () => collection._sync.unloadSubset(option),
+            ),
+            () => Promise.allSettled(receipts),
+            () => collection.cleanup(),
+          ],
           hasPrimaryFailure,
         )
       }
