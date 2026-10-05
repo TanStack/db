@@ -146,6 +146,8 @@ took #2004's smaller state stack and kept this branch's laws.
 | Query Collection rolls back accepted ownership on supersession | ownership oracle | killed |
 | TrailBase aborted load resolves | TrailBase | killed, 5 failures |
 | Electric aborted load resolves | Electric | killed, 1 failure |
+| Reject a source delete for a never-held key | state-retention oracle | killed, 11 failures |
+| Drop a source delete for a never-held key | state-retention oracle | survived; equivalent |
 
 Corrections and survivors:
 
@@ -153,6 +155,10 @@ Corrections and survivors:
   its name filter no longer matched the supersession test. With the correct
   filter, the mutant fails. It is not equivalent, and the earlier note about
   it is withdrawn.
+- **Dropped never-held delete:** the key is absent from the applied synced
+  rows, and the optimistic state drops at settlement either way. The
+  [absent-key review](2026-10-02-absent-key-source-delete.md) records the
+  rewritten pinned histories.
 - **Core abort calls the cancel path:** `cancelPendingSyncedTransaction` now
   throws `SyncQueueInvariantError` for a committed transaction. The guard
   stops the cancellation before it changes state, so the accepted rows still

@@ -1967,7 +1967,7 @@ const sourceBatch = fc.record({
     selector: (row) => row.id,
     maxLength: 3,
   }),
-  // The source may also delete keys; only keys it holds take effect.
+  // The source may also delete keys, including keys it does not hold.
   deletes: fc.oneof(
     { weight: 3, arbitrary: fc.constant([]) },
     {
@@ -2315,14 +2315,94 @@ it(`writes source inserts and deletes in the fixed campaign`, async () => {
   const histories = fc.sample(optimisticHistory, { seed: 86103, numRuns: 40 })
   let inserts = 0
   let deletes = 0
+  let absentDeletes = 0
   for (const { initial, steps } of histories) {
     const counts = await runOptimisticHistory(initial, steps)
     inserts += counts.sourceInserts
     deletes += counts.sourceDeletes
+    absentDeletes += counts.absentSourceDeletes
   }
   expect(inserts).toBeGreaterThan(0)
-  expect(deletes).toBeGreaterThan(0)
+  expect(deletes).toBeGreaterThan(absentDeletes)
+  expect(absentDeletes).toBeGreaterThan(0)
 })
+
+// Pinned replays for a source delete of a key the source never held. The
+// backend accepted an optimistic insert, then deleted the row before the
+// source streamed it. The model's drain applies the delete to the applied
+// synced rows, where it changes nothing, so the visible result follows from
+// the settlement-drop law alone. The driver compares every step with the
+// model; each count below proves the replay reached its premise.
+function absentKeyDelete(truncate = false) {
+  return {
+    type: `sync` as const,
+    rows: [],
+    deletes: [1],
+    truncate,
+    copies: 1,
+  }
+}
+
+// Committed while the insert persists, or inside its handler, the delete is
+// queued. The settled insert's row is held with it, and the drop and the
+// delete publish together, so the row is gone after settlement.
+it.each([`while persisting`, `inside the handler`] as const)(
+  `removes a settled insert in its drop publication when the source deletes a key it never held %s`,
+  async (delivery) => {
+    const inHandler = delivery === `inside the handler`
+    const counts = await runOptimisticHistory(
+      [{ id: 2, a: 0, b: 0, c: 0 }],
+      [
+        {
+          type: `edit`,
+          key: 1,
+          fields: { a: 1 },
+          optimistic: true,
+          ...(inHandler ? { inHandler: absentKeyDelete() } : {}),
+        },
+        ...(inHandler ? [] : [absentKeyDelete()]),
+        { type: `settle`, slot: 0, success: true, cascade: false },
+      ],
+    )
+    expect(counts.absentSourceDeletes).toBe(1)
+    expect(counts.queued).toBe(1)
+    expect(counts.handlerBatches).toBe(inHandler ? 1 : 0)
+  },
+)
+
+// Once the optimistic state has dropped, the key is absent from the visible
+// rows, and the delete changes nothing a reader can see.
+it(`leaves the visible rows unchanged when the source deletes a never-held key after the drop`, async () => {
+  const counts = await runOptimisticHistory(
+    [{ id: 2, a: 0, b: 0, c: 0 }],
+    [
+      { type: `edit`, key: 1, fields: { a: 1 }, optimistic: true },
+      { type: `settle`, slot: 0, success: true, cascade: false },
+      absentKeyDelete(),
+    ],
+  )
+  expect(counts.absentSourceDeletes).toBe(1)
+  expect(counts.queued).toBe(0)
+})
+
+// The nearby boundary: a persisting request keeps its optimistic row. A
+// queued delete waits for settlement. A truncate that carries the delete
+// applies at once, and the persisting insert overlays the replacement.
+it.each([false, true])(
+  `keeps a persisting insert's optimistic row when the source deletes a key it never held, truncate=%s`,
+  async (truncate) => {
+    const counts = await runOptimisticHistory(
+      [{ id: 2, a: 0, b: 0, c: 0 }],
+      [
+        { type: `edit`, key: 1, fields: { a: 1 }, optimistic: true },
+        absentKeyDelete(truncate),
+        { type: `settle`, slot: 0, success: true, cascade: false },
+      ],
+    )
+    expect(counts.absentSourceDeletes).toBe(1)
+    expect(truncate ? counts.snapshotOverrides : counts.queued).toBe(1)
+  },
+)
 
 it(`generates source batches inside insert, update, and delete handlers`, () => {
   const histories = fc.sample(optimisticHistory, { seed: 86103, numRuns: 100 })
