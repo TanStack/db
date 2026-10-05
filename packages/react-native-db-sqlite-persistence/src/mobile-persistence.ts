@@ -1,4 +1,6 @@
 import {
+  DEFAULT_APPLIED_TX_PRUNE_MAX_AGE_SECONDS,
+  DEFAULT_APPLIED_TX_PRUNE_MAX_ROWS,
   SingleProcessCoordinator,
   createSQLiteCorePersistenceAdapter,
 } from '@tanstack/db-sqlite-persistence-core'
@@ -10,24 +12,28 @@ import type {
   SQLiteCoreAdapterOptions,
   SQLiteDriver,
 } from '@tanstack/db-sqlite-persistence-core'
-import type { OpSQLiteDatabaseLike } from './op-sqlite-driver'
+import type {
+  OpSQLiteArrayResultMode,
+  OpSQLiteDatabaseLike,
+} from './op-sqlite-driver'
 
-export type { OpSQLiteDatabaseLike } from './op-sqlite-driver'
+export type {
+  OpSQLiteArrayResultMode,
+  OpSQLiteDatabaseLike,
+} from './op-sqlite-driver'
 
 type MobileSQLiteCoreSchemaMismatchPolicy =
-  | `sync-present-reset`
-  | `sync-absent-error`
-  | `reset`
+  `sync-present-reset` | `sync-absent-error` | `reset`
 
 export type MobileSQLiteSchemaMismatchPolicy =
-  | MobileSQLiteCoreSchemaMismatchPolicy
-  | `throw`
+  MobileSQLiteCoreSchemaMismatchPolicy | `throw`
 
 type MobileSQLitePersistenceBaseOptions = Omit<
   SQLiteCoreAdapterOptions,
   `driver` | `schemaVersion` | `schemaMismatchPolicy`
 > & {
   database: OpSQLiteDatabaseLike
+  arrayResultMode?: OpSQLiteArrayResultMode
   coordinator?: PersistedCollectionCoordinator
   schemaMismatchPolicy?: MobileSQLiteSchemaMismatchPolicy
 }
@@ -69,6 +75,7 @@ function createInternalSQLiteDriver(
 ): SQLiteDriver {
   return new OpSQLiteDriver({
     database: options.database,
+    arrayResultMode: options.arrayResultMode,
   })
 }
 
@@ -79,8 +86,11 @@ function resolveAdapterBaseOptions(
   `driver` | `schemaVersion` | `schemaMismatchPolicy`
 > {
   return {
-    appliedTxPruneMaxRows: options.appliedTxPruneMaxRows,
-    appliedTxPruneMaxAgeSeconds: options.appliedTxPruneMaxAgeSeconds,
+    appliedTxPruneMaxRows:
+      options.appliedTxPruneMaxRows ?? DEFAULT_APPLIED_TX_PRUNE_MAX_ROWS,
+    appliedTxPruneMaxAgeSeconds:
+      options.appliedTxPruneMaxAgeSeconds ??
+      DEFAULT_APPLIED_TX_PRUNE_MAX_AGE_SECONDS,
     pullSinceReloadThreshold: options.pullSinceReloadThreshold,
   }
 }

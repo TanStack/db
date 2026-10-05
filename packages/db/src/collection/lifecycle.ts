@@ -7,6 +7,8 @@ import {
   safeCancelIdleCallback,
   safeRequestIdleCallback,
 } from '../utils/browser-polyfills'
+import { runAllCallbacks } from '../utils/callbacks'
+import { createDeferred } from '../deferred'
 import { CleanupQueue } from './cleanup-queue'
 import type { IdleCallbackDeadline } from '../utils/browser-polyfills'
 import type { StandardSchemaV1 } from '@standard-schema/spec'
@@ -17,13 +19,24 @@ import type { CollectionChangesManager } from './changes'
 import type { CollectionSyncManager } from './sync'
 import type { CollectionStateManager } from './state'
 
+/**
+ * Floor applied to the GC delay of a collection that started syncing before
+ * anything subscribed. Adapters build their live query while rendering and
+ * subscribe when that render commits. This grace period reduces cleanup
+ * during that gap; a later subscriber can still restart sync. Adapters pass
+ * a near-zero `gcTime` to make teardown on unmount immediate. Does not apply
+ * to the timer armed when the last subscriber leaves, which still honours
+ * `gcTime` exactly.
+ */
+export const UNSUBSCRIBED_GC_FLOOR_MS = 50
+
 export class CollectionLifecycleManager<
   TOutput extends object = Record<string, unknown>,
   TKey extends string | number = string | number,
   TSchema extends StandardSchemaV1 = StandardSchemaV1,
   TInput extends object = TOutput,
 > {
-  private config: CollectionConfig<TOutput, TKey, TSchema>
+  private config: CollectionConfig<TOutput, TKey, TSchema, any>
   private id: string
   private indexes!: CollectionIndexesManager<TOutput, TKey, TSchema, TInput>
   private events!: CollectionEventsManager
@@ -36,13 +49,24 @@ export class CollectionLifecycleManager<
   public hasReceivedFirstCommit = false
   public onFirstReadyCallbacks: Array<() => void> = []
   private idleCallbackId: number | null = null
+  private syncError: unknown
+  private cleanupConfig: () => void
+  private statusRevision = 0
+  private cleaningUp = false
+  private cleanupPromise: Promise<void> | null = null
+  private readonly cleanupStartCallbacks = new Set<() => void>()
 
   /**
    * Creates a new CollectionLifecycleManager instance
    */
-  constructor(config: CollectionConfig<TOutput, TKey, TSchema>, id: string) {
+  constructor(
+    config: CollectionConfig<TOutput, TKey, TSchema, any>,
+    id: string,
+    cleanupConfig: () => void = () => {},
+  ) {
     this.config = config
     this.id = id
+    this.cleanupConfig = cleanupConfig
   }
 
   setDeps(deps: {
@@ -77,7 +101,7 @@ export class CollectionLifecycleManager<
       idle: [`loading`, `error`, `cleaned-up`],
       loading: [`ready`, `error`, `cleaned-up`],
       ready: [`cleaned-up`, `error`],
-      error: [`cleaned-up`, `idle`],
+      error: [`ready`, `cleaned-up`, `idle`],
       'cleaned-up': [`loading`, `error`],
     }
 
@@ -103,11 +127,16 @@ export class CollectionLifecycleManager<
       )
     }
     this.validateStatusTransition(this.status, newStatus)
+    const revision = ++this.statusRevision
     const previousStatus = this.status
     this.status = newStatus
 
     // Emit event
-    this.events.emitStatusChange(newStatus, previousStatus)
+    this.events.emitStatusChange(
+      newStatus,
+      previousStatus,
+      () => this.statusRevision === revision,
+    )
   }
 
   /**
@@ -132,10 +161,33 @@ export class CollectionLifecycleManager<
    * @private - Should only be called by sync implementations
    */
   public markReady(): void {
+    const failure = this.applyReadyTransition()
+    if (failure) throw failure.error
+  }
+
+  /** @internal Capture ready-effect failures while the sync entry completes. */
+  public markReadyDuringSyncStart(): { error: unknown } | undefined {
+    return this.applyReadyTransition()
+  }
+
+  private applyReadyTransition(): { error: unknown } | undefined {
     this.validateStatusTransition(this.status, `ready`)
-    // Can transition to ready from loading state
-    if (this.status === `loading`) {
+    // A successful initial sync or recovery establishes a ready snapshot.
+    if (this.status === `loading` || this.status === `error`) {
+      this.syncError = undefined
+      const readyRevision = this.statusRevision + 1
       this.setStatus(`ready`, true)
+
+      // A status listener can synchronously supersede this transition, even
+      // when it restarts the Collection back to ready before returning.
+      if (
+        (this.status as CollectionStatus) !== `ready` ||
+        this.statusRevision !== readyRevision
+      ) {
+        return undefined
+      }
+
+      const readyEffects: Array<() => void> = []
 
       // Call any registered first ready callbacks (only on first time becoming ready)
       if (!this.hasBeenReady) {
@@ -146,23 +198,87 @@ export class CollectionLifecycleManager<
           this.hasReceivedFirstCommit = true
         }
 
-        const callbacks = [...this.onFirstReadyCallbacks]
+        readyEffects.push(...this.onFirstReadyCallbacks)
         this.onFirstReadyCallbacks = []
-        callbacks.forEach((callback) => callback())
       }
       // Notify dependents when markReady is called, after status is set
       // This ensures live queries get notified when their dependencies become ready
-      if (this.changes.changeSubscriptions.size > 0) {
-        this.changes.emitEmptyReadyEvent()
+      readyEffects.push(() => this.changes.emitEmptyReadyEvent())
+      try {
+        runAllCallbacks(readyEffects)
+      } catch (error) {
+        return { error }
       }
     }
+    return undefined
+  }
+
+  /** Mark an asynchronous sync failure after sync has started. */
+  public markError(error?: unknown): void {
+    this.validateStatusTransition(this.status, `error`)
+    this.syncError = error
+    this.setStatus(`error`)
+  }
+
+  /** Return the cause supplied by the current sync run, if any. */
+  public getSyncError(): unknown {
+    return this.syncError
+  }
+
+  public assertCanStartSync(): void {
+    if (this.cleaningUp) {
+      throw new CollectionStateError(
+        `Cannot start collection "${this.id}" during cleanup. Restart after cleanup() completes.`,
+      )
+    }
+    // A synchronously finished retirement retains its public promise until
+    // settlement. Starting a new sync run assigns later cleanup to that run.
+    this.cleanupPromise = null
+  }
+
+  /**
+   * Observe the synchronous start of cleanup without treating it as terminal
+   * resource settlement. Internal dependents use this to retire work before
+   * an asynchronous adapter cleanup publishes `cleaned-up`.
+   */
+  public onCleanupStart(callback: () => void): () => void {
+    this.cleanupStartCallbacks.add(callback)
+    if (this.cleaningUp) {
+      try {
+        callback()
+      } catch (error) {
+        // Registration did not return its ownership handle. Do not retain an
+        // observer that its caller has no way to unsubscribe.
+        this.cleanupStartCallbacks.delete(callback)
+        throw error
+      }
+    }
+    return () => this.cleanupStartCallbacks.delete(callback)
+  }
+
+  /**
+   * Start the garbage collection timer for a collection with no subscribers
+   * Called when sync starts outside a subscription
+   */
+  public startGCTimerIfUnsubscribed(): void {
+    this.startGCTimer(UNSUBSCRIBED_GC_FLOOR_MS)
+  }
+
+  private canGarbageCollect(): boolean {
+    return (
+      !this.cleaningUp &&
+      this.changes.activeSubscribersCount === 0 &&
+      !this.sync.hasPendingPreload
+    )
   }
 
   /**
    * Start the garbage collection timer
    * Called when the collection becomes inactive (no subscribers)
    */
-  public startGCTimer(): void {
+  public startGCTimer(minDelay = 0): void {
+    if (!this.canGarbageCollect()) return
+
     const gcTime = this.config.gcTime ?? 300000 // 5 minutes default
 
     // If gcTime is 0, negative, or non-finite (Infinity, -Infinity, NaN), GC is disabled.
@@ -172,12 +288,16 @@ export class CollectionLifecycleManager<
       return
     }
 
-    CleanupQueue.getInstance().schedule(this, gcTime, () => {
-      if (this.changes.activeSubscribersCount === 0) {
-        // Schedule cleanup during idle time to avoid blocking the UI thread
-        this.scheduleIdleCleanup()
-      }
-    })
+    CleanupQueue.getInstance().schedule(
+      this,
+      Math.max(gcTime, minDelay),
+      () => {
+        if (this.canGarbageCollect()) {
+          // Schedule cleanup during idle time to avoid blocking the UI thread
+          this.scheduleIdleCleanup()
+        }
+      },
+    )
   }
 
   /**
@@ -208,7 +328,7 @@ export class CollectionLifecycleManager<
     this.idleCallbackId = safeRequestIdleCallback(
       (deadline) => {
         // Perform cleanup if we still have no subscribers
-        if (this.changes.activeSubscribersCount === 0) {
+        if (this.canGarbageCollect()) {
           const cleanupCompleted = this.performCleanup(deadline)
           // Only clear the callback ID if cleanup actually completed
           if (cleanupCompleted) {
@@ -228,43 +348,19 @@ export class CollectionLifecycleManager<
    * @returns true if cleanup was completed, false if it was rescheduled
    */
   private performCleanup(deadline?: IdleCallbackDeadline): boolean {
+    // Nested cleanup belongs to this retirement, not a new lifecycle turn.
+    if (this.cleaningUp) return true
     // If we have a deadline, we can potentially split cleanup into chunks
     // For now, we'll do all cleanup at once but check if we have time
     const hasTime =
       !deadline || deadline.timeRemaining() > 0 || deadline.didTimeout
 
     if (hasTime) {
-      // Perform all cleanup operations except events
-      this.sync.cleanup()
-      this.state.cleanup()
-      this.changes.cleanup()
-      this.indexes.cleanup()
-
-      CleanupQueue.getInstance().cancel(this)
-
-      this.hasBeenReady = false
-
-      // Call any pending onFirstReady callbacks before clearing them.
-      // This ensures preload() promises resolve during cleanup instead of hanging.
-      const callbacks = [...this.onFirstReadyCallbacks]
-      this.onFirstReadyCallbacks = []
-      callbacks.forEach((callback) => {
-        try {
-          callback()
-        } catch (error) {
-          console.error(
-            `${this.config.id ? `[${this.config.id}] ` : ``}Error in onFirstReady callback during cleanup:`,
-            error,
-          )
-        }
-      })
-
-      // Set status to cleaned-up after everything is cleaned up
-      // This fires the status:change event to notify listeners
-      this.setStatus(`cleaned-up`)
-
-      // Finally, cleanup event handlers after the event has been fired
-      this.events.cleanup()
+      const cleanup = this.beginCleanup()
+      // Automatic GC has no caller to receive cleanup rejection. Core still
+      // finalizes the lifecycle; adapter diagnostics remain observable through
+      // the returned promise for explicit cleanup.
+      void cleanup.catch(() => undefined)
 
       return true
     } else {
@@ -274,29 +370,134 @@ export class CollectionLifecycleManager<
     }
   }
 
+  private beginCleanup(): Promise<void> {
+    if (this.cleanupPromise) return this.cleanupPromise
+
+    const completion = createDeferred<void>()
+    this.cleanupPromise = completion.promise
+    this.cleaningUp = true
+    const localFailures: Array<unknown> = []
+    let synchronousSyncFailure: { error: unknown } | undefined
+    let syncCleanupComplete = true
+    let finished = false
+
+    const attempt = (callback: () => void): void => {
+      try {
+        callback()
+      } catch (error) {
+        localFailures.push(error)
+      }
+    }
+
+    // Dependents must stop using the discarded sync run immediately, while
+    // the public status and cleanup promise still wait for adapter settlement.
+    for (const callback of [...this.cleanupStartCallbacks]) {
+      attempt(callback)
+    }
+
+    const finish = (syncFailure?: { error: unknown }) => {
+      if (finished) return
+      finished = true
+      this.cleaningUp = false
+      attempt(() => this.setStatus(`cleaned-up`))
+
+      // Active collection subscriptions still depend on lifecycle events.
+      // Once the last subscriber leaves, its GC cleanup clears the handlers.
+      if (this.changes.activeSubscribersCount === 0) {
+        attempt(() => this.events.cleanup())
+      }
+
+      // Keep cleanup observably asynchronous even when every release is
+      // synchronous. Existing callers may use this turn to let optimistic
+      // settlement finish before starting the next operation.
+      let failure: { error: unknown } | undefined
+      if (syncFailure && localFailures.length > 0) {
+        failure = {
+          error: new AggregateError(
+            [syncFailure.error, ...localFailures],
+            `Adapter cleanup and local teardown both failed`,
+            { cause: syncFailure.error },
+          ),
+        }
+      } else if (syncFailure) {
+        failure = syncFailure
+      } else if (localFailures.length === 1) {
+        failure = { error: localFailures[0] }
+      } else if (localFailures.length > 1) {
+        failure = {
+          error: new AggregateError(
+            localFailures,
+            `Multiple local teardown steps failed`,
+            { cause: localFailures[0] },
+          ),
+        }
+      }
+      void Promise.resolve()
+        .then(() => Promise.resolve())
+        .then(() => {
+          if (this.cleanupPromise === completion.promise) {
+            this.cleanupPromise = null
+          }
+          if (failure) completion.reject(failure.error)
+          else completion.resolve()
+        })
+    }
+
+    // Sync cleanup invalidates the sync run before invoking the adapter. The
+    // remaining managers retire their local state synchronously while the
+    // adapter's resource-release promise is pending.
+    attempt(() => this.cleanupConfig())
+    try {
+      syncCleanupComplete = this.sync.cleanup(finish)
+    } catch (error) {
+      synchronousSyncFailure = { error }
+    }
+
+    attempt(() => this.state.cleanup())
+    attempt(() => this.changes.cleanup())
+    attempt(() => this.indexes.cleanup())
+    CleanupQueue.getInstance().cancel(this)
+
+    this.hasBeenReady = false
+    this.syncError = undefined
+    // Cleanup is not readiness. Sync cleanup rejects pending preload callers;
+    // first-ready listeners belong to the discarded run.
+    this.onFirstReadyCallbacks = []
+
+    if (syncCleanupComplete) finish(synchronousSyncFailure)
+    return completion.promise
+  }
+
   /**
    * Register a callback to be executed when the collection first becomes ready
    * Useful for preloading collections
    * @param callback Function to call when the collection first becomes ready
    */
-  public onFirstReady(callback: () => void): void {
+  public onFirstReady(callback: () => void): () => void {
     // If already ready, call immediately
     if (this.hasBeenReady) {
       callback()
-      return
+      return () => {}
     }
 
     this.onFirstReadyCallbacks.push(callback)
+    return () => {
+      const index = this.onFirstReadyCallbacks.indexOf(callback)
+      if (index !== -1) {
+        this.onFirstReadyCallbacks.splice(index, 1)
+      }
+    }
   }
 
-  public cleanup(): void {
+  public cleanup(): Promise<void> {
     // Cancel any pending idle cleanup
     if (this.idleCallbackId !== null) {
       safeCancelIdleCallback(this.idleCallbackId)
       this.idleCallbackId = null
     }
 
-    // Perform cleanup immediately (used when explicitly called)
-    this.performCleanup()
+    // Return this exact retirement operation even if an event listener starts
+    // a replacement run and cleanup while the first promise is still pending.
+    return this.beginCleanup()
   }
 }

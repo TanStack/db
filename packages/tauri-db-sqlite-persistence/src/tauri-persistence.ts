@@ -1,4 +1,6 @@
 import {
+  DEFAULT_APPLIED_TX_PRUNE_MAX_AGE_SECONDS,
+  DEFAULT_APPLIED_TX_PRUNE_MAX_ROWS,
   SingleProcessCoordinator,
   createSQLiteCorePersistenceAdapter,
 } from '@tanstack/db-sqlite-persistence-core'
@@ -15,13 +17,10 @@ import type { TauriSQLiteDatabaseLike } from './tauri-sql-driver'
 export type { TauriSQLiteDatabaseLike } from './tauri-sql-driver'
 
 type TauriSQLiteCoreSchemaMismatchPolicy =
-  | `sync-present-reset`
-  | `sync-absent-error`
-  | `reset`
+  `sync-present-reset` | `sync-absent-error` | `reset`
 
 export type TauriSQLiteSchemaMismatchPolicy =
-  | TauriSQLiteCoreSchemaMismatchPolicy
-  | `throw`
+  TauriSQLiteCoreSchemaMismatchPolicy | `throw`
 
 type TauriSQLitePersistenceBaseOptions = Omit<
   SQLiteCoreAdapterOptions,
@@ -91,8 +90,11 @@ function resolveAdapterBaseOptions(
   `driver` | `schemaVersion` | `schemaMismatchPolicy`
 > {
   return {
-    appliedTxPruneMaxRows: options.appliedTxPruneMaxRows,
-    appliedTxPruneMaxAgeSeconds: options.appliedTxPruneMaxAgeSeconds,
+    appliedTxPruneMaxRows:
+      options.appliedTxPruneMaxRows ?? DEFAULT_APPLIED_TX_PRUNE_MAX_ROWS,
+    appliedTxPruneMaxAgeSeconds:
+      options.appliedTxPruneMaxAgeSeconds ??
+      DEFAULT_APPLIED_TX_PRUNE_MAX_AGE_SECONDS,
     pullSinceReloadThreshold: options.pullSinceReloadThreshold,
   }
 }

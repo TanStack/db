@@ -14,7 +14,11 @@ export {
   type ExtractContext,
   type QueryResult,
   // Types needed for declaration emit (https://github.com/TanStack/db/issues/1012)
+  type ContextFromSource,
+  type ContextFromUnionBranches,
+  type ContextFromUnionSource,
   type SchemaFromSource,
+  type SingleSource,
   type InferCollectionType,
   type MergeContextWithJoinType,
   type MergeContextForJoinCallback,
@@ -53,7 +57,11 @@ export {
   length,
   concat,
   coalesce,
+  caseWhen,
   add,
+  subtract,
+  multiply,
+  divide,
   // Aggregates
   count,
   avg,
@@ -62,6 +70,7 @@ export {
   max,
   // Includes helpers
   toArray,
+  materialize,
 } from './builder/functions.js'
 
 // Ref proxy utilities
@@ -86,16 +95,16 @@ export { queryOnce, type QueryOnceConfig } from './query-once.js'
 
 export { type LiveQueryCollectionConfig } from './live/types.js'
 export { type LiveQueryCollectionUtils } from './live/collection-config-builder.js'
-
-// Predicate utilities for predicate push-down
 export {
-  isWhereSubset,
-  unionWherePredicates,
-  minusWherePredicates,
-  isOrderBySubset,
-  isLimitSubset,
-  isOffsetLimitSubset,
-  isPredicateSubset,
-} from './predicate-utils.js'
+  UnhashableQueryIRError,
+  canonicalizeQueryIR,
+  getLoadSubsetDemandKey,
+  getQueryIdentity,
+  getStableQueryBuilderHash,
+  getStableQueryIRHash,
+  getStableValueHash,
+  type DemandKey,
+  type QueryIdentity,
+} from './ir-stable-identity.js'
 
 export { DeduplicatedLoadSubset } from './subset-dedupe.js'

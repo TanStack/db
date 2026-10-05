@@ -8,6 +8,16 @@ import { createPaginationTestSuite } from '../../../db-collection-e2e/src/suites
 import { createPredicatesTestSuite } from '../../../db-collection-e2e/src/suites/predicates.suite'
 import type { E2ETestConfig } from '../../../db-collection-e2e/src/types'
 
+/**
+ * Shared semantic portfolio for a native persisted-collection host.
+ *
+ * The imported suites own predicates, pagination, joins, deduplication,
+ * collation, mutations, and live-update laws. A host supplies only a real
+ * platform harness and explicit capability exclusions. Registering this
+ * function proves no native behavior by itself; credit belongs to a completed
+ * host run with its actual driver, storage, and lifecycle.
+ */
+
 export type PersistedCollectionConformanceGetConfig =
   () => Promise<E2ETestConfig>
 

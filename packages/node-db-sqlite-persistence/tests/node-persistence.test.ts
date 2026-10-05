@@ -7,6 +7,7 @@ import { createNodeSQLitePersistence, persistedCollectionOptions } from '../src'
 import { BetterSqlite3SQLiteDriver } from '../src/node-driver'
 import { SingleProcessCoordinator } from '../../db-sqlite-persistence-core/src'
 import { runRuntimePersistenceContractSuite } from '../../db-sqlite-persistence-core/tests/contracts/runtime-persistence-contract'
+import type { SQLitePullSinceResult } from '../../db-sqlite-persistence-core/src'
 import type {
   RuntimePersistenceContractTodo,
   RuntimePersistenceDatabaseHarness,
@@ -121,6 +122,208 @@ describe(`node persistence helpers`, () => {
           },
         },
       ])
+    } finally {
+      database.close()
+      rmSync(tempDirectory, { recursive: true, force: true })
+    }
+  })
+
+  it(`prunes applied_tx rows past the default age backstop`, async () => {
+    const tempDirectory = mkdtempSync(join(tmpdir(), `db-node-default-prune-`))
+    const dbPath = join(tempDirectory, `state.sqlite`)
+    const collectionId = `default-prune`
+    const database = new BetterSqlite3(dbPath)
+
+    try {
+      const persistence = createNodeSQLitePersistence({ database })
+
+      await persistence.adapter.applyCommittedTx(collectionId, {
+        txId: `tx-1`,
+        term: 1,
+        seq: 1,
+        rowVersion: 1,
+        mutations: [
+          {
+            type: `insert`,
+            key: `1`,
+            value: { id: `1`, title: `old`, score: 1 },
+          },
+        ],
+      })
+
+      // Backdate the first row well beyond the 24h default age backstop.
+      database
+        .prepare(
+          `UPDATE applied_tx SET applied_at = 0 WHERE collection_id = ? AND seq = 1`,
+        )
+        .run(collectionId)
+
+      await persistence.adapter.applyCommittedTx(collectionId, {
+        txId: `tx-2`,
+        term: 1,
+        seq: 2,
+        rowVersion: 2,
+        mutations: [
+          {
+            type: `insert`,
+            key: `2`,
+            value: { id: `2`, title: `new`, score: 2 },
+          },
+        ],
+      })
+
+      const appliedRows = database
+        .prepare(
+          `SELECT seq FROM applied_tx WHERE collection_id = ? ORDER BY seq ASC`,
+        )
+        .all(collectionId) as Array<{ seq: number }>
+      expect(appliedRows.map((row) => row.seq)).toEqual([2])
+    } finally {
+      database.close()
+      rmSync(tempDirectory, { recursive: true, force: true })
+    }
+  })
+
+  it(`forces full reload when pullSince starts before pruned replay rows`, async () => {
+    const tempDirectory = mkdtempSync(
+      join(tmpdir(), `db-node-pruned-pull-since-`),
+    )
+    const dbPath = join(tempDirectory, `state.sqlite`)
+    const collectionId = `pruned-pull-since`
+    const database = new BetterSqlite3(dbPath)
+
+    try {
+      const persistence = createNodeSQLitePersistence({
+        database,
+        appliedTxPruneMaxRows: 2,
+        appliedTxPruneMaxAgeSeconds: 0,
+      })
+
+      for (const seq of [1, 2, 3]) {
+        await persistence.adapter.applyCommittedTx(collectionId, {
+          txId: `tx-${seq}`,
+          term: 1,
+          seq,
+          rowVersion: seq,
+          mutations: [
+            {
+              type: `insert`,
+              key: String(seq),
+              value: { id: String(seq), title: `todo-${seq}`, score: seq },
+            },
+          ],
+        })
+      }
+
+      const adapter = persistence.adapter as typeof persistence.adapter & {
+        pullSince: (
+          collectionId: string,
+          fromRowVersion: number,
+        ) => Promise<SQLitePullSinceResult<string | number>>
+      }
+      const result = await adapter.pullSince(collectionId, 0)
+
+      expect(result.requiresFullReload).toBe(true)
+    } finally {
+      database.close()
+      rmSync(tempDirectory, { recursive: true, force: true })
+    }
+  })
+
+  it(`prunes applied_tx rows past explicit row cap`, async () => {
+    const tempDirectory = mkdtempSync(join(tmpdir(), `db-node-row-prune-`))
+    const dbPath = join(tempDirectory, `state.sqlite`)
+    const collectionId = `row-prune`
+    const database = new BetterSqlite3(dbPath)
+
+    try {
+      const persistence = createNodeSQLitePersistence({
+        database,
+        appliedTxPruneMaxRows: 2,
+        appliedTxPruneMaxAgeSeconds: 0,
+      })
+
+      for (const seq of [1, 2, 3]) {
+        await persistence.adapter.applyCommittedTx(collectionId, {
+          txId: `tx-${seq}`,
+          term: 1,
+          seq,
+          rowVersion: seq,
+          mutations: [
+            {
+              type: `insert`,
+              key: String(seq),
+              value: { id: String(seq), title: `todo-${seq}`, score: seq },
+            },
+          ],
+        })
+      }
+
+      const appliedRows = database
+        .prepare(
+          `SELECT seq FROM applied_tx WHERE collection_id = ? ORDER BY seq ASC`,
+        )
+        .all(collectionId) as Array<{ seq: number }>
+      expect(appliedRows.map((row) => row.seq)).toEqual([2, 3])
+    } finally {
+      database.close()
+      rmSync(tempDirectory, { recursive: true, force: true })
+    }
+  })
+
+  it(`leaves applied_tx rows untouched when pruning is disabled`, async () => {
+    const tempDirectory = mkdtempSync(join(tmpdir(), `db-node-no-prune-`))
+    const dbPath = join(tempDirectory, `state.sqlite`)
+    const collectionId = `no-prune`
+    const database = new BetterSqlite3(dbPath)
+
+    try {
+      const persistence = createNodeSQLitePersistence({
+        database,
+        appliedTxPruneMaxRows: 0,
+        appliedTxPruneMaxAgeSeconds: 0,
+      })
+
+      await persistence.adapter.applyCommittedTx(collectionId, {
+        txId: `tx-1`,
+        term: 1,
+        seq: 1,
+        rowVersion: 1,
+        mutations: [
+          {
+            type: `insert`,
+            key: `1`,
+            value: { id: `1`, title: `old`, score: 1 },
+          },
+        ],
+      })
+
+      database
+        .prepare(
+          `UPDATE applied_tx SET applied_at = 0 WHERE collection_id = ? AND seq = 1`,
+        )
+        .run(collectionId)
+
+      await persistence.adapter.applyCommittedTx(collectionId, {
+        txId: `tx-2`,
+        term: 1,
+        seq: 2,
+        rowVersion: 2,
+        mutations: [
+          {
+            type: `insert`,
+            key: `2`,
+            value: { id: `2`, title: `new`, score: 2 },
+          },
+        ],
+      })
+
+      const appliedRows = database
+        .prepare(
+          `SELECT seq FROM applied_tx WHERE collection_id = ? ORDER BY seq ASC`,
+        )
+        .all(collectionId) as Array<{ seq: number }>
+      expect(appliedRows.map((row) => row.seq)).toEqual([1, 2])
     } finally {
       database.close()
       rmSync(tempDirectory, { recursive: true, force: true })

@@ -3,8 +3,6 @@ id: isDevModeEnabled
 title: isDevModeEnabled
 ---
 
-# Function: isDevModeEnabled()
-
 ```ts
 function isDevModeEnabled(): boolean;
 ```

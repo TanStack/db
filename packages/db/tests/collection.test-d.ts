@@ -1,8 +1,14 @@
 import { assertType, describe, expectTypeOf, it } from 'vitest'
 import { z } from 'zod'
 import { createCollection } from '../src/collection/index.js'
+import { DbClient, collectionOptions } from '../src/index.js'
 import type { OutputWithVirtual } from './utils'
-import type { OperationConfig } from '../src/types'
+import type { Collection } from '../src/collection/index.js'
+import type {
+  ChangeListener,
+  ChangeMessage,
+  OperationConfig,
+} from '../src/types'
 import type { StandardSchemaV1 } from '@standard-schema/spec'
 
 describe(`Collection.update type tests`, () => {
@@ -46,6 +52,53 @@ describe(`Collection.update type tests`, () => {
       // @ts-expect-error - This line should error.
       assertType<Array<TypeTestItem>>(draft)
     })
+  })
+})
+
+describe(`Collection change key type tests`, () => {
+  type ItemKey = string & { readonly __brand: `ItemKey` }
+  type Item = { id: ItemKey; value: number }
+
+  const key = `item-1` as ItemKey
+  const collection = createCollection<Item, ItemKey>({
+    getKey: (item) => item.id,
+    sync: { sync: () => {} },
+  })
+
+  it(`preserves the exact key in current-state changes`, () => {
+    expectTypeOf(collection.currentStateAsChanges()).toEqualTypeOf<Array<
+      ChangeMessage<OutputWithVirtual<Item, ItemKey>, ItemKey>
+    > | void>()
+  })
+
+  it(`preserves the exact key in subscription changes`, () => {
+    const listener: ChangeListener<Item, ItemKey> = (changes) => {
+      expectTypeOf(changes).toEqualTypeOf<
+        Array<ChangeMessage<OutputWithVirtual<Item, ItemKey>, ItemKey>>
+      >()
+      expectTypeOf(changes[0]!.key).toEqualTypeOf<ItemKey>()
+      expectTypeOf(changes[0]!.value.$key).toEqualTypeOf<ItemKey>()
+    }
+
+    collection.subscribeChanges(listener)
+  })
+
+  it(`rejects incompatible key consumers`, () => {
+    collection.get(key)
+    // @ts-expect-error - Plain strings are not keys of this branded-key Collection.
+    collection.get(`item-1`)
+
+    const numericListener: ChangeListener<Item, number> = () => {}
+    // @ts-expect-error - A number-key listener cannot consume branded-string changes.
+    collection.subscribeChanges(numericListener)
+  })
+
+  it(`keeps custom-utility collections assignable to the default collection type`, () => {
+    type ItemUtils = { refresh: () => void }
+
+    expectTypeOf<Collection<Item, ItemKey, ItemUtils>>().toMatchTypeOf<
+      Collection<Item, ItemKey>
+    >()
   })
 })
 
@@ -159,6 +212,42 @@ describe(`Collection type resolution tests`, () => {
 
     // Should automatically infer nullable types correctly
     expectTypeOf<ItemOf<Param>>().toEqualTypeOf<ExpectedType>()
+  })
+})
+
+describe(`DbClient type tests`, () => {
+  type Todo = { id: string; text: string }
+
+  it(`materializes typed collection options`, () => {
+    const todos = collectionOptions<Todo, string>({
+      id: `todos`,
+      getKey: (todo) => todo.id,
+      sync: { sync: () => {} },
+    })
+
+    const client = new DbClient()
+    const collection = client.collection(todos)
+
+    expectTypeOf(collection.get(`1`)).toEqualTypeOf<
+      OutputWithVirtual<Todo, string> | undefined
+    >()
+  })
+
+  it(`accepts materialization initialData`, () => {
+    const todos = collectionOptions<Todo, string>({
+      id: `todos`,
+      getKey: (todo) => todo.id,
+      sync: { sync: () => {} },
+    })
+
+    const client = new DbClient()
+    const collection = client.collection(todos, {
+      initialData: [{ id: `1`, text: `Write tests` }],
+    })
+
+    expectTypeOf(collection.toArray).toEqualTypeOf<
+      Array<OutputWithVirtual<Todo, string>>
+    >()
   })
 })
 

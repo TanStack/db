@@ -3,13 +3,11 @@ id: WhereCallback
 title: WhereCallback
 ---
 
-# Type Alias: WhereCallback()\<TContext\>
-
 ```ts
 type WhereCallback<TContext> = (refs) => any;
 ```
 
-Defined in: [packages/db/src/query/builder/types.ts:129](https://github.com/TanStack/db/blob/main/packages/db/src/query/builder/types.ts#L129)
+Defined in: [packages/db/src/query/builder/types.ts:218](https://github.com/TanStack/db/blob/main/packages/db/src/query/builder/types.ts#L218)
 
 WhereCallback - Type for where/having clause callback functions
 

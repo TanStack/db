@@ -3,9 +3,7 @@ id: SyncMetadataApi
 title: SyncMetadataApi
 ---
 
-# Interface: SyncMetadataApi\<TKey\>
-
-Defined in: [packages/db/src/types.ts:362](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L362)
+Defined in: [packages/db/src/types.ts:492](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L492)
 
 ## Type Parameters
 
@@ -21,7 +19,7 @@ Defined in: [packages/db/src/types.ts:362](https://github.com/TanStack/db/blob/m
 collection: object;
 ```
 
-Defined in: [packages/db/src/types.ts:370](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L370)
+Defined in: [packages/db/src/types.ts:500](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L500)
 
 #### delete()
 
@@ -93,13 +91,35 @@ set: (key, value) => void;
 
 ***
 
+### persistence
+
+```ts
+persistence: 
+  | SyncPersistenceCapabilityV1<TKey>
+  | null;
+```
+
+Defined in: [packages/db/src/types.ts:518](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L518)
+
+**`Internal`**
+
+Unstable, versioned bridge between persistence-aware collection adapters
+and sync adapters. Application code should not construct this capability.
+Custom adapter wrappers must forward it unchanged. `null` explicitly means
+that the collection has no persistence capability; a missing property is
+invalid.
+
+ Adapter infrastructure; not an application-facing API.
+
+***
+
 ### row
 
 ```ts
 row: object;
 ```
 
-Defined in: [packages/db/src/types.ts:365](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L365)
+Defined in: [packages/db/src/types.ts:495](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L495)
 
 #### delete()
 

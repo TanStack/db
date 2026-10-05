@@ -63,7 +63,7 @@ export function materializeKeyedResults<K, V>(
     )
 
     if (positiveValues.length === 1) {
-      finalResult.set(key, positiveValues[0].value)
+      finalResult.set(key, positiveValues[0]!.value)
     } else if (positiveValues.length > 1) {
       throw new Error(
         `Key ${key} has multiple final values: ${positiveValues.map((v) => JSON.stringify(v.value)).join(`, `)}`,

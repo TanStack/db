@@ -3,6 +3,7 @@ import {
   toExpression,
 } from '../query/builder/ref-proxy'
 import { CollectionConfigurationError } from '../errors'
+import { builtInIndexResolverNames } from '../indexes/base-index'
 import type { StandardSchemaV1 } from '@standard-schema/spec'
 import type { BaseIndex, IndexConstructor } from '../indexes/base-index'
 import type { ChangeMessage } from '../types'
@@ -31,9 +32,10 @@ function compareStringsCodePoint(left: string, right: string): number {
 function resolveResolverMetadata<TKey extends string | number>(
   resolver: IndexConstructor<TKey>,
 ): CollectionIndexResolverMetadata {
+  const name = builtInIndexResolverNames.get(resolver) ?? resolver.name
   return {
     kind: `constructor`,
-    ...(resolver.name ? { name: resolver.name } : {}),
+    ...(name ? { name } : {}),
   }
 }
 
@@ -249,13 +251,13 @@ export class CollectionIndexesManager<
    * ```
    */
   public createIndex<TIndexType extends IndexConstructor<TKey>>(
-    indexCallback: (row: SingleRowRefProxy<TOutput>) => any,
+    indexCallback: (row: SingleRowRefProxy<TOutput, TKey, true>) => any,
     config: IndexOptions<TIndexType> = {},
   ): BaseIndex<TKey> {
     this.lifecycle.validateCollectionUsable(`createIndex`)
 
     const indexId = ++this.indexCounter
-    const singleRowRefProxy = createSingleRowRefProxy<TOutput>()
+    const singleRowRefProxy = createSingleRowRefProxy<TOutput, TKey>()
     const indexExpression = indexCallback(singleRowRefProxy)
     const expression = toExpression(indexExpression)
 
@@ -348,24 +350,31 @@ export class CollectionIndexesManager<
    * Updates all indexes when the collection changes
    */
   public updateIndexes(changes: Array<ChangeMessage<TOutput, TKey>>): void {
-    for (const index of this.indexes.values()) {
-      for (const change of changes) {
-        switch (change.type) {
-          case `insert`:
-            index.add(change.key, change.value)
-            break
-          case `update`:
-            if (change.previousValue) {
-              index.update(change.key, change.previousValue, change.value)
-            } else {
+    try {
+      for (const index of this.indexes.values()) {
+        for (const change of changes) {
+          switch (change.type) {
+            case `insert`:
               index.add(change.key, change.value)
-            }
-            break
-          case `delete`:
-            index.remove(change.key, change.value)
-            break
+              break
+            case `update`:
+              if (change.previousValue) {
+                index.update(change.key, change.previousValue, change.value)
+              } else {
+                index.add(change.key, change.value)
+              }
+              break
+            case `delete`:
+              index.remove(change.key, change.value)
+              break
+          }
         }
       }
+    } catch (error) {
+      // Callers have written rows that are not yet published. Crash the
+      // collection instead of leaving it usable with unpublished rows.
+      this.lifecycle.markError(error)
+      throw error
     }
   }
 

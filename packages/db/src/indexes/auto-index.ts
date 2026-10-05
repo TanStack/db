@@ -1,13 +1,9 @@
 import { DEFAULT_COMPARE_OPTIONS } from '../utils'
-import { checkCollectionSizeForIndex, isDevModeEnabled } from './index-registry'
 import { hasVirtualPropPath } from '../virtual-props'
+import { checkCollectionSizeForIndex, isDevModeEnabled } from './index-registry'
 import type { CompareOptions } from '../query/builder/types'
 import type { BasicExpression } from '../query/ir'
 import type { CollectionImpl } from '../collection/index.js'
-
-export interface AutoIndexConfig {
-  autoIndex?: `off` | `eager`
-}
 
 function shouldAutoIndex(collection: CollectionImpl<any, any, any, any, any>) {
   // Only proceed if auto-indexing is enabled
@@ -29,7 +25,8 @@ export function ensureIndexForField<
   if (hasVirtualPropPath(fieldPath)) {
     return
   }
-  if (!shouldAutoIndex(collection)) {
+  const autoIndex = shouldAutoIndex(collection)
+  if (!autoIndex && !isDevModeEnabled()) {
     return
   }
 
@@ -48,13 +45,13 @@ export function ensureIndexForField<
     return // Index already exists
   }
 
-  // Dev mode: check if collection size warrants an index suggestion
-  if (isDevModeEnabled()) {
+  if (!autoIndex) {
     checkCollectionSizeForIndex(
       collection.id || `unknown`,
       collection.size,
       fieldPath,
     )
+    return
   }
 
   // Create a new index for this field using the collection's createIndex method
@@ -71,7 +68,7 @@ export function ensureIndexForField<
       },
       {
         name: `auto:${fieldPath.join(`.`)}`,
-        options: compareFn ? { compareFn, compareOptions: compareOpts } : {},
+        options: { compareFn, compareOptions: compareOpts },
       },
     )
   } catch (error) {
@@ -82,9 +79,7 @@ export function ensureIndexForField<
   }
 }
 
-/**
- * Analyzes a where expression and creates indexes for all simple operations on single fields
- */
+/** Check indexable WHERE fields for eager indexes or development advice. */
 export function ensureIndexForExpression<
   T extends Record<string, any>,
   TKey extends string | number,
@@ -92,11 +87,8 @@ export function ensureIndexForExpression<
   expression: BasicExpression,
   collection: CollectionImpl<T, TKey, any, any, any>,
 ): void {
-  if (!shouldAutoIndex(collection)) {
-    return
-  }
+  if (!shouldAutoIndex(collection) && !isDevModeEnabled()) return
 
-  // Extract all indexable expressions and create indexes for them
   const indexableExpressions = extractIndexableExpressions(expression)
 
   for (const { fieldName, fieldPath } of indexableExpressions) {

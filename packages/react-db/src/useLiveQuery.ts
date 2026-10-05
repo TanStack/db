@@ -1,75 +1,391 @@
+'use client'
+
 import { useRef, useSyncExternalStore } from 'react'
 import {
   BaseQueryBuilder,
-  CollectionImpl,
-  createLiveQueryCollection,
+  IR,
+  UnhashableQueryIRError,
+  createLiveQueryObserver,
+  deepEquals,
+  getPreparedLiveQueryIdentity,
+  getStableValueHash,
+  isCollection,
+  prepareLiveQueryValue,
+  resolveLiveQueryValue,
 } from '@tanstack/db'
+import { useOptionalDbClient } from './DbProvider'
+import { setLiveQueryResultInfo } from './live-query-internals'
+import { shouldWarnInDevelopment } from './development'
 import type {
   Collection,
-  CollectionConfigSingleRowOption,
+  CollectionImpl,
   CollectionStatus,
   Context,
+  DbClient,
   GetResult,
   InferResultType,
   InitialQueryBuilder,
   LiveQueryCollectionConfig,
+  LiveQueryObserver,
+  LiveQueryPersistedStatus,
   NonSingleResult,
   QueryBuilder,
   SingleResult,
 } from '@tanstack/db'
 
 const DEFAULT_GC_TIME_MS = 1 // Live queries created by useLiveQuery are cleaned up immediately (0 disables GC)
+// Suspense renders can be abandoned before React subscribes. Keep their
+// collection briefly so a nearby retry can commit without starting over.
+const DEFAULT_SUSPENSE_GC_TIME_MS = 5000
+const DERIVED_IDENTITY_SINGLE_RENDER_WARN_MS = 16
+const DERIVED_IDENTITY_RENDER_COUNT_WARN_THRESHOLD = 10
+const DERIVED_IDENTITY_TOTAL_WARN_MS = 50
+const warnedDepsCallsites = new Set<string>()
+const warnedDerivedIdentityCallsites = new Set<string>()
+const warnedUnhashableIdentityCallsites = new Set<string>()
+const unpreparedQueryValue = Symbol(`unpreparedQueryValue`)
+
+type SuspenseCollection = Collection<object, string | number, {}>
+type SuspenseCollectionEntry = {
+  collection: SuspenseCollection
+  removeStatusListeners: () => void
+}
+
+const unscopedSuspenseCollections = new Map<string, SuspenseCollectionEntry>()
+const suspenseCollectionsByClient = new WeakMap<
+  DbClient,
+  Map<string, SuspenseCollectionEntry>
+>()
+const suspenseSourceIds = new WeakMap<object, number>()
+let nextSuspenseSourceId = 0
+
+function getSuspenseSourceId(source: object): number {
+  let id = suspenseSourceIds.get(source)
+  if (id === undefined) {
+    id = ++nextSuspenseSourceId
+    suspenseSourceIds.set(source, id)
+  }
+  return id
+}
+
+function getUnscopedSuspenseKey(
+  preparedValue: unknown,
+  queryHash: string,
+): string {
+  const query =
+    preparedValue instanceof BaseQueryBuilder
+      ? preparedValue
+      : preparedValue &&
+          typeof preparedValue === `object` &&
+          `query` in preparedValue &&
+          preparedValue.query instanceof BaseQueryBuilder
+        ? preparedValue.query
+        : undefined
+  if (!query) return queryHash
+  const sourceIds = IR.collectCollectionSources(query._getQuery()).map(
+    ({ collection }) => getSuspenseSourceId(collection),
+  )
+  return `${sourceIds.join(`,`)}:${queryHash}`
+}
+
+function getSuspenseCollections(
+  client: DbClient | undefined,
+): Map<string, SuspenseCollectionEntry> {
+  if (!client) return unscopedSuspenseCollections
+  let collections = suspenseCollectionsByClient.get(client)
+  if (!collections) {
+    collections = new Map()
+    suspenseCollectionsByClient.set(client, collections)
+  }
+  return collections
+}
+
+function releaseSuspenseCollection(
+  collections: Map<string, SuspenseCollectionEntry>,
+  queryHash: string,
+  collection: SuspenseCollection,
+): void {
+  const entry = collections.get(queryHash)
+  if (entry?.collection !== collection) return
+  collections.delete(queryHash)
+  entry.removeStatusListeners()
+}
+
+export type DerivedIdentityProfiler = {
+  renderCount: number
+  totalMs: number
+  maxMs: number
+  warned: boolean
+}
 
 export type UseLiveQueryStatus = CollectionStatus | `disabled`
+export type LiveQueryKey = ReadonlyArray<unknown>
+type UseLiveQueryConfigOptions<TContext extends Context> = Omit<
+  LiveQueryCollectionConfig<TContext>,
+  `query`
+> & {
+  /**
+   * Explicit identity for queries that contain opaque functional variants or
+   * are hot enough that deriving identity from structured IR is too expensive.
+   * Structured queries should omit this so DB can derive identity directly.
+   */
+  queryKey?: LiveQueryKey
+  /** Override the nearest DbProvider for this query. */
+  client?: DbClient
+}
+
+type ConfiguredQueryBuilder<TContext extends Context> = Extract<
+  LiveQueryCollectionConfig<TContext>[`query`],
+  QueryBuilder<TContext>
+>
+
+export type UseLiveQueryConfig<TContext extends Context> =
+  UseLiveQueryConfigOptions<TContext> &
+    Pick<LiveQueryCollectionConfig<TContext>, `query`>
+
+export type ConditionalUseLiveQueryConfig<TContext extends Context> =
+  UseLiveQueryConfigOptions<TContext> & {
+    query:
+      | ConfiguredQueryBuilder<TContext>
+      | ((
+          q: InitialQueryBuilder,
+        ) => ConfiguredQueryBuilder<TContext> | undefined | null)
+  }
+
+export function warnDeprecatedDepsArray(
+  hookName: `useLiveQuery` | `useLiveInfiniteQuery` = `useLiveQuery`,
+): void {
+  if (!shouldWarnInDevelopment(`TANSTACK_DB_DISABLE_DEPRECATION_WARNINGS`)) {
+    return
+  }
+
+  const callsite = getWarningCallsite(4)
+  if (warnedDepsCallsites.has(callsite)) {
+    return
+  }
+  warnedDepsCallsites.add(callsite)
+  const replacement =
+    hookName === `useLiveQuery`
+      ? `useLiveQuery({ query })`
+      : `useLiveInfiniteQuery(query, { queryKey })`
+  console.warn(
+    `[${hookName}] The dependency-array form is deprecated and will be removed in 1.0. Use ${replacement} instead. Provide queryKey only for functional/opaque queries or to avoid deriving identity from structured query IR on render.`,
+  )
+}
+
+function getCurrentTime(): number {
+  return typeof performance !== `undefined` &&
+    typeof performance.now === `function`
+    ? performance.now()
+    : Date.now()
+}
+
+function getWarningCallsite(stackIndex: number): string {
+  const stack = new Error().stack ?? `unknown`
+  const lines = stack.split(`\n`)
+  const userFrame = lines
+    .slice(1)
+    .find(
+      (line) =>
+        !line.includes(`useLiveQuery.ts`) &&
+        !line.includes(`useLiveSuspenseQuery.ts`) &&
+        !line.includes(`useLiveInfiniteQuery.ts`),
+    )
+  return userFrame?.trim() ?? lines[stackIndex]?.trim() ?? stack
+}
+
+function warnDerivedIdentityHotPath(
+  profiler: DerivedIdentityProfiler,
+  durationMs: number,
+): void {
+  if (
+    profiler.warned ||
+    !shouldWarnInDevelopment(`TANSTACK_DB_DISABLE_QUERY_IDENTITY_WARNINGS`)
+  ) {
+    return
+  }
+
+  const isSlowSingleRender =
+    durationMs >= DERIVED_IDENTITY_SINGLE_RENDER_WARN_MS
+  const isHotRenderPath =
+    profiler.renderCount >= DERIVED_IDENTITY_RENDER_COUNT_WARN_THRESHOLD &&
+    profiler.totalMs >= DERIVED_IDENTITY_TOTAL_WARN_MS
+
+  if (!isSlowSingleRender && !isHotRenderPath) {
+    return
+  }
+
+  const callsite = getWarningCallsite(5)
+  if (warnedDerivedIdentityCallsites.has(callsite)) {
+    profiler.warned = true
+    return
+  }
+
+  warnedDerivedIdentityCallsites.add(callsite)
+  profiler.warned = true
+
+  const reason = isSlowSingleRender
+    ? `one render took ${durationMs.toFixed(1)}ms`
+    : `${profiler.renderCount} renders took ${profiler.totalMs.toFixed(1)}ms`
+
+  console.warn(
+    `[useLiveQuery] Deriving live query identity from structured query IR is running on a hot render path (${reason}, max ${profiler.maxMs.toFixed(1)}ms). ` +
+      `Provide an explicit queryKey to skip rebuilding and hashing the IR on every render: useLiveQuery({ queryKey: [...], query }).`,
+  )
+}
+
+function getExplicitQueryKey(value: unknown): LiveQueryKey | undefined {
+  return value &&
+    typeof value === `object` &&
+    Array.isArray((value as { queryKey?: unknown }).queryKey)
+    ? (value as { queryKey: LiveQueryKey }).queryKey
+    : undefined
+}
+
+function getExplicitDbClient(value: unknown): DbClient | undefined {
+  return value &&
+    typeof value === `object` &&
+    `client` in value &&
+    (value as { client?: unknown }).client !== undefined
+    ? (value as { client: DbClient }).client
+    : undefined
+}
+
+export function prepareQueryValue(
+  value: unknown,
+  dbClient: DbClient | undefined,
+  deferredCollections: Set<CollectionImpl<any, string | number, any, any, any>>,
+): unknown {
+  return prepareLiveQueryValue(value, dbClient, deferredCollections)
+}
+
+type DerivedQueryPreparation =
+  | {
+      status: `hashable`
+      value: unknown
+      identityDeps: Array<unknown>
+    }
+  | {
+      status: `unhashable`
+      value: unknown
+      error: UnhashableQueryIRError
+    }
+
+export function prepareDerivedQuery(
+  value: unknown,
+  dbClient: DbClient | undefined,
+  profiler: DerivedIdentityProfiler,
+  deferredCollections: Set<CollectionImpl<any, string | number, any, any, any>>,
+): DerivedQueryPreparation {
+  const shouldProfile = shouldWarnInDevelopment(
+    `TANSTACK_DB_DISABLE_QUERY_IDENTITY_WARNINGS`,
+  )
+  const start = shouldProfile ? getCurrentTime() : 0
+  const preparedValue = prepareQueryValue(value, dbClient, deferredCollections)
+
+  try {
+    const identity = getPreparedLiveQueryIdentity(preparedValue)
+    return {
+      status: `hashable`,
+      value: preparedValue,
+      identityDeps: [`derived`, identity],
+    }
+  } catch (error) {
+    if (error instanceof UnhashableQueryIRError) {
+      return { status: `unhashable`, value: preparedValue, error }
+    }
+
+    throw error
+  } finally {
+    if (shouldProfile) {
+      const durationMs = getCurrentTime() - start
+      profiler.renderCount += 1
+      profiler.totalMs += durationMs
+      profiler.maxMs = Math.max(profiler.maxMs, durationMs)
+      warnDerivedIdentityHotPath(profiler, durationMs)
+    }
+  }
+}
+
+export function warnUnhashableDerivedIdentity(
+  error: UnhashableQueryIRError,
+): void {
+  if (!shouldWarnInDevelopment(`TANSTACK_DB_DISABLE_QUERY_IDENTITY_WARNINGS`)) {
+    return
+  }
+
+  const callsite = getWarningCallsite(4)
+  if (warnedUnhashableIdentityCallsites.has(callsite)) {
+    return
+  }
+  warnedUnhashableIdentityCallsites.add(callsite)
+
+  console.warn(
+    `[useLiveQuery] This query cannot derive a stable identity because ${error.reason} at ${error.path}. ` +
+      `It will keep the legacy mount-stable behavior for now. Add queryKey: [...] to make captured values reactive. ` +
+      `Unhashable queries without queryKey will throw in 1.0.`,
+  )
+}
 
 /**
- * Create a live query using a query function
+ * Create a live query using a query function.
  * @param queryFn - Query function that defines what data to fetch
- * @param deps - Array of dependencies that trigger query re-execution when changed
+ * @param deps - Deprecated array of dependencies that trigger query re-execution when changed
  * @returns Object with reactive data, state, and status information
  * @example
- * // Basic query with object syntax
- * const { data, isLoading } = useLiveQuery((q) =>
- *   q.from({ todos: todosCollection })
- *    .where(({ todos }) => eq(todos.completed, false))
- *    .select(({ todos }) => ({ id: todos.id, text: todos.text }))
- * )
+ * // Prefer config object syntax
+ * const { data, isLoading } = useLiveQuery({
+ *   query: (q) =>
+ *     q.from({ todos: todosCollection })
+ *      .where(({ todos }) => eq(todos.completed, false))
+ *      .select(({ todos }) => ({ id: todos.id, text: todos.text }))
+ * })
  *
  *  @example
  * // Single result query
- * const { data } = useLiveQuery(
- *   (q) => q.from({ todos: todosCollection })
+ * const { data } = useLiveQuery({
+ *   query: (q) => q.from({ todos: todosCollection })
  *          .where(({ todos }) => eq(todos.id, 1))
  *          .findOne()
- * )
+ * })
  *
  * @example
- * // With dependencies that trigger re-execution
- * const { data, state } = useLiveQuery(
- *   (q) => q.from({ todos: todosCollection })
+ * // Structured captured values are included in derived query identity
+ * const { data, state } = useLiveQuery({
+ *   query: (q) => q.from({ todos: todosCollection })
  *          .where(({ todos }) => gt(todos.priority, minPriority)),
- *   [minPriority] // Re-run when minPriority changes
- * )
+ * })
+ *
+ * @example
+ * // Return undefined or null to disable a query
+ * const { data, isEnabled } = useLiveQuery({
+ *   query: (q) => {
+ *     if (!userId) return undefined
+ *     return q.from({ todos: todosCollection })
+ *             .where(({ todos }) => eq(todos.userId, userId))
+ *   },
+ * })
  *
  * @example
  * // Join pattern
- * const { data } = useLiveQuery((q) =>
- *   q.from({ issues: issueCollection })
- *    .join({ persons: personCollection }, ({ issues, persons }) =>
- *      eq(issues.userId, persons.id)
- *    )
- *    .select(({ issues, persons }) => ({
- *      id: issues.id,
- *      title: issues.title,
- *      userName: persons.name
- *    }))
- * )
+ * const { data } = useLiveQuery({
+ *   query: (q) =>
+ *     q.from({ issues: issueCollection })
+ *      .join({ persons: personCollection }, ({ issues, persons }) =>
+ *        eq(issues.userId, persons.id)
+ *      )
+ *      .select(({ issues, persons }) => ({
+ *        id: issues.id,
+ *        title: issues.title,
+ *        userName: persons.name
+ *      }))
+ * })
  *
  * @example
  * // Handle loading and error states
- * const { data, isLoading, isError, status } = useLiveQuery((q) =>
- *   q.from({ todos: todoCollection })
- * )
+ * const { data, isLoading, isError, status } = useLiveQuery({
+ *   query: (q) => q.from({ todos: todoCollection })
+ * })
  *
  * if (isLoading) return <div>Loading...</div>
  * if (isError) return <div>Error: {status}</div>
@@ -91,6 +407,9 @@ export function useLiveQuery<TContext extends Context>(
   status: CollectionStatus // Can't be disabled if always returns QueryBuilder
   isLoading: boolean
   isReady: boolean
+  persistedStatus: LiveQueryPersistedStatus
+  isPersistedReady: boolean
+  persistedError: unknown | undefined
   isIdle: boolean
   isError: boolean
   isCleanedUp: boolean
@@ -110,6 +429,9 @@ export function useLiveQuery<TContext extends Context>(
   status: UseLiveQueryStatus
   isLoading: boolean
   isReady: boolean
+  persistedStatus: LiveQueryPersistedStatus
+  isPersistedReady: boolean
+  persistedError: unknown | undefined
   isIdle: boolean
   isError: boolean
   isCleanedUp: boolean
@@ -129,6 +451,9 @@ export function useLiveQuery<TContext extends Context>(
   status: UseLiveQueryStatus
   isLoading: boolean
   isReady: boolean
+  persistedStatus: LiveQueryPersistedStatus
+  isPersistedReady: boolean
+  persistedError: unknown | undefined
   isIdle: boolean
   isError: boolean
   isCleanedUp: boolean
@@ -152,6 +477,9 @@ export function useLiveQuery<
   status: UseLiveQueryStatus
   isLoading: boolean
   isReady: boolean
+  persistedStatus: LiveQueryPersistedStatus
+  isPersistedReady: boolean
+  persistedError: unknown | undefined
   isIdle: boolean
   isError: boolean
   isCleanedUp: boolean
@@ -176,9 +504,7 @@ export function useLiveQuery<
   deps?: Array<unknown>,
 ): {
   state:
-    | Map<string | number, GetResult<TContext>>
-    | Map<TKey, TResult>
-    | undefined
+    Map<string | number, GetResult<TContext>> | Map<TKey, TResult> | undefined
   data: InferResultType<TContext> | Array<TResult> | undefined
   collection:
     | Collection<GetResult<TContext>, string | number, {}>
@@ -187,6 +513,9 @@ export function useLiveQuery<
   status: UseLiveQueryStatus
   isLoading: boolean
   isReady: boolean
+  persistedStatus: LiveQueryPersistedStatus
+  isPersistedReady: boolean
+  persistedError: unknown | undefined
   isIdle: boolean
   isError: boolean
   isCleanedUp: boolean
@@ -196,7 +525,7 @@ export function useLiveQuery<
 /**
  * Create a live query using configuration object
  * @param config - Configuration object with query and options
- * @param deps - Array of dependencies that trigger query re-execution when changed
+ * @param deps - Deprecated array of dependencies that trigger query re-execution when changed
  * @returns Object with reactive data, state, and status information
  * @example
  * // Basic config object usage
@@ -212,7 +541,9 @@ export function useLiveQuery<
  *   .where(({ persons }) => gt(persons.age, 30))
  *   .select(({ persons }) => ({ id: persons.id, name: persons.name }))
  *
- * const { data, isReady } = useLiveQuery({ query: queryBuilder })
+ * const { data, isReady } = useLiveQuery({
+ *   query: queryBuilder,
+ * })
  *
  * @example
  * // Handle all states uniformly
@@ -228,19 +559,80 @@ export function useLiveQuery<
  */
 // Overload 6: Accept config object
 export function useLiveQuery<TContext extends Context>(
+  config: UseLiveQueryConfig<TContext>,
+): {
+  state: Map<string | number, GetResult<TContext>>
+  data: InferResultType<TContext>
+  collection: Collection<GetResult<TContext>, string | number, {}>
+  status: CollectionStatus // Can't be disabled when query always returns a builder
+  isLoading: boolean
+  isReady: boolean
+  persistedStatus: LiveQueryPersistedStatus
+  isPersistedReady: boolean
+  persistedError: unknown | undefined
+  isIdle: boolean
+  isError: boolean
+  isCleanedUp: boolean
+  isEnabled: true // Always true when query always returns a builder
+}
+
+// Overload 7: Accept config object with a query that can return undefined/null
+export function useLiveQuery<TContext extends Context>(
+  config: ConditionalUseLiveQueryConfig<TContext>,
+): {
+  state: Map<string | number, GetResult<TContext>> | undefined
+  data: InferResultType<TContext> | undefined
+  collection: Collection<GetResult<TContext>, string | number, {}> | undefined
+  status: UseLiveQueryStatus
+  isLoading: boolean
+  isReady: boolean
+  persistedStatus: LiveQueryPersistedStatus
+  isPersistedReady: boolean
+  persistedError: unknown | undefined
+  isIdle: boolean
+  isError: boolean
+  isCleanedUp: boolean
+  isEnabled: boolean
+}
+
+// Overload 8: Accept config object with legacy deps
+export function useLiveQuery<TContext extends Context>(
   config: LiveQueryCollectionConfig<TContext>,
   deps?: Array<unknown>,
 ): {
   state: Map<string | number, GetResult<TContext>>
   data: InferResultType<TContext>
   collection: Collection<GetResult<TContext>, string | number, {}>
-  status: CollectionStatus // Can't be disabled for config objects
+  status: CollectionStatus // Can't be disabled when query always returns a builder
   isLoading: boolean
   isReady: boolean
+  persistedStatus: LiveQueryPersistedStatus
+  isPersistedReady: boolean
+  persistedError: unknown | undefined
   isIdle: boolean
   isError: boolean
   isCleanedUp: boolean
-  isEnabled: true // Always true for config objects
+  isEnabled: true // Always true when query always returns a builder
+}
+
+// Overload 9: Accept config object with legacy deps and a query that can return undefined/null
+export function useLiveQuery<TContext extends Context>(
+  config: ConditionalUseLiveQueryConfig<TContext>,
+  deps: Array<unknown>,
+): {
+  state: Map<string | number, GetResult<TContext>> | undefined
+  data: InferResultType<TContext> | undefined
+  collection: Collection<GetResult<TContext>, string | number, {}> | undefined
+  status: UseLiveQueryStatus
+  isLoading: boolean
+  isReady: boolean
+  persistedStatus: LiveQueryPersistedStatus
+  isPersistedReady: boolean
+  persistedError: unknown | undefined
+  isIdle: boolean
+  isError: boolean
+  isCleanedUp: boolean
+  isEnabled: boolean
 }
 
 /**
@@ -272,7 +664,7 @@ export function useLiveQuery<TContext extends Context>(
  *
  * return <div>{data.map(item => <Item key={item.id} {...item} />)}</div>
  */
-// Overload 7: Accept pre-created live query collection
+// Overload 10: Accept pre-created live query collection
 export function useLiveQuery<
   TResult extends object,
   TKey extends string | number,
@@ -286,13 +678,16 @@ export function useLiveQuery<
   status: CollectionStatus // Can't be disabled for pre-created live query collections
   isLoading: boolean
   isReady: boolean
+  persistedStatus: LiveQueryPersistedStatus
+  isPersistedReady: boolean
+  persistedError: unknown | undefined
   isIdle: boolean
   isError: boolean
   isCleanedUp: boolean
   isEnabled: true // Always true for pre-created live query collections
 }
 
-// Overload 8: Accept pre-created live query collection with singleResult: true
+// Overload 10: Accept pre-created live query collection with singleResult: true
 export function useLiveQuery<
   TResult extends object,
   TKey extends string | number,
@@ -306,6 +701,9 @@ export function useLiveQuery<
   status: CollectionStatus // Can't be disabled for pre-created live query collections
   isLoading: boolean
   isReady: boolean
+  persistedStatus: LiveQueryPersistedStatus
+  isPersistedReady: boolean
+  persistedError: unknown | undefined
   isIdle: boolean
   isError: boolean
   isCleanedUp: boolean
@@ -315,240 +713,328 @@ export function useLiveQuery<
 // Implementation - use function overloads to infer the actual collection type
 export function useLiveQuery(
   configOrQueryOrCollection: any,
-  deps: Array<unknown> = [],
+  deps?: Array<unknown>,
 ) {
-  // Check if it's already a collection by checking for specific collection methods
-  const isCollection =
-    configOrQueryOrCollection &&
-    typeof configOrQueryOrCollection === `object` &&
-    typeof configOrQueryOrCollection.subscribeChanges === `function` &&
-    typeof configOrQueryOrCollection.startSyncImmediate === `function` &&
-    typeof configOrQueryOrCollection.id === `string`
+  return useLiveQueryImpl(configOrQueryOrCollection, deps)
+}
 
-  // Use refs to cache collection and track dependencies
-  const collectionRef = useRef<Collection<object, string | number, {}> | null>(
-    null,
-  )
-  const depsRef = useRef<Array<unknown> | null>(null)
-  const configRef = useRef<unknown>(null)
+/** @internal Shared implementation for the Suspense wrapper. */
+export function useLiveQueryForSuspense(
+  configOrQueryOrCollection: any,
+  deps: Array<unknown> | undefined,
+) {
+  return useLiveQueryImpl(configOrQueryOrCollection, deps, true)
+}
 
-  // Use refs to track version and memoized snapshot
-  const versionRef = useRef(0)
-  const snapshotRef = useRef<{
-    collection: Collection<object, string | number, {}> | null
-    version: number
-  } | null>(null)
+// What one hook instance keeps across renders. It lives in a single ref
+// slot, so a render neither looks up nor allocates more.
+function createHookInstance(dbClient: DbClient | undefined) {
+  return {
+    collection: null as Collection<object, string | number, {}> | null,
+    deps: null as Array<unknown> | null,
+    config: null as unknown,
+    client: dbClient,
+    legacyUnhashableIdentity: [`legacy-unhashable`] as Array<unknown>,
+    derivedIdentityProfiler: {
+      renderCount: 0,
+      totalMs: 0,
+      maxMs: 0,
+      warned: false,
+    } as DerivedIdentityProfiler,
+    deferredCollections: new Set<
+      CollectionImpl<any, string | number, any, any, any>
+    >(),
+    observer: null as LiveQueryObserver<object, string | number> | null,
+    queryHash: undefined as string | undefined,
+    suspenseKey: undefined as string | undefined,
+    identityError: undefined as UnhashableQueryIRError | undefined,
+    subscribe: null as ((onStoreChange: () => void) => () => void) | null,
+  }
+}
+
+function useLiveQueryImpl(
+  configOrQueryOrCollection: any,
+  deps: Array<unknown> | undefined,
+  forSuspense = false,
+) {
+  const contextDbClient = useOptionalDbClient()
+  // Check if it's already a collection
+  const inputIsCollection = isCollection(configOrQueryOrCollection)
+  const dbClient = inputIsCollection
+    ? contextDbClient
+    : (getExplicitDbClient(configOrQueryOrCollection) ?? contextDbClient)
+  const resolvedDeps = deps ?? []
+
+  const instanceRef = useRef<ReturnType<typeof createHookInstance> | null>(null)
+  const instance = (instanceRef.current ??= createHookInstance(dbClient))
+
+  const queryKey = !inputIsCollection
+    ? getExplicitQueryKey(configOrQueryOrCollection)
+    : undefined
+  let preparedQueryValue: unknown | typeof unpreparedQueryValue =
+    unpreparedQueryValue
+  let identityDeps: ReadonlyArray<unknown>
+  let streamIdentity: unknown = undefined
+  let identityError: UnhashableQueryIRError | undefined
+
+  if (queryKey) {
+    identityDeps = queryKey
+    streamIdentity = [`queryKey`, queryKey]
+  } else if (deps !== undefined) {
+    identityDeps = resolvedDeps
+    // Deps decide reuse. Only hydration and Suspense read the query hash; the
+    // development warning about unhashable queries still derives it.
+    if (
+      dbClient ||
+      forSuspense ||
+      shouldWarnInDevelopment(`TANSTACK_DB_DISABLE_QUERY_IDENTITY_WARNINGS`)
+    )
+      try {
+        preparedQueryValue = prepareQueryValue(
+          configOrQueryOrCollection,
+          dbClient,
+          instance.deferredCollections,
+        )
+        streamIdentity = [
+          `deps`,
+          resolvedDeps,
+          getPreparedLiveQueryIdentity(preparedQueryValue),
+        ]
+      } catch (error) {
+        if (!(error instanceof UnhashableQueryIRError)) throw error
+        warnUnhashableDerivedIdentity(error)
+        identityError = error
+      }
+  } else if (inputIsCollection) {
+    identityDeps = []
+    streamIdentity = [`collection`, configOrQueryOrCollection.id]
+  } else {
+    const preparation = prepareDerivedQuery(
+      configOrQueryOrCollection,
+      dbClient,
+      instance.derivedIdentityProfiler,
+      instance.deferredCollections,
+    )
+    preparedQueryValue = preparation.value
+    if (preparation.status === `hashable`) {
+      identityDeps = preparation.identityDeps
+      streamIdentity = preparation.identityDeps
+    } else {
+      warnUnhashableDerivedIdentity(preparation.error)
+      identityDeps = instance.legacyUnhashableIdentity
+      identityError = preparation.error
+    }
+  }
+
+  let queryHash: string | undefined
+  if (streamIdentity !== undefined) {
+    try {
+      queryHash = getStableValueHash(streamIdentity, `queryKey`)
+    } catch (error) {
+      if (error instanceof UnhashableQueryIRError) {
+        if (queryKey !== undefined) throw error
+        identityError = error
+      } else {
+        throw error
+      }
+    }
+  }
+
+  if (deps !== undefined) {
+    warnDeprecatedDepsArray()
+  }
+
+  const canReuseSuspenseKey =
+    forSuspense &&
+    !inputIsCollection &&
+    queryHash !== undefined &&
+    !dbClient &&
+    instance.collection !== null &&
+    instance.client === dbClient &&
+    instance.queryHash === queryHash &&
+    instance.suspenseKey !== undefined
+
+  if (
+    forSuspense &&
+    !inputIsCollection &&
+    queryHash &&
+    !dbClient &&
+    !canReuseSuspenseKey &&
+    preparedQueryValue === unpreparedQueryValue
+  ) {
+    preparedQueryValue = prepareQueryValue(
+      configOrQueryOrCollection,
+      dbClient,
+      instance.deferredCollections,
+    )
+  }
+
+  const suspenseKey =
+    queryHash && !dbClient
+      ? canReuseSuspenseKey
+        ? instance.suspenseKey
+        : getUnscopedSuspenseKey(preparedQueryValue, queryHash)
+      : queryHash
+
+  const suspenseCollections =
+    forSuspense && !inputIsCollection && suspenseKey
+      ? getSuspenseCollections(dbClient)
+      : undefined
+  const suspenseEntry = suspenseKey
+    ? suspenseCollections?.get(suspenseKey)
+    : undefined
+  const suspenseCollection = suspenseEntry?.collection
+
+  const identityChanged =
+    instance.deps === null ||
+    (deps !== undefined
+      ? instance.deps.length !== identityDeps.length ||
+        instance.deps.some((dep, index) => dep !== identityDeps[index])
+      : !deepEquals(instance.deps, identityDeps))
 
   // Check if we need to create/recreate the collection
   const needsNewCollection =
-    !collectionRef.current ||
-    (isCollection && configRef.current !== configOrQueryOrCollection) ||
-    (!isCollection &&
-      (depsRef.current === null ||
-        depsRef.current.length !== deps.length ||
-        depsRef.current.some((dep, i) => dep !== deps[i])))
+    !instance.collection ||
+    (inputIsCollection && instance.config !== configOrQueryOrCollection) ||
+    (!inputIsCollection && (instance.client !== dbClient || identityChanged))
+
+  const resumeDeferredCollections = () => {
+    if (instance.deferredCollections.size === 0) return
+    for (const collection of instance.deferredCollections) {
+      collection._resumeSyncStart()
+    }
+    instance.deferredCollections.clear()
+  }
 
   if (needsNewCollection) {
-    if (isCollection) {
+    if (inputIsCollection) {
       // Warn when passing a collection directly with on-demand sync mode
       // In on-demand mode, data is only loaded when queries with predicates request it
       // Passing the collection directly doesn't provide any predicates, so no data loads
       const syncMode = (
         configOrQueryOrCollection as { config?: { syncMode?: string } }
       ).config?.syncMode
-      if (syncMode === `on-demand`) {
+      if (
+        syncMode === `on-demand` &&
+        shouldWarnInDevelopment(`TANSTACK_DB_DISABLE_QUERY_IDENTITY_WARNINGS`)
+      ) {
         console.warn(
           `[useLiveQuery] Warning: Passing a collection with syncMode "on-demand" directly to useLiveQuery ` +
             `will not load any data. In on-demand mode, data is only loaded when queries with predicates request it.\n\n` +
             `Instead, use a query builder function:\n` +
-            `  const { data } = useLiveQuery((q) => q.from({ c: myCollection }).select(({ c }) => c))\n\n` +
+            `  const { data } = useLiveQuery({ query: (q) => q.from({ c: myCollection }).select(({ c }) => c) })\n\n` +
             `Or switch to syncMode "eager" if you want all data to sync automatically.`,
         )
       }
       // It's already a collection, ensure sync is started for React hooks
       configOrQueryOrCollection.startSyncImmediate()
-      collectionRef.current = configOrQueryOrCollection
-      configRef.current = configOrQueryOrCollection
+      instance.collection = configOrQueryOrCollection
+      instance.config = configOrQueryOrCollection
     } else {
-      // Handle different callback return types
-      if (typeof configOrQueryOrCollection === `function`) {
-        // Call the function with a query builder to see what it returns
-        const queryBuilder = new BaseQueryBuilder() as InitialQueryBuilder
-        const result = configOrQueryOrCollection(queryBuilder)
-
-        if (result === undefined || result === null) {
-          // Callback returned undefined/null - disabled query
-          collectionRef.current = null
-        } else if (result instanceof CollectionImpl) {
-          // Callback returned a Collection instance - use it directly
-          result.startSyncImmediate()
-          collectionRef.current = result
-        } else if (result instanceof BaseQueryBuilder) {
-          // Callback returned QueryBuilder - create live query collection using the original callback
-          // (not the result, since the result might be from a different query builder instance)
-          collectionRef.current = createLiveQueryCollection({
-            query: configOrQueryOrCollection,
-            startSync: true,
-            gcTime: DEFAULT_GC_TIME_MS,
-          })
-        } else if (result && typeof result === `object`) {
-          // Assume it's a LiveQueryCollectionConfig
-          collectionRef.current = createLiveQueryCollection({
-            startSync: true,
-            gcTime: DEFAULT_GC_TIME_MS,
-            ...result,
-          })
-        } else {
-          // Unexpected return type
-          throw new Error(
-            `useLiveQuery callback must return a QueryBuilder, LiveQueryCollectionConfig, Collection, undefined, or null. Got: ${typeof result}`,
+      if (suspenseCollection) {
+        instance.collection = suspenseCollection
+      } else {
+        if (preparedQueryValue === unpreparedQueryValue) {
+          preparedQueryValue = prepareQueryValue(
+            configOrQueryOrCollection,
+            dbClient,
+            instance.deferredCollections,
           )
         }
-        depsRef.current = [...deps]
-      } else {
-        // Original logic for config objects
-        collectionRef.current = createLiveQueryCollection({
-          startSync: true,
-          gcTime: DEFAULT_GC_TIME_MS,
-          ...configOrQueryOrCollection,
-        })
-        depsRef.current = [...deps]
-      }
-    }
-  }
-
-  // Reset refs when collection changes
-  if (needsNewCollection) {
-    versionRef.current = 0
-    snapshotRef.current = null
-  }
-
-  // Create stable subscribe function using ref
-  const subscribeRef = useRef<
-    ((onStoreChange: () => void) => () => void) | null
-  >(null)
-  if (!subscribeRef.current || needsNewCollection) {
-    subscribeRef.current = (onStoreChange: () => void) => {
-      // If no collection, return a no-op unsubscribe function
-      if (!collectionRef.current) {
-        return () => {}
-      }
-
-      const subscription = collectionRef.current.subscribeChanges(() => {
-        // Bump version on any change; getSnapshot will rebuild next time
-        versionRef.current += 1
-        onStoreChange()
-      })
-      // Collection may be ready and will not receive initial `subscribeChanges()`
-      if (collectionRef.current.status === `ready`) {
-        versionRef.current += 1
-        onStoreChange()
-      }
-      return () => {
-        subscription.unsubscribe()
-      }
-    }
-  }
-
-  // Create stable getSnapshot function using ref
-  const getSnapshotRef = useRef<
-    | (() => {
-        collection: Collection<object, string | number, {}> | null
-        version: number
-      })
-    | null
-  >(null)
-  if (!getSnapshotRef.current || needsNewCollection) {
-    getSnapshotRef.current = () => {
-      const currentVersion = versionRef.current
-      const currentCollection = collectionRef.current
-
-      // Recreate snapshot object only if version/collection changed
-      if (
-        !snapshotRef.current ||
-        snapshotRef.current.version !== currentVersion ||
-        snapshotRef.current.collection !== currentCollection
-      ) {
-        snapshotRef.current = {
-          collection: currentCollection,
-          version: currentVersion,
+        instance.collection = resolveLiveQueryValue(preparedQueryValue, {
+          gcTime: forSuspense
+            ? DEFAULT_SUSPENSE_GC_TIME_MS
+            : DEFAULT_GC_TIME_MS,
+          // Hydration and Suspense key the live-query Collection by identity.
+          pool: !forSuspense && !dbClient,
+        }) as SuspenseCollection | null
+        if (suspenseCollections && suspenseKey && instance.collection) {
+          const collection = instance.collection
+          const removeCleanupListener = collection.on(`status:cleaned-up`, () =>
+            releaseSuspenseCollection(
+              suspenseCollections,
+              suspenseKey,
+              collection,
+            ),
+          )
+          const removeErrorListener = collection.on(`status:error`, () => {
+            // Keep the failed collection through React's immediate retry so
+            // the hook can throw its actual load error to an ErrorBoundary.
+            // Retire it afterward so a later boundary reset starts fresh.
+            setTimeout(
+              () =>
+                releaseSuspenseCollection(
+                  suspenseCollections,
+                  suspenseKey,
+                  collection,
+                ),
+              0,
+            )
+          })
+          const entry: SuspenseCollectionEntry = {
+            collection,
+            removeStatusListeners: () => {
+              removeCleanupListener()
+              removeErrorListener()
+            },
+          }
+          suspenseCollections.set(suspenseKey, entry)
         }
       }
+      instance.config = configOrQueryOrCollection
+      instance.deps = [...identityDeps]
+    }
+    instance.client = dbClient
+    instance.queryHash = queryHash
+    instance.suspenseKey = suspenseKey
+    instance.identityError = identityError
+  }
 
-      return snapshotRef.current
+  // Recreate the observer when the underlying collection changes. The observer
+  // is not disposed explicitly here or on unmount: `useSyncExternalStore`
+  // unsubscribes it when the subscribe changes or the component unmounts, which
+  // detaches the collection subscription; the observer is then GC'd. (An unmount
+  // effect that disposed it would misfire under StrictMode/offscreen effect
+  // replay, leaving a disposed observer in the ref.)
+  if (needsNewCollection) {
+    // Defer the initial notify: useSyncExternalStore must not be notified
+    // synchronously during subscribe.
+    // Wholesale mode: React re-reads getSnapshot() on notify, keeps the
+    // hook's pre-observer loading policy, and — because wholesale delivers
+    // nothing synchronously during subscribe — never notifies
+    // useSyncExternalStore inside its own subscribe call.
+    instance.observer = createLiveQueryObserver(instance.collection, {
+      mode: `wholesale`,
+      client: dbClient,
+      queryHash: instance.queryHash,
+      onPreload: resumeDeferredCollections,
+    })
+  }
+  const observer = instance.observer!
+
+  // Stable subscribe bound to the current observer; the observer owns the
+  // subscription, ready-race, and disposal.
+  if (!instance.subscribe || needsNewCollection) {
+    instance.subscribe = (onStoreChange: () => void) => {
+      const unsubscribe = observer.subscribe(onStoreChange)
+      resumeDeferredCollections()
+      return unsubscribe
     }
   }
 
-  // Use useSyncExternalStore to subscribe to collection changes
-  const snapshot = useSyncExternalStore(
-    subscribeRef.current,
-    getSnapshotRef.current,
+  const returned = useSyncExternalStore(
+    instance.subscribe,
+    () => observer.getSnapshot(),
+    () => observer.getServerSnapshot(),
   )
-
-  // Track last snapshot (from useSyncExternalStore) and the returned value separately
-  const returnedSnapshotRef = useRef<{
-    collection: Collection<object, string | number, {}> | null
-    version: number
-  } | null>(null)
-  // Keep implementation return loose to satisfy overload signatures
-  const returnedRef = useRef<any>(null)
-
-  // Rebuild returned object only when the snapshot changes (version or collection identity)
-  if (
-    !returnedSnapshotRef.current ||
-    returnedSnapshotRef.current.version !== snapshot.version ||
-    returnedSnapshotRef.current.collection !== snapshot.collection
-  ) {
-    // Handle null collection case (when callback returns undefined/null)
-    if (!snapshot.collection) {
-      returnedRef.current = {
-        state: undefined,
-        data: undefined,
-        collection: undefined,
-        status: `disabled`,
-        isLoading: false,
-        isReady: true,
-        isIdle: false,
-        isError: false,
-        isCleanedUp: false,
-        isEnabled: false,
-      }
-    } else {
-      // Capture a stable view of entries for this snapshot to avoid tearing
-      const entries = Array.from(snapshot.collection.entries())
-      const config: CollectionConfigSingleRowOption<any, any, any> =
-        snapshot.collection.config
-      const singleResult = config.singleResult
-      let stateCache: Map<string | number, unknown> | null = null
-      let dataCache: Array<unknown> | null = null
-
-      returnedRef.current = {
-        get state() {
-          if (!stateCache) {
-            stateCache = new Map(entries)
-          }
-          return stateCache
-        },
-        get data() {
-          if (!dataCache) {
-            dataCache = entries.map(([, value]) => value)
-          }
-          return singleResult ? dataCache[0] : dataCache
-        },
-        collection: snapshot.collection,
-        status: snapshot.collection.status,
-        isLoading: snapshot.collection.status === `loading`,
-        isReady: snapshot.collection.status === `ready`,
-        isIdle: snapshot.collection.status === `idle`,
-        isError: snapshot.collection.status === `error`,
-        isCleanedUp: snapshot.collection.status === `cleaned-up`,
-        isEnabled: true,
-      }
-    }
-
-    // Remember the snapshot that produced this returned value
-    returnedSnapshotRef.current = snapshot
+  // Only useLiveSuspenseQuery reads this, and it costs a define per render.
+  if (forSuspense) {
+    setLiveQueryResultInfo(returned, {
+      client: dbClient,
+      queryHash: instance.queryHash,
+      identityError: instance.identityError,
+      observer,
+    })
   }
-
-  return returnedRef.current!
+  return returned as any
 }

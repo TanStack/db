@@ -5,31 +5,43 @@ on:
     branches: [main]
   pull_request:
 
+permissions:
+  contents: read
+
 jobs:
   e2e-tests:
     name: Run E2E Tests
     runs-on: ubuntu-latest
     timeout-minutes: 35
+    env:
+      # Since 2026-10-01 Docker Hub rejects anonymous pulls of
+      # electricsql/electric (401 "authentication required"). The Docker
+      # services and the suites that need Electric are skipped until the
+      # image can be pulled again. Set this back to 'true' then.
+      ELECTRIC_E2E: 'false'
 
     steps:
       - name: Checkout code
-        uses: actions/checkout@v6.0.1
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
 
       - name: Setup pnpm
-        uses: pnpm/action-setup@v4
+        uses: pnpm/action-setup@739bfe42ca9233c5e6aca07c1a25a9d34aca49b0 # v6.0.7
         with:
-          version: 10.27.0
+          cache: false
 
       - name: Setup Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
-          node-version: '20'
+          node-version: '22.13'
           cache: 'pnpm'
 
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
       - name: Start Docker services
+        if: env.ELECTRIC_E2E == 'true'
         run: |
           cd packages/db-collection-e2e/docker
           docker compose up -d
@@ -40,11 +52,13 @@ jobs:
         run: |
           pnpm --filter @tanstack/db-ivm build
           pnpm --filter @tanstack/db build
+          pnpm --filter @tanstack/react-db build
           pnpm --filter @tanstack/electric-db-collection build
           pnpm --filter @tanstack/offline-transactions build
           pnpm --filter @tanstack/query-db-collection build
 
       - name: Run Electric E2E tests
+        if: env.ELECTRIC_E2E == 'true'
         run: |
           cd packages/electric-db-collection
           pnpm test:e2e
@@ -62,6 +76,34 @@ jobs:
           pnpm test:e2e
         env:
           ELECTRIC_URL: http://localhost:3000
+
+      - name: Install Playwright browsers
+        run: |
+          cd examples/react/start-ssr-e2e
+          pnpm exec playwright install --with-deps chromium
+
+      - name: Run Browser SQLite OPFS fairness E2E tests
+        run: |
+          cd packages/browser-db-sqlite-persistence
+          pnpm test:opfs-fairness
+
+      - name: Run Browser SQLite OPFS with live Electric E2E tests
+        if: env.ELECTRIC_E2E == 'true'
+        run: |
+          cd packages/browser-db-sqlite-persistence
+          pnpm test:opfs-electric
+        env:
+          ELECTRIC_URL: http://localhost:3000
+
+      - name: Run React Start SSR E2E tests
+        run: |
+          cd examples/react/start-ssr-e2e
+          pnpm test:e2e
+
+      - name: Run Next.js SSR E2E tests
+        run: |
+          cd examples/react/next-ssr-e2e
+          pnpm test:e2e
 
       - name: Run Node SQLite persisted collection E2E tests
         run: |
@@ -116,14 +158,14 @@ jobs:
           TANSTACK_DB_REQUIRE_MOBILE_RUNTIME_LANE: ${{ vars.TANSTACK_DB_REQUIRE_MOBILE_RUNTIME_LANE }}
 
       - name: Stop Docker services
-        if: always()
+        if: always() && env.ELECTRIC_E2E == 'true'
         run: |
           cd packages/db-collection-e2e/docker
           docker compose down -v
 
       - name: Upload test results
         if: failure()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: test-results
           path: packages/db-collection-e2e/junit/

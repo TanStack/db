@@ -749,5 +749,50 @@ describe(`LocalOnly Collection`, () => {
       // Item should be rolled back
       expect(collection.has(700)).toBe(false)
     })
+
+    it(`keeps fields omitted by a same-key replacement absent`, async () => {
+      const replacementCollection = createCollection<
+        TestItem,
+        number,
+        LocalOnlyCollectionUtils
+      >(
+        localOnlyCollectionOptions<TestItem, number>({
+          id: `local-only-replacement`,
+          getKey: (item: TestItem) => item.id,
+          initialData: [
+            { id: 1, name: `replacement`, completed: true, number: 1 },
+          ],
+        }),
+      )
+      const transaction = createTransaction({
+        autoCommit: false,
+        mutationFn: ({ transaction: committed }: any) =>
+          Promise.resolve(
+            replacementCollection.utils.acceptMutations(committed),
+          ),
+      })
+
+      try {
+        await replacementCollection.stateWhenReady()
+        transaction.mutate(() => {
+          replacementCollection.delete(1)
+          replacementCollection.insert({ id: 1, name: `replacement` })
+        })
+        await transaction.commit()
+
+        expect(stripVirtualProps(replacementCollection.get(1))).toStrictEqual({
+          id: 1,
+          name: `replacement`,
+        })
+      } finally {
+        if (
+          transaction.state === `pending` ||
+          transaction.state === `persisting`
+        )
+          transaction.rollback()
+        await transaction.isPersisted.promise.catch(() => undefined)
+        await replacementCollection.cleanup()
+      }
+    })
   })
 })
