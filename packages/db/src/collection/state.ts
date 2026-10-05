@@ -301,7 +301,6 @@ export class CollectionStateManager<
       rowOrigins?: ReadonlyMap<TKey, VirtualOrigin>
       optimisticUpserts?: Pick<Map<TKey, unknown>, 'has'>
       optimisticDeletes?: Pick<Set<TKey>, 'has'>
-      completedOptimisticKeys?: Pick<Set<TKey>, 'has'>
     },
   ): VirtualRowProps<TKey> {
     if (this.isLocalOnly) {
@@ -316,9 +315,7 @@ export class CollectionStateManager<
     const optimisticDeletes =
       options?.optimisticDeletes ?? this.optimisticDeletes
     const hasOptimisticChange =
-      optimisticUpserts.has(key) ||
-      optimisticDeletes.has(key) ||
-      options?.completedOptimisticKeys?.has(key) === true
+      optimisticUpserts.has(key) || optimisticDeletes.has(key)
 
     return this.createVirtualPropsSnapshot(key, {
       $synced: !hasOptimisticChange,
@@ -1481,15 +1478,6 @@ export class CollectionStateManager<
         }
       }
       const rowUpdateMode = this.config.sync.rowUpdateMode || `partial`
-      const completedOptimisticKeys = new Set<TKey>()
-      for (const transaction of this.transactions.values()) {
-        if (transaction.state !== `completed`) continue
-        for (const mutation of transaction.mutations) {
-          if (this.isThisCollection(mutation.collection) && mutation.optimistic)
-            completedOptimisticKeys.add(mutation.key)
-        }
-      }
-
       for (const transaction of committedSyncedTransactions) {
         // Handle truncate operations first
         if (transaction.truncate) {
@@ -1729,7 +1717,6 @@ export class CollectionStateManager<
             rowOrigins: previousRowOrigins,
             optimisticUpserts: previousOptimisticUpserts,
             optimisticDeletes: previousOptimisticDeletes,
-            completedOptimisticKeys,
           })
         const nextVirtualProps = this.getVirtualPropsSnapshotForState(key)
         const virtualChanged =
