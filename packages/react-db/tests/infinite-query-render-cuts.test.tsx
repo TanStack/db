@@ -6,19 +6,21 @@
  * discarded. The shared infinite-query suite cannot express that cut, because
  * Vue's setup is its commit. These laws belong to the React driver:
  *
- * - A render that never commits sends no request to an on-demand source,
- *   whether a query callback or a supplied collection reads it, directly or
- *   through a live-query Collection. After the subscription commits, the
- *   source is acquired.
- * - A StrictMode double render requests an on-demand first window once.
+ * - For an on-demand source, the hook does what useLiveQuery does under the
+ *   same history: it starts the source during render, so a render that never
+ *   commits acquires it as often as useLiveQuery would, and a StrictMode double
+ *   render requests the first window once and commits the same first value.
+ *   This holds for a query callback and a supplied collection, with the source
+ *   read directly or through a live-query Collection. useLiveQuery is the
+ *   reference by decision: the two hooks must behave the same.
  * - When GC has reclaimed an abandoned render's collection, the retry's first
  *   commit is the ready first page, after a fresh mount and after a mounted
  *   component's suspended update.
  * - The hook agrees with `useLiveQuery`: for the same synchronous source, both
  *   commit the same ready rows first.
  *
- * Expectations come from the source rows, page size, and request counts, never
- * from the hook's controller state.
+ * Expectations come from the source rows, page size, request counts, and
+ * useLiveQuery under the same history, never from the hook's controller state.
  */
 import { StrictMode, Suspense, useLayoutEffect } from 'react'
 import { act, render, renderHook, waitFor } from '@testing-library/react'
@@ -65,10 +67,14 @@ function makeSyncSource(count: number) {
   return source
 }
 
+type HookName = `live` | `infinite`
+type InputForm = `query` | `supplied`
+const PAGE_SIZE = 2
+
 // Counts source acquisitions. The load never settles, so only the request
-// itself is observed. The live-query Collection over it does not copy its
-// source's sync mode.
-function makeWrappedOnDemandSource() {
+// itself is observed. A wrapped source sits behind a live-query Collection,
+// which does not copy its source's sync mode.
+function makeCountingOnDemandSource(wrapped: boolean) {
   let loads = 0
   const source = createCollection<Row>({
     id: `infinite-render-cuts-remote-${sequence++}`,
@@ -88,107 +94,119 @@ function makeWrappedOnDemandSource() {
       },
     },
   })
+  cleanups.push(() => source.cleanup())
+  if (!wrapped) return { target: source as any, loads: () => loads }
   const intermediate = createLiveQueryCollection({
     query: (q) =>
       q.from({ row: source }).orderBy(({ row }) => row.rank, `desc`),
     startSync: false,
     gcTime: 1,
   })
-  cleanups.push(
-    () => source.cleanup(),
-    () => intermediate.cleanup(),
-  )
-  return { intermediate, loads: () => loads }
+  cleanups.push(() => intermediate.cleanup())
+  return { target: intermediate as any, loads: () => loads }
 }
 
-type InputForm = `query` | `supplied`
-
-// Reads the wrapped source through a query callback or as the supplied
-// collection itself. The start rule must hold for both input forms.
-function useWrappedInfiniteQuery(
-  intermediate: ReturnType<typeof makeWrappedOnDemandSource>[`intermediate`],
-  form: InputForm,
-) {
-  return useLiveInfiniteQuery(
-    form === `supplied`
-      ? (intermediate as any)
-      : (q: any) =>
-          q
-            .from({ items: intermediate })
-            .orderBy(({ items }: any) => items.rank, `desc`),
-    { pageSize: 2 },
-  )
-}
-
-const inputForms: Array<InputForm> = [`query`, `supplied`]
-
-describe(`on-demand sources before commit`, () => {
-  it.each(inputForms)(
-    `does not acquire a wrapped on-demand source for a render that never commits (%s input)`,
-    async (form) => {
-      const { intermediate, loads } = makeWrappedOnDemandSource()
-      const never = new Promise<void>(() => {})
-
-      function Abandoned(): ReactNode {
-        useWrappedInfiniteQuery(intermediate, form)
-        throw never
-      }
-
-      const view = render(
-        <Suspense fallback={null}>
-          <Abandoned />
-        </Suspense>,
+// The same read through either hook. A query callback asks useLiveQuery for
+// the infinite hook's first window, so both build the same physical query.
+function useHookUnderTest(hook: HookName, form: InputForm, target: any) {
+  if (form === `supplied`) {
+    return hook === `live`
+      ? useLiveQuery(target)
+      : useLiveInfiniteQuery(target, { pageSize: PAGE_SIZE })
+  }
+  return hook === `live`
+    ? useLiveQuery((q: any) =>
+        q
+          .from({ items: target })
+          .orderBy(({ items }: any) => items.rank, `desc`)
+          .limit(PAGE_SIZE + 1),
       )
-      cleanups.push(() => view.unmount())
-      expect(loads()).toBe(0)
-      await act(async () => {
-        await new Promise((resolve) => setTimeout(resolve, 0))
+    : useLiveInfiniteQuery(
+        (q: any) =>
+          q
+            .from({ items: target })
+            .orderBy(({ items }: any) => items.rank, `desc`),
+        { pageSize: PAGE_SIZE },
+      )
+}
+
+async function acquisitionsForAbandonedRender(
+  hook: HookName,
+  form: InputForm,
+  wrapped: boolean,
+): Promise<number> {
+  const { target, loads } = makeCountingOnDemandSource(wrapped)
+  const never = new Promise<void>(() => {})
+  function Abandoned(): ReactNode {
+    useHookUnderTest(hook, form, target)
+    throw never
+  }
+  const view = render(
+    <Suspense fallback={null}>
+      <Abandoned />
+    </Suspense>,
+  )
+  cleanups.push(() => view.unmount())
+  await act(async () => {
+    await new Promise((resolve) => setTimeout(resolve, 0))
+  })
+  return loads()
+}
+
+async function firstWindowLoadsForStrictMount(hook: HookName) {
+  const source = makeInfiniteOnDemandSource(
+    { createCollection, BTreeIndex },
+    rows(8),
+  )
+  cleanups.push(() => source.collection.cleanup())
+  const commits: Array<{ status: string; ids: Array<string> }> = []
+  const hook_ = renderHook(
+    () => {
+      const result: any = useHookUnderTest(hook, `query`, source.collection)
+      useLayoutEffect(() => {
+        commits.push({
+          status: result.status,
+          ids: result.data.slice(0, PAGE_SIZE).map((row: Row) => row.id),
+        })
       })
-      expect(loads()).toBe(0)
+      return result
+    },
+    { wrapper: StrictMode },
+  )
+  cleanups.push(() => hook_.unmount())
+  await waitFor(() => expect(commits.length).toBeGreaterThan(0))
+  return {
+    loads: source.calls.filter((call) => call.limit === PAGE_SIZE + 1).length,
+    firstCommit: commits[0],
+  }
+}
+
+describe(`on-demand sources match useLiveQuery`, () => {
+  it.each([
+    { form: `query` as const, wrapped: false },
+    { form: `query` as const, wrapped: true },
+    { form: `supplied` as const, wrapped: true },
+  ])(
+    `acquires as useLiveQuery does for a render that never commits (%o)`,
+    async ({ form, wrapped }) => {
+      const reference = await acquisitionsForAbandonedRender(
+        `live`,
+        form,
+        wrapped,
+      )
+      expect(
+        await acquisitionsForAbandonedRender(`infinite`, form, wrapped),
+      ).toBe(reference)
     },
   )
 
-  it.each(inputForms)(
-    `acquires a wrapped on-demand source once the subscription commits (%s input)`,
-    async (form) => {
-      const { intermediate, loads } = makeWrappedOnDemandSource()
-
-      const hook = renderHook(() => useWrappedInfiniteQuery(intermediate, form))
-      cleanups.push(() => hook.unmount())
-
-      await waitFor(() => expect(loads()).toBeGreaterThan(0))
-    },
-  )
-
-  it(`loads an on-demand first page once across a StrictMode double render`, async () => {
-    const source = makeInfiniteOnDemandSource(
-      { createCollection, BTreeIndex },
-      rows(8),
-    )
-    cleanups.push(() => source.collection.cleanup())
-
-    const hook = renderHook(
-      () =>
-        useLiveInfiniteQuery(
-          (q) =>
-            q
-              .from({ items: source.collection })
-              .orderBy(({ items }: any) => items.rank, `desc`),
-          { pageSize: 3 },
-        ),
-      { wrapper: StrictMode },
-    )
-    cleanups.push(() => hook.unmount())
-
-    await waitFor(() =>
-      expect(hook.result.current.data.map((row) => row.id)).toEqual([
-        `1`,
-        `2`,
-        `3`,
-      ]),
-    )
-    // pageSize 3 means the first peek-ahead window is limit 4.
-    expect(source.calls.filter((call) => call.limit === 4)).toHaveLength(1)
+  it(`requests the first window and commits the first value as useLiveQuery does across a StrictMode double render`, async () => {
+    const reference = await firstWindowLoadsForStrictMount(`live`)
+    expect(reference.firstCommit).toEqual({
+      status: `ready`,
+      ids: [`1`, `2`],
+    })
+    expect(await firstWindowLoadsForStrictMount(`infinite`)).toEqual(reference)
   })
 })
 

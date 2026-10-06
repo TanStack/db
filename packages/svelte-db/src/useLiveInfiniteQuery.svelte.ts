@@ -1,12 +1,11 @@
 import {
   assertLiveQueryWindowManyResult,
-  canStartLiveQueryWindowSyncInRender,
-  canStartSuppliedLiveQueryWindowInRender,
   compareLiveQueryWindowDependencies,
   createLiveQueryCollection,
   createLiveQueryWindowController,
   fetchNextLiveQueryWindowPage,
   getLiveQueryWindowCollectionWarning,
+  liveQueryWindowHoldsRows,
   normalizeLiveQueryWindowPageSize,
   resolveLiveQueryWindowInput,
   shouldPreserveLiveQueryWindowPageCount,
@@ -177,10 +176,7 @@ export function useLiveInfiniteQuery<TContext extends Context>(
       // its rows are already correct. A window the controller must still adjust
       // waits for the subscription.
       if (
-        canStartSuppliedLiveQueryWindowInRender(
-          collection,
-          initialPageCount * pageSize + 1,
-        )
+        liveQueryWindowHoldsRows(collection, initialPageCount * pageSize + 1)
       ) {
         collection.startSyncImmediate()
       }
@@ -203,11 +199,7 @@ export function useLiveInfiniteQuery<TContext extends Context>(
     // Like useLiveQuery, start sync during construction once the query is
     // valid, so a synchronously loaded source is published on the first render
     // instead of an empty idle snapshot before the subscribing effect attaches.
-    // On-demand sources wait for the subscription, so a superseded recompute
-    // does not send a page request.
-    if (canStartLiveQueryWindowSyncInRender(input.query)) {
-      collection.startSyncImmediate()
-    }
+    collection.startSyncImmediate()
     const currentController = createLiveQueryWindowController(collection, {
       pageSize,
       initialPageParam,

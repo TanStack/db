@@ -3,14 +3,13 @@
 import { useCallback, useRef, useSyncExternalStore } from 'react'
 import {
   assertLiveQueryWindowManyResult,
-  canStartLiveQueryWindowSyncInRender,
-  canStartSuppliedLiveQueryWindowInRender,
   compareLiveQueryWindowDependencies,
   createLiveQueryCollection,
   createLiveQueryWindowController,
   fetchNextLiveQueryWindowPage,
   getLiveQueryWindowCollectionWarning,
   getLiveQueryWindowInputKind,
+  liveQueryWindowHoldsRows,
   normalizeLiveQueryWindowPageSize,
   resolveLiveQueryWindowInput,
   shouldPreserveLiveQueryWindowPageCount,
@@ -121,6 +120,30 @@ type InfiniteQueryRenderState = {
   >
 }
 
+type RenderedWindowCollection = {
+  client: DbClient | undefined
+  dependencies: Array<unknown>
+  collection: Collection<any, any, any>
+  deferredCollections: Set<
+    CollectionImplType<any, string | number, any, any, any>
+  >
+}
+
+/**
+ * Whether a recorded query identity matches the current one. Legacy deps
+ * compare by reference. Derived identities and query keys compare by structure.
+ */
+function queryIdentityMatches(
+  comparison: { changed: boolean; structurallyEqual: boolean },
+  sameClient: boolean,
+  usesLegacyDeps: boolean,
+): boolean {
+  return (
+    sameClient &&
+    (usesLegacyDeps ? !comparison.changed : comparison.structurallyEqual)
+  )
+}
+
 /**
  * Create an infinite query using a query function with live updates.
  *
@@ -171,6 +194,12 @@ export function useLiveInfiniteQuery<TContext extends Context>(
 
   const committedRef = useRef<InfiniteQueryRenderState | null>(null)
   const committed = committedRef.current
+  // Like useLiveQuery's instance memo, keep the window collection built by the
+  // latest render. A second render before commit, such as a StrictMode double
+  // render, reuses it instead of starting another one. Only the collection is
+  // kept. Each render still builds its own controller and page count from the
+  // committed state, which an uncommitted render never changes.
+  const renderedCollectionRef = useRef<RenderedWindowCollection | null>(null)
   const inputKind = inputIsCollection ? `collection` : `query`
   const derivedIdentityProfilerRef = useRef<DerivedIdentityProfiler>({
     renderCount: 0,
@@ -232,10 +261,7 @@ export function useLiveInfiniteQuery<TContext extends Context>(
   const sameClient = committed?.client === dbClient
   const dependenciesChanged =
     !inputIsCollection &&
-    (!sameClient ||
-      (usesLegacyDeps
-        ? dependencyComparison.changed
-        : !dependencyComparison.structurallyEqual))
+    !queryIdentityMatches(dependencyComparison, sameClient, usesLegacyDeps)
   const dependenciesStructurallyEqual =
     usesLegacyDeps && sameClient && dependencyComparison.structurallyEqual
   const needsNewCollection =
@@ -284,19 +310,51 @@ export function useLiveInfiniteQuery<TContext extends Context>(
         }
         inputValue = () => preparedQueryValue
       }
-      const input = resolveLiveQueryWindowInput<TContext>(inputValue)
-      if (input.kind === `collection`) {
-        collection = input.collection
-        suppliedCollection = true
+      const rendered = renderedCollectionRef.current
+      const requiredLimit = initialPageCount * pageSize + 1
+      if (
+        !inputIsCollection &&
+        rendered !== null &&
+        queryIdentityMatches(
+          compareLiveQueryWindowDependencies(
+            rendered.dependencies,
+            identityDeps,
+          ),
+          rendered.client === dbClient,
+          usesLegacyDeps,
+        ) &&
+        rendered.collection.status !== `cleaned-up` &&
+        liveQueryWindowHoldsRows(rendered.collection, requiredLimit)
+      ) {
+        // An earlier render built this collection and nothing has committed
+        // since. Its window already holds the retained pages, so its first
+        // rows are correct. Sources it deferred still resume at commit.
+        collection = rendered.collection
+        for (const deferred of rendered.deferredCollections) {
+          deferredCollections.add(deferred)
+        }
       } else {
-        // Wrap the query with the peek-ahead window for every retained page, so
-        // a collection that starts syncing now never publishes fewer rows than
-        // the controller's pages. The controller grows the limit via setWindow.
-        collection = createLiveQueryCollection({
-          query: input.query.limit(initialPageCount * pageSize + 1).offset(0),
-          gcTime: DEFAULT_GC_TIME_MS,
-        })
-        startInRender = canStartLiveQueryWindowSyncInRender(input.query)
+        const input = resolveLiveQueryWindowInput<TContext>(inputValue)
+        if (input.kind === `collection`) {
+          collection = input.collection
+          suppliedCollection = true
+        } else {
+          // Wrap the query with the peek-ahead window for every retained page,
+          // so a collection that starts syncing now never publishes fewer rows
+          // than the controller's pages. The controller grows the limit via
+          // setWindow.
+          collection = createLiveQueryCollection({
+            query: input.query.limit(requiredLimit).offset(0),
+            gcTime: DEFAULT_GC_TIME_MS,
+          })
+          startInRender = true
+          renderedCollectionRef.current = {
+            client: dbClient,
+            dependencies: [...identityDeps],
+            collection,
+            deferredCollections,
+          }
+        }
       }
     }
 
@@ -312,11 +370,11 @@ export function useLiveInfiniteQuery<TContext extends Context>(
     }
     // Like useLiveQuery, start sync during render once the input is valid, so
     // a synchronously loaded source is published on the first commit instead
-    // of an empty idle commit. GC reclaims a render that never commits. An
-    // on-demand source, or a supplied window that the controller must still
-    // adjust, waits for the subscription.
+    // of an empty idle commit. GC reclaims a render that never commits. A
+    // supplied window that the controller must still adjust waits for the
+    // subscription.
     if (suppliedCollection) {
-      startInRender = canStartSuppliedLiveQueryWindowInRender(
+      startInRender = liveQueryWindowHoldsRows(
         collection,
         initialPageCount * pageSize + 1,
       )

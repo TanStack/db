@@ -270,6 +270,60 @@ until that choice is made. With a DbClient, a source that is first created
 during render waits for commit in both hooks, by the deferral contract from
 #1564.
 
+## Addendum: on-demand sources follow useLiveQuery
+
+Decision: the maintainer chose that `useLiveInfiniteQuery` follow
+`useLiveQuery` for on-demand sources too, unless that is plainly wrong. The
+two rules conflict for an on-demand source. Ready on the first paint needs a
+request during render, and no request before commit forbids one.
+`useLiveQuery` starts on-demand sources in render, so the infinite hook now
+does too. The start gate is removed, and the law that a render that never
+commits sends no on-demand request is retired. A parity law replaces it: under
+the same history, the infinite hook acquires an on-demand source as often as
+`useLiveQuery` does, and commits the same first value.
+
+Two parts of `useLiveQuery` were matched in substance, not copied:
+
+- `useLiveQuery` dedupes a React 19 StrictMode double render with a
+  render-time instance memo. The infinite hook now keeps the window collection
+  from its latest render and reuses it when the query identity matches, the
+  collection is not `cleaned-up`, and its window holds the retained pages. It
+  keeps only the collection. Each render still builds its own controller and
+  page count from committed state. One identity rule serves both the committed
+  and the rendered baseline.
+- A supplied collection starts in render as in `useLiveQuery`, but only when
+  its window already holds the requested rows from offset 0. Starting a
+  shifted or narrower window would publish the wrong rows first, which breaks
+  the ready-value law.
+
+Evidence, produced on the working tree above `e6a31f6eb`:
+
+- Before the change, an on-demand source that loads synchronously committed
+  ready first in `useLiveQuery` and idle first in the infinite hook. With the
+  gate removed alone, a StrictMode mount sent two first-window requests in the
+  infinite hook and one in `useLiveQuery`. With the memo, both send one, and
+  both send the same count for an abandoned render.
+- React `infinite-query-render-cuts.test.tsx` compares both hooks for an
+  abandoned render with a direct source, a wrapped source, and a supplied
+  collection, and for a StrictMode mount. Deferring query collections to
+  commit fails the abandoned-render and StrictMode cases. Deferring supplied
+  collections fails the supplied case. Removing the memo fails the StrictMode
+  case. Removing the memo's liveness check fails the mounted suspended-update
+  retry with a `cleaned-up` commit.
+- `useLiveInfiniteQuery.svelte.test.ts` compares settled acquisition counts
+  with Svelte's `useLiveQuery` after construction and a superseded recompute,
+  for direct and wrapped sources. Deferring query collections fails it and
+  Svelte `first-paint-ready`. The two hooks issue their requests at different
+  moments inside the same tick; only the settled count is compared.
+- Local suites: react-db 337, vue-db 122, svelte-db 120, and the full db suite
+  of 8267 tests.
+
+Remaining exposure, shared with `useLiveQuery` by this decision: a render that
+never commits, including a Suspense render that throws, sends on-demand
+requests. On React 18, StrictMode does not keep refs across the double render,
+so both hooks send two first-window requests there. Removing early on-demand
+requests from both hooks needs a change in the live-query Collection itself.
+
 ## Revision index
 
 Each entry's evidence applies to the revision named here. The first section's
@@ -283,4 +337,5 @@ table and closure apply to `415a8d4a1`.
 | Start-sync gate replaces render-time reuse | `b31b84ff9` |
 | Nested on-demand sources and retained-page windows | `2b461f8cd` |
 | Publication laws in the shared oracle | `083247d18` |
-| Supplied collections match useLiveQuery | the commit that adds this entry, on top of `083247d18` |
+| Supplied collections match useLiveQuery | `e6a31f6eb` |
+| On-demand sources follow useLiveQuery | the commit that adds this entry, on top of `e6a31f6eb` |

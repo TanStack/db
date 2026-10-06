@@ -9,9 +9,6 @@ import {
 } from './live-query-adapter.js'
 import { createLiveQueryObserver } from './live-query-observer.js'
 import { BaseQueryBuilder } from './query/builder/index.js'
-import { getQueryIR } from './query/builder/query-ir.js'
-import { collectCollectionSources } from './query/ir.js'
-import { everySourceCollection } from './query/live/collection-registry.js'
 import { deepEquals } from './utils.js'
 import type {
   LiveQueryObserver,
@@ -89,48 +86,23 @@ export function resolveLiveQueryWindowInput<TContext extends Context>(
   return { kind: `query`, query: value as QueryBuilder<TContext> }
 }
 
-function loadsEagerly(collection: Collection<any, any, any>): boolean {
-  return collection.config.syncMode !== `on-demand`
-}
-
 /**
- * Whether an adapter may start an infinite query's window collection during
- * render. Starting early lets a synchronously loaded source publish its first
- * page on the first paint. An on-demand source loads asynchronously, so it
- * gains nothing from an early start, and a render that never commits would
- * still send its page request. Such queries start when the subscription
- * commits.
+ * Whether a window collection's current window already holds the requested
+ * rows from offset 0. An adapter may then start the collection, or reuse one it
+ * started, during render, as useLiveQuery does: its first published rows are
+ * already correct. A shifted or narrower window waits for the controller to
+ * adjust it when the subscription commits, because starting it would publish
+ * the wrong rows first.
  *
  * @internal This contract is unstable while RFC #1623 is being implemented.
  */
-export function canStartLiveQueryWindowSyncInRender<TContext extends Context>(
-  query: QueryBuilder<TContext>,
-): boolean {
-  const visited = new Set<Collection<any, any, any>>()
-  return collectCollectionSources(getQueryIR(query)).every(({ collection }) =>
-    everySourceCollection(collection, loadsEagerly, visited),
-  )
-}
-
-/**
- * Whether an adapter may start a supplied window collection during render.
- * The same source rule applies as for a query. The supplied window must also
- * already hold the requested rows from offset 0, because the controller adjusts
- * it only when its subscription commits. Starting a narrower or shifted window
- * would publish the wrong rows first.
- *
- * @internal This contract is unstable while RFC #1623 is being implemented.
- */
-export function canStartSuppliedLiveQueryWindowInRender(
+export function liveQueryWindowHoldsRows(
   collection: Collection<any, any, any>,
   requiredLimit: number,
 ): boolean {
   const window = (collection as WindowTarget).utils?.getWindow?.()
   return (
-    window !== undefined &&
-    window.offset === 0 &&
-    window.limit >= requiredLimit &&
-    everySourceCollection(collection, loadsEagerly)
+    window !== undefined && window.offset === 0 && window.limit >= requiredLimit
   )
 }
 
