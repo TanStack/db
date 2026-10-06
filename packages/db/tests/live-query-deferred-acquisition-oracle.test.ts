@@ -113,6 +113,7 @@ const HISTORIES: Record<string, Array<Command>> = {
   'subscribe after start': [`start`, `read`, `subscribe`],
   'preload after start': [`start`, `preload`],
   'subscribe without a prior start': [`subscribe`],
+  'preload without a prior start': [`preload`],
   'cleanup before a subscriber, then subscribe': [
     `start`,
     `read`,
