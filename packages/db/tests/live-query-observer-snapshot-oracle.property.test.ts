@@ -4,7 +4,7 @@ import { createCollection } from '../src/collection/index.js'
 import { localOnlyCollectionOptions } from '../src/local-only.js'
 import { createLiveQueryObserver } from '../src/live-query-observer.js'
 import { createLiveQueryCollection } from '../src/query/index.js'
-import { oraclePropertyOptions } from './oracle-config.js'
+import { oraclePropertyOptions, oracleRuns } from './oracle-config.js'
 import type { LiveQuerySnapshot } from '../src/live-query-observer.js'
 
 /**
@@ -221,12 +221,13 @@ describe(`retained live-query snapshots are point-in-time`, () => {
   ] as const)(
     `first reads match the capture-time rows (%s, attached=%s)`,
     async (shape, attached) => {
-      await fc.assert(
-        fc.asyncProperty(history, reads, (commands, order) =>
-          checkHistory(shape, attached, commands, order),
-        ),
-        oraclePropertyOptions(40, PROPERTY),
+      const property = fc.asyncProperty(history, reads, (commands, order) =>
+        checkHistory(shape, attached, commands, order),
       )
+      // Fixed campaign: a repeatable baseline. Seed 2043 is arbitrary.
+      await fc.assert(property, { numRuns: oracleRuns(40), seed: 2043 })
+      // Random campaign, or a replay of a reported seed and path.
+      await fc.assert(property, oraclePropertyOptions(40, PROPERTY))
     },
   )
 
