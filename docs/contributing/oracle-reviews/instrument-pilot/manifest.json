@@ -95,6 +95,15 @@
   "d2_review": {
     "initial_reviewed_head": "322a48ad6fc37ed7ecbd517d57598a124b533b46",
     "artifact_sha256": "776f994027a13cf866dc3711c0615d92e68cbb52cffc6205f76d9130d60d40e7",
-    "followup": "Replaced mutable calibration flag with assert.throws; replay retains all 600 comparisons and exact mutant checkpoint."
+    "followup": "Replaced mutable calibration flag with assert.throws; replay retains all 600 comparisons and exact mutant checkpoint.",
+    "final_reviewed_head": "adda7583461589aa3394031822e3a6710f9a5842"
+  },
+  "final_validation": {
+    "reviewed_head": "adda7583461589aa3394031822e3a6710f9a5842",
+    "source_review": "Five independent review angles, confidence validation, and narrow follow-up found no remaining instruction or evidence defect. Independent preservation follow-up accepted three candidate corrections.",
+    "static": "44 local links resolve; skill metadata and instruction/artifact fingerprints valid; whitespace clean.",
+    "d2_replay": "600 production comparisons pass; valid topological scheduler passes; wrong two-pass scheduler fails at exact first active output comparison.",
+    "paced_replay": "43 pass / 2 intentionally failing concurrency assertions; production and existing tests unchanged.",
+    "release": "Contributor tooling only; no package changeset."
   }
 }
