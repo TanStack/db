@@ -381,5 +381,6 @@
   "clock": "gj",
   "emitLoadingSubsetChange": "gk",
   "overlayActiveTransactions": "gl",
-  "completeLoadSubsetOperation": "gm"
+  "completeLoadSubsetOperation": "gm",
+  "readyFailureSink": "gn"
 }
