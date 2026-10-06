@@ -4517,7 +4517,10 @@ async function checkEagerWindow(testCase: EagerCase): Promise<void> {
         rows.set(command.id, next)
         if (testCase.path === `sync`) {
           syncControls!.begin()
-          syncControls!.write({ type: before ? `update` : `insert`, value: next })
+          syncControls!.write({
+            type: before ? `update` : `insert`,
+            value: next,
+          })
           syncControls!.commit()
         } else if (before) {
           await source.update(command.id, (draft) => {
@@ -4545,10 +4548,9 @@ async function checkEagerWindow(testCase: EagerCase): Promise<void> {
             (other) => Object.is(other.rank, row.rank) && other.id !== row.id,
           ),
         ).length
-        expect(
-          delivered,
-          `rows delivered by step ${step}`,
-        ).toBeLessThanOrEqual(2 * window + ties + 1)
+        expect(delivered, `rows delivered by step ${step}`).toBeLessThanOrEqual(
+          2 * window + ties + 1,
+        )
       }
     }
   } finally {

@@ -551,7 +551,8 @@ function deleteVisibleIssue(
   if (mutationMode === `synced`) {
     writeSync(fixture.issues, { type: `delete`, value: issue })
     return {
-      cleanup: () => writeSync(fixture.issues, { type: `insert`, value: issue }),
+      cleanup: () =>
+        writeSync(fixture.issues, { type: `insert`, value: issue }),
     }
   }
 
