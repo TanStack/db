@@ -34,6 +34,7 @@ async function setup() {
   const syncWrites: Array<string> = []
   let truncates = 0,
     versionChanges = 0,
+    nativeCloses = 0,
     requestProgress = 0
   let abortRead = query.get('abort') === 'startup'
   let abortWrite = false
@@ -100,6 +101,9 @@ async function setup() {
   })
   descriptor.db.addEventListener('versionchange', () => {
     versionChanges++
+  })
+  descriptor.db.addEventListener('close', () => {
+    nativeCloses++
   })
   const originalTransaction = descriptor.db.transaction.bind(descriptor.db)
   let arm = false
@@ -270,6 +274,7 @@ async function setup() {
       syncWrites: [...syncWrites],
       truncates,
       versionChanges,
+      nativeCloses,
       schema: { ...schema },
       requestProgress,
       retirement: structuredClone(retirement),
@@ -479,8 +484,9 @@ async function setup() {
     },
     releaseBarrier: async () => {
       if (!gate) throw new Error('Write barrier was not reached')
-      await gate.release()
+      const current = gate
       gate = undefined
+      await current.release()
     },
     holdInsert: () => {
       holdNext = true

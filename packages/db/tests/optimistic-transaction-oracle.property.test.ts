@@ -1205,3 +1205,105 @@ describe(`Whole mixed transaction publication`, () => {
     },
   )
 })
+
+// Typed keys retain their identity through a whole transaction. The independent
+// expected payload is the authored key list, including multiplicity and order;
+// no encoded production globalKey participates in the comparison. Cross each
+// same-text pair with inserts, updates, deletes, repeated updates, and rollback.
+// Existing same-key lanes still require genuine repeated keys to collapse.
+for (const { numberKey, reversed } of [0, -1, 1, 1.5].flatMap((numberKey) =>
+  [false, true].map((reversed) => ({ numberKey, reversed })),
+)) {
+  for (const operation of [`insert`, `update`, `delete`, `repeat`] as const) {
+    for (const success of [true, false]) {
+      it(`keeps typed ${numberKey} keys distinct during ${operation}, success=${success}, reversed=${reversed}`, async () => {
+        type TypedRow = { id: string | number; value: number }
+        const keys = reversed
+          ? [String(numberKey), numberKey]
+          : [numberKey, String(numberKey)]
+        const initial =
+          operation === `insert` ? [] : keys.map((id) => ({ id, value: 0 }))
+        const proposed =
+          operation === `delete`
+            ? []
+            : keys.map((id, i) => ({ id, value: i + 10 }))
+        let sync!: Parameters<SyncConfig<TypedRow>[`sync`]>[0]
+        const source = createCollection<TypedRow>({
+          getKey: (row) => row.id,
+          sync: {
+            sync(actions) {
+              sync = actions
+              actions.begin()
+              for (const value of initial)
+                actions.write({ type: `insert`, value })
+              actions.commit()
+              actions.markReady()
+            },
+          },
+        })
+        const payload: Array<{
+          key: string | number
+          type: string
+          value: number
+        }> = []
+        const tx = createTransaction<TypedRow>({
+          autoCommit: false,
+          mutationFn: ({ transaction }) => {
+            for (const mutation of transaction.mutations)
+              payload.push({
+                key: mutation.key,
+                type: mutation.type,
+                value: operation === `delete` ? 0 : mutation.modified.value,
+              })
+            if (!success) return Promise.reject(new Error(`authored rejection`))
+            sync.begin()
+            for (const mutation of transaction.mutations) {
+              if (mutation.type === `delete`)
+                sync.write({ type: `delete`, key: mutation.key })
+              else sync.write({ type: mutation.type, value: mutation.modified })
+            }
+            sync.commit()
+            return Promise.resolve()
+          },
+        })
+        const persisted = observeHistoryPromise(tx.isPersisted.promise)
+        await withHistoryCleanup(
+          async () => {
+            await source.preload()
+            tx.mutate(() => {
+              keys.forEach((key, index) => {
+                if (operation === `insert`)
+                  source.insert({ id: key, value: index + 10 })
+                else if (operation === `delete`) source.delete(key)
+                else {
+                  if (operation === `repeat`)
+                    source.update(key, (draft) => {
+                      draft.value = 3
+                    })
+                  source.update(key, (draft) => {
+                    draft.value = index + 10
+                  })
+                }
+              })
+            })
+            const committed = observeHistoryPromise(tx.commit())
+            await committed.settled
+            await persisted.settled
+            expect(payload, `handler payload retains typed keys`).toEqual(
+              keys.map((key, index) => ({
+                key,
+                type: operation === `repeat` ? `update` : operation,
+                value: operation === `delete` ? 0 : index + 10,
+              })),
+            )
+            const expected = success ? proposed : initial
+            expect(source.size).toBe(expected.length)
+            for (const row of expected)
+              expect(source.get(row.id)?.value).toBe(row.value)
+          },
+          () => [() => source.cleanup()],
+        )
+      })
+    }
+  }
+}

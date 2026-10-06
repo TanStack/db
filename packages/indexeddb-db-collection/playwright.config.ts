@@ -16,10 +16,17 @@ export default defineConfig({
     headless: true,
     trace: 'retain-on-failure',
   },
-  projects: ['chromium', 'firefox', 'webkit'].map((browserName) => ({
-    name: browserName,
-    use: { browserName: browserName as 'chromium' | 'firefox' | 'webkit' },
-  })),
+  projects: [
+    ...['chromium', 'firefox', 'webkit'].map((browserName) => ({
+      name: browserName,
+      use: { browserName: browserName as 'chromium' | 'firefox' | 'webkit' },
+    })),
+    {
+      name: 'webkit-persistent',
+      testMatch: '**/value-oracle.spec.ts',
+      use: { browserName: 'webkit' },
+    },
+  ],
   webServer: {
     command:
       'node ../../node_modules/vite/bin/vite.js --config vite.browser.config.ts --host 127.0.0.1 --port 4197',

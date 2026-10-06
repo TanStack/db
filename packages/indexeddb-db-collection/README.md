@@ -395,6 +395,21 @@ See [the oracle contract](./tests/ORACLE.md) for replay commands and scope limit
 These tests cover stated histories and observation cuts; they do not prove crash
 durability or guarantee delivery to a suspended tab.
 
+## Native closure, workers, and value ownership
+
+Pages and dedicated workers on the same origin can share persisted Collections.
+Unexpected native connection closure marks managed Collections as errored and retains their public snapshots.
+Recreate the database descriptor and Collections to resume work.
+Service-worker suspension and background delivery are outside this support scope.
+
+`importData` copies validated rows before waiting for storage.
+Later caller mutations cannot change that import.
+Collection updates copy supported assigned values when the update callback returns.
+
+`createIndexedDB({ ..., onBlocked })` reports native blocked events.
+The low-level `openDatabase` and `deleteDatabase` functions accept this callback as their fifth and third arguments, respectively.
+The request remains pending until native success or failure.
+
 ## License
 
 MIT

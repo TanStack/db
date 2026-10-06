@@ -1117,3 +1117,83 @@ for (const transactionFirst of [false, true])
       expect((await observe(a)).status).toBe('error')
     })
   })
+
+// Chromium DevTools supplies actual abnormal closure, including native aborts;
+// no synthetic close event or test-triggered transaction.abort supplies it.
+// Site-data clearing also deletes storage, so retained public rows and empty
+// fresh restore are distinct observations. Other engines have no equivalent
+// control in this runner; their normal closure laws remain in the matrix above.
+for (const phase of [
+  'loading',
+  'insert',
+  'update',
+  'delete',
+  'clear',
+  'import',
+] as const) {
+  test(`forced native closure aborts admitted ${phase} and retains its snapshot`, async ({
+    context,
+    browserName,
+  }) => {
+    test.skip(
+      browserName !== 'chromium',
+      'Native force-close control uses Chromium DevTools',
+    )
+    await withPages(context, async (_events, database) => {
+      const loading = phase === 'loading'
+      const page = await open(
+        context,
+        database,
+        'owner',
+        false,
+        loading ? '&hold=startup' : '',
+      )
+      const before = loading ? [] : [{ id: 1, name: 'before' }]
+      if (!loading) {
+        await page.evaluate((rows) => window.crossTab!.import(rows), before)
+        await page.evaluate(() => window.crossTab!.holdStorage())
+        const count = (await observe(page)).writes.length
+        await page.evaluate(
+          (kind) => window.crossTab!.startRetirementWrite(kind),
+          phase,
+        )
+        await page.waitForFunction(
+          (length) => window.crossTab!.observe().writes.length === length + 1,
+          count,
+        )
+        expect((await observe(page)).retirement.outcome).toBe('pending')
+      } else expect((await observe(page)).reads).toContain('pending')
+      const cdp = await context.newCDPSession(page)
+      try {
+        await cdp.send('Storage.clearDataForOrigin', {
+          origin: new URL(page.url()).origin,
+          storageTypes: 'indexeddb',
+        })
+        await page.waitForFunction(
+          () => window.crossTab!.observe().nativeCloses === 1,
+        )
+        await expect(
+          page.evaluate(() => window.crossTab!.releaseBarrier()),
+        ).rejects.toThrow()
+        if (!loading)
+          await page.evaluate(() => window.crossTab!.retirementDone())
+        const after = await observe(page)
+        expect(after.status).toBe('error')
+        assertSnapshot(after.rows, before, 'forced-close retained snapshot')
+        if (loading) expect(after.reads.at(-1)).toBe('abort')
+        else {
+          expect(after.retirement.outcome).toBe('rejected')
+          expect(after.writes.at(-1)).toBe('abort')
+        }
+        const restored = await open(context, database, 'fresh')
+        assertSnapshot(
+          (await observe(restored)).rows,
+          [],
+          'site-data deletion empties fresh storage',
+        )
+      } finally {
+        await cdp.detach()
+      }
+    })
+  })
+}

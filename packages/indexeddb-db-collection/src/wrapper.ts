@@ -73,6 +73,7 @@ function executeRequest<T>(
  * @param onUpgrade - Optional callback that runs during the onupgradeneeded event.
  *                    Use this to create object stores and indexes.
  * @param idbFactory - Optional IDBFactory for testing/mocking (defaults to window.indexedDB or globalThis.indexedDB)
+ * @param onBlocked - Optional diagnostic callback for native blocked events. The request stays pending.
  * @returns A promise that resolves to the IDBDatabase instance
  *
  * @example
@@ -94,6 +95,7 @@ export function openDatabase(
     transaction: IDBTransaction,
   ) => void,
   idbFactory?: IDBFactory,
+  onBlocked?: (event: IDBVersionChangeEvent) => void,
 ): Promise<IDBDatabase> {
   return new Promise((resolve, reject) => {
     const factory = getIDBFactory(idbFactory)
@@ -134,6 +136,8 @@ export function openDatabase(
         }
       }
     }
+
+    if (onBlocked) request.addEventListener('blocked', onBlocked)
 
     request.onsuccess = () => {
       resolve(request.result)
@@ -489,6 +493,7 @@ export function clear(objectStore: IDBObjectStore): Promise<void> {
  *
  * @param name - The name of the database to delete
  * @param idbFactory - Optional IDBFactory for testing/mocking
+ * @param onBlocked - Optional diagnostic callback for native blocked events. The request stays pending.
  * @returns A promise that resolves when the database is deleted
  *
  * @example
@@ -500,6 +505,7 @@ export function clear(objectStore: IDBObjectStore): Promise<void> {
 export function deleteDatabase(
   name: string,
   idbFactory?: IDBFactory,
+  onBlocked?: (event: IDBVersionChangeEvent) => void,
 ): Promise<void> {
   return new Promise((resolve, reject) => {
     const factory = getIDBFactory(idbFactory)
@@ -516,6 +522,8 @@ export function deleteDatabase(
       )
       return
     }
+
+    if (onBlocked) request.addEventListener('blocked', onBlocked)
 
     request.onsuccess = () => {
       resolve()

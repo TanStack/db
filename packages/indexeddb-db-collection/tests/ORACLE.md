@@ -374,8 +374,7 @@ cleanup's pending mutation caller/confirmation policy, same-ID/same-key
 core mutation payloads, lost notifications after suspension, post-durability send
 failure (AUX01), nested mutable input identity, quota, eviction, physical crash
 durability and uncontrolled page discard remain open. The controlled destruction
-protocol does not observe an unacknowledged last event before a crash. HC005,
-the core typed-key mutation-payload counterexample, remains under its core owner.
+protocol does not observe an unacknowledged last event before a crash. HC005 now has its core payload repair and native receiving witness described below.
 The coverage map names the needed witnesses; none is waived by random green.
 
 ## Local ordering and review boundary extension
@@ -479,16 +478,16 @@ BigInt64Array, Blob and a nested array pass through unrelated scalar updates,
 peers, export/import and fresh restore. Each shape crosses insert/import rejection
 at first/middle/last nested uncloneable values, with raw row and metadata rollback
 and a valid suffix. Inputs never share mutable objects with the expected result.
-Mutable post-submission ownership, cycles and custom prototypes remain outside
-this bounded law.
+The approved capture extension below adds post-submission ownership. Cycles
+and arbitrary custom prototypes remain outside this adapter value corpus.
 
 `e2e/value-oracle.spec.ts` receives those value and first-open premises through
 native IndexedDB and BroadcastChannel. Observations inspect rich values inside
 the page before serialization. Raw native Blob preparation fails in the local
 Playwright WebKit provider; those two cells prove matching adapter rejection,
 empty durable/public rows and a healthy suffix, not Blob preservation. The runner
-attaches that limitation. It remains open until a Blob-capable WebKit provider
-receives the preservation histories. Other engines receive the full corpus.
+attaches that limitation. The added persistent WebKit project requires successful native Blob storage
+and receives those same preservation histories. Other engines receive the full corpus.
 
 `packed-consumer.test.ts` is an integration companion, not a Collection oracle.
 It installs actual adapter/core/dependency tarballs into a temporary consumer and
@@ -502,3 +501,46 @@ records three assertion-killed production mutants and the finite coverage bounds
 It keeps the known core numeric/string same-transaction collision separate from
 this adapter's legal-name coverage. No production or product-policy change is
 required by the four transferred dimensions.
+
+
+## Approved donor follow-up: closure, capture and receiving hosts
+
+Native abnormal `close` has the same immediate-error/retained-snapshot contract
+as managed closure. The retirement owner adds idle, ready, loading and admitted
+insert/update/delete/clear/import phases. Its controlled provider closes the
+actual connection and explicitly aborts admitted native transactions because
+fake-IDB does not yet implement that part of forced closure. Native Chromium
+storage clearing receives actual close and abort for ready and six admitted-work
+cases. Durable rows after native clearing are empty; controlled close alone
+retains committed rows. No artificial close event on a usable connection stands
+in for either premise.
+
+Value capture is owned by the existing core detachment oracle at update callback
+return and by the persistence value companion after import validation, before
+storage awaits. Six mutable kinds cross both paths with caller changes while
+handler/native gates hold. Independent tagged descriptions judge writer, peer,
+export and durable rows. Native receiving also checks the immediate optimistic
+update and that persistence remains pending before gate release. Core buffer/view
+copying preserves authored bytes, ranges and aliases, with foreign/shared buffers,
+both property orders and existing one-argument subclass construction. Browser
+iframe witnesses receive foreign standard values; concurrent shared-memory
+writers and detached/resizable buffers are not modeled.
+
+The host owner in `e2e/host-oracle.spec.ts` uses authored per-store arrays across
+six legal names, prefix neighbors and anchor stores. It receives numeric and
+string keys together in a single transaction, peer updates, import, clear,
+export and fresh restore. The core payload owner independently checks both key
+orders, exact mutation multiplicity and rollback. A dedicated worker/page history
+receives native IndexedDB/BroadcastChannel writes, managed closure, retained
+error snapshot, rejected late write and worker recreation. Service workers and
+suspended-host delivery remain outside the support claim.
+
+Wrapper blocked diagnostics are observation only. The wrapper owner checks
+native version fields, pending caller state, reentrant blocker release and native
+terminal settlement. Omitting managed-factory forwarding fails the independent
+blocked checkpoint. The native durability default and lack of a cross-Collection
+atomic read-modify-write API remain explicit accepted design boundaries.
+
+See the [follow-up audit](../../../docs/contributing/oracle-reviews/2026-10-06-indexeddb-donor-followup.md)
+for calibration and final verification. The preceding port record is historical;
+its then-open decisions and provider gaps are superseded only by these named laws.

@@ -277,7 +277,7 @@ describe(`IndexedDB collection type resolution tests`, () => {
 
     it(`types administrative deletion by name`, () => {
       expectTypeOf(deleteDatabase).parameters.toEqualTypeOf<
-        [string, IDBFactory?]
+        [string, IDBFactory?, ((event: IDBVersionChangeEvent) => void)?]
       >()
       expectTypeOf(deleteDatabase).returns.toEqualTypeOf<Promise<void>>()
     })

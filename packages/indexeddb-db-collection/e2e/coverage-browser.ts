@@ -16,9 +16,18 @@ async function descriptor(name: string, stores = ['items'], version = 1) {
   descriptors.push(db)
   return db
 }
-function collection(db: IndexedDBInstance, name = 'items') {
+function collection(
+  db: IndexedDBInstance,
+  name = 'items',
+  onUpdate?: () => Promise<void>,
+) {
   const value = createCollection(
-    indexedDBCollectionOptions<ValueRow>({ db, name, getKey: (row) => row.id }),
+    indexedDBCollectionOptions<ValueRow>({
+      db,
+      name,
+      getKey: (row) => row.id,
+      onUpdate,
+    }),
   )
   disposers.push(() => value.cleanup())
   return value
@@ -36,9 +45,109 @@ async function rawRows(
 }
 async function valuePeer(name: string) {
   const db = await descriptor(name)
-  const c = collection(db)
+  let handler = Promise.resolve()
+  const c = collection(db, 'items', () => handler)
   await c.preload()
   return {
+    capture: async (kind: ValueKind, entry: 'update' | 'import') => {
+      await c.utils.importData([
+        { id: 1, name: 'before', nested: { value: null } },
+      ])
+      let release!: () => void
+      handler = new Promise<void>((resolve) => {
+        release = resolve
+      })
+      const gate = holdStore(db.db)
+      await gate.started
+      const row = {
+        id: 1,
+        name: 'captured',
+        nested: { value: createValue(kind) },
+      }
+      let settled = false
+      try {
+        const pending =
+          entry === 'import'
+            ? c.utils.importData([row])
+            : c.update(1, (draft) => {
+                draft.name = row.name
+                draft.nested = row.nested
+              }).isPersisted.promise
+        // Attach rejection immediately so failure cannot become an unhandled event
+        // while the oracle records the deliberately held native boundary.
+        const done = pending.then(
+          () => {
+            settled = true
+          },
+          (error: unknown) => {
+            settled = true
+            throw error
+          },
+        )
+        void done.catch(() => undefined)
+        row.name = 'caller changed'
+        function mutate(value: unknown): void {
+          if (value instanceof Date) value.setTime(0)
+          else if (value instanceof ArrayBuffer) new Uint8Array(value).fill(99)
+          else if (ArrayBuffer.isView(value))
+            new Uint8Array(value.buffer).fill(99)
+          else if (Array.isArray(value)) value.forEach(mutate)
+        }
+        mutate(row.nested.value)
+        const immediate =
+          entry === 'update' ? await observeValueRows(c.values()) : undefined
+        const beforeRelease = settled
+        release()
+        await gate.release()
+        await done
+        return { beforeRelease, immediate }
+      } finally {
+        release()
+        await gate.release()
+      }
+    },
+    captureRealm: async (viewFirst: boolean, kind: 'u8' | 'view') => {
+      await c.utils.importData([
+        { id: 1, name: 'before', nested: { value: null } },
+      ])
+      const frame = document.createElement('iframe')
+      document.body.append(frame)
+      try {
+        const realm = frame.contentWindow as Window & typeof globalThis
+        const buffer = new realm.ArrayBuffer(8)
+        const bytes = new Uint8Array(buffer)
+        bytes.set([0, 1, 2, 3, 4, 5, 6, 7])
+        const view =
+          kind === 'u8'
+            ? new realm.Uint8Array(buffer, 2, 3)
+            : new realm.DataView(buffer, 2, 3)
+        const value = viewFirst ? { view, buffer } : { buffer, view }
+        const tx = c.update(1, (draft) => {
+          draft.nested = { value }
+        })
+        const immediate = c.get(1)!
+        bytes.fill(99)
+        await tx.isPersisted.promise
+        function observe(row: ValueRow) {
+          const copy = row.nested.value as typeof value
+          return {
+            bytes: [...new Uint8Array(copy.buffer)],
+            offset: copy.view.byteOffset,
+            length: copy.view.byteLength,
+            alias: copy.view.buffer === copy.buffer,
+            detached: copy.buffer !== buffer,
+          }
+        }
+        return [
+          immediate,
+          c.get(1)!,
+          (await rawRows(db, 'items'))[0]!,
+          (await c.utils.exportData())[0]!,
+        ].map(observe)
+      } finally {
+        frame.remove()
+      }
+    },
     observe: async () => ({
       status: c.status,
       rows: await observeValueRows(c.values()),

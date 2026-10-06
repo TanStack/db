@@ -95,6 +95,8 @@ export interface CreateIndexedDBOptions {
   stores: ReadonlyArray<string>
   /** Custom IDBFactory for testing/mocking */
   idbFactory?: IDBFactory
+  /** Reports a native blocker without settling the open request. */
+  onBlocked?: (event: IDBVersionChangeEvent) => void
 }
 
 /**
@@ -282,7 +284,7 @@ const connections = new WeakMap<
 export async function createIndexedDB(
   options: CreateIndexedDBOptions,
 ): Promise<IndexedDBInstance> {
-  const { name, version, stores, idbFactory } = options
+  const { name, version, stores, idbFactory, onBlocked } = options
 
   // Validate options
   // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- runtime safety for JS consumers
@@ -330,6 +332,7 @@ export async function createIndexedDB(
       }
     },
     idbFactory,
+    onBlocked,
   )
 
   const connection: { error?: Error; listeners: Set<() => void> } = {
@@ -347,6 +350,7 @@ export async function createIndexedDB(
     for (const notify of [...connection.listeners]) notify()
   }
   db.addEventListener('versionchange', close)
+  db.addEventListener('close', close)
 
   // Create frozen stores array for immutability
   const frozenStores = Object.freeze([...stores])
@@ -853,7 +857,7 @@ export function indexedDBCollectionOptions(
       const key = getKey(item)
       if (keys.has(key)) throw new Error(`Duplicate imported key: ${key}`)
       keys.add(key)
-      return { type: 'insert' as const, key, modified: item }
+      return { type: 'insert' as const, key, modified: structuredClone(item) }
     })
     await persist(mutations, true)
     confirm(mutations, true)

@@ -13,6 +13,7 @@ import { IDBFactory as FakeIDBFactory } from 'fake-indexeddb'
 import { expect, it, vi } from 'vitest'
 import {
   clear,
+  createIndexedDB,
   createObjectStore,
   deleteByKey,
   deleteDatabase,
@@ -376,11 +377,23 @@ for (const operation of ['open', 'delete'] as const) {
         let status = 'pending'
         let statusAtBlocked: string | undefined
         let result: unknown
+        const diagnostics: Array<{
+          oldVersion: number
+          newVersion: number | null
+          status: string
+        }> = []
+        const onBlocked = (event: IDBVersionChangeEvent) => {
+          diagnostics.push({
+            oldVersion: event.oldVersion,
+            newVersion: event.newVersion,
+            status,
+          })
+        }
         try {
           const promise =
             operation === 'open'
-              ? openDatabase(name, 2, undefined, factory)
-              : deleteDatabase(name, factory)
+              ? openDatabase(name, 2, undefined, factory, onBlocked)
+              : deleteDatabase(name, factory, onBlocked)
           const outcome = promise.then(
             (value) => {
               status = 'fulfilled'
@@ -404,6 +417,20 @@ for (const operation of ['open', 'delete'] as const) {
           )
           if (blocked)
             expect(statusAtBlocked, 'blocked caller settlement').toBe('pending')
+          expect(
+            diagnostics,
+            'diagnostics preserve native versions and pending settlement',
+          ).toEqual(
+            blocked
+              ? [
+                  {
+                    oldVersion: 1,
+                    newVersion: operation === 'open' ? 2 : null,
+                    status: 'pending',
+                  },
+                ]
+              : [],
+          )
           expect(status, 'terminal caller settlement').toBe('fulfilled')
           expect(result, 'caller owns the native result').toBe(
             operation === 'open' ? opened : undefined,
@@ -667,3 +694,57 @@ for (const kind of ['InvalidStateError', 'ConstraintError', 'SecurityError']) {
     })
   })
 }
+
+// Managed opening forwards the same native diagnostic, including reentrant
+// blocker release. A missing forwarding call would leave this observable list
+// empty even though the independently observed native request was blocked.
+it('forwards managed opening diagnostics without settling the blocked request', async () => {
+  const factory = new FakeIDBFactory(),
+    name = crypto.randomUUID()
+  const blocker = await openDatabase(
+    name,
+    1,
+    (db) => db.createObjectStore('items'),
+    factory,
+  )
+  const entered = deferred()
+  const opening = factory.open.bind(factory)
+  const spy = vi.spyOn(factory, 'open').mockImplementation((...args) => {
+    const openingRequest = opening(...args)
+    openingRequest.addEventListener('blocked', () => entered.resolve())
+    return openingRequest
+  })
+  let settled = false
+  const observations: Array<{
+    oldVersion: number
+    newVersion: number | null
+    settled: boolean
+  }> = []
+  const pending = createIndexedDB({
+    name,
+    version: 2,
+    stores: ['items'],
+    idbFactory: factory,
+    onBlocked: (event) => {
+      observations.push({
+        oldVersion: event.oldVersion,
+        newVersion: event.newVersion,
+        settled,
+      })
+      blocker.close()
+    },
+  }).then((db) => {
+    settled = true
+    return db
+  })
+  try {
+    await entered.promise
+    expect(observations).toEqual([
+      { oldVersion: 1, newVersion: 2, settled: false },
+    ])
+  } finally {
+    blocker.close()
+    ;(await pending).close()
+    spy.mockRestore()
+  }
+})

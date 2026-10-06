@@ -17,6 +17,7 @@
  * These finite schedules cover the semantic cuts, not every TLC interleaving.
  */
 import { createTransaction } from '@tanstack/db'
+import { forceCloseDatabase } from 'fake-indexeddb'
 import { describe, expect, it, vi } from 'vitest'
 import { deleteDatabase } from '../src'
 import {
@@ -777,3 +778,68 @@ it('notifies sibling Collections while preserving listener error reporting', asy
     }
   })
 })
+
+// Abnormal native closure differs from ordinary close: the provider aborts
+// admitted work. fake-IDB's forceCloseDatabase closes admission but omits the
+// spec's forced-abort step. Supply that premise with native transaction.abort(),
+// then use its real close path; dispatching an Event alone would be invalid.
+// A separate inspector holds storage so both loading and write prefixes reach
+// the pending native cut. The model retains committed rows, rejects unfinished
+// work, and keeps every attached Collection in error after the close event.
+for (const phase of ['idle', 'ready', 'loading', ...kinds] as const) {
+  it(`retains committed rows after abnormal native close during ${phase}`, async () => {
+    await withHarness(async (h) => {
+      await seed(h.db, 'items', initial)
+      const inspector = await h.connect()
+      const c =
+        phase === 'idle' || phase === 'loading' ? h.make() : await h.open()
+      const statuses = recordStatus(c)
+      const native = observeTransactions(h.db.db)
+      h.disposers.push(() => native.restore())
+      const gate = holdStore(inspector.db)
+      h.disposers.push(() => gate.release())
+      await gate.started
+      const pending =
+        phase === 'loading'
+          ? observe(c.preload())
+          : phase === 'idle' || phase === 'ready'
+            ? undefined
+            : observe(start(c, phase, 1))
+      if (pending)
+        await vi.waitFor(() => expect(native.entries.length).toBeGreaterThan(0))
+      const terminated = new Promise<void>((resolve) =>
+        h.db.db.addEventListener('close', () => resolve(), { once: true }),
+      )
+      for (const entry of native.entries) entry.transaction.abort()
+      // fake-IDB 6.2.5 incorrectly declares a constructor parameter; its
+      // documented runtime API takes the native database instance.
+      ;(forceCloseDatabase as unknown as (db: IDBDatabase) => void)(h.db.db)
+      await gate.release()
+      await terminated
+      expect(() => h.db.db.transaction('items')).toThrow()
+      if (pending) {
+        await pending.done
+        expect(pending.result.state).toBe('rejected')
+        expect(native.entries.map((entry) => entry.status)).toEqual(['abort'])
+      }
+      if (phase === 'idle') await expect(c.preload()).rejects.toThrow()
+      closed(c, statuses)
+      assertRows(
+        c.values(),
+        phase === 'idle' || phase === 'loading' ? [] : initial,
+        'retained public snapshot',
+      )
+      assertRows(
+        (await readStore<Row>(inspector, 'items')).rows,
+        initial,
+        'aborted work cannot change disk',
+      )
+      const fresh = await h.open('items', { db: inspector })
+      assertRows(
+        fresh.values(),
+        initial,
+        'new descriptor restores committed rows',
+      )
+    })
+  })
+}
