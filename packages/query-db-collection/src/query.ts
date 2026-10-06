@@ -3428,11 +3428,32 @@ export function queryCollectionOptions(
     write: (message: Omit<ChangeMessage<any>, `key`>) => void
     commit: () => SyncAppliedReceipt
     updateCacheData?: (getItems: () => Array<any>, keys: Array<any>) => void
+    earlierCommits?: () => Promise<void> | undefined
   } | null = null
 
   // Enhanced internalSync that captures write functions for manual use
-  const enhancedInternalSync: SyncConfig<any>[`sync`] = (params) => {
-    const { begin, write, commit, collection } = params
+  const enhancedInternalSync: SyncConfig<any>[`sync`] = (syncParams) => {
+    // A direct write validates against every earlier commit, so track when
+    // the last commit is accepted.
+    let earlierCommits: Promise<void> | undefined
+    const commit: typeof syncParams.commit = (signal) => {
+      const applied = syncParams.commit(signal)
+      const accepted = whenSyncAccepted(applied)
+      if (accepted !== true) {
+        const tail = accepted.then(
+          () => {
+            if (earlierCommits === tail) earlierCommits = undefined
+          },
+          () => {
+            if (earlierCommits === tail) earlierCommits = undefined
+          },
+        )
+        earlierCommits = tail
+      }
+      return applied
+    }
+    const params = { ...syncParams, commit }
+    const { begin, write, collection } = params
     let queryClientMounted = false
 
     const mountQueryClient = () => {
@@ -3467,6 +3488,7 @@ export function queryCollectionOptions(
       write,
       commit,
       updateCacheData,
+      earlierCommits: () => earlierCommits,
     }
     writeContext = currentWriteContext
 

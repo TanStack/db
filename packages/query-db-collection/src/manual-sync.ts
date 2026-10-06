@@ -1,4 +1,4 @@
-import { whenSyncAccepted } from '@tanstack/db'
+import { DuplicateKeySyncError, whenSyncAccepted } from '@tanstack/db'
 import {
   DeleteOperationItemNotFoundError,
   DuplicateKeyInBatchError,
@@ -50,6 +50,8 @@ export interface SyncContext<
    * If not provided, falls back to directly setting the cache with the raw array.
    */
   updateCacheData?: (getItems: () => Array<TRow>, keys: Array<TKey>) => void
+  /** Settles once every earlier commit is accepted, or undefined if it is. */
+  earlierCommits?: () => Promise<void> | undefined
 }
 
 interface NormalizedOperation<
@@ -124,7 +126,12 @@ function validateOperations<
     // Validate operation-specific requirements
     // Validate against accepted synced rows, not the optimistic view, so a
     // write works while its row is optimistically modified or queued.
-    if (op.type === `update`) {
+    if (op.type === `insert`) {
+      // Persistence stores a sync insert as an update, so check here.
+      if (ctx.collection._state.getAcceptedSyncedRow(op.key)) {
+        throw new DuplicateKeySyncError(op.key, ctx.collection.id)
+      }
+    } else if (op.type === `update`) {
       if (!ctx.collection._state.getAcceptedSyncedRow(op.key)) {
         throw new UpdateOperationItemNotFoundError(op.key)
       }
@@ -138,6 +145,28 @@ function validateOperations<
 
 // Execute a batch of operations
 export function performWriteOperations<
+  TRow extends object,
+  TKey extends string | number = string | number,
+  TInsertInput extends object = TRow,
+>(
+  operations:
+    | SyncOperation<TRow, TKey, TInsertInput>
+    | Array<SyncOperation<TRow, TKey, TInsertInput>>,
+  ctx: SyncContext<TRow, TKey>,
+): Promise<void> {
+  // Validate against, and apply on top of, every earlier commit. A commit
+  // can wait for a persistence lock before it is accepted, so the write waits
+  // too. A validation error rejects the returned promise.
+  const earlier = ctx.earlierCommits?.()
+  if (earlier) return earlier.then(() => applyWriteOperations(operations, ctx))
+  try {
+    return applyWriteOperations(operations, ctx)
+  } catch (error) {
+    return Promise.reject(error)
+  }
+}
+
+function applyWriteOperations<
   TRow extends object,
   TKey extends string | number = string | number,
   TInsertInput extends object = TRow,
