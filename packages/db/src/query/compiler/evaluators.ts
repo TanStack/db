@@ -5,9 +5,12 @@ import {
 } from '../../errors.js'
 import {
   areValuesEqual,
+  compareValues,
+  isUint8Array,
   isUnorderable,
   normalizeValue,
 } from '../../utils/comparison.js'
+import { getPropRefPropertyPath, getPropRefSourceAlias } from '../ir.js'
 import type { BasicExpression, Func, PropRef } from '../ir.js'
 import type { NamespacedRow } from '../../types.js'
 
@@ -16,6 +19,11 @@ import type { NamespacedRow } from '../../types.js'
  */
 function isUnknown(value: any): boolean {
   return value === null || value === undefined
+}
+
+function normalizeEqualityOperand(value: unknown): unknown {
+  // Byte comparison needs no Map-key encoding, even for large binary values.
+  return isUint8Array(value) ? value : normalizeValue(value)
 }
 
 /**
@@ -137,7 +145,13 @@ function compileExpressionInternal(
  * Compiles a reference expression into an optimized evaluator
  */
 function compileRef(ref: PropRef): CompiledExpression {
-  const [namespace, ...propertyPath] = ref.path
+  const explicitAlias = getPropRefSourceAlias(ref)
+  const [legacyNamespace, ...legacyPropertyPath] = ref.path
+  const namespace = explicitAlias ?? legacyNamespace
+  const propertyPath =
+    explicitAlias === undefined
+      ? legacyPropertyPath
+      : getPropRefPropertyPath(ref)
 
   if (!namespace) {
     throw new EmptyReferencePathError()
@@ -214,7 +228,7 @@ function compileRef(ref: PropRef): CompiledExpression {
  * Compiles a reference expression for single-row evaluation
  */
 function compileSingleRowRef(ref: PropRef): CompiledSingleRowExpression {
-  const propertyPath = ref.path
+  const propertyPath = getPropRefPropertyPath(ref)
 
   // This function works for all path lengths including empty path
   return (item) => {
@@ -239,13 +253,26 @@ function compileFunction(func: Func, isSingleRow: boolean): (data: any) => any {
   )
 
   switch (func.name) {
+    case `array`:
+      return (data) => compiledArgs.map((evaluate) => evaluate(data))
     // Comparison operators
     case `eq`: {
       const argA = compiledArgs[0]!
       const argB = compiledArgs[1]!
       return (data) => {
-        const a = normalizeValue(argA(data))
-        const b = normalizeValue(argB(data))
+        const rawA = argA(data)
+        const rawB = argB(data)
+        // Same-type strings and booleans need no normalization; this is the
+        // hot path for predicate scans and change filtering.
+        const typeA = typeof rawA
+        if (
+          typeA === typeof rawB &&
+          (typeA === `string` || typeA === `boolean`)
+        ) {
+          return rawA === rawB
+        }
+        const a = normalizeEqualityOperand(rawA)
+        const b = normalizeEqualityOperand(rawB)
         // In 3-valued logic, any comparison with null/undefined returns UNKNOWN
         if (isUnknown(a) || isUnknown(b)) {
           return null
@@ -265,12 +292,10 @@ function compileFunction(func: Func, isSingleRow: boolean): (data: any) => any {
         if (isUnknown(a) || isUnknown(b)) {
           return null
         }
-        // NaN/invalid Dates sort greater than every other value, and are equal
-        // to one another (PostgreSQL semantics)
         if (isUnorderable(a) || isUnorderable(b)) {
           return isUnorderable(a) && !isUnorderable(b)
         }
-        return a > b
+        return compareValues(a, b) > 0
       }
     }
     case `gte`: {
@@ -286,7 +311,7 @@ function compileFunction(func: Func, isSingleRow: boolean): (data: any) => any {
         if (isUnorderable(a) || isUnorderable(b)) {
           return isUnorderable(a)
         }
-        return a >= b
+        return compareValues(a, b) >= 0
       }
     }
     case `lt`: {
@@ -302,7 +327,7 @@ function compileFunction(func: Func, isSingleRow: boolean): (data: any) => any {
         if (isUnorderable(a) || isUnorderable(b)) {
           return isUnorderable(b) && !isUnorderable(a)
         }
-        return a < b
+        return compareValues(a, b) < 0
       }
     }
     case `lte`: {
@@ -318,7 +343,7 @@ function compileFunction(func: Func, isSingleRow: boolean): (data: any) => any {
         if (isUnorderable(a) || isUnorderable(b)) {
           return isUnorderable(b)
         }
-        return a <= b
+        return compareValues(a, b) <= 0
       }
     }
 
@@ -393,7 +418,7 @@ function compileFunction(func: Func, isSingleRow: boolean): (data: any) => any {
       const valueEvaluator = compiledArgs[0]!
       const arrayEvaluator = compiledArgs[1]!
       return (data) => {
-        const value = normalizeValue(valueEvaluator(data))
+        const value = normalizeEqualityOperand(valueEvaluator(data))
         const array = arrayEvaluator(data)
         // In 3-valued logic, if the value is null/undefined, return UNKNOWN
         if (isUnknown(value)) {
@@ -402,7 +427,9 @@ function compileFunction(func: Func, isSingleRow: boolean): (data: any) => any {
         if (!Array.isArray(array)) {
           return false
         }
-        return array.some((item) => valuesEqual(normalizeValue(item), value))
+        return array.some((item) =>
+          valuesEqual(normalizeEqualityOperand(item), value),
+        )
       }
     }
 
@@ -628,6 +655,13 @@ export function isCaseWhenConditionTrue(value: any): boolean {
 
 /**
  * Evaluates LIKE/ILIKE patterns
+ *
+ * `%` matches any sequence of characters (including none), `_` matches
+ * exactly one. The pattern is matched with an iterative two-pointer walk
+ * instead of being compiled to a RegExp: patterns with many `%` wildcards
+ * would produce overlapping `.*` segments whose catastrophic backtracking
+ * makes near-miss inputs take exponential time (CWE-1333). The walk is
+ * O(value.length * pattern.length) in the worst case.
  */
 function evaluateLike(
   value: any,
@@ -641,15 +675,37 @@ function evaluateLike(
   const searchValue = caseInsensitive ? value.toLowerCase() : value
   const searchPattern = caseInsensitive ? pattern.toLowerCase() : pattern
 
-  // Convert SQL LIKE pattern to regex
-  // First escape all regex special chars except % and _
-  let regexPattern = searchPattern.replace(/[.*+?^${}()|[\]\\]/g, `\\$&`)
+  let valueIndex = 0
+  let patternIndex = 0
+  // Position of the most recent `%` and the value position it restarts from
+  let starPatternIndex = -1
+  let starValueIndex = 0
 
-  // Then convert SQL wildcards to regex
-  regexPattern = regexPattern.replace(/%/g, `.*`) // % matches any sequence
-  regexPattern = regexPattern.replace(/_/g, `.`) // _ matches any single char
+  while (valueIndex < searchValue.length) {
+    const patternChar =
+      patternIndex < searchPattern.length
+        ? searchPattern[patternIndex]
+        : undefined
+    if (patternChar === `%`) {
+      starPatternIndex = patternIndex
+      starValueIndex = valueIndex
+      patternIndex++
+    } else if (patternChar === `_` || patternChar === searchValue[valueIndex]) {
+      valueIndex++
+      patternIndex++
+    } else if (starPatternIndex !== -1) {
+      // Mismatch after a `%`: let it consume one more character and retry
+      starValueIndex++
+      valueIndex = starValueIndex
+      patternIndex = starPatternIndex + 1
+    } else {
+      return false
+    }
+  }
 
-  // 's' (dotAll flag) makes '.' match all characters including line terminations
-  const regex = new RegExp(`^${regexPattern}$`, 's')
-  return regex.test(searchValue)
+  // The value is consumed; only trailing `%` wildcards may remain
+  while (searchPattern[patternIndex] === `%`) {
+    patternIndex++
+  }
+  return patternIndex === searchPattern.length
 }

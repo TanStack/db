@@ -3,8 +3,6 @@ id: IR
 title: IR
 ---
 
-# IR
-
 ## Classes
 
 - [Aggregate](classes/Aggregate.md)
@@ -47,9 +45,14 @@ title: IR
 
 ## Functions
 
+- [collectCollectionSources](functions/collectCollectionSources.md)
 - [createResidualWhere](functions/createResidualWhere.md)
 - [followRef](functions/followRef.md)
+- [getFromSources](functions/getFromSources.md)
 - [getHavingExpression](functions/getHavingExpression.md)
+- [getPropRefPropertyPath](functions/getPropRefPropertyPath.md)
+- [getPropRefSourceAlias](functions/getPropRefSourceAlias.md)
 - [getWhereExpression](functions/getWhereExpression.md)
+- [isBasicOrAggregateExpression](functions/isBasicOrAggregateExpression.md)
 - [isExpressionLike](functions/isExpressionLike.md)
 - [isResidualWhere](functions/isResidualWhere.md)

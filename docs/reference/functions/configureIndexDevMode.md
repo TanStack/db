@@ -3,8 +3,6 @@ id: configureIndexDevMode
 title: configureIndexDevMode
 ---
 
-# Function: configureIndexDevMode()
-
 ```ts
 function configureIndexDevMode(config): void;
 ```

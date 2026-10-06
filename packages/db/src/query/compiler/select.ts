@@ -5,10 +5,7 @@ import {
   Value as ValClass,
   isExpressionLike,
 } from '../ir.js'
-import {
-  AggregateNotSupportedError,
-  UnsafeAliasPathError,
-} from '../../errors.js'
+import { UnsafeAliasPathError } from '../../errors.js'
 import { compileExpression, isCaseWhenConditionTrue } from './evaluators.js'
 import { containsAggregate } from './group-by.js'
 import type {
@@ -156,6 +153,16 @@ export function processSelect(
   select: Select,
   _allInputs: Record<string, KeyedStream>,
 ): NamespacedAndKeyedStream {
+  if (!isNestedSelectObject(select)) {
+    const compiled = compileSelectValue(select as SelectValueExpression)
+    return pipeline.pipe(
+      map(([key, namespacedRow]) => [
+        key,
+        { ...namespacedRow, $selected: compiled(namespacedRow) },
+      ]),
+    ) as NamespacedAndKeyedStream
+  }
+
   // Build ordered operations to preserve authoring order (spreads and fields)
   const ops: Array<SelectOp> = []
 
@@ -257,24 +264,6 @@ function isAggregateExpression(
 }
 
 /**
- * Processes a single argument in a function context
- */
-export function processArgument(
-  arg: BasicExpression | Aggregate,
-  namespacedRow: NamespacedRow,
-): any {
-  if (isAggregateExpression(arg)) {
-    throw new AggregateNotSupportedError()
-  }
-
-  // Pre-compile the expression and evaluate immediately
-  const compiledExpression = compileExpression(arg)
-  const value = compiledExpression(namespacedRow)
-
-  return value
-}
-
-/**
  * Helper function to check if an object is a nested select object
  *
  * .select({
@@ -313,9 +302,10 @@ function addFromObject(
       if (pathStr.includes(`.`) || isRefExpr) {
         // Merge into the current destination (prefixPath) from the referenced source path
         const targetPath = [...prefixPath]
+        const path = pathStr.split(`.`)
         const expr = isRefExpr
           ? (value as BasicExpression)
-          : (new PropRef(pathStr.split(`.`)) as BasicExpression)
+          : (new PropRef(path, path[0]) as BasicExpression)
         const compiled = compileExpression(expr)
         ops.push({ kind: `merge`, targetPath, source: compiled })
       } else {

@@ -3,13 +3,11 @@ id: subtract
 title: subtract
 ---
 
-# Function: subtract()
-
 ```ts
 function subtract<T1, T2>(left, right): BinaryNumericReturnType;
 ```
 
-Defined in: [packages/db/src/query/builder/functions.ts:611](https://github.com/TanStack/db/blob/main/packages/db/src/query/builder/functions.ts#L611)
+Defined in: [packages/db/src/query/builder/functions.ts:617](https://github.com/TanStack/db/blob/main/packages/db/src/query/builder/functions.ts#L617)
 
 ## Type Parameters
 

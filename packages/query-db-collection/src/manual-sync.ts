@@ -1,3 +1,4 @@
+import { whenSyncAccepted } from '@tanstack/db'
 import {
   DeleteOperationItemNotFoundError,
   DuplicateKeyInBatchError,
@@ -5,16 +6,21 @@ import {
   UpdateOperationItemNotFoundError,
 } from './errors'
 import type { QueryClient } from '@tanstack/query-core'
-import type { ChangeMessage, Collection } from '@tanstack/db'
+import type {
+  ChangeMessage,
+  Collection,
+  SyncAppliedReceipt,
+} from '@tanstack/db'
 
 // Track active batch operations per context to prevent cross-collection contamination
 const activeBatchContexts = new WeakMap<
   SyncContext<any, any>,
   {
     operations: Array<SyncOperation<any, any, any>>
-    isActive: boolean
+    completion: Promise<void>
   }
 >()
+const writeCompletionPromises = new WeakSet<object>()
 
 // Types for sync operations
 export type SyncOperation<
@@ -35,20 +41,15 @@ export interface SyncContext<
   queryClient: QueryClient
   queryKey: Array<unknown>
   getKey: (item: TRow) => TKey
-  /**
-   * Begin a new sync transaction.
-   * @param options.immediate - When true, the transaction will be processed immediately
-   *   even if there are persisting user transactions. Used by manual write operations.
-   */
-  begin: (options?: { immediate?: boolean }) => void
+  begin: () => void
   write: (message: Omit<ChangeMessage<TRow>, `key`>) => void
-  commit: () => void
+  commit: () => SyncAppliedReceipt
   /**
    * Optional function to update the query cache with the latest synced data.
    * Handles both direct array caches and wrapped response formats (when `select` is used).
    * If not provided, falls back to directly setting the cache with the raw array.
    */
-  updateCacheData?: (items: Array<TRow>) => void
+  updateCacheData?: (getItems: () => Array<TRow>, keys: Array<TKey>) => void
 }
 
 interface NormalizedOperation<
@@ -121,14 +122,14 @@ function validateOperations<
     seenKeys.add(op.key)
 
     // Validate operation-specific requirements
-    // NOTE: These validations check the synced store only, not the combined view (synced + optimistic)
-    // This allows write operations to work correctly even when items are optimistically modified
+    // Validate against accepted synced rows, not the optimistic view, so a
+    // write works while its row is optimistically modified or queued.
     if (op.type === `update`) {
-      if (!ctx.collection._state.syncedData.has(op.key)) {
+      if (!ctx.collection._state.getAcceptedSyncedRow(op.key)) {
         throw new UpdateOperationItemNotFoundError(op.key)
       }
     } else if (op.type === `delete`) {
-      if (!ctx.collection._state.syncedData.has(op.key)) {
+      if (!ctx.collection._state.getAcceptedSyncedRow(op.key)) {
         throw new DeleteOperationItemNotFoundError(op.key)
       }
     }
@@ -145,13 +146,13 @@ export function performWriteOperations<
     | SyncOperation<TRow, TKey, TInsertInput>
     | Array<SyncOperation<TRow, TKey, TInsertInput>>,
   ctx: SyncContext<TRow, TKey>,
-): void {
+): Promise<void> {
   const normalized = normalizeOperations(operations, ctx)
   validateOperations(normalized, ctx)
 
-  // Use immediate: true to ensure syncedData is updated synchronously,
-  // even when called from within a mutationFn with an active persisting transaction
-  ctx.begin({ immediate: true })
+  // While an optimistic transaction persists, this sync transaction waits
+  // and applies when that transaction settles.
+  ctx.begin()
 
   for (const op of normalized) {
     switch (op.type) {
@@ -164,8 +165,7 @@ export function performWriteOperations<
         break
       }
       case `update`: {
-        // Get from synced store only, not the combined view
-        const currentItem = ctx.collection._state.syncedData.get(op.key)!
+        const currentItem = ctx.collection._state.getAcceptedSyncedRow(op.key)!
         const updatedItem = {
           ...currentItem,
           ...op.data,
@@ -182,8 +182,7 @@ export function performWriteOperations<
         break
       }
       case `delete`: {
-        // Get from synced store only, not the combined view
-        const currentItem = ctx.collection._state.syncedData.get(op.key)!
+        const currentItem = ctx.collection._state.getAcceptedSyncedRow(op.key)!
         ctx.write({
           type: `delete`,
           value: currentItem,
@@ -191,8 +190,8 @@ export function performWriteOperations<
         break
       }
       case `upsert`: {
-        // Check synced store only, not the combined view
-        const existsInSyncedStore = ctx.collection._state.syncedData.has(op.key)
+        const existsInSyncedStore =
+          ctx.collection._state.getAcceptedSyncedRow(op.key) !== undefined
         const resolved = ctx.collection.validateData(
           op.data,
           existsInSyncedStore ? `update` : `insert`,
@@ -214,16 +213,32 @@ export function performWriteOperations<
     }
   }
 
-  ctx.commit()
+  const applied = ctx.commit()
 
-  // Update query cache after successful commit
-  const updatedData = Array.from(ctx.collection._state.syncedData.values())
-  if (ctx.updateCacheData) {
-    ctx.updateCacheData(updatedData)
-  } else {
-    // Fallback: directly set the cache with raw array (for non-Query Collection consumers)
-    ctx.queryClient.setQueryData(ctx.queryKey, updatedData)
+  // A handler awaits this write, so it resolves once the transaction is
+  // accepted, including any durable step; while the handler's own mutation
+  // persists, the rows become visible when that mutation settles. The Query
+  // cache holds accepted rows.
+  const accepted = whenSyncAccepted(applied)
+  const updateCache = () => {
+    const getItems = () =>
+      Array.from(
+        ctx.collection._state.acceptedSyncedEntries(),
+        ([, row]) => row,
+      )
+    if (ctx.updateCacheData)
+      ctx.updateCacheData(
+        getItems,
+        normalized.map((op) => op.key),
+      )
+    else ctx.queryClient.setQueryData(ctx.queryKey, getItems())
   }
+  if (accepted === true) updateCache()
+  const completion = Promise.resolve(accepted).then(() => {
+    if (accepted !== true) updateCache()
+  })
+  void completion.catch(() => undefined)
+  return completion
 }
 
 // Factory function to create write utils
@@ -240,75 +255,33 @@ export function createWriteUtils<
     return context
   }
 
+  function write(operation: SyncOperation<TRow, TKey, TInsertInput>) {
+    const ctx = ensureContext()
+    const batchContext = activeBatchContexts.get(ctx)
+    if (batchContext) {
+      batchContext.operations.push(operation)
+      return batchContext.completion
+    }
+    const completion = performWriteOperations(operation, ctx)
+    writeCompletionPromises.add(completion)
+    return completion
+  }
+
   return {
     writeInsert(data: TInsertInput | Array<TInsertInput>) {
-      const operation: SyncOperation<TRow, TKey, TInsertInput> = {
-        type: `insert`,
-        data,
-      }
-
-      const ctx = ensureContext()
-      const batchContext = activeBatchContexts.get(ctx)
-
-      // If we're in a batch, just add to the batch operations
-      if (batchContext?.isActive) {
-        batchContext.operations.push(operation)
-        return
-      }
-
-      // Otherwise, perform the operation immediately
-      performWriteOperations(operation, ctx)
+      return write({ type: `insert`, data })
     },
 
     writeUpdate(data: Partial<TRow> | Array<Partial<TRow>>) {
-      const operation: SyncOperation<TRow, TKey, TInsertInput> = {
-        type: `update`,
-        data,
-      }
-
-      const ctx = ensureContext()
-      const batchContext = activeBatchContexts.get(ctx)
-
-      if (batchContext?.isActive) {
-        batchContext.operations.push(operation)
-        return
-      }
-
-      performWriteOperations(operation, ctx)
+      return write({ type: `update`, data })
     },
 
     writeDelete(key: TKey | Array<TKey>) {
-      const operation: SyncOperation<TRow, TKey, TInsertInput> = {
-        type: `delete`,
-        key,
-      }
-
-      const ctx = ensureContext()
-      const batchContext = activeBatchContexts.get(ctx)
-
-      if (batchContext?.isActive) {
-        batchContext.operations.push(operation)
-        return
-      }
-
-      performWriteOperations(operation, ctx)
+      return write({ type: `delete`, key })
     },
 
     writeUpsert(data: Partial<TRow> | Array<Partial<TRow>>) {
-      const operation: SyncOperation<TRow, TKey, TInsertInput> = {
-        type: `upsert`,
-        data,
-      }
-
-      const ctx = ensureContext()
-      const batchContext = activeBatchContexts.get(ctx)
-
-      if (batchContext?.isActive) {
-        batchContext.operations.push(operation)
-        return
-      }
-
-      performWriteOperations(operation, ctx)
+      return write({ type: `upsert`, data })
     },
 
     writeBatch(callback: () => void) {
@@ -316,46 +289,64 @@ export function createWriteUtils<
 
       // Check if we're already in a batch (nested batch)
       const existingBatch = activeBatchContexts.get(ctx)
-      if (existingBatch?.isActive) {
+      if (existingBatch) {
         throw new Error(
           `Cannot nest writeBatch calls. Complete the current batch before starting a new one.`,
         )
       }
 
+      let resolveBatch!: (completion: Promise<void>) => void
+      let rejectBatch!: (reason: unknown) => void
+      const completion = new Promise<void>((resolve, reject) => {
+        resolveBatch = resolve
+        rejectBatch = reject
+      })
+      writeCompletionPromises.add(completion)
+      void completion.catch(() => undefined)
+
       // Set up the batch context for this specific collection
       const batchContext = {
         operations: [] as Array<SyncOperation<TRow, TKey, TInsertInput>>,
-        isActive: true,
+        completion,
       }
       activeBatchContexts.set(ctx, batchContext)
 
       try {
         // Execute the callback - any write operations will be collected
-        const result = callback()
+        const result: unknown = callback()
 
-        // Check if callback returns a promise (async function)
+        // A direct write in another collection may be returned incidentally.
         if (
-          // @ts-expect-error - Runtime check for async callback, callback is typed as () => void but user might pass async
-          // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
-          result &&
+          result !== null &&
           typeof result === `object` &&
           `then` in result &&
-          // @ts-expect-error - Runtime check for async callback, callback is typed as () => void but user might pass async
-          typeof result.then === `function`
+          typeof result.then === `function` &&
+          !writeCompletionPromises.has(result)
         ) {
+          // Rejecting the batch can also reject an async callback awaiting it.
+          void Promise.resolve(result).catch(() => undefined)
           throw new Error(
             `writeBatch does not support async callbacks. The callback must be synchronous.`,
           )
         }
 
-        // Perform all collected operations
-        if (batchContext.operations.length > 0) {
-          performWriteOperations(batchContext.operations, ctx)
-        }
-      } finally {
-        // Always clear the batch context
-        batchContext.isActive = false
+        // A subscriber called during commit starts a separate write or batch.
         activeBatchContexts.delete(ctx)
+
+        // Perform all collected operations
+        resolveBatch(
+          batchContext.operations.length > 0
+            ? performWriteOperations(batchContext.operations, ctx)
+            : Promise.resolve(),
+        )
+        return completion
+      } catch (error) {
+        rejectBatch(error)
+        throw error
+      } finally {
+        if (activeBatchContexts.get(ctx) === batchContext) {
+          activeBatchContexts.delete(ctx)
+        }
       }
     },
   }

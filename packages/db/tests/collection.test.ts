@@ -1,12 +1,16 @@
 import mitt from 'mitt'
 import { describe, expect, it, vi } from 'vitest'
-import { createCollection } from '../src/collection/index.js'
+import {
+  createCollection,
+  withCollectionSyncConfigFactory,
+} from '../src/collection/index.js'
 import {
   CollectionRequiresConfigError,
   DuplicateKeyError,
   DuplicateKeySyncError,
   InvalidKeyError,
   KeyUpdateNotAllowedError,
+  LoadSubsetOperationAbortedError,
   MissingDeleteHandlerError,
   MissingInsertHandlerError,
   MissingUpdateHandlerError,
@@ -43,6 +47,45 @@ const getStateEntries = <
   ])
 
 describe(`Collection`, () => {
+  it.each([false, true])(
+    `owns binding utilities only when a sync factory exists: %s`,
+    async (bind) => {
+      let value = 1
+      const read = vi.fn(() => value)
+      const utilities = Object.create(
+        { inherited: () => `prototype` },
+        {
+          current: { get: read, enumerable: true },
+        },
+      ) as { readonly current: number; inherited: () => string }
+      const source: SyncConfig<{ id: number }> = { sync: () => {} }
+      const factory = vi.fn((sync: typeof source) => sync)
+      const sync = bind
+        ? withCollectionSyncConfigFactory(source, factory)
+        : source
+      const options = {
+        getKey: (row: { id: number }) => row.id,
+        sync,
+        utils: utilities,
+      }
+      const a = createCollection(options)
+      const b = createCollection(options)
+      try {
+        expect(read).not.toHaveBeenCalled()
+        expect(a.utils === utilities).toBe(!bind)
+        expect(a.utils === b.utils).toBe(!bind)
+        expect(a.utils.inherited()).toBe(`prototype`)
+        value = 2
+        expect(a.utils.current).toBe(2)
+        expect(b.utils.current).toBe(2)
+        expect(factory).toHaveBeenCalledTimes(bind ? 2 : 0)
+      } finally {
+        await a.cleanup()
+        await b.cleanup()
+      }
+    },
+  )
+
   it(`should throw if there's no sync config`, () => {
     // @ts-expect-error we're testing for throwing when there's no config passed in
     expect(() => createCollection()).toThrow(CollectionRequiresConfigError)
@@ -77,7 +120,7 @@ describe(`Collection`, () => {
     ).toThrow(DuplicateKeySyncError)
   })
 
-  it(`removes optimistic insert when sync confirms with a different server-generated key`, async () => {
+  it(`keeps ambiguous server-key sync queued while a temp-key optimistic insert is pending`, async () => {
     const options = mockSyncCollectionOptionsNoInitialState<{
       id: number
       text: string
@@ -102,6 +145,11 @@ describe(`Collection`, () => {
     options.utils.commit()
 
     // The sync commit is held while the local insert transaction is persisting.
+    // Without an explicit temp-key -> server-key mapping, core cannot know
+    // whether key 24 is this optimistic insert's server echo or an unrelated
+    // row, so it must not expose both rows at the same time.
+    expect(tx.isPersisted.isPending()).toBe(true)
+    expect(collection.has(24)).toBe(false)
     expect(getStateEntries(collection)).toEqual([
       [4733, { id: 4733, text: `two` }],
     ])
@@ -127,14 +175,14 @@ describe(`Collection`, () => {
     const liveCollection = createLiveQueryCollection((q) =>
       q
         .from({ collection })
-        .where(({ collection }) => eq(collection.project_id, 1))
-        .select(({ collection }) => ({
-          id: collection.id,
-          text: collection.text,
-          project_id: collection.project_id,
-          $synced: collection.$synced,
-          $origin: collection.$origin,
-          $key: collection.$key,
+        .where(({ collection: item }) => eq(item.project_id, 1))
+        .select(({ collection: item }) => ({
+          id: item.id,
+          text: item.text,
+          project_id: item.project_id,
+          $synced: item.$synced,
+          $origin: item.$origin,
+          $key: item.$key,
         })),
     )
 
@@ -521,7 +569,7 @@ describe(`Collection`, () => {
     // Test bulk update
     tx6.mutate(() =>
       collection.update(
-        [keys[2], keys[3]],
+        [keys[2]!, keys[3]!],
         { metadata: { bulkUpdate: true } },
         (drafts) => {
           drafts.forEach((draft) => {
@@ -2177,6 +2225,45 @@ describe(`Collection isLoadingSubset property`, () => {
     expect(collection.isLoadingSubset).toBe(false)
   })
 
+  it(`cleanup isolates subset loading state from a later sync run`, async () => {
+    const resolveLoads: Array<() => void> = []
+    const collection = createCollection<{ id: string; value: string }>({
+      id: `cleanup-isolates-subset-loading`,
+      getKey: (item) => item.id,
+      syncMode: `on-demand`,
+      startSync: true,
+      sync: {
+        sync: ({ markReady }) => {
+          markReady()
+          return {
+            loadSubset: () =>
+              new Promise<void>((resolve) => resolveLoads.push(resolve)),
+          }
+        },
+      },
+    })
+
+    collection._sync.loadSubset({})
+    expect(collection.isLoadingSubset).toBe(true)
+
+    await collection.cleanup()
+    expect(collection.isLoadingSubset).toBe(false)
+
+    collection.startSyncImmediate()
+    collection._sync.loadSubset({})
+    expect(collection.isLoadingSubset).toBe(true)
+
+    resolveLoads[0]!()
+    await flushPromises()
+    expect(collection.isLoadingSubset).toBe(true)
+
+    resolveLoads[1]!()
+    await flushPromises()
+    expect(collection.isLoadingSubset).toBe(false)
+
+    await collection.cleanup()
+  })
+
   it(`emits loadingSubset:change event`, async () => {
     let resolveLoadSubset: () => void
     const loadSubsetPromise = new Promise<void>((resolve) => {
@@ -2284,5 +2371,85 @@ describe(`Collection isLoadingSubset property`, () => {
     const result = collection._sync.loadSubset({})
     expect(result).toBe(true)
     expect(collection.isLoadingSubset).toBe(false)
+  })
+
+  it(`rejects an already-aborted subset request before the adapter branch`, async () => {
+    const loadSubset = vi.fn(() => true as const)
+    const collection = createCollection<{ id: string; value: string }>({
+      id: `already-aborted-subset-request`,
+      getKey: (item) => item.id,
+      syncMode: `on-demand`,
+      startSync: true,
+      sync: {
+        sync: ({ markReady }) => {
+          markReady()
+          return { loadSubset }
+        },
+      },
+    })
+    const request = new AbortController()
+    request.abort()
+
+    await expect(
+      collection._sync.loadSubset({ signal: request.signal }),
+    ).rejects.toBeInstanceOf(LoadSubsetOperationAbortedError)
+
+    expect(loadSubset).not.toHaveBeenCalled()
+    expect(collection.isLoadingSubset).toBe(false)
+    await collection.cleanup()
+  })
+
+  it(`rejects an already-aborted subset request before the eager return`, async () => {
+    const loadSubset = vi.fn(() => true as const)
+    const collection = createCollection<{ id: string; value: string }>({
+      id: `already-aborted-eager-subset-request`,
+      getKey: (item) => item.id,
+      syncMode: `eager`,
+      startSync: true,
+      sync: {
+        sync: ({ markReady }) => {
+          markReady()
+          return { loadSubset }
+        },
+      },
+    })
+    const request = new AbortController()
+    request.abort()
+
+    await expect(
+      collection._sync.loadSubset({ signal: request.signal }),
+    ).rejects.toMatchObject({ name: `AbortError` })
+
+    expect(loadSubset).not.toHaveBeenCalled()
+    expect(collection.isLoadingSubset).toBe(false)
+    await collection.cleanup()
+  })
+
+  it(`rejects an already-aborted subset request before deferred start`, async () => {
+    const loadSubset = vi.fn(() => true as const)
+    const collection = createCollection<{ id: string; value: string }>({
+      id: `already-aborted-deferred-subset-request`,
+      getKey: (item) => item.id,
+      syncMode: `on-demand`,
+      sync: {
+        sync: ({ markReady }) => {
+          markReady()
+          return { loadSubset }
+        },
+      },
+    })
+    expect(collection._deferSyncStart()).toBe(true)
+    const request = new AbortController()
+    request.abort()
+
+    await expect(
+      collection._sync.loadSubset({ signal: request.signal }),
+    ).rejects.toMatchObject({ name: `AbortError` })
+
+    expect(loadSubset).not.toHaveBeenCalled()
+    expect(collection.isLoadingSubset).toBe(false)
+    collection._resumeSyncStart()
+    expect(loadSubset).not.toHaveBeenCalled()
+    await collection.cleanup()
   })
 })

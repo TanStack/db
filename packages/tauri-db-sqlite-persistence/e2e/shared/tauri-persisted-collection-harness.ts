@@ -1,6 +1,9 @@
 import { BTreeIndex, createCollection } from '@tanstack/db'
 import { persistedCollectionOptions } from '../../src'
-import { generateSeedData } from '../../../db-collection-e2e/src/fixtures/seed-data'
+import {
+  captureSeedData,
+  generateSeedData,
+} from '../../../db-collection-e2e/src/fixtures/seed-data'
 import type { Collection } from '@tanstack/db'
 import type {
   Comment,
@@ -153,6 +156,11 @@ export async function createTauriPersistedCollectionHarnessConfig<
     cleanup = () => Promise.resolve(),
   } = options
   const seedData = generateSeedData()
+  const fixture = captureSeedData(seedData, {
+    registration:
+      'packages/tauri-db-sqlite-persistence/e2e/shared/tauri-persisted-collection-harness.ts',
+    provider: 'Supplied Tauri persistence factory',
+  })
 
   const eagerUsers = createPersistedCollection<User, TDatabase>(
     database,
@@ -219,6 +227,7 @@ export async function createTauriPersistedCollectionHarnessConfig<
   }
 
   const config: TauriPersistedCollectionHarnessConfig = {
+    fixture,
     collections: {
       eager: {
         users: eagerUsers.collection,
@@ -252,6 +261,11 @@ export async function createTauriPersistedCollectionHarnessConfig<
         insertRowIntoCollections(
           [eagerPosts.collection, onDemandPosts.collection],
           post,
+        ),
+      deletePost: async (id: string) =>
+        deleteRowAcrossCollections(
+          [eagerPosts.collection, onDemandPosts.collection],
+          id,
         ),
     },
     setup: async () => {},

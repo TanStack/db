@@ -3,13 +3,11 @@ id: Prettify
 title: Prettify
 ---
 
-# Type Alias: Prettify\<T\>
-
 ```ts
 type Prettify<T> = { [K in keyof T]: T[K] } & object;
 ```
 
-Defined in: [packages/db/src/query/builder/types.ts:1242](https://github.com/TanStack/db/blob/main/packages/db/src/query/builder/types.ts#L1242)
+Defined in: [packages/db/src/query/builder/types.ts:1370](https://github.com/TanStack/db/blob/main/packages/db/src/query/builder/types.ts#L1370)
 
 Prettify - Utility type for clean IDE display
 

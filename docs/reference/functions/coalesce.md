@@ -3,13 +3,11 @@ id: coalesce
 title: coalesce
 ---
 
-# Function: coalesce()
-
 ```ts
 function coalesce<T>(...args): CoalesceReturnType<T>;
 ```
 
-Defined in: [packages/db/src/query/builder/functions.ts:349](https://github.com/TanStack/db/blob/main/packages/db/src/query/builder/functions.ts#L349)
+Defined in: [packages/db/src/query/builder/functions.ts:355](https://github.com/TanStack/db/blob/main/packages/db/src/query/builder/functions.ts#L355)
 
 ## Type Parameters
 

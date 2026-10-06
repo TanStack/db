@@ -3,11 +3,11 @@ title: Mutations
 id: mutations
 ---
 
-# TanStack DB Mutations
+TanStack DB provides a powerful mutation system that enables optimistic updates with automatic state management. This system is built around a pattern of **optimistic mutation → mutation handler → handler-defined settlement**. A handler can extend that boundary through backend confirmation by waiting for the write to sync back before it returns. This creates a highly responsive user experience while maintaining data consistency and being easy to reason about.
 
-TanStack DB provides a powerful mutation system that enables optimistic updates with automatic state management. This system is built around a pattern of **optimistic mutation → backend persistence → sync back → confirmed state**. This creates a highly responsive user experience while maintaining data consistency and being easy to reason about.
+Local changes are applied immediately as optimistic state. When the mutation handler returns successfully while the transaction is still `persisting`, the transaction completes and the optimistic state is recomputed. Completion proves backend confirmation only when the handler explicitly waited for that confirmation or read-back.
 
-Local changes are applied immediately as optimistic state, then persisted to your backend, and finally the optimistic state is replaced by the confirmed server state once it syncs back.
+Use [offline transactions](./offline-transactions.md) when a mutation must remain pending across an app restart. Use [SQLite persistence](./sqlite-persistence.md) to retain Collection rows. It can also save sync metadata for supported adapters.
 
 ```tsx
 // Define a collection with a mutation handler
@@ -33,7 +33,10 @@ This pattern extends the Redux/Flux unidirectional data flow beyond the client t
   </a>
 </figure>
 
-With an instant inner loop of optimistic state, superseded in time by the slower outer loop of persisting to the server and syncing the updated server state back into the collection.
+The instant inner loop provides optimistic state. The slower outer loop is owned
+by the mutation handler, which can persist to a server and wait for the updated
+server state to sync back into the collection when that confirmation is
+required.
 
 ### Simplified Mutations vs Traditional Approaches
 
@@ -193,6 +196,8 @@ Use custom actions when:
 
 Custom actions provide the cleanest way to capture specific types of mutations as named operations in your application. While you can achieve similar results using metadata with collection-level mutations, custom actions make the intent explicit and keep related logic together.
 
+Teams that require writes to use actions can [enforce action boundaries with ESLint](#enforcing-action-boundaries-with-eslint).
+
 **When to use each:**
 
 - **Collection-level mutations** (`collection.update`): Simple CRUD operations on a single collection
@@ -233,7 +238,7 @@ Use this approach when:
 - You want to use TanStack DB only for queries and state management
 
 How to sync changes back:
-- **QueryCollection**: Manually refetch with `collection.utils.refetch()` to reload data from the server
+- **QueryCollection**: Refetch with `collection.utils.refetch()` to reload data from the server
 - **ElectricCollection**: Use `collection.utils.awaitTxId(txid)` to wait for a specific transaction to sync
 - **Other sync systems**: Wait for your sync mechanism to update the collection
 
@@ -243,9 +248,9 @@ The mutation lifecycle follows a consistent pattern across all mutation types:
 
 1. **Optimistic state applied**: The mutation is immediately applied to the local collection as optimistic state
 2. **Handler invoked**: The appropriate handler — either `mutationFn` or a Collection handler (`onInsert`, `onUpdate`, or `onDelete`) — is called to persist the change
-3. **Backend persistence**: Your handler persists the data to your backend
-4. **Sync back**: The handler ensures server writes have synced back to the collection
-5. **Optimistic state dropped**: Once synced, the optimistic state is replaced by the confirmed server state
+3. **Handler-defined persistence**: Your handler performs the required local or backend work
+4. **Optional confirmation**: If transaction completion must mean server confirmation, the handler waits for the provider's acknowledgement, read-back, or sync observation
+5. **Successful transaction settlement**: If the handler returns while the transaction is still `persisting`, the transaction becomes `completed` and the visible state is recomputed from synced data and any remaining optimistic transactions
 
 ```tsx
 // Step 1: Optimistic state applied immediately
@@ -254,12 +259,55 @@ todoCollection.update(todo.id, (draft) => {
 })
 // UI updates instantly with optimistic state
 
-// Step 2-3: onUpdate handler persists to backend
-// Step 4: Handler waits for sync back
-// Step 5: Optimistic state replaced by server state
+// Step 2-3: onUpdate handler performs its persistence work
+// Step 4: The handler may wait for sync back when confirmation is required
+// Step 5: Handler return settles the transaction and recomputes visible state
 ```
 
 If the handler throws an error during persistence, the optimistic state is automatically rolled back.
+
+`tx.when('settled')` observes this transaction-settlement boundary. It resolves
+with the transaction on success and rejects with the original error on failure
+(or `undefined` for a rollback without an error). It does not by itself prove
+that a server uploaded, confirmed, or returned the write. It proves those
+stronger guarantees only when the handler waits for that backend observation
+before returning. The old `tx.isPersisted.promise` remains available for the
+pre-RC releases but is deprecated and will be removed in the 1.0 RC; replace
+each use with `tx.when('settled')`.
+
+### Concurrent Optimistic Transactions
+
+Separate transactions that update the same row are layered as whole-row
+snapshots. The latest contributing whole-row snapshot supplies the visible row;
+fields are not independently merged from whichever transactions remain
+pending. Each later `update()` draft starts from the current visible state,
+including optimistic changes from earlier transactions, so edits can build on
+one another.
+
+```tsx
+const tx1 = docCollection.update(docId, (draft) => {
+  draft.content = 'A'
+})
+const tx2 = docCollection.update(docId, (draft) => {
+  // This draft sees content = 'A'.
+  draft.content = 'B'
+})
+const tx3 = docCollection.update(docId, (draft) => {
+  // This draft sees content = 'B'.
+  draft.content = 'C'
+})
+
+// Visible content is now 'C'. If tx1 and then tx2 settle while tx3 is still
+// active, 'C' remains visible.
+```
+
+If a newer transaction stops contributing while an older one is still active,
+the older transaction's snapshot can become visible again until that older
+transaction itself settles or rolls back. Do not infer server execution order
+from the local layering order. Multiple writes to the same row inside one
+manual transaction are different: they merge into that transaction's single
+pending mutation according to the
+[mutation-merging rules](#mutation-merging).
 
 ## Collection Write Operations
 
@@ -343,6 +391,33 @@ todoCollection.update(
 
 > [!IMPORTANT]
 > The `updater` function uses an Immer-like pattern to capture changes as immutable updates. You must not reassign the draft parameter itself—only mutate its properties.
+
+Existing row values stay isolated from draft edits. New objects you assign or
+add to a draft keep normal shared references during the synchronous callback:
+
+```ts
+const tag = { label: 'new' }
+todoCollection.update(todoId, (draft) => {
+  draft.tags.add(tag) // tags is a Set
+  tag.label = 'edited' // included in the update
+  for (const value of draft.tags) value.label = 'final'
+  // tag.label is now 'final' too
+})
+tag.label = 'later' // does not change the stored row
+```
+
+The completed changes are copied when the callback returns. This applies to
+new Map values, Set members, and objects assigned to draft properties. If you
+need to keep a new caller-owned object unchanged during the callback, insert
+your own copy. A thrown callback does not roll back edits to that caller-owned
+object; it leaves existing collection data unchanged.
+
+Arbitrary class instances are an exception: newly assigned instances stay by
+reference so their methods, prototypes, and private fields remain intact.
+Later changes to such an instance can therefore affect stored data without a
+new update or notification. Treat those instances as immutable, or convert them
+to plain data before assignment when you need isolation. Supported native values
+such as `URL`, `Date`, `RegExp`, and typed arrays are copied instead.
 
 ### Delete
 
@@ -432,33 +507,43 @@ const todoCollection = createCollection({
 
 > [!IMPORTANT]
 > Operation handlers must not resolve until the server changes have synced back to the collection. Different collection types provide different patterns to ensure this happens correctly.
+>
+> Do not call or await `collection.preload()`, live-query `preload()`, or a
+> direct `loadSubset()` inside a mutation handler. The optimistic mutation is
+> already applied when the handler starts. A preload may need a sync commit
+> that is queued behind that same handler, which creates a deadlock. Use the
+> collection adapter's documented mutation acknowledgement pattern instead.
 
 ### Collection-Specific Handler Patterns
 
 Different collection types have specific patterns for their handlers:
 
-**QueryCollection** - automatically refetches after handler completes:
+**QueryCollection** - currently refetches automatically after persisting changes. To adopt the explicit v1.0 pattern now:
 ```typescript
-onUpdate: async ({ transaction }) => {
+onUpdate: async ({ transaction, collection }) => {
   await Promise.all(
     transaction.mutations.map((mutation) =>
       api.todos.update(mutation.original.id, mutation.changes)
     )
   )
-  // Automatic refetch happens after handler completes
+  // Trigger refetch to sync server state
+  await collection.utils.refetch()
+  // Prevent the current pre-1.0 wrapper from refetching a second time.
+  // Remove this return in v1.0.
+  return { refetch: false }
 }
 ```
 
-**ElectricCollection** - return txid(s) to track sync:
+**ElectricCollection** - wait for txid(s) to sync:
 ```typescript
-onUpdate: async ({ transaction }) => {
-  const txids = await Promise.all(
+onUpdate: async ({ transaction, collection }) => {
+  await Promise.all(
     transaction.mutations.map(async (mutation) => {
       const response = await api.todos.update(mutation.original.id, mutation.changes)
-      return response.txid
+      // Wait for this txid to sync
+      await collection.utils.awaitTxId(response.txid)
     })
   )
-  return { txid: txids }
 }
 ```
 
@@ -706,6 +791,12 @@ const updateTodo = createOptimisticAction<{
   },
 })
 ```
+
+### Enforcing Action Boundaries with ESLint
+
+Some teams require UI writes to use actions so shared validation, side effects, and persistence logic remain together. This is an optional application convention. Direct Collection mutations remain appropriate for simple CRUD operations.
+
+The [React action-enforcement example](https://github.com/TanStack/db/tree/main/examples/react/action-enforcement) shows two ESLint policies. Its custom rule permits direct Collection reads in feature code and rejects calls to configured mutation methods on matching Collection imports. The stricter `no-restricted-imports` alternative prohibits those imports, so feature code uses query hooks for reads and actions for writes. See the [example README](https://github.com/TanStack/db/blob/main/examples/react/action-enforcement/README.md#what-is-enforced) for setup, configurable import paths, and the limits of its static analysis.
 
 ## Manual Transactions
 
@@ -983,9 +1074,9 @@ const tx = createTransaction({
   },
 })
 
-// Wait for transaction to complete
-tx.isPersisted.promise.then(() => {
-  console.log("Transaction persisted!")
+// Wait for the transaction handler to settle
+tx.when('settled').then(() => {
+  console.log("Transaction completed!")
 })
 
 // Check current state
@@ -999,7 +1090,7 @@ Paced mutations provide fine-grained control over **when and how** mutations are
 Powered by [TanStack Pacer](https://github.com/TanStack/pacer), paced mutations are ideal for scenarios like:
 - **Auto-save forms** that wait for the user to stop typing
 - **Slider controls** that need smooth updates without overwhelming the backend
-- **Sequential workflows** where order matters and every mutation must persist
+- **Sequential workflows** where admitted mutations must be attempted in order
 
 ### Key Design
 
@@ -1007,7 +1098,7 @@ The fundamental difference between strategies is how they handle transactions:
 
 **Debounce/Throttle**: Only one pending transaction (collecting mutations) and one persisting transaction (writing to backend) at a time. Multiple rapid mutations automatically merge together into a single transaction.
 
-**Queue**: Each mutation creates a separate transaction, guaranteed to run in the order they're made (FIFO by default, configurable to LIFO). All mutations are guaranteed to persist.
+**Queue**: Each mutation creates a separate transaction. Admitted mutations run in queue order (FIFO by default, configurable to LIFO). If `maxSize` is set and the waiting queue is full, the returned transaction fails and its optimistic state rolls back.
 
 ### Available Strategies
 
@@ -1015,7 +1106,7 @@ The fundamental difference between strategies is how they handle transactions:
 |----------|----------|----------|
 | **`debounceStrategy`** | Wait for inactivity before persisting. Only final state is saved. | Auto-save forms, search-as-you-type |
 | **`throttleStrategy`** | Ensure minimum spacing between executions. Mutations between executions are merged. | Sliders, progress updates, analytics |
-| **`queueStrategy`** | Each mutation becomes a separate transaction, processed sequentially in order (FIFO by default, configurable to LIFO). All mutations guaranteed to persist. | Sequential workflows, file uploads, rate-limited APIs |
+| **`queueStrategy`** | Each mutation becomes a separate transaction. Admitted mutations are attempted sequentially in queue order (FIFO by default, configurable to LIFO). | Sequential workflows, file uploads, rate-limited APIs |
 
 ### Debounce Strategy
 
@@ -1058,6 +1149,10 @@ function AutoSaveForm({ formId }: { formId: string }) {
 - Timer resets on each mutation
 - Only the final merged state persists
 - Reduces backend writes significantly for rapid changes
+- Omitted `trailing` enables trailing execution, even when `leading` is set
+- With `trailing: false`, calls skipped inside the leading window reject with `DebounceCallDroppedError` and roll back their optimistic changes. Both edges disabled reject every call.
+
+Calling `strategy.cleanup()` leaves a pending debounce write scheduled for the quiet edge after its last call. Cleanup returns before the write settles. Await its persistence promise before releasing an external client that the write needs. New debounce calls after cleanup have no defined admission rule.
 
 ### Throttle Strategy
 
@@ -1103,11 +1198,20 @@ function VolumeSlider() {
 **Key characteristics**:
 - Guarantees minimum spacing between persists
 - Can execute on leading edge, trailing edge, or both
+- With `leading: false, trailing: true`, the first write waits until the first trailing edge
+- With `leading: false`, omitting `trailing` also enables the trailing edge
+- With `trailing: false`, calls inside a throttle window fail immediately with `ThrottleCallDroppedError` and roll back their optimistic changes. Omitting `leading` in this case enables the leading edge.
+- With both edges disabled, every call fails with `ThrottleCallDroppedError`
 - Mutations between executions are merged
+
+Calling `strategy.cleanup()` leaves an already scheduled trailing write at its regular edge, so its optimistic transaction and persistence promise can settle. Cleanup returns before that write settles. Stop invoking the mutation function when its strategy is no longer needed; throttle admission after cleanup is not a defined cancellation boundary.
 
 ### Queue Strategy
 
-The queue strategy creates a separate transaction for each mutation and processes them sequentially in order. Unlike debounce/throttle which may drop intermediate mutations, **every mutation is guaranteed to be attempted**, making it ideal for workflows where you can't skip any operations.
+The queue strategy creates a separate transaction for each mutation and processes admitted transactions sequentially in queue order. Unlike debounce/throttle, **every admitted mutation is attempted**. When `maxSize` is set, overflow is rejected at admission rather than silently dropped.
+
+Calling `strategy.cleanup()` stops new admission. The existing timer drains admitted waiting mutations at the configured `wait` interval and in queue order. Cleanup returns before those writes settle.
+If the Collection is cleaned up separately, admitted persistence callbacks still run; callers should await the returned transactions when they need those writes to settle before finishing their own teardown.
 
 ```tsx
 import { usePacedMutations, queueStrategy } from "@tanstack/react-db"
@@ -1150,12 +1254,15 @@ function FileUploader() {
 - Each mutation becomes its own transaction
 - Processes sequentially in order (FIFO by default)
 - Can configure to LIFO by setting `getItemsFrom: 'back'`
-- All mutations guaranteed to be attempted (unlike debounce/throttle which may skip intermediate mutations)
+- Every admitted mutation is attempted (unlike debounce/throttle which may merge intermediate mutations)
+- `maxSize` limits waiting items; overflow fails the returned transaction and rolls back its optimistic state. Admission happens before processing, so `maxSize: 0` rejects even the first mutation.
 - Waits for each transaction to complete before starting the next
 
 **Error handling**:
 - If a mutation fails, **it is not automatically retried** - the transaction transitions to "failed" state
-- Failed mutations surface their error via `transaction.isPersisted.promise` (which will reject)
+- Failed mutations surface their error via `transaction.when('settled')` (which will reject)
+- Queue overflow rejects `transaction.when('settled')` with `QueueCapacityExceededError`
+- A call after queue cleanup rejects `transaction.when('settled')` with `QueueDisposedError` and rolls back its optimistic mutation
 - **Subsequent mutations continue processing** - a single failure does not block the queue
 - Each mutation is independent; there is no all-or-nothing transaction semantics across multiple mutations
 - To implement retry logic, see [Retry Behavior](#retry-behavior)
@@ -1208,10 +1315,10 @@ function MyComponent({ itemId }: { itemId: string }) {
   const handleSave = async (newValue: number) => {
     const tx = mutate(newValue)
 
-    // Optionally wait for persistence
+    // Optionally wait for handler settlement
     try {
-      await tx.isPersisted.promise
-      console.log('Saved successfully!')
+      await tx.when('settled')
+      console.log('Transaction completed!')
     } catch (error) {
       console.error('Save failed:', error)
     }
@@ -1345,7 +1452,7 @@ The merging behavior follows a truth table based on the mutation types:
 
 ## Controlling Optimistic Behavior
 
-By default, all mutations apply optimistic updates immediately to provide instant feedback. However, you can disable this behavior when you need to wait for server confirmation before applying changes locally.
+By default, all mutations apply optimistic updates immediately to provide instant feedback. You can disable this behavior when you do not want a pending transaction to affect the local view. With `optimistic: false`, the view changes only when the collection receives new synced or local data; successful handler settlement does not publish the mutation by itself.
 
 ### When to Disable Optimistic Updates
 
@@ -1353,7 +1460,7 @@ Consider using `optimistic: false` when:
 
 - **Complex server-side processing**: Operations that depend on server-side generation (e.g., cascading foreign keys, computed fields)
 - **Validation requirements**: Operations where backend validation might reject the change
-- **Confirmation workflows**: Deletes where UX should wait for confirmation before removing data
+- **Confirmation workflows**: Deletes where data should remain visible until confirmed synced data removes it
 - **Batch operations**: Large operations where optimistic rollback would be disruptive
 
 ### Behavior Differences
@@ -1365,9 +1472,9 @@ Consider using `optimistic: false` when:
 - Best for simple, predictable operations
 
 **`optimistic: false`**:
-- Does not modify local store until server confirms
-- No immediate UI feedback, but no rollback needed
-- UI updates only after successful server response
+- Does not modify the local view while the handler is pending
+- No optimistic view change to roll back
+- The view updates only when the collection publishes new synced or local data
 - Best for complex or validation-heavy operations
 
 ### Using Non-Optimistic Mutations
@@ -1391,14 +1498,17 @@ tx.mutate(() => {
     draft.completed = true
   })
 
-  // Wait for server confirmation for complex change
+  // The transaction mutationFn must cause the confirmed data to sync.
   auditCollection.insert(auditRecord, { optimistic: false })
 })
 ```
 
-### Waiting for Persistence
+### Waiting for Handler Settlement
 
-A common pattern with `optimistic: false` is to wait for the mutation to complete before navigating or showing success feedback:
+A common pattern with `optimistic: false` is to wait for the mutation handler to
+complete before navigating or showing success feedback. If the feedback means
+"confirmed and published by the server," configure the handler to wait for both
+the confirmation and the relevant sync observation before returning:
 
 ```typescript
 const handleCreatePost = async (postData) => {
@@ -1406,30 +1516,14 @@ const handleCreatePost = async (postData) => {
   const tx = postsCollection.insert(postData, { optimistic: false })
 
   try {
-    // Wait for write to server and sync back to complete
-    await tx.isPersisted.promise
+    // Wait for this transaction's handler to complete.
+    await tx.when('settled')
 
-    // Server write and sync back were successful
+    // This is confirmed and published only if the handler awaited both.
     navigate(`/posts/${postData.id}`)
   } catch (error) {
     // Show error notification
     toast.error("Failed to create post: " + error.message)
-  }
-}
-
-// Works with updates and deletes too
-const handleUpdateTodo = async (todoId, changes) => {
-  const tx = todoCollection.update(
-    todoId,
-    { optimistic: false },
-    (draft) => Object.assign(draft, changes)
-  )
-
-  try {
-    await tx.isPersisted.promise
-    navigate("/todos")
-  } catch (error) {
-    toast.error("Failed to update todo: " + error.message)
   }
 }
 ```
@@ -1439,9 +1533,13 @@ const handleUpdateTodo = async (todoId, changes) => {
 Transactions progress through the following states during their lifecycle:
 
 1. **`pending`**: Initial state when a transaction is created and optimistic mutations can be applied
-2. **`persisting`**: Transaction is being persisted to the backend
-3. **`completed`**: Transaction has been successfully persisted and any backend changes have been synced back
-4. **`failed`**: An error was thrown while persisting or syncing back the transaction
+2. **`persisting`**: The transaction's mutation handler is running
+3. **`completed`**: The mutation handler returned successfully while the transaction was still `persisting`
+4. **`failed`**: The transaction was rolled back or its mutation handler threw
+
+These are local transaction states. `completed` means server-confirmed only if
+the mutation handler waited for the relevant backend acknowledgement or sync
+observation before returning.
 
 ### Monitoring Transaction State
 
@@ -1454,12 +1552,12 @@ const tx = todoCollection.update(todoId, (draft) => {
 console.log(tx.state) // 'pending'
 
 // Wait for specific states
-await tx.isPersisted.promise
-console.log(tx.state) // 'completed' or 'failed'
+await tx.when('settled')
+console.log(tx.state) // 'completed'; a rejection takes the transaction to 'failed'
 
 // Handle errors
 try {
-  await tx.isPersisted.promise
+  await tx.when('settled')
   console.log("Success!")
 } catch (error) {
   console.log("Failed:", error)
@@ -1561,13 +1659,18 @@ todoCollection.delete(id) // Works with the same ID
 
 This is the cleanest approach when your backend supports it, as the ID never changes.
 
-### Solution 2: Wait for Persistence or Use Non-Optimistic Inserts
+### Solution 2: Wait for Authoritative Sync or Use Non-Optimistic Inserts
 
-Wait for the mutation to persist before allowing subsequent operations, or use non-optimistic inserts to avoid showing the item until the real ID is available:
+Configure the mutation handler to wait for the server response and the
+authoritative row to sync before it returns. You can then await handler
+settlement before enabling subsequent operations. `when('settled')` does
+not expose or translate the real ID; read it from the synced row or an
+application-owned response mapping. With a non-optimistic insert, the pending
+item stays out of the view until the collection publishes synced data.
 
 ```tsx
 const handleCreateTodo = async (text: string) => {
-  const tempId = -Math.floor(Math.random() * 1000000) + 1
+  const tempId = -(Math.floor(Math.random() * 1000000) + 1)
 
   const tx = todoCollection.insert({
     id: tempId,
@@ -1575,26 +1678,11 @@ const handleCreateTodo = async (text: string) => {
     completed: false
   })
 
-  // Wait for persistence to complete
-  await tx.isPersisted.promise
+  // This is an authoritative-sync gate only if onInsert waits for that sync.
+  await tx.when('settled')
 
-  // Now we have the real ID from the server
-  // Subsequent operations will use the real ID
-}
-
-// Disable delete buttons until persisted
-const TodoItem = ({ todo, isPersisted }: { todo: Todo, isPersisted: boolean }) => {
-  return (
-    <div>
-      {todo.text}
-      <button
-        onClick={() => todoCollection.delete(todo.id)}
-        disabled={!isPersisted}
-      >
-        Delete
-      </button>
-    </div>
-  )
+  // Do not infer ID readiness from transaction state. Read the synced row or
+  // application-owned mapping, then enable operations with that real ID.
 }
 ```
 
@@ -1653,9 +1741,9 @@ todoCollection.insert({
 
 // Use view key for rendering
 const TodoList = () => {
-  const { data: todos } = useLiveQuery((q) =>
-    q.from({ todo: todoCollection })
-  )
+  const { data: todos } = useLiveQuery({
+    query: (q) => q.from({ todo: todoCollection }),
+  })
 
   return (
     <ul>

@@ -6,7 +6,7 @@
  * the root. Reads happen after `flushSync()`. Realm-sensitive pieces come from
  * Svelte's `@tanstack/db`.
  *
- * `knownGaps` is populated empirically from the run below.
+ * All registered laws must pass; the driver has no whole-test waivers.
  */
 import {
   coalesce,
@@ -19,12 +19,14 @@ import {
   sum,
 } from '@tanstack/db'
 import { flushSync } from 'svelte'
+import { expect, it } from 'vitest'
 import {
   mockSyncCollectionOptions,
   mockSyncCollectionOptionsNoInitialState,
 } from '../../db/tests/utils'
 import { useLiveQuery } from '../src/useLiveQuery.svelte.js'
 import { runSuite } from '../../db/tests/conformance/suite'
+import { expectResultSurface } from '../../db/tests/conformance/result-laws'
 import type {
   ConformanceResult,
   ControllableHandle,
@@ -98,22 +100,26 @@ function makePrecreated(build: QueryBuild, opts?: { startSync?: boolean }) {
 }
 
 function makeErrorSource() {
+  const expectedError = new Error(`conformance: sync failure`)
+  let startup: { returned: true } | { returned: false; error: unknown } = {
+    returned: true,
+  }
   const collection = createCollection<{ id: string }>({
     id: `conformance-svelte-err-${sourceSeq++}`,
     getKey: (r) => r.id,
     startSync: false,
     sync: {
       sync: () => {
-        throw new Error(`conformance: sync failure`)
+        throw expectedError
       },
     },
   })
   try {
     collection.startSyncImmediate()
-  } catch {
-    // expected: engine catches the sync error and sets status to `error`
+  } catch (error) {
+    startup = { returned: false, error }
   }
-  return { collection }
+  return { collection, expectedError, startup }
 }
 
 async function settle() {
@@ -126,14 +132,18 @@ function makeHandle(getQuery: () => any, dispose: () => void): LiveQueryHandle {
   return {
     current(): ConformanceResult {
       const query = getQuery()
-      return {
+      return expectResultSurface({
         data: query?.data,
-        status: query?.status ?? `idle`,
-        isReady: Boolean(query?.isReady),
-        isError: Boolean(query?.isError),
+        state: query?.state,
+        status: query?.status,
+        isReady: query?.isReady,
+        persistedStatus: query?.persistedStatus,
+        isPersistedReady: query?.isPersistedReady,
+        persistedError: query?.persistedError,
+        isError: query?.isError,
         // svelte-db exposes no `isEnabled`; derive it from status (status-derived).
         isEnabled: query?.status !== `disabled`,
-      }
+      })
     },
     flush: settle,
     async apply(fn: () => void) {
@@ -200,6 +210,7 @@ function mountControllable<P>(
 
 const svelteDriver: LiveQueryDriver = {
   name: `svelte`,
+  disabledRepresentation: `empty-reactive`,
   ops: { eq, gt, count, sum, coalesce, createOptimisticAction },
   makeSource,
   makeDeferredSource,
@@ -210,14 +221,45 @@ const svelteDriver: LiveQueryDriver = {
   mountCollection,
   mountConfig,
   mountDisabled,
-  // Real bug the suite caught: svelte-db's `toValue()` unwrapping (added for the
-  // reactive `() => collection` form) CALLS a disabled query fn like `() => null`
-  // as if it were a getter, unwraps it to null, and falls through to
-  // createLiveQueryCollection({...null}) → crash in getQueryIR. The disabled
-  // short-circuit is unreachable for this case, and svelte-db has no disabled
-  // tests. Both disabled scenarios fail until this is fixed.
-  knownGaps: [`disabled-explicit`, `disabled-transition`],
-  features: { serverSnapshot: false, suspense: false },
+  knownGaps: [],
+  features: { serverSnapshot: false, suspense: false, pooledEqFilters: true },
 }
 
 runSuite(svelteDriver)
+it(`preserves raw result types through the actual driver reader`, () => {
+  const raw: Record<string, unknown> = {
+    data: [{ id: `a`, value: undefined }],
+    state: new Map(),
+    status: `disabled`,
+    isReady: false,
+    isError: false,
+    isEnabled: false,
+  }
+  const handle = makeHandle(
+    () => raw,
+    () => {},
+  )
+  try {
+    const healthy = handle.current()
+    expect(healthy.data).toBe(raw.data)
+    expect(healthy.state).toBe(raw.state)
+    expect(healthy.isReady).toBe(false)
+    expect(healthy.isError).toBe(false)
+    expect(healthy.isEnabled).toBe(false)
+    for (const key of [`status`, `isReady`, `isError`]) {
+      const original = raw[key]
+      delete raw[key]
+      expect(() => handle.current()).toThrowError(new RegExp(`raw ${key}`))
+      for (const invalid of key === `status`
+        ? [undefined, 0]
+        : [undefined, 0, ``]) {
+        raw[key] = invalid
+        expect(() => handle.current()).toThrowError(new RegExp(`raw ${key}`))
+      }
+      raw[key] = original
+      expect(handle.current()[key as keyof ConformanceResult]).toBe(original)
+    }
+  } finally {
+    handle.unmount()
+  }
+})

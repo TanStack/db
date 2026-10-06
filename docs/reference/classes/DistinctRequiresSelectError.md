@@ -3,9 +3,7 @@ id: DistinctRequiresSelectError
 title: DistinctRequiresSelectError
 ---
 
-# Class: DistinctRequiresSelectError
-
-Defined in: [packages/db/src/errors.ts:455](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L455)
+Defined in: [packages/db/src/errors.ts:526](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L526)
 
 ## Extends
 
@@ -19,7 +17,7 @@ Defined in: [packages/db/src/errors.ts:455](https://github.com/TanStack/db/blob/
 new DistinctRequiresSelectError(): DistinctRequiresSelectError;
 ```
 
-Defined in: [packages/db/src/errors.ts:456](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L456)
+Defined in: [packages/db/src/errors.ts:527](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L527)
 
 #### Returns
 

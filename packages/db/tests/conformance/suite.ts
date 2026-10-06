@@ -1,23 +1,48 @@
 /**
  * Shared live-query conformance suite.
  *
- * Sourced bottom-up from the union of the five adapters' existing test suites
- * (the "spine" + framework-agnostic "gap-closers"), plus a small tail of
- * behaviors no adapter tests yet but all should (encoded as expected-fail).
+ * Think of each scenario as a short state-machine trace:
  *
- * Each scenario has a stable KEY. An adapter marks a key in `driver.knownGaps`
- * (populated empirically by running, not from the coverage matrix) to assert it
- * as expected-fail. `UNIVERSAL_EXPECTED_FAIL` keys fail on every adapter until
- * the underlying core gap is fixed.
+ *     create sources -> mount -> publish or reconfigure -> flush -> observe
+ *
+ * Sources and handles form an ownership graph. `ScenarioSources` and
+ * `ScenarioLifetime` release that graph even when an assertion fails, while
+ * each framework driver chooses the native scheduling operation that defines
+ * `flush`. The suite compares public observations, not framework internals.
+ * This keeps the reference smaller than any adapter and makes disagreements
+ * between adapters visible without copying their implementations.
+ *
+ * The scenario set came from the union of the five adapters' existing suites
+ * plus framework-neutral gap closers. It covers value, order, cardinality,
+ * lifecycle, reactivity, failure, and disposal as separate laws so a passing
+ * final row assertion cannot hide a wrong intermediate state.
+ *
+ * Each scenario has a unique stable key. All current scenarios must pass;
+ * future known bugs need exact failure signatures, not whole-test waivers.
  *
  * Coverage: query/where/select, live insert/update/delete, orderBy, join,
  * groupBy/aggregate, nested aggregates, `.includes` subqueries, findOne
  * cardinality, disabled + transitions, deferred readiness / eager / ready-with-
  * no-data, param recompilation, optimistic mutation, pre-created & config-object
- * inputs, error status, and the order-only-move tail (expected-fail).
+ * inputs, error status, and order-only moves.
  */
 import { describe, expect, it } from 'vitest'
-import type { LiveQueryDriver, LiveQueryHandle, Row } from './contract'
+import { ScenarioLifetime } from './scenario-lifetime'
+import { ScenarioSources } from './scenario-sources'
+import { scenarioRegistry } from './registration'
+import { expectDisabledResult } from './disabled-laws'
+import {
+  expectKeyedRows,
+  expectOrderedRows,
+  expectUnorderedRows,
+  selectedRow,
+} from './result-laws'
+import type {
+  DeferredSourceHandle,
+  LiveQueryDriver,
+  LiveQueryHandle,
+  Row,
+} from './contract'
 
 const SEED: Array<Row> = [
   { id: `1`, name: `John Doe`, age: 30, team: `a` },
@@ -38,28 +63,29 @@ const ISSUES: Array<Issue> = [
   { id: `i3`, title: `Issue 3`, userId: `1` },
 ]
 
-/** Keys that are expected to fail on ALL adapters (core gaps, not adapter drift). */
-const UNIVERSAL_EXPECTED_FAIL = new Set<string>([`order-only-move`])
-
 export function runSuite(rawDriver: LiveQueryDriver) {
   const { ops } = rawDriver
-  const gaps = new Set(rawDriver.knownGaps ?? [])
-
-  // Every scenario key registered below, used to validate `knownGaps` /
-  // `UNIVERSAL_EXPECTED_FAIL` don't reference a stale or misspelled key.
-  const registeredKeys = new Set<string>()
+  const registry = scenarioRegistry(rawDriver.knownGaps)
 
   // Track every handle mounted during the current scenario so it is always torn
-  // down, even when an (expected-fail) scenario throws before its own
+  // down, even when a scenario throws before its own
   // `h.unmount()`. Wrapping the driver's `mount*` methods records handles
   // automatically, so scenario bodies need no `try/finally` of their own.
-  let mounted: Array<LiveQueryHandle> | null = null
+  let lifetime: ScenarioLifetime | null = null
+  let sources: ScenarioSources | null = null
   const track = <H extends LiveQueryHandle>(handle: H): H => {
-    mounted?.push(handle)
+    const unmount = handle.unmount.bind(handle)
+    if (lifetime) handle.unmount = lifetime.defer(unmount)
     return handle
   }
   const driver: LiveQueryDriver = {
     ...rawDriver,
+    makeSource: (data) => sources!.track(rawDriver.makeSource(data)),
+    makeDeferredSource: <T extends { id: string }>() =>
+      sources!.track(rawDriver.makeDeferredSource<T>()),
+    makePrecreated: (build, options) =>
+      sources!.track(rawDriver.makePrecreated(build, options)),
+    makeErrorSource: () => sources!.track(rawDriver.makeErrorSource()),
     mount: (build) => track(rawDriver.mount(build)),
     mountControllable: (build, initial) =>
       track(rawDriver.mountControllable(build, initial)),
@@ -69,36 +95,154 @@ export function runSuite(rawDriver: LiveQueryDriver) {
     mountDisabled: () => track(rawDriver.mountDisabled()),
   }
 
-  /** Register a scenario as `it` or `it.fails` based on known gaps. */
+  const installPersistedReadiness = (
+    source: DeferredSourceHandle,
+    settledSnapshot:
+      { status: `ready` } | { status: `error`; error: unknown } = {
+      status: `ready`,
+    },
+  ) => {
+    let snapshot:
+      | { status: `loading` }
+      | { status: `ready` }
+      | { status: `error`; error: unknown } = { status: `loading` }
+    const listeners = new Set<() => void>()
+    Object.defineProperty(
+      source.collection.config,
+      Symbol.for(`@tanstack/db.persistedReadiness`),
+      {
+        value: {
+          networkTimeoutMs: 0,
+          getOrStartNetworkDeadline: () => Date.now(),
+          getSnapshot: () => snapshot,
+          subscribe: (listener: () => void) => {
+            listeners.add(listener)
+            return () => listeners.delete(listener)
+          },
+        },
+      },
+    )
+    return () => {
+      snapshot = settledSnapshot
+      for (const listener of listeners) listener()
+    }
+  }
+
+  /** Register one unique law. */
   const scenario = (
     key: string,
     name: string,
     fn: () => Promise<void> | void,
   ) => {
-    registeredKeys.add(key)
-    const expectFail = gaps.has(key) || UNIVERSAL_EXPECTED_FAIL.has(key)
-    const label = `[${key}] ${name}${expectFail ? ` (expected-fail)` : ``}`
+    registry.register(key)
+    const label = `[${key}] ${name}`
     const run = async () => {
-      const handles: Array<LiveQueryHandle> = []
-      mounted = handles
+      const resources = new ScenarioLifetime()
+      const ownedSources = new ScenarioSources()
+      lifetime = resources
+      sources = ownedSources
       try {
-        await fn()
-      } finally {
-        mounted = null
-        for (const handle of handles) {
+        await resources.run(async () => {
           try {
-            handle.unmount()
-          } catch {
-            // teardown is best-effort / idempotent
+            await fn()
+          } finally {
+            ownedSources.defer(resources)
           }
-        }
+        })
+      } finally {
+        lifetime = null
+        sources = null
       }
     }
-    if (expectFail) it.fails(label, run)
-    else it(label, run)
+    it(label, run)
   }
 
   describe(`live-query conformance :: ${driver.name}`, () => {
+    scenario(
+      `persisted-readiness`,
+      `every opted-in source restores before a joined query reports persisted readiness`,
+      async () => {
+        const left = driver.makeDeferredSource<Row>()
+        const right = driver.makeDeferredSource<Row>()
+        const settleLeft = installPersistedReadiness(left)
+        const settleRight = installPersistedReadiness(right)
+        const h = driver.mount((q) =>
+          q
+            .from({ left: left.collection })
+            .join({ right: right.collection }, ({ left: a, right: b }: any) =>
+              ops.eq(a.id, b.id),
+            ),
+        )
+        await h.flush()
+        expect(h.current()).toMatchObject({
+          status: `loading`,
+          persistedStatus: `loading`,
+          isPersistedReady: false,
+        })
+
+        await h.apply(() => {
+          left.emit([SEED[0]!])
+          right.emit([SEED[0]!])
+        })
+        await h.flush()
+        expect(h.current().data).toHaveLength(1)
+
+        await h.apply(settleLeft)
+        await h.flush()
+        expect(h.current().persistedStatus).toBe(`loading`)
+        await h.apply(settleRight)
+        await h.flush()
+        expect(h.current()).toMatchObject({
+          status: `loading`,
+          persistedStatus: `ready`,
+          isPersistedReady: true,
+        })
+      },
+    )
+
+    scenario(
+      `persisted-readiness-opt-out`,
+      `one unconfigured source keeps the persisted signal unavailable`,
+      async () => {
+        const opted = driver.makeDeferredSource<Row>()
+        const ordinary = driver.makeDeferredSource<Row>()
+        const settle = installPersistedReadiness(opted)
+        const h = driver.mount((q) =>
+          q
+            .from({ opted: opted.collection })
+            .join(
+              { ordinary: ordinary.collection },
+              ({ opted: a, ordinary: b }: any) => ops.eq(a.id, b.id),
+            ),
+        )
+        await h.apply(settle)
+        await h.flush()
+        expect(h.current()).toMatchObject({
+          persistedStatus: `unavailable`,
+          isPersistedReady: false,
+        })
+      },
+    )
+    scenario(
+      `persisted-error-identity`,
+      `a persisted restore failure keeps its original object identity`,
+      async () => {
+        const source = driver.makeDeferredSource<Row>()
+        const failure = { code: `restore-failed`, detail: { retryable: false } }
+        const failRestore = installPersistedReadiness(source, {
+          status: `error`,
+          error: failure,
+        })
+        const h = driver.mount((q) => q.from({ items: source.collection }))
+        await h.flush()
+        expect(h.current().persistedStatus).toBe(`loading`)
+
+        await h.apply(failRestore)
+        expect(h.current().persistedStatus).toBe(`error`)
+        expect(h.current().persistedError).toBe(failure)
+        expect(h.current().isPersistedReady).toBe(false)
+      },
+    )
     // ---- spine: query + liveness ----------------------------------------
 
     scenario(
@@ -114,12 +258,85 @@ export function runSuite(rawDriver: LiveQueryDriver) {
         )
         await h.flush()
 
-        expect(h.current().data).toHaveLength(1)
-        expect(h.current().data[0]).toMatchObject({
-          id: `3`,
-          name: `John Smith`,
-        })
+        expectUnorderedRows(h.current().data, [{ id: `3`, name: `John Smith` }])
         h.unmount()
+      },
+    )
+
+    // Single-source eq filters may be served from a partition shared by every
+    // query of that shape; adapters must publish what the live query would.
+    scenario(
+      `eq-filter-rows`,
+      `an eq filter publishes matching rows in key order as rows move in and out`,
+      async () => {
+        const source = driver.makeSource(SEED)
+        const h = driver.mount((q) =>
+          q
+            .from({ items: source.collection })
+            .where(({ items }: any) => ops.eq(items.team, `a`)),
+        )
+        await h.flush()
+        const ids = () =>
+          (h.current().data as Array<{ id: string }>).map((row) => row.id)
+        expect(ids()).toEqual([`1`, `3`])
+
+        source.update({ id: `2`, name: `Jane Doe`, age: 25, team: `a` })
+        await h.flush()
+        expect(ids()).toEqual([`1`, `2`, `3`])
+
+        source.update({ id: `1`, name: `John Doe`, age: 30, team: `b` })
+        source.insert({ id: `4`, name: `Dave`, age: 40, team: `a` })
+        await h.flush()
+        expect(ids()).toEqual([`2`, `3`, `4`])
+
+        source.remove({ id: `3`, name: `John Smith`, age: 35, team: `a` })
+        await h.flush()
+        const remaining: Array<Row> = [
+          { id: `2`, name: `Jane Doe`, age: 25, team: `a` },
+          { id: `4`, name: `Dave`, age: 40, team: `a` },
+        ]
+        expectOrderedRows(h.current().data, remaining)
+        expectKeyedRows(h.current().state, remaining)
+        expect(h.current().status).toBe(`ready`)
+        h.unmount()
+      },
+    )
+
+    scenario(
+      `eq-filter-peers`,
+      `eq-filtered peers on one source each see only their rows`,
+      async () => {
+        const source = driver.makeSource(SEED)
+        const query = (team: string) => (q: any) =>
+          q
+            .from({ items: source.collection })
+            .where(({ items }: any) => ops.eq(items.team, team))
+        const teamA = driver.mount(query(`a`))
+        const teamB = driver.mount(query(`b`))
+        const olderA = driver.mount((q) =>
+          query(`a`)(q).where(({ items }: any) => ops.eq(items.age, 35)),
+        )
+        for (const h of [teamA, teamB, olderA]) await h.flush()
+        // Pooling shares one subscription between the two team queries.
+        expect(source.collection.subscriberCount).toBe(
+          driver.features?.pooledEqFilters ? 2 : 3,
+        )
+        const ids = (h: typeof teamA) =>
+          (h.current().data as Array<{ id: string }>).map((row) => row.id)
+        expect([ids(teamA), ids(teamB), ids(olderA)]).toEqual([
+          [`1`, `3`],
+          [`2`],
+          [`3`],
+        ])
+
+        source.update({ id: `3`, name: `John Smith`, age: 35, team: `b` })
+        for (const h of [teamA, teamB, olderA]) await h.flush()
+        expect([ids(teamA), ids(teamB), ids(olderA)]).toEqual([
+          [`1`],
+          [`2`, `3`],
+          [],
+        ])
+        for (const h of [teamA, teamB, olderA]) h.unmount()
       },
     )
 
@@ -131,12 +348,21 @@ export function runSuite(rawDriver: LiveQueryDriver) {
           .select(({ items }: any) => ({ id: items.id })),
       )
       await h.flush()
-      expect(h.current().data).toHaveLength(SEED.length)
+      expectUnorderedRows(h.current().data, [
+        { id: `1` },
+        { id: `2` },
+        { id: `3` },
+      ])
 
       source.insert({ id: `4`, name: `Dave`, age: 40, team: `b` })
       await h.flush()
 
-      expect(h.current().data).toHaveLength(SEED.length + 1)
+      expectUnorderedRows(h.current().data, [
+        { id: `1` },
+        { id: `2` },
+        { id: `3` },
+        { id: `4` },
+      ])
       h.unmount()
     })
 
@@ -155,7 +381,7 @@ export function runSuite(rawDriver: LiveQueryDriver) {
         source.remove(SEED[0]!)
         await h.flush()
 
-        expect(h.current().data).toHaveLength(SEED.length - 1)
+        expectUnorderedRows(h.current().data, [{ id: `2` }, { id: `3` }])
         h.unmount()
       },
     )
@@ -204,8 +430,7 @@ export function runSuite(rawDriver: LiveQueryDriver) {
         const h = driver.mountDisabled()
         await h.flush()
 
-        expect(h.current().isEnabled).toBe(false)
-        expect(h.current().data ?? []).toHaveLength(0)
+        expectDisabledResult(h.current(), driver.disabledRepresentation)
         h.unmount()
       },
     )
@@ -252,11 +477,11 @@ export function runSuite(rawDriver: LiveQueryDriver) {
       )
       await h.flush()
 
-      expect(h.current().data).toHaveLength(ISSUES.length)
-      expect(h.current().data.find((r: any) => r.id === `i1`)).toMatchObject({
-        title: `Issue 1`,
-        name: `John Doe`,
-      })
+      expectUnorderedRows(h.current().data, [
+        { id: `i1`, title: `Issue 1`, name: `John Doe` },
+        { id: `i2`, title: `Issue 2`, name: `Jane Doe` },
+        { id: `i3`, title: `Issue 3`, name: `John Doe` },
+      ])
       h.unmount()
     })
 
@@ -276,11 +501,14 @@ export function runSuite(rawDriver: LiveQueryDriver) {
         )
         await h.flush()
 
-        const byTeam = new Map(
-          h.current().data.map((r: any) => [r.team, r.count]),
+        expectUnorderedRows(
+          h.current().data,
+          [
+            { team: `a`, count: 2 },
+            { team: `b`, count: 1 },
+          ],
+          `team`,
         )
-        expect(byTeam.get(`a`)).toBe(2)
-        expect(byTeam.get(`b`)).toBe(1)
         h.unmount()
       },
     )
@@ -313,11 +541,17 @@ export function runSuite(rawDriver: LiveQueryDriver) {
         })
         await h.flush()
 
-        const byName = new Map(
-          h.current().data.map((r: any) => [r.name, r.issueCount]),
+        // Coalesce runs inside the grouped subquery: an absent joined group
+        // is still undefined, not an invented zero-count group.
+        expectUnorderedRows(
+          h.current().data,
+          [
+            { name: `John Doe`, issueCount: 2 },
+            { name: `Jane Doe`, issueCount: 1 },
+            { name: `John Smith`, issueCount: undefined },
+          ],
+          `name`,
         )
-        expect(byName.get(`John Doe`)).toBe(2)
-        expect(byName.get(`Jane Doe`)).toBe(1)
         h.unmount()
       },
     )
@@ -349,6 +583,38 @@ export function runSuite(rawDriver: LiveQueryDriver) {
           .map((i: any) => i.id)
           .sort()
         expect(johnIssueIds).toEqual([`i1`, `i3`])
+        expectUnorderedRows(
+          h.current().data.map(
+            (person: {
+              id: string
+              name: string
+              issues: {
+                values: () => Iterable<{ id: string; title: string }>
+              }
+            }) => ({
+              ...selectedRow(person),
+              issues: Array.from(person.issues.values())
+                .sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0))
+                .map(selectedRow),
+            }),
+          ),
+          [
+            {
+              id: `1`,
+              name: `John Doe`,
+              issues: [
+                { id: `i1`, title: `Issue 1` },
+                { id: `i3`, title: `Issue 3` },
+              ],
+            },
+            {
+              id: `2`,
+              name: `Jane Doe`,
+              issues: [{ id: `i2`, title: `Issue 2` }],
+            },
+            { id: `3`, name: `John Smith`, issues: [] },
+          ],
+        )
         h.unmount()
       },
     )
@@ -370,6 +636,11 @@ export function runSuite(rawDriver: LiveQueryDriver) {
       expect(h.current().data.find((r: any) => r.id === `1`).name).toBe(
         `Johnny Doe`,
       )
+      expectUnorderedRows(h.current().data, [
+        { id: `1`, name: `Johnny Doe` },
+        { id: `2`, name: `Jane Doe` },
+        { id: `3`, name: `John Smith` },
+      ])
       h.unmount()
     })
 
@@ -482,13 +753,54 @@ export function runSuite(rawDriver: LiveQueryDriver) {
           30,
         )
         await h.flush()
-        expect(h.current().data).toHaveLength(1) // age > 30 → John Smith
+        expectUnorderedRows(h.current().data, [{ id: `3` }])
 
         await h.setParam(20)
-        expect(h.current().data).toHaveLength(3) // all
+        expectUnorderedRows(h.current().data, [
+          { id: `1` },
+          { id: `2` },
+          { id: `3` },
+        ])
 
         await h.setParam(50)
-        expect(h.current().data).toHaveLength(0) // none
+        expectUnorderedRows(h.current().data, [])
+        h.unmount()
+      },
+    )
+
+    scenario(
+      `recompile-drops-stale-keys`,
+      `recompiling to a narrower result drops keys from the previous collection`,
+      async () => {
+        const source = driver.makeSource(SEED)
+        const h = driver.mountControllable<number>(
+          (q, minAge) =>
+            q
+              .from({ items: source.collection })
+              .where(({ items }: any) => ops.gt(items.age, minAge))
+              .select(({ items }: any) => ({ id: items.id })),
+          10,
+        )
+        await h.flush()
+        expectUnorderedRows(h.current().data, [
+          { id: `1` },
+          { id: `2` },
+          { id: `3` },
+        ])
+        // The keyed `state` map must mirror `data` exactly.
+        expectKeyedRows(h.current().state, [
+          { id: `1` },
+          { id: `2` },
+          { id: `3` },
+        ])
+
+        // Narrowing the filter recompiles into a *new* underlying collection
+        // holding fewer keys. `includeInitialState` only inserts the new rows;
+        // if the adapter reuses a persistent keyed map without clearing it, the
+        // dropped keys leak into `state` even though `data` looks correct.
+        await h.setParam(32) // only John Smith (age 35) survives
+        expectUnorderedRows(h.current().data, [{ id: `3` }])
+        expectKeyedRows(h.current().state, [{ id: `3` }])
         h.unmount()
       },
     )
@@ -508,14 +820,22 @@ export function runSuite(rawDriver: LiveQueryDriver) {
           false,
         )
         await h.flush()
-        expect(h.current().isEnabled).toBe(false)
+        expectDisabledResult(h.current(), driver.disabledRepresentation)
 
         await h.setParam(true)
         expect(h.current().isEnabled).toBe(true)
         expect(h.current().data).toHaveLength(SEED.length)
+        expectUnorderedRows(
+          h.current().data,
+          SEED.map(({ id }) => ({ id })),
+        )
+        expectKeyedRows(
+          h.current().state,
+          SEED.map(({ id }) => ({ id })),
+        )
 
         await h.setParam(false)
-        expect(h.current().isEnabled).toBe(false)
+        expectDisabledResult(h.current(), driver.disabledRepresentation)
         h.unmount()
       },
     )
@@ -542,6 +862,7 @@ export function runSuite(rawDriver: LiveQueryDriver) {
         const serverConfirmed = new Promise<void>((resolve) => {
           confirmServer = resolve
         })
+        lifetime!.defer(confirmServer)
         const add = ops.createOptimisticAction({
           onMutate: () => source.collection.insert(temp),
           mutationFn: async () => {
@@ -554,6 +875,8 @@ export function runSuite(rawDriver: LiveQueryDriver) {
         let tx!: { isPersisted: { promise: Promise<any> } }
         await h.apply(() => {
           tx = add()
+          void tx.isPersisted.promise.catch(() => undefined)
+          lifetime!.defer(() => tx.isPersisted.promise)
         })
         // Optimistic row is visible before the server confirms.
         expect(h.current().data.find((r: any) => r.id === `temp`)).toBeDefined()
@@ -628,22 +951,33 @@ export function runSuite(rawDriver: LiveQueryDriver) {
         )
         await h.flush()
 
-        expect(h.current().data).toHaveLength(1)
-        expect(h.current().data[0]).toMatchObject({ id: `3` })
+        expectUnorderedRows(h.current().data, [{ id: `3`, name: `John Smith` }])
         h.unmount()
       },
     )
 
     scenario(
       `error-status`,
-      `a failing source surfaces status=error / isError`,
+      `a failing source surfaces an error (flag or boundary)`,
       async () => {
         const source = driver.makeErrorSource()
+        // Source ownership is registered before judging a failed setup.
+        expect(source.startup.returned, `source startup threw`).toBe(false)
+        if (!source.startup.returned)
+          expect(source.startup.error, `intended source startup error`).toBe(
+            source.expectedError,
+          )
         const h = driver.mountCollection(source.collection)
         await h.flush()
 
-        expect(h.current().status).toBe(`error`)
-        expect(h.current().isError).toBe(true)
+        if (driver.errorSurface === `throw`) {
+          // Boundary model: reading the errored result throws (for an error
+          // boundary to catch), rather than exposing a readable flag.
+          expect(() => h.current()).toThrow()
+        } else {
+          expect(h.current().status).toBe(`error`)
+          expect(h.current().isError).toBe(true)
+        }
         h.unmount()
       },
     )
@@ -665,30 +999,27 @@ export function runSuite(rawDriver: LiveQueryDriver) {
         )
         await h.flush()
         const first = h.current().data.map((r: any) => r.id) // ['2','1','3']
+        expectOrderedRows(h.current().data, [
+          { id: `2`, name: `Jane Doe` },
+          { id: `1`, name: `John Doe` },
+          { id: `3`, name: `John Smith` },
+        ])
 
         source.update({ id: `2`, name: `Jane Doe`, age: 99, team: `b` })
         await h.flush()
 
         expect(h.current().data.map((r: any) => r.id)).not.toEqual(first)
+        expectOrderedRows(h.current().data, [
+          { id: `1`, name: `John Doe` },
+          { id: `3`, name: `John Smith` },
+          { id: `2`, name: `Jane Doe` },
+        ])
         h.unmount()
       },
     )
 
-    // ---- meta: guard against stale/misspelled expected-fail keys ---------
-
-    it(`every knownGap / universal expected-fail references a real scenario`, () => {
-      for (const key of rawDriver.knownGaps ?? []) {
-        expect(
-          registeredKeys.has(key),
-          `${driver.name} knownGaps has "${key}", which is not a scenario key`,
-        ).toBe(true)
-      }
-      for (const key of UNIVERSAL_EXPECTED_FAIL) {
-        expect(
-          registeredKeys.has(key),
-          `UNIVERSAL_EXPECTED_FAIL has "${key}", which is not a scenario key`,
-        ).toBe(true)
-      }
+    it(`registers every distinct scenario without whole-test waivers`, () => {
+      expect(registry.size).toBe(30)
     })
   })
 }

@@ -3,9 +3,7 @@ id: PropRef
 title: PropRef
 ---
 
-# Class: PropRef\<T\>
-
-Defined in: [packages/db/src/query/ir.ts:133](https://github.com/TanStack/db/blob/main/packages/db/src/query/ir.ts#L133)
+Defined in: [packages/db/src/query/ir.ts:136](https://github.com/TanStack/db/blob/main/packages/db/src/query/ir.ts#L136)
 
 ## Extends
 
@@ -22,16 +20,20 @@ Defined in: [packages/db/src/query/ir.ts:133](https://github.com/TanStack/db/blo
 ### Constructor
 
 ```ts
-new PropRef<T>(path): PropRef<T>;
+new PropRef<T>(path, sourceAlias?): PropRef<T>;
 ```
 
-Defined in: [packages/db/src/query/ir.ts:135](https://github.com/TanStack/db/blob/main/packages/db/src/query/ir.ts#L135)
+Defined in: [packages/db/src/query/ir.ts:139](https://github.com/TanStack/db/blob/main/packages/db/src/query/ir.ts#L139)
 
 #### Parameters
 
 ##### path
 
 `string`[]
+
+##### sourceAlias?
+
+`string`
 
 #### Returns
 
@@ -51,7 +53,7 @@ BaseExpression<T>.constructor
 readonly __returnType: T;
 ```
 
-Defined in: [packages/db/src/query/ir.ts:82](https://github.com/TanStack/db/blob/main/packages/db/src/query/ir.ts#L82)
+Defined in: [packages/db/src/query/ir.ts:78](https://github.com/TanStack/db/blob/main/packages/db/src/query/ir.ts#L78)
 
 **`Internal`**
 
@@ -71,7 +73,17 @@ BaseExpression.__returnType
 path: string[];
 ```
 
-Defined in: [packages/db/src/query/ir.ts:136](https://github.com/TanStack/db/blob/main/packages/db/src/query/ir.ts#L136)
+Defined in: [packages/db/src/query/ir.ts:140](https://github.com/TanStack/db/blob/main/packages/db/src/query/ir.ts#L140)
+
+***
+
+### sourceAlias?
+
+```ts
+readonly optional sourceAlias: string;
+```
+
+Defined in: [packages/db/src/query/ir.ts:138](https://github.com/TanStack/db/blob/main/packages/db/src/query/ir.ts#L138)
 
 ***
 
@@ -81,7 +93,7 @@ Defined in: [packages/db/src/query/ir.ts:136](https://github.com/TanStack/db/blo
 type: "ref";
 ```
 
-Defined in: [packages/db/src/query/ir.ts:134](https://github.com/TanStack/db/blob/main/packages/db/src/query/ir.ts#L134)
+Defined in: [packages/db/src/query/ir.ts:137](https://github.com/TanStack/db/blob/main/packages/db/src/query/ir.ts#L137)
 
 #### Overrides
 

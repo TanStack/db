@@ -3,6 +3,8 @@
 Thin SQLite persistence for Capacitor apps using
 `@capacitor-community/sqlite`.
 
+Start with the [SQLite Persistence guide](../../docs/guides/sqlite-persistence.md) for Collection setup and lifecycle behavior.
+
 ## Public API
 
 - `createCapacitorSQLitePersistence(...)`

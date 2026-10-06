@@ -5,11 +5,10 @@
  * imported here (React package's `@tanstack/db`) and handed to the shared
  * scenarios, so instances match what this package's `useLiveQuery` expects.
  *
- * `knownGaps` is populated empirically from the run below, NOT from the coverage
- * matrix: only keys that actually fail belong here. Today that's just the
- * universal order-only-move case (handled by the shared suite), so the list is empty.
+ * All registered laws must pass; the driver has no whole-test waivers.
  */
 import { act, renderHook } from '@testing-library/react'
+import { useLayoutEffect } from 'react'
 import {
   coalesce,
   count,
@@ -20,12 +19,14 @@ import {
   gt,
   sum,
 } from '@tanstack/db'
+import { expect, it } from 'vitest'
 import {
   mockSyncCollectionOptions,
   mockSyncCollectionOptionsNoInitialState,
 } from '../../db/tests/utils'
 import { useLiveQuery } from '../src/useLiveQuery'
 import { runSuite } from '../../db/tests/conformance/suite'
+import { expectResultSurface } from '../../db/tests/conformance/result-laws'
 import type { RenderHookResult } from '@testing-library/react'
 import type {
   ConformanceResult,
@@ -33,7 +34,6 @@ import type {
   DeferredSourceHandle,
   LiveQueryDriver,
   QueryBuild,
-  SourceHandle,
 } from '../../db/tests/conformance/contract'
 
 let sourceSeq = 0
@@ -46,9 +46,7 @@ function writer<T extends { id: string }>(collection: any) {
   }
 }
 
-function makeSource<T extends { id: string }>(
-  initialData: ReadonlyArray<T>,
-): SourceHandle<T> {
+function makeSource<T extends { id: string }>(initialData: ReadonlyArray<T>) {
   const collection = createCollection(
     mockSyncCollectionOptions<T>({
       id: `conformance-react-${sourceSeq++}`,
@@ -59,9 +57,9 @@ function makeSource<T extends { id: string }>(
   const write = writer<T>(collection)
   return {
     collection,
-    insert: (row) => write(`insert`, row),
-    update: (row) => write(`update`, row),
-    remove: (row) => write(`delete`, row),
+    insert: (row: T) => write(`insert`, row),
+    update: (row: T) => write(`update`, row),
+    remove: (row: T) => write(`delete`, row),
   }
 }
 
@@ -101,23 +99,27 @@ function makePrecreated(build: QueryBuild, opts?: { startSync?: boolean }) {
 }
 
 function makeErrorSource() {
+  const expectedError = new Error(`conformance: sync failure`)
+  let startup: { returned: true } | { returned: false; error: unknown } = {
+    returned: true,
+  }
   const collection = createCollection<{ id: string }>({
     id: `conformance-react-err-${sourceSeq++}`,
     getKey: (r) => r.id,
     startSync: false,
     sync: {
       sync: () => {
-        throw new Error(`conformance: sync failure`)
+        throw expectedError
       },
     },
   })
   // Starting sync throws → engine catches and sets status to `error`.
   try {
     collection.startSyncImmediate()
-  } catch {
-    // expected: the rethrown sync error; status is already `error`
+  } catch (error) {
+    startup = { returned: false, error }
   }
-  return { collection }
+  return { collection, expectedError, startup }
 }
 
 function mount(build: QueryBuild) {
@@ -167,15 +169,19 @@ function makeHandle(hook: RenderHookResult<any, any>) {
   return {
     current(): ConformanceResult {
       const r: any = hook.result.current
-      return {
+      return expectResultSurface({
         data: r?.data,
-        status: r?.status ?? `idle`,
-        isReady: Boolean(r?.isReady),
-        isError: Boolean(r?.isError),
+        state: r?.state,
+        status: r?.status,
+        isReady: r?.isReady,
+        persistedStatus: r?.persistedStatus,
+        isPersistedReady: r?.isPersistedReady,
+        persistedError: r?.persistedError,
+        isError: r?.isError,
         // Read react-db's real `isEnabled` field so the suite catches a broken
         // one (deriving from status would mask it).
-        isEnabled: Boolean(r?.isEnabled),
-      }
+        isEnabled: r?.isEnabled,
+      })
     },
     async flush() {
       await act(async () => {
@@ -196,6 +202,7 @@ function makeHandle(hook: RenderHookResult<any, any>) {
 
 const reactDriver: LiveQueryDriver = {
   name: `react`,
+  disabledRepresentation: `absent`,
   ops: { eq, gt, count, sum, coalesce, createOptimisticAction },
   makeSource,
   makeDeferredSource,
@@ -207,7 +214,75 @@ const reactDriver: LiveQueryDriver = {
   mountConfig,
   mountDisabled,
   knownGaps: [],
-  features: { serverSnapshot: true, suspense: true },
+  features: { serverSnapshot: true, suspense: true, pooledEqFilters: true },
 }
 
 runSuite(reactDriver)
+it(`publishes a synchronous ordered limit in the first layout commit`, async () => {
+  const source = makeSource([
+    { id: `1`, rank: 1 },
+    { id: `2`, rank: 2 },
+    { id: `3`, rank: 3 },
+  ])
+  const commits: Array<{ ids: Array<string>; status: string }> = []
+  const hook = renderHook(() => {
+    const result = useLiveQuery((q) =>
+      q
+        .from({ row: source.collection })
+        .orderBy(({ row }) => row.rank)
+        .limit(2),
+    )
+    useLayoutEffect(() => {
+      commits.push({
+        ids: result.data.map(({ id }) => id),
+        status: result.status,
+      })
+    })
+    return result
+  })
+
+  try {
+    expect(commits[0]).toEqual({ ids: [`1`, `2`], status: `ready` })
+  } finally {
+    const liveQueryCollection = hook.result.current.collection
+    hook.unmount()
+    await liveQueryCollection.cleanup()
+    await source.collection.cleanup()
+  }
+})
+
+it(`preserves raw result types through the actual driver reader`, () => {
+  const raw: Record<string, unknown> = {
+    data: [{ id: `a`, value: undefined }],
+    state: new Map(),
+    status: `disabled`,
+    isReady: false,
+    isError: false,
+    isEnabled: false,
+  }
+  const hook = renderHook(() => raw)
+  const handle = makeHandle(hook)
+  try {
+    const healthy = handle.current()
+    expect(healthy.data).toBe(raw.data)
+    expect(healthy.state).toBe(raw.state)
+    expect(healthy.isReady).toBe(false)
+    expect(healthy.isError).toBe(false)
+    expect(healthy.isEnabled).toBe(false)
+    for (const key of [`status`, `isReady`, `isError`, `isEnabled`]) {
+      const original = raw[key]
+      delete raw[key]
+      expect(() => handle.current()).toThrowError(new RegExp(`raw ${key}`))
+      for (const invalid of key === `status`
+        ? [undefined, 0]
+        : [undefined, 0, ``]) {
+        raw[key] = invalid
+        expect(() => handle.current()).toThrowError(new RegExp(`raw ${key}`))
+      }
+      raw[key] = original
+      expect(handle.current()[key as keyof ConformanceResult]).toBe(original)
+    }
+  } finally {
+    handle.unmount()
+  }
+})

@@ -348,12 +348,14 @@ function createJoinSubqueryTests(autoIndex: `off` | `eager`): void {
     describe(`subqueries in JOIN clause`, () => {
       let issuesCollection: ReturnType<typeof createIssuesCollection>
       let usersCollection: ReturnType<typeof createUsersCollection>
+      let profilesCollection: ReturnType<typeof createProfilesCollection>
       let productsCollection: ReturnType<typeof createProductsCollection>
       let trialsCollection: ReturnType<typeof createTrialsCollection>
 
       beforeEach(() => {
         issuesCollection = createIssuesCollection(autoIndex)
         usersCollection = createUsersCollection(autoIndex)
+        profilesCollection = createProfilesCollection(autoIndex)
         productsCollection = createProductsCollection(autoIndex)
         trialsCollection = createTrialsCollection(autoIndex)
       })
@@ -392,6 +394,138 @@ function createJoinSubqueryTests(autoIndex: `off` | `eager`): void {
         // Issue 4 (Charlie from dept 2) should not appear
         const charlieIssue = results.find((r) => r.user_name === `Charlie`)
         expect(charlieIssue).toBeUndefined()
+      })
+
+      test.each([
+        [`inner`, `collection`],
+        [`inner`, `subquery`],
+        [`left`, `collection`],
+        [`left`, `subquery`],
+      ] as const)(
+        `applies an outer joined-alias filter for a %s join with a %s source`,
+        (joinType, sourceKind) => {
+          const joinQuery = createLiveQueryCollection({
+            startSync: true,
+            query: (q) => {
+              if (sourceKind === `subquery`) {
+                const activeUsers = q
+                  .from({ user: usersCollection })
+                  .where(({ user }) => eq(user.status, `active`))
+
+                return q
+                  .from({ issue: issuesCollection })
+                  .join(
+                    { user: activeUsers },
+                    ({ issue, user }) => eq(issue.userId, user.id),
+                    joinType,
+                  )
+                  .where(({ user }) => eq(user.name, `Bob`))
+                  .select(({ issue }) => ({ id: issue.id }))
+              }
+
+              return q
+                .from({ issue: issuesCollection })
+                .join(
+                  { user: usersCollection },
+                  ({ issue, user }) => eq(issue.userId, user.id),
+                  joinType,
+                )
+                .where(({ user }) => eq(user.name, `Bob`))
+                .select(({ issue }) => ({ id: issue.id }))
+            },
+          })
+
+          expect(joinQuery.toArray.map((row) => row.id).sort()).toEqual([2, 5])
+        },
+      )
+
+      test(`applies an outer joined-alias filter through innerJoin`, () => {
+        const joinQuery = createLiveQueryCollection({
+          startSync: true,
+          query: (q) => {
+            const activeUsers = q
+              .from({ user: usersCollection })
+              .where(({ user }) => eq(user.status, `active`))
+
+            return q
+              .from({ issue: issuesCollection })
+              .innerJoin({ user: activeUsers }, ({ issue, user }) =>
+                eq(issue.userId, user.id),
+              )
+              .where(({ user }) => eq(user.name, `Charlie`))
+              .select(({ issue }) => ({ id: issue.id }))
+          },
+        })
+
+        expect(joinQuery.toArray).toEqual([])
+      })
+
+      test(`remaps a pushed predicate to a subquery's inner alias`, () => {
+        const joinQuery = createLiveQueryCollection({
+          startSync: true,
+          query: (q) => {
+            const activeUsers = q
+              .from({ user: usersCollection })
+              .where(({ user }) => eq(user.status, `active`))
+
+            return q
+              .from({ issue: issuesCollection })
+              .innerJoin({ member: activeUsers }, ({ issue, member }) =>
+                eq(issue.userId, member.id),
+              )
+              .where(({ member }) => eq(member.name, `Bob`))
+              .select(({ issue }) => ({ id: issue.id }))
+          },
+        })
+
+        expect(joinQuery.toArray.map((row) => row.id).sort()).toEqual([2, 5])
+      })
+
+      test(`remaps a pushed predicate through a joined subquery result`, () => {
+        const joinQuery = createLiveQueryCollection({
+          startSync: true,
+          query: (q) => {
+            const usersWithProfiles = q
+              .from({ user: usersCollection })
+              .innerJoin({ profile: profilesCollection }, ({ user, profile }) =>
+                eq(user.id, profile.userId),
+              )
+
+            return q
+              .from({ issue: issuesCollection })
+              .innerJoin({ member: usersWithProfiles }, ({ issue, member }) =>
+                eq(issue.userId, member.user.id),
+              )
+              .where(({ member }) => eq(member.user.name, `Bob`))
+              .select(({ issue }) => ({ id: issue.id }))
+          },
+        })
+
+        expect(joinQuery.toArray.map((row) => row.id).sort()).toEqual([2, 5])
+      })
+
+      test(`preserves a predicate on a spread-selected join result`, () => {
+        const joinQuery = createLiveQueryCollection({
+          startSync: true,
+          query: (q) => {
+            const usersWithProfiles = q
+              .from({ user: usersCollection })
+              .innerJoin({ profile: profilesCollection }, ({ user, profile }) =>
+                eq(user.id, profile.userId),
+              )
+              .select(({ user }) => user)
+
+            return q
+              .from({ issue: issuesCollection })
+              .innerJoin({ member: usersWithProfiles }, ({ issue, member }) =>
+                eq(issue.userId, member.id),
+              )
+              .where(({ member }) => eq(member.name, `Bob`))
+              .select(({ issue }) => ({ id: issue.id }))
+          },
+        })
+
+        expect(joinQuery.toArray.map((row) => row.id).sort()).toEqual([2, 5])
       })
 
       test(`should use subquery in JOIN clause - left join`, () => {
@@ -469,14 +603,14 @@ function createJoinSubqueryTests(autoIndex: `off` | `eager`): void {
         expect(results).toHaveLength(1)
         expect(results[0]!.product.id).toBe(1)
         expect(results[0]!.tried).toBeDefined()
-        expect(results[0]!.tried.userId).toBe(1)
+        expect(results[0]!.tried!.userId).toBe(1)
         expect(results[0]).toEqual({
           product: { id: 1, a: `8` },
           tried: sampleTrials[0],
         })
       })
 
-      test(`should use subquery in LEFT JOIN clause - left join with ordered subquery with limit`, () => {
+      test(`should use subquery in LEFT JOIN clause - left join with ordered subquery with limit`, async () => {
         const joinSubquery = createLiveQueryCollection({
           query: (q) => {
             return q
@@ -498,6 +632,9 @@ function createJoinSubqueryTests(autoIndex: `off` | `eager`): void {
           startSync: true,
         })
 
+        // Initial ordered refinement may hold publication beyond startSync.
+        await joinSubquery.preload()
+        expect(joinSubquery.isReady()).toBe(true)
         const results = joinSubquery.toArray.map((row) => ({
           ...stripVirtualProps(row),
           issue: stripVirtualProps(row.issue),
@@ -517,7 +654,7 @@ function createJoinSubqueryTests(autoIndex: `off` | `eager`): void {
         ])
       })
 
-      test(`should use subquery in RIGHT JOIN clause - left join with ordered subquery with limit`, () => {
+      test(`should use subquery in RIGHT JOIN clause - left join with ordered subquery with limit`, async () => {
         const joinSubquery = createLiveQueryCollection({
           query: (q) => {
             return q
@@ -539,6 +676,8 @@ function createJoinSubqueryTests(autoIndex: `off` | `eager`): void {
           startSync: true,
         })
 
+        await joinSubquery.preload()
+        expect(joinSubquery.isReady()).toBe(true)
         const results = joinSubquery.toArray.map((row) => ({
           ...stripVirtualProps(row),
           issue: stripVirtualProps(row.issue),
@@ -653,6 +792,66 @@ function createJoinSubqueryTests(autoIndex: `off` | `eager`): void {
           },
         ])
       })
+    })
+
+    test(`applies an outer filter pushed into a FROM subquery`, () => {
+      const issuesCollection = createIssuesCollection(autoIndex)
+      const usersCollection = createUsersCollection(autoIndex)
+      const joinQuery = createLiveQueryCollection({
+        startSync: true,
+        query: (q) => {
+          const activeUsers = q
+            .from({ user: usersCollection })
+            .where(({ user }) => eq(user.status, `active`))
+
+          return q
+            .from({ user: activeUsers })
+            .innerJoin({ issue: issuesCollection }, ({ user, issue }) =>
+              eq(user.id, issue.userId),
+            )
+            .where(({ user }) => eq(user.name, `Bob`))
+            .select(({ issue }) => ({ id: issue.id }))
+        },
+      })
+
+      expect(joinQuery.toArray.map((row) => row.id).sort()).toEqual([2, 5])
+    })
+
+    test(`keeps an outer filter above a unionAll subquery`, () => {
+      const issuesCollection = createIssuesCollection(autoIndex)
+      const usersCollection = createUsersCollection(autoIndex)
+      const query = createLiveQueryCollection({
+        startSync: true,
+        query: (q) => {
+          const projectOneIssues = q
+            .from({ projectOneIssue: issuesCollection })
+            .where(({ projectOneIssue }) => eq(projectOneIssue.projectId, 1))
+            .select(({ projectOneIssue }) => ({
+              id: projectOneIssue.id,
+              status: projectOneIssue.status,
+              userId: projectOneIssue.userId,
+            }))
+          const projectTwoIssues = q
+            .from({ projectTwoIssue: issuesCollection })
+            .where(({ projectTwoIssue }) => eq(projectTwoIssue.projectId, 2))
+            .select(({ projectTwoIssue }) => ({
+              id: projectTwoIssue.id,
+              status: projectTwoIssue.status,
+              userId: projectTwoIssue.userId,
+            }))
+          const allIssues = q.unionAll(projectOneIssues, projectTwoIssues)
+
+          return q
+            .from({ row: allIssues })
+            .innerJoin({ user: usersCollection }, ({ row, user }) =>
+              eq(row.userId, user.id),
+            )
+            .where(({ row }) => eq(row.status, `open`))
+            .select(({ row }) => ({ id: row.id }))
+        },
+      })
+
+      expect(query.toArray.map((row) => row.id).sort()).toEqual([1, 4])
     })
 
     describe(`nested subqueries with joins (alias remapping)`, () => {
@@ -867,6 +1066,54 @@ function createJoinSubqueryTests(autoIndex: `off` | `eager`): void {
         })
       })
     })
+
+    describe(`reused subquery builders`, () => {
+      let usersCollection: ReturnType<typeof createUsersCollection>
+
+      beforeEach(() => {
+        usersCollection = createUsersCollection(autoIndex)
+      })
+
+      const cases = [
+        { shared: true, filterRight: false, expected: [1, 2, 4] },
+        { shared: true, filterRight: true, expected: [2] },
+        { shared: false, filterRight: false, expected: [1, 2, 4] },
+        { shared: false, filterRight: true, expected: [2] },
+      ] as const
+
+      for (const { shared, filterRight, expected } of cases) {
+        test(`${shared ? `shared` : `separate`} builders with${
+          filterRight ? `` : `out`
+        } a right-side predicate`, () => {
+          const joinQuery = createLiveQueryCollection({
+            startSync: true,
+            query: (q) => {
+              const activeUsers = () =>
+                q
+                  .from({ user: usersCollection })
+                  .where(({ user }) => eq(user.status, `active`))
+              const left = activeUsers()
+              const right = shared ? left : activeUsers()
+              let query = q
+                .from({ leftUser: left })
+                .innerJoin({ rightUser: right }, ({ leftUser, rightUser }) =>
+                  eq(leftUser.id, rightUser.id),
+                )
+
+              if (filterRight) {
+                query = query.where(({ rightUser }) =>
+                  eq(rightUser.name, `Bob`),
+                )
+              }
+
+              return query.select(({ leftUser }) => ({ id: leftUser.id }))
+            },
+          })
+
+          expect(joinQuery.toArray.map((row) => row.id)).toEqual(expected)
+        })
+      }
+    })
   })
 }
 
@@ -951,5 +1198,125 @@ describe(`Lazy join: subquery whose join key resolves to an indexed collection`,
     expect(indexWarnings.filter((m) => m.includes(`lazy-join-teams`))).toEqual(
       [],
     )
+  })
+})
+
+describe(`Lazy join index availability`, () => {
+  test(`uses an auto-index with omitted locale options`, async () => {
+    type Team = { id: string }
+    type Member = { id: string; teamId: string }
+    const teams = createCollection(
+      mockSyncCollectionOptions<Team>({
+        id: `lazy-default-collation-teams`,
+        getKey: (team) => team.id,
+        initialData: [{ id: `t1` }],
+      }),
+    )
+    const members = createCollection(
+      mockSyncCollectionOptions<Member>({
+        id: `lazy-default-collation-members`,
+        getKey: (member) => member.id,
+        initialData: [{ id: `m1`, teamId: `t1` }],
+        syncMode: `on-demand`,
+        autoIndex: `eager`,
+        defaultIndexType: BTreeIndex,
+        defaultStringCollation: {
+          stringSort: `locale`,
+          localeOptions: { sensitivity: undefined },
+        },
+        sync: {
+          sync: ({ begin, write, commit, markReady }) => {
+            begin()
+            write({ type: `insert`, value: { id: `m1`, teamId: `t1` } })
+            commit()
+            markReady()
+            return { loadSubset: () => true }
+          },
+        },
+      }),
+    )
+    const warnSpy = vi.spyOn(console, `warn`).mockImplementation(() => {})
+    const live = createLiveQueryCollection((q) =>
+      q
+        .from({ team: teams })
+        .leftJoin({ member: members }, ({ team, member }) =>
+          eq(team.id, member.teamId),
+        )
+        .select(({ team, member }) => ({
+          id: team.id,
+          memberId: member.id,
+        })),
+    )
+
+    try {
+      await live.preload()
+      expect(live.toArray.map(stripVirtualProps)).toEqual([
+        { id: `t1`, memberId: `m1` },
+      ])
+      expect(members.indexes.size).toBe(1)
+      expect(warnSpy).not.toHaveBeenCalledWith(
+        expect.stringContaining(`Join requires an index`),
+      )
+    } finally {
+      warnSpy.mockRestore()
+      await Promise.all([live.cleanup(), teams.cleanup(), members.cleanup()])
+    }
+  })
+
+  test(`warns when demand falls back to a full local scan`, async () => {
+    type Team = { id: string }
+    type Member = { id: string; teamId: string }
+    const teams = createCollection(
+      mockSyncCollectionOptions<Team>({
+        id: `lazy-fallback-teams`,
+        getKey: (team) => team.id,
+        initialData: [{ id: `t1` }],
+      }),
+    )
+    const members = createCollection(
+      mockSyncCollectionOptions<Member>({
+        id: `lazy-fallback-members`,
+        getKey: (member) => member.id,
+        initialData: [{ id: `m1`, teamId: `t1` }],
+        syncMode: `on-demand`,
+        autoIndex: `off`,
+        sync: {
+          sync: ({ begin, write, commit, markReady }) => {
+            begin()
+            write({ type: `insert`, value: { id: `m1`, teamId: `t1` } })
+            commit()
+            markReady()
+            return { loadSubset: () => true }
+          },
+        },
+      }),
+    )
+    const warnSpy = vi.spyOn(console, `warn`).mockImplementation(() => {})
+    const live = createLiveQueryCollection((q) =>
+      q
+        .from({ team: teams })
+        .leftJoin({ member: members }, ({ team, member }) =>
+          eq(team.id, member.teamId),
+        )
+        .select(({ team, member }) => ({
+          id: team.id,
+          memberId: member.id,
+        })),
+    )
+
+    try {
+      await live.preload()
+      expect(live.toArray.map(stripVirtualProps)).toEqual([
+        { id: `t1`, memberId: `m1` },
+      ])
+      expect(warnSpy).toHaveBeenCalledWith(
+        expect.stringContaining(
+          `[lazy-fallback-members] Join requires an index on "teamId"`,
+        ),
+      )
+    } finally {
+      warnSpy.mockRestore()
+      await Promise.all([live.cleanup(), teams.cleanup(), members.cleanup()])
+    }
   })
 })

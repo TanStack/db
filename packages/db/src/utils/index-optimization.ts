@@ -20,7 +20,7 @@ import { ReverseIndex } from '../indexes/reverse-index.js'
 import { hasVirtualPropPath } from '../virtual-props.js'
 import { makeComparator } from './comparison.js'
 import type { CompareOptions } from '../query/builder/types.js'
-import type { IndexInterface, IndexOperation } from '../indexes/base-index.js'
+import type { IndexOperation, IndexReader } from '../indexes/base-index.js'
 import type { BasicExpression } from '../query/ir.js'
 import type { CollectionLike } from '../types.js'
 
@@ -46,7 +46,7 @@ export function findIndexForField<TKey extends string | number>(
   collection: CollectionLike<any, TKey>,
   fieldPath: Array<string>,
   compareOptions?: CompareOptions,
-): IndexInterface<TKey> | undefined {
+): IndexReader<TKey> | undefined {
   if (hasVirtualPropPath(fieldPath)) {
     return undefined
   }
@@ -120,19 +120,18 @@ function isExactComparisonValue(value: unknown): boolean {
 }
 
 /**
- * Whether the collection orders strings using locale collation.
+ * Whether the collection orders strings differently from the WHERE
+ * evaluator's lexical relational operators.
  *
- * Under `stringSort: 'locale'` a BTree string index orders values with
- * `localeCompare`, but the WHERE evaluator compares strings with JS relational
- * operators (code-point order). For range predicates these orders disagree
- * (e.g. `'ö' > 'z'` is true in JS but `'ö'` sorts before `'z'` under locale
- * `en`), so an index range lookup can omit matching rows. Such omissions cannot
- * be recovered by re-filtering, so locale-backed string range predicates must
- * not be index-optimized.
+ * Locale and custom string indexes may disagree with that lexical order, so a
+ * range lookup can omit matching rows. Such omissions cannot be recovered by
+ * re-filtering; only lexical string indexes can optimize ordinary ranges.
  */
-function usesLocaleStringSort(collection: CollectionLike<any, any>): boolean {
+function usesNonLexicalStringSort(
+  collection: CollectionLike<any, any>,
+): boolean {
   const opts = { ...DEFAULT_COMPARE_OPTIONS, ...collection.compareOptions }
-  return opts.stringSort === `locale`
+  return opts.stringSort !== `lexical`
 }
 
 /**
@@ -161,7 +160,9 @@ function isRangeOrderingDivergent(
     case `boolean`:
       return false
     case `string`:
-      return usesLocaleStringSort(collection)
+      return usesNonLexicalStringSort(collection)
+    case `symbol`:
+      return true
     case `object`: {
       if (value === null) return false
       // Dates order consistently with the evaluator: valid Dates by time, and
@@ -181,12 +182,13 @@ function isRangeOrderingDivergent(
  */
 function canRangeOptimize(
   value: unknown,
-  index: IndexInterface<any>,
+  index: IndexReader<any>,
   collection: CollectionLike<any, any>,
 ): boolean {
   return (
     !isRangeOrderingDivergent(value, collection) &&
-    index.supportsRangeOptimization
+    index.supportsRangeOptimization &&
+    (index.canOptimizeRangeFor?.(value) ?? true)
   )
 }
 
@@ -342,7 +344,8 @@ function optimizeCompoundRangeQuery<
 
         if (fieldArg && valueArg) {
           const fieldPath = (fieldArg as any).path
-          const fieldKey = fieldPath.join(`.`)
+          // Preserve segment boundaries: [`a.b`] and [`a`, `b`] are distinct.
+          const fieldKey = JSON.stringify(fieldPath)
           const value = (valueArg as any).value
 
           if (!fieldOperations.has(fieldKey)) {
@@ -357,7 +360,7 @@ function optimizeCompoundRangeQuery<
   // Check if we have multiple operations on the same field
   for (const [fieldKey, operations] of fieldOperations) {
     if (operations.length >= 2) {
-      const fieldPath = fieldKey.split(`.`)
+      const fieldPath = JSON.parse(fieldKey) as Array<string>
       const index = findIndexForField(collection, fieldPath)
 
       // Only collapse this field into a range query when every bound's domain

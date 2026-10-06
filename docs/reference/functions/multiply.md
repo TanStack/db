@@ -3,13 +3,11 @@ id: multiply
 title: multiply
 ---
 
-# Function: multiply()
-
 ```ts
 function multiply<T1, T2>(left, right): BinaryNumericReturnType;
 ```
 
-Defined in: [packages/db/src/query/builder/functions.ts:621](https://github.com/TanStack/db/blob/main/packages/db/src/query/builder/functions.ts#L621)
+Defined in: [packages/db/src/query/builder/functions.ts:627](https://github.com/TanStack/db/blob/main/packages/db/src/query/builder/functions.ts#L627)
 
 ## Type Parameters
 

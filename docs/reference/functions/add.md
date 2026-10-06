@@ -3,13 +3,11 @@ id: add
 title: add
 ---
 
-# Function: add()
-
 ```ts
 function add<T1, T2>(left, right): BinaryNumericReturnType;
 ```
 
-Defined in: [packages/db/src/query/builder/functions.ts:601](https://github.com/TanStack/db/blob/main/packages/db/src/query/builder/functions.ts#L601)
+Defined in: [packages/db/src/query/builder/functions.ts:607](https://github.com/TanStack/db/blob/main/packages/db/src/query/builder/functions.ts#L607)
 
 ## Type Parameters
 

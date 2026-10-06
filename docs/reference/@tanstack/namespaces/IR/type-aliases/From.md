@@ -3,8 +3,6 @@ id: From
 title: From
 ---
 
-# Type Alias: From
-
 ```ts
 type From = 
   | CollectionRef
@@ -13,4 +11,4 @@ type From =
   | UnionAll;
 ```
 
-Defined in: [packages/db/src/query/ir.ts:36](https://github.com/TanStack/db/blob/main/packages/db/src/query/ir.ts#L36)
+Defined in: [packages/db/src/query/ir.ts:35](https://github.com/TanStack/db/blob/main/packages/db/src/query/ir.ts#L35)

@@ -2,6 +2,8 @@
 
 Thin SQLite persistence for Expo apps using the official `expo-sqlite` adapter.
 
+Start with the [SQLite Persistence guide](../../docs/guides/sqlite-persistence.md) for Collection setup and lifecycle behavior.
+
 ## Public API
 
 - `createExpoSQLitePersistence(...)`
@@ -45,7 +47,7 @@ export const todosCollection = createCollection(
 ## Notes
 
 - This package targets the official `expo-sqlite` async database API.
-- Requires `expo-sqlite` `^55.0.10` (documented as a peer dependency).
+- Requires `expo-sqlite` `^55.0.10` or `^57.0.0` (documented as a peer dependency).
 - `createExpoSQLitePersistence` is shared across collections.
 - Mode defaults (`sync-present` vs `sync-absent`) are inferred from whether a
   `sync` config is present in `persistedCollectionOptions`.

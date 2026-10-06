@@ -2,6 +2,8 @@
 
 Thin Node SQLite persistence for TanStack DB.
 
+Start with the [SQLite Persistence guide](../../docs/guides/sqlite-persistence.md) for Collection setup and lifecycle behavior.
+
 ## Public API
 
 - `createNodeSQLitePersistence(...)`

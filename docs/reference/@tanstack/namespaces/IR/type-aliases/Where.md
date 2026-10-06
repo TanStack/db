@@ -3,8 +3,6 @@ id: Where
 title: Where
 ---
 
-# Type Alias: Where
-
 ```ts
 type Where = 
   | BasicExpression<boolean>
@@ -14,4 +12,4 @@ type Where =
 };
 ```
 
-Defined in: [packages/db/src/query/ir.ts:56](https://github.com/TanStack/db/blob/main/packages/db/src/query/ir.ts#L56)
+Defined in: [packages/db/src/query/ir.ts:50](https://github.com/TanStack/db/blob/main/packages/db/src/query/ir.ts#L50)

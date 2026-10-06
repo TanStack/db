@@ -3,13 +3,11 @@ id: MergeContextWithJoinType
 title: MergeContextWithJoinType
 ---
 
-# Type Alias: MergeContextWithJoinType\<TContext, TNewSchema, TJoinType\>
-
 ```ts
-type MergeContextWithJoinType<TContext, TNewSchema, TJoinType> = object & PreserveSingleResultFlag<TContext["singleResult"]> & PreserveHasResultFlag<TContext["hasResult"]> & PreserveUnionFromFlag<TContext["hasUnionFrom"]> & PreserveFromSourceNames<TContext["fromSourceNames"]>;
+type MergeContextWithJoinType<TContext, TNewSchema, TJoinType> = Omit<TContext, "schema" | "refsSchema" | "hasJoins" | "joinTypes"> & object;
 ```
 
-Defined in: [packages/db/src/query/builder/types.ts:871](https://github.com/TanStack/db/blob/main/packages/db/src/query/builder/types.ts#L871)
+Defined in: [packages/db/src/query/builder/types.ts:983](https://github.com/TanStack/db/blob/main/packages/db/src/query/builder/types.ts#L983)
 
 MergeContextWithJoinType - Creates a new context after a join operation
 
@@ -31,7 +29,7 @@ when tables are joined, applying the correct optionality based on join type.
 - `hasJoins`: Set to true
 - `joinTypes`: Updated to track this join type
 - `result`: Preserved from previous operations
-- `singleResult`: Preserved only if already true (via PreserveSingleResultFlag)
+- All other context state is preserved
 
 ## Type Declaration
 
@@ -63,12 +61,6 @@ joinTypes: TContext["joinTypes"] extends Record<string, any> ? TContext["joinTyp
 
 ```ts
 refsSchema: ApplyJoinOptionalityToMergedSchema<RefsSchemaForContext<TContext>, TNewSchema, TJoinType, FromSourceNamesForOptionality<TContext>>;
-```
-
-### result
-
-```ts
-result: TContext["result"];
 ```
 
 ### schema

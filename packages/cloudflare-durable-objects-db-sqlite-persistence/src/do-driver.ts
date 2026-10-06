@@ -33,8 +33,7 @@ type CloudflareDOProvidedStorageOptions = {
 }
 
 export type CloudflareDOSQLiteDriverOptions =
-  | CloudflareDOProvidedSqlOptions
-  | CloudflareDOProvidedStorageOptions
+  CloudflareDOProvidedSqlOptions | CloudflareDOProvidedStorageOptions
 
 function assertTransactionCallbackHasDriverArg(
   fn: (transactionDriver: SQLiteDriver) => Promise<unknown>,
@@ -86,6 +85,9 @@ function toRowArray<T>(
 }
 
 export class CloudflareDOSQLiteDriver implements SQLiteDriver {
+  // https://developers.cloudflare.com/durable-objects/platform/limits/
+  // Durable Object SQL storage permits at most 100 bound parameters per query.
+  readonly maxBoundParameters = 100
   private readonly sqlStorage: DurableObjectSqlStorageLike
   private readonly storage: DurableObjectStorageLike
   private readonly transactionExecutor: DurableObjectTransactionExecutor | null
@@ -203,6 +205,7 @@ export class CloudflareDOSQLiteDriver implements SQLiteDriver {
 
   private createTransactionDriver(): SQLiteDriver {
     const transactionDriver: SQLiteDriver = {
+      maxBoundParameters: this.maxBoundParameters,
       exec: (sql) => {
         this.execute(sql)
         return Promise.resolve()
