@@ -87,6 +87,7 @@ export class RemoteSubsetWireValueError extends TypeError {
 }
 
 type ProjectionState = {
+  validateOnly: boolean
   expressions: WeakMap<object, RemoteSubsetWireExpression>
   expressionArrays: WeakMap<object, Array<RemoteSubsetWireExpression>>
   stringArrays: WeakMap<object, Array<string>>
@@ -135,6 +136,20 @@ const identifierPattern = /^[A-Za-z_$][A-Za-z0-9_$]*$/
 export function toTransportedLoadSubsetOptions(
   options: LoadSubsetOptions,
 ): TransportedLoadSubsetOptions {
+  return visitLoadSubsetOptions(options, false)
+}
+
+/** Checks wire admission without constructing a detached request snapshot. */
+export function validateRemoteSubsetOptions(options: LoadSubsetOptions): void {
+  visitLoadSubsetOptions(options, true)
+}
+
+// Both modes run the same admission checks. Validation retains input nodes only
+// as cycle markers; it never writes to them or returns them to a caller.
+function visitLoadSubsetOptions(
+  options: LoadSubsetOptions,
+  validateOnly: boolean,
+): TransportedLoadSubsetOptions {
   assertPlainContainer(options, `options`)
   assertAllowedProperties(options, `options`, [
     `where`,
@@ -147,6 +162,7 @@ export function toTransportedLoadSubsetOptions(
   ])
 
   const state: ProjectionState = {
+    validateOnly,
     expressions: new WeakMap(),
     expressionArrays: new WeakMap(),
     stringArrays: new WeakMap(),
@@ -156,7 +172,9 @@ export function toTransportedLoadSubsetOptions(
     cursors: new WeakMap(),
     wireValues: new WeakMap(),
   }
-  const projected: TransportedLoadSubsetOptions = {}
+  const projected: TransportedLoadSubsetOptions = validateOnly
+    ? (options as TransportedLoadSubsetOptions)
+    : {}
   const where = readDataProperty(options, `where`, `options.where`)
   const orderBy = readDataProperty(options, `orderBy`, `options.orderBy`)
   const limit = readDataProperty(options, `limit`, `options.limit`)
@@ -164,19 +182,24 @@ export function toTransportedLoadSubsetOptions(
   const offset = readDataProperty(options, `offset`, `options.offset`)
 
   if (where.present && where.value !== undefined) {
-    projected.where = projectExpression(where.value, `options.where`, state)
+    const result = projectExpression(where.value, `options.where`, state)
+    if (!state.validateOnly) projected.where = result
   }
   if (orderBy.present && orderBy.value !== undefined) {
-    projected.orderBy = projectOrderBy(orderBy.value, `options.orderBy`, state)
+    const result = projectOrderBy(orderBy.value, `options.orderBy`, state)
+    if (!state.validateOnly) projected.orderBy = result
   }
   if (limit.present && limit.value !== undefined) {
-    projected.limit = projectNumber(limit.value, `options.limit`)
+    const result = projectNumber(limit.value, `options.limit`)
+    if (!state.validateOnly) projected.limit = result
   }
   if (cursor.present && cursor.value !== undefined) {
-    projected.cursor = projectCursor(cursor.value, `options.cursor`, state)
+    const result = projectCursor(cursor.value, `options.cursor`, state)
+    if (!state.validateOnly) projected.cursor = result
   }
   if (offset.present && offset.value !== undefined) {
-    projected.offset = projectNumber(offset.value, `options.offset`)
+    const result = projectNumber(offset.value, `options.offset`)
+    if (!state.validateOnly) projected.offset = result
   }
 
   return projected
@@ -228,17 +251,18 @@ function projectExpression(
     case `ref`: {
       assertExpressionPrototype(object, path, IR.PropRef.prototype)
       assertAllowedProperties(object, path, [`type`, `path`, `sourceAlias`])
-      const projected: Extract<RemoteSubsetWireExpression, { type: `ref` }> = {
-        type: `ref`,
-        path: [],
-      }
+      const projected: Extract<RemoteSubsetWireExpression, { type: `ref` }> =
+        state.validateOnly
+          ? (object as Extract<RemoteSubsetWireExpression, { type: `ref` }>)
+          : { type: `ref`, path: [] }
       state.expressions.set(object, projected)
       const sourcePath = readRequiredDataProperty(
         object,
         `path`,
         `${path}.path`,
       )
-      projected.path = projectStringArray(sourcePath, `${path}.path`, state)
+      const result = projectStringArray(sourcePath, `${path}.path`, state)
+      if (!state.validateOnly) projected.path = result
       const sourceAlias = readDataProperty(
         object,
         `sourceAlias`,
@@ -247,49 +271,50 @@ function projectExpression(
       if (sourceAlias.present) {
         if (
           typeof sourceAlias.value !== `string` ||
-          projected.path[0] !== sourceAlias.value
+          result[0] !== sourceAlias.value
         ) {
           throw new RemoteSubsetWireValueError(
             `${path}.sourceAlias`,
             `source alias must match the first path segment`,
           )
         }
-        projected.sourceAlias = sourceAlias.value
+        if (!state.validateOnly) projected.sourceAlias = sourceAlias.value
       }
       return projected
     }
     case `val`: {
       assertExpressionPrototype(object, path, IR.Value.prototype)
       assertAllowedProperties(object, path, [`type`, `value`])
-      const projected: Extract<RemoteSubsetWireExpression, { type: `val` }> = {
-        type: `val`,
-        value: undefined,
-      }
+      const projected: Extract<RemoteSubsetWireExpression, { type: `val` }> =
+        state.validateOnly
+          ? (object as Extract<RemoteSubsetWireExpression, { type: `val` }>)
+          : { type: `val`, value: undefined }
       state.expressions.set(object, projected)
       const sourceValue = readRequiredDataProperty(
         object,
         `value`,
         `${path}.value`,
       )
-      projected.value = projectWireValue(sourceValue, `${path}.value`, state)
+      const result = projectWireValue(sourceValue, `${path}.value`, state)
+      if (!state.validateOnly) projected.value = result
       return projected
     }
     case `func`: {
       assertExpressionPrototype(object, path, IR.Func.prototype)
       assertAllowedProperties(object, path, [`type`, `name`, `args`])
-      const projected = {
-        type: `func`,
-        name: ``,
-        args: [] as Array<RemoteSubsetWireExpression>,
-      } satisfies RemoteSubsetWireExpression
+      const projected: Extract<RemoteSubsetWireExpression, { type: `func` }> =
+        state.validateOnly
+          ? (object as Extract<RemoteSubsetWireExpression, { type: `func` }>)
+          : { type: `func`, name: ``, args: [] }
       state.expressions.set(object, projected)
       const name = readRequiredDataProperty(object, `name`, `${path}.name`)
       if (typeof name !== `string`) {
         throw new RemoteSubsetWireValueError(`${path}.name`, describe(name))
       }
-      projected.name = name
+      if (!state.validateOnly) projected.name = name
       const args = readRequiredDataProperty(object, `args`, `${path}.args`)
-      projected.args = projectExpressionArray(args, `${path}.args`, state)
+      const result = projectExpressionArray(args, `${path}.args`, state)
+      if (!state.validateOnly) projected.args = result
       return projected
     }
     default:
@@ -306,7 +331,9 @@ function projectExpressionArray(
   const existing = state.expressionArrays.get(array)
   if (existing) return existing
   assertArrayShape(array, path)
-  const projected = new Array<RemoteSubsetWireExpression>(array.length)
+  const projected = state.validateOnly
+    ? (array as Array<RemoteSubsetWireExpression>)
+    : new Array<RemoteSubsetWireExpression>(array.length)
   state.expressionArrays.set(array, projected)
   for (let index = 0; index < array.length; index++) {
     if (!(index in array)) {
@@ -315,11 +342,8 @@ function projectExpressionArray(
         `missing expression`,
       )
     }
-    projected[index] = projectExpression(
-      array[index],
-      `${path}[${index}]`,
-      state,
-    )
+    const result = projectExpression(array[index], `${path}[${index}]`, state)
+    if (!state.validateOnly) projected[index] = result
   }
   return projected
 }
@@ -333,14 +357,16 @@ function projectStringArray(
   const existing = state.stringArrays.get(array)
   if (existing) return existing
   assertArrayShape(array, path)
-  const projected = new Array<string>(array.length)
+  const projected = state.validateOnly
+    ? (array as Array<string>)
+    : new Array<string>(array.length)
   state.stringArrays.set(array, projected)
   for (let index = 0; index < array.length; index++) {
     const entry = array[index]
     if (!(index in array) || typeof entry !== `string`) {
       throw new RemoteSubsetWireValueError(`${path}[${index}]`, describe(entry))
     }
-    projected[index] = entry
+    if (!state.validateOnly) projected[index] = entry
   }
   return projected
 }
@@ -354,7 +380,9 @@ function projectOrderBy(
   const existing = state.orderByArrays.get(array)
   if (existing) return existing
   assertArrayShape(array, path)
-  const projected = new Array<RemoteSubsetWireOrderByClause>(array.length)
+  const projected = state.validateOnly
+    ? (array as Array<RemoteSubsetWireOrderByClause>)
+    : new Array<RemoteSubsetWireOrderByClause>(array.length)
   state.orderByArrays.set(array, projected)
 
   for (let index = 0; index < array.length; index++) {
@@ -362,20 +390,23 @@ function projectOrderBy(
     const clause = requirePlainRecord(array[index], clausePath)
     const existingClause = state.orderByClauses.get(clause)
     if (existingClause) {
-      projected[index] = existingClause
+      if (!state.validateOnly) projected[index] = existingClause
       continue
     }
     assertAllowedProperties(clause, clausePath, [
       `expression`,
       `compareOptions`,
     ])
-    const projectedClause = {
-      expression: undefined as unknown as RemoteSubsetWireExpression,
-      compareOptions: undefined as unknown as RemoteSubsetWireCompareOptions,
-    }
-    projected[index] = projectedClause
+    const projectedClause = state.validateOnly
+      ? (clause as RemoteSubsetWireOrderByClause)
+      : {
+          expression: undefined as unknown as RemoteSubsetWireExpression,
+          compareOptions:
+            undefined as unknown as RemoteSubsetWireCompareOptions,
+        }
+    if (!state.validateOnly) projected[index] = projectedClause
     state.orderByClauses.set(clause, projectedClause)
-    projectedClause.expression = projectExpression(
+    const expression = projectExpression(
       readRequiredDataProperty(
         clause,
         `expression`,
@@ -384,7 +415,7 @@ function projectOrderBy(
       `${clausePath}.expression`,
       state,
     )
-    projectedClause.compareOptions = projectCompareOptions(
+    const compareOptions = projectCompareOptions(
       readRequiredDataProperty(
         clause,
         `compareOptions`,
@@ -393,6 +424,10 @@ function projectOrderBy(
       `${clausePath}.compareOptions`,
       state,
     )
+    if (!state.validateOnly) {
+      projectedClause.expression = expression
+      projectedClause.compareOptions = compareOptions
+    }
   }
   return projected
 }
@@ -418,7 +453,7 @@ function projectCompareOptions(
     stringSort?: `lexical` | `locale`
     locale?: string
     localeOptions?: RemoteSubsetWireRecord
-  } = {}
+  } = state.validateOnly ? source : {}
 
   const direction = readRequiredDataProperty(
     source,
@@ -431,13 +466,13 @@ function projectCompareOptions(
       describe(direction),
     )
   }
-  projected.direction = direction
+  if (!state.validateOnly) projected.direction = direction
 
   const nulls = readRequiredDataProperty(source, `nulls`, `${path}.nulls`)
   if (nulls !== `first` && nulls !== `last`) {
     throw new RemoteSubsetWireValueError(`${path}.nulls`, describe(nulls))
   }
-  projected.nulls = nulls
+  if (!state.validateOnly) projected.nulls = nulls
 
   const stringSort = readDataProperty(
     source,
@@ -451,7 +486,7 @@ function projectCompareOptions(
         describe(stringSort.value),
       )
     }
-    projected.stringSort = stringSort.value
+    if (!state.validateOnly) projected.stringSort = stringSort.value
   }
   if (projected.stringSort !== `lexical`) {
     const locale = readDataProperty(source, `locale`, `${path}.locale`)
@@ -462,7 +497,7 @@ function projectCompareOptions(
           describe(locale.value),
         )
       }
-      projected.locale = locale.value
+      if (!state.validateOnly) projected.locale = locale.value
     }
     const localeOptions = readDataProperty(
       source,
@@ -470,11 +505,12 @@ function projectCompareOptions(
       `${path}.localeOptions`,
     )
     if (localeOptions.present && localeOptions.value !== undefined) {
-      projected.localeOptions = projectWireRecord(
+      const result = projectWireRecord(
         localeOptions.value,
         `${path}.localeOptions`,
         state,
       )
+      if (!state.validateOnly) projected.localeOptions = result
     }
   }
   const result = projected as RemoteSubsetWireCompareOptions
@@ -495,21 +531,27 @@ function projectCursor(
     `whereCurrent`,
     `lastKey`,
   ])
-  const projected: RemoteSubsetWireCursor = {
-    whereFrom: undefined as unknown as RemoteSubsetWireExpression,
-    whereCurrent: undefined as unknown as RemoteSubsetWireExpression,
-  }
+  const projected: RemoteSubsetWireCursor = state.validateOnly
+    ? (source as RemoteSubsetWireCursor)
+    : {
+        whereFrom: undefined as unknown as RemoteSubsetWireExpression,
+        whereCurrent: undefined as unknown as RemoteSubsetWireExpression,
+      }
   state.cursors.set(source, projected)
-  projected.whereFrom = projectExpression(
+  const whereFrom = projectExpression(
     readRequiredDataProperty(source, `whereFrom`, `${path}.whereFrom`),
     `${path}.whereFrom`,
     state,
   )
-  projected.whereCurrent = projectExpression(
+  const whereCurrent = projectExpression(
     readRequiredDataProperty(source, `whereCurrent`, `${path}.whereCurrent`),
     `${path}.whereCurrent`,
     state,
   )
+  if (!state.validateOnly) {
+    projected.whereFrom = whereFrom
+    projected.whereCurrent = whereCurrent
+  }
   const lastKey = readDataProperty(source, `lastKey`, `${path}.lastKey`)
   if (lastKey.present && lastKey.value !== undefined) {
     if (
@@ -521,7 +563,7 @@ function projectCursor(
         describe(lastKey.value),
       )
     }
-    projected.lastKey = lastKey.value
+    if (!state.validateOnly) projected.lastKey = lastKey.value
   }
   return projected
 }
@@ -557,14 +599,16 @@ function projectWireValue(
   if (value instanceof NativeDate) {
     assertExactPrototype(value, NativeDate.prototype, path)
     assertNoOwnProperties(value, path)
-    const projected = new NativeDate(value.getTime())
+    const time = value.getTime()
+    const projected = state.validateOnly ? value : new NativeDate(time)
     state.wireValues.set(value, projected)
     return projected
   }
   if (value instanceof RegExp) {
     assertExactPrototype(value, RegExp.prototype, path)
     assertRegExpShape(value, path)
-    const projected = new RegExp(value.source, value.flags)
+    const { source, flags } = value
+    const projected = state.validateOnly ? value : new RegExp(source, flags)
     state.wireValues.set(value, projected)
     return projected
   }
@@ -574,7 +618,13 @@ function projectWireValue(
     assertFixedArrayBuffer(value, path)
     let projected: ArrayBuffer
     try {
-      projected = value.slice(0)
+      if (state.validateOnly) {
+        // A zero-length view checks detachment without copying the backing bytes.
+        new Uint8Array(value, 0, 0)
+        projected = value
+      } else {
+        projected = value.slice(0)
+      }
     } catch {
       throw new RemoteSubsetWireValueError(path, `detached ArrayBuffer`)
     }
@@ -598,7 +648,9 @@ function projectWireValue(
     if (!(projectedBuffer instanceof ArrayBuffer)) {
       throw new RemoteSubsetWireValueError(path, `shared DataView buffer`)
     }
-    const projected = new DataView(projectedBuffer, byteOffset, byteLength)
+    const projected = state.validateOnly
+      ? value
+      : new DataView(projectedBuffer, byteOffset, byteLength)
     state.wireValues.set(value, projected)
     return projected
   }
@@ -626,7 +678,9 @@ function projectWireValue(
     }
     let projected: RemoteSubsetWireTypedArray
     try {
-      projected = new typedArrayConstructor(projectedBuffer, byteOffset, length)
+      projected = state.validateOnly
+        ? typedArray
+        : new typedArrayConstructor(projectedBuffer, byteOffset, length)
     } catch {
       throw new RemoteSubsetWireValueError(path, `detached typed array`)
     }
@@ -648,15 +702,14 @@ function projectWireArray(
   state: ProjectionState,
 ): Array<RemoteSubsetWireValue> {
   assertArrayShape(value, path)
-  const projected = new Array<RemoteSubsetWireValue>(value.length)
+  const projected = state.validateOnly
+    ? (value as Array<RemoteSubsetWireValue>)
+    : new Array<RemoteSubsetWireValue>(value.length)
   state.wireValues.set(value, projected)
   for (let index = 0; index < value.length; index++) {
     if (index in value) {
-      projected[index] = projectWireValue(
-        value[index],
-        `${path}[${index}]`,
-        state,
-      )
+      const result = projectWireValue(value[index], `${path}[${index}]`, state)
+      if (!state.validateOnly) projected[index] = result
     }
   }
   return projected
@@ -669,14 +722,23 @@ function projectWireMap(
 ): Map<RemoteSubsetWireValue, RemoteSubsetWireValue> {
   assertExactPrototype(value, Map.prototype, path)
   assertNoOwnProperties(value, path)
-  const projected = new Map<RemoteSubsetWireValue, RemoteSubsetWireValue>()
+  const projected = state.validateOnly
+    ? (value as Map<RemoteSubsetWireValue, RemoteSubsetWireValue>)
+    : new Map<RemoteSubsetWireValue, RemoteSubsetWireValue>()
   state.wireValues.set(value, projected)
   let index = 0
   for (const [key, entry] of value) {
-    projected.set(
-      projectWireValue(key, `${path}.entries[${index}].key`, state),
-      projectWireValue(entry, `${path}.entries[${index}].value`, state),
+    const projectedKey = projectWireValue(
+      key,
+      `${path}.entries[${index}].key`,
+      state,
     )
+    const projectedValue = projectWireValue(
+      entry,
+      `${path}.entries[${index}].value`,
+      state,
+    )
+    if (!state.validateOnly) projected.set(projectedKey, projectedValue)
     index++
   }
   return projected
@@ -689,11 +751,14 @@ function projectWireSet(
 ): Set<RemoteSubsetWireValue> {
   assertExactPrototype(value, Set.prototype, path)
   assertNoOwnProperties(value, path)
-  const projected = new Set<RemoteSubsetWireValue>()
+  const projected = state.validateOnly
+    ? (value as Set<RemoteSubsetWireValue>)
+    : new Set<RemoteSubsetWireValue>()
   state.wireValues.set(value, projected)
   let index = 0
   for (const entry of value) {
-    projected.add(projectWireValue(entry, `${path}.values[${index}]`, state))
+    const result = projectWireValue(entry, `${path}.values[${index}]`, state)
+    if (!state.validateOnly) projected.add(result)
     index++
   }
   return projected
@@ -707,7 +772,9 @@ function projectWireRecord(
   const source = requirePlainRecord(value, path)
   const existing = state.wireValues.get(source)
   if (existing) return existing as RemoteSubsetWireRecord
-  const projected: RemoteSubsetWireRecord = {}
+  const projected: RemoteSubsetWireRecord = state.validateOnly
+    ? (source as RemoteSubsetWireRecord)
+    : {}
   state.wireValues.set(source, projected)
 
   for (const key of ownKeys(source, path)) {
@@ -719,12 +786,15 @@ function projectWireRecord(
     if (!descriptor || !descriptor.enumerable || !(`value` in descriptor)) {
       throw new RemoteSubsetWireValueError(childPath, `non-data property`)
     }
-    Object.defineProperty(projected, key, {
-      value: projectWireValue(descriptor.value, childPath, state),
-      enumerable: true,
-      writable: true,
-      configurable: true,
-    })
+    const result = projectWireValue(descriptor.value, childPath, state)
+    if (!state.validateOnly) {
+      Object.defineProperty(projected, key, {
+        value: result,
+        enumerable: true,
+        writable: true,
+        configurable: true,
+      })
+    }
   }
   return projected
 }

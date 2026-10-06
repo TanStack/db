@@ -1,5 +1,6 @@
 import {
   IR,
+  compareTemporalValues,
   compileSingleRowExpression,
   toBooleanPredicate,
 } from '@tanstack/db'
@@ -17,7 +18,11 @@ import {
   PERSISTED_TYPE_TAG,
   PERSISTED_VALUE_TAG,
   assertSQLiteBigIntInRange,
+  reviveSQLiteTemporal,
   serializeSQLiteBigInt,
+  serializeSQLiteTemporal,
+  sqliteTemporalIdentity,
+  sqliteTemporalKind,
 } from './sqlite-value'
 import type { LoadSubsetOptions } from '@tanstack/db'
 import type {
@@ -47,6 +52,7 @@ type CompiledSqlFragment = {
   supported: boolean
   sql: string
   params: Array<SqliteSupportedValue>
+  identitySql?: string
   valueKind?: CompiledValueKind
 }
 
@@ -259,7 +265,14 @@ const SAFE_IDENTIFIER_PATTERN = /^[a-zA-Z_][a-zA-Z0-9_]*$/
 const FORBIDDEN_SQL_FRAGMENT_PATTERN = /(;|--|\/\*)/
 type CompiledValueKind = `unknown` | `bigint` | `date` | `datetime`
 type PersistedTaggedValueType =
-  `bigint` | `date` | `nan` | `infinity` | `-infinity`
+  | `bigint`
+  | `date`
+  | `nan`
+  | `infinity`
+  | `-infinity`
+  | `string`
+  | `Temporal.Instant`
+  | `Temporal.PlainDate`
 type PersistedTaggedValue = {
   [PERSISTED_TYPE_TAG]: PersistedTaggedValueType
   [PERSISTED_VALUE_TAG]: string
@@ -271,6 +284,9 @@ const persistedTaggedValueTypes = new Set<PersistedTaggedValueType>([
   `nan`,
   `infinity`,
   `-infinity`,
+  `string`,
+  `Temporal.Instant`,
+  `Temporal.PlainDate`,
 ])
 
 const orderByObjectIds = new WeakMap<object, number>()
@@ -333,6 +349,9 @@ function encodePersistedJsonValue(value: unknown): unknown {
     return serializeSQLiteBigInt(value) satisfies PersistedTaggedValue
   }
 
+  const temporal = serializeSQLiteTemporal(value)
+  if (temporal) return temporal
+
   if (value instanceof Date) {
     return {
       [PERSISTED_TYPE_TAG]: `date`,
@@ -375,6 +394,13 @@ function encodePersistedJsonValue(value: unknown): unknown {
         encodedRecord[key] = encodedValue
       }
     }
+    // Escape the marker field itself, leaving ordinary nested JSON paths intact.
+    if (typeof recordValue[PERSISTED_TYPE_TAG] === `string`) {
+      encodedRecord[PERSISTED_TYPE_TAG] = {
+        [PERSISTED_TYPE_TAG]: `string`,
+        [PERSISTED_VALUE_TAG]: recordValue[PERSISTED_TYPE_TAG],
+      }
+    }
     return encodedRecord
   }
 
@@ -388,6 +414,14 @@ function decodePersistedJsonValue(value: unknown): unknown {
 
   if (isPersistedTaggedValue(value)) {
     switch (value[PERSISTED_TYPE_TAG]) {
+      case `string`:
+        return value[PERSISTED_VALUE_TAG]
+      case `Temporal.Instant`:
+      case `Temporal.PlainDate`:
+        return reviveSQLiteTemporal(
+          value[PERSISTED_TYPE_TAG],
+          value[PERSISTED_VALUE_TAG],
+        )
       case `bigint`:
         return BigInt(value[PERSISTED_VALUE_TAG])
       case `date`: {
@@ -459,7 +493,8 @@ function toSqliteParameterValue(value: unknown): SqliteSupportedValue {
     return value.toISOString()
   }
 
-  return serializePersistedRowValue(value)
+  const temporal = serializeSQLiteTemporal(value)
+  return temporal?.order ?? serializePersistedRowValue(value)
 }
 
 function toSqliteLiteral(value: SqliteSupportedValue): string {
@@ -471,6 +506,10 @@ function toSqliteLiteral(value: SqliteSupportedValue): string {
     return Number.isFinite(value) ? String(value) : `NULL`
   }
 
+  if (value.includes(`\u0000`)) {
+    // JSON escapes NUL before SQL parsing and matches stored-string extraction.
+    return `json_extract(${toSqliteLiteral(JSON.stringify(value))}, '$')`
+  }
   return `'${value.replace(/'/g, `''`)}'`
 }
 
@@ -561,6 +600,10 @@ function compareOrderByValues(
 
   if (left instanceof Date && right instanceof Date) {
     return left.getTime() - right.getTime()
+  }
+
+  if (sqliteTemporalKind(left) && sqliteTemporalKind(right)) {
+    return compareTemporalValues(left, right)
   }
 
   const leftIsObject = typeof left === `object`
@@ -720,16 +763,23 @@ function compileRefExpressionSql(jsonPath: string): CompiledSqlFragment {
   const taggedValuePathSql = toSqliteLiteral(taggedValuePath)
   const jsonPathSql = toSqliteLiteral(jsonPath)
 
-  return {
-    supported: true,
-    sql: `(CASE json_extract(value, ${typePathSql})
+  const typeSql = `json_extract(value, ${typePathSql})`
+  const orderPathSql = toSqliteLiteral(`${jsonPath}.order`)
+  const sql = `(CASE ${typeSql}
       WHEN 'bigint' THEN CAST(json_extract(value, ${taggedValuePathSql}) AS NUMERIC)
       WHEN 'date' THEN json_extract(value, ${taggedValuePathSql})
+      WHEN 'string' THEN json_extract(value, ${taggedValuePathSql})
+      WHEN 'Temporal.Instant' THEN json_extract(value, ${orderPathSql})
+      WHEN 'Temporal.PlainDate' THEN json_extract(value, ${orderPathSql})
       WHEN 'nan' THEN NULL
       WHEN 'infinity' THEN NULL
       WHEN '-infinity' THEN NULL
       ELSE json_extract(value, ${jsonPathSql})
-    END)`,
+    END)`
+  return {
+    supported: true,
+    sql,
+    identitySql: `(CASE WHEN ${typeSql} IN ('Temporal.Instant', 'Temporal.PlainDate') THEN ${typeSql} || ':' || json_extract(value, ${taggedValuePathSql}) ELSE ${sql} END)`,
     params: [],
     valueKind: `unknown`,
   }
@@ -781,6 +831,13 @@ function stableStringify(value: unknown): string {
   return serializePersistedRowValue(value)
 }
 
+/** Balance disjunctions so a large membership index stays below SQL depth limits. */
+function joinSqlDisjunction(parts: ReadonlyArray<string>): string {
+  if (parts.length === 1) return parts[0]!
+  const middle = Math.floor(parts.length / 2)
+  return `(${joinSqlDisjunction(parts.slice(0, middle))} OR ${joinSqlDisjunction(parts.slice(middle))})`
+}
+
 function argumentCompilationContext(
   parentName: string,
   argumentIndex: number,
@@ -824,7 +881,8 @@ function isSafeEqualityLiteral(value: unknown): boolean {
   return (
     typeof value === `string` ||
     typeof value === `boolean` ||
-    typeof value === `bigint`
+    typeof value === `bigint` ||
+    sqliteTemporalKind(value) !== undefined
   )
 }
 
@@ -863,18 +921,21 @@ function compileSqlExpression(
         params: [JSON.stringify(expression.value)],
       }
     }
-    const valueKind = getLiteralValueKind(expression.value)
+    const temporal = serializeSQLiteTemporal(expression.value)
+    const value = temporal?.order ?? toSqliteParameterValue(expression.value)
     return {
+      identitySql: temporal
+        ? toSqliteLiteral(sqliteTemporalIdentity(temporal))
+        : undefined,
       supported: true,
       sql:
         context === `index-expression`
-          ? toSqliteExpressionLiteral(expression.value)
+          ? toSqliteExpressionLiteral(
+              typeof expression.value === `bigint` ? expression.value : value,
+            )
           : `?`,
-      params:
-        context === `predicate`
-          ? [toSqliteParameterValue(expression.value)]
-          : [],
-      valueKind,
+      params: context === `predicate` ? [value] : [],
+      valueKind: getLiteralValueKind(expression.value),
     }
   }
 
@@ -891,15 +952,20 @@ function compileSqlExpression(
     }
 
     if (jsonPaths.length === 1) return compileRefExpressionSql(jsonPaths[0]!)
+    const variants = jsonPaths.map(compileRefExpressionSql)
     return {
       supported: true,
-      sql: `COALESCE(${jsonPaths.map((path) => compileRefExpressionSql(path).sql).join(`, `)})`,
+      identitySql: `COALESCE(${variants.map((variant) => variant.identitySql).join(`, `)})`,
+      sql: `COALESCE(${variants.map((variant) => variant.sql).join(`, `)})`,
       params: [],
       valueKind: `unknown`,
     }
   }
 
-  const compiledArgs = expression.args.map((arg, index) =>
+  // IN owns its list encoding; compiling that list as a scalar discards work.
+  const args =
+    expression.name === `in` ? expression.args.slice(0, 1) : expression.args
+  const compiledArgs = args.map((arg, index) =>
     compileSqlExpression(
       arg,
       argumentCompilationContext(expression.name, index, arg, context),
@@ -949,18 +1015,32 @@ function compileSqlExpression(
         lte: `<=`,
       }
 
+      const comparison = compileComparisonSql(
+        operatorByName[expression.name],
+        expression.args[0]!,
+        expression.args[1]!,
+        argSql[0],
+        argSql[1],
+        valueKind,
+        getCompiledValueKind(compiledArgs[0]),
+        getCompiledValueKind(compiledArgs[1]),
+      )
+      // Native order ties need canonical identity, including in persisted
+      // expressions. Ordinary string predicates keep one binding; residual
+      // filtering removes native order-key collisions from their candidate set.
+      const needsIdentity =
+        expression.name === `eq` &&
+        expression.args.every(
+          (arg) =>
+            arg.type !== `val` ||
+            sqliteTemporalKind(arg.value) ||
+            (context === `index-expression` && typeof arg.value === `string`),
+        )
       return {
         supported: true,
-        sql: compileComparisonSql(
-          operatorByName[expression.name],
-          expression.args[0]!,
-          expression.args[1]!,
-          argSql[0],
-          argSql[1],
-          valueKind,
-          getCompiledValueKind(compiledArgs[0]),
-          getCompiledValueKind(compiledArgs[1]),
-        ),
+        sql: needsIdentity
+          ? `(${comparison} AND (${compiledArgs[0].identitySql ?? argSql[0]} = ${compiledArgs[1].identitySql ?? argSql[1]}))`
+          : comparison,
         params,
       }
     }
@@ -1011,26 +1091,53 @@ function compileSqlExpression(
         return { supported: false, sql: ``, params: [] }
       }
 
+      // Order and identity are two projections of one validated native encoding.
+      const values = listValue.map((value) => {
+        const temporal = serializeSQLiteTemporal(value)
+        return {
+          value:
+            typeof value === `bigint`
+              ? assertSQLiteBigIntInRange(value)
+              : (temporal?.order ?? toSqliteParameterValue(value)),
+          identity: temporal ? sqliteTemporalIdentity(temporal) : undefined,
+        }
+      })
+      let identity = ``
+      if (
+        listValue.some(
+          (value) =>
+            sqliteTemporalKind(value) ||
+            (context === `index-expression` && typeof value === `string`),
+        )
+      ) {
+        const leftIdentity = compiledArgs[0]?.identitySql ?? leftSql
+        // Index expressions cannot contain subqueries. Both forms preserve
+        // correlated membership and SQL's three-valued Boolean semantics.
+        identity =
+          context === `index-expression`
+            ? ` AND (${joinSqlDisjunction(values.map(({ value, identity: nativeIdentity }) => `(${leftSql} = ${toSqliteExpressionLiteral(value)} AND ${leftIdentity} = ${toSqliteExpressionLiteral(nativeIdentity ?? value)})`))})`
+            : ` AND ((${leftSql}, ${leftIdentity}) IN (VALUES ${[...new Set(values.map(({ value, identity: nativeIdentity }) => `(${toSqliteExpressionLiteral(value)}, ${toSqliteExpressionLiteral(nativeIdentity ?? value)})`))].join(`, `)}))`
+      }
       if (context === `index-expression`) {
         return {
           supported: true,
-          sql: `(${leftSql} IN (${listValue
-            .map((value) => toSqliteExpressionLiteral(value))
-            .join(`, `)}))`,
+          sql: `(${leftSql} IN (${values
+            .map(({ value }) => toSqliteExpressionLiteral(value))
+            .join(`, `)})${identity})`,
           params: leftParams,
         }
       }
 
-      const jsonList = `[${listValue
-        .map((value) =>
+      const jsonList = `[${values
+        .map(({ value }) =>
           typeof value === `bigint`
             ? assertSQLiteBigIntInRange(value).toString()
-            : JSON.stringify(toSqliteParameterValue(value)),
+            : JSON.stringify(value),
         )
         .join(`,`)}]`
       return {
         supported: true,
-        sql: `(${leftSql} IN (SELECT value FROM json_each(?)))`,
+        sql: `(${leftSql} IN (SELECT value FROM json_each(?))${identity})`,
         params: [...leftParams, jsonList],
       }
     }
@@ -1058,7 +1165,12 @@ function compileSqlExpression(
     case `concat`:
       return { supported: true, sql: `(${argSql.join(` || `)})`, params }
     case `coalesce`:
-      return { supported: true, sql: `COALESCE(${argSql.join(`, `)})`, params }
+      return {
+        supported: true,
+        sql: `COALESCE(${argSql.join(`, `)})`,
+        identitySql: `COALESCE(${compiledArgs.map((arg) => arg.identitySql ?? arg.sql).join(`, `)})`,
+        params,
+      }
     case `add`:
       return { supported: true, sql: `(${argSql[0]} + ${argSql[1]})`, params }
     case `subtract`:
@@ -1094,6 +1206,51 @@ function compileSqlExpression(
         params: [],
       }
   }
+}
+
+/** A raw ref/native-literal leaf has exact native truth before prefilter broadening. */
+function nativeComparisonRef(
+  expression: IR.BasicExpression,
+): IR.PropRef | undefined {
+  if (expression.type !== `func` || expression.args.length !== 2)
+    return undefined
+  const [left, right] = expression.args
+  if (expression.name === `in`) {
+    return left?.type === `ref` &&
+      right?.type === `val` &&
+      Array.isArray(right.value) &&
+      right.value.length > 0 &&
+      right.value.every((value) => sqliteTemporalKind(value))
+      ? left
+      : undefined
+  }
+  if (![`eq`, `gt`, `gte`, `lt`, `lte`].includes(expression.name))
+    return undefined
+  if (
+    left?.type === `ref` &&
+    right?.type === `val` &&
+    sqliteTemporalKind(right.value)
+  )
+    return left
+  if (
+    right?.type === `ref` &&
+    left?.type === `val` &&
+    sqliteTemporalKind(left.value)
+  )
+    return right
+  return undefined
+}
+
+function compileNativeRefGuard(ref: IR.PropRef): string {
+  const paths = createJsonPathVariants(
+    IR.getPropRefPropertyPath(ref).map(String),
+  )!
+  const kinds = paths.map(
+    (path) =>
+      `json_extract(value, ${toSqliteLiteral(`${path}.${PERSISTED_TYPE_TAG}`)})`,
+  )
+  const kind = kinds.length === 1 ? kinds[0] : `COALESCE(${kinds.join(`, `)})`
+  return `${kind} IN ('Temporal.Instant', 'Temporal.PlainDate')`
 }
 
 function compileSafeSqlPrefilter(
@@ -1139,7 +1296,37 @@ function compileSafeSqlPrefilter(
   compiled ??= compileSqlExpression(expression)
   if (!compiled.supported) return undefined
   const [left, right] = expression.args
+  if (
+    expression.name === `not` &&
+    expression.args.length === 1 &&
+    left &&
+    nativeComparisonRef(left)
+  ) {
+    // Negate the original leaf, never a broadened prefilter. Nonfinite stored
+    // scalars project to NULL; retaining them also retains valid NOT matches.
+    return { ...compiled, sql: `COALESCE(${compiled.sql}, 1)` }
+  }
   if (expression.args.length === 2) {
+    const nativeRef = nativeComparisonRef(expression)
+    if (nativeRef) {
+      if (expression.name === `eq` || expression.name === `in`) return compiled
+      // NaN orders above native values in the core evaluator. NULL candidates
+      // also preserve that law with either operand direction.
+      const fieldSql = compileSqlExpression(nativeRef, `index-expression`).sql
+      return { ...compiled, sql: `(${compiled.sql} OR ${fieldSql} IS NULL)` }
+    }
+    if (
+      expression.name === `eq` &&
+      left?.type === `ref` &&
+      right?.type === `ref`
+    ) {
+      // Ref/ref scalar coercions are not generally SQL-exact. Restrict only
+      // native pairs; leave every other pair to the authoritative evaluator.
+      return {
+        ...compiled,
+        sql: `(CASE WHEN ${compileNativeRefGuard(left)} AND ${compileNativeRefGuard(right)} THEN ${compiled.sql} ELSE 1 END)`,
+      }
+    }
     if (
       [`gt`, `gte`, `lt`, `lte`].includes(expression.name) &&
       (left?.type === `ref` || right?.type === `ref`)
