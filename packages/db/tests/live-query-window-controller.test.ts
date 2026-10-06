@@ -239,6 +239,7 @@ describe(`createLiveQueryWindowController`, () => {
       const next = controller.getSnapshot().state
       expect([...(next?.keys() ?? [])]).not.toEqual(keys)
       expect(next).not.toBe(state)
+      expect(snap.state).toBe(state)
       expect([...(state?.keys() ?? [])]).toEqual(keys)
     } finally {
       controller.dispose()

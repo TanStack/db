@@ -212,6 +212,11 @@ async function checkHistory(
     // returned, and snapshots with different rows have different maps.
     const keep = shape === `single` ? 1 : Infinity
     for (const [index, state] of seen) {
+      // Every later read of a snapshot returns the map its first read did.
+      expect(
+        captured[index]!.snapshot.state,
+        `snapshot ${index}: state identity after other reads`,
+      ).toBe(state)
       const rows = captured[index]!.rows.slice(0, keep)
       expect(
         [...(state?.values() ?? [])].map(plain),

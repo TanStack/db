@@ -6,8 +6,9 @@ Revisions:
 - Witnesses: the first versions ran on `2376eb581` (`main` after #2048). The
   first review's fixes ran on `d57be3d6f`, and its merge of `main` on
   `5a24b9025`.
-- Second review: its fixes are in the commit that adds this line, on
-  `5a24b9025`. The results under "Second review" ran on that commit.
+- Second review: its fixes are in `7bc58cfab`, on `5a24b9025`.
+- Third review: its fixes are in the commit that adds this line, on
+  `7bc58cfab`. The X7 results ran on that commit.
 
 This branch changes no production code.
 
@@ -92,6 +93,13 @@ witness fetches a page and checks that the newer revision has its own map and
 the older map is unchanged. Under X6, five of the six snapshot tests and the
 window witness fail.
 
+A third review found X7, a single cache entry on the observer. It builds a
+new map whenever a different snapshot is read, so a later read of an earlier
+snapshot returns a new map with the same rows. X7 passed every check above.
+Now the oracle reads each snapshot again after all reads and requires the map
+that its first read returned. The window witness reads the older snapshot
+again after the newer one. Under X7, the same six tests fail.
+
 ## ST27: an unreachable branch
 
 `recomputeOptimisticState` keeps a completed optimistic row only while a
@@ -139,6 +147,12 @@ A second code review, of `5a24b9025`, found two items.
    each run.
 2. X6, a map shared across snapshots, passed the identity checks. Fixed: the
    saved-map and cross-revision checks under "State identity" above.
+
+## Third review
+
+A third review, of `7bc58cfab`, found one item. The saved-map checks did not
+read a snapshot again after another snapshot was read, so X7 passed. Fixed:
+the identity checks under "State identity" above.
 
 ## ORC outcomes
 
