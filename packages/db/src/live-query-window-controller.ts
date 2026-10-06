@@ -667,7 +667,9 @@ class LiveQueryWindowControllerImpl<
       hasNextPage,
       isFetchingNextPage: this.isFetchingNextPage,
       error: this.hasPaginationError ? this.paginationError : undefined,
-      state: observerSnapshot.state,
+      get state() {
+        return observerSnapshot.state
+      },
       collection: observerSnapshot.collection,
       status,
       isLoading: statusFlags.isLoading,

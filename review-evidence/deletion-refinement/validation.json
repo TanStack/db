@@ -248,5 +248,68 @@
     "packages/indexeddb-db-collection/tests/deletion-queue-oracle.test.ts": "8b5b476ddf19e85db7c4c52da9332be2be3726d45449b4fe957a70e7105c36fe",
     "packages/indexeddb-db-collection/e2e/browser.ts": "4d48493d71654c23caaed7aa7a9be015fcc4bc2c778156ff52e69d1385617c22",
     "packages/indexeddb-db-collection/e2e/cross-tab-oracle.spec.ts": "4ea42357f2ee5b9a068206ce8c4a1e4f964b1023d018be3ee7c39d1045d350ef"
+  },
+  "postMainMerge": {
+    "main": "65992aacda530fde89f4c8ffa803b60cd708c425",
+    "prParent": "e6a2b8b48513c484ad7a4c0266d74a681cc09c63",
+    "conflict": "packages/db/package.json; preserved both oracle registrations",
+    "results": [
+      {
+        "name": "adapter",
+        "cases": 2406,
+        "result": "passed",
+        "receipt": "receipts/merge-adapter.txt",
+        "sourceSha256": "b86ffedbd344d316b622cf78898b8ce6b6ba0e04cede40268b174b5f0aff8bd6"
+      },
+      {
+        "name": "core",
+        "cases": 300,
+        "result": "passed",
+        "receipt": "receipts/merge-core.txt",
+        "sourceSha256": "afcd5d32e4f6334bed095de79e1d091714700b6e9fdffd49d6d2e7ef06856327"
+      },
+      {
+        "name": "browser",
+        "cases": 156,
+        "result": "passed",
+        "receipt": "receipts/merge-browser.txt",
+        "sourceSha256": "ad1f45bcc8989b4b15c83371ecb10b1e69fb3ccd69a7e8ca7e77fa05a0c63e00"
+      },
+      {
+        "name": "declarations",
+        "cases": 12,
+        "result": "passed",
+        "receipt": "receipts/merge-declarations.txt",
+        "sourceSha256": "c316735e0b3a1143fe5140f7935e5b4eca2a9f2183d82f98f3f62f05d10a6713"
+      },
+      {
+        "name": "format",
+        "cases": null,
+        "result": "passed",
+        "receipt": "receipts/merge-format.txt",
+        "sourceSha256": "17aa973d3f004560237d9a95171210b0671deff23d61628eecf7322ff5938f20"
+      },
+      {
+        "name": "lint",
+        "cases": null,
+        "result": "passed",
+        "receipt": "receipts/merge-lint.txt",
+        "sourceSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      }
+    ],
+    "sourceSha256": {
+      "packages/db/src/collection/state.ts": "d0a278e8a1544c75327de9e5b9421066da9dfb598c1d646c0d2811f2dfb1f7f5",
+      "packages/db/src/collection/sync.ts": "831c1851cf0d5daed991d7598d0ab50e77b5d74d6c937ae50fe6ff66df0742e9",
+      "packages/db/src/types.ts": "e58970a7dcf8a6a510889bd5e02cc6ed9677a5a70b58e64fbdc8f57a80a2c79e",
+      "packages/indexeddb-db-collection/src/indexeddb.ts": "829215a68e46e81f165b274795e93523ffd0ea2ae0eec2bd51754cd9f387e75b",
+      "packages/indexeddb-db-collection/src/wrapper.ts": "9435242c76c8acf88f27b252c668daf16bca6a67b6a71926cec94bef9610e3f1",
+      "packages/db/tests/truncate-readiness-oracle.test.ts": "d70dbd169971af199d392b8c29f84ad0e373b58520113615ee689f59eb054426",
+      "packages/indexeddb-db-collection/tests/retirement-oracle.test.ts": "ead2bd350e0f9437cfdbb35588d2f1dc0f544af200a99736d40e3761b54c6a62",
+      "packages/indexeddb-db-collection/tests/deletion-queue-oracle.test.ts": "8b5b476ddf19e85db7c4c52da9332be2be3726d45449b4fe957a70e7105c36fe",
+      "packages/indexeddb-db-collection/e2e/browser.ts": "4d48493d71654c23caaed7aa7a9be015fcc4bc2c778156ff52e69d1385617c22",
+      "packages/indexeddb-db-collection/e2e/cross-tab-oracle.spec.ts": "4ea42357f2ee5b9a068206ce8c4a1e4f964b1023d018be3ee7c39d1045d350ef",
+      "packages/db/src/collection/lifecycle.ts": "c6b03d5476fa21c1368799479c2c2e28acae971107e0d8a996b8eed713e32732",
+      "packages/db/package.json": "61e56976597593c7e2c47769b79a05c67b40adbd1de98f18809da478cbde2749"
+    }
   }
 }

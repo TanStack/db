@@ -7,7 +7,7 @@ title: toArray
 function toArray<TContext>(query): ToArrayWrapper<GetInlineResult<TContext>>;
 ```
 
-Defined in: [packages/db/src/query/builder/functions.ts:807](https://github.com/TanStack/db/blob/main/packages/db/src/query/builder/functions.ts#L807)
+Defined in: [packages/db/src/query/builder/functions.ts:790](https://github.com/TanStack/db/blob/main/packages/db/src/query/builder/functions.ts#L790)
 
 ## Type Parameters
 

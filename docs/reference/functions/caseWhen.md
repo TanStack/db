@@ -9,7 +9,7 @@ title: caseWhen
 function caseWhen<C1, V1>(condition1, value1): CaseWhenResult<[V1], false>;
 ```
 
-Defined in: [packages/db/src/query/builder/functions.ts:422](https://github.com/TanStack/db/blob/main/packages/db/src/query/builder/functions.ts#L422)
+Defined in: [packages/db/src/query/builder/functions.ts:405](https://github.com/TanStack/db/blob/main/packages/db/src/query/builder/functions.ts#L405)
 
 Returns the value for the first matching condition, similar to SQL
 `CASE WHEN`.
@@ -83,7 +83,7 @@ function caseWhen<C1, V1, D>(
 defaultValue): CaseWhenResult<[V1, D], true>;
 ```
 
-Defined in: [packages/db/src/query/builder/functions.ts:426](https://github.com/TanStack/db/blob/main/packages/db/src/query/builder/functions.ts#L426)
+Defined in: [packages/db/src/query/builder/functions.ts:409](https://github.com/TanStack/db/blob/main/packages/db/src/query/builder/functions.ts#L409)
 
 Returns the value for the first matching condition, similar to SQL
 `CASE WHEN`.
@@ -166,7 +166,7 @@ function caseWhen<C1, V1, C2, V2>(
 value2): CaseWhenResult<[V1, V2], false>;
 ```
 
-Defined in: [packages/db/src/query/builder/functions.ts:431](https://github.com/TanStack/db/blob/main/packages/db/src/query/builder/functions.ts#L431)
+Defined in: [packages/db/src/query/builder/functions.ts:414](https://github.com/TanStack/db/blob/main/packages/db/src/query/builder/functions.ts#L414)
 
 Returns the value for the first matching condition, similar to SQL
 `CASE WHEN`.
@@ -258,7 +258,7 @@ function caseWhen<C1, V1, C2, V2, D>(
 defaultValue): CaseWhenResult<[V1, V2, D], true>;
 ```
 
-Defined in: [packages/db/src/query/builder/functions.ts:442](https://github.com/TanStack/db/blob/main/packages/db/src/query/builder/functions.ts#L442)
+Defined in: [packages/db/src/query/builder/functions.ts:425](https://github.com/TanStack/db/blob/main/packages/db/src/query/builder/functions.ts#L425)
 
 Returns the value for the first matching condition, similar to SQL
 `CASE WHEN`.
@@ -359,7 +359,7 @@ function caseWhen<C1, V1, C2, V2, C3, V3>(
 value3): CaseWhenResult<[V1, V2, V3], false>;
 ```
 
-Defined in: [packages/db/src/query/builder/functions.ts:455](https://github.com/TanStack/db/blob/main/packages/db/src/query/builder/functions.ts#L455)
+Defined in: [packages/db/src/query/builder/functions.ts:438](https://github.com/TanStack/db/blob/main/packages/db/src/query/builder/functions.ts#L438)
 
 Returns the value for the first matching condition, similar to SQL
 `CASE WHEN`.
@@ -469,7 +469,7 @@ function caseWhen<C1, V1, C2, V2, C3, V3, D>(
 defaultValue): CaseWhenResult<[V1, V2, V3, D], true>;
 ```
 
-Defined in: [packages/db/src/query/builder/functions.ts:470](https://github.com/TanStack/db/blob/main/packages/db/src/query/builder/functions.ts#L470)
+Defined in: [packages/db/src/query/builder/functions.ts:453](https://github.com/TanStack/db/blob/main/packages/db/src/query/builder/functions.ts#L453)
 
 Returns the value for the first matching condition, similar to SQL
 `CASE WHEN`.
@@ -588,7 +588,7 @@ function caseWhen<C1, V1, C2, V2, C3, V3, C4, V4>(
 value4): CaseWhenResult<[V1, V2, V3, V4], false>;
 ```
 
-Defined in: [packages/db/src/query/builder/functions.ts:487](https://github.com/TanStack/db/blob/main/packages/db/src/query/builder/functions.ts#L487)
+Defined in: [packages/db/src/query/builder/functions.ts:470](https://github.com/TanStack/db/blob/main/packages/db/src/query/builder/functions.ts#L470)
 
 Returns the value for the first matching condition, similar to SQL
 `CASE WHEN`.
@@ -716,7 +716,7 @@ function caseWhen<C1, V1, C2, V2, C3, V3, C4, V4, D>(
 defaultValue): CaseWhenResult<[V1, V2, V3, V4, D], true>;
 ```
 
-Defined in: [packages/db/src/query/builder/functions.ts:506](https://github.com/TanStack/db/blob/main/packages/db/src/query/builder/functions.ts#L506)
+Defined in: [packages/db/src/query/builder/functions.ts:489](https://github.com/TanStack/db/blob/main/packages/db/src/query/builder/functions.ts#L489)
 
 Returns the value for the first matching condition, similar to SQL
 `CASE WHEN`.
@@ -853,7 +853,7 @@ function caseWhen<C1, V1, C2, V2, C3, V3, C4, V4, C5, V5>(
 value5): CaseWhenResult<[V1, V2, V3, V4, V5], false>;
 ```
 
-Defined in: [packages/db/src/query/builder/functions.ts:527](https://github.com/TanStack/db/blob/main/packages/db/src/query/builder/functions.ts#L527)
+Defined in: [packages/db/src/query/builder/functions.ts:510](https://github.com/TanStack/db/blob/main/packages/db/src/query/builder/functions.ts#L510)
 
 Returns the value for the first matching condition, similar to SQL
 `CASE WHEN`.
@@ -999,7 +999,7 @@ function caseWhen<C1, V1, C2, V2, C3, V3, C4, V4, C5, V5, D>(
 defaultValue): CaseWhenResult<[V1, V2, V3, V4, V5, D], true>;
 ```
 
-Defined in: [packages/db/src/query/builder/functions.ts:550](https://github.com/TanStack/db/blob/main/packages/db/src/query/builder/functions.ts#L550)
+Defined in: [packages/db/src/query/builder/functions.ts:533](https://github.com/TanStack/db/blob/main/packages/db/src/query/builder/functions.ts#L533)
 
 Returns the value for the first matching condition, similar to SQL
 `CASE WHEN`.
@@ -1155,7 +1155,7 @@ function caseWhen<C1, V1, C2, V2, C3, V3, C4, V4, C5, V5>(
    rest): any;
 ```
 
-Defined in: [packages/db/src/query/builder/functions.ts:575](https://github.com/TanStack/db/blob/main/packages/db/src/query/builder/functions.ts#L575)
+Defined in: [packages/db/src/query/builder/functions.ts:558](https://github.com/TanStack/db/blob/main/packages/db/src/query/builder/functions.ts#L558)
 
 Returns the value for the first matching condition, similar to SQL
 `CASE WHEN`.

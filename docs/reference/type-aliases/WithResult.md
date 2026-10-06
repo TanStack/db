@@ -7,7 +7,7 @@ title: WithResult
 type WithResult<TContext, TResult> = Prettify<Omit<TContext, "result" | "hasResult"> & Pick<TContext, "baseSchema" | "schema" | "fromSourceName"> & object>;
 ```
 
-Defined in: [packages/db/src/query/builder/types.ts:1367](https://github.com/TanStack/db/blob/main/packages/db/src/query/builder/types.ts#L1367)
+Defined in: [packages/db/src/query/builder/types.ts:1359](https://github.com/TanStack/db/blob/main/packages/db/src/query/builder/types.ts#L1359)
 
 WithResult - Updates a context with a new result type after select()
 

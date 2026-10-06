@@ -156,3 +156,18 @@ other thirteen retain their prior fixes and expanded laws. Cleanup/restart of
 pending mutations, post-durable auxiliary failures, arbitrary same-key ordering
 between Collections, lost notifications, quota/eviction and physical crash remain
 separate pre-existing boundaries, not claims made by these formal models.
+
+## Main integration verification
+
+The implementation was committed as `e6a2b8b48`. GitHub then reported a conflict
+with current main, so the published branch received a normal merge of
+`65992aacda530fde89f4c8ffa803b60cd708c425`. The only textual conflict was the core oracle
+script; both branches' registrations remain. Main's sync-entry readiness-error
+change merged alongside the explicit truncate readiness intent.
+
+The merged tree passed all 2,406 adapter runtime/type cases, 300 related core
+cases including the sync-entry reentrancy owner, all 156 native browser cases in
+one run, and all 12 published-declaration consumer tests after fresh builds.
+Formatting and changed-core lint also passed. `validation.json` retains the
+merge-parent identities, final source hashes and separate receipts without
+rewriting the earlier RED or calibration evidence.
