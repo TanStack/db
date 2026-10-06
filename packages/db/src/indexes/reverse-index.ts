@@ -1,3 +1,4 @@
+import { compareKeys } from '@tanstack/db-ivm'
 import type { IndexInterface, IndexOperation, IndexReader } from './base-index'
 import type { RangeQueryOptions } from './btree-index'
 
@@ -67,15 +68,35 @@ export class ReverseIndex<
     from?: unknown,
   ): Array<TKey> {
     if (n <= 0) return []
-    // With nullish values above every value, a walk down from them, or from
-    // any value, never reaches them. Otherwise the walk stops before them.
-    return this.nullsFirst
-      ? this.originalIndex.takeReversedNonNullish(n, from, filterFn)
-      : this.originalIndex.takeReversed(n, from ?? null, filterFn)
+    if (!this.nullsFirst) {
+      // The nullish group is above every value, so a walk down from it, or
+      // from any value, never reaches it.
+      return this.originalIndex.takeReversed(n, from ?? null, filterFn)
+    }
+    // The walk reaches the nullish group only after every value.
+    let nullish: Set<TKey> | undefined
+    const accept = (key: TKey) =>
+      !(nullish ??= this.nullishKeys()).has(key) && (filterFn?.(key) ?? true)
+    return from === undefined
+      ? this.originalIndex.takeReversedFromEnd(n, accept)
+      : this.originalIndex.takeReversed(n, from, accept)
   }
 
   private nullish(n: number, filterFn?: (key: TKey) => boolean): Array<TKey> {
-    return n <= 0 ? [] : this.originalIndex.takeNullish(n, filterFn)
+    const keys: Array<TKey> = []
+    if (n <= 0) return keys
+    for (const key of [...this.nullishKeys()].sort(compareKeys)) {
+      if (keys.length >= n) break
+      if (filterFn?.(key) ?? true) keys.push(key)
+    }
+    return keys
+  }
+
+  private nullishKeys(): Set<TKey> {
+    return new Set([
+      ...this.originalIndex.lookup(`eq`, null),
+      ...this.originalIndex.lookup(`eq`, undefined),
+    ])
   }
 
   // All operations below delegate to the original index
