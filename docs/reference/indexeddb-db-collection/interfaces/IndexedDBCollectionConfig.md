@@ -3,7 +3,7 @@ id: IndexedDBCollectionConfig
 title: IndexedDBCollectionConfig
 ---
 
-Defined in: [.codex/worktrees/pr-1179-review/tanstack-db/packages/indexeddb-db-collection/src/indexeddb.ts:140](https://github.com/TanStack/db/blob/main/packages/indexeddb-db-collection/src/indexeddb.ts#L140)
+Defined in: [packages/indexeddb-db-collection/src/indexeddb.ts:139](https://github.com/TanStack/db/blob/main/packages/indexeddb-db-collection/src/indexeddb.ts#L139)
 
 Configuration options for creating an IndexedDB Collection
 
@@ -33,7 +33,7 @@ Configuration options for creating an IndexedDB Collection
 db: IndexedDBInstance;
 ```
 
-Defined in: [.codex/worktrees/pr-1179-review/tanstack-db/packages/indexeddb-db-collection/src/indexeddb.ts:149](https://github.com/TanStack/db/blob/main/packages/indexeddb-db-collection/src/indexeddb.ts#L149)
+Defined in: [packages/indexeddb-db-collection/src/indexeddb.ts:148](https://github.com/TanStack/db/blob/main/packages/indexeddb-db-collection/src/indexeddb.ts#L148)
 
 IndexedDB instance from createIndexedDB()
 REQUIRED - must create database before collections
@@ -46,7 +46,7 @@ REQUIRED - must create database before collections
 name: string;
 ```
 
-Defined in: [.codex/worktrees/pr-1179-review/tanstack-db/packages/indexeddb-db-collection/src/indexeddb.ts:155](https://github.com/TanStack/db/blob/main/packages/indexeddb-db-collection/src/indexeddb.ts#L155)
+Defined in: [packages/indexeddb-db-collection/src/indexeddb.ts:154](https://github.com/TanStack/db/blob/main/packages/indexeddb-db-collection/src/indexeddb.ts#L154)
 
 Name of the object store within the database
 Must exist in the underlying database

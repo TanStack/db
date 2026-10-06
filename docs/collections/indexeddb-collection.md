@@ -50,7 +50,7 @@ const todos = createCollection(
 await todos.preload()
 ```
 
-Create the database in browser code where IndexedDB is available. `preload()` restores the store's rows and resolves when the Collection is ready. A failed initial read rejects `preload()` and sets the Collection status to `error`.
+Create the database in a browser page or dedicated worker where IndexedDB is available. `preload()` restores the store's rows and resolves when the Collection is ready. A failed initial read rejects `preload()` and sets the Collection status to `error`.
 
 The Collection loads the entire store into memory. Use it for data that fits in your app's memory budget.
 
@@ -214,9 +214,12 @@ Collections stay errored with their snapshots; fresh Collections restore the
 resulting storage. Use `clearObjectStore()` to publish a live replacement for one
 store while the connection remains open.
 
+`importData` copies the validated rows before it waits for storage. Later changes to caller-owned objects do not alter the imported snapshot.
+Updates follow the core callback-return snapshot rules for supported values, including native buffers and views. Treat public Collection rows as immutable.
+
 ## Cross-Tab Synchronization
 
-Tabs on the same origin use the same database and store names to access the same data. After persistence, the adapter sends a `BroadcastChannel` notification. Active receiving Collections read the changes from IndexedDB and update their public snapshots.
+Pages and dedicated workers on the same origin use the same database and store names to access the same data. After persistence, the adapter sends a `BroadcastChannel` notification. Active receiving Collections read the changes from IndexedDB and update their public snapshots.
 
 If `BroadcastChannel` is unavailable, local persistence still works, but active tabs do not receive change notifications. This adapter does not synchronize data to a server or define a conflict-resolution policy for simultaneous writes to the same key from different Collections or tabs.
 
@@ -230,7 +233,7 @@ db.close()
 ```
 
 Connections created by `createIndexedDB` close automatically on native
-`versionchange`, and all their active Collections immediately enter `error`.
+`versionchange`. Unexpected native connection closure also notifies their managed Collections. In both cases, active Collections enter `error`.
 The descriptor's `db.close()` method has the same local effect. Their last
 published rows remain available. Recreate affected Collections with a new
 instance using the current database version. Calling the raw `db.db.close()`
@@ -244,6 +247,27 @@ These publications keep the Collection in `error`; late startup and notification
 reads cannot publish or make it ready again. There is no automatic restart.
 
 Connections opened outside `createIndexedDB` can still block upgrades or deletion. Their owner must close them. The operation's promise remains pending until the native request succeeds or fails.
+
+Use `onBlocked` to report a native blocker without changing the request outcome:
+
+```typescript
+const db = await createIndexedDB({
+  name: 'my-app',
+  version: 2,
+  stores: ['todos'],
+  onBlocked: (event) => {
+    console.info('Close older connections', event.oldVersion, event.newVersion)
+  },
+})
+
+await deleteDatabase('my-app', undefined, (event) => {
+  console.info('Deletion waits for open connections', event.oldVersion)
+})
+```
+
+The low-level `openDatabase` function accepts the same callback as its fifth argument.
+Native deletion reports `newVersion: null`. The callback does not cancel the operation or settle its promise.
+Dedicated workers receive the same persistence and connection notifications while running. This does not promise service-worker background delivery or recovery after worker termination.
 
 These operations have no deadline or cancellation option. A blocked operation does not switch the Collection to in-memory storage.
 

@@ -3,7 +3,7 @@ id: DatabaseInfo
 title: DatabaseInfo
 ---
 
-Defined in: [.codex/worktrees/pr-1179-review/tanstack-db/packages/indexeddb-db-collection/src/indexeddb.ts:183](https://github.com/TanStack/db/blob/main/packages/indexeddb-db-collection/src/indexeddb.ts#L183)
+Defined in: [packages/indexeddb-db-collection/src/indexeddb.ts:198](https://github.com/TanStack/db/blob/main/packages/indexeddb-db-collection/src/indexeddb.ts#L198)
 
 Database information returned by getDatabaseInfo()
 
@@ -15,9 +15,9 @@ Database information returned by getDatabaseInfo()
 optional estimatedSize: number;
 ```
 
-Origin-wide storage usage in bytes, including other databases and caches. This is not a measurement of this database alone.
+Defined in: [packages/indexeddb-db-collection/src/indexeddb.ts:203](https://github.com/TanStack/db/blob/main/packages/indexeddb-db-collection/src/indexeddb.ts#L203)
 
-Defined in: [.codex/worktrees/pr-1179-review/tanstack-db/packages/indexeddb-db-collection/src/indexeddb.ts:187](https://github.com/TanStack/db/blob/main/packages/indexeddb-db-collection/src/indexeddb.ts#L187)
+Origin-wide storage usage in bytes, including other databases and caches.
 
 ***
 
@@ -27,7 +27,7 @@ Defined in: [.codex/worktrees/pr-1179-review/tanstack-db/packages/indexeddb-db-c
 name: string;
 ```
 
-Defined in: [.codex/worktrees/pr-1179-review/tanstack-db/packages/indexeddb-db-collection/src/indexeddb.ts:184](https://github.com/TanStack/db/blob/main/packages/indexeddb-db-collection/src/indexeddb.ts#L184)
+Defined in: [packages/indexeddb-db-collection/src/indexeddb.ts:199](https://github.com/TanStack/db/blob/main/packages/indexeddb-db-collection/src/indexeddb.ts#L199)
 
 ***
 
@@ -37,7 +37,7 @@ Defined in: [.codex/worktrees/pr-1179-review/tanstack-db/packages/indexeddb-db-c
 objectStores: string[];
 ```
 
-Defined in: [.codex/worktrees/pr-1179-review/tanstack-db/packages/indexeddb-db-collection/src/indexeddb.ts:186](https://github.com/TanStack/db/blob/main/packages/indexeddb-db-collection/src/indexeddb.ts#L186)
+Defined in: [packages/indexeddb-db-collection/src/indexeddb.ts:201](https://github.com/TanStack/db/blob/main/packages/indexeddb-db-collection/src/indexeddb.ts#L201)
 
 ***
 
@@ -47,4 +47,4 @@ Defined in: [.codex/worktrees/pr-1179-review/tanstack-db/packages/indexeddb-db-c
 version: number;
 ```
 
-Defined in: [.codex/worktrees/pr-1179-review/tanstack-db/packages/indexeddb-db-collection/src/indexeddb.ts:185](https://github.com/TanStack/db/blob/main/packages/indexeddb-db-collection/src/indexeddb.ts#L185)
+Defined in: [packages/indexeddb-db-collection/src/indexeddb.ts:200](https://github.com/TanStack/db/blob/main/packages/indexeddb-db-collection/src/indexeddb.ts#L200)

@@ -7,7 +7,7 @@ title: getAll
 function getAll<T>(objectStore): Promise<T[]>;
 ```
 
-Defined in: [.codex/worktrees/pr-1179-review/tanstack-db/packages/indexeddb-db-collection/src/wrapper.ts:322](https://github.com/TanStack/db/blob/main/packages/indexeddb-db-collection/src/wrapper.ts#L322)
+Defined in: [packages/indexeddb-db-collection/src/wrapper.ts:341](https://github.com/TanStack/db/blob/main/packages/indexeddb-db-collection/src/wrapper.ts#L341)
 
 Retrieves all items from an object store.
 

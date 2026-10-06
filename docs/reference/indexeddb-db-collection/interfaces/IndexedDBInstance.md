@@ -3,7 +3,7 @@ id: IndexedDBInstance
 title: IndexedDBInstance
 ---
 
-Defined in: [.codex/worktrees/pr-1179-review/tanstack-db/packages/indexeddb-db-collection/src/indexeddb.ts:107](https://github.com/TanStack/db/blob/main/packages/indexeddb-db-collection/src/indexeddb.ts#L107)
+Defined in: [packages/indexeddb-db-collection/src/indexeddb.ts:106](https://github.com/TanStack/db/blob/main/packages/indexeddb-db-collection/src/indexeddb.ts#L106)
 
 A shared IndexedDB database instance.
 Create with createIndexedDB() and pass to collections.
@@ -16,9 +16,9 @@ Create with createIndexedDB() and pass to collections.
 close: () => void;
 ```
 
-Defined in: [.codex/worktrees/pr-1179-review/tanstack-db/packages/indexeddb-db-collection/src/indexeddb.ts:119](https://github.com/TanStack/db/blob/main/packages/indexeddb-db-collection/src/indexeddb.ts#L119)
+Defined in: [packages/indexeddb-db-collection/src/indexeddb.ts:118](https://github.com/TanStack/db/blob/main/packages/indexeddb-db-collection/src/indexeddb.ts#L118)
 
-Close the database connection
+Close the connection and mark its managed Collections as errored.
 
 #### Returns
 
@@ -32,7 +32,7 @@ Close the database connection
 readonly db: IDBDatabase;
 ```
 
-Defined in: [.codex/worktrees/pr-1179-review/tanstack-db/packages/indexeddb-db-collection/src/indexeddb.ts:109](https://github.com/TanStack/db/blob/main/packages/indexeddb-db-collection/src/indexeddb.ts#L109)
+Defined in: [packages/indexeddb-db-collection/src/indexeddb.ts:108](https://github.com/TanStack/db/blob/main/packages/indexeddb-db-collection/src/indexeddb.ts#L108)
 
 The underlying IDBDatabase connection
 
@@ -44,7 +44,7 @@ The underlying IDBDatabase connection
 readonly optional idbFactory: IDBFactory;
 ```
 
-Defined in: [.codex/worktrees/pr-1179-review/tanstack-db/packages/indexeddb-db-collection/src/indexeddb.ts:117](https://github.com/TanStack/db/blob/main/packages/indexeddb-db-collection/src/indexeddb.ts#L117)
+Defined in: [packages/indexeddb-db-collection/src/indexeddb.ts:116](https://github.com/TanStack/db/blob/main/packages/indexeddb-db-collection/src/indexeddb.ts#L116)
 
 IDBFactory used to create this database (for testing)
 
@@ -56,7 +56,7 @@ IDBFactory used to create this database (for testing)
 readonly name: string;
 ```
 
-Defined in: [.codex/worktrees/pr-1179-review/tanstack-db/packages/indexeddb-db-collection/src/indexeddb.ts:111](https://github.com/TanStack/db/blob/main/packages/indexeddb-db-collection/src/indexeddb.ts#L111)
+Defined in: [packages/indexeddb-db-collection/src/indexeddb.ts:110](https://github.com/TanStack/db/blob/main/packages/indexeddb-db-collection/src/indexeddb.ts#L110)
 
 Database name
 
@@ -68,7 +68,7 @@ Database name
 readonly stores: readonly string[];
 ```
 
-Defined in: [.codex/worktrees/pr-1179-review/tanstack-db/packages/indexeddb-db-collection/src/indexeddb.ts:115](https://github.com/TanStack/db/blob/main/packages/indexeddb-db-collection/src/indexeddb.ts#L115)
+Defined in: [packages/indexeddb-db-collection/src/indexeddb.ts:114](https://github.com/TanStack/db/blob/main/packages/indexeddb-db-collection/src/indexeddb.ts#L114)
 
 Requested object store names (frozen); omissions do not remove stores
 
@@ -80,12 +80,6 @@ Requested object store names (frozen); omissions do not remove stores
 readonly version: number;
 ```
 
-Defined in: [.codex/worktrees/pr-1179-review/tanstack-db/packages/indexeddb-db-collection/src/indexeddb.ts:113](https://github.com/TanStack/db/blob/main/packages/indexeddb-db-collection/src/indexeddb.ts#L113)
+Defined in: [packages/indexeddb-db-collection/src/indexeddb.ts:112](https://github.com/TanStack/db/blob/main/packages/indexeddb-db-collection/src/indexeddb.ts#L112)
 
 Database version
-
-Calling `close()` retires this managed connection and marks its Collections as
-`error`. Already admitted writes finish with their actual native outcome and
-confirm committed data without restoring readiness. Recreate Collections with a
-new descriptor before further persistence. Calling the raw `db.close()` bypasses
-managed notification.

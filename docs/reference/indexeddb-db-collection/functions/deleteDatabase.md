@@ -4,10 +4,13 @@ title: deleteDatabase
 ---
 
 ```ts
-function deleteDatabase(name, idbFactory?): Promise<void>;
+function deleteDatabase(
+   name,
+   idbFactory?,
+onBlocked?): Promise<void>;
 ```
 
-Defined in: [.codex/worktrees/pr-1179-review/tanstack-db/packages/indexeddb-db-collection/src/wrapper.ts:485](https://github.com/TanStack/db/blob/main/packages/indexeddb-db-collection/src/wrapper.ts#L485)
+Defined in: [packages/indexeddb-db-collection/src/wrapper.ts:505](https://github.com/TanStack/db/blob/main/packages/indexeddb-db-collection/src/wrapper.ts#L505)
 
 Deletes an entire IndexedDB database.
 A blocked request stays pending until native success or error.
@@ -28,6 +31,12 @@ The name of the database to delete
 
 Optional IDBFactory for testing/mocking
 
+### onBlocked?
+
+(`event`) => `void`
+
+Optional diagnostic callback for native blocked events. The request stays pending.
+
 ## Returns
 
 `Promise`\<`void`\>
@@ -40,9 +49,3 @@ A promise that resolves when the database is deleted
 await deleteDatabase('myApp')
 console.log('Database deleted')
 ```
-
-This administrative operation targets the name at its turn in IndexedDB's native
-connection queue. It does not publish Collection rows. Managed connections close
-and their Collections enter `error` on `versionchange`; retained snapshots stay
-available. Recreate Collections with a fresh descriptor after the operation. An
-unmanaged connection can keep the request pending until its owner closes it.

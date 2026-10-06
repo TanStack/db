@@ -3,7 +3,7 @@ id: IndexedDBCollectionUtils
 title: IndexedDBCollectionUtils
 ---
 
-Defined in: [.codex/worktrees/pr-1179-review/tanstack-db/packages/indexeddb-db-collection/src/indexeddb.ts:193](https://github.com/TanStack/db/blob/main/packages/indexeddb-db-collection/src/indexeddb.ts#L193)
+Defined in: [packages/indexeddb-db-collection/src/indexeddb.ts:209](https://github.com/TanStack/db/blob/main/packages/indexeddb-db-collection/src/indexeddb.ts#L209)
 
 Utility functions exposed on collection.utils
 
@@ -35,7 +35,7 @@ Utility functions exposed on collection.utils
 acceptMutations: (transaction) => Promise<void>;
 ```
 
-Defined in: [.codex/worktrees/pr-1179-review/tanstack-db/packages/indexeddb-db-collection/src/indexeddb.ts:218](https://github.com/TanStack/db/blob/main/packages/indexeddb-db-collection/src/indexeddb.ts#L218)
+Defined in: [packages/indexeddb-db-collection/src/indexeddb.ts:227](https://github.com/TanStack/db/blob/main/packages/indexeddb-db-collection/src/indexeddb.ts#L227)
 
 Accepts mutations from a manual transaction and persists to IndexedDB
 
@@ -59,7 +59,7 @@ Accepts mutations from a manual transaction and persists to IndexedDB
 clearObjectStore: () => Promise<void>;
 ```
 
-Defined in: [.codex/worktrees/pr-1179-review/tanstack-db/packages/indexeddb-db-collection/src/indexeddb.ts:202](https://github.com/TanStack/db/blob/main/packages/indexeddb-db-collection/src/indexeddb.ts#L202)
+Defined in: [packages/indexeddb-db-collection/src/indexeddb.ts:217](https://github.com/TanStack/db/blob/main/packages/indexeddb-db-collection/src/indexeddb.ts#L217)
 
 Removes all data from the object store
 Does NOT delete the database itself
@@ -76,7 +76,7 @@ Does NOT delete the database itself
 exportData: () => Promise<TItem[]>;
 ```
 
-Defined in: [.codex/worktrees/pr-1179-review/tanstack-db/packages/indexeddb-db-collection/src/indexeddb.ts:226](https://github.com/TanStack/db/blob/main/packages/indexeddb-db-collection/src/indexeddb.ts#L226)
+Defined in: [packages/indexeddb-db-collection/src/indexeddb.ts:235](https://github.com/TanStack/db/blob/main/packages/indexeddb-db-collection/src/indexeddb.ts#L235)
 
 Exports all data from the object store as an array
 Useful for backup/debugging
@@ -93,7 +93,7 @@ Useful for backup/debugging
 getDatabaseInfo: () => Promise<DatabaseInfo>;
 ```
 
-Defined in: [.codex/worktrees/pr-1179-review/tanstack-db/packages/indexeddb-db-collection/src/indexeddb.ts:213](https://github.com/TanStack/db/blob/main/packages/indexeddb-db-collection/src/indexeddb.ts#L213)
+Defined in: [packages/indexeddb-db-collection/src/indexeddb.ts:222](https://github.com/TanStack/db/blob/main/packages/indexeddb-db-collection/src/indexeddb.ts#L222)
 
 Returns database information for debugging
 
@@ -109,7 +109,7 @@ Returns database information for debugging
 importData: (items) => Promise<void>;
 ```
 
-Defined in: [.codex/worktrees/pr-1179-review/tanstack-db/packages/indexeddb-db-collection/src/indexeddb.ts:232](https://github.com/TanStack/db/blob/main/packages/indexeddb-db-collection/src/indexeddb.ts#L232)
+Defined in: [packages/indexeddb-db-collection/src/indexeddb.ts:241](https://github.com/TanStack/db/blob/main/packages/indexeddb-db-collection/src/indexeddb.ts#L241)
 
 Validates input rows and atomically replaces the object store.
 Failure preserves the previous rows and versions.

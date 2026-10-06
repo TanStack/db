@@ -7,7 +7,7 @@ title: getAllKeys
 function getAllKeys(objectStore): Promise<IDBValidKey[]>;
 ```
 
-Defined in: [.codex/worktrees/pr-1179-review/tanstack-db/packages/indexeddb-db-collection/src/wrapper.ts:345](https://github.com/TanStack/db/blob/main/packages/indexeddb-db-collection/src/wrapper.ts#L345)
+Defined in: [packages/indexeddb-db-collection/src/wrapper.ts:364](https://github.com/TanStack/db/blob/main/packages/indexeddb-db-collection/src/wrapper.ts#L364)
 
 Retrieves all keys from an object store.
 

@@ -118,3 +118,11 @@ consumption.
 - Provider evidence: WebKit Blob preservation and the wider native naming matrix.
 - Existing open boundaries, including HC005 and the previously recorded lifecycle/
   suspension/crash limits, remain in the coverage map. This port does not retire them.
+
+
+## Approved follow-up
+
+The later [follow-up audit](2026-10-06-indexeddb-donor-followup.md) records the
+approved closure/capture/worker contracts, optional blocked diagnostics, core
+typed-key repair, and completed native naming and persistent-WebKit Blob evidence.
+The earlier findings above retain their original revision and evidence boundary.

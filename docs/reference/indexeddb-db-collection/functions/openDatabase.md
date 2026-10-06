@@ -8,10 +8,11 @@ function openDatabase(
    name,
    version,
    onUpgrade?,
-idbFactory?): Promise<IDBDatabase>;
+   idbFactory?,
+onBlocked?): Promise<IDBDatabase>;
 ```
 
-Defined in: [.codex/worktrees/pr-1179-review/tanstack-db/packages/indexeddb-db-collection/src/wrapper.ts:82](https://github.com/TanStack/db/blob/main/packages/indexeddb-db-collection/src/wrapper.ts#L82)
+Defined in: [packages/indexeddb-db-collection/src/wrapper.ts:88](https://github.com/TanStack/db/blob/main/packages/indexeddb-db-collection/src/wrapper.ts#L88)
 
 Opens an IndexedDB database with the specified name and version.
 A blocked request stays pending until native success or error. The caller
@@ -43,6 +44,12 @@ Optional callback that runs during the onupgradeneeded event.
 `IDBFactory`
 
 Optional IDBFactory for testing/mocking (defaults to window.indexedDB or globalThis.indexedDB)
+
+### onBlocked?
+
+(`event`) => `void`
+
+Optional diagnostic callback for native blocked events. The request stays pending.
 
 ## Returns
 

@@ -10,7 +10,7 @@ function put<T>(
 key?): Promise<IDBValidKey>;
 ```
 
-Defined in: [.codex/worktrees/pr-1179-review/tanstack-db/packages/indexeddb-db-collection/src/wrapper.ts:410](https://github.com/TanStack/db/blob/main/packages/indexeddb-db-collection/src/wrapper.ts#L410)
+Defined in: [packages/indexeddb-db-collection/src/wrapper.ts:429](https://github.com/TanStack/db/blob/main/packages/indexeddb-db-collection/src/wrapper.ts#L429)
 
 Writes an item to an object store using upsert semantics.
 

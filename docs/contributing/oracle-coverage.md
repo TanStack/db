@@ -1152,9 +1152,10 @@ Executed coverage and remaining package-owned cells:
   test-owned readwrite transaction and unmanaged deletion blocking, in all three
   engines. The retirement and deletion-queue owners now receive admitted writes,
   immediate error notification, obsolete reads, late startup, caller/publication
-  obligations, and both native blocker-release orders. Raw close bypass and
-  abnormal native connection termination are separate ownership boundaries;
-  automatic restart is not promised.
+  obligations, and both native blocker-release orders. The retirement owner additionally receives abnormal native closure with ready,
+  idle, loading and five admitted persistence operations. Chromium receives actual
+  native close/abort through storage clearing; other engines lack that control.
+  Raw close bypass and automatic restart remain outside the managed contract.
 - **Persistence, PC02:** all six manual acceptance orders for three distinct
   Collection identities, two stores, disjoint same-store keys, reused sibling
   keys, mixed deletes/inserts and unaffected versions. The compatibility owner
@@ -1197,19 +1198,19 @@ Executed coverage and remaining package-owned cells:
 
 Native evidence is per engine. Simulated reverse/duplicate messages do not prove
 browser delivery ordering. The package has no leader election, timeout or
-in-memory fallback. Same-key writers without explicit persistence order, nested
-input identity and timing guarantees remain unresolved; separate Collection
+in-memory fallback. Same-key writers without explicit persistence order, untested mutable-value
+shapes and timing guarantees remain unresolved; separate Collection
 acceptance calls do not promise cross-Collection atomicity.
 
-**Known pre-existing core counterexample (HC005):** numeric 0 and string "0" in
-one Collection transaction can collapse before the adapter receives its mutation
-payload. Owner:
-[optimistic transaction payload oracle](https://github.com/TanStack/db/blob/main/packages/db/tests/optimistic-transaction-oracle.property.test.ts),
-whose relevant history grammar uses numeric keys. Needed witness: same-string-
-representation typed keys in one transaction, exact handler payload multiplicity
-and keys, then public and adapter-durable rows. IndexedDB import/restore and
-separate-operation typed-key evidence does not close this boundary. No adapter
-workaround is included; universal closure is not claimed.
+**Typed-key payload identity (HC005):** the
+[optimistic transaction payload oracle](https://github.com/TanStack/db/blob/main/packages/db/tests/optimistic-transaction-oracle.property.test.ts)
+now crosses four numeric/string pairs, both author orders, insert/update/delete/
+repeat-update, and success/rejection. Exact handler payload multiplicity, order,
+types and final public keyed rows reject the original collision. The native
+host owner receives numeric 0 and string "0" in one insert, then peer update,
+import, clear and restore. Core global mutation identity now encodes Collection
+id, key type and key value as a tuple. This does not establish interoperability
+between distinct Collections that intentionally reuse the same id and key.
 
 ## Compound joins
 
@@ -1405,23 +1406,53 @@ records calibration, validation and the remaining limits.
 - DP10: the compatibility owner substitutes six legal database/store names into
   the same authored multi-store history. Prefix neighbors, typed keys in separate
   transactions, version values, peers and restore distinguish routing mistakes.
-  Native first-open cases receive prototype and Unicode store names. A broader
-  native renaming/import/clear matrix remains unclaimed.
+  `e2e/host-oracle.spec.ts` receives all six names through single-transaction
+  typed-key insertion, peer update, import, clear, export and fresh restore.
+  Prefix-neighbor and anchor snapshots must remain unchanged.
 - DP17: `packed-consumer.test.ts` supplements declaration tests with installed
   tarball ESM/CJS consumers and broken-export controls. The browser spec builds
   the same consumer without source aliases and executes it in all three engines.
   Tarball overrides pin the installed dependency closure; registry range selection,
   older Node/tool versions and every public export remain outside this smoke test.
 
-The local Playwright WebKit provider rejects Blob preparation with `UnknownError`
-even through raw IndexedDB. Its Blob-containing cells compare exact rejection,
-unchanged rows and a successful Date suffix. They do not establish WebKit Blob
-preservation. The native value owner still needs a provider that accepts Blob
-storage to receive those two preservation histories. Chromium and Firefox receive
-all seven; fake-IDB receives all seven with the controlled message fixture.
+The ordinary local Playwright WebKit profile rejects Blob preparation with
+`UnknownError`; its two Blob-containing cells require exact rejection and a
+healthy suffix. The additional disposable persistent WebKit profile requires
+native acceptance and executes the full preservation/capture/rejection/restore
+histories. Chromium and Firefox receive the same full corpus. The provider
+rejection branch cannot certify success in the persistent profile.
 
-Native abnormal closure (DP02), mutable-value capture/ownership (DP12), and worker
-host support (DP13) retain explicit contract-decision boundaries. The existing
-core typed-key payload collision (HC005) remains with its core owner; this port
-reproduced it and uses separate typed-key transactions to isolate name routing.
-No ordering, ownership, fallback or durability policy changes in this extension.
+### IndexedDB approved donor follow-up laws
+
+The [follow-up audit](oracle-reviews/2026-10-06-indexeddb-donor-followup.md)
+records the approved contracts and assertion-killed wrong implementations.
+
+- **DP02, abnormal closure:** the retirement owner adds idle/ready/loading and
+  five admitted persistence phases. It compares actual native outcome, caller
+  settlement, retained public rows, error status, rejected later admission and
+  fresh restore. Its forced-close fixture compensates for fake-IDB's missing
+  forced transaction abort by aborting those native transactions explicitly.
+  Native Chromium storage clearing supplies seven actual close witnesses,
+  including six with admitted work. This proves neither other-engine forced
+  termination nor physical-crash durability.
+- **DP03, blocked diagnostics:** wrapper open/delete and managed opening expose
+  the optional native event without settling the caller. Native old/new version,
+  independent blocked reach, callback count and eventual terminal settlement
+  are checked. No timeout, cancellation or fallback is added.
+- **DP12, value capture:** `persistence-values-oracle.test.ts` crosses six mutable
+  kinds with update/import behind handler/storage gates. Authored descriptions
+  compare writer, peer, export and durable rows after caller mutation. Native
+  receiving includes the immediate update snapshot and held settlement cut.
+  The core detachment owner checks buffer bytes, view range, aliases in both
+  traversal orders, foreign realms and custom-constructor compatibility. Native
+  iframe witnesses receive standard foreign ArrayBuffer/Uint8Array/DataView
+  aliases in each engine. Shared-memory concurrency, detached/resizable buffers
+  and arbitrary class private state are outside these copy laws.
+- **DP13, dedicated workers:** the native host owner uses real worker and page
+  contexts for typed-key insert, peer update, import, managed close, retained
+  error snapshot, late-write rejection and worker recreation/restore. Service
+  workers, SharedWorkers and background delivery are unclaimed.
+
+Atomic cross-Collection read-modify-write remains a separate API proposal.
+Native durability remains the current receipt. These are accepted design limits,
+not deferred implementations of the approved follow-up.

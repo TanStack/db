@@ -11,7 +11,7 @@ function executeTransaction<T>(
 callback): Promise<T>;
 ```
 
-Defined in: [.codex/worktrees/pr-1179-review/tanstack-db/packages/indexeddb-db-collection/src/wrapper.ts:233](https://github.com/TanStack/db/blob/main/packages/indexeddb-db-collection/src/wrapper.ts#L233)
+Defined in: [packages/indexeddb-db-collection/src/wrapper.ts:248](https://github.com/TanStack/db/blob/main/packages/indexeddb-db-collection/src/wrapper.ts#L248)
 
 Executes a callback within an IndexedDB transaction.
 

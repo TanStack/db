@@ -7,7 +7,7 @@ title: deleteByKey
 function deleteByKey(objectStore, key): Promise<void>;
 ```
 
-Defined in: [.codex/worktrees/pr-1179-review/tanstack-db/packages/indexeddb-db-collection/src/wrapper.ts:437](https://github.com/TanStack/db/blob/main/packages/indexeddb-db-collection/src/wrapper.ts#L437)
+Defined in: [packages/indexeddb-db-collection/src/wrapper.ts:456](https://github.com/TanStack/db/blob/main/packages/indexeddb-db-collection/src/wrapper.ts#L456)
 
 Deletes an item by its key from an object store.
 

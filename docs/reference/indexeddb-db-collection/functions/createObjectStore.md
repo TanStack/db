@@ -10,7 +10,7 @@ function createObjectStore(
    options?): IDBObjectStore;
 ```
 
-Defined in: [.codex/worktrees/pr-1179-review/tanstack-db/packages/indexeddb-db-collection/src/wrapper.ts:167](https://github.com/TanStack/db/blob/main/packages/indexeddb-db-collection/src/wrapper.ts#L167)
+Defined in: [packages/indexeddb-db-collection/src/wrapper.ts:179](https://github.com/TanStack/db/blob/main/packages/indexeddb-db-collection/src/wrapper.ts#L179)
 
 Creates an object store during a database upgrade.
 

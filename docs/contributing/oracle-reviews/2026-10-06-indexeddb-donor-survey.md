@@ -328,3 +328,11 @@ resolver controls. DP09's native WebKit Blob-preservation cells remain unproved:
 the local raw provider rejects Blob preparation, so those cells now establish
 truthful rejection and a healthy suffix. No new recovery or ownership policy was
 adopted. DP02, DP12 and DP13 still require the stated product decisions.
+
+
+## Approved follow-up
+
+The later [follow-up audit](2026-10-06-indexeddb-donor-followup.md) records the
+approved closure/capture/worker contracts, optional blocked diagnostics, core
+typed-key repair, and completed native naming and persistent-WebKit Blob evidence.
+The earlier findings above retain their original revision and evidence boundary.

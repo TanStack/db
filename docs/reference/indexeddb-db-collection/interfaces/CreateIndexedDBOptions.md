@@ -3,7 +3,7 @@ id: CreateIndexedDBOptions
 title: CreateIndexedDBOptions
 ---
 
-Defined in: [.codex/worktrees/pr-1179-review/tanstack-db/packages/indexeddb-db-collection/src/indexeddb.ts:92](https://github.com/TanStack/db/blob/main/packages/indexeddb-db-collection/src/indexeddb.ts#L92)
+Defined in: [packages/indexeddb-db-collection/src/indexeddb.ts:89](https://github.com/TanStack/db/blob/main/packages/indexeddb-db-collection/src/indexeddb.ts#L89)
 
 ## Properties
 
@@ -13,7 +13,7 @@ Defined in: [.codex/worktrees/pr-1179-review/tanstack-db/packages/indexeddb-db-c
 optional idbFactory: IDBFactory;
 ```
 
-Defined in: [.codex/worktrees/pr-1179-review/tanstack-db/packages/indexeddb-db-collection/src/indexeddb.ts:100](https://github.com/TanStack/db/blob/main/packages/indexeddb-db-collection/src/indexeddb.ts#L100)
+Defined in: [packages/indexeddb-db-collection/src/indexeddb.ts:97](https://github.com/TanStack/db/blob/main/packages/indexeddb-db-collection/src/indexeddb.ts#L97)
 
 Custom IDBFactory for testing/mocking
 
@@ -25,9 +25,31 @@ Custom IDBFactory for testing/mocking
 name: string;
 ```
 
-Defined in: [.codex/worktrees/pr-1179-review/tanstack-db/packages/indexeddb-db-collection/src/indexeddb.ts:94](https://github.com/TanStack/db/blob/main/packages/indexeddb-db-collection/src/indexeddb.ts#L94)
+Defined in: [packages/indexeddb-db-collection/src/indexeddb.ts:91](https://github.com/TanStack/db/blob/main/packages/indexeddb-db-collection/src/indexeddb.ts#L91)
 
 Database name
+
+***
+
+### onBlocked()?
+
+```ts
+optional onBlocked: (event) => void;
+```
+
+Defined in: [packages/indexeddb-db-collection/src/indexeddb.ts:99](https://github.com/TanStack/db/blob/main/packages/indexeddb-db-collection/src/indexeddb.ts#L99)
+
+Reports a native blocker without settling the open request.
+
+#### Parameters
+
+##### event
+
+`IDBVersionChangeEvent`
+
+#### Returns
+
+`void`
 
 ***
 
@@ -37,7 +59,7 @@ Database name
 stores: readonly string[];
 ```
 
-Defined in: [.codex/worktrees/pr-1179-review/tanstack-db/packages/indexeddb-db-collection/src/indexeddb.ts:98](https://github.com/TanStack/db/blob/main/packages/indexeddb-db-collection/src/indexeddb.ts#L98)
+Defined in: [packages/indexeddb-db-collection/src/indexeddb.ts:95](https://github.com/TanStack/db/blob/main/packages/indexeddb-db-collection/src/indexeddb.ts#L95)
 
 Object store names to create
 
@@ -49,6 +71,6 @@ Object store names to create
 version: number;
 ```
 
-Defined in: [.codex/worktrees/pr-1179-review/tanstack-db/packages/indexeddb-db-collection/src/indexeddb.ts:96](https://github.com/TanStack/db/blob/main/packages/indexeddb-db-collection/src/indexeddb.ts#L96)
+Defined in: [packages/indexeddb-db-collection/src/indexeddb.ts:93](https://github.com/TanStack/db/blob/main/packages/indexeddb-db-collection/src/indexeddb.ts#L93)
 
 Schema version (increment when adding stores)

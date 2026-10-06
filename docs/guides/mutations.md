@@ -417,7 +417,7 @@ reference so their methods, prototypes, and private fields remain intact.
 Later changes to such an instance can therefore affect stored data without a
 new update or notification. Treat those instances as immutable, or convert them
 to plain data before assignment when you need isolation. Supported native values
-such as `URL`, `Date`, `RegExp`, and typed arrays are copied instead.
+such as `URL`, `Date`, `RegExp`, ArrayBuffer, DataView, and typed arrays are copied instead. Standard binary views retain their byte range and backing bytes.
 
 ### Delete
 
