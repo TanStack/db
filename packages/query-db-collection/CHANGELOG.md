@@ -1,5 +1,22 @@
 # @tanstack/query-db-collection
 
+## 1.4.0
+
+### Minor Changes
+
+- Validate a Query Collection direct write against every earlier sync commit, and order it before later refetch results. ([#2044](https://github.com/TanStack/db/pull/2044))
+
+  Breaking: validation errors from `writeInsert`, `writeUpdate`, `writeDelete`, `writeUpsert` and `writeBatch` now reject the returned promise. Before, they were thrown synchronously. Await the promise and catch the error.
+
+  In a persisted collection, a direct write can now wait for an earlier sync commit's durable write before it applies. Before, a refetch could wait behind the persistence lock, and a direct write in that window validated against older rows: `writeUpdate` and `writeDelete` of a key that only the refetch held failed, and `writeInsert` of that key replaced it. A refetch that returns while the write waits is handled after the write. It keeps the write's rows if it started before the write was called, and it replaces them if it started after.
+
+  In a persisted collection, `writeInsert` of a key that is already in the synced store now rejects with `DuplicateKeySyncError`, as it does without persistence. Before, it silently replaced the row.
+
+### Patch Changes
+
+- Updated dependencies [[`d029833`](https://github.com/TanStack/db/commit/d0298332ec98ef99e8bf6e08cc32c8e1cd345fab), [`aa1b58e`](https://github.com/TanStack/db/commit/aa1b58e960421479c0fe1ffc243d49feada3c1c7), [`c3a4e4a`](https://github.com/TanStack/db/commit/c3a4e4a008ead8a2a910c9d965a1f3a77a0f2606), [`2376eb5`](https://github.com/TanStack/db/commit/2376eb581d66d1d52d2ab8fd1619060c74be5311), [`a37e69a`](https://github.com/TanStack/db/commit/a37e69ab6aa35fd6a2a72d727de2b5168d10b1a0), [`d029833`](https://github.com/TanStack/db/commit/d0298332ec98ef99e8bf6e08cc32c8e1cd345fab), [`d029833`](https://github.com/TanStack/db/commit/d0298332ec98ef99e8bf6e08cc32c8e1cd345fab), [`de8d0f1`](https://github.com/TanStack/db/commit/de8d0f1bffefb2885c4fe244c317c81d1ddc9117)]:
+  - @tanstack/db@0.12.1
+
 ## 1.3.5
 
 ### Patch Changes

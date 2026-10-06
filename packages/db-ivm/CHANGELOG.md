@@ -1,5 +1,11 @@
 # @tanstack/db-ivm
 
+## 0.1.26
+
+### Patch Changes
+
+- Fix CommonJS declaration imports so Node16 and NodeNext TypeScript consumers can resolve the public APIs. Preserve ESM module references and string-literal types. ([#1179](https://github.com/TanStack/db/pull/1179))
+
 ## 0.1.25
 
 ### Patch Changes
