@@ -1370,3 +1370,26 @@ crash, lost notifications, post-durability application listener failures and
 uncontrolled browser discard. Those existing owners/boundaries are unchanged.
 This bounded translation does not claim every formal graph path is executed by
 the TypeScript suite or that finite tests prove unconditional progress.
+
+### IndexedDB wrapper observer composition
+
+`packages/indexeddb-db-collection/tests/wrapper-settlement-oracle.test.ts` owns
+callback/native settlement independently of native event-observer registration.
+Its 20-case matrix crosses native complete/abort, none/additive/property/replaced/
+cleared observers and immediate/held callbacks. It checks caller outcome at native
+terminal and callback-release cuts, durable rows and exact application observer
+events. Twelve cases failed against property-owned settlement; eight controls
+passed. Two adjacent native request-error cases distinguish prevented errors that
+permit commit from uncanceled errors that abort. The original wrapper owner keeps
+callback failure identity and late rejection after native commit. Provider scope
+is fake-IDB; no physical-crash or arbitrary event-suppression guarantee is added.
+
+The [sighted donor survey](oracle-reviews/2026-10-06-indexeddb-donor-survey.md)
+records remaining receiving work without claiming a product failure: DP08 belongs
+to compatibility (simultaneous first opens with identical declarations), DP09 to
+persistence (clone-preserving rich values through unrelated updates and restore),
+DP10 to compatibility (metamorphic legal store/database names), and DP17 to the
+package-consumer lane (packed runtime and browser-bundler consumption). Each needs
+the distinguishing witness named in the survey; none is supplied by the new
+observer-composition matrix. Native abnormal termination, mutable-value ownership,
+and worker host support retain the survey's explicit contract-decision boundaries.

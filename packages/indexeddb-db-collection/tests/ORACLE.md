@@ -14,6 +14,7 @@ Their laws inform this suite; their host guarantees do not transfer to fake-IDB.
 | transport-oracle.test.ts            | Authored durable operation order; union of disjoint writes; exclusion of self/foreign messages                     | Delayed CRUD and replacement, inactive utility writers, administrative deletion, and initial-load cleanup/restart. Compare raw durable rows, every affected Collection and fresh restore after controlled delivery.                              |
 | compatibility-oracle.test.ts        | Authored rows per store; independent DbClient sync runs; untouched-store version ownership                         | Crypto capability, reusable descriptors and injected factories without ambient IndexedDB globals. Compare public, peer and durable rows after writes, cleanup, replacement and restore.                                                          |
 | wrapper.test.ts                     | Callback success AND native transaction completion are separate obligations                                        | Request success followed by abort; callback settlement after transaction completion; exact error identity, multi-store rollback, request values, upgrades and deletion.                                                                          |
+| wrapper-settlement-oracle.test.ts | Independent callback/native outcome conjunction, unaffected by observer registration | Complete/abort × five observer registrations × immediate/held callback; native terminal and callback-release checkpoints, authored durable rows and exact user observer events. Canceled/uncanceled request-error neighbors distinguish progress from outcome. |
 | api.test.ts and indexeddb.test-d.ts | Configuration, schema and type contracts                                                                           | Synchronous validation, reserved metadata store, transformed import inputs, duplicate rejection, utilities and precise API types.                                                                                                                |
 
 harness.ts owns setup, raw IDB requests, controlled transport and cleanup. It
@@ -132,11 +133,10 @@ is nonterminal. The wrapper grammar crosses blocked/unblocked requests and
 checks that a successful open transfers connection ownership to its caller.
 Closing that returned connection must permit later native upgrade and deletion.
 Native failed opens preserve durable rows and schema and permit successful next
-use. The transport owner observes a real blocked utility deletion: caller
-pending, every public snapshot retained, durable rows retained, and no deletion
-notification. After native success, caller fulfillment and delivered deletion
-empty every affected public snapshot and a fresh database. A factory failure
-before deletion is issued preserves rows and sends no success notification.
+use. The deletion-queue owner observes administrative deletion independently of
+caller receipt delivery. Old Collections retain their errored snapshots; fresh
+storage is empty after native success. A delayed receipt has no row-publication
+authority, including after another database with the same name is created.
 
 These laws transfer the offline IndexedDB settlement distinction and OPFS
 resource-ownership checks to the IDB request boundary. They do not transfer the

@@ -288,9 +288,11 @@ export function executeTransaction<T>(
     // Success requires both obligations: callback result AND transaction
     // completion. Request success alone is not a durability receipt.
     const completed = new Promise<void>((complete, abort) => {
-      transaction.oncomplete = () => complete()
-      transaction.onabort = () =>
-        abort(transaction.error ?? new Error('Transaction was aborted'))
+      // The callback may also set native event-handler properties.
+      transaction.addEventListener('complete', () => complete())
+      transaction.addEventListener('abort', () =>
+        abort(transaction.error ?? new Error('Transaction was aborted')),
+      )
       // Request errors normally bubble before abort. Let abort report the
       // transaction outcome; callback rejection retains its original cause.
     })

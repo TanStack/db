@@ -7,3 +7,5 @@ Add IndexedDB-backed Collections with persistent local storage, cross-tab synchr
 Managed connection closure marks affected Collections as errored while admitted
 writes finish truthfully. Administrative database deletion no longer publishes
 empty Collection snapshots; use the exported `deleteDatabase(name)` function.
+
+Keep low-level transaction settlement independent of application native event handlers.
