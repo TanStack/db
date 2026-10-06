@@ -139,3 +139,13 @@ assertion failures establish detection. The control proves current sensor reach,
 not a universal measure of every future quoting algorithm. Unrelated future
 transformations of identical fixture strings could conservatively fail this
 primitive-work check and would need investigation.
+
+
+## Medium-review clarification
+
+The [mixed-demand follow-up](issue-2034-recovery-review.md) corrects the earlier
+HE-001 refutation wording. Terminal Collection failure and a stopped recovery
+suffix are observed M7 behavior; only the claimed repeated-gap consequence was
+refuted. The former two-order scratch evidence is now retained and expanded in
+the primary oracle, with abort/release/string neighbors, exact original errors,
+post-terminal fencing and hostile controls. No production policy changed.

@@ -1083,7 +1083,15 @@ publication-before-durability laws remain with their current owners.
   ownerless leader that becomes a follower while hydration waits or after local
   success followed by sequence-gap recovery. The latter uses the existing
   terminal error path before retry admission. String controls dispatch once;
-  existing transient retry, receipt and FIFO histories still run.
+  existing transient retry, receipt and FIFO histories still run. The
+  [mixed-demand refinement](oracle-reviews/issue-2034-recovery-review.md) covers
+  both demand orders, retained/aborted/released candidates, both native kinds
+  and string controls. It observes valid-prefix dispatch, exact reentrant and
+  later error identity, post-terminal replay/retry fencing, and exact release
+  objects. Successful controls observe complete demand coverage after held
+  transport settles. First-demand-only and replacement-error mutants distinguish
+  these laws from the older singleton checks; successful pullSince recovery and
+  real-host elections remain separate receiving paths.
 
 The [initial RED receipt](oracle-reviews/issue-2034-temporal-persistence.md)
 remains historical. The v2 receipt records failures against original production,

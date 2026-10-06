@@ -16261,6 +16261,201 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
     },
   )
 
+  // M7 selects Collection-wide fail-stop for failed fallback gap recovery.
+  // Admission is ordered: a valid prefix may already be in flight, but a
+  // retained invalid demand terminates the run and fences every later demand.
+  // Abort cancels admission without retiring its lease; release retires it.
+  // This bounded model names two demands independently of runtime queues.
+  // It judges dispatch coverage, not retry-attempt multiplicity. Successful
+  // pullSince replay and real-host election timing have separate owners.
+  it.each(
+    ([`Instant`, `PlainDate`, `string`] as const).flatMap((kind) =>
+      ([`candidate-first`, `candidate-last`] as const).flatMap((order) =>
+        ([`retained`, `aborted`, `released`] as const).map((lifetime) => ({
+          kind,
+          order,
+          lifetime,
+        })),
+      ),
+    ),
+  )(
+    `preserves the recovery failure boundary for mixed demands / $kind / $order / $lifetime`,
+    async ({ kind, order, lifetime }) => {
+      const terminal = kind !== `string` && lifetime === `retained`
+      const expectedDispatches =
+        terminal && order === `candidate-first`
+          ? []
+          : lifetime !== `retained` || terminal
+            ? [`sibling`]
+            : [`candidate`, `sibling`]
+      const id = `mixed-recovery-${kind}-${order}-${lifetime}`
+      const adapter = createRecordingAdapter()
+      const coordinator = createFailStopCoordinatorHarness(id)
+      let leader = true
+      coordinator.isLeader = () => leader
+      const controller = new AbortController()
+      const value =
+        kind === `Instant`
+          ? Temporal.Instant.from(`2026-01-02T00:00:00Z`)
+          : kind === `PlainDate`
+            ? Temporal.PlainDate.from(`2026-01-02`)
+            : `2026-01-02`
+      const candidate: LoadSubsetOptions = {
+        signal: controller.signal,
+        where: new IR.Func(`eq`, [
+          new IR.PropRef([`stamp`]),
+          new IR.Value(value),
+        ]),
+      }
+      const sibling: LoadSubsetOptions = { limit: 1 }
+      const demands =
+        order === `candidate-first`
+          ? [candidate, sibling]
+          : [sibling, candidate]
+      const remoteSettlement = createEventGate()
+      // Observe attempted dispatch before the transport settles. A late
+      // rejection after fail-stop must not resurrect the valid prefix's retry.
+      const attempts: Array<LoadSubsetOptions> = []
+      coordinator.requestEnsureRemoteSubset = (_id, options) => {
+        attempts.push(options)
+        toTransportedLoadSubsetOptions(options)
+        return remoteSettlement.promise
+      }
+      const errorReported = createEventGate()
+      const reported: Array<unknown> = []
+      let reentrantFailure: Promise<unknown> | undefined
+      const warning = vi.spyOn(console, `warn`).mockImplementation(() => {})
+      const collection = createCollection(
+        persistedCollectionOptions<Todo, string>({
+          id,
+          syncMode: `on-demand`,
+          getKey: (row) => row.id,
+          sync: {
+            sync: ({ markReady }) => {
+              markReady()
+              return {}
+            },
+          },
+          persistence: { adapter, coordinator },
+        }),
+      )
+      const markError = collection._lifecycle.markError.bind(
+        collection._lifecycle,
+      )
+      const report = vi
+        .spyOn(collection._lifecycle, `markError`)
+        .mockImplementation((error) => {
+          reported.push(error)
+          // Invoke while the error is being reported, before core marks the
+          // Collection failed. The runtime must already reject this sibling.
+          reentrantFailure = Promise.resolve(
+            collection._sync.loadSubset(sibling),
+          ).catch((reason: unknown) => reason)
+          markError(error)
+          errorReported.resolve()
+        })
+      let hasPrimaryFailure = false
+      try {
+        await collection.stateWhenReady()
+        for (const demand of demands) await collection._sync.loadSubset(demand)
+        expect(attempts).toEqual([])
+        if (lifetime === `aborted`) controller.abort()
+        if (lifetime === `released`) collection._sync.unloadSubset(candidate)
+        leader = false
+        const emitGap = (seq: number) =>
+          coordinator.emit({
+            type: `tx:committed`,
+            term: 1,
+            seq,
+            txId: `gap-${seq}`,
+            latestRowVersion: seq,
+            changedRows: [],
+            deletedKeys: [],
+            requiresFullReload: true,
+          })
+        emitGap(2)
+        // Recording-adapter I/O is immediate. Drain the turn while transport
+        // remains held; this is not a real-host timing or latency assertion.
+        await flushAsyncWork()
+        expect(collection.status).toBe(terminal ? `error` : `ready`)
+        if (terminal) {
+          await atPersistedOracleCheckpoint(
+            errorReported.promise,
+            `mixed recovery error reported`,
+          )
+        } else {
+          // Successful remote work may drain serially. Demand coverage is
+          // required after the prefix settles, not while it remains held.
+          remoteSettlement.resolve()
+          await flushAsyncWork()
+        }
+        const names = attempts.map((options) => {
+          expect(demands).toContain(options)
+          return options === candidate ? `candidate` : `sibling`
+        })
+        expect([...new Set(names)].sort()).toEqual(
+          expectedDispatches.slice().sort(),
+        )
+        const failure = collection._lifecycle.getSyncError()
+        if (terminal) {
+          expect(failure).toMatchObject({ name: `RemoteSubsetWireValueError` })
+          expect(reported).toHaveLength(1)
+          expect(reported[0]).toBe(failure)
+          await expect(reentrantFailure).resolves.toBe(failure)
+          const loads = adapter.loadSubsetCalls.length
+          const dispatched = attempts.length
+          vi.useFakeTimers()
+          if (dispatched > 0) {
+            remoteSettlement.reject(new Error(`late transport failure`))
+          } else {
+            remoteSettlement.resolve()
+          }
+          await vi.advanceTimersByTimeAsync(0)
+          emitGap(3)
+          emitGap(4)
+          await vi.advanceTimersByTimeAsync(1_000)
+          await expect(
+            Promise.resolve(collection._sync.loadSubset(sibling)),
+          ).rejects.toBe(failure)
+          expect(adapter.loadSubsetCalls).toHaveLength(loads)
+          expect(attempts).toHaveLength(dispatched)
+          expect(reported).toHaveLength(1)
+          vi.useRealTimers()
+        } else {
+          expect(failure).toBeUndefined()
+          expect(reported).toEqual([])
+        }
+        // Every retained lease remains releasable, including after abort or
+        // Collection failure. Compare object identity, not structural equality.
+        for (const demand of demands) {
+          if (lifetime !== `released` || demand !== candidate) {
+            collection._sync.unloadSubset(demand)
+          }
+        }
+        const releases =
+          lifetime === `released` ? [candidate, sibling] : demands
+        expect(coordinator.remoteReleaseCalls).toHaveLength(releases.length)
+        releases.forEach((options, index) => {
+          expect(coordinator.remoteReleaseCalls[index]).toBe(options)
+        })
+      } catch (error) {
+        hasPrimaryFailure = true
+        throw error
+      } finally {
+        vi.useRealTimers()
+        remoteSettlement.resolve()
+        await cleanupPersistedOracle(
+          [
+            () => report.mockRestore(),
+            () => collection.cleanup(),
+            () => warning.mockRestore(),
+          ],
+          hasPrimaryFailure,
+        )
+      }
+    },
+  )
+
   it(`retries queued remote subset ensure after transient failures`, async () => {
     const adapter = createRecordingAdapter()
     let ensureCalls = 0

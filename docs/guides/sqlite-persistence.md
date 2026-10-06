@@ -150,9 +150,12 @@ in-memory cleanup pipeline without reducing nanosecond precision.
 This support applies to the shared SQLite adapter and local persisted wrapper.
 The remote-subset coordinator wire domain does not include Temporal literals;
 those requests reject before remote retry admission. If retained local demand
-becomes remote after an ownership change, recovery reports a collection error
-before it can retry that invalid request. Multiprocess transport of
-native Temporal rows is not covered by this support claim.
+becomes remote after an ownership change, fallback sequence-gap recovery fails
+the current Collection sync run before retrying that invalid request. This is a
+terminal Collection error: later active subsets are not recovered, subsequent
+loads reject with the same error, and later coordinator messages do not resume
+the failed run. Existing acquisitions can still be released. Multiprocess
+transport of native Temporal rows is not covered by this support claim.
 
 Values already stored as `{}` cannot be recovered. If an older version damaged
 a synced cache, replace it through the existing `schemaVersion` and schema-reset
