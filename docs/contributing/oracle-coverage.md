@@ -1666,3 +1666,36 @@ records the approved contracts and assertion-killed wrong implementations.
 Atomic cross-Collection read-modify-write remains a separate API proposal.
 Native durability remains the current receipt. These are accepted design limits,
 not deferred implementations of the approved follow-up.
+
+
+## Paced persistence serialization
+
+Issue #2058's primary owner is
+`packages/db/tests/paced-mutations-oracle.test.ts`. Its held-write model
+crosses debounce/throttle, explicit leading/non-leading and omitted leading
+with trailing enabled, and successful release one tick before, at, one tick
+after, or ten ticks after the successor's timer edge. It observes handler
+concurrency, start times, transaction states, receipt settlement and identity,
+and optimistic rows at admission, timer edges, release, and drain. The original
+implementation fails 18 of 24 histories at the held edge; the six
+release-before-edge controls pass. The model's immediate handoff after both
+prerequisites hold is the chosen pacing policy. The original overlap violates
+the independent serialization promise regardless of that policy.
+
+Adjacent histories check renewed debounce quiet, throttle spacing from actual
+starts, leading-only admission isolation, same/distinct-key success or failure,
+pending cancellation, manual rollback of a persisting transaction, and
+synchronous nested admission. Manual-rollback witnesses cross all three serial
+strategies, including queue, and observe handler overlap after the public
+receipt has rejected. The wrong implementation fails at that intermediate cut;
+the repaired implementation waits for the handler itself to return.
+
+The owner does not yet cover provider echo, cleanup during a held handler,
+longer arbitrary bursts, held default/omitted-trailing combinations, or
+multiple managers. It owns those future source-level witnesses. Leading-only
+throttle admission-window timing while a write is held remains a separate
+policy question; the existing serialization and minimum actual-start spacing
+do not depend on its resolution. Real server ordering, framework unmount
+scheduling, and published npm behavior require receiving integration witnesses;
+the present evidence is controlled DB source execution. The revision-bound
+review record is `docs/contributing/oracle-reviews/issue-2058-paced-serialization.md`.

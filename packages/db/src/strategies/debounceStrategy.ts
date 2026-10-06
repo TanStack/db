@@ -1,4 +1,4 @@
-import { LiteDebouncer } from '@tanstack/pacer-lite/lite-debouncer'
+import { createSerialPacer } from './serial-pacer'
 import type { DebounceStrategy, DebounceStrategyOptions } from './types'
 import type { Transaction } from '../transactions'
 
@@ -28,32 +28,48 @@ import type { Transaction } from '../transactions'
 export function debounceStrategy(
   options: DebounceStrategyOptions,
 ): DebounceStrategy {
+  const leading = options.leading ?? false
   const trailing = options.trailing ?? true
-  const debouncer = new LiteDebouncer(
-    (callback: () => Transaction) => callback(),
-    {
-      ...options,
-      leading: options.leading ?? false,
-      trailing,
-    },
-  )
+  const serial = createSerialPacer(0)
+  let canLead = true
+  let timeout: ReturnType<typeof setTimeout> | undefined
 
   return {
     _type: `debounce`,
     options,
     execute: <T extends object = Record<string, unknown>>(
       fn: () => Transaction<T>,
+      onAdmit?: () => void,
+      onCommit?: () => Promise<unknown> | undefined,
     ) => {
-      const execution = { happened: false }
-      debouncer.maybeExecute(() => {
-        execution.happened = true
-        return (fn as () => Transaction)()
-      })
-      if (!trailing && !execution.happened) return false
+      const leadingCall = leading && canLead
+      const admitted = leadingCall || trailing
+      // Reserve the edge before optimistic mutation can reenter execute.
+      canLead = false
+      if (admitted) onAdmit?.()
+      if (timeout !== undefined) clearTimeout(timeout)
+      // A new call renews the quiet period, including after an earlier timer
+      // became eligible while persistence was held.
+      if (trailing) serial.cancel()
+      timeout = setTimeout(() => {
+        timeout = undefined
+        canLead = true
+        if (trailing && !leadingCall)
+          serial.schedule(() => {
+            const transaction = fn()
+            return onCommit?.() ?? transaction.isPersisted.promise
+          })
+      }, options.wait)
+      if (leadingCall)
+        serial.schedule(() => {
+          const transaction = fn()
+          return onCommit?.() ?? transaction.isPersisted.promise
+        })
+      if (!admitted) return false
       return
     },
     cleanup: () => {
-      // Keep pending work scheduled until its quiet-period callback runs.
+      // Admitted work retains its timer and persistence obligation.
     },
   }
 }

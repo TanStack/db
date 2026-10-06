@@ -1,3 +1,4 @@
+import { createSerialPacer } from './serial-pacer'
 import type { ThrottleStrategy, ThrottleStrategyOptions } from './types'
 import type { Transaction } from '../transactions'
 
@@ -51,24 +52,47 @@ export function throttleStrategy(
     options.leading === true ||
     (options.leading === undefined && options.trailing !== true)
   const trailing = options.trailing !== false
+  const serial = createSerialPacer(options.wait)
   let nextAllowedAt = Number.NEGATIVE_INFINITY
   let trailingTimeout: ReturnType<typeof setTimeout> | undefined
-  let pendingCallback: (() => Transaction) | undefined
+  let pendingCallback: (() => Promise<unknown>) | undefined
+
+  function discardNestedTrailing(): void {
+    if (trailingTimeout !== undefined) clearTimeout(trailingTimeout)
+    trailingTimeout = undefined
+    pendingCallback = undefined
+  }
 
   return {
     _type: `throttle`,
     options,
     execute: <T extends object = Record<string, unknown>>(
       fn: () => Transaction<T>,
+      onAdmit?: () => void,
+      onCommit?: () => Promise<unknown> | undefined,
     ) => {
+      const run = () => {
+        const transaction = fn()
+        return onCommit?.() ?? transaction.isPersisted.promise
+      }
       const now = Date.now()
       if (leading && trailingTimeout === undefined && now >= nextAllowedAt) {
+        // Reserve the edge before optimistic mutation can reenter execute.
         nextAllowedAt = now + options.wait
-        fn()
+        onAdmit?.()
+        discardNestedTrailing()
+        serial.schedule(run)
         return
       }
       if (!trailing) return false
-      pendingCallback = fn as () => Transaction
+      onAdmit?.()
+      // Once the pending transaction is eligible, later admitted calls merge
+      // into it. Another timer would outlive that transaction after it drains.
+      if (serial.hasPending()) {
+        serial.schedule(run)
+        return
+      }
+      pendingCallback = run
       if (trailingTimeout === undefined) {
         const delay = leading ? Math.max(0, nextAllowedAt - now) : options.wait
         trailingTimeout = setTimeout(() => {
@@ -76,7 +100,7 @@ export function throttleStrategy(
           nextAllowedAt = Date.now() + options.wait
           const callback = pendingCallback
           pendingCallback = undefined
-          callback?.()
+          if (callback) serial.schedule(callback)
         }, delay)
       }
       return
