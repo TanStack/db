@@ -607,3 +607,65 @@ describe(`a later refetch while a persisted direct write waits`, () => {
     }
   }
 })
+
+/**
+ * ## A persisted insert of an existing key
+ *
+ * Without persistence, core rejects a sync insert of a key that it already
+ * holds. Persistence stores every sync insert as an update, so before this
+ * check a persisted `writeInsert` of an existing key replaced the row. This
+ * witness needs no lock window: the key is applied before the write runs.
+ */
+describe(`a persisted direct insert of an existing key`, () => {
+  it(`rejects like the reference and keeps the row`, async () => {
+    const base: Array<Row> = [{ id: `k`, value: 1 }]
+    const reference = createCollection(
+      queryCollectionOptions<Row>({
+        id: `reference-duplicate-insert`,
+        queryKey: [`reference-duplicate-insert`],
+        queryFn: () => Promise.resolve(base.map((row) => ({ ...row }))),
+        queryClient: newQueryClient(),
+        getKey: (row) => row.id,
+        startSync: true,
+      }),
+    )
+    const adapter = createAdapter(base)
+    const persistedCollection = createCollection(
+      persistedCollectionOptions<
+        Row,
+        string | number,
+        never,
+        QueryCollectionUtils<Row>
+      >({
+        ...queryCollectionOptions<Row>({
+          id: `persisted-duplicate-insert`,
+          queryKey: [`persisted-duplicate-insert`],
+          queryFn: () => Promise.resolve(base.map((row) => ({ ...row }))),
+          queryClient: newQueryClient(),
+          getKey: (row) => row.id,
+          startSync: true,
+        }),
+        persistence: { adapter },
+      }),
+    )
+    try {
+      await reference.preload()
+      await persistedCollection.preload()
+      const expected = await outcomeOf(() =>
+        reference.utils.writeInsert({ id: `k`, value: 9 }),
+      )
+      const actual = await outcomeOf(() =>
+        persistedCollection.utils.writeInsert({ id: `k`, value: 9 }),
+      )
+      await flush()
+      expect(actual.outcome).toBe(expected.outcome)
+      expect(sortRows(persistedCollection.values())).toEqual(
+        sortRows(reference.values()),
+      )
+      expect(sortRows(adapter.rows.values())).toEqual([{ id: `k`, value: 1 }])
+    } finally {
+      await reference.cleanup()
+      await persistedCollection.cleanup()
+    }
+  })
+})
