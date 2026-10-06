@@ -544,6 +544,12 @@ export interface PersistedCollectionCoordinator {
     collectionId: string,
     mutations: Array<PersistedMutationEnvelope>,
   ) => Promise<ApplyLocalMutationsResponse>
+  /**
+   * Applies a committed transaction through the supplied adapter when present.
+   * Wrappers must forward this leader-local loan: scheduling it again can wait
+   * on the hydration that is awaiting this call. Never serialize or retain the
+   * loan after the call; ordinary work uses the registered collection adapter.
+   */
   requestApplyCommittedTx: (
     collectionId: string,
     tx: PersistedTx,

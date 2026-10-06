@@ -15,7 +15,8 @@
  * All calls still reach production unchanged.
  *
  * Comparison cuts are held read, actual nested routing, and completed receipts,
- * exact owning-scope exit, peer readiness, durable reads, and reopen. Cleanup
+ * exact owning-scope exit (16 held-read histories), peer readiness, durable
+ * reads, and reopen. Eight after-ready controls have no held owning scope. Cleanup
  * copies the primary observation first and records each secondary failure;
  * page disposal owns remaining JS resources if the production cycle is red.
  * Other browsers, multi-tab election, physical I/O failures, arbitrary fairness
@@ -46,12 +47,17 @@ export type HydrationCommitObservation = {
     rows: Array<Row>
     ordinary: Receipt
     interleavedSql: Array<string>
+    peerHydrationAdmitted: boolean
+    ordinaryAdmitted: boolean
   } | null
   receipts: Array<Receipt>
   sourceStatus: string
   peerStatus: string
   ordinaryReceipt: Receipt
-  owningScopeExited: boolean
+  owningScopeExited: boolean | null
+  tailScheduling: Array<`public-apply` | `regular-scope`>
+  peerWorkBeforeScopeExit: Array<string>
+  ordinaryCommitSqlCalls: number
   rows: Array<Row>
   durableRows: Array<Row> | null
   durableMetadata: Array<{ key: string; value: unknown }> | null
@@ -109,24 +115,56 @@ async function run(): Promise<void> {
     const sourceReady = deferred()
     const peerReady = deferred()
     const scopeExited = deferred()
+    const peerHydrationAdmission = deferred()
+    const ordinaryAdmission = deferred()
+    let observeContenders = false
+    let peerHydrationAdmitted = false
+    let ordinaryAdmitted = false
+    let scopePremiseError: Error | undefined
     let holdRead = false
     let readHeld = false
     const interleavedSql: Array<string> = []
     let rowReads = 0
-    let activeScope: HydrationPersistenceAdapter | undefined
-    let heldScope: HydrationPersistenceAdapter | undefined
-    let owningScopeExited = phase === `after-ready`
-    const liveScopes = new Set<HydrationPersistenceAdapter>()
+    let scopeSequence = 0
+    let heldScope: number | undefined
+    let owningScopeExited: boolean | null =
+      phase === `after-ready` ? null : false
+    const liveScopes = new Map<number, HydrationPersistenceAdapter>()
+    let ordinaryCommitSqlCalls = 0
+    const peerWorkBeforeScopeExit: Array<string> = []
+    const observePeerWork = (operation: string) => {
+      if (heldScope !== undefined && liveScopes.has(heldScope)) {
+        peerWorkBeforeScopeExit.push(operation)
+      }
+    }
     const persistence = createBrowserWASQLitePersistence({
       database: {
         execute: async <T>(sql: string, bindings?: ReadonlyArray<unknown>) => {
           if (readHeld) interleavedSql.push(sql)
+          // Every ordinary apply reads its applied_tx/version state before
+          // writing. Observe C at that real SQL boundary, through scope exit.
+          // Election stream-position reads intentionally bypass this scheduler
+          // and are not regular work (getStreamPosition's existing contract).
+          if (sql.includes(`AS already_applied`) && bindings?.includes(`c`)) {
+            ordinaryCommitSqlCalls++
+            observePeerWork(`ordinary-commit-sql`)
+          }
           const result = await database.execute<T>(sql, bindings)
           if (sql.includes(`SELECT key, value, metadata, row_version FROM`)) {
             rowReads++
             if (holdRead) {
               holdRead = false
-              heldScope = activeScope
+              // Public A scopes are serialized by the real shared scheduler.
+              // Key by callback invocation, since SQLite reuses its loan object.
+              // An invalid premise fails here instead of waiting for a lost exit.
+              if (liveScopes.size !== 1) {
+                scopePremiseError = new Error(
+                  `Held read requires exactly one owning callback; got ${liveScopes.size}`,
+                )
+                readEntered.resolve()
+                throw scopePremiseError
+              }
+              heldScope = liveScopes.keys().next().value
               readHeld = true
               readEntered.resolve()
               await releaseRead.promise
@@ -165,29 +203,86 @@ async function run(): Promise<void> {
     if (baseline) await seed(`a`, { id: `baseline`, value: 0 }, adapter)
     await seed(`b`, { id: `peer-baseline`, value: 22 }, bAdapter)
     const runScope = adapter.runInHydrationScope!.bind(adapter)
-    adapter.runInHydrationScope = (task) =>
-      runScope(async (scoped) => {
-        activeScope = scoped
-        liveScopes.add(scoped)
+    const pendingHydrations = new Set<Promise<unknown>>()
+    adapter.runInHydrationScope = (task) => {
+      const result = runScope(async (scoped) => {
+        const scope = ++scopeSequence
+        liveScopes.set(scope, scoped)
         try {
           return await task(scoped)
         } finally {
-          liveScopes.delete(scoped)
-          activeScope = undefined
-          if (scoped === heldScope) {
+          liveScopes.delete(scope)
+          if (scope === heldScope) {
             owningScopeExited = true
             scopeExited.resolve()
           }
         }
       })
+      pendingHydrations.add(result)
+      void result.then(
+        () => pendingHydrations.delete(result),
+        () => pendingHydrations.delete(result),
+      )
+      return result
+    }
+    // Each method enqueues synchronously before returning its promise. Observe
+    // that return without awaiting completion, which is blocked by A's read.
+    const bHydrate = bAdapter.runInHydrationScope!.bind(bAdapter)
+    bAdapter.runInHydrationScope = (task) => {
+      const result = bHydrate((scoped) => {
+        observePeerWork(`peer-hydrate`)
+        return task(scoped)
+      })
+      if (observeContenders) {
+        peerHydrationAdmitted = true
+        peerHydrationAdmission.resolve()
+      }
+      return result
+    }
+    const admitOrdinary = () => {
+      if (observeContenders) {
+        ordinaryAdmitted = true
+        ordinaryAdmission.resolve()
+      }
+    }
+    // Default coordinator uses public apply; browser leadership uses the
+    // regular-scope API before its writer lock. Observe both real entry paths.
+    const cApply = cAdapter.applyCommittedTx.bind(cAdapter)
+    cAdapter.applyCommittedTx = (...args) => {
+      const result = cApply(...args)
+      admitOrdinary()
+      return result
+    }
+    const cRegular = cAdapter.runInRegularScope!.bind(cAdapter)
+    cAdapter.runInRegularScope = (task) => {
+      const result = cRegular((scoped) => {
+        observePeerWork(`ordinary-scope`)
+        return task(scoped)
+      })
+      admitOrdinary()
+      return result
+    }
     const nested = new Set<string>()
+    const tailTransactions = new Set<string>()
+    let tailStarted = false
+    const tailScheduling: HydrationCommitObservation[`tailScheduling`] = []
+    const aRegular = adapter.runInRegularScope!.bind(adapter)
+    adapter.runInRegularScope = (task) => {
+      const result = aRegular(task)
+      if (tailStarted && tailTransactions.size > 0)
+        tailScheduling.push(`regular-scope`)
+      return result
+    }
     const request = resolved.coordinator!.requestApplyCommittedTx.bind(
       resolved.coordinator!,
     )
     resolved.coordinator!.requestApplyCommittedTx = async (id, tx, scoped) => {
       const nestedHere =
-        id === `a` && scoped !== undefined && liveScopes.has(scoped)
+        id === `a` &&
+        scoped !== undefined &&
+        [...liveScopes.values()].includes(scoped)
       if (nestedHere) nested.add(tx.txId)
+      if (id === `a` && tailStarted) tailTransactions.add(tx.txId)
       try {
         return await request(id, tx, scoped)
       } finally {
@@ -197,6 +292,8 @@ async function run(): Promise<void> {
     const apply = adapter.applyCommittedTx.bind(adapter)
     adapter.applyCommittedTx = (id, tx) => {
       const result = apply(id, tx)
+      if (id === `a` && tailStarted && tailTransactions.has(tx.txId))
+        tailScheduling.push(`public-apply`)
       if (id === `a` && nested.has(tx.txId)) {
         cycleCalls++
         cycle.resolve()
@@ -298,7 +395,9 @@ async function run(): Promise<void> {
       await sourceReady.promise
       scopeExited.resolve()
     }
+    if (scopePremiseError) throw scopePremiseError
     if (phase === `subscription`) sourceHistory()
+    observeContenders = true
     const b = createCollection(
       persistedCollectionOptions<Row, string>({
         id: `b`,
@@ -326,9 +425,12 @@ async function run(): Promise<void> {
         errors.push(String(error))
       },
     )
-    // Drain promise reactions while the provider gate is still held. The hold,
-    // rather than elapsed time, supplies the no-settlement premise.
-    await new Promise((resolve) => setTimeout(resolve, 0))
+    // Both contenders have crossed their real scheduling API before the cut.
+    // No task tick or SQL latency is used as evidence of admission.
+    await Promise.all([
+      peerHydrationAdmission.promise,
+      ordinaryAdmission.promise,
+    ])
     const held =
       phase === `after-ready`
         ? null
@@ -337,6 +439,8 @@ async function run(): Promise<void> {
             rows: publicRows(a),
             ordinary: ordinaryReceipt,
             interleavedSql: [...interleavedSql],
+            peerHydrationAdmitted,
+            ordinaryAdmitted,
           }
     releaseRead.resolve()
     await Promise.race([
@@ -360,11 +464,20 @@ async function run(): Promise<void> {
     let schemas: HydrationCommitObservation[`schemas`] = null
     const reopenedRows: Array<Row> | null = null
     if (cycleCalls === 0) {
-      // A same-run ordinary commit challenges leaked scoped adapters.
+      // Truncate can trigger a follow-up subset hydrate. Join all public A
+      // invocations already requested by the source history before issuing an
+      // ordinary tail; the originally held callback alone is not quiescence.
+      while (pendingHydrations.size > 0) {
+        await Promise.all([...pendingHydrations])
+      }
+      // Record the tail at the coordinator's ordinary scheduling boundary. Rows
+      // alone cannot distinguish a cached, expired loan from ordinary routing.
+      tailStarted = true
       commit(() =>
         source.write({ type: `insert`, value: { id: `tail`, value: 9 } }),
       )
       await receiptPromises.at(-1)
+      tailStarted = false
       const durable = await adapter.loadSubset(`a`, {})
       durableRows = durable
         .map(({ value }) => value as Row)
@@ -401,6 +514,9 @@ async function run(): Promise<void> {
       peerStatus: b.status,
       ordinaryReceipt,
       owningScopeExited,
+      tailScheduling,
+      peerWorkBeforeScopeExit,
+      ordinaryCommitSqlCalls,
       rows: publicRows(a),
       durableRows,
       durableMetadata,

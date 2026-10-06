@@ -2,7 +2,7 @@
  * Real-provider refinement of the law/driver in hydration-commit.opfs.ts.
  * The insert history retains baseline+r1. The rich history replaces all rows,
  * ends with r2=3, cursor=8 and r2 ownership metadata. Both append an ordinary
- * tail only after the owning scope exits. These literal expectations are a
+ * tail after their receipt cut. Held histories additionally require scope exit. These literal expectations are a
  * second formulation of the core edit-log oracle, not derived from its model.
  * Peer B's schema/data and C's ordinary write must survive A's nested work.
  * A cycle is an assertion at a reached causal boundary, never a timeout waiver.
@@ -42,9 +42,25 @@ for (const phase of [`startup`, `subscription`, `after-ready`] as const) {
               rows: [],
               ordinary: `pending`,
               interleavedSql: [],
+              peerHydrationAdmitted: true,
+              ordinaryAdmitted: true,
             })
           expect(observed.cycleCalls, JSON.stringify(result)).toBe(0)
           expect(observed.errors).toEqual([])
+          expect(
+            observed.ordinaryCommitSqlCalls,
+            `the ordinary SQL observer must be reached`,
+          ).toBe(1)
+          expect(
+            observed.tailScheduling,
+            `the tail must reenter ordinary scheduling exactly once`,
+          ).toEqual([
+            coordinator === `browser` ? `regular-scope` : `public-apply`,
+          ])
+          expect(
+            observed.peerWorkBeforeScopeExit,
+            `peer work cannot preempt the whole owning callback`,
+          ).toEqual([])
           expect({
             receipts: observed.receipts,
             source: observed.sourceStatus,
@@ -56,7 +72,7 @@ for (const phase of [`startup`, `subscription`, `after-ready`] as const) {
             source: `ready`,
             peer: `ready`,
             ordinary: `fulfilled`,
-            exited: true,
+            exited: phase === `after-ready` ? null : true,
           })
           const expected = rich
             ? [

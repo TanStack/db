@@ -1,12 +1,19 @@
 # Issue 2046: source commits inside shared hydration scopes
 
+Current status: [PR #2049](https://github.com/TanStack/db/pull/2049) contains the
+committed production repair and strengthened oracles. See the
+[latest receipt](issue-2046-hydration-loss-audit.md#high-effort-review-receipt)
+for current results and content hashes. The historical RED-stage ledger below
+is retained for provenance; its open verdicts and unchanged-production statements
+are not the PR's current status.
+
 The initial entry below records the frozen 24-core/12-browser candidate. The
 [follow-up loss audit](issue-2046-hydration-loss-audit.md) supersedes its oracle
 enforcement claims and results. In particular, the original aggregate receipt
 check and browser cleanup capture were weaker than described here; the follow-up
 preserves those losses and strengthens the executable checks.
 
-## Scope and verdict
+## Historical scope and verdict: initial RED stage
 
 [Issue 2046](https://github.com/TanStack/db/issues/2046) reports one **P1
 persistence deadlock**, expressed through nine claims below. The report is an
@@ -14,10 +21,11 @@ issue, not a pull request. Checked source:
 `65992aacda530fde89f4c8ffa803b60cd708c425` (`origin/main`, fetched 2026-10-06).
 The worktree branch is `codex/issue-2046-red-oracles`.
 
-The current-main defect is confirmed through both the controlled persisted
-history owner and real Chromium OPFS. The requested deliverable is red
-reproductions. Production is unchanged; a temporary repair was calibrated and
-then restored byte-for-byte. No issue comment, PR, push, or release was made.
+The defect on the initial main baseline was confirmed through both the controlled persisted
+history owner and real Chromium OPFS. The requested deliverable at that stage was red
+reproductions. Production was unchanged; a temporary repair was calibrated and
+then restored byte-for-byte. No issue comment, PR, push, or release had been
+made at that stage.
 
 ## Reviewer assessment
 

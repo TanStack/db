@@ -1,21 +1,36 @@
 # Hydration source durability: loss audit and oracle strengthening
 
-## Identity and scope
+## Current status
 
-Date: 2026-10-06. Production baseline is
+[PR #2049](https://github.com/TanStack/db/pull/2049) contains the approved
+call-local adapter repair, committed oracles, and a patch changeset. The
+production base advanced to `a37e69ab6aa35fd6a2a72d727de2b5168d10b1a0` before the
+repair was committed. The [latest review receipt](#high-effort-review-receipt)
+is authoritative for the current executable hashes, 640 passing core checks
+(with one existing todo), and 25 passing Chromium OPFS checks.
+
+This document preserves a chronological audit. Earlier statements about
+uncommitted tests, unchanged production, no PR, old baselines, and smaller
+counts describe those historical stages only. Each SHA-256 binds its named
+stage; it is not an assertion that every historical digest matches HEAD.
+The final executable hashes at reviewed commit `90cbda1e5` all matched the
+receipt below, including the later cleanup correction to the core test hash.
+
+## Historical identity and scope: pre-fix loss audit
+
+At this pre-fix stage on 2026-10-06, the production baseline was
 `65992aacda530fde89f4c8ffa803b60cd708c425` (`origin/main`). Worktree branch:
-`codex/issue-2046-red-oracles`. The tests are uncommitted; the executable SHA-256
+`codex/issue-2046-red-oracles`. The tests were uncommitted; the executable SHA-256
 bindings below identify their reviewed content without pretending that the
-production commit contains these tests. Production and the lockfile remain
-unchanged. The [initial review](issue-2046-hydration-commit-deadlock.md) remains
+production commit contains these tests. Production and the lockfile were unchanged at this stage. The [initial review](issue-2046-hydration-commit-deadlock.md) remains
 an historical record of the smaller 24-core/12-browser candidate.
 
 The user requested Field Lab's **Hidden-signal recovery assay (`loss-audit`)**
 and separately authorized improving the oracle. The candidate was frozen before
 three fresh, read-only scanners received separate sources with sibling findings
 hidden: S1 the oracle guide; S2 persistence contracts; S3 the existing oracle
-portfolio. Recovery and implementation judgment are separated below. No Field
-Log, external message, production fix, commit, push, or PR was created.
+portfolio. Recovery and implementation judgment are separated below. At this stage, no Field
+Log, external message, production fix, commit, push, or PR had been created.
 
 This improves enforcement of the local composition: source transactions buffered
 by persisted hydration must use the current scoped adapter, preserve their
@@ -308,7 +323,7 @@ acceptance/publication, FIFO, failure and scheduler contracts. It does not add
 recovery state, bypass unrelated scheduled work, or replace the default
 coordinator. The earlier RED-stage statements remain historical evidence.
 
-| Current-base execution | Result | Reached evidence |
+| Initial repair execution on the advanced base | Result | Reached evidence |
 |---|---|---|
 | Original core implementation | 48 failed, 566 passed, 1 existing todo | Routing assertions, with no timeout or setup failures |
 | Retained repair, complete persisted oracle | 614 passed, 1 existing todo | All existing and added comparisons |
@@ -325,7 +340,7 @@ timed out, remained unreached, or survived. The counts refer to the 149 focused
 checks. Browser GREEN uses the same local source paths as RED. Cached tooling
 from another checkout supplies dependencies only, never the production build.
 
-Current executable SHA-256 bindings:
+Executable SHA-256 bindings at the initial repair stage (superseded below):
 
 | File | SHA-256 |
 |---|---|
@@ -340,7 +355,7 @@ commands above. Current browser verification uses `--timeout=15000`. Logs and
 raw prep-pr reviews are under `/private/tmp/issue-2046-prep-pr/`; this record
 preserves the verdict-critical results without requiring those temporary files.
 
-### Original issue ledger: current disposition
+### Original issue ledger: disposition after the production repair
 
 This entry updates the original R1–R9 ledger without rewriting its historical
 verdicts. R1, R2, R3, R4 and R9 are **fixed-now** within the declared source
@@ -357,7 +372,7 @@ backlog, elected-owner/host handoff and historical-version witnesses listed in
 remain separate open evidence. These bounded results do not establish universal
 liveness or every persistence composition.
 
-### Prep-pr review and final oracle receipt
+### Initial prep-pr review and cleanup oracle receipt
 
 The simplifier returned no proposals. Five parallel review angles checked
 repository instructions, obvious bugs, history, prior PR decisions and code
@@ -441,3 +456,111 @@ The documentation follow-up for CodeRabbit review `5431163123` distinguishes
 these reproducible entry points from the original session commands and removes
 nontechnical personnel commentary. No executable file, oracle law, assertion,
 or recorded runtime result changed.
+
+
+## High-effort review receipt
+
+This follow-up evaluates all ten items from a source-only review of
+`90cbda1e5`, against the later documentation head `996292b31`. The review found
+no introduced production bug. Its useful findings concern the coordinator
+contract, historical documentation, and oracle integrity. The runtime repair
+remains unchanged; this follow-up adds six lines of interface JSDoc, with no
+new production state, branch, fallback, or coordinator replacement.
+
+The interface now states that wrappers must forward a supplied leader-local
+adapter and must not retain or serialize it. A forwarding wrapper and a
+loan-dropping wrapper reach the actual default coordinator and produce opposite
+routing observations. An explicit-adapter control also shows that this call can
+succeed without a registered fallback; a later ordinary call must reject before
+an apply until that fallback is registered. Collection construction supplies
+that registration. This records the existing optional-adapter design, rather
+than adding a new configuration restriction.
+
+The controlled routing probe now tracks each callback's lifetime independently.
+Three calibration histories cover nested callbacks and overlapping callbacks
+with either exit order. Each distinguishes a live loan, an expired loan,
+reentry through the public adapter, and ordinary work after all callbacks exit.
+These histories describe the controlled adapter. They do not claim that the
+real SQLite scheduler permits overlapping hydrate callbacks.
+
+The eight rejected-buffer histories, request-local failed-read/retry witness,
+and optimistic causal-replay witness each run with no scope API, a same-adapter
+scope, and a distinct loan. Their existing exact failure, durability, public
+row, acceptance, and applied-receipt comparisons are preserved. Adding a scope
+probe no longer substitutes for either original adapter path.
+
+The OPFS receiver now observes both contenders at their actual scheduling
+entry points before taking the held-read snapshot. It continues observing
+peer hydrate and regular callback entry, and C's commit SQL, until A's owning
+callback exits. A positive count requires the C SQL observer to be reached
+exactly once, so a changed query cannot silently disable that comparison.
+Election stream-position reads deliberately bypass logical scheduling and are
+outside this regular-work law; treating all peer SQL as forbidden would impose
+a false contract. The default coordinator's tail must enter public apply;
+the browser coordinator's tail must enter its regular scope. Rich subscription
+histories join the follow-up hydrations triggered by truncate before issuing
+that ordinary tail. Final rows alone cannot establish correct tail routing.
+
+Scope identity is now a callback invocation token, not a reusable adapter
+object or singleton active value. The actual held SELECT requires exactly one
+owning callback and publishes a diagnostic immediately if that premise is
+missing. Sixteen startup/subscription histories assert owning-scope exit.
+Eight after-ready controls report no held scope (`null`); their useful receipt,
+row, schema and reopen checks remain. Those controls do not prove a universal
+readiness-versus-scope-exit ordering.
+
+### Calibration and validation
+
+All runs used this worktree's source with the historical cached tooling
+explained above. The fresh-checkout entry points remain the tracked commands in
+the previous section. Temporary mutations were restored byte-for-byte. The
+missing-owner injection below is a deliberate harness fault, not evidence of
+reachable overlapping callbacks in the real host.
+
+| Check | Result and meaning |
+|---|---|
+| Original scope-dropping behavior with strengthened core oracle | 50 assertion failures, 590 passes, 1 existing todo; no setup or timeout failure |
+| Retained repair, complete core oracle | 640 passes, 1 existing todo |
+| Original scope-dropping behavior, strengthened Chromium receiver | 8 cycle assertion failures, 17 passes; no setup or timeout failure |
+| Retained repair, complete Chromium receiver | 25 passes |
+| Callback-lifetime calibration against old probe | 3 assertion failures; all 3 pass with independent lifetime tracking |
+| Cached-loan mutation | Old browser receiver: 25 passes. Strengthened receiver: 8 tail-route assertion failures, 17 passes |
+| Ordinary scheduling bypass mutation | Old receiver: all 4 selected held-read histories pass. Strengthened receiver: all 4 fail at whole-callback peer exclusion, without timeout |
+| Missing no-scope failure identity | 4 restored rejection histories fail exact-reason assertions; 20 other rejection histories pass |
+| Missing owning-callback identity injection | Old harness waits until its 15-second test timeout with no observation. New harness reaches an immediate missing-owner diagnostic and assertion failure; no timeout |
+| Types and static checks | Core and focused browser TypeScript pass; ESLint has 0 errors and the same 22 existing warnings; executable formatting and diff whitespace pass |
+
+The original eight hostile-repair counts earlier in this record remain bound
+to their earlier executable revision. The new runs establish sensitivity for
+the newly strengthened boundaries; they do not retroactively relabel those
+historical runs as executions of this revision.
+
+### Review accounting and limits
+
+All ten review items retain separate dispositions in the task-local lossless
+ledger: eight fixed-now (contract prose, documentation clarity, scope probe,
+adapter-mode coverage, tail routing, owner diagnostics, causal preemption checks,
+and after-ready coverage credit), one already-fixed (personnel commentary,
+removed in `996292b31`), and one accepted-design (explicit adapter versus
+registered ordinary fallback). Some claims needed qualification: the historical
+hashes were stage-specific and the final reviewed hashes matched; after-ready
+histories were not wholly vacuous; and real public A callbacks are serialized,
+so the hypothesized existing overlap timeout was not reproduced as product
+behavior. The deliberate lost-owner fault established the diagnostic weakness.
+
+There is no deferred repair from these ten findings and no new runtime defect.
+The scope remains finite: the primary routing grammar, the restored failure and
+replay paths, and one Chromium OPFS host. Arbitrary custom coordinator wrappers
+must obey the stated contract; this suite cannot enforce third-party code.
+The separately recorded scoped lifecycle, fairness backlog, host/election
+handoff, native failure, and historical release-attribution gaps remain in the
+coverage map. A Collection reopen here is not a process or worker restart.
+
+Current executable SHA-256 bindings for this follow-up:
+
+| File | SHA-256 |
+|---|---|
+| `packages/db-sqlite-persistence-core/src/persisted.ts` | `d319f74a1020f6fd96db5cd5cb995c42a7809c105b423abdc6da25ba2d1fb070` |
+| `packages/db-sqlite-persistence-core/tests/persisted-oracle.test.ts` | `f3939fc3cdc81580398b7ff8a07737a5745dfb0da458b85af02585eaacdce89a` |
+| `packages/browser-db-sqlite-persistence/e2e/hydration-commit.opfs.ts` | `a0044df64bbe8281a53150b2698b97a25f796d3cfae707f7eb5220dfd682bb68` |
+| `packages/browser-db-sqlite-persistence/e2e/hydration-commit-oracle.opfs.spec.ts` | `6e7936824e92fb4f0adb2f7da5650ff5aaf9d2d10ecb8c8833b0947529f8271e` |

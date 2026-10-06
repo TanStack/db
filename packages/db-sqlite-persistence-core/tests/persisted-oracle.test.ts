@@ -134,6 +134,12 @@ const itUnlessAnyOracleReplay =
 const describeUnlessAnyOracleReplay =
   requestedOracleReplayProperty === undefined ? describe : describe.skip
 
+const hydrationScopeModes = [
+  `none`,
+  `same-adapter`,
+  `distinct-adapter`,
+] as const
+
 const persistedKeySetEvidenceStatuses = [
   `consistent`,
   `unknown`,
@@ -759,7 +765,10 @@ function expectPendingKeyMembershipWork(
 async function runRejectedHydrationBufferWitness(
   id: string,
   rows: ReadonlyArray<Todo>,
-  options: { commitAfterHydrationFailure?: boolean } = {},
+  options: {
+    commitAfterHydrationFailure?: boolean
+    scopeMode?: (typeof hydrationScopeModes)[number]
+  } = {},
 ): Promise<void> {
   const hydrationEntered = createEventGate()
   const releaseHydration = createEventGate()
@@ -773,7 +782,7 @@ async function runRejectedHydrationBufferWitness(
     throw hydrationError
   })
 
-  const routing = installHydrationRoutingProbe(adapter)
+  const routing = configureHydrationScope(adapter, options.scopeMode ?? `none`)
   let remoteBegin: (() => void) | undefined
   let remoteWrite:
     ((message: { type: `insert`; value: Todo }) => void) | undefined
@@ -870,7 +879,7 @@ async function runRejectedHydrationBufferWitness(
       collection.cleanup(),
       `${id} failed collection cleanup`,
     )
-    expect(routing.violations()).toEqual([])
+    expect(routing?.violations() ?? []).toEqual([])
     initialCollectionCleaned = true
     restoreBaselineRows()
 
@@ -9312,77 +9321,87 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
     }
   })
 
-  it(`rejects every buffered receipt with the exact persisted hydration failure`, async () => {
-    await runRejectedHydrationBufferWitness(`rejected-hydration-buffer-fixed`, [
-      { id: `first`, title: `first buffered commit` },
-      { id: `second`, title: `second buffered commit` },
-    ])
-  })
+  describe.each(hydrationScopeModes)(
+    `hydration failure with %s scope`,
+    (scopeMode) => {
+      it(`rejects every buffered receipt with the exact persisted hydration failure`, async () => {
+        await runRejectedHydrationBufferWitness(
+          `rejected-hydration-buffer-fixed`,
+          [
+            { id: `first`, title: `first buffered commit` },
+            { id: `second`, title: `second buffered commit` },
+          ],
+          { scopeMode },
+        )
+      })
 
-  it(`rejects a hydration-straddling transaction committed after hydration fails`, async () => {
-    await runRejectedHydrationBufferWitness(
-      `rejected-hydration-late-commit-fixed`,
-      [{ id: `late`, title: `must not cross a failed baseline` }],
-      { commitAfterHydrationFailure: true },
-    )
-  })
+      it(`rejects a hydration-straddling transaction committed after hydration fails`, async () => {
+        await runRejectedHydrationBufferWitness(
+          `rejected-hydration-late-commit-fixed`,
+          [{ id: `late`, title: `must not cross a failed baseline` }],
+          { commitAfterHydrationFailure: true, scopeMode },
+        )
+      })
 
-  it.each([
-    {
-      schedule: `one late commit`,
-      rows: [{ id: `one-late`, title: `` }],
-    },
-    {
-      schedule: `two sibling late commits`,
-      rows: [
-        { id: `late-a`, title: `a` },
-        { id: `late-b`, title: `b` },
-      ],
-    },
-    {
-      schedule: `same-key late replacements`,
-      rows: [
-        { id: `late-shared`, title: `old` },
-        { id: `late-shared`, title: `new` },
-      ],
-    },
-  ])(
-    `rejects generated late commits after hydration failure: $schedule`,
-    async ({ schedule, rows }) => {
-      await runRejectedHydrationBufferWitness(
-        `rejected-hydration-late-${schedule.replaceAll(` `, `-`)}`,
-        rows,
-        { commitAfterHydrationFailure: true },
+      it.each([
+        {
+          schedule: `one late commit`,
+          rows: [{ id: `one-late`, title: `` }],
+        },
+        {
+          schedule: `two sibling late commits`,
+          rows: [
+            { id: `late-a`, title: `a` },
+            { id: `late-b`, title: `b` },
+          ],
+        },
+        {
+          schedule: `same-key late replacements`,
+          rows: [
+            { id: `late-shared`, title: `old` },
+            { id: `late-shared`, title: `new` },
+          ],
+        },
+      ])(
+        `rejects generated late commits after hydration failure: $schedule`,
+        async ({ schedule, rows }) => {
+          await runRejectedHydrationBufferWitness(
+            `rejected-hydration-late-${schedule.replaceAll(` `, `-`)}`,
+            rows,
+            { commitAfterHydrationFailure: true, scopeMode },
+          )
+        },
       )
-    },
-  )
 
-  it.each([
-    {
-      schedule: `one buffered commit`,
-      rows: [{ id: `one`, title: `one` }],
-    },
-    {
-      schedule: `three sibling commits`,
-      rows: [
-        { id: `a`, title: `a` },
-        { id: `b`, title: `b` },
-        { id: `c`, title: `c` },
-      ],
-    },
-    {
-      schedule: `same-key replacement commits`,
-      rows: [
-        { id: `shared`, title: `old` },
-        { id: `shared`, title: `new` },
-      ],
-    },
-  ])(
-    `rejects all receipts and adopts no rows after hydration failure: $schedule`,
-    async ({ schedule, rows }) => {
-      await runRejectedHydrationBufferWitness(
-        `rejected-hydration-${schedule.replaceAll(` `, `-`)}`,
-        rows,
+      it.each([
+        {
+          schedule: `one buffered commit`,
+          rows: [{ id: `one`, title: `one` }],
+        },
+        {
+          schedule: `three sibling commits`,
+          rows: [
+            { id: `a`, title: `a` },
+            { id: `b`, title: `b` },
+            { id: `c`, title: `c` },
+          ],
+        },
+        {
+          schedule: `same-key replacement commits`,
+          rows: [
+            { id: `shared`, title: `old` },
+            { id: `shared`, title: `new` },
+          ],
+        },
+      ])(
+        `rejects all receipts and adopts no rows after hydration failure: $schedule`,
+        async ({ schedule, rows }) => {
+          await runRejectedHydrationBufferWitness(
+            `rejected-hydration-${schedule.replaceAll(` `, `-`)}`,
+            rows,
+            { scopeMode },
+          )
+        },
       )
     },
   )
@@ -14506,9 +14525,9 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
     }
   })
 
-  itUnlessAnyOracleReplay(
-    `settles hydration-buffered source work and reconciles an overlapping retry after incremental load rejection`,
-    async () => {
+  itUnlessAnyOracleReplay.each(hydrationScopeModes)(
+    `settles hydration-buffered source work and reconciles an overlapping retry after incremental load rejection (%s scope)`,
+    async (scopeMode) => {
       const failure = new Error(`incremental subset rejected exactly`)
       const adapter = createRecordingAdapter()
       const loadPersistedRows = adapter.loadSubset.bind(adapter)
@@ -14519,7 +14538,7 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
         await rejectLoad.promise
         throw failure
       }
-      const routing = installHydrationRoutingProbe(adapter)
+      const routing = configureHydrationScope(adapter, scopeMode)
       let sourceParams!: TodoSyncParams
       const collection = createCollection(
         persistedCollectionOptions<Todo, string>({
@@ -14587,7 +14606,7 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
         })
 
         expect(
-          routing.violations(),
+          routing?.violations() ?? [],
           `failed incremental reads retain the current scope for surviving source work`,
         ).toEqual([])
         adapter.loadSubset = loadPersistedRows
@@ -19681,9 +19700,9 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
   // source receipt must replay without awaiting the persisting operation whose
   // callback is itself awaiting that receipt. Persistence reach, both public
   // settlements, and the final source row expose the otherwise hidden cycle.
-  itUnlessAnyOracleReplay(
-    `replays a buffered source receipt without blocking its persisting predecessor`,
-    async () => {
+  itUnlessAnyOracleReplay.each(hydrationScopeModes)(
+    `replays a buffered source receipt without blocking its persisting predecessor (%s scope)`,
+    async (scopeMode) => {
       const adapter = createRecordingAdapter()
       const hydrateLoadEntered = createDeferred()
       const allowHydrateLoad = createDeferred()
@@ -19704,7 +19723,7 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
         replayState.persisted = true
         await applyCommittedTx(...args)
       }
-      const routing = installHydrationRoutingProbe(adapter)
+      const routing = configureHydrationScope(adapter, scopeMode)
       const accepted = createDeferred()
       const releaseMutation = createDeferred()
 
@@ -19790,7 +19809,7 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
           accepted.promise,
           `source accepted before optimistic publication`,
         )
-        expect(routing.violations()).toEqual([])
+        expect(routing?.violations() ?? []).toEqual([])
         const appliedState = observeSettlement(bufferedReceipt)
         await flushAsyncWork()
         expect(appliedState.read()).toEqual({ status: `pending` })
@@ -20286,6 +20305,19 @@ function hydrationSourceSnapshot(
   }
 }
 
+// The public optional API admits all three paths. Keep the no-scope and
+// same-adapter histories when adding a distinguishable loan; their receipt and
+// replay laws do not depend on a scheduler being present.
+function configureHydrationScope(
+  adapter: PersistenceAdapter,
+  mode: (typeof hydrationScopeModes)[number],
+) {
+  if (mode === `distinct-adapter`) return installHydrationRoutingProbe(adapter)
+  if (mode === `same-adapter`)
+    adapter.runInHydrationScope = (task) => task(adapter)
+  return undefined
+}
+
 // This is a controlled ownership probe, not a scheduler model. Each invocation
 // lends a fresh adapter. A call records both its route and whether its loan is
 // still live. Forwarding wrong calls permits teardown while retaining the
@@ -20298,27 +20330,27 @@ function installHydrationRoutingProbe(adapter: PersistenceAdapter) {
     live: boolean
     collectionId: string
   }> = []
-  let active: number | undefined
+  const active = new Set<number>()
   let sequence = 0
   adapter.applyCommittedTx = (collectionId, tx) => {
     calls.push({
       route: `public`,
-      scope: active,
-      live: active === undefined,
+      scope: [...active].at(-1),
+      live: active.size === 0,
       collectionId,
     })
     return direct(collectionId, tx)
   }
   adapter.runInHydrationScope = async (task) => {
     const scope = ++sequence
-    active = scope
+    active.add(scope)
     const scopedAdapter: PersistenceAdapter = {
       ...adapter,
       applyCommittedTx: (collectionId, tx) => {
         calls.push({
           route: `scoped`,
           scope,
-          live: active === scope,
+          live: active.has(scope),
           collectionId,
         })
         return direct(collectionId, tx)
@@ -20327,11 +20359,133 @@ function installHydrationRoutingProbe(adapter: PersistenceAdapter) {
     try {
       return await task(scopedAdapter)
     } finally {
-      active = undefined
+      active.delete(scope)
     }
   }
   return { calls, violations: () => calls.filter((call) => !call.live) }
 }
+
+// Probe calibration uses an independently specified lifetime table. These are
+// adapter-callback histories, not claims that a shared SQLite scheduler permits
+// concurrent hydrates. Deliberately expired loans and public reentry must remain
+// observable even when another callback exits; successful calls still forward.
+describeUnlessAnyOracleReplay(`hydration routing probe calibration`, () => {
+  it.each([
+    { history: `nested`, exitFirst: 1 },
+    { history: `overlap, first exits first`, exitFirst: 0 },
+    { history: `overlap, second exits first`, exitFirst: 1 },
+  ])(
+    `tracks each callback lifetime: $history`,
+    async ({ history, exitFirst }) => {
+      const adapter = createRecordingAdapter()
+      const routing = installHydrationRoutingProbe(adapter)
+      const release = [createEventGate(), createEventGate()]
+      const loans: Array<PersistenceAdapter> = []
+      const first = adapter.runInHydrationScope!(async (loan) => {
+        loans[0] = loan
+        await release[0]!.promise
+      })
+      const parent = history === `nested` ? loans[0]! : adapter
+      const second = parent.runInHydrationScope!(async (loan) => {
+        loans[1] = loan
+        await release[1]!.promise
+      })
+      const scopes = [first, second]
+      const tx: PersistedTx = {
+        txId: `probe`,
+        term: 1,
+        seq: 1,
+        rowVersion: 1,
+        mutations: [],
+      }
+      const apply = (target: PersistenceAdapter) =>
+        target.applyCommittedTx(`probe`, tx)
+      try {
+        await apply(loans[0]!)
+        await apply(loans[1]!)
+        release[exitFirst]!.resolve()
+        await scopes[exitFirst]
+        await apply(loans[exitFirst]!)
+        await apply(loans[1 - exitFirst]!)
+        await apply(adapter)
+        release[1 - exitFirst]!.resolve()
+        await scopes[1 - exitFirst]
+        await apply(loans[1 - exitFirst]!)
+        await apply(adapter)
+        expect(
+          routing.calls.map(({ route, live }) => ({ route, live })),
+        ).toEqual([
+          { route: `scoped`, live: true },
+          { route: `scoped`, live: true },
+          { route: `scoped`, live: false },
+          { route: `scoped`, live: true },
+          { route: `public`, live: false },
+          { route: `scoped`, live: false },
+          { route: `public`, live: true },
+        ])
+      } finally {
+        release.forEach((gate) => gate.resolve())
+        await Promise.all(scopes)
+      }
+    },
+  )
+
+  // The explicit adapter is sufficient for this call; only ordinary work needs
+  // a registered fallback. Collection construction registers that fallback.
+  it(`uses an explicit adapter without registration and rejects missing ordinary routing`, async () => {
+    const coordinator = new SingleProcessCoordinator()
+    const adapter = createRecordingAdapter()
+    const tx: PersistedTx = {
+      txId: `explicit`,
+      term: 1,
+      seq: 1,
+      rowVersion: 1,
+      mutations: [],
+    }
+    await expect(
+      coordinator.requestApplyCommittedTx(`explicit`, tx, adapter),
+    ).resolves.toBeDefined()
+    expect(adapter.applyCommittedTxCalls).toHaveLength(1)
+    await expect(
+      coordinator.requestApplyCommittedTx(`explicit`, tx),
+    ).rejects.toMatchObject({
+      name: `InvalidPersistedCollectionConfigError`,
+    })
+    expect(adapter.applyCommittedTxCalls).toHaveLength(1)
+    coordinator.setAdapterForCollection(`explicit`, adapter)
+    await expect(
+      coordinator.requestApplyCommittedTx(`explicit`, tx),
+    ).resolves.toBeDefined()
+    expect(adapter.applyCommittedTxCalls).toHaveLength(2)
+  })
+
+  // The adapter contract requires call-local forwarding through wrappers. This
+  // positive/hostile pair reaches the real coordinator but lets the recorder
+  // finish bad calls, so losing the loan is a routing assertion, not a timeout.
+  it.each([true, false])(
+    `detects a wrapper that forwards its loan=%s`,
+    async (forward) => {
+      const adapter = createRecordingAdapter()
+      const routing = installHydrationRoutingProbe(adapter)
+      const inner = new SingleProcessCoordinator()
+      inner.setAdapterForCollection(`wrapper`, adapter)
+      const wrapper: PersistedCollectionCoordinator[`requestApplyCommittedTx`] =
+        (id, tx, scoped) =>
+          inner.requestApplyCommittedTx(id, tx, forward ? scoped : undefined)
+      await adapter.runInHydrationScope!(async (scoped) => {
+        await wrapper(
+          `wrapper`,
+          { txId: `nested`, term: 1, seq: 1, rowVersion: 1, mutations: [] },
+          scoped,
+        )
+      })
+      expect(routing.calls.map(({ route, live }) => ({ route, live }))).toEqual(
+        [{ route: forward ? `scoped` : `public`, live: forward }],
+      )
+      expect(routing.violations()).toHaveLength(forward ? 0 : 1)
+    },
+  )
+})
 
 function expectHydrationReceiptsPending(
   receipts: Array<ReturnType<typeof observeSettlement>>,

@@ -626,26 +626,38 @@ sequence allocation, current scoped-adapter identity/lifetime, ordinary next
 use, a second on-demand scope, and durable reopen. Four cleanup/restart histories
 and one early-receipt checker calibration supplement the matrix. Existing
 startup-read failure, request-local failed-read/retry, and optimistic causal
-replay witnesses now supply distinct scoped adapters as well.
+replay witnesses preserve no-scope, same-adapter and distinct-adapter paths.
+Three callback-lifetime calibrations distinguish nested scopes and both overlap
+exit orders. Forwarding-wrapper and explicit-adapter controls cover coordinator
+composition and the ordinary registered fallback.
 
 The receiving
 `packages/browser-db-sqlite-persistence/e2e/hydration-commit-oracle.opfs.spec.ts`
 runs 24 real Chromium OPFS histories plus one cleanup-failure calibration.
 It crosses the original phases/coordinators/baselines with single-insert and
 rich source histories, and checks three distinct Collection schemas, a cold
-peer, an ordinary peer write during the held read, exact owning-scope exit,
-metadata, durable rows, and reopen. Cycle detection ties the same transaction
+peer, metadata, durable rows, and reopen. Sixteen startup/subscription histories
+require exact owning-scope exit; eight after-ready controls have no held scope
+and report that fact explicitly. The held cut waits for real peer hydration and
+ordinary-write scheduling admission. Peer hydrate/regular callback entry and
+C's commit SQL remain forbidden until the owning callback exits. Election
+stream-position reads are deliberately outside that regular-work law. The tail
+joins any truncate-triggered hydration, then must use the default coordinator's
+public apply or the browser coordinator's regular scope exactly once. Cycle detection ties the same transaction
 to the supplied live scope and its erroneous scheduled call; temporal overlap
 alone is insufficient. Captured primary evidence survives cleanup failures.
 
 The default coordinator now uses the supplied scoped adapter for that call,
-without caching it. Against main at `a37e69ab`, the original implementation
-reaches **48 core routing assertion failures and eight actual scheduler-cycle
-assertion failures**. The retained repair passes all 614 persisted-oracle tests
-(with one existing todo) and all 25 Chromium OPFS checks. Eight hostile repairs
-are rejected by assertions and challenge premature receipt settlement,
-cached scope loans, omitted data, reverse FIFO and suppressed/misclassified
-failure. The
+without caching it. The initial repair receipt on main at `a37e69ab` records
+48 core routing assertion failures and eight real scheduler-cycle assertion
+failures for the original production code. The latest review follow-up passes
+640 persisted-oracle checks (with one existing todo) and 25 Chromium OPFS checks.
+The original eight hostile repairs cover premature receipts, cached loans,
+omitted data, reverse FIFO and suppressed/misclassified failure. New calibration
+shows the old browser checks accepting cached loans and ordinary scheduling
+bypass; the strengthened receiver rejects them at tail routing and the complete
+scope boundary. A no-scope error-identity mutant is rejected by the restored
+failure paths. The
 [loss audit and exact content bindings](oracle-reviews/issue-2046-hydration-loss-audit.md)
 preserve all source recoveries, decisions, commands, calibration and limits;
 the [initial review](oracle-reviews/issue-2046-hydration-commit-deadlock.md)
