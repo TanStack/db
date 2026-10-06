@@ -384,3 +384,40 @@ it('retains the previous snapshot when an imported replacement cannot be cloned'
     expect(Channel.sent).toEqual([])
   })
 })
+
+// Request admission work is independent of durable row equality. For N rows,
+// queue the N data and N version writes before waiting for request completion;
+// native transaction completion remains the single atomic success boundary.
+for (const count of [0, 1, 10]) {
+  it(`queues a ${count}-row import before waiting for individual writes`, async () => {
+    await withHarness(async (h) => {
+      const c = await h.open(),
+        nativePut = IDBObjectStore.prototype.put
+      let issued = 0,
+        beforeFirstSuccess = 0
+      vi.spyOn(IDBObjectStore.prototype, 'put').mockImplementation(function (
+        this: IDBObjectStore,
+        ...args: Parameters<IDBObjectStore['put']>
+      ) {
+        issued++
+        const req = nativePut.apply(this, args)
+        req.addEventListener('success', () => {
+          beforeFirstSuccess ||= issued
+        })
+        return req
+      })
+      const expected = Array.from({ length: count }, (_, id) => ({
+        id,
+        name: String(id),
+      }))
+      await c.utils.importData(expected)
+      expect(issued).toBe(2 * count)
+      expect(beforeFirstSuccess).toBe(2 * count)
+      assertRows(
+        (await readStore<Row>(h.db, 'items')).rows,
+        expected,
+        'bulk native completion',
+      )
+    })
+  })
+}

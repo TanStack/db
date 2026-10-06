@@ -202,6 +202,7 @@ await todosCollection.utils.deleteDatabase()
 
 // Get database info for debugging
 const info = await todosCollection.utils.getDatabaseInfo()
+// info.estimatedSize is origin-wide usage, including other databases and caches.
 // { name: 'myApp', version: 1, objectStores: ['todos', '_versions'] }
 
 // Export all data as an array
@@ -228,6 +229,11 @@ isPersisted.promise to observe persistence; the transaction itself is not a Prom
 acceptMutations filters a manual transaction to the receiving Collection.
 Calling it separately for multiple Collections does not provide one atomic
 transaction across those Collections.
+
+exportData returns stored schema output. importData accepts schema input; when
+a schema transforms values, convert exported output back to input before import.
+For example, convert an exported Date to the string expected by a string-to-Date
+schema. Arbitrary schema transformations have no general inverse.
 
 importData validates schema inputs, applies schema defaults and transformations,
 and rejects duplicate keys before writing. It atomically replaces the store;
@@ -310,13 +316,20 @@ Low-level helpers reject with descriptive `Error` objects or native IndexedDB
 errors. When a callback rejection settles `executeTransaction`, its original
 rejection value is preserved. A native transaction abort can reject the
 operation before a pending callback settles. Underlying errors are available
-through `cause` where the helper provides it.
+through `cause` on contextual wrapper errors; inspect that cause’s native `name`
+(e.g. `VersionError` or `QuotaExceededError`).
 
-The package also exports `IndexedDBError`, `IndexedDBNotSupportedError`,
-`IndexedDBConnectionError`, `IndexedDBTransactionError`, and
-`IndexedDBOperationError` constructors. The low-level helpers do not use these
-classes to classify failures, so consumers should not rely on those
-`instanceof` checks for errors from the helpers.
+## Automatic Write Ordering
+
+Automatic writes in one Collection persist in mutation order. Handlers can run
+concurrently, but a later write and its `isPersisted` promise wait for earlier
+handlers and persistence to settle. A rejected handler writes nothing and lets
+the next write proceed. A handler must not await a later automatic write in the
+same Collection, because that write waits for the handler to finish.
+
+This ordering does not span separate Collections or tabs. Manual acceptance,
+import, and clear remain explicit operations; callers must order them when they
+need an ordering relation with automatic writes.
 
 ## Cross-Tab Synchronization
 
@@ -346,7 +359,9 @@ const db = await createIndexedDB({
 ```
 
 Run the package test script for runtime tests, type assertions, coverage, and
-both oracle campaigns. Run the typecheck script to check all test-driver types
+both oracle campaigns against current workspace source. Run `pnpm test:package`
+for the separate build and published-declaration checks. CI reuses its completed
+build for those checks after runtime suites finish. Run the typecheck script to check all test-driver types
 as well. The [oracle contract and audit](tests/ORACLE.md) describes the model,
 replay coordinates, fault witnesses, and coverage limits.
 

@@ -19,7 +19,12 @@
  * controlled capabilities and fake-IDB provider, not native browser failure
  * ordering, crash durability, or server-side availability of IndexedDB.
  */
-import { DbClient, collectionOptions } from '@tanstack/db'
+import {
+  DbClient,
+  collectionOptions,
+  createCollection,
+  createTransaction,
+} from '@tanstack/db'
 import { IDBFactory } from 'fake-indexeddb'
 import { expect, it, vi } from 'vitest'
 import { createIndexedDB, indexedDBCollectionOptions } from '../src'
@@ -257,3 +262,48 @@ it('distinguishes requested stores from existing stores at an unchanged version'
     }
   })
 })
+
+// Collection identity is an object capability, not the user-controlled display
+// id captured by an options builder. Rename the id at either construction cut,
+// then observe automatic/manual persistence and a successful cleanup suffix.
+for (const idLocation of ['options', 'collection'] as const) {
+  for (const entry of ['automatic', 'manual', 'after-cleanup'] as const) {
+    it(`persists its own mutations with an id set on ${idLocation} through ${entry}`, async () => {
+      await withHarness(async (h) => {
+        const options = indexedDBCollectionOptions<Row>({
+          db: h.db,
+          name: 'items',
+          getKey: (row) => row.id,
+          ...(idLocation === 'options' ? { id: 'custom' } : {}),
+        })
+        const c = createCollection({ ...options, id: 'custom' })
+        h.collections.push(c)
+        await c.preload()
+        const expected = [{ id: 1, name: 'owned' }]
+        if (entry === 'automatic')
+          await c.insert(expected[0]!).isPersisted.promise
+        else {
+          const tx = createTransaction({
+            autoCommit: false,
+            mutationFn: async ({ transaction }) => {
+              await c.utils.acceptMutations(transaction)
+            },
+          })
+          tx.mutate(() => c.insert(expected[0]!))
+          if (entry === 'after-cleanup') await c.cleanup()
+          await tx.commit()
+        }
+        assertRows(
+          (await readStore<Row>(h.db, 'items')).rows,
+          expected,
+          'renamed owner durable',
+        )
+        assertRows(
+          (await h.open()).values(),
+          expected,
+          'renamed owner fresh restore',
+        )
+      })
+    })
+  }
+}

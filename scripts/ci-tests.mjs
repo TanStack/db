@@ -108,4 +108,22 @@ if (command === `check`) {
     ]
   }
   execFileSync(`pnpm`, args, { cwd: root, stdio: `inherit` })
+  if (command === `test` && group === `collections`) {
+    // The group build is complete. Verify published declarations after runtime
+    // suites finish, without rebuilding a dependency they could still read.
+    execFileSync(
+      `pnpm`,
+      [
+        `--filter`,
+        `@tanstack/indexeddb-db-collection`,
+        `exec`,
+        `vitest`,
+        `run`,
+        `--config`,
+        `vitest.package.config.ts`,
+        `--maxWorkers=2`,
+      ],
+      { cwd: root, stdio: `inherit` },
+    )
+  }
 }

@@ -1,7 +1,12 @@
 import { expect, it, vi } from 'vitest'
 import { z } from 'zod'
 import { createCollection } from '@tanstack/db'
-import { createIndexedDB, indexedDBCollectionOptions } from '../src'
+import {
+  ObjectStoreNotFoundError,
+  createIndexedDB,
+  indexedDBCollectionOptions,
+  openDatabase,
+} from '../src'
 import { withHarness } from './harness'
 import type { IndexedDBCollectionConfig } from '../src'
 import type { Row } from './harness'
@@ -187,5 +192,76 @@ it('reserves the version store for adapter metadata', async () => {
         getKey: (row) => row.id,
       }),
     ).toThrow()
+  })
+})
+
+// A native database can predate this adapter. Reopening at the same version
+// does not run upgrade callbacks, so admission must validate metadata as well
+// as the requested store before any Collection can claim to persist writes.
+it('rejects a database without its required metadata store before startup', async () => {
+  const name = crypto.randomUUID()
+  const raw = await openDatabase(name, 1, (db) => {
+    db.createObjectStore('items')
+  })
+  raw.close()
+  const db = await createIndexedDB({ name, version: 1, stores: ['items'] })
+  try {
+    expect(() =>
+      indexedDBCollectionOptions<Row>({
+        db,
+        name: 'items',
+        getKey: (row) => row.id,
+      }),
+    ).toThrow(ObjectStoreNotFoundError)
+  } finally {
+    db.close()
+  }
+})
+
+it('labels storage estimates as origin-wide usage even for an empty database', async () => {
+  await withHarness(async (h) => {
+    vi.stubGlobal('navigator', {
+      storage: { estimate: () => Promise.resolve({ usage: 987654321 }) },
+    })
+    const c = await h.open()
+    expect(await c.utils.exportData()).toEqual([])
+    expect((await c.utils.getDatabaseInfo()).estimatedSize).toBe(987654321)
+  })
+})
+
+// Import's existing authority is schema input validation. Output from an
+// arbitrary transform need not inhabit that input domain. The invalid attempt
+// must preserve the backup; explicit inverse conversion can round trip it.
+it('preserves exported transformed rows when invalid restore input is rejected', async () => {
+  await withHarness(async (h) => {
+    const schema = z.object({
+      id: z.number(),
+      date: z.string().transform((value) => new Date(value)),
+    })
+    const c = createCollection(
+      indexedDBCollectionOptions({
+        db: h.db,
+        name: 'items',
+        schema,
+        getKey: (row) => row.id,
+      }),
+    )
+    try {
+      await c.preload()
+      await c.insert({ id: 1, date: '2026-01-01T00:00:00.000Z' }).isPersisted
+        .promise
+      const backup = await c.utils.exportData()
+      // @ts-expect-error Schema output is not the string input expected by import.
+      await expect(c.utils.importData(backup)).rejects.toThrow(
+        /Expected string/,
+      )
+      expect(await c.utils.exportData()).toEqual(backup)
+      await c.utils.importData(
+        backup.map((row) => ({ id: row.id, date: row.date.toISOString() })),
+      )
+      expect(await c.utils.exportData()).toEqual(backup)
+    } finally {
+      await c.cleanup()
+    }
   })
 })

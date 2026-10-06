@@ -1,4 +1,4 @@
-import { createCollection } from '@tanstack/db'
+import { createCollection, createTransaction } from '@tanstack/db'
 import { createIndexedDB, indexedDBCollectionOptions } from '../src'
 import { holdStore } from '../tests/idb-driver'
 import { snapshot } from '../tests/cross-tab-oracle'
@@ -34,6 +34,8 @@ async function setup() {
   let abortRead = query.get('abort') === 'startup'
   let abortWrite = false
   let unmanaged: IDBDatabase | undefined
+  let deletionReceipt: (() => void) | undefined
+  let deletion: Promise<void> | undefined
   const schema = { status: 'idle', blocked: 0 }
   const transactions: Array<IDBTransaction> = []
   const failures: Array<string> = []
@@ -283,12 +285,21 @@ async function setup() {
       await collection.delete(key).isPersisted.promise
     },
     omit: (row: OracleRow) => {
-      const removed = collection.delete(row.id)
-      const inserted = collection.insert(structuredClone(row))
-      return Promise.all([
-        removed.isPersisted.promise,
-        inserted.isPersisted.promise,
-      ])
+      // Manual acceptance admits both native transactions before the first
+      // completes. Automatic writes now intentionally await their predecessor.
+      const removed = createTransaction({
+        autoCommit: false,
+        mutationFn: ({ transaction }) =>
+          collection.utils.acceptMutations(transaction),
+      })
+      removed.mutate(() => collection.delete(row.id))
+      const inserted = createTransaction({
+        autoCommit: false,
+        mutationFn: ({ transaction }) =>
+          collection.utils.acceptMutations(transaction),
+      })
+      inserted.mutate(() => collection.insert(structuredClone(row)))
+      return Promise.all([removed.commit(), inserted.commit()])
     },
     holdStorage: async () => {
       gate = holdStore(descriptor.db)
@@ -312,6 +323,39 @@ async function setup() {
     closeBlocker: () => {
       unmanaged?.close()
       unmanaged = undefined
+    },
+    // Native deletion completes before this test-owned callback hold. A second
+    // page may now recreate the database before the first page broadcasts.
+    holdDeletionReceipt: () =>
+      new Promise<void>((resolve, reject) => {
+        const factory = indexedDB
+        const nativeDelete = factory.deleteDatabase.bind(factory)
+        factory.deleteDatabase = (name) => {
+          const request = nativeDelete(name)
+          Object.defineProperty(request, 'onsuccess', {
+            get: () => null,
+            set: (callback: (event: Event) => void) => {
+              request.addEventListener('success', (event) => {
+                deletionReceipt = () => callback.call(request, event)
+                resolve()
+              })
+            },
+          })
+          request.addEventListener('error', () => reject(request.error))
+          return request
+        }
+        try {
+          deletion = collection.utils.deleteDatabase()
+          void deletion.catch(reject)
+        } finally {
+          factory.deleteDatabase = nativeDelete
+        }
+      }),
+    releaseDeletionReceipt: async () => {
+      if (!deletionReceipt || !deletion)
+        throw new Error('deletion receipt not held')
+      deletionReceipt()
+      await deletion
     },
     durable: () => collection.utils.exportData(),
     versions: () =>

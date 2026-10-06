@@ -33,9 +33,9 @@ it('preserves native request-error text with operation context', async () => {
   await withHarness(async (h) => {
     const tx = h.db.db.transaction('items', 'readonly')
     const done = completed(tx).catch(() => undefined)
-    const nativeErrors: Array<string> = []
+    const nativeErrors: Array<DOMException> = []
     tx.addEventListener('error', (event) => {
-      nativeErrors.push((event.target as IDBRequest).error!.message)
+      nativeErrors.push((event.target as IDBRequest).error!)
     })
     const result = getAll(tx.objectStore('items')).catch(
       (error: unknown) => error,
@@ -44,9 +44,10 @@ it('preserves native request-error text with operation context', async () => {
     const error = await result
     await done
     expect(nativeErrors).toHaveLength(1)
+    expect(error).toHaveProperty('cause', nativeErrors[0])
     expect(error).toEqual(
       new Error(
-        `Failed to get all items from object store "items": ${nativeErrors[0]}`,
+        `Failed to get all items from object store "items": ${nativeErrors[0]!.message}`,
       ),
     )
   })
@@ -69,6 +70,10 @@ it('preserves synchronous DOMException text as a rejected Promise', async () => 
     // This provider DOMException is outside the test environment's Error realm.
     expect(nativeError).not.toBeInstanceOf(Error)
     const result = getAll(store)
+    await expect(result).rejects.toHaveProperty(
+      'cause',
+      expect.objectContaining({ name: 'TransactionInactiveError' }),
+    )
     expect(result).toBeInstanceOf(Promise)
     await expect(result).rejects.toEqual(
       new Error(
@@ -581,3 +586,31 @@ for (const failure of ['lower-version', 'abort-upgrade'] as const) {
     )
   }
 }
+
+// The wrapper supplies operation context, while the native error supplies the
+// machine-readable failure kind. Compare against the actual request error,
+// including cross-realm DOMExceptions, rather than matching error messages.
+it('retains the native open failure as its cause', async () => {
+  const factory = new FakeIDBFactory()
+  const name = crypto.randomUUID()
+  const db = await openDatabase(name, 2, undefined, factory)
+  db.close()
+  const original = factory.open.bind(factory)
+  let native: DOMException | null = null
+  vi.spyOn(factory, 'open').mockImplementation((...args) => {
+    const req = original(...args)
+    req.addEventListener('error', () => {
+      native = req.error
+    })
+    return req
+  })
+  try {
+    const failure = await openDatabase(name, 1, undefined, factory).catch(
+      (error: unknown) => error,
+    )
+    expect(native).toMatchObject({ name: 'VersionError' })
+    expect(failure).toHaveProperty('cause', native)
+  } finally {
+    vi.restoreAllMocks()
+  }
+})

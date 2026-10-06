@@ -7,11 +7,6 @@ title: "@tanstack/indexeddb-db-collection"
 
 - [DatabaseRequiredError](classes/DatabaseRequiredError.md)
 - [GetKeyRequiredError](classes/GetKeyRequiredError.md)
-- [IndexedDBConnectionError](classes/IndexedDBConnectionError.md)
-- [IndexedDBError](classes/IndexedDBError.md)
-- [IndexedDBNotSupportedError](classes/IndexedDBNotSupportedError.md)
-- [IndexedDBOperationError](classes/IndexedDBOperationError.md)
-- [IndexedDBTransactionError](classes/IndexedDBTransactionError.md)
 - [NameRequiredError](classes/NameRequiredError.md)
 - [ObjectStoreNotFoundError](classes/ObjectStoreNotFoundError.md)
 

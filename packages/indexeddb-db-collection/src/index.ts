@@ -24,11 +24,3 @@ export {
   clear,
   deleteDatabase,
 } from './wrapper'
-
-export {
-  IndexedDBError,
-  IndexedDBNotSupportedError,
-  IndexedDBConnectionError,
-  IndexedDBTransactionError,
-  IndexedDBOperationError,
-} from './errors'

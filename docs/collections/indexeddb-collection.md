@@ -165,33 +165,48 @@ await manual.commit()
 
 For a transaction involving several Collections, call each Collection's acceptance utility. Separate acceptance calls do not form one atomic IndexedDB transaction across Collections.
 
+Automatic writes in one Collection persist in mutation order, even when their
+handlers finish out of order. Later writes wait for earlier handlers and
+persistence to settle before reporting `isPersisted`. Rejection contributes no
+durable write and allows the next mutation to proceed. Do not await a later
+automatic write from an earlier handler in the same Collection: each would wait
+for the other. This rule does not order separate Collections, manual acceptance,
+imports, or clears; explicitly order those operations when your application
+requires it.
+
 ## Utilities
 
 The Collection exposes these methods through `collection.utils`:
 
-| Method                         | Behavior                                                                                                                                   |
-| ------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------ |
-| `exportData()`                 | Returns the durable rows as an array.                                                                                                      |
-| `importData(rows)`             | Validates inputs and atomically replaces this store. Rejects duplicate keys. Failed validation or persistence preserves the previous rows. |
-| `clearObjectStore()`           | Removes this store's durable rows and publishes an empty source snapshot. Other stores remain intact.                                      |
-| `getDatabaseInfo()`            | Returns the database name, version, and actual object store names. Includes a storage estimate when the browser supplies one.              |
-| `acceptMutations(transaction)` | Persists the receiving Collection's mutations from a manual transaction.                                                                   |
-| `deleteDatabase()`             | Closes the shared connection and deletes the entire database, including every store.                                                       |
+| Method                         | Behavior                                                                                                                                                                |
+| ------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `exportData()`                 | Returns the durable rows as an array.                                                                                                                                   |
+| `importData(rows)`             | Validates inputs and atomically replaces this store. Rejects duplicate keys. Failed validation or persistence preserves the previous rows.                              |
+| `clearObjectStore()`           | Removes this store's durable rows and publishes an empty source snapshot. Other stores remain intact.                                                                   |
+| `getDatabaseInfo()`            | Returns the database name, version, and actual object store names. `estimatedSize`, when available, is origin-wide storage usage, including other databases and caches. |
+| `acceptMutations(transaction)` | Persists the receiving Collection's mutations from a manual transaction.                                                                                                |
+| `deleteDatabase()`             | Closes the shared connection and deletes the entire database, including every store.                                                                                    |
 
-For example, export and restore a snapshot:
+For a Collection whose schema output is also valid schema input, export and restore a snapshot:
 
 ```typescript
 const backup = await todos.utils.exportData()
 await todos.utils.importData(backup)
 ```
 
-After database deletion succeeds, the originating Collection publishes an empty snapshot and notifies active Collections in every store. Create a new database instance and Collections before further persistence.
+`exportData()` returns stored schema output; `importData()` accepts and validates
+schema input. A transforming schema may require an explicit conversion before
+import. For example, a string-to-Date transform exports `Date` values, which must
+be converted back to input strings. Arbitrary transforms have no general inverse;
+`importData()` is not an unchecked stored-output restore API.
+
+After database deletion succeeds, the originating Collection publishes an empty snapshot and notifies active Collections in every store. Create a new database instance and Collections before further persistence. A deletion notification affects only connections that observed or initiated that native deletion; it cannot clear a later database that reuses the name.
 
 ## Cross-Tab Synchronization
 
 Tabs on the same origin use the same database and store names to access the same data. After persistence, the adapter sends a `BroadcastChannel` notification. Active receiving Collections read the changes from IndexedDB and update their public snapshots.
 
-If `BroadcastChannel` is unavailable, local persistence still works, but active tabs do not receive change notifications. This adapter does not synchronize data to a server or define a conflict-resolution policy for simultaneous writes to the same key.
+If `BroadcastChannel` is unavailable, local persistence still works, but active tabs do not receive change notifications. This adapter does not synchronize data to a server or define a conflict-resolution policy for simultaneous writes to the same key from different Collections or tabs.
 
 ## Connection Lifecycle and Blocked Operations
 
@@ -204,7 +219,7 @@ db.close()
 
 Connections created by `createIndexedDB` close automatically on the native `versionchange` event. This lets another tab upgrade or delete the database. Existing transactions can finish, but further persistence through the closed instance rejects. Reload the app or recreate affected Collections with a new instance using the current database version.
 
-You can observe connection retirement with `db.db.addEventListener('versionchange', handler)`. The adapter closes the connection without automatically restarting its Collections.
+You can observe connection retirement with `db.db.addEventListener('versionchange', handler)`. The adapter closes the connection without automatically restarting its Collections. If a later notification causes a read through the closed connection, that Collection and its dependent live queries enter the error state; recreate them with the new instance.
 
 Connections opened outside `createIndexedDB` can still block upgrades or deletion. Their owner must close them. The operation's promise remains pending until the native request succeeds or fails.
 

@@ -18,7 +18,9 @@
     "vite.config.ts",
     "e2e",
     "playwright.config.ts",
-    "vite.browser.config.ts"
+    "vite.browser.config.ts",
+    "vitest.config.ts",
+    "vitest.package.config.ts"
   ],
   "exclude": ["node_modules", "dist"]
 }

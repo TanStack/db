@@ -20,7 +20,7 @@
     "lint": "pnpm --filter \"./packages/**\" lint",
     "lint-all": "eslint . --fix",
     "prepare": "husky",
-    "test": "pnpm --filter \"./packages/**\" test",
+    "test": "pnpm --filter \"./packages/**\" test && pnpm --filter @tanstack/indexeddb-db-collection test:package",
     "test:oracles": "pnpm --filter @tanstack/db test:oracles && pnpm --filter @tanstack/query-db-collection test:oracles && pnpm --filter @tanstack/indexeddb-db-collection test:oracles",
     "test:minified-db": "node scripts/test-minified-db.mjs",
     "check:mangle": "node scripts/mangle-private-members.mjs",

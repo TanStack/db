@@ -13,13 +13,11 @@ import {
 } from '@tanstack/db'
 import {
   clear,
-  deleteByKey,
   deleteDatabase as deleteIDBDatabase,
   executeTransaction,
   getAll,
   getByKey,
   openDatabase,
-  put,
 } from './wrapper'
 import type {
   BaseCollectionConfig,
@@ -171,10 +169,29 @@ interface CrossTabMessage {
   type: 'data-changed' | 'database-cleared' | 'database-deleted'
   database: string
   name: string // Object store name
-  collectionVersion: string // Notification identifier
   changedKeys: Array<string | number> // Keys that changed (for targeted loading)
-  timestamp: number // Notification timestamp
   tabId: string // To avoid processing own messages
+}
+
+// BroadcastChannel is shared transport. Admit only this protocol before reading
+// its routing fields or issuing storage work. Invalid messages carry no writes.
+function isCrossTabMessage(value: unknown): value is CrossTabMessage {
+  if (!value || typeof value !== 'object') return false
+  const message = value as Record<string, unknown>
+  return (
+    (message.type === 'data-changed' ||
+      message.type === 'database-cleared' ||
+      message.type === 'database-deleted') &&
+    typeof message.database === 'string' &&
+    typeof message.name === 'string' &&
+    typeof message.tabId === 'string' &&
+    Array.isArray(message.changedKeys) &&
+    message.changedKeys.every(
+      (key: unknown) =>
+        typeof key === 'string' ||
+        (typeof key === 'number' && !Number.isNaN(key)),
+    )
+  )
 }
 
 /**
@@ -184,7 +201,8 @@ export interface DatabaseInfo {
   name: string
   version: number
   objectStores: Array<string>
-  estimatedSize?: number // via StorageManager API if available
+  /** Origin-wide storage usage in bytes, including other databases and caches. */
+  estimatedSize?: number
 }
 
 /**
@@ -233,6 +251,9 @@ export interface IndexedDBCollectionUtils<
 }
 
 const VERSIONS_STORE_NAME = '_versions'
+// Native deletion retires a particular connection, not every future database
+// that reuses its name. Weak ownership ends with the descriptor.
+const deletedConnections = new WeakSet<IDBDatabase>()
 
 /**
  * Creates or opens an IndexedDB database with the specified stores.
@@ -315,7 +336,10 @@ export async function createIndexedDB(
   )
 
   // Other tabs can upgrade or delete once this connection releases its handle.
-  db.addEventListener('versionchange', () => db.close())
+  db.addEventListener('versionchange', (event) => {
+    if (event.newVersion === null) deletedConnections.add(db)
+    db.close()
+  })
 
   // Create frozen stores array for immutability
   const frozenStores = Object.freeze([...stores])
@@ -437,9 +461,14 @@ export function indexedDBCollectionOptions(
   }
 
   // Validate that the store exists in the database (sync check)
-  if (!dbInstance.db.objectStoreNames.contains(name)) {
-    const availableStores = Array.from(dbInstance.db.objectStoreNames)
-    throw new ObjectStoreNotFoundError(name, dbInstance.name, availableStores)
+  for (const storeName of [name, VERSIONS_STORE_NAME]) {
+    if (!dbInstance.db.objectStoreNames.contains(storeName)) {
+      throw new ObjectStoreNotFoundError(
+        storeName,
+        dbInstance.name,
+        Array.from(dbInstance.db.objectStoreNames),
+      )
+    }
   }
 
   // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
@@ -458,6 +487,8 @@ export function indexedDBCollectionOptions(
     baseCollectionConfig.id ?? `indexeddb-collection:${dbInstance.name}:${name}`
   const tabId = safeRandomUUID()
   const versionCache = new Map<string | number, string>()
+  let collection: Sync['collection'] | undefined
+  let acceptance: Promise<void> = Promise.resolve()
   let activeSync: Sync | undefined
   let broadcastChannel: BroadcastChannel | undefined
 
@@ -478,9 +509,7 @@ export function indexedDBCollectionOptions(
         type,
         database: dbInstance.name,
         name,
-        collectionVersion: safeRandomUUID(),
         changedKeys,
-        timestamp: Date.now(),
         tabId,
       } satisfies CrossTabMessage)
     } finally {
@@ -545,13 +574,12 @@ export function indexedDBCollectionOptions(
         for (const mutation of mutations) {
           const { key } = mutation
           if (mutation.type === 'delete') {
-            await deleteByKey(stores[name]!, key)
-            await deleteByKey(stores[VERSIONS_STORE_NAME]!, [name, key])
+            stores[name]!.delete(key)
+            stores[VERSIONS_STORE_NAME]!.delete([name, key])
           } else {
             const versionKey = safeRandomUUID()
-            await put(stores[name]!, mutation.modified, key)
-            await put(
-              stores[VERSIONS_STORE_NAME]!,
+            stores[name]!.put(mutation.modified, key)
+            stores[VERSIONS_STORE_NAME]!.put(
               {
                 versionKey,
                 updatedAt: Date.now(),
@@ -620,13 +648,15 @@ export function indexedDBCollectionOptions(
   const internalSync: SyncConfig<Item>['sync'] = (params) => {
     const { begin, write, commit, markError, truncate } = params
     activeSync = params
+    collection = params.collection
     let channel: BroadcastChannel | undefined
 
     try {
       channel = new BroadcastChannel(`tanstack-db:${dbInstance.name}`)
       broadcastChannel = channel
       channel.onmessage = async (event: MessageEvent<CrossTabMessage>) => {
-        const message = event.data
+        const message: unknown = event.data
+        if (!isCrossTabMessage(message)) return
         if (
           activeSync !== params ||
           message.tabId === tabId ||
@@ -636,6 +666,7 @@ export function indexedDBCollectionOptions(
           return
         try {
           if (message.type === 'database-deleted') {
+            if (!deletedConnections.has(dbInstance.db)) return
             begin()
             truncate()
             versionCache.clear()
@@ -672,15 +703,16 @@ export function indexedDBCollectionOptions(
           const changes: Array<ChangeMessageOrDeleteKeyMessage<Item>> = []
           for (const { key, version, value } of rows) {
             const cached = versionCache.get(key)
-            if (version && value) {
-              if (cached !== version.versionKey) {
+            if (value) {
+              if (!version || cached !== version.versionKey) {
                 changes.push({
-                  type: cached === undefined ? 'insert' : 'update',
+                  type: 'update',
                   value,
                 })
-                versionCache.set(key, version.versionKey)
+                if (version) versionCache.set(key, version.versionKey)
+                else versionCache.delete(key)
               }
-            } else if (cached !== undefined) {
+            } else {
               // Source deletion is independent of the optimistic public view.
               changes.push({ type: 'delete', key })
               versionCache.delete(key)
@@ -719,7 +751,7 @@ export function indexedDBCollectionOptions(
     mutations: Array<PendingMutation<Item>>
   }): Promise<void> => {
     const mutations = transaction.mutations
-      .filter((m) => m.collection.id === collectionId)
+      .filter((m) => m.collection === collection)
       .map((m) => ({
         type: m.type,
         key: getKey(m.modified),
@@ -731,21 +763,37 @@ export function indexedDBCollectionOptions(
     broadcastChange(mutations.map((m) => m.key))
   }
 
-  const wrappedOnInsert = async (params: InsertMutationFnParams<Item>) => {
-    const result = await onInsert?.(params)
-    await acceptMutations(params.transaction)
+  // Start handlers immediately, but accept successful automatic writes in
+  // invocation order. Observe rejection immediately even while a predecessor
+  // is held. Each rejected decision releases its place without persisting.
+  function persistInOrder(
+    transaction: { mutations: Array<PendingMutation<Item>> },
+    handler: () => unknown,
+  ): Promise<unknown> {
+    const result = acceptance.then(async () => {
+      const outcome = await decision
+      if (!outcome.accepted) throw outcome.error
+      await acceptMutations(transaction)
+      return outcome.value
+    })
+    acceptance = result.then(
+      () => undefined,
+      () => undefined,
+    )
+    // Reserve the position before application code can author another write.
+    const decision = new Promise<unknown>((resolve) => resolve(handler())).then(
+      (value) => ({ accepted: true as const, value }),
+      (error: unknown) => ({ accepted: false as const, error }),
+    )
     return result
   }
-  const wrappedOnUpdate = async (params: UpdateMutationFnParams<Item>) => {
-    const result = await onUpdate?.(params)
-    await acceptMutations(params.transaction)
-    return result
-  }
-  const wrappedOnDelete = async (params: DeleteMutationFnParams<Item>) => {
-    const result = await onDelete?.(params)
-    await acceptMutations(params.transaction)
-    return result
-  }
+
+  const wrappedOnInsert = (params: InsertMutationFnParams<Item>) =>
+    persistInOrder(params.transaction, () => onInsert?.(params))
+  const wrappedOnUpdate = (params: UpdateMutationFnParams<Item>) =>
+    persistInOrder(params.transaction, () => onUpdate?.(params))
+  const wrappedOnDelete = (params: DeleteMutationFnParams<Item>) =>
+    persistInOrder(params.transaction, () => onDelete?.(params))
 
   const clearObjectStore = async (): Promise<void> => {
     await persist([], true)
@@ -756,6 +804,7 @@ export function indexedDBCollectionOptions(
   const deleteDatabaseUtil = async (): Promise<void> => {
     dbInstance.close()
     await deleteIDBDatabase(dbInstance.name, dbInstance.idbFactory)
+    deletedConnections.add(dbInstance.db)
     versionCache.clear()
     confirm([], true)
     broadcastChange([], 'database-deleted')

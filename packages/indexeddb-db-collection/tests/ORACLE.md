@@ -121,8 +121,7 @@ for exact receipts and the source-alias limits of those calibration runs.
 API limits remain explicit. Store declarations add requested stores; omissions
 do not remove existing stores. The descriptor lists requested names, while
 getDatabaseInfo reports native names. Low-level wrapper failures use ordinary
-or native errors; the exported specialized constructors do not establish a
-runtime error taxonomy. Observed callback errors retain identity. Awaiting
+or native errors. Contextual wrapper errors retain the native error as `cause`. Observed callback errors retain identity. Awaiting
 unrelated work cannot keep an IDB transaction active, and a rejection after
 native commit cannot roll back already durable rows. The readwrite late-callback
 witness observes that durable boundary directly.
@@ -342,3 +341,38 @@ durability and uncontrolled page discard remain open. The controlled destruction
 protocol does not observe an unacknowledged last event before a crash. HC005,
 the core typed-key mutation-payload counterexample, remains under its core owner.
 The coverage map names the needed witnesses; none is waived by random green.
+
+## Local ordering and review boundary extension
+
+The maintainer approved mutation-order persistence for automatic writes in one
+Collection. `local-write-order-oracle.test.ts` keeps an independent fold of
+whole-row effects in author order, omitting rejected handler positions. Its 146
+bounded cases cross same/disjoint keys and delete/reinsert, all six completion
+orders, all eight decisions, a held predecessor, and synchronous handler reentry.
+Caller outcomes, raw durable rows, peers and fresh restore are separate cuts.
+No manual or cross-Collection ordering follows from this law.
+
+The compatibility owner adds id changes at options and Collection construction,
+with automatic/manual acceptance and acceptance after cleanup. The transport
+owner separates row membership from none/mixed/all initial version metadata,
+checks duplicate delivery and typed keys, and excludes malformed protocol
+messages before reading storage. An unseen durable row establishes that a valid
+neighboring message still works. Connection-scoped deletion requires a native
+deletion signal on the affected descriptor. Holding the old native success
+callback across recreation checks that a fresh Collection keeps its own rows.
+
+The wrapper owner compares native error causes, including request-error identity
+and cross-realm synchronous failures. The settlement owner counts request
+admission for empty/single/bulk import before the first write succeeds, while the
+existing abort matrix proves atomicity. No elapsed-performance claim is made.
+
+Native ordering and deletion/recreation witnesses run in all three engines.
+The native omission witness uses two explicit manual acceptance calls to queue
+both write transactions before a test-owned read blocker. It retains its
+non-truncating full-row comparison. Automatic writes intentionally wait for
+their predecessor; they can no longer supply that old fixture schedule.
+
+Runtime/type tests resolve workspace source with no dependency build. The
+separate package lane compiles published ESM/CJS consumers after complete builds.
+The review evidence and guide audit are in
+[`2026-10-05-indexeddb-xhigh.md`](../../../docs/contributing/oracle-reviews/2026-10-05-indexeddb-xhigh.md).

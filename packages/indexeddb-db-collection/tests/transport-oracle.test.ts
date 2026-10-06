@@ -17,9 +17,17 @@
  * Collection over its stores; reopening requires a fresh database descriptor.
  * These are bounded controlled histories, not browser scheduling evidence.
  */
-import { createCollection, createTransaction } from '@tanstack/db'
+import {
+  createCollection,
+  createLiveQueryCollection,
+  createTransaction,
+} from '@tanstack/db'
 import { expect, it, vi } from 'vitest'
-import { createIndexedDB, indexedDBCollectionOptions } from '../src'
+import {
+  createIndexedDB,
+  executeTransaction,
+  indexedDBCollectionOptions,
+} from '../src'
 import {
   Channel,
   assertRows,
@@ -686,3 +694,182 @@ for (const count of [2, 3]) {
     )
   }
 }
+
+// Restored source membership does not depend on adapter metadata. The model
+// applies an authored peer edit to initial rows; metadata completeness is an
+// independent grammar axis. Raw wrapper rows reach the production restore path.
+for (const metadata of ['none', 'mixed', 'all'] as const) {
+  for (const key of [1, '1'])
+    for (const action of ['update', 'delete'] as const) {
+      it(`reconciles ${action} of ${typeof key} keys with ${metadata} initial versions`, async () => {
+        await withHarness(async (h) => {
+          const initial = [
+            { id: key, name: 'legacy' },
+            { id: 'anchor', name: 'untouched' },
+          ]
+          await executeTransaction(
+            h.db.db,
+            'items',
+            'readwrite',
+            (_, stores) => {
+              for (const row of initial) stores.items!.put(row, row.id)
+            },
+          )
+          if (metadata !== 'none')
+            await seed(
+              h.db,
+              'items',
+              metadata === 'all' ? initial : initial.slice(1),
+            )
+          const receiver = await h.open()
+          const sender = await h.open('items', { db: await h.connect() })
+          if (action === 'update')
+            await sender.update(key, (row) => {
+              row.name = 'new'
+            }).isPersisted.promise
+          else await sender.delete(key).isPersisted.promise
+          // Repeat delivery: missing versions cannot turn an update into a second
+          // insert, and repeated deletes must leave the independent anchor intact.
+          Channel.pending.push(...Channel.pending)
+          await Channel.deliver()
+          const expected =
+            action === 'update'
+              ? [{ id: key, name: 'new' }, initial[1]!]
+              : initial.slice(1)
+          expect(receiver.status).toBe('ready')
+          for (const subject of [receiver, sender, await h.open()])
+            assertRows(subject.values(), expected, 'unversioned reconciliation')
+          assertRows(
+            (await readStore<Row>(h.db, 'items')).rows,
+            expected,
+            'unversioned durable',
+          )
+        })
+      })
+    }
+}
+
+// Invalid envelopes are not source writes. Keep a raw unseen row as a positive
+// witness: a valid neighboring envelope must read it, while each malformed form
+// must leave both the public snapshot and Collection status unchanged.
+it('excludes malformed channel envelopes before storage or publication', async () => {
+  await withHarness(async (h) => {
+    const c = await h.open(),
+      channel = [...Channel.peers][0]!
+    await seed(h.db, 'items', [{ id: 1, name: 'valid neighbor' }])
+    const valid = {
+      type: 'data-changed',
+      database: h.db.name,
+      name: 'items',
+      tabId: 'peer',
+      changedKeys: [1],
+    }
+    const invalid = [
+      null,
+      undefined,
+      1,
+      'message',
+      {},
+      { ...valid, type: 'unknown' },
+      { ...valid, changedKeys: null },
+      { ...valid, changedKeys: { length: 1 } },
+      { ...valid, changedKeys: [{}] },
+      { ...valid, changedKeys: [NaN] },
+      { ...valid, tabId: null },
+    ]
+    for (const data of invalid) {
+      await channel.onmessage?.(new MessageEvent('message', { data }))
+      expect(c.status).toBe('ready')
+      assertRows(c.values(), [], 'invalid envelope exclusion')
+    }
+    await channel.onmessage?.(new MessageEvent('message', { data: valid }))
+    assertRows(
+      c.values(),
+      [{ id: 1, name: 'valid neighbor' }],
+      'valid envelope reach',
+    )
+  })
+})
+
+// A deletion notification has authority only over the retired connection. A
+// native success event can be delivered after another context has recreated the
+// database. Hold that receipt (not native deletion), create and write through a
+// fresh descriptor, then compare its authored snapshot after late delivery.
+// This controlled callback premise still needs a native multi-page witness.
+it('ignores an old native deletion receipt after database recreation', async () => {
+  await withHarness(async (h) => {
+    const old = await h.open(),
+      nativeComplete = deferred(),
+      receipt = deferred(),
+      original = indexedDB.deleteDatabase.bind(indexedDB)
+    vi.spyOn(indexedDB, 'deleteDatabase').mockImplementation((name) => {
+      const req = original(name)
+      let callback: ((this: IDBRequest, event: Event) => unknown) | null = null
+      Object.defineProperty(req, 'onsuccess', {
+        get: () => null,
+        set: (value) => {
+          callback = value
+        },
+        configurable: true,
+      })
+      req.addEventListener('success', (event) => {
+        nativeComplete.resolve()
+        void receipt.promise.then(() => callback?.call(req, event))
+      })
+      return req
+    })
+    const deletion = old.utils.deleteDatabase()
+    await nativeComplete.promise
+    const recreated = await createIndexedDB({
+      name: h.db.name,
+      version: 1,
+      stores: ['items'],
+    })
+    h.descriptors.push(recreated)
+    const fresh = await h.open('items', { db: recreated })
+    await fresh.insert({ id: 1, name: 'new incarnation' }).isPersisted.promise
+    Channel.pending = []
+    receipt.resolve()
+    await deletion
+    await Channel.deliver()
+    assertRows(
+      (await readStore<Row>(recreated, 'items')).rows,
+      [{ id: 1, name: 'new incarnation' }],
+      'recreated durable snapshot',
+    )
+    assertRows(
+      fresh.values(),
+      [{ id: 1, name: 'new incarnation' }],
+      'new incarnation public',
+    )
+  })
+})
+
+// Managed versionchange intentionally closes the old connection. A subsequent
+// read fails through the existing Collection error path; a fresh descriptor
+// restores the new durable rows. This preserves the approved recreation policy.
+it('reports old-connection read failure after upgrade and supports fresh Collections', async () => {
+  await withHarness(async (h) => {
+    const old = await h.open()
+    const live = createLiveQueryCollection((q) => q.from({ row: old }))
+    h.disposers.push(() => live.cleanup())
+    await live.preload()
+    const upgraded = await createIndexedDB({
+      name: h.db.name,
+      version: 2,
+      stores: ['items'],
+    })
+    h.descriptors.push(upgraded)
+    const fresh = await h.open('items', { db: upgraded })
+    await fresh.insert({ id: 1, name: 'new' }).isPersisted.promise
+    await Channel.deliver()
+    expect(old.status).toBe('error')
+    expect(live.status).toBe('error')
+    expect(fresh.status).toBe('ready')
+    assertRows(
+      fresh.values(),
+      [{ id: 1, name: 'new' }],
+      'new connection usable',
+    )
+  })
+})

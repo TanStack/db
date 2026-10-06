@@ -1237,3 +1237,41 @@ does not establish other frameworks' reuse behavior.
   compiler/lazy-demand and cold-acquisition owners, plus adapter witnesses.
   Independent per-field IN sets admit cross-pairs from different parent tuples.
   Current first-field candidate supersets remain permitted by the architecture.
+
+### IndexedDB review extension: local ordering and boundary admission
+
+The xhigh review at `6ad2edc42` receives its audit in
+[the versioned review record](oracle-reviews/2026-10-05-indexeddb-xhigh.md).
+`local-write-order-oracle.test.ts` owns the approved automatic-write ordering
+law for one Collection: three authored effects, every handler completion
+permutation, every accept/reject mask, held earlier handlers, and synchronous
+handler reentry. It checks caller outcomes, durable/public/peer snapshots and
+fresh restore. The native suite receives held insert followed by update in
+Chromium, Firefox and WebKit. Cross-Collection writers and explicit utility
+operations remain outside this ordering contract.
+
+The compatibility owner adds id changes at options/Collection construction,
+automatic/manual acceptance and acceptance after cleanup. Transport adds
+none/mixed/all version metadata, typed keys, duplicate delivery, invalid message
+exclusion with a valid neighboring read, old-connection error propagation, and
+native deletion completion separated from callback delivery and database
+recreation. Native multi-page tests receive the deletion/recreation premise in
+all three engines with the old success callback deliberately held.
+
+The wrapper owner observes native error causes. Settlement counts all native
+write requests admitted before the first success and retains its atomic abort
+matrix. This establishes request admission work, not an elapsed-time speedup.
+Runtime and type tests use source without built DB output. Published declarations
+have a separate build-consuming lane after concurrent CI runtime tests finish.
+
+Remaining design work has explicit owners:
+
+- **Connection retirement, XH-06:** the approved behavior requires recreation;
+  background reads through a retired connection report Collection error. Any
+  alternative notification/status/restart policy belongs to the transport
+  connection owner and needs old/fresh-connection and downstream-query witnesses.
+- **Stored metadata/public type cleanup, XH-14:** `VersionEntry.updatedAt` remains
+  write-only and the utils key parameter remains a public phantom parameter.
+  The persistence owner must prove old/new stored-record compatibility before a
+  format cleanup; declaration consumers must receive any generic-arity change.
+  Unused notification fields were removed without changing stored records.

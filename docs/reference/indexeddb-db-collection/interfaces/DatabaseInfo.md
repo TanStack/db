@@ -15,6 +15,8 @@ Database information returned by getDatabaseInfo()
 optional estimatedSize: number;
 ```
 
+Origin-wide storage usage in bytes, including other databases and caches. This is not a measurement of this database alone.
+
 Defined in: [.codex/worktrees/pr-1179-review/tanstack-db/packages/indexeddb-db-collection/src/indexeddb.ts:187](https://github.com/TanStack/db/blob/main/packages/indexeddb-db-collection/src/indexeddb.ts#L187)
 
 ***

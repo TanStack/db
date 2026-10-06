@@ -440,7 +440,8 @@ for (const seed of replaySeed ? [Number(replaySeed)] : [1179, undefined])
     })
   })
 
-// Ordered storage transactions are created before either notification can run.
+// Explicit manual acceptance creates ordered storage transactions before either
+// notification can run. Automatic write ordering has a separate native witness.
 // The write-complete gate is queued after both writes, before their reads.
 // B therefore receives a normal full-row update, without any truncate.
 test('native ordered delete and reinsert removes omitted fields through an ordinary update', async ({
@@ -823,4 +824,77 @@ test('cleanup retains a primary mismatch and closes every page after an injected
     }),
   ).rejects.toMatchObject({ cause: primary })
   expect(context.pages()).toHaveLength(0)
+})
+
+// Native receiving witness for the connection-scoped deletion law. Hold only
+// the deleting page's success callback, then let a second page actually create,
+// write and receive the old notification over native BroadcastChannel.
+test('late deletion notification preserves a recreated database snapshot', async ({
+  context,
+}) => {
+  await withPages(context, async (_events, database) => {
+    const old = await open(context, database, 'deleted')
+    await old.evaluate(() => window.crossTab!.holdDeletionReceipt())
+    const fresh = await open(context, database, 'recreated')
+    const expected = [{ id: 1, name: 'new incarnation' }]
+    await fresh.evaluate((rows) => window.crossTab!.import(rows), expected)
+    const before = await observe(fresh)
+    await old.evaluate(() => window.crossTab!.releaseDeletionReceipt())
+    await fresh.waitForFunction(
+      (count) => window.crossTab!.observe().callbacks.completed > count,
+      before.callbacks.completed,
+    )
+    const after = await observe(fresh)
+    assertSnapshot(after.rows, expected, 'native stale deletion: public')
+    assertSnapshot(
+      await fresh.evaluate(() => window.crossTab!.durable()),
+      expected,
+      'native stale deletion: durable',
+    )
+    const restored = await open(context, database, 'restored')
+    assertSnapshot(
+      (await observe(restored)).rows,
+      expected,
+      'native stale deletion: fresh restore',
+    )
+  })
+})
+
+// The native host receives the same held-earlier/accepted-later premise as the
+// local-write-order owner. Public optimistic rows are separate from durability.
+test('persists a later local update after a held insert in mutation order', async ({
+  context,
+}) => {
+  await withPages(context, async (_events, database) => {
+    const writer = await open(context, database, 'local-order')
+    await writer.evaluate(() => window.crossTab!.holdInsert())
+    const expected = [{ id: 'held', name: 'newer edit' }]
+    const later = writer.evaluate(
+      (row) => window.crossTab!.write(row),
+      expected[0]!,
+    )
+    await writer.waitForFunction(() =>
+      window.crossTab!.observe().rows.some((row) => row.name === 'newer edit'),
+    )
+    const before = await writer.evaluate(() => window.crossTab!.durable())
+    await writer.evaluate(() => window.crossTab!.settleInsert(true))
+    await later
+    assertSnapshot(before, [], 'native earlier handler held: durable')
+    assertSnapshot(
+      await writer.evaluate(() => window.crossTab!.durable()),
+      expected,
+      'native local order: durable',
+    )
+    assertSnapshot(
+      (await observe(writer)).rows,
+      expected,
+      'native local order: public',
+    )
+    const fresh = await open(context, database, 'local-order-restore')
+    assertSnapshot(
+      (await observe(fresh)).rows,
+      expected,
+      'native local order: restore',
+    )
+  })
 })

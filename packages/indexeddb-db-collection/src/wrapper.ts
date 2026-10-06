@@ -46,6 +46,7 @@ function executeRequest<T>(
       reject(
         new Error(
           `${describeFailure()}: ${error instanceof Error ? error.message : String(error)}`,
+          { cause: error },
         ),
       )
       return
@@ -53,7 +54,11 @@ function executeRequest<T>(
     request.onsuccess = () => resolve(request.result)
     request.onerror = () => {
       const errorMessage = request.error?.message || 'Unknown error'
-      reject(new Error(`${describeFailure()}: ${errorMessage}`))
+      reject(
+        new Error(`${describeFailure()}: ${errorMessage}`, {
+          cause: request.error,
+        }),
+      )
     }
   })
 }
@@ -100,6 +105,7 @@ export function openDatabase(
       reject(
         new Error(
           `Failed to open IndexedDB database "${name}": ${error instanceof Error ? error.message : String(error)}`,
+          { cause: error },
         ),
       )
       return
@@ -122,6 +128,7 @@ export function openDatabase(
           reject(
             new Error(
               `Database upgrade failed for "${name}": ${error instanceof Error ? error.message : String(error)}`,
+              { cause: error },
             ),
           )
         }
@@ -137,6 +144,7 @@ export function openDatabase(
       reject(
         new Error(
           `Failed to open IndexedDB database "${name}": ${errorMessage}`,
+          { cause: request.error },
         ),
       )
     }
@@ -177,6 +185,7 @@ export function createObjectStore(
       throw new Error(
         `Cannot create object store "${storeName}": This operation is only allowed during a database upgrade. ` +
           'Ensure you are calling createObjectStore within the onUpgrade callback of openDatabase.',
+        { cause: error },
       )
     }
 
@@ -185,11 +194,13 @@ export function createObjectStore(
       throw new Error(
         `Object store "${storeName}" already exists in the database. ` +
           'Check the database version and only create stores when needed.',
+        { cause: error },
       )
     }
 
     throw new Error(
       `Failed to create object store "${storeName}": ${error instanceof Error ? error.message : String(error)}`,
+      { cause: error },
     )
   }
 }
@@ -251,6 +262,7 @@ export function executeTransaction<T>(
       reject(
         new Error(
           `Failed to create transaction for stores [${storeNamesArray.join(', ')}]: ${error instanceof Error ? error.message : String(error)}`,
+          { cause: error },
         ),
       )
       return
@@ -261,11 +273,12 @@ export function executeTransaction<T>(
     for (const storeName of storeNamesArray) {
       try {
         stores[storeName] = transaction.objectStore(storeName)
-      } catch {
+      } catch (error) {
         reject(
           new Error(
             `Object store "${storeName}" not found in the database. ` +
               'Ensure the store was created during the database upgrade.',
+            { cause: error },
           ),
         )
         return
@@ -496,6 +509,7 @@ export function deleteDatabase(
       reject(
         new Error(
           `Failed to delete IndexedDB database "${name}": ${error instanceof Error ? error.message : String(error)}`,
+          { cause: error },
         ),
       )
       return
@@ -510,6 +524,7 @@ export function deleteDatabase(
       reject(
         new Error(
           `Failed to delete IndexedDB database "${name}": ${errorMessage}`,
+          { cause: request.error },
         ),
       )
     }
