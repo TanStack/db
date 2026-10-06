@@ -358,6 +358,8 @@ on-demand source holds after mount, which are the rows it was asked for.
   derived too. On the follow-up branch, where a live-query Collection defers
   acquisition until a subscriber or preload, the same probe passes for both
   hooks.
+  Decision: the maintainer accepted this exposure in this PR, shared with
+  `useLiveQuery`, and the deferred-acquisition follow-up removes it for both.
 - On React 18, StrictMode does not keep refs across the double render, so both
   hooks still send two first-window requests. The changeset now names React 19.
 
