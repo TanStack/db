@@ -2,9 +2,30 @@
 title: IndexedDB Collection
 ---
 
-IndexedDB Collections persist local data across browser sessions. They restore stored rows when a Collection starts and notify other tabs through `BroadcastChannel` after writes complete.
+**Reactive local data that survives a reload.**
 
-Use this Collection for browser data that your app manages locally. For a persistent cache around an existing server sync adapter, see [SQLite Persistence](../guides/sqlite-persistence.md).
+Build notes, drafts, reading lists, and offline workspaces with TanStack DB's live queries and optimistic mutations. IndexedDB Collections save your rows between visits and share persisted changes with other active tabs and dedicated workers.
+
+- **Keep editing without a network connection.** Local reads and writes use the browser's built-in database, with no backend service required.
+- **Keep the UI current.** Optimistic mutations update local state immediately. Live queries filter, sort, aggregate, and join your Collections as their data changes.
+- **Keep data between sessions.** A new Collection restores saved rows from the same database and object store.
+- **Share changes across tabs.** Active same-origin Collections receive persisted changes through `BroadcastChannel`.
+- **Keep your data typed.** Use TypeScript and optional Standard Schema validation. IndexedDB stores supported structured values, including dates and binary data, without JSON serialization.
+
+For example, a reading app can save articles and reading progress locally. A live query can show unread articles, while another joins articles with tags. Marking an article as read updates local query results immediately, persists the edit, and notifies other active tabs.
+
+## When to Choose IndexedDB
+
+Choose IndexedDB Collections when the browser owns the data and your app needs reactive queries over it. This works for a standalone local app or for local data alongside server-synced Collections.
+
+| Your data needs                                                                  | Choose                                                   |
+| -------------------------------------------------------------------------------- | -------------------------------------------------------- |
+| Temporary UI state that lasts only for the current session                       | [LocalOnly Collection](./local-only-collection.md)       |
+| Small preferences stored through the Web Storage API                             | [LocalStorage Collection](./local-storage-collection.md) |
+| Local records with asynchronous persistence, structured values, and live queries | IndexedDB Collection                                     |
+| Persistence around an existing server sync adapter                               | [SQLite Persistence](../guides/sqlite-persistence.md)    |
+
+IndexedDB Collections load their entire object store into memory. Choose a dataset that fits your app's memory budget. Local data access works offline once the app is loaded. Caching the app for offline startup and synchronizing data across devices require separate setup. Browser storage remains subject to quota, eviction, and user deletion.
 
 ## Installation
 
@@ -52,8 +73,6 @@ await todos.preload()
 
 Create the database in a browser page or dedicated worker where IndexedDB is available. `preload()` restores the store's rows and resolves when the Collection is ready. A failed initial read rejects `preload()` and sets the Collection status to `error`.
 
-The Collection loads the entire store into memory. Use it for data that fits in your app's memory budget.
-
 ## Direct Mutations
 
 Call `insert`, `update`, and `delete` directly. Mutation handlers are optional. The Collection applies optimistic changes and persists accepted mutations to IndexedDB.
@@ -80,6 +99,29 @@ await remove.isPersisted.promise
 Await `isPersisted.promise` to observe persistence success or failure. The returned transaction itself is not a Promise.
 
 If you provide `onInsert`, `onUpdate`, or `onDelete`, the handler runs before persistence. A rejected handler leaves durable rows unchanged and rolls back its optimistic changes. Each accepted Collection batch writes rows and metadata in one IndexedDB transaction. A failed write aborts the batch.
+
+## Live Queries over Persisted Data
+
+Use these Collections with TanStack DB's query API. This query keeps an alphabetized list of unfinished todos:
+
+```typescript
+import { createLiveQueryCollection, eq } from '@tanstack/db'
+
+const unfinishedTodos = createLiveQueryCollection((q) =>
+  q
+    .from({ todo: todos })
+    .where(({ todo }) => eq(todo.completed, false))
+    .orderBy(({ todo }) => todo.text, 'asc')
+    .select(({ todo }) => ({ id: todo.id, text: todo.text })),
+)
+
+await unfinishedTodos.preload()
+console.log(unfinishedTodos.toArray)
+```
+
+An insert adds a matching todo to the result. Marking it complete removes it. Received changes from another active tab update the same query. TanStack DB's framework bindings can render these results in your UI.
+
+The query runs over Collection rows in memory. IndexedDB handles persistence, while TanStack DB maintains the query result. You can also join these rows with other Collections, including Collections supplied by a server sync adapter. See [Live Queries](../guides/live-queries.md) for joins, aggregates, and framework examples.
 
 ## Configuration
 

@@ -1,10 +1,20 @@
 # @tanstack/indexeddb-db-collection
 
-**IndexedDB-backed collections for TanStack DB**
+**Reactive local data that survives a reload.**
 
-Persistent local storage with automatic cross-tab synchronization for TanStack DB collections. Data persists across browser sessions and stays in sync across all open tabs.
+Build a notes app, a reading list, or an offline workspace with TanStack DB's live queries and optimistic mutations. IndexedDB saves your data between visits. Active tabs and dedicated workers receive each other's persisted changes automatically.
 
-See the [IndexedDB Collection guide](https://tanstack.com/db/latest/docs/collections/indexeddb-collection) for setup, mutations, and connection ownership.
+Use the same Collection API from the first edit to the next session:
+
+- **Edit immediately.** Inserts, updates, and deletes update local state optimistically while IndexedDB saves them asynchronously.
+- **Query your local data.** Filter, sort, aggregate, and join Collections with TanStack DB's live queries. Query results update as the data changes.
+- **Continue across visits.** Reopen the same database and restore saved rows. Local reads and writes need no server connection.
+- **Share changes across tabs.** Active same-origin tabs and dedicated workers receive updates through `BroadcastChannel`.
+- **Keep your types.** Use TypeScript row types or a Standard Schema compatible validator such as Zod or Valibot. Store supported structured values without JSON serialization.
+
+The adapter uses the browser's built-in database. It needs no backend service or separate database engine. Use it for app-owned data that fits in memory. Server synchronization and offline loading of the app itself require separate setup.
+
+See the [IndexedDB Collection guide](https://tanstack.com/db/latest/docs/collections/indexeddb-collection) for choosing a Collection, live queries, and connection ownership.
 
 ## Installation
 
@@ -14,8 +24,10 @@ npm install @tanstack/indexeddb-db-collection @tanstack/db
 
 ## Quick Start
 
+Create a Collection, query unfinished todos, and save an edit:
+
 ```typescript
-import { createCollection } from '@tanstack/db'
+import { createCollection, createLiveQueryCollection, eq } from '@tanstack/db'
 import {
   createIndexedDB,
   indexedDBCollectionOptions,
@@ -27,31 +39,45 @@ interface Todo {
   completed: boolean
 }
 
-// Step 1: Create the database with all stores defined upfront
 const db = await createIndexedDB({
-  name: 'myApp',
+  name: 'my-app',
   version: 1,
   stores: ['todos'],
 })
 
-// Step 2: Create collections using the shared database
-const todosCollection = createCollection(
+const todos = createCollection(
   indexedDBCollectionOptions<Todo>({
     db,
     name: 'todos',
     getKey: (todo) => todo.id,
   }),
 )
+
+// Restore saved rows before reading them.
+await todos.preload()
+
+const unfinishedTodos = createLiveQueryCollection((q) =>
+  q.from({ todo: todos }).where(({ todo }) => eq(todo.completed, false)),
+)
+await unfinishedTodos.preload()
+
+const id = crypto.randomUUID()
+const insert = todos.insert({ id, text: 'Write a draft', completed: false })
+await insert.isPersisted.promise
+
+// The live query now includes the new todo.
+console.log(unfinishedTodos.toArray)
+
+const update = todos.update(id, (draft) => {
+  draft.completed = true
+})
+await update.isPersisted.promise
+// The live query removes the completed todo automatically.
 ```
 
-## Features
+On the next visit, `preload()` restores the saved todos from the same database. Another active tab using that database and store receives the edits too. Use TanStack DB's framework bindings to render live-query results in your UI.
 
-- **Persistent Storage** - Data survives browser refreshes and sessions
-- **Cross-Tab Sync** - Changes automatically propagate to all open tabs via BroadcastChannel
-- **Multiple Collections** - Share a single database across multiple collections
-- **Schema Validation** - Optional schema support with Standard Schema (Zod, Valibot, etc.)
-- **Full TypeScript Support** - Complete type inference for items and keys
-- **Utility Functions** - Export, import, clear, and inspect your data
+See [utilities](#utility-functions) for export, import, clear, and database inspection.
 
 ## Usage
 
