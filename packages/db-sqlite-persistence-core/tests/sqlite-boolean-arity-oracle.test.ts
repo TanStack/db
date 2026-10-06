@@ -875,13 +875,16 @@ it('keeps large string-ID OR scopes selective at the SQLite boundary', async () 
 // values. Counting the quoting primitive detects discarded construction that
 // cannot be seen in the final SQL. The original compiler performs two quotes
 // per value; exact result and binding checks retain the receiving contract.
-it.each([0, 1, 32, 1_025])(
+// A sequential index-expression control proves the sensor still sees quoting
+// before the bound-path counter resets; changing the primitive cannot pass silently.
+it.sequential.each([0, 1, 32, 1_025])(
   'avoids discarded literal quoting for bound string membership / %i',
   async (size) => {
     const driver = new CountingDriver()
     const adapter = new SQLiteCorePersistenceAdapter({ driver })
     const values = Array.from({ length: size }, (_, index) => `work-${index}`)
-    const allowed = new Set(values)
+    const control = 'quote-probe-control'
+    const observedValues = new Set([...values, control])
     let quotedValues = 0
     const replace = String.prototype.replace
     const quoteProbe = vi
@@ -890,7 +893,7 @@ it.each([0, 1, 32, 1_025])(
         this: string,
         ...args: Parameters<typeof replace>
       ) {
-        if (allowed.has(String(this))) quotedValues++
+        if (observedValues.has(String(this))) quotedValues++
         return Reflect.apply(replace, this, args)
       })
     try {
@@ -904,6 +907,18 @@ it.each([0, 1, 32, 1_025])(
           { type: 'insert', key: 'other', value: { value: 'outside' } },
         ],
       })
+      // An index literal must reach the probe, even for an empty bound list.
+      await adapter.ensureIndex('string-membership-work', 'quote-control', {
+        expressionSql: [
+          JSON.stringify(
+            new IR.Func('coalesce', [
+              new IR.PropRef(['value']),
+              new IR.Value(control),
+            ]),
+          ),
+        ],
+      })
+      expect(quotedValues).toBeGreaterThan(0)
       quotedValues = 0
       driver.reads = []
       const rows = await adapter.loadSubset('string-membership-work', {

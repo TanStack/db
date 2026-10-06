@@ -117,3 +117,25 @@ The ten-item disposition audit is: one fixed-now, three refuted as stated, three
 duplicates of selected design restrictions, and three deferred investigations.
 Each compound claim retains its valid observation even when its claimed
 consequence was refuted. No design decision is required to apply the narrow fix.
+
+## Quoting-probe calibration follow-up
+
+CodeRabbit review 5422260805 examined
+`f0f3bdc9ea2004919b1b4c5a80ac4e7403079080` and proposed an executable positive
+control for the literal-quoting probe. A scratch adapter restored the discarded
+string-identity construction but switched quoting from `replace` to `replaceAll`.
+The original four work checks incorrectly passed this mutant.
+
+The work owner now creates a valid coalesce expression index with a control
+literal and requires a nonzero probe count before resetting the counter for the
+bound query. This also calibrates the size-zero case. All four mutant cases now
+fail at that positive-control assertion, while the real production owner passes
+all six tests. The spy test is explicitly sequential and restores the prototype
+in cleanup. Production code is unchanged by this follow-up.
+
+An initial constant-only index fixture failed SQLite setup on both paths. Those
+failures are excluded from mutant evidence; only the valid coalesce-index
+assertion failures establish detection. The control proves current sensor reach,
+not a universal measure of every future quoting algorithm. Unrelated future
+transformations of identical fixture strings could conservatively fail this
+primitive-work check and would need investigation.
