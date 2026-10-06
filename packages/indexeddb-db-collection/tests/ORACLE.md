@@ -502,7 +502,6 @@ It keeps the known core numeric/string same-transaction collision separate from
 this adapter's legal-name coverage. No production or product-policy change is
 required by the four transferred dimensions.
 
-
 ## Approved donor follow-up: closure, capture and receiving hosts
 
 Native abnormal `close` has the same immediate-error/retained-snapshot contract

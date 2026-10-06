@@ -1211,8 +1211,11 @@ describe(`Whole mixed transaction publication`, () => {
 // no encoded production globalKey participates in the comparison. Cross each
 // same-text pair with inserts, updates, deletes, repeated updates, and rollback.
 // Existing same-key lanes still require genuine repeated keys to collapse.
-for (const { numberKey, reversed } of [0, -1, 1, 1.5].flatMap((numberKey) =>
-  [false, true].map((reversed) => ({ numberKey, reversed })),
+for (const { numberKey, reversed } of [0, -1, 1, 1.5].flatMap((key) =>
+  [false, true].map((reverseOrder) => ({
+    numberKey: key,
+    reversed: reverseOrder,
+  })),
 )) {
   for (const operation of [`insert`, `update`, `delete`, `repeat`] as const) {
     for (const success of [true, false]) {
