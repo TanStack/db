@@ -23,7 +23,6 @@ import type { ReactNode } from 'react'
 
 type Row = { id: string; label: string; rank: number }
 
-
 let sequence = 0
 const cleanups: Array<() => Promise<void> | void> = []
 afterEach(async () => {
@@ -136,9 +135,7 @@ it(`keeps retained pages complete in every ready commit after an equal dependenc
     ({ filter }: { filter: { minimum: number } }) => {
       const result = useLiveInfiniteQuery(
         (q) =>
-          q
-            .from({ items: source })
-            .orderBy(({ items }) => items.rank, `desc`),
+          q.from({ items: source }).orderBy(({ items }) => items.rank, `desc`),
         { pageSize: 2 },
         [filter],
       )
