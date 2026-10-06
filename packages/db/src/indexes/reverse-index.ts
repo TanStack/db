@@ -39,64 +39,49 @@ export class ReverseIndex<
     return this.originalIndex.rangeQueryReversed(options)
   }
 
-  // The nullish group sits at one end of the original index. `nullsFirst`
-  // says it is at the original's start, so the reversed walk reaches it last.
-  // Nullish keys come back in ascending key order; equal non-null values come
-  // back in descending key order, as the reversed walk returns them.
+  // Reversing the original index moves its nullish group to the opposite
+  // end, so reads put the group back at the end the query asks for. Nullish
+  // keys come in ascending key order; equal non-null values come in the
+  // reversed walk's order. Each read gathers the nullish group, so its cost
+  // grows with the number of nullish keys.
 
   take(n: number, from: any, filterFn?: (key: TKey) => boolean): Array<TKey> {
-    if (from == null) return this.nullsFirst ? this.values(n, filterFn) : []
-    const keys = this.values(n, filterFn, from)
-    return this.nullsFirst
-      ? keys
-      : [...keys, ...this.nullish(n - keys.length, filterFn)]
+    return this.read(n, filterFn, from ?? null)
   }
 
   takeFromStart(n: number, filterFn?: (key: TKey) => boolean): Array<TKey> {
-    if (!this.nullsFirst) {
-      const keys = this.values(n, filterFn)
-      return [...keys, ...this.nullish(n - keys.length, filterFn)]
-    }
-    const keys = this.nullish(n, filterFn)
-    return [...keys, ...this.values(n - keys.length, filterFn)]
+    return this.read(n, filterFn)
   }
 
-  /** Non-null keys in reversed order, after `from` when it is given. */
-  private values(
+  /** Reads after `from` (`null` is the nullish group), or from the start. */
+  private read(
     n: number,
     filterFn?: (key: TKey) => boolean,
     from?: unknown,
   ): Array<TKey> {
-    if (n <= 0) return []
-    if (!this.nullsFirst) {
-      // The nullish group is above every value, so a walk down from it, or
-      // from any value, never reaches it.
-      return this.originalIndex.takeReversed(n, from ?? null, filterFn)
-    }
-    // The walk reaches the nullish group only after every value.
-    let nullish: Set<TKey> | undefined
-    const accept = (key: TKey) =>
-      !(nullish ??= this.nullishKeys()).has(key) && (filterFn?.(key) ?? true)
-    return from === undefined
-      ? this.originalIndex.takeReversedFromEnd(n, accept)
-      : this.originalIndex.takeReversed(n, from, accept)
-  }
-
-  private nullish(n: number, filterFn?: (key: TKey) => boolean): Array<TKey> {
-    const keys: Array<TKey> = []
-    if (n <= 0) return keys
-    for (const key of [...this.nullishKeys()].sort(compareKeys)) {
-      if (keys.length >= n) break
-      if (filterFn?.(key) ?? true) keys.push(key)
-    }
-    return keys
-  }
-
-  private nullishKeys(): Set<TKey> {
-    return new Set([
+    const nullish = new Set([
       ...this.originalIndex.lookup(`eq`, null),
       ...this.originalIndex.lookup(`eq`, undefined),
     ])
+    const keep = (key: TKey) => filterFn?.(key) ?? true
+    const accept = (key: TKey) => !nullish.has(key) && keep(key)
+    const values = (count: number) =>
+      count <= 0
+        ? []
+        : from == null
+          ? this.originalIndex.takeReversedFromEnd(count, accept)
+          : this.originalIndex.takeReversed(count, from, accept)
+    const nulls = (count: number) =>
+      count <= 0
+        ? []
+        : [...nullish].sort(compareKeys).filter(keep).slice(0, count)
+    if (from === null) return this.nullsFirst ? values(n) : []
+    if (this.nullsFirst && from === undefined) {
+      const head = nulls(n)
+      return [...head, ...values(n - head.length)]
+    }
+    const keys = values(n)
+    return this.nullsFirst ? keys : [...keys, ...nulls(n - keys.length)]
   }
 
   // All operations below delegate to the original index

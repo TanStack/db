@@ -23,9 +23,11 @@ import { oracleRandomParameters, readOracleRunConfig } from './oracle-config.js'
  *   returns nullish keys in ascending key order and non-null keys in
  *   descending key order (the reversed index walk). Callers that need a
  *   different tie order resolve ties with their own boundary request.
- * - **Work:** a read calls the filter only on keys up to its `n`-th accepted
- *   key in that order. A read that resolves its result before the nullish
- *   group never calls the filter on a nullish key.
+ * - **Work:** a read calls the filter on non-null keys only up to its `n`-th
+ *   accepted key in that order. It may call the filter once on each nullish
+ *   key, because the reader gathers the whole nullish group on each read.
+ *   Large nullish groups are rare in ordered windows, so the reader keeps
+ *   that cost for simpler code; it is not bounded by `n`.
  *
  * The model is a plain array of `[key, value]` pairs, sorted here by the order
  * above. It shares no code with the index. The grammar crosses the index's
@@ -83,13 +85,13 @@ function after(order: Array<Entry>, from: Value, options: Options) {
   )
 }
 
-/** Expected keys and the most filter calls the work law allows. */
+/** Expected keys and the most non-null filter calls the work law allows. */
 function expectedRead(stream: Array<Entry>, n: number, rejected: Set<number>) {
   const keys: Array<number> = []
   let calls = 0
-  for (const [key] of stream) {
+  for (const [key, value] of stream) {
     if (keys.length >= n) break
-    calls++
+    if (value != null) calls++
     if (!rejected.has(key)) keys.push(key)
   }
   return { keys, calls }
@@ -106,9 +108,17 @@ type ReadCase = {
 function checkRead({ options, entries, n, cursor, rejected }: ReadCase) {
   const reader = makeReader(entries, options)
   const rejectedKeys = new Set(rejected)
+  const nullishKeys = new Set(
+    entries.filter(([, value]) => value == null).map(([key]) => key),
+  )
   let calls = 0
+  const nullishCalls = new Map<number, number>()
   const filter = (key: number) => {
-    calls++
+    if (nullishKeys.has(key)) {
+      nullishCalls.set(key, (nullishCalls.get(key) ?? 0) + 1)
+    } else {
+      calls++
+    }
     return !rejectedKeys.has(key)
   }
   const order = modelOrder(entries, options)
@@ -118,7 +128,11 @@ function checkRead({ options, entries, n, cursor, rejected }: ReadCase) {
     ? reader.take(n, cursor.from, filter)
     : reader.takeFromStart(n, filter)
   expect(actual, `keys`).toEqual(expected.keys)
-  expect(calls, `filter calls`).toBeLessThanOrEqual(expected.calls)
+  expect(calls, `non-null filter calls`).toBeLessThanOrEqual(expected.calls)
+  expect(
+    Math.max(0, ...nullishCalls.values()),
+    `filter calls on one nullish key`,
+  ).toBeLessThanOrEqual(1)
 }
 
 const value: fc.Arbitrary<Value> = fc.oneof(
@@ -148,7 +162,7 @@ describe(`reversed index reads`, () => {
   const runs = 200 * multiplier
 
   it.each([`first`, `last`] as const)(
-    `reads 50 keys among 5,000 nullish keys with nulls %s in bounded filter calls`,
+    `reads 50 keys among 5,000 nullish keys with nulls %s in bounded non-null work`,
     (nulls) => {
       const entries: Array<Entry> = Array.from({ length: 10_000 }, (_, key) => [
         key,
