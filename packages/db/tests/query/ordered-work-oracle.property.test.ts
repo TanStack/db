@@ -4345,9 +4345,10 @@ describe(`ordered source work oracle`, () => {
  * deletes over ids 0..29 and ranks 0..15, NaN, or null, so ties, deletes
  * inside and at the edge of the window, and rank changes across its boundary
  * all occur. The observation point is after each change and a flush. Work is
- * counted as the rows the source delivers to the query's subscription, so
- * snapshot reads and index refills both count. Scan is counted as the rows
- * the Collection's `entries()` yields.
+ * counted twice, and both counts are bounded: rows a local snapshot returns
+ * from the Collection's `currentStateAsChanges`, and rows the source delivers
+ * to the query's subscription, which include index refills. Scan is counted
+ * as the rows the Collection's `entries()` yields.
  * This owner does not cover on-demand providers, which have their own work
  * laws above.
  */
@@ -4500,7 +4501,15 @@ async function checkEagerWindow(testCase: EagerCase): Promise<void> {
   if (testCase.indexed) {
     source.createIndex((row) => row.rank, { indexType: BTreeIndex })
   }
-  // Work: rows the source delivers to the query, from snapshots and refills.
+  // Work has two counts: rows a local snapshot reads for the query, and rows
+  // the source delivers to it, which include index refills. Both are bounded.
+  let read = 0
+  const readSnapshot = source.currentStateAsChanges.bind(source)
+  source.currentStateAsChanges = ((...args) => {
+    const result = readSnapshot(...args)
+    read += result?.length ?? 0
+    return result
+  }) as typeof source.currentStateAsChanges
   let delivered = 0
   const subscribe = source.subscribeChanges.bind(source)
   source.subscribeChanges = ((callback, options) =>
@@ -4537,8 +4546,14 @@ async function checkEagerWindow(testCase: EagerCase): Promise<void> {
   const workBound = (boundary: Array<number>): number | undefined => {
     if (!testCase.indexed || testCase.terms !== 1) return undefined
     if (boundary.some((rank) => rank === null || Number.isNaN(rank))) return
-    const ties = [...rows.values()].filter((row) =>
-      boundary.some((rank) => Object.is(rank, row.rank)),
+    // Rows in a tie group, of two or more equal ranks, at a boundary value.
+    const all = [...rows.values()]
+    const ties = all.filter(
+      (row) =>
+        boundary.some((rank) => Object.is(rank, row.rank)) &&
+        all.some(
+          (other) => other.id !== row.id && Object.is(other.rank, row.rank),
+        ),
     ).length
     return 2 * window + ties + 1
   }
@@ -4549,6 +4564,9 @@ async function checkEagerWindow(testCase: EagerCase): Promise<void> {
     )
     const initialBound = workBound(boundaryRanks(rows, testCase))
     if (initialBound !== undefined) {
+      expect(read, `rows read by the initial load`).toBeLessThanOrEqual(
+        initialBound,
+      )
       expect(
         delivered,
         `rows delivered by the initial load`,
@@ -4558,6 +4576,7 @@ async function checkEagerWindow(testCase: EagerCase): Promise<void> {
       const before = rows.get(command.id)
       const boundaryBefore = boundaryRanks(rows, testCase)
       const sizeBefore = rows.size
+      read = 0
       delivered = 0
       scanned = 0
       if (command.type === `delete`) {
@@ -4610,6 +4629,7 @@ async function checkEagerWindow(testCase: EagerCase): Promise<void> {
         ...boundaryRanks(rows, testCase),
       ])
       if (bound !== undefined) {
+        expect(read, `rows read by step ${step}`).toBeLessThanOrEqual(bound)
         expect(delivered, `rows delivered by step ${step}`).toBeLessThanOrEqual(
           bound,
         )
