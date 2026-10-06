@@ -77,8 +77,7 @@ interface PendingSyncedTransaction<
 }
 
 export type PendingMetadataWrite =
-  | { type: `set`; value: unknown }
-  | { type: `delete` }
+  { type: `set`; value: unknown } | { type: `delete` }
 
 /** The row metadata a sync operation writes unless the adapter set it explicitly. */
 export function automaticRowMetadataWrite(

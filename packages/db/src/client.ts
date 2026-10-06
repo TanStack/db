@@ -238,14 +238,12 @@ export function collectionOptions(
   }
 
   const reusableFactory:
-    | ((client: DbClient) => AnyCollectionConfig)
-    | undefined = config
+    ((client: DbClient) => AnyCollectionConfig) | undefined = config
     ? (config as CollectionConfigWithFactory<AnyCollectionConfig>)[
         collectionConfigFactory
       ]
     : (explicitFactory as
-        | ((client: DbClient) => AnyCollectionConfig)
-        | undefined)
+        ((client: DbClient) => AnyCollectionConfig) | undefined)
 
   let owner: DbClient | undefined
   const materialize = (client: DbClient): AnyCollectionConfig => {
