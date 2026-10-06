@@ -118,6 +118,15 @@ export class CollectionConfigBuilder<
   // Reference to the live query collection for error state transitions
   public liveQueryCollection?: Collection<TResult, any, any>
 
+  /**
+   * Whether this live query has an admitted consumer in its current sync run:
+   * an admitted subscriber or a preload. Until then it reads its sources
+   * without starting network.
+   */
+  isDemandAdmitted(): boolean {
+    return this.liveQueryCollection?._isDemandAdmitted() ?? true
+  }
+
   private windowFn: ((options: WindowOptions) => void) | undefined
   private readonly initialWindow: WindowOptions | undefined
   private currentWindow: WindowOptions | undefined
@@ -1247,6 +1256,13 @@ export class CollectionConfigBuilder<
 
       const subscription = collectionSubscriber.subscribe()
       this.subscriptions[sourceId] = subscription
+      if (!subscription.isAdmitted()) {
+        // This live query has no admitted consumer yet. Its source reads stay
+        // local until one arrives, then the held network work proceeds.
+        syncState.unsubscribeCallbacks.add(
+          this.liveQueryCollection!._onDemandAdmitted(() => subscription.admit()),
+        )
+      }
 
       const lazyCallbacks = this.lazySourcesCallbacks[sourceId]
       if (lazyCallbacks) {

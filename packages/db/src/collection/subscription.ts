@@ -75,6 +75,14 @@ type CollectionSubscriptionOptions = {
   /** Callback for subset-load failures scoped to this subscription. */
   onLoadSubsetError?: (event: SubscriptionLoadSubsetErrorEvent) => void
   truncateReplayPublication?: TruncateReplayPublicationControl
+  /**
+   * Whether this subscription's consumer may start network. A live query
+   * subscribes to its sources unadmitted until it is admitted itself. Defaults
+   * to admitted.
+   */
+  admitted?: boolean
+  /** Called once when an unadmitted subscription is admitted. */
+  onAdmit?: () => void
 }
 
 type TruncateReplayPublicationControl = Readonly<{
@@ -197,6 +205,7 @@ export class CollectionSubscription
   >()
   private truncateReplacementPending = false
   private unsubscribed = false
+  private admitted: boolean
 
   public get status(): SubscriptionStatus {
     return this._status
@@ -212,6 +221,7 @@ export class CollectionSubscription
     private options: CollectionSubscriptionOptions,
   ) {
     super()
+    this.admitted = options.admitted !== false
     if (options.onUnsubscribe) {
       this.on(`unsubscribed`, options.onUnsubscribe)
     }
@@ -271,6 +281,25 @@ export class CollectionSubscription
         })
       },
     )
+  }
+
+  /** Whether this subscription's consumer may start network. */
+  public isAdmitted(): boolean {
+    return this.admitted
+  }
+
+  /**
+   * Admit this subscription: its consumer may now start network. Admission
+   * may start an idle source's sync run, then acquires the on-demand subsets
+   * that were held as detached demand while the subscription was unadmitted.
+   */
+  public admit(): void {
+    if (this.admitted || this.unsubscribed) return
+    this.admitted = true
+    this.options.onAdmit?.()
+    if (this.collection.status !== `idle`) {
+      this.restartDetachedDemands(this.collection._sync.getSyncRunGeneration())
+    }
   }
 
   /** Detach logical demand from work owned by a discarded sync run. */
@@ -999,6 +1028,8 @@ export class CollectionSubscription
     }
     if (
       this.collection.status === `cleaned-up` ||
+      // An unadmitted consumer holds on-demand acquisition until admission.
+      (!this.admitted && this.collection.config.syncMode === `on-demand`) ||
       // Ready/error callbacks can run before sync returns its loader. Idle
       // deferred starts still acquire through the sync manager's queue.
       (this.collection.config.syncMode === `on-demand` &&

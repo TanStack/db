@@ -5,6 +5,7 @@ import {
   createSingleRowRefProxy,
   toExpression,
 } from '../query/builder/ref-proxy.js'
+import { getBuilderFromConfig } from '../query/live/collection-registry.js'
 import { CollectionSubscription } from './subscription.js'
 import type { StandardSchemaV1 } from '@standard-schema/spec'
 import type { ChangeMessage, SubscribeChangesOptions } from '../types'
@@ -49,6 +50,11 @@ export class CollectionChangesManager<
       }
     | undefined
   private layoutChangeListeners = new Set<() => void>()
+  // Whether a consumer that may start network reached this Collection in its
+  // current sync run: an admitted subscriber or a preload. A live query keeps
+  // its own source subscriptions unadmitted until then.
+  private demandAdmitted = false
+  private demandAdmissionListeners = new Set<() => void>()
 
   /**
    * Monotonic revision of the collection's visible state, advanced once per
@@ -308,7 +314,8 @@ export class CollectionChangesManager<
 
     // Acquire ownership only after all fallible option validation and
     // user-provided predicate compilation has completed.
-    this.addSubscriber()
+    const admitted = opts.admitted !== false
+    this.addSubscriber(admitted)
 
     let subscription: CollectionSubscription | undefined
     const setupState = { closed: false }
@@ -316,6 +323,8 @@ export class CollectionChangesManager<
       subscription = new CollectionSubscription(this.collection, callback, {
         ...opts,
         whereExpression,
+        admitted,
+        onAdmit: () => this.admitSubscriber(),
         onUnsubscribe: () => {
           setupState.closed = true
           this.removeSubscriber()
@@ -362,21 +371,62 @@ export class CollectionChangesManager<
     return subscription
   }
 
+  /** Whether a consumer that may start network reached this sync run. */
+  public isDemandAdmitted(): boolean {
+    return this.demandAdmitted
+  }
+
+  /** Listen for this Collection's admission in its current sync run. */
+  public onDemandAdmitted(listener: () => void): () => void {
+    this.demandAdmissionListeners.add(listener)
+    return () => this.demandAdmissionListeners.delete(listener)
+  }
+
   /**
-   * Increment the active subscribers count and start sync if needed
+   * Record that a consumer that may start network reached this Collection,
+   * through an admitted subscriber or a preload. A live query listens for this
+   * to admit its own source subscriptions.
    */
-  private addSubscriber(): void {
+  public admitDemand(): void {
+    if (this.demandAdmitted) return
+    this.demandAdmitted = true
+    for (const listener of [...this.demandAdmissionListeners]) listener()
+  }
+
+  /** An unadmitted subscription was admitted: it may now start this sync. */
+  private admitSubscriber(): void {
+    // Admit first, so a sync run that starts now builds admitted demand.
+    this.admitDemand()
+    this.startSyncIfStopped()
+  }
+
+  private startSyncIfStopped(): void {
+    if (
+      this.lifecycle.status === `cleaned-up` ||
+      this.lifecycle.status === `idle`
+    ) {
+      this.sync.startSync()
+    }
+  }
+
+  /**
+   * Increment the active subscribers count and start sync if needed. An
+   * unadmitted subscriber may not start network. It still starts a live
+   * query, whose sync run reads local memory and stays unadmitted itself, but
+   * it does not start any other Collection's sync run.
+   */
+  private addSubscriber(admitted: boolean): void {
     const previousSubscriberCount = this.activeSubscribersCount
     this.activeSubscribersCount++
     this.lifecycle.cancelGCTimer()
 
     try {
-      // Start sync if collection was cleaned up
-      if (
-        this.lifecycle.status === `cleaned-up` ||
-        this.lifecycle.status === `idle`
-      ) {
-        this.sync.startSync()
+      if (admitted) {
+        // Admit first, so a sync run that starts now builds admitted demand.
+        this.admitDemand()
+        this.startSyncIfStopped()
+      } else if (getBuilderFromConfig(this.collection.config)) {
+        this.startSyncIfStopped()
       }
     } catch (error) {
       this.activeSubscribersCount = previousSubscriberCount
@@ -416,6 +466,9 @@ export class CollectionChangesManager<
    * This can be called manually or automatically by garbage collection
    */
   public cleanup(): void {
+    // Admission belongs to one sync run. A restarted Collection waits for a
+    // new admitted consumer before it may start network.
+    this.demandAdmitted = false
     // Cleanup clears visible state without publishing row changes. Detached
     // consumers may miss every status transition before an empty restart.
     this.stateRevision++

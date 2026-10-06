@@ -263,6 +263,9 @@ export class CollectionSubscriber<
       whereExpression,
       onStatusChange,
       onLoadSubsetError,
+      // A live query never starts network on its own: it reads its sources
+      // unadmitted until it is admitted itself.
+      admitted: this.collectionConfigBuilder.isDemandAdmitted(),
       truncateReplayPublication: this.truncateReplayPublicationControl(),
       orderBy: hints.orderBy,
       limit: hints.limit,
@@ -302,6 +305,9 @@ export class CollectionSubscriber<
       whereExpression,
       onStatusChange,
       onLoadSubsetError,
+      // A live query never starts network on its own: it reads its sources
+      // unadmitted until it is admitted itself.
+      admitted: this.collectionConfigBuilder.isDemandAdmitted(),
       truncateReplayPublication: this.truncateReplayPublicationControl(() => {
         // Recovery favors a simple, authoritative rebuild over resuming a
         // fragile cursor. The retained full-source demand is replayed on later

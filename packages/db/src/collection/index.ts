@@ -662,7 +662,19 @@ export class CollectionImpl<
    * Multiple concurrent calls will share the same promise
    */
   public preload(): Promise<void> {
+    // Preload asks for this Collection's data, so it may start network.
+    this._changes.admitDemand()
     return this._sync.preload()
+  }
+
+  /** @internal Whether a consumer that may start network reached this sync run. */
+  public _isDemandAdmitted(): boolean {
+    return this._changes.isDemandAdmitted()
+  }
+
+  /** @internal Listen for admission in this Collection's current sync run. */
+  public _onDemandAdmitted(listener: () => void): () => void {
+    return this._changes.onDemandAdmitted(listener)
   }
 
   /**

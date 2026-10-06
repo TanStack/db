@@ -1094,6 +1094,14 @@ export interface SubscribeChangesOptions<
   /** Pre-compiled expression for filtering changes */
   whereExpression?: BasicExpression<boolean>
   /**
+   * Whether this subscriber may start network. An unadmitted subscriber keeps
+   * the Collection alive and reads its local rows, but starts no sync run and
+   * holds on-demand acquisition until `subscription.admit()`. A live query
+   * subscribes to its sources unadmitted until it is admitted itself.
+   * @internal
+   */
+  admitted?: boolean
+  /**
    * Listener for subscription status changes.
    * Registered BEFORE any snapshot is requested, ensuring no status transitions are missed.
    * @internal
