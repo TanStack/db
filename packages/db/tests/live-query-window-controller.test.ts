@@ -1477,4 +1477,52 @@ describe(`createLiveQueryWindowController`, () => {
     expect(snap.pages).toEqual([])
     controller.dispose()
   })
+
+  it(`publishes no non-ready value when it subscribes after GC reclaimed a collection started before commit`, async () => {
+    // An adapter starts its window collection during render and subscribes at
+    // commit. If the commit arrives after the 50 ms unsubscribed GC floor, the
+    // collection has been cleaned up. Subscribing restarts it; for an eager,
+    // loaded source the restart is synchronous, so the subscriber must never
+    // see a cleaned-up, loading, or truncated value. This drives the controller
+    // directly, because a test DOM cannot hold a React commit; the restart work
+    // itself still happens twice.
+    const source = makeSource()
+    const collection = createLiveQueryCollection({
+      query: (q) =>
+        q
+          .from({ r: source })
+          .orderBy(({ r }) => r.n, `asc`)
+          .limit(3)
+          .offset(0),
+      startSync: true,
+      gcTime: 1,
+    })
+    const controller = createLiveQueryWindowController(collection, {
+      pageSize: 2,
+    })
+    const view = () => {
+      const snapshot = controller.getSnapshot()
+      return {
+        status: snapshot.status,
+        ids: snapshot.data.map((row) => row.id),
+        hasNextPage: snapshot.hasNextPage,
+      }
+    }
+    const ready = { status: `ready`, ids: [`1`, `2`], hasNextPage: true }
+    expect(view()).toEqual(ready)
+
+    await new Promise((resolve) => setTimeout(resolve, 200))
+    expect(collection.status).toBe(`cleaned-up`)
+
+    const published: Array<ReturnType<typeof view>> = []
+    const unsubscribe = controller.subscribe(() => published.push(view()))
+    expect(view()).toEqual(ready)
+    await new Promise((resolve) => setTimeout(resolve, 20))
+    for (const value of published) expect(value).toEqual(ready)
+    expect(view()).toEqual(ready)
+
+    unsubscribe()
+    controller.dispose()
+    await source.cleanup()
+  })
 })

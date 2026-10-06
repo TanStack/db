@@ -40,6 +40,7 @@ import { describe, expect, it, vi } from 'vitest'
 import { Component, Suspense } from 'react'
 import { DbProvider } from '../src/DbProvider'
 import { useLiveQuery } from '../src/useLiveQuery'
+import { useLiveInfiniteQuery } from '../src/useLiveInfiniteQuery'
 import { useLiveSuspenseQuery } from '../src/useLiveSuspenseQuery'
 import { mockSyncCollectionOptions } from '../../db/tests/utils'
 import type { Context, QueryBuilder } from '@tanstack/db'
@@ -572,5 +573,191 @@ describe(`React source ID reuse`, () => {
           </Suspense>,
         ),
     )
+  })
+})
+
+/**
+ * ## useLiveInfiniteQuery
+ *
+ * The infinite hook derives its identity the same way, and keeps the window
+ * collection built by its latest render for a second render before commit.
+ * That cache is keyed by derived identity, which names sources by ID, so the
+ * same law applies: a different same-ID source must reject before the hook
+ * can publish the old source's rows, from a committed or a suspended render.
+ * This driver reuses the model above with the bounded histories that
+ * distinguish the law from a hash-only check.
+ */
+describe(`React source ID reuse: useLiveInfiniteQuery`, () => {
+  const useInfinite = (current: ReturnType<typeof source>) =>
+    useLiveInfiniteQuery(
+      (q) =>
+        q.from({ settings: current }).orderBy(({ settings }) => settings.rank),
+      { pageSize: 1 },
+    )
+
+  it(`rejects a different active source with the same ID before exposing stale rows`, async () => {
+    const first = source(`settings`, `first`)
+    const second = source(`settings`, `second`)
+    const hook = renderHook(({ current }) => useInfinite(current), {
+      initialProps: { current: first },
+    })
+    await waitFor(() =>
+      expect(hook.result.current.data[0]?.value).toBe(`first`),
+    )
+    checkRerender([{ source: first }], { source: second }, () =>
+      hook.rerender({ current: second }),
+    )
+  })
+
+  it(`rejects a previously used ID after another source`, async () => {
+    const first = source(`settings`, `first`)
+    const other = source(`other`, `other`)
+    const second = source(`settings`, `second`)
+    const hook = renderHook(({ current }) => useInfinite(current), {
+      initialProps: { current: first },
+    })
+    await waitFor(() =>
+      expect(hook.result.current.data[0]?.value).toBe(`first`),
+    )
+    act(() => hook.rerender({ current: other }))
+    await waitFor(() =>
+      expect(hook.result.current.data[0]?.value).toBe(`other`),
+    )
+    checkRerender(
+      [{ source: first }, { source: other }],
+      { source: second },
+      () => hook.rerender({ current: second }),
+    )
+  })
+
+  it(`accepts the same source object and a different source ID`, async () => {
+    const first = source(`settings`, `first`)
+    const other = source(`other`, `other`)
+    const hook = renderHook(({ current }) => useInfinite(current), {
+      initialProps: { current: first },
+    })
+    await waitFor(() =>
+      expect(hook.result.current.data[0]?.value).toBe(`first`),
+    )
+    checkRerender([{ source: first }], { source: first }, () =>
+      hook.rerender({ current: first }),
+    )
+    checkRerender([{ source: first }], { source: other }, () =>
+      hook.rerender({ current: other }),
+    )
+    await waitFor(() =>
+      expect(hook.result.current.data[0]?.value).toBe(`other`),
+    )
+  })
+
+  it(`rejects same-ID reuse after a suspended render starts a source query`, async () => {
+    const first = source(`first`, `first`)
+    const abandoned = source(`candidate`, `abandoned`)
+    const replacement = source(`candidate`, `replacement`)
+    const never = new Promise<void>(() => {})
+    const View = ({
+      current,
+      suspend,
+    }: {
+      current: typeof first
+      suspend: boolean
+    }) => {
+      const { data } = useInfinite(current)
+      if (suspend) throw never
+      return <div>{data[0]?.value}</div>
+    }
+    const root = render(
+      <Suspense fallback={<div>Loading</div>}>
+        <View current={first} suspend={false} />
+      </Suspense>,
+    )
+    await waitFor(() => expect(root.getByText(`first`)).toBeDefined())
+    root.rerender(
+      <Suspense fallback={<div>Loading</div>}>
+        <View current={abandoned} suspend={true} />
+      </Suspense>,
+    )
+    checkRerender(
+      [{ source: first }, { source: abandoned }],
+      { source: replacement },
+      () =>
+        root.rerender(
+          <Suspense fallback={<div>Loading</div>}>
+            <View current={replacement} suspend={false} />
+          </Suspense>,
+        ),
+    )
+  })
+
+  it(`releases a shared descriptor's sync deferral when a collision tears down the hook`, async () => {
+    const client = new DbClient()
+    const first = source(`settings`, `first`)
+    const replacement = source(`settings`, `replacement`)
+    let syncStarts = 0
+    const descriptor = collectionOptions(
+      `infinite-shared-after-collision`,
+      () => ({
+        id: `infinite-shared-after-collision`,
+        getKey: (row: Row) => row.id,
+        sync: {
+          sync: ({ begin, write, commit, markReady }) => {
+            syncStarts++
+            begin()
+            write({
+              type: `insert`,
+              value: { id: `one`, value: `shared`, rank: 1 },
+            })
+            commit()
+            markReady()
+          },
+        },
+      }),
+    )
+    const consoleError = vi.spyOn(console, `error`).mockImplementation(() => {})
+    function View({
+      current,
+      includeShared,
+    }: {
+      current: typeof first
+      includeShared: boolean
+    }) {
+      useLiveInfiniteQuery(
+        (q) =>
+          includeShared
+            ? q
+                .from({ settings: current })
+                .join({ shared: descriptor }, ({ settings, shared }) =>
+                  eq(settings.id, shared.id),
+                )
+                .orderBy(({ settings }) => settings.rank)
+            : q
+                .from({ settings: current })
+                .orderBy(({ settings }) => settings.rank),
+        { pageSize: 1, client },
+      )
+      return <div>Query</div>
+    }
+    try {
+      const root = render(
+        <TestErrorBoundary>
+          <View current={first} includeShared={false} />
+        </TestErrorBoundary>,
+      )
+      await act(async () => {})
+      root.rerender(
+        <TestErrorBoundary>
+          <View current={replacement} includeShared={true} />
+        </TestErrorBoundary>,
+      )
+      expect(root.getByText(`Rejected`)).toBeDefined()
+      expect(syncStarts).toBe(0)
+      const shared = client.collection(descriptor)
+      const reader = renderHook(() => useLiveQuery(shared))
+      await act(async () => {})
+      expect(reader.result.current.data[0]?.value).toBe(`shared`)
+      expect(syncStarts).toBe(1)
+    } finally {
+      consoleError.mockRestore()
+    }
   })
 })

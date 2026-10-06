@@ -5,6 +5,7 @@ import {
   createLiveQueryWindowController,
   fetchNextLiveQueryWindowPage,
   getLiveQueryWindowCollectionWarning,
+  liveQueryWindowMatches,
   normalizeLiveQueryWindowPageSize,
   resolveLiveQueryWindowInput,
   shouldPreserveLiveQueryWindowPageCount,
@@ -154,6 +155,8 @@ export function useLiveInfiniteQuery<TContext extends Context>(
       ? Math.max(1, previousController.getSnapshot().pages.length)
       : 1
     const initialPageCount = canPreservePageCount ? previousPageCount : 1
+    // The peek-ahead window for every retained page.
+    const requiredLimit = initialPageCount * pageSize + 1
 
     previousInput = input
     previousDependencies = [...dependencies]
@@ -171,6 +174,12 @@ export function useLiveInfiniteQuery<TContext extends Context>(
         validatedCollection = collection
         if (warning) console.warn(warning)
       }
+      // Like useLiveQuery, start a supplied collection during construction when
+      // its rows are already correct. A window the controller must still adjust
+      // waits for the subscription.
+      if (liveQueryWindowMatches(collection, requiredLimit)) {
+        collection.startSyncImmediate()
+      }
       const currentController = createLiveQueryWindowController(collection, {
         pageSize,
         initialPageParam,
@@ -181,11 +190,16 @@ export function useLiveInfiniteQuery<TContext extends Context>(
     }
 
     const collection = createLiveQueryCollection({
-      query: input.query.limit(pageSize + 1).offset(0),
-      startSync: false,
+      // Size the window for every retained page, so a collection that starts
+      // syncing now never publishes fewer rows than the controller's pages.
+      query: input.query.limit(requiredLimit).offset(0),
       gcTime: DEFAULT_GC_TIME_MS,
     })
     assertLiveQueryWindowManyResult(collection)
+    // Like useLiveQuery, start sync during construction once the query is
+    // valid, so a synchronously loaded source is published on the first render
+    // instead of an empty idle snapshot before the subscribing effect attaches.
+    collection.startSyncImmediate()
     const currentController = createLiveQueryWindowController(collection, {
       pageSize,
       initialPageParam,

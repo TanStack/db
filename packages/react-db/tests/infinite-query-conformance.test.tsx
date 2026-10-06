@@ -25,6 +25,7 @@ import type {
   InfiniteQueryConfig,
   InfiniteQueryDriver,
   InfiniteQueryHandle,
+  InfiniteQueryObservation,
 } from '../../db/tests/conformance/infinite-contract'
 import type { QueryBuild } from '../../db/tests/conformance/contract'
 
@@ -58,7 +59,32 @@ function makePrecreated(build: QueryBuild) {
   }
 }
 
-function makeHandle(hook: RenderHookResult<any, any>): InfiniteQueryHandle {
+type Observations = Array<InfiniteQueryObservation>
+
+function observe(result: any): InfiniteQueryObservation {
+  return {
+    status: result.status,
+    ids: result.data.map((row: { id: string }) => row.id),
+    pages: result.pages.map((page: Array<{ id: string }>) =>
+      page.map((row) => row.id),
+    ),
+    hasNextPage: result.hasNextPage,
+  }
+}
+
+// React publishes at each layout commit. renderHook can coalesce a commit
+// before it returns, so only a layout effect sees every published value.
+function useRecorded<T>(result: T, log: Observations): T {
+  useLayoutEffect(() => {
+    log.push(observe(result))
+  })
+  return result
+}
+
+function makeHandle(
+  hook: RenderHookResult<any, any>,
+  log: Observations,
+): InfiniteQueryHandle {
   return {
     current() {
       const result = hook.result.current
@@ -73,6 +99,7 @@ function makeHandle(hook: RenderHookResult<any, any>): InfiniteQueryHandle {
         collection: result.collection,
       }
     },
+    observations: () => log,
     fetchNextPage() {
       let request!: Promise<void>
       act(() => {
@@ -98,8 +125,12 @@ function makeHandle(hook: RenderHookResult<any, any>): InfiniteQueryHandle {
 }
 
 function mount(build: QueryBuild, config: InfiniteQueryConfig = {}) {
+  const log: Observations = []
   return makeHandle(
-    renderHook(() => useLiveInfiniteQuery(build as any, config as any)),
+    renderHook(() =>
+      useRecorded(useLiveInfiniteQuery(build as any, config as any), log),
+    ),
+    log,
   )
 }
 
@@ -108,12 +139,18 @@ function mountControllable<P>(
   initial: P,
   config: InfiniteQueryConfig = {},
 ) {
+  const log: Observations = []
   const hook = renderHook(
     ({ param }: { param: P }) =>
-      useLiveInfiniteQuery((q: any) => build(q, param), config as any, [param]),
+      useRecorded(
+        useLiveInfiniteQuery((q: any) => build(q, param), config as any, [
+          param,
+        ]),
+        log,
+      ),
     { initialProps: { param: initial } },
   )
-  const handle = makeHandle(hook)
+  const handle = makeHandle(hook, log)
   return {
     ...handle,
     setParamSync(param: P) {
@@ -123,8 +160,12 @@ function mountControllable<P>(
 }
 
 function mountCollection(collection: any, config: InfiniteQueryConfig = {}) {
+  const log: Observations = []
   return makeHandle(
-    renderHook(() => useLiveInfiniteQuery(collection, config as any)),
+    renderHook(() =>
+      useRecorded(useLiveInfiniteQuery(collection, config as any), log),
+    ),
+    log,
   )
 }
 
@@ -132,11 +173,13 @@ function mountCollectionControllable(
   initial: any,
   config: InfiniteQueryConfig = {},
 ) {
+  const log: Observations = []
   const hook = renderHook(
-    ({ collection }) => useLiveInfiniteQuery(collection, config as any),
+    ({ collection }) =>
+      useRecorded(useLiveInfiniteQuery(collection, config as any), log),
     { initialProps: { collection: initial } },
   )
-  const handle = makeHandle(hook)
+  const handle = makeHandle(hook, log)
   return {
     ...handle,
     replaceCollectionSync(collection: any) {
@@ -149,12 +192,13 @@ function mountConfigControllable(
   build: QueryBuild,
   initial: InfiniteQueryConfig,
 ) {
+  const log: Observations = []
   const hook = renderHook(
     ({ config }: { config: InfiniteQueryConfig }) =>
-      useLiveInfiniteQuery(build as any, config as any),
+      useRecorded(useLiveInfiniteQuery(build as any, config as any), log),
     { initialProps: { config: initial } },
   )
-  const handle = makeHandle(hook)
+  const handle = makeHandle(hook, log)
   return {
     ...handle,
     setConfigSync(config: InfiniteQueryConfig) {
@@ -168,12 +212,16 @@ function mountInputControllable(
   build: QueryBuild,
   config: InfiniteQueryConfig = {},
 ) {
+  const log: Observations = []
   const hook = renderHook(
     ({ kind }: { kind: `collection` | `query` }) =>
-      useLiveInfiniteQuery(
-        kind === `collection` ? collection : build,
-        config as any,
-        [kind],
+      useRecorded(
+        useLiveInfiniteQuery(
+          kind === `collection` ? collection : build,
+          config as any,
+          [kind],
+        ),
+        log,
       ),
     {
       initialProps: {
@@ -181,7 +229,7 @@ function mountInputControllable(
       },
     },
   )
-  const handle = makeHandle(hook)
+  const handle = makeHandle(hook, log)
   return {
     ...handle,
     setInputKindSync(kind: `collection` | `query`) {
@@ -209,7 +257,7 @@ const reactInfiniteDriver: InfiniteQueryDriver = {
 
 runInfiniteQuerySuite(reactInfiniteDriver)
 
-it(`publishes query-function pages in the first non-idle layout commit after mount and dependency replacement`, async () => {
+it(`publishes query-function pages on the first layout commit after mount and dependency replacement`, async () => {
   const source = makeSource(
     Array.from({ length: 10 }, (_, index) => ({
       id: String(index + 1),
@@ -246,7 +294,9 @@ it(`publishes query-function pages in the first non-idle layout commit after mou
 
   try {
     await waitFor(() => expect(hook.result.current.status).toBe(`ready`))
-    expect(commits.find(({ status }) => status !== `idle`)).toEqual({
+    // The very first commit already carries data: no empty idle flash precedes
+    // it, matching useLiveQuery for a synchronously loaded source.
+    expect(commits[0]).toEqual({
       ranks: [10, 9, 8],
       status: `ready`,
     })
@@ -255,7 +305,9 @@ it(`publishes query-function pages in the first non-idle layout commit after mou
     await waitFor(() =>
       expect(hook.result.current.data.map(({ rank }) => rank)).toEqual([10, 9]),
     )
-    expect(commits.find(({ status }) => status !== `idle`)).toEqual({
+    // Replacing the dependency builds a fresh eager collection, so its first
+    // commit is ready too — no idle flash on re-query.
+    expect(commits[0]).toEqual({
       ranks: [10, 9],
       status: `ready`,
     })

@@ -20,6 +20,16 @@
  * and scenario grammar are shared. The overlapping window-operation law below
  * uses each driver's DB controller directly: hooks expose fetchNextPage but not
  * controller preload, so that cell does not claim framework scheduling reach.
+ *
+ * Two publication laws read every value a binding published, not only settled
+ * state. For a source that loads synchronously, the first value is ready with
+ * the first page. Every ready value equals the source prefix for its own page
+ * count, with matching page boundaries and continuation. A ready value with
+ * fewer rows than its pages, or with a false end of list, breaks the second law
+ * even when the settled state recovers. Each driver records values at its
+ * framework's own publication cut. Pre-commit work, such as a React render that
+ * never commits, belongs to the drivers: Vue's setup is its commit, so that cut
+ * has no shared form.
  */
 import type { Collection, LiveQueryWindowController } from '@tanstack/db'
 import type { QueryBuild, SourceHandle } from './contract'
@@ -40,8 +50,25 @@ export interface InfiniteQueryResult {
   collection: Collection<any, any, any>
 }
 
+/** One value the binding published, reduced to what the publication laws read. */
+export interface InfiniteQueryObservation {
+  status: string
+  ids: Array<string>
+  pages: Array<Array<string>>
+  hasNextPage: boolean
+}
+
 export interface InfiniteQueryHandle {
   current: () => InfiniteQueryResult
+  /**
+   * Every value the binding published since mount, oldest first, recorded at
+   * the framework's own publication cut: each React layout commit, each Vue
+   * pre-flush, and the Svelte construction value plus each pre-effect run. The
+   * first entry is the first paint. `current()` cannot serve these laws: React
+   * can coalesce a commit before `mount` returns, and a settled read hides an
+   * intermediate value that a consumer rendered.
+   */
+  observations: () => ReadonlyArray<InfiniteQueryObservation>
   /** Invoke a page fetch and wait until its observable request settles. */
   fetchNextPage: () => Promise<void>
   flush: () => Promise<void>

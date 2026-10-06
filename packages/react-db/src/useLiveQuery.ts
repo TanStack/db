@@ -2,8 +2,6 @@
 
 import { useRef, useSyncExternalStore } from 'react'
 import {
-  BaseQueryBuilder,
-  IR,
   UnhashableQueryIRError,
   createLiveQueryObserver,
   deepEquals,
@@ -16,6 +14,13 @@ import {
 import { useOptionalDbClient } from './DbProvider'
 import { setLiveQueryResultInfo } from './live-query-internals'
 import { shouldWarnInDevelopment } from './development'
+import {
+  claimSourceIds,
+  createSourceIdBindings,
+  getPreparedSources,
+  getSourceObjectToken,
+  resumeSyncStarts,
+} from './source-id-bindings'
 import type {
   Collection,
   CollectionImpl,
@@ -56,36 +61,6 @@ const suspenseCollectionsByClient = new WeakMap<
   DbClient,
   Map<string, SuspenseCollectionEntry>
 >()
-const sourceObjectTokens = new WeakMap<object, number>()
-let nextSourceObjectToken = 0
-
-function getSourceObjectToken(source: object): number {
-  let id = sourceObjectTokens.get(source)
-  if (id === undefined) {
-    id = ++nextSourceObjectToken
-    sourceObjectTokens.set(source, id)
-  }
-  return id
-}
-
-function getPreparedSources(preparedValue: unknown): Array<{ id: string }> {
-  if (isCollection(preparedValue)) return [preparedValue]
-  const query =
-    preparedValue instanceof BaseQueryBuilder
-      ? preparedValue
-      : preparedValue &&
-          typeof preparedValue === `object` &&
-          `query` in preparedValue &&
-          preparedValue.query instanceof BaseQueryBuilder
-        ? preparedValue.query
-        : undefined
-  return query
-    ? IR.collectCollectionSources(query._getQuery()).map(
-        ({ collection }) => collection,
-      )
-    : []
-}
-
 function getSourceQualifiedSuspenseKey(
   preparedValue: unknown,
   queryHash: string,
@@ -751,10 +726,7 @@ function createHookInstance(dbClient: DbClient | undefined) {
     deferredCollections: new Set<
       CollectionImpl<any, string | number, any, any, any>
     >(),
-    sourceIds: {
-      unscoped: new Map<string, number>(),
-      byClient: new WeakMap<DbClient, Map<string, number>>(),
-    },
+    sourceIds: createSourceIdBindings(),
     observer: null as LiveQueryObserver<object, string | number> | null,
     queryHash: undefined as string | undefined,
     suspenseKey: undefined as string | undefined,
@@ -778,19 +750,8 @@ function useLiveQueryImpl(
 
   const instanceRef = useRef<ReturnType<typeof createHookInstance> | null>(null)
   const instance = (instanceRef.current ??= createHookInstance(dbClient))
-  const resumeDeferredCollections = () => {
-    const collections = Array.from(instance.deferredCollections)
-    instance.deferredCollections.clear()
-    const errors: Array<unknown> = []
-    for (const collection of collections) {
-      try {
-        collection._resumeSyncStart()
-      } catch (error) {
-        errors.push(error)
-      }
-    }
-    if (errors.length) throw errors[0]
-  }
+  const resumeDeferredCollections = () =>
+    resumeSyncStarts(instance.deferredCollections)
 
   const queryKey = !inputIsCollection
     ? getExplicitQueryKey(configOrQueryOrCollection)
@@ -873,25 +834,13 @@ function useLiveQueryImpl(
     deps === undefined &&
     preparedQueryValue !== unpreparedQueryValue
   ) {
-    const prior = dbClient
-      ? instance.sourceIds.byClient.get(dbClient)
-      : instance.sourceIds.unscoped
-    const seen = new Map<string, number>()
-    for (const source of getPreparedSources(preparedQueryValue)) {
-      const token = getSourceObjectToken(source)
-      const previous = seen.get(source.id) ?? prior?.get(source.id)
-      if (previous !== undefined && previous !== token) {
-        // The rejected render must not retain a shared Collection's sync deferral.
-        resumeDeferredCollections()
-        throw new Error(
-          `[useLiveQuery] Source Collection "${source.id}" was replaced by a different Collection with the same ID while this hook is mounted. Unmount the hook and clean up its previous source and client scope before reusing the ID.`,
-        )
-      }
-      seen.set(source.id, token)
-    }
-    const bindings = prior ?? new Map<string, number>()
-    for (const [id, token] of seen) bindings.set(id, token)
-    if (dbClient) instance.sourceIds.byClient.set(dbClient, bindings)
+    claimSourceIds(
+      instance.sourceIds,
+      preparedQueryValue,
+      dbClient,
+      `useLiveQuery`,
+      resumeDeferredCollections,
+    )
   }
 
   const canReuseSuspenseKey =
