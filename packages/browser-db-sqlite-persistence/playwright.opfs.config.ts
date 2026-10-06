@@ -10,6 +10,7 @@ export default defineConfig({
     `shared-driver-fairness-oracle.opfs.spec.ts`,
     `remote-subset-two-tab.opfs.spec.ts`,
     `open-timeout.opfs.spec.ts`,
+    `hydration-commit-oracle.opfs.spec.ts`,
   ],
   timeout: 60_000,
   fullyParallel: false,

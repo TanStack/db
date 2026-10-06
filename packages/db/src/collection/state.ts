@@ -59,7 +59,11 @@ interface PendingSyncedTransaction<
   truncate?: boolean
   truncateMarkReady?: boolean
   rowMetadataWrites: Map<TKey, PendingMetadataWrite>
-  explicitRowMetadataWriteKeys?: Set<TKey>
+  /** The last explicit write per key, after `position` operations. */
+  explicitRowMetadataWrites: Map<
+    TKey,
+    { position: number; write: PendingMetadataWrite }
+  >
   collectionMetadataWrites: Map<string, PendingMetadataWrite>
   /** Resolves after application and rejects if canceled before application. */
   applied: Deferred<void>
@@ -73,7 +77,8 @@ interface PendingSyncedTransaction<
   invalidationError?: Error
 }
 
-type PendingMetadataWrite = { type: `set`; value: unknown } | { type: `delete` }
+export type PendingMetadataWrite =
+  { type: `set`; value: unknown } | { type: `delete` }
 
 /** The row metadata a sync operation writes unless the adapter set it explicitly. */
 export function automaticRowMetadataWrite(
@@ -942,19 +947,19 @@ export class CollectionStateManager<
   private rebuildAutomaticRowMetadataWrites(
     transaction: PendingSyncedTransaction<TOutput, TKey>,
   ): void {
-    const explicitKeys = transaction.explicitRowMetadataWriteKeys ?? new Set()
-    const operationKeys = new Set(
-      transaction.operations.map((operation) => operation.key as TKey),
-    )
-    for (const key of operationKeys) {
-      if (!explicitKeys.has(key)) transaction.rowMetadataWrites.delete(key)
-    }
-    for (const operation of transaction.operations) {
+    // A rebuild can reclassify an operation. Last write wins: each key's
+    // last explicit write holds unless a later operation writes the key.
+    const explicit = transaction.explicitRowMetadataWrites
+    const writes = transaction.rowMetadataWrites
+    for (const operation of transaction.operations)
+      writes.delete(operation.key as TKey)
+    for (const [key, last] of explicit) writes.set(key, last.write)
+    transaction.operations.forEach((operation, position) => {
       const key = operation.key as TKey
-      if (explicitKeys.has(key)) continue
+      if (position < (explicit.get(key)?.position ?? 0)) return
       const metadataWrite = automaticRowMetadataWrite(operation)
-      if (metadataWrite) transaction.rowMetadataWrites.set(key, metadataWrite)
-    }
+      if (metadataWrite) writes.set(key, metadataWrite)
+    })
   }
 
   /**

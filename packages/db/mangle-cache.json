@@ -380,5 +380,6 @@
   "emitLoadingSubsetChange": "gk",
   "overlayActiveTransactions": "gl",
   "completeLoadSubsetOperation": "gm",
-  "readyFailureSink": "gn"
+  "readyFailureSink": "gn",
+  "writeExplicitRowMetadata": "a8"
 }

@@ -29,7 +29,7 @@ import type {
   SyncMetadataApi,
 } from '../types'
 import type { CollectionImpl } from './index.js'
-import type { CollectionStateManager } from './state'
+import type { CollectionStateManager, PendingMetadataWrite } from './state'
 import type { CollectionLifecycleManager } from './lifecycle'
 import type { CollectionEventsManager } from './events.js'
 import type { LiveQueryCollectionUtils } from '../query/live/collection-config-builder.js'
@@ -228,7 +228,7 @@ export class CollectionSyncManager<
               layoutChanged: false,
               operations: [],
               rowMetadataWrites: new Map(),
-              explicitRowMetadataWriteKeys: new Set(),
+              explicitRowMetadataWrites: new Map(),
               collectionMetadataWrites: new Map(),
               applied,
               duplicateKeyError: (key) => this.createDuplicateKeyError(key),
@@ -335,7 +335,7 @@ export class CollectionSyncManager<
             // Clear all operations from the current transaction
             pendingTransaction.operations = []
             pendingTransaction.rowMetadataWrites.clear()
-            pendingTransaction.explicitRowMetadataWriteKeys?.clear()
+            pendingTransaction.explicitRowMetadataWrites.clear()
             pendingTransaction.invalidationError = undefined
             // Intentionally preserve collectionMetadataWrites across truncate.
             // Collection-scoped metadata (for example persisted resume/reset
@@ -471,6 +471,19 @@ export class CollectionSyncManager<
     return pendingTransaction
   }
 
+  /** Record an explicit row metadata write and its place among the operations. */
+  private writeExplicitRowMetadata(
+    key: TKey,
+    write: PendingMetadataWrite,
+  ): void {
+    const pendingTransaction = this.getActivePendingSyncTransaction()
+    pendingTransaction.explicitRowMetadataWrites.set(key, {
+      position: pendingTransaction.operations.length,
+      write,
+    })
+    pendingTransaction.rowMetadataWrites.set(key, write)
+  }
+
   private createSyncMetadataApi(
     isCurrentSync: () => boolean,
   ): SyncMetadataApi<TKey> {
@@ -492,21 +505,12 @@ export class CollectionSyncManager<
           return this.state.syncedMetadata.get(key)
         },
         set: (key, metadata) => {
-          if (!isCurrentSync()) return
-          const pendingTransaction = this.getActivePendingSyncTransaction()
-          pendingTransaction.explicitRowMetadataWriteKeys?.add(key)
-          pendingTransaction.rowMetadataWrites.set(key, {
-            type: `set`,
-            value: metadata,
-          })
+          if (isCurrentSync())
+            this.writeExplicitRowMetadata(key, { type: `set`, value: metadata })
         },
         delete: (key) => {
-          if (!isCurrentSync()) return
-          const pendingTransaction = this.getActivePendingSyncTransaction()
-          pendingTransaction.explicitRowMetadataWriteKeys?.add(key)
-          pendingTransaction.rowMetadataWrites.set(key, {
-            type: `delete`,
-          })
+          if (isCurrentSync())
+            this.writeExplicitRowMetadata(key, { type: `delete` })
         },
       },
       collection: {

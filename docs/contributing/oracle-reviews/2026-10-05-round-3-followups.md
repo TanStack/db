@@ -12,6 +12,11 @@ stays, with witnesses. #2030 on `main` made the other two unnecessary.
 metadata writes through a rebuild, equivalent within legal histories. Reaching
 it needed a canceled earlier transaction, which the grammar did not generate.
 
+**Correction, 2026-10-06.** The outcome below is wrong. A transaction begun
+inside an open one can still commit first, and the rebuild then reclassifies
+the open one's inserts. `main` loses last-write-wins there. See
+[`2026-10-06-nested-begin-metadata-rebuild.md`](2026-10-06-nested-begin-metadata-rebuild.md).
+
 **Outcome: made unnecessary by #2030.** A first revision of this branch added a
 canceled lane to the metadata composition oracle. An earlier held transaction
 deleted key 1, the open transaction wrote against that projection, and the
@@ -83,7 +88,8 @@ A high-effort review found nine items.
 5. The ready failure sink restored an outer sink that cannot exist. Removed.
 6. A cache comment described the removed delete. Resolved by the revert.
 7. The rebuild replay had a simpler equivalent form. Adopted, then dropped
-   with the rebuild change after #2030.
+   with the rebuild change after #2030. The 2026-10-06 nested-begin fix
+   restores it.
 8. A hydration transaction rebuilt through a cancellation could lose its
    metadata. #2030 marks hydration metadata as explicit, which fixes it on
    `main`.

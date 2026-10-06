@@ -24,10 +24,11 @@ import {
   PersistedCollectionDurabilityError,
   toPersistedCollectionDurabilityError,
 } from './errors'
-import { serializeSQLiteBigInt } from './sqlite-value'
+import { serializeSQLiteBigInt, serializeSQLiteTemporal } from './sqlite-value'
 import {
   toProcessLocalLoadSubsetOptions,
   toTransportedLoadSubsetOptions,
+  validateRemoteSubsetOptions,
 } from './remote-subset-wire'
 import {
   reportRemoteSubsetOwnerError,
@@ -543,6 +544,12 @@ export interface PersistedCollectionCoordinator {
     collectionId: string,
     mutations: Array<PersistedMutationEnvelope>,
   ) => Promise<ApplyLocalMutationsResponse>
+  /**
+   * Applies a committed transaction through the supplied adapter when present.
+   * Wrappers must forward this leader-local loan: scheduling it again can wait
+   * on the hydration that is awaiting this call. Never serialize or retain the
+   * loan after the call; ordinary work uses the registered collection adapter.
+   */
   requestApplyCommittedTx: (
     collectionId: string,
     tx: PersistedTx,
@@ -887,8 +894,9 @@ export class SingleProcessCoordinator implements PersistedCollectionCoordinator 
   public async requestApplyCommittedTx(
     collectionId: string,
     tx: PersistedTx,
+    scopedAdapter?: HydrationPersistenceAdapter,
   ): Promise<ApplyCommittedTxResponse> {
-    const adapter = this.collectionAdapters.get(collectionId)
+    const adapter = scopedAdapter ?? this.collectionAdapters.get(collectionId)
     if (!adapter) {
       throw new InvalidPersistedCollectionConfigError(
         `SingleProcessCoordinator has no persistence adapter configured for collection "${collectionId}"`,
@@ -1151,6 +1159,9 @@ function toStableSerializable(value: unknown): unknown {
     case `undefined`:
       return undefined
   }
+
+  const temporal = serializeSQLiteTemporal(value)
+  if (temporal) return temporal
 
   if (value instanceof Date) {
     return value.toISOString()
@@ -1730,7 +1741,6 @@ class PersistedCollectionRuntime<
     await this.hydrateSubsetUnsafe(
       baseline,
       {
-        requestRemoteEnsure: false,
         lifecycleGeneration,
         bindKeySetEvidence: true,
       },
@@ -1866,6 +1876,8 @@ class PersistedCollectionRuntime<
     const truncateGeneration = this.sourceTruncateGeneration
     const routeRemoteDemandDuringHydration =
       this.canRouteRemoteDemandThroughCoordinator()
+    // Wire admission failures are permanent input errors, not transport retries.
+    if (routeRemoteDemandDuringHydration) validateRemoteSubsetOptions(options)
     this.activeSubsets.set(subsetKey, options)
     const appliedCursor = this.appliedReceiptSequence
     try {
@@ -1875,9 +1887,6 @@ class PersistedCollectionRuntime<
             this.hydrateSubsetUnsafe(
               options,
               {
-                requestRemoteEnsure:
-                  this.mode === `sync-present` &&
-                  !routeRemoteDemandDuringHydration,
                 lifecycleGeneration,
                 requestLocalLoadFailure: true,
                 rejectBufferedReplayFailure: true,
@@ -1896,6 +1905,14 @@ class PersistedCollectionRuntime<
       })
       if (lifecycleGeneration !== this.lifecycleGeneration) return
       await this.waitForAppliedReceiptsAfter(appliedCursor)
+      // Leadership can change while hydration waits. Validate newly remote
+      // demand inside the admission cleanup boundary, before retry can own it.
+      if (
+        !routeRemoteDemandDuringHydration &&
+        this.canRouteRemoteDemandThroughCoordinator()
+      ) {
+        validateRemoteSubsetOptions(options)
+      }
     } catch (error) {
       if (this.activeSubsets.get(subsetKey) === options) {
         this.activeSubsets.delete(subsetKey)
@@ -2056,7 +2073,6 @@ class PersistedCollectionRuntime<
         this.hydrateSubsetUnsafe(
           options,
           {
-            requestRemoteEnsure: false,
             lifecycleGeneration,
             rejectBufferedReplayFailure: true,
           },
@@ -2329,7 +2345,6 @@ class PersistedCollectionRuntime<
   private async hydrateSubsetUnsafe(
     options: LoadSubsetOptions,
     config: {
-      requestRemoteEnsure: boolean
       lifecycleGeneration: number
       bindKeySetEvidence?: boolean
       requestLocalLoadFailure?: boolean
@@ -2390,10 +2405,6 @@ class PersistedCollectionRuntime<
       if (config.lifecycleGeneration !== this.lifecycleGeneration) return
       replayFailure = await this.flushQueuedHydrationTransactionsUnsafe(adapter)
       if (config.lifecycleGeneration !== this.lifecycleGeneration) return
-
-      if (config.requestRemoteEnsure && !replayFailure) {
-        this.queueRemoteSubsetEnsure(options)
-      }
     } catch (error) {
       if (config.requestLocalLoadFailure && !rowsLoaded) {
         // Keep admitting source work to the hydration queue while recovery
@@ -3262,6 +3273,9 @@ class PersistedCollectionRuntime<
     const subsetKey = this.getSubsetKey(options)
     if (this.activeSubsets.get(subsetKey) !== options) return
 
+    // A previously local acquisition can become remote after an ownership
+    // change. Recovery must reject permanent wire errors before retry owns it.
+    validateRemoteSubsetOptions(options)
     this.pendingRemoteSubsetEnsures.set(subsetKey, options)
     void this.flushPendingRemoteSubsetEnsures()
   }
@@ -3808,9 +3822,8 @@ class PersistedCollectionRuntime<
     indexMetadata: CollectionIndexMetadata,
     adapter: HydrationPersistenceAdapter,
   ): Promise<boolean> {
-    const spec = this.buildPersistedIndexSpec(indexMetadata)
-
     try {
+      const spec = this.buildPersistedIndexSpec(indexMetadata)
       await adapter.ensureIndex(
         this.collectionId,
         indexMetadata.signature,
@@ -3827,9 +3840,8 @@ class PersistedCollectionRuntime<
     indexMetadata: CollectionIndexMetadata,
     completedLocally: boolean,
   ): Promise<void> {
-    const spec = this.buildPersistedIndexSpec(indexMetadata)
-
     try {
+      const spec = this.buildPersistedIndexSpec(indexMetadata)
       await this.persistence.coordinator.requestEnsurePersistedIndex(
         this.collectionId,
         indexMetadata.signature,
