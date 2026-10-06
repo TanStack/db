@@ -7,15 +7,15 @@ Their laws inform this suite; their host guarantees do not transfer to fake-IDB.
 
 ## Owners and checkpoints
 
-| Owner                               | Independent judgment                                                                                               | Production path and checkpoint                                                                                                                                                                                                                   |
-| ----------------------------------- | ------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| persistence-oracle.test.ts          | Two arrays of authored rows, keyed by store and typed key                                                          | Automatic CRUD, manual acceptance, clear/import, cleanup/restart and fresh restore. Compare public, subscription, peer, export, raw durable rows and version ownership after settlement and explicit message delivery.                           |
-| settlement-oracle.test.ts           | Before/after snapshots selected by application decision; source deletion survives removal of an optimistic overlay | Held handlers, resolve/reject, clone failures at either position in a batch, IDB aborts, populated restore, remote delete/clear during pending local deletion. Observe handler entry, settlement, source delivery, successful suffix and reopen. |
-| transport-oracle.test.ts            | Authored durable operation order; union of disjoint writes; exclusion of self/foreign messages                     | Delayed CRUD and replacement, inactive utility writers, administrative deletion, and initial-load cleanup/restart. Compare raw durable rows, every affected Collection and fresh restore after controlled delivery.                              |
-| compatibility-oracle.test.ts        | Authored rows per store; independent DbClient sync runs; untouched-store version ownership                         | Crypto capability, reusable descriptors and injected factories without ambient IndexedDB globals. Compare public, peer and durable rows after writes, cleanup, replacement and restore.                                                          |
-| wrapper.test.ts                     | Callback success AND native transaction completion are separate obligations                                        | Request success followed by abort; callback settlement after transaction completion; exact error identity, multi-store rollback, request values, upgrades and deletion.                                                                          |
-| wrapper-settlement-oracle.test.ts | Independent callback/native outcome conjunction, unaffected by observer registration | Complete/abort × five observer registrations × immediate/held callback; native terminal and callback-release checkpoints, authored durable rows and exact user observer events. Canceled/uncanceled request-error neighbors distinguish progress from outcome. |
-| api.test.ts and indexeddb.test-d.ts | Configuration, schema and type contracts                                                                           | Synchronous validation, reserved metadata store, transformed import inputs, duplicate rejection, utilities and precise API types.                                                                                                                |
+| Owner                               | Independent judgment                                                                                               | Production path and checkpoint                                                                                                                                                                                                                                 |
+| ----------------------------------- | ------------------------------------------------------------------------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| persistence-oracle.test.ts          | Two arrays of authored rows, keyed by store and typed key                                                          | Automatic CRUD, manual acceptance, clear/import, cleanup/restart and fresh restore. Compare public, subscription, peer, export, raw durable rows and version ownership after settlement and explicit message delivery.                                         |
+| settlement-oracle.test.ts           | Before/after snapshots selected by application decision; source deletion survives removal of an optimistic overlay | Held handlers, resolve/reject, clone failures at either position in a batch, IDB aborts, populated restore, remote delete/clear during pending local deletion. Observe handler entry, settlement, source delivery, successful suffix and reopen.               |
+| transport-oracle.test.ts            | Authored durable operation order; union of disjoint writes; exclusion of self/foreign messages                     | Delayed CRUD and replacement, inactive utility writers, administrative deletion, and initial-load cleanup/restart. Compare raw durable rows, every affected Collection and fresh restore after controlled delivery.                                            |
+| compatibility-oracle.test.ts        | Authored rows per store; independent DbClient sync runs; untouched-store version ownership                         | Crypto capability, reusable descriptors and injected factories without ambient IndexedDB globals. Compare public, peer and durable rows after writes, cleanup, replacement and restore.                                                                        |
+| wrapper.test.ts                     | Callback success AND native transaction completion are separate obligations                                        | Request success followed by abort; callback settlement after transaction completion; exact error identity, multi-store rollback, request values, upgrades and deletion.                                                                                        |
+| wrapper-settlement-oracle.test.ts   | Independent callback/native outcome conjunction, unaffected by observer registration                               | Complete/abort × five observer registrations × immediate/held callback; native terminal and callback-release checkpoints, authored durable rows and exact user observer events. Canceled/uncanceled request-error neighbors distinguish progress from outcome. |
+| api.test.ts and indexeddb.test-d.ts | Configuration, schema and type contracts                                                                           | Synchronous validation, reserved metadata store, transformed import inputs, duplicate rejection, utilities and precise API types.                                                                                                                              |
 
 harness.ts owns setup, raw IDB requests, controlled transport and cleanup. It
 supplies the provider and transport, never expected product results. It removes
@@ -457,12 +457,48 @@ The current evidence is recorded in
 [`2026-10-05-indexeddb-law-audit.md`](../../../docs/contributing/oracle-reviews/2026-10-05-indexeddb-law-audit.md).
 An accounting-complete review is not proof of every cross-tab history.
 
-The deletion authority law remains open. Retaining an old native success
-callback across recreation and a second, blocked deletion exposes a lost
-database-lifetime distinction: the recreated peer has now observed native
-deletion, but the old receipt cannot complete that newer deletion. Its public
-rows must remain until matching native completion. Current production fails
-this comparison in the controlled owner and Chromium, Firefox and WebKit.
-The earlier connection-scoped witness does not establish this broader law.
-A persisted database identity or a changed peer-publication policy requires
-the pending maintainer decision before implementation.
+That earlier audit exposed a deletion-authority counterexample: an old native
+receipt could clear a recreated peer during a newer blocked deletion. The later
+approved administrative-deletion contract removed notification-based deletion
+publication. The TLA+ refinement owners above now receive that repair; the
+historical law-audit record preserves the earlier RED evidence.
+
+## Donor value, initialization and package receiving extension
+
+`compatibility-oracle.test.ts` extends the same authored per-store array model
+with six legal names, prefix neighbors and two/three competing first opens.
+First-open calls reach the native queue before any call settles, against an
+absent name. Held real transactions distinguish restore admission from readiness.
+Same-name and independent-name controls check schema, convergence, restore and
+later upgrade. Different same-version schema declarations still do not union.
+
+`persistence-values-oracle.test.ts` is a receiving companion to the settled
+persistence owner. `structured-clone-oracle.ts` owns its authored value descriptions
+and realm-local observations. Date, odd ArrayBuffer, offset Uint8Array/DataView,
+BigInt64Array, Blob and a nested array pass through unrelated scalar updates,
+peers, export/import and fresh restore. Each shape crosses insert/import rejection
+at first/middle/last nested uncloneable values, with raw row and metadata rollback
+and a valid suffix. Inputs never share mutable objects with the expected result.
+Mutable post-submission ownership, cycles and custom prototypes remain outside
+this bounded law.
+
+`e2e/value-oracle.spec.ts` receives those value and first-open premises through
+native IndexedDB and BroadcastChannel. Observations inspect rich values inside
+the page before serialization. Raw native Blob preparation fails in the local
+Playwright WebKit provider; those two cells prove matching adapter rejection,
+empty durable/public rows and a healthy suffix, not Blob preservation. The runner
+attaches that limitation. It remains open until a Blob-capable WebKit provider
+receives the preservation histories. Other engines receive the full corpus.
+
+`packed-consumer.test.ts` is an integration companion, not a Collection oracle.
+It installs actual adapter/core/dependency tarballs into a temporary consumer and
+executes ESM and CommonJS persist/reopen paths. Missing-export controls prove
+workspace resolution cannot rescue missing files. `e2e/packed-consumer.spec.ts`
+bundles that consumer with no aliases and runs it in the three native engines.
+Completed builds are reused; the ordinary runtime suite does not build or pack.
+
+The [port audit](../../../docs/contributing/oracle-reviews/2026-10-06-indexeddb-donor-port.md)
+records three assertion-killed production mutants and the finite coverage bounds.
+It keeps the known core numeric/string same-transaction collision separate from
+this adapter's legal-name coverage. No production or product-policy change is
+required by the four transferred dimensions.

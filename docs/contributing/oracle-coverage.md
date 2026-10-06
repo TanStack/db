@@ -1384,12 +1384,44 @@ permit commit from uncanceled errors that abort. The original wrapper owner keep
 callback failure identity and late rejection after native commit. Provider scope
 is fake-IDB; no physical-crash or arbitrary event-suppression guarantee is added.
 
+### IndexedDB donor coverage receiving extension
+
 The [sighted donor survey](oracle-reviews/2026-10-06-indexeddb-donor-survey.md)
-records remaining receiving work without claiming a product failure: DP08 belongs
-to compatibility (simultaneous first opens with identical declarations), DP09 to
-persistence (clone-preserving rich values through unrelated updates and restore),
-DP10 to compatibility (metamorphic legal store/database names), and DP17 to the
-package-consumer lane (packed runtime and browser-bundler consumption). Each needs
-the distinguishing witness named in the survey; none is supplied by the new
-observer-composition matrix. Native abnormal termination, mutable-value ownership,
-and worker host support retain the survey's explicit contract-decision boundaries.
+now has these receiving owners. The [port audit](oracle-reviews/2026-10-06-indexeddb-donor-port.md)
+records calibration, validation and the remaining limits.
+
+- DP08: `compatibility-oracle.test.ts` starts two/three native opens against
+  absent same/independent names, with identical complete declarations. It checks
+  schema, held restore/readiness, disjoint writes, convergence, restore and a later
+  upgrade with no orphan blocker. `e2e/value-oracle.spec.ts` receives three-open
+  histories in all engines. These histories settle all opens before writing;
+  they do not impose an order on open callbacks or union conflicting declarations.
+- DP09: `persistence-values-oracle.test.ts` extends the persistence owner with
+  independent tagged descriptions in `structured-clone-oracle.ts`. Seven value
+  shapes cross scalar updates, peer delivery, export/import, first/middle/last
+  nested clone rejection, metadata rollback and fresh descriptor restore.
+  Type, offsets, backing bytes, dates and Blob content are observed inside the
+  receiving realm. Native receiving is in `e2e/value-oracle.spec.ts`.
+- DP10: the compatibility owner substitutes six legal database/store names into
+  the same authored multi-store history. Prefix neighbors, typed keys in separate
+  transactions, version values, peers and restore distinguish routing mistakes.
+  Native first-open cases receive prototype and Unicode store names. A broader
+  native renaming/import/clear matrix remains unclaimed.
+- DP17: `packed-consumer.test.ts` supplements declaration tests with installed
+  tarball ESM/CJS consumers and broken-export controls. The browser spec builds
+  the same consumer without source aliases and executes it in all three engines.
+  Tarball overrides pin the installed dependency closure; registry range selection,
+  older Node/tool versions and every public export remain outside this smoke test.
+
+The local Playwright WebKit provider rejects Blob preparation with `UnknownError`
+even through raw IndexedDB. Its Blob-containing cells compare exact rejection,
+unchanged rows and a successful Date suffix. They do not establish WebKit Blob
+preservation. The native value owner still needs a provider that accepts Blob
+storage to receive those two preservation histories. Chromium and Firefox receive
+all seven; fake-IDB receives all seven with the controlled message fixture.
+
+Native abnormal closure (DP02), mutable-value capture/ownership (DP12), and worker
+host support (DP13) retain explicit contract-decision boundaries. The existing
+core typed-key payload collision (HC005) remains with its core owner; this port
+reproduced it and uses separate typed-key transactions to isolate name routing.
+No ordering, ownership, fallback or durability policy changes in this extension.

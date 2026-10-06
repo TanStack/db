@@ -18,7 +18,10 @@ export default mergeConfig(
       },
     },
     test: {
-      exclude: ['tests/portable-declarations.test.ts'],
+      exclude: [
+        'tests/portable-declarations.test.ts',
+        'tests/packed-consumer.test.ts',
+      ],
       typecheck: { tsconfig: './tsconfig.test.json' },
     },
   }),

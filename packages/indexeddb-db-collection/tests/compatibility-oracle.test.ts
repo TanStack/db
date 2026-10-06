@@ -29,6 +29,7 @@ import { IDBFactory } from 'fake-indexeddb'
 import { expect, it, vi } from 'vitest'
 import { createIndexedDB, indexedDBCollectionOptions } from '../src'
 import { Channel, assertRows, readStore, seed, withHarness } from './harness'
+import { holdStore, observeTransactions } from './idb-driver'
 import type { IndexedDBInstance } from '../src'
 import type { Row } from './harness'
 
@@ -381,5 +382,234 @@ for (const sharedId of [false, true]) {
         })
       })
     }
+  }
+}
+
+// Renaming a legal database/store does not change row ownership. The same
+// authored history runs under each substitution; typed keys, prefix neighbors
+// and untouched version values distinguish routing from accidental aliasing.
+// Empty and reserved store names remain outside this grammar (api.test.ts).
+const legalNames = [
+  'items',
+  'constructor',
+  '__proto__',
+  'toString',
+  '雪/é',
+  'a:b[0]',
+]
+for (const name of legalNames) {
+  it(`preserves store isolation under legal name ${name}`, async () => {
+    await withHarness(async (h) => {
+      const stores = [name, name + '-neighbor', 'anchor']
+      const db = await createIndexedDB({
+        name,
+        version: 1,
+        stores,
+        idbFactory: new IDBFactory(),
+      })
+      h.descriptors.push(db)
+      const peerDb = await createIndexedDB({
+        name,
+        version: 1,
+        stores,
+        idbFactory: db.idbFactory,
+      })
+      h.descriptors.push(peerDb)
+      const writers = await Promise.all(
+        stores.map((store) => h.open(store, { db })),
+      )
+      const peers = await Promise.all(
+        stores.map((store) => h.open(store, { db: peerDb })),
+      )
+      const expected = new Map<string, Array<Row>>(
+        stores.map((store) => [store, []]),
+      )
+      async function checkpoint() {
+        await Channel.deliver()
+        await expectDurableStores(db, expected)
+        for (const [index, store] of stores.entries()) {
+          assertRows(
+            writers[index]!.values(),
+            expected.get(store)!,
+            'renamed writer',
+          )
+          assertRows(
+            peers[index]!.values(),
+            expected.get(store)!,
+            'renamed peer',
+          )
+          const restored = await h.open(store, { db: peerDb })
+          assertRows(restored.values(), expected.get(store)!, 'renamed restore')
+          await restored.cleanup()
+        }
+      }
+      for (const [index, store] of stores.entries()) {
+        const rows = [
+          { id: 0, name: store },
+          { id: '0', name: store + ':string' },
+        ]
+        // Separate transactions isolate name routing from the already tracked
+        // core same-transaction numeric/string key collision (HC005).
+        for (const row of rows)
+          await writers[index]!.insert({ ...row }).isPersisted.promise
+        expected.set(store, rows)
+      }
+      await checkpoint()
+      const versions = await readStore(db, '_versions')
+      await writers[0]!.update(0, (draft) => {
+        draft.name = 'changed'
+      }).isPersisted.promise
+      expected.set(name, [
+        { id: 0, name: 'changed' },
+        { id: '0', name: name + ':string' },
+      ])
+      await checkpoint()
+      await writers[0]!.utils.importData([{ id: 2, name: 'replacement' }])
+      expected.set(name, [{ id: 2, name: 'replacement' }])
+      await checkpoint()
+      await writers[0]!.utils.clearObjectStore()
+      expected.set(name, [])
+      await checkpoint()
+      const remaining = await readStore(db, '_versions')
+      for (const [index, key] of versions.keys.entries()) {
+        if (Array.isArray(key) && key[0] !== name) {
+          const next = remaining.keys.findIndex(
+            (candidate) => JSON.stringify(candidate) === JSON.stringify(key),
+          )
+          expect(next, 'neighbor metadata survives').toBeGreaterThanOrEqual(0)
+          expect(
+            remaining.rows[next],
+            'neighbor metadata is unchanged',
+          ).toEqual(versions.rows[index])
+        }
+      }
+    })
+  })
+}
+
+// First-open grammar: two/three calls, same absent name or independent absent
+// names, identical complete schema. The harness's own database is irrelevant:
+// a fresh injected factory proves none of these target names exists beforehand.
+// Raw open admission is recorded before any promise settles. A native storage
+// blocker then distinguishes restore admission from Collection readiness.
+for (const count of [2, 3]) {
+  for (const sharedName of [true, false]) {
+    it(`initializes ${count} concurrent first opens with shared name ${sharedName}`, async () => {
+      await withHarness(async (h) => {
+        const factory = new IDBFactory()
+        const stores = ['items', 'other']
+        const upgrades: Array<number> = []
+        const open = factory.open.bind(factory)
+        let admitted = 0,
+          settled = 0,
+          blocked = 0
+        vi.spyOn(factory, 'open').mockImplementation((...args) => {
+          admitted++
+          const request = open(...args)
+          request.addEventListener('upgradeneeded', (event) =>
+            upgrades.push(event.oldVersion),
+          )
+          request.addEventListener('blocked', () => {
+            blocked++
+          })
+          return request
+        })
+        const pending = Array.from({ length: count }, (_, index) =>
+          createIndexedDB({
+            name: sharedName ? 'first' : `first-${index}`,
+            version: 1,
+            stores,
+            idbFactory: factory,
+          }).then((db) => {
+            settled++
+            h.descriptors.push(db)
+            return db
+          }),
+        )
+        expect(admitted, 'all native opens admitted before awaiting').toBe(
+          count,
+        )
+        expect(settled, 'no open settled during admission').toBe(0)
+        const descriptors = await Promise.all(pending)
+        expect(upgrades, 'only absent names initialize').toEqual(
+          Array(sharedName ? 1 : count).fill(0),
+        )
+        for (const db of descriptors)
+          expect([...db.db.objectStoreNames]).toEqual([
+            '_versions',
+            'items',
+            'other',
+          ])
+        const unique = sharedName ? descriptors.slice(0, 1) : descriptors
+        const gates = unique.map((db) => holdStore(db.db))
+        for (const gate of gates) h.disposers.push(() => gate.release())
+        await Promise.all(gates.map((gate) => gate.started))
+        const observations = descriptors.map((db) => observeTransactions(db.db))
+        const collections = descriptors.map((db) => h.make('items', { db }))
+        const ready = collections.map((collection) => collection.preload())
+        await vi.waitFor(() => {
+          for (const observation of observations)
+            expect(
+              observation.entries.some((entry) => entry.mode === 'readonly'),
+            ).toBe(true)
+        })
+        for (const collection of collections)
+          expect(collection.status).toBe('loading')
+        await Promise.all(gates.map((gate) => gate.release()))
+        await Promise.all(ready)
+        for (const [index, collection] of collections.entries()) {
+          expect(collection.status).toBe('ready')
+          expect(
+            observations[index]!.entries.some(
+              (entry) =>
+                entry.mode === 'readonly' && entry.status === 'complete',
+            ),
+          ).toBe(true)
+          observations[index]!.restore()
+        }
+        const rows = collections.map((_, id) => ({ id, name: `writer-${id}` }))
+        await Promise.all(
+          collections.map(
+            (collection, index) =>
+              collection.insert({ ...rows[index]! }).isPersisted.promise,
+          ),
+        )
+        await Channel.deliver()
+        for (const [index, collection] of collections.entries()) {
+          const expected = sharedName ? rows : [rows[index]!]
+          assertRows(collection.values(), expected, 'first-open convergence')
+          assertRows(
+            (await readStore<Row>(descriptors[index]!, 'items')).rows,
+            expected,
+            'first-open durable',
+          )
+          const restored = await h.open('items', { db: descriptors[index]! })
+          assertRows(restored.values(), expected, 'first-open restore')
+        }
+        // A later native upgrade must complete with all managed descriptors
+        // still present. A leaked unmanaged initial handle would block it.
+        for (const db of unique) {
+          const upgraded = await createIndexedDB({
+            name: db.name,
+            version: 2,
+            stores: [...stores, 'added'],
+            idbFactory: factory,
+          })
+          h.descriptors.push(upgraded)
+          expect([...upgraded.db.objectStoreNames]).toEqual([
+            '_versions',
+            'added',
+            'items',
+            'other',
+          ])
+        }
+        expect(
+          blocked,
+          'managed initial handles do not orphan an upgrade blocker',
+        ).toBe(0)
+        for (const collection of collections)
+          expect(collection.status).toBe('error')
+      })
+    })
   }
 }

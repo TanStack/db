@@ -317,3 +317,14 @@ Final regression checks after the observer repair: 2,428 adapter runtime/type
 cases, all 156 native browser cases, changed-file lint, formatting and whitespace
 checks passed. The earlier merged-core 300 cases and 12 declaration consumers
 remain separate receipts; this repair changes neither core nor exported types.
+
+
+## Receiving update: obvious coverage port
+
+The prior disposition table is the frozen research result. The subsequent
+[port audit](2026-10-06-indexeddb-donor-port.md) records implementation of DP08,
+DP09, DP10 and DP17, with three assertion-killed production mutants and packed
+resolver controls. DP09's native WebKit Blob-preservation cells remain unproved:
+the local raw provider rejects Blob preparation, so those cells now establish
+truthful rejection and a healthy suffix. No new recovery or ownership policy was
+adopted. DP02, DP12 and DP13 still require the stated product decisions.
