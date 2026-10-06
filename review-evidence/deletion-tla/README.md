@@ -18,12 +18,12 @@ do not approve either proposed policy or replace the receiving oracle suites.
 All 21 configurations produced their expected outcome using the checksum-pinned
 TLA+ 1.7.4 distribution (TLC 2.19) and Temurin Java 21.0.12.1+1.
 
-| Configuration | Distinct states | Result |
-| --- | ---: | --- |
-| Finish confirmations for native-admitted writes | 333,984 | All 10 safety invariants hold |
-| Suppress confirmations not yet accepted when closure occurs | 386,688 | All 10 safety invariants hold under its weaker confirmation contract |
-| One-operation conditional settlement progress | 3,496 | Every caller eventually settles under the stated fairness assumptions |
-| Delete / recreate / delete queue | 22 | All five safety invariants hold |
+| Configuration                                               | Distinct states | Result                                                                |
+| ----------------------------------------------------------- | --------------: | --------------------------------------------------------------------- |
+| Finish confirmations for native-admitted writes             |         333,984 | All 10 safety invariants hold                                         |
+| Suppress confirmations not yet accepted when closure occurs |         386,688 | All 10 safety invariants hold under its weaker confirmation contract  |
+| One-operation conditional settlement progress               |           3,496 | Every caller eventually settles under the stated fairness assumptions |
+| Delete / recreate / delete queue                            |              22 | All five safety invariants hold                                       |
 
 The four rows count type invariants as well as product-law invariants. The two
 large runs explore separate policy graphs; adding their counts would not count
