@@ -1,11 +1,20 @@
 import { DatabaseSync } from 'node:sqlite'
 import { fc, test as fcTest } from '@fast-check/vitest'
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { oraclePropertyOptions, oracleRuns } from '../../db/tests/oracle-config'
 import { SQLiteCorePersistenceAdapter, createPersistedTableName } from '../src'
+import {
+  Temporal,
+  observeTemporal,
+  temporalFamilies,
+  temporalValue,
+} from './temporal-value-oracle'
 import type { PersistedTx, SQLiteDriver } from '../src'
 
-type Row = Record<string, string | number>
+type Row = Record<
+  string,
+  string | number | Temporal.Instant | Temporal.PlainDate
+>
 type Tx = PersistedTx<Row, string>
 type SnapshotRow = { key: string; value: Row; metadata?: unknown }
 type Tombstone = { key: string; value: Row; rowVersion: number }
@@ -95,7 +104,16 @@ type Observation = {
  */
 
 function clone<T>(value: T): T {
-  return structuredClone(value)
+  // Native Temporal values are immutable. structuredClone erases their slots.
+  if (value instanceof Temporal.Instant || value instanceof Temporal.PlainDate)
+    return value
+  if (Array.isArray(value)) return value.map(clone) as T
+  if (value !== null && typeof value === `object`) {
+    return Object.fromEntries(
+      Object.entries(value).map(([key, entry]) => [key, clone(entry)]),
+    ) as T
+  }
+  return value
 }
 
 function sortedKeys(values: Iterable<string>): Array<string> {
@@ -1131,6 +1149,86 @@ async function assertGeneratedHistory(
 
 export function runOrdinaryTransactionWorkOracle(): void {
   describe('ordinary SQLite committed transaction oracle', () => {
+    // The native dimension reuses the existing action model and work counter.
+    // At settlement compare intrinsic kind/text; empty-object equality is not
+    // evidence of a successful native write. No new transaction model is added.
+    it.each(
+      temporalFamilies.flatMap((family) =>
+        [false, true].map((rollback) => ({ family, rollback })),
+      ),
+    )(
+      `preserves native values through repeated actions / $family.name / rollback=$rollback`,
+      async ({ family, rollback }) => {
+        vi.stubGlobal(`Temporal`, Temporal)
+        const host = fixture(100)
+        try {
+          const first = temporalValue(family, 0)
+          const last = temporalValue(family, 2)
+          const seed = transaction(`seed`, 1, [
+            { type: `insert`, key: `a`, value: { stamp: first } },
+          ])
+          const candidate = transaction(
+            `candidate`,
+            2,
+            [
+              {
+                type: `update`,
+                key: `a`,
+                value: { stamp: temporalValue(family, 1) },
+                metadataChanged: true,
+                metadata: first,
+              },
+              { type: `update`, key: `a`, value: { stamp: last } },
+            ],
+            [{ type: `set`, key: `a`, value: last }],
+            [{ type: `set`, key: `cursor`, value: first }],
+          )
+          await host.adapter.applyCommittedTx(`native-actions`, seed)
+          if (rollback) host.failRunMatching(/INSERT INTO applied_tx/)
+          beginMeasuredWrite(host)
+          const pending = host.adapter.applyCommittedTx(
+            `native-actions`,
+            candidate,
+          )
+          if (rollback)
+            await expect(pending).rejects.toThrow(
+              `injected late bookkeeping failure`,
+            )
+          else await pending
+          const work = finishMeasuredWrite(host, `native actions`)
+          expect(work.query + work.run).toBeLessThanOrEqual(30)
+          const expected = observeTemporal(
+            modelAfter(rollback ? [seed] : [seed, candidate]),
+          )
+          const actual = observeTemporal(
+            await observe(host.adapter, host.driver, `native-actions`),
+          )
+          expect(actual).toEqual(expected)
+          expect(
+            observeTemporal(structuredClone({ stamp: first })),
+          ).not.toEqual(observeTemporal({ stamp: first }))
+          host.failRunMatching(undefined)
+          vi.stubGlobal(`Temporal`, undefined)
+          const invalid = transaction(`invalid`, 3, [
+            { type: `update`, key: `a`, value: { stamp: first } },
+            { type: `update`, key: `a`, value: { stamp: `overwritten` } },
+          ])
+          await expect(
+            host.adapter.applyCommittedTx(`native-actions`, invalid),
+          ).rejects.toThrow(/Temporal/)
+          vi.stubGlobal(`Temporal`, Temporal)
+          expect(
+            observeTemporal(
+              await observe(host.adapter, host.driver, `native-actions`),
+            ),
+          ).toEqual(expected)
+        } finally {
+          vi.unstubAllGlobals()
+          host.close()
+        }
+      },
+    )
+
     it('reconstructs the bounded generated action-history axes', () => {
       const samples = fc.sample(generatedHistoryArbitrary, {
         seed: 1992,
