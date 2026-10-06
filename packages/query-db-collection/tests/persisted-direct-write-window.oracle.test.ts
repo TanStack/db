@@ -50,8 +50,9 @@ import type { QueryCollectionUtils } from '../src/query'
  * thrown at once or rejects later. The driver records that timing, because it
  * is an API choice and not part of this law.
  *
- * The driver checks that it reached the window: when the write runs, core has
- * not accepted the waiting refetch's row for `k`. Each failure message carries
+ * The driver checks that it reached the window: when the write runs, storage
+ * does not hold the waiting refetch's row for `k` yet. This check does not
+ * depend on when core accepts the refetch, which a fix may change. Each failure message carries
  * both observations, so a failure keeps the case that broke the law.
  */
 
@@ -336,7 +337,9 @@ async function persisted(
         ),
       ).toEqual(sortRows(next)),
     )
-    const waited = collection._state.getAcceptedSyncedRow(`k`)?.value !== 5
+    // The window: the refetch is committed, but its durable write has not
+    // finished, because another task holds the lock.
+    const waited = adapter.rows.get(`k`)?.value !== 5
     const settled = outcomeOf(() => write(collection.utils, op))
     release.resolve()
     const { outcome, timing } = await settled
