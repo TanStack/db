@@ -161,7 +161,11 @@ Also rebuild an older cache if ordinary objects used the reserved
 `__tanstack_db_persisted_type__` marker with a newly recognized type name. Older
 writes did not escape those objects, so their original meaning is ambiguous.
 New writes escape the marker and preserve the ordinary object.
-Older library versions cannot interpret the new Temporal encoding.
+Older library versions cannot interpret the new Temporal encoding. Changed
+expression indexes rebuild when first ensured after upgrade. Later startups reuse
+those indexes. A changed native-literal signature can leave an obsolete registry
+entry and index until an explicit schema reset; this release does not reclaim
+those entries automatically.
 
 ## Add persistence to a synced Collection
 

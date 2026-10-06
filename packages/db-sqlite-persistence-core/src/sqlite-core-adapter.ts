@@ -1094,7 +1094,9 @@ function compileSqlExpression(
       let identity = ``
       if (
         listValue.some(
-          (value) => typeof value === `string` || sqliteTemporalKind(value),
+          (value) =>
+            sqliteTemporalKind(value) ||
+            (context === `index-expression` && typeof value === `string`),
         )
       ) {
         const leftIdentity = compiledArgs[0]?.identitySql ?? leftSql

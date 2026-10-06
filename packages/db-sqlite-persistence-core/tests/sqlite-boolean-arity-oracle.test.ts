@@ -1,9 +1,9 @@
 // @vitest-environment node
 import { DatabaseSync } from 'node:sqlite'
 import { fc } from '@fast-check/vitest'
-import { expect, it } from 'vitest'
+import { expect, it, vi } from 'vitest'
 import { IR } from '@tanstack/db'
-import { createPersistedTableName, SQLiteCorePersistenceAdapter } from '../src'
+import { SQLiteCorePersistenceAdapter, createPersistedTableName } from '../src'
 import type { SQLiteDriver } from '../src'
 
 /**
@@ -52,6 +52,11 @@ import type { SQLiteDriver } from '../src'
  * A cursor witness checks both receiving SELECTs, and a removed-WHERE mutant
  * proves the work check fails even when final public keys remain correct.
  * The large string scope checks both named indexes in its SQLite query plan.
+ * A bounded string-IN work witness counts literal quoting at the compiler
+ * boundary. Bound list values require no SQL literal construction, including
+ * construction discarded before the receiving SELECT. Sizes 0, 1, 32 and 1,025
+ * separate the empty branch, ordinary lists and lists beyond the binding cap.
+ * This work observation does not assert a latency or total-allocation bound.
  *
  * Limits: simple rows, one SQLite process, ordinary loads and one cursor
  * composition. No native host, OPFS worker, multi-process WAL, ordering
@@ -864,3 +869,56 @@ it('keeps large string-ID OR scopes selective at the SQLite boundary', async () 
     driver.db.close()
   }
 })
+
+// Ordinary runtime membership transports its list through one JSON binding.
+// The independent work rule therefore permits zero SQL-literal quoting of list
+// values. Counting the quoting primitive detects discarded construction that
+// cannot be seen in the final SQL. The original compiler performs two quotes
+// per value; exact result and binding checks retain the receiving contract.
+it.each([0, 1, 32, 1_025])(
+  'avoids discarded literal quoting for bound string membership / %i',
+  async (size) => {
+    const driver = new CountingDriver()
+    const adapter = new SQLiteCorePersistenceAdapter({ driver })
+    const values = Array.from({ length: size }, (_, index) => `work-${index}`)
+    const allowed = new Set(values)
+    let quotedValues = 0
+    const replace = String.prototype.replace
+    const quoteProbe = vi
+      .spyOn(String.prototype, 'replace')
+      .mockImplementation(function (
+        this: string,
+        ...args: Parameters<typeof replace>
+      ) {
+        if (allowed.has(String(this))) quotedValues++
+        return Reflect.apply(replace, this, args)
+      })
+    try {
+      await adapter.applyCommittedTx('string-membership-work', {
+        txId: 'seed',
+        term: 1,
+        seq: 1,
+        rowVersion: 1,
+        mutations: [
+          { type: 'insert', key: 'match', value: { value: 'work-0' } },
+          { type: 'insert', key: 'other', value: { value: 'outside' } },
+        ],
+      })
+      quotedValues = 0
+      driver.reads = []
+      const rows = await adapter.loadSubset('string-membership-work', {
+        where: new IR.Func('in', [
+          new IR.PropRef(['value']),
+          new IR.Value(values),
+        ]),
+      })
+      expect(rows.map((row) => row.key)).toEqual(size === 0 ? [] : ['match'])
+      expect(driver.reads).toHaveLength(1)
+      expect(driver.reads[0]?.parameters).toBe(size === 0 ? 0 : 1)
+      expect(quotedValues).toBe(0)
+    } finally {
+      quoteProbe.mockRestore()
+      driver.db.close()
+    }
+  },
+)

@@ -1106,11 +1106,26 @@ no type can be recovered from an already-erased empty object.
 
 ### Remaining review investigations
 
-These are assigned questions, not established product failures:
+The [high-effort follow-up](oracle-reviews/issue-2034-high-effort-review.md)
+records measured work and upgrade behavior. Remaining questions are assigned
+to the following owners:
 
-- The boolean-arity compiler-work owner needs a deterministic allocation or
-  cardinality witness before claiming that discarded string-IN identity SQL is
-  too expensive (BUG-007).
+- The boolean-arity compiler-work owner now counts discarded literal quoting
+  for bound string IN at sizes 0, 1, 32 and 1,025. The old compiler performed
+  two quotes per value; the repair performs none and retains exact rows and
+  binding counts (BUG-007, HE-006). This is not a latency bound.
+- The typed-value and expression-index owners retain encoded-literal reuse
+  (HE-007). Empty-table probes count two native parses for EQ and four per IN
+  element. A repair needs value, calendar-identity and binding-cap witnesses.
+- The persisted wrapper and coordinator receiving owners retain projection
+  reuse as optional work (HE-008): two projections on success, or four across
+  two attempts after one transient failure. Ownership-transition admission
+  and receiver validation must remain explicit.
+- The typed-value/resume and Collection index-signature owners retain upgrade
+  cleanup (HE-010). Old/new native signatures leave both registry entries;
+  changed field-expression SQL rebuilds once. Existing schema/reset paths
+  remove obsolete entries. Automatic reclamation needs an old-writer/new-reader
+  history proving both index reuse and cleanup without removing active indexes.
 - The typed-value/resume owners retain old-writer/new-reader marker ambiguity
   (HISTORY-002). Rebuild is the selected migration policy; lossless old-byte
   preservation is not proved. The guide states this limit.
