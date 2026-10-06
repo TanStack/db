@@ -790,6 +790,26 @@ ws.on("todos:update", (changes) => {
   commit's durable write, so its rows can appear after the call returns. Await
   the returned promise before you read them.
 
+A direct write returns a promise. Await it to know that the write applied, and
+catch its rejection to handle a validation error:
+
+```typescript
+try {
+  await todosCollection.utils.writeUpdate({ id: change.id, done: true })
+} catch (error) {
+  if (error instanceof UpdateOperationItemNotFoundError) {
+    // The row is not in the synced store yet. Refetch, or skip this event.
+    await todosCollection.utils.refetch()
+  } else {
+    throw error
+  }
+}
+```
+
+Import `UpdateOperationItemNotFoundError`, `DeleteOperationItemNotFoundError`
+and `DuplicateKeyInBatchError` from `@tanstack/query-db-collection`, and
+`DuplicateKeySyncError` from `@tanstack/db`.
+
 ### Example: Incremental Updates
 
 When the server returns computed fields (like server-generated IDs or timestamps), you can use direct writes to sync the server response without triggering a full refetch:
