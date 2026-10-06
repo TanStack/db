@@ -76,13 +76,14 @@ type CollectionSubscriptionOptions = {
   onLoadSubsetError?: (event: SubscriptionLoadSubsetErrorEvent) => void
   truncateReplayPublication?: TruncateReplayPublicationControl
   /**
-   * Whether this subscription's consumer may start network. A live query
-   * subscribes to its sources unadmitted until it is admitted itself. Defaults
-   * to admitted.
+   * Whether this subscription defers provider work: it starts no idle source
+   * sync run and no acquisition attempt until its acquisition resumes. A
+   * live-query Collection defers its source subscriptions until it has a
+   * subscriber or a preload in its current sync run.
    */
-  admitted?: boolean
-  /** Called once when an unadmitted subscription is admitted. */
-  onAdmit?: () => void
+  deferAcquisition?: boolean
+  /** Called once when deferred acquisition resumes. */
+  onResumeAcquisition?: () => void
 }
 
 type TruncateReplayPublicationControl = Readonly<{
@@ -205,7 +206,7 @@ export class CollectionSubscription
   >()
   private truncateReplacementPending = false
   private unsubscribed = false
-  private admitted: boolean
+  private defersAcquisition: boolean
 
   public get status(): SubscriptionStatus {
     return this._status
@@ -221,7 +222,7 @@ export class CollectionSubscription
     private options: CollectionSubscriptionOptions,
   ) {
     super()
-    this.admitted = options.admitted !== false
+    this.defersAcquisition = options.deferAcquisition === true
     if (options.onUnsubscribe) {
       this.on(`unsubscribed`, options.onUnsubscribe)
     }
@@ -283,20 +284,20 @@ export class CollectionSubscription
     )
   }
 
-  /** Whether this subscription's consumer may start network. */
-  public isAdmitted(): boolean {
-    return this.admitted
+  /** Whether this subscription still defers provider work. */
+  public isDeferringAcquisition(): boolean {
+    return this.defersAcquisition
   }
 
   /**
-   * Admit this subscription: its consumer may now start network. Admission
-   * may start an idle source's sync run, then acquires the on-demand subsets
-   * that were held as detached demand while the subscription was unadmitted.
+   * Resume deferred acquisition: provider work may now start. This may start
+   * an idle source Collection's sync run, then starts acquisition attempts for
+   * the on-demand demand that stayed detached while acquisition was deferred.
    */
-  public admit(): void {
-    if (this.admitted || this.unsubscribed) return
-    this.admitted = true
-    this.options.onAdmit?.()
+  public resumeDeferredAcquisition(): void {
+    if (!this.defersAcquisition || this.unsubscribed) return
+    this.defersAcquisition = false
+    this.options.onResumeAcquisition?.()
     if (this.collection.status !== `idle`) {
       this.restartDetachedDemands(this.collection._sync.getSyncRunGeneration())
     }
@@ -1028,8 +1029,9 @@ export class CollectionSubscription
     }
     if (
       this.collection.status === `cleaned-up` ||
-      // An unadmitted consumer holds on-demand acquisition until admission.
-      (!this.admitted && this.collection.config.syncMode === `on-demand`) ||
+      // A deferring subscription starts no acquisition attempt until it resumes.
+      (this.defersAcquisition &&
+        this.collection.config.syncMode === `on-demand`) ||
       // Ready/error callbacks can run before sync returns its loader. Idle
       // deferred starts still acquire through the sync manager's queue.
       (this.collection.config.syncMode === `on-demand` &&

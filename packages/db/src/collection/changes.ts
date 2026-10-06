@@ -50,11 +50,11 @@ export class CollectionChangesManager<
       }
     | undefined
   private layoutChangeListeners = new Set<() => void>()
-  // Whether a consumer that may start network reached this Collection in its
-  // current sync run: an admitted subscriber or a preload. A live query keeps
-  // its own source subscriptions unadmitted until then.
-  private demandAdmitted = false
-  private demandAdmissionListeners = new Set<() => void>()
+  // Whether this Collection has had a subscriber or a preload in its current
+  // sync run. A live-query Collection defers acquisition on its own source
+  // subscriptions until then.
+  private subscriberOrPreload = false
+  private subscriberOrPreloadListeners = new Set<() => void>()
 
   /**
    * Monotonic revision of the collection's visible state, advanced once per
@@ -314,8 +314,8 @@ export class CollectionChangesManager<
 
     // Acquire ownership only after all fallible option validation and
     // user-provided predicate compilation has completed.
-    const admitted = opts.admitted !== false
-    this.addSubscriber(admitted)
+    const defersAcquisition = opts.deferAcquisition === true
+    this.addSubscriber(defersAcquisition)
 
     let subscription: CollectionSubscription | undefined
     const setupState = { closed: false }
@@ -323,8 +323,8 @@ export class CollectionChangesManager<
       subscription = new CollectionSubscription(this.collection, callback, {
         ...opts,
         whereExpression,
-        admitted,
-        onAdmit: () => this.admitSubscriber(),
+        deferAcquisition: defersAcquisition,
+        onResumeAcquisition: () => this.resumeSubscriber(),
         onUnsubscribe: () => {
           setupState.closed = true
           this.removeSubscriber()
@@ -371,32 +371,32 @@ export class CollectionChangesManager<
     return subscription
   }
 
-  /** Whether a consumer that may start network reached this sync run. */
-  public isDemandAdmitted(): boolean {
-    return this.demandAdmitted
+  /** Whether this Collection had a subscriber or a preload in this sync run. */
+  public hasSubscriberOrPreload(): boolean {
+    return this.subscriberOrPreload
   }
 
-  /** Listen for this Collection's admission in its current sync run. */
-  public onDemandAdmitted(listener: () => void): () => void {
-    this.demandAdmissionListeners.add(listener)
-    return () => this.demandAdmissionListeners.delete(listener)
+  /** Listen for the first subscriber or preload in the current sync run. */
+  public onFirstSubscriberOrPreload(listener: () => void): () => void {
+    this.subscriberOrPreloadListeners.add(listener)
+    return () => this.subscriberOrPreloadListeners.delete(listener)
   }
 
   /**
-   * Record that a consumer that may start network reached this Collection,
-   * through an admitted subscriber or a preload. A live query listens for this
-   * to admit its own source subscriptions.
+   * Record a subscriber or a preload in the current sync run. A live-query
+   * Collection listens for the first one to resume deferred acquisition on its
+   * own source subscriptions.
    */
-  public admitDemand(): void {
-    if (this.demandAdmitted) return
-    this.demandAdmitted = true
-    for (const listener of [...this.demandAdmissionListeners]) listener()
+  public markSubscriberOrPreload(): void {
+    if (this.subscriberOrPreload) return
+    this.subscriberOrPreload = true
+    for (const listener of [...this.subscriberOrPreloadListeners]) listener()
   }
 
-  /** An unadmitted subscription was admitted: it may now start this sync. */
-  private admitSubscriber(): void {
-    // Admit first, so a sync run that starts now builds admitted demand.
-    this.admitDemand()
+  /** A deferring subscription resumed: it may now start this sync run. */
+  private resumeSubscriber(): void {
+    // Mark first, so a sync run that starts now builds non-deferred demand.
+    this.markSubscriberOrPreload()
     this.startSyncIfStopped()
   }
 
@@ -410,20 +410,20 @@ export class CollectionChangesManager<
   }
 
   /**
-   * Increment the active subscribers count and start sync if needed. An
-   * unadmitted subscriber may not start network. It still starts a live
-   * query, whose sync run reads local memory and stays unadmitted itself, but
-   * it does not start any other Collection's sync run.
+   * Increment the active subscribers count and start sync if needed. A
+   * subscriber that defers acquisition starts no provider work. It still
+   * starts a live-query Collection, whose sync run reads local memory and
+   * defers its own acquisition, but no other Collection's sync run.
    */
-  private addSubscriber(admitted: boolean): void {
+  private addSubscriber(defersAcquisition: boolean): void {
     const previousSubscriberCount = this.activeSubscribersCount
     this.activeSubscribersCount++
     this.lifecycle.cancelGCTimer()
 
     try {
-      if (admitted) {
-        // Admit first, so a sync run that starts now builds admitted demand.
-        this.admitDemand()
+      if (!defersAcquisition) {
+        // Mark first, so a sync run that starts now builds non-deferred demand.
+        this.markSubscriberOrPreload()
         this.startSyncIfStopped()
       } else if (getBuilderFromConfig(this.collection.config)) {
         this.startSyncIfStopped()
@@ -466,9 +466,9 @@ export class CollectionChangesManager<
    * This can be called manually or automatically by garbage collection
    */
   public cleanup(): void {
-    // Admission belongs to one sync run. A restarted Collection waits for a
-    // new admitted consumer before it may start network.
-    this.demandAdmitted = false
+    // A subscriber or preload belongs to one sync run. A restarted live-query
+    // Collection defers acquisition again until a new one arrives.
+    this.subscriberOrPreload = false
     // Cleanup clears visible state without publishing row changes. Detached
     // consumers may miss every status transition before an empty restart.
     this.stateRevision++

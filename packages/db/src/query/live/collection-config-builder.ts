@@ -119,12 +119,12 @@ export class CollectionConfigBuilder<
   public liveQueryCollection?: Collection<TResult, any, any>
 
   /**
-   * Whether this live query has an admitted consumer in its current sync run:
-   * an admitted subscriber or a preload. Until then it reads its sources
-   * without starting network.
+   * Whether this live-query Collection had a subscriber or a preload in its
+   * current sync run. Until then it reads its source Collections without
+   * starting provider work.
    */
-  isDemandAdmitted(): boolean {
-    return this.liveQueryCollection?._isDemandAdmitted() ?? true
+  hasSubscriberOrPreload(): boolean {
+    return this.liveQueryCollection?._hasSubscriberOrPreload() ?? true
   }
 
   private windowFn: ((options: WindowOptions) => void) | undefined
@@ -1256,11 +1256,13 @@ export class CollectionConfigBuilder<
 
       const subscription = collectionSubscriber.subscribe()
       this.subscriptions[sourceId] = subscription
-      if (!subscription.isAdmitted()) {
-        // This live query has no admitted consumer yet. Its source reads stay
-        // local until one arrives, then the held network work proceeds.
+      if (subscription.isDeferringAcquisition()) {
+        // No subscriber or preload yet: source reads stay local, and the
+        // deferred provider work starts when the first one arrives.
         syncState.unsubscribeCallbacks.add(
-          this.liveQueryCollection!._onDemandAdmitted(() => subscription.admit()),
+          this.liveQueryCollection!._onFirstSubscriberOrPreload(() =>
+            subscription.resumeDeferredAcquisition(),
+          ),
         )
       }
 

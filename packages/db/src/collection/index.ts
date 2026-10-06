@@ -662,19 +662,19 @@ export class CollectionImpl<
    * Multiple concurrent calls will share the same promise
    */
   public preload(): Promise<void> {
-    // Preload asks for this Collection's data, so it may start network.
-    this._changes.admitDemand()
+    // Preload asks for this Collection's data, so provider work may start.
+    this._changes.markSubscriberOrPreload()
     return this._sync.preload()
   }
 
-  /** @internal Whether a consumer that may start network reached this sync run. */
-  public _isDemandAdmitted(): boolean {
-    return this._changes.isDemandAdmitted()
+  /** @internal Whether this Collection had a subscriber or a preload in this sync run. */
+  public _hasSubscriberOrPreload(): boolean {
+    return this._changes.hasSubscriberOrPreload()
   }
 
-  /** @internal Listen for admission in this Collection's current sync run. */
-  public _onDemandAdmitted(listener: () => void): () => void {
-    return this._changes.onDemandAdmitted(listener)
+  /** @internal Listen for the first subscriber or preload in this sync run. */
+  public _onFirstSubscriberOrPreload(listener: () => void): () => void {
+    return this._changes.onFirstSubscriberOrPreload(listener)
   }
 
   /**
