@@ -11,6 +11,7 @@ import {
   oracleRandomParameters,
   readOracleRunConfig,
 } from '../oracle-config.js'
+import type { Collection } from '../../src/collection/index.js'
 import type { LoadSubsetOptions, SyncConfig } from '../../src/types.js'
 
 /**
@@ -1668,8 +1669,8 @@ const labelRank = new Map([
 
 function createFullSourceQuery(
   feature: FullSourceFeature,
-  source: ReturnType<typeof createCollection<FullSourceRow, number>>,
-  tags: ReturnType<typeof createCollection<{ tag: string }, string>>,
+  source: Collection<FullSourceRow, number>,
+  tags: Collection<{ tag: string }, string>,
 ) {
   return createLiveQueryCollection({
     startSync: false,
