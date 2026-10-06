@@ -1,3 +1,4 @@
+import { compareKeys } from '@tanstack/db-ivm'
 import type { IndexInterface, IndexOperation, IndexReader } from './base-index'
 import type { RangeQueryOptions } from './btree-index'
 
@@ -6,7 +7,15 @@ export class ReverseIndex<
 > implements IndexReader<TKey> {
   private originalIndex: IndexInterface<TKey>
 
-  constructor(index: IndexInterface<TKey>) {
+  /**
+   * @param nullsFirst - Whether nullish values come first in the reversed
+   * order. The original index keeps them at the opposite end, so reversing
+   * it alone would move them; ordered reads put them back.
+   */
+  constructor(
+    index: IndexInterface<TKey>,
+    private readonly nullsFirst: boolean,
+  ) {
     this.originalIndex = index
   }
 
@@ -31,11 +40,50 @@ export class ReverseIndex<
   }
 
   take(n: number, from: any, filterFn?: (key: TKey) => boolean): Array<TKey> {
-    return this.originalIndex.takeReversed(n, from, filterFn)
+    const nulls = this.nullKeys()
+    const nonNull = (key: TKey) => !nulls.has(key) && (filterFn?.(key) ?? true)
+    if (this.nullsFirst) {
+      return from == null
+        ? this.originalIndex.takeReversedFromEnd(n, nonNull)
+        : this.originalIndex.takeReversed(n, from, nonNull)
+    }
+    if (from == null) return []
+    const keys = this.originalIndex.takeReversed(n, from, nonNull)
+    return [...keys, ...this.takeNulls(n - keys.length, nulls, filterFn)]
   }
 
   takeFromStart(n: number, filterFn?: (key: TKey) => boolean): Array<TKey> {
-    return this.originalIndex.takeReversedFromEnd(n, filterFn)
+    const nulls = this.nullKeys()
+    const nonNull = (key: TKey) => !nulls.has(key) && (filterFn?.(key) ?? true)
+    if (this.nullsFirst) {
+      const keys = this.takeNulls(n, nulls, filterFn)
+      return [
+        ...keys,
+        ...this.originalIndex.takeReversedFromEnd(n - keys.length, nonNull),
+      ]
+    }
+    const keys = this.originalIndex.takeReversedFromEnd(n, nonNull)
+    return [...keys, ...this.takeNulls(n - keys.length, nulls, filterFn)]
+  }
+
+  /** Keys whose indexed value is `null` or `undefined`. */
+  private nullKeys(): Set<TKey> {
+    return new Set([
+      ...this.originalIndex.lookup(`eq`, null),
+      ...this.originalIndex.lookup(`eq`, undefined),
+    ])
+  }
+
+  private takeNulls(
+    n: number,
+    nulls: Set<TKey>,
+    filterFn?: (key: TKey) => boolean,
+  ): Array<TKey> {
+    if (n <= 0) return []
+    return [...nulls]
+      .sort(compareKeys)
+      .filter((key) => filterFn?.(key) ?? true)
+      .slice(0, n)
   }
 
   // All operations below delegate to the original index

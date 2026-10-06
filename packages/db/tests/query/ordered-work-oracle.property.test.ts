@@ -4328,15 +4328,13 @@ describe(`ordered source work oracle`, () => {
  *   and the changed row itself. The
  *   source holds 200 eligible filler rows outside every window. A loader that
  *   resends every eligible row on each repair delivers more than 200 rows and
- *   fails. Without an index, or while a NaN rank is present (a NaN boundary
- *   cannot be expressed as a cursor), the loader legitimately reads the full
- *   source, so only the rows law applies there. Null ranks are outside this
- *   grammar: an indexed descending window misplaces them on main, and the
- *   coverage map records that gap.
+ *   fails. Without an index, or while a NaN or null rank is present (such a
+ *   boundary cannot be expressed as a cursor), the loader legitimately reads the full
+ *   source, so only the rows law applies there.
  *
  * The grammar crosses the sync path (sync writes, or local-only direct writes),
  * the index (present or absent), the direction, limit 1..3, offset 0..1, and a
- * history of upserts and deletes over ids 0..9 and ranks 0..3 or NaN, so ties,
+ * history of upserts and deletes over ids 0..9 and ranks 0..3, NaN, or null, so ties,
  * deletes inside and at the edge of the window, and rank changes across its
  * boundary all occur. The observation point is after each change and a flush.
  * Work is counted at the Collection's `currentStateAsChanges` boundary, which
@@ -4373,12 +4371,11 @@ function fillerRows(direction: `asc` | `desc`): Array<Row> {
 
 const eagerRow = fc.record({
   id: fc.integer({ min: 0, max: 9 }),
-  // NaN exercises comparator placement outside the integer order. Null ranks
-  // are excluded: an indexed descending window misplaces them on main
-  // (recorded as a separate gap in the coverage map).
+  // NaN and null exercise comparator placement outside the integer order.
   rank: fc.oneof(
     { weight: 6, arbitrary: fc.integer({ min: 0, max: 3 }) },
     { weight: 1, arbitrary: fc.constant(Number.NaN) },
+    { weight: 1, arbitrary: fc.constant(null as unknown as number) },
   ),
   eligible: fc.boolean(),
 })
@@ -4536,10 +4533,13 @@ async function checkEagerWindow(testCase: EagerCase): Promise<void> {
         query.toArray.map((row) => row.id),
         `rows after step ${step}`,
       ).toEqual(eagerWindow(rows, testCase))
-      // A NaN boundary cannot be expressed as a cursor, so the loader takes
-      // the documented full-source fallback; only the rows law applies then.
-      const hasNaN = [...rows.values()].some((row) => Number.isNaN(row.rank))
-      if (testCase.indexed && !hasNaN) {
+      // A NaN or null boundary cannot be expressed as a cursor
+      // (canExpressCursorOrder), so the loader takes the documented
+      // full-source fallback; only the rows law applies then.
+      const hasInexpressibleRank = [...rows.values()].some(
+        (row) => row.rank === null || Number.isNaN(row.rank),
+      )
+      if (testCase.indexed && !hasInexpressibleRank) {
         const ties = [...rows.values()].filter((row) =>
           [...rows.values()].some(
             (other) => Object.is(other.rank, row.rank) && other.id !== row.id,
@@ -4560,6 +4560,18 @@ async function checkEagerWindow(testCase: EagerCase): Promise<void> {
 describe(`eager indexed ordered windows`, () => {
   const { multiplier, ...replay } = readOracleRunConfig()
   const runs = 40 * multiplier
+
+  it(`places null ranks first in an indexed descending window`, async () => {
+    await checkEagerWindow({
+      path: `sync`,
+      indexed: true,
+      direction: `desc`,
+      limit: 1,
+      offset: 0,
+      initial: [{ id: 0, rank: null as unknown as number, eligible: true }],
+      history: [{ type: `upsert`, id: 1, rank: 2, eligible: true }],
+    })
+  })
 
   it(`refills after a visible delete without resending the source`, async () => {
     await checkEagerWindow({
