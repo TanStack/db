@@ -154,6 +154,10 @@ A third review, of `7bc58cfab`, found one item. The saved-map checks did not
 read a snapshot again after another snapshot was read, so X7 passed. Fixed:
 the identity checks under "State identity" above.
 
+CodeRabbit then asked for the same recheck of `data`. The oracle now saves
+each first read's `data` too and requires it on the later read. `data` is a
+plain field today, so this check has no demonstrated kill.
+
 ## ORC outcomes
 
 - **ORC-001: met.** SY8 follows the comment on the guard: a commit receipt

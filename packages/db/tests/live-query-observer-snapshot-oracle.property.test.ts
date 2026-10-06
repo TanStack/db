@@ -152,7 +152,7 @@ function checkRead(
   entry: Captured,
   dataFirst: boolean,
   label: string,
-): Snapshot[`state`] {
+): Pick<Snapshot, `data` | `state`> {
   let read: Pick<Snapshot, `data` | `state`>
   if (dataFirst) {
     const data = entry.snapshot.data
@@ -184,7 +184,7 @@ function checkRead(
   // A snapshot is one value: later reads return the same objects.
   expect(entry.snapshot.state, `${label}: state identity`).toBe(read.state)
   expect(entry.snapshot.data, `${label}: data identity`).toBe(read.data)
-  return read.state
+  return read
 }
 
 async function checkHistory(
@@ -199,7 +199,7 @@ async function checkHistory(
       reads.length > 0
         ? reads
         : captured.map((_, i) => ({ snapshot: i, dataFirst: true }))
-    const seen = new Map<number, Snapshot[`state`]>()
+    const seen = new Map<number, Pick<Snapshot, `data` | `state`>>()
     for (const { snapshot, dataFirst } of order) {
       const index = snapshot % captured.length
       if (seen.has(index)) continue
@@ -211,18 +211,22 @@ async function checkHistory(
     // Reading a later snapshot must not change a map an earlier read
     // returned, and snapshots with different rows have different maps.
     const keep = shape === `single` ? 1 : Infinity
-    for (const [index, state] of seen) {
-      // Every later read of a snapshot returns the map its first read did.
+    for (const [index, { data, state }] of seen) {
+      // Every later read of a snapshot returns the objects its first read did.
       expect(
         captured[index]!.snapshot.state,
         `snapshot ${index}: state identity after other reads`,
       ).toBe(state)
+      expect(
+        captured[index]!.snapshot.data,
+        `snapshot ${index}: data identity after other reads`,
+      ).toBe(data)
       const rows = captured[index]!.rows.slice(0, keep)
       expect(
         [...(state?.values() ?? [])].map(plain),
         `snapshot ${index}: saved state rows`,
       ).toEqual(rows)
-      for (const [other, otherState] of seen) {
+      for (const [other, { state: otherState }] of seen) {
         const otherRows = captured[other]!.rows.slice(0, keep)
         if (JSON.stringify(otherRows) !== JSON.stringify(rows))
           expect(otherState, `snapshots ${index} and ${other}`).not.toBe(state)
