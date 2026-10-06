@@ -55,27 +55,39 @@ reclassify an insert that is still open.
 
 ## Witness
 
-A nested lane in the metadata composition oracle writes up to three of `set`,
-`unset`, and an insert of one fixed row value, with or without metadata. Then
-a nested transaction writes key 1 and commits first:
+A nested lane in the metadata composition oracle opens a transaction, T1. T1
+writes up to three of `set`, `unset`, `truncate`, and an insert, update, or
+delete of one fixed row value, each with or without metadata. Then a nested
+write applies before T1 commits:
 
-- From a present row, it deletes the row.
-- From an absent row, it inserts the same row with its own metadata.
+- From a present row, a nested transaction deletes the row.
+- From an absent row, a nested transaction inserts the same row with its own
+  metadata.
+- From an absent row, a hydration seed inserts the same row with its own
+  metadata. The Collection places a seed ahead of the first open transaction.
 
-The model reclassifies the sequence by the row's presence after the nested
-write, and folds it over the value that the nested write leaves. It reads no
-production state. The lane runs 252 histories.
+A nested transaction can also call `metadata.row.set` after its row write. A
+history is legal when T1's writes are legal both where T1 writes them and
+where they apply.
 
-| Revision | Nested lane |
-| --- | --- |
-| `main` | 12 of 252 fail, in both directions |
-| this fix | pass |
-| explicit write always wins (M1) | fail; the rebuilt lane also fails |
-| keep stale automatic writes (M2, RB2) | 3 fail, in the insert direction |
-| explicit position recorded as 0 (M4) | fail; the rebuilt lane also fails |
+The model reclassifies T1's inserts by the row's presence where they apply,
+and folds T1's writes over the value that the nested write leaves. It reads no
+production state. The lane runs 1,925 histories: 275 for each of seven
+variants.
 
-A mutant that records hydrated metadata at position 0 fails `DbClient >
-hydrates pending collection rows when the collection materializes`.
+| Revision                                              | Nested lane (of 1,925)                                          |
+| ----------------------------------------------------- | --------------------------------------------------------------- |
+| `main`                                                | 35 fail: all three nested writes, with and without a nested set |
+| this fix                                              | pass                                                            |
+| explicit write always wins (M1)                       | 279 fail; the rebuilt lane also fails                           |
+| keep stale automatic writes (M2, RB2)                 | 21 fail                                                         |
+| explicit position recorded as 0 (M4)                  | 267 fail; the rebuilt lane also fails                           |
+| hydrated metadata recorded at position 0              | 7 fail, all hydration seeds                                     |
+| explicit write recorded in the first open transaction | 818 fail, all with a nested set                                 |
+| truncate keeps explicit positions                     | 63 fail; the immediate, held, and rebuilt lanes also fail       |
+
+The hydration mutant also fails `DbClient > hydrates pending collection rows
+when the collection materializes`.
 
 ## Review outcomes
 
@@ -98,6 +110,27 @@ pass found one item, the same as item 5.
 6. The exported type was not formatted. Fixed.
 7. The nested lane had no timeout, unlike the other lanes. Fixed.
 
+## Second review
+
+A second medium code review, of #2048 at `9e34d6c94`, found no correctness
+bug and seven items.
+
+1. `metadata.row.set` writes to an invalidated transaction. The same as item
+   2 above. Open, with round 4's SY8.
+2. T1 never wrote an update, a delete, or a truncate. Fixed: the lane
+   generates them where they are legal in both places.
+3. No lane reached a hydration seed ahead of an open transaction. A probe
+   showed that `main` reads `undefined` where last write wins expects the
+   explicit set. Fixed: the seed is a nested write.
+4. A nested transaction made no explicit metadata call, so a mutant that
+   writes to the first open transaction survived. Fixed: the nested set.
+5. The rebuild rescans every operation of every queued transaction. `main`
+   has the same loop, and this change adds no rebuild. No change.
+6. Hydration builds its explicit map in a second pass. A one-loop version
+   added seven production lines to save one copy per chunk. Not adopted.
+7. The fix adds production lines against the bug-fix budget. A position-only
+   map still needs the explicit value, so no smaller design was found.
+
 ## ORC outcomes
 
 - **ORC-001: met.** The contract is the metadata oracle's opening prose. Its
@@ -107,8 +140,9 @@ pass found one item, the same as item 5.
 - **ORC-003: met.** The lane's grammar, model step, and driver step each have
   prose beside them.
 - **ORC-004: met.** The lane is exhaustive within its bound. A count control
-  checks 252 histories, and two named model witnesses cover both directions.
-  Every insert writes one value, so no reclassified insert is a duplicate.
+  checks 1,925 histories, named witnesses cover each variant, and two
+  exclusions check the legality rule. Every row write uses one value, so no
+  reclassified insert is a duplicate.
 - **ORC-005: met.** The driver writes through a real Collection's sync API and
   reads `metadata.row.get`.
 - **ORC-006: met.** See the table above.
@@ -121,13 +155,14 @@ pass found one item, the same as item 5.
   block.
 - **ORC-011: not applicable.** No reviewer named a shared fault.
 - **ORC-012: met by this record.**
-- **ORC-013: met.** The two directions distinguish the repair from M1 and M2,
-  which each pass one direction.
+- **ORC-013: met.** Each mutant in the table fails a distinct part of the
+  lane. The hydration and first-open-transaction mutants fail only the seed
+  and nested-set variants.
 - **ORC-014: not applicable.**
 
 ## Limits
 
-The lane covers one key, a nested delete or insert, and no truncate in the
-open transaction. A nested truncate, or a nested write to another key, is not
-generated. A nested insert with a different value makes the open transaction a
-duplicate. The sync reentrancy oracle owns that invalidation.
+The lane covers one key. A nested truncate, a nested update, or a nested
+write to another key is not generated. A nested insert with a different value
+makes the open transaction a duplicate. The sync reentrancy oracle owns that
+invalidation.
