@@ -14,6 +14,7 @@ env:
 permissions:
   contents: write
   id-token: write
+  issues: write
   pull-requests: write
 
 jobs:
@@ -93,3 +94,6 @@ jobs:
         uses: tanstack/config/.github/comment-on-release@e4b48f16568324f76f467aa4c2aac2f05db632c3
         with:
           published-packages: ${{ steps.changesets.outputs.publishedPackages }}
+        env:
+          # The pinned action reads REPOSITORY but does not set it.
+          REPOSITORY: ${{ github.repository }}
