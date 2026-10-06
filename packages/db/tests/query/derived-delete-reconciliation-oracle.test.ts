@@ -150,6 +150,7 @@ describe(`derived updates beneath optimistic deletes`, () => {
           layoutChanged: false,
           operations: [],
           rowMetadataWrites: new Map(),
+          explicitRowMetadataWrites: new Map(),
           collectionMetadataWrites: new Map(),
           applied: createDeferred<void>(),
         })
