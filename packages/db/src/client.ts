@@ -237,12 +237,14 @@ export function collectionOptions(
   }
 
   const reusableFactory:
-    ((client: DbClient) => AnyCollectionConfig) | undefined = config
+    | ((client: DbClient) => AnyCollectionConfig)
+    | undefined = config
     ? (config as CollectionConfigWithFactory<AnyCollectionConfig>)[
         collectionConfigFactory
       ]
     : (explicitFactory as
-        ((client: DbClient) => AnyCollectionConfig) | undefined)
+        | ((client: DbClient) => AnyCollectionConfig)
+        | undefined)
 
   let owner: DbClient | undefined
   const materialize = (client: DbClient): AnyCollectionConfig => {
@@ -882,7 +884,13 @@ export class DbClient {
           value: row.value,
         })),
         rowMetadataWrites,
-        explicitRowMetadataWriteKeys: new Set(rowMetadataWrites.keys()),
+        // Hydrated metadata follows every row it describes.
+        explicitRowMetadataWrites: new Map(
+          [...rowMetadataWrites].map(([key, write]) => [
+            key,
+            { position: rows.length, write },
+          ]),
+        ),
         collectionMetadataWrites: new Map(),
         applied: createDeferred<void>(),
         preserveHydrationSeedKeys: seedKind !== undefined,
