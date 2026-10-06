@@ -35,7 +35,8 @@ type RunResult = {
   scale: FixtureScale
   sourceIndexMode: string
   mutationMode: string
-  coldHydrateMs: number
+  // Older reports may lack cold hydrate data.
+  coldHydrateMs?: number
   writeSummary: Summary
 }
 
@@ -64,10 +65,38 @@ type Comparison = {
   p95Ratio: number
 }
 
+/**
+ * A per-case timing that the report compares. Writes use the per-write median
+ * of many samples. Cold hydrate is one sample per case, so same-code runs vary
+ * by up to about ±50% on small cases; its flags need a larger relative change
+ * and a larger absolute floor.
+ */
+type Metric = {
+  label: string
+  floorMs: number
+  minRelativeThreshold: number
+  value: (result: RunResult) => number | undefined
+}
+
 // Relative change below which a result is considered noise, and an absolute
 // floor so sub-hundredth-of-a-ms jitter never counts as a change.
 const defaultThreshold = 0.2
 const absoluteFloorMs = 0.05
+const coldAbsoluteFloorMs = 5
+const coldRelativeThreshold = 0.5
+
+const writeMetric: Metric = {
+  label: `median write time`,
+  floorMs: absoluteFloorMs,
+  minRelativeThreshold: 0,
+  value: (result) => result.writeSummary.medianMs,
+}
+const coldMetric: Metric = {
+  label: `cold hydrate time`,
+  floorMs: coldAbsoluteFloorMs,
+  minRelativeThreshold: coldRelativeThreshold,
+  value: (result) => result.coldHydrateMs,
+}
 
 const args = parseArgs(process.argv.slice(2))
 
@@ -150,47 +179,76 @@ function isSignificant(
   baseMs: number,
   candidateMs: number,
   threshold: number,
+  floorMs: number,
 ): boolean {
   const relativeChange = Math.abs(ratio(baseMs, candidateMs) - 1)
   const absoluteChange = Math.abs(candidateMs - baseMs)
-  return relativeChange > threshold && absoluteChange > absoluteFloorMs
+  return relativeChange > threshold && absoluteChange > floorMs
 }
 
-function isRegression(comparison: Comparison, threshold: number): boolean {
-  return (
-    comparison.medianRatio > 1 &&
-    isSignificant(
-      comparison.base.writeSummary.medianMs,
-      comparison.candidate.writeSummary.medianMs,
-      threshold,
-    )
-  )
+/** The candidate/base ratio of a metric, or undefined when a side lacks it. */
+function metricRatio(
+  comparison: Comparison,
+  metric: Metric,
+): number | undefined {
+  const baseMs = metric.value(comparison.base)
+  const candidateMs = metric.value(comparison.candidate)
+  if (baseMs === undefined || candidateMs === undefined) return undefined
+  return ratio(baseMs, candidateMs)
 }
 
-function isImprovement(comparison: Comparison, threshold: number): boolean {
-  return (
-    comparison.medianRatio < 1 &&
-    isSignificant(
-      comparison.base.writeSummary.medianMs,
-      comparison.candidate.writeSummary.medianMs,
-      threshold,
-    )
-  )
+function changeDirection(
+  comparison: Comparison,
+  threshold: number,
+  metric: Metric,
+): -1 | 0 | 1 {
+  const baseMs = metric.value(comparison.base)
+  const candidateMs = metric.value(comparison.candidate)
+  if (baseMs === undefined || candidateMs === undefined) return 0
+  const relative = Math.max(threshold, metric.minRelativeThreshold)
+  if (!isSignificant(baseMs, candidateMs, relative, metric.floorMs)) return 0
+  return candidateMs > baseMs ? 1 : -1
 }
 
-function marker(comparison: Comparison, threshold: number): string {
-  if (isRegression(comparison, threshold)) return `🔴`
-  if (isImprovement(comparison, threshold)) return `🟢`
+function isRegression(
+  comparison: Comparison,
+  threshold: number,
+  metric: Metric = writeMetric,
+): boolean {
+  return changeDirection(comparison, threshold, metric) === 1
+}
+
+function isImprovement(
+  comparison: Comparison,
+  threshold: number,
+  metric: Metric = writeMetric,
+): boolean {
+  return changeDirection(comparison, threshold, metric) === -1
+}
+
+function marker(
+  comparison: Comparison,
+  threshold: number,
+  metric: Metric = writeMetric,
+): string {
+  if (isRegression(comparison, threshold, metric)) return `🔴`
+  if (isImprovement(comparison, threshold, metric)) return `🟢`
   return ``
 }
 
 // Individual rows are noisy at sub-ms timings, but a consistent shift across
 // many rows is a real change even when no single row clears the per-row
 // significance bar — the geometric mean of the ratios captures that.
-function geomeanRatio(group: Array<Comparison>): number {
+function geomeanRatio(
+  group: Array<Comparison>,
+  metric: Metric = writeMetric,
+): number {
   const finite = group
-    .map((comparison) => comparison.medianRatio)
-    .filter((value) => Number.isFinite(value) && value > 0)
+    .map((comparison) => metricRatio(comparison, metric))
+    .filter(
+      (value): value is number =>
+        value !== undefined && Number.isFinite(value) && value > 0,
+    )
   if (finite.length === 0) return 1
   return Math.exp(
     finite.reduce((sum, value) => sum + Math.log(value), 0) / finite.length,
@@ -208,37 +266,42 @@ function formatMarkdown(
   threshold: number,
 ): string {
   const lines: Array<string> = []
-  const regressed = allComparisons.filter((comparison) =>
-    isRegression(comparison, threshold),
-  )
-  const improved = allComparisons.filter((comparison) =>
-    isImprovement(comparison, threshold),
+  const coldComparisons = allComparisons.filter(
+    (comparison) => metricRatio(comparison, coldMetric) !== undefined,
   )
 
   lines.push(`## Incremental update benchmark`)
   lines.push(``)
   lines.push(
     `Comparing \`${candidateReport.metadata.gitSha}\` (this PR) against \`${baseReport.metadata.gitSha}\` (base). ` +
-      `Times are per-write medians over ${candidateReport.metadata.iterations} iterations ` +
-      `(${candidateReport.metadata.warmup} warmup writes).`,
+      `Write times are per-write medians over ${candidateReport.metadata.iterations} iterations ` +
+      `(${candidateReport.metadata.warmup} warmup writes). Cold hydrate is one timed first load of each query.`,
   )
   lines.push(``)
-
-  if (regressed.length === 0 && improved.length === 0) {
+  const coldSummary =
+    coldComparisons.length > 0
+      ? ` · cold hydrate time: **${formatRatio(
+          geomeanRatio(coldComparisons, coldMetric),
+        )}**`
+      : ` · cold hydrate time: n/a (a report has no cold data)`
+  lines.push(
+    `Overall median write time vs base: **${formatRatio(
+      geomeanRatio(allComparisons),
+    )}**${coldSummary} (geometric mean of per-case ratios; lower is faster).`,
+  )
+  lines.push(``)
+  lines.push(
+    formatFlagSummary(`Writes`, allComparisons, threshold, writeMetric),
+  )
+  if (coldComparisons.length > 0) {
+    lines.push(``)
     lines.push(
-      `**No significant changes** (threshold: ±${Math.round(threshold * 100)}% and >${absoluteFloorMs}ms).`,
-    )
-  } else {
-    lines.push(
-      `**${regressed.length} regression(s), ${improved.length} improvement(s)** ` +
-        `(threshold: ±${Math.round(threshold * 100)}% and >${absoluteFloorMs}ms).`,
+      formatFlagSummary(`Cold hydrate`, coldComparisons, threshold, coldMetric),
     )
   }
   lines.push(``)
   lines.push(
-    `Overall median write time vs base: **${formatRatio(
-      geomeanRatio(allComparisons),
-    )}** (geometric mean of per-case ratios; lower is faster).`,
+    `<sub>Per-case flags are noisy on shared runners. Read the geometric means first.</sub>`,
   )
   lines.push(``)
 
@@ -249,34 +312,16 @@ function formatMarkdown(
     byQuery.set(comparison.query, group)
   }
 
-  lines.push(`| Query | Δ median (geomean) | Best case | Worst case | Flags |`)
-  lines.push(`| --- | ---: | ---: | ---: | :-- |`)
-  for (const [query, group] of byQuery) {
-    const ratios = group
-      .map((comparison) => comparison.medianRatio)
-      .filter((value) => Number.isFinite(value))
-    const best = Math.min(...ratios)
-    const worst = Math.max(...ratios)
-    const redCount = group.filter((comparison) =>
-      isRegression(comparison, threshold),
-    ).length
-    const greenCount = group.filter((comparison) =>
-      isImprovement(comparison, threshold),
-    ).length
-    const flags =
-      [
-        redCount > 0 ? `${redCount} 🔴` : ``,
-        greenCount > 0 ? `${greenCount} 🟢` : ``,
-      ]
-        .filter(Boolean)
-        .join(` `) || `—`
-    lines.push(
-      `| ${query} | ${formatDelta(geomeanRatio(group))} | ${formatDelta(
-        best,
-      )} | ${formatDelta(worst)} | ${flags} |`,
-    )
-  }
+  lines.push(`### Writes`)
   lines.push(``)
+  pushQueryRollup(lines, byQuery, threshold, writeMetric)
+  lines.push(``)
+  if (coldComparisons.length > 0) {
+    lines.push(`### Cold hydrate`)
+    lines.push(``)
+    pushQueryRollup(lines, byQuery, threshold, coldMetric)
+    lines.push(``)
+  }
   lines.push(
     `Each row aggregates the ${allComparisons.length / byQuery.size || 0} ` +
       `scale/index/write-mode configurations of that query; per-configuration ` +
@@ -297,19 +342,28 @@ function formatMarkdown(
   for (const [groupKey, group] of groups) {
     lines.push(`<details>`)
     const changed = group.filter(
-      (comparison) => marker(comparison, threshold) !== ``,
+      (comparison) =>
+        marker(comparison, threshold) !== `` ||
+        marker(comparison, threshold, coldMetric) !== ``,
     ).length
     const changedSuffix = changed > 0 ? `, ${changed} change(s)` : ``
+    const coldSuffix = group.some(
+      (comparison) => metricRatio(comparison, coldMetric) !== undefined,
+    )
+      ? `, cold ${formatRatio(geomeanRatio(group, coldMetric))}`
+      : ``
     lines.push(
       `<summary><b>${groupKey}</b> — geomean ${formatRatio(
         geomeanRatio(group),
-      )}${changedSuffix}</summary>`,
+      )}${coldSuffix}${changedSuffix}</summary>`,
     )
     lines.push(``)
     lines.push(
-      `| Query | Base median | PR median | Δ median | Base p95 | PR p95 | Δ p95 | |`,
+      `| Query | Base median | PR median | Δ median | Base p95 | PR p95 | Δ p95 | | Base cold | PR cold | Δ cold | |`,
     )
-    lines.push(`| --- | ---: | ---: | ---: | ---: | ---: | ---: | --- |`)
+    lines.push(
+      `| --- | ---: | ---: | ---: | ---: | ---: | ---: | --- | ---: | ---: | ---: | --- |`,
+    )
     for (const comparison of group) {
       lines.push(
         `| ${comparison.query} | ${formatMs(
@@ -321,7 +375,11 @@ function formatMarkdown(
         )} | ${formatDelta(comparison.p95Ratio)} | ${marker(
           comparison,
           threshold,
-        )} |`,
+        )} | ${formatOptionalMs(comparison.base.coldHydrateMs)} | ${formatOptionalMs(
+          comparison.candidate.coldHydrateMs,
+        )} | ${formatDelta(
+          metricRatio(comparison, coldMetric) ?? Number.NaN,
+        )} | ${marker(comparison, threshold, coldMetric)} |`,
       )
     }
     lines.push(``)
@@ -335,6 +393,69 @@ function formatMarkdown(
   )
 
   return lines.join(`\n`)
+}
+
+function formatFlagSummary(
+  label: string,
+  group: Array<Comparison>,
+  threshold: number,
+  metric: Metric,
+): string {
+  const regressed = group.filter((comparison) =>
+    isRegression(comparison, threshold, metric),
+  ).length
+  const improved = group.filter((comparison) =>
+    isImprovement(comparison, threshold, metric),
+  ).length
+  const relative = Math.max(threshold, metric.minRelativeThreshold)
+  const rule = `threshold: ±${Math.round(relative * 100)}% and >${metric.floorMs}ms`
+  if (regressed === 0 && improved === 0) {
+    return `${label}: **No significant changes** (${rule}).`
+  }
+  return `${label}: **${regressed} regression(s), ${improved} improvement(s)** (${rule}).`
+}
+
+function pushQueryRollup(
+  lines: Array<string>,
+  byQuery: Map<string, Array<Comparison>>,
+  threshold: number,
+  metric: Metric,
+): void {
+  lines.push(
+    `| Query | Δ ${metric.label} (geomean) | Best case | Worst case | Flags |`,
+  )
+  lines.push(`| --- | ---: | ---: | ---: | :-- |`)
+  for (const [query, group] of byQuery) {
+    const ratios = group
+      .map((comparison) => metricRatio(comparison, metric))
+      .filter(
+        (value): value is number =>
+          value !== undefined && Number.isFinite(value),
+      )
+    if (ratios.length === 0) continue
+    const redCount = group.filter((comparison) =>
+      isRegression(comparison, threshold, metric),
+    ).length
+    const greenCount = group.filter((comparison) =>
+      isImprovement(comparison, threshold, metric),
+    ).length
+    const flags =
+      [
+        redCount > 0 ? `${redCount} 🔴` : ``,
+        greenCount > 0 ? `${greenCount} 🟢` : ``,
+      ]
+        .filter(Boolean)
+        .join(` `) || `—`
+    lines.push(
+      `| ${query} | ${formatDelta(geomeanRatio(group, metric))} | ${formatDelta(
+        Math.min(...ratios),
+      )} | ${formatDelta(Math.max(...ratios))} | ${flags} |`,
+    )
+  }
+}
+
+function formatOptionalMs(value: number | undefined): string {
+  return value === undefined ? `n/a` : formatMs(value)
 }
 
 function formatScale(scale: FixtureScale): string {
