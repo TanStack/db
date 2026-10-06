@@ -15,7 +15,8 @@ import { oraclePropertyOptions, oracleRuns } from './oracle-config.js'
  * first read, in either order, shows the rows that were visible when the
  * snapshot was built. `data` lists the same rows as `state.values()`, in the
  * same order. Every later read returns the same `data` and `state` objects as
- * the first. A single-result query keeps only the first such row: `state`
+ * the first, and reading another snapshot never changes a map that an earlier
+ * read returned. A single-result query keeps only the first such row: `state`
  * holds that row, and `data` is that row or `undefined`.
  *
  * The model is a sorted map from key to version. Each history step changes the
@@ -151,7 +152,7 @@ function checkRead(
   entry: Captured,
   dataFirst: boolean,
   label: string,
-): void {
+): Snapshot[`state`] {
   let read: Pick<Snapshot, `data` | `state`>
   if (dataFirst) {
     const data = entry.snapshot.data
@@ -183,6 +184,7 @@ function checkRead(
   // A snapshot is one value: later reads return the same objects.
   expect(entry.snapshot.state, `${label}: state identity`).toBe(read.state)
   expect(entry.snapshot.data, `${label}: data identity`).toBe(read.data)
+  return read.state
 }
 
 async function checkHistory(
@@ -197,12 +199,29 @@ async function checkHistory(
       reads.length > 0
         ? reads
         : captured.map((_, i) => ({ snapshot: i, dataFirst: true }))
-    const seen = new Set<number>()
+    const seen = new Map<number, Snapshot[`state`]>()
     for (const { snapshot, dataFirst } of order) {
       const index = snapshot % captured.length
       if (seen.has(index)) continue
-      seen.add(index)
-      checkRead(shape, captured[index]!, dataFirst, `snapshot ${index}`)
+      seen.set(
+        index,
+        checkRead(shape, captured[index]!, dataFirst, `snapshot ${index}`),
+      )
+    }
+    // Reading a later snapshot must not change a map an earlier read
+    // returned, and snapshots with different rows have different maps.
+    const keep = shape === `single` ? 1 : Infinity
+    for (const [index, state] of seen) {
+      const rows = captured[index]!.rows.slice(0, keep)
+      expect(
+        [...(state?.values() ?? [])].map(plain),
+        `snapshot ${index}: saved state rows`,
+      ).toEqual(rows)
+      for (const [other, otherState] of seen) {
+        const otherRows = captured[other]!.rows.slice(0, keep)
+        if (JSON.stringify(otherRows) !== JSON.stringify(rows))
+          expect(otherState, `snapshots ${index} and ${other}`).not.toBe(state)
+      }
     }
   } finally {
     await cleanup()

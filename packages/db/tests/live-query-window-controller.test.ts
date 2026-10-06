@@ -231,6 +231,15 @@ describe(`createLiveQueryWindowController`, () => {
       expect(state?.size).toBeGreaterThan(0)
       expect(snap.state).toBe(state)
       expect(controller.getSnapshot().state).toBe(state)
+
+      // A newer revision has its own map and leaves the older one unchanged.
+      const keys = [...(state?.keys() ?? [])]
+      await controller.fetchNextPage()
+      await flush()
+      const next = controller.getSnapshot().state
+      expect([...(next?.keys() ?? [])]).not.toEqual(keys)
+      expect(next).not.toBe(state)
+      expect([...(state?.keys() ?? [])]).toEqual(keys)
     } finally {
       controller.dispose()
       await lq.cleanup()

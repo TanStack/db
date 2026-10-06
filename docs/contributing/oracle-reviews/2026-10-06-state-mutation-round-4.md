@@ -1,8 +1,15 @@
 # State stack mutation round 4
 
-Base revision: `de8d0f1bf` (`main` after #2040). Tested revision: this
-branch on `2376eb581` (`main` after #2048). Production code is unchanged from
-the tested base.
+Revisions:
+
+- Mutation campaign: the 53 mutants ran on `de8d0f1bf` (`main` after #2040).
+- Witnesses: the first versions ran on `2376eb581` (`main` after #2048). The
+  first review's fixes ran on `d57be3d6f`, and its merge of `main` on
+  `5a24b9025`.
+- Second review: its fixes are in the commit that adds this line, on
+  `5a24b9025`. The results under "Second review" ran on that commit.
+
+This branch changes no production code.
 
 ## Method
 
@@ -77,6 +84,14 @@ demonstrated kill. It guards a future lazy `data`. A witness in
 `live-query-window-controller.test.ts` checks the window snapshot and fails
 under both X4 and X5.
 
+The second review found X6, which shares one map per observer and refills it
+on every read. Each read then looks right on its own, so X6 passed. Now the
+oracle saves every map it reads and checks each one again after all reads.
+Snapshots with different rows must also have different maps. The window
+witness fetches a page and checks that the newer revision has its own map and
+the older map is unchanged. Under X6, five of the six snapshot tests and the
+window witness fail.
+
 ## ST27: an unreachable branch
 
 `recomputeOptimisticState` keeps a completed optimistic row only while a
@@ -114,6 +129,16 @@ A medium code review found eight items. Each is fixed here.
 7. The snapshot oracle has six tests, not five. Corrected.
 8. The SY8 witnesses did not check their premise. They now check that the
    open transaction is invalid before the late write.
+
+## Second review
+
+A second code review, of `5a24b9025`, found two items.
+
+1. The record named the tested revision as "this branch on `2376eb581`",
+   but later commits changed the witnesses. Fixed: the revisions above name
+   each run.
+2. X6, a map shared across snapshots, passed the identity checks. Fixed: the
+   saved-map and cross-revision checks under "State identity" above.
 
 ## ORC outcomes
 
