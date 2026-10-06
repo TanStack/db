@@ -47,7 +47,7 @@ const streamedTodoCollection = collectionOptions(
               return new Promise<void>((resolve) => {
                 setTimeout(
                   () => {
-                    begin({ immediate: true })
+                    begin()
                     write({
                       type: `insert`,
                       value: runtime === `server` ? serverTodo : browserTodo,

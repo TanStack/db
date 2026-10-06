@@ -503,14 +503,14 @@ describe(`useLiveSuspenseQuery`, () => {
                 runtime === `server`
                   ? async () => {
                       await serverLoad
-                      begin({ immediate: true })
+                      begin()
                       write({ type: `insert`, value: initialPersons[0]! })
                       commit()
                     }
                   : () => {
                       browserLoad()
                       resolveBrowserLoad = () => {
-                        begin({ immediate: true })
+                        begin()
                         write({
                           type: `insert`,
                           value: initialPersons[1]!,

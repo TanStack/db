@@ -10,6 +10,7 @@ import {
   getLoadSubsetDemandKey,
   validateSyncPersistenceCapability,
   warnOnce,
+  whenSyncAccepted,
   withCollectionConfigFactory,
   withCollectionSyncConfigFactory,
 } from '@tanstack/db'
@@ -1009,6 +1010,12 @@ export function queryCollectionOptions(
     string,
     { data: unknown; dataUpdateCount: number }
   >()
+  // An eager fetch that started before a direct write returns older server
+  // data. Count direct writes, and record the count when each fetch starts.
+  let directWriteGeneration = 0
+  const fetchStartGenerations = new Map<string, number>()
+  // The generation of the latest direct write to each key.
+  const directWriteKeyGenerations = new Map<string | number, number>()
 
   // queryKey → reference count (how many loadSubset calls are active)
   // Reference counting for QueryObserver lifecycle management
@@ -1862,7 +1869,16 @@ export function queryCollectionOptions(
         }),
         ...initialDataObserverOptions,
         queryKey: key,
-        queryFn: queryFunction,
+        queryFn:
+          syncMode === `on-demand`
+            ? queryFunction
+            : (context: Parameters<typeof queryFunction>[0]) => {
+                fetchStartGenerations.set(
+                  hashKey(context.queryKey),
+                  directWriteGeneration,
+                )
+                return queryFunction(context)
+              },
         meta: extendedMeta,
         structuralSharing: true,
         notifyOnChangeProps: `all`,
@@ -2021,8 +2037,10 @@ export function queryCollectionOptions(
         validatedItems ??
         validateSuccessfulResultItemsForApplication(queryKey, result)
 
+      // Diff against accepted rows: an earlier result or direct write can be
+      // accepted while it waits behind a persisting optimistic transaction.
       const currentSyncedItems: Map<string | number, any> = new Map(
-        collection._state.syncedData.entries(),
+        collection._state.acceptedSyncedEntries(),
       )
       const shouldUsePersistedBaseline = persistedBaseline !== undefined
       const previouslyOwnedRows = shouldUsePersistedBaseline
@@ -2134,19 +2152,18 @@ export function queryCollectionOptions(
           const oldItem = shouldUsePersistedBaseline
             ? persistedBaseline.get(key)?.value
             : currentSyncedItems.get(key)
-          if (!oldItem) {
-            return
-          }
           const newItem = newItemsMap.get(key)
           if (!newItem) {
             const owners = getPersistedOwners(key)
             owners.delete(hashedQueryKey)
             setPersistedOwners(key, owners)
             const needToRemove = removeRowOwner(key, hashedQueryKey)
+            // A superseded result's row can still be waiting for durable
+            // storage, so delete by key even when no stored row is known.
             if (needToRemove) {
-              write({ type: `delete`, value: oldItem })
+              write({ type: `delete`, key })
             }
-          } else if (!deepEquals(oldItem, newItem)) {
+          } else if (oldItem && !deepEquals(oldItem, newItem)) {
             write({ type: `update`, value: newItem })
           }
         })
@@ -2177,20 +2194,25 @@ export function queryCollectionOptions(
         if (isMutationPublicationBlocked()) {
           applicationToken.settleRefetchAtFetchBoundary?.()
         }
-        const applied = commit(signal)
+        // An accepted sync transaction always applies, so a later result or
+        // cleanup must not cancel it or roll back the ownership it records.
+        const applied = commit()
+        applicationToken.rollback = undefined
         transactionActive = false
         retainedQueriesPendingRevalidation.delete(hashedQueryKey)
         cancelPersistedRetentionExpiry(hashedQueryKey)
 
-        // Readiness is publication: do not expose it until the establishing
-        // transaction's rows and events are visible.
+        // Readiness counts accepted rows; the application, which settles a
+        // subset load, waits for them to be visible.
         const finishApplication = () => {
           if (!signal?.aborted) markReady()
         }
+        const accepted = whenSyncAccepted(applied)
+        if (accepted === true) finishApplication()
+        else void accepted.then(finishApplication, () => undefined)
         if (applied !== true) {
-          return applied.then(finishApplication, failApplication)
+          return applied.then(() => undefined, failApplication)
         }
-        finishApplication()
         return true
       } catch (error) {
         return failApplication(error)
@@ -2365,6 +2387,34 @@ export function queryCollectionOptions(
               return
             }
             requiredFetchStarts.delete(hashedQueryKey)
+          }
+        }
+        if (
+          syncMode !== `on-demand` &&
+          result.isSuccess &&
+          !result.isFetching &&
+          (fetchStartGenerations.get(hashedQueryKey) ?? directWriteGeneration) <
+            directWriteGeneration
+        ) {
+          // This fetch started before a direct write. Its rows are older
+          // than the accepted rows only for the keys written since it
+          // started; take those from the accepted rows and the rest from
+          // the fetch.
+          const validation = validateSuccessfulResultItems(queryKey, result)
+          if (`items` in validation) {
+            const fetchStart = fetchStartGenerations.get(hashedQueryKey) ?? 0
+            const rows = new Map(
+              validation.items.map((row) => [getKey(row), row]),
+            )
+            for (const [key, generation] of directWriteKeyGenerations) {
+              if (generation <= fetchStart) continue
+              const accepted = collection._state.getAcceptedSyncedRow(key)
+              if (accepted === undefined) rows.delete(key)
+              else rows.set(key, accepted)
+            }
+            fetchStartGenerations.set(hashedQueryKey, directWriteGeneration)
+            updateCacheDataForKey(queryKey, Array.from(rows.values()))
+            return
           }
         }
         if (result.isSuccess) {
@@ -2601,8 +2651,9 @@ export function queryCollectionOptions(
       const rowsToDelete: Array<any> = []
 
       nextOwnersByRow.forEach((nextOwners, rowKey) => {
-        if (nextOwners.size === 0 && collection.has(rowKey)) {
-          rowsToDelete.push(collection.get(rowKey))
+        const row = collection._state.getAcceptedSyncedRow(rowKey)
+        if (nextOwners.size === 0 && row) {
+          rowsToDelete.push(row)
         }
       })
 
@@ -3164,7 +3215,25 @@ export function queryCollectionOptions(
    * and remove every other scoped entry so a later owner fetches it again.
    * Eager collections retain their single full-result cache patch.
    */
-  const updateCacheData = (getItems: () => Array<any>): void => {
+  const updateCacheData = (
+    getItems: () => Array<any>,
+    keys: Array<string | number>,
+  ): void => {
+    directWriteGeneration++
+    // Only a fetch already in flight can return rows older than this write.
+    // On-demand queries revalidate through post-write authority instead.
+    let fetching = false
+    for (const [hashedQueryKey, observer] of state.observers) {
+      if (observer.getCurrentQuery().state.fetchStatus === `fetching`)
+        fetching = true
+      else fetchStartGenerations.set(hashedQueryKey, directWriteGeneration)
+    }
+    // With no fetch in flight, no older result can arrive, so the per-key
+    // generations are not needed.
+    if (!fetching) directWriteKeyGenerations.clear()
+    else
+      for (const key of keys)
+        directWriteKeyGenerations.set(key, directWriteGeneration)
     if (syncMode === `on-demand`) {
       const deferredRefresh = writeContext?.collection.deferDataRefresh
       const revalidatingQueries = new Set<AnyQuery>()
@@ -3358,7 +3427,7 @@ export function queryCollectionOptions(
     begin: () => void
     write: (message: Omit<ChangeMessage<any>, `key`>) => void
     commit: () => SyncAppliedReceipt
-    updateCacheData?: (getItems: () => Array<any>) => void
+    updateCacheData?: (getItems: () => Array<any>, keys: Array<any>) => void
   } | null = null
 
   // Enhanced internalSync that captures write functions for manual use

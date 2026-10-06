@@ -246,3 +246,80 @@ items and overstated test-integrity claims retain their original dispositions.
 No broad closure claim follows. Cancellation, cleanup, read failure, arbitrary
 buffered replay/reset interleavings, and the semantic basis of the still-open
 transaction restriction retain their named persistence-history owner.
+
+## 2026-10-05: integration with the current sync API
+
+PR head `4c9962e4ec30e2579dfbbd4bc7ad4e61d10c408f` passed the
+standalone-branch checks recorded above. Those results did not establish that
+it passed with current main. CI job `112035444776` in run `37388315568`
+checked out merge `7ef5161` against main `49abb32ff`. Main commit
+`eac6e8b6a` (#2030) had removed `begin({ immediate })`. Three calls in the
+new oracle still used that API. Four histories also expected the reservation
+that the removed option no longer supplied. CI correctly rejected both the
+calls and those ordering observations.
+
+This follow-up merges main `482196ec4c4369ec540b510ced926bb7d82d7231`
+without rewriting published history. DB-IVM and DB were rebuilt from the merged
+sources before testing. The unmodified integration reproduced all four runtime
+failures and all three type-error locations. The earlier local success was a
+base-integration gap, not evidence of a flaky test or stale dependency output.
+
+The existing adapter capability `metadata.persistence.reserveCommitTurn()`
+replaces the removed option in these fixtures. Its documented contract reserves
+an open sync transaction's turn ahead of later subset reads; Electric uses it
+for overlapping stream transactions. All 24 original and eight adjacent
+histories remain. Their rows, metadata, receipts and exact ordering comparisons
+are unchanged. The two admission orders are now named unreserved/reserved
+commit turns. The 90 precedence histories and their reference algebra are
+unchanged. This repair adds no production behavior beyond main's integration.
+
+### Revision and execution receipt
+
+- Integrated production blob: `314a0ea3ea7a858a7f69bfd33dadda8566100063`.
+- Final oracle blob: `68ae72caf3713875b0ba466a9698434eb62cea5b`.
+- Calibration oracle blob: `b9459c822b3f47c314dd3b42ebf2dcfa41726873`.
+  The only subsequent oracle edit wraps one grammar comment; executable code
+  and assertions are identical. The full suite uses the final blob.
+- Both dependency builds use main `482196ec4`; this PR does not modify those
+  sources. Cached third-party tooling has the same Rollup limitation recorded
+  above. The merge imports main's manifests and lockfile without local edits.
+
+| Check on the integrated candidate | Result |
+| --- | --- |
+| Unmodified integration | Same four ordering failures and three type-error locations as CI. |
+| Updated fixture | All 122 histories and their three typechecked definitions pass. |
+| Remove sequence retirement | 73 histories fail: the original 24, four unreserved begin-during-read histories, and 45 queued precedence histories. The other 49 runtime histories pass. |
+| Restore the reviewed flag-based guard | All four unreserved begin-during-read histories fail; the four reserved controls pass. |
+| Omit public truncate | 60 precedence histories fail, 30 pass. |
+| Omit public delete | Ten no-truncate delete histories fail, 80 pass. |
+| Omit commit-turn reservation from the updated fixture | Four reserved histories fail the exact read-count observation; four unreserved controls pass. |
+| Final full package suite | 23 files, 836 passing checks, two existing TODOs, no type errors. |
+| Standalone TypeScript | Exit 0. |
+| Final package lint | No errors; 25 existing require-await warnings. |
+
+All hostile controls failed at assertions, with no type, timeout, or setup
+failure. Every temporary mutation was restored. The only additional correction
+sorts two imported names in `sqlite-boolean-arity-oracle.test.ts`; that lint
+error was already present on main and does not alter the oracle's behavior.
+
+### Audit delta and loss reconciliation
+
+ORC-001 and ORC-009 now cite the documented commit-turn capability for the
+fixture's ordering control. ORC-002's independent expected values do not change.
+ORC-003 and ORC-004 retain all histories and describe both supported orders.
+ORC-005, ORC-006 and ORC-013 have fresh path and hostile-control evidence above,
+including a direct omission control for the replacement API. ORC-007 remains
+inapplicable to the bounded enumeration; ORC-008 adds no model state.
+ORC-010's cleanup and ORC-011's serial controls remain intact. This appended
+revision receipt satisfies ORC-012 for the integration repair. ORC-014 retains
+the controlled-adapter limit; calling the same capability as Electric does not
+prove live Electric or host delivery. The coverage item remains open.
+
+CI01, the user-reported integration failure, is confirmed and `fixed-now`.
+CI02, the inherited import-order lint error, is confirmed and `fixed-now`.
+The ten original review items retain seven fixed-now, one duplicate, one refuted,
+and one confirmed-open evidence gap (H10). The four additional review items
+retain two fixed-now and two deferred to their named owners. Current-head
+CodeRabbit review `87aabed8-7ed1-4853-a6c0-d83e12999aeb` has no new code
+findings; its repeated docstring metric remains duplicate C04. No review item
+or tested history was discarded to make this integration pass.

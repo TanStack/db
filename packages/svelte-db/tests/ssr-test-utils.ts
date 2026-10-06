@@ -38,7 +38,7 @@ export function createPeopleDescriptor() {
                   resolveBrowserLoad = resolve
                 })
               }
-              begin({ immediate: true })
+              begin()
               write({
                 type: `insert`,
                 value: runtime === `server` ? serverPerson : browserPerson,

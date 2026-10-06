@@ -12,6 +12,7 @@ import {
   SyncTransactionAlreadyCommittedWriteError,
 } from '../errors'
 import { createDeferred } from '../deferred'
+import { withAcceptedReceipt } from '../sync-receipt'
 import { isPromiseLike } from '../utils/type-guards'
 import { LIVE_QUERY_INTERNAL } from '../query/live/internal.js'
 import { automaticRowMetadataWrite } from './state'
@@ -214,7 +215,7 @@ export class CollectionSyncManager<
       const syncRes = normalizeSyncFnResult(
         this.config.sync.sync({
           collection: this.collection,
-          begin: (options?: { immediate?: boolean }) => {
+          begin: () => {
             if (!isCurrentSync()) return
             const applied = createDeferred<void>()
             // A source may ignore a stream receipt. Keep cancellation from
@@ -229,7 +230,6 @@ export class CollectionSyncManager<
               rowMetadataWrites: new Map(),
               explicitRowMetadataWriteKeys: new Set(),
               collectionMetadataWrites: new Map(),
-              immediate: options?.immediate,
               applied,
               duplicateKeyError: (key) => this.createDuplicateKeyError(key),
             })
@@ -242,8 +242,8 @@ export class CollectionSyncManager<
           ) => {
             if (!isCurrentSync()) return
             const pendingTransaction = this.getActivePendingSyncTransaction()
-            // Cancellation can invalidate an open transaction between writes.
-            // Its commit receipt owns that failure; later writes cannot revive it.
+            // A replay can invalidate an open transaction between writes. Its
+            // commit receipt owns that failure; later writes cannot revive it.
             if (pendingTransaction.invalidationError !== undefined) return
 
             const key =
@@ -312,29 +312,18 @@ export class CollectionSyncManager<
             }
 
             pendingTransaction.committed = true
-
-            const cancel = () => {
-              this.state.cancelPendingSyncedTransaction(pendingTransaction)
-            }
-            signal?.addEventListener(`abort`, cancel, { once: true })
-
+            // An accepted transaction always applies in commit order. Core
+            // accepts it now; the receipt resolves when it is visible. One
+            // held by a persisting optimistic transaction becomes visible when
+            // that transaction settles.
             this.state.commitPendingTransactions()
-            if (!pendingTransaction.applied.isPending()) {
-              signal?.removeEventListener(`abort`, cancel)
-              return true
-            }
-
-            const receipt = pendingTransaction.applied.promise
-            if (signal) {
-              const removeAbortListener = () => {
-                signal.removeEventListener(`abort`, cancel)
-              }
-              void receipt.then(removeAbortListener, removeAbortListener)
-            }
-            return receipt
+            if (!pendingTransaction.applied.isPending()) return true
+            return withAcceptedReceipt(pendingTransaction.applied.promise, true)
           },
           markReady: () => {
             if (!isCurrentSync()) return
+            // Readiness counts accepted rows. Rows a persisting optimistic
+            // transaction holds still publish with the drop of its state.
             if (syncEntryActive) {
               readyEffectFailure ??= this.lifecycle.markReadyDuringSyncStart()
             } else {
@@ -365,9 +354,6 @@ export class CollectionSyncManager<
             // - Finally, optimistic mutations re-applied on top (single batch)
             pendingTransaction.truncate = true
             this.state.refreshPendingSyncedProjection()
-
-            pendingTransaction.optimisticSnapshot =
-              this.state.captureTruncateOptimisticSnapshot()
           },
           metadata: this.createSyncMetadataApi(isCurrentSync),
         }),

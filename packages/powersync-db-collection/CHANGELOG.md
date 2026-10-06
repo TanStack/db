@@ -1,5 +1,30 @@
 # @tanstack/powersync-db-collection
 
+## 0.2.5
+
+### Patch Changes
+
+- Add development-only collection configuration diagnostics. Missing or invalid core options throw actionable errors. Extra adapter properties remain accepted without warnings, except for likely misspellings: casing mistakes or adjacent letter swaps in option names with at least five characters. A suggestion is suppressed when the correctly named option is already present. Keep the validator, warnings, and internal diagnostic classes out of production application bundles. ([#1278](https://github.com/TanStack/db/pull/1278))
+
+  Keep adapter-specific options inside PowerSync, RxDB, and TrailBase. Update the adapter guide to keep conversions in adapter code and place rowUpdateMode inside the sync config.
+
+- Drop a transaction's optimistic state when its mutation function settles. A sync transaction committed while the transaction is persisting is accepted and held. It publishes together with that drop, and `isPersisted` settles after that publication. A mutation function that returns before its server row arrives shows the previous synced row until that row applies. A sync write is attributed `$origin: 'local'` only if it was accepted before the optimistic state dropped. A sync transaction still open at that point is not counted. ([#2030](https://github.com/TanStack/db/pull/2030))
+
+  Breaking: remove the `begin({ immediate })` option from the sync API. Writes made while a mutation persists now queue behind it instead of applying at once.
+
+  Each sync transaction now has two moments: accepted and visible. `commit()` receipts and subset loads resolve when the rows are visible. Collection readiness (`preload`, `stateWhenReady`, `toArrayWhenReady`) resolves once the startup rows are accepted, so a mutation handler that awaits its own collection's readiness during startup settles. An accepted transaction always applies. Handler-facing writes resolve at acceptance, so a mutation handler can await them: Query Collection direct writes, persisted mutation confirmation, and the PowerSync mutation path. A handler that awaits an on-demand load of its own collection waits for itself.
+
+  A subset load whose caller aborts rejects with `AbortError` at every point: before the fetch, when the fetch fails because of the abort, after the fetch but before the commit, and between pages. Pages that were already accepted still apply, and a TrailBase load waits until they are visible.
+
+  Query Collection direct writes read and validate the accepted rows and update the Query cache after acceptance. A refetch no longer cancels an accepted result, so overlapping refetches of a persisted collection apply in order (#1990). An eager fetch that started before a direct write keeps the server's rows for every key the write did not touch and the accepted row for each key it did, in both the collection and the Query cache.
+
+  A DbClient hydration chunk is accepted ahead of a still-open source transaction, so readers of accepted rows see it and the source's `commit()` still commits its own writes.
+
+  Partial sync updates now keep an own `__proto__` field. Metadata-only sync writes no longer publish a spurious insert when they apply with a held transaction. A rollback keeps its delete event when a sync transaction for the same key is still open. When two completed transactions hold one key, the newer transaction's row stays visible. Canceling any sync transaction other than the open last one throws `SyncQueueInvariantError`.
+
+- Updated dependencies [[`2806da0`](https://github.com/TanStack/db/commit/2806da0c41ba99ce6aeef70556a8ac2fd66e2295), [`7c516ce`](https://github.com/TanStack/db/commit/7c516ce025cdac8a986a5d11800b06ed554a1a64), [`eac6e8b`](https://github.com/TanStack/db/commit/eac6e8b6a6150b8e48bdbe61365bceec1e768eb1), [`a21f4a4`](https://github.com/TanStack/db/commit/a21f4a4d553514cd694051dfe74e64109c82b146), [`cfb03f2`](https://github.com/TanStack/db/commit/cfb03f201bb21d82b7f537a9fbe59d3623f395d6)]:
+  - @tanstack/db@0.12.0
+
 ## 0.2.4
 
 ### Patch Changes

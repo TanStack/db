@@ -3,7 +3,7 @@ import { DatabaseSync } from 'node:sqlite'
 import { fc } from '@fast-check/vitest'
 import { expect, it } from 'vitest'
 import { IR } from '@tanstack/db'
-import { createPersistedTableName, SQLiteCorePersistenceAdapter } from '../src'
+import { SQLiteCorePersistenceAdapter, createPersistedTableName } from '../src'
 import type { SQLiteDriver } from '../src'
 
 /**

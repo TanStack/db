@@ -147,3 +147,11 @@ remain outside it:
 - several callbacks that write;
 - generated histories that combine ready callbacks with the optimistic-history
   grammar.
+
+## Note added 2026-10-05: settlement drop
+
+This fix merged with the settlement-drop change
+([2026-10-03 review](2026-10-03-settlement-drop.md)), where readiness counts
+accepted rows. A ready truncate batch still publishes before ready effects
+run: the reentrancy oracle passes on the merged revision, and S6 still fails
+it.

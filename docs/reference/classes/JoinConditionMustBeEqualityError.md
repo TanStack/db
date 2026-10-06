@@ -3,7 +3,7 @@ id: JoinConditionMustBeEqualityError
 title: JoinConditionMustBeEqualityError
 ---
 
-Defined in: [packages/db/src/errors.ts:472](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L472)
+Defined in: [packages/db/src/errors.ts:481](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L481)
 
 ## Extends
 
@@ -17,7 +17,7 @@ Defined in: [packages/db/src/errors.ts:472](https://github.com/TanStack/db/blob/
 new JoinConditionMustBeEqualityError(): JoinConditionMustBeEqualityError;
 ```
 
-Defined in: [packages/db/src/errors.ts:473](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L473)
+Defined in: [packages/db/src/errors.ts:482](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L482)
 
 #### Returns
 

@@ -1,5 +1,5 @@
 import { DiffTriggerOperation, LogLevels, sanitizeSQL } from '@powersync/common'
-import { or, withCollectionConfigFactory } from '@tanstack/db'
+import { or, whenSyncAccepted, withCollectionConfigFactory } from '@tanstack/db'
 import { compileSQLite } from './sqlite-compiler'
 import { PendingOperationStore } from './PendingOperationStore'
 import { PowerSyncTransactor } from './PowerSyncTransactor'
@@ -409,7 +409,6 @@ function createPowerSyncCollectionConfig<
       async function createDiffTrigger(
         options: {
           setupContext?: LockContext
-          immediate?: boolean
           when: Record<DiffTriggerOperation, string>
           writeType: (rowId: string) => OperationType
           batchQuery: (
@@ -420,7 +419,7 @@ function createPowerSyncCollectionConfig<
         },
         appliedReceipts: Array<SyncAppliedReceipt>,
       ) {
-        const { setupContext, immediate, when, writeType, batchQuery } = options
+        const { setupContext, when, writeType, batchQuery } = options
 
         return await database.triggers.createDiffTrigger({
           source: viewName,
@@ -433,7 +432,7 @@ function createPowerSyncCollectionConfig<
               let currentBatchCount = syncBatchSize
               let cursor = 0
               while (currentBatchCount == syncBatchSize) {
-                begin(immediate ? { immediate: true } : undefined)
+                begin()
 
                 const batchItems = await batchQuery(
                   context,
@@ -598,9 +597,6 @@ function createPowerSyncCollectionConfig<
           const appliedReceipts: Array<SyncAppliedReceipt> = []
           await establishTracking(
             {
-              // Initial eager hydration must make the source usable before
-              // PowerSync can persist a mutation queued during startup.
-              immediate: true,
               when: {
                 [DiffTriggerOperation.INSERT]: `TRUE`,
                 [DiffTriggerOperation.UPDATE]: `TRUE`,
@@ -619,7 +615,9 @@ function createPowerSyncCollectionConfig<
             },
             appliedReceipts,
           )
-          await Promise.all(appliedReceipts)
+          // Readiness counts accepted rows. A mutation handler waits for it,
+          // and its own persisting transaction holds the startup rows.
+          await Promise.all(appliedReceipts.map(whenSyncAccepted))
           markReady()
         }).catch((error) => {
           database.logger.log({

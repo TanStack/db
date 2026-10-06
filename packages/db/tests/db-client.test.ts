@@ -388,7 +388,7 @@ describe(`DbClient`, () => {
           return {
             loadSubset: () => {
               lifecycleOrder.push(`load`)
-              begin({ immediate: true })
+              begin()
               write({
                 type: `insert`,
                 value: { id: `1`, name: `fresh` },
@@ -706,7 +706,7 @@ describe(`DbClient`, () => {
 
           return {
             loadSubset: () => {
-              begin({ immediate: true })
+              begin()
               for (const person of people) {
                 write({
                   type: `insert`,

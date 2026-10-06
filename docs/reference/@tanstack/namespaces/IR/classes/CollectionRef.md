@@ -3,7 +3,7 @@ id: CollectionRef
 title: CollectionRef
 ---
 
-Defined in: [packages/db/src/query/ir.ts:89](https://github.com/TanStack/db/blob/main/packages/db/src/query/ir.ts#L89)
+Defined in: [packages/db/src/query/ir.ts:81](https://github.com/TanStack/db/blob/main/packages/db/src/query/ir.ts#L81)
 
 ## Extends
 
@@ -17,7 +17,7 @@ Defined in: [packages/db/src/query/ir.ts:89](https://github.com/TanStack/db/blob
 new CollectionRef(collection, alias): CollectionRef;
 ```
 
-Defined in: [packages/db/src/query/ir.ts:93](https://github.com/TanStack/db/blob/main/packages/db/src/query/ir.ts#L93)
+Defined in: [packages/db/src/query/ir.ts:85](https://github.com/TanStack/db/blob/main/packages/db/src/query/ir.ts#L85)
 
 #### Parameters
 
@@ -47,7 +47,7 @@ BaseExpression.constructor
 readonly __returnType: any;
 ```
 
-Defined in: [packages/db/src/query/ir.ts:86](https://github.com/TanStack/db/blob/main/packages/db/src/query/ir.ts#L86)
+Defined in: [packages/db/src/query/ir.ts:78](https://github.com/TanStack/db/blob/main/packages/db/src/query/ir.ts#L78)
 
 **`Internal`**
 
@@ -67,7 +67,7 @@ BaseExpression.__returnType
 alias: string;
 ```
 
-Defined in: [packages/db/src/query/ir.ts:95](https://github.com/TanStack/db/blob/main/packages/db/src/query/ir.ts#L95)
+Defined in: [packages/db/src/query/ir.ts:87](https://github.com/TanStack/db/blob/main/packages/db/src/query/ir.ts#L87)
 
 ***
 
@@ -77,7 +77,7 @@ Defined in: [packages/db/src/query/ir.ts:95](https://github.com/TanStack/db/blob
 collection: CollectionImpl;
 ```
 
-Defined in: [packages/db/src/query/ir.ts:94](https://github.com/TanStack/db/blob/main/packages/db/src/query/ir.ts#L94)
+Defined in: [packages/db/src/query/ir.ts:86](https://github.com/TanStack/db/blob/main/packages/db/src/query/ir.ts#L86)
 
 ***
 
@@ -87,7 +87,7 @@ Defined in: [packages/db/src/query/ir.ts:94](https://github.com/TanStack/db/blob
 type: "collectionRef";
 ```
 
-Defined in: [packages/db/src/query/ir.ts:90](https://github.com/TanStack/db/blob/main/packages/db/src/query/ir.ts#L90)
+Defined in: [packages/db/src/query/ir.ts:82](https://github.com/TanStack/db/blob/main/packages/db/src/query/ir.ts#L82)
 
 #### Overrides
 
@@ -105,7 +105,7 @@ BaseExpression.type
 get sourceId(): string;
 ```
 
-Defined in: [packages/db/src/query/ir.ts:101](https://github.com/TanStack/db/blob/main/packages/db/src/query/ir.ts#L101)
+Defined in: [packages/db/src/query/ir.ts:93](https://github.com/TanStack/db/blob/main/packages/db/src/query/ir.ts#L93)
 
 Opaque runtime identity; aliases are lexical names only.
 

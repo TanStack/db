@@ -2940,7 +2940,7 @@ describe(`Query Collections`, () => {
 
             return {
               loadSubset: () => {
-                begin({ immediate: true })
+                begin()
                 for (const person of initialPersons) {
                   write({
                     type: `insert`,
