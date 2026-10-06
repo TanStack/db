@@ -4590,6 +4590,9 @@ function createWrappedSyncConfig<
             return visibleAfterDurable(openTransaction, applied)
           }
 
+          // Admission is complete. Only queued hydration replay remains tied
+          // to its sequence; retain hydrationContext for row metadata ownership.
+          openTransaction.hydrationSequence = undefined
           let applied: Promise<void>
           try {
             applied = runtime.applyHydrationBufferedTransaction(transaction)

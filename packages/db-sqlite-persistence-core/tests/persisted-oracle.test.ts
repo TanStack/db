@@ -64,6 +64,17 @@ import type {
  * route through the configured collection owner. Publication precedes
  * durability, but a rejected durability boundary must reject its wrapped sync
  * receipt and fail-stop that sync run without admitting a suffix.
+ * Accepted sync transactions from the sync adapter take precedence over older
+ * persisted rows. Reading those rows for a subset demand or a coordinator
+ * notification may delay publication, but cannot revoke acceptance. Truncate
+ * replay replaces earlier source rows; later sync transactions apply to that
+ * replacement. The settled-result oracle below compares queued and completed
+ * persistence reads against the same independent snapshot algebra.
+ * Existing admission tests separately retain the rejection of transactions
+ * still open when another persistence read begins. They characterize the
+ * current restriction; they do not establish that reading makes work obsolete.
+ * Buffered hydration transactions retain the row metadata ownership captured
+ * from their original persistence read.
  *
  * `foldDurabilityLedger` is the independent model for append-only source
  * obligations. The recording adapter is a plain durable-state model: Maps for
@@ -11789,6 +11800,653 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
       )
     }
   })
+
+  // Commit acceptance creates a source obligation. Successful subset hydration
+  // queued ahead of publication cannot revoke it. This finite grammar crosses
+  // one/two/three queued hydrations, unreserved/reserved commit turns,
+  // insert/update, and absent/present dependent successors. The two-read
+  // unreserved case
+  // reconstructs the report; one and three distinguish a misplaced threshold.
+  // Open transactions crossing hydration are excluded here and rejected below.
+  // This driver supplies adapter scheduling, not live Electric or OPFS delivery.
+  it.each(
+    ([`insert`, `update`] as const).flatMap((type) =>
+      [1, 2, 3].flatMap((hydrationCount) =>
+        [false, true].flatMap((reserveCommitTurn) =>
+          [false, true].map((hasSuccessor) => ({
+            type,
+            hydrationCount,
+            reserveCommitTurn,
+            hasSuccessor,
+          })),
+        ),
+      ),
+    ),
+  )(
+    `publishes committed source $type after $hydrationCount queued hydrations (reserveCommitTurn=$reserveCommitTurn, successor=$hasSuccessor)`,
+    async ({ type, hydrationCount, reserveCommitTurn, hasSuccessor }) => {
+      // https://github.com/TanStack/db/issues/2036
+      const adapter = createRecordingAdapter([
+        { id: `shared`, title: `persisted`, detail: `retained baseline` },
+      ])
+      adapter.rowMetadata.set(`shared`, { owner: `persisted` })
+      const persistenceEntered = createEventGate()
+      const releasePersistence = createEventGate()
+      const applyCommittedTx = adapter.applyCommittedTx.bind(adapter)
+      let applyCalls = 0
+      adapter.applyCommittedTx = async (...args) => {
+        if (++applyCalls === 1) {
+          persistenceEntered.resolve()
+          await releasePersistence.promise
+        }
+        await applyCommittedTx(...args)
+        for (const mutation of args[1].mutations) {
+          if (mutation.type !== `delete` && mutation.key === `shared`) {
+            durableSourceTitles.push((mutation.value as Todo).title)
+          }
+        }
+      }
+      const durableSourceTitles: Array<string> = []
+      const hydrationTitles: Array<string | undefined> = []
+      const loadSubset = adapter.loadSubset.bind(adapter)
+      adapter.loadSubset = async (...args) => {
+        hydrationTitles.push(collection.get(`shared`)?.title)
+        return loadSubset(...args)
+      }
+      let sourceParams!: TodoSyncParams
+      const collection = createCollection(
+        persistedCollectionOptions<Todo, string>({
+          id: `committed-source-${type}-queued-behind-hydration`,
+          getKey: (row) => row.id,
+          syncMode: `on-demand`,
+          sync: {
+            sync: (params) => {
+              sourceParams = params
+              params.markReady()
+              return { loadSubset: () => true }
+            },
+          },
+          persistence: { adapter },
+        }),
+      )
+      const options = Array.from({ length: hydrationCount }, (_, index) => ({
+        limit: index + 1,
+      }))
+      // Model complete source obligations independently of production queues.
+      // Hydration establishes the baseline first; source patches retain detail.
+      // Fresh inserts reset metadata, while updates keep baseline ownership.
+      // Row values retain the pre-existing quiescent wrapper semantics: source
+      // inserts are upserts, and partial mode retains omitted baseline fields.
+      // Metadata reset does not imply replacement of the complete row value.
+      const sourceTitles = hasSuccessor
+        ? [`first source value`, `second source value`]
+        : [`first source value`]
+      const expected = foldDurabilityLedger(
+        sourceTitles.flatMap((title): Array<DurabilityLedgerEvent> => [
+          { type: `begin`, transactionId: title },
+          {
+            type: `write`,
+            transactionId: title,
+            row: { id: `shared`, title, detail: `retained baseline` },
+          },
+          { type: `commit`, transactionId: title },
+        ]),
+      )
+      const receipts: Array<Promise<true | void>> = []
+      let hasPrimaryFailure = false
+      try {
+        await collection.stateWhenReady()
+        sourceParams.begin()
+        sourceParams.write({
+          type: `insert`,
+          value: { id: `gate`, title: `holds apply mutex` },
+        })
+        const gateReceipt = Promise.resolve(sourceParams.commit())
+        void gateReceipt.catch(() => undefined)
+        receipts.push(gateReceipt)
+        await atPersistedOracleCheckpoint(
+          persistenceEntered.promise,
+          `predecessor persistence entered`,
+        )
+
+        // Reserve hydrations while the predecessor holds the mutex.
+        // None has started when the source transaction begins and commits.
+        for (const option of options) {
+          const hydration = Promise.resolve(collection._sync.loadSubset(option))
+          void hydration.catch(() => undefined)
+          receipts.push(hydration)
+        }
+        await flushAsyncWork()
+        expect(adapter.loadSubsetCalls).toHaveLength(0)
+        sourceParams.begin()
+        if (reserveCommitTurn) {
+          sourceParams.metadata!.persistence!.reserveCommitTurn()
+        }
+        sourceParams.write({
+          type,
+          value: { id: `shared`, title: `first source value` },
+        })
+        sourceParams.metadata!.collection.set(`cursor`, `first`)
+        const firstReceipt = Promise.resolve(sourceParams.commit())
+        void firstReceipt.catch(() => undefined)
+        receipts.push(firstReceipt)
+
+        if (hasSuccessor) {
+          sourceParams.begin()
+          if (reserveCommitTurn) {
+            sourceParams.metadata!.persistence!.reserveCommitTurn()
+          }
+          expect(sourceParams.metadata!.collection.get(`cursor`)).toBe(`first`)
+          sourceParams.write({
+            type: `update`,
+            value: { id: `shared`, title: `second source value` },
+          })
+          sourceParams.metadata!.collection.set(`cursor`, `second`)
+          const secondReceipt = Promise.resolve(sourceParams.commit())
+          void secondReceipt.catch(() => undefined)
+          receipts.push(secondReceipt)
+        }
+        expect(collection.get(`shared`)).toBeUndefined()
+
+        releasePersistence.resolve()
+        // Observe every receipt before cleanup. allSettled preserves rejection
+        // identity alongside the wrong public/durable snapshot on main.
+        const outcomes = await atPersistedOracleCheckpoint(
+          Promise.allSettled(receipts),
+          `committed source receipts after queued hydrations`,
+        )
+        expect({
+          outcomes,
+          hydrationTitles,
+          durableSourceTitles,
+          status: collection.status,
+          publicRow: stripVirtualProps(collection.get(`shared`)),
+          durableRow: adapter.rows.get(`shared`),
+          rowMetadata: adapter.rowMetadata.get(`shared`),
+          cursor: adapter.collectionMetadata.get(`cursor`),
+          durableKeys: adapter.applyCommittedTxCalls.map(({ tx }) =>
+            tx.mutations.map(({ key }) => key),
+          ),
+        }).toEqual({
+          outcomes: receipts.map(() => ({
+            status: `fulfilled`,
+            value: undefined,
+          })),
+          hydrationTitles: options.map((_, index) =>
+            index === 0 ? undefined : `persisted`,
+          ),
+          durableSourceTitles: expected.commitOrder,
+          status: `ready`,
+          publicRow: expected.committedRows.get(`shared`),
+          durableRow: expected.committedRows.get(`shared`),
+          rowMetadata: type === `insert` ? undefined : { owner: `persisted` },
+          cursor: hasSuccessor ? `second` : `first`,
+          durableKeys: [[`gate`], ...sourceTitles.map(() => [`shared`])],
+        })
+      } catch (error) {
+        hasPrimaryFailure = true
+        throw error
+      } finally {
+        releasePersistence.resolve()
+        await cleanupPersistedOracle(
+          [
+            ...options.map(
+              (option) => () => collection._sync.unloadSubset(option),
+            ),
+            () => Promise.allSettled(receipts),
+            () => collection.cleanup(),
+          ],
+          hasPrimaryFailure,
+        )
+      }
+    },
+  )
+
+  // A source transaction may begin during hydration and commit after that
+  // same hydration finishes (the metadata-owner test above establishes this
+  // history). Commit acceptance must survive later queued hydration. Starting
+  // during hydration captures metadata ownership; it does not require replay
+  // inside that hydration. This grammar varies the captured key membership,
+  // commit-turn reservation, and the number of later hydrations. The first
+  // scope is held after its task finishes. Without a reserved commit turn, later
+  // reads run first. The adapter capability reserveCommitTurn holds those reads
+  // behind the sync transaction, as Electric does for an overlapping stream.
+  // All receipts settle before public/durable rows and metadata are compared.
+  it.each(
+    [false, true].flatMap((ownerSuppliesRow) =>
+      [false, true].flatMap((reserveCommitTurn) =>
+        [1, 2].map((laterHydrations) => ({
+          ownerSuppliesRow,
+          reserveCommitTurn,
+          laterHydrations,
+        })),
+      ),
+    ),
+  )(
+    `publishes a source begun during hydration after $laterHydrations later hydrations (ownerSuppliesRow=$ownerSuppliesRow, reserveCommitTurn=$reserveCommitTurn)`,
+    async ({ ownerSuppliesRow, reserveCommitTurn, laterHydrations }) => {
+      const baseline = { id: `shared`, title: `persisted`, detail: `baseline` }
+      const adapter = createRecordingAdapter([baseline])
+      adapter.rowMetadata.set(`shared`, { owner: `persisted` })
+      const loadEntered = createEventGate()
+      const releaseLoad = createEventGate()
+      const firstPublished = createEventGate()
+      const releaseScope = createEventGate()
+      const loadSubset = adapter.loadSubset.bind(adapter)
+      let loads = 0
+      adapter.loadSubset = async (...args) => {
+        if (++loads === 1) {
+          loadEntered.resolve()
+          await releaseLoad.promise
+          return ownerSuppliesRow ? loadSubset(...args) : []
+        }
+        return loadSubset(...args)
+      }
+      let sourcePersistenceLoads = 0
+      const applyCommittedTx = adapter.applyCommittedTx.bind(adapter)
+      adapter.applyCommittedTx = async (...args) => {
+        await applyCommittedTx(...args)
+        if (args[1].mutations.some(({ key }) => key === `shared`)) {
+          sourcePersistenceLoads = loads
+        }
+      }
+      let sourceParams!: TodoSyncParams
+      const collection = createCollection(
+        persistedCollectionOptions<Todo, string>({
+          id: `source-begun-during-hydration`,
+          getKey: (row) => row.id,
+          syncMode: `on-demand`,
+          sync: {
+            sync: (params) => {
+              sourceParams = params
+              params.markReady()
+              return { loadSubset: () => true }
+            },
+          },
+          persistence: { adapter },
+        }),
+      )
+      const options = Array.from(
+        { length: laterHydrations + 1 },
+        (_, index) => ({
+          limit: index + 1,
+        }),
+      )
+      const receipts: Array<Promise<true | void>> = []
+      let hasPrimaryFailure = false
+      try {
+        await collection.stateWhenReady()
+        let scopes = 0
+        adapter.runInHydrationScope = async (task) => {
+          const first = ++scopes === 1
+          const result = await task(adapter)
+          if (first) {
+            firstPublished.resolve()
+            await releaseScope.promise
+          }
+          return result
+        }
+        const first = Promise.resolve(collection._sync.loadSubset(options[0]!))
+        void first.catch(() => undefined)
+        receipts.push(first)
+        await atPersistedOracleCheckpoint(
+          loadEntered.promise,
+          `owning hydration entered`,
+        )
+        sourceParams.begin()
+        if (reserveCommitTurn) {
+          sourceParams.metadata!.persistence!.reserveCommitTurn()
+        }
+        sourceParams.write({
+          type: `insert`,
+          value: { ...baseline, title: `source` },
+        })
+        releaseLoad.resolve()
+        await atPersistedOracleCheckpoint(
+          firstPublished.promise,
+          `owning hydration published`,
+        )
+        expect(collection.get(`shared`)?.title).toBe(
+          ownerSuppliesRow ? `persisted` : undefined,
+        )
+        for (const option of options.slice(1)) {
+          const load = Promise.resolve(collection._sync.loadSubset(option))
+          void load.catch(() => undefined)
+          receipts.push(load)
+        }
+        await flushAsyncWork()
+        expect(loads).toBe(1)
+        const committed = Promise.resolve(sourceParams.commit())
+        void committed.catch(() => undefined)
+        receipts.push(committed)
+        releaseScope.resolve()
+        const outcomes = await atPersistedOracleCheckpoint(
+          Promise.allSettled(receipts),
+          `source begun during hydration settled`,
+        )
+        // Accepted source writes follow the baseline; metadata survival belongs
+        // to the rows supplied by the original owning hydration, not later loads.
+        expect({
+          outcomes,
+          loads,
+          sourcePersistenceLoads,
+          status: collection.status,
+          publicRow: stripVirtualProps(collection.get(`shared`)),
+          durableRow: adapter.rows.get(`shared`),
+          metadata: adapter.rowMetadata.get(`shared`),
+        }).toEqual({
+          outcomes: receipts.map(() => ({
+            status: `fulfilled`,
+            value: undefined,
+          })),
+          loads: laterHydrations + 1,
+          sourcePersistenceLoads: reserveCommitTurn ? 1 : laterHydrations + 1,
+          status: `ready`,
+          publicRow: { ...baseline, title: `source` },
+          durableRow: { ...baseline, title: `source` },
+          metadata: ownerSuppliesRow ? { owner: `persisted` } : undefined,
+        })
+      } catch (error) {
+        hasPrimaryFailure = true
+        throw error
+      } finally {
+        releaseLoad.resolve()
+        releaseScope.resolve()
+        await cleanupPersistedOracle(
+          [
+            ...options.map(
+              (option) => () => collection._sync.unloadSubset(option),
+            ),
+            () => Promise.allSettled(receipts),
+            () => collection.cleanup(),
+          ],
+          hasPrimaryFailure,
+        )
+      }
+    },
+  )
+
+  // Persisted rows are a baseline for newer sync-adapter changes. The maintainer
+  // decision recorded in issue-2036-admission-follow-up.md gives accepted sync
+  // transactions precedence over that baseline. A persistence read cannot revoke
+  // acceptance. A later truncate replay can supersede earlier source writes.
+  //
+  // This bounded grammar crosses insert/update/delete with no truncate replay,
+  // replay before the change, and replay after it. Each history runs with the
+  // persistence read already finished and with accepted commits waiting behind
+  // that read. Both schedules must satisfy the same independent result below.
+  // Eager and on-demand Collections receive reset/full-reload notifications;
+  // on-demand Collections also acquire a subset. Notifications only request a
+  // reread here: schema changes and invalidated resume points are outside this
+  // law. The controlled coordinator does not prove cross-tab transport delivery.
+  it.each(
+    (
+      [
+        { syncMode: `on-demand`, route: `subset` },
+        { syncMode: `on-demand`, route: `collection-reset` },
+        { syncMode: `on-demand`, route: `full-reload` },
+        { syncMode: `eager`, route: `collection-reset` },
+        { syncMode: `eager`, route: `full-reload` },
+      ] as const
+    ).flatMap(({ syncMode, route }) =>
+      ([`insert`, `update`, `delete`] as const).flatMap((operation) =>
+        ([`none`, `before`, `after`] as const).flatMap((truncateReplay) =>
+          [false, true].map((commitBeforeRead) => ({
+            syncMode,
+            route,
+            operation,
+            truncateReplay,
+            commitBeforeRead,
+          })),
+        ),
+      ),
+    ),
+  )(
+    `preserves sync history over persisted reads ($syncMode, $route, $operation, truncate=$truncateReplay, queued=$commitBeforeRead)`,
+    async ({
+      syncMode,
+      route,
+      operation,
+      truncateReplay,
+      commitBeforeRead,
+    }) => {
+      const storedRow = { id: `shared`, title: `persisted`, detail: `old` }
+      const storedOnly = { id: `stored-only`, title: `removed by truncate` }
+      const gateRow = { id: `gate`, title: `earlier sync transaction` }
+      const networkRow = { id: `shared`, title: `network`, detail: `new` }
+      const replacementRow = { id: `replacement`, title: `truncate replay` }
+      const adapter = createRecordingAdapter([
+        { ...storedRow },
+        { ...storedOnly },
+      ])
+      adapter.rowMetadata.set(`shared`, { owner: `persisted` })
+      adapter.collectionMetadata.set(`cursor`, `persisted`)
+      const coordinator = createFailStopCoordinatorHarness(
+        `persisted-read-precedence`,
+      )
+      const persistenceEntered = createEventGate()
+      const releasePersistence = createEventGate()
+      const readApplied = createEventGate()
+      const trace: Array<string> = []
+      const applyCommittedTx = adapter.applyCommittedTx.bind(adapter)
+      adapter.applyCommittedTx = async (...args) => {
+        if (args[1].mutations.some(({ key }) => key === `gate`)) {
+          persistenceEntered.resolve()
+          await releasePersistence.promise
+        }
+        await applyCommittedTx(...args)
+        // Record durable completion, including a delete or truncate. A rejected
+        // adapter write must never appear as a completed source obligation.
+        if (args[1].truncate) trace.push(`replacement`)
+        else if (args[1].mutations.some(({ key }) => key === `shared`)) {
+          trace.push(`network`)
+        }
+      }
+      coordinator.requestApplyCommittedTx = async (id, tx) => {
+        await adapter.applyCommittedTx(id, tx)
+        return {
+          type: `rpc:applyCommittedTx:res`,
+          rpcId: tx.txId,
+          ok: true,
+          term: tx.term,
+          seq: tx.seq,
+          latestRowVersion: tx.rowVersion,
+        }
+      }
+      const loadSubset = adapter.loadSubset.bind(adapter)
+      const readRows: Array<Array<Record<string, unknown>>> = []
+      adapter.loadSubset = async (...args) => {
+        const rows = await loadSubset(...args)
+        readRows.push(rows.map(({ value }) => ({ ...value })))
+        trace.push(`persisted read`)
+        return rows
+      }
+      let sourceParams!: TodoSyncParams
+      const collection = createCollection(
+        persistedCollectionOptions<Todo, string>({
+          id: `persisted-read-precedence`,
+          getKey: (row) => row.id,
+          syncMode,
+          sync: {
+            sync: (params) => {
+              sourceParams = params
+              params.markReady()
+              return { loadSubset: () => true }
+            },
+          },
+          persistence: { adapter, coordinator },
+        }),
+      )
+      const options = { limit: 100 }
+      const sourceSteps =
+        truncateReplay === `none`
+          ? [`network`]
+          : truncateReplay === `before`
+            ? [`replacement`, `network`]
+            : [`network`, `replacement`]
+
+      // Independent snapshot algebra: a later replacement discards everything
+      // before it. Otherwise the baseline survives only when there is no
+      // replacement, and the newer change decides the shared key. Complete row
+      // values and explicit metadata avoid the separate partial-update contract.
+      // Source steps are input history, never observations from production.
+      const expectedRows =
+        truncateReplay === `after`
+          ? [replacementRow]
+          : [
+              ...(truncateReplay === `before`
+                ? [replacementRow]
+                : [storedOnly, gateRow]),
+              ...(operation === `delete` ? [] : [networkRow]),
+            ]
+      const expectedMetadata = new Map<string, unknown>([
+        ...(truncateReplay === `none`
+          ? []
+          : [[`replacement`, { owner: `replacement` }] as const]),
+        ...(truncateReplay !== `after` && operation !== `delete`
+          ? [[`shared`, { owner: `network` }] as const]
+          : []),
+      ])
+      const expectedCursor =
+        truncateReplay === `after` ? `replacement` : `network`
+      // Await applied receipts and the optional subset-load promise.
+      const pendingOperations: Array<Promise<true | void>> = []
+      const retainOperation = (receipt: true | void | Promise<true | void>) => {
+        const pending = Promise.resolve(receipt)
+        void pending.catch(() => undefined)
+        pendingOperations.push(pending)
+      }
+      let hasPrimaryFailure = false
+      try {
+        await atPersistedOracleCheckpoint(
+          collection.stateWhenReady(),
+          `precedence collection ready`,
+        )
+        // Hold an earlier durable write so the real runtime queues its read and
+        // ordinary sync transactions. The scope callback witnesses publication,
+        // not just completion of the adapter's load promise.
+        adapter.runInHydrationScope = async (task) => {
+          const result = await task(adapter)
+          readApplied.resolve()
+          return result
+        }
+        sourceParams.begin()
+        sourceParams.write({ type: `insert`, value: { ...gateRow } })
+        retainOperation(sourceParams.commit())
+        await atPersistedOracleCheckpoint(
+          persistenceEntered.promise,
+          `precedence predecessor held`,
+        )
+        if (route === `subset`) {
+          retainOperation(collection._sync.loadSubset(options))
+        } else if (route === `collection-reset`) {
+          coordinator.emit({
+            type: `collection:reset`,
+            schemaVersion: 1,
+            resetEpoch: 1,
+          })
+        } else {
+          coordinator.emit({
+            type: `tx:committed`,
+            term: 1,
+            seq: 2,
+            txId: `remote-reload`,
+            latestRowVersion: 2,
+            requiresFullReload: true,
+          })
+        }
+        await flushAsyncWork()
+        expect(readRows).toEqual([])
+        expect(collection.get(`shared`)?.title).toBe(
+          syncMode === `eager` ? `persisted` : undefined,
+        )
+        if (!commitBeforeRead) {
+          releasePersistence.resolve()
+          await atPersistedOracleCheckpoint(
+            readApplied.promise,
+            `persistence read published before commit`,
+          )
+        }
+        for (const step of sourceSteps) {
+          sourceParams.begin()
+          if (step === `replacement`) {
+            sourceParams.truncate()
+            sourceParams.write({ type: `insert`, value: { ...replacementRow } })
+            sourceParams.metadata!.row.set(`replacement`, {
+              owner: `replacement`,
+            })
+          } else if (operation === `delete`) {
+            sourceParams.write({ type: `delete`, key: `shared` })
+          } else {
+            sourceParams.write({ type: operation, value: { ...networkRow } })
+            sourceParams.metadata!.row.set(`shared`, { owner: `network` })
+          }
+          sourceParams.metadata!.collection.set(`cursor`, step)
+          retainOperation(sourceParams.commit())
+        }
+        releasePersistence.resolve()
+        const outcomes = await atPersistedOracleCheckpoint(
+          Promise.allSettled(pendingOperations),
+          `sync history applied and durable`,
+        )
+        // Compare after applied receipts and the subset load settle, before cleanup. Exact
+        // keys detect resurrected deletes and rows wrongly retained by truncate.
+        // Read contents and completion order prove that the older baseline ran
+        // first in both schedules. No intermediate-publication claim is made.
+        const metadataKeys = [`shared`, `stored-only`, `gate`, `replacement`]
+        expect({
+          outcomes,
+          trace,
+          readRows,
+          status: collection.status,
+          publicRows: new Map(
+            Array.from(collection.values(), (row) => [
+              row.id,
+              stripVirtualProps(row),
+            ]),
+          ),
+          durableRows: adapter.rows,
+          publicMetadata: metadataKeys.map((key) =>
+            sourceParams.metadata!.row.get(key),
+          ),
+          durableMetadata: metadataKeys.map((key) =>
+            adapter.rowMetadata.get(key),
+          ),
+          publicCursor: sourceParams.metadata!.collection.get(`cursor`),
+          durableCursor: adapter.collectionMetadata.get(`cursor`),
+        }).toEqual({
+          outcomes: pendingOperations.map(() => ({
+            status: `fulfilled`,
+            value: undefined,
+          })),
+          trace: [`persisted read`, ...sourceSteps],
+          readRows: [[storedRow, storedOnly, gateRow]],
+          status: `ready`,
+          publicRows: new Map(expectedRows.map((row) => [row.id, row])),
+          durableRows: new Map(expectedRows.map((row) => [row.id, row])),
+          publicMetadata: metadataKeys.map((key) => expectedMetadata.get(key)),
+          durableMetadata: metadataKeys.map((key) => expectedMetadata.get(key)),
+          publicCursor: expectedCursor,
+          durableCursor: expectedCursor,
+        })
+      } catch (error) {
+        hasPrimaryFailure = true
+        throw error
+      } finally {
+        releasePersistence.resolve()
+        await cleanupPersistedOracle(
+          [
+            ...(route === `subset`
+              ? [() => collection._sync.unloadSubset(options)]
+              : []),
+            () => Promise.allSettled(pendingOperations),
+            () => collection.cleanup(),
+          ],
+          hasPrimaryFailure,
+        )
+      }
+    },
+  )
 
   it(`rejects a source transaction that crosses a hydration cycle`, async () => {
     const adapter = createRecordingAdapter()
