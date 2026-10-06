@@ -50,7 +50,3 @@ Use concise prose suited to the change; no particular report template is
 required. When changing repository coverage, update the existing owner and
 coverage map to reflect the changed scope. A scratch law-design experiment
 retains its proposals and limits without claiming new repository coverage.
-
-Track newly confirmed bugs using [the repository's issue-filing guidance](../../../AGENTS.md#track-newly-discovered-bugs),
-including discoveries made during a scratch experiment whose fix is outside the
-current task. Link the tracking issue in the experiment's closeout.

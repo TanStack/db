@@ -50,9 +50,5 @@ behavior, but must name the external standard or engineering reason, its
 applicability, and migration cost. Existing behavior does not establish its own
 correctness; a preference does not establish a contract violation.
 
-Track confirmed bugs using [the repository's issue-filing guidance](../../../AGENTS.md#track-newly-discovered-bugs).
-Include the issue link in the review; a local finding alone does not track the
-follow-up. Delegated reviewers return evidence to the coordinating agent.
-
 Report supported findings and remaining uncertainty. Do not invent findings,
 retire laws, or rewrite expectations to make a review come out decisive.

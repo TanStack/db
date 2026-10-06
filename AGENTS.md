@@ -498,23 +498,6 @@ classifier, fixture, or assertion that let it pass. Use that analysis to suggest
 the smallest test or oracle improvement that would catch the same class of bug,
 not only the reported example.
 
-### Track Newly Discovered Bugs
-
-When investigation or review confirms a new bug, search the issue tracker for
-an existing report. File an issue when the bug has no existing issue or active
-fix tracking it, including when the fix is outside the current task. Do not
-leave a confirmed bug only in a local report or final response.
-
-Include the violated law and its authority, the tested revision, a reproducible
-witness, expected and observed behavior, and why existing tests missed the bug.
-Link the issue from the review record and closeout. Keep design proposals and
-untested hypotheses distinct from confirmed bugs. Filing an issue does not
-expand the current task into implementing its fix.
-
-For delegated work, the coordinating agent owns deduplication and filing;
-reviewers return evidence to it. If the task prohibits external writes or tracker
-access is unavailable, retain a ready-to-file report and state that limitation.
-
 ### Close the Declared Bug Class
 
 A passing reproduction fixes one trace; it does not establish that the bug
