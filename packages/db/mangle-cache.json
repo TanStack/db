@@ -360,8 +360,6 @@
   "onResult": "f_",
   "windowFn": "f$",
   "canRetryRepair": "f0",
-  "restore": "f1",
-  "attach": "f2",
   "compilations": "f3",
   "writtenRows": "f4",
   "checkReusedRow": "f6",
