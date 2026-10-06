@@ -2,11 +2,11 @@ import { describe, expect, it, vi } from 'vitest'
 import { QueryClient } from '@tanstack/query-core'
 import { DuplicateKeySyncError, createCollection } from '@tanstack/db'
 import { persistedCollectionOptions } from '../../db-sqlite-persistence-core/src'
-import type { PersistedTx } from '../../db-sqlite-persistence-core/src'
 import { createNodeSQLitePersistence } from '../../node-db-sqlite-persistence/src'
 import { BetterSqlite3SQLiteDriver } from '../../node-db-sqlite-persistence/src/node-driver'
 import { queryCollectionOptions } from '../src/query'
 import type { QueryCollectionUtils } from '../src/query'
+import type { PersistedTx } from '../../db-sqlite-persistence-core/src'
 
 /**
  * # Does a direct write see the commits that came before it?
@@ -1017,7 +1017,7 @@ describe(`direct writes interleaved with refetches follow the precedence model`,
           )
           expect(rowsAtSettlement).toEqual([{ id: `k`, value: 2 }])
           expect(
-            sortRows((queryClient.getQueryData([id]) ?? []) as Array<Row>),
+            sortRows(queryClient.getQueryData<Array<Row>>([id]) ?? []),
           ).toEqual([{ id: `k`, value: 2 }])
         }, [() => collection.cleanup()])
       })
@@ -1202,9 +1202,7 @@ describe(`direct writes interleaved with refetches follow the precedence model`,
           : [{ id: `k`, value: 10 }]
         expect({
           rows: sortRows(collection.values()),
-          cache: sortRows(
-            (queryClient.getQueryData(queryKey) ?? []) as Array<Row>,
-          ),
+          cache: sortRows(queryClient.getQueryData<Array<Row>>(queryKey) ?? []),
           stored: sortRows(storage.rows.values()),
         }).toEqual({ rows: expected, cache: expected, stored: expected })
       }, [() => fixture.release(), () => collection.cleanup()])
