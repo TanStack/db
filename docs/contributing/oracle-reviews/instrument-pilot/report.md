@@ -23,13 +23,13 @@ excluded from the source corpus.
 | Task | Cards used | Observable result |
 | --- | --- | --- |
 | Extend D2 execution laws beyond the existing bounded owner | Law discovery | Three candidate laws with authority status; a bounded executable extension with both a wrong and a valid alternative scheduler. |
-| Review the paced-mutation oracle and its public promises | Adversarial review; tension scan | Two failing concurrency witnesses and a separate passing probe supporting a design objection. |
+| Review the paced-mutation oracle and its public promises | Adversarial review; tension scan | Two failing concurrency witnesses and a passing queue probe separating a capacity proposal from an unresolved spacing contract. |
 | Reorganize cleanup, admission, and settlement obligations | Law restructuring; tension scan | An old-to-new obligation map and concrete preservation examples; several apparent tensions dissolved without dropping obligations. |
 
 The checks sought sourced laws, independent rival predictions, legal witnesses,
 implementation freedom, separation of evidence from hypotheses, justified
-contract criticism, and preservation of original obligations. All appeared in
-the outputs. The author explicitly marked broad DAG behavior as a supported
+contract criticism, and preservation of original obligations. The outputs addressed these criteria; the clean preservation check below
+identified two narrow repairs before an unqualified preservation claim. The author explicitly marked broad DAG behavior as a supported
 extension requiring acceptance before advertising a universal promise. The
 reviewer separated a contract discrepancy from a proposed change to queue
 capacity semantics. The restructuring agent labeled its work a trace audit.
@@ -42,7 +42,7 @@ substantial scientific-method guidance.
 
 The restructuring run accidentally received historical-review excerpts through
 an incorrectly excluded broad search. It corrected the search and disclosed
-the error. Its design output is retained, but that run is contaminated and is
+the error. A summary of its design output is retained, but that run is contaminated and is
 not evidence of a blind reconstruction. The other two agents reported excluding
 prior review files. Fresh context is a separation control, not statistical
 independence.
@@ -104,15 +104,25 @@ promise currently supports serialization. A different promise would require an
 explicit contract decision, not merely weakening the failing assertion. This
 pilot does not choose or implement the repair or claim bug-class closure.
 
-**Supported design objection, not a failing accepted law.** With queue
+**Queue capacity proposal and unresolved spacing contract.** With queue
 `maxSize: 1`, `wait: 10`, and the first write held, eight calls spaced ten
-milliseconds apart are admitted. After release at time 80, their callback
-starts are `[0,80,80,80,80,80,80,80]`. The third witness passes this observation.
-Queue-stage capacity does not bound all pending transactions, and timer
-eligibility does not guarantee spacing between actual callback starts after a
-stall. This matters to the guide's rate-limited API advice. Redefining capacity
-or wait would reject or delay currently accepted work, so it is a design
-proposal with migration costs. No memory benchmark or provider failure was run.
+milliseconds apart are admitted. After release at time 80, callback starts are
+`[0,80,80,80,80,80,80,80]`. The third witness passes this observation.
+
+Waiting-queue capacity is the documented `maxSize` boundary. Bounding all
+unsettled transactions would change accepted admission behavior and remains a
+design proposal. No memory benchmark or provider failure was run.
+
+Spacing has conflicting authority. The public upload example says “Process
+each upload sequentially with 500ms between them”; `QueueStrategyOptions.wait`
+describes time between processing items. The existing paced owner permits
+same-clock callback starts after a held write settles. Its timing model covers
+immediately fulfilled writes, where queue processing and handler starts coincide.
+Current acceptance does not settle that public promise. A three-call held-write
+history distinguishes callback spacing from timer eligibility. The existing
+paced owner needs start-time observations across release if callback spacing is
+confirmed; the public guide needs clarification if eligibility is intended.
+This pilot retains the conflict and chooses neither policy.
 
 ## Law restructuring result
 
@@ -127,8 +137,45 @@ Reasoned preservation checks retained delayed debounce/throttle edges, queue
 ordering and serialization, rollback reasons, receipt identity, and separate
 Collection cleanup. They rejected cancellation, early flushing, and a universal
 minimum callback-spacing law. Stopping new calls and draining old ones were
-classified as compatible obligations. No executable restructuring check or
-independent preservation validator ran; these are source-based predictions.
+classified as compatible obligations. The original trial had no independent preservation validator. These were
+source-based predictions, and its queue-spacing conclusion did not settle the
+public wording conflict above.
+
+## Clean restructuring trial and independent check
+
+A fresh author received only a frozen 25-file source packet. It contained the
+instructions, public contracts, existing owners, and relevant implementation.
+It excluded prior candidates, review reports, the issue, and pilot conclusions.
+The [input manifest](clean-restructure/input-manifest.json) records every hash
+and source commit `322a48ad6fc37ed7ecbd517d57598a124b533b46`. Reconstruct the packet
+from that commit, not a later checkout. Absolute scratch paths in the raw reports
+identify the original experiment location.
+
+The [original candidate](clean-restructure/candidate-original.md) and
+[author's mapping](clean-restructure/analysis-original.md) remain unchanged.
+A separate reviewer received the source packet and candidate, without the
+mapping or author's intended verdict. Its [original review](clean-restructure/preservation-original.md)
+identified two repairs: preserve explicit `false` as custom queue rejection,
+and scope call-local rollback to admission rejection rather than shared-batch
+persistence failure. The reviewer disclosed generic platform and original
+repository instructions in its context; it reported no earlier substantive
+verdict or historical review input. This is source separation, not statistical
+independence or a completely instruction-free context.
+
+The PR review exposed a third problem: both clean agents treated the existing
+queue tests as settling the public upload-spacing promise. The
+[revised candidate](clean-restructure/candidate-revised.md) retains that authority
+conflict and applies the two local repairs. The [narrow follow-up](clean-restructure/preservation-followup.md) accepts those
+edits against the same frozen sources and withdraws the original queue-authority
+conclusion. No product law has been adopted or test
+expectation changed. The author independently identified the batch-concurrency
+interaction by source inspection; that is not a new executed reproduction.
+
+These artifacts supply inspectable obligation mappings and reasoning witnesses.
+They also show why a fresh reviewer is useful but insufficient: two agents can
+share an authority mistake. The restructuring card now explicitly preserves
+conflicting public and executable claims until a design decision resolves them.
+That final reminder received source review, not another behavioral trial.
 
 ## Feedback applied and remaining limits
 
@@ -149,7 +196,7 @@ Subsequent maintainer feedback added issue tracking for confirmed discoveries.
 The concurrency report is filed as [#2058](https://github.com/TanStack/db/issues/2058),
 with its runnable reproduction and test gap. The affected production files match
 the default branch when checked at filing. The queue-capacity concern remains
-a design proposal. This follow-up policy was not part of the three agent trials.
+a design proposal; callback spacing remains an unresolved contract conflict. This follow-up policy was not part of the three agent trials.
 
 Required reading was the largest cost reported by the agents. This pilot keeps
 the existing reading policy intact; it does not establish which portions could
@@ -160,6 +207,34 @@ Both skills pass YAML metadata/name/description/scaffold validation and local
 links resolve. The bundled Python validator could not import PyYAML in either
 available Python environment; equivalent checks used the existing Node YAML
 parser. No dependency was installed. Whitespace checks pass.
+
+## D2 guide applicability and outcomes
+
+The source audit started at `322a48ad6fc37ed7ecbd517d57598a124b533b46`.
+The manifest records the reviewed revision and final executable artifact hash.
+This account concerns the retained bounded D2 oracle, not adoption into package
+coverage or closure of a production bug class.
+
+| Requirement | Outcome and evidence |
+| --- | --- |
+| ORC-001 | Satisfied for the named graph: authority and limits are in the opening comment and authored-laws section above. Arbitrary DAGs remain a proposal. |
+| ORC-002 | Satisfied: expected messages use arithmetic substitution, independently of the production queues and scheduler. |
+| ORC-003 | Satisfied: law, model, bounded histories, driver, and comparison have adjacent explanatory prose in the executable file. |
+| ORC-004 | No generated-history coverage claim; the experiment enumerates one bounded grammar. Every registration permutation appears once; the reversed order reconstructs the hostile case. Removing registration variation hides the scheduling fault, and removing later active/idle turns loses stale-replay observations. The only values are 2 and 3, with the stated weights; duplicate registration is explicitly rejected. |
+| ORC-005 | Satisfied for the finite claim: 600 real `D2.run()` boundaries compare output messages. Copies retain omissions, duplicates, weights, and message boundaries; message order is deliberately excluded. |
+| ORC-006 | The important-generated-property and repair triggers do not apply. The executed mutant still triggers outcome classification: two-pass fails the first active output assertion. The valid topological alternative passes all orders. |
+| ORC-007 | Not applicable: bounded enumeration, not an important generated property or random campaign. |
+| ORC-008 | Not applicable: expected-message recomputation is stateless; no reference state is introduced or merged. |
+| ORC-009 | Satisfied: the model comment maps `Message` to the D2 recorder value and distinguishes it from a Collection change message. |
+| ORC-010 | The mutant catch preserves the exact output checkpoint and rethrows other errors. There is no shrinker, external resource, asynchronous cleanup, or reduction that can replace the mismatch. |
+| ORC-011 | Not triggered: review identified no shared semantic fault needing a second reference. The topological scheduler checks implementation freedom; it is not claimed as an independent semantic oracle. |
+| ORC-012 | This versioned record and manifest provide each outcome and provenance. No bug-class closure is claimed. |
+| ORC-013 | Claim limited to the named graph and five checkpoints. The reversed path rejects two-pass draining; adjacent idle and later-input cuts check silence and fresh delivery. No general topology, depth threshold, or separate replay-mutant result is claimed. |
+| ORC-014 | Not applicable: real synchronous D2 operators run directly, with no transfer from a controlled provider to a real-provider or host claim. |
+
+The maintained owner remains `packages/db-ivm/tests/d2-work-oracle.test.ts`.
+Promoting this experiment would require that owner's scope and the coverage map
+to change together. This record does not claim that integration has occurred.
 
 ## Replay
 

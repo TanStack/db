@@ -12,6 +12,8 @@ recovering the obligations they represent.
 1. Decompose the laws into traceable obligations, conditions, distinctions,
    and promised observations. Check that these parts can reconstruct each
    original claim; invented categories can lose the essential constraint.
+   If public wording and an executable owner disagree, retain both claims and
+   the unresolved authority. A passing test alone cannot retire public wording.
 2. Propose a different organization and state the operation: merge under a
    common principle, split by authority or checkpoint, replace a concept, or
    retire an obligation with an explicit reason. Fewer words or model fields

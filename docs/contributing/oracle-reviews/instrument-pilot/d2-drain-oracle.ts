@@ -173,16 +173,16 @@ console.log(
   'PASS legal alternative: all 120 orders permit one topological pass',
 )
 
-let killed = false
-try {
-  exercise([4, 3, 2, 1, 0], 'two-pass')
-} catch (error) {
-  if (!(error instanceof assert.AssertionError)) throw error
-  assert.match(error.message, /two-pass: order=4,3,2,1,0; turn=1/)
-  console.log(`KILLED two-pass at output comparison: ${error.message}`)
-  killed = true
-}
-assert.equal(killed, true, 'two-pass wrong scheduler must fail the output law')
+assert.throws(
+  () => exercise([4, 3, 2, 1, 0], 'two-pass'),
+  (error: unknown) => {
+    if (!(error instanceof assert.AssertionError)) throw error
+    assert.match(error.message, /two-pass: order=4,3,2,1,0; turn=1/)
+    console.log(`KILLED two-pass at output comparison: ${error.message}`)
+    return true
+  },
+  'two-pass wrong scheduler must fail the output law',
+)
 console.log(
   'Production files were not modified; calibration schedulers live only in this scratch driver.',
 )

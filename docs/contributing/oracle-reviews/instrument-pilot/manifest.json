@@ -37,7 +37,7 @@
     "docs/contributing/instruments/law-restructuring.md": "68e7f2d76f77bec1dce0ba726398400d52643439564520e5c565f8de71777cad",
     "docs/contributing/instruments/tension-scan.md": "baa6b04449f43cb615b0c2c92ca0f7908dd1d15c4c9fcefcd06651a2f4bf1f2a"
   },
-  "instruction_version_note": "Trial hashes identify the initial instructions used by the three agents. Final hashes include formatting, two pilot-feedback edits, and the later maintainer-requested issue-tracking policy.",
+  "instruction_version_note": "Trial hashes identify the initial instructions used by the three agents. Final hashes include formatting, two pilot-feedback edits, and the later maintainer-requested issue-tracking policy. The clean rerun used the previously final instructions; the last restructuring reminder followed its review and was not behaviorally retried.",
   "final_instruction_hashes": {
     "AGENTS.md": "04837bac1feeb24ea3a1646f066cd48b09ae0604b06cc188982b434d659ca973",
     "docs/contributing/oracle-tests.md": "3e5bfcdb2a1002613416a276f9c10d032528d17e69d0bc80ea021e3e6fb3e5b1",
@@ -46,7 +46,7 @@
     "docs/contributing/instruments/adversarial-review.md": "454728024fe3261243b21fdabc03a3c011c7fa1346ee30e5df694c60ef5a7927",
     "docs/contributing/instruments/index.md": "d54623f47da2a61983d9740b81c0cb8f82f7dfa9d7b9898183add677ccaf9490",
     "docs/contributing/instruments/law-discovery.md": "ab06d3a10589871b2336f56f6635e50b3baa483bae74090bbaefa12739546491",
-    "docs/contributing/instruments/law-restructuring.md": "68e7f2d76f77bec1dce0ba726398400d52643439564520e5c565f8de71777cad",
+    "docs/contributing/instruments/law-restructuring.md": "e613b27daddc28c3a989ef33194a9050266e0edf3f1f3508c814d5a0fe562d40",
     "docs/contributing/instruments/tension-scan.md": "baa6b04449f43cb615b0c2c92ca0f7908dd1d15c4c9fcefcd06651a2f4bf1f2a"
   },
   "saved_replay": {
@@ -76,5 +76,25 @@
       "kind": "confirmed documented-contract discrepancy",
       "scope": "debounce/throttle concurrent persistence"
     }
-  ]
+  ],
+  "clean_restructure": {
+    "source_commit": "322a48ad6fc37ed7ecbd517d57598a124b533b46",
+    "input_manifest": "clean-restructure/input-manifest.json",
+    "author_received": "frozen source packet only",
+    "reviewer_received": "same source packet and original candidate, without author analysis",
+    "evidence": "source inspection and reasoned witnesses only",
+    "artifacts": {
+      "analysis-original.md": "767cc43f7c86aba9d5177c721e042036a18ea20e9d43394100820b406e51c241",
+      "candidate-original.md": "9a49d6b7123bc6c1400cf43f1bd00a60446d791c5697d9f23de6bc4281c7debd",
+      "candidate-revised.md": "baf1a2d07f6d5dd8d62c141058051e3a97b16f87c3bd78bb3a3ed4a09f65f15c",
+      "input-manifest.json": "2917329e6b2af62140b2d89245b112cba0903ffcf587371f24701d0b76599a76",
+      "preservation-followup.md": "5d918dda342e695ab65aa445c998af4c334f9a99ac4dba33efde4106f721ffe2",
+      "preservation-original.md": "949b40c1b29f4b6369c5ecbf801f17ffe3fbacca7d121d1f684a3c411da4fdf5"
+    }
+  },
+  "d2_review": {
+    "initial_reviewed_head": "322a48ad6fc37ed7ecbd517d57598a124b533b46",
+    "artifact_sha256": "776f994027a13cf866dc3711c0615d92e68cbb52cffc6205f76d9130d60d40e7",
+    "followup": "Replaced mutable calibration flag with assert.throws; replay retains all 600 comparisons and exact mutant checkpoint."
+  }
 }
