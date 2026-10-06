@@ -355,7 +355,9 @@ export function useLiveInfiniteQuery<TContext extends Context>(
 
   return {
     data: snapshot.data as InferResultType<TContext>,
-    state: snapshot.state as EnabledLiveQueryReturn<TContext>[`state`],
+    get state() {
+      return snapshot.state as EnabledLiveQueryReturn<TContext>[`state`]
+    },
     status: snapshot.status as EnabledLiveQueryReturn<TContext>[`status`],
     isLoading: snapshot.isLoading,
     isReady: snapshot.isReady,

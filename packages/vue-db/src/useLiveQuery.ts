@@ -34,6 +34,12 @@ import type {
 } from '@tanstack/db'
 import type { ComputedRef, MaybeRefOrGetter } from 'vue'
 
+/** Copy a snapshot's ordered rows; a single-result query's `data` is one row. */
+function snapshotRows(data: unknown): Array<any> {
+  if (Array.isArray(data)) return [...data]
+  return data === undefined ? [] : [data]
+}
+
 /**
  * Return type for useLiveQuery hook
  * @property state - Reactive Map of query results (key → item)
@@ -378,7 +384,7 @@ export function useLiveQuery(
     status.value = snapshot.status as CollectionStatus
     persistedStatus.value = snapshot.persistedStatus
     persistedError.value = snapshot.persistedError
-    internalData.value = Array.from(snapshot.state?.values() ?? [])
+    internalData.value = snapshotRows(snapshot.data)
   }
 
   // Watch for collection changes and subscribe to updates
