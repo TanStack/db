@@ -49,7 +49,6 @@ async function runOutcomeScenario(scenario: Scenario) {
             type: `sync` as const,
             rows: [{ id: 3, a, b, c: 0 }],
             truncate: false,
-            immediate: false,
             copies: 1,
           },
         ]

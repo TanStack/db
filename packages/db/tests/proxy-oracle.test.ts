@@ -188,6 +188,7 @@ describe(`native array callback oracle`, () => {
         const changes = withChangeTracking(original, run)
         expect({ ...original, ...changes }).toStrictEqual(expected)
         expect(original).toStrictEqual(make())
+        let confirm: (value: ReturnType<typeof make>) => void = () => {}
         const collection = createCollection({
           getKey: (row: ReturnType<typeof make>) => row.id,
           startSync: true,
@@ -197,9 +198,18 @@ describe(`native array callback oracle`, () => {
               write({ type: `insert`, value: make() })
               commit()
               markReady()
+              confirm = (value) => {
+                begin()
+                write({ type: `update`, value })
+                commit()
+              }
             },
           },
-          onUpdate: () => Promise.resolve(),
+          // The handler confirms the update, so the stored row is its result.
+          onUpdate: ({ transaction }) => {
+            confirm(transaction.mutations[0].modified)
+            return Promise.resolve()
+          },
         })
         try {
           const tx = collection.update(1, run)

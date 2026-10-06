@@ -116,3 +116,46 @@ accepted row until the next source publication. That follows the existing
 rule that a delete acknowledges no request. Immediate sync batches are
 scheduled for removal in a separate change, so this record does not revisit
 that rule.
+
+## Update, 2026-10-05: settlement-drop law
+
+The record above describes the retention law that was current on
+`06cab6fc7`. The settlement-drop change replaces that law. See
+[the settlement-drop review](2026-10-03-settlement-drop.md). The following
+now applies to this owner:
+
+- A source delete for a key the source never held removes no applied synced
+  row and acknowledges no request.
+- If the source commits the delete while the transaction persists, or inside
+  its handler, the delete is queued. The completed row is held, and the drop
+  and the delete publish together. The row is gone after settlement.
+- Once the optimistic state has dropped, the delete changes no visible row.
+- A persisting transaction keeps its optimistic row. This includes a truncate
+  that carries the delete: the truncate applies at once, beneath that row.
+- The `immediate` dimension is gone, because `begin({ immediate })` was
+  removed.
+
+The pinned histories in `collection-state-retention-oracle.property.test.ts`
+now cover these cases:
+
+- a queued delete;
+- a delete inside the handler;
+- a delete after the drop;
+- a persisting insert with a queued delete;
+- a persisting insert with a truncate delete.
+
+The driver and its counters are unchanged.
+
+Mutants on the merged branch:
+
+- **Reject (throw on) a delete for a key absent from the source projection:**
+  killed. The state-retention oracle fails 11 tests, including the fixed and
+  random campaigns and the pinned histories.
+- **Silently drop the same delete:** survived, and is equivalent under the
+  new law. The key is absent from the applied synced rows, and the
+  optimistic state drops at settlement whether or not a queued sync
+  transaction touches the key. So readers see the same rows and the same
+  publications. Under the retention law, this delete was what retired the
+  accepted snapshot, so the mutant was observable there.
+
+The ORC-004 gap and the ORC-013 limit recorded above still apply.

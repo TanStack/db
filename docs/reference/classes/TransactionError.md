@@ -25,6 +25,7 @@ Defined in: [packages/db/src/errors.ts:308](https://github.com/TanStack/db/blob/
 - [`SyncRowReusedWithoutPreviousValueError`](SyncRowReusedWithoutPreviousValueError.md)
 - [`NoPendingSyncTransactionCommitError`](NoPendingSyncTransactionCommitError.md)
 - [`SyncTransactionAlreadyCommittedError`](SyncTransactionAlreadyCommittedError.md)
+- [`SyncQueueInvariantError`](SyncQueueInvariantError.md)
 
 ## Constructors
 

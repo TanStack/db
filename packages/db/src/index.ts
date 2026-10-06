@@ -24,6 +24,7 @@ export * from './local-storage'
 export * from './errors'
 /** @internal Unstable protocol for persistence-aware collection adapters. */
 export * from './sync-persistence'
+export * from './sync-receipt'
 export { deepEquals } from './utils'
 /** @internal Used by first-party collection adapters. */
 export { warnOnce, resetWarnings } from './utils'

@@ -7,7 +7,7 @@ title: ilike
 function ilike(left, right): BasicExpression<boolean>;
 ```
 
-Defined in: [packages/db/src/query/builder/functions.ts:297](https://github.com/TanStack/db/blob/main/packages/db/src/query/builder/functions.ts#L297)
+Defined in: [packages/db/src/query/builder/functions.ts:280](https://github.com/TanStack/db/blob/main/packages/db/src/query/builder/functions.ts#L280)
 
 ## Parameters
 

@@ -7,7 +7,7 @@ title: getStableQueryBuilderHash
 function getStableQueryBuilderHash(query): string;
 ```
 
-Defined in: [packages/db/src/query/ir-stable-identity.ts:72](https://github.com/TanStack/db/blob/main/packages/db/src/query/ir-stable-identity.ts#L72)
+Defined in: [packages/db/src/query/ir-stable-identity.ts:70](https://github.com/TanStack/db/blob/main/packages/db/src/query/ir-stable-identity.ts#L70)
 
 ## Parameters
 

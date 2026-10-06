@@ -1,6 +1,10 @@
 // @ts-nocheck
 import { DurableObject } from 'cloudflare:workers'
-import { createCollection } from '../../../db/dist/esm/index.js'
+// Wrangler resolves `@tanstack/*` through the package tsconfig paths, so the
+// persistence code below loads `@tanstack/db` from source. Import the
+// Collection from the same module graph: one runtime must load one copy of
+// `@tanstack/db`.
+import { createCollection } from '@tanstack/db'
 import {
   createCloudflareDOSQLitePersistence,
   persistedCollectionOptions,

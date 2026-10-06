@@ -1,5 +1,6 @@
+// eslint-disable-next-line import/no-duplicates -- See https://github.com/un-ts/eslint-plugin-import-x/issues/308
 import { untrack } from 'svelte'
-
+// eslint-disable-next-line import/no-duplicates -- See https://github.com/un-ts/eslint-plugin-import-x/issues/308
 import { SvelteMap } from 'svelte/reactivity'
 import {
   BaseQueryBuilder,
@@ -33,6 +34,12 @@ import type {
   QueryBuilder,
   SingleResult,
 } from '@tanstack/db'
+
+/** Copy a snapshot's ordered rows; a single-result query's `data` is one row. */
+function snapshotRows(data: unknown): Array<any> {
+  if (Array.isArray(data)) return [...data]
+  return data === undefined ? [] : [data]
+}
 
 /**
  * Return type for useLiveQuery hook
@@ -450,9 +457,7 @@ export function useLiveQuery(
   const state = new SvelteMap<string | number, any>(initialSnapshot.state ?? [])
 
   // Reactive data array that maintains sorted order
-  let internalData = $state<Array<any>>(
-    Array.from(initialSnapshot.state?.values() ?? []),
-  )
+  let internalData = $state<Array<any>>(snapshotRows(initialSnapshot.data))
 
   // Track collection status reactively
   let status = $state(initialSnapshot.status)
@@ -486,7 +491,7 @@ export function useLiveQuery(
           state.set(key, value)
         }
       }
-      internalData = Array.from(snapshot.state?.values() ?? [])
+      internalData = snapshotRows(snapshot.data)
     })
   }
 

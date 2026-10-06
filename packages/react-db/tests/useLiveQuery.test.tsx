@@ -10,6 +10,7 @@ import {
   createLiveQueryCollection,
   createOptimisticAction,
   eq,
+  localOnlyCollectionOptions,
   gt,
   lte,
   sum,
@@ -2940,7 +2941,7 @@ describe(`Query Collections`, () => {
 
             return {
               loadSubset: () => {
-                begin({ immediate: true })
+                begin()
                 for (const person of initialPersons) {
                   write({
                     type: `insert`,
@@ -3643,4 +3644,42 @@ describe(`Query Collections`, () => {
       )
     })
   })
+})
+
+describe(`retained useLiveQuery results`, () => {
+  // React returns the observer snapshot itself. The shared observer oracle
+  // owns the point-in-time law; this witness checks the hook's wiring: a
+  // result retained unread keeps its render-time rows on a later first read.
+  it.each([`data`, `state`] as const)(
+    `shows render-time rows when %s is first read after an update`,
+    async (first) => {
+      const source = createCollection(
+        localOnlyCollectionOptions<{ id: string; version: number }, string>({
+          id: `retained-result-${first}`,
+          getKey: (row) => row.id,
+          initialData: [{ id: `a`, version: 1 }],
+        }),
+      )
+      const { result } = renderHook(() =>
+        useLiveQuery((q) => q.from({ row: source })),
+      )
+      await waitFor(() => expect(result.current.isReady).toBe(true))
+      const retained = result.current
+
+      act(() => {
+        source.update(`a`, (draft) => {
+          draft.version = 2
+        })
+        source.insert({ id: `b`, version: 1 })
+      })
+      await waitFor(() => expect(result.current.data).toHaveLength(2))
+
+      const read =
+        first === `data`
+          ? { data: retained.data, state: retained.state }
+          : { state: retained.state, data: retained.data }
+      expect(read.data.map((row) => row.version)).toEqual([1])
+      expect([...read.state.values()].map((row) => row.version)).toEqual([1])
+    },
+  )
 })

@@ -417,6 +417,17 @@ export class SyncTransactionAlreadyCommittedError extends TransactionError {
   }
 }
 
+/**
+ * An internal sync-queue invariant failed: a cancel targeted a transaction
+ * that is not the open last one, or replaying the queue invalidated a
+ * transaction. No public path should reach this.
+ */
+export class SyncQueueInvariantError extends TransactionError {
+  constructor(detail: string) {
+    super(`Sync queue invariant failed: ${detail}`)
+  }
+}
+
 // Query Builder Errors
 export class QueryBuilderError extends TanStackDBError {
   constructor(message: string) {

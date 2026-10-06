@@ -1,5 +1,12 @@
 # @tanstack/react-native-db-sqlite-persistence
 
+## 0.2.29
+
+### Patch Changes
+
+- Updated dependencies [[`dbffea1`](https://github.com/TanStack/db/commit/dbffea1fd4dcba669e4bb959629e2837c3970fbe), [`b6c8540`](https://github.com/TanStack/db/commit/b6c85403cf60aa10e2328f27b3adb04aae718eac), [`4b83aa7`](https://github.com/TanStack/db/commit/4b83aa7e18742a036cc55ef9570e3a9d1d222074), [`eac6e8b`](https://github.com/TanStack/db/commit/eac6e8b6a6150b8e48bdbe61365bceec1e768eb1)]:
+  - @tanstack/db-sqlite-persistence-core@0.4.4
+
 ## 0.2.28
 
 ### Patch Changes
