@@ -55,6 +55,21 @@ export async function run(factory) {
   } finally { await restored.cleanup(); reopened.close() }
 }
 `
+// The workspace pins pnpm. Its explicit option suppresses all pack hooks,
+// including prepare, which older npm versions can run despite --ignore-scripts.
+// Consume the existing build without mutating installed dependency artifacts.
+export function packPackage(directory: string, archives: string) {
+  execFileSync(
+    'pnpm',
+    ['pack', '--pack-destination', archives, '--config.ignore-scripts=true'],
+    {
+      cwd: directory,
+      stdio: 'pipe',
+      env: { ...process.env, pnpm_config_verify_deps_before_run: 'warn' },
+    },
+  )
+}
+
 export function createPackedConsumer() {
   const root = realpathSync(mkdtempSync(join(tmpdir(), 'indexeddb-packed-')))
   try {
@@ -77,31 +92,7 @@ export function createPackedConsumer() {
     visit(dependencyDirectory(packageRoot, 'fake-indexeddb'))
     const dependencies: Record<string, string> = {}
     for (const { directory, manifest } of packages.values()) {
-      const workspace =
-        manifest.name.startsWith('@tanstack/') &&
-        [
-          '@tanstack/db',
-          '@tanstack/db-ivm',
-          '@tanstack/indexeddb-db-collection',
-        ].includes(manifest.name)
-      execFileSync(
-        workspace ? 'pnpm' : 'npm',
-        [
-          'pack',
-          '--pack-destination',
-          archives,
-          ...(workspace ? [] : ['--ignore-scripts']),
-        ],
-        {
-          cwd: directory,
-          stdio: 'pipe',
-          env: {
-            ...process.env,
-            pnpm_config_verify_deps_before_run: 'warn',
-            npm_config_ignore_scripts: 'true',
-          },
-        },
-      )
+      packPackage(directory, archives)
       dependencies[manifest.name] =
         `file:${join(archives, manifest.name.replace('@', '').replace('/', '-') + '-' + manifest.version + '.tgz')}`
     }

@@ -7,6 +7,7 @@ export default defineConfig({
     include: [
       'tests/portable-declarations.test.ts',
       'tests/packed-consumer.test.ts',
+      'tests/pack-hooks.test.ts',
     ],
     environment: 'node',
     coverage: { enabled: false },

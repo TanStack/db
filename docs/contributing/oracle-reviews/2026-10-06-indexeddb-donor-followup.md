@@ -143,3 +143,36 @@ and changesets are additional supporting changes. Binary native compatibility
 accounts for 50 net production lines; the typed-key repair is net-neutral, and
 adapter capture/closure/diagnostics add 12. No second lifecycle or recovery
 machinery was introduced.
+
+
+## CI fixture follow-up from `1c46068cf`
+
+CI's lint job ran without dependency builds. The adapter's main TypeScript
+configuration resolved `@tanstack/db` through absent `dist` declarations, while
+its test configuration alone had source paths. ESLint consequently lost Collection
+types and misclassified six required assertions as unnecessary. Temporarily
+removing both dependency builds locally reproduced all six errors and the unused
+suppression warning. Moving the shared source paths to the main configuration
+makes the same clean-checkout lint pass without changing the oracle assertions.
+The test configuration inherits those paths. Rebuilt published declarations still
+import the package name, as confirmed by the portable consumer checks.
+
+The browser CI lane also exposed packing's reliance on the host npm version.
+`npm pack --ignore-scripts` ran fractional-indexing's lifecycle build under that
+runner and failed before any browser consumer could execute. The fixture now
+uses workspace-pinned pnpm and an explicit `ignore-scripts=true` option for every
+package. This removes the separate external-dependency command and preserves
+already-built artifacts. No package lifecycle rebuild is part of the witness.
+
+`tests/pack-hooks.test.ts` independently authors prepack, prepare and postpack
+hooks that leave a marker and rewrite a built file. Suppressed packing must
+leave no marker and preserve that file. An enabled native control proves each
+hook is reachable. A temporary hooks-enabled helper fails all three suppression
+assertions, and the repaired helper passes. These checks live in the package
+lane, so ordinary runtime tests still do not pack dependencies.
+
+Validation: clean-checkout and built-checkout package lint, standalone typecheck,
+package build, all 1,623 retirement-oracle cases, 19 package cases, and packed
+browser consumers in Chromium/Firefox/WebKit pass. Formatting and whitespace
+checks pass. Product code and oracle expectations are unchanged. The earlier
+full-suite results retain their original revision boundaries.
