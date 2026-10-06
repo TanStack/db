@@ -1,4 +1,3 @@
-import { LiteDebouncer } from '@tanstack/pacer-lite/lite-debouncer'
 import type { DebounceStrategy, DebounceStrategyOptions } from './types'
 import type { Transaction } from '../transactions'
 
@@ -28,28 +27,32 @@ import type { Transaction } from '../transactions'
 export function debounceStrategy(
   options: DebounceStrategyOptions,
 ): DebounceStrategy {
+  const leading = options.leading ?? false
   const trailing = options.trailing ?? true
-  const debouncer = new LiteDebouncer(
-    (callback: () => Transaction) => callback(),
-    {
-      ...options,
-      leading: options.leading ?? false,
-      trailing,
-    },
-  )
+  const wait = options.wait
+  let timeout: ReturnType<typeof setTimeout> | undefined
+  let pendingCallback: (() => Transaction) | undefined
 
   return {
     _type: `debounce`,
     options,
+    willDropCall: () => !trailing && !(leading && timeout === undefined),
     execute: <T extends object = Record<string, unknown>>(
       fn: () => Transaction<T>,
     ) => {
-      const execution = { happened: false }
-      debouncer.maybeExecute(() => {
-        execution.happened = true
-        return (fn as () => Transaction)()
-      })
-      if (!trailing && !execution.happened) return false
+      const runsLeading = leading && timeout === undefined
+      pendingCallback = fn as () => Transaction
+      if (timeout !== undefined) clearTimeout(timeout)
+      timeout = setTimeout(() => {
+        timeout = undefined
+        const callback = pendingCallback
+        pendingCallback = undefined
+        if (trailing && !runsLeading) callback?.()
+      }, wait)
+      // A leading callback may synchronously call mutate again. Install this
+      // call's timer first so the nested call can replace it.
+      if (runsLeading) fn()
+      if (!trailing && !runsLeading) return false
       return
     },
     cleanup: () => {

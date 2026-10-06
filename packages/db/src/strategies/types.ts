@@ -41,6 +41,8 @@ export interface DebounceStrategyOptions {
  */
 export interface DebounceStrategy extends BaseStrategy<`debounce`> {
   options: DebounceStrategyOptions
+  /** Side-effect-free admission check for the paced manager. */
+  willDropCall?: () => boolean
 }
 
 /**
@@ -89,6 +91,10 @@ export interface ThrottleStrategyOptions {
  */
 export interface ThrottleStrategy extends BaseStrategy<`throttle`> {
   options: ThrottleStrategyOptions
+  /** Side-effect-free admission check for the paced manager. */
+  willDropCall?: () => boolean
+  /** Called by the paced manager when persistence actually starts. */
+  onPersistenceStart?: () => void
 }
 
 /**

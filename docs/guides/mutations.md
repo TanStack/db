@@ -1097,6 +1097,8 @@ Powered by [TanStack Pacer](https://github.com/TanStack/pacer), paced mutations 
 The fundamental difference between strategies is how they handle transactions:
 
 **Debounce/Throttle**: Only one pending transaction (collecting mutations) and one persisting transaction (writing to backend) at a time. Multiple rapid mutations automatically merge together into a single transaction.
+If a timer edge arrives while persistence is still in flight, the pending transaction keeps its optimistic changes and waits to persist until the earlier persistence callback finishes. A later mutation can move its timer edge.
+The strategy owns persistence timing. Do not call `commit()` directly on a transaction returned by a paced mutation function; a direct commit bypasses the strategy's schedule and serialization.
 
 **Queue**: Each mutation creates a separate transaction. Admitted mutations run in queue order (FIFO by default, configurable to LIFO). If `maxSize` is set and the waiting queue is full, the returned transaction fails and its optimistic state rolls back.
 
@@ -1104,7 +1106,7 @@ The fundamental difference between strategies is how they handle transactions:
 
 | Strategy | Behavior | Best For |
 |----------|----------|----------|
-| **`debounceStrategy`** | Wait for inactivity before persisting. Only final state is saved. | Auto-save forms, search-as-you-type |
+| **`debounceStrategy`** | Persist after inactivity, with an optional leading persistence call. | Auto-save forms, search-as-you-type |
 | **`throttleStrategy`** | Ensure minimum spacing between executions. Mutations between executions are merged. | Sliders, progress updates, analytics |
 | **`queueStrategy`** | Each mutation becomes a separate transaction. Admitted mutations are attempted sequentially in queue order (FIFO by default, configurable to LIFO). | Sequential workflows, file uploads, rate-limited APIs |
 

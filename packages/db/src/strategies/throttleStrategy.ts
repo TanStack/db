@@ -53,11 +53,33 @@ export function throttleStrategy(
   const trailing = options.trailing !== false
   let nextAllowedAt = Number.NEGATIVE_INFINITY
   let trailingTimeout: ReturnType<typeof setTimeout> | undefined
+  let trailingDueAt: number | undefined
   let pendingCallback: (() => Transaction) | undefined
+
+  const runTrailing = () => {
+    trailingTimeout = undefined
+    trailingDueAt = undefined
+    nextAllowedAt = Date.now() + options.wait
+    const callback = pendingCallback
+    pendingCallback = undefined
+    callback?.()
+  }
+
+  const scheduleTrailing = (dueAt: number) => {
+    trailingDueAt = dueAt
+    trailingTimeout = setTimeout(runTrailing, Math.max(0, dueAt - Date.now()))
+  }
 
   return {
     _type: `throttle`,
     options,
+    willDropCall: () =>
+      !trailing &&
+      !(
+        leading &&
+        trailingTimeout === undefined &&
+        Date.now() >= nextAllowedAt
+      ),
     execute: <T extends object = Record<string, unknown>>(
       fn: () => Transaction<T>,
     ) => {
@@ -71,15 +93,22 @@ export function throttleStrategy(
       pendingCallback = fn as () => Transaction
       if (trailingTimeout === undefined) {
         const delay = leading ? Math.max(0, nextAllowedAt - now) : options.wait
-        trailingTimeout = setTimeout(() => {
-          trailingTimeout = undefined
-          nextAllowedAt = Date.now() + options.wait
-          const callback = pendingCallback
-          pendingCallback = undefined
-          callback?.()
-        }, delay)
+        scheduleTrailing(now + delay)
       }
       return
+    },
+    onPersistenceStart: () => {
+      // A held predecessor can make the real start later than its timer edge.
+      // Keep later trailing work at least one wait after that real start.
+      nextAllowedAt = Date.now() + options.wait
+      if (
+        trailingTimeout !== undefined &&
+        trailingDueAt !== undefined &&
+        trailingDueAt < nextAllowedAt
+      ) {
+        clearTimeout(trailingTimeout)
+        scheduleTrailing(nextAllowedAt)
+      }
     },
     cleanup: () => {
       // Pending work keeps its timer until the scheduled callback runs.

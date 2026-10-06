@@ -34,14 +34,27 @@ import type { Transaction } from '../src/transactions'
  * caller-owned options unchanged. A custom queue strategy may admit work
  * and return void. A custom batch strategy may return false while retaining
  * its callback, as the original public execute contract allowed.
- * Failed persistence and new debounce/throttle calls after cleanup remain
- * outside this owner's grammar.
+ * Broader failure schedules and new debounce/throttle calls after cleanup
+ * remain outside this owner's grammar.
  * Cleanup stops new admission and drains admitted queue work at its regular
  * wait intervals, even if a separate Collection cleanup has finished. The
  * throttle's pending trailing timer also drains after cleanup at its regular
  * edge. A pending debounce timer drains after the last call's quiet period.
  * A call after queue cleanup rejects with a disposal reason. The final cut
  * waits for every admitted receipt.
+ * For debounce and throttle, a timer edge makes the pending transaction
+ * eligible to persist; it does not start a second persistence while the first
+ * is in flight. A later call can move that edge. The held-write histories
+ * compare callback starts, optimistic rows, transaction identity and states,
+ * and receipt settlement before the edge, at the edge, and after release.
+ * A rejected leading-only call cannot roll back an earlier admitted group.
+ * Throttle spacing is measured between actual persistence starts, including
+ * when a held predecessor delays a timer-eligible write. Focused histories
+ * also admit a mutation synchronously inside a persistence callback and a
+ * slow optimistic callback that crosses a throttle window. The former must
+ * drain at its own quiet edge; the latter keeps its admission-time decision.
+ * They also compare both orders of synchronous onMutate reentry, canceled
+ * pending work, and rollback while a persistence callback remains active.
  *
  * Model `pendingIds` combines the production active optimistic transaction's
  * mutations. Model `ready` is an ordered list of queue calls, not pacer-lite's
@@ -276,6 +289,14 @@ function observeReceipt<T extends object>(transaction: Transaction<T>) {
   return receipt
 }
 
+function mutationIds(transaction: Transaction<{ id: number }>): Array<number> {
+  return transaction.mutations.map((mutation) => {
+    const id = mutation.changes.id
+    if (typeof id !== `number`) throw new Error(`Missing mutation ID`)
+    return id
+  })
+}
+
 type Observation = {
   starts: Array<Start>
   sameTransaction: Array<Array<number>>
@@ -306,11 +327,7 @@ async function runProduction(
     mutationFn: ({ transaction }) => {
       starts.push({
         at: Date.now() - origin,
-        ids: transaction.mutations.map((mutation) => {
-          const id = mutation.changes.id
-          if (typeof id !== `number`) throw new Error(`Missing mutation ID`)
-          return id
-        }),
+        ids: mutationIds(transaction),
       })
       return Promise.resolve()
     },
@@ -799,6 +816,55 @@ describe(`paced mutation timeline oracle`, () => {
     })
   })
 
+  for (const { name, strategyFactory } of [
+    {
+      name: `debounce`,
+      strategyFactory: () => debounceStrategy({ wait: 10 }),
+    },
+    {
+      name: `throttle`,
+      strategyFactory: () =>
+        throttleStrategy({ wait: 10, leading: false, trailing: true }),
+    },
+  ]) {
+    it(`${name} ignores a canceled pending group's timer and admits the next call`, async () => {
+      const collection = await createReadyCollection()
+      const strategy = strategyFactory()
+      const starts: Array<Start> = []
+      const mutate = createPacedMutations<number, { id: number }>({
+        onMutate: (id) => collection.insert({ id }),
+        mutationFn: ({ transaction }) => {
+          starts.push({
+            at: Date.now() - origin,
+            ids: mutationIds(transaction),
+          })
+          return Promise.resolve()
+        },
+        strategy,
+      })
+
+      await withCleanup(strategy, collection, async () => {
+        const canceled = mutate(1)
+        const canceledReceipt = observeReceipt(canceled)
+        await vi.advanceTimersByTimeAsync(1)
+        canceled.rollback()
+        await vi.advanceTimersByTimeAsync(9)
+        expect(starts).toEqual([])
+        expect(canceledReceipt.outcome).toBe(`rejected`)
+        expect(collection.get(1)).toBeUndefined()
+        await vi.advanceTimersByTimeAsync(1)
+        const next = mutate(2)
+        const nextReceipt = observeReceipt(next)
+        await vi.advanceTimersByTimeAsync(10)
+        expect(starts).toEqual([{ at: 21, ids: [2] }])
+        expect(nextReceipt).toMatchObject({
+          outcome: `fulfilled`,
+          returnedSame: true,
+        })
+      })
+    })
+  }
+
   it(`drains a second leading debounce transaction when trailing is omitted`, async () => {
     const collection = await createReadyCollection()
     const strategy = debounceStrategy({ wait: 10, leading: true })
@@ -845,6 +911,149 @@ describe(`paced mutation timeline oracle`, () => {
       })
     })
   })
+
+  it(`drains a leading debounce write admitted inside a persistence callback`, async () => {
+    const collection = await createReadyCollection()
+    const strategy = debounceStrategy({
+      wait: 10,
+      leading: true,
+      trailing: true,
+    })
+    const starts: Array<Start> = []
+    let nested: Transaction<{ id: number }> | undefined
+    const mutate = createPacedMutations<number, { id: number }>({
+      onMutate: (id) => collection.insert({ id }),
+      mutationFn: ({ transaction }) => {
+        const ids = mutationIds(transaction)
+        starts.push({ at: Date.now() - origin, ids })
+        if (ids[0] === 1) nested = mutate(2)
+        return Promise.resolve()
+      },
+      strategy,
+    })
+
+    await withCleanup(strategy, collection, async () => {
+      const first = mutate(1)
+      const firstReceipt = observeReceipt(first)
+      const nestedReceipt = observeReceipt(nested!)
+      expect(starts).toEqual([{ at: 0, ids: [1] }])
+      expect(nested?.state).toBe(`pending`)
+      expect(collection.get(2)?.id).toBe(2)
+      await vi.advanceTimersByTimeAsync(10)
+      expect(starts).toEqual([
+        { at: 0, ids: [1] },
+        { at: 10, ids: [2] },
+      ])
+      expect(firstReceipt.outcome).toBe(`fulfilled`)
+      expect(nestedReceipt).toMatchObject({
+        outcome: `fulfilled`,
+        returnedSame: true,
+      })
+    })
+  })
+
+  for (const { name, strategyFactory } of [
+    {
+      name: `debounce`,
+      strategyFactory: () =>
+        debounceStrategy({ wait: 10, leading: true, trailing: true }),
+    },
+    {
+      name: `throttle`,
+      strategyFactory: () =>
+        throttleStrategy({ wait: 10, leading: true, trailing: true }),
+    },
+  ]) {
+    for (const reenterFirst of [false, true]) {
+      it(`${name} finishes optimistic authoring when onMutate reenters ${reenterFirst ? `before` : `after`} its own write`, async () => {
+        const collection = await createReadyCollection()
+        const strategy = strategyFactory()
+        const starts: Array<Start> = []
+        let nested: Transaction<{ id: number }> | undefined
+        const mutate = createPacedMutations<number, { id: number }>({
+          onMutate: (id) => {
+            if (id === 1 && reenterFirst) nested = mutate(2)
+            collection.insert({ id })
+            if (id === 1 && !reenterFirst) nested = mutate(2)
+          },
+          mutationFn: ({ transaction }) => {
+            starts.push({
+              at: Date.now() - origin,
+              ids: mutationIds(transaction),
+            })
+            return Promise.resolve()
+          },
+          strategy,
+        })
+
+        await withCleanup(strategy, collection, async () => {
+          const outer = mutate(1)
+          const receipt = observeReceipt(outer)
+          expect(nested).toBe(outer)
+          const expected = [{ at: 0, ids: reenterFirst ? [2, 1] : [1, 2] }]
+          expect(starts).toEqual(expected)
+          expect([collection.get(1)?.id, collection.get(2)?.id]).toEqual([1, 2])
+          await vi.advanceTimersByTimeAsync(20)
+          expect(starts).toEqual(expected)
+          expect(receipt).toMatchObject({
+            outcome: `fulfilled`,
+            returnedSame: true,
+          })
+        })
+      })
+    }
+  }
+
+  for (const { name, strategyFactory } of [
+    {
+      name: `debounce`,
+      strategyFactory: () =>
+        debounceStrategy({ wait: 10, leading: true, trailing: true }),
+    },
+    {
+      name: `throttle`,
+      strategyFactory: () =>
+        throttleStrategy({ wait: 10, leading: true, trailing: true }),
+    },
+  ]) {
+    it(`${name} settles admitted nested work when the outer onMutate throws`, async () => {
+      const collection = await createReadyCollection()
+      const strategy = strategyFactory()
+      const failure = new Error(`outer authoring failed`)
+      const starts: Array<Start> = []
+      let nested: Transaction<{ id: number }> | undefined
+      const mutate = createPacedMutations<number, { id: number }>({
+        onMutate: (id) => {
+          if (id === 1) {
+            nested = mutate(2)
+            throw failure
+          }
+          collection.insert({ id })
+        },
+        mutationFn: ({ transaction }) => {
+          starts.push({
+            at: Date.now() - origin,
+            ids: mutationIds(transaction),
+          })
+          return Promise.resolve()
+        },
+        strategy,
+      })
+
+      await withCleanup(strategy, collection, async () => {
+        expect(() => mutate(1)).toThrow(failure)
+        const nestedReceipt = observeReceipt(nested!)
+        await vi.advanceTimersByTimeAsync(0)
+        expect(starts).toEqual([{ at: 0, ids: [2] }])
+        expect(collection.get(1)).toBeUndefined()
+        expect(mutationIds(nested!)).toEqual([2])
+        expect(nestedReceipt).toMatchObject({
+          outcome: `fulfilled`,
+          returnedSame: true,
+        })
+      })
+    })
+  }
 
   it(`rejects a debounce call dropped inside a leading-only window`, async () => {
     const collection = await createReadyCollection()
@@ -1081,6 +1290,760 @@ describe(`paced mutation timeline oracle`, () => {
           })),
         )
       })
+    })
+  }
+
+  // The guide promises one pending and one persisting transaction for each
+  // debounce/throttle manager. This small reference schedule has one held
+  // write and one pending group. The group's timer may expire while held;
+  // release then admits it, unless a later call moved its eligibility edge.
+  for (const { name, strategyFactory, firstEdge, secondEdge, releaseAt } of [
+    {
+      name: `leading debounce`,
+      strategyFactory: () =>
+        debounceStrategy({ wait: 10, leading: true, trailing: true }),
+      firstEdge: 0,
+      secondEdge: 11,
+      releaseAt: 21,
+    },
+    {
+      name: `leading throttle`,
+      strategyFactory: () =>
+        throttleStrategy({ wait: 10, leading: true, trailing: true }),
+      firstEdge: 0,
+      secondEdge: 10,
+      releaseAt: 21,
+    },
+    {
+      name: `non-leading debounce`,
+      strategyFactory: () =>
+        debounceStrategy({ wait: 10, leading: false, trailing: true }),
+      firstEdge: 10,
+      secondEdge: 21,
+      releaseAt: 25,
+    },
+    {
+      name: `non-leading throttle`,
+      strategyFactory: () =>
+        throttleStrategy({ wait: 10, leading: false, trailing: true }),
+      firstEdge: 10,
+      secondEdge: 21,
+      releaseAt: 25,
+    },
+  ]) {
+    it(`${name} holds an eligible write until prior persistence settles`, async () => {
+      const collection = await createReadyCollection()
+      const strategy = strategyFactory()
+      const starts: Array<Start> = []
+      const releases: Array<() => void> = []
+      const mutate = createPacedMutations<number, { id: number }>({
+        onMutate: (id) => collection.insert({ id }),
+        mutationFn: ({ transaction }) => {
+          starts.push({
+            at: Date.now() - origin,
+            ids: mutationIds(transaction),
+          })
+          return new Promise<void>((resolve) => releases.push(resolve))
+        },
+        strategy,
+      })
+
+      await withCleanup(
+        strategy,
+        collection,
+        async () => {
+          const first = mutate(1)
+          const firstReceipt = observeReceipt(first)
+          await vi.advanceTimersByTimeAsync(firstEdge)
+          expect(starts).toEqual([{ at: firstEdge, ids: [1] }])
+          expect(first.state).toBe(`persisting`)
+          await vi.advanceTimersByTimeAsync(1)
+          const second = mutate(2)
+          const secondReceipt = observeReceipt(second)
+          expect(second).not.toBe(first)
+          expect(collection.get(2)?.id).toBe(2)
+          await vi.advanceTimersByTimeAsync(secondEdge - firstEdge - 2)
+          expect(starts).toEqual([{ at: firstEdge, ids: [1] }])
+          expect(second.state).toBe(`pending`)
+          expect(secondReceipt.outcome).toBe(`pending`)
+
+          await vi.advanceTimersByTimeAsync(1)
+          expect(starts, `only one persistence call at the timer edge`).toEqual(
+            [{ at: firstEdge, ids: [1] }],
+          )
+          expect([first.state, second.state]).toEqual([`persisting`, `pending`])
+          expect(collection.get(2)?.id).toBe(2)
+          expect(secondReceipt.outcome).toBe(`pending`)
+
+          await vi.advanceTimersByTimeAsync(releaseAt - secondEdge)
+          releases[0]?.()
+          await vi.advanceTimersByTimeAsync(0)
+          expect(starts).toEqual([
+            { at: firstEdge, ids: [1] },
+            { at: releaseAt, ids: [2] },
+          ])
+          expect([first.state, second.state]).toEqual([
+            `completed`,
+            `persisting`,
+          ])
+          expect(firstReceipt).toMatchObject({
+            outcome: `fulfilled`,
+            returnedSame: true,
+          })
+          expect(secondReceipt.outcome).toBe(`pending`)
+          releases[1]?.()
+          await vi.advanceTimersByTimeAsync(0)
+          expect(secondReceipt).toMatchObject({
+            outcome: `fulfilled`,
+            returnedSame: true,
+          })
+        },
+        async () => {
+          for (const release of releases) release()
+          await vi.advanceTimersByTimeAsync(0)
+        },
+      )
+    })
+  }
+
+  for (const {
+    name,
+    strategyFactory,
+    firstEdge,
+    secondAt,
+    firstTrailingEdge,
+    thirdAt,
+    releaseAt,
+    movedEdge,
+  } of [
+    {
+      name: `debounce`,
+      strategyFactory: () =>
+        debounceStrategy({ wait: 10, leading: false, trailing: true }),
+      firstEdge: 10,
+      secondAt: 11,
+      firstTrailingEdge: 21,
+      thirdAt: 22,
+      releaseAt: 25,
+      movedEdge: 32,
+    },
+    {
+      name: `throttle`,
+      strategyFactory: () =>
+        throttleStrategy({ wait: 10, leading: true, trailing: true }),
+      firstEdge: 0,
+      secondAt: 1,
+      firstTrailingEdge: 10,
+      thirdAt: 12,
+      releaseAt: 15,
+      movedEdge: 20,
+    },
+  ]) {
+    it(`${name} keeps a moved pending group after cleanup until its new edge`, async () => {
+      const collection = await createReadyCollection()
+      const strategy = strategyFactory()
+      const starts: Array<Start> = []
+      const releases: Array<() => void> = []
+      const mutate = createPacedMutations<number, { id: number }>({
+        onMutate: (id) => collection.insert({ id }),
+        mutationFn: ({ transaction }) => {
+          starts.push({
+            at: Date.now() - origin,
+            ids: mutationIds(transaction),
+          })
+          return new Promise<void>((resolve) => releases.push(resolve))
+        },
+        strategy,
+      })
+
+      await withCleanup(
+        strategy,
+        collection,
+        async () => {
+          const first = mutate(1)
+          const firstReceipt = observeReceipt(first)
+          await vi.advanceTimersByTimeAsync(secondAt)
+          const pending = mutate(2)
+          const pendingReceipt = observeReceipt(pending)
+          await vi.advanceTimersByTimeAsync(firstTrailingEdge - secondAt)
+          expect(starts).toEqual([{ at: firstEdge, ids: [1] }])
+          expect(pending.state).toBe(`pending`)
+
+          await vi.advanceTimersByTimeAsync(thirdAt - firstTrailingEdge)
+          expect(mutate(3)).toBe(pending)
+          expect([2, 3].map((id) => collection.get(id)?.id)).toEqual([2, 3])
+          strategy.cleanup()
+          await collection.cleanup()
+          await vi.advanceTimersByTimeAsync(releaseAt - thirdAt)
+          releases[0]?.()
+          await vi.advanceTimersByTimeAsync(0)
+          expect(firstReceipt).toMatchObject({
+            outcome: `fulfilled`,
+            returnedSame: true,
+          })
+          expect(starts, `the old edge cannot start the moved group`).toEqual([
+            { at: firstEdge, ids: [1] },
+          ])
+          expect(pending.state).toBe(`pending`)
+          expect(pendingReceipt.outcome).toBe(`pending`)
+
+          await vi.advanceTimersByTimeAsync(movedEdge - releaseAt)
+          expect(starts).toEqual([
+            { at: firstEdge, ids: [1] },
+            { at: movedEdge, ids: [2, 3] },
+          ])
+          expect(pending.state).toBe(`persisting`)
+          releases[1]?.()
+          await vi.advanceTimersByTimeAsync(0)
+          expect(pendingReceipt).toMatchObject({
+            outcome: `fulfilled`,
+            returnedSame: true,
+          })
+        },
+        async () => {
+          for (const release of releases) release()
+          await vi.advanceTimersByTimeAsync(0)
+        },
+      )
+    })
+  }
+
+  for (const { name, strategyFactory } of [
+    {
+      name: `debounce`,
+      strategyFactory: () =>
+        debounceStrategy({ wait: 10, leading: true, trailing: true }),
+    },
+    {
+      name: `throttle`,
+      strategyFactory: () =>
+        throttleStrategy({ wait: 10, leading: true, trailing: true }),
+    },
+  ]) {
+    it(`${name} admits the held successor after failed persistence settles`, async () => {
+      const collection = await createReadyCollection()
+      const strategy = strategyFactory()
+      const starts: Array<number> = []
+      const failure = new Error(`first persistence failed`)
+      let rejectFirst: ((error: Error) => void) | undefined
+      const mutate = createPacedMutations<number, { id: number }>({
+        onMutate: (id) => collection.insert({ id }),
+        mutationFn: ({ transaction }) => {
+          const id = transaction.mutations[0].changes.id
+          if (typeof id !== `number`) throw new Error(`Missing mutation ID`)
+          starts.push(id)
+          if (id === 1) {
+            return new Promise<void>((_resolve, reject) => {
+              rejectFirst = reject
+            })
+          }
+          return Promise.resolve()
+        },
+        strategy,
+      })
+
+      await withCleanup(
+        strategy,
+        collection,
+        async () => {
+          const first = mutate(1)
+          const firstReceipt = observeReceipt(first)
+          await vi.advanceTimersByTimeAsync(1)
+          const second = mutate(2)
+          const secondReceipt = observeReceipt(second)
+          await vi.advanceTimersByTimeAsync(20)
+          expect(starts).toEqual([1])
+          expect([first.state, second.state]).toEqual([`persisting`, `pending`])
+          expect(collection.get(2)?.id).toBe(2)
+          rejectFirst?.(failure)
+          await vi.advanceTimersByTimeAsync(0)
+          expect(starts).toEqual([1, 2])
+          expect([first.state, second.state]).toEqual([`failed`, `completed`])
+          expect(firstReceipt).toMatchObject({
+            outcome: `rejected`,
+            error: failure,
+          })
+          expect(secondReceipt).toMatchObject({
+            outcome: `fulfilled`,
+            returnedSame: true,
+          })
+        },
+        async () => {
+          rejectFirst?.(failure)
+          await vi.advanceTimersByTimeAsync(0)
+        },
+      )
+    })
+  }
+
+  for (const { name, strategyFactory } of [
+    {
+      name: `debounce`,
+      strategyFactory: () =>
+        debounceStrategy({ wait: 10, leading: true, trailing: true }),
+    },
+    {
+      name: `throttle`,
+      strategyFactory: () =>
+        throttleStrategy({ wait: 10, leading: true, trailing: true }),
+    },
+  ]) {
+    it(`${name} keeps a successor pending until a rolled-back handler returns`, async () => {
+      const collection = await createReadyCollection()
+      const strategy = strategyFactory()
+      const starts: Array<number> = []
+      let releaseFirst: (() => void) | undefined
+      let firstRunning = false
+      let overlap = false
+      const mutate = createPacedMutations<number, { id: number }>({
+        onMutate: (id) => collection.insert({ id }),
+        mutationFn: async ({ transaction }) => {
+          const id = mutationIds(transaction)[0]!
+          if (id !== 1) overlap ||= firstRunning
+          starts.push(id)
+          if (id === 1) {
+            firstRunning = true
+            await new Promise<void>((resolve) => {
+              releaseFirst = resolve
+            })
+            firstRunning = false
+          }
+        },
+        strategy,
+      })
+
+      await withCleanup(
+        strategy,
+        collection,
+        async () => {
+          const first = mutate(1)
+          const firstReceipt = observeReceipt(first)
+          await vi.advanceTimersByTimeAsync(1)
+          const second = mutate(2)
+          const secondReceipt = observeReceipt(second)
+          await vi.advanceTimersByTimeAsync(20)
+          expect(starts).toEqual([1])
+          first.rollback()
+          await vi.advanceTimersByTimeAsync(0)
+          expect(firstReceipt.outcome).toBe(`rejected`)
+          expect(starts, `rollback does not end the backend callback`).toEqual([
+            1,
+          ])
+          expect(second.state).toBe(`pending`)
+          expect(secondReceipt.outcome).toBe(`pending`)
+          releaseFirst?.()
+          await vi.advanceTimersByTimeAsync(0)
+          expect(starts).toEqual([1, 2])
+          expect(overlap).toBe(false)
+          expect(secondReceipt).toMatchObject({
+            outcome: `fulfilled`,
+            returnedSame: true,
+          })
+        },
+        async () => {
+          releaseFirst?.()
+          await vi.advanceTimersByTimeAsync(0)
+        },
+      )
+    })
+  }
+
+  for (const { name, strategyFactory, droppedError } of [
+    {
+      name: `debounce`,
+      strategyFactory: () =>
+        debounceStrategy({ wait: 10, leading: true, trailing: false }),
+      droppedError: `DebounceCallDroppedError`,
+    },
+    {
+      name: `throttle`,
+      strategyFactory: () =>
+        throttleStrategy({ wait: 10, leading: true, trailing: false }),
+      droppedError: `ThrottleCallDroppedError`,
+    },
+  ]) {
+    it(`${name} rejects only the dropped call behind an admitted held successor`, async () => {
+      const collection = await createReadyCollection()
+      const strategy = strategyFactory()
+      const starts: Array<Start> = []
+      const releases: Array<() => void> = []
+      const mutate = createPacedMutations<number, { id: number }>({
+        onMutate: (id) => collection.insert({ id }),
+        mutationFn: ({ transaction }) => {
+          starts.push({
+            at: Date.now() - origin,
+            ids: mutationIds(transaction),
+          })
+          return new Promise<void>((resolve) => releases.push(resolve))
+        },
+        strategy,
+      })
+
+      await withCleanup(
+        strategy,
+        collection,
+        async () => {
+          const first = mutate(1)
+          await vi.advanceTimersByTimeAsync(11)
+          const admitted = mutate(2)
+          const admittedReceipt = observeReceipt(admitted)
+          await vi.advanceTimersByTimeAsync(1)
+          const dropped = mutate(3)
+          const droppedReceipt = observeReceipt(dropped)
+          await vi.advanceTimersByTimeAsync(0)
+          expect(dropped).not.toBe(admitted)
+          expect(droppedReceipt).toMatchObject({
+            outcome: `rejected`,
+            error: { name: droppedError },
+          })
+          expect([first.state, admitted.state, dropped.state]).toEqual([
+            `persisting`,
+            `pending`,
+            `failed`,
+          ])
+          expect([2, 3].map((id) => collection.get(id)?.id)).toEqual([
+            2,
+            undefined,
+          ])
+          expect(starts).toEqual([{ at: 0, ids: [1] }])
+
+          releases[0]?.()
+          await vi.advanceTimersByTimeAsync(0)
+          expect(starts).toEqual([
+            { at: 0, ids: [1] },
+            { at: 12, ids: [2] },
+          ])
+          expect(admitted.state).toBe(`persisting`)
+          expect(admittedReceipt.outcome).toBe(`pending`)
+          releases[1]?.()
+          await vi.advanceTimersByTimeAsync(0)
+          expect(admittedReceipt).toMatchObject({
+            outcome: `fulfilled`,
+            returnedSame: true,
+          })
+        },
+        async () => {
+          for (const release of releases) release()
+          await vi.advanceTimersByTimeAsync(0)
+        },
+      )
+    })
+  }
+
+  it(`spaces throttle starts from a delayed write's actual start`, async () => {
+    const collection = await createReadyCollection()
+    const strategy = throttleStrategy({
+      wait: 10,
+      leading: true,
+      trailing: true,
+    })
+    const starts: Array<Start> = []
+    let releaseFirst: (() => void) | undefined
+    const mutate = createPacedMutations<number, { id: number }>({
+      onMutate: (id) => collection.insert({ id }),
+      mutationFn: ({ transaction }) => {
+        const ids = mutationIds(transaction)
+        starts.push({ at: Date.now() - origin, ids })
+        if (ids[0] === 1) {
+          return new Promise<void>((resolve) => {
+            releaseFirst = resolve
+          })
+        }
+        return Promise.resolve()
+      },
+      strategy,
+    })
+
+    await withCleanup(
+      strategy,
+      collection,
+      async () => {
+        const first = mutate(1)
+        await vi.advanceTimersByTimeAsync(1)
+        const second = mutate(2)
+        await vi.advanceTimersByTimeAsync(19)
+        expect(starts).toEqual([{ at: 0, ids: [1] }])
+        releaseFirst?.()
+        await vi.advanceTimersByTimeAsync(0)
+        expect(starts).toEqual([
+          { at: 0, ids: [1] },
+          { at: 20, ids: [2] },
+        ])
+        expect([first.state, second.state]).toEqual([`completed`, `completed`])
+
+        await vi.advanceTimersByTimeAsync(1)
+        const third = mutate(3)
+        const thirdReceipt = observeReceipt(third)
+        await vi.advanceTimersByTimeAsync(8)
+        expect(starts).toHaveLength(2)
+        expect(third.state).toBe(`pending`)
+        expect(collection.get(3)?.id).toBe(3)
+        expect(thirdReceipt.outcome).toBe(`pending`)
+        await vi.advanceTimersByTimeAsync(1)
+        expect(starts).toEqual([
+          { at: 0, ids: [1] },
+          { at: 20, ids: [2] },
+          { at: 30, ids: [3] },
+        ])
+        expect(thirdReceipt).toMatchObject({
+          outcome: `fulfilled`,
+          returnedSame: true,
+        })
+      },
+      async () => {
+        releaseFirst?.()
+        await vi.advanceTimersByTimeAsync(0)
+      },
+    )
+  })
+
+  it(`spaces a throttle call made synchronously inside a delayed write`, async () => {
+    const collection = await createReadyCollection()
+    const strategy = throttleStrategy({
+      wait: 10,
+      leading: true,
+      trailing: true,
+    })
+    const starts: Array<Start> = []
+    let releaseFirst: (() => void) | undefined
+    let reentrant: Transaction<{ id: number }> | undefined
+    let reentrantReceipt:
+      ReturnType<typeof observeReceipt<{ id: number }>> | undefined
+    const mutate = createPacedMutations<number, { id: number }>({
+      onMutate: (id) => collection.insert({ id }),
+      mutationFn: ({ transaction }) => {
+        const ids = mutationIds(transaction)
+        starts.push({ at: Date.now() - origin, ids })
+        if (ids[0] === 1) {
+          return new Promise<void>((resolve) => {
+            releaseFirst = resolve
+          })
+        }
+        if (ids[0] === 2) {
+          reentrant = mutate(3)
+          reentrantReceipt = observeReceipt(reentrant)
+        }
+        return Promise.resolve()
+      },
+      strategy,
+    })
+
+    await withCleanup(
+      strategy,
+      collection,
+      async () => {
+        const first = mutate(1)
+        await vi.advanceTimersByTimeAsync(1)
+        const second = mutate(2)
+        await vi.advanceTimersByTimeAsync(19)
+        expect(starts).toEqual([{ at: 0, ids: [1] }])
+        releaseFirst?.()
+        await vi.advanceTimersByTimeAsync(0)
+        expect(starts).toEqual([
+          { at: 0, ids: [1] },
+          { at: 20, ids: [2] },
+        ])
+        expect([first.state, second.state, reentrant?.state]).toEqual([
+          `completed`,
+          `completed`,
+          `pending`,
+        ])
+        expect(reentrantReceipt?.outcome).toBe(`pending`)
+        await vi.advanceTimersByTimeAsync(9)
+        expect(starts).toHaveLength(2)
+        await vi.advanceTimersByTimeAsync(1)
+        expect(starts).toEqual([
+          { at: 0, ids: [1] },
+          { at: 20, ids: [2] },
+          { at: 30, ids: [3] },
+        ])
+        expect(reentrantReceipt).toMatchObject({
+          outcome: `fulfilled`,
+          returnedSame: true,
+        })
+      },
+      async () => {
+        releaseFirst?.()
+        await vi.advanceTimersByTimeAsync(0)
+      },
+    )
+  })
+
+  it(`drops a throttle call using its admission-time window when onMutate crosses an edge`, async () => {
+    const collection = await createReadyCollection()
+    const strategy = throttleStrategy({
+      wait: 10,
+      leading: true,
+      trailing: false,
+    })
+    const starts: Array<Start> = []
+    let releaseFirst: (() => void) | undefined
+    const mutate = createPacedMutations<number, { id: number }>({
+      onMutate: (id) => {
+        collection.insert({ id })
+        if (id === 3) vi.setSystemTime(origin + 23)
+      },
+      mutationFn: ({ transaction }) => {
+        const ids = mutationIds(transaction)
+        starts.push({ at: Date.now() - origin, ids })
+        if (ids[0] === 1) {
+          return new Promise<void>((resolve) => {
+            releaseFirst = resolve
+          })
+        }
+        return Promise.resolve()
+      },
+      strategy,
+    })
+
+    await withCleanup(
+      strategy,
+      collection,
+      async () => {
+        const first = mutate(1)
+        await vi.advanceTimersByTimeAsync(11)
+        const admitted = mutate(2)
+        const admittedReceipt = observeReceipt(admitted)
+        await vi.advanceTimersByTimeAsync(1)
+        const dropped = mutate(3)
+        const droppedReceipt = observeReceipt(dropped)
+        await vi.advanceTimersByTimeAsync(0)
+        expect(dropped).not.toBe(admitted)
+        expect(droppedReceipt).toMatchObject({
+          outcome: `rejected`,
+          error: { name: `ThrottleCallDroppedError` },
+        })
+        expect([first.state, admitted.state, dropped.state]).toEqual([
+          `persisting`,
+          `pending`,
+          `failed`,
+        ])
+        expect(collection.get(2)?.id).toBe(2)
+        expect(collection.get(3)).toBeUndefined()
+        releaseFirst?.()
+        await vi.advanceTimersByTimeAsync(0)
+        expect(starts).toEqual([
+          { at: 0, ids: [1] },
+          { at: 23, ids: [2] },
+        ])
+        expect(admittedReceipt).toMatchObject({
+          outcome: `fulfilled`,
+          returnedSame: true,
+        })
+      },
+      async () => {
+        releaseFirst?.()
+        await vi.advanceTimersByTimeAsync(0)
+      },
+    )
+  })
+
+  it(`a throwing optimistic call leaves an admitted debounce quiet edge intact`, async () => {
+    const collection = await createReadyCollection()
+    const strategy = debounceStrategy({
+      wait: 10,
+      leading: false,
+      trailing: true,
+    })
+    const starts: Array<Start> = []
+    const failure = new Error(`optimistic mutation failed`)
+    const mutate = createPacedMutations<number, { id: number }>({
+      onMutate: (id) => {
+        if (id === 2) throw failure
+        collection.insert({ id })
+      },
+      mutationFn: ({ transaction }) => {
+        starts.push({
+          at: Date.now() - origin,
+          ids: mutationIds(transaction),
+        })
+        return Promise.resolve()
+      },
+      strategy,
+    })
+
+    await withCleanup(strategy, collection, async () => {
+      const admitted = mutate(1)
+      const receipt = observeReceipt(admitted)
+      await vi.advanceTimersByTimeAsync(5)
+      expect(() => mutate(2)).toThrow(failure)
+      await vi.advanceTimersByTimeAsync(5)
+      expect(starts).toEqual([{ at: 10, ids: [1] }])
+      expect(receipt).toMatchObject({
+        outcome: `fulfilled`,
+        returnedSame: true,
+      })
+    })
+  })
+
+  for (const { name, strategyFactory } of [
+    {
+      name: `debounce`,
+      strategyFactory: () =>
+        debounceStrategy({ wait: 10, leading: true, trailing: false }),
+    },
+    {
+      name: `throttle`,
+      strategyFactory: () =>
+        throttleStrategy({ wait: 10, leading: true, trailing: false }),
+    },
+  ]) {
+    it(`${name} leaves a leading edge available after a throwing call`, async () => {
+      const collection = await createReadyCollection()
+      const strategy = strategyFactory()
+      const starts: Array<Start> = []
+      const failure = new Error(`optimistic mutation failed`)
+      let releaseFirst: (() => void) | undefined
+      const mutate = createPacedMutations<number, { id: number }>({
+        onMutate: (id) => {
+          if (id === 3) throw failure
+          collection.insert({ id })
+        },
+        mutationFn: ({ transaction }) => {
+          const ids = mutationIds(transaction)
+          starts.push({ at: Date.now() - origin, ids })
+          if (ids[0] === 1) {
+            return new Promise<void>((resolve) => {
+              releaseFirst = resolve
+            })
+          }
+          return Promise.resolve()
+        },
+        strategy,
+      })
+
+      await withCleanup(
+        strategy,
+        collection,
+        async () => {
+          const first = mutate(1)
+          await vi.advanceTimersByTimeAsync(11)
+          const admitted = mutate(2)
+          const admittedReceipt = observeReceipt(admitted)
+          await vi.advanceTimersByTimeAsync(11)
+          expect(() => mutate(3)).toThrow(failure)
+          await vi.advanceTimersByTimeAsync(1)
+          const next = mutate(4)
+          expect(next).toBe(admitted)
+          expect(collection.get(4)?.id).toBe(4)
+          expect(starts).toEqual([{ at: 0, ids: [1] }])
+          releaseFirst?.()
+          await vi.advanceTimersByTimeAsync(0)
+          expect(starts).toEqual([
+            { at: 0, ids: [1] },
+            { at: 23, ids: [2, 4] },
+          ])
+          expect(first.state).toBe(`completed`)
+          expect(admittedReceipt).toMatchObject({
+            outcome: `fulfilled`,
+            returnedSame: true,
+          })
+        },
+        async () => {
+          releaseFirst?.()
+          await vi.advanceTimersByTimeAsync(0)
+        },
+      )
     })
   }
 
