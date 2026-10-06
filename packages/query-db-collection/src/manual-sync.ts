@@ -1,4 +1,8 @@
-import { DuplicateKeySyncError, whenSyncAccepted } from '@tanstack/db'
+import {
+  DuplicateKeySyncError,
+  SyncTransactionAbortedError,
+  whenSyncAccepted,
+} from '@tanstack/db'
 import {
   DeleteOperationItemNotFoundError,
   DuplicateKeyInBatchError,
@@ -51,13 +55,17 @@ export interface SyncContext<
    */
   updateCacheData?: (getItems: () => Array<TRow>) => void
   /**
-   * Records a direct write when it is called. `waiting` settles when a write
-   * that waits for earlier commits is accepted.
+   * Gives a direct write its position when it is called. A fetch that starts
+   * later counts as newer than the write.
    */
-  noteDirectWrite?: (
-    keys: Array<TKey>,
-    waiting: Promise<void> | undefined,
-  ) => void
+  reserveDirectWrite?: () => number
+  /**
+   * Gives an accepted write's keys precedence from its reserved position.
+   * A rejected write never calls this.
+   */
+  claimDirectWriteKeys?: (keys: Array<TKey>, position: number) => void
+  /** Records a write that waits for earlier commits until it settles. */
+  noteWaitingDirectWrite?: (waiting: Promise<void>) => void
   /** Settles once every earlier commit is accepted, or undefined if it is. */
   earlierCommits?: () => Promise<void> | undefined
 }
@@ -161,6 +169,7 @@ export function performWriteOperations<
     | SyncOperation<TRow, TKey, TInsertInput>
     | Array<SyncOperation<TRow, TKey, TInsertInput>>,
   ctx: SyncContext<TRow, TKey>,
+  isCurrent: () => boolean,
 ): Promise<void> {
   let normalized: Array<NormalizedOperation<TRow, TKey>>
   try {
@@ -168,22 +177,24 @@ export function performWriteOperations<
   } catch (error) {
     return Promise.reject(error)
   }
-  const keys = normalized.map((op) => op.key)
+  const position = ctx.reserveDirectWrite?.() ?? 0
   // Validate against, and apply on top of, every earlier commit. A commit
   // can wait for a persistence lock before it is accepted, so the write waits
   // too. A validation error rejects the returned promise.
   const earlier = ctx.earlierCommits?.()
   if (!earlier) {
-    ctx.noteDirectWrite?.(keys, undefined)
     try {
-      return applyWriteOperations(normalized, ctx)
+      return applyWriteOperations(normalized, ctx, position)
     } catch (error) {
       return Promise.reject(error)
     }
   }
-  const written = earlier.then(() => applyWriteOperations(normalized, ctx))
-  ctx.noteDirectWrite?.(
-    keys,
+  const written = earlier.then(() => {
+    // Cleanup retired this sync run while the write waited.
+    if (!isCurrent()) throw new SyncTransactionAbortedError()
+    return applyWriteOperations(normalized, ctx, position)
+  })
+  ctx.noteWaitingDirectWrite?.(
     written.then(
       () => undefined,
       () => undefined,
@@ -198,8 +209,13 @@ function applyWriteOperations<
 >(
   normalized: Array<NormalizedOperation<TRow, TKey>>,
   ctx: SyncContext<TRow, TKey>,
+  position: number,
 ): Promise<void> {
   validateOperations(normalized, ctx)
+  ctx.claimDirectWriteKeys?.(
+    normalized.map((op) => op.key),
+    position,
+  )
 
   // While an optimistic transaction persists, this sync transaction waits
   // and applies when that transaction settles.
@@ -309,7 +325,11 @@ export function createWriteUtils<
       batchContext.operations.push(operation)
       return batchContext.completion
     }
-    const completion = performWriteOperations(operation, ctx)
+    const completion = performWriteOperations(
+      operation,
+      ctx,
+      () => getContext() === ctx,
+    )
     writeCompletionPromises.add(completion)
     return completion
   }
@@ -383,7 +403,11 @@ export function createWriteUtils<
         // Perform all collected operations
         resolveBatch(
           batchContext.operations.length > 0
-            ? performWriteOperations(batchContext.operations, ctx)
+            ? performWriteOperations(
+                batchContext.operations,
+                ctx,
+                () => getContext() === ctx,
+              )
             : Promise.resolve(),
         )
         return completion

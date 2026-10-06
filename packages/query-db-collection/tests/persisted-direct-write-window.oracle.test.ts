@@ -1,7 +1,8 @@
 import { describe, expect, it, vi } from 'vitest'
 import { QueryClient } from '@tanstack/query-core'
-import { createCollection } from '@tanstack/db'
+import { DuplicateKeySyncError, createCollection } from '@tanstack/db'
 import { persistedCollectionOptions } from '../../db-sqlite-persistence-core/src'
+import type { PersistedTx } from '../../db-sqlite-persistence-core/src'
 import { createNodeSQLitePersistence } from '../../node-db-sqlite-persistence/src'
 import { BetterSqlite3SQLiteDriver } from '../../node-db-sqlite-persistence/src/node-driver'
 import { queryCollectionOptions } from '../src/query'
@@ -22,7 +23,9 @@ import type { QueryCollectionUtils } from '../src/query'
  * same operations, but no lock exists, so the earlier refetch has applied when
  * the write runs. The reference does not share the persistence wrapper, which
  * is the code under judgment. It shares the Query Collection's direct-write
- * code, so this oracle cannot find a fault in that code that both paths share.
+ * code, so it cannot find a fault in that code that both paths share. The
+ * precedence model at the end of this file covers that code: its expected
+ * rows come from stated rules, not from a collection.
  *
  * ## Contract and ownership table
  *
@@ -33,6 +36,11 @@ import type { QueryCollectionUtils } from '../src/query'
  * | the Query cache agrees | the same | updateCacheData | Query cache rows after settlement | this oracle |
  * | storage agrees | the same | persisted durable write | stored rows after settlement equal the visible rows | this oracle |
  * | real SQLite receives the same | a subset: each write type, `refetch-only`, `source-write`, and the ordering cases | the same, over the node SQLite adapter | the same observations | this oracle; the full matrix runs over an in-memory fake adapter |
+ * | rejected writes gain no precedence | 4 rejected writes during a held refetch, with and without persistence | utils.write* -> validation | rows and Query cache inside the refetch's fulfillment | precedence model |
+ * | a later accepted write keeps precedence | a second write after a deferred result arrives, same key and sibling key | deferred merge | rows, Query cache and stored rows after settlement | precedence model |
+ * | refetch settles after its rows apply | a deferred result, and one whose merged write is held | deferred merge -> result settlement | rows inside the refetch's fulfillment | precedence model |
+ * | cleanup during the wait rejects | insert, upsert and batch while cleanup retires the sync run | manual-sync -> current-context check | outcome, stored rows, rows after a restart | precedence model |
+ * | validation errors reject the promise | duplicate insert, with and without persistence | utils.writeInsert | `rejects.toBeInstanceOf(DuplicateKeySyncError)` | this oracle |
  *
  * Lock holders:
  *
@@ -49,9 +57,9 @@ import type { QueryCollectionUtils } from '../src/query'
  * `both` means the applied rows hold `k`, and the waiting refetch changes it.
  *
  * The domain is a finite matrix of 16 cases, not a generated history, so no
- * random campaign is claimed. The comparison ignores whether an error is
- * thrown at once or rejects later. The driver records that timing, because it
- * is an API choice and not part of this law.
+ * random campaign is claimed. The matrix comparison ignores whether an error
+ * is thrown at once or rejects later. The precedence model and the
+ * duplicate-insert witness check that validation errors reject the promise.
  *
  * The driver checks that it reached the window: when the write runs, storage
  * does not hold the waiting refetch's row for `k` yet. This check does not
@@ -181,6 +189,19 @@ async function checked<T>(
   }
 }
 
+/** Narrow a stored value and key to this oracle's row shape. */
+function asRow(value: Record<string, unknown>): Row {
+  if (typeof value.id !== `string` || typeof value.value !== `number`) {
+    throw new Error(`unexpected stored row: ${JSON.stringify(value)}`)
+  }
+  return { ...value, id: value.id, value: value.value }
+}
+
+function asKey(key: string | number): string {
+  if (typeof key !== `string`) throw new Error(`unexpected key: ${key}`)
+  return key
+}
+
 function createAdapter(seed: Array<Row>) {
   const rows = new Map(seed.map((row) => [row.id, row]))
   const rowMetadata = new Map<string, unknown>()
@@ -218,22 +239,24 @@ function createAdapter(seed: Array<Row>) {
         value,
       })),
     scanRows: async () => entries(),
-    applyCommittedTx: async (_collectionId: string, tx: any) => {
+    applyCommittedTx: async (_collectionId: string, tx: PersistedTx) => {
       if (tx.truncate) {
         rows.clear()
         rowMetadata.clear()
       }
       for (const mutation of tx.mutations) {
+        const key = asKey(mutation.key)
         if (mutation.type === `delete`) {
-          rows.delete(mutation.key)
-          rowMetadata.delete(mutation.key)
+          rows.delete(key)
+          rowMetadata.delete(key)
         } else {
-          rows.set(mutation.key, mutation.value)
+          rows.set(key, asRow(mutation.value))
         }
       }
       for (const mutation of tx.rowMetadataMutations ?? []) {
-        if (mutation.type === `delete`) rowMetadata.delete(mutation.key)
-        else rowMetadata.set(mutation.key, mutation.value)
+        const key = asKey(mutation.key)
+        if (mutation.type === `delete`) rowMetadata.delete(key)
+        else rowMetadata.set(key, mutation.value)
       }
       for (const mutation of tx.collectionMetadataMutations ?? []) {
         if (mutation.type === `delete`) collectionMetadata.delete(mutation.key)
@@ -795,14 +818,15 @@ describe(`a persisted direct insert of an existing key`, () => {
     await checked(async () => {
       await reference.preload()
       await persistedCollection.preload()
-      const expected = await outcomeOf(() =>
-        reference.utils.writeInsert({ id: `k`, value: 9 }),
-      )
-      const actual = await outcomeOf(() =>
-        persistedCollection.utils.writeInsert({ id: `k`, value: 9 }),
-      )
+      // The returned promise rejects with DuplicateKeySyncError. A
+      // synchronous throw fails here, because it escapes the call before
+      // `expect` receives a promise.
+      for (const collection of [reference, persistedCollection]) {
+        await expect(
+          collection.utils.writeInsert({ id: `k`, value: 9 }),
+        ).rejects.toBeInstanceOf(DuplicateKeySyncError)
+      }
       await flush()
-      expect(actual.outcome).toBe(expected.outcome)
       expect(sortRows(persistedCollection.values())).toEqual(
         sortRows(reference.values()),
       )
@@ -891,15 +915,21 @@ function heldPersistedCollection(
   storage: ReturnType<typeof createAdapter>,
   queryFn: () => Promise<Array<Row>>,
 ) {
-  const gate = deferred()
-  const entered = deferred()
-  let hold = false
+  // Each hold catches the next durable write that changes rows.
+  let held:
+    | {
+        entered: ReturnType<typeof deferred<void>>
+        gate: ReturnType<typeof deferred<void>>
+      }
+    | undefined
+  let first: typeof held
   const original = storage.applyCommittedTx
   storage.applyCommittedTx = async (...args) => {
-    if (hold && args[1].mutations.length) {
-      hold = false
-      entered.resolve()
-      await gate.promise
+    const current = held
+    if (current && args[1].mutations.length) {
+      held = undefined
+      current.entered.resolve()
+      await current.gate.promise
     }
     return original(...args)
   }
@@ -928,10 +958,17 @@ function heldPersistedCollection(
     queryClient,
     queryKey,
     hold: () => {
-      hold = true
+      held = { entered: deferred(), gate: deferred() }
+      first ??= held
+      return {
+        entered: held.entered.promise,
+        release: held.gate.resolve,
+      }
     },
-    entered: entered.promise,
-    release: () => gate.resolve(),
+    get entered() {
+      return first!.entered.promise
+    },
+    release: () => first?.gate.resolve(),
   }
 }
 
@@ -979,9 +1016,9 @@ describe(`direct writes interleaved with refetches follow the precedence model`,
             sortRows(collection.values()),
           )
           expect(rowsAtSettlement).toEqual([{ id: `k`, value: 2 }])
-          expect(sortRows((queryClient.getQueryData([id]) ?? []) as Array<Row>)).toEqual([
-            { id: `k`, value: 2 },
-          ])
+          expect(
+            sortRows((queryClient.getQueryData([id]) ?? []) as Array<Row>),
+          ).toEqual([{ id: `k`, value: 2 }])
         }, [() => collection.cleanup()])
       })
     }
@@ -1025,7 +1062,11 @@ describe(`direct writes interleaved with refetches follow the precedence model`,
     let server = [{ id: `k`, value: 1 }]
     const storage = createAdapter(server)
     const held = heldQueryFn(() => server)
-    const fixture = heldPersistedCollection(`settles-after-apply`, storage, held.queryFn)
+    const fixture = heldPersistedCollection(
+      `settles-after-apply`,
+      storage,
+      held.queryFn,
+    )
     const { collection } = fixture
     await checked(async () => {
       await collection.preload()
@@ -1055,6 +1096,59 @@ describe(`direct writes interleaved with refetches follow the precedence model`,
       expect(await later).toEqual([{ id: `k`, value: 6 }])
       await Promise.all([firstRefetch, directWrite])
     }, [() => fixture.release(), () => collection.cleanup()])
+  })
+
+  it(`a refetch that waited for a direct write settles only after its held merge applies`, async () => {
+    // Rule 4 when the merged rows' own durable write is held: the refetch
+    // must keep waiting until that write releases and the rows apply.
+    let server = [{ id: `k`, value: 1 }]
+    const storage = createAdapter(server)
+    const held = heldQueryFn(() => server)
+    const fixture = heldPersistedCollection(
+      `settles-after-held-merge`,
+      storage,
+      held.queryFn,
+    )
+    const { collection } = fixture
+    let mergeHold: ReturnType<typeof fixture.hold> | undefined
+    await checked(async () => {
+      await collection.preload()
+      fixture.hold()
+      server = [{ id: `k`, value: 2 }]
+      const firstRefetch = collection.utils.refetch()
+      await fixture.entered
+      const directWrite = outcomeOf(() =>
+        collection.utils.writeUpdate({ id: `k`, value: 9 }),
+      )
+      held.arm()
+      let settled = false
+      const later = collection.utils.refetch().then(() => {
+        settled = true
+        return sortRows(collection.values())
+      })
+      await vi.waitFor(() => expect(held.calls.length).toBe(1))
+      held.disarm()
+      held.calls[0]!.resolve([{ id: `k`, value: 6 }])
+      await flush()
+      // Release the first hold, but catch the next row write: the direct
+      // write's, then the merged result's.
+      mergeHold = fixture.hold()
+      fixture.release()
+      await mergeHold.entered
+      const writeHold = mergeHold
+      mergeHold = fixture.hold()
+      writeHold.release()
+      await mergeHold.entered
+      await flush()
+      expect(settled).toBe(false)
+      mergeHold.release()
+      expect(await later).toEqual([{ id: `k`, value: 6 }])
+      await Promise.all([directWrite, firstRefetch])
+    }, [
+      () => fixture.release(),
+      () => mergeHold?.release(),
+      () => collection.cleanup(),
+    ])
   })
 
   for (const sibling of [false, true]) {
@@ -1108,7 +1202,9 @@ describe(`direct writes interleaved with refetches follow the precedence model`,
           : [{ id: `k`, value: 10 }]
         expect({
           rows: sortRows(collection.values()),
-          cache: sortRows((queryClient.getQueryData(queryKey) ?? []) as Array<Row>),
+          cache: sortRows(
+            (queryClient.getQueryData(queryKey) ?? []) as Array<Row>,
+          ),
           stored: sortRows(storage.rows.values()),
         }).toEqual({ rows: expected, cache: expected, stored: expected })
       }, [() => fixture.release(), () => collection.cleanup()])
