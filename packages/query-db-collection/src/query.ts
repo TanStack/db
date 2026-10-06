@@ -1016,6 +1016,11 @@ export function queryCollectionOptions(
   const fetchStartGenerations = new Map<string, number>()
   // The generation of the latest direct write to each key.
   const directWriteKeyGenerations = new Map<string | number, number>()
+  // Direct writes that wait for earlier commits. A result that arrives
+  // meanwhile is handled after them.
+  let pendingDirectWrites: Promise<void> | undefined
+  // True while a direct write puts its accepted rows into the cache.
+  let writingDirectCache = false
 
   // queryKey → reference count (how many loadSubset calls are active)
   // Reference counting for QueryObserver lifecycle management
@@ -2393,6 +2398,29 @@ export function queryCollectionOptions(
           syncMode !== `on-demand` &&
           result.isSuccess &&
           !result.isFetching &&
+          pendingDirectWrites &&
+          !writingDirectCache
+        ) {
+          // Handle this result after the waiting direct writes. Each write
+          // replaces the cache with its accepted rows, so restore this
+          // result; the merge rule below then compares it with the writes.
+          const query = observer?.getCurrentQuery()
+          const data = query?.state.data
+          void pendingDirectWrites.then(() => {
+            if (
+              !query ||
+              state.observers.get(hashedQueryKey)?.getCurrentQuery() !== query
+            )
+              return
+            queryClient.setQueryData(query.queryKey, data)
+          })
+          return
+        }
+        if (
+          syncMode !== `on-demand` &&
+          result.isSuccess &&
+          !result.isFetching &&
+          !writingDirectCache &&
           (fetchStartGenerations.get(hashedQueryKey) ?? directWriteGeneration) <
             directWriteGeneration
         ) {
@@ -3215,9 +3243,11 @@ export function queryCollectionOptions(
    * and remove every other scoped entry so a later owner fetches it again.
    * Eager collections retain their single full-result cache patch.
    */
-  const updateCacheData = (
-    getItems: () => Array<any>,
+  // A direct write takes its generation when it is called, so a fetch that
+  // starts later counts as newer even if the write applies later.
+  const noteDirectWrite = (
     keys: Array<string | number>,
+    waiting: Promise<void> | undefined,
   ): void => {
     directWriteGeneration++
     // Only a fetch already in flight can return rows older than this write.
@@ -3234,6 +3264,32 @@ export function queryCollectionOptions(
     else
       for (const key of keys)
         directWriteKeyGenerations.set(key, directWriteGeneration)
+    if (waiting) {
+      const tail: Promise<void> = Promise.all([
+        pendingDirectWrites,
+        waiting,
+      ]).then(
+        () => {
+          if (pendingDirectWrites === tail) pendingDirectWrites = undefined
+        },
+        () => {
+          if (pendingDirectWrites === tail) pendingDirectWrites = undefined
+        },
+      )
+      pendingDirectWrites = tail
+    }
+  }
+
+  const updateCacheData = (getItems: () => Array<any>): void => {
+    writingDirectCache = true
+    try {
+      writeDirectCache(getItems)
+    } finally {
+      writingDirectCache = false
+    }
+  }
+
+  const writeDirectCache = (getItems: () => Array<any>): void => {
     if (syncMode === `on-demand`) {
       const deferredRefresh = writeContext?.collection.deferDataRefresh
       const revalidatingQueries = new Set<AnyQuery>()
@@ -3427,7 +3483,11 @@ export function queryCollectionOptions(
     begin: () => void
     write: (message: Omit<ChangeMessage<any>, `key`>) => void
     commit: () => SyncAppliedReceipt
-    updateCacheData?: (getItems: () => Array<any>, keys: Array<any>) => void
+    updateCacheData?: (getItems: () => Array<any>) => void
+    noteDirectWrite?: (
+      keys: Array<string | number>,
+      waiting: Promise<void> | undefined,
+    ) => void
     earlierCommits?: () => Promise<void> | undefined
   } | null = null
 
@@ -3488,6 +3548,7 @@ export function queryCollectionOptions(
       write,
       commit,
       updateCacheData,
+      noteDirectWrite,
       earlierCommits: () => earlierCommits,
     }
     writeContext = currentWriteContext

@@ -389,3 +389,221 @@ describe(`persisted direct writes behind a waiting refetch`, () => {
     }
   }
 })
+
+/**
+ * ## A later refetch while the direct write waits
+ *
+ * A direct write W waits for earlier commits. A third refetch R3 can return
+ * during that wait. The ordering law comes from the merge rule for direct
+ * writes and in-flight fetches:
+ *
+ * - If R3 started before W was called, R3 has older server data for W's keys.
+ *   W wins on its keys, and R3 wins on the other keys.
+ * - If R3 started after W was called, R3 reflects the server after the write,
+ *   so R3 wins.
+ *
+ * W writes `k`. R3 either changes `k` (same key) or only changes `a`
+ * (different key). The reference runs the same timeline without persistence:
+ * W applies at once, and R3 returns afterwards.
+ */
+type Start = `before` | `after`
+type Touch = `same` | `different`
+
+function laterRows(touch: Touch): Array<Row> {
+  return touch === `same`
+    ? [
+        { id: `a`, value: 2 },
+        { id: `k`, value: 6 },
+      ]
+    : [
+        { id: `a`, value: 7 },
+        { id: `k`, value: 5 },
+      ]
+}
+
+/** A queryFn whose calls after `armed` wait for the test to return them. */
+function heldQueryFn(rows: () => Array<Row>) {
+  const calls: Array<{ resolve: (rows: Array<Row>) => void }> = []
+  let armed = false
+  const started = { count: 0 }
+  const queryFn = () => {
+    started.count++
+    if (!armed) return Promise.resolve(rows().map((row) => ({ ...row })))
+    const call = deferred<Array<Row>>()
+    calls.push(call)
+    return call.promise
+  }
+  return {
+    queryFn,
+    started,
+    arm: () => {
+      armed = true
+    },
+    disarm: () => {
+      armed = false
+    },
+    calls,
+  }
+}
+
+async function referenceOrder(start: Start, touch: Touch): Promise<Array<Row>> {
+  let server: Array<Row> = [
+    { id: `a`, value: 2 },
+    { id: `k`, value: 5 },
+  ]
+  const held = heldQueryFn(() => server)
+  const queryClient = newQueryClient()
+  const collection = createCollection(
+    queryCollectionOptions<Row>({
+      id: `reference-order-${start}-${touch}`,
+      queryKey: [`reference-order`, start, touch],
+      queryFn: held.queryFn,
+      queryClient,
+      getKey: (row) => row.id,
+      startSync: true,
+    }),
+  )
+  try {
+    await collection.preload()
+    let r3: Promise<unknown> | undefined
+    if (start === `before`) {
+      held.arm()
+      r3 = collection.utils.refetch()
+      await vi.waitFor(() => expect(held.calls.length).toBe(1))
+    }
+    await outcomeOf(() => collection.utils.writeUpdate({ id: `k`, value: 9 }))
+    if (start === `after`) {
+      held.arm()
+      r3 = collection.utils.refetch()
+      await vi.waitFor(() => expect(held.calls.length).toBe(1))
+    }
+    held.disarm()
+    held.calls[0]!.resolve(laterRows(touch))
+    await r3
+    await flush()
+    await flush()
+    return sortRows(collection.values())
+  } finally {
+    await collection.cleanup()
+  }
+}
+
+async function persistedOrder(
+  start: Start,
+  touch: Touch,
+): Promise<{ visible: Array<Row>; stored: Array<Row>; waited: boolean }> {
+  const base: Array<Row> = [
+    { id: `a`, value: 1 },
+    { id: `k`, value: 1 },
+  ]
+  const adapter = createAdapter(base)
+  let server = base
+  const held = heldQueryFn(() => server)
+  const release = deferred()
+  const entered = deferred()
+  let hold = false
+  const applyCommittedTx = adapter.applyCommittedTx
+  adapter.applyCommittedTx = async (...args) => {
+    if (hold && args[1].mutations.length > 0) {
+      hold = false
+      entered.resolve()
+      await release.promise
+    }
+    return applyCommittedTx(...args)
+  }
+  const errors = vi.spyOn(console, `error`).mockImplementation(() => {})
+  const queryClient = newQueryClient()
+  const collection = createCollection(
+    persistedCollectionOptions<
+      Row,
+      string | number,
+      never,
+      QueryCollectionUtils<Row>
+    >({
+      ...queryCollectionOptions<Row>({
+        id: `persisted-order-${start}-${touch}`,
+        queryKey: [`persisted-order`, start, touch],
+        queryFn: held.queryFn,
+        queryClient,
+        getKey: (row) => row.id,
+        startSync: true,
+      }),
+      persistence: { adapter },
+    }),
+  )
+  const pending: Array<Promise<unknown>> = []
+  try {
+    await collection.preload()
+    // R1 holds the lock; R2 (a=2, k=5) commits and waits behind it.
+    hold = true
+    server = [
+      { id: `a`, value: 2 },
+      { id: `k`, value: 1 },
+    ]
+    pending.push(collection.utils.refetch())
+    await entered.promise
+    server = [
+      { id: `a`, value: 2 },
+      { id: `k`, value: 5 },
+    ]
+    pending.push(collection.utils.refetch())
+    await vi.waitFor(() =>
+      expect(
+        sortRows(
+          (queryClient.getQueryData([`persisted-order`, start, touch]) as
+            Array<Row> | undefined) ?? [],
+        ),
+      ).toEqual(sortRows(server)),
+    )
+    const waited = adapter.rows.get(`k`)?.value !== 5
+    if (start === `before`) {
+      held.arm()
+      pending.push(collection.utils.refetch())
+      await vi.waitFor(() => expect(held.calls.length).toBe(1))
+    }
+    const w = outcomeOf(() =>
+      collection.utils.writeUpdate({ id: `k`, value: 9 }),
+    )
+    if (start === `after`) {
+      held.arm()
+      pending.push(collection.utils.refetch())
+      await vi.waitFor(() => expect(held.calls.length).toBe(1))
+    }
+    held.disarm()
+    // R3 returns while W still waits for R2.
+    held.calls[0]!.resolve(laterRows(touch))
+    await flush()
+    release.resolve()
+    await w
+    await Promise.allSettled(pending)
+    for (let i = 0; i < 20; i++) await flush()
+    return {
+      visible: sortRows(collection.values()),
+      stored: sortRows(adapter.rows.values()),
+      waited,
+    }
+  } finally {
+    release.resolve()
+    errors.mockRestore()
+    await collection.cleanup()
+  }
+}
+
+describe(`a later refetch while a persisted direct write waits`, () => {
+  for (const start of [`before`, `after`] as const) {
+    for (const touch of [`same`, `different`] as const) {
+      it(`R3 started ${start} the write, ${touch} key`, async () => {
+        const expected = await referenceOrder(start, touch)
+        const actual = await persistedOrder(start, touch)
+        expect(actual.waited, `the write waited on the lock`).toBe(true)
+        expect(
+          actual.visible,
+          `persisted ${JSON.stringify(actual.visible)} != reference ${JSON.stringify(expected)}`,
+        ).toEqual(expected)
+        expect(actual.stored, `storage matches the visible rows`).toEqual(
+          actual.visible,
+        )
+      })
+    }
+  }
+})

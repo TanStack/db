@@ -49,7 +49,15 @@ export interface SyncContext<
    * Handles both direct array caches and wrapped response formats (when `select` is used).
    * If not provided, falls back to directly setting the cache with the raw array.
    */
-  updateCacheData?: (getItems: () => Array<TRow>, keys: Array<TKey>) => void
+  updateCacheData?: (getItems: () => Array<TRow>) => void
+  /**
+   * Records a direct write when it is called. `waiting` settles when a write
+   * that waits for earlier commits is accepted.
+   */
+  noteDirectWrite?: (
+    keys: Array<TKey>,
+    waiting: Promise<void> | undefined,
+  ) => void
   /** Settles once every earlier commit is accepted, or undefined if it is. */
   earlierCommits?: () => Promise<void> | undefined
 }
@@ -154,29 +162,43 @@ export function performWriteOperations<
     | Array<SyncOperation<TRow, TKey, TInsertInput>>,
   ctx: SyncContext<TRow, TKey>,
 ): Promise<void> {
+  let normalized: Array<NormalizedOperation<TRow, TKey>>
+  try {
+    normalized = normalizeOperations(operations, ctx)
+  } catch (error) {
+    return Promise.reject(error)
+  }
+  const keys = normalized.map((op) => op.key)
   // Validate against, and apply on top of, every earlier commit. A commit
   // can wait for a persistence lock before it is accepted, so the write waits
   // too. A validation error rejects the returned promise.
   const earlier = ctx.earlierCommits?.()
-  if (earlier) return earlier.then(() => applyWriteOperations(operations, ctx))
-  try {
-    return applyWriteOperations(operations, ctx)
-  } catch (error) {
-    return Promise.reject(error)
+  if (!earlier) {
+    ctx.noteDirectWrite?.(keys, undefined)
+    try {
+      return applyWriteOperations(normalized, ctx)
+    } catch (error) {
+      return Promise.reject(error)
+    }
   }
+  const written = earlier.then(() => applyWriteOperations(normalized, ctx))
+  ctx.noteDirectWrite?.(
+    keys,
+    written.then(
+      () => undefined,
+      () => undefined,
+    ),
+  )
+  return written
 }
 
 function applyWriteOperations<
   TRow extends object,
   TKey extends string | number = string | number,
-  TInsertInput extends object = TRow,
 >(
-  operations:
-    | SyncOperation<TRow, TKey, TInsertInput>
-    | Array<SyncOperation<TRow, TKey, TInsertInput>>,
+  normalized: Array<NormalizedOperation<TRow, TKey>>,
   ctx: SyncContext<TRow, TKey>,
 ): Promise<void> {
-  const normalized = normalizeOperations(operations, ctx)
   validateOperations(normalized, ctx)
 
   // While an optimistic transaction persists, this sync transaction waits
@@ -255,11 +277,7 @@ function applyWriteOperations<
         ctx.collection._state.acceptedSyncedEntries(),
         ([, row]) => row,
       )
-    if (ctx.updateCacheData)
-      ctx.updateCacheData(
-        getItems,
-        normalized.map((op) => op.key),
-      )
+    if (ctx.updateCacheData) ctx.updateCacheData(getItems)
     else ctx.queryClient.setQueryData(ctx.queryKey, getItems())
   }
   if (accepted === true) updateCache()
