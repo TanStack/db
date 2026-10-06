@@ -782,10 +782,28 @@ describe(`OrderedSourceLoader`, () => {
   // keeps the full local read, so that repair keeps its asynchronous
   // settlement, as does every on-demand source.
   it.each([
-    { name: `one indexed term`, terms: 1, indexed: true, eager: true, sync: true },
-    { name: `two indexed terms`, terms: 2, indexed: true, eager: true, sync: false },
+    {
+      name: `one indexed term`,
+      terms: 1,
+      indexed: true,
+      eager: true,
+      sync: true,
+    },
+    {
+      name: `two indexed terms`,
+      terms: 2,
+      indexed: true,
+      eager: true,
+      sync: false,
+    },
     { name: `no index`, terms: 1, indexed: false, eager: true, sync: false },
-    { name: `an on-demand source`, terms: 1, indexed: true, eager: false, sync: false },
+    {
+      name: `an on-demand source`,
+      terms: 1,
+      indexed: true,
+      eager: false,
+      sync: false,
+    },
   ])(
     `settles an eager prefix repair synchronously only for a bounded read ($name)`,
     async ({ terms, indexed, eager, sync }) => {
