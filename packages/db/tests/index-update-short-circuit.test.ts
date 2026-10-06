@@ -119,6 +119,32 @@ describe.each(indexTypes)(`%s update`, (_indexName, IndexType) => {
   })
 })
 
+describe.each(indexTypes)(`%s add`, (_indexName, IndexType) => {
+  // Both index types report a failed index expression with the key and keep
+  // the expression's own error as the cause.
+  it(`keeps the expression error as the cause of an add failure`, () => {
+    const index = new IndexType(1, new PropRef([`value`]))
+    const failure = new Error(`evaluation failed`)
+    const item = Object.defineProperty({}, `value`, {
+      get() {
+        throw failure
+      },
+    })
+
+    let thrown: unknown
+    try {
+      index.add(`a`, item)
+    } catch (error) {
+      thrown = error
+    }
+
+    expect(thrown).toBeInstanceOf(Error)
+    expect((thrown as Error).message).toContain(`key a`)
+    expect((thrown as Error).cause).toBe(failure)
+    expect(index.keyCount).toBe(0)
+  })
+})
+
 describe(`BasicIndex update bookkeeping`, () => {
   it(`repairs indexed key membership after a failed removal`, () => {
     const index = new BasicIndex<string>(1, new PropRef([`value`]))
