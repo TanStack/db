@@ -1131,6 +1131,14 @@ to the following owners:
   original guards and no-admission/no-detachment mutants fail at intended
   assertions. Repeated validation traversal and runtime latency remain unmeasured;
   real-host scheduling remains with the browser/Electron receiving owners.
+- Optional index specification serialization now shares the existing best-effort
+  persistence boundary. The [index-admission follow-up](oracle-reviews/issue-2034-index-admission.md)
+  records startup/runtime histories with supported native controls, unsupported
+  kinds, missing global constructors, and healthy siblings. The persisted owner
+  asserts readiness, exact local/coordinator signatures, warning paths, rows,
+  and subsequent ordinary reads. Original source and a local-only repair fail
+  six cases each. This covers wrapper admission; real SQLite index execution and
+  browser scheduling retain their separate receiving owners.
 - The resume owner now proves the selected explicit schema-reset route for
   obsolete indexes (HE-010) and ambiguous legacy marker bytes (HISTORY-002).
   It removes both registry entries and physical indexes before the first read,

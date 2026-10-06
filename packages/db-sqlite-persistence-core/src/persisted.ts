@@ -3815,9 +3815,8 @@ class PersistedCollectionRuntime<
     indexMetadata: CollectionIndexMetadata,
     adapter: HydrationPersistenceAdapter,
   ): Promise<boolean> {
-    const spec = this.buildPersistedIndexSpec(indexMetadata)
-
     try {
+      const spec = this.buildPersistedIndexSpec(indexMetadata)
       await adapter.ensureIndex(
         this.collectionId,
         indexMetadata.signature,
@@ -3834,9 +3833,8 @@ class PersistedCollectionRuntime<
     indexMetadata: CollectionIndexMetadata,
     completedLocally: boolean,
   ): Promise<void> {
-    const spec = this.buildPersistedIndexSpec(indexMetadata)
-
     try {
+      const spec = this.buildPersistedIndexSpec(indexMetadata)
       await this.persistence.coordinator.requestEnsurePersistedIndex(
         this.collectionId,
         indexMetadata.signature,

@@ -7,6 +7,7 @@ import {
   NoPendingSyncTransactionCommitError,
   NoPendingSyncTransactionWriteError,
   SyncTransactionAbortedError,
+  coalesce,
   collectionOptions,
   createCollection,
   createLiveQueryCollection,
@@ -18059,6 +18060,118 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
       await collection.cleanup()
     }
   })
+
+  // Persisted indexes are optional query accelerators: the existing adapter
+  // failure law keeps rows and readiness available when an index cannot be
+  // stored. Spec construction belongs to that same best-effort boundary.
+  // These histories add real serialization rejection before adapter entry,
+  // both at bootstrap and at index:added, with a healthy sibling and supported
+  // native control. Rows use ordinary strings; no unsupported row write is
+  // admitted. At settled index work, compare readiness, rows, warnings, and the
+  // exact signatures that reached the adapter and coordinator.
+  it.sequential.each(
+    [`startup`, `runtime`].flatMap((phase) =>
+      [`Instant`, `ZonedDateTime`, `Duration`, `missing-global`].map(
+        (kind) => ({ phase, kind }),
+      ),
+    ),
+  )(
+    `keeps index serialization failure best-effort / $phase / $kind`,
+    async ({ phase, kind }) => {
+      const originalTemporal = Object.getOwnPropertyDescriptor(
+        globalThis,
+        `Temporal`,
+      )
+      Object.defineProperty(globalThis, `Temporal`, {
+        value: kind === `missing-global` ? undefined : Temporal,
+        configurable: true,
+        writable: true,
+      })
+      const value =
+        kind === `ZonedDateTime`
+          ? Temporal.ZonedDateTime.from(`2026-01-02T00:00:00+00:00[UTC]`)
+          : kind === `Duration`
+            ? Temporal.Duration.from(`PT1H`)
+            : Temporal.Instant.from(`2026-01-02T00:00:00Z`)
+      const accepted = kind === `Instant`
+      const row = { id: `persisted`, title: `ordinary row` }
+      const adapter = createRecordingAdapter([row])
+      const coordinator = createCoordinatorHarness()
+      const remoteSignatures: Array<string> = []
+      coordinator.requestEnsurePersistedIndex = (_id, signature) => {
+        remoteSignatures.push(signature)
+        return Promise.resolve()
+      }
+      const warning = vi.spyOn(console, `warn`).mockImplementation(() => {})
+      const collection = createCollection(
+        persistedCollectionOptions<Todo, string>({
+          id: `index-serialization-${phase}-${kind}`,
+          getKey: (item) => item.id,
+          defaultIndexType: BasicIndex,
+          sync: { sync: ({ markReady }) => markReady() },
+          persistence: { adapter, coordinator },
+        }),
+      )
+      let hasPrimaryFailure = false
+      try {
+        if (phase === `runtime`) await collection.preload()
+        const index = collection.createIndex((item) =>
+          coalesce(item.title, new IR.Value(value)),
+        )
+        const healthy = collection.createIndex((item) => item.id)
+        const metadata = collection.getIndexMetadata()
+        const signature = metadata.find(
+          (entry) => entry.indexId === index.id,
+        )!.signature
+        const healthySignature = metadata.find(
+          (entry) => entry.indexId === healthy.id,
+        )!.signature
+        if (phase === `startup`)
+          await expect(collection.preload()).resolves.toBeUndefined()
+        await flushAsyncWork()
+        expect(collection.status).toBe(`ready`)
+        expect(stripVirtualProps(collection.get(row.id))).toEqual(row)
+        const expectedSignatures = accepted
+          ? [signature, healthySignature]
+          : [healthySignature]
+        expect(adapter.ensureIndexCalls.map((call) => call.signature)).toEqual(
+          expectedSignatures,
+        )
+        expect(remoteSignatures).toEqual(expectedSignatures)
+        expect(warning.mock.calls).toHaveLength(accepted ? 0 : 2)
+        if (!accepted) {
+          expect(warning.mock.calls.map(([message]) => message)).toEqual([
+            `Failed to ensure persisted index in adapter:`,
+            `Failed to ensure persisted index through coordinator:`,
+          ])
+          for (const [, error] of warning.mock.calls) {
+            expect(error).toMatchObject({
+              name: `InvalidPersistedCollectionConfigError`,
+            })
+          }
+        }
+        // A following ordinary subset load is still usable after the skipped index.
+        await collection._sync.loadSubset({ limit: 1 })
+        expect(stripVirtualProps(collection.get(row.id))).toEqual(row)
+      } catch (error) {
+        hasPrimaryFailure = true
+        throw error
+      } finally {
+        await cleanupPersistedOracle(
+          [
+            () => warning.mockRestore(),
+            () => collection.cleanup(),
+            () => {
+              if (originalTemporal)
+                Object.defineProperty(globalThis, `Temporal`, originalTemporal)
+              else Reflect.deleteProperty(globalThis, `Temporal`)
+            },
+          ],
+          hasPrimaryFailure,
+        )
+      }
+    },
+  )
 
   it(`only signals completed leader-local index work after local success`, async () => {
     const adapter = createRecordingAdapter()
