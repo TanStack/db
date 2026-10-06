@@ -612,18 +612,6 @@ exclusive OPFS ownership. The
 [review record](oracle-reviews/issue-1754-live-electric-hydration-straddle.md)
 preserves the live-host and mutant evidence.
 
-The straddle oracle routes through `BrowserCollectionCoordinator`, and the
-persisted oracle's recording adapters do not expose `runInHydrationScope`.
-Neither reaches a buffered source commit replayed inside a scheduled hydration
-scope with the default `SingleProcessCoordinator` (#2046). The focused
-[hydration-scope commit test](https://github.com/TanStack/db/blob/main/packages/db-sqlite-persistence-core/tests/persisted-hydration-scope-commit.test.ts)
-holds the first row read of a startup or on-demand subset hydrate on a real
-core adapter, commits one row, and checks receipt settlement, the durable row,
-and readiness of a peer Collection on the same adapter. Unscheduled drivers are
-the control. Both scheduled histories hung before the coordinator forwarded the
-scoped adapter. It is a fixed regression, not an oracle: it covers one insert
-per history and no other coordinator or browser driver.
-
 ### SQLite boolean predicate arity and row work
 
 `packages/db-sqlite-persistence-core/tests/sqlite-boolean-arity-oracle.test.ts`
