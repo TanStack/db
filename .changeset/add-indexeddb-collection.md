@@ -9,3 +9,5 @@ writes finish truthfully. Administrative database deletion no longer publishes
 empty Collection snapshots; use the exported `deleteDatabase(name)` function.
 
 Keep low-level transaction settlement independent of application native event handlers.
+
+Capture validated import values before awaiting storage, and retain errored Collection snapshots after abnormal native closure. Support dedicated-worker persistence and optional blocked-event diagnostics for database open and deletion.

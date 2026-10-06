@@ -103,3 +103,43 @@ it adds no reconnect, retry queue, fallback or database epoch. Adapter capture,
 closure and diagnostics use existing control flow. Tests and explanatory code
 carry most of the growth. Exact final weights and complete merged-revision
 validation are recorded in the receipt below.
+
+
+## Final merged-revision receipt
+
+The normal merge `3944198461443af22b52c7e7e063b672624ebd00` includes
+`origin/main` at `48065980e`. The follow-up `36cdc3b89` only removes a now-unsafe
+private-member map entry, renames two test generator variables and formats prose.
+No published history was rewritten.
+
+- Complete core suite: **8,717 cases, 250 files**, runtime and configured type
+  checks green. The earlier run exposed 36 test root-directory errors and one
+  unrelated helper return-type mismatch. A test-specific root and the actual
+  operation return-type union repair those checks without changing assertions.
+- Complete adapter suite: **2,467 cases, 15 files**, no type errors. Standalone
+  source/test/browser-driver typechecking also passes.
+- Complete native suite: **247 passed, 14 skipped, 261 total**. The skipped cases
+  are exactly the seven Chromium-only forced-close controls in each other engine.
+  Persistent WebKit passes the same rich-value corpus, including both Blob shapes.
+- Fresh db-ivm, db and adapter ESM/CommonJS/declaration builds pass. After the
+  private-member map cleanup, rebuilt core passes **290 distribution cases**,
+  the minified public API check (100 error names, metadata, queries and updates),
+  **16 package-consumer cases** and **three packed native-browser cases**.
+- Changed-file lint, formatting, whitespace and the 382-name private-member map
+  check pass. The map drops `detach` because the new tests use Playwright's public
+  method with that name. Dependency builds finish before final lint/consumer runs.
+
+Commands use direct local Node entry points for Vitest, Vite, TypeScript and
+Playwright. Vitest runs use coverage disabled and at most two workers. The
+configured registry denies locked Rollup 4.64.0 with HTTP 403; local builds use
+cached 4.59.0 while the lockfile keeps 4.64.0. These are local results, not a claim
+that `pnpm test:pr` or remote CI passed.
+
+Before merging unrelated main changes, this follow-up's production delta is
+**75 added / 13 removed lines (net +62)**. Tests and receiving drivers add
+**1,215 / remove 22** lines; documentation adds **392 / removes 132** lines;
+configuration adds **18 / removes 5**. The final formatting, map cleanup, receipt
+and changesets are additional supporting changes. Binary native compatibility
+accounts for 50 net production lines; the typed-key repair is net-neutral, and
+adapter capture/closure/diagnostics add 12. No second lifecycle or recovery
+machinery was introduced.
