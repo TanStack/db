@@ -28,6 +28,7 @@ import { serializeSQLiteBigInt, serializeSQLiteTemporal } from './sqlite-value'
 import {
   toProcessLocalLoadSubsetOptions,
   toTransportedLoadSubsetOptions,
+  validateRemoteSubsetOptions,
 } from './remote-subset-wire'
 import {
   reportRemoteSubsetOwnerError,
@@ -1869,8 +1870,7 @@ class PersistedCollectionRuntime<
     const routeRemoteDemandDuringHydration =
       this.canRouteRemoteDemandThroughCoordinator()
     // Wire admission failures are permanent input errors, not transport retries.
-    if (routeRemoteDemandDuringHydration)
-      toTransportedLoadSubsetOptions(options)
+    if (routeRemoteDemandDuringHydration) validateRemoteSubsetOptions(options)
     this.activeSubsets.set(subsetKey, options)
     const appliedCursor = this.appliedReceiptSequence
     try {
@@ -1904,7 +1904,7 @@ class PersistedCollectionRuntime<
         !routeRemoteDemandDuringHydration &&
         this.canRouteRemoteDemandThroughCoordinator()
       ) {
-        toTransportedLoadSubsetOptions(options)
+        validateRemoteSubsetOptions(options)
       }
     } catch (error) {
       if (this.activeSubsets.get(subsetKey) === options) {
@@ -3268,7 +3268,7 @@ class PersistedCollectionRuntime<
 
     // A previously local acquisition can become remote after an ownership
     // change. Recovery must reject permanent wire errors before retry owns it.
-    toTransportedLoadSubsetOptions(options)
+    validateRemoteSubsetOptions(options)
     this.pendingRemoteSubsetEnsures.set(subsetKey, options)
     void this.flushPendingRemoteSubsetEnsures()
   }

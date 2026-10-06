@@ -1,7 +1,10 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import fc from 'fast-check'
 import { BasicIndex, IR, createCollection } from '@tanstack/db'
-import { RetryableRemoteSubsetAcquisitionError } from '@tanstack/db-sqlite-persistence-core'
+import {
+  RetryableRemoteSubsetAcquisitionError,
+  validateRemoteSubsetOptions,
+} from '@tanstack/db-sqlite-persistence-core'
 import { BrowserCollectionCoordinator } from '../src/browser-coordinator'
 import {
   createBrowserWASQLitePersistence,
@@ -4281,6 +4284,18 @@ describe(`BrowserCollectionCoordinator`, () => {
         }
 
         try {
+          // Admission-only traversal must retain the same independently named
+          // rejection boundary as the local and transported coordinator routes.
+          expect(() =>
+            validateRemoteSubsetOptions(
+              subsetWithNestedValue(createUnsupported()),
+            ),
+          ).toThrowError(
+            expect.objectContaining({
+              name: `RemoteSubsetWireValueError`,
+              path,
+            }),
+          )
           const outcomes = await Promise.all(
             [leader, follower].map((coordinator) =>
               coordinator
@@ -4414,6 +4429,18 @@ describe(`BrowserCollectionCoordinator`, () => {
         }
 
         try {
+          // Admission-only traversal must retain the same independently named
+          // rejection boundary as the local and transported coordinator routes.
+          expect(() =>
+            validateRemoteSubsetOptions(
+              options as unknown as LoadSubsetOptions,
+            ),
+          ).toThrowError(
+            expect.objectContaining({
+              name: `RemoteSubsetWireValueError`,
+              path,
+            }),
+          )
           const outcomes = await Promise.all(
             [leader, follower].map((coordinator) =>
               coordinator
@@ -4523,6 +4550,18 @@ describe(`BrowserCollectionCoordinator`, () => {
         }
 
         try {
+          // Admission-only traversal must retain the same independently named
+          // rejection boundary as the local and transported coordinator routes.
+          expect(() =>
+            validateRemoteSubsetOptions(
+              createOptions() as unknown as LoadSubsetOptions,
+            ),
+          ).toThrowError(
+            expect.objectContaining({
+              name: `RemoteSubsetWireValueError`,
+              path,
+            }),
+          )
           const outcomes = await Promise.all(
             [leader, follower].map((coordinator) =>
               coordinator
@@ -4638,6 +4677,21 @@ describe(`BrowserCollectionCoordinator`, () => {
       }
 
       try {
+        // Validation cannot rewrite a request or erase the aliases/cycle that
+        // this receiving witness observes. Frozen records expose accidental writes.
+        for (const value of [
+          options,
+          options.where,
+          options.where.args,
+          richValue,
+          shared,
+          cycle,
+          sparse,
+          reservedKeys,
+          typedArrays,
+        ])
+          Object.freeze(value)
+        expect(validateRemoteSubsetOptions(options)).toBeUndefined()
         await leader.requestEnsureRemoteSubset(`todos`, options)
         await follower.requestEnsureRemoteSubset(`todos`, options)
         expect(received).toHaveLength(2)

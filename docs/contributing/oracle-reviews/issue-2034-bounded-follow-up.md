@@ -91,3 +91,11 @@ failures), `temporal-bounded-final-surrounding.json` (575 passed, one TODO),
 `temporal-bounded-projection-mutant-red.json` (one intended assertion failure
 each). All are under `/private/tmp`; the laws, bounds, observed results and limits
 are preserved in this versioned record and the executable owners.
+
+## Subsequent HE-008 repair
+
+The [validation-work follow-up](issue-2034-wire-validation-work.md) supersedes
+HE-008's open disposition above. Its oracle was red before the repair. Shared
+validation-only traversal removes discarded snapshots while retaining admission,
+receiver validation, detached output, and local lifecycle identity. The historical
+bounded-pass verdict remains unchanged as evidence of what that pass established.

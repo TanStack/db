@@ -1120,12 +1120,17 @@ to the following owners:
   at most one encoding per literal occurrence for EQ and IN at sizes 1/3/1,025.
   Both native kinds are calibrated against the previous implementation; the
   surrounding expression-index and rank/text owners retain semantic coverage.
-- Projection reuse (HE-008) remains open with the persisted/coordinator owners:
-  two projections on success, four across two attempts after one transient
-  failure. The persisted owner now rejects a global request-identity cache with
-  a fresh detached-snapshot witness. A repair needs shared validation without
-  building a discarded projection, or a prepared request boundary preserving
-  admission, receiver validation, ownership identity, and local lifecycle handles.
+- Discarded wire projections (HE-008) are closed for the three persisted admission
+  guards by shared validation-only traversal. The [work follow-up](oracle-reviews/issue-2034-wire-validation-work.md)
+  records an 18-case persisted matrix: follower/role transition/retry/recovery and
+  abort/release during hydration at 0/1/33 bytes. Payload copies drop from two to
+  one per successful attempt, four to two across a retry, and one to zero when
+  demand retires during hydration. Independent Browser-owner rejection/path
+  fixtures cover validation-only admission; frozen rich-value receiving histories
+  retain cycles, aliases, detached snapshots, and local lifecycle identity. The
+  original guards and no-admission/no-detachment mutants fail at intended
+  assertions. Repeated validation traversal and runtime latency remain unmeasured;
+  real-host scheduling remains with the browser/Electron receiving owners.
 - The resume owner now proves the selected explicit schema-reset route for
   obsolete indexes (HE-010) and ambiguous legacy marker bytes (HISTORY-002).
   It removes both registry entries and physical indexes before the first read,
