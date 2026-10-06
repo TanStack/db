@@ -333,9 +333,7 @@ async function reference(op: Op, keyCase: KeyCase): Promise<Observation> {
     return {
       outcome,
       visible: sortRows(collection.values()),
-      cache: sortRows(
-        (queryClient.getQueryData(queryKey)) ?? [],
-      ),
+      cache: sortRows(queryClient.getQueryData(queryKey) ?? []),
     }
   }, [() => collection.cleanup()])
 }
@@ -425,11 +423,9 @@ async function persisted(
     }
     // The Query cache holds `next` once its result is committed.
     await vi.waitFor(() =>
-      expect(
-        sortRows(
-          (queryClient.getQueryData(queryKey)) ?? [],
-        ),
-      ).toEqual(sortRows(next)),
+      expect(sortRows(queryClient.getQueryData(queryKey) ?? [])).toEqual(
+        sortRows(next),
+      ),
     )
     // The window: the refetch is committed, but its durable write has not
     // finished, because another task holds the lock.
@@ -446,9 +442,7 @@ async function persisted(
       timing,
       waited,
       visible: sortRows(collection.values()),
-      cache: sortRows(
-        (queryClient.getQueryData(queryKey)) ?? [],
-      ),
+      cache: sortRows(queryClient.getQueryData(queryKey) ?? []),
       stored: await storage.storedRows(id),
     }
   }, [
@@ -647,7 +641,7 @@ async function persistedOrder(
     await vi.waitFor(() =>
       expect(
         sortRows(
-          (queryClient.getQueryData([`persisted-order`, start, touch])) ?? [],
+          queryClient.getQueryData([`persisted-order`, start, touch]) ?? [],
         ),
       ).toEqual(sortRows(server)),
     )
