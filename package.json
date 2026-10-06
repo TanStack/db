@@ -18,6 +18,7 @@
     "changeset:version": "changeset version && tsx scripts/update-example-deps.ts && pnpm install --no-frozen-lockfile",
     "format": "prettier --experimental-cli --ignore-unknown '**/*' --write",
     "lint": "pnpm --filter \"./packages/**\" lint",
+    "lint:check": "pnpm --filter \"./packages/**\" lint --fix=false",
     "lint-all": "eslint . --fix",
     "prepare": "husky",
     "test": "pnpm --filter \"./packages/**\" test",
