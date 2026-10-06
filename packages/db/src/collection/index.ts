@@ -663,8 +663,17 @@ export class CollectionImpl<
    */
   public preload(): Promise<void> {
     // Preload asks for this Collection's data, so provider work may start.
-    this._changes.markSubscriberOrPreload()
+    this._markPreload()
     return this._sync.preload()
+  }
+
+  /**
+   * @internal Record a preload without starting one, for a caller whose data
+   * request another promise answers, such as a DbClient stream for the same
+   * query. The request still counts: deferred acquisition may now resume.
+   */
+  public _markPreload(): void {
+    this._changes.markSubscriberOrPreload()
   }
 
   /** @internal Whether this Collection had a subscriber or a preload in this sync run. */

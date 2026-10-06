@@ -953,8 +953,12 @@ class LiveQueryObserverImpl<
 
     if (this.client && this.queryHash) {
       const query = this.client._getLiveQuery(this.queryHash)
-      if (query?.status === `pending`) return query.promise
-      if (query?.status === `success`) return Promise.resolve()
+      if (query?.status === `pending` || query?.status === `success`) {
+        // The client stream answers this preload, but it is still a request
+        // for this Collection's data, so its deferred acquisition may resume.
+        this.collection?._markPreload()
+        return query.status === `pending` ? query.promise : Promise.resolve()
+      }
     }
 
     this.registerClientResource()
