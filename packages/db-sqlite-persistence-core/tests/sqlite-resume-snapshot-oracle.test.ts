@@ -1632,3 +1632,110 @@ describe(`SQLite resume snapshots`, () => {
 
 // The ordinary committed-transaction work law extends this SQLite owner.
 runOrdinaryTransactionWorkOracle()
+
+// The selected upgrade policy is an explicit schema reset. Frozen old bytes
+// include an ordinary record that the new decoder would reinterpret as a tag.
+// At the first new-schema read, this collection must be empty and all its old
+// registry/physical indexes gone. Another collection must survive. Re-seeding
+// then preserves the marker record, and a same-schema reopen must retain it.
+// This reset/re-seed history does not claim lossless old-byte migration.
+it(`resets ambiguous legacy values and obsolete indexes before reading a new schema`, async () => {
+  const database = new DatabaseSync(`:memory:`)
+  let primaryFailure: unknown
+  try {
+    const driver = createDriver(database)
+    const collectionId = `legacy-marker-reset`
+    const table = createPersistedTableName(collectionId, `c`)
+    const old = new SQLiteCorePersistenceAdapter({ driver, schemaVersion: 1 })
+    for (const id of [collectionId, `unrelated-cache`]) {
+      await old.applyCommittedTx(id, {
+        txId: `seed`,
+        term: 1,
+        seq: 1,
+        rowVersion: 1,
+        mutations: [
+          { type: `insert`, key: `old`, value: { id: `old`, stamp: 1 } },
+        ],
+      })
+      for (const signature of [
+        `old-native-signature`,
+        `current-native-signature`,
+      ]) {
+        await old.ensureIndex(id, signature, { expressionSql: [`row_version`] })
+      }
+    }
+    const marker = {
+      __tanstack_db_persisted_type__: `string`,
+      value: `ordinary`,
+    }
+    database
+      .prepare(`UPDATE "${table}" SET value = ?`)
+      .run(JSON.stringify({ id: `old`, marker }))
+    const indexes = database
+      .prepare(
+        `SELECT index_name FROM persisted_index_registry WHERE collection_id = ?`,
+      )
+      .all(collectionId) as Array<{ index_name: string }>
+    expect(indexes).toHaveLength(2)
+    const next = new SQLiteCorePersistenceAdapter({
+      driver,
+      schemaVersion: 2,
+      schemaMismatchPolicy: `reset`,
+    })
+    expect(await next.loadSubset(collectionId, {})).toEqual([])
+    expect(
+      database
+        .prepare(
+          `SELECT * FROM persisted_index_registry WHERE collection_id = ?`,
+        )
+        .all(collectionId),
+    ).toEqual([])
+    for (const { index_name } of indexes) {
+      expect(
+        database
+          .prepare(
+            `SELECT name FROM sqlite_master WHERE type = 'index' AND name = ?`,
+          )
+          .all(index_name),
+      ).toEqual([])
+    }
+    expect(
+      database
+        .prepare(
+          `SELECT * FROM persisted_index_registry WHERE collection_id = ?`,
+        )
+        .all(`unrelated-cache`),
+    ).toHaveLength(2)
+    expect(
+      (await old.loadSubset(`unrelated-cache`, {})).map(({ key }) => key),
+    ).toEqual([`old`])
+    await next.applyCommittedTx(collectionId, {
+      txId: `reseed`,
+      term: 2,
+      seq: 1,
+      rowVersion: 1,
+      mutations: [{ type: `insert`, key: `new`, value: { id: `new`, marker } }],
+    })
+    await next.ensureIndex(collectionId, `replacement`, {
+      expressionSql: [`row_version`],
+    })
+    const reopened = new SQLiteCorePersistenceAdapter({
+      driver,
+      schemaVersion: 2,
+    })
+    expect(
+      (await reopened.loadSubset(collectionId, {})).map(({ value }) => value),
+    ).toEqual([{ id: `new`, marker }])
+    expect(
+      database
+        .prepare(
+          `SELECT signature FROM persisted_index_registry WHERE collection_id = ?`,
+        )
+        .all(collectionId),
+    ).toEqual([{ signature: `replacement` }])
+  } catch (error) {
+    primaryFailure = error
+  } finally {
+    closeDatabasePreservingPrimary(database, primaryFailure)
+  }
+})

@@ -1087,6 +1087,141 @@ green:
   An earlier suggestion to merge unnamed cleanup helpers still lacks exact
   targets; do not perform a blind consolidation.
 
+## SQLite Temporal value preservation
+
+The implemented [v2 grammar and evidence](oracle-reviews/issue-2034-design/v2.md)
+cover native `Temporal.Instant` and `Temporal.PlainDate` through the shared
+SQLite adapter and local persisted wrapper. Global constructors must be
+registered; other Temporal kinds reject. Existing lifecycle, receipt and
+publication-before-durability laws remain with their current owners.
+
+- The [typed-value owner](../../packages/db-sqlite-persistence-core/tests/sqlite-temporal-value-oracle.test.ts)
+  checks real file reopen, direct/nested rows, metadata, replay, equality/range,
+  Boolean/IN, large IN, field comparisons, cursor ties/continuation and ordered
+  windows. Its directly named rank/text companion supplies independent native
+  observations across precision, signed-year, endpoint and calendar families.
+  Constructor failures, invalid brands and marker-shaped records are included.
+- The [Node expression-index owner](../../packages/node-db-sqlite-persistence/tests/expression-index-oracle.test.ts)
+  checks raw SQL before residual cleanup, final adapter keys and actual named
+  index use. Wrapper-created coalesce indexes reach Collection metadata/native
+  literals and distinguish adjacent-literal signatures. Small and large scalar
+  membership indexes protect compatibility with SQLite's DDL restrictions.
+  Numeric array/object native EQ and IN also inspect persisted expression values.
+  Mixed-domain polarity checks retain NaN, null/missing and scalar controls.
+  NUL strings cover both equality directions, membership and Boolean composition.
+  Negated coalesce and scalar eq(in(...), true) keep #1997's full-read fallback.
+  Exact replay excludes unrelated native cases; simultaneous semantic/cleanup
+  failure retains both errors and still closes SQLite.
+- The [ordinary-work owner](../../packages/db-sqlite-persistence-core/tests/ordinary-transaction-work-oracle.ts)
+  adds twelve native repeated-action success/rollback histories and invalid
+  superseded actions. Its independent Map model retains immutable native values;
+  kind/text observations reject the old structuredClone false-green boundary.
+- The [persisted wrapper owner](../../packages/db-sqlite-persistence-core/tests/persisted-oracle.test.ts)
+  rejects native remote-subset literals before dispatch/retry, including an
+  ownerless leader that becomes a follower while hydration waits or after local
+  success followed by sequence-gap recovery. The latter uses the existing
+  terminal error path before retry admission. String controls dispatch once;
+  existing transient retry, receipt and FIFO histories still run. The
+  [mixed-demand refinement](oracle-reviews/issue-2034-recovery-review.md) covers
+  both demand orders, retained/aborted/released candidates, both native kinds
+  and string controls. It observes valid-prefix dispatch, exact reentrant and
+  later error identity, post-terminal replay/retry fencing, and exact release
+  objects. Successful controls observe complete demand coverage after held
+  transport settles. First-demand-only and replacement-error mutants distinguish
+  these laws from the older singleton checks; successful pullSince recovery and
+  real-host elections remain separate receiving paths.
+
+The [initial RED receipt](oracle-reviews/issue-2034-temporal-persistence.md)
+remains historical. The v2 receipt records failures against original production,
+a lexical-order mutant that retains native reconstruction, and intermediate
+paired-IN, nested-path, routing and membership-index counterexamples. Final
+results are green for the reached paths; this is not a universal proof or a
+latency guarantee. SQL cleanup alone cannot compensate for lost candidates.
+
+Remaining witnesses have explicit owners: engine-native/alternate constructors
+and old-byte/marker-shaped compatibility belong to the typed-value owner;
+native truncate/delete, crash and format-transition histories belong jointly
+with ordinary-work/resume owners; real mobile/browser roundtrips belong to each
+adapter's receiving contract; actual native multiprocess transport belongs to
+browser/Electron coordinator receiving owners. The persisted owner retains
+native release/abort/reset and wider ownership schedules. None of those receiving
+claims follows from this Node/shared-core result. Same-kind ordering is the
+supported domain; arbitrary Temporal arithmetic and other kinds are excluded.
+Applications may rebuild old damaged caches through existing schema/reset paths;
+no type can be recovered from an already-erased empty object.
+
+
+### Law enforcement audit
+
+The [law audit](oracle-reviews/issue-2034-law-enforcement.md) strengthens the
+persisted and Browser owners after three demonstrated false greens. Captured
+pre-validation expectations protect mutable builtin state on acceptance and
+rejection. Rich output checks now enforce detachment and exact release-object
+identity; later projections must reflect changed input without altering earlier
+snapshots. Optional indexes cross both supported native kinds and missing-global
+cases, plus independent local/coordinator synchronous and held failures. The
+intermediate held cut checks that coordinator completion evidence cannot precede
+local settlement; settled cuts check warnings, exact calls, healthy siblings,
+readiness and ordinary reads. Mutants establish assertion sensitivity. Copy-work
+bounds remain explicitly limited to the measured buffer/record copy seams and
+full discarded projections; total allocations, latency, arbitrary third-party
+coordinator work, and real-host scheduling are not established by these checks.
+
+### Remaining review investigations
+
+The [high-effort follow-up](oracle-reviews/issue-2034-high-effort-review.md)
+records measured work and upgrade behavior. Remaining questions are assigned
+to the following owners:
+
+- The boolean-arity compiler-work owner now counts discarded literal quoting
+  for bound string IN at sizes 0, 1, 32 and 1,025. The old compiler performed
+  two quotes per value; the repair performs none and retains exact rows and
+  binding counts (BUG-007, HE-006). This is not a latency bound.
+- The [bounded follow-up](oracle-reviews/issue-2034-bounded-follow-up.md) closes
+  repeated native literal encoding (HE-007): the typed-value work witness admits
+  at most one encoding per literal occurrence for EQ and IN at sizes 1/3/1,025.
+  Both native kinds are calibrated against the previous implementation; the
+  surrounding expression-index and rank/text owners retain semantic coverage.
+- Discarded wire projections (HE-008) are closed for the three persisted admission
+  guards by shared validation-only traversal. The [work follow-up](oracle-reviews/issue-2034-wire-validation-work.md)
+  records an 18-case persisted matrix: follower/role transition/retry/recovery and
+  abort/release during hydration at 0/1/33 bytes. Payload copies drop from two to
+  one per successful attempt, four to two across a retry, and one to zero when
+  demand retires during hydration. Independent Browser-owner rejection/path
+  fixtures cover validation-only admission; frozen rich-value receiving histories
+  retain cycles, aliases, detached snapshots, and local lifecycle identity. The
+  original guards and no-admission/no-detachment mutants fail at intended
+  assertions. Repeated validation traversal and runtime latency remain unmeasured;
+  real-host scheduling remains with the browser/Electron receiving owners.
+- Optional index specification serialization now shares the existing best-effort
+  persistence boundary. The [index-admission follow-up](oracle-reviews/issue-2034-index-admission.md)
+  records startup/runtime histories with supported native controls, unsupported
+  kinds, missing global constructors, and healthy siblings. The persisted owner
+  asserts readiness, exact local/coordinator signatures, warning paths, rows,
+  and subsequent ordinary reads. Original source and a local-only repair fail
+  six cases each. This covers wrapper admission; real SQLite index execution and
+  browser scheduling retain their separate receiving owners.
+- The resume owner now proves the selected explicit schema-reset route for
+  obsolete indexes (HE-010) and ambiguous legacy marker bytes (HISTORY-002).
+  It removes both registry entries and physical indexes before the first read,
+  preserves an unrelated collection, and retains newly escaped data and rebuilt
+  indexes on same-schema reopen. A registry-cleanup mutant fails this witness.
+  Automatic reclamation without reset and lossless old-byte migration remain
+  outside the selected policy; this test does not claim either.
+- The [Collection index-value owner](../../packages/db/tests/collection-index-value-oracle.test.ts)
+  distinguishes native literals from ordinary tagged records, nested mixtures,
+  and the escape envelope while preserving equivalent key orders (BOUNDARY-005).
+  Plain and null-prototype own-tag records have isolated metadata snapshots
+  (BOUNDARY-004/HISTORY-004). The old implementation fails these public metadata
+  observations. Custom-prototype impersonators are outside this owner's native
+  contract; the typed-value owner separately checks rejection and rollback of an
+  invalid native brand at SQLite persistence.
+- The Node expression-index owner now covers ordinary/native-mixed NUL lists,
+  four NUL/Unicode positions, positive and negated membership, exact stored index
+  values, final keys and candidate containment (VERIFY-NUL-NOTE). The former SQL
+  literal encoder fails at the public index-DDL boundary. Direct runtime mixed
+  membership already passed; the defect was persisted expression construction.
+
 ## Final evidence record
 
 Verification receipts and follow-up issue links are recorded in the PR and
