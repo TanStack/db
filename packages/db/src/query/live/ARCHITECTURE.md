@@ -1170,15 +1170,17 @@ has no child demand, but its root demand must still settle. Later readiness
 transitions follow the existing Collection contract until an executable test
 defines another public behavior.
 
-An ordinary initial ordered request also has a synchronous observation cut.
-When every acquisition needed for its completed initial window returns literal
-`true` after its establishing applied receipts are visible, core drains the
-remaining synchronous ordered continuations and graph work before the
-initiating call stack returns. The live-query Collection rows and initial-query
-readiness are observable at that cut. A Promise result keeps that acquisition
-asynchronous. This cut does not apply to explicit window moves, repair,
-truncate replay, or framework render timing, and it proves neither source
-exhaustion nor broader source coverage.
+An initial ordered load also has a synchronous observation cut. The initial
+load is an ordinary ordered request or, for a plan that requires the full
+source, its first filtered full-source request. When every acquisition needed
+for its completed initial window returns literal `true` after its establishing
+applied receipts are visible, core drains the remaining synchronous ordered
+continuations and graph work before the initiating call stack returns. The
+live-query Collection rows and initial-query readiness are observable at that
+cut. A Promise result keeps that acquisition asynchronous. This cut does not
+apply to explicit window moves, a later full-source fallback, repair, truncate
+replay, or framework render timing, and it proves neither source exhaustion nor
+broader source coverage.
 
 If any source subscriber adds input to the graph during a synchronous ordered
 continuation, core returns to graph work before deciding whether that ordered

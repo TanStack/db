@@ -591,10 +591,14 @@ export class OrderedSourceLoader {
     const orderedLoadGeneration = this.orderedLoadGeneration
     const orderingInvalidationGeneration = this.orderingInvalidationGeneration
     const settlesAsync = result instanceof Promise
+    // A requiresFullSource plan's first full-source request is its initial
+    // load, not a repair, so it shares the initial synchronous cut.
+    const isInitialFullSource =
+      isFullSource && !this.hasSettledSourceRequest && !this.needsOrderingRepair
     const canSettleSynchronously =
       !settlesAsync &&
       windowOperationGeneration === undefined &&
-      !isAuthoritativeRepair &&
+      (!isAuthoritativeRepair || isInitialFullSource) &&
       requestGraphInputRevision !== undefined
     let synchronousCompletionFailure: { error: unknown } | undefined
     const continuation = (
