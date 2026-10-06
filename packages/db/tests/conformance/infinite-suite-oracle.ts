@@ -664,6 +664,47 @@ export function runInfiniteQuerySuite(rawDriver: InfiniteQueryDriver): void {
     )
 
     scenario(
+      `on-demand-collection-window`,
+      `requests only the window the hook needs from a supplied on-demand collection`,
+      async () => {
+        // Same law as `on-demand-paging`, for the collection input form. A
+        // supplied collection may declare a wider limit than the hook needs,
+        // or exactly the first page and its peek-ahead row. Either way, a
+        // mount requests no on-demand rows beyond the window the hook needs,
+        // and requests that first window once. A wider window is adjusted
+        // before the collection starts, never after. An unbounded supplied
+        // window is outside this law: the controller cannot narrow it before
+        // its first source request, on main or here.
+        for (const declared of [10, 4] as const) {
+          const source = driver.makeOnDemandSource(rows(8))
+          const collection = driver.makePrecreated((q) => {
+            const ordered = q
+              .from({ items: source.collection })
+              .orderBy(({ items }: any) => items.rank, `desc`)
+            return ordered.limit(declared)
+          }).collection
+          const handle = driver.mountCollection(collection, { pageSize: 3 })
+          await handle.flush()
+
+          const where = `declared limit ${declared}`
+          // An on-demand source holds only the rows it was asked for, so its
+          // keys are the rows the mount requested.
+          expect(
+            [...source.collection.keys()].sort(),
+            `${where}: the source loaded only the first page and peek-ahead row`,
+          ).toEqual([`1`, `2`, `3`, `4`])
+          expect(
+            source.calls.filter((call) => call.limit === 4),
+            `${where}: first window once`,
+          ).toHaveLength(1)
+          expectPageRows(handle.current(), rows(8).slice(0, 3), 3)
+          expectReadyObservationsMatchSource(handle, rows(8), 3)
+          handle.unmount()
+        }
+      },
+    )
+
+    scenario(
       `on-demand-async`,
       `tracks an asynchronous on-demand page load`,
       async () => {
@@ -1485,7 +1526,7 @@ export function runInfiniteQuerySuite(rawDriver: InfiniteQueryDriver): void {
     )
 
     it(`registers every distinct scenario without whole-test waivers`, () => {
-      expect(registry.size).toBe(36)
+      expect(registry.size).toBe(37)
     })
   })
 }

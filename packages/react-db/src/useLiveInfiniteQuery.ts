@@ -9,7 +9,7 @@ import {
   fetchNextLiveQueryWindowPage,
   getLiveQueryWindowCollectionWarning,
   getLiveQueryWindowInputKind,
-  liveQueryWindowHoldsRows,
+  liveQueryWindowMatches,
   normalizeLiveQueryWindowPageSize,
   resolveLiveQueryWindowInput,
   shouldPreserveLiveQueryWindowPageCount,
@@ -297,6 +297,8 @@ export function useLiveInfiniteQuery<TContext extends Context>(
       ? Math.max(1, committed.controller.getSnapshot().pages.length)
       : 1
     const initialPageCount = canPreservePageCount ? previousPageCount : 1
+    // The peek-ahead window for every retained page.
+    const requiredLimit = initialPageCount * pageSize + 1
 
     if (needsNewCollection) {
       let inputValue = queryFnOrCollection
@@ -311,7 +313,6 @@ export function useLiveInfiniteQuery<TContext extends Context>(
         inputValue = () => preparedQueryValue
       }
       const rendered = renderedCollectionRef.current
-      const requiredLimit = initialPageCount * pageSize + 1
       if (
         !inputIsCollection &&
         rendered !== null &&
@@ -324,10 +325,10 @@ export function useLiveInfiniteQuery<TContext extends Context>(
           usesLegacyDeps,
         ) &&
         rendered.collection.status !== `cleaned-up` &&
-        liveQueryWindowHoldsRows(rendered.collection, requiredLimit)
+        liveQueryWindowMatches(rendered.collection, requiredLimit)
       ) {
         // An earlier render built this collection and nothing has committed
-        // since. Its window already holds the retained pages, so its first
+        // since. Its window is exactly the retained pages, so its first
         // rows are correct. Sources it deferred still resume at commit.
         collection = rendered.collection
         for (const deferred of rendered.deferredCollections) {
@@ -338,6 +339,8 @@ export function useLiveInfiniteQuery<TContext extends Context>(
         if (input.kind === `collection`) {
           collection = input.collection
           suppliedCollection = true
+          // A supplied collection is never reused, so release the last one.
+          renderedCollectionRef.current = null
         } else {
           // Wrap the query with the peek-ahead window for every retained page,
           // so a collection that starts syncing now never publishes fewer rows
@@ -374,10 +377,7 @@ export function useLiveInfiniteQuery<TContext extends Context>(
     // supplied window that the controller must still adjust waits for the
     // subscription.
     if (suppliedCollection) {
-      startInRender = liveQueryWindowHoldsRows(
-        collection,
-        initialPageCount * pageSize + 1,
-      )
+      startInRender = liveQueryWindowMatches(collection, requiredLimit)
     }
     if (startInRender) collection.startSyncImmediate()
 

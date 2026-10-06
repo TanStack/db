@@ -75,8 +75,9 @@ describe(`useLiveInfiniteQuery`, () => {
     // collection's own gcTime reclaims a render that never commits. #1675 kept
     // supplied collections idle until commit; that rule caused the empty first
     // render in #2023 and was reversed by decision to match useLiveQuery.
-    // On-demand supplied collections still wait for commit: see
-    // infinite-query-render-cuts.test.tsx.
+    // A supplied window wider than the hook needs, but finite, waits for
+    // commit so it never requests extra rows: see the shared
+    // on-demand-collection-window scenario.
     const source = createCollection(
       mockSyncCollectionOptions<Post>({
         id: `abandoned-supplied-infinite-query`,

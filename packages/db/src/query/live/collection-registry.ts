@@ -20,32 +20,6 @@ export function getBuilderFromConfig(
 }
 
 /**
- * Whether `predicate` holds for every source Collection behind `collection`.
- * A live-query Collection does not copy its sources' configuration, so this
- * follows each one to the Collections it reads. A Collection-compatible object
- * without config is unknown and fails the check.
- *
- * @param collection - The Collection to start from
- * @param predicate - The check for each source Collection that has config
- * @param visited - Collections already checked, shared across calls
- */
-export function everySourceCollection(
-  collection: Collection<any, any, any>,
-  predicate: (source: Collection<any, any, any>) => boolean,
-  visited: Set<Collection<any, any, any>> = new Set(),
-): boolean {
-  if (visited.has(collection)) return true
-  visited.add(collection)
-  const config = (collection as { config?: object }).config
-  if (!config) return false
-  const builder = getBuilderFromConfig(config)
-  if (!builder) return predicate(collection)
-  return builder
-    .getSourceCollections()
-    .every((source) => everySourceCollection(source, predicate, visited))
-}
-
-/**
  * Registers a builder for a collection in the global registry.
  * Used to detect when a live query depends on another live query,
  * enabling the scheduler to ensure parent queries run first.

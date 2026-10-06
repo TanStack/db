@@ -191,8 +191,8 @@ pre-commit work to the drivers.
 | A synchronous source's first published value is ready with the first page. | Shared `first-paint-ready` |
 | Every ready value in a fixed-source, fixed-query scenario equals the source prefix for its own page count, with matching pages and continuation. | Shared, in 11 scenarios including `equal-dependency-depth` and `circular-dependency` |
 | A mount requests an on-demand first window once. | Shared `on-demand-paging` |
-| A render that never commits, or a superseded pre-commit recompute, does not acquire an on-demand source, direct or wrapped; commit does. | React `infinite-query-render-cuts.test.tsx`, Svelte hook tests |
-| A StrictMode double render requests an on-demand first window once. | React render cuts |
+| A render that never commits, or a superseded pre-commit recompute, does not acquire an on-demand source, direct or wrapped; commit does. Retired by the addendum "On-demand sources follow useLiveQuery"; replaced by acquisition parity with `useLiveQuery`. | React `infinite-query-render-cuts.test.tsx`, Svelte hook tests |
+| A StrictMode double render requests an on-demand first window once. Narrowed by the same addendum to React 19, where both hooks keep refs across the double render. | React render cuts |
 | After GC reclaims an abandoned render's collection, the retry's first commit is the ready first page. | React render cuts |
 
 Each shared handle now records every value its framework published, which
@@ -259,7 +259,8 @@ Evidence, produced on the working tree above `083247d18`:
   commit, so it does not prove React scheduling.
 - The walk from a live-query Collection to its sources is one shared helper,
   `everySourceCollection`, which the observer's persisted-readiness check also
-  uses.
+  uses. The addendum "Supplied windows request only what the hook needs"
+  removes it with the on-demand gate it served.
 - Local suites: react-db 338, vue-db 122, svelte-db 120, and the full db suite
   of 8267 tests.
 
@@ -324,6 +325,42 @@ requests. On React 18, StrictMode does not keep refs across the double render,
 so both hooks send two first-window requests there. Removing early on-demand
 requests from both hooks needs a change in the live-query Collection itself.
 
+## Addendum: supplied windows request only what the hook needs
+
+An external review of `c3341af0f` raised ten findings. This entry records the
+behavioral ones.
+
+Law: a mount requests no on-demand rows beyond the window the hook needs, for
+either input form. Authority: established behavior on `main`, where a supplied
+collection waits for the controller to set its window at commit. The shared
+`on-demand-paging` scenario covered only query callbacks, and the supplied
+scenarios used an exact `.limit(4)` window, so a wider window was never
+generated. The new shared scenario `on-demand-collection-window` declares a
+wider `.limit(10)` and an exact `.limit(4)`, and checks the rows the
+on-demand source holds after mount, which are the rows it was asked for.
+
+- With the earlier rule, which started any window at least as wide as needed,
+  the scenario fails in React and Svelte: the source loads all eight rows. It
+  passes on `main` and with the repair. Vue starts at commit and passes both.
+- The repair starts a supplied collection in render only when its window is
+  exactly the needed one, or unbounded. An unbounded window, from a query with
+  no `.limit`, sends one unbounded request on `main` too, because the
+  controller cannot narrow it before the source request, so starting it in
+  render adds no request and keeps its first paint ready. That pre-existing
+  unbounded request is outside this law and stays open.
+- The React render-time reuse path uses the same rule. A reuse mutant that
+  accepts a wider window survives every suite: the reused collection's rows
+  are already loaded, so no observation distinguishes it. No harm was found.
+- In Svelte, starting sync inside `$derived.by` can throw
+  `state_unsafe_mutation` when the start synchronously writes rows a peer's
+  pending load is waiting for. A two-component probe reproduces it for the
+  infinite hook and, on `main`, for Svelte's `useLiveQuery`, which starts in a
+  derived too. On the follow-up branch, where a live-query Collection defers
+  acquisition until a subscriber or preload, the same probe passes for both
+  hooks.
+- On React 18, StrictMode does not keep refs across the double render, so both
+  hooks still send two first-window requests. The changeset now names React 19.
+
 ## Revision index
 
 Each entry's evidence applies to the revision named here. The first section's
@@ -338,4 +375,5 @@ table and closure apply to `415a8d4a1`.
 | Nested on-demand sources and retained-page windows | `2b461f8cd` |
 | Publication laws in the shared oracle | `083247d18` |
 | Supplied collections match useLiveQuery | `e6a31f6eb` |
-| On-demand sources follow useLiveQuery | the commit that adds this entry, on top of `e6a31f6eb` |
+| On-demand sources follow useLiveQuery | `c3341af0f` |
+| Supplied windows request only what the hook needs | the commit that adds this entry, on top of `c3341af0f` |
