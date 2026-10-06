@@ -328,7 +328,7 @@ export class CollectionSyncManager<
           markError: (error?: unknown) => {
             if (isCurrentSync()) this.lifecycle.markError(error)
           },
-          truncate: () => {
+          truncate: (options) => {
             if (!isCurrentSync()) return
             const pendingTransaction = this.getActivePendingSyncTransaction()
 
@@ -348,6 +348,7 @@ export class CollectionSyncManager<
             // - Subsequent synced ops applied on the fresh base
             // - Finally, optimistic mutations re-applied on top (single batch)
             pendingTransaction.truncate = true
+            pendingTransaction.truncateMarkReady = options?.markReady ?? true
             this.state.refreshPendingSyncedProjection()
           },
           metadata: this.createSyncMetadataApi(isCurrentSync),

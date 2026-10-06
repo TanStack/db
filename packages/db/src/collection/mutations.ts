@@ -189,7 +189,7 @@ export class CollectionMutationsManager<
       throw new InvalidKeyError(key, item)
     }
 
-    return `KEY::${this.id}/${key}`
+    return `KEY::${JSON.stringify([this.id, typeof key, String(key)])}`
   }
 
   /**

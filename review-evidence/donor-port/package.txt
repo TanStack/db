@@ -1,0 +1,23 @@
+
+ RUN  v3.2.4 /Users/kyle.mathews/.codex/worktrees/pr-1179-review/tanstack-db/packages/indexeddb-db-collection
+
+ ✓ |@tanstack/indexeddb-db-collection (package)| tests/packed-consumer.test.ts (4 tests) 6026ms
+ ✓ |@tanstack/indexeddb-db-collection (package)| tests/portable-declarations.test.ts (12 tests) 6608ms
+   ✓ resolves public package types for Node16 ESM consumers  806ms
+   ✓ resolves public package types for Node16 CommonJS consumers  1135ms
+   ✓ resolves public package types for NodeNext ESM consumers  763ms
+   ✓ resolves public package types for NodeNext CommonJS consumers  602ms
+   ✓ resolves public package types for Bundler consumers  820ms
+   ✓ preserves consumer types when rewriting import type arguments  367ms
+   ✓ preserves consumer types when rewriting package import type arguments  355ms
+   ✓ preserves consumer types when rewriting literal types  387ms
+   ✓ preserves consumer types when rewriting static imports  353ms
+   ✓ preserves consumer types when rewriting re-exports  336ms
+   ✓ preserves consumer types when rewriting import equals  345ms
+   ✓ preserves consumer types when rewriting module augmentation  336ms
+
+ Test Files  2 passed (2)
+      Tests  16 passed (16)
+   Start at  09:58:22
+   Duration  7.16s (transform 50ms, setup 0ms, collect 387ms, tests 12.63s, environment 0ms, prepare 188ms)
+

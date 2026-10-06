@@ -1,0 +1,106 @@
+Testing types with tsc and vue-tsc is an experimental feature.
+Breaking changes might not follow SemVer, please pin Vitest's version when using it.
+
+ RUN  v3.2.4 /Users/kyle.mathews/.codex/worktrees/pr-1179-review/tanstack-db/packages/indexeddb-db-collection
+
+ ✓  TS  |@tanstack/indexeddb-db-collection| tests/indexeddb.test-d.ts (24 tests)
+ ✓ |@tanstack/indexeddb-db-collection| tests/persistence-values-oracle.test.ts (8 tests) 163ms
+ ✓ |@tanstack/indexeddb-db-collection| tests/wrapper-settlement-oracle.test.ts (22 tests) 63ms
+ ✓ |@tanstack/indexeddb-db-collection| tests/api.test.ts (12 tests) 85ms
+ ✓ |@tanstack/indexeddb-db-collection| tests/wrapper.test.ts (23 tests) 93ms
+ ✓ |@tanstack/indexeddb-db-collection| tests/deletion-queue-oracle.test.ts (7 tests) 60ms
+ ✓ |@tanstack/indexeddb-db-collection| tests/cross-tab-boundary-oracle.test.ts (11 tests) 79ms
+stderr | tests/transport-oracle.test.ts > reports connection closure immediately and supports fresh Collections
+[Live Query Error] Source collection 'indexeddb-collection:2341ab9a-8d4b-458d-b370-ab9600c9635d:items' entered error state
+
+stdout | tests/persistence-oracle.test.ts > settled histories > matches authored data through fixed histories
+indexeddb.persistence campaign fixed { numRuns: 30, seed: 1179001 }
+
+ ✓ |@tanstack/indexeddb-db-collection| tests/settlement-oracle.test.ts (40 tests) 408ms
+ ✓ |@tanstack/indexeddb-db-collection| tests/transport-oracle.test.ts (47 tests) 438ms
+ ✓ |@tanstack/indexeddb-db-collection| tests/compatibility-oracle.test.ts (31 tests) 458ms
+stdout | tests/persistence-oracle.test.ts > settled histories > matches authored data through fixed histories
+indexeddb.persistence completed { mode: 'fixed', seed: 1179001, path: null, runs: 30, failed: false }
+
+stdout | tests/persistence-oracle.test.ts > settled histories > matches authored data through random histories
+indexeddb.persistence campaign random { numRuns: 30 }
+
+ ✓ |@tanstack/indexeddb-db-collection| tests/cross-tab-history-oracle.test.ts (10 tests) 1097ms
+   ✓ refines independent per-Collection snapshots with fixed histories  688ms
+ ✓ |@tanstack/indexeddb-db-collection| tests/pending-history-oracle.test.ts (5 tests) 944ms
+   ✓ reconstructs held multi-row CRUD crossed with every peer action and decision  437ms
+stdout | tests/persistence-oracle.test.ts > settled histories > matches authored data through random histories
+indexeddb.persistence completed {
+  mode: 'random',
+  seed: -1455114845,
+  path: null,
+  runs: 30,
+  failed: false
+}
+
+ ✓ |@tanstack/indexeddb-db-collection| tests/persistence-oracle.test.ts (11 tests) 1052ms
+   ✓ settled histories > matches authored data through fixed histories  527ms
+   ✓ settled histories > matches authored data through random histories  352ms
+ ✓ |@tanstack/indexeddb-db-collection| tests/local-write-order-oracle.test.ts (580 tests) 2892ms
+ ✓ |@tanstack/indexeddb-db-collection| tests/retirement-oracle.test.ts (1615 tests) 65161ms
+   ✓ admitted native writes retain their actual outcome after closure > {"first":"insert","second":"insert","reason":"explicit","reverse":false}  559ms
+   ✓ admitted native writes retain their actual outcome after closure > {"first":"insert","second":"insert","reason":"explicit","reverse":true}  412ms
+   ✓ admitted native writes retain their actual outcome after closure > {"first":"insert","second":"insert","reason":"upgrade","reverse":false}  425ms
+   ✓ admitted native writes retain their actual outcome after closure > {"first":"insert","second":"insert","reason":"upgrade","reverse":true}  413ms
+   ✓ admitted native writes retain their actual outcome after closure > {"first":"insert","second":"insert","reason":"delete","reverse":false}  409ms
+   ✓ admitted native writes retain their actual outcome after closure > {"first":"insert","second":"insert","reason":"delete","reverse":true}  412ms
+   ✓ admitted native writes retain their actual outcome after closure > {"first":"insert","second":"update","reason":"explicit","reverse":false}  407ms
+   ✓ admitted native writes retain their actual outcome after closure > {"first":"insert","second":"update","reason":"explicit","reverse":true}  416ms
+   ✓ admitted native writes retain their actual outcome after closure > {"first":"insert","second":"update","reason":"upgrade","reverse":false}  410ms
+   ✓ admitted native writes retain their actual outcome after closure > {"first":"insert","second":"update","reason":"upgrade","reverse":true}  409ms
+   ✓ admitted native writes retain their actual outcome after closure > {"first":"insert","second":"update","reason":"delete","reverse":false}  407ms
+   ✓ admitted native writes retain their actual outcome after closure > {"first":"insert","second":"update","reason":"delete","reverse":true}  407ms
+   ✓ admitted native writes retain their actual outcome after closure > {"first":"insert","second":"delete","reason":"explicit","reverse":false}  410ms
+   ✓ admitted native writes retain their actual outcome after closure > {"first":"insert","second":"delete","reason":"explicit","reverse":true}  414ms
+   ✓ admitted native writes retain their actual outcome after closure > {"first":"insert","second":"delete","reason":"upgrade","reverse":false}  414ms
+   ✓ admitted native writes retain their actual outcome after closure > {"first":"insert","second":"delete","reason":"upgrade","reverse":true}  416ms
+   ✓ admitted native writes retain their actual outcome after closure > {"first":"insert","second":"delete","reason":"delete","reverse":false}  412ms
+   ✓ admitted native writes retain their actual outcome after closure > {"first":"insert","second":"delete","reason":"delete","reverse":true}  410ms
+   ✓ admitted native writes retain their actual outcome after closure > {"first":"update","second":"insert","reason":"explicit","reverse":false}  412ms
+   ✓ admitted native writes retain their actual outcome after closure > {"first":"update","second":"insert","reason":"explicit","reverse":true}  415ms
+   ✓ admitted native writes retain their actual outcome after closure > {"first":"update","second":"insert","reason":"upgrade","reverse":false}  409ms
+   ✓ admitted native writes retain their actual outcome after closure > {"first":"update","second":"insert","reason":"upgrade","reverse":true}  404ms
+   ✓ admitted native writes retain their actual outcome after closure > {"first":"update","second":"insert","reason":"delete","reverse":false}  407ms
+   ✓ admitted native writes retain their actual outcome after closure > {"first":"update","second":"insert","reason":"delete","reverse":true}  406ms
+   ✓ admitted native writes retain their actual outcome after closure > {"first":"update","second":"update","reason":"explicit","reverse":false}  411ms
+   ✓ admitted native writes retain their actual outcome after closure > {"first":"update","second":"update","reason":"explicit","reverse":true}  411ms
+   ✓ admitted native writes retain their actual outcome after closure > {"first":"update","second":"update","reason":"upgrade","reverse":false}  404ms
+   ✓ admitted native writes retain their actual outcome after closure > {"first":"update","second":"update","reason":"upgrade","reverse":true}  404ms
+   ✓ admitted native writes retain their actual outcome after closure > {"first":"update","second":"update","reason":"delete","reverse":false}  404ms
+   ✓ admitted native writes retain their actual outcome after closure > {"first":"update","second":"update","reason":"delete","reverse":true}  405ms
+   ✓ admitted native writes retain their actual outcome after closure > {"first":"update","second":"delete","reason":"explicit","reverse":false}  404ms
+   ✓ admitted native writes retain their actual outcome after closure > {"first":"update","second":"delete","reason":"explicit","reverse":true}  404ms
+   ✓ admitted native writes retain their actual outcome after closure > {"first":"update","second":"delete","reason":"upgrade","reverse":false}  404ms
+   ✓ admitted native writes retain their actual outcome after closure > {"first":"update","second":"delete","reason":"upgrade","reverse":true}  406ms
+   ✓ admitted native writes retain their actual outcome after closure > {"first":"update","second":"delete","reason":"delete","reverse":false}  406ms
+   ✓ admitted native writes retain their actual outcome after closure > {"first":"update","second":"delete","reason":"delete","reverse":true}  413ms
+   ✓ admitted native writes retain their actual outcome after closure > {"first":"delete","second":"insert","reason":"explicit","reverse":false}  404ms
+   ✓ admitted native writes retain their actual outcome after closure > {"first":"delete","second":"insert","reason":"explicit","reverse":true}  405ms
+   ✓ admitted native writes retain their actual outcome after closure > {"first":"delete","second":"insert","reason":"upgrade","reverse":false}  406ms
+   ✓ admitted native writes retain their actual outcome after closure > {"first":"delete","second":"insert","reason":"upgrade","reverse":true}  414ms
+   ✓ admitted native writes retain their actual outcome after closure > {"first":"delete","second":"insert","reason":"delete","reverse":false}  405ms
+   ✓ admitted native writes retain their actual outcome after closure > {"first":"delete","second":"insert","reason":"delete","reverse":true}  406ms
+   ✓ admitted native writes retain their actual outcome after closure > {"first":"delete","second":"update","reason":"explicit","reverse":false}  406ms
+   ✓ admitted native writes retain their actual outcome after closure > {"first":"delete","second":"update","reason":"explicit","reverse":true}  405ms
+   ✓ admitted native writes retain their actual outcome after closure > {"first":"delete","second":"update","reason":"upgrade","reverse":false}  405ms
+   ✓ admitted native writes retain their actual outcome after closure > {"first":"delete","second":"update","reason":"upgrade","reverse":true}  405ms
+   ✓ admitted native writes retain their actual outcome after closure > {"first":"delete","second":"update","reason":"delete","reverse":false}  404ms
+   ✓ admitted native writes retain their actual outcome after closure > {"first":"delete","second":"update","reason":"delete","reverse":true}  404ms
+   ✓ admitted native writes retain their actual outcome after closure > {"first":"delete","second":"delete","reason":"explicit","reverse":false}  404ms
+   ✓ admitted native writes retain their actual outcome after closure > {"first":"delete","second":"delete","reason":"explicit","reverse":true}  405ms
+   ✓ admitted native writes retain their actual outcome after closure > {"first":"delete","second":"delete","reason":"upgrade","reverse":false}  406ms
+   ✓ admitted native writes retain their actual outcome after closure > {"first":"delete","second":"delete","reason":"upgrade","reverse":true}  405ms
+   ✓ admitted native writes retain their actual outcome after closure > {"first":"delete","second":"delete","reason":"delete","reverse":false}  404ms
+   ✓ admitted native writes retain their actual outcome after closure > {"first":"delete","second":"delete","reason":"delete","reverse":true}  405ms
+
+ Test Files  15 passed (15)
+      Tests  2446 passed (2446)
+Type Errors  no errors
+   Start at  09:58:23
+   Duration  68.01s (transform 2.02s, setup 484ms, collect 20.46s, tests 72.99s, environment 9.49s, prepare 2.44s, typecheck 622ms)
+

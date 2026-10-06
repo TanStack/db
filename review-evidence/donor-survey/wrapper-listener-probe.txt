@@ -1,0 +1,8 @@
+Source: /tmp/pr1179-donors/wrapper-listener-probe.log
+SHA-256: 4bf5b32310c90479ba2e8e2975ae4c1a55c9beabd5662d84c12c89487ac8918a
+Trailing whitespace normalized.
+
+{"mode":"addEventListener","observed":1,"caller":"fulfilled:42","native":"complete"}
+{"mode":"property","observed":1,"caller":"pending","native":"complete"}
+{"mode":"addEventListener","observed":1,"caller":"rejected:Error: Transaction was aborted","native":"abort"}
+{"mode":"property","observed":1,"caller":"pending","native":"abort"}

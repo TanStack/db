@@ -57,6 +57,7 @@ interface PendingSyncedTransaction<
   layoutChanged: boolean
   operations: Array<PendingSyncOperation<T, TKey>>
   truncate?: boolean
+  truncateMarkReady?: boolean
   rowMetadataWrites: Map<TKey, PendingMetadataWrite>
   /** The last explicit write per key, after `position` operations. */
   explicitRowMetadataWrites: Map<
@@ -1074,12 +1075,16 @@ export class CollectionStateManager<
       PendingSyncedTransaction<TOutput, TKey>
     > = []
     let hasTruncateSync = false
+    let truncateMarksReady = false
     let layoutChanged = false
     for (const t of this.pendingSyncedTransactions) {
       if (t.committed) {
         committedSyncedTransactions.push(t)
         layoutChanged ||= t.layoutChanged
-        hasTruncateSync ||= t.truncate === true
+        if (t.truncate) {
+          hasTruncateSync = true
+          truncateMarksReady = t.truncateMarkReady !== false
+        }
       } else {
         uncommittedSyncedTransactions.push(t)
       }
@@ -1413,7 +1418,7 @@ export class CollectionStateManager<
       // A truncate that makes the Collection ready publishes its batch after
       // the status reads ready and before status listeners and ready
       // callbacks run, so their writes follow the batch they describe.
-      if (hasTruncateSync && this.lifecycle.status !== `ready`)
+      if (truncateMarksReady && this.lifecycle.status !== `ready`)
         capture(() => this.lifecycle.markReady(emit))
       if (!emitted) emit()
 

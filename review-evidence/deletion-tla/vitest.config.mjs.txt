@@ -1,0 +1,12 @@
+import { fileURLToPath } from 'node:url'
+const repository = '/Users/kyle.mathews/.codex/worktrees/pr-1179-review/tanstack-db'
+export default {
+  root: fileURLToPath(new URL('.', import.meta.url)),
+  resolve: { alias: {
+    '@tanstack/db': `${repository}/packages/db/src/index.ts`,
+    '@tanstack/db-ivm': `${repository}/packages/db-ivm/src/index.ts`,
+    vitest: `${repository}/node_modules/vitest/dist/index.js`,
+    'fake-indexeddb': `${repository}/packages/indexeddb-db-collection/node_modules/fake-indexeddb/build/esm/index.js`,
+  } },
+  test: { include: ['accepted-before-close.test.ts'], environment: 'node', testTimeout: 5000 },
+}

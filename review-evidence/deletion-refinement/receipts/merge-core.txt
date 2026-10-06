@@ -1,0 +1,12 @@
+Source log: /tmp/pr1179-merge-core.log
+SHA-256 of full source: afcd5d32e4f6334bed095de79e1d091714700b6e9fdffd49d6d2e7ef06856327
+Progress dot lines omitted; trailing whitespace normalized.
+
+
+ RUN  v3.2.4 /Users/kyle.mathews/.codex/worktrees/pr-1179-review/tanstack-db/packages/db
+
+
+ Test Files  6 passed (6)
+      Tests  300 passed (300)
+   Start at  08:33:07
+   Duration  1.94s (transform 614ms, setup 413ms, collect 3.07s, tests 1.24s, environment 2.14s, prepare 466ms)

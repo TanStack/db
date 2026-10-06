@@ -178,7 +178,12 @@ Signal that a usable initial or recovered snapshot is available.
 
 ###### truncate
 
-() => `void`
+`truncate({ markReady: false })` replaces synced rows without changing Collection
+status. Omitting the option preserves the default behavior of marking the
+Collection ready. The last truncate in one transaction supplies its readiness
+intent; the last replacement in one published batch supplies that batch's intent.
+
+(options?: { markReady?: boolean }) => `void`
 
 ###### write
 

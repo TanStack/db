@@ -1,4 +1,8 @@
-import { whenSyncAccepted } from '@tanstack/db'
+import {
+  DuplicateKeySyncError,
+  SyncTransactionAbortedError,
+  whenSyncAccepted,
+} from '@tanstack/db'
 import {
   DeleteOperationItemNotFoundError,
   DuplicateKeyInBatchError,
@@ -49,7 +53,21 @@ export interface SyncContext<
    * Handles both direct array caches and wrapped response formats (when `select` is used).
    * If not provided, falls back to directly setting the cache with the raw array.
    */
-  updateCacheData?: (getItems: () => Array<TRow>, keys: Array<TKey>) => void
+  updateCacheData?: (getItems: () => Array<TRow>) => void
+  /**
+   * Gives a direct write its position when it is called. A fetch that starts
+   * later counts as newer than the write.
+   */
+  reserveDirectWrite?: () => number
+  /**
+   * Gives an accepted write's keys precedence from its reserved position.
+   * A rejected write never calls this.
+   */
+  claimDirectWriteKeys?: (keys: Array<TKey>, position: number) => void
+  /** Records a write that waits for earlier commits until it settles. */
+  noteWaitingDirectWrite?: (waiting: Promise<void>) => void
+  /** Settles once every earlier commit is accepted, or undefined if it is. */
+  earlierCommits?: () => Promise<void> | undefined
 }
 
 interface NormalizedOperation<
@@ -124,7 +142,12 @@ function validateOperations<
     // Validate operation-specific requirements
     // Validate against accepted synced rows, not the optimistic view, so a
     // write works while its row is optimistically modified or queued.
-    if (op.type === `update`) {
+    if (op.type === `insert`) {
+      // Persistence stores a sync insert as an update, so check here.
+      if (ctx.collection._state.getAcceptedSyncedRow(op.key)) {
+        throw new DuplicateKeySyncError(op.key, ctx.collection.id)
+      }
+    } else if (op.type === `update`) {
       if (!ctx.collection._state.getAcceptedSyncedRow(op.key)) {
         throw new UpdateOperationItemNotFoundError(op.key)
       }
@@ -146,9 +169,53 @@ export function performWriteOperations<
     | SyncOperation<TRow, TKey, TInsertInput>
     | Array<SyncOperation<TRow, TKey, TInsertInput>>,
   ctx: SyncContext<TRow, TKey>,
+  isCurrent: () => boolean,
 ): Promise<void> {
-  const normalized = normalizeOperations(operations, ctx)
+  let normalized: Array<NormalizedOperation<TRow, TKey>>
+  try {
+    normalized = normalizeOperations(operations, ctx)
+  } catch (error) {
+    return Promise.reject(error)
+  }
+  const position = ctx.reserveDirectWrite?.() ?? 0
+  // Validate against, and apply on top of, every earlier commit. A commit
+  // can wait for a persistence lock before it is accepted, so the write waits
+  // too. A validation error rejects the returned promise.
+  const earlier = ctx.earlierCommits?.()
+  if (!earlier) {
+    try {
+      return applyWriteOperations(normalized, ctx, position)
+    } catch (error) {
+      return Promise.reject(error)
+    }
+  }
+  const written = earlier.then(() => {
+    // Cleanup retired this sync run while the write waited.
+    if (!isCurrent()) throw new SyncTransactionAbortedError()
+    return applyWriteOperations(normalized, ctx, position)
+  })
+  ctx.noteWaitingDirectWrite?.(
+    written.then(
+      () => undefined,
+      () => undefined,
+    ),
+  )
+  return written
+}
+
+function applyWriteOperations<
+  TRow extends object,
+  TKey extends string | number = string | number,
+>(
+  normalized: Array<NormalizedOperation<TRow, TKey>>,
+  ctx: SyncContext<TRow, TKey>,
+  position: number,
+): Promise<void> {
   validateOperations(normalized, ctx)
+  ctx.claimDirectWriteKeys?.(
+    normalized.map((op) => op.key),
+    position,
+  )
 
   // While an optimistic transaction persists, this sync transaction waits
   // and applies when that transaction settles.
@@ -226,11 +293,7 @@ export function performWriteOperations<
         ctx.collection._state.acceptedSyncedEntries(),
         ([, row]) => row,
       )
-    if (ctx.updateCacheData)
-      ctx.updateCacheData(
-        getItems,
-        normalized.map((op) => op.key),
-      )
+    if (ctx.updateCacheData) ctx.updateCacheData(getItems)
     else ctx.queryClient.setQueryData(ctx.queryKey, getItems())
   }
   if (accepted === true) updateCache()
@@ -262,7 +325,11 @@ export function createWriteUtils<
       batchContext.operations.push(operation)
       return batchContext.completion
     }
-    const completion = performWriteOperations(operation, ctx)
+    const completion = performWriteOperations(
+      operation,
+      ctx,
+      () => getContext() === ctx,
+    )
     writeCompletionPromises.add(completion)
     return completion
   }
@@ -336,7 +403,11 @@ export function createWriteUtils<
         // Perform all collected operations
         resolveBatch(
           batchContext.operations.length > 0
-            ? performWriteOperations(batchContext.operations, ctx)
+            ? performWriteOperations(
+                batchContext.operations,
+                ctx,
+                () => getContext() === ctx,
+              )
             : Promise.resolve(),
         )
         return completion

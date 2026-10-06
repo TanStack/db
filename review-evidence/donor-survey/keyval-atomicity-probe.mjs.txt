@@ -1,0 +1,7 @@
+import { IDBFactory } from '/Users/kyle.mathews/.codex/worktrees/pr-1179-review/tanstack-db/packages/indexeddb-db-collection/node_modules/fake-indexeddb/build/esm/index.js'
+import { createStore, setMany, get } from './idb-keyval/src/index.ts'
+globalThis.indexedDB = new IDBFactory()
+const store = createStore('atomicity-negative-transfer', 'rows')
+let failure
+try { await setMany([['prefix', { value: 'valid' }], ['bad', () => {}]], store) } catch (e) { failure = e.name }
+console.log(JSON.stringify({ failure, prefixAfterRejection: await get('prefix', store), badAfterRejection: await get('bad', store) }))

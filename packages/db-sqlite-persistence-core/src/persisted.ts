@@ -544,6 +544,12 @@ export interface PersistedCollectionCoordinator {
     collectionId: string,
     mutations: Array<PersistedMutationEnvelope>,
   ) => Promise<ApplyLocalMutationsResponse>
+  /**
+   * Applies a committed transaction through the supplied adapter when present.
+   * Wrappers must forward this leader-local loan: scheduling it again can wait
+   * on the hydration that is awaiting this call. Never serialize or retain the
+   * loan after the call; ordinary work uses the registered collection adapter.
+   */
   requestApplyCommittedTx: (
     collectionId: string,
     tx: PersistedTx,
@@ -888,8 +894,9 @@ export class SingleProcessCoordinator implements PersistedCollectionCoordinator 
   public async requestApplyCommittedTx(
     collectionId: string,
     tx: PersistedTx,
+    scopedAdapter?: HydrationPersistenceAdapter,
   ): Promise<ApplyCommittedTxResponse> {
-    const adapter = this.collectionAdapters.get(collectionId)
+    const adapter = scopedAdapter ?? this.collectionAdapters.get(collectionId)
     if (!adapter) {
       throw new InvalidPersistedCollectionConfigError(
         `SingleProcessCoordinator has no persistence adapter configured for collection "${collectionId}"`,
