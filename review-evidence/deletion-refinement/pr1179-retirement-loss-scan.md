@@ -73,35 +73,35 @@ The existing late-read cases do retain meaningful coverage: their deliberately c
 
 ## Transition correspondence
 
-| Source transition | Frozen driver/checkpoint | Boundary retained or lost |
-| --- | --- | --- |
-| `Init` (S37–60) | Two preloaded Collections in R99–100; separate initial-read case R205–233 | Two distinct owners retained. Initially loading plus concurrent writes is not crossed into the pair matrix. |
-| `Close` (S64–71) | All three reasons through R74–87 | Explicit close and native versionchange paths retained. Callback-boundary admission ordering is unobserved. |
-| `FinishRead` (S73–78) | Held initial/replacement/targeted reads, R205–240 | Native readonly reach, final rows, startup outcome, and status events checked. Source read kinds retained; targeted read is additional coverage. |
-| `RegisterLate`, `FinishLateStartup` (S80–87) | R168–171 | Final rejection/error and zero successful native admissions checked. Event history omitted. |
-| `Decide`, `Admit` (S89–102) | Default accepting pair starts R110–115; delayed update decision R140–163 | Closed refusal retained; open rejection and mixed decision phases absent. |
-| `FinishNative` (S108–115) | Reverse-order abort calls R118–120; real gated transactions; terminal outcomes R128 | Commit/abort outcomes and FIFO durable fold retained. Caller-time native facts and independently scheduled local continuations omitted. |
-| `Confirm` (S120–133) | Final base rows; explicit close in native-complete listener R245–266; core T26–68 | Finish policy and replacement readiness have concrete paths. Source's arbitrary independent confirmation scheduling is not enumerated. |
-| `FinishHandler` (S138–147) | Explicit held handler R183–200 | One-owner accepted-work continuation retained; mixed sibling phases absent. |
-| `SettleCaller` (S149–154) | R47–53 and final comparisons | Outcome retained; row/native state at settlement omitted. |
-| `PrematureCaller` (S156–160) | Pending checks R114–115 and R192 | Pre-release premature success detectable; post-request/pre-completion interval lacks the corresponding observation. |
+| Source transition                            | Frozen driver/checkpoint                                                            | Boundary retained or lost                                                                                                                        |
+| -------------------------------------------- | ----------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `Init` (S37–60)                              | Two preloaded Collections in R99–100; separate initial-read case R205–233           | Two distinct owners retained. Initially loading plus concurrent writes is not crossed into the pair matrix.                                      |
+| `Close` (S64–71)                             | All three reasons through R74–87                                                    | Explicit close and native versionchange paths retained. Callback-boundary admission ordering is unobserved.                                      |
+| `FinishRead` (S73–78)                        | Held initial/replacement/targeted reads, R205–240                                   | Native readonly reach, final rows, startup outcome, and status events checked. Source read kinds retained; targeted read is additional coverage. |
+| `RegisterLate`, `FinishLateStartup` (S80–87) | R168–171                                                                            | Final rejection/error and zero successful native admissions checked. Event history omitted.                                                      |
+| `Decide`, `Admit` (S89–102)                  | Default accepting pair starts R110–115; delayed update decision R140–163            | Closed refusal retained; open rejection and mixed decision phases absent.                                                                        |
+| `FinishNative` (S108–115)                    | Reverse-order abort calls R118–120; real gated transactions; terminal outcomes R128 | Commit/abort outcomes and FIFO durable fold retained. Caller-time native facts and independently scheduled local continuations omitted.          |
+| `Confirm` (S120–133)                         | Final base rows; explicit close in native-complete listener R245–266; core T26–68   | Finish policy and replacement readiness have concrete paths. Source's arbitrary independent confirmation scheduling is not enumerated.           |
+| `FinishHandler` (S138–147)                   | Explicit held handler R183–200                                                      | One-owner accepted-work continuation retained; mixed sibling phases absent.                                                                      |
+| `SettleCaller` (S149–154)                    | R47–53 and final comparisons                                                        | Outcome retained; row/native state at settlement omitted.                                                                                        |
+| `PrematureCaller` (S156–160)                 | Pending checks R114–115 and R192                                                    | Pre-release premature success detectable; post-request/pre-completion interval lacks the corresponding observation.                              |
 
 ## Invariants and challenged claims
 
-| Source claim | Frozen evidence and limit |
-| --- | --- |
-| `TypeOK` (S178–199) | Primarily model integrity. The executable candidate uses types and declared inputs; it need not reconstruct all internal TLA fields. |
-| `ClosedConnectionsDoNotBecomeReady` (S201–202) | Final error plus no recorded ready; weaker than an all-error retired suffix. |
-| `ReadAuthority` (S203) | R205–240 checks blocked read completion cannot replace final base/public rows or restore readiness. No joint read/write schedule or row-event trace. |
-| `AdmissionAuthority` (S204) | R149–171 checks no successful native transactions after held update decisions and utility/late attempts. Retirement callback cut absent. |
-| `NativeAdmissionAccounting` (S205–208) | Native entry count and terminal status are checked. The source queue equality is internal model accounting, not an independent public product law demanding an identical queue in the oracle. |
-| `TruthfulSettlement` (S209–212) | Commit/abort results checked after joint completion; exact caller-time native state omitted. |
-| `AcceptedWorkIsAccountedFor` (S213) | Held ordinary confirmation is initially queued, then appears after handler release; no discard allowed in this one-owner witness. Intermediate accounting and mixed sibling continuation are not enumerated. |
-| `OnlyCommittedWritesPublish` (S214) | Final abort/commit base rows checked; premature transient base publication unobserved. |
-| `AcceptedWorkPrecedesCaller` (S215–216) | Final rows and held-work example support ordinary behavior; precise per-caller cut is lost. |
-| `FinishPolicyConfirms` (S217–219) | Candidate explicitly owns finish policy, and every committed kind has a confirmation check. Same settlement checkpoint limit applies. |
-| `EverySuccessIsConfirmed` (S221–224) | Required under the chosen finish policy. The suppress-policy counterexample is intentionally outside the candidate. |
-| `StrictPublicationSilence` (S226–228) | Explicitly challenged, not a default invariant. R175–203 correctly preserves accepted work that publishes after closure while status remains error. Do not turn this challenged claim into a required silence assertion. |
+| Source claim                                   | Frozen evidence and limit                                                                                                                                                                                                |
+| ---------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `TypeOK` (S178–199)                            | Primarily model integrity. The executable candidate uses types and declared inputs; it need not reconstruct all internal TLA fields.                                                                                     |
+| `ClosedConnectionsDoNotBecomeReady` (S201–202) | Final error plus no recorded ready; weaker than an all-error retired suffix.                                                                                                                                             |
+| `ReadAuthority` (S203)                         | R205–240 checks blocked read completion cannot replace final base/public rows or restore readiness. No joint read/write schedule or row-event trace.                                                                     |
+| `AdmissionAuthority` (S204)                    | R149–171 checks no successful native transactions after held update decisions and utility/late attempts. Retirement callback cut absent.                                                                                 |
+| `NativeAdmissionAccounting` (S205–208)         | Native entry count and terminal status are checked. The source queue equality is internal model accounting, not an independent public product law demanding an identical queue in the oracle.                            |
+| `TruthfulSettlement` (S209–212)                | Commit/abort results checked after joint completion; exact caller-time native state omitted.                                                                                                                             |
+| `AcceptedWorkIsAccountedFor` (S213)            | Held ordinary confirmation is initially queued, then appears after handler release; no discard allowed in this one-owner witness. Intermediate accounting and mixed sibling continuation are not enumerated.             |
+| `OnlyCommittedWritesPublish` (S214)            | Final abort/commit base rows checked; premature transient base publication unobserved.                                                                                                                                   |
+| `AcceptedWorkPrecedesCaller` (S215–216)        | Final rows and held-work example support ordinary behavior; precise per-caller cut is lost.                                                                                                                              |
+| `FinishPolicyConfirms` (S217–219)              | Candidate explicitly owns finish policy, and every committed kind has a confirmation check. Same settlement checkpoint limit applies.                                                                                    |
+| `EverySuccessIsConfirmed` (S221–224)           | Required under the chosen finish policy. The suppress-policy counterexample is intentionally outside the candidate.                                                                                                      |
+| `StrictPublicationSilence` (S226–228)          | Explicitly challenged, not a default invariant. R175–203 correctly preserves accepted work that publishes after closure while status remains error. Do not turn this challenged claim into a required silence assertion. |
 
 ## Progress assumptions
 
@@ -115,16 +115,16 @@ These are finite completion witnesses. A permanently missing continuation can pr
 
 The following maps named source controls to candidate sensitivity by inspection. It is not an executed mutant result. No tests or mutants were run in this scan, and no external review record was inspected. Later RED evidence supplied to the parent is outside this frozen-file audit.
 
-| Source fault | Nearby frozen witness | Calibration conclusion |
-| --- | --- | --- |
-| `explicitClose` (S67–71) | Every explicit-close status assertion | Persistent missing retirement should fail final error checks. |
-| `lateRead` (S75–78) | R205–233 | Changed stale rows and any restored ready should fail. |
-| `lateReady` (S85–87) | R168–170 | Persistent late ready should fail final rejection/error checks. |
-| `admitClosed` (S97–102) | R149–171 | Successful native admission after closure should fail zero-entry checks. A real closed native descriptor can also independently reject admission; calling its transaction method and successfully admitting a transaction are different facts. |
-| `truncateReady` (S132–133) | Retired clear/import cases; T45–59 with final `markReady:false` | Both final error preservation and notification status have distinguishing cells. T47–48 says the pre-fix run can reach assertions, but the comment is not an executed result. |
-| `dropAccepted` (S141–147) | R175–203 | Persistent loss of accepted ordinary work should fail base-row assertions. |
-| `rejectCommitted` (S152–154) | Committed pair outcomes R127; accepted work R198 | Invented rejection after commitment should fail outcome assertions. |
-| `prematureSuccess` (S156–160) | R114–115 before gate release | Some early timings are sensitive; post-request/pre-completion success lacks caller-time native/publication capture. |
+| Source fault                  | Nearby frozen witness                                           | Calibration conclusion                                                                                                                                                                                                                         |
+| ----------------------------- | --------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `explicitClose` (S67–71)      | Every explicit-close status assertion                           | Persistent missing retirement should fail final error checks.                                                                                                                                                                                  |
+| `lateRead` (S75–78)           | R205–233                                                        | Changed stale rows and any restored ready should fail.                                                                                                                                                                                         |
+| `lateReady` (S85–87)          | R168–170                                                        | Persistent late ready should fail final rejection/error checks.                                                                                                                                                                                |
+| `admitClosed` (S97–102)       | R149–171                                                        | Successful native admission after closure should fail zero-entry checks. A real closed native descriptor can also independently reject admission; calling its transaction method and successfully admitting a transaction are different facts. |
+| `truncateReady` (S132–133)    | Retired clear/import cases; T45–59 with final `markReady:false` | Both final error preservation and notification status have distinguishing cells. T47–48 says the pre-fix run can reach assertions, but the comment is not an executed result.                                                                  |
+| `dropAccepted` (S141–147)     | R175–203                                                        | Persistent loss of accepted ordinary work should fail base-row assertions.                                                                                                                                                                     |
+| `rejectCommitted` (S152–154)  | Committed pair outcomes R127; accepted work R198                | Invented rejection after commitment should fail outcome assertions.                                                                                                                                                                            |
+| `prematureSuccess` (S156–160) | R114–115 before gate release                                    | Some early timings are sensitive; post-request/pre-completion success lacks caller-time native/publication capture.                                                                                                                            |
 
 The frozen files contain normal commit/abort fault injection and controlled delays, but no executable wrong-answer comparison, deliberate wrong-design branch, or recorded killed-mutant result. Therefore the named source control set has not been carried into self-contained calibration evidence in these files. This is an evidence omission, distinct from a demonstrated inability of each assertion to detect its fault. Ordinary native abort is an allowed environment outcome, not by itself calibration against a wrong oracle or implementation.
 

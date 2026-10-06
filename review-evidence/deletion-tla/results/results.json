@@ -7,11 +7,7 @@
       "matched": true,
       "exit_code": 0,
       "seconds": 0.676,
-      "counts": [
-        "11",
-        "6",
-        "0"
-      ],
+      "counts": ["11", "6", "0"],
       "trace_actions": [],
       "command": [
         "/tmp/pr1179-tla-runtime/jdk-21.0.12.1+1-jre/Contents/Home/bin/java",
@@ -42,11 +38,7 @@
       "matched": true,
       "exit_code": 12,
       "seconds": 0.71,
-      "counts": [
-        "4",
-        "4",
-        "2"
-      ],
+      "counts": ["4", "4", "2"],
       "trace_actions": [
         "Initial predicate",
         "PrematureGenerate line 38, col 3 to line 41, col 53 of module DesignGrammarControl"
@@ -80,11 +72,7 @@
       "matched": true,
       "exit_code": 0,
       "seconds": 3.749,
-      "counts": [
-        "1031088",
-        "333984",
-        "0"
-      ],
+      "counts": ["1031088", "333984", "0"],
       "trace_actions": [],
       "command": [
         "/tmp/pr1179-tla-runtime/jdk-21.0.12.1+1-jre/Contents/Home/bin/java",
@@ -115,11 +103,7 @@
       "matched": true,
       "exit_code": 0,
       "seconds": 4.137,
-      "counts": [
-        "1172640",
-        "386688",
-        "0"
-      ],
+      "counts": ["1172640", "386688", "0"],
       "trace_actions": [],
       "command": [
         "/tmp/pr1179-tla-runtime/jdk-21.0.12.1+1-jre/Contents/Home/bin/java",
@@ -150,11 +134,7 @@
       "matched": true,
       "exit_code": 0,
       "seconds": 0.877,
-      "counts": [
-        "7892",
-        "3496",
-        "0"
-      ],
+      "counts": ["7892", "3496", "0"],
       "trace_actions": [],
       "command": [
         "/tmp/pr1179-tla-runtime/jdk-21.0.12.1+1-jre/Contents/Home/bin/java",
@@ -185,11 +165,7 @@
       "matched": true,
       "exit_code": 12,
       "seconds": 0.716,
-      "counts": [
-        "57",
-        "57",
-        "47"
-      ],
+      "counts": ["57", "57", "47"],
       "trace_actions": [
         "Initial predicate",
         "Close line 65, col 3 to line 71, col 40 of module retirement_oracle",
@@ -224,11 +200,7 @@
       "matched": true,
       "exit_code": 12,
       "seconds": 0.734,
-      "counts": [
-        "2002",
-        "1032",
-        "448"
-      ],
+      "counts": ["2002", "1032", "448"],
       "trace_actions": [
         "Initial predicate",
         "Decide line 90, col 3 to line 92, col 43 of module retirement_oracle",
@@ -266,11 +238,7 @@
       "matched": true,
       "exit_code": 12,
       "seconds": 0.692,
-      "counts": [
-        "11",
-        "11",
-        "9"
-      ],
+      "counts": ["11", "11", "9"],
       "trace_actions": [
         "Initial predicate",
         "Close line 65, col 3 to line 71, col 40 of module retirement_oracle"
@@ -304,11 +272,7 @@
       "matched": true,
       "exit_code": 12,
       "seconds": 0.698,
-      "counts": [
-        "277",
-        "188",
-        "129"
-      ],
+      "counts": ["277", "188", "129"],
       "trace_actions": [
         "Initial predicate",
         "Close line 65, col 3 to line 71, col 40 of module retirement_oracle",
@@ -344,11 +308,7 @@
       "matched": true,
       "exit_code": 12,
       "seconds": 0.694,
-      "counts": [
-        "282",
-        "191",
-        "131"
-      ],
+      "counts": ["282", "191", "131"],
       "trace_actions": [
         "Initial predicate",
         "Close line 65, col 3 to line 71, col 40 of module retirement_oracle",
@@ -384,11 +344,7 @@
       "matched": true,
       "exit_code": 12,
       "seconds": 0.764,
-      "counts": [
-        "2919",
-        "1447",
-        "546"
-      ],
+      "counts": ["2919", "1447", "546"],
       "trace_actions": [
         "Initial predicate",
         "Decide line 90, col 3 to line 92, col 43 of module retirement_oracle",
@@ -427,11 +383,7 @@
       "matched": true,
       "exit_code": 12,
       "seconds": 0.77,
-      "counts": [
-        "4365",
-        "2086",
-        "638"
-      ],
+      "counts": ["4365", "2086", "638"],
       "trace_actions": [
         "Initial predicate",
         "Decide line 90, col 3 to line 92, col 43 of module retirement_oracle",
@@ -471,11 +423,7 @@
       "matched": true,
       "exit_code": 12,
       "seconds": 0.726,
-      "counts": [
-        "327",
-        "216",
-        "144"
-      ],
+      "counts": ["327", "216", "144"],
       "trace_actions": [
         "Initial predicate",
         "Decide line 90, col 3 to line 92, col 43 of module retirement_oracle",
@@ -511,11 +459,7 @@
       "matched": true,
       "exit_code": 12,
       "seconds": 0.755,
-      "counts": [
-        "2957",
-        "1477",
-        "564"
-      ],
+      "counts": ["2957", "1477", "564"],
       "trace_actions": [
         "Initial predicate",
         "Decide line 90, col 3 to line 92, col 43 of module retirement_oracle",
@@ -554,11 +498,7 @@
       "matched": true,
       "exit_code": 0,
       "seconds": 0.705,
-      "counts": [
-        "35",
-        "22",
-        "0"
-      ],
+      "counts": ["35", "22", "0"],
       "trace_actions": [],
       "command": [
         "/tmp/pr1179-tla-runtime/jdk-21.0.12.1+1-jre/Contents/Home/bin/java",
@@ -589,11 +529,7 @@
       "matched": true,
       "exit_code": 12,
       "seconds": 0.699,
-      "counts": [
-        "22",
-        "16",
-        "3"
-      ],
+      "counts": ["22", "16", "3"],
       "trace_actions": [
         "Initial predicate",
         "AnnounceDelete line 43, col 3 to line 49, col 55 of module deletion_queue_oracle",
@@ -633,11 +569,7 @@
       "matched": true,
       "exit_code": 12,
       "seconds": 0.691,
-      "counts": [
-        "7",
-        "7",
-        "4"
-      ],
+      "counts": ["7", "7", "4"],
       "trace_actions": [
         "Initial predicate",
         "AnnounceDelete line 43, col 3 to line 49, col 55 of module deletion_queue_oracle",
@@ -672,11 +604,7 @@
       "matched": true,
       "exit_code": 12,
       "seconds": 0.691,
-      "counts": [
-        "7",
-        "7",
-        "4"
-      ],
+      "counts": ["7", "7", "4"],
       "trace_actions": [
         "Initial predicate",
         "AnnounceDelete line 43, col 3 to line 49, col 55 of module deletion_queue_oracle",
@@ -711,11 +639,7 @@
       "matched": true,
       "exit_code": 12,
       "seconds": 0.699,
-      "counts": [
-        "17",
-        "12",
-        "1"
-      ],
+      "counts": ["17", "12", "1"],
       "trace_actions": [
         "Initial predicate",
         "AnnounceDelete line 43, col 3 to line 49, col 55 of module deletion_queue_oracle",
@@ -754,11 +678,7 @@
       "matched": true,
       "exit_code": 13,
       "seconds": 0.826,
-      "counts": [
-        "7892",
-        "3496",
-        "0"
-      ],
+      "counts": ["7892", "3496", "0"],
       "trace_actions": [
         "Initial predicate",
         "Close line 65, col 3 to line 71, col 40 of module retirement_oracle",
@@ -799,11 +719,7 @@
       "matched": true,
       "exit_code": 12,
       "seconds": 0.773,
-      "counts": [
-        "4407",
-        "2140",
-        "677"
-      ],
+      "counts": ["4407", "2140", "677"],
       "trace_actions": [
         "Initial predicate",
         "Decide line 90, col 3 to line 92, col 43 of module retirement_oracle",
