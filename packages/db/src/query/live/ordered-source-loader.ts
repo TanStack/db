@@ -594,7 +594,9 @@ export class OrderedSourceLoader {
     const canSettleSynchronously =
       !settlesAsync &&
       windowOperationGeneration === undefined &&
-      !isAuthoritativeRepair &&
+      // An eager source's repair reads only installed rows, so its whole
+      // chain can finish inside the graph run that publishes the window.
+      (!isAuthoritativeRepair || this.info.sourceHoldsAllRows === true) &&
       requestGraphInputRevision !== undefined
     let synchronousCompletionFailure: { error: unknown } | undefined
     const continuation = (

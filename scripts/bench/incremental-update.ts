@@ -177,6 +177,25 @@ const queryCases: Array<QueryCase> = [
     write: updateVisibleIssue,
   },
   {
+    name: `list: newest 50 open`,
+    scenario: `visible issue delete`,
+    createQuery: ({ issues }) =>
+      createLiveQueryCollection((q) =>
+        q
+          .from({ issue: issues })
+          .where(({ issue }) => eq(issue.status, `open`))
+          .orderBy(({ issue }) => issue.createdAt, `desc`)
+          .limit(50)
+          .select(({ issue }) => ({
+            id: issue.id,
+            title: issue.title,
+            createdAt: issue.createdAt,
+          })),
+      ) as unknown as BenchmarkCollection,
+    // A visible delete makes an ordered, limited query refill its window.
+    write: deleteVisibleIssue,
+  },
+  {
     name: `list + author`,
     scenario: `visible author update`,
     createQuery: ({ issues, users }) =>
@@ -357,7 +376,7 @@ function createManualCollection<T extends object, TKey extends string | number>(
   let commit: Parameters<SyncConfig<T, TKey>[`sync`]>[0][`commit`] | undefined
 
   const utils: ManualSyncUtils<T, TKey> = {
-    begin: (syncOptions) => begin!(syncOptions),
+    begin: () => begin!(),
     write: (message) => write!(message),
     commit: () => commit!(),
   }
@@ -522,6 +541,26 @@ function updateVisibleIssue(
   }
 }
 
+function deleteVisibleIssue(
+  fixture: Fixture,
+  _iteration: number,
+  mutationMode: MutationMode,
+): WriteResult {
+  const issue = fixture.issueById.get(fixture.visibleIssueId)!
+
+  if (mutationMode === `synced`) {
+    writeSync(fixture.issues, { type: `delete`, value: issue })
+    return {
+      cleanup: () => writeSync(fixture.issues, { type: `insert`, value: issue }),
+    }
+  }
+
+  const transaction = writeOptimistic(() => {
+    fixture.issues.delete(issue.id)
+  })
+  return { cleanup: () => transaction.rollback() }
+}
+
 function updateVisibleAuthor(
   fixture: Fixture,
   iteration: number,
@@ -625,7 +664,7 @@ function writeSync<T extends object, TKey extends string | number>(
   collection: ManualCollection<T, TKey>,
   message: ChangeMessageOrDeleteKeyMessage<T, TKey>,
 ): void {
-  collection.utils.begin({ immediate: true })
+  collection.utils.begin()
   collection.utils.write(message)
   collection.utils.commit()
 }

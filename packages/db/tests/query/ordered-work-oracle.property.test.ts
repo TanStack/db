@@ -1,6 +1,7 @@
 import { fc, test as fcTest } from '@fast-check/vitest'
 import { describe, expect, it, vi } from 'vitest'
 import { createCollection } from '../../src/collection/index.js'
+import { localOnlyCollectionOptions } from '../../src/local-only.js'
 import { createDeferred } from '../../src/deferred.js'
 import { LoadSubsetOperationAbortedError } from '../../src/errors.js'
 import { BTreeIndex } from '../../src/indexes/btree-index.js'
@@ -4300,5 +4301,297 @@ describe(`ordered source work oracle`, () => {
   )(
     `keeps rows, request traces, batches, errors, and liveness equal for a random or replayed seed`,
     assertConsumerParity,
+  )
+})
+
+/**
+ * ## Does an eager indexed window refine from its source in bounded work?
+ *
+ * An eager source installs every row before and during the query, so its local
+ * state is the complete source. When an ordered, limited query reads that
+ * source through an index on its leading order term, the loader sends D2 only
+ * the rows the window needs. A visible delete or an order change can then make
+ * a row that D2 has not seen belong in the window, so the loader reacquires the
+ * ordered prefix (ARCHITECTURE.md, "Ordered requests, continuation, and
+ * recovery").
+ *
+ * Two laws hold after every source change:
+ *
+ * - **Rows:** the visible window equals the first `limit` rows after `offset`
+ *   of the eligible source rows, sorted by rank and then id. The model is a
+ *   plain array of the current source rows, filtered and sorted here; it shares
+ *   no code with the loader or the index.
+ * - **Work:** with an index, the source delivers at most a bounded number of
+ *   rows per change, independent of the source size. The bound is
+ *   `2 * (offset + limit) + tied rows + 1`: one reacquired prefix of the
+ *   window, the tie group at its boundary, one refill of at most the window,
+ *   and the changed row itself. The
+ *   source holds 200 eligible filler rows outside every window. A loader that
+ *   resends every eligible row on each repair delivers more than 200 rows and
+ *   fails. Without an index, or while a NaN rank is present (a NaN boundary
+ *   cannot be expressed as a cursor), the loader legitimately reads the full
+ *   source, so only the rows law applies there. Null ranks are outside this
+ *   grammar: an indexed descending window misplaces them on main, and the
+ *   coverage map records that gap.
+ *
+ * The grammar crosses the sync path (sync writes, or local-only direct writes),
+ * the index (present or absent), the direction, limit 1..3, offset 0..1, and a
+ * history of upserts and deletes over ids 0..9 and ranks 0..3 or NaN, so ties,
+ * deletes inside and at the edge of the window, and rank changes across its
+ * boundary all occur. The observation point is after each change and a flush.
+ * Work is counted at the Collection's `currentStateAsChanges` boundary, which
+ * every snapshot read uses; index-cursor reads count their delivered rows.
+ * This owner does not cover on-demand providers, which have their own work
+ * laws above.
+ */
+type EagerCommand =
+  | { type: `upsert`; id: number; rank: number; eligible: boolean }
+  | { type: `delete`; id: number }
+
+type EagerCase = {
+  path: `sync` | `local-only`
+  indexed: boolean
+  direction: `asc` | `desc`
+  limit: number
+  offset: number
+  initial: Array<{ id: number; rank: number; eligible: boolean }>
+  history: Array<EagerCommand>
+}
+
+const EAGER_FILLER = 200
+
+function fillerRows(direction: `asc` | `desc`): Array<Row> {
+  // Eligible rows that sort after every domain row, so a correct window never
+  // needs them and a full rescan must deliver them.
+  return Array.from({ length: EAGER_FILLER }, (_, index) => ({
+    id: 1000 + index,
+    rank: direction === `asc` ? 100 + index : -100 - index,
+    eligible: true,
+    label: `filler`,
+  }))
+}
+
+const eagerRow = fc.record({
+  id: fc.integer({ min: 0, max: 9 }),
+  // NaN exercises comparator placement outside the integer order. Null ranks
+  // are excluded: an indexed descending window misplaces them on main
+  // (recorded as a separate gap in the coverage map).
+  rank: fc.oneof(
+    { weight: 6, arbitrary: fc.integer({ min: 0, max: 3 }) },
+    { weight: 1, arbitrary: fc.constant(Number.NaN) },
+  ),
+  eligible: fc.boolean(),
+})
+
+const eagerCase: fc.Arbitrary<EagerCase> = fc.record({
+  path: fc.constantFrom(`sync` as const, `local-only` as const),
+  indexed: fc.boolean(),
+  direction: fc.constantFrom(`asc` as const, `desc` as const),
+  limit: fc.integer({ min: 1, max: 3 }),
+  offset: fc.integer({ min: 0, max: 1 }),
+  initial: fc.uniqueArray(eagerRow, {
+    selector: (row) => row.id,
+    maxLength: 8,
+  }),
+  history: fc.array(
+    fc.oneof(
+      eagerRow.map((row) => ({ type: `upsert` as const, ...row })),
+      fc.record({
+        type: fc.constant(`delete` as const),
+        id: fc.integer({ min: 0, max: 9 }),
+      }),
+    ),
+    { minLength: 1, maxLength: 12 },
+  ),
+})
+
+function eagerWindow(
+  rows: ReadonlyMap<number, Row>,
+  { direction, limit, offset }: EagerCase,
+): Array<number> {
+  // Documented order (live-queries guide): nulls first in either direction;
+  // NaN is greater than every other non-null value; ties by ascending id.
+  const position = (rank: number | null): [number, number] => {
+    if (rank === null) return [0, 0]
+    if (Number.isNaN(rank)) return [direction === `asc` ? 2 : 1, 0]
+    return [direction === `asc` ? 1 : 2, direction === `asc` ? rank : -rank]
+  }
+  return [...rows.values()]
+    .filter((row) => row.eligible)
+    .sort((left, right) => {
+      const [leftGroup, leftValue] = position(left.rank)
+      const [rightGroup, rightValue] = position(right.rank)
+      return (
+        leftGroup - rightGroup || leftValue - rightValue || left.id - right.id
+      )
+    })
+    .slice(offset, offset + limit)
+    .map((row) => row.id)
+}
+
+async function checkEagerWindow(testCase: EagerCase): Promise<void> {
+  const rows = new Map<number, Row>()
+  for (const row of [...fillerRows(testCase.direction), ...testCase.initial]) {
+    rows.set(row.id, { label: `row`, ...row })
+  }
+  let syncControls:
+    | {
+        begin: () => void
+        write: (message: {
+          type: `insert` | `update` | `delete`
+          value: Row
+        }) => void
+        commit: () => void
+      }
+    | undefined
+  const id = `eager-window-${Math.random()}`
+  const source =
+    testCase.path === `local-only`
+      ? createCollection(
+          localOnlyCollectionOptions<Row, number>({
+            id,
+            getKey: (row) => row.id,
+            initialData: [...rows.values()],
+          }),
+        )
+      : createCollection<Row, number>({
+          id,
+          getKey: (row) => row.id,
+          syncMode: `eager`,
+          startSync: true,
+          sync: {
+            sync: ({ begin, write, commit, markReady }) => {
+              syncControls = { begin, write, commit }
+              begin()
+              for (const row of rows.values()) {
+                write({ type: `insert`, value: row })
+              }
+              commit()
+              markReady()
+            },
+          },
+        })
+  if (testCase.indexed) {
+    source.createIndex((row) => row.rank, { indexType: BTreeIndex })
+  }
+  let delivered = 0
+  const read = source.currentStateAsChanges.bind(source)
+  source.currentStateAsChanges = ((...args) => {
+    const result = read(...args)
+    delivered += result?.length ?? 0
+    return result
+  }) as typeof source.currentStateAsChanges
+  const query = createLiveQueryCollection({
+    startSync: true,
+    query: (q) =>
+      q
+        .from({ row: source })
+        .where(({ row }) => eq(row.eligible, true))
+        .orderBy(({ row }) => row.rank, testCase.direction)
+        .offset(testCase.offset)
+        .limit(testCase.limit),
+  })
+  try {
+    await query.preload()
+    expect(query.toArray.map((row) => row.id)).toEqual(
+      eagerWindow(rows, testCase),
+    )
+    const window = testCase.offset + testCase.limit
+    for (const [step, command] of testCase.history.entries()) {
+      const before = rows.get(command.id)
+      delivered = 0
+      if (command.type === `delete`) {
+        if (!before) continue
+        rows.delete(command.id)
+        if (testCase.path === `sync`) {
+          syncControls!.begin()
+          syncControls!.write({ type: `delete`, value: before })
+          syncControls!.commit()
+        } else {
+          await source.delete(command.id).isPersisted.promise
+        }
+      } else {
+        const next = {
+          id: command.id,
+          rank: command.rank,
+          eligible: command.eligible,
+          label: `row`,
+        }
+        rows.set(command.id, next)
+        if (testCase.path === `sync`) {
+          syncControls!.begin()
+          syncControls!.write({ type: before ? `update` : `insert`, value: next })
+          syncControls!.commit()
+        } else if (before) {
+          await source.update(command.id, (draft) => {
+            draft.rank = next.rank
+            draft.eligible = next.eligible
+          }).isPersisted.promise
+        } else {
+          await source.insert(next).isPersisted.promise
+        }
+      }
+      await flushPromises()
+      expect(
+        query.toArray.map((row) => row.id),
+        `rows after step ${step}`,
+      ).toEqual(eagerWindow(rows, testCase))
+      // A NaN boundary cannot be expressed as a cursor, so the loader takes
+      // the documented full-source fallback; only the rows law applies then.
+      const hasNaN = [...rows.values()].some((row) => Number.isNaN(row.rank))
+      if (testCase.indexed && !hasNaN) {
+        const ties = [...rows.values()].filter((row) =>
+          [...rows.values()].some(
+            (other) => Object.is(other.rank, row.rank) && other.id !== row.id,
+          ),
+        ).length
+        expect(
+          delivered,
+          `rows delivered by step ${step}`,
+        ).toBeLessThanOrEqual(2 * window + ties + 1)
+      }
+    }
+  } finally {
+    await query.cleanup()
+    await source.cleanup()
+  }
+}
+
+describe(`eager indexed ordered windows`, () => {
+  const { multiplier, ...replay } = readOracleRunConfig()
+  const runs = 40 * multiplier
+
+  it(`refills after a visible delete without resending the source`, async () => {
+    await checkEagerWindow({
+      path: `local-only`,
+      indexed: true,
+      direction: `desc`,
+      limit: 2,
+      offset: 0,
+      initial: [
+        { id: 0, rank: 3, eligible: true },
+        { id: 1, rank: 2, eligible: true },
+        { id: 2, rank: 1, eligible: true },
+      ],
+      history: [
+        { type: `upsert`, id: 5, rank: 3, eligible: true },
+        { type: `delete`, id: 5 },
+        { type: `delete`, id: 0 },
+        { type: `upsert`, id: 1, rank: 0, eligible: true },
+      ],
+    })
+  })
+
+  fcTest.prop([eagerCase], { numRuns: runs, seed: 2044 })(
+    `keeps rows and per-change work bounded for a fixed seed`,
+    checkEagerWindow,
+  )
+
+  fcTest.prop(
+    [eagerCase],
+    oracleRandomParameters(runs, replay, `ordered-work.eager-indexed-window`),
+  )(
+    `keeps rows and per-change work bounded for a random or replayed seed`,
+    checkEagerWindow,
   )
 })

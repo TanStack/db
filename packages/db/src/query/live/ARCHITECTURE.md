@@ -895,11 +895,18 @@ finite coverage.
 
 “Bounded prefix” describes the adapter acquisition, not the subscription's
 immediate local replay. `requestSnapshot()` composes the subscription and
-request predicates for both legs, but its local snapshot is predicate-only: it
-may deliver every matching row already installed in the Collection without
-applying the request's order or limit. The ordered graph's top-K operator owns
-the local result window. Provider transfer remains bounded by `orderBy` and
-`limit`; local delivery cardinality is a separate observation.
+request predicates for both legs. For an on-demand source its local snapshot is
+predicate-only: it may deliver every matching row already installed in the
+Collection without applying the request's order or limit, and the repair chain
+relies on that delivery. An eager source's installed rows are the whole source,
+so an indexed ordered request reads only the first `limit` matching local rows;
+a row in the source's first `limit` is also in the local first `limit`. When
+every request in an eager source's repair returns literal `true`, the repair
+settles synchronously, so its tie and refill steps finish inside the same graph
+run and a window move that consumes the repair still publishes once. The
+ordered graph's top-K operator owns the local result window. Provider transfer
+remains bounded by `orderBy` and `limit`; local delivery cardinality is a
+separate observation.
 
 Bounded repair is available only when a provider prefix is sufficient for the
 local plan. Core requires full-source recovery for an indirect order

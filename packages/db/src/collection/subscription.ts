@@ -1161,6 +1161,18 @@ export class CollectionSubscription
           stateOpts.where = snapshotWhereExp
         }
       }
+      // An eager source's installed rows are the whole source, so its indexed
+      // prefix needs only the first `limit` local rows. An on-demand source
+      // must still resend every loaded row: its repair chain relies on them.
+      if (
+        this.orderByIndex &&
+        opts.orderBy &&
+        opts.limit !== undefined &&
+        this.collection.config.syncMode !== `on-demand`
+      ) {
+        stateOpts.orderBy = opts.orderBy
+        stateOpts.limit = opts.limit
+      }
     } else {
       // No options provided so it's loading the entire initial state
       this.loadedInitialState = true
