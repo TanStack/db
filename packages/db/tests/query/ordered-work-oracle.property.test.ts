@@ -4558,11 +4558,19 @@ async function checkEagerWindow(testCase: EagerCase): Promise<void> {
     ).length
     return 2 * window + ties + 1
   }
+  // Publication: a change publishes its window once. Each batch a subscriber
+  // receives must already show the window the change produces.
+  const published: Array<Array<number>> = []
+  let unsubscribe: (() => void) | undefined
   try {
     await query.preload()
     expect(query.toArray.map((row) => row.id)).toEqual(
       eagerWindow(rows, testCase),
     )
+    const subscription = query.subscribeChanges(() => {
+      published.push(query.toArray.map((row) => row.id))
+    })
+    unsubscribe = () => subscription.unsubscribe()
     const initialBound = workBound(boundaryRanks(rows, testCase))
     if (initialBound !== undefined) {
       expect(read, `rows read by the initial load`).toBeLessThanOrEqual(
@@ -4580,6 +4588,7 @@ async function checkEagerWindow(testCase: EagerCase): Promise<void> {
       read = 0
       delivered = 0
       scanned = 0
+      published.length = 0
       if (command.type === `delete`) {
         if (!before) continue
         rows.delete(command.id)
@@ -4619,6 +4628,15 @@ async function checkEagerWindow(testCase: EagerCase): Promise<void> {
         query.toArray.map((row) => row.id),
         `rows after step ${step}`,
       ).toEqual(eagerWindow(rows, testCase))
+      expect(
+        published.length,
+        `publications by step ${step}`,
+      ).toBeLessThanOrEqual(1)
+      for (const window of published) {
+        expect(window, `published window at step ${step}`).toEqual(
+          eagerWindow(rows, testCase),
+        )
+      }
       expect(scanned, `rows scanned by step ${step}`).toBeLessThanOrEqual(
         Math.max(sizeBefore, rows.size),
       )
@@ -4634,9 +4652,15 @@ async function checkEagerWindow(testCase: EagerCase): Promise<void> {
         expect(delivered, `rows delivered by step ${step}`).toBeLessThanOrEqual(
           bound,
         )
+        // A bounded read walks the index; it never scans the source.
+        expect(
+          scanned,
+          `rows scanned by bounded step ${step}`,
+        ).toBeLessThanOrEqual(bound)
       }
     }
   } finally {
+    unsubscribe?.()
     await query.cleanup()
     await source.cleanup()
   }
@@ -4680,6 +4704,32 @@ describe(`eager indexed ordered windows`, () => {
       ],
     })
   })
+
+  it.each([`sync`, `local-only`] as const)(
+    `publishes one complete window when a repair reaches a NaN tie group (%s)`,
+    async (path) => {
+      // The bounded prefix ends inside a NaN tie group, which cannot be a
+      // cursor, so the repair falls back to a full-source read.
+      await checkEagerWindow({
+        path,
+        indexed: true,
+        direction: `desc`,
+        terms: 1,
+        limit: 2,
+        offset: 0,
+        initial: [1, 2, 3, 4, 5].map((id) => ({
+          id,
+          rank: Number.NaN,
+          eligible: true,
+        })),
+        history: [
+          { type: `delete`, id: 1 },
+          { type: `delete`, id: 3 },
+          { type: `upsert`, id: 6, rank: Number.NaN, eligible: true },
+        ],
+      })
+    },
+  )
 
   fcTest.prop([eagerCase], { numRuns: runs, seed: 2044 })(
     `keeps rows and per-change work bounded for a fixed seed`,
