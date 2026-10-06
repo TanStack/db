@@ -4073,14 +4073,14 @@ describe(`QueryCollection`, () => {
       })
 
       // Test missing key error in writeUpdate
-      expect(() => {
-        collection.utils.writeUpdate({ id: `999`, name: `Missing` })
-      }).toThrow(/does not exist/)
+      await expect(
+        collection.utils.writeUpdate({ id: `999`, name: `Missing` }),
+      ).rejects.toThrow(/does not exist/)
 
       // Test missing key error in writeDelete
-      expect(() => {
-        collection.utils.writeDelete(`999`)
-      }).toThrow(/does not exist/)
+      await expect(collection.utils.writeDelete(`999`)).rejects.toThrow(
+        /does not exist/,
+      )
     })
 
     it(`should handle writeBatch validation errors`, async () => {
@@ -4106,26 +4106,26 @@ describe(`QueryCollection`, () => {
       })
 
       // Test duplicate keys within batch
-      expect(() => {
+      await expect(
         collection.utils.writeBatch(() => {
           collection.utils.writeInsert({ id: `2`, name: `Item 2` })
           collection.utils.writeUpdate({ id: `2`, name: `Updated Item 2` })
-        })
-      }).toThrow(/Duplicate key.*found within batch operations/)
+        }),
+      ).rejects.toThrow(/Duplicate key.*found within batch operations/)
 
       // Test updating non-existent item in batch
-      expect(() => {
+      await expect(
         collection.utils.writeBatch(() => {
           collection.utils.writeUpdate({ id: `999`, name: `Missing` })
-        })
-      }).toThrow(/does not exist/)
+        }),
+      ).rejects.toThrow(/does not exist/)
 
       // Test deleting non-existent item in batch
-      expect(() => {
+      await expect(
         collection.utils.writeBatch(() => {
           collection.utils.writeDelete(`999`)
-        })
-      }).toThrow(/does not exist/)
+        }),
+      ).rejects.toThrow(/does not exist/)
     })
 
     it(`should update query cache when using sync methods`, async () => {
@@ -4284,9 +4284,9 @@ describe(`QueryCollection`, () => {
       expect(initialCache).toHaveLength(2)
 
       // Try to update non-existent item (should throw and not update cache)
-      expect(() => {
-        collection.utils.writeUpdate({ id: `999`, name: `Should Fail` })
-      }).toThrow()
+      await expect(
+        collection.utils.writeUpdate({ id: `999`, name: `Should Fail` }),
+      ).rejects.toThrow()
 
       // Verify cache wasn't modified
       const cacheAfterError = queryClient.getQueryData(
@@ -4296,12 +4296,12 @@ describe(`QueryCollection`, () => {
       expect(cacheAfterError).toHaveLength(2)
 
       // Try batch with duplicate keys (should throw and not update cache)
-      expect(() => {
+      await expect(
         collection.utils.writeBatch(() => {
           collection.utils.writeInsert({ id: `3`, name: `Item 3` })
           collection.utils.writeUpdate({ id: `3`, name: `Duplicate` })
-        })
-      }).toThrow(/Duplicate key/)
+        }),
+      ).rejects.toThrow(/Duplicate key/)
 
       // Verify cache wasn't modified
       const cacheAfterBatchError = queryClient.getQueryData(

@@ -780,10 +780,15 @@ ws.on("todos:update", (changes) => {
 - In eager mode, these writes patch the cached query result without a
   refetch. In on-demand mode, each direct write refetches the active queries.
   See [Direct Writes and Query Sync](#direct-writes-and-query-sync).
-- `writeUpdate` and `writeDelete` throw if the row is not in the synced store.
-  An event can arrive before the first load finishes, or for a row the
-  collection has not loaded. Guard for this, or use `writeUpsert` when events
-  carry the full row.
+- A direct write is validated against the synced store after every earlier
+  sync commit is accepted. `writeUpdate` and `writeDelete` reject their
+  promise if the row is not in the synced store, and `writeInsert` rejects if
+  the row is already there. They do not throw. An event can arrive before the
+  first load finishes, or for a row the collection has not loaded. Handle the
+  rejection, or use `writeUpsert` when events carry the full row.
+- In a persisted collection, a direct write can wait for an earlier sync
+  commit's durable write, so its rows can appear after the call returns. Await
+  the returned promise before you read them.
 
 ### Example: Incremental Updates
 
