@@ -644,3 +644,42 @@ it(`keeps native IN membership distinct from lookalike string keys`, async () =>
     ).map((row) => row.key),
   ).toEqual([`row-0`])
 })
+
+// Native literals need at most one brand-validated encoding per occurrence. The number
+// of occurrences supplies the work budget; no codec helper computes it. Empty
+// tables isolate compilation from revival. Positive counts also calibrate the
+// sensor. The existing rank/text and index owners check resulting query semantics.
+it.sequential.each([`Instant`, `PlainDate`] as const)(
+  `encodes each native query literal at most once / %s`,
+  async (kind) => {
+    const { adapter } = scope.create().open()
+    const constructor = Temporal[kind]
+    const value =
+      kind === `Instant`
+        ? Temporal.Instant.from(`2026-01-02T00:00:00Z`)
+        : Temporal.PlainDate.from(`2026-01-02[u-ca=japanese]`)
+    const parse = vi.spyOn(constructor, `from`)
+    try {
+      for (const size of [1, 3, 1_025]) {
+        for (const operation of size === 1 ? [`eq`, `in`] : [`in`]) {
+          parse.mockClear()
+          const rows = await adapter.loadSubset(`literal-work`, {
+            where: new IR.Func(operation, [
+              new IR.PropRef([`stamp`]),
+              new IR.Value(
+                operation === `eq`
+                  ? value
+                  : Array.from({ length: size }, () => value),
+              ),
+            ]),
+          })
+          expect(rows).toEqual([])
+          expect(parse.mock.calls.length).toBeGreaterThan(0)
+          expect(parse.mock.calls.length).toBeLessThanOrEqual(size)
+        }
+      }
+    } finally {
+      parse.mockRestore()
+    }
+  },
+)

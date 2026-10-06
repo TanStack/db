@@ -506,6 +506,10 @@ function toSqliteLiteral(value: SqliteSupportedValue): string {
     return Number.isFinite(value) ? String(value) : `NULL`
   }
 
+  if (value.includes(`\u0000`)) {
+    // JSON escapes NUL before SQL parsing and matches stored-string extraction.
+    return `json_extract(${toSqliteLiteral(JSON.stringify(value))}, '$')`
+  }
   return `'${value.replace(/'/g, `''`)}'`
 }
 
@@ -514,13 +518,6 @@ function toSqliteExpressionLiteral(value: unknown): string {
     return assertSQLiteBigIntInRange(value).toString()
   }
   return toSqliteLiteral(toSqliteParameterValue(value))
-}
-
-function toSqliteIdentityLiteral(value: unknown): string {
-  const temporal = serializeSQLiteTemporal(value)
-  return temporal
-    ? toSqliteLiteral(sqliteTemporalIdentity(temporal))
-    : toSqliteExpressionLiteral(value)
 }
 
 type CompiledRowExpressionEvaluator = (row: Record<string, unknown>) => unknown
@@ -924,21 +921,21 @@ function compileSqlExpression(
         params: [JSON.stringify(expression.value)],
       }
     }
-    const valueKind = getLiteralValueKind(expression.value)
+    const temporal = serializeSQLiteTemporal(expression.value)
+    const value = temporal?.order ?? toSqliteParameterValue(expression.value)
     return {
-      identitySql: sqliteTemporalKind(expression.value)
-        ? toSqliteIdentityLiteral(expression.value)
+      identitySql: temporal
+        ? toSqliteLiteral(sqliteTemporalIdentity(temporal))
         : undefined,
       supported: true,
       sql:
         context === `index-expression`
-          ? toSqliteExpressionLiteral(expression.value)
+          ? toSqliteExpressionLiteral(
+              typeof expression.value === `bigint` ? expression.value : value,
+            )
           : `?`,
-      params:
-        context === `predicate`
-          ? [toSqliteParameterValue(expression.value)]
-          : [],
-      valueKind,
+      params: context === `predicate` ? [value] : [],
+      valueKind: getLiteralValueKind(expression.value),
     }
   }
 
@@ -965,7 +962,10 @@ function compileSqlExpression(
     }
   }
 
-  const compiledArgs = expression.args.map((arg, index) =>
+  // IN owns its list encoding; compiling that list as a scalar discards work.
+  const args =
+    expression.name === `in` ? expression.args.slice(0, 1) : expression.args
+  const compiledArgs = args.map((arg, index) =>
     compileSqlExpression(
       arg,
       argumentCompilationContext(expression.name, index, arg, context),
@@ -1091,6 +1091,17 @@ function compileSqlExpression(
         return { supported: false, sql: ``, params: [] }
       }
 
+      // Order and identity are two projections of one validated native encoding.
+      const values = listValue.map((value) => {
+        const temporal = serializeSQLiteTemporal(value)
+        return {
+          value:
+            typeof value === `bigint`
+              ? assertSQLiteBigIntInRange(value)
+              : (temporal?.order ?? toSqliteParameterValue(value)),
+          identity: temporal ? sqliteTemporalIdentity(temporal) : undefined,
+        }
+      })
       let identity = ``
       if (
         listValue.some(
@@ -1104,24 +1115,24 @@ function compileSqlExpression(
         // correlated membership and SQL's three-valued Boolean semantics.
         identity =
           context === `index-expression`
-            ? ` AND (${joinSqlDisjunction(listValue.map((value) => `(${leftSql} = ${toSqliteExpressionLiteral(value)} AND ${leftIdentity} = ${toSqliteIdentityLiteral(value)})`))})`
-            : ` AND ((${leftSql}, ${leftIdentity}) IN (VALUES ${[...new Set(listValue.map((value) => `(${toSqliteExpressionLiteral(value)}, ${toSqliteIdentityLiteral(value)})`))].join(`, `)}))`
+            ? ` AND (${joinSqlDisjunction(values.map(({ value, identity: nativeIdentity }) => `(${leftSql} = ${toSqliteExpressionLiteral(value)} AND ${leftIdentity} = ${toSqliteExpressionLiteral(nativeIdentity ?? value)})`))})`
+            : ` AND ((${leftSql}, ${leftIdentity}) IN (VALUES ${[...new Set(values.map(({ value, identity: nativeIdentity }) => `(${toSqliteExpressionLiteral(value)}, ${toSqliteExpressionLiteral(nativeIdentity ?? value)})`))].join(`, `)}))`
       }
       if (context === `index-expression`) {
         return {
           supported: true,
-          sql: `(${leftSql} IN (${listValue
-            .map((value) => toSqliteExpressionLiteral(value))
+          sql: `(${leftSql} IN (${values
+            .map(({ value }) => toSqliteExpressionLiteral(value))
             .join(`, `)})${identity})`,
           params: leftParams,
         }
       }
 
-      const jsonList = `[${listValue
-        .map((value) =>
+      const jsonList = `[${values
+        .map(({ value }) =>
           typeof value === `bigint`
             ? assertSQLiteBigIntInRange(value).toString()
-            : JSON.stringify(toSqliteParameterValue(value)),
+            : JSON.stringify(value),
         )
         .join(`,`)}]`
       return {

@@ -3216,6 +3216,26 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
     ).toThrowError(/options\.where\.args\[0\]\.sourceAlias/)
   })
 
+  // A projection is a detached snapshot at one call boundary. A later call on
+  // reused input must observe its current data, without changing the first
+  // snapshot. This distinguishes safe per-call reuse from a global identity cache.
+  it(`takes a fresh detached wire snapshot on each projection`, () => {
+    const literal = new IR.Value({ label: `before` })
+    const options = {
+      where: new IR.Func(`eq`, [new IR.PropRef([`value`]), literal]),
+    }
+    const first = toTransportedLoadSubsetOptions(options)
+    literal.value.label = `after`
+    const second = toTransportedLoadSubsetOptions(options)
+    expect(first.where).toMatchObject({
+      args: [{}, { value: { label: `before` } }],
+    })
+    expect(second.where).toMatchObject({
+      args: [{}, { value: { label: `after` } }],
+    })
+    expect(first).not.toBe(second)
+  })
+
   it(`projects lexical comparison options without locale-only wire fields`, () => {
     const projected = toTransportedLoadSubsetOptions({
       orderBy: [

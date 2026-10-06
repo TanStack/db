@@ -1510,6 +1510,110 @@ describe(`SQLite expression-index oracle`, () => {
     },
   )
 
+  // Distinct native/ordinary fallback meanings must retain separate persisted
+  // indexes. The wrapper receives both public definitions before preload; the
+  // registry and sqlite_master checkpoints expose a signature collision even
+  // when residual query evaluation could still return correct rows.
+  it(`persists separate indexes for native and ordinary tagged literals`, async () => {
+    vi.stubGlobal(`Temporal`, Temporal)
+    const driver = new BetterSqlite3SQLiteDriver({ filename: `:memory:` })
+    const adapter = createSQLiteCorePersistenceAdapter({ driver })
+    const collectionId = `native-tag-indexes`
+    const collection = createCollection(
+      persistedCollectionOptions<{ id: string; stamp: unknown }, string>({
+        id: collectionId,
+        getKey: (row) => row.id,
+        defaultIndexType: BasicIndex,
+        sync: { sync: ({ markReady }) => markReady() },
+        persistence: { adapter },
+      }),
+    )
+    try {
+      await withFailurePreservingCleanup(async () => {
+        const native = Temporal.Instant.from(`2026-01-02T00:00:00Z`)
+        for (const value of [
+          native,
+          { __type: `Temporal.Instant`, value: String(native) },
+        ]) {
+          collection.createIndex((row) =>
+            coalesceExpression(row.stamp, new IR.Value(value)),
+          )
+        }
+        await collection.preload()
+        const entries = driver
+          .getDatabase()
+          .prepare(
+            `SELECT index_name FROM persisted_index_registry WHERE collection_id = ? AND removed = 0`,
+          )
+          .all(collectionId) as Array<{ index_name: string }>
+        expect(entries).toHaveLength(2)
+        expect(new Set(entries.map((entry) => entry.index_name)).size).toBe(2)
+        for (const entry of entries) {
+          expect(
+            driver
+              .getDatabase()
+              .prepare(
+                `SELECT name FROM sqlite_master WHERE type = 'index' AND name = ?`,
+              )
+              .all(entry.index_name),
+          ).toHaveLength(1)
+        }
+      }, [() => collection.cleanup(), () => driver.close()])
+    } finally {
+      vi.unstubAllGlobals()
+    }
+  })
+
+  // A NUL string stays ordinary text in both bound predicates and index DDL.
+  // Enumerate string-only and native-mixed membership, with positive/negative
+  // predicates. Expected keys come from fixture membership; stored index values
+  // independently observe the DDL before residual filtering can hide a mismatch.
+  it.each([`\u0000ab`, `a\u0000b`, `ab\u0000`, `é'\u0000𐀀`])(
+    `preserves NUL membership literals in index definitions / %j`,
+    async (target) => {
+      vi.stubGlobal(`Temporal`, Temporal)
+      try {
+        const native = Temporal.Instant.from(`2026-01-02T00:00:00Z`)
+        for (const mixed of [false, true]) {
+          const membership = new IR.Func<boolean>(`in`, [
+            new IR.PropRef([`stamp`]),
+            new IR.Value(mixed ? [target, native] : [target]),
+          ])
+          for (const negate of [false, true]) {
+            const result = await observeExpressionIndexScenario({
+              label: `NUL-membership`,
+              indexExpression: membership,
+              observeIndexValues: true,
+              where: negate ? new IR.Func(`not`, [membership]) : membership,
+              rows: [
+                { key: `match`, value: { stamp: target } },
+                { key: `native`, value: { stamp: native } },
+                { key: `other`, value: { stamp: `absent` } },
+              ],
+            })
+            const matches = mixed ? [`match`, `native`] : [`match`]
+            const expected = negate
+              ? [`match`, `native`, `other`].filter(
+                  (key) => !matches.includes(key),
+                )
+              : matches
+            expect(result.adapterKeys).toEqual(expected)
+            expect(result.directSqlKeys).toEqual(
+              expect.arrayContaining(expected),
+            )
+            expect(result.indexValues).toEqual([
+              { key: `match`, value: 1 },
+              { key: `native`, value: mixed ? 1 : 0 },
+              { key: `other`, value: 0 },
+            ])
+          }
+        }
+      } finally {
+        vi.unstubAllGlobals()
+      }
+    },
+  )
+
   it(`keeps large string membership indexes within SQLite expression depth`, async () => {
     const membership = new IR.Func(`in`, [
       new IR.PropRef([`nickname`]),

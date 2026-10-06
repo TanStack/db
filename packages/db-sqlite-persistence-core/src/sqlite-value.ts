@@ -60,7 +60,9 @@ export function sqliteTemporalKind(
   return undefined
 }
 
-function requireSQLiteTemporalConstructor(kind: string): TemporalConstructor {
+function requireSQLiteTemporalConstructor(
+  kind: SQLiteTemporalKind,
+): TemporalConstructor {
   const name = kind.slice(`Temporal.`.length)
   const constructor = (
     globalThis as { Temporal?: Record<string, TemporalConstructor> }
@@ -76,7 +78,10 @@ function requireSQLiteTemporalConstructor(kind: string): TemporalConstructor {
   return constructor
 }
 
-export function reviveSQLiteTemporal(kind: string, value: string): unknown {
+export function reviveSQLiteTemporal(
+  kind: SQLiteTemporalKind,
+  value: string,
+): unknown {
   return requireSQLiteTemporalConstructor(kind).from(value)
 }
 

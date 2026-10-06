@@ -1114,30 +1114,37 @@ to the following owners:
   for bound string IN at sizes 0, 1, 32 and 1,025. The old compiler performed
   two quotes per value; the repair performs none and retains exact rows and
   binding counts (BUG-007, HE-006). This is not a latency bound.
-- The typed-value and expression-index owners retain encoded-literal reuse
-  (HE-007). Empty-table probes count two native parses for EQ and four per IN
-  element. A repair needs value, calendar-identity and binding-cap witnesses.
-- The persisted wrapper and coordinator receiving owners retain projection
-  reuse as optional work (HE-008): two projections on success, or four across
-  two attempts after one transient failure. Ownership-transition admission
-  and receiver validation must remain explicit.
-- The typed-value/resume and Collection index-signature owners retain upgrade
-  cleanup (HE-010). Old/new native signatures leave both registry entries;
-  changed field-expression SQL rebuilds once. Existing schema/reset paths
-  remove obsolete entries. Automatic reclamation needs an old-writer/new-reader
-  history proving both index reuse and cleanup without removing active indexes.
-- The typed-value/resume owners retain old-writer/new-reader marker ambiguity
-  (HISTORY-002). Rebuild is the selected migration policy; lossless old-byte
-  preservation is not proved. The guide states this limit.
-- The Collection index metadata owner needs a public mutation/query witness for
-  mutable own-tag and altered-prototype impersonators before changing clone
-  semantics (BOUNDARY-004, HISTORY-004).
-- The Collection index-signature owner needs distinct legal expressions and a
-  receiving effect before introducing another signature representation
-  (BOUNDARY-005).
-- The Node expression-index owner now reaches direct NUL string IN and Boolean
-  composition. Mixed-list/index-definition NUL cases remain a narrower follow-up
-  witness, not a confirmed second runtime defect (VERIFY-NUL-NOTE).
+- The [bounded follow-up](oracle-reviews/issue-2034-bounded-follow-up.md) closes
+  repeated native literal encoding (HE-007): the typed-value work witness admits
+  at most one encoding per literal occurrence for EQ and IN at sizes 1/3/1,025.
+  Both native kinds are calibrated against the previous implementation; the
+  surrounding expression-index and rank/text owners retain semantic coverage.
+- Projection reuse (HE-008) remains open with the persisted/coordinator owners:
+  two projections on success, four across two attempts after one transient
+  failure. The persisted owner now rejects a global request-identity cache with
+  a fresh detached-snapshot witness. A repair needs shared validation without
+  building a discarded projection, or a prepared request boundary preserving
+  admission, receiver validation, ownership identity, and local lifecycle handles.
+- The resume owner now proves the selected explicit schema-reset route for
+  obsolete indexes (HE-010) and ambiguous legacy marker bytes (HISTORY-002).
+  It removes both registry entries and physical indexes before the first read,
+  preserves an unrelated collection, and retains newly escaped data and rebuilt
+  indexes on same-schema reopen. A registry-cleanup mutant fails this witness.
+  Automatic reclamation without reset and lossless old-byte migration remain
+  outside the selected policy; this test does not claim either.
+- The [Collection index-value owner](../../packages/db/tests/collection-index-value-oracle.test.ts)
+  distinguishes native literals from ordinary tagged records, nested mixtures,
+  and the escape envelope while preserving equivalent key orders (BOUNDARY-005).
+  Plain and null-prototype own-tag records have isolated metadata snapshots
+  (BOUNDARY-004/HISTORY-004). The old implementation fails these public metadata
+  observations. Custom-prototype impersonators are outside this owner's native
+  contract; the typed-value owner separately checks rejection and rollback of an
+  invalid native brand at SQLite persistence.
+- The Node expression-index owner now covers ordinary/native-mixed NUL lists,
+  four NUL/Unicode positions, positive and negated membership, exact stored index
+  values, final keys and candidate containment (VERIFY-NUL-NOTE). The former SQL
+  literal encoder fails at the public index-DDL boundary. Direct runtime mixed
+  membership already passed; the defect was persisted expression construction.
 
 ## Final evidence record
 

@@ -163,9 +163,13 @@ writes did not escape those objects, so their original meaning is ambiguous.
 New writes escape the marker and preserve the ordinary object.
 Older library versions cannot interpret the new Temporal encoding. Changed
 expression indexes rebuild when first ensured after upgrade. Later startups reuse
-those indexes. A changed native-literal signature can leave an obsolete registry
-entry and index until an explicit schema reset; this release does not reclaim
-those entries automatically.
+those indexes. A changed native-literal or escaped-record signature can leave an
+obsolete registry entry and index until an explicit schema reset; this release
+does not reclaim those entries automatically. Increment the affected synced
+Collection's `schemaVersion` and retain its reset policy to rebuild that cache.
+The reset removes its old values and indexes before reading the new schema;
+other Collections with unchanged schema versions retain their caches. Refetch
+from the upstream source after reset.
 
 ## Add persistence to a synced Collection
 

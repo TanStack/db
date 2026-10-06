@@ -22,6 +22,12 @@ import type {
 
 const INDEX_SIGNATURE_VERSION = 1 as const
 
+function isNativeTemporalIndexValue(value: unknown): boolean {
+  if (!isTemporal(value)) return false
+  const prototype = Object.getPrototypeOf(value)
+  return prototype !== null && prototype !== Object.prototype
+}
+
 function compareStringsCodePoint(left: string, right: string): number {
   if (left === right) {
     return 0
@@ -68,7 +74,7 @@ function toSerializableIndexValue(
     return value.map((entry) => toSerializableIndexValue(entry) ?? null)
   }
 
-  if (isTemporal(value)) {
+  if (isNativeTemporalIndexValue(value)) {
     return {
       __type: (value as { [Symbol.toStringTag]: string })[Symbol.toStringTag],
       value: String(value),
@@ -135,7 +141,10 @@ function toSerializableIndexValue(
     }
   }
 
-  return serializedObject
+  // Escape ordinary tagged records so they cannot impersonate native signatures.
+  return Object.hasOwn(serializedObject, `__type`)
+    ? { __type: `object`, value: serializedObject }
+    : serializedObject
 }
 
 function stableStringifyCollectionIndexValue(
@@ -173,15 +182,12 @@ function createCollectionIndexMetadata<TKey extends string | number>(
   const resolverMetadata = resolveResolverMetadata(resolver)
   const serializedExpression = toSerializableIndexValue(expression) ?? null
   const serializedOptions = toSerializableIndexValue(options)
-  const signatureInput = toSerializableIndexValue({
+  // Each value is encoded once. Re-encoding would escape our own native tags.
+  const signature = stableStringifyCollectionIndexValue({
     signatureVersion: INDEX_SIGNATURE_VERSION,
     expression: serializedExpression,
     options: serializedOptions ?? null,
   })
-  const normalizedSignatureInput = signatureInput ?? null
-  const signature = stableStringifyCollectionIndexValue(
-    normalizedSignatureInput,
-  )
 
   return {
     signatureVersion: INDEX_SIGNATURE_VERSION,
@@ -214,7 +220,7 @@ function cloneSerializableIndexValue(
 
 function cloneIndexExpressionValue(value: unknown): unknown {
   // Immutable native values retain their slots; JSON/structuredClone erase them.
-  if (isTemporal(value)) return value
+  if (isNativeTemporalIndexValue(value)) return value
   if (value instanceof Date) return new Date(value.getTime())
   if (Array.isArray(value)) return value.map(cloneIndexExpressionValue)
   if (value !== null && typeof value === `object`) {
