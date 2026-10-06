@@ -3260,7 +3260,57 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
         first: shared,
         second: shared,
       }
-      const before = structuredClone(payload)
+      // Compare values and aliases explicitly. In jsdom, structuredClone can
+      // return a buffer from another realm, which Vitest's object comparison
+      // does not equate with this realm's otherwise identical ArrayBuffer.
+      // These observations preserve contents, order, multiplicity and identity
+      // relationships without requiring cross-realm object equality.
+      const observe = (value: typeof payload) => ({
+        keys: Reflect.ownKeys(value),
+        recordKeys: [
+          Reflect.ownKeys(value.first),
+          Reflect.ownKeys(value.second),
+        ],
+        date: value.date.getTime(),
+        bytes: Array.from(new Uint8Array(value.buffer)),
+        view: Array.from(value.view),
+        map: [...value.map].map(([key, entry]) => ({
+          label: key.label,
+          date: entry.getTime(),
+          keyIsFirst: key === value.first,
+          valueIsDate: entry === value.date,
+        })),
+        set: [...value.set].map((entry) => ({
+          label: entry.label,
+          isFirst: entry === value.first,
+        })),
+        first: value.first.label,
+        second: value.second.label,
+        sharedRecord: value.first === value.second,
+        sharedBuffer: value.view.buffer === value.buffer,
+      })
+      const before = {
+        keys: [`date`, `buffer`, `view`, `map`, `set`, `first`, `second`],
+        recordKeys: [[`label`], [`label`]],
+        date: Date.UTC(2026, 8, 16, 12, 34, 56, 123),
+        bytes: [7, 8],
+        view: [7, 8],
+        map: [
+          {
+            label: `before`,
+            date: Date.UTC(2026, 8, 16, 12, 34, 56, 123),
+            keyIsFirst: true,
+            valueIsDate: true,
+          },
+        ],
+        set: [{ label: `before`, isFirst: true }],
+        first: `before`,
+        second: `before`,
+        sharedRecord: true,
+        sharedBuffer: true,
+      }
+      // Calibrate the fixture before entering either production traversal.
+      expect(observe(payload)).toEqual(before)
       const options = {
         where: new IR.Func(`eq`, [
           new IR.PropRef([`payload`]),
@@ -3279,32 +3329,44 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
               path: `options.limit`,
             }),
           )
-          expect(payload).toEqual(before)
+          expect(observe(payload)).toEqual(before)
         }
         return
       }
       expect(validateRemoteSubsetOptions(options)).toBeUndefined()
-      expect(payload).toEqual(before)
+      expect(observe(payload)).toEqual(before)
       const first = toTransportedLoadSubsetOptions(options)
-      expect(payload).toEqual(before)
+      expect(observe(payload)).toEqual(before)
       date.setTime(1)
       new Uint8Array(buffer)[0] = 9
       shared.label = `after`
       payload.map.clear()
       payload.set.clear()
-      const after = structuredClone(payload)
+      const after = {
+        ...before,
+        date: 1,
+        bytes: [9, 8],
+        view: [9, 8],
+        map: [],
+        set: [],
+        first: `after`,
+        second: `after`,
+      }
+      expect(observe(payload)).toEqual(after)
       expect(validateRemoteSubsetOptions(options)).toBeUndefined()
-      expect(payload).toEqual(after)
+      expect(observe(payload)).toEqual(after)
       const second = toTransportedLoadSubsetOptions(options)
-      expect(first.where).toMatchObject({ args: [{}, { value: before }] })
-      expect(second.where).toMatchObject({ args: [{}, { value: after }] })
-      expect(payload).toEqual(after)
-      for (const snapshot of [first, second]) {
+      expect(observe(payload)).toEqual(after)
+      for (const [snapshot, expected] of [
+        [first, before],
+        [second, after],
+      ] as const) {
         if (snapshot.where?.type !== `func`)
           throw new Error(`missing predicate`)
         const literal = snapshot.where.args[1]
         if (literal?.type !== `val`) throw new Error(`missing literal`)
         const value = literal.value as typeof payload
+        expect(observe(value)).toEqual(expected)
         expect(value.first).toBe(value.second)
         expect(value.view.buffer).toBe(value.buffer)
         for (const key of Object.keys(payload) as Array<keyof typeof payload>)
