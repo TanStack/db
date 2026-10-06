@@ -29,8 +29,12 @@ jobs:
           persist-credentials: true # release job pushes version/docs changes
       - name: Setup Tools
         uses: tanstack/config/.github/setup@e4b48f16568324f76f467aa4c2aac2f05db632c3
+      - name: Check lint
+        run: pnpm run lint:check
+      - name: Build packages
+        run: pnpm run build
       - name: Run Tests
-        run: pnpm run lint && pnpm run build && pnpm run test
+        run: pnpm run test
       - name: Run Changesets (version or publish)
         id: changesets
         uses: changesets/action@e0145edc7d9d8679003495b11f87bd8ef63c0cba # v1.5.3

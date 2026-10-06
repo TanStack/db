@@ -5,7 +5,6 @@ import { localOnlyCollectionOptions } from '../src/local-only.js'
 import { createLiveQueryObserver } from '../src/live-query-observer.js'
 import { createLiveQueryCollection } from '../src/query/index.js'
 import { oraclePropertyOptions, oracleRuns } from './oracle-config.js'
-import type { LiveQuerySnapshot } from '../src/live-query-observer.js'
 
 /**
  * # Is a retained live-query snapshot point-in-time?
@@ -49,8 +48,9 @@ type Command =
   | { type: `delete`; id: string }
   | { type: `capture` }
 type Read = { snapshot: number; dataFirst: boolean }
+type Snapshot = ReturnType<ReturnType<typeof setup>[`observer`][`getSnapshot`]>
 type Captured = {
-  snapshot: LiveQuerySnapshot<Row, string>
+  snapshot: Snapshot
   rows: Array<Row>
 }
 
@@ -92,7 +92,7 @@ function setup(shape: Shape) {
       return shape === `single` ? ordered.findOne() : ordered
     },
   })
-  const observer = createLiveQueryObserver<Row, string>(query as any)
+  const observer = createLiveQueryObserver(query)
   return { source, query, observer }
 }
 
@@ -152,7 +152,7 @@ function checkRead(
   dataFirst: boolean,
   label: string,
 ): void {
-  let read: Pick<LiveQuerySnapshot<Row, string>, `data` | `state`>
+  let read: Pick<Snapshot, `data` | `state`>
   if (dataFirst) {
     const data = entry.snapshot.data
     read = { data, state: entry.snapshot.state }
@@ -266,7 +266,7 @@ describe(`retained live-query snapshots are point-in-time`, () => {
       const hostile = Object.create(captured, {
         data: { get: () => [...query.values()] },
         state: { get: () => new Map(query.entries()) },
-      }) as LiveQuerySnapshot<Row, string>
+      }) as Snapshot
       source.update(`a`, (draft) => {
         draft.version = 2
       })
