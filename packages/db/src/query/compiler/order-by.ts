@@ -275,7 +275,7 @@ export function processOrderBy(
         orderBy: sourceOrderBy,
         joinedFilterSourceId,
         sourceHoldsAllRows:
-          followRefCollection?.config.syncMode !== `on-demand`,
+          followRefResult.collection.config.syncMode !== `on-demand`,
         requiresFullSource:
           sourceOrderBy.some(
             ({ compareOptions }) => compareOptions.stringSort === `custom`,

@@ -38,6 +38,8 @@ type RequestSnapshotOptions = {
   orderBy?: OrderBy
   /** Optional limit to pass to loadSubset for backend optimization */
   limit?: number
+  /** Read only the first `limit` local rows: the source holds every row and an index serves the order. */
+  boundedPrefix?: boolean
   /** Callback that receives the normalized loadSubset result for internal tracking */
   onLoadSubsetResult?: SubsetResultObserver
   /** Called when the local snapshot must fall back from an index to a scan. */
@@ -1161,17 +1163,10 @@ export class CollectionSubscription
           stateOpts.where = snapshotWhereExp
         }
       }
-      // An eager source's installed rows are the whole source, so its indexed
-      // prefix needs only the first `limit` local rows. An on-demand source
-      // must still resend every loaded row: its repair chain relies on them.
-      // A second order term would sort the whole source in memory, so it
-      // keeps the full read.
-      if (
-        this.orderByIndex &&
-        opts.orderBy?.length === 1 &&
-        opts.limit !== undefined &&
-        this.collection.config.syncMode !== `on-demand`
-      ) {
+      // The ordered loader asks for a bounded prefix only when the source
+      // holds every row and an index serves its single order term. Any other
+      // prefix resends every matching row: an on-demand repair relies on them.
+      if (opts.boundedPrefix) {
         stateOpts.orderBy = opts.orderBy
         stateOpts.limit = opts.limit
       }

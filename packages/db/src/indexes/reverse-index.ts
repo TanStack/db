@@ -10,11 +10,12 @@ export class ReverseIndex<
   /**
    * @param nullsFirst - Whether nullish values come first in the reversed
    * order. The original index keeps them at the opposite end, so reversing
-   * it alone would move them; ordered reads put them back.
+   * it alone would move them; ordered reads put them back. The default keeps
+   * them where a plain reversed read puts them.
    */
   constructor(
     index: IndexInterface<TKey>,
-    private readonly nullsFirst: boolean,
+    private readonly nullsFirst = false,
   ) {
     this.originalIndex = index
   }
