@@ -104,19 +104,45 @@ geomean is 0.95–0.96× against `main`, with a same-code noise run of 1.00×.
 | ORC-001 | Applicable. The rows and work laws and their authority are above. The claim covers eager sources only. On-demand providers keep their own work laws in this owner. |
 | ORC-002 | Applicable. The model sorts plain rows by the documented order with its own comparator. It does not import the loader, the index, or `makeComparator`. |
 | ORC-003 | Applicable. The section's opening prose states both laws, the bound's derivation, the grammar, the production path, the checkpoint and the limits. |
-| ORC-004 | Applicable. The grammar crosses sync and local-only writes, index present or absent, both directions, limit 1–3, offset 0–1, and upserts and deletes over ids 0–9 with ranks 0–3, NaN and null. The pinned delete case and the pinned null case reconstruct the reported traces. Excluded: on-demand sources, custom collation, and a reversed index serving `nulls: 'last'`, which this grammar never requests. |
-| ORC-005 | Applicable. The driver runs a real live-query Collection over a real eager Collection and counts rows at the Collection's `currentStateAsChanges` boundary, which every snapshot read uses. |
+| ORC-004 | Applicable. The grammar crosses sync and local-only writes, index present or absent, both directions, one or two order terms, limit 1–3, offset 0–1, and upserts and deletes over ids 0–29 with ranks 0–15, NaN and null. The pinned delete case and the pinned null case reconstruct the reported traces. The work law skips only steps whose boundary value is NaN or null; it asserts on 88.5% of indexed single-term steps. The reversed-index oracle covers `nulls: 'last'`. Excluded: on-demand sources and custom collation. |
+| ORC-005 | Applicable. The driver runs a real live-query Collection over a real eager Collection. It counts rows a snapshot returns from `currentStateAsChanges`, rows the source delivers to the query's subscription (which include index refills), and rows `entries()` yields. |
 | ORC-006 | Applicable. The original code and the mutants above reach the checkpoint. Each outcome is classified. |
 | ORC-007 | Applicable. Each campaign runs with fixed seed 2044 and with a random or replay seed through `oracleRandomParameters`, property `ordered-work.eager-indexed-window`. |
 | ORC-008 | Applicable. The model keeps only the current rows. Order is derived from them. |
-| ORC-009 | Applicable. "Delivered rows" means rows returned by `currentStateAsChanges` during one change. It is a work observation, not a production state. |
+| ORC-009 | Applicable. "Read rows", "delivered rows" and "scanned rows" are work observations, not production states. |
 | ORC-010 | Applicable, with a gap. Cleanup runs in a `finally` block, so a cleanup error after an assertion failure would replace it. No run showed a cleanup failure. |
 | ORC-011 | Inapplicable. No reviewer named a fault shared by the model and production. |
 | ORC-012 | This record. |
-| ORC-013 | Applicable. The work bound is a threshold law. Measured over a 5× campaign, the fix's maximum delivery equals the bound exactly, and the `limit + 1` mutant exceeds it by one row. |
+| ORC-013 | Applicable. The work bound is a threshold law. The `limit + 1` mutant exceeds it by one row (4 > 3). |
 | ORC-014 | Inapplicable. No controlled provider supplies a premise. |
 
 ## Unresolved
 
-- A reversed index serving a `nulls: 'last'` query is not generated.
 - Per-change work for on-demand sources is not bounded by this owner.
+- A reversed index read with nullish keys copies the nullish key set (O(m))
+  when the read can reach the nullish group. It no longer sorts or filters the
+  whole group. Removing the copy needs an index API change.
+- An initial full-source ordered load over an eager source stays asynchronous,
+  as on `main`. #1896 states a general rule for synchronous results, so this
+  is a likely gap; it is the next change, not this one.
+
+## Review follow-up (2026-10-06)
+
+A code review of this branch found eight issues. The probes, the RED output
+and the mutant runs are in the PR evidence; this section records the outcomes.
+
+| Finding | Outcome |
+| --- | --- |
+| R1: a reversed index sorted and filtered every nullish key on each read | Fixed. The new reversed-index oracle (`reverse-index-oracle.property.test.ts`) bounds filter calls by the position of the n-th accepted key. RED on the branch: 5,000 filter calls for n = 50 among 5,000 nullish keys. A mutant that filters the whole nullish group fails it. |
+| R2: a second order term took the bounded read into a full in-memory sort | Fixed. The bounded read applies only to one order term. The eager-window oracle gains a second order term and a scan law (one pass per change). RED: 400 rows scanned against a bound of 201. Removing the gate fails it. |
+| R3: ARCHITECTURE.md contradicted the synchronous repair | Fixed. Both passages now name the eager ordered-prefix exception. |
+| R4: the synchronous gate also matched full-source requests | Fixed by narrowing the gate. A lifecycle witness checks that an eager `fn.where` ordered window is `loading` at creation; it fails on the widened gate and passes on `main`. |
+| R5: index refills were not counted | Fixed. The oracle also counts rows delivered to the subscription and bounds the initial load. The unbounded-refill mutant now fails (200 > 3); before, the refill ran only during the initial load, which the law did not bound. |
+| R6: the work law skipped every history with a NaN or null rank | Fixed. It skips only an inexpressible boundary and counts tie groups at the boundary, over a larger domain. A mutant that resends about 20 domain rows fails (23 > 3). |
+| R7: the reader returns two tie-key orders | Documented, not changed. The query breaks ties by ascending key, so the reviewer's fix would put nullish keys in the wrong order. The reversed-index oracle states the reader's order. |
+| R8: `sourceHoldsAllRows` was optional and always set | Fixed. It is required. |
+| R10: a `null` cursor in a nulls-first reversed read | Refuted. A cursor at `null` is past the nullish group, so the non-null keys are the correct result. The order law passed on the original code at 20× runs. |
+
+After these fixes, the original predicate-only read, `limit + 1`, the
+resend-domain mutant and the unbounded refill all fail. `limit - 1` (M1)
+still survives, as above.
