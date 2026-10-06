@@ -119,9 +119,15 @@ geomean is 0.95–0.96× against `main`, with a same-code noise run of 1.00×.
 ## Unresolved
 
 - Per-change work for on-demand sources is not bounded by this owner.
-- The basic index (`BasicIndex`) still sorts a group of equal values on each
-  read, including the nullish group, so its bounded reads cost O(m log m) for
-  a group of size m. The BTree index does not.
+- A bounded read that reaches a group of equal values sorts that group, so it
+  costs O(m log m) for a group of size m. This is old behavior on `main`: both
+  index types sort a group on each read. For the nullish group, a reversed
+  read also copies the group's keys. With 5,000 nullish keys and n = 50, a
+  nulls-first read that reaches the group makes 50 filter calls, 4,999 sort
+  comparisons and iterates 15,000 set elements; a nulls-last read makes 50,
+  0 and 50. The filter-call law holds. A change that removed the sort was
+  reverted (`e0ab7e0f5`) because the cost is rare and the change needed a new
+  index API and write-path upkeep.
 - An initial full-source ordered load over an eager source stays asynchronous,
   as on `main`. #1896 states a general rule for synchronous results, so this
   is a likely gap; it is the next change, not this one.
@@ -133,7 +139,7 @@ and the mutant runs are in the PR evidence; this section records the outcomes.
 
 | Finding | Outcome |
 | --- | --- |
-| R1: a reversed index sorted and filtered every nullish key on each read | Fixed. The new reversed-index oracle (`reverse-index-oracle.property.test.ts`) bounds filter calls by the position of the n-th accepted key. RED on the branch: 5,000 filter calls for n = 50 among 5,000 nullish keys. A mutant that filters the whole nullish group fails it. A follow-up closed the remaining group work: the oracle also counts the keys `lookup` returns and every `Array.prototype.sort` comparison during a read, after a warm-up read and after a write to the nullish group. RED: 15,001 against a bound of 256 (copy and sort of the nullish group), and 5,003 for the BTree index's own per-read bucket sort. The BTree index now orders a bucket's keys on its first ordered read and keeps them in order on writes, and `takeNullish` and `takeReversedNonNullish` let a reversed read walk the nullish group in order and stop after n keys. Mutants that copy the set again, sort the bucket on each read, append a written key out of order, or leave a deleted key in the ordered list each fail. |
+| R1: a reversed index sorted and filtered every nullish key on each read | Fixed. The new reversed-index oracle (`reverse-index-oracle.property.test.ts`) bounds filter calls by the position of the n-th accepted key. RED on the branch: 5,000 filter calls for n = 50 among 5,000 nullish keys. A mutant that filters the whole nullish group fails it. A follow-up (`afe19e442`) also removed the per-read sort of an equal-value group, through a new index API and write-path upkeep. It was reverted in `e0ab7e0f5`: that sort is old behavior on `main` and not part of this regression, so the change did not earn its code weight. See Unresolved. |
 | R2: a second order term took the bounded read into a full in-memory sort | Fixed. The bounded read applies only to one order term. The eager-window oracle gains a second order term and a scan law (one pass per change). RED: 400 rows scanned against a bound of 201. Removing the gate fails it. |
 | R3: ARCHITECTURE.md contradicted the synchronous repair | Fixed. Both passages now name the eager ordered-prefix exception. |
 | R4: the synchronous gate also matched full-source requests | Fixed by narrowing the gate. A lifecycle witness checks that an eager `fn.where` ordered window is `loading` at creation; it fails on the widened gate and passes on `main`. |

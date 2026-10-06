@@ -79,7 +79,7 @@ function after(order: Array<Entry>, from: Value, options: Options) {
   return order.filter(([, value]) =>
     value == null
       ? options.nulls === `last`
-      : queryDirection * ((value as number) - from) > 0,
+      : queryDirection * (value - from) > 0,
   )
 }
 

@@ -4449,11 +4449,12 @@ function eagerWindow(
 function boundaryRanks(
   rows: ReadonlyMap<number, Row>,
   testCase: EagerCase,
-): Array<number> {
+): Array<number | null> {
   const end = testCase.offset + testCase.limit
+  // Generated rows may carry a null rank behind the `number` row type.
   return eagerOrder(rows, testCase)
     .slice(end - 1, end + 1)
-    .map((row) => row.rank)
+    .map((row): number | null => row.rank)
 }
 
 async function checkEagerWindow(testCase: EagerCase): Promise<void> {
@@ -4543,7 +4544,7 @@ async function checkEagerWindow(testCase: EagerCase): Promise<void> {
   const window = testCase.offset + testCase.limit
   // The bound for one load: a prefix, the boundary ties, a refill, and the
   // changed row. Null when a boundary value cannot be expressed as a cursor.
-  const workBound = (boundary: Array<number>): number | undefined => {
+  const workBound = (boundary: Array<number | null>): number | undefined => {
     if (!testCase.indexed || testCase.terms !== 1) return undefined
     if (boundary.some((rank) => rank === null || Number.isNaN(rank))) return
     // Rows in a tie group, of two or more equal ranks, at a boundary value.
