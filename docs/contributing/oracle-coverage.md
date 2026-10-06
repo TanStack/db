@@ -1105,6 +1105,22 @@ Applications may rebuild old damaged caches through existing schema/reset paths;
 no type can be recovered from an already-erased empty object.
 
 
+### Law enforcement audit
+
+The [law audit](oracle-reviews/issue-2034-law-enforcement.md) strengthens the
+persisted and Browser owners after three demonstrated false greens. Captured
+pre-validation expectations protect mutable builtin state on acceptance and
+rejection. Rich output checks now enforce detachment and exact release-object
+identity; later projections must reflect changed input without altering earlier
+snapshots. Optional indexes cross both supported native kinds and missing-global
+cases, plus independent local/coordinator synchronous and held failures. The
+intermediate held cut checks that coordinator completion evidence cannot precede
+local settlement; settled cuts check warnings, exact calls, healthy siblings,
+readiness and ordinary reads. Mutants establish assertion sensitivity. Copy-work
+bounds remain explicitly limited to the measured buffer/record copy seams and
+full discarded projections; total allocations, latency, arbitrary third-party
+coordinator work, and real-host scheduling are not established by these checks.
+
 ### Remaining review investigations
 
 The [high-effort follow-up](oracle-reviews/issue-2034-high-effort-review.md)

@@ -1,5 +1,8 @@
 # Optional persisted index serialization
 
+The [law enforcement audit](issue-2034-law-enforcement.md) strengthens the
+original witnesses below and supersedes their earlier completeness claims.
+
 CodeRabbit review 5422905753 identified an escaping serializer exception on
 `e61cda199`. The oracle reproduced it on `5d97c7790` before production changes.
 

@@ -1,5 +1,8 @@
 # Remote subset validation work follow-up
 
+The [law enforcement audit](issue-2034-law-enforcement.md) strengthens the
+original witnesses below and supersedes their earlier completeness claims.
+
 Baseline: `e61cda19997c169a59b6e345197a36eca9e75ec7`.
 This follow-up supersedes the open HE-008 disposition in the bounded review.
 The user authorized encoding the work law before implementing the repair.

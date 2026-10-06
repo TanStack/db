@@ -3239,6 +3239,80 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
     expect(first).not.toBe(second)
   })
 
+  // Read-only admission is a law about caller state, including builtin internal
+  // slots that Object.freeze cannot protect. Capture expectations before either
+  // traversal, and retain them when a later invalid field rejects the request.
+  // Fresh snapshots must preserve internal aliases but share no mutable payload
+  // with the caller or a later projection. These are two call-boundary histories,
+  // not a reference implementation of the encoder.
+  it.each([false, true])(
+    `preserves caller state and detached snapshots / rejected suffix %s`,
+    (rejectedSuffix) => {
+      const date = new Date(`2026-09-16T12:34:56.123Z`)
+      const buffer = new Uint8Array([7, 8]).buffer
+      const shared = { label: `before` }
+      const payload = {
+        date,
+        buffer,
+        view: new Uint8Array(buffer),
+        map: new Map([[shared, date]]),
+        set: new Set([shared]),
+        first: shared,
+        second: shared,
+      }
+      const before = structuredClone(payload)
+      const options = {
+        where: new IR.Func(`eq`, [
+          new IR.PropRef([`payload`]),
+          new IR.Value(payload),
+        ]),
+        ...(rejectedSuffix ? { limit: -1 } : {}),
+      }
+      if (rejectedSuffix) {
+        for (const visit of [
+          validateRemoteSubsetOptions,
+          toTransportedLoadSubsetOptions,
+        ]) {
+          expect(() => visit(options)).toThrowError(
+            expect.objectContaining({
+              name: `RemoteSubsetWireValueError`,
+              path: `options.limit`,
+            }),
+          )
+          expect(payload).toEqual(before)
+        }
+        return
+      }
+      expect(validateRemoteSubsetOptions(options)).toBeUndefined()
+      expect(payload).toEqual(before)
+      const first = toTransportedLoadSubsetOptions(options)
+      expect(payload).toEqual(before)
+      date.setTime(1)
+      new Uint8Array(buffer)[0] = 9
+      shared.label = `after`
+      payload.map.clear()
+      payload.set.clear()
+      const after = structuredClone(payload)
+      expect(validateRemoteSubsetOptions(options)).toBeUndefined()
+      expect(payload).toEqual(after)
+      const second = toTransportedLoadSubsetOptions(options)
+      expect(first.where).toMatchObject({ args: [{}, { value: before }] })
+      expect(second.where).toMatchObject({ args: [{}, { value: after }] })
+      expect(payload).toEqual(after)
+      for (const snapshot of [first, second]) {
+        if (snapshot.where?.type !== `func`)
+          throw new Error(`missing predicate`)
+        const literal = snapshot.where.args[1]
+        if (literal?.type !== `val`) throw new Error(`missing literal`)
+        const value = literal.value as typeof payload
+        expect(value.first).toBe(value.second)
+        expect(value.view.buffer).toBe(value.buffer)
+        for (const key of Object.keys(payload) as Array<keyof typeof payload>)
+          expect(value[key]).not.toBe(payload[key])
+      }
+    },
+  )
+
   // Both modes enforce the complete request schema. Validation must only read
   // the caller's frozen graph; projection still returns detached request data.
   it.each([`lexical`, `locale`] as const)(
@@ -15925,6 +15999,8 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
           expect(value?.type).toBe(`val`)
           if (value?.type !== `val`) throw new Error(`missing wire literal`)
           const received = value.value as typeof literal
+          expect(received).not.toBe(literal)
+          expect(received.label).toBe(label)
           expect(received.buffer).not.toBe(buffer)
           expect(received.view.buffer).toBe(received.buffer)
           expect(Array.from(received.view)).toEqual(
@@ -18071,9 +18147,14 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
   // exact signatures that reached the adapter and coordinator.
   it.sequential.each(
     [`startup`, `runtime`].flatMap((phase) =>
-      [`Instant`, `ZonedDateTime`, `Duration`, `missing-global`].map(
-        (kind) => ({ phase, kind }),
-      ),
+      [
+        `Instant`,
+        `PlainDate`,
+        `ZonedDateTime`,
+        `Duration`,
+        `missing-global`,
+        `missing-global-date`,
+      ].map((kind) => ({ phase, kind })),
     ),
   )(
     `keeps index serialization failure best-effort / $phase / $kind`,
@@ -18083,17 +18164,19 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
         `Temporal`,
       )
       Object.defineProperty(globalThis, `Temporal`, {
-        value: kind === `missing-global` ? undefined : Temporal,
+        value: kind.startsWith(`missing-global`) ? undefined : Temporal,
         configurable: true,
         writable: true,
       })
       const value =
-        kind === `ZonedDateTime`
-          ? Temporal.ZonedDateTime.from(`2026-01-02T00:00:00+00:00[UTC]`)
-          : kind === `Duration`
-            ? Temporal.Duration.from(`PT1H`)
-            : Temporal.Instant.from(`2026-01-02T00:00:00Z`)
-      const accepted = kind === `Instant`
+        kind === `PlainDate` || kind === `missing-global-date`
+          ? Temporal.PlainDate.from(`2026-01-02`)
+          : kind === `ZonedDateTime`
+            ? Temporal.ZonedDateTime.from(`2026-01-02T00:00:00+00:00[UTC]`)
+            : kind === `Duration`
+              ? Temporal.Duration.from(`PT1H`)
+              : Temporal.Instant.from(`2026-01-02T00:00:00Z`)
+      const accepted = kind === `Instant` || kind === `PlainDate`
       const row = { id: `persisted`, title: `ordinary row` }
       const adapter = createRecordingAdapter([row])
       const coordinator = createCoordinatorHarness()
@@ -18165,6 +18248,161 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
               if (originalTemporal)
                 Object.defineProperty(globalThis, `Temporal`, originalTemporal)
               else Reflect.deleteProperty(globalThis, `Temporal`)
+            },
+          ],
+          hasPrimaryFailure,
+        )
+      }
+    },
+  )
+
+  // Optional index failure isolation also applies after serializer admission.
+  // The model is a product of independent collaborator outcomes, not runtime
+  // control flow: local success alone authorizes a completion marker; either
+  // collaborator may fail without failing rows, readiness, or a healthy sibling.
+  // A held local promise supplies the intermediate observation: its coordinator
+  // request cannot claim completed work before that promise settles. Startup
+  // visits indexes serially; runtime additions may overlap, so only per-index
+  // causality and exact call multiplicity are promised, not global call order.
+  it.sequential.each(
+    [`startup`, `runtime`].flatMap((phase) =>
+      [`local`, `coordinator`, `both`].flatMap((boundary) =>
+        [`throw`, `held`].flatMap((settlement) =>
+          [false, true].map((fails) => ({
+            phase,
+            boundary,
+            settlement,
+            fails,
+          })),
+        ),
+      ),
+    ),
+  )(
+    `isolates optional index outcomes / $phase / $boundary / $settlement / fails $fails`,
+    async ({ phase, boundary, settlement, fails }) => {
+      const row = { id: `row`, title: `available` }
+      const adapter = createRecordingAdapter([row])
+      const coordinator = createCoordinatorHarness()
+      const entered = createDeferred()
+      const gate = createDeferred()
+      const failure = new Error(`optional index rejected`)
+      const localNames: Array<string> = []
+      const remote: Array<{ name: string; completed: boolean }> = []
+      const unhandled: Array<unknown> = []
+      const onUnhandled = (error: unknown) => unhandled.push(error)
+      const warning = vi.spyOn(console, `warn`).mockImplementation(() => {})
+      const settle = () => {
+        entered.resolve()
+        if (settlement === `held`)
+          return gate.promise.then(() => {
+            if (fails) throw failure
+          })
+        if (fails) throw failure
+        return Promise.resolve()
+      }
+      adapter.ensureIndex = (_id, _signature, spec) => {
+        const name = String(spec.metadata?.name)
+        localNames.push(name)
+        return name === `target` && boundary !== `coordinator`
+          ? settle()
+          : Promise.resolve()
+      }
+      coordinator.requestEnsurePersistedIndex = (
+        _id,
+        _signature,
+        spec,
+        completedAdapter,
+        completed,
+      ) => {
+        const name = String(spec.metadata?.name)
+        // The flag and adapter capability must agree, including failed locals.
+        expect(completedAdapter).toBe(completed ? adapter : undefined)
+        remote.push({ name, completed: completed === true })
+        return name === `target` && boundary !== `local`
+          ? settle()
+          : Promise.resolve()
+      }
+      const collection = createCollection(
+        persistedCollectionOptions<Todo, string>({
+          id: `optional-index-${phase}-${boundary}-${settlement}-${fails}`,
+          getKey: (item) => item.id,
+          defaultIndexType: BasicIndex,
+          sync: { sync: ({ markReady }) => markReady() },
+          persistence: { adapter, coordinator },
+        }),
+      )
+      let preload: Promise<void> | undefined
+      let hasPrimaryFailure = false
+      process.on(`unhandledRejection`, onUnhandled)
+      try {
+        if (phase === `runtime`) await collection.preload()
+        collection.createIndex((item) => item.title, { name: `target` })
+        collection.createIndex((item) => item.id, { name: `healthy` })
+        if (phase === `startup`) {
+          preload = Promise.resolve(collection.preload())
+          void preload.catch(() => undefined)
+        }
+        await entered.promise
+        await flushAsyncWork()
+        expect(collection.status).not.toBe(`error`)
+        if (phase === `runtime`) {
+          expect(collection.status).toBe(`ready`)
+          expect(stripVirtualProps(collection.get(row.id))).toEqual(row)
+        }
+        if (settlement === `held`) {
+          expect(warning).not.toHaveBeenCalled()
+          if (boundary !== `coordinator`)
+            expect(remote.filter((entry) => entry.name === `target`)).toEqual(
+              [],
+            )
+        }
+        gate.resolve()
+        await preload
+        await flushAsyncWork()
+        expect(collection.status).toBe(`ready`)
+        expect(stripVirtualProps(collection.get(row.id))).toEqual(row)
+        expect([...localNames].sort()).toEqual([`healthy`, `target`])
+        expect(
+          [...remote].sort((a, b) => a.name.localeCompare(b.name)),
+        ).toEqual([
+          { name: `healthy`, completed: true },
+          { name: `target`, completed: !(fails && boundary !== `coordinator`) },
+        ])
+        expect(warning.mock.calls).toEqual(
+          fails
+            ? [
+                ...(boundary !== `coordinator`
+                  ? [[`Failed to ensure persisted index in adapter:`, failure]]
+                  : []),
+                ...(boundary !== `local`
+                  ? [
+                      [
+                        `Failed to ensure persisted index through coordinator:`,
+                        failure,
+                      ],
+                    ]
+                  : []),
+              ]
+            : [],
+        )
+        for (const [, error] of warning.mock.calls) expect(error).toBe(failure)
+        expect(unhandled).toEqual([])
+        await collection._sync.loadSubset({ limit: 1 })
+        expect(stripVirtualProps(collection.get(row.id))).toEqual(row)
+      } catch (error) {
+        hasPrimaryFailure = true
+        throw error
+      } finally {
+        gate.resolve()
+        await cleanupPersistedOracle(
+          [
+            () => preload?.catch(() => undefined),
+            // Drain held rejection delivery before this case releases its observer.
+            () => flushAsyncWork(),
+            () => warning.mockRestore(),
+            () => collection.cleanup(),
+            () => {
+              process.off(`unhandledRejection`, onUnhandled)
             },
           ],
           hasPrimaryFailure,

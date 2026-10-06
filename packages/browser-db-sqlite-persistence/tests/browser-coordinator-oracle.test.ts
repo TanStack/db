@@ -4691,7 +4691,9 @@ describe(`BrowserCollectionCoordinator`, () => {
           typedArrays,
         ])
           Object.freeze(value)
+        const beforeValidation = structuredClone(richValue)
         expect(validateRemoteSubsetOptions(options)).toBeUndefined()
+        expect(richValue).toEqual(beforeValidation)
         await leader.requestEnsureRemoteSubset(`todos`, options)
         await follower.requestEnsureRemoteSubset(`todos`, options)
         expect(received).toHaveLength(2)
@@ -4702,6 +4704,13 @@ describe(`BrowserCollectionCoordinator`, () => {
               args: Array<{ value?: typeof richValue }>
             }
           ).args[1]!.value!
+          expect(value).toEqual(beforeValidation)
+          for (const key of Object.keys(richValue) as Array<
+            keyof typeof richValue
+          >) {
+            if (typeof richValue[key] === `object` && richValue[key] !== null)
+              expect(value[key]).not.toBe(richValue[key])
+          }
           expect(value.undefinedValue).toBeUndefined()
           expect(value.nullValue).toBeNull()
           expect(value.booleanValue).toBe(true)
@@ -4799,9 +4808,9 @@ describe(`BrowserCollectionCoordinator`, () => {
 
         await leader.requestReleaseRemoteSubset(`todos`, options)
         await follower.requestReleaseRemoteSubset(`todos`, options)
-        expect(unloadSubset.mock.calls.map(([value]) => value)).toEqual(
-          received,
-        )
+        expect(unloadSubset.mock.calls).toHaveLength(received.length)
+        for (const [index, [value]] of unloadSubset.mock.calls.entries())
+          expect(value).toBe(received[index])
       } finally {
         unregisterOwner()
         leader.dispose()
