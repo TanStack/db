@@ -380,5 +380,7 @@
   "overlayActiveTransactions": "gl",
   "completeLoadSubsetOperation": "gm",
   "readyFailureSink": "gn",
-  "writeExplicitRowMetadata": "a8"
+  "writeExplicitRowMetadata": "a8",
+  "applyOwnedMutations": "bX",
+  "commitDirect": "cn"
 }

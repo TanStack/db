@@ -1,6 +1,6 @@
 {
   "name": "@tanstack/indexeddb-db-collection",
-  "version": "0.0.2",
+  "version": "0.0.3",
   "description": "IndexedDB collection for TanStack DB",
   "author": "Ravi Atluri",
   "license": "MIT",

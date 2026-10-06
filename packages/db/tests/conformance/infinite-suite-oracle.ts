@@ -6,7 +6,9 @@
  * expectation is a finite ordered prefix sliced into fixed-size pages; the
  * on-demand fixture recomputes requests from immutable source data rather than
  * borrowing the hook's page cache. Every checkpoint checks the whole public
- * page ledger, not only its newest page.
+ * page ledger, not only its newest page. Scenarios with a fixed source and
+ * query also check every ready value the binding published along the way, so a
+ * truncated intermediate value fails even when the settled ledger recovers.
  *
  * A driver may differ in how its framework reaches the checkpoint. It may not
  * differ in the value and lifecycle facts visible there. The suite tracks all
@@ -56,6 +58,37 @@ function expectedOverlappingWindow(
     isFetchingNextPage: !pageSucceeded,
     error: preloadFailed ? failure : undefined,
     status: preloadFailed ? `error` : `ready`,
+  }
+}
+
+/**
+ * Publication law for a fixed source and query: every ready value the binding
+ * published equals the source prefix for that value's own page count. The
+ * expectation comes from the immutable source rows and page size, not from the
+ * controller, so a ready value that holds fewer rows than its pages, splits
+ * them at the wrong boundary, or reports a false end of list fails here even
+ * when the settled state later recovers.
+ */
+function expectReadyObservationsMatchSource(
+  handle: InfiniteQueryHandle,
+  source: ReadonlyArray<InfiniteRow>,
+  pageSize: number,
+): void {
+  const ready = handle
+    .observations()
+    .filter((observation) => observation.status === `ready`)
+  expect(ready.length).toBeGreaterThan(0)
+  for (const observation of ready) {
+    const pageCount = observation.pages.length
+    const visible = source.slice(0, pageCount * pageSize).map((row) => row.id)
+    expect(observation).toEqual({
+      status: `ready`,
+      ids: visible,
+      pages: Array.from({ length: pageCount }, (_, page) =>
+        visible.slice(page * pageSize, (page + 1) * pageSize),
+      ),
+      hasNextPage: source.length > pageCount * pageSize,
+    })
   }
 }
 
@@ -158,6 +191,64 @@ export function runInfiniteQuerySuite(rawDriver: InfiniteQueryDriver): void {
 
   describe(`infinite-query conformance :: ${driver.name}`, () => {
     scenario(
+      `first-paint-ready`,
+      `publishes the ready first page on the first paint for a synchronous source`,
+      async () => {
+        // Independent model: a synchronously loaded source is already complete,
+        // so the first page is ready at the first paint. An empty idle paint
+        // before data is the "flash of no content" this law forbids; the
+        // framework must not commit one. Reading only the final settled state
+        // would hide such a flash, so this asserts the first recorded paint.
+        const source = driver.makeSource(rows(8))
+        const handle = driver.mount(
+          (q) =>
+            q
+              .from({ items: source.collection })
+              .orderBy(({ items }: any) => items.rank, `desc`),
+          { pageSize: 3 },
+        )
+        await handle.flush()
+
+        expect(handle.observations()[0]).toEqual({
+          status: `ready`,
+          ids: [`1`, `2`, `3`],
+          pages: [[`1`, `2`, `3`]],
+          hasNextPage: true,
+        })
+        expectReadyObservationsMatchSource(handle, rows(8), 3)
+      },
+    )
+
+    scenario(
+      `first-paint-ready-collection`,
+      `publishes the ready first page on the first paint for a supplied collection that has not started`,
+      async () => {
+        // Same law as `first-paint-ready`, for the collection input form. The
+        // supplied collection has not started and its window already holds the
+        // first page and its peek-ahead row, so nothing has to change before
+        // its rows are correct.
+        const source = driver.makeSource(rows(8))
+        const collection = driver.makePrecreated((q) =>
+          q
+            .from({ items: source.collection })
+            .orderBy(({ items }: any) => items.rank, `desc`)
+            .limit(4),
+        ).collection
+        expect(collection.status).toBe(`idle`)
+        const handle = driver.mountCollection(collection, { pageSize: 3 })
+        await handle.flush()
+
+        expect(handle.observations()[0]).toEqual({
+          status: `ready`,
+          ids: [`1`, `2`, `3`],
+          pages: [[`1`, `2`, `3`]],
+          hasNextPage: true,
+        })
+        expectReadyObservationsMatchSource(handle, rows(8), 3)
+      },
+    )
+
+    scenario(
       `page-expansion`,
       `loads the initial page and expands through the final partial page`,
       async () => {
@@ -202,6 +293,7 @@ export function runInfiniteQuerySuite(rawDriver: InfiniteQueryDriver): void {
         expect(handle.current().pageParams).toEqual([4, 5, 6])
         expectPageRows(handle.current(), rows(8), 3)
         expect(handle.current().hasNextPage).toBe(false)
+        expectReadyObservationsMatchSource(handle, rows(8), 3)
       },
     )
 
@@ -224,6 +316,7 @@ export function runInfiniteQuerySuite(rawDriver: InfiniteQueryDriver): void {
         expect(handle.current().pages.map((page) => page.length)).toEqual([2])
         expectPageRows(handle.current(), rows(2), 3)
         expect(handle.current().hasNextPage).toBe(false)
+        expectReadyObservationsMatchSource(handle, rows(2), 3)
       },
     )
 
@@ -245,6 +338,7 @@ export function runInfiniteQuerySuite(rawDriver: InfiniteQueryDriver): void {
         expect(handle.current().pages).toEqual([[]])
         expectPageRows(handle.current(), [], 3)
         expect(handle.current().hasNextPage).toBe(false)
+        expectReadyObservationsMatchSource(handle, [], 3)
       },
     )
 
@@ -269,6 +363,7 @@ export function runInfiniteQuerySuite(rawDriver: InfiniteQueryDriver): void {
         ])
         expect(handle.current().hasNextPage).toBe(false)
         expectPageRows(handle.current(), rows(6), 3)
+        expectReadyObservationsMatchSource(handle, rows(6), 3)
       },
     )
 
@@ -546,7 +641,15 @@ export function runInfiniteQuerySuite(rawDriver: InfiniteQueryDriver): void {
         )
         await handle.flush()
 
-        expect(source.calls.some((call) => call.limit === 4)).toBe(true)
+        // One mount requests its first peek-ahead window exactly once, and a
+        // source that answers synchronously makes the first value ready.
+        expect(source.calls.filter((call) => call.limit === 4)).toHaveLength(1)
+        expect(handle.observations()[0]).toEqual({
+          status: `ready`,
+          ids: [`1`, `2`, `3`],
+          pages: [[`1`, `2`, `3`]],
+          hasNextPage: true,
+        })
         expectPageRows(handle.current(), rows(8).slice(0, 3), 3)
         expect(handle.current().data.map((row) => row.id)).toEqual([
           `1`,
@@ -563,6 +666,57 @@ export function runInfiniteQuerySuite(rawDriver: InfiniteQueryDriver): void {
         ])
         expect(handle.current().hasNextPage).toBe(false)
         expectPageRows(handle.current(), rows(8), 3)
+        expectReadyObservationsMatchSource(handle, rows(8), 3)
+      },
+    )
+
+    scenario(
+      `on-demand-collection-window`,
+      `requests only the window the hook needs from a supplied on-demand collection`,
+      async () => {
+        // Same law as `on-demand-paging`, for the collection input form. A
+        // supplied collection may declare a wider limit than the hook needs,
+        // or exactly the first page and its peek-ahead row. Either way, a
+        // mount requests no on-demand rows beyond the window the hook needs,
+        // and requests that first window once. A wider window is adjusted
+        // before the collection starts, never after. An unbounded supplied
+        // window is outside this law: the controller cannot narrow it before
+        // its first source request, on main or here.
+        for (const declared of [10, 4] as const) {
+          const source = driver.makeOnDemandSource(rows(8))
+          const collection = driver.makePrecreated((q) => {
+            const ordered = q
+              .from({ items: source.collection })
+              .orderBy(({ items }: any) => items.rank, `desc`)
+            return ordered.limit(declared)
+          }).collection
+          const handle = driver.mountCollection(collection, { pageSize: 3 })
+          await handle.flush()
+
+          const where = `declared limit ${declared}`
+          // An on-demand source holds only the rows it was asked for, so its
+          // keys are the rows the mount requested.
+          expect(
+            [...source.collection.keys()].sort(),
+            `${where}: the source loaded only the first page and peek-ahead row`,
+          ).toEqual([`1`, `2`, `3`, `4`])
+          expect(
+            source.calls.filter((call) => call.limit === 4),
+            `${where}: first window once`,
+          ).toHaveLength(1)
+          expectPageRows(handle.current(), rows(8).slice(0, 3), 3)
+          expectReadyObservationsMatchSource(handle, rows(8), 3)
+          if (declared === 4) {
+            // The exact window starts in render, so its first value is ready.
+            expect(handle.observations()[0], `${where}: first value`).toEqual({
+              status: `ready`,
+              ids: [`1`, `2`, `3`],
+              pages: [[`1`, `2`, `3`]],
+              hasNextPage: true,
+            })
+          }
+          handle.unmount()
+        }
       },
     )
 
@@ -590,6 +744,7 @@ export function runInfiniteQuerySuite(rawDriver: InfiniteQueryDriver): void {
         ])
         expect(handle.current().isFetchingNextPage).toBe(false)
         expectPageRows(handle.current(), rows(8).slice(0, 6), 3)
+        expectReadyObservationsMatchSource(handle, rows(8), 3)
       },
     )
 
@@ -858,6 +1013,9 @@ export function runInfiniteQuerySuite(rawDriver: InfiniteQueryDriver): void {
           3, 3,
         ])
         expectPageRows(handle.current(), rows(10).slice(0, 6), 3)
+        // The replacement must not publish a truncated ready value on its way to
+        // the retained depth. `minimum: 0` admits every row.
+        expectReadyObservationsMatchSource(handle, rows(10), 3)
       },
     )
 
@@ -889,6 +1047,7 @@ export function runInfiniteQuerySuite(rawDriver: InfiniteQueryDriver): void {
           3, 3,
         ])
         expectPageRows(handle.current(), rows(8).slice(0, 6), 3)
+        expectReadyObservationsMatchSource(handle, rows(8), 3)
       },
     )
 
@@ -986,6 +1145,7 @@ export function runInfiniteQuerySuite(rawDriver: InfiniteQueryDriver): void {
           expect(handle.current().pages[0]).toHaveLength(20)
           expectPageRows(handle.current(), rows(21).slice(0, 20), 20)
           expect(handle.current().hasNextPage).toBe(true)
+          expectReadyObservationsMatchSource(handle, rows(21), 20)
           handle.unmount()
         }
       },
@@ -1156,6 +1316,7 @@ export function runInfiniteQuerySuite(rawDriver: InfiniteQueryDriver): void {
         expect(calls).toBe(1)
         expect(handle.current().data).toHaveLength(3)
         expectPageRows(handle.current(), rows(4).slice(0, 3), 3)
+        expectReadyObservationsMatchSource(handle, rows(4), 3)
       },
     )
 
@@ -1207,6 +1368,8 @@ export function runInfiniteQuerySuite(rawDriver: InfiniteQueryDriver): void {
         )
         expect(error).toBeInstanceOf(Error)
         expect((error as Error).message).toContain(`Remove .findOne()`)
+        // A rejected query must not have started: its source stays unread.
+        expect(source.collection.subscriberCount).toBe(0)
       },
     )
 
@@ -1288,6 +1451,9 @@ export function runInfiniteQuerySuite(rawDriver: InfiniteQueryDriver): void {
           `3`,
         ])
         expectPageRows(handle.current(), rows(8).slice(0, 3), 3)
+        // The supplied window starts at offset 1. A binding that published its
+        // rows before normalizing the window would show a wrong ready prefix.
+        expectReadyObservationsMatchSource(handle, rows(8), 3)
         warn.mockRestore()
       },
     )
@@ -1376,7 +1542,7 @@ export function runInfiniteQuerySuite(rawDriver: InfiniteQueryDriver): void {
     )
 
     it(`registers every distinct scenario without whole-test waivers`, () => {
-      expect(registry.size).toBe(34)
+      expect(registry.size).toBe(37)
     })
   })
 }

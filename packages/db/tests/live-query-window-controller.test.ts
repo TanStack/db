@@ -213,6 +213,41 @@ describe(`createLiveQueryWindowController`, () => {
     controller.dispose()
   })
 
+  // A snapshot is one value. Code that compares `state` by identity, such as
+  // a React dependency list, must see one Map for one snapshot.
+  it(`returns the same state map on every read of one snapshot`, async () => {
+    const source = makeSource()
+    const lq = makeOrderedLiveQuery(source, 2)
+    const controller = createLiveQueryWindowController<Row, string>(lq as any, {
+      pageSize: 2,
+    })
+    try {
+      controller.subscribe(() => {})
+      await lq.preload()
+      await flush()
+
+      const snap = controller.getSnapshot()
+      const state = snap.state
+      expect(state?.size).toBeGreaterThan(0)
+      expect(snap.state).toBe(state)
+      expect(controller.getSnapshot().state).toBe(state)
+
+      // A newer revision has its own map and leaves the older one unchanged.
+      const keys = [...(state?.keys() ?? [])]
+      await controller.fetchNextPage()
+      await flush()
+      const next = controller.getSnapshot().state
+      expect([...(next?.keys() ?? [])]).not.toEqual(keys)
+      expect(next).not.toBe(state)
+      expect(snap.state).toBe(state)
+      expect([...(state?.keys() ?? [])]).toEqual(keys)
+    } finally {
+      controller.dispose()
+      await lq.cleanup()
+      await source.cleanup()
+    }
+  })
+
   it(`loads further pages via fetchNextPage until the source is exhausted`, async () => {
     const lq = makeOrderedLiveQuery(makeSource(), 2)
     const controller = createLiveQueryWindowController<Row, string>(lq as any, {
@@ -1441,5 +1476,53 @@ describe(`createLiveQueryWindowController`, () => {
     expect(snap.hasNextPage).toBe(false)
     expect(snap.pages).toEqual([])
     controller.dispose()
+  })
+
+  it(`publishes no non-ready value when it subscribes after GC reclaimed a collection started before commit`, async () => {
+    // An adapter starts its window collection during render and subscribes at
+    // commit. If the commit arrives after the 50 ms unsubscribed GC floor, the
+    // collection has been cleaned up. Subscribing restarts it; for an eager,
+    // loaded source the restart is synchronous, so the subscriber must never
+    // see a cleaned-up, loading, or truncated value. This drives the controller
+    // directly, because a test DOM cannot hold a React commit; the restart work
+    // itself still happens twice.
+    const source = makeSource()
+    const collection = createLiveQueryCollection({
+      query: (q) =>
+        q
+          .from({ r: source })
+          .orderBy(({ r }) => r.n, `asc`)
+          .limit(3)
+          .offset(0),
+      startSync: true,
+      gcTime: 1,
+    })
+    const controller = createLiveQueryWindowController(collection, {
+      pageSize: 2,
+    })
+    const view = () => {
+      const snapshot = controller.getSnapshot()
+      return {
+        status: snapshot.status,
+        ids: snapshot.data.map((row) => row.id),
+        hasNextPage: snapshot.hasNextPage,
+      }
+    }
+    const ready = { status: `ready`, ids: [`1`, `2`], hasNextPage: true }
+    expect(view()).toEqual(ready)
+
+    await new Promise((resolve) => setTimeout(resolve, 200))
+    expect(collection.status).toBe(`cleaned-up`)
+
+    const published: Array<ReturnType<typeof view>> = []
+    const unsubscribe = controller.subscribe(() => published.push(view()))
+    expect(view()).toEqual(ready)
+    await new Promise((resolve) => setTimeout(resolve, 20))
+    for (const value of published) expect(value).toEqual(ready)
+    expect(view()).toEqual(ready)
+
+    unsubscribe()
+    controller.dispose()
+    await source.cleanup()
   })
 })
