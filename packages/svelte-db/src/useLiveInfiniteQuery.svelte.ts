@@ -1,6 +1,7 @@
 import {
   assertLiveQueryWindowManyResult,
   canStartLiveQueryWindowSyncInRender,
+  canStartSuppliedLiveQueryWindowInRender,
   compareLiveQueryWindowDependencies,
   createLiveQueryCollection,
   createLiveQueryWindowController,
@@ -172,6 +173,17 @@ export function useLiveInfiniteQuery<TContext extends Context>(
         validatedCollection = collection
         if (warning) console.warn(warning)
       }
+      // Like useLiveQuery, start a supplied collection during construction when
+      // its rows are already correct. A window the controller must still adjust
+      // waits for the subscription.
+      if (
+        canStartSuppliedLiveQueryWindowInRender(
+          collection,
+          initialPageCount * pageSize + 1,
+        )
+      ) {
+        collection.startSyncImmediate()
+      }
       const currentController = createLiveQueryWindowController(collection, {
         pageSize,
         initialPageParam,
@@ -185,15 +197,17 @@ export function useLiveInfiniteQuery<TContext extends Context>(
       // Size the window for every retained page, so a collection that starts
       // syncing now never publishes fewer rows than the controller's pages.
       query: input.query.limit(initialPageCount * pageSize + 1).offset(0),
-      // Like useLiveQuery, start sync during construction so a synchronously
-      // loaded source is published on the first render instead of an empty
-      // idle snapshot before the subscribing effect attaches. On-demand
-      // sources wait for the subscription, so a superseded recompute does not
-      // send a page request.
-      startSync: canStartLiveQueryWindowSyncInRender(input.query),
       gcTime: DEFAULT_GC_TIME_MS,
     })
     assertLiveQueryWindowManyResult(collection)
+    // Like useLiveQuery, start sync during construction once the query is
+    // valid, so a synchronously loaded source is published on the first render
+    // instead of an empty idle snapshot before the subscribing effect attaches.
+    // On-demand sources wait for the subscription, so a superseded recompute
+    // does not send a page request.
+    if (canStartLiveQueryWindowSyncInRender(input.query)) {
+      collection.startSyncImmediate()
+    }
     const currentController = createLiveQueryWindowController(collection, {
       pageSize,
       initialPageParam,

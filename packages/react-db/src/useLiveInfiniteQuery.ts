@@ -4,6 +4,7 @@ import { useCallback, useRef, useSyncExternalStore } from 'react'
 import {
   assertLiveQueryWindowManyResult,
   canStartLiveQueryWindowSyncInRender,
+  canStartSuppliedLiveQueryWindowInRender,
   compareLiveQueryWindowDependencies,
   createLiveQueryCollection,
   createLiveQueryWindowController,
@@ -253,6 +254,8 @@ export function useLiveInfiniteQuery<TContext extends Context>(
   if (needsNewController) {
     let collection = committed?.collection
     let warning: string | null = null
+    let startInRender = false
+    let suppliedCollection = false
 
     const canPreservePageCount = shouldPreserveLiveQueryWindowPageCount({
       hasPreviousController: committed !== null,
@@ -284,20 +287,16 @@ export function useLiveInfiniteQuery<TContext extends Context>(
       const input = resolveLiveQueryWindowInput<TContext>(inputValue)
       if (input.kind === `collection`) {
         collection = input.collection
+        suppliedCollection = true
       } else {
         // Wrap the query with the peek-ahead window for every retained page, so
         // a collection that starts syncing now never publishes fewer rows than
         // the controller's pages. The controller grows the limit via setWindow.
         collection = createLiveQueryCollection({
           query: input.query.limit(initialPageCount * pageSize + 1).offset(0),
-          // Like useLiveQuery, start sync during render so a synchronously
-          // loaded source is published on the first commit instead of an empty
-          // idle commit. GC reclaims a render that never commits. On-demand
-          // sources wait for the subscription, so an abandoned or duplicate
-          // render does not send a page request.
-          startSync: canStartLiveQueryWindowSyncInRender(input.query),
           gcTime: DEFAULT_GC_TIME_MS,
         })
+        startInRender = canStartLiveQueryWindowSyncInRender(input.query)
       }
     }
 
@@ -311,6 +310,18 @@ export function useLiveInfiniteQuery<TContext extends Context>(
     } else {
       assertLiveQueryWindowManyResult(collection)
     }
+    // Like useLiveQuery, start sync during render once the input is valid, so
+    // a synchronously loaded source is published on the first commit instead
+    // of an empty idle commit. GC reclaims a render that never commits. An
+    // on-demand source, or a supplied window that the controller must still
+    // adjust, waits for the subscription.
+    if (suppliedCollection) {
+      startInRender = canStartSuppliedLiveQueryWindowInRender(
+        collection,
+        initialPageCount * pageSize + 1,
+      )
+    }
+    if (startInRender) collection.startSyncImmediate()
 
     renderState = {
       inputKind,

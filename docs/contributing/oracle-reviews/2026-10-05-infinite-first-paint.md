@@ -221,6 +221,55 @@ not, and a React test requires that an abandoned render leave a supplied
 collection unsubscribed. Closing this cell changes that contract, so it is
 recorded for decision rather than changed here.
 
+## Addendum: supplied collections match useLiveQuery
+
+Decision: the maintainer chose to make `useLiveInfiniteQuery` behave like
+`useLiveQuery` for a supplied collection, and to reverse the rule from #1675
+that no supplied collection starts before commit. That rule came from a #1675
+review, which asked that collection construction be inert so that a render
+that never commits leaves no resources behind. This PR keeps the purpose of
+that rule with two safeguards: GC reclaims an abandoned start, and on-demand
+sources still wait for commit. The contract test
+`does not activate a supplied collection for an abandoned render` is replaced
+by `reclaims a supplied collection that an abandoned render started`.
+
+A supplied collection starts during render only when no source behind it is
+on-demand and its window already holds the requested rows from offset 0. A
+shifted or narrower window waits for the controller to adjust it at commit.
+Both hooks now validate a query or collection before starting it, so a
+rejected `.findOne()` query never reads its source.
+
+Evidence, produced on the working tree above `083247d18`:
+
+- The shared `first-paint-ready-collection` scenario failed in React and
+  Svelte with an idle first value, and passed in Vue, before the change. All
+  three drivers pass after it.
+- `collection-window-normalization` now checks every ready value. A supplied
+  gate that ignores the window fails it.
+- A supplied gate that ignores on-demand sources fails the supplied-input case
+  of the React render-cuts abandoned-render test.
+- `findone-runtime` now requires an unread source. Starting before validation
+  fails it with two subscribers.
+- `live-query-window-controller.test.ts` adds a controlled-premise witness for
+  a commit that arrives after the 50 ms GC floor. The collection is cleaned up
+  first, and subscribing restarts it without publishing a non-ready value. A
+  restart guard that skips cleaned-up collections fails it. Delivering the
+  subscribe handshake's publications to the listener does not. The witness
+  drives the controller directly, because a test DOM cannot hold a React
+  commit, so it does not prove React scheduling.
+- The walk from a live-query Collection to its sources is one shared helper,
+  `everySourceCollection`, which the observer's persisted-readiness check also
+  uses.
+- Local suites: react-db 338, vue-db 122, svelte-db 120, and the full db suite
+  of 8267 tests.
+
+Still open: an on-demand source that loads synchronously publishes ready
+first in `useLiveQuery` and idle first in `useLiveInfiniteQuery`, because the
+infinite hook defers on-demand sources to commit. The two hooks differ there
+until that choice is made. With a DbClient, a source that is first created
+during render waits for commit in both hooks, by the deferral contract from
+#1564.
+
 ## Revision index
 
 Each entry's evidence applies to the revision named here. The first section's
@@ -233,4 +282,5 @@ table and closure apply to `415a8d4a1`.
 | Cleaned-up reuse liveness check | `fc5f136a5` |
 | Start-sync gate replaces render-time reuse | `b31b84ff9` |
 | Nested on-demand sources and retained-page windows | `2b461f8cd` |
-| Publication laws in the shared oracle | the commit that adds this entry, on top of `0f0e05cbb` |
+| Publication laws in the shared oracle | `083247d18` |
+| Supplied collections match useLiveQuery | the commit that adds this entry, on top of `083247d18` |

@@ -220,6 +220,35 @@ export function runInfiniteQuerySuite(rawDriver: InfiniteQueryDriver): void {
     )
 
     scenario(
+      `first-paint-ready-collection`,
+      `publishes the ready first page on the first paint for a supplied collection that has not started`,
+      async () => {
+        // Same law as `first-paint-ready`, for the collection input form. The
+        // supplied collection has not started and its window already holds the
+        // first page and its peek-ahead row, so nothing has to change before
+        // its rows are correct.
+        const source = driver.makeSource(rows(8))
+        const collection = driver.makePrecreated((q) =>
+          q
+            .from({ items: source.collection })
+            .orderBy(({ items }: any) => items.rank, `desc`)
+            .limit(4),
+        ).collection
+        expect(collection.status).toBe(`idle`)
+        const handle = driver.mountCollection(collection, { pageSize: 3 })
+        await handle.flush()
+
+        expect(handle.observations()[0]).toEqual({
+          status: `ready`,
+          ids: [`1`, `2`, `3`],
+          pages: [[`1`, `2`, `3`]],
+          hasNextPage: true,
+        })
+        expectReadyObservationsMatchSource(handle, rows(8), 3)
+      },
+    )
+
+    scenario(
       `page-expansion`,
       `loads the initial page and expands through the final partial page`,
       async () => {
@@ -1282,6 +1311,8 @@ export function runInfiniteQuerySuite(rawDriver: InfiniteQueryDriver): void {
         )
         expect(error).toBeInstanceOf(Error)
         expect((error as Error).message).toContain(`Remove .findOne()`)
+        // A rejected query must not have started: its source stays unread.
+        expect(source.collection.subscriberCount).toBe(0)
       },
     )
 
@@ -1363,6 +1394,9 @@ export function runInfiniteQuerySuite(rawDriver: InfiniteQueryDriver): void {
           `3`,
         ])
         expectPageRows(handle.current(), rows(8).slice(0, 3), 3)
+        // The supplied window starts at offset 1. A binding that published its
+        // rows before normalizing the window would show a wrong ready prefix.
+        expectReadyObservationsMatchSource(handle, rows(8), 3)
         warn.mockRestore()
       },
     )
@@ -1451,7 +1485,7 @@ export function runInfiniteQuerySuite(rawDriver: InfiniteQueryDriver): void {
     )
 
     it(`registers every distinct scenario without whole-test waivers`, () => {
-      expect(registry.size).toBe(35)
+      expect(registry.size).toBe(36)
     })
   })
 }

@@ -7,8 +7,9 @@
  * Vue's setup is its commit. These laws belong to the React driver:
  *
  * - A render that never commits sends no request to an on-demand source,
- *   whether the query reads it directly or through a live-query Collection.
- *   After the subscription commits, the source is acquired.
+ *   whether a query callback or a supplied collection reads it, directly or
+ *   through a live-query Collection. After the subscription commits, the
+ *   source is acquired.
  * - A StrictMode double render requests an on-demand first window once.
  * - When GC has reclaimed an abandoned render's collection, the retry's first
  *   commit is the ready first page, after a fresh mount and after a mounted
@@ -100,49 +101,64 @@ function makeWrappedOnDemandSource() {
   return { intermediate, loads: () => loads }
 }
 
+type InputForm = `query` | `supplied`
+
+// Reads the wrapped source through a query callback or as the supplied
+// collection itself. The start rule must hold for both input forms.
 function useWrappedInfiniteQuery(
   intermediate: ReturnType<typeof makeWrappedOnDemandSource>[`intermediate`],
+  form: InputForm,
 ) {
   return useLiveInfiniteQuery(
-    (q) =>
-      q
-        .from({ items: intermediate })
-        .orderBy(({ items }) => items.rank, `desc`),
+    form === `supplied`
+      ? (intermediate as any)
+      : (q: any) =>
+          q
+            .from({ items: intermediate })
+            .orderBy(({ items }: any) => items.rank, `desc`),
     { pageSize: 2 },
   )
 }
 
+const inputForms: Array<InputForm> = [`query`, `supplied`]
+
 describe(`on-demand sources before commit`, () => {
-  it(`does not acquire a wrapped on-demand source for a render that never commits`, async () => {
-    const { intermediate, loads } = makeWrappedOnDemandSource()
-    const never = new Promise<void>(() => {})
+  it.each(inputForms)(
+    `does not acquire a wrapped on-demand source for a render that never commits (%s input)`,
+    async (form) => {
+      const { intermediate, loads } = makeWrappedOnDemandSource()
+      const never = new Promise<void>(() => {})
 
-    function Abandoned(): ReactNode {
-      useWrappedInfiniteQuery(intermediate)
-      throw never
-    }
+      function Abandoned(): ReactNode {
+        useWrappedInfiniteQuery(intermediate, form)
+        throw never
+      }
 
-    const view = render(
-      <Suspense fallback={null}>
-        <Abandoned />
-      </Suspense>,
-    )
-    cleanups.push(() => view.unmount())
-    expect(loads()).toBe(0)
-    await act(async () => {
-      await new Promise((resolve) => setTimeout(resolve, 0))
-    })
-    expect(loads()).toBe(0)
-  })
+      const view = render(
+        <Suspense fallback={null}>
+          <Abandoned />
+        </Suspense>,
+      )
+      cleanups.push(() => view.unmount())
+      expect(loads()).toBe(0)
+      await act(async () => {
+        await new Promise((resolve) => setTimeout(resolve, 0))
+      })
+      expect(loads()).toBe(0)
+    },
+  )
 
-  it(`acquires a wrapped on-demand source once the subscription commits`, async () => {
-    const { intermediate, loads } = makeWrappedOnDemandSource()
+  it.each(inputForms)(
+    `acquires a wrapped on-demand source once the subscription commits (%s input)`,
+    async (form) => {
+      const { intermediate, loads } = makeWrappedOnDemandSource()
 
-    const hook = renderHook(() => useWrappedInfiniteQuery(intermediate))
-    cleanups.push(() => hook.unmount())
+      const hook = renderHook(() => useWrappedInfiniteQuery(intermediate, form))
+      cleanups.push(() => hook.unmount())
 
-    await waitFor(() => expect(loads()).toBeGreaterThan(0))
-  })
+      await waitFor(() => expect(loads()).toBeGreaterThan(0))
+    },
+  )
 
   it(`loads an on-demand first page once across a StrictMode double render`, async () => {
     const source = makeInfiniteOnDemandSource(

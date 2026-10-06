@@ -4,7 +4,10 @@ import {
   getPublicCollection,
   isSingleResultCollection,
 } from './live-query-adapter.js'
-import { getBuilderFromConfig } from './query/live/collection-registry.js'
+import {
+  everySourceCollection,
+  getBuilderFromConfig,
+} from './query/live/collection-registry.js'
 import { getPersistedReadinessSource } from './persisted-readiness.js'
 import type { Collection } from './collection/index.js'
 import type { DbClient, DehydratedLiveQueryResult } from './client.js'
@@ -33,26 +36,14 @@ interface PersistedSourceEntry {
 function collectPersistedReadinessSources(
   root: Collection<any, any, any>,
 ): ReadonlyArray<PersistedSourceEntry> | undefined {
-  // A few integrations provide Collection-compatible objects without config.
-  if (!(root as { config?: unknown }).config) return undefined
-  const seen = new Set<Collection<any, any, any>>()
   const sources: Array<PersistedSourceEntry> = []
-  const visit = (collection: Collection<any, any, any>): boolean => {
-    if (seen.has(collection)) return true
-    seen.add(collection)
-    // A few integrations provide Collection-compatible objects without config.
-    const config = (collection as { config?: typeof collection.config }).config
-    if (!config) return false
-    const builder = getBuilderFromConfig(config)
-    if (builder) {
-      return builder.getSourceCollections().every(visit)
-    }
-    const source = getPersistedReadinessSource(config)
+  const allPersisted = everySourceCollection(root, (collection) => {
+    const source = getPersistedReadinessSource(collection.config)
     if (!source) return false
     sources.push({ collection, readiness: source })
     return true
-  }
-  return visit(root) && sources.length > 0 ? sources : undefined
+  })
+  return allPersisted && sources.length > 0 ? sources : undefined
 }
 
 /**

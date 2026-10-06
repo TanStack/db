@@ -69,7 +69,14 @@ describe(`useLiveInfiniteQuery`, () => {
     rendered.unmount()
   })
 
-  it(`does not activate a supplied collection for an abandoned render`, async () => {
+  it(`reclaims a supplied collection that an abandoned render started`, async () => {
+    // Like useLiveQuery, the hook starts a supplied collection with eager
+    // sources during render, so its first paint is ready. The supplied
+    // collection's own gcTime reclaims a render that never commits. #1675 kept
+    // supplied collections idle until commit; that rule caused the empty first
+    // render in #2023 and was reversed by decision to match useLiveQuery.
+    // On-demand supplied collections still wait for commit: see
+    // infinite-query-render-cuts.test.tsx.
     const source = createCollection(
       mockSyncCollectionOptions<Post>({
         id: `abandoned-supplied-infinite-query`,
@@ -80,6 +87,7 @@ describe(`useLiveInfiniteQuery`, () => {
     const liveQuery = createLiveQueryCollection({
       query: (q) =>
         q.from({ post: source }).orderBy(({ post }) => post.createdAt, `desc`),
+      gcTime: 1,
     })
     const never = new Promise<void>(() => {})
 
@@ -93,9 +101,9 @@ describe(`useLiveInfiniteQuery`, () => {
         <AbandonedQuery />
       </Suspense>,
     )
-    await new Promise((resolve) => setTimeout(resolve, 0))
 
-    expect(source.subscriberCount).toBe(0)
+    expect(source.subscriberCount).toBeGreaterThan(0)
+    await waitFor(() => expect(source.subscriberCount).toBe(0))
     rendered.unmount()
   })
 
