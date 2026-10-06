@@ -188,8 +188,12 @@ retained early-receipt calibration exercises the replacement checker. The final
 browser cleanup calibration supplies permanent ORC-010 evidence. Original main
 is itself the routing hostile subject in both controlled and actual-host tests.
 
-Commands use the cached tools and local-source aliases documented in the initial
-review; no other checkout's production build supplies test behavior:
+The following historical session-only commands used cached tools and untracked
+local-source aliases. No other checkout's production build supplied test
+behavior. These commands are **not runnable from a fresh checkout** because
+the cache configuration and temporary typecheck project were not committed.
+Use the [fresh-checkout instructions below](#reproducing-the-retained-checks-from-a-fresh-checkout)
+to run the retained checks with repository configurations.
 
 ```sh
 node node_modules/vitest/vitest.mjs run --config node_modules/.cache/issue-2046/vitest.config.ts --reporter=dot
@@ -363,8 +367,8 @@ an introduced production defect. The parent evaluated every candidate without
 a severity cap: one fixed-now, ten already-fixed, twelve refuted and two
 duplicates. The task-local append-only evaluation ledger retains the full raw
 claims, sources, judgments and independent cleanup score. No candidate was
-silently filtered or deferred. The reviewers showed accurate contract tracing
-and useful restraint, which support a positive hiring signal for this review.
+silently filtered or deferred. The reviewers traced the existing contracts
+and distinguished introduced defects from historical diagnostic limitations.
 
 Two independent reviewers identified the same preexisting diagnostic weakness
 in the strengthened optimistic causal witness. Direct cleanup in `finally`
@@ -392,3 +396,48 @@ for the held startup/subscription histories. The after-ready control does not
 establish a universal readiness-versus-scope-exit ordering. Browser reopen here
 creates a new Collection over retained persistence, not a physical browser or
 worker restart. Native failures and process restart keep their separate owners.
+
+## Reproducing the retained checks from a fresh checkout
+
+These commands use tracked package scripts and configurations. Run them from
+the repository root with the repository's supported Node.js and pnpm versions.
+Install dependencies and build the core package with its workspace dependencies:
+
+```sh
+pnpm install --frozen-lockfile
+pnpm --filter '@tanstack/db-sqlite-persistence-core...' build
+```
+
+Run the complete persisted oracle through its repository Vitest configuration,
+with at most two workers. Coverage and integrated typechecking are disabled
+for this focused runtime invocation, as in the historical source-alias run:
+
+```sh
+pnpm --filter @tanstack/db-sqlite-persistence-core exec vitest run --config vite.config.ts tests/persisted-oracle.test.ts --coverage.enabled=false --typecheck.enabled=false --pool=threads --pool-options.threads.maxThreads=2 --pool-options.threads.minThreads=1
+pnpm --filter @tanstack/db-sqlite-persistence-core exec tsc --noEmit -p tsconfig.json
+```
+
+For only the finite routing matrix, add `-t 'hydration source durability routing'`
+to the Vitest command. To replay the existing FIFO property, prefix that same
+command with `TANSTACK_DB_ORACLE_PROPERTY=sqlite-persistence.source-fifo-order
+TANSTACK_DB_ORACLE_SEED=2046 TANSTACK_DB_ORACLE_PATH=0`.
+
+Install Chromium and run the real OPFS receiver. The explicit browser channel
+selects the installed Playwright Chromium instead of requiring local Chrome:
+
+```sh
+pnpm --filter @tanstack/browser-db-sqlite-persistence exec playwright install --with-deps chromium
+PLAYWRIGHT_CHANNEL=chromium pnpm --filter @tanstack/browser-db-sqlite-persistence exec playwright test --config playwright.opfs.config.ts hydration-commit-oracle.opfs.spec.ts --reporter=line --timeout=15000
+```
+
+The browser Vite configuration aliases the workspace source packages. These
+commands need no `node_modules/.cache/issue-2046` configuration or `/private/tmp`
+project. The temporary paths elsewhere in this record identify historical
+session artifacts only. The reported historical counts belong to their stated
+source/dependency revisions, not to an unexecuted clean installation. The PR's
+CI separately runs the tracked package and OPFS configurations.
+
+The documentation follow-up for CodeRabbit review `5431163123` distinguishes
+these reproducible entry points from the original session commands and removes
+nontechnical personnel commentary. No executable file, oracle law, assertion,
+or recorded runtime result changed.

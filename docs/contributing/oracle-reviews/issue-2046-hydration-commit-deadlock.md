@@ -26,8 +26,7 @@ adapter, both hydration entry points, the effect on a peer Collection, and two
 working controls. The report has high technical depth and signal, appropriate
 urgency, and a narrow implied repair: honor the supplied scoped adapter while
 retaining the registered adapter for ordinary commits. The calibration supports
-that repair within the tested bounds. Strong positive hiring signal for debugging
-and causal analysis, with the qualification that one report is limited evidence.
+that repair within the tested bounds.
 
 The release cutoff needs qualification. The repository changelogs list #1868
 under core 0.3.0/browser 0.2.24, earlier than the report's core 0.4.0/browser
@@ -162,7 +161,11 @@ fallback. Cached tools were reused; source aliases target this worktree's
 `db`, `db-ivm`, and persistence-core source, not another checkout's builds.
 The lockfile remains unchanged.
 
-Exact local commands, from the worktree root:
+Historical session-only commands, from the worktree root, are retained below
+as execution provenance. They depend on untracked cache/temporary files and
+are **not runnable from a fresh checkout**. Use the
+[fresh-checkout instructions](issue-2046-hydration-loss-audit.md#reproducing-the-retained-checks-from-a-fresh-checkout)
+for the current repository configurations.
 
 ```sh
 node node_modules/vitest/vitest.mjs run --config node_modules/.cache/issue-2046/vitest.config.ts --reporter=dot
@@ -179,7 +182,9 @@ PATH="$PWD/../../node_modules/.bin:$PATH" node node_modules/@playwright/test/cli
 The ordinary package test glob includes the appended core matrix; the existing
 Playwright OPFS configuration now registers the browser spec. The local source
 alias runner and append-only working ledger remain ignored/task-local. Raw
-source and logs are in `/private/tmp/issue-2046-audit/`.
+source and logs were stored in the session-only, untracked directory
+`/private/tmp/issue-2046-audit/`. That path is not a repository prerequisite or
+a durable source for reproducing these checks.
 
 ## Oracle guide audit
 
