@@ -40,3 +40,9 @@ A promise that resolves when the database is deleted
 await deleteDatabase('myApp')
 console.log('Database deleted')
 ```
+
+This administrative operation targets the name at its turn in IndexedDB's native
+connection queue. It does not publish Collection rows. Managed connections close
+and their Collections enter `error` on `versionchange`; retained snapshots stay
+available. Recreate Collections with a fresh descriptor after the operation. An
+unmanaged connection can keep the request pending until its owner closes it.

@@ -185,7 +185,6 @@ The Collection exposes these methods through `collection.utils`:
 | `clearObjectStore()`           | Removes this store's durable rows and publishes an empty source snapshot. Other stores remain intact.                                                                   |
 | `getDatabaseInfo()`            | Returns the database name, version, and actual object store names. `estimatedSize`, when available, is origin-wide storage usage, including other databases and caches. |
 | `acceptMutations(transaction)` | Persists the receiving Collection's mutations from a manual transaction.                                                                                                |
-| `deleteDatabase()`             | Closes the shared connection and deletes the entire database, including every store.                                                                                    |
 
 For a Collection whose schema output is also valid schema input, export and restore a snapshot:
 
@@ -200,7 +199,20 @@ import. For example, a string-to-Date transform exports `Date` values, which mus
 be converted back to input strings. Arbitrary transforms have no general inverse;
 `importData()` is not an unchecked stored-output restore API.
 
-After database deletion succeeds, the originating Collection publishes an empty snapshot and notifies active Collections in every store. Create a new database instance and Collections before further persistence. A deletion notification affects only connections that observed or initiated that native deletion; it cannot clear a later database that reuses the name.
+To delete the entire database, use the exported administrative function:
+
+```typescript
+import { deleteDatabase } from '@tanstack/indexeddb-db-collection'
+
+await deleteDatabase('my-app')
+```
+
+This operation targets the database name at its turn in the native request queue.
+It is not bound to a previously opened descriptor's database lifetime. Its success
+receipt does not publish Collection rows or send row notifications. Retained
+Collections stay errored with their snapshots; fresh Collections restore the
+resulting storage. Use `clearObjectStore()` to publish a live replacement for one
+store while the connection remains open.
 
 ## Cross-Tab Synchronization
 
@@ -217,9 +229,19 @@ await todos.cleanup()
 db.close()
 ```
 
-Connections created by `createIndexedDB` close automatically on the native `versionchange` event. This lets another tab upgrade or delete the database. Existing transactions can finish, but further persistence through the closed instance rejects. Reload the app or recreate affected Collections with a new instance using the current database version.
+Connections created by `createIndexedDB` close automatically on native
+`versionchange`, and all their active Collections immediately enter `error`.
+The descriptor's `db.close()` method has the same local effect. Their last
+published rows remain available. Recreate affected Collections with a new
+instance using the current database version. Calling the raw `db.db.close()`
+bypasses managed Collection notification.
 
-You can observe connection retirement with `db.db.addEventListener('versionchange', handler)`. The adapter closes the connection without automatically restarting its Collections. If a later notification causes a read through the closed connection, that Collection and its dependent live queries enter the error state; recreate them with the new instance.
+Closure prevents new native transactions. Already admitted writes can commit or
+abort; their callers receive that actual outcome. Committed writes finish their
+Collection confirmations, including clear/import replacements. Sync transactions
+accepted before closure still publish when their optimistic transactions settle.
+These publications keep the Collection in `error`; late startup and notification
+reads cannot publish or make it ready again. There is no automatic restart.
 
 Connections opened outside `createIndexedDB` can still block upgrades or deletion. Their owner must close them. The operation's promise remains pending until the native request succeeds or fails.
 

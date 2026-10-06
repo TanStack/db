@@ -1,0 +1,50 @@
+Source log: /Users/kyle.mathews/.codex/worktrees/pr-1179-review/tanstack-db/review-evidence/deletion-refinement/calibration/dropAccepted.log
+SHA-256 of full source: 76cd35966a8e1ca2f3873a64d7a14e896ebf949bab4595cbd012f0c497e3c16d
+Receipt transformation: calibration; progress-only dot lines omitted; trailing whitespace normalized.
+
+
+ RUN  v3.2.4 /Users/kyle.mathews/.codex/worktrees/pr-1179-review/tanstack-db/packages/indexeddb-db-collection
+
+ × |@tanstack/indexeddb-db-collection| tests/retirement-oracle.test.ts > publishes accepted update before caller settlement after explicit 13ms
+   → accepted work precedes caller: expected [ …(3) ] to deeply equal [ …(3) ]
+
+ Test Files  1 failed (1)
+      Tests  1 failed | 1614 skipped (1615)
+   Start at  08:17:05
+   Duration  883ms (transform 334ms, setup 16ms, collect 478ms, tests 15ms, environment 181ms, prepare 55ms)
+
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  |@tanstack/indexeddb-db-collection| tests/retirement-oracle.test.ts > publishes accepted update before caller settlement after explicit
+AssertionError: accepted work precedes caller: expected [ …(3) ] to deeply equal [ …(3) ]
+
+- Expected
++ Received
+
+@@ -3,11 +3,11 @@
+      "id": "anchor",
+      "name": "anchor",
+    },
+    {
+      "id": 1,
+-     "name": "after-1",
++     "name": "one",
+    },
+    {
+      "id": 2,
+      "name": "two",
+    },
+
+ ❯ assertRows tests/harness.ts:128:31
+    126|   cut: string,
+    127| ) {
+    128|   expect(sorted(actual), cut).toEqual(sorted(expected))
+       |                               ^
+    129| }
+    130|
+ ❯ tests/retirement-oracle.test.ts:352:9
+ ❯ withHarness tests/harness.ts:184:5
+ ❯ tests/retirement-oracle.test.ts:319:7
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯

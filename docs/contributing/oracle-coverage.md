@@ -1085,16 +1085,17 @@ creation is additive; declared stores and actual native stores are distinct.
 Normal generated persistence tests retain fixed/random campaigns and direct
 seed/path replay. Blocked/unblocked open/delete cases check native terminal
 settlement and caller connection ownership through later native upgrade/delete.
-Native failed opens preserve durable rows/schema. A blocked utility deletion
-retains public and durable snapshots and sends no notification before native
-success; delivered success empties every affected Collection. Failure to issue
+Native failed opens preserve durable rows/schema. A blocked administrative deletion
+retains public and durable snapshots. Its receipt has no row-publication authority;
+managed versionchange marks affected Collections errored while retaining rows. Failure to issue
 deletion preserves those snapshots. No timeout, cancellation, automatic
 in-memory fallback or real-browser lock scheduling is established.
 
 The transport owner also crosses two/three independent managed descriptors with
 native upgrade/delete. Exact versionchange recipients and zero blocked events
-check automatic close. Deletion publishes empty snapshots; upgrade preserves
-rows, rejects old-descriptor writes, and supports fresh restore/write. The four
+check automatic close. Deletion retains errored public snapshots while fresh
+storage is empty; upgrade preserves durable rows. Both require fresh descriptors
+for further persistence. The four
 original-source assertion failures and repaired cases distinguish this law from
 the earlier shared-descriptor fixtures. Raw unmanaged blockers keep the wrapper's
 pending-until-terminal law. These controlled cases do not prove browser scheduling.
@@ -1111,12 +1112,17 @@ Executed coverage and remaining package-owned cells:
 
 - **Connection ownership, CR-02:** native managed versionchange with a held
   test-owned readwrite transaction and unmanaged deletion blocking, in all three
-  engines. Adapter writes already in flight, abnormal connection close and app
-  notification policy remain open; no new status/restart API is promised.
+  engines. The retirement and deletion-queue owners now receive admitted writes,
+  immediate error notification, obsolete reads, late startup, caller/publication
+  obligations, and both native blocker-release orders. Raw close bypass and
+  abnormal native connection termination are separate ownership boundaries;
+  automatic restart is not promised.
 - **Persistence, PC02:** all six manual acceptance orders for three distinct
   Collection identities, two stores, disjoint same-store keys, reused sibling
-  keys, mixed deletes/inserts and unaffected versions. Same-ID ownership still
-  needs the applicable core identity contract and witness.
+  keys, mixed deletes/inserts and unaffected versions. The compatibility owner
+  also projects same-ID/disjoint-key payloads by Collection reference, in both
+  acceptance orders before/after cleanup. Same-ID/same-key core payload merging
+  remains outside that adapter witness.
 - **Settlement, PC04/PC06:** first/middle/last clone failure in a three-row batch
   for automatic/manual/import; multi-row held CRUD with both decisions and
   independent peer progress. Raw storage, caller, payload, versions, ordinary
@@ -1126,8 +1132,11 @@ Executed coverage and remaining package-owned cells:
   intent crossed with peer CRUD/clear/import, and downstream query cuts. Native
   import exposed transient union publication and ordered peer persistence exposed
   duplicate-insert confirmation; both have source repairs and receiving tests.
-  Several simultaneous local intents and reads straddling unordered writes need
-  a broader independent ordering model and their own positive reach witnesses.
+  The local-order owner now crosses three held local intents with ordered peer
+  update/delete/replace and checks every decided prefix. Peer work interleaved
+  between those acceptances, multi-intent intermediate local publications and
+  reads straddling unordered writes still need receiving witnesses in the
+  pending/transport owners; final local equality does not prove those cuts.
 - **Transport, PC12/CC09:** obsolete receiving read success/abort after cleanup
   and restart; native obsolete abort and later restore. Pending mutation caller
   outcome/confirmation into a restarted sync run remains a distinct policy and
@@ -1264,14 +1273,62 @@ matrix. This establishes request admission work, not an elapsed-time speedup.
 Runtime and type tests use source without built DB output. Published declarations
 have a separate build-consuming lane after concurrent CI runtime tests finish.
 
-Remaining design work has explicit owners:
+The [law enforcement follow-up](oracle-reviews/2026-10-05-indexeddb-law-audit.md)
+records the subsequent calibration and closes the stored-field/type cleanup.
 
-- **Connection retirement, XH-06:** the approved behavior requires recreation;
-  background reads through a retired connection report Collection error. Any
-  alternative notification/status/restart policy belongs to the transport
-  connection owner and needs old/fresh-connection and downstream-query witnesses.
-- **Stored metadata/public type cleanup, XH-14:** `VersionEntry.updatedAt` remains
-  write-only and the utils key parameter remains a public phantom parameter.
-  The persistence owner must prove old/new stored-record compatibility before a
-  format cleanup; declaration consumers must receive any generic-arity change.
-  Unused notification fields were removed without changing stored records.
+- **Connection closure, XH-06:** implemented under the subsequent approved
+  contract. Managed versionchange and explicit descriptor close immediately mark
+  affected Collections errored. New reads lose publication authority; native-
+  admitted writes finish and confirm without regaining readiness. Applications
+  recreate Collections. The retirement owner, core readiness owner, and native
+  receiving cases enforce these separate obligations.
+- **Deletion lifetime authority, XH-07:** closed under administrative deletion.
+  The stale-receipt counterexample was retained before implementation. The
+  Collection deletion utility and database-deleted message authority were removed;
+  `deleteDatabase(name)` only reports the native administrative outcome. The
+  deletion-queue owner checks old/new receipt cuts, retained errored snapshots,
+  queued name targeting, and fresh empty storage. The browser owner receives
+  both unmanaged/native transaction release orders. See the
+  [TLA refinement audit](oracle-reviews/2026-10-06-indexeddb-tla-refinement.md)
+  for exact bounds and provider limitations. No persisted identity or deferral.
+- **Stored metadata/public types, XH-14:** new version records omit `updatedAt`;
+  legacy absent/past/future timestamps retain their row semantics. Persistence
+  checks ordinary writes, untouched records, mixed-format restore and replacement.
+  Utils now carry output and input types only; source assertions and published
+  ESM/CJS consumers preserve the transformation distinction and Collection keys.
+- **Ownership, XH-02:** equal/distinct Collection IDs, both manual acceptance
+  orders and live/cleaned-up sync runs retain only reference-owned effects.
+- **Transport, XH-03/XH-08:** absent metadata at the receiving read is independent
+  of startup metadata. Typed keys, initial membership, duplicate delivery and a
+  successful suffix are checked. Invalid envelopes cannot issue storage work.
+  Native pages receive missing-metadata rows and duplicate notifications in all
+  three engines; low-level writes still require their own invalidation.
+- **Settlement and diagnostics, XH-04/XH-09/XH-13:** transformed-key collisions
+  and schema failures at first/middle/last input preserve rows and versions;
+  exact cause identity survives each native admission branch. Request admission
+  counters cover automatic insert/update/delete and import, with atomicity
+  enforced by the existing abort matrix.
+
+
+### IndexedDB connection closure: TLA+ refinement owners
+
+`packages/indexeddb-db-collection/tests/retirement-oracle.test.ts` owns the finish
+policy's row, caller, admission, read-authority, accepted-work and error-status
+laws. `deletion-queue-oracle.test.ts` owns administrative receipt authority across
+delete/recreate/delete. `packages/db/tests/truncate-readiness-oracle.test.ts`
+owns replacement publication with explicit readiness preservation. Their models
+remain structurally independent of production connection listeners and caches.
+See the [loss audit](oracle-reviews/2026-10-06-indexeddb-tla-refinement.md) for every
+formal transition/invariant, recovered distinctions, fault calibration and bounds.
+
+The browser receiving owner crosses five admitted mutation kinds × three closure
+origins × commit/abort in all three engines. It separately receives both releases
+of an old native transaction and unmanaged deletion blocker. This last receiving
+witness is required: fake-indexeddb 6.2.5 violates the transaction-only deletion
+hold. The model law remains normative; the faulty provider does not narrow it.
+
+The closed-connection finish policy is separate from cleanup/restart, physical
+crash, lost notifications, post-durability application listener failures and
+uncontrolled browser discard. Those existing owners/boundaries are unchanged.
+This bounded translation does not claim every formal graph path is executed by
+the TypeScript suite or that finite tests prove unconditional progress.

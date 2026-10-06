@@ -1,0 +1,52 @@
+Source log: /Users/kyle.mathews/.codex/worktrees/pr-1179-review/tanstack-db/review-evidence/deletion-refinement/calibration/explicitClose.log
+SHA-256 of full source: f566b5b3d0a5770444954752beb39bdb13bac3bf8e7520023b69d34372ae7a59
+Receipt transformation: calibration; progress-only dot lines omitted; trailing whitespace normalized.
+
+
+ RUN  v3.2.4 /Users/kyle.mathews/.codex/worktrees/pr-1179-review/tanstack-db/packages/indexeddb-db-collection
+
+ × |@tanstack/indexeddb-db-collection| tests/retirement-oracle.test.ts > confirms native-committed update if explicit close precedes its continuation 15ms
+   → closed connection status: expected 'ready' to be 'error' // Object.is equality
+   → retirement is observable: expected -1 to be greater than or equal to 0
+
+ Test Files  1 failed (1)
+      Tests  1 failed | 1614 skipped (1615)
+   Start at  08:16:56
+   Duration  943ms (transform 378ms, setup 14ms, collect 543ms, tests 17ms, environment 179ms, prepare 55ms)
+
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  |@tanstack/indexeddb-db-collection| tests/retirement-oracle.test.ts > confirms native-committed update if explicit close precedes its continuation
+AssertionError: closed connection status: expected 'ready' to be 'error' // Object.is equality
+
+Expected: "error"
+Received: "ready"
+
+ ❯ closed tests/retirement-oracle.test.ts:99:53
+     97| }
+     98| function closed(c: Subject, statuses: Array<string>) {
+     99|   expect.soft(c.status, 'closed connection status').toBe('error')
+       |                                                     ^
+    100|   const firstError = statuses.indexOf('error')
+    101|   expect.soft(firstError, 'retirement is observable').toBeGreaterThanO…
+ ❯ tests/retirement-oracle.test.ts:459:7
+ ❯ withHarness tests/harness.ts:184:5
+ ❯ tests/retirement-oracle.test.ts:439:5
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/2]⎯
+
+ FAIL  |@tanstack/indexeddb-db-collection| tests/retirement-oracle.test.ts > confirms native-committed update if explicit close precedes its continuation
+AssertionError: retirement is observable: expected -1 to be greater than or equal to 0
+ ❯ closed tests/retirement-oracle.test.ts:101:55
+     99|   expect.soft(c.status, 'closed connection status').toBe('error')
+    100|   const firstError = statuses.indexOf('error')
+    101|   expect.soft(firstError, 'retirement is observable').toBeGreaterThanO…
+       |                                                       ^
+    102|   expect
+    103|     .soft(
+ ❯ tests/retirement-oracle.test.ts:459:7
+ ❯ withHarness tests/harness.ts:184:5
+ ❯ tests/retirement-oracle.test.ts:439:5
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/2]⎯

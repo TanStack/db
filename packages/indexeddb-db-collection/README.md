@@ -197,9 +197,6 @@ The collection exposes utility functions via `collection.utils`:
 // Clear all data from the object store
 await todosCollection.utils.clearObjectStore()
 
-// Delete the entire database
-await todosCollection.utils.deleteDatabase()
-
 // Get database info for debugging
 const info = await todosCollection.utils.getDatabaseInfo()
 // info.estimatedSize is origin-wide usage, including other databases and caches.
@@ -283,21 +280,41 @@ rejects but cannot roll back the committed data.
 
 ## Blocked database operations
 
-Connections created by createIndexedDB close automatically on the native
-versionchange event so another tab can upgrade or delete the database. Existing
-transactions can finish, but further persistence through that instance rejects.
-Reload the app or recreate affected Collections with a new instance using the
-current database version.
+Connections created by `createIndexedDB` close automatically on the native
+`versionchange` event so another tab can upgrade or delete the database. Calling
+`db.close()` has the same local effect: affected Collections enter `error` and
+keep their last published rows. Recreate them with a new descriptor using the
+current database version. There is no automatic restart or in-memory fallback.
+Use the descriptor's `close()` method; calling its raw `db.db.close()` bypasses
+managed Collection notification.
 
-Connections opened outside createIndexedDB can still block these operations.
-Their owner must close them. The promise remains pending until the native
-request succeeds or fails. These operations have no deadline or cancellation
-option. The adapter does not switch to in-memory storage when a request is blocked.
+Closure prevents new native transactions. Transactions already admitted to
+IndexedDB can still commit or abort. Their callers receive that actual outcome,
+and successful writes finish their Collection confirmations. Accepted sync
+transactions still publish when their optimistic transactions settle. These
+publications, including a committed clear or import, do not make a Collection
+on the closed connection ready again. An unfinished startup or notification read
+cannot publish after closure.
 
-Database deletion closes the supplied descriptor. After deletion succeeds, its
-Collections publish empty snapshots and notify active Collections in every
-store. Create a new descriptor before further persistence. If deletion fails,
-the utility rejects and sends no success notification.
+Connections opened outside `createIndexedDB` can still block upgrades and
+deletion. Their owner must close them. The administrative promise remains pending
+until the native request succeeds or fails; it has no deadline or cancellation
+option.
+
+To delete the entire database, use the exported administrative function:
+
+```typescript
+import { deleteDatabase } from '@tanstack/indexeddb-db-collection'
+
+await deleteDatabase('myApp')
+```
+
+Deletion targets a database **name at its turn in the native request queue**.
+It is not bound to the lifetime of a previously opened descriptor. Its success
+receipt does not clear retained Collection snapshots or send cross-tab row
+notifications. Fresh descriptors and Collections restore the resulting storage.
+Use `collection.utils.clearObjectStore()` to remove one store's rows while its
+connection remains open and publish that replacement to active peers.
 
 ## Error Handling
 

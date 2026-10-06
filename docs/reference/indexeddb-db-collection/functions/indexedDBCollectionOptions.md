@@ -6,7 +6,7 @@ title: indexedDBCollectionOptions
 ## Call Signature
 
 ```ts
-function indexedDBCollectionOptions<T, TKey>(config): CollectionConfig<InferSchemaOutput<T>, TKey, T, IndexedDBCollectionUtils<InferSchemaOutput<T>, TKey, InferSchemaInput<T>>> & object;
+function indexedDBCollectionOptions<T, TKey>(config): CollectionConfig<InferSchemaOutput<T>, TKey, T, IndexedDBCollectionUtils<InferSchemaOutput<T>, InferSchemaInput<T>>> & object;
 ```
 
 Defined in: [.codex/worktrees/pr-1179-review/tanstack-db/packages/indexeddb-db-collection/src/indexeddb.ts:371](https://github.com/TanStack/db/blob/main/packages/indexeddb-db-collection/src/indexeddb.ts#L371)
@@ -36,7 +36,7 @@ upfront in a single upgrade transaction.
 
 ### Returns
 
-`CollectionConfig`\<`InferSchemaOutput`\<`T`\>, `TKey`, `T`, [`IndexedDBCollectionUtils`](../interfaces/IndexedDBCollectionUtils.md)\<`InferSchemaOutput`\<`T`\>, `TKey`, `InferSchemaInput`\<`T`\>\>\> & `object`
+`CollectionConfig`\<`InferSchemaOutput`\<`T`\>, `TKey`, `T`, [`IndexedDBCollectionUtils`](../interfaces/IndexedDBCollectionUtils.md)\<`InferSchemaOutput`\<`T`\>, `InferSchemaInput`\<`T`\>\>\> & `object`
 
 ### Examples
 
@@ -73,7 +73,7 @@ const todosCollection = createCollection(
 ## Call Signature
 
 ```ts
-function indexedDBCollectionOptions<T, TKey>(config): CollectionConfig<T, TKey, never, IndexedDBCollectionUtils<T, TKey, T>> & object;
+function indexedDBCollectionOptions<T, TKey>(config): CollectionConfig<T, TKey, never, IndexedDBCollectionUtils<T>> & object;
 ```
 
 Defined in: [.codex/worktrees/pr-1179-review/tanstack-db/packages/indexeddb-db-collection/src/indexeddb.ts:393](https://github.com/TanStack/db/blob/main/packages/indexeddb-db-collection/src/indexeddb.ts#L393)
@@ -103,7 +103,7 @@ upfront in a single upgrade transaction.
 
 ### Returns
 
-`CollectionConfig`\<`T`, `TKey`, `never`, [`IndexedDBCollectionUtils`](../interfaces/IndexedDBCollectionUtils.md)\<`T`, `TKey`, `T`\>\> & `object`
+`CollectionConfig`\<`T`, `TKey`, `never`, [`IndexedDBCollectionUtils`](../interfaces/IndexedDBCollectionUtils.md)\<`T`\>\> & `object`
 
 ### Examples
 

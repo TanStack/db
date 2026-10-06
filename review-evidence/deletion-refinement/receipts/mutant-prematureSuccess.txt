@@ -1,0 +1,42 @@
+Source log: /Users/kyle.mathews/.codex/worktrees/pr-1179-review/tanstack-db/review-evidence/deletion-refinement/calibration/prematureSuccess.log
+SHA-256 of full source: 03bdfd1ae878839e2d6ad1e42f52659f9975eba70b08f74145dc68a6e5911f03
+Receipt transformation: calibration; progress-only dot lines omitted; trailing whitespace normalized.
+
+
+ RUN  v3.2.4 /Users/kyle.mathews/.codex/worktrees/pr-1179-review/tanstack-db/packages/indexeddb-db-collection
+
+ × |@tanstack/indexeddb-db-collection| tests/retirement-oracle.test.ts > admitted native writes retain their actual outcome after closure > {"first":"insert","second":"insert","reason":"explicit","reverse":false} 114ms
+   → expected [ 'fulfilled', 'fulfilled' ] to deeply equal [ 'pending', 'pending' ]
+
+ Test Files  1 failed (1)
+      Tests  1 failed | 1614 skipped (1615)
+   Start at  08:17:08
+   Duration  990ms (transform 334ms, setup 14ms, collect 483ms, tests 116ms, environment 182ms, prepare 55ms)
+
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  |@tanstack/indexeddb-db-collection| tests/retirement-oracle.test.ts > admitted native writes retain their actual outcome after closure > {"first":"insert","second":"insert","reason":"explicit","reverse":false}
+AssertionError: expected [ 'fulfilled', 'fulfilled' ] to deeply equal [ 'pending', 'pending' ]
+
+- Expected
++ Received
+
+  [
+-   "pending",
+-   "pending",
++   "fulfilled",
++   "fulfilled",
+  ]
+
+ ❯ tests/retirement-oracle.test.ts:195:52
+    193|           native.entries.every((entry) => entry.status === 'pending'),
+    194|         ).toBe(true)
+    195|         expect(callers.map((c) => c.result.state)).toEqual([
+       |                                                    ^
+    196|           'pending',
+    197|           'pending',
+ ❯ withHarness tests/harness.ts:184:5
+ ❯ tests/retirement-oracle.test.ts:151:7
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯

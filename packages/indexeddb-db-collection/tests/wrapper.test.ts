@@ -44,7 +44,9 @@ it('preserves native request-error text with operation context', async () => {
     const error = await result
     await done
     expect(nativeErrors).toHaveLength(1)
-    expect(error).toHaveProperty('cause', nativeErrors[0])
+    expect((error as Error).cause, 'request failure identity').toBe(
+      nativeErrors[0],
+    )
     expect(error).toEqual(
       new Error(
         `Failed to get all items from object store "items": ${nativeErrors[0]!.message}`,
@@ -609,8 +611,59 @@ it('retains the native open failure as its cause', async () => {
       (error: unknown) => error,
     )
     expect(native).toMatchObject({ name: 'VersionError' })
-    expect(failure).toHaveProperty('cause', native)
+    expect((failure as Error).cause, 'open failure identity').toBe(native)
   } finally {
     vi.restoreAllMocks()
   }
 })
+
+// The cause law crosses separate wrapper error branches, not only the shared
+// getAll request helper: issue open/delete, create a store, and create a
+// transaction. These pre-request failures allocate no native work. The native
+// object is the independent expected cause even when its name chooses a
+// specialized context message; no new error taxonomy is promised.
+for (const kind of ['InvalidStateError', 'ConstraintError', 'SecurityError']) {
+  it(`retains ${kind} identity across native operation admission`, async () => {
+    await withHarness(async (h) => {
+      const failure = new DOMException('native admission failure', kind)
+      const factory = new FakeIDBFactory()
+      vi.spyOn(factory, 'open').mockImplementation(() => {
+        throw failure
+      })
+      vi.spyOn(factory, 'deleteDatabase').mockImplementation(() => {
+        throw failure
+      })
+      const openFailure = await openDatabase(
+        'failed',
+        1,
+        undefined,
+        factory,
+      ).catch((error: unknown) => error)
+      expect((openFailure as Error).cause).toBe(failure)
+      const deleteFailure = await deleteDatabase('failed', factory).catch(
+        (error: unknown) => error,
+      )
+      expect((deleteFailure as Error).cause).toBe(failure)
+      vi.spyOn(h.db.db, 'createObjectStore').mockImplementation(() => {
+        throw failure
+      })
+      let caught: unknown
+      try {
+        createObjectStore(h.db.db, 'failed')
+      } catch (error) {
+        caught = error
+      }
+      expect((caught as Error).cause).toBe(failure)
+      vi.spyOn(h.db.db, 'transaction').mockImplementation(() => {
+        throw failure
+      })
+      const transactionFailure = await executeTransaction(
+        h.db.db,
+        'items',
+        'readwrite',
+        () => undefined,
+      ).catch((error: unknown) => error)
+      expect((transactionFailure as Error).cause).toBe(failure)
+    })
+  })
+}

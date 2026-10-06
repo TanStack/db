@@ -13,8 +13,8 @@
  * Replacement notifications invalidate an earlier snapshot. A disjoint write
  * that commits afterward remains authoritative even if that notification arrives
  * later. Utility persistence has the same notification obligation while its
- * Collection is idle or cleaned-up. Deleting a database clears every active
- * Collection over its stores; reopening requires a fresh database descriptor.
+ * Collection is idle or cleaned-up. Administrative deletion retires managed
+ * Collections without replacing their rows; reuse requires a fresh descriptor.
  * These are bounded controlled histories, not browser scheduling evidence.
  */
 import {
@@ -25,6 +25,7 @@ import {
 import { expect, it, vi } from 'vitest'
 import {
   createIndexedDB,
+  deleteDatabase,
   executeTransaction,
   indexedDBCollectionOptions,
 } from '../src'
@@ -294,23 +295,21 @@ it('publishes manual acceptance after the writer sync run is cleaned up', async 
   })
 })
 
-// Database deletion has wider authority than store replacement. The model is
-// empty rows in every declared store. Independent native reads and fresh
-// Collections use a newly opened descriptor because the deleted connection is
-// closed. Existing Collections are checked at delivered deletion, without
-// attempting further persistence through their obsolete descriptor.
-it('publishes database deletion to active Collections in every store', async () => {
+// Administrative deletion removes native rows in every store and retires
+// every managed Collection. Its caller receipt grants no row publication
+// authority: retained errored snapshots and fresh empty restores differ.
+it('retires every managed store without publishing database deletion', async () => {
   await withHarness(async (h) => {
     await seed(h.db, 'items', [{ id: 'item', name: 'removed item' }])
     await seed(h.db, 'other', [{ id: 'other', name: 'removed sibling' }])
     const source = await h.open()
     const sameStore = await h.open()
     const sibling = await h.open('other')
-    await source.utils.deleteDatabase()
+    await deleteDatabase(h.db.name)
     expect(
       await Channel.deliver(),
-      'deletion reached active peers',
-    ).toBeGreaterThan(0)
+      'administrative deletion emits no row notification',
+    ).toBe(0)
     const fresh = await createIndexedDB({
       name: h.db.name,
       version: 1,
@@ -337,9 +336,26 @@ it('publishes database deletion to active Collections in every store', async () 
           await restored.cleanup()
         }
       }
-      assertRows(source.values(), [], 'deletion originating Collection')
-      assertRows(sameStore.values(), [], 'deletion same-store peer')
-      assertRows(sibling.values(), [], 'deletion sibling-store peer')
+      expect([source.status, sameStore.status, sibling.status]).toEqual([
+        'error',
+        'error',
+        'error',
+      ])
+      assertRows(
+        source.values(),
+        [{ id: 'item', name: 'removed item' }],
+        'retained originating snapshot',
+      )
+      assertRows(
+        sameStore.values(),
+        [{ id: 'item', name: 'removed item' }],
+        'retained same-store snapshot',
+      )
+      assertRows(
+        sibling.values(),
+        [{ id: 'other', name: 'removed sibling' }],
+        'retained sibling snapshot',
+      )
     } finally {
       fresh.close()
     }
@@ -374,7 +390,7 @@ it('retains every public snapshot and sends no deletion before native deletion s
       return nativeRequest
     })
     let status = 'pending'
-    const outcome = source.utils.deleteDatabase().then(
+    const outcome = deleteDatabase(h.db.name).then(
       () => {
         status = 'fulfilled'
       },
@@ -404,8 +420,14 @@ it('retains every public snapshot and sends no deletion before native deletion s
       })
       assertRows(durable.rows, [item], 'blocked deletion durable snapshot')
       expect(status, 'native deletion acknowledged to caller').toBe('fulfilled')
-      for (const collection of [source, peer, sibling])
-        assertRows(collection.values(), [], 'native deletion published')
+      for (const collection of [source, peer, sibling]) {
+        assertRows(
+          collection.values(),
+          collection === sibling ? [other] : [item],
+          'deletion retains errored snapshot',
+        )
+        expect(collection.status).toBe('error')
+      }
       const fresh = await createIndexedDB({
         name: h.db.name,
         version: 1,
@@ -431,8 +453,8 @@ it('retains every public snapshot and sends no deletion before native deletion s
 
 // Failure to issue deletion changes neither storage nor the published source.
 // This injected factory failure has no native request, so it makes no rollback
-// claim for an operation that already reached the provider. The utility closes
-// its descriptor first; durable observations therefore use a new descriptor.
+// claim for an operation that already reached the provider. Rejected native
+// admission does not close an unrelated managed connection.
 it('preserves durable and public snapshots when deletion cannot be issued', async () => {
   await withHarness(async (h) => {
     const item = { id: 'item', name: 'retained item' }
@@ -447,7 +469,7 @@ it('preserves durable and public snapshots when deletion cannot be issued', asyn
       .mockImplementation(() => {
         throw new DOMException('storage deletion denied', 'SecurityError')
       })
-    await expect(source.utils.deleteDatabase()).rejects.toThrow(
+    await expect(deleteDatabase(h.db.name)).rejects.toThrow(
       'storage deletion denied',
     )
     issue.mockRestore()
@@ -481,10 +503,9 @@ it('preserves durable and public snapshots when deletion cannot be issued', asyn
 
 // Managed connection ownership, approved by the maintainer: createIndexedDB
 // closes its native connection when another request delivers versionchange.
-// Closing permits upgrade/deletion; it does not restart a Collection, invent a
-// Collection status, or convert later persistence into an in-memory success.
-// Upgrade preserves existing durable rows. Deletion publishes empty snapshots
-// after native success. The caller recreates descriptors and Collections for
+// Closing permits upgrade/deletion and marks affected Collections errored.
+// Upgrade preserves durable rows; deletion removes them without publishing
+// replacement rows into retained Collections. The caller recreates descriptors and Collections for
 // subsequent persistence through the changed database.
 //
 // The reference is authored rows plus the operation's native version: upgrade
@@ -569,16 +590,16 @@ for (const count of [2, 3]) {
                     stores: ['items', 'other', 'added'],
                   })
                 : await (async () => {
-                    await source.utils.deleteDatabase()
+                    await deleteDatabase(h.db.name)
                     expect(
                       await Channel.deliver(),
-                      'native deletion notification reaches independent peers',
-                    ).toBe(2)
+                      'administrative deletion has no notification',
+                    ).toBe(0)
                     for (const collection of collections)
                       assertRows(
                         collection.values(),
-                        [],
-                        'native deletion published across managed descriptors',
+                        collection === sibling ? [other] : [item],
+                        'retained managed snapshot',
                       )
                     return createIndexedDB({
                       name: h.db.name,
@@ -594,16 +615,12 @@ for (const count of [2, 3]) {
               versionchanges,
               'every open managed connection receives versionchange',
             ).toEqual(
-              Array.from({ length: count }, (_, index) =>
-                operation === 'delete' && index === 0
-                  ? []
-                  : [
-                      {
-                        oldVersion: 1,
-                        newVersion: operation === 'upgrade' ? 2 : null,
-                      },
-                    ],
-              ),
+              Array.from({ length: count }, () => [
+                {
+                  oldVersion: 1,
+                  newVersion: operation === 'upgrade' ? 2 : null,
+                },
+              ]),
             )
             expect(
               fresh.version,
@@ -620,20 +637,16 @@ for (const count of [2, 3]) {
                 'durable rows after native ' + operation,
               )
             }
-            if (operation === 'upgrade') {
-              for (const [index, collection] of collections.entries()) {
-                await expect(
-                  collection.insert({
-                    id: 'closed-' + index,
-                    name: 'must not become durable',
-                  }).isPersisted.promise,
-                ).rejects.toThrow('Failed to create transaction')
-                assertRows(
-                  collection.values(),
-                  index === 2 ? [other] : [item],
-                  'closed-descriptor rejection rolls back its optimistic row',
-                )
-              }
+            for (const [index, collection] of collections.entries()) {
+              expect(collection.status).toBe('error')
+              expect(() =>
+                collection.insert({ id: 'closed-' + index, name: 'rejected' }),
+              ).toThrow()
+              assertRows(
+                collection.values(),
+                index === 2 ? [other] : [item],
+                'errored Collection retains source',
+              )
             }
             // Recreate consumers explicitly. Delivering a later write into an
             // obsolete connection would test a different receiving-work contract.
@@ -777,12 +790,18 @@ it('excludes malformed channel envelopes before storage or publication', async (
       { ...valid, changedKeys: [NaN] },
       { ...valid, tabId: null },
     ]
+    const reads = vi.spyOn(h.db.db, 'transaction')
     for (const data of invalid) {
       await channel.onmessage?.(new MessageEvent('message', { data }))
       expect(c.status).toBe('ready')
       assertRows(c.values(), [], 'invalid envelope exclusion')
+      expect(
+        reads,
+        'invalid envelope has no storage authority',
+      ).not.toHaveBeenCalled()
     }
     await channel.onmessage?.(new MessageEvent('message', { data: valid }))
+    expect(reads, 'valid envelope reaches storage').toHaveBeenCalledTimes(1)
     assertRows(
       c.values(),
       [{ id: 1, name: 'valid neighbor' }],
@@ -818,8 +837,9 @@ it('ignores an old native deletion receipt after database recreation', async () 
       })
       return req
     })
-    const deletion = old.utils.deleteDatabase()
+    const deletion = deleteDatabase(h.db.name)
     await nativeComplete.promise
+    expect(old.status).toBe('error')
     const recreated = await createIndexedDB({
       name: h.db.name,
       version: 1,
@@ -848,7 +868,7 @@ it('ignores an old native deletion receipt after database recreation', async () 
 // Managed versionchange intentionally closes the old connection. A subsequent
 // read fails through the existing Collection error path; a fresh descriptor
 // restores the new durable rows. This preserves the approved recreation policy.
-it('reports old-connection read failure after upgrade and supports fresh Collections', async () => {
+it('reports connection closure immediately and supports fresh Collections', async () => {
   await withHarness(async (h) => {
     const old = await h.open()
     const live = createLiveQueryCollection((q) => q.from({ row: old }))
@@ -860,6 +880,8 @@ it('reports old-connection read failure after upgrade and supports fresh Collect
       stores: ['items'],
     })
     h.descriptors.push(upgraded)
+    expect(old.status).toBe('error')
+    expect(live.status).toBe('error')
     const fresh = await h.open('items', { db: upgraded })
     await fresh.insert({ id: 1, name: 'new' }).isPersisted.promise
     await Channel.deliver()
@@ -871,5 +893,145 @@ it('reports old-connection read failure after upgrade and supports fresh Collect
       [{ id: 1, name: 'new' }],
       'new connection usable',
     )
+  })
+})
+
+// A notification is an invalidation, not a row snapshot. A raw wrapper write
+// can replace its row and remove optional version metadata before delivery.
+// Current durable values still determine source membership and full-row values.
+// The finite grammar crosses present/absent initial rows, typed keys, and absent
+// or current metadata at the receiving read. Each history delivers a real peer
+// notification twice, then an ordinary peer suffix proves the cache stays usable.
+for (const present of [false, true]) {
+  for (const metadata of [false, true]) {
+    for (const key of [1, '1']) {
+      it(`reads current rows with initial membership ${present}, metadata ${metadata}, ${typeof key} key`, async () => {
+        await withHarness(async (h) => {
+          const anchor = { id: 'anchor', name: 'untouched' }
+          const before = { id: key, name: 'before', optional: 1 }
+          await seed(h.db, 'items', present ? [anchor, before] : [anchor])
+          const receiver = await h.open()
+          const sender = await h.open('items', { db: await h.connect() })
+          if (present)
+            await sender.update(key, (row) => {
+              row.name = 'notified'
+            }).isPersisted.promise
+          else
+            await sender.insert({ id: key, name: 'notified' }).isPersisted
+              .promise
+          const current = { id: key, name: 'current' }
+          await executeTransaction(
+            h.db.db,
+            ['items', '_versions'],
+            'readwrite',
+            (_, stores) => {
+              stores.items!.put(current, key)
+              if (!metadata) stores._versions!.delete(['items', key])
+            },
+          )
+          Channel.pending.push(...Channel.pending)
+          expect(
+            await Channel.deliver(),
+            'real peer notification delivered twice',
+          ).toBe(2)
+          expect(receiver.status).toBe('ready')
+          const expected = [anchor, current]
+          assertRows(
+            receiver.values(),
+            expected,
+            'current durable value without omitted field',
+          )
+          assertRows(
+            (await readStore<Row>(h.db, 'items')).rows,
+            expected,
+            'current raw storage',
+          )
+          const fresh = await h.open()
+          assertRows(fresh.values(), expected, 'current restore')
+          await fresh.update(key, (row) => {
+            row.name = 'suffix'
+          }).isPersisted.promise
+          await Channel.deliver()
+          assertRows(
+            receiver.values(),
+            [anchor, { ...current, name: 'suffix' }],
+            'ordinary versioned suffix',
+          )
+        })
+      })
+    }
+  }
+}
+
+// Two deletion lifetimes distinguish connection retirement from deletion
+// completion. An old successful receipt can arrive after a recreated peer has
+// observed a newer native deletion request that is still blocked. Only the
+// newer deletion's success may empty that peer; native versionchange alone
+// grants no authority to the unrelated old receipt.
+it('preserves a recreated peer while a newer deletion is blocked', async () => {
+  await withHarness(async (h) => {
+    const old = await h.open()
+    const nativeComplete = deferred(),
+      receipt = deferred(),
+      blocked = deferred()
+    const nativeDelete = indexedDB.deleteDatabase.bind(indexedDB)
+    let deletes = 0
+    vi.spyOn(indexedDB, 'deleteDatabase').mockImplementation((name) => {
+      const req = nativeDelete(name)
+      if (deletes++ === 0) {
+        let callback: ((this: IDBRequest, event: Event) => unknown) | null =
+          null
+        Object.defineProperty(req, 'onsuccess', {
+          get: () => null,
+          set: (value) => {
+            callback = value
+          },
+          configurable: true,
+        })
+        req.addEventListener('success', (event) => {
+          nativeComplete.resolve()
+          void receipt.promise.then(() => callback?.call(req, event))
+        })
+      } else req.addEventListener('blocked', () => blocked.resolve())
+      return req
+    })
+    const firstDeletion = deleteDatabase(h.db.name)
+    await nativeComplete.promise
+    expect(old.status).toBe('error')
+    const freshDb = await h.connect()
+    const peerDb = await h.connect()
+    const fresh = await h.open('items', { db: freshDb })
+    const peer = await h.open('items', { db: peerDb })
+    const expected = [{ id: 1, name: 'recreated' }]
+    await fresh.insert(expected[0]!).isPersisted.promise
+    await Channel.deliver()
+    const blockerRequest = indexedDB.open(h.db.name, 1)
+    const blocker = await request(blockerRequest)
+    let secondComplete = false
+    const secondDeletion = deleteDatabase(h.db.name).then(() => {
+      secondComplete = true
+    })
+    let observed: Array<Row> = [],
+      durable: Array<Row> = [],
+      premature = false
+    try {
+      await blocked.promise
+      receipt.resolve()
+      await firstDeletion
+      await Channel.deliver()
+      observed = sorted(peer.values())
+      durable = (await readStore<Row>({ ...freshDb, db: blocker }, 'items'))
+        .rows
+      premature = secondComplete
+    } finally {
+      receipt.resolve()
+      blocker.close()
+      await firstDeletion
+      await secondDeletion
+      await Channel.deliver()
+    }
+    expect(premature, 'newer native deletion remains blocked').toBe(false)
+    assertRows(durable, expected, 'newer blocked deletion durable')
+    assertRows(observed, expected, 'old receipt cannot complete newer deletion')
   })
 })

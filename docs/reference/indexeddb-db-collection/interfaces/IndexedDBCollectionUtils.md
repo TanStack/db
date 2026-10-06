@@ -17,10 +17,6 @@ Utility functions exposed on collection.utils
 
 `TItem` *extends* `object` = `Record`\<`string`, `unknown`\>
 
-### _TKey
-
-`_TKey` *extends* `string` \| `number` = `string` \| `number`
-
 ### TInsertInput
 
 `TInsertInput` *extends* `object` = `TItem`
@@ -67,23 +63,6 @@ Defined in: [.codex/worktrees/pr-1179-review/tanstack-db/packages/indexeddb-db-c
 
 Removes all data from the object store
 Does NOT delete the database itself
-
-#### Returns
-
-`Promise`\<`void`\>
-
-***
-
-### deleteDatabase()
-
-```ts
-deleteDatabase: () => Promise<void>;
-```
-
-Defined in: [.codex/worktrees/pr-1179-review/tanstack-db/packages/indexeddb-db-collection/src/indexeddb.ts:208](https://github.com/TanStack/db/blob/main/packages/indexeddb-db-collection/src/indexeddb.ts#L208)
-
-Deletes the entire database
-Use with caution - removes all object stores and indexes
 
 #### Returns
 

@@ -83,3 +83,9 @@ readonly version: number;
 Defined in: [.codex/worktrees/pr-1179-review/tanstack-db/packages/indexeddb-db-collection/src/indexeddb.ts:113](https://github.com/TanStack/db/blob/main/packages/indexeddb-db-collection/src/indexeddb.ts#L113)
 
 Database version
+
+Calling `close()` retires this managed connection and marks its Collections as
+`error`. Already admitted writes finish with their actual native outcome and
+confirm committed data without restoring readiness. Recreate Collections with a
+new descriptor before further persistence. Calling the raw `db.close()` bypasses
+managed notification.

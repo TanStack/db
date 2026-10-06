@@ -26,6 +26,7 @@ import { describe, expect, it } from 'vitest'
 import {
   Channel,
   assertRows,
+  completed,
   readStore,
   seed,
   sorted,
@@ -112,7 +113,6 @@ async function runHistory(steps: Array<Step>) {
       assertRows(peer.values(), model[0]!, cut + ': peer')
       const versions = await readStore<{
         versionKey: string
-        updatedAt: number
       }>(h.db, '_versions')
       // Typed key comparison avoids String conflating number 0 with string "0".
       expect(
@@ -127,7 +127,6 @@ async function runHistory(steps: Array<Step>) {
       )
       for (const value of versions.rows) {
         expect(value.versionKey).toEqual(expect.any(String))
-        expect(value.updatedAt).toEqual(expect.any(Number))
       }
       checks++
     }
@@ -463,3 +462,80 @@ it('manual acceptance partitions mixed payloads across three Collections in ever
     })
   }
 })
+
+// Version tokens detect changes; wall-clock values have no ordering authority.
+// Legacy records may retain timestamps, but new writes need only a token. The
+// authored row fold is identical for absent, past and future legacy timestamps.
+// Restore, an ordinary write and an import must preserve this relation. The
+// untouched anchor proves cleanup does not require rewriting old metadata.
+for (const timestamp of [undefined, -1, Number.MAX_SAFE_INTEGER]) {
+  it(`preserves legacy metadata semantics with timestamp ${timestamp}`, async () => {
+    await withHarness(async (h) => {
+      const initial = [
+        { id: 1, name: 'before' },
+        { id: 2, name: 'anchor' },
+      ]
+      await seed(h.db, 'items', initial)
+      const metadata = {
+        versionKey: 'legacy',
+        ...(timestamp === undefined ? {} : { updatedAt: timestamp }),
+      }
+      const tx = h.db.db.transaction('_versions', 'readwrite')
+      const done = completed(tx)
+      for (const row of initial)
+        tx.objectStore('_versions').put(metadata, ['items', row.id])
+      await done
+      const source = await h.open()
+      const peer = await h.open('items', { db: await h.connect() })
+      assertRows(source.values(), initial, 'legacy restore')
+      await source.update(1, (row) => {
+        row.name = 'after'
+      }).isPersisted.promise
+      await Channel.deliver()
+      const after = [{ id: 1, name: 'after' }, initial[1]!]
+      assertRows(
+        peer.values(),
+        after,
+        'legacy timestamp cannot suppress notification',
+      )
+      const versions = await readStore(h.db, '_versions')
+      const changed = versions.keys.findIndex(
+        (key) => JSON.stringify(key) === '["items",1]',
+      )
+      const untouched = versions.keys.findIndex(
+        (key) => JSON.stringify(key) === '["items",2]',
+      )
+      expect(
+        versions.rows[changed],
+        'new metadata has no unused timestamp',
+      ).toEqual({ versionKey: expect.any(String) })
+      expect(
+        versions.rows[untouched],
+        'legacy anchor need not migrate',
+      ).toEqual(metadata)
+      assertRows(
+        (await readStore<Row>(h.db, 'items')).rows,
+        after,
+        'legacy durable suffix',
+      )
+      assertRows((await h.open()).values(), after, 'mixed-format restore')
+      await source.utils.importData([{ id: 3, name: 'replacement' }])
+      await Channel.deliver()
+      const replacementVersions = await readStore(h.db, '_versions')
+      expect(replacementVersions.keys).toEqual([['items', 3]])
+      expect(replacementVersions.rows).toEqual([
+        { versionKey: expect.any(String) },
+      ])
+      assertRows(
+        peer.values(),
+        [{ id: 3, name: 'replacement' }],
+        'legacy replacement peer',
+      )
+      assertRows(
+        (await h.open()).values(),
+        [{ id: 3, name: 'replacement' }],
+        'legacy replacement restore',
+      )
+    })
+  })
+}

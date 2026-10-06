@@ -1,0 +1,41 @@
+Source log: /Users/kyle.mathews/.codex/worktrees/pr-1179-review/tanstack-db/review-evidence/deletion-refinement/calibration/notifyBeforeClose.log
+SHA-256 of full source: 69abc306f9acda6006ea8831c04f1a95334e0bd695b5aaba09722f3937e20272
+Receipt transformation: calibration; progress-only dot lines omitted; trailing whitespace normalized.
+
+
+ RUN  v3.2.4 /Users/kyle.mathews/.codex/worktrees/pr-1179-review/tanstack-db/packages/indexeddb-db-collection
+
+ × |@tanstack/indexeddb-db-collection| tests/retirement-oracle.test.ts > closes native admission before exposing explicit retirement 8ms
+   → expected [ 'fulfilled', 'rejected' ] to deeply equal [ 'rejected', 'rejected' ]
+
+ Test Files  1 failed (1)
+      Tests  1 failed | 1614 skipped (1615)
+   Start at  08:17:03
+   Duration  884ms (transform 335ms, setup 17ms, collect 480ms, tests 10ms, environment 186ms, prepare 56ms)
+
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  |@tanstack/indexeddb-db-collection| tests/retirement-oracle.test.ts > closes native admission before exposing explicit retirement
+AssertionError: expected [ 'fulfilled', 'rejected' ] to deeply equal [ 'rejected', 'rejected' ]
+
+- Expected
++ Received
+
+  [
+-   "rejected",
++   "fulfilled",
+    "rejected",
+  ]
+
+ ❯ tests/retirement-oracle.test.ts:666:63
+    664|       await Promise.all(attempts.map((attempt) => attempt.done))
+    665|       expect(attempts).toHaveLength(2)
+    666|       expect(attempts.map((attempt) => attempt.result.state)).toEqual([
+       |                                                               ^
+    667|         'rejected',
+    668|         'rejected',
+ ❯ withHarness tests/harness.ts:184:5
+ ❯ tests/retirement-oracle.test.ts:646:5
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯

@@ -1,5 +1,9 @@
 import { createCollection, createTransaction } from '@tanstack/db'
-import { createIndexedDB, indexedDBCollectionOptions } from '../src'
+import {
+  createIndexedDB,
+  deleteDatabase,
+  indexedDBCollectionOptions,
+} from '../src'
 import { holdStore } from '../tests/idb-driver'
 import { snapshot } from '../tests/cross-tab-oracle'
 import { recordCollection } from '../tests/recorder'
@@ -36,6 +40,12 @@ async function setup() {
   let unmanaged: IDBDatabase | undefined
   let deletionReceipt: (() => void) | undefined
   let deletion: Promise<void> | undefined
+  let retirementDone: Promise<void> = Promise.resolve()
+  const retirement = {
+    outcome: 'idle',
+    rows: [] as Array<OracleRow>,
+    native: [] as Array<string>,
+  }
   const schema = { status: 'idle', blocked: 0 }
   const transactions: Array<IDBTransaction> = []
   const failures: Array<string> = []
@@ -180,10 +190,10 @@ async function setup() {
             writes = []
             return params.begin()
           },
-          truncate: () => {
+          truncate: (truncateOptions) => {
             truncates++
             replace = true
-            return params.truncate()
+            return params.truncate(truncateOptions)
           },
           write: (change) => {
             syncWrites.push(change.type)
@@ -262,6 +272,7 @@ async function setup() {
       versionChanges,
       schema: { ...schema },
       requestProgress,
+      retirement: structuredClone(retirement),
     }),
     import: (rows: Array<OracleRow>) =>
       collection.utils.importData(structuredClone(rows)),
@@ -281,6 +292,33 @@ async function setup() {
         : collection.insert(structuredClone(row))
       await transaction.isPersisted.promise
     },
+    // Low-level writers own invalidation: wrapper writes do not broadcast for
+    // them. This native provider fixture writes without version metadata and
+    // sends real protocol messages after the transaction completes.
+    rawWrite: (row: OracleRow) =>
+      new Promise<void>((resolve, reject) => {
+        const transaction = originalTransaction(
+          ['items', '_versions'],
+          'readwrite',
+        )
+        transaction.objectStore('items').put(row, row.id)
+        transaction.objectStore('_versions').delete(['items', row.id])
+        transaction.onabort = () => reject(transaction.error)
+        transaction.oncomplete = () => {
+          const channel = new NativeChannel(`tanstack-db:${database}`)
+          const message = {
+            type: 'data-changed',
+            database,
+            name: 'items',
+            tabId: 'raw-writer',
+            changedKeys: [row.id],
+          }
+          channel.postMessage(message)
+          channel.postMessage(message)
+          channel.close()
+          resolve()
+        }
+      }),
     remove: async (key: string | number) => {
       await collection.delete(key).isPersisted.promise
     },
@@ -301,6 +339,38 @@ async function setup() {
       inserted.mutate(() => collection.insert(structuredClone(row)))
       return Promise.all([removed.commit(), inserted.commit()])
     },
+    closeDescriptor: () => descriptor.close(),
+    startRetirementWrite: (
+      kind: 'insert' | 'update' | 'delete' | 'clear' | 'import',
+    ) => {
+      retirement.outcome = 'pending'
+      const operation =
+        kind === 'clear'
+          ? collection.utils.clearObjectStore()
+          : kind === 'import'
+            ? collection.utils.importData([{ id: 2, name: 'replacement' }])
+            : kind === 'insert'
+              ? collection.insert({ id: 2, name: 'inserted' }).isPersisted
+                  .promise
+              : kind === 'delete'
+                ? collection.delete(1).isPersisted.promise
+                : collection.update(1, (row) => {
+                    row.name = 'updated'
+                  }).isPersisted.promise
+      retirementDone = operation.then(
+        () => {
+          retirement.outcome = 'fulfilled'
+          retirement.rows = snapshot(collection.base.values())
+          retirement.native = [...nativeWrites]
+        },
+        () => {
+          retirement.outcome = 'rejected'
+          retirement.rows = snapshot(collection.base.values())
+          retirement.native = [...nativeWrites]
+        },
+      )
+    },
+    retirementDone: () => retirementDone,
     holdStorage: async () => {
       gate = holdStore(descriptor.db)
       await gate.started
@@ -319,6 +389,14 @@ async function setup() {
           resolve()
         }
         request.onerror = () => reject(request.error)
+      }),
+    blockerRows: () =>
+      new Promise<Array<OracleRow>>((resolve, reject) => {
+        if (!unmanaged) throw new Error('unmanaged blocker not open')
+        const tx = unmanaged.transaction('items', 'readonly')
+        const request = tx.objectStore('items').getAll()
+        tx.oncomplete = () => resolve(request.result)
+        tx.onabort = () => reject(tx.error)
       }),
     closeBlocker: () => {
       unmanaged?.close()
@@ -345,7 +423,7 @@ async function setup() {
           return request
         }
         try {
-          deletion = collection.utils.deleteDatabase()
+          deletion = deleteDatabase(database)
           void deletion.catch(reject)
         } finally {
           factory.deleteDatabase = nativeDelete

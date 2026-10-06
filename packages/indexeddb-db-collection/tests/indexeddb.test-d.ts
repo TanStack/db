@@ -1,7 +1,7 @@
 import { describe, expectTypeOf, it } from 'vitest'
 import { createCollection } from '@tanstack/db'
 import { z } from 'zod'
-import { indexedDBCollectionOptions } from '../src'
+import { deleteDatabase, indexedDBCollectionOptions } from '../src'
 import type {
   DatabaseInfo,
   IndexedDBCollectionConfig,
@@ -75,7 +75,7 @@ describe(`IndexedDB collection type resolution tests`, () => {
         InsertMutationFnParams<
           ExplicitType,
           string | number,
-          IndexedDBCollectionUtils<ExplicitType, string | number, ExplicitType>
+          IndexedDBCollectionUtils<ExplicitType>
         >,
       ]
     >()
@@ -85,7 +85,7 @@ describe(`IndexedDB collection type resolution tests`, () => {
         UpdateMutationFnParams<
           ExplicitType,
           string | number,
-          IndexedDBCollectionUtils<ExplicitType, string | number, ExplicitType>
+          IndexedDBCollectionUtils<ExplicitType>
         >,
       ]
     >()
@@ -95,7 +95,7 @@ describe(`IndexedDB collection type resolution tests`, () => {
         DeleteMutationFnParams<
           ExplicitType,
           string | number,
-          IndexedDBCollectionUtils<ExplicitType, string | number, ExplicitType>
+          IndexedDBCollectionUtils<ExplicitType>
         >,
       ]
     >()
@@ -275,16 +275,11 @@ describe(`IndexedDB collection type resolution tests`, () => {
       >()
     })
 
-    it(`should type deleteDatabase as returning Promise<void>`, () => {
-      const options = indexedDBCollectionOptions<TestItem>({
-        db: mockDbInstance,
-        name: `test-store`,
-        getKey: (item) => item.id,
-      })
-
-      expectTypeOf(options.utils.deleteDatabase).returns.toEqualTypeOf<
-        Promise<void>
+    it(`types administrative deletion by name`, () => {
+      expectTypeOf(deleteDatabase).parameters.toEqualTypeOf<
+        [string, IDBFactory?]
       >()
+      expectTypeOf(deleteDatabase).returns.toEqualTypeOf<Promise<void>>()
     })
 
     it(`should type getDatabaseInfo as returning Promise<DatabaseInfo>`, () => {
@@ -479,4 +474,33 @@ describe(`IndexedDB collection type resolution tests`, () => {
       >()
     })
   })
+})
+
+// Utils carry output rows and schema input rows. Collection keys remain on the
+// Collection/config types; removing a phantom utils key must not erase either
+// schema domain or weaken the Collection's inferred key.
+it('keeps transformed input and output distinct without a utils key parameter', () => {
+  const schema = z.object({
+    id: z.number(),
+    date: z.string().transform((value) => new Date(value)),
+  })
+  const options = indexedDBCollectionOptions({
+    db: mockDbInstance,
+    name: 'items',
+    schema,
+    getKey: (row) => row.id,
+  })
+  type Input = z.input<typeof schema>
+  type Output = z.output<typeof schema>
+  expectTypeOf(options.utils).toEqualTypeOf<
+    IndexedDBCollectionUtils<Output, Input>
+  >()
+  expectTypeOf(options.utils.importData).parameters.toEqualTypeOf<
+    [Array<Input>]
+  >()
+  expectTypeOf(options.utils.exportData).returns.toEqualTypeOf<
+    Promise<Array<Output>>
+  >()
+  const collection = createCollection(options)
+  expectTypeOf(collection.get).parameter(0).toEqualTypeOf<number>()
 })

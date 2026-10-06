@@ -1,0 +1,111 @@
+/**
+ * Administrative delete-by-name follows the native connection queue. Its
+ * receipt has no Collection publication authority, even across recreation and
+ * a second blocked deletion. This refines deletion_queue_oracle.tla: lifetimes
+ * A/B below are test identities only, never stored database metadata.
+ *
+ * The grammar crosses old transaction/blocker release order with old receipt
+ * delivery before recreation, after recreation, during B's blocked deletion,
+ * and after B's deletion. Wrapper success callbacks can be withheld after real
+ * native success; this models delivery delay, not a claim about browser tasks.
+ * Every checkpoint checks native/caller outcome separately, retained public
+ * rows, and sticky error status. Native blockers and writes are real IDB work.
+ */
+import { expect, it, vi } from 'vitest'
+import { deleteDatabase } from '../src'
+import { Channel, assertRows, deferred, readStore, request, seed, withHarness } from './harness'
+import { holdStore } from './idb-driver'
+import type { Row } from './harness'
+
+const cells = [false, true].flatMap(transactionFirst =>
+  ['before-recreate', 'after-recreate', 'second-blocked', 'after-second']
+    .map(receiptCut => ({ transactionFirst, receiptCut })),
+)
+it.each(cells)('administrative deletion has no row authority: %j', async ({ transactionFirst, receiptCut }) => {
+  await withHarness(async h => {
+    const a = [{ id: 1, name: 'A' }], b = [{ id: 2, name: 'B' }]
+    await seed(h.db, 'items', a)
+    const old = await h.open()
+    const blockerA = await request(indexedDB.open(h.db.name, 1))
+    const gate = holdStore(h.db.db)
+    await gate.started
+    const receipts = [deferred(), deferred()]
+    const nativeDone = [deferred(), deferred()]
+    const blocked = [deferred(), deferred()]
+    const settled = [false, false]
+    const nativeDelete = indexedDB.deleteDatabase.bind(indexedDB)
+    let count = 0
+    vi.spyOn(indexedDB, 'deleteDatabase').mockImplementation(name => {
+      const slot = count++
+      const req = nativeDelete(name)
+      let callback: ((this: IDBRequest, event: Event) => unknown) | null = null
+      Object.defineProperty(req, 'onsuccess', {
+        get: () => callback,
+        set: value => { callback = value },
+        configurable: true,
+      })
+      req.addEventListener('blocked', () => blocked[slot]!.resolve())
+      req.addEventListener('success', event => {
+        nativeDone[slot]!.resolve()
+        void receipts[slot]!.promise.then(() => callback?.call(req, event))
+      })
+      return req
+    })
+    const first = deleteDatabase(h.db.name).then(() => { settled[0] = true })
+    let second: Promise<void> | undefined, blockerB: IDBDatabase | undefined
+    h.disposers.push(async () => {
+      await gate.release()
+      blockerA.close(); blockerB?.close()
+      receipts.forEach(receipt => receipt.resolve())
+      await first; await second
+    })
+    await blocked[0]!.promise
+    expect.soft(old.status).toBe('error')
+    assertRows(old.values(), a, 'announced deletion retains A')
+    expect(settled).toEqual([false, false])
+    if (transactionFirst) {
+      await gate.release()
+      expect(settled[0], 'blocker alone prevents success').toBe(false)
+      assertRows((await readStore<Row>({ ...h.db, db: blockerA }, 'items')).rows, a, 'A still exists while blocked')
+      blockerA.close()
+    } else {
+      blockerA.close()
+      expect(settled[0], 'admitted native work alone prevents success').toBe(false)
+      expect(gate.finished).toBeInstanceOf(Promise)
+      await gate.release()
+    }
+    await nativeDone[0]!.promise
+    expect(settled[0], 'native success and caller delivery are distinct').toBe(false)
+    if (receiptCut === 'before-recreate') { receipts[0]!.resolve(); await first }
+    const freshDb = await h.connect()
+    await seed(freshDb, 'items', b)
+    const fresh = await h.open('items', { db: freshDb })
+    blockerB = await request(indexedDB.open(h.db.name, 1))
+    if (receiptCut === 'after-recreate') { receipts[0]!.resolve(); await first }
+    await Channel.drain()
+    assertRows(fresh.values(), b, 'old receipt after recreation')
+    second = deleteDatabase(h.db.name).then(() => { settled[1] = true })
+    await blocked[1]!.promise
+    if (receiptCut === 'second-blocked') { receipts[0]!.resolve(); await first }
+    await Channel.drain()
+    expect(settled[1], 'newer deletion still blocked').toBe(false)
+    expect.soft(fresh.status).toBe('error')
+    assertRows(fresh.values(), b, 'B retained while newer deletion blocked')
+    assertRows((await readStore<Row>({ ...freshDb, db: blockerB }, 'items')).rows, b, 'B native rows survive old receipt')
+    blockerB.close()
+    await nativeDone[1]!.promise
+    expect(settled[1]).toBe(false)
+    receipts[1]!.resolve(); await second
+    receipts[0]!.resolve(); await first
+    await Channel.drain()
+    expect(settled).toEqual([true, true])
+    assertRows(old.values(), a, 'A receipt never empties A')
+    assertRows(fresh.values(), b, 'B receipt never empties B')
+    expect.soft([old.status, fresh.status]).toEqual(['error', 'error'])
+    // A fresh open proves native deletion did occur. Retained Collection rows
+    // are an errored snapshot, not a claim that deleted rows remain durable.
+    const restored = await h.connect()
+    assertRows((await readStore<Row>(restored, 'items')).rows, [], 'second deletion reached recreated name')
+    expect(Channel.sent).toEqual([])
+  })
+})

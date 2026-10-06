@@ -24,7 +24,20 @@ import { commonJsDeclarations } from '../../../scripts/commonjs-declarations.mjs
 const packageRoot = resolve(dirname(fileURLToPath(import.meta.url)), `..`)
 const consumer = `
 import { createCollection } from '@tanstack/db'
-import { createIndexedDB, indexedDBCollectionOptions } from '@tanstack/indexeddb-db-collection'
+import { createIndexedDB, indexedDBCollectionOptions, type IndexedDBCollectionUtils } from '@tanstack/indexeddb-db-collection'
+
+type Input = { id: number; date: string }
+type Output = { id: number; date: Date }
+declare const utils: IndexedDBCollectionUtils<Output, Input>
+export async function schemaDomains() {
+  await utils.importData([{ id: 1, date: '2026-01-01' }])
+  // @ts-expect-error Schema output is not validated schema input.
+  await utils.importData([{ id: 1, date: new Date() }])
+  const output: Array<Output> = await utils.exportData()
+  // @ts-expect-error Export retains the transformed output domain.
+  const input: Array<Input> = await utils.exportData()
+  return { output, input }
+}
 
 export async function createRows() {
   const db = await createIndexedDB({ name: 'typed', version: 1, stores: ['rows'] })

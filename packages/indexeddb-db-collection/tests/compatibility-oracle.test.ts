@@ -307,3 +307,79 @@ for (const idLocation of ['options', 'collection'] as const) {
     })
   }
 }
+
+// Ownership is the Collection object even when IDs collide. Distinct keys keep
+// core's same-ID/same-key payload merging outside this adapter boundary. Every
+// acceptance must project the mixed payload onto exactly one owner, whether its
+// sync run is active or cleaned up. The other store and its versions are anchors.
+for (const sharedId of [false, true]) {
+  for (const cleanedUp of [false, true]) {
+    for (const order of [
+      [0, 1],
+      [1, 0],
+    ]) {
+      it(`partitions owners with shared id ${sharedId}, cleanup ${cleanedUp}, order ${order}`, async () => {
+        await withHarness(async (h) => {
+          const names = ['items', 'other']
+          const rows = [
+            { id: 1, name: 'first' },
+            { id: 2, name: 'second' },
+          ]
+          const collections = await Promise.all(
+            names.map((name, index) =>
+              h.open(name, { id: sharedId ? 'shared' : `owner-${index}` }),
+            ),
+          )
+          const expected = new Map<string, Array<Row>>(
+            names.map((name) => [name, []]),
+          )
+          const tx = createTransaction({
+            autoCommit: false,
+            mutationFn: async ({ transaction }) => {
+              expect(
+                transaction.mutations.map((mutation) => mutation.collection),
+              ).toEqual(collections)
+              for (const index of order) {
+                await collections[index]!.utils.acceptMutations(transaction)
+                expected.set(names[index]!, [rows[index]!])
+                await expectDurableStores(h.db, expected)
+                for (const name of names) {
+                  const fresh = await h.open(name)
+                  assertRows(
+                    fresh.values(),
+                    expected.get(name)!,
+                    'owner projection restore',
+                  )
+                  await fresh.cleanup()
+                }
+              }
+            },
+          })
+          const outcome = tx.isPersisted.promise.catch(
+            (error: unknown) => error,
+          )
+          tx.mutate(() =>
+            collections.forEach((collection, index) =>
+              collection.insert(rows[index]!),
+            ),
+          )
+          if (cleanedUp)
+            await Promise.all(
+              collections.map((collection) => collection.cleanup()),
+            )
+          await tx.commit()
+          await outcome
+          await Channel.deliver()
+          if (!cleanedUp)
+            collections.forEach((collection, index) =>
+              assertRows(
+                collection.values(),
+                [rows[index]!],
+                'owner projection public',
+              ),
+            )
+        })
+      })
+    }
+  }
+}

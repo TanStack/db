@@ -826,10 +826,9 @@ test('cleanup retains a primary mismatch and closes every page after an injected
   expect(context.pages()).toHaveLength(0)
 })
 
-// Native receiving witness for the connection-scoped deletion law. Hold only
-// the deleting page's success callback, then let a second page actually create,
-// write and receive the old notification over native BroadcastChannel.
-test('late deletion notification preserves a recreated database snapshot', async ({
+// Native administrative deletion witness. Hold only the old success callback;
+// its late delivery grants no authority over a recreated Collection.
+test('late administrative deletion receipt preserves a recreated database snapshot', async ({
   context,
 }) => {
   await withPages(context, async (_events, database) => {
@@ -840,11 +839,9 @@ test('late deletion notification preserves a recreated database snapshot', async
     await fresh.evaluate((rows) => window.crossTab!.import(rows), expected)
     const before = await observe(fresh)
     await old.evaluate(() => window.crossTab!.releaseDeletionReceipt())
-    await fresh.waitForFunction(
-      (count) => window.crossTab!.observe().callbacks.completed > count,
-      before.callbacks.completed,
-    )
     const after = await observe(fresh)
+    expect(after.callbacks.completed).toBe(before.callbacks.completed)
+    expect(after.status).toBe('ready')
     assertSnapshot(after.rows, expected, 'native stale deletion: public')
     assertSnapshot(
       await fresh.evaluate(() => window.crossTab!.durable()),
@@ -898,3 +895,225 @@ test('persists a later local update after a held insert in mutation order', asyn
     )
   })
 })
+
+// The browser supplies absent metadata, native reads and duplicate native
+// messages. The model is the authored full row; no timestamp or version lookup
+// computes truth. This receives the controlled transport owner's missing-version
+// premise without claiming wrapper writes automatically notify other tabs.
+test('native invalidation reconciles rows without version metadata', async ({
+  context,
+}) => {
+  await withPages(context, async (_events, database) => {
+    const writer = await open(context, database, 'raw-writer')
+    const initial = { id: 1, name: 'before', optional: 1 }
+    await writer.evaluate((row) => window.crossTab!.rawWrite(row), initial)
+    const receiver = await open(context, database, 'unversioned-receiver')
+    assertSnapshot(
+      (await observe(receiver)).rows,
+      [initial],
+      'native unversioned restore',
+    )
+    const before = await observe(receiver)
+    const current = { id: 1, name: 'after' }
+    await writer.evaluate((row) => window.crossTab!.rawWrite(row), current)
+    await receiver.waitForFunction(
+      (count) => window.crossTab!.observe().callbacks.completed >= count + 2,
+      before.callbacks.completed,
+    )
+    const after = await observe(receiver)
+    expect(after.status).toBe('ready')
+    assertSnapshot(
+      after.rows,
+      [current],
+      'native unversioned duplicate delivery',
+    )
+    assertSnapshot(
+      await receiver.evaluate(() => window.crossTab!.durable()),
+      [current],
+      'native unversioned durable',
+    )
+    const fresh = await open(context, database, 'unversioned-restore')
+    assertSnapshot(
+      (await observe(fresh)).rows,
+      [current],
+      'native unversioned fresh restore',
+    )
+  })
+})
+
+// A second native deletion supplies a new versionchange on recreated peers,
+// while an unmanaged connection keeps its completion pending. The old native
+// success callback and its actual BroadcastChannel message remain independently
+// releasable. A prior lifetime cannot supply the newer operation's completion.
+test('an old native deletion receipt cannot complete a newer blocked deletion', async ({
+  context,
+}) => {
+  await withPages(context, async (_events, database) => {
+    const old = await open(context, database, 'first-delete')
+    await old.evaluate(() => window.crossTab!.holdDeletionReceipt())
+    const owner = await open(context, database, 'second-delete')
+    const expected = [{ id: 1, name: 'recreated' }]
+    await owner.evaluate((rows) => window.crossTab!.import(rows), expected)
+    const peer = await open(context, database, 'recreated-peer')
+    await owner.evaluate(() => window.crossTab!.openBlocker())
+    await owner.evaluate(() => window.crossTab!.startSchema('delete'))
+    // Versionchange proves the newer native request reached this connection.
+    // The live unmanaged handle and the pending caller below prove deletion
+    // cannot have completed; engine-specific blocked-event timing is irrelevant.
+    await peer.waitForFunction(
+      () => window.crossTab!.observe().versionChanges === 1,
+    )
+    const before = await observe(peer)
+    await old.evaluate(() => window.crossTab!.releaseDeletionReceipt())
+    const after = await observe(peer)
+    expect(after.status).toBe('error')
+    expect(after.callbacks.completed).toBe(before.callbacks.completed)
+    const durable = await owner.evaluate(() => window.crossTab!.blockerRows())
+    const state = await observe(owner)
+    await owner.evaluate(() => window.crossTab!.closeBlocker())
+    await owner.waitForFunction(
+      () => window.crossTab!.observe().schema.status === 'complete',
+    )
+    expect(state.schema.status).toBe('pending')
+    assertSnapshot(
+      durable,
+      expected,
+      'native newer deletion still blocked: durable',
+    )
+    assertSnapshot(
+      after.rows,
+      expected,
+      'native old receipt cannot complete newer deletion',
+    )
+  })
+})
+
+// Native receiving lane for the formal finish policy. A real transaction holds
+// each admitted adapter write while another page requests upgrade/deletion (or
+// the owner explicitly closes). Success/abort, caller-time source rows, retained
+// error status, and raw storage are separate observations. The unmanaged read
+// connection keeps administrative deletion pending until those checks finish.
+for (const reason of ['explicit', 'upgrade', 'delete'] as const)
+  for (const kind of ['insert', 'update', 'delete', 'clear', 'import'] as const)
+    for (const abort of [false, true])
+      test(`native admitted ${kind} ${abort ? 'aborts' : 'commits'} after ${reason} closure`, async ({
+        context,
+      }) => {
+        await withPages(context, async (_events, database) => {
+          const a = await open(context, database, 'owner')
+          const before = [{ id: 1, name: 'before' }]
+          await a.evaluate((rows) => window.crossTab!.import(rows), before)
+          const b = await open(context, database, 'administrator')
+          await a.evaluate(() => window.crossTab!.openBlocker())
+          await a.evaluate(() => window.crossTab!.holdStorage())
+          const writesBefore = (await observe(a)).writes.length
+          if (abort) await a.evaluate(() => window.crossTab!.abortNextWrite())
+          await a.evaluate(
+            (value) => window.crossTab!.startRetirementWrite(value),
+            kind,
+          )
+          await a.waitForFunction(
+            (count) => window.crossTab!.observe().writes.length === count + 1,
+            writesBefore,
+          )
+          expect((await observe(a)).retirement.outcome).toBe('pending')
+          if (reason === 'explicit')
+            await a.evaluate(() => window.crossTab!.closeDescriptor())
+          else {
+            await b.evaluate(
+              (value) => window.crossTab!.startSchema(value),
+              reason,
+            )
+            await a.waitForFunction(
+              () => window.crossTab!.observe().versionChanges === 1,
+            )
+          }
+          expect.soft((await observe(a)).status).toBe('error')
+          await a.evaluate(() => window.crossTab!.releaseBarrier())
+          await a.evaluate(() => window.crossTab!.retirementDone())
+          const after = await observe(a)
+          const expected = abort
+            ? before
+            : kind === 'insert'
+              ? [...before, { id: 2, name: 'inserted' }]
+              : kind === 'update'
+                ? [{ id: 1, name: 'updated' }]
+                : kind === 'import'
+                  ? [{ id: 2, name: 'replacement' }]
+                  : []
+          expect(after.retirement.outcome).toBe(
+            abort ? 'rejected' : 'fulfilled',
+          )
+          if (abort) {
+            expect(after.retirement.native.at(-1)).not.toBe('complete')
+            await a.waitForFunction(
+              () => window.crossTab!.observe().writes.at(-1) === 'abort',
+            )
+          } else expect(after.retirement.native.at(-1)).toBe('complete')
+          assertSnapshot(
+            after.retirement.rows,
+            expected,
+            'native source at caller settlement',
+          )
+          assertSnapshot(after.rows, expected, 'native retired public rows')
+          assertSnapshot(
+            await a.evaluate(() => window.crossTab!.blockerRows()),
+            expected,
+            'native retired disk rows',
+          )
+          expect(after.status).toBe('error')
+          const retiredAt = after.statuses.indexOf('error')
+          expect(retiredAt).toBeGreaterThanOrEqual(0)
+          expect(
+            after.statuses
+              .slice(retiredAt)
+              .every((status) => status === 'error'),
+          ).toBe(true)
+          await a.evaluate(() => window.crossTab!.closeBlocker())
+          if (reason !== 'explicit')
+            await b.waitForFunction(
+              () => window.crossTab!.observe().schema.status === 'complete',
+            )
+        })
+      })
+
+// fake-indexeddb cannot provide this witness: its deletion queue treats a
+// close-pending connection as closed. Real engines must wait for BOTH native
+// transaction completion and the unmanaged connection, in either release order.
+for (const transactionFirst of [false, true])
+  test(`native deletion waits for both obligations, transaction first ${transactionFirst}`, async ({
+    context,
+  }) => {
+    await withPages(context, async (_events, database) => {
+      const a = await open(context, database, 'owner')
+      const b = await open(context, database, 'administrator')
+      await a.evaluate(() => window.crossTab!.openBlocker())
+      await a.evaluate(() => window.crossTab!.holdStorage())
+      await b.evaluate(() => window.crossTab!.startSchema('delete'))
+      await a.waitForFunction(
+        () => window.crossTab!.observe().versionChanges === 1,
+      )
+      expect((await observe(a)).status).toBe('error')
+      if (transactionFirst) {
+        await a.evaluate(() => window.crossTab!.releaseBarrier())
+        expect((await observe(a)).writes.at(-1)).toBe('complete')
+        expect((await observe(b)).schema.status).toBe('pending')
+        await a.evaluate(() => window.crossTab!.closeBlocker())
+      } else {
+        await a.evaluate(() => window.crossTab!.closeBlocker())
+        await b.evaluate(
+          () =>
+            new Promise<void>((resolve) =>
+              requestAnimationFrame(() => resolve()),
+            ),
+        )
+        expect((await observe(a)).writes.at(-1)).toBe('pending')
+        expect((await observe(b)).schema.status).toBe('pending')
+        await a.evaluate(() => window.crossTab!.releaseBarrier())
+      }
+      await b.waitForFunction(
+        () => window.crossTab!.observe().schema.status === 'complete',
+      )
+      expect((await observe(a)).status).toBe('error')
+    })
+  })

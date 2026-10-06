@@ -4,6 +4,7 @@ import { createCollection } from '@tanstack/db'
 import {
   ObjectStoreNotFoundError,
   createIndexedDB,
+  deleteDatabase,
   indexedDBCollectionOptions,
   openDatabase,
 } from '../src'
@@ -95,11 +96,12 @@ it('rejects opening without IndexedDB', async () => {
   }
 })
 
-it('deletes the database through the utility', async () => {
+it('exposes deletion only as an administrative function', async () => {
   await withHarness(async (h) => {
     const collection = await h.open()
     await collection.insert({ id: 1, name: 'removed' }).isPersisted.promise
-    await collection.utils.deleteDatabase()
+    expect(collection.utils).not.toHaveProperty('deleteDatabase')
+    await deleteDatabase(h.db.name)
     const reopened = await createIndexedDB({
       name: h.db.name,
       version: 1,

@@ -1,0 +1,16 @@
+{
+  "java": {
+    "vendor": "Eclipse Adoptium / Temurin",
+    "release": "jdk-21.0.12.1+1",
+    "package": "https://github.com/adoptium/temurin21-binaries/releases/download/jdk-21.0.12.1%2B1/OpenJDK21U-jre_aarch64_mac_hotspot_21.0.12.1_1.tar.gz",
+    "sha256": "dec50fc6f9fcd4fe3ae8cabf5a5fa68f6afc48841f7698e468e9aa5d54beed84"
+  },
+  "tla": {
+    "release": "v1.7.4",
+    "checker": "TLC2 2.19, 08 August 2024, rev 5a47802",
+    "url": "https://github.com/tlaplus/tlaplus/releases/download/v1.7.4/tla2tools.jar",
+    "sha256": "936a262061c914694dfd669a543be24573c45d5aa0ff20a8b96b23d01e050e88"
+  },
+  "platform": "macOS arm64",
+  "vitest": "3.2.4"
+}

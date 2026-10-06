@@ -11,7 +11,7 @@ Their laws inform this suite; their host guarantees do not transfer to fake-IDB.
 | ----------------------------------- | ------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | persistence-oracle.test.ts          | Two arrays of authored rows, keyed by store and typed key                                                          | Automatic CRUD, manual acceptance, clear/import, cleanup/restart and fresh restore. Compare public, subscription, peer, export, raw durable rows and version ownership after settlement and explicit message delivery.                           |
 | settlement-oracle.test.ts           | Before/after snapshots selected by application decision; source deletion survives removal of an optimistic overlay | Held handlers, resolve/reject, clone failures at either position in a batch, IDB aborts, populated restore, remote delete/clear during pending local deletion. Observe handler entry, settlement, source delivery, successful suffix and reopen. |
-| transport-oracle.test.ts            | Authored durable operation order; union of disjoint writes; exclusion of self/foreign messages                     | Delayed CRUD and replacement, inactive utility writers, database-wide deletion, and initial-load cleanup/restart. Compare raw durable rows, every affected Collection and fresh restore after controlled delivery.                               |
+| transport-oracle.test.ts            | Authored durable operation order; union of disjoint writes; exclusion of self/foreign messages                     | Delayed CRUD and replacement, inactive utility writers, administrative deletion, and initial-load cleanup/restart. Compare raw durable rows, every affected Collection and fresh restore after controlled delivery.                              |
 | compatibility-oracle.test.ts        | Authored rows per store; independent DbClient sync runs; untouched-store version ownership                         | Crypto capability, reusable descriptors and injected factories without ambient IndexedDB globals. Compare public, peer and durable rows after writes, cleanup, replacement and restore.                                                          |
 | wrapper.test.ts                     | Callback success AND native transaction completion are separate obligations                                        | Request success followed by abort; callback settlement after transaction completion; exact error identity, multi-store rollback, request values, upgrades and deletion.                                                                          |
 | api.test.ts and indexeddb.test-d.ts | Configuration, schema and type contracts                                                                           | Synchronous validation, reserved metadata store, transformed import inputs, duplicate rejection, utilities and precise API types.                                                                                                                |
@@ -62,7 +62,7 @@ Each axis contributes independently:
 - Request/transaction cuts distinguish request success from persistence success.
 - Delayed replacement crosses later disjoint writes before notification delivery.
 - Idle and cleaned-up utility writers distinguish notification ownership from sync-run ownership.
-- Database deletion distinguishes store-scoped replacement from effects on every store.
+- Administrative deletion distinguishes retained errored snapshots from fresh empty restores.
 - Runtime capabilities and two DbClients distinguish ambient assumptions and shared closure state.
 
 Permanent checker controls reject missing/duplicate rows, wrong key types and
@@ -84,12 +84,13 @@ across Collections.
 
 The transport owner adds twelve legal histories: clear/import × FIFO/reverse/
 duplicate delivery after a later disjoint receiver insert; idle/cleaned-up
-writer × clear/import; manual acceptance after cleanup; and database deletion
+writer × clear/import; manual acceptance after cleanup; and administrative deletion
 with active same-store and sibling-store Collections. The authored storage order
 predicts rows independently of notification order. Each case compares native
 rows and a fresh restore before checking every affected public Collection.
-All twelve failed at those public checkpoints on the prepared implementation
-and pass after repair. FIFO alone establishes the delayed-replacement defect;
+The original twelve failed at those public checkpoints on the prepared implementation.
+The deletion publication contract was subsequently replaced by the administrative
+contract below; its retained row expectations deliberately differ. FIFO alone establishes the delayed-replacement defect;
 reverse and duplicate schedules are controlled challenges, not native-host claims.
 
 Manual acceptance after cleanup uses a real transaction authored while active.
@@ -146,25 +147,58 @@ cases use fake-IDB and controlled notifications, not native-browser lock proof.
 
 ## Managed connection ownership
 
-`createIndexedDB` closes its connection on native `versionchange`. This releases
-managed peer connections so another context can upgrade or delete the database.
-The wrapper's raw connections keep the separate blocked-request contract. Closing
-a managed connection does not restart a Collection or invent a new Collection
-status. Further persistence through that descriptor rejects; callers recreate
-Collections with a new descriptor using the current database version.
+`createIndexedDB` closes native admission before notifying Collections on
+`versionchange` or descriptor `close()`. Each active Collection enters `error`;
+late startup on that descriptor also rejects. Core sync cleanup is a different
+operation: already accepted sync work and admitted writes retain their obligations.
+Raw `descriptor.db.close()` bypasses managed notification and is outside this
+managed-close contract. Applications recreate descriptors and Collections.
 
-The transport owner crosses two/three independent descriptors with upgrade/delete.
-Source, same-store peer and sibling-store peer stay active until native completion.
-Exact versionchange recipients establish the reach witness. A native blocked event
-records a violation before fixture rescue closes the owned handles, so missing
-automatic close fails a deterministic zero-blocked assertion instead of timing out.
-Deletion then publishes empty snapshots. Upgrade retains rows/version, rejects
-old-descriptor writes without optimistic leakage, and permits new-descriptor
-restore and writes in retained and added stores. All four histories fail without
-the listener and pass with it. Application notification APIs remain unspecified. The extension below receives
-native scheduling and held read transactions; adapter writes already in flight
-at versionchange remain a separate receiving boundary. No elapsed-time bound or automatic restart
-is implied by these controlled histories.
+`retirement-oracle.test.ts` owns the independent row/outcome fold for the finish
+policy from `review-evidence/deletion-tla/retirement_oracle.tla`. The grammar crosses
+all CRUD/clear/import pairs, both native admission orders and native commit/abort
+pairs; it also crosses distinct Collections' deciding, rejected, native-active,
+accepted-sync and settled prefixes with all three closure reasons. Utilities
+have no asynchronous application handler or accepted-but-unpublished interval;
+those abstract steps collapse into their native completion continuation.
+Initial/replacement/targeted reads, late startup, reentrant admission from status
+listeners, and initial reads crossed with admitted writes have separate histories.
+
+Checks retain source rows at the caller callback, native status at successful
+settlement, every authoritative base publication, and the entire retired status
+suffix. Raw storage is folded in native admission order; each closed Collection
+confirms its own admitted effect. Already accepted ordinary sync work may publish
+after closure. A committed clear/import publishes without readiness recovery via
+core `truncate({ markReady: false })`. The separate core
+`truncate-readiness-oracle.test.ts` checks default recovery, explicit status
+preservation, optimistic holds, and composed reentrant replacements.
+
+`deletion-queue-oracle.test.ts` owns the native name queue and receipt authority
+projection from `deletion_queue_oracle.tla`. Native deletion and caller receipt are
+separate cuts. Old receipts are delivered before/after recreation, while the new
+deletion is blocked, between its native success and caller, and after its caller.
+Queued delete/open/delete targeting has a separate witness that does not assume
+an intermediate Collection restore wins against an already-queued native delete.
+An administrative receipt never publishes rows. `utils.deleteDatabase` and the
+`database-deleted` message protocol were removed; the exported administrative
+`deleteDatabase(name, factory?)` remains.
+
+There is one measured provider boundary: fake-indexeddb 6.2.5 counts a close-pending
+connection as closed in its delete queue. It permits native deletion success while
+the old transaction remains active after the unmanaged blocker closes. This is
+not accepted product behavior. The controlled queue keeps its unmanaged blocker
+until old work finishes. Native tests receive BOTH release orders in Chromium,
+Firefox, and WebKit. Other native cases cross all five mutation paths, three
+closure reasons and native commit/abort, with caller-time source rows and raw
+storage checks. Aborting a transaction is irreversible before its asynchronous
+abort event: failure may precede that event; success still requires native commit.
+
+The loss audit and source-fault calibration are recorded in
+`review-evidence/deletion-refinement/`. These are finite refinement witnesses, not
+an enumeration of every TLC graph path or a browser liveness proof. The formal
+progress result assumes cooperative application decisions, native outcomes, and
+local scheduling. No timeout, automatic restart, or stored database identity is
+introduced.
 
 ## Campaigns and direct replay
 
@@ -220,8 +254,9 @@ whole-row omission and raw/downstream observations are addressed by the bounded
 extension below. Its remaining-boundaries section and the repository coverage
 map are the current gap inventory.
 
-Same-key concurrent writers still need an explicit conflict policy and receiving
-witness. Separate per-Collection acceptance calls do not promise cross-Collection
+Unordered same-key writers across Collections still need an explicit conflict
+policy and receiving witness. Automatic writes in one Collection have the local
+ordering owner below. Separate per-Collection acceptance calls do not promise cross-Collection
 atomicity. Nested input mutation requires its own copy/identity policy beyond
 the bounded scalar model.
 
@@ -307,8 +342,9 @@ startup subscriptions crossed with a peer write, managed versionchange with a
 held test-owned transaction, an unmanaged deletion blocker, active/obsolete read
 aborts, write abort after request progress, fresh restore, and accepted/rejected
 held intent after peer persistence. A test-owned `abort()` exercises a real
-native abort, not quota exhaustion. No public error status is invented for
-versionchange itself. Closing a managed descriptor still requires recreation.
+native abort, not quota exhaustion. Managed versionchange immediately marks the affected Collections errored.
+Closing a managed descriptor still requires recreation; admitted writes retain
+the finish-policy obligations described above.
 
 `campaign.ts` records seed/path, original and reduced histories, reached premises,
 expected/actual mismatch, replay outcome, base commit, fast-check version and
@@ -333,9 +369,9 @@ TANSTACK_INDEXEDDB_BROWSER_SEED=<seed> TANSTACK_INDEXEDDB_BROWSER_PATH=<path> pn
 These are bounded refinement checks, not a proof against every interleaving.
 The transport grammar completes writes before concurrent read windows; the
 pending grammar has one local intent and ordered peer work. Reads straddling
-unordered writes, several simultaneous local intents, adapter writes in flight
-at versionchange, cleanup's pending mutation caller/confirmation policy, same-ID
-manual ownership, lost notifications after suspension, post-durability send
+unordered writes, peer work interleaved between several local acceptances,
+cleanup's pending mutation caller/confirmation policy, same-ID/same-key
+core mutation payloads, lost notifications after suspension, post-durability send
 failure (AUX01), nested mutable input identity, quota, eviction, physical crash
 durability and uncontrolled page discard remain open. The controlled destruction
 protocol does not observe an unacknowledged last event before a crash. HC005,
@@ -346,10 +382,16 @@ The coverage map names the needed witnesses; none is waived by random green.
 
 The maintainer approved mutation-order persistence for automatic writes in one
 Collection. `local-write-order-oracle.test.ts` keeps an independent fold of
-whole-row effects in author order, omitting rejected handler positions. Its 146
-bounded cases cross same/disjoint keys and delete/reinsert, all six completion
-orders, all eight decisions, a held predecessor, and synchronous handler reentry.
-Caller outcomes, raw durable rows, peers and fresh restore are separate cuts.
+whole-row effects in author order, omitting rejected handler positions. Its 576
+bounded histories cross same/disjoint keys and delete/reinsert, all six completion
+orders, all eight decision masks, and no peer work or an ordered peer update,
+delete or replacement while local handlers are held. After every handler decision,
+raw durable rows, peer rows and fresh restore must equal the decided author
+prefix; accepted callers beyond that prefix cannot report persistence. Four
+additional witnesses cover a held predecessor, synchronous handler reentry, and
+same/disjoint-key successor writes after native failure. Intermediate local
+optimistic publications remain under the core optimistic-history owner and the
+single-intent pending companion; these new cuts do not claim that broader law.
 No manual or cross-Collection ordering follows from this law.
 
 The compatibility owner adds id changes at options and Collection construction,
@@ -376,3 +418,51 @@ Runtime/type tests resolve workspace source with no dependency build. The
 separate package lane compiles published ESM/CJS consumers after complete builds.
 The review evidence and guide audit are in
 [`2026-10-05-indexeddb-xhigh.md`](../../../docs/contributing/oracle-reviews/2026-10-05-indexeddb-xhigh.md).
+
+## Law enforcement audit after the xhigh review
+
+The next audit challenged rules rather than counting repaired examples. Three
+wrong implementations passed the previous relevant suites: ID equality instead
+of Collection-reference ownership; ignoring rows without metadata at notification
+time; and reading storage for invalid envelopes. The expanded comparisons reject
+all three at their own boundaries.
+
+- Compatibility projects mixed manual payloads by Collection reference across
+  equal/distinct IDs, both acceptance orders and live/cleaned-up sync runs.
+  Keys are disjoint to isolate adapter ownership from core same-ID/same-key
+  payload merging. Each acceptance checks both stores, version keys and restore.
+- Transport separates metadata at startup from metadata at the receiving read.
+  Present/absent initial rows and typed keys cross absent/current metadata after
+  a raw write. Duplicate real peer notifications reconcile current whole rows;
+  a later versioned write proves continued synchronization. Invalid envelopes
+  must cause zero storage transactions; a valid neighbor must cause one.
+- Native pages receive raw writes without version metadata and duplicate native
+  invalidations. This proves receiving behavior, not automatic notifications
+  for low-level wrapper writes. Chromium, Firefox and WebKit exercise the premise.
+- Settlement counts native request admission for insert/update/delete as well as
+  import. Schema validation and transformed-key collisions at every position of
+  a three-row import must preserve all prior rows/versions without storage work.
+  A valid transformed suffix compares numeric keys and uppercase output values
+  with independent authored data.
+- Native error assertions preserve the exact cause object. Admission checks
+  cover open/delete, object-store creation and transaction creation separately.
+- Persistence accepts legacy version records with absent/past/future timestamps.
+  New metadata contains only a version token; unrelated legacy records need no
+  migration. Ordinary updates, mixed-format restore and replacement keep the
+  same authored rows. Type and published-consumer checks preserve distinct
+  schema input/output types after removing the unused utils key parameter.
+
+These are bounded laws with explicit production paths and observation cuts.
+The current evidence is recorded in
+[`2026-10-05-indexeddb-law-audit.md`](../../../docs/contributing/oracle-reviews/2026-10-05-indexeddb-law-audit.md).
+An accounting-complete review is not proof of every cross-tab history.
+
+The deletion authority law remains open. Retaining an old native success
+callback across recreation and a second, blocked deletion exposes a lost
+database-lifetime distinction: the recreated peer has now observed native
+deletion, but the old receipt cannot complete that newer deletion. Its public
+rows must remain until matching native completion. Current production fails
+this comparison in the controlled owner and Chromium, Firefox and WebKit.
+The earlier connection-scoped witness does not establish this broader law.
+A persisted database identity or a changed peer-publication policy requires
+the pending maintainer decision before implementation.

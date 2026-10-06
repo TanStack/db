@@ -13,7 +13,6 @@ import {
 } from '@tanstack/db'
 import {
   clear,
-  deleteDatabase as deleteIDBDatabase,
   executeTransaction,
   getAll,
   getByKey,
@@ -113,7 +112,7 @@ export interface IndexedDBInstance {
   readonly stores: ReadonlyArray<string>
   /** IDBFactory used to create this database (for testing) */
   readonly idbFactory?: IDBFactory
-  /** Close the database connection */
+  /** Close the connection and mark its managed Collections as errored. */
   close: () => void
 }
 
@@ -159,14 +158,13 @@ export interface IndexedDBCollectionConfig<
  */
 interface VersionEntry {
   versionKey: string // UUID for change detection
-  updatedAt: number // Write timestamp
 }
 
 /**
  * Cross-tab message format via BroadcastChannel
  */
 interface CrossTabMessage {
-  type: 'data-changed' | 'database-cleared' | 'database-deleted'
+  type: 'data-changed' | 'database-cleared'
   database: string
   name: string // Object store name
   changedKeys: Array<string | number> // Keys that changed (for targeted loading)
@@ -179,9 +177,7 @@ function isCrossTabMessage(value: unknown): value is CrossTabMessage {
   if (!value || typeof value !== 'object') return false
   const message = value as Record<string, unknown>
   return (
-    (message.type === 'data-changed' ||
-      message.type === 'database-cleared' ||
-      message.type === 'database-deleted') &&
+    (message.type === 'data-changed' || message.type === 'database-cleared') &&
     typeof message.database === 'string' &&
     typeof message.name === 'string' &&
     typeof message.tabId === 'string' &&
@@ -210,7 +206,6 @@ export interface DatabaseInfo {
  */
 export interface IndexedDBCollectionUtils<
   TItem extends object = Record<string, unknown>,
-  _TKey extends string | number = string | number,
   TInsertInput extends object = TItem,
 > extends UtilsRecord {
   /**
@@ -218,12 +213,6 @@ export interface IndexedDBCollectionUtils<
    * Does NOT delete the database itself
    */
   clearObjectStore: () => Promise<void>
-
-  /**
-   * Deletes the entire database
-   * Use with caution - removes all object stores and indexes
-   */
-  deleteDatabase: () => Promise<void>
 
   /**
    * Returns database information for debugging
@@ -251,15 +240,23 @@ export interface IndexedDBCollectionUtils<
 }
 
 const VERSIONS_STORE_NAME = '_versions'
-// Native deletion retires a particular connection, not every future database
-// that reuses its name. Weak ownership ends with the descriptor.
-const deletedConnections = new WeakSet<IDBDatabase>()
+// Connection closure is sticky, including Collections started after close.
+// Keep core's sync run alive: admitted writes and accepted sync transactions
+// still owe their confirmations, while new reads have no publication authority.
+const connections = new WeakMap<
+  IDBDatabase,
+  {
+    error?: Error
+    listeners: Set<() => void>
+  }
+>()
 
 /**
  * Creates or opens an IndexedDB database with the specified stores.
  * Call this once at app startup, then pass the instance to collections.
  * The connection closes on versionchange so another context can upgrade or
- * delete the database. Recreate affected Collections with a new instance before
+ * delete the database. Affected Collections enter error and retain their rows.
+ * Recreate affected Collections with a new instance before
  * further persistence.
  *
  * All stores are created in a single upgrade transaction, avoiding
@@ -335,11 +332,21 @@ export async function createIndexedDB(
     idbFactory,
   )
 
-  // Other tabs can upgrade or delete once this connection releases its handle.
-  db.addEventListener('versionchange', (event) => {
-    if (event.newVersion === null) deletedConnections.add(db)
+  const connection: { error?: Error; listeners: Set<() => void> } = {
+    listeners: new Set(),
+  }
+  connections.set(db, connection)
+  const close = () => {
     db.close()
-  })
+    if (connection.error) return
+    connection.error = new Error(
+      `IndexedDB connection "${name}" closed. Recreate its Collections with a new database instance.`,
+    )
+    // Record closure before reentrant listeners can request more work. Core
+    // reports user event-listener failures asynchronously and notifies siblings.
+    for (const notify of [...connection.listeners]) notify()
+  }
+  db.addEventListener('versionchange', close)
 
   // Create frozen stores array for immutability
   const frozenStores = Object.freeze([...stores])
@@ -350,7 +357,7 @@ export async function createIndexedDB(
     version: db.version,
     stores: frozenStores,
     idbFactory,
-    close: () => db.close(),
+    close,
   })
 }
 
@@ -403,14 +410,10 @@ export function indexedDBCollectionOptions<
   InferSchemaOutput<T>,
   TKey,
   T,
-  IndexedDBCollectionUtils<InferSchemaOutput<T>, TKey, InferSchemaInput<T>>
+  IndexedDBCollectionUtils<InferSchemaOutput<T>, InferSchemaInput<T>>
 > & {
   schema: T
-  utils: IndexedDBCollectionUtils<
-    InferSchemaOutput<T>,
-    TKey,
-    InferSchemaInput<T>
-  >
+  utils: IndexedDBCollectionUtils<InferSchemaOutput<T>, InferSchemaInput<T>>
 }
 
 // Overload for when no schema is provided
@@ -421,9 +424,9 @@ export function indexedDBCollectionOptions<
   config: IndexedDBCollectionConfig<T, never, TKey> & {
     schema?: never
   },
-): CollectionConfig<T, TKey, never, IndexedDBCollectionUtils<T, TKey, T>> & {
+): CollectionConfig<T, TKey, never, IndexedDBCollectionUtils<T>> & {
   schema?: never
-  utils: IndexedDBCollectionUtils<T, TKey, T>
+  utils: IndexedDBCollectionUtils<T>
 }
 
 export function indexedDBCollectionOptions(
@@ -485,6 +488,7 @@ export function indexedDBCollectionOptions(
   type Sync = Parameters<SyncConfig<Item>['sync']>[0]
   const collectionId =
     baseCollectionConfig.id ?? `indexeddb-collection:${dbInstance.name}:${name}`
+  const connection = connections.get(dbInstance.db)
   const tabId = safeRandomUUID()
   const versionCache = new Map<string | number, string>()
   let collection: Sync['collection'] | undefined
@@ -582,7 +586,6 @@ export function indexedDBCollectionOptions(
             stores[VERSIONS_STORE_NAME]!.put(
               {
                 versionKey,
-                updatedAt: Date.now(),
               } satisfies VersionEntry,
               [name, key],
             )
@@ -605,7 +608,7 @@ export function indexedDBCollectionOptions(
     // Full-row update confirms put even if a peer inserted during the handler.
     // A replacement's truncate already supplies its own publication boundary.
     activeSync.begin()
-    if (replace) activeSync.truncate()
+    if (replace) activeSync.truncate({ markReady: !connection?.error })
     for (const mutation of mutations) {
       activeSync.write(
         mutation.type === 'delete'
@@ -633,7 +636,7 @@ export function indexedDBCollectionOptions(
         return { items, versions }
       },
     )
-    if (activeSync !== params) return
+    if (activeSync !== params || connection?.error) return
     versionCache.clear()
     for (const [key, version] of snapshot.versions)
       versionCache.set(key, version)
@@ -646,10 +649,22 @@ export function indexedDBCollectionOptions(
   }
 
   const internalSync: SyncConfig<Item>['sync'] = (params) => {
-    const { begin, write, commit, markError, truncate } = params
+    const { begin, write, commit, markError } = params
     activeSync = params
     collection = params.collection
     let channel: BroadcastChannel | undefined
+    const retire = () => {
+      channel?.close()
+      if (activeSync === params) {
+        broadcastChannel = undefined
+        markError(connection?.error)
+      }
+    }
+    if (connection?.error) {
+      retire()
+      return
+    }
+    connection?.listeners.add(retire)
 
     try {
       channel = new BroadcastChannel(`tanstack-db:${dbInstance.name}`)
@@ -659,20 +674,13 @@ export function indexedDBCollectionOptions(
         if (!isCrossTabMessage(message)) return
         if (
           activeSync !== params ||
+          connection?.error ||
           message.tabId === tabId ||
           message.database !== dbInstance.name ||
-          (message.type !== 'database-deleted' && message.name !== name)
+          message.name !== name
         )
           return
         try {
-          if (message.type === 'database-deleted') {
-            if (!deletedConnections.has(dbInstance.db)) return
-            begin()
-            truncate()
-            versionCache.clear()
-            commit()
-            return
-          }
           if (message.type === 'database-cleared') {
             // The notification describes an earlier replacement. Current
             // durable rows may also contain later accepted writes.
@@ -699,7 +707,7 @@ export function indexedDBCollectionOptions(
               return result
             },
           )
-          if (activeSync !== params) return
+          if (activeSync !== params || connection?.error) return
           const changes: Array<ChangeMessageOrDeleteKeyMessage<Item>> = []
           for (const { key, version, value } of rows) {
             const cached = versionCache.get(key)
@@ -737,6 +745,7 @@ export function indexedDBCollectionOptions(
 
     return {
       cleanup: () => {
+        connection?.listeners.delete(retire)
         channel?.close()
         if (activeSync === params) {
           activeSync = undefined
@@ -801,15 +810,6 @@ export function indexedDBCollectionOptions(
     broadcastChange([], 'database-cleared')
   }
 
-  const deleteDatabaseUtil = async (): Promise<void> => {
-    dbInstance.close()
-    await deleteIDBDatabase(dbInstance.name, dbInstance.idbFactory)
-    deletedConnections.add(dbInstance.db)
-    versionCache.clear()
-    confirm([], true)
-    broadcastChange([], 'database-deleted')
-  }
-
   const getDatabaseInfo = async (): Promise<DatabaseInfo> => {
     const db = dbInstance.db
     const info: DatabaseInfo = {
@@ -862,7 +862,6 @@ export function indexedDBCollectionOptions(
 
   const utils: IndexedDBCollectionUtils = {
     clearObjectStore,
-    deleteDatabase: deleteDatabaseUtil,
     getDatabaseInfo,
     acceptMutations,
     exportData,

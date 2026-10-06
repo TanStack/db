@@ -26,8 +26,10 @@
  * arbitrary overlapping writers or process crash. This owner makes bounded
  * matrix claims; generated sequential histories live in persistence-oracle.
  */
-import { createTransaction } from '@tanstack/db'
+import { createCollection, createTransaction } from '@tanstack/db'
+import { z } from 'zod'
 import { describe, expect, it, vi } from 'vitest'
+import { indexedDBCollectionOptions } from '../src'
 import {
   Channel,
   assertRows,
@@ -388,36 +390,148 @@ it('retains the previous snapshot when an imported replacement cannot be cloned'
 // Request admission work is independent of durable row equality. For N rows,
 // queue the N data and N version writes before waiting for request completion;
 // native transaction completion remains the single atomic success boundary.
-for (const count of [0, 1, 10]) {
-  it(`queues a ${count}-row import before waiting for individual writes`, async () => {
-    await withHarness(async (h) => {
-      const c = await h.open(),
-        nativePut = IDBObjectStore.prototype.put
-      let issued = 0,
-        beforeFirstSuccess = 0
-      vi.spyOn(IDBObjectStore.prototype, 'put').mockImplementation(function (
-        this: IDBObjectStore,
-        ...args: Parameters<IDBObjectStore['put']>
-      ) {
-        issued++
-        const req = nativePut.apply(this, args)
-        req.addEventListener('success', () => {
-          beforeFirstSuccess ||= issued
+// Import can be empty. Automatic CRUD supplies one or ten actual mutations.
+for (const entry of ['import', 'insert', 'update', 'delete'] as const) {
+  for (const count of entry === 'import' ? [0, 1, 10] : [1, 10]) {
+    it(`queues a ${count}-row ${entry} before waiting for individual writes`, async () => {
+      await withHarness(async (h) => {
+        const authored = Array.from({ length: count }, (_, id) => ({
+          id,
+          name: String(id),
+        }))
+        if (entry === 'update' || entry === 'delete')
+          await seed(
+            h.db,
+            'items',
+            authored.map((row) => ({ ...row, name: 'before' })),
+          )
+        const c = await h.open()
+        let issued = 0,
+          beforeFirstSuccess = 0
+        const observe = <T>(req: IDBRequest<T>) => {
+          issued++
+          req.addEventListener('success', () => {
+            beforeFirstSuccess ||= issued
+          })
+          return req
+        }
+        const nativePut = IDBObjectStore.prototype.put
+        const nativeDelete = IDBObjectStore.prototype.delete
+        vi.spyOn(IDBObjectStore.prototype, 'put').mockImplementation(function (
+          this: IDBObjectStore,
+          ...args: Parameters<IDBObjectStore['put']>
+        ) {
+          return observe(nativePut.apply(this, args))
         })
-        return req
+        vi.spyOn(IDBObjectStore.prototype, 'delete').mockImplementation(
+          function (
+            this: IDBObjectStore,
+            ...args: Parameters<IDBObjectStore['delete']>
+          ) {
+            return observe(nativeDelete.apply(this, args))
+          },
+        )
+        if (entry === 'import') await c.utils.importData(authored)
+        else if (entry === 'insert')
+          await c.insert(authored).isPersisted.promise
+        else if (entry === 'update')
+          await c.update(
+            authored.map((row) => row.id),
+            (drafts) => {
+              drafts.forEach((draft) => {
+                draft.name = String(draft.id)
+              })
+            },
+          ).isPersisted.promise
+        else await c.delete(authored.map((row) => row.id)).isPersisted.promise
+        const expected = entry === 'delete' ? [] : authored
+        expect(issued).toBe(2 * count)
+        expect(beforeFirstSuccess).toBe(2 * count)
+        assertRows(
+          (await readStore<Row>(h.db, 'items')).rows,
+          expected,
+          'bulk native completion',
+        )
+        assertRows(c.values(), expected, 'bulk caller settlement')
       })
-      const expected = Array.from({ length: count }, (_, id) => ({
-        id,
-        name: String(id),
-      }))
-      await c.utils.importData(expected)
-      expect(issued).toBe(2 * count)
-      expect(beforeFirstSuccess).toBe(2 * count)
-      assertRows(
-        (await readStore<Row>(h.db, 'items')).rows,
-        expected,
-        'bulk native completion',
-      )
     })
-  })
+  }
+}
+
+// Schema input and durable output are different domains. Validate the whole
+// replacement and check uniqueness of transformed keys before storage work.
+// A bad first/middle/last input is an identity effect on rows and versions.
+// The accepted suffix has independently authored numeric keys and uppercase
+// names; deriving keys from unvalidated strings or validating output again fails.
+for (const failure of ['schema', 'transformed-key'] as const) {
+  for (const badIndex of [0, 1, 2]) {
+    it(`preserves replacement on ${failure} failure at input ${badIndex}`, async () => {
+      await withHarness(async (h) => {
+        await seed(h.db, 'items', original)
+        const c = createCollection(
+          indexedDBCollectionOptions({
+            db: h.db,
+            name: 'items',
+            schema: z.object({
+              id: z.string().transform(Number),
+              name: z
+                .string()
+                .min(1)
+                .transform((value) => value.trim().toUpperCase()),
+            }),
+            getKey: (row) => row.id,
+          }),
+        )
+        h.disposers.push(() => c.cleanup())
+        await c.preload()
+        const peer = await h.open('items', { db: await h.connect() })
+        const input = [
+          { id: '3', name: ' three ' },
+          { id: '4', name: ' four ' },
+          { id: '5', name: ' five ' },
+        ]
+        const invalid = input.map((row) => ({ ...row }))
+        if (failure === 'schema') invalid[badIndex]!.name = ''
+        else invalid[badIndex]!.id = '0' + input[(badIndex + 1) % 3]!.id
+        const beforeVersions = await readStore(h.db, '_versions')
+        const transactions = vi.spyOn(h.db.db, 'transaction')
+        await expect(c.utils.importData(invalid)).rejects.toThrow()
+        expect(
+          transactions,
+          'invalid batch has no storage effects',
+        ).not.toHaveBeenCalled()
+        transactions.mockRestore()
+        expect(
+          Channel.sent,
+          'invalid batch has no publication authority',
+        ).toEqual([])
+        expect(await readStore(h.db, '_versions')).toEqual(beforeVersions)
+        assertRows(
+          (await readStore<Row>(h.db, 'items')).rows,
+          original,
+          'invalid schema durable',
+        )
+        assertRows(c.values(), original, 'invalid schema public')
+        assertRows(peer.values(), original, 'invalid schema peer')
+        await c.utils.importData(input)
+        await Channel.deliver()
+        const expected = [
+          { id: 3, name: 'THREE' },
+          { id: 4, name: 'FOUR' },
+          { id: 5, name: 'FIVE' },
+        ]
+        assertRows(
+          (await readStore<Row>(h.db, 'items')).rows,
+          expected,
+          'transformed durable keys and values',
+        )
+        for (const subject of [c, peer, await h.open()])
+          assertRows(
+            subject.values(),
+            expected,
+            'transformed output public and restore',
+          )
+      })
+    })
+  }
 }

@@ -145,3 +145,21 @@ claim that every cross-tab history is correct. Cross-Collection ordering,
 utility/automatic ordering, pending writes across cleanup/restart, lost
 notifications, nested mutable values, and physical crash durability keep their
 existing coverage-map owners.
+
+## Subsequent law audit
+
+The [law enforcement follow-up](2026-10-05-indexeddb-law-audit.md) supersedes
+the closure and deferral assessment above without changing this historical
+evidence. It records four previously surviving hostile implementations,
+their stronger oracle checks, completion of XH-14, and XH-06 as an accepted
+design. It also reopens XH-07 with a deletion-lifetime counterexample that
+fails in the controlled suite and all three native browser engines. The
+follow-up is working-tree evidence; a deletion design decision is pending.
+
+## Subsequent TLA+ refinement
+
+The [TLA+ translation and loss audit](2026-10-06-indexeddb-tla-refinement.md)
+supersedes the open deletion-design disposition above. It records the approved
+administrative deletion contract, oracle-first RED, source repairs, loss recovery,
+production fault calibration and native receiving evidence. The historical
+counterexamples above are retained; no deferral is used to claim closure.
