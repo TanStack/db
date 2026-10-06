@@ -1,5 +1,5 @@
 import { compareKeys } from '@tanstack/db-ivm'
-import { compareKeysReversed } from '../utils/array-utils.js'
+import { findInsertPositionInArray } from '../utils/array-utils.js'
 import { BTree } from '../utils/btree.js'
 import {
   areSameValueZeroEqual,
@@ -32,6 +32,35 @@ type OrderedBucket<TKey> = {
   representative: unknown
   exactValues: Set<unknown>
   keys: Set<TKey>
+  /**
+   * The keys by ascending key. The first ordered read builds it, and writes
+   * then keep it in order, so a bounded read never sorts the bucket.
+   */
+  sorted?: Array<TKey>
+}
+
+function addBucketKey<TKey extends string | number>(
+  bucket: OrderedBucket<TKey>,
+  key: TKey,
+): void {
+  if (bucket.keys.has(key)) return
+  bucket.keys.add(key)
+  bucket.sorted?.splice(
+    findInsertPositionInArray(bucket.sorted, key, compareKeys),
+    0,
+    key,
+  )
+}
+
+function deleteBucketKey<TKey extends string | number>(
+  bucket: OrderedBucket<TKey>,
+  key: TKey,
+): void {
+  if (!bucket.keys.delete(key) || !bucket.sorted) return
+  bucket.sorted.splice(
+    findInsertPositionInArray(bucket.sorted, key, compareKeys),
+    1,
+  )
 }
 
 /**
@@ -96,13 +125,13 @@ export class BTreeIndex<
     const exact = this.valueMap.get(normalizedValue)
     if (exact) {
       exact.keys.add(key)
-      exact.ordered.keys.add(key)
+      addBucketKey(exact.ordered, key)
       return
     }
 
     let orderedBucket = this.orderedEntries.get(normalizedValue)
     if (orderedBucket) {
-      orderedBucket.keys.add(key)
+      addBucketKey(orderedBucket, key)
       orderedBucket.exactValues.add(normalizedValue)
     } else {
       orderedBucket = {
@@ -164,7 +193,7 @@ export class BTreeIndex<
       orderedBucket.representative = representative
     }
     exact.keys.delete(key)
-    orderedBucket.keys.delete(key)
+    deleteBucketKey(orderedBucket, key)
     if (removedExactValue) {
       this.valueMap.delete(normalizedValue)
       orderedBucket.exactValues.delete(normalizedValue)
@@ -340,12 +369,10 @@ export class BTreeIndex<
     // Every key owns exactly one bucket, so the walk never repeats a key.
     while ((pair = nextPair(key)) !== undefined && result.length < n) {
       key = pair[0]
-      // Sort keys for deterministic order within a comparator position.
-      const sorted = Array.from(pair[1].keys).sort(
-        reversed ? compareKeysReversed : compareKeys,
-      )
-      for (const ks of sorted) {
-        if (result.length >= n) break
+      // Keys within a comparator position come in key order, deterministically.
+      const sorted = (pair[1].sorted ??= [...pair[1].keys].sort(compareKeys))
+      for (let i = 0; i < sorted.length && result.length < n; i++) {
+        const ks = sorted[reversed ? sorted.length - 1 - i : i]!
         if (filterFn?.(ks) ?? true) result.push(ks)
       }
     }
@@ -408,6 +435,34 @@ export class BTreeIndex<
     const nextPair = (k?: any) => this.orderedEntries.nextLowerPair(k)
     // Pass undefined to mean "start from end" (BTree's native behavior)
     return this.takeInternal(n, nextPair, undefined, filterFn, true)
+  }
+
+  takeNullish(n: number, filterFn?: (key: TKey) => boolean): Array<TKey> {
+    // `null` and `undefined` share one comparator position. The value map
+    // finds it without calling a possibly custom comparator on `null`.
+    const bucket = (
+      this.valueMap.get(null) ?? this.valueMap.get(normalizeForBTree(undefined))
+    )?.ordered
+    if (!bucket) return []
+    return this.takeInternal(
+      n,
+      (k) => (k === undefined ? [null, bucket] : undefined),
+      undefined,
+      filterFn,
+    )
+  }
+
+  takeReversedNonNullish(
+    n: number,
+    from?: unknown,
+    filterFn?: (key: TKey) => boolean,
+  ): Array<TKey> {
+    const nextPair = (k?: any) => {
+      const pair = this.orderedEntries.nextLowerPair(k)
+      return pair && denormalizeUndefined(pair[0]) != null ? pair : undefined
+    }
+    const start = from === undefined ? undefined : normalizeForBTree(from)
+    return this.takeInternal(n, nextPair, start, filterFn, true)
   }
 
   /**

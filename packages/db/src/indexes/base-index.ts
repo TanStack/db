@@ -87,6 +87,17 @@ export interface IndexInterface<
     n: number,
     filterFn?: (key: TKey) => boolean,
   ) => Array<TKey>
+  /** The first `n` keys whose value is null or undefined, by ascending key. */
+  takeNullish: (n: number, filterFn?: (key: TKey) => boolean) => Array<TKey>
+  /**
+   * `takeReversed`, from the end when `from` is omitted, stopping before the
+   * null or undefined values.
+   */
+  takeReversedNonNullish: (
+    n: number,
+    from?: unknown,
+    filterFn?: (key: TKey) => boolean,
+  ) => Array<TKey>
 
   get keyCount(): number
   supports: (operation: IndexOperation) => boolean
@@ -176,6 +187,15 @@ export abstract class BaseIndex<
   ): Array<TKey>
   abstract takeReversedFromEnd(
     n: number,
+    filterFn?: (key: TKey) => boolean,
+  ): Array<TKey>
+  abstract takeNullish(
+    n: number,
+    filterFn?: (key: TKey) => boolean,
+  ): Array<TKey>
+  abstract takeReversedNonNullish(
+    n: number,
+    from?: unknown,
     filterFn?: (key: TKey) => boolean,
   ): Array<TKey>
   abstract get keyCount(): number

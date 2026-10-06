@@ -373,6 +373,37 @@ export class BasicIndex<
     from: any,
     filterFn?: (key: TKey) => boolean,
   ): Array<TKey> {
+    return this.takeFromIndex(n, this.reversedStart(from), -1, filterFn)
+  }
+
+  takeReversedNonNullish(
+    n: number,
+    from?: unknown,
+    filterFn?: (key: TKey) => boolean,
+  ): Array<TKey> {
+    const start =
+      from === undefined
+        ? this.sortedValues.length - 1
+        : this.reversedStart(from)
+    return this.takeFromIndex(n, start, -1, filterFn, true)
+  }
+
+  /** This index sorts a group on each read, including the nullish group. */
+  takeNullish(n: number, filterFn?: (key: TKey) => boolean): Array<TKey> {
+    const keys = [
+      ...(this.valueMap.get(null) ?? []),
+      ...(this.valueMap.get(undefined) ?? []),
+    ].sort(compareKeys)
+    const result: Array<TKey> = []
+    for (const key of keys) {
+      if (result.length >= n) break
+      if (filterFn?.(key) ?? true) result.push(key)
+    }
+    return result
+  }
+
+  /** The last position before `from` in sorted order. */
+  private reversedStart(from: unknown): number {
     const normalizedFrom = normalizeValue(from)
     let startIdx =
       findInsertPositionInArray(
@@ -387,8 +418,7 @@ export class BasicIndex<
     ) {
       startIdx--
     }
-
-    return this.takeFromIndex(n, startIdx, -1, filterFn)
+    return startIdx
   }
 
   /**
@@ -413,13 +443,15 @@ export class BasicIndex<
     startIndex: number,
     step: 1 | -1,
     filterFn?: (key: TKey) => boolean,
+    stopAtNullish = false,
   ): Array<TKey> {
     const result: Array<TKey> = []
     let index = startIndex
     while (
       index >= 0 &&
       index < this.sortedValues.length &&
-      result.length < n
+      result.length < n &&
+      !(stopAtNullish && this.sortedValues[index] == null)
     ) {
       const groupValue = this.sortedValues[index]
       const groupKeys: Array<TKey> = []
