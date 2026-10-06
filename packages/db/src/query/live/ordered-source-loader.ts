@@ -497,7 +497,6 @@ export class OrderedSourceLoader {
 
   dispose(): void {
     this.active = false
-    this.stagedContinuation = undefined
     this.resetCursor()
     this.failedAcquisitions.clear()
     this.settledFiniteAcquisitions.clear()

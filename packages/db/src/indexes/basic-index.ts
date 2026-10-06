@@ -61,16 +61,7 @@ export class BasicIndex<
    * Adds a value to the index
    */
   add(key: TKey, item: any): void {
-    let indexedValue: any
-    try {
-      indexedValue = this.evaluateIndexExpression(item)
-    } catch (error) {
-      throw new Error(
-        `Failed to evaluate index expression for key ${key}: ${error}`,
-        { cause: error },
-      )
-    }
-
+    const indexedValue = this.evaluateAddedValue(key, item)
     const normalizedValue = normalizeValue(indexedValue)
 
     this.addToBucket(key, normalizedValue)
@@ -197,15 +188,7 @@ export class BasicIndex<
     // Collect all entries first
     const entriesArray: Array<{ key: TKey; value: any }> = []
     for (const [key, item] of entries) {
-      let indexedValue: any
-      try {
-        indexedValue = this.evaluateIndexExpression(item)
-      } catch (error) {
-        throw new Error(
-          `Failed to evaluate index expression for key ${key}: ${error}`,
-          { cause: error },
-        )
-      }
+      const indexedValue = this.evaluateAddedValue(key, item)
       entriesArray.push({ key, value: normalizeValue(indexedValue) })
       this.addRangeValue(indexedValue)
       this.indexedKeys.add(key)

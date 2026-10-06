@@ -74,14 +74,7 @@ export class BTreeIndex<
    * Adds a value to the index
    */
   add(key: TKey, item: any): void {
-    let indexedValue: any
-    try {
-      indexedValue = this.evaluateIndexExpression(item)
-    } catch (error) {
-      throw new Error(
-        `Failed to evaluate index expression for key ${key}: ${error}`,
-      )
-    }
+    const indexedValue = this.evaluateAddedValue(key, item)
 
     // Normalize the value for Map key usage
     const normalizedValue = normalizeForBTree(indexedValue)
