@@ -867,7 +867,6 @@ function deepCopyFrom(from: From): From {
   )
 }
 
-
 function optimizeNestedFrom(from: From): From {
   if (from.type === `queryRef`) {
     return new QueryRefClass(applyRecursiveOptimization(from.query), from.alias)
@@ -907,12 +906,13 @@ function optimizeFromWithTracking(
 ): From {
   if (from.type === `unionFrom`) {
     return new UnionFromClass(
-      from.sources.map((source) =>
-        optimizeFromWithTracking(
-          source,
-          singleSourceClauses,
-          actuallyOptimized,
-        ) as CollectionRefClass | QueryRefClass,
+      from.sources.map(
+        (source) =>
+          optimizeFromWithTracking(
+            source,
+            singleSourceClauses,
+            actuallyOptimized,
+          ) as CollectionRefClass | QueryRefClass,
       ),
     )
   }

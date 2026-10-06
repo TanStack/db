@@ -47,6 +47,54 @@ const getStateEntries = <
   ])
 
 describe(`Collection`, () => {
+  type SyncActionsForThis = Parameters<
+    SyncConfig<{ id: number; v: number }, number>[`sync`]
+  >[0]
+  // A config may define its handlers as methods. Each direct mutation calls
+  // its handler as a method of the config, so `this` is the config.
+  it(`calls mutation handlers as methods of the config`, async () => {
+    const calls: Array<string> = []
+    const config = {
+      id: `handler-this`,
+      getKey: (row: { id: number; v: number }) => row.id,
+      startSync: true,
+      sync: {
+        sync: ({ begin, write, commit, markReady }: SyncActionsForThis) => {
+          begin()
+          write({ type: `insert`, value: { id: 1, v: 0 } })
+          write({ type: `insert`, value: { id: 2, v: 0 } })
+          commit()
+          markReady()
+        },
+      },
+      label: `config`,
+      onInsert() {
+        calls.push(`insert:${this.label}`)
+        return Promise.resolve()
+      },
+      onUpdate() {
+        calls.push(`update:${this.label}`)
+        return Promise.resolve()
+      },
+      onDelete() {
+        calls.push(`delete:${this.label}`)
+        return Promise.resolve()
+      },
+    }
+    const collection = createCollection(config)
+    try {
+      await collection.stateWhenReady()
+      await collection.insert({ id: 3, v: 0 }).isPersisted.promise
+      await collection.update(1, (draft) => {
+        draft.v = 1
+      }).isPersisted.promise
+      await collection.delete(2).isPersisted.promise
+      expect(calls).toEqual([`insert:config`, `update:config`, `delete:config`])
+    } finally {
+      await collection.cleanup()
+    }
+  })
+
   it.each([false, true])(
     `owns binding utilities only when a sync factory exists: %s`,
     async (bind) => {

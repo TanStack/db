@@ -347,9 +347,14 @@ export class CollectionMutationsManager<
     if (ambientTransaction) {
       this.applyOwnedMutations(ambientTransaction, mutations)
       return ambientTransaction
-    } else {
-      return this.commitDirect(`insert`, this.config.onInsert!, mutations)
     }
+
+    // Call each handler through the config so a method keeps its `this`.
+    return this.commitDirect(
+      `insert`,
+      (params) => this.config.onInsert!(params),
+      mutations,
+    )
   }
 
   /**
@@ -520,7 +525,11 @@ export class CollectionMutationsManager<
       return ambientTransaction
     }
 
-    return this.commitDirect(`update`, this.config.onUpdate!, mutations)
+    return this.commitDirect(
+      `update`,
+      (params) => this.config.onUpdate!(params),
+      mutations,
+    )
   }
 
   /**
@@ -593,6 +602,10 @@ export class CollectionMutationsManager<
       return ambientTransaction
     }
 
-    return this.commitDirect(`delete`, this.config.onDelete!, mutations)
+    return this.commitDirect(
+      `delete`,
+      (params) => this.config.onDelete!(params),
+      mutations,
+    )
   }
 }
