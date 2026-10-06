@@ -9,7 +9,9 @@ import {
 } from './live-query-adapter.js'
 import { createLiveQueryObserver } from './live-query-observer.js'
 import { BaseQueryBuilder } from './query/builder/index.js'
+import { getQueryIR } from './query/builder/query-ir.js'
 import { collectCollectionSources } from './query/ir.js'
+import { getBuilderFromConfig } from './query/live/collection-registry.js'
 import { deepEquals } from './utils.js'
 import type {
   LiveQueryObserver,
@@ -97,12 +99,21 @@ export function resolveLiveQueryWindowInput<TContext extends Context>(
  *
  * @internal This contract is unstable while RFC #1623 is being implemented.
  */
-export function canStartLiveQueryWindowSyncInRender(
-  query: QueryBuilder<any>,
+export function canStartLiveQueryWindowSyncInRender<TContext extends Context>(
+  query: QueryBuilder<TContext>,
 ): boolean {
-  const ir = (query as unknown as BaseQueryBuilder)._getQuery()
-  return collectCollectionSources(ir).every(
-    ({ collection }) => collection.config.syncMode !== `on-demand`,
+  const visited = new Set<Collection<any, any, any>>()
+  const loadsEagerly = (collection: Collection<any, any, any>): boolean => {
+    if (visited.has(collection)) return true
+    visited.add(collection)
+    // A live-query Collection does not copy its sources' sync mode, so check
+    // the sources it reads from.
+    const builder = getBuilderFromConfig(collection.config)
+    if (builder) return builder.getSourceCollections().every(loadsEagerly)
+    return collection.config.syncMode !== `on-demand`
+  }
+  return collectCollectionSources(getQueryIR(query)).every(({ collection }) =>
+    loadsEagerly(collection),
   )
 }
 

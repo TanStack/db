@@ -1,6 +1,11 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { flushSync } from 'svelte'
-import { createCollection, createLiveQueryCollection, lte } from '@tanstack/db'
+import {
+  BTreeIndex,
+  createCollection,
+  createLiveQueryCollection,
+  lte,
+} from '@tanstack/db'
 import { useLiveInfiniteQuery } from '../src/useLiveInfiniteQuery.svelte.js'
 import { mockSyncCollectionOptions } from '../../db/tests/utils'
 import type { InitialQueryBuilder } from '@tanstack/db'
@@ -38,6 +43,31 @@ function createPostsLiveQuery(posts: ReturnType<typeof createPostsCollection>) {
         .orderBy(({ posts: post }) => post.createdAt, `desc`)
         .limit(4),
   })
+}
+
+// An on-demand source that counts acquisitions. Its loads never settle, so
+// the test observes only whether a request was sent.
+function createCountingOnDemandPosts(id: string) {
+  let loads = 0
+  const posts = createCollection<Post>({
+    id,
+    getKey: (post) => post.id,
+    syncMode: `on-demand`,
+    autoIndex: `eager`,
+    defaultIndexType: BTreeIndex,
+    sync: {
+      sync: ({ markReady }) => {
+        markReady()
+        return {
+          loadSubset: () => {
+            loads++
+            return new Promise<void>(() => {})
+          },
+        }
+      },
+    },
+  })
+  return { posts, loads: () => loads }
 }
 
 // Reads the maximum inside the query callback, so the hook tracks it directly.
@@ -171,5 +201,49 @@ describe(`useLiveInfiniteQuery`, () => {
     setMaximum(5)
     flushSync()
     expect(query.data.map((post) => post.createdAt)).toEqual([5, 4, 3])
+  })
+  it(`does not acquire an on-demand source before the subscribing effect runs`, () => {
+    for (const wrapped of [false, true]) {
+      const { posts: remote, loads } = createCountingOnDemandPosts(
+        `svelte-infinite-on-demand-${wrapped ? `wrapped` : `direct`}`,
+      )
+      // A live-query Collection does not copy its source's sync mode.
+      const posts = wrapped
+        ? createLiveQueryCollection({
+            query: (q) =>
+              q
+                .from({ posts: remote })
+                .orderBy(({ posts: post }) => post.createdAt, `desc`),
+            startSync: false,
+            gcTime: 1,
+          })
+        : remote
+      let query: ReturnType<typeof usePostsAtMostInfiniteQuery> | undefined
+      let setMaximum: ((maximum: number) => void) | undefined
+      const stop = $effect.root(() => {
+        let maximum = $state(8)
+        // The wrapped live-query Collection has a derived row type. This test
+        // reads only acquisition counts, so the source type is cast here.
+        query = usePostsAtMostInfiniteQuery(posts as any, () => maximum)
+        setMaximum = (next) => {
+          maximum = next
+        }
+      })
+      try {
+        if (!query || !setMaximum) {
+          throw new Error(`Failed to mount infinite query`)
+        }
+        // Construction and a superseded recompute both precede the effect.
+        void query.data
+        setMaximum(5)
+        void query.data
+        expect(loads()).toBe(0)
+
+        flushSync()
+        expect(loads()).toBeGreaterThan(0)
+      } finally {
+        stop()
+      }
+    }
   })
 })

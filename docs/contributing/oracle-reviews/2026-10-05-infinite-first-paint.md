@@ -144,3 +144,51 @@ Known limit: an eager collection started during render has only the 50 ms
 unsubscribed GC floor before its commit. If a commit arrives later than that,
 GC may clean the collection up first. `useLiveQuery` shares this exposure. No
 test reaches this case.
+
+## Addendum: nested on-demand sources and retained-page windows
+
+A review of `725e37a28ac81e3d5041d990eb4abeebedc60399` reproduced two
+regressions from starting sync in render:
+
+- The start gate read only a query's immediate sources. A live-query
+  Collection does not copy its sources' sync mode, so an on-demand source
+  behind one passed the gate. An abandoned React Suspense render then sent a
+  page request. The gate now follows each live-query Collection to the sources
+  it reads.
+- A dependency replacement that keeps page depth built its collection with a
+  one-page window and started it in render. React committed a `ready` result
+  with fewer rows than the retained pages and `hasNextPage: false`, then
+  corrected it. React and Svelte now size the new window for every retained
+  page.
+
+Evidence, produced on the working tree above that commit:
+
+- `packages/react-db/tests/infinite-query-render-start.test.tsx` has three
+  tests. A wrapped on-demand source gets no acquisition from an abandoned
+  render, and a committed control acquires it. Every ready commit after an
+  equal dependency replacement keeps all retained rows and continuation.
+- Mutants: without the nested walk, only the abandoned-render test fails. With
+  a one-page window, only the retained-pages test fails.
+- `useLiveInfiniteQuery.svelte.test.ts` checks that no on-demand source, direct
+  or wrapped, is acquired at construction or by a superseded recompute before
+  the subscribing effect runs, and that one is acquired after it runs. Against
+  a `db` build without the nested walk, the wrapped case loaded once at
+  construction.
+- Local suites: react-db 336, vue-db 121, svelte-db 119, and the db infinite
+  calibration 9.
+
+Svelte's retained-page window was fixed by the same rule, but no test observes
+an intermediate Svelte value. The coverage map lists that cell.
+
+## Revision index
+
+Each entry's evidence applies to the revision named here. The first section's
+table and closure apply to `415a8d4a1`.
+
+| Entry | Revision |
+| --- | --- |
+| Record and requirement outcomes | `415a8d4a1` (record added in `1c74a335d`) |
+| Duplicate pre-commit render fix | `a4af6a251` |
+| Cleaned-up reuse liveness check | `fc5f136a5` |
+| Start-sync gate replaces render-time reuse | `b31b84ff9` |
+| Nested on-demand sources and retained-page windows | the commit that adds this entry, on top of `725e37a28` |

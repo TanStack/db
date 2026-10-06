@@ -254,6 +254,21 @@ export function useLiveInfiniteQuery<TContext extends Context>(
     let collection = committed?.collection
     let warning: string | null = null
 
+    const canPreservePageCount = shouldPreserveLiveQueryWindowPageCount({
+      hasPreviousController: committed !== null,
+      previousInputKind: committed?.inputKind,
+      inputKind,
+      sameCollection:
+        inputIsCollection && committed?.inputCollection === queryFnOrCollection,
+      dependenciesChanged,
+      dependenciesStructurallyEqual,
+      pageShapeChanged,
+    })
+    const previousPageCount = committed
+      ? Math.max(1, committed.controller.getSnapshot().pages.length)
+      : 1
+    const initialPageCount = canPreservePageCount ? previousPageCount : 1
+
     if (needsNewCollection) {
       let inputValue = queryFnOrCollection
       if (!inputIsCollection) {
@@ -270,10 +285,11 @@ export function useLiveInfiniteQuery<TContext extends Context>(
       if (input.kind === `collection`) {
         collection = input.collection
       } else {
-        // Wrap the query with the first page's peek-ahead window; the controller
-        // grows the limit from here via setWindow.
+        // Wrap the query with the peek-ahead window for every retained page, so
+        // a collection that starts syncing now never publishes fewer rows than
+        // the controller's pages. The controller grows the limit via setWindow.
         collection = createLiveQueryCollection({
-          query: input.query.limit(pageSize + 1).offset(0),
+          query: input.query.limit(initialPageCount * pageSize + 1).offset(0),
           // Like useLiveQuery, start sync during render so a synchronously
           // loaded source is published on the first commit instead of an empty
           // idle commit. GC reclaims a render that never commits. On-demand
@@ -296,20 +312,6 @@ export function useLiveInfiniteQuery<TContext extends Context>(
       assertLiveQueryWindowManyResult(collection)
     }
 
-    const canPreservePageCount = shouldPreserveLiveQueryWindowPageCount({
-      hasPreviousController: committed !== null,
-      previousInputKind: committed?.inputKind,
-      inputKind,
-      sameCollection:
-        inputIsCollection && committed?.inputCollection === collection,
-      dependenciesChanged,
-      dependenciesStructurallyEqual,
-      pageShapeChanged,
-    })
-    const previousPageCount = committed
-      ? Math.max(1, committed.controller.getSnapshot().pages.length)
-      : 1
-    const initialPageCount = canPreservePageCount ? previousPageCount : 1
     renderState = {
       inputKind,
       inputCollection: inputIsCollection ? collection : null,

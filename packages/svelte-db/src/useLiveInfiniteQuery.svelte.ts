@@ -182,7 +182,9 @@ export function useLiveInfiniteQuery<TContext extends Context>(
     }
 
     const collection = createLiveQueryCollection({
-      query: input.query.limit(pageSize + 1).offset(0),
+      // Size the window for every retained page, so a collection that starts
+      // syncing now never publishes fewer rows than the controller's pages.
+      query: input.query.limit(initialPageCount * pageSize + 1).offset(0),
       // Like useLiveQuery, start sync during construction so a synchronously
       // loaded source is published on the first render instead of an empty
       // idle snapshot before the subscribing effect attaches. On-demand
