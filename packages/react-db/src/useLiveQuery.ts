@@ -936,6 +936,8 @@ function useLiveQueryImpl(
             : DEFAULT_GC_TIME_MS,
           // Hydration and Suspense key the live-query Collection by identity.
           pool: !forSuspense && !dbClient,
+          // Without a DbClient, Suspense starts it through a preload below.
+          startSync: !forSuspense || dbClient !== undefined,
         }) as SuspenseCollection | null
         if (suspenseCollections && suspenseKey && instance.collection) {
           const collection = instance.collection
@@ -1000,6 +1002,13 @@ function useLiveQueryImpl(
     })
   }
   const observer = instance.observer!
+  // A Suspense render asks for its data. Preloading starts the sync run, so a
+  // source that already holds the rows makes it ready before the snapshot is
+  // read instead of suspending once. useLiveSuspenseQuery surfaces failures.
+  // A DbClient defers source starts past render and owns its streamed query.
+  if (forSuspense && !dbClient && instance.collection?.status === `idle`) {
+    observer.preloadForInitialRender().catch(() => {})
+  }
 
   // Stable subscribe bound to the current observer; the observer owns the
   // subscription, ready-race, and disposal.
