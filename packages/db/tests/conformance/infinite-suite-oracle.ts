@@ -641,8 +641,15 @@ export function runInfiniteQuerySuite(rawDriver: InfiniteQueryDriver): void {
         )
         await handle.flush()
 
-        // One mount requests its first peek-ahead window exactly once.
+        // One mount requests its first peek-ahead window exactly once, and a
+        // source that answers synchronously makes the first value ready.
         expect(source.calls.filter((call) => call.limit === 4)).toHaveLength(1)
+        expect(handle.observations()[0]).toEqual({
+          status: `ready`,
+          ids: [`1`, `2`, `3`],
+          pages: [[`1`, `2`, `3`]],
+          hasNextPage: true,
+        })
         expectPageRows(handle.current(), rows(8).slice(0, 3), 3)
         expect(handle.current().data.map((row) => row.id)).toEqual([
           `1`,
@@ -699,6 +706,15 @@ export function runInfiniteQuerySuite(rawDriver: InfiniteQueryDriver): void {
           ).toHaveLength(1)
           expectPageRows(handle.current(), rows(8).slice(0, 3), 3)
           expectReadyObservationsMatchSource(handle, rows(8), 3)
+          if (declared === 4) {
+            // The exact window starts in render, so its first value is ready.
+            expect(handle.observations()[0], `${where}: first value`).toEqual({
+              status: `ready`,
+              ids: [`1`, `2`, `3`],
+              pages: [[`1`, `2`, `3`]],
+              hasNextPage: true,
+            })
+          }
           handle.unmount()
         }
       },

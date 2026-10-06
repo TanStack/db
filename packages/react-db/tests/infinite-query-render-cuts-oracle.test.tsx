@@ -18,11 +18,15 @@
  *   component's suspended update.
  * - The hook agrees with `useLiveQuery`: for the same synchronous source, both
  *   commit the same ready rows first.
+ * - A mounted replacement whose synchronous startup throws delivers that error
+ *   to the error boundary, as useLiveQuery does. React retries the render; a
+ *   retry that reused the failed render's collection would commit
+ *   `status: error` instead.
  *
  * Expectations come from the source rows, page size, request counts, and
  * useLiveQuery under the same history, never from the hook's controller state.
  */
-import { StrictMode, Suspense, useLayoutEffect } from 'react'
+import { Component, StrictMode, Suspense, useLayoutEffect } from 'react'
 import { act, render, renderHook, waitFor } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import {
@@ -38,6 +42,23 @@ import { useLiveQuery } from '../src/useLiveQuery'
 import type { ReactNode } from 'react'
 
 type Row = { id: string; label: string; rank: number }
+
+class ErrorBoundary extends Component<
+  { children: ReactNode },
+  { error?: Error }
+> {
+  state: { error?: Error } = {}
+  static getDerivedStateFromError(error: Error) {
+    return { error }
+  }
+  render() {
+    return this.state.error ? (
+      <div>Rejected: {this.state.error.message}</div>
+    ) : (
+      this.props.children
+    )
+  }
+}
 
 let sequence = 0
 const cleanups: Array<() => Promise<void> | void> = []
@@ -206,8 +227,69 @@ describe(`on-demand sources match useLiveQuery`, () => {
       status: `ready`,
       ids: [`1`, `2`],
     })
+    // React 19 keeps refs across the double render, so both hooks request the
+    // first window once. React 18 does not; see the coverage map.
+    expect(reference.loads).toBe(1)
     expect(await firstWindowLoadsForStrictMount(`infinite`)).toEqual(reference)
   })
+
+  it.each([`live`, `infinite`] as const)(
+    `delivers a mounted replacement's startup error to the error boundary (%s)`,
+    async (hook) => {
+      const source = makeSyncSource(4)
+      const failure = new Error(`replacement failed to start`)
+      const commits: Array<{ fail: boolean; status: string }> = []
+      const consoleError = vi
+        .spyOn(console, `error`)
+        .mockImplementation(() => {})
+      function View({ fail }: { fail: boolean }): ReactNode {
+        const query = (q: any) =>
+          q
+            .from({ items: source })
+            .fn.where(() => {
+              if (fail) throw failure
+              return true
+            })
+            .orderBy(({ items }: any) => items.rank, `desc`)
+        const result: any =
+          hook === `live`
+            ? useLiveQuery((q: any) => query(q).limit(PAGE_SIZE + 1), [fail])
+            : useLiveInfiniteQuery(query, {
+                pageSize: PAGE_SIZE,
+                queryKey: [`startup-error`, fail],
+              })
+        useLayoutEffect(() => {
+          commits.push({ fail, status: result.status })
+        })
+        return null
+      }
+      try {
+        const view = render(
+          <ErrorBoundary>
+            <View fail={false} />
+          </ErrorBoundary>,
+        )
+        cleanups.push(() => view.unmount())
+        await waitFor(() =>
+          expect(commits.at(-1)).toEqual({ fail: false, status: `ready` }),
+        )
+        await act(async () => {
+          view.rerender(
+            <ErrorBoundary>
+              <View fail={true} />
+            </ErrorBoundary>,
+          )
+        })
+        // The error reaches the boundary; the replacement never commits.
+        expect(
+          view.getByText(`Rejected: replacement failed to start`),
+        ).toBeDefined()
+        expect(commits.filter((commit) => commit.fail)).toEqual([])
+      } finally {
+        consoleError.mockRestore()
+      }
+    },
+  )
 })
 
 describe(`retries after GC`, () => {

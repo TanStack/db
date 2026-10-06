@@ -191,7 +191,7 @@ pre-commit work to the drivers.
 | A synchronous source's first published value is ready with the first page. | Shared `first-paint-ready` |
 | Every ready value in a fixed-source, fixed-query scenario equals the source prefix for its own page count, with matching pages and continuation. | Shared, in 11 scenarios including `equal-dependency-depth` and `circular-dependency` |
 | A mount requests an on-demand first window once. | Shared `on-demand-paging` |
-| A render that never commits, or a superseded pre-commit recompute, does not acquire an on-demand source, direct or wrapped; commit does. Retired by the addendum "On-demand sources follow useLiveQuery"; replaced by acquisition parity with `useLiveQuery`. | React `infinite-query-render-cuts.test.tsx`, Svelte hook tests |
+| A render that never commits, or a superseded pre-commit recompute, does not acquire an on-demand source, direct or wrapped; commit does. Retired by the addendum "On-demand sources follow useLiveQuery"; replaced by acquisition parity with `useLiveQuery`. | React `infinite-query-render-cuts-oracle.test.tsx`, Svelte hook tests |
 | A StrictMode double render requests an on-demand first window once. Narrowed by the same addendum to React 19, where both hooks keep refs across the double render. | React render cuts |
 | After GC reclaims an abandoned render's collection, the retry's first commit is the ready first page. | React render cuts |
 
@@ -304,7 +304,7 @@ Evidence, produced on the working tree above `e6a31f6eb`:
   gate removed alone, a StrictMode mount sent two first-window requests in the
   infinite hook and one in `useLiveQuery`. With the memo, both send one, and
   both send the same count for an abandoned render.
-- React `infinite-query-render-cuts.test.tsx` compares both hooks for an
+- React `infinite-query-render-cuts-oracle.test.tsx` compares both hooks for an
   abandoned render with a direct source, a wrapped source, and a supplied
   collection, and for a StrictMode mount. Deferring query collections to
   commit fails the abandoned-render and StrictMode cases. Deferring supplied
@@ -363,6 +363,38 @@ on-demand source holds after mount, which are the rows it was asked for.
 - On React 18, StrictMode does not keep refs across the double render, so both
   hooks still send two first-window requests. The changeset now names React 19.
 
+## Addendum: render-time reuse follows useLiveQuery's identity and error laws
+
+A second external review of `16a34e061` reproduced two React regressions in
+the render-time collection cache, both against `useLiveQuery` as the
+reference.
+
+- A mounted replacement whose synchronous startup throws reached the error
+  boundary under `useLiveQuery` but committed `status: error` under the
+  infinite hook. React retried the render, and the retry reused the collection
+  the failed render had cached before it started. The hook now caches a created
+  collection only after it validated and started. The render-cut oracle,
+  renamed `infinite-query-render-cuts-oracle.test.tsx`, compares both hooks on
+  this history; caching before startup fails the infinite case.
+- A mounted hook rerendered with a different source object under a claimed
+  Collection ID showed the old source's rows, after a suspended update and,
+  before this PR, after a committed one too. `useLiveQuery` rejects that
+  history. Its rule now lives in `source-id-bindings.ts`, shared by both hooks,
+  and the source ID reuse oracle adds an infinite-hook driver over its model:
+  direct reuse, reuse after another ID, the same object and a new ID, reuse
+  after a suspended render, and release of a shared descriptor's sync deferral
+  on rejection. Removing the infinite hook's claim fails five of them, and a
+  claim that releases nothing fails the deferral case.
+- `on-demand-paging` and the exact supplied window now assert the first value
+  itself, not only later ready values, and the StrictMode parity test asserts
+  one first-window request on React 19. An infinite hook that leaves query
+  collections unstarted in render fails `on-demand-paging`, and one without
+  render-time reuse fails the StrictMode test.
+
+The deferred-acquisition follow-up must revisit the new first-value assertion
+for `on-demand-paging`: before a subscriber, its ordered on-demand window is
+unpublished, so that law and this one conflict and need a decision there.
+
 ## Revision index
 
 Each entry's evidence applies to the revision named here. The first section's
@@ -378,4 +410,5 @@ table and closure apply to `415a8d4a1`.
 | Publication laws in the shared oracle | `083247d18` |
 | Supplied collections match useLiveQuery | `e6a31f6eb` |
 | On-demand sources follow useLiveQuery | `c3341af0f` |
-| Supplied windows request only what the hook needs | the commit that adds this entry, on top of `c3341af0f` |
+| Supplied windows request only what the hook needs | `ff7549054` |
+| Render-time reuse follows useLiveQuery's identity and error laws | the commit that adds this entry, on top of `16a34e061` |

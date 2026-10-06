@@ -16,11 +16,17 @@ import {
 } from '@tanstack/db'
 import { useOptionalDbClient } from './DbProvider'
 import {
+  claimSourceIds,
+  createSourceIdBindings,
+  resumeSyncStarts,
+} from './source-id-bindings'
+import {
   prepareDerivedQuery,
   prepareQueryValue,
   warnDeprecatedDepsArray,
   warnUnhashableDerivedIdentity,
 } from './useLiveQuery'
+import type { SourceIdBindings } from './source-id-bindings'
 import type {
   DerivedIdentityProfiler,
   LiveQueryKey,
@@ -200,6 +206,7 @@ export function useLiveInfiniteQuery<TContext extends Context>(
   // kept. Each render still builds its own controller and page count from the
   // committed state, which an uncommitted render never changes.
   const renderedCollectionRef = useRef<RenderedWindowCollection | null>(null)
+  const sourceIdsRef = useRef<SourceIdBindings | null>(null)
   const inputKind = inputIsCollection ? `collection` : `query`
   const derivedIdentityProfilerRef = useRef<DerivedIdentityProfiler>({
     renderCount: 0,
@@ -243,6 +250,13 @@ export function useLiveInfiniteQuery<TContext extends Context>(
         deferredCollections,
       )
       preparedQueryValue = preparation.value
+      claimSourceIds(
+        (sourceIdsRef.current ??= createSourceIdBindings()),
+        preparation.value,
+        dbClient,
+        `useLiveInfiniteQuery`,
+        () => resumeSyncStarts(deferredCollections),
+      )
       if (preparation.status === `hashable`) {
         identityDeps = preparation.identityDeps
       } else {
@@ -282,6 +296,7 @@ export function useLiveInfiniteQuery<TContext extends Context>(
     let warning: string | null = null
     let startInRender = false
     let suppliedCollection = false
+    let createdCollection = false
 
     const canPreservePageCount = shouldPreserveLiveQueryWindowPageCount({
       hasPreviousController: committed !== null,
@@ -351,12 +366,7 @@ export function useLiveInfiniteQuery<TContext extends Context>(
             gcTime: DEFAULT_GC_TIME_MS,
           })
           startInRender = true
-          renderedCollectionRef.current = {
-            client: dbClient,
-            dependencies: [...identityDeps],
-            collection,
-            deferredCollections,
-          }
+          createdCollection = true
         }
       }
     }
@@ -380,6 +390,16 @@ export function useLiveInfiniteQuery<TContext extends Context>(
       startInRender = liveQueryWindowMatches(collection, requiredLimit)
     }
     if (startInRender) collection.startSyncImmediate()
+    // Keep a created collection for the next render only once it validated and
+    // started, so a retry after a startup error builds a new one and throws.
+    if (createdCollection) {
+      renderedCollectionRef.current = {
+        client: dbClient,
+        dependencies: [...identityDeps],
+        collection,
+        deferredCollections,
+      }
+    }
 
     renderState = {
       inputKind,
@@ -412,10 +432,7 @@ export function useLiveInfiniteQuery<TContext extends Context>(
         currentRenderState.warned = true
         console.warn(currentRenderState.warning)
       }
-      for (const collection of currentRenderState.deferredCollections) {
-        collection._resumeSyncStart()
-      }
-      currentRenderState.deferredCollections.clear()
+      resumeSyncStarts(currentRenderState.deferredCollections)
       return unsubscribe
     },
     [controller, currentRenderState],
