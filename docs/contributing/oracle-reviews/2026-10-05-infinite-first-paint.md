@@ -391,6 +391,16 @@ reference.
   collections unstarted in render fails `on-demand-paging`, and one without
   render-time reuse fails the StrictMode test.
 
+A third review of `f490f3d4d` found that the cache also reused a collection
+that entered terminal error after it was cached, for example when its source
+restarted after cleanup, so selecting its query again showed stale rows with
+`status: error`. `useLiveQuery` builds a fresh collection there. The cache now
+rejects a collection in terminal error. The render-cut oracle compares both
+hooks on that history and checks the restarted source's rows; dropping the
+error check fails the infinite case. A synchronous load failure still throws
+from render in both hooks, and an asynchronous one settles after commit, so
+neither path reaches the cache.
+
 The deferred-acquisition follow-up must revisit the new first-value assertion
 for `on-demand-paging`: before a subscriber, its ordered on-demand window is
 unpublished, so that law and this one conflict and need a decision there.

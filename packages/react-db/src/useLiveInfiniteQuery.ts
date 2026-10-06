@@ -340,11 +340,14 @@ export function useLiveInfiniteQuery<TContext extends Context>(
           usesLegacyDeps,
         ) &&
         rendered.collection.status !== `cleaned-up` &&
+        rendered.collection.status !== `error` &&
         liveQueryWindowMatches(rendered.collection, requiredLimit)
       ) {
         // An earlier render built this collection and nothing has committed
         // since. Its window is exactly the retained pages, so its first
-        // rows are correct. Sources it deferred still resume at commit.
+        // rows are correct. Sources it deferred still resume at commit. A
+        // collection in terminal error, such as after its source restarted,
+        // cannot serve the query again, so a new one replaces it.
         collection = rendered.collection
         for (const deferred of rendered.deferredCollections) {
           deferredCollections.add(deferred)
