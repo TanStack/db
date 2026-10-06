@@ -145,6 +145,7 @@ const staticOracleProperties = [
   `ordered-work.lifecycle`,
   `ordered-work.nullable-lifecycle`,
   `pagination.async-cursor`,
+  `reverse-index.reads`,
   `pagination.multi-order`,
   `pagination.nullable-cursor`,
   `pagination.ordered-window`,
