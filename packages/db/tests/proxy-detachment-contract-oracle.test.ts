@@ -1,3 +1,4 @@
+import { runInNewContext } from 'node:vm'
 import { describe, expect, it, vi } from 'vitest'
 import fc from 'fast-check'
 import { createCollection } from '../src/collection/index.js'
@@ -37,7 +38,10 @@ class Label {
   }
 }
 
+// The handler confirms each update through sync, so the stored row is the
+// update's result once the mutation settles.
 function storedRowOptions<T extends object>(row: T & { id: number }) {
+  let confirm: (rows: Array<T & { id: number }>) => void = () => {}
   return {
     getKey: (value) => value.id,
     startSync: true,
@@ -47,9 +51,17 @@ function storedRowOptions<T extends object>(row: T & { id: number }) {
         write({ type: `insert`, value: row })
         commit()
         markReady()
+        confirm = (rows) => {
+          begin()
+          for (const value of rows) write({ type: `update`, value })
+          commit()
+        }
       },
     },
-    onUpdate: () => Promise.resolve(),
+    onUpdate: ({ transaction }) => {
+      confirm(transaction.mutations.map((mutation) => mutation.modified))
+      return Promise.resolve()
+    },
   } satisfies CollectionConfig<T & { id: number }, number>
 }
 
@@ -803,4 +815,143 @@ describe(`Mutation result detachment`, () => {
       ])
     },
   )
+})
+
+// Native binary snapshots preserve the entire backing buffer and view range,
+// while detaching caller ownership. Native structuredClone is a second,
+// independent formulation for this bounded standard-native value domain.
+// Custom typed-array subclasses retain their separately tested construction
+// semantics; shared, resizable and detached buffers are outside this matrix.
+for (const kind of [`buffer`, `view`, `u8`, `i64`] as const) {
+  it(`detaches assigned ${kind} without losing buffer bytes or view range`, () => {
+    const bytes = Uint8Array.from({ length: 24 }, (_, index) => index)
+    const value =
+      kind === `buffer`
+        ? bytes.buffer
+        : kind === `view`
+          ? new DataView(bytes.buffer, 3, 7)
+          : kind === `u8`
+            ? new Uint8Array(bytes.buffer, 3, 7)
+            : new BigInt64Array(bytes.buffer, 8, 1)
+    const expected = structuredClone(value)
+    const changes = withChangeTracking({ value: null as unknown }, (draft) => {
+      draft.value = value
+    })
+    bytes.fill(99)
+    const actual = changes.value as typeof value
+    expect(actual).not.toBe(value)
+    const buffer = (input: typeof value) =>
+      ArrayBuffer.isView(input) ? input.buffer : input
+    expect([...new Uint8Array(buffer(actual))]).toEqual([
+      ...new Uint8Array(buffer(expected)),
+    ])
+    expect(Object.prototype.toString.call(actual)).toBe(
+      Object.prototype.toString.call(expected),
+    )
+    if (ArrayBuffer.isView(actual) && ArrayBuffer.isView(expected)) {
+      expect(actual.byteOffset).toBe(expected.byteOffset)
+      expect(actual.byteLength).toBe(expected.byteLength)
+    }
+  })
+}
+
+// Construction compatibility has two independent axes: built-in versus
+// length-sensitive subclass, and local versus foreign/shared backing storage.
+// Each was accepted before native range preservation. A scalar edit must still
+// work, and a newly assigned view must detach without changing its elements.
+for (const kind of [
+  `length-subclass`,
+  `legacy-subclass`,
+  `foreign`,
+  `shared`,
+] as const) {
+  it(`keeps ${kind} typed arrays usable and detached`, () => {
+    class LengthOnly extends Uint8Array {
+      constructor(length: number) {
+        if (typeof length !== `number` || arguments.length !== 1)
+          throw new TypeError(`one numeric length required`)
+        super(length)
+      }
+    }
+    function Legacy(length: number): Uint8Array {
+      if (typeof length !== `number`)
+        throw new TypeError(`numeric length required`)
+      return Reflect.construct(Uint8Array, [length], Legacy) as Uint8Array
+    }
+    Object.setPrototypeOf(Legacy.prototype, Uint8Array.prototype)
+    const value =
+      kind === `legacy-subclass`
+        ? Legacy(3)
+        : kind === `length-subclass`
+          ? new LengthOnly(3)
+          : kind === `foreign`
+            ? (runInNewContext(
+                `new Uint8Array(new Uint8Array([7,1,2,3,8]).buffer, 1, 3)`,
+              ) as Uint8Array)
+            : new Uint8Array(new SharedArrayBuffer(3))
+    value.set([1, 2, 3])
+    expect(
+      withChangeTracking({ value, other: 0 }, (draft) => {
+        draft.other = 1
+      }),
+    ).toEqual({ other: 1 })
+    const changes = withChangeTracking({ value: null as unknown }, (draft) => {
+      draft.value = value
+    })
+    const copy = changes.value as Uint8Array
+    value.fill(99)
+    expect([...copy]).toEqual([1, 2, 3])
+    expect(copy).not.toBe(value)
+    expect(copy.buffer).not.toBe(value.buffer)
+    expect(Object.getPrototypeOf(copy)).toBe(Object.getPrototypeOf(value))
+    if (kind === `foreign`) {
+      expect(copy.byteOffset).toBe(1)
+      expect([...new Uint8Array(copy.buffer)]).toEqual([7, 1, 2, 3, 8])
+    }
+  })
+}
+
+// Buffer and view are two references to one authored backing store. Copying
+// must preserve that graph regardless of property traversal order or realm.
+// Shared-memory concurrency is excluded: the caller mutates only after capture.
+for (const kind of [`local`, `foreign`, `shared`] as const) {
+  for (const viewFirst of [false, true]) {
+    it(`preserves ${kind} buffer aliases with viewFirst=${viewFirst}`, () => {
+      const buffer =
+        kind === `local`
+          ? new ArrayBuffer(8)
+          : kind === `foreign`
+            ? (runInNewContext(`new ArrayBuffer(8)`) as ArrayBuffer)
+            : new SharedArrayBuffer(8)
+      const bytes = new Uint8Array(buffer)
+      bytes.set([0, 1, 2, 3, 4, 5, 6, 7])
+      const view = new Uint8Array(buffer, 2, 3)
+      const value = viewFirst ? { view, buffer } : { buffer, view }
+      expect(
+        withChangeTracking({ value, other: 0 }, (draft) => {
+          draft.other = 1
+        }),
+      ).toEqual({ other: 1 })
+      const changes = withChangeTracking(
+        { value: null as unknown },
+        (draft) => {
+          draft.value = value
+        },
+      )
+      const copy = changes.value as typeof value
+      bytes.fill(99)
+      expect(copy.buffer).not.toBe(buffer)
+      expect(copy.view.buffer).toBe(copy.buffer)
+      expect(copy.view.byteOffset).toBe(2)
+      expect([...new Uint8Array(copy.buffer)]).toEqual([0, 1, 2, 3, 4, 5, 6, 7])
+    })
+  }
+}
+it(`does not classify ordinary tagged data as a native buffer`, () => {
+  const value = { [Symbol.toStringTag]: `ArrayBuffer`, marker: 1 }
+  const changes = withChangeTracking({ value: null as unknown }, (draft) => {
+    draft.value = value
+  })
+  expect(changes.value).toEqual(value)
+  expect(changes.value).not.toBe(value)
 })

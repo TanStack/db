@@ -245,36 +245,6 @@ describe(`Electric Integration`, () => {
     }
   })
 
-  it(`does not let a parked ready receipt overwrite a later stream error`, async () => {
-    const persistence = createDeferred<void>()
-    const transaction = createTransaction({
-      mutationFn: () => persistence.promise,
-    })
-    const streamError = new Error(`stream failed`)
-    const loggedError = vi.spyOn(console, `error`).mockImplementation(() => {})
-
-    try {
-      transaction.mutate(() => collection.insert({ id: 99, name: `Local row` }))
-      subscriber([{ headers: { control: `up-to-date` } }])
-      expect(collection.status).toBe(`loading`)
-
-      const streamOptions = vi.mocked(ShapeStream).mock.calls.at(-1)?.[0] as
-        { onError?: (error: unknown) => void } | undefined
-      streamOptions?.onError?.(streamError)
-      expect(collection.status).toBe(`error`)
-
-      persistence.resolve()
-      await transaction.isPersisted.promise
-      await Promise.resolve()
-
-      expect(collection.status).toBe(`error`)
-    } finally {
-      persistence.resolve()
-      await transaction.isPersisted.promise.catch(() => undefined)
-      loggedError.mockRestore()
-    }
-  })
-
   it(`should handle incoming insert messages and commit on up-to-date`, () => {
     // Simulate incoming insert message
     subscriber([
@@ -298,7 +268,8 @@ describe(`Electric Integration`, () => {
     )
   })
 
-  it(`marks the source ready only after its initial rows are applied`, async () => {
+  // Readiness counts accepted rows; they publish when the mutation settles.
+  it(`marks the source ready once its initial rows are accepted`, async () => {
     const persistence = createDeferred<void>()
     const transaction = createTransaction({
       mutationFn: () => persistence.promise,
@@ -317,7 +288,7 @@ describe(`Electric Integration`, () => {
     ])
     await Promise.resolve()
 
-    expect(collection.status).toBe(`loading`)
+    expect(collection.status).toBe(`ready`)
     expect(collection.get(1)).toBeUndefined()
 
     persistence.resolve()
@@ -3270,7 +3241,9 @@ describe(`Electric Integration`, () => {
       })
     })
 
-    it(`ignores a progressive snapshot after its subset request is aborted`, async () => {
+    // A caller that aborts sees `AbortError` at every cut: here, after the
+    // fetch but before its commit, so the snapshot is discarded.
+    it(`discards a progressive snapshot after its subset request is aborted, and rejects the load`, async () => {
       mockFetchSnapshot.mockReset()
       let resolveSnapshot!: (value: {
         metadata: Record<string, never>
@@ -3319,7 +3292,8 @@ describe(`Electric Integration`, () => {
             },
           ],
         })
-        if (load instanceof Promise) await load
+        if (load === true) throw new Error(`Expected a pending subset load`)
+        await expect(load).rejects.toMatchObject({ name: `AbortError` })
 
         expect(testCollection.has(2)).toBe(false)
       } finally {
@@ -3328,7 +3302,41 @@ describe(`Electric Integration`, () => {
       }
     })
 
-    it(`does not publish a progressive snapshot aborted while its commit is parked`, async () => {
+    it(`rejects a progressive subset load whose fetch fails because it was aborted`, async () => {
+      mockFetchSnapshot.mockReset()
+      const abortController = new AbortController()
+      mockFetchSnapshot.mockImplementation(async () => {
+        abortController.abort()
+        throw new DOMException(`aborted`, `AbortError`)
+      })
+      mockSubscribe.mockImplementation(() => () => {})
+      const testCollection = createCollection(
+        electricCollectionOptions({
+          id: `progressive-aborted-fetch-test`,
+          shapeOptions: {
+            url: `http://test-url`,
+            params: { table: `test_table` },
+          },
+          syncMode: `progressive`,
+          getKey: (item: Row) => item.id as number,
+          startSync: true,
+        }),
+      )
+      try {
+        const load = testCollection._sync.loadSubset({
+          limit: 1,
+          signal: abortController.signal,
+        })
+        if (load === true) throw new Error(`Expected a pending subset load`)
+        await expect(load).rejects.toMatchObject({ name: `AbortError` })
+      } finally {
+        await testCollection.cleanup()
+      }
+    })
+
+    // A commit that core accepted always applies. Aborting the request after
+    // its snapshot committed cannot withdraw those rows, but the load rejects.
+    it(`publishes an accepted progressive snapshot and rejects its aborted load`, async () => {
       mockFetchSnapshot.mockResolvedValue({
         metadata: {},
         data: [
@@ -3374,9 +3382,12 @@ describe(`Electric Integration`, () => {
         abortController.abort()
         persistence.resolve()
         await transaction.isPersisted.promise
-        if (load instanceof Promise) await load
+        // The accepted snapshot applies, but the aborted caller sees
+        // `AbortError`.
+        if (load === true) throw new Error(`Expected a pending subset load`)
+        await expect(load).rejects.toMatchObject({ name: `AbortError` })
 
-        expect(testCollection.has(2)).toBe(false)
+        expect(testCollection.has(2)).toBe(true)
       } finally {
         abortController.abort()
         persistence.resolve()
@@ -3957,6 +3968,7 @@ describe(`Electric Integration`, () => {
           protocol: `@tanstack/db/sync-persistence`,
           version: 1,
           hydrateBaseline: () => Promise.resolve(),
+          reserveCommitTurn: () => {},
           scanPersistedRows: () => Promise.resolve([]),
           resumeSnapshot: {
             certify: () => Promise.resolve(),

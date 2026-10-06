@@ -196,6 +196,8 @@ Use custom actions when:
 
 Custom actions provide the cleanest way to capture specific types of mutations as named operations in your application. While you can achieve similar results using metadata with collection-level mutations, custom actions make the intent explicit and keep related logic together.
 
+Teams that require writes to use actions can [enforce action boundaries with ESLint](#enforcing-action-boundaries-with-eslint).
+
 **When to use each:**
 
 - **Collection-level mutations** (`collection.update`): Simple CRUD operations on a single collection
@@ -415,7 +417,7 @@ reference so their methods, prototypes, and private fields remain intact.
 Later changes to such an instance can therefore affect stored data without a
 new update or notification. Treat those instances as immutable, or convert them
 to plain data before assignment when you need isolation. Supported native values
-such as `URL`, `Date`, `RegExp`, and typed arrays are copied instead.
+such as `URL`, `Date`, `RegExp`, ArrayBuffer, DataView, and typed arrays are copied instead. Standard binary views retain their byte range and backing bytes.
 
 ### Delete
 
@@ -789,6 +791,12 @@ const updateTodo = createOptimisticAction<{
   },
 })
 ```
+
+### Enforcing Action Boundaries with ESLint
+
+Some teams require UI writes to use actions so shared validation, side effects, and persistence logic remain together. This is an optional application convention. Direct Collection mutations remain appropriate for simple CRUD operations.
+
+The [React action-enforcement example](https://github.com/TanStack/db/tree/main/examples/react/action-enforcement) shows two ESLint policies. Its custom rule permits direct Collection reads in feature code and rejects calls to configured mutation methods on matching Collection imports. The stricter `no-restricted-imports` alternative prohibits those imports, so feature code uses query hooks for reads and actions for writes. See the [example README](https://github.com/TanStack/db/blob/main/examples/react/action-enforcement/README.md#what-is-enforced) for setup, configurable import paths, and the limits of its static analysis.
 
 ## Manual Transactions
 

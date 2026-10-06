@@ -726,11 +726,12 @@ These operations:
 
 - Write directly to the synced data store
 - Do NOT create optimistic mutations
-- Return a promise that resolves when the sync commit applies, including any configured persistence write. Await it in a mutation handler before returning so the optimistic mutation remains active until the server response is stored.
+- Return a promise that resolves when the sync commit is accepted, including any configured persistence write. Await it in a mutation handler before returning so the server response is stored before the optimistic state drops.
+- While a mutation handler is running, wait behind it and become visible when its optimistic transaction settles, in the same update that drops its optimistic state
 - In eager mode, update the full-result TanStack Query cache in place without refetching
 - In on-demand mode, refetch active enabled queries and remove inactive or disabled cache entries
 
-The promise waits for the sync commit. It does not wait for on-demand Query revalidation or guarantee that a completed optimistic snapshot no longer overlays the row.
+The promise does not wait for on-demand Query revalidation. If a handler returns before it writes the server response, its optimistic state drops and the row shows the previous server value until the response arrives.
 After Collection cleanup starts, direct writes fail with `SyncNotInitializedError` until a new sync run starts.
 
 ### Batch Operations
@@ -779,10 +780,35 @@ ws.on("todos:update", (changes) => {
 - In eager mode, these writes patch the cached query result without a
   refetch. In on-demand mode, each direct write refetches the active queries.
   See [Direct Writes and Query Sync](#direct-writes-and-query-sync).
-- `writeUpdate` and `writeDelete` throw if the row is not in the synced store.
-  An event can arrive before the first load finishes, or for a row the
-  collection has not loaded. Guard for this, or use `writeUpsert` when events
-  carry the full row.
+- A direct write is validated against the synced store after every earlier
+  sync commit is accepted. `writeUpdate` and `writeDelete` reject their
+  promise if the row is not in the synced store, and `writeInsert` rejects if
+  the row is already there. They do not throw. An event can arrive before the
+  first load finishes, or for a row the collection has not loaded. Handle the
+  rejection, or use `writeUpsert` when events carry the full row.
+- In a persisted collection, a direct write can wait for an earlier sync
+  commit's durable write, so its rows can appear after the call returns. Await
+  the returned promise before you read them.
+
+A direct write returns a promise. Await it to know that the write applied, and
+catch its rejection to handle a validation error:
+
+```typescript
+try {
+  await todosCollection.utils.writeUpdate({ id: change.id, done: true })
+} catch (error) {
+  if (error instanceof UpdateOperationItemNotFoundError) {
+    // The row is not in the synced store yet. Refetch, or skip this event.
+    await todosCollection.utils.refetch()
+  } else {
+    throw error
+  }
+}
+```
+
+Import `UpdateOperationItemNotFoundError`, `DeleteOperationItemNotFoundError`
+and `DuplicateKeyInBatchError` from `@tanstack/query-db-collection`, and
+`DuplicateKeySyncError` from `@tanstack/db`.
 
 ### Example: Incremental Updates
 
@@ -1163,7 +1189,7 @@ This pattern allows you to:
 
 ### Direct Writes and Query Sync
 
-Direct writes update the collection immediately. In eager mode, they also patch the full-result TanStack Query cache in place.
+Direct writes update the collection immediately, or when a running mutation handler settles. In eager mode, they also patch the full-result TanStack Query cache in place.
 
 In on-demand mode, each Query cache entry may represent a different predicate, order, limit, or offset. A full collection snapshot cannot safely replace those scoped results. Direct writes therefore refetch active enabled queries and remove inactive or disabled entries. A successful `queryFn` result remains authoritative and may reconcile or replace a direct write.
 
@@ -1465,26 +1491,26 @@ const comparisons = extractSimpleComparisons(where)
 
 ### Using Query Key Builders
 
-Create different cache entries for different filter combinations:
+With `syncMode: 'on-demand'`, a static key such as `queryKey: ['products']`
+automatically includes the subset demand identity. Filters, ordering, limits,
+offsets, and cursor hints distinguish cache entries when they change the
+requested data. Prefer a static key when you do not need a custom key structure.
+
+A function-based `queryKey` replaces that automatic key construction. Include
+all options that change the requested data; omitting `offset`, for example,
+can make different windows share a cache entry. Use `getLoadSubsetDemandKey`
+from `@tanstack/db` to retain the same subset identity as a static key, including
+`limit: 0`:
 
 ```typescript
+import { getLoadSubsetDemandKey } from '@tanstack/db'
+
 const productsCollection = createCollection(
   queryCollectionOptions({
     id: 'products',
-    // Dynamic query key based on filters
     queryKey: (opts) => {
-      const parsed = parseLoadSubsetOptions(opts)
-      const cacheKey = ['products']
-
-      parsed.filters.forEach(f => {
-        cacheKey.push(`${f.field.join('.')}-${f.operator}-${f.value}`)
-      })
-
-      if (parsed.limit) {
-        cacheKey.push(`limit-${parsed.limit}`)
-      }
-
-      return cacheKey
+      const demandKey = getLoadSubsetDemandKey(opts)
+      return demandKey === undefined ? ['products'] : ['products', demandKey]
     },
     queryClient,
     getKey: (item) => item.id,
@@ -1500,21 +1526,16 @@ When using a function-based `queryKey`, all derived keys **must extend the base 
 
 TanStack Query uses prefix matching for cache operations internally. The query collection relies on this to find all cache entries belonging to a collection — including stale entries from destroyed query observers that are still held in cache due to `gcTime`. If derived keys don't share the base prefix, cache updates may silently miss entries, leading to stale data.
 
-```typescript
-// ✅ Correct: base key ['products'] is a prefix of all derived keys
-queryKey: (opts) => {
-  if (opts.where) {
-    return ['products', JSON.stringify(opts.where)]
-  }
-  return ['products']
-}
+The example above returns `['products']` for `queryKey({})` and keeps it as
+the prefix of every derived key. Avoid changing the prefix for subset demands:
 
+```typescript
 // ❌ Wrong: base key ['products-all'] is NOT a prefix of ['products-filtered', ...]
 queryKey: (opts) => {
-  if (opts.where) {
-    return ['products-filtered', JSON.stringify(opts.where)]
-  }
-  return ['products-all']
+  const demandKey = getLoadSubsetDemandKey(opts)
+  return demandKey === undefined
+    ? ['products-all']
+    : ['products-filtered', demandKey]
 }
 ```
 

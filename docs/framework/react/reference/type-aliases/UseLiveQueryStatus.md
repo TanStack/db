@@ -7,4 +7,4 @@ title: UseLiveQueryStatus
 type UseLiveQueryStatus = CollectionStatus | "disabled";
 ```
 
-Defined in: [useLiveQuery.ts:121](https://github.com/TanStack/db/blob/main/packages/react-db/src/useLiveQuery.ts#L121)
+Defined in: [useLiveQuery.ts:128](https://github.com/TanStack/db/blob/main/packages/react-db/src/useLiveQuery.ts#L128)

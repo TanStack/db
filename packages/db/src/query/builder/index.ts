@@ -18,11 +18,11 @@ import {
   InvalidSourceError,
   InvalidSourceTypeError,
   InvalidWhereExpressionError,
-  JoinConditionMustBeEqualityError,
   OnlyOneSourceAllowedError,
   QueryMustHaveFromClauseError,
   SubQueryMustHaveFromClauseError,
 } from '../../errors.js'
+import { validateJoinConditions } from '../join-conditions.js'
 import { getQueryIR } from './query-ir.js'
 import { cloneQueryForPlacement } from './clone-query.js'
 import {
@@ -365,28 +365,8 @@ export class BaseQueryBuilder<TContext extends Context = Context> {
     // Get the join condition expression
     const onExpression = onCallback(refProxy)
 
-    // Extract left and right from the expression
-    // For now, we'll assume it's an eq function with two arguments
-    let left: BasicExpression
-    let right: BasicExpression
-
-    if (
-      onExpression.type === `func` &&
-      onExpression.name === `eq` &&
-      onExpression.args.length === 2
-    ) {
-      left = onExpression.args[0]!
-      right = onExpression.args[1]!
-    } else {
-      throw new JoinConditionMustBeEqualityError()
-    }
-
-    const joinClause: JoinClause = {
-      from,
-      type,
-      left,
-      right,
-    }
+    validateJoinConditions(onExpression)
+    const joinClause: JoinClause = { from, type, on: onExpression }
 
     const existingJoins = this.query.join || []
 
@@ -1250,8 +1230,7 @@ function collectExternalRefsFromQuery(query: QueryIR): Array<PropRef> {
 
   for (const where of query.where ?? []) addWhere(where)
   for (const join of query.join ?? []) {
-    addExpression(join.left)
-    addExpression(join.right)
+    addExpression(join.on)
     if (join.from.type === `queryRef`) {
       refs.push(...collectExternalRefsFromQuery(join.from.query))
     }
@@ -1310,8 +1289,7 @@ function collectParentRefsFromQuery(
 
   for (const where of query.where ?? []) addWhere(where)
   for (const join of query.join ?? []) {
-    addExpression(join.left)
-    addExpression(join.right)
+    addExpression(join.on)
     if (join.from.type === `queryRef`) {
       refs.push(...collectParentRefsFromQuery(join.from.query, parentAliases))
     }

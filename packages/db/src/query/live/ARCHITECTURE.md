@@ -164,6 +164,21 @@ namespace, and the compiler rejects a name that two branches repeat. A union row
 holds the branches' projected fields, so a branch alias is not visible to the
 union's own joins or includes.
 
+Join conditions are an equality or a nonempty, possibly nested conjunction of
+equalities. `JoinClause.on` keeps the complete expression tree. Every equality
+contributes to query identity, optimizer copies, and parent-reference discovery.
+Each operand pair binds the joined source to an available source expression;
+the pairs may reverse operand direction independently. OR and non-equality
+predicates are rejected at join admission.
+
+A compound match requires every component equality to be TRUE. Any nullish
+operand prevents a match. Each component uses the same graph-scoped equality
+identity as a single-condition join; raw JSON representations do not define
+value equality. Lazy loading may use the first equality to acquire a superset
+of candidate rows, while the compiled join checks the full tuple. A tuple with
+any nullish component contributes no keyed lazy demand. A parent
+reference in any joined-side component requires route context before evaluation.
+
 A `CanonicalCorrelationKey` is the canonical tuple of every evaluated
 parent-dependent value that can affect the child plan. This includes values
 used by filters, joins, grouping, aggregates, ordering, projections, limits,
@@ -775,18 +790,23 @@ to one acquisition.
 
 Every sync `commit()` returns an applied receipt: `true` when that
 transaction's writes and events are already visible, or a promise when the
-transaction is parked in the causal queue. The promise resolves only after the
-writes and events become visible. It rejects with `AbortError` if request
-cancellation or collection cleanup abandons the transaction first. An abort
-after application has no effect. Application becomes irrevocable before change
-events are emitted, so an abort raised by a publication observer is already
-late. A successful `loadSubset` implementation must await or return every
-receipt for the transactions that establish its result. A source must not add
-priority merely to make a subset load settle.
-Existing immediate bootstrap and persistence-hydration paths, plus truncate,
-retain their queue-bypass contract; if one applies a parked subset transaction
-as part of that prefix, the subset receipt settles only after the writes are
-visible. Rejected acquisitions establish no result. Canceled or obsolete
+transaction is parked in the causal queue. Commit accepts the transaction, and
+an accepted transaction always applies in commit order. The promise resolves
+only after the writes and events become visible. It rejects with `AbortError`
+only if its signal aborted before acceptance or collection cleanup abandons
+the transaction; a later abort cannot withdraw its rows. A source discards a
+stale page by checking the signal before `commit()`, and rejects a load whose
+caller aborted with `AbortError` once its accepted rows apply. The receipt also carries its
+acceptance moment for handler-facing writes and Collection readiness
+(`whenSyncAccepted`): readiness counts accepted rows, and a mutation
+handler waits for acceptance, because a transaction parked behind its own
+persisting optimistic transaction becomes visible only when that transaction
+settles. A successful `loadSubset` implementation must await or return every
+receipt for the transactions that establish its result, so a handler that
+awaits an on-demand load of its own Collection waits for itself. A source must
+not add priority merely to make a subset load settle. Truncate retains its
+queue-bypass contract; if it applies a parked subset transaction as part of
+that prefix, the subset receipt settles only after the writes are visible. Rejected acquisitions establish no result. Canceled or obsolete
 acquisitions either stop before publishing more request-scoped rows or settle
 behind the active replay barrier.
 
@@ -1217,17 +1237,14 @@ snapshots, including fields they did not change and insert schema defaults.
 Do not merge newer synced fields into those snapshots: that could publish a
 combination neither the mutation nor the server created. This applies to both
 ordinary sync and truncate. The mutation payload stays unchanged as well.
-Active snapshots are selected in transaction order. Completed snapshots remain
-beneath active transactions under the existing retention policy until sync
-retires them. A later snapshot may contain values seen from an earlier sibling;
-rolling back that sibling does not rewrite the later snapshot. Sync publication
-compares actual previous and next visible rows, not just mutation identities.
-An update made over an unconfirmed insert retains that exact insert dependency,
-not just its key. Insert success preserves the later completed snapshot; insert
-failure removes the already-retained dependent row. An independently submitted
-update accepted after that failure still retains its own snapshot. An
-acknowledged insert or a later same-key
-insertion is not the failed insertion. Truncate replay derives events and reads
+Active snapshots are selected in transaction order. A transaction's
+optimistic state drops when its mutation function settles. Sync transactions
+accepted while it persisted are held and publish in the same update as that
+drop. A completed row is held only while an accepted, queued sync transaction
+touches its key; nothing else retains it. A later snapshot may contain values
+seen from an earlier sibling; rolling back that sibling does not rewrite the
+later snapshot. Sync publication compares actual previous and next visible
+rows, not just mutation identities. Truncate replay derives events and reads
 from the same snapshot overlay, without merging in its new authoritative fields.
 
 Installed state, synchronous reads, change-event payloads, and downstream

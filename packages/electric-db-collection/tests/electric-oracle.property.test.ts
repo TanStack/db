@@ -5048,7 +5048,8 @@ describeUnlessQueuedPresenceReplay(`Electric adapter laws`, () => {
     await trace.collection.cleanup()
   })
 
-  it(`waits for a deferred applied receipt before publishing readiness`, async () => {
+  // Readiness counts accepted rows; they publish when the mutation settles.
+  it(`publishes readiness once a held receipt is accepted`, async () => {
     const metadata = createMetadata(new Map())
     const trace = createOracleCollection(
       `deferred-applied-receipt`,
@@ -5070,7 +5071,7 @@ describeUnlessQueuedPresenceReplay(`Electric adapter laws`, () => {
     trace.subscriber([change(`insert`, 1, `synced`), upToDate])
     await Promise.resolve()
 
-    expect(trace.collection.status).toBe(`loading`)
+    expect(trace.collection.status).toBe(`ready`)
     expect(trace.collection.has(1)).toBe(false)
 
     persistence.resolve()
@@ -5084,7 +5085,7 @@ describeUnlessQueuedPresenceReplay(`Electric adapter laws`, () => {
     await trace.collection.cleanup()
   })
 
-  it(`does not publish readiness after a parked receipt is rejected by cleanup`, async () => {
+  it(`drops a held receipt's rows when cleanup abandons it`, async () => {
     const metadata = createMetadata(new Map())
     const trace = createOracleCollection(
       `rejected-applied-receipt`,
@@ -5104,7 +5105,7 @@ describeUnlessQueuedPresenceReplay(`Electric adapter laws`, () => {
     )
     trace.subscriber([change(`insert`, 1, `synced`), upToDate])
     await Promise.resolve()
-    expect(trace.collection.status).toBe(`loading`)
+    expect(trace.collection.status).toBe(`ready`)
 
     await trace.collection.cleanup()
     persistence.resolve()

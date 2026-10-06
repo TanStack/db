@@ -55,6 +55,12 @@ React derives live query identity from structured query IR by default. Add
 `queryKey` only for opaque functional query logic or for a hot render path where
 you want to skip derived identity work.
 
+If the old dependency array tracked a Collection object that you replace while
+the hook stays mounted, give the replacement a distinct ID. A different source
+object with the same ID now throws in the derived-identity form. To reuse the
+ID, unmount the old hook, clean up its source and client scope, then mount the
+replacement.
+
 ## Cheat Sheet
 
 | Task | Before | SSR-friendly |
@@ -202,7 +208,7 @@ export const todoCollection = collectionOptions('todos', () => ({
       return {
         loadSubset: async () => {
           const todos = await api.todos.list()
-          begin({ immediate: true })
+          begin()
           for (const todo of todos) {
             write({ type: 'insert', value: todo })
           }

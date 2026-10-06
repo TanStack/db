@@ -7,7 +7,7 @@ title: StrategyOptions
 type StrategyOptions<T> = T extends DebounceStrategy ? DebounceStrategyOptions : T extends QueueStrategy ? QueueStrategyOptions : T extends ThrottleStrategy ? ThrottleStrategyOptions : T extends BatchStrategy ? BatchStrategyOptions : never;
 ```
 
-Defined in: [packages/db/src/strategies/types.ts:126](https://github.com/TanStack/db/blob/main/packages/db/src/strategies/types.ts#L126)
+Defined in: [packages/db/src/strategies/types.ts:123](https://github.com/TanStack/db/blob/main/packages/db/src/strategies/types.ts#L123)
 
 Extract the options type from a strategy
 

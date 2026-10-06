@@ -1354,7 +1354,7 @@ async function runDeferralCleanupHistory(
           expect(batches).toEqual([])
         }
       } else if (command.type === `write`) {
-        operations.begin({ immediate: true })
+        operations.begin()
         operations.write({
           type: `insert`,
           value: { id: command.key, value: command.key.charCodeAt(0) },

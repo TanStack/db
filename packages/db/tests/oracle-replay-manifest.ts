@@ -82,7 +82,7 @@ const ownerGroups: ReadonlyArray<readonly [string, string, string]> = [
   [
     `db/tests/collection-state-retention-oracle.property.test.ts`,
     `collection-state`,
-    `retention optimistic-history accepted-snapshot.before-delete accepted-snapshot.during-delete accepted-snapshot.after-rollback`,
+    `retention optimistic-history optimistic-history-partial accepted-snapshot.before-delete accepted-snapshot.during-delete accepted-snapshot.after-rollback`,
   ],
   [
     `db/tests/change-event-history-oracle.test.ts`,
@@ -122,7 +122,7 @@ const ownerGroups: ReadonlyArray<readonly [string, string, string]> = [
   [
     `db/tests/query/cold-join-reconciliation-oracle.test.ts`,
     `cold-join`,
-    `reconciliation`,
+    `reconciliation compound`,
   ],
   [
     `db/tests/live-query-observer-history-oracle.property.test.ts`,
@@ -277,6 +277,8 @@ const indexReplayTestNames = new Map([
 ])
 
 function directReplayTestName(property: string): string | undefined {
+  if (property === `cold-join.compound`)
+    return `recomputes generated compound histories, seed=undefined`
   if (property === `oracle-replay.calibration`)
     return `executes the replay calibration property`
   if (property.startsWith(`pagination.matrix.`))

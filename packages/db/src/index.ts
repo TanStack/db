@@ -24,6 +24,7 @@ export * from './local-storage'
 export * from './errors'
 /** @internal Unstable protocol for persistence-aware collection adapters. */
 export * from './sync-persistence'
+export * from './sync-receipt'
 export { deepEquals } from './utils'
 /** @internal Used by first-party collection adapters. */
 export { warnOnce, resetWarnings } from './utils'
@@ -100,3 +101,6 @@ export { safeRandomUUID } from './utils/uuid.js'
 export type { Collection } from './collection/index.js'
 export { IR }
 export { operators, type OperatorName } from './query/builder/functions.js'
+
+/** @internal Shared native ordering for first-party persistence. */
+export { compareTemporalValues } from './utils/comparison'

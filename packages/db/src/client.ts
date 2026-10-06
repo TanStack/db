@@ -29,6 +29,7 @@ import type {
   DeferredLiveQueryCollections,
   LiveQueryOptions,
 } from './live-query-options.js'
+import type { PendingMetadataWrite } from './collection/state.js'
 
 const collectionConfigFactory: unique symbol = Symbol.for(
   `@tanstack/db.collectionConfig.factory`,
@@ -849,10 +850,7 @@ export class DbClient {
 
       return isAdapterAuthoritative ? [] : [{ ...row, key, value }]
     })
-    const rowMetadataWrites = new Map<
-      string | number,
-      { type: `set`; value: unknown } | { type: `delete` }
-    >()
+    const rowMetadataWrites = new Map<string | number, PendingMetadataWrite>()
 
     for (const row of rows) {
       if (row.metadata !== undefined) {
@@ -870,7 +868,7 @@ export class DbClient {
     }
 
     if (rows.length > 0) {
-      collection._state.pendingSyncedTransactions.push({
+      collection._state.acceptSeedTransaction({
         committed: true,
         applicationStarted: false,
         layoutChanged: false,
@@ -882,12 +880,17 @@ export class DbClient {
           value: row.value,
         })),
         rowMetadataWrites,
+        // Hydrated metadata follows every row it describes.
+        explicitRowMetadataWrites: new Map(
+          [...rowMetadataWrites].map(([key, write]) => [
+            key,
+            { position: rows.length, write },
+          ]),
+        ),
         collectionMetadataWrites: new Map(),
         applied: createDeferred<void>(),
-        immediate: true,
         preserveHydrationSeedKeys: seedKind !== undefined,
       })
-      collection._state.commitPendingTransactions()
     }
 
     if (chunk.syncMeta !== undefined) {

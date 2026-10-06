@@ -826,8 +826,7 @@ function deepCopyQuery(query: QueryIR): QueryIR {
     join: query.join
       ? query.join.map((joinClause) => ({
           type: joinClause.type,
-          left: joinClause.left,
-          right: joinClause.right,
+          on: joinClause.on,
           from: deepCopyJoinFrom(joinClause.from),
         }))
       : undefined,

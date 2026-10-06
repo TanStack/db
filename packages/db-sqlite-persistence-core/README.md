@@ -260,12 +260,20 @@ source publication and its durable suffix. A source may mark a transaction
 optimistic layer. The wrapper still gives that transaction one FIFO turn and
 writes its durable suffix before admitting the next source turn.
 
-The wrapper deliberately rejects schedules that would require a second
-ordering mechanism. An `immediate` source transaction cannot enter while an
-earlier normal source publication is waiting, and a source transaction cannot
-cross a hydration cycle. These cases throw
-`InvalidPersistedCollectionConfigError` instead of reordering data or waiting
-in a dependency cycle.
+Persisted rows establish a baseline for newer changes from the sync adapter.
+Once an ordinary sync transaction is accepted at `commit()`, queued reads of
+that baseline cannot revoke acceptance. This includes subset reads and rereads
+requested by coordinator reset or full-reload notifications. This rule assumes
+a compatible baseline; it does not authorize using an invalidated resume point.
+A truncate replay replaces earlier source rows in the same sync run. Sync
+transactions ordered after that replacement apply to the replacement.
+
+An `immediate` sync transaction cannot enter while an earlier normal source
+publication is waiting. The wrapper also currently rejects a sync transaction
+that remains open across another persistence read. These admission restrictions
+throw `InvalidPersistedCollectionConfigError`; an internal wait after accepted
+`commit()` is not an admission failure. The open-transaction restriction is
+separate from the accepted-transaction precedence rule.
 
 ### Atomic resume snapshots
 

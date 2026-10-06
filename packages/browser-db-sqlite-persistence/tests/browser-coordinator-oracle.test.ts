@@ -1,7 +1,10 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import fc from 'fast-check'
 import { BasicIndex, IR, createCollection } from '@tanstack/db'
-import { RetryableRemoteSubsetAcquisitionError } from '@tanstack/db-sqlite-persistence-core'
+import {
+  RetryableRemoteSubsetAcquisitionError,
+  validateRemoteSubsetOptions,
+} from '@tanstack/db-sqlite-persistence-core'
 import { BrowserCollectionCoordinator } from '../src/browser-coordinator'
 import {
   createBrowserWASQLitePersistence,
@@ -4281,6 +4284,18 @@ describe(`BrowserCollectionCoordinator`, () => {
         }
 
         try {
+          // Admission-only traversal must retain the same independently named
+          // rejection boundary as the local and transported coordinator routes.
+          expect(() =>
+            validateRemoteSubsetOptions(
+              subsetWithNestedValue(createUnsupported()),
+            ),
+          ).toThrowError(
+            expect.objectContaining({
+              name: `RemoteSubsetWireValueError`,
+              path,
+            }),
+          )
           const outcomes = await Promise.all(
             [leader, follower].map((coordinator) =>
               coordinator
@@ -4414,6 +4429,18 @@ describe(`BrowserCollectionCoordinator`, () => {
         }
 
         try {
+          // Admission-only traversal must retain the same independently named
+          // rejection boundary as the local and transported coordinator routes.
+          expect(() =>
+            validateRemoteSubsetOptions(
+              options as unknown as LoadSubsetOptions,
+            ),
+          ).toThrowError(
+            expect.objectContaining({
+              name: `RemoteSubsetWireValueError`,
+              path,
+            }),
+          )
           const outcomes = await Promise.all(
             [leader, follower].map((coordinator) =>
               coordinator
@@ -4523,6 +4550,18 @@ describe(`BrowserCollectionCoordinator`, () => {
         }
 
         try {
+          // Admission-only traversal must retain the same independently named
+          // rejection boundary as the local and transported coordinator routes.
+          expect(() =>
+            validateRemoteSubsetOptions(
+              createOptions() as unknown as LoadSubsetOptions,
+            ),
+          ).toThrowError(
+            expect.objectContaining({
+              name: `RemoteSubsetWireValueError`,
+              path,
+            }),
+          )
           const outcomes = await Promise.all(
             [leader, follower].map((coordinator) =>
               coordinator
@@ -4638,6 +4677,23 @@ describe(`BrowserCollectionCoordinator`, () => {
       }
 
       try {
+        // Validation cannot rewrite a request or erase the aliases/cycle that
+        // this receiving witness observes. Frozen records expose accidental writes.
+        for (const value of [
+          options,
+          options.where,
+          options.where.args,
+          richValue,
+          shared,
+          cycle,
+          sparse,
+          reservedKeys,
+          typedArrays,
+        ])
+          Object.freeze(value)
+        const beforeValidation = structuredClone(richValue)
+        expect(validateRemoteSubsetOptions(options)).toBeUndefined()
+        expect(richValue).toEqual(beforeValidation)
         await leader.requestEnsureRemoteSubset(`todos`, options)
         await follower.requestEnsureRemoteSubset(`todos`, options)
         expect(received).toHaveLength(2)
@@ -4648,6 +4704,13 @@ describe(`BrowserCollectionCoordinator`, () => {
               args: Array<{ value?: typeof richValue }>
             }
           ).args[1]!.value!
+          expect(value).toEqual(beforeValidation)
+          for (const key of Object.keys(richValue) as Array<
+            keyof typeof richValue
+          >) {
+            if (typeof richValue[key] === `object` && richValue[key] !== null)
+              expect(value[key]).not.toBe(richValue[key])
+          }
           expect(value.undefinedValue).toBeUndefined()
           expect(value.nullValue).toBeNull()
           expect(value.booleanValue).toBe(true)
@@ -4745,9 +4808,9 @@ describe(`BrowserCollectionCoordinator`, () => {
 
         await leader.requestReleaseRemoteSubset(`todos`, options)
         await follower.requestReleaseRemoteSubset(`todos`, options)
-        expect(unloadSubset.mock.calls.map(([value]) => value)).toEqual(
-          received,
-        )
+        expect(unloadSubset.mock.calls).toHaveLength(received.length)
+        for (const [index, [value]] of unloadSubset.mock.calls.entries())
+          expect(value).toBe(received[index])
       } finally {
         unregisterOwner()
         leader.dispose()

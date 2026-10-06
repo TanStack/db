@@ -3,7 +3,7 @@ id: DbClient
 title: DbClient
 ---
 
-Defined in: [packages/db/src/client.ts:308](https://github.com/TanStack/db/blob/main/packages/db/src/client.ts#L308)
+Defined in: [packages/db/src/client.ts:306](https://github.com/TanStack/db/blob/main/packages/db/src/client.ts#L306)
 
 ## Constructors
 
@@ -13,7 +13,7 @@ Defined in: [packages/db/src/client.ts:308](https://github.com/TanStack/db/blob/
 new DbClient(options): DbClient;
 ```
 
-Defined in: [packages/db/src/client.ts:326](https://github.com/TanStack/db/blob/main/packages/db/src/client.ts#L326)
+Defined in: [packages/db/src/client.ts:324](https://github.com/TanStack/db/blob/main/packages/db/src/client.ts#L324)
 
 #### Parameters
 
@@ -37,7 +37,7 @@ get activeTransaction():
   | undefined;
 ```
 
-Defined in: [packages/db/src/client.ts:342](https://github.com/TanStack/db/blob/main/packages/db/src/client.ts#L342)
+Defined in: [packages/db/src/client.ts:340](https://github.com/TanStack/db/blob/main/packages/db/src/client.ts#L340)
 
 ##### Returns
 
@@ -52,7 +52,7 @@ Defined in: [packages/db/src/client.ts:342](https://github.com/TanStack/db/blob/
 _consumeLiveQueryResult(queryHash, dehydratedAt): void;
 ```
 
-Defined in: [packages/db/src/client.ts:636](https://github.com/TanStack/db/blob/main/packages/db/src/client.ts#L636)
+Defined in: [packages/db/src/client.ts:634](https://github.com/TanStack/db/blob/main/packages/db/src/client.ts#L634)
 
 **`Internal`**
 
@@ -78,7 +78,7 @@ Defined in: [packages/db/src/client.ts:636](https://github.com/TanStack/db/blob/
 _failPendingLiveQueries(error): void;
 ```
 
-Defined in: [packages/db/src/client.ts:679](https://github.com/TanStack/db/blob/main/packages/db/src/client.ts#L679)
+Defined in: [packages/db/src/client.ts:677](https://github.com/TanStack/db/blob/main/packages/db/src/client.ts#L677)
 
 **`Internal`**
 
@@ -100,7 +100,7 @@ Defined in: [packages/db/src/client.ts:679](https://github.com/TanStack/db/blob/
 _getLiveQuery(queryHash): DbClientLiveQuery | undefined;
 ```
 
-Defined in: [packages/db/src/client.ts:631](https://github.com/TanStack/db/blob/main/packages/db/src/client.ts#L631)
+Defined in: [packages/db/src/client.ts:629](https://github.com/TanStack/db/blob/main/packages/db/src/client.ts#L629)
 
 **`Internal`**
 
@@ -122,7 +122,7 @@ Defined in: [packages/db/src/client.ts:631](https://github.com/TanStack/db/blob/
 _isSsrServerCleanupEnabled(): boolean;
 ```
 
-Defined in: [packages/db/src/client.ts:626](https://github.com/TanStack/db/blob/main/packages/db/src/client.ts#L626)
+Defined in: [packages/db/src/client.ts:624](https://github.com/TanStack/db/blob/main/packages/db/src/client.ts#L624)
 
 **`Internal`**
 
@@ -138,7 +138,7 @@ Defined in: [packages/db/src/client.ts:626](https://github.com/TanStack/db/blob/
 _isSsrStreamingEnabled(): boolean;
 ```
 
-Defined in: [packages/db/src/client.ts:616](https://github.com/TanStack/db/blob/main/packages/db/src/client.ts#L616)
+Defined in: [packages/db/src/client.ts:614](https://github.com/TanStack/db/blob/main/packages/db/src/client.ts#L614)
 
 **`Internal`**
 
@@ -154,7 +154,7 @@ Defined in: [packages/db/src/client.ts:616](https://github.com/TanStack/db/blob/
 _materializeCollectionForRender<T, TKey, TSchema, TUtils>(options): Collection<T, TKey, TUtils, TSchema, [TSchema] extends [never] ? T : InferSchemaInput<TSchema>>;
 ```
 
-Defined in: [packages/db/src/client.ts:432](https://github.com/TanStack/db/blob/main/packages/db/src/client.ts#L432)
+Defined in: [packages/db/src/client.ts:430](https://github.com/TanStack/db/blob/main/packages/db/src/client.ts#L430)
 
 **`Internal`**
 
@@ -194,7 +194,7 @@ Defined in: [packages/db/src/client.ts:432](https://github.com/TanStack/db/blob/
 _registerLiveQuery(queryHash, promise): Promise<void>;
 ```
 
-Defined in: [packages/db/src/client.ts:644](https://github.com/TanStack/db/blob/main/packages/db/src/client.ts#L644)
+Defined in: [packages/db/src/client.ts:642](https://github.com/TanStack/db/blob/main/packages/db/src/client.ts#L642)
 
 **`Internal`**
 
@@ -220,7 +220,7 @@ Defined in: [packages/db/src/client.ts:644](https://github.com/TanStack/db/blob/
 _registerLiveQueryResource(owner, cleanup): () => void;
 ```
 
-Defined in: [packages/db/src/client.ts:666](https://github.com/TanStack/db/blob/main/packages/db/src/client.ts#L666)
+Defined in: [packages/db/src/client.ts:664](https://github.com/TanStack/db/blob/main/packages/db/src/client.ts#L664)
 
 **`Internal`**
 
@@ -252,7 +252,7 @@ Defined in: [packages/db/src/client.ts:666](https://github.com/TanStack/db/blob/
 _setSsrServerCleanupEnabled(enabled): void;
 ```
 
-Defined in: [packages/db/src/client.ts:621](https://github.com/TanStack/db/blob/main/packages/db/src/client.ts#L621)
+Defined in: [packages/db/src/client.ts:619](https://github.com/TanStack/db/blob/main/packages/db/src/client.ts#L619)
 
 **`Internal`**
 
@@ -274,7 +274,7 @@ Defined in: [packages/db/src/client.ts:621](https://github.com/TanStack/db/blob/
 _setSsrStreamingEnabled(enabled): void;
 ```
 
-Defined in: [packages/db/src/client.ts:611](https://github.com/TanStack/db/blob/main/packages/db/src/client.ts#L611)
+Defined in: [packages/db/src/client.ts:609](https://github.com/TanStack/db/blob/main/packages/db/src/client.ts#L609)
 
 **`Internal`**
 
@@ -296,7 +296,7 @@ Defined in: [packages/db/src/client.ts:611](https://github.com/TanStack/db/blob/
 applyCollectionChunk(chunk): void;
 ```
 
-Defined in: [packages/db/src/client.ts:601](https://github.com/TanStack/db/blob/main/packages/db/src/client.ts#L601)
+Defined in: [packages/db/src/client.ts:599](https://github.com/TanStack/db/blob/main/packages/db/src/client.ts#L599)
 
 #### Parameters
 
@@ -316,7 +316,7 @@ Defined in: [packages/db/src/client.ts:601](https://github.com/TanStack/db/blob/
 cleanup(): Promise<void>;
 ```
 
-Defined in: [packages/db/src/client.ts:686](https://github.com/TanStack/db/blob/main/packages/db/src/client.ts#L686)
+Defined in: [packages/db/src/client.ts:684](https://github.com/TanStack/db/blob/main/packages/db/src/client.ts#L684)
 
 #### Returns
 
@@ -332,7 +332,7 @@ Defined in: [packages/db/src/client.ts:686](https://github.com/TanStack/db/blob/
 collection<T, TKey, TUtils>(options, materializeOptions?): Collection<InferSchemaOutput<T>, TKey, TUtils, T, InferSchemaInput<T>> & NonSingleResult;
 ```
 
-Defined in: [packages/db/src/client.ts:388](https://github.com/TanStack/db/blob/main/packages/db/src/client.ts#L388)
+Defined in: [packages/db/src/client.ts:386](https://github.com/TanStack/db/blob/main/packages/db/src/client.ts#L386)
 
 ##### Type Parameters
 
@@ -368,7 +368,7 @@ Defined in: [packages/db/src/client.ts:388](https://github.com/TanStack/db/blob/
 collection<T, TKey, TUtils>(options, materializeOptions?): Collection<InferSchemaOutput<T>, TKey, TUtils, T, InferSchemaInput<T>> & SingleResult;
 ```
 
-Defined in: [packages/db/src/client.ts:398](https://github.com/TanStack/db/blob/main/packages/db/src/client.ts#L398)
+Defined in: [packages/db/src/client.ts:396](https://github.com/TanStack/db/blob/main/packages/db/src/client.ts#L396)
 
 ##### Type Parameters
 
@@ -404,7 +404,7 @@ Defined in: [packages/db/src/client.ts:398](https://github.com/TanStack/db/blob/
 collection<T, TKey, TUtils>(options, materializeOptions?): Collection<T, TKey, TUtils, never, T> & NonSingleResult;
 ```
 
-Defined in: [packages/db/src/client.ts:408](https://github.com/TanStack/db/blob/main/packages/db/src/client.ts#L408)
+Defined in: [packages/db/src/client.ts:406](https://github.com/TanStack/db/blob/main/packages/db/src/client.ts#L406)
 
 ##### Type Parameters
 
@@ -440,7 +440,7 @@ Defined in: [packages/db/src/client.ts:408](https://github.com/TanStack/db/blob/
 collection<T, TKey, TUtils>(options, materializeOptions?): Collection<T, TKey, TUtils, never, T> & SingleResult;
 ```
 
-Defined in: [packages/db/src/client.ts:416](https://github.com/TanStack/db/blob/main/packages/db/src/client.ts#L416)
+Defined in: [packages/db/src/client.ts:414](https://github.com/TanStack/db/blob/main/packages/db/src/client.ts#L414)
 
 ##### Type Parameters
 
@@ -478,7 +478,7 @@ Defined in: [packages/db/src/client.ts:416](https://github.com/TanStack/db/blob/
 createTransaction<T>(config): Transaction<T>;
 ```
 
-Defined in: [packages/db/src/client.ts:346](https://github.com/TanStack/db/blob/main/packages/db/src/client.ts#L346)
+Defined in: [packages/db/src/client.ts:344](https://github.com/TanStack/db/blob/main/packages/db/src/client.ts#L344)
 
 #### Type Parameters
 
@@ -504,7 +504,7 @@ Defined in: [packages/db/src/client.ts:346](https://github.com/TanStack/db/blob/
 dehydrate(options): DehydratedDbState;
 ```
 
-Defined in: [packages/db/src/client.ts:522](https://github.com/TanStack/db/blob/main/packages/db/src/client.ts#L522)
+Defined in: [packages/db/src/client.ts:520](https://github.com/TanStack/db/blob/main/packages/db/src/client.ts#L520)
 
 #### Parameters
 
@@ -524,7 +524,7 @@ Defined in: [packages/db/src/client.ts:522](https://github.com/TanStack/db/blob/
 getDependency<T>(key): T | undefined;
 ```
 
-Defined in: [packages/db/src/client.ts:328](https://github.com/TanStack/db/blob/main/packages/db/src/client.ts#L328)
+Defined in: [packages/db/src/client.ts:326](https://github.com/TanStack/db/blob/main/packages/db/src/client.ts#L326)
 
 #### Type Parameters
 
@@ -550,7 +550,7 @@ Defined in: [packages/db/src/client.ts:328](https://github.com/TanStack/db/blob/
 hydrate(state): void;
 ```
 
-Defined in: [packages/db/src/client.ts:583](https://github.com/TanStack/db/blob/main/packages/db/src/client.ts#L583)
+Defined in: [packages/db/src/client.ts:581](https://github.com/TanStack/db/blob/main/packages/db/src/client.ts#L581)
 
 #### Parameters
 
@@ -570,7 +570,7 @@ Defined in: [packages/db/src/client.ts:583](https://github.com/TanStack/db/blob/
 preloadLiveQuery(options): Promise<void>;
 ```
 
-Defined in: [packages/db/src/client.ts:352](https://github.com/TanStack/db/blob/main/packages/db/src/client.ts#L352)
+Defined in: [packages/db/src/client.ts:350](https://github.com/TanStack/db/blob/main/packages/db/src/client.ts#L350)
 
 #### Parameters
 
@@ -590,7 +590,7 @@ Defined in: [packages/db/src/client.ts:352](https://github.com/TanStack/db/blob/
 requireDependency<T>(key): T;
 ```
 
-Defined in: [packages/db/src/client.ts:332](https://github.com/TanStack/db/blob/main/packages/db/src/client.ts#L332)
+Defined in: [packages/db/src/client.ts:330](https://github.com/TanStack/db/blob/main/packages/db/src/client.ts#L330)
 
 #### Type Parameters
 
@@ -616,7 +616,7 @@ Defined in: [packages/db/src/client.ts:332](https://github.com/TanStack/db/blob/
 subscribe(listener): () => void;
 ```
 
-Defined in: [packages/db/src/client.ts:605](https://github.com/TanStack/db/blob/main/packages/db/src/client.ts#L605)
+Defined in: [packages/db/src/client.ts:603](https://github.com/TanStack/db/blob/main/packages/db/src/client.ts#L603)
 
 #### Parameters
 

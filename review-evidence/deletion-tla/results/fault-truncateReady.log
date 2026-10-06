@@ -1,0 +1,161 @@
+TLC2 Version 2.19 of 08 August 2024 (rev: 5a47802)
+Running breadth-first search Model-Checking with fp 0 and seed 1 with 1 worker on 18 cores with 981MB heap and 64MB offheap memory [pid: 95533] (Mac OS X 26.6.2 aarch64, Eclipse Adoptium 21.0.12.1 x86_64, MSBDiskFPSet, DiskStateQueue).
+Parsing file /private/tmp/pr1179-tla/retirement_oracle.tla
+Parsing file /private/var/folders/zy/zxh2j5n97vq2tt8d8q7_1t5r0000gp/T/Naturals.tla
+Parsing file /private/var/folders/zy/zxh2j5n97vq2tt8d8q7_1t5r0000gp/T/Sequences.tla
+Parsing file /private/var/folders/zy/zxh2j5n97vq2tt8d8q7_1t5r0000gp/T/FiniteSets.tla
+Parsing file /private/var/folders/zy/zxh2j5n97vq2tt8d8q7_1t5r0000gp/T/TLC.tla
+Semantic processing of module Naturals
+Semantic processing of module Sequences
+Semantic processing of module FiniteSets
+Semantic processing of module TLC
+Semantic processing of module retirement_oracle
+Starting... (2026-10-05 22:34:24)
+Computing initial states...
+Computed 2 initial states...
+Computed 4 initial states...
+Finished computing initial states: 8 distinct states generated at 2026-10-05 22:34:24.
+Error: Invariant ClosedConnectionsDoNotBecomeReady is violated.
+Error: The behavior up to this point is:
+State 1: <Initial predicate>
+s = [ readKind |-> "initial",
+  open |-> TRUE,
+  retired |-> FALSE,
+  closeReason |-> "none",
+  status |-> <<"loading">>,
+  kind |-> <<"clear">>,
+  readPending |-> TRUE,
+  readPublishedAfterClose |-> FALSE,
+  late |-> "absent",
+  decision |-> <<"pending">>,
+  native |-> <<"none">>,
+  nativeQueue |-> <<>>,
+  admittedAfterClose |-> {},
+  nativeCommits |-> <<>>,
+  confirmation |-> <<"none">>,
+  accepted |-> {},
+  pendingSync |-> {},
+  published |-> {},
+  publishedAfterClose |-> {},
+  handlerDone |-> {},
+  caller |-> <<"pending">> ]
+
+State 2: <Decide line 90, col 3 to line 92, col 43 of module retirement_oracle>
+s = [ readKind |-> "initial",
+  open |-> TRUE,
+  retired |-> FALSE,
+  closeReason |-> "none",
+  status |-> <<"loading">>,
+  kind |-> <<"clear">>,
+  readPending |-> TRUE,
+  readPublishedAfterClose |-> FALSE,
+  late |-> "absent",
+  decision |-> <<"accepted">>,
+  native |-> <<"none">>,
+  nativeQueue |-> <<>>,
+  admittedAfterClose |-> {},
+  nativeCommits |-> <<>>,
+  confirmation |-> <<"none">>,
+  accepted |-> {},
+  pendingSync |-> {},
+  published |-> {},
+  publishedAfterClose |-> {},
+  handlerDone |-> {},
+  caller |-> <<"pending">> ]
+
+State 3: <Admit line 95, col 3 to line 102, col 76 of module retirement_oracle>
+s = [ readKind |-> "initial",
+  open |-> TRUE,
+  retired |-> FALSE,
+  closeReason |-> "none",
+  status |-> <<"loading">>,
+  kind |-> <<"clear">>,
+  readPending |-> TRUE,
+  readPublishedAfterClose |-> FALSE,
+  late |-> "absent",
+  decision |-> <<"accepted">>,
+  native |-> <<"active">>,
+  nativeQueue |-> <<1>>,
+  admittedAfterClose |-> {},
+  nativeCommits |-> <<>>,
+  confirmation |-> <<"none">>,
+  accepted |-> {},
+  pendingSync |-> {},
+  published |-> {},
+  publishedAfterClose |-> {},
+  handlerDone |-> {},
+  caller |-> <<"pending">> ]
+
+State 4: <Close line 65, col 3 to line 71, col 40 of module retirement_oracle>
+s = [ readKind |-> "initial",
+  open |-> FALSE,
+  retired |-> TRUE,
+  closeReason |-> "delete",
+  status |-> <<"error">>,
+  kind |-> <<"clear">>,
+  readPending |-> TRUE,
+  readPublishedAfterClose |-> FALSE,
+  late |-> "absent",
+  decision |-> <<"accepted">>,
+  native |-> <<"active">>,
+  nativeQueue |-> <<1>>,
+  admittedAfterClose |-> {},
+  nativeCommits |-> <<>>,
+  confirmation |-> <<"none">>,
+  accepted |-> {},
+  pendingSync |-> {},
+  published |-> {},
+  publishedAfterClose |-> {},
+  handlerDone |-> {},
+  caller |-> <<"pending">> ]
+
+State 5: <FinishNative line 109, col 3 to line 115, col 43 of module retirement_oracle>
+s = [ readKind |-> "initial",
+  open |-> FALSE,
+  retired |-> TRUE,
+  closeReason |-> "delete",
+  status |-> <<"error">>,
+  kind |-> <<"clear">>,
+  readPending |-> TRUE,
+  readPublishedAfterClose |-> FALSE,
+  late |-> "absent",
+  decision |-> <<"accepted">>,
+  native |-> <<"committed">>,
+  nativeQueue |-> <<>>,
+  admittedAfterClose |-> {},
+  nativeCommits |-> <<1>>,
+  confirmation |-> <<"none">>,
+  accepted |-> {},
+  pendingSync |-> {},
+  published |-> {},
+  publishedAfterClose |-> {},
+  handlerDone |-> {},
+  caller |-> <<"pending">> ]
+
+State 6: <Confirm line 121, col 3 to line 133, col 40 of module retirement_oracle>
+s = [ readKind |-> "initial",
+  open |-> FALSE,
+  retired |-> TRUE,
+  closeReason |-> "delete",
+  status |-> <<"ready">>,
+  kind |-> <<"clear">>,
+  readPending |-> TRUE,
+  readPublishedAfterClose |-> FALSE,
+  late |-> "absent",
+  decision |-> <<"accepted">>,
+  native |-> <<"committed">>,
+  nativeQueue |-> <<>>,
+  admittedAfterClose |-> {},
+  nativeCommits |-> <<1>>,
+  confirmation |-> <<"accepted">>,
+  accepted |-> {1},
+  pendingSync |-> {},
+  published |-> {1},
+  publishedAfterClose |-> {1},
+  handlerDone |-> {},
+  caller |-> <<"pending">> ]
+
+2002 states generated, 1032 distinct states found, 448 states left on queue.
+The depth of the complete state graph search is 6.
+The average outdegree of the complete state graph is 2 (minimum is 1, the maximum 6 and the 95th percentile is 4).
+Finished in 00s at (2026-10-05 22:34:24)

@@ -9,7 +9,7 @@ title: lte
 function lte<T>(left, right): BasicExpression<boolean>;
 ```
 
-Defined in: [packages/db/src/query/builder/functions.ts:212](https://github.com/TanStack/db/blob/main/packages/db/src/query/builder/functions.ts#L212)
+Defined in: [packages/db/src/query/builder/functions.ts:195](https://github.com/TanStack/db/blob/main/packages/db/src/query/builder/functions.ts#L195)
 
 ### Type Parameters
 
@@ -37,7 +37,7 @@ Defined in: [packages/db/src/query/builder/functions.ts:212](https://github.com/
 function lte<T>(left, right): BasicExpression<boolean>;
 ```
 
-Defined in: [packages/db/src/query/builder/functions.ts:216](https://github.com/TanStack/db/blob/main/packages/db/src/query/builder/functions.ts#L216)
+Defined in: [packages/db/src/query/builder/functions.ts:199](https://github.com/TanStack/db/blob/main/packages/db/src/query/builder/functions.ts#L199)
 
 ### Type Parameters
 
@@ -65,7 +65,7 @@ Defined in: [packages/db/src/query/builder/functions.ts:216](https://github.com/
 function lte<T>(left, right): BasicExpression<boolean>;
 ```
 
-Defined in: [packages/db/src/query/builder/functions.ts:220](https://github.com/TanStack/db/blob/main/packages/db/src/query/builder/functions.ts#L220)
+Defined in: [packages/db/src/query/builder/functions.ts:203](https://github.com/TanStack/db/blob/main/packages/db/src/query/builder/functions.ts#L203)
 
 ### Type Parameters
 

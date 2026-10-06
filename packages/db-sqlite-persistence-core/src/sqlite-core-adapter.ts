@@ -1,5 +1,6 @@
 import {
   IR,
+  compareTemporalValues,
   compileSingleRowExpression,
   toBooleanPredicate,
 } from '@tanstack/db'
@@ -17,7 +18,11 @@ import {
   PERSISTED_TYPE_TAG,
   PERSISTED_VALUE_TAG,
   assertSQLiteBigIntInRange,
+  reviveSQLiteTemporal,
   serializeSQLiteBigInt,
+  serializeSQLiteTemporal,
+  sqliteTemporalIdentity,
+  sqliteTemporalKind,
 } from './sqlite-value'
 import type { LoadSubsetOptions } from '@tanstack/db'
 import type {
@@ -36,7 +41,7 @@ type SqliteSupportedValue = null | number | string
 
 // The default stays below SQLite's older 999-variable limit. Drivers with a
 // lower binding cap use smaller chunks; each replacement row binds four values.
-const REPLACEMENT_BATCH_SIZE = 100
+const REPLACEMENT_BATCH_SIZE = 125
 
 type CollectionTableMapping = {
   tableName: string
@@ -47,6 +52,7 @@ type CompiledSqlFragment = {
   supported: boolean
   sql: string
   params: Array<SqliteSupportedValue>
+  identitySql?: string
   valueKind?: CompiledValueKind
 }
 
@@ -220,6 +226,7 @@ function observeSharedLogicalSchedulingSupport(
   }
 
   return {
+    maxBoundParameters: driver.maxBoundParameters,
     exec: (sql) => observe(driver.exec(sql)),
     query: <T>(sql: string, params: ReadonlyArray<unknown> = []) =>
       observe(driver.query<T>(sql, params)),
@@ -254,12 +261,18 @@ export const DEFAULT_APPLIED_TX_PRUNE_MAX_ROWS = 1_000
  */
 export const DEFAULT_APPLIED_TX_PRUNE_MAX_AGE_SECONDS = 24 * 60 * 60
 
-const SQLITE_MAX_IN_BATCH_SIZE = 900
 const SAFE_IDENTIFIER_PATTERN = /^[a-zA-Z_][a-zA-Z0-9_]*$/
 const FORBIDDEN_SQL_FRAGMENT_PATTERN = /(;|--|\/\*)/
 type CompiledValueKind = `unknown` | `bigint` | `date` | `datetime`
 type PersistedTaggedValueType =
-  `bigint` | `date` | `nan` | `infinity` | `-infinity`
+  | `bigint`
+  | `date`
+  | `nan`
+  | `infinity`
+  | `-infinity`
+  | `string`
+  | `Temporal.Instant`
+  | `Temporal.PlainDate`
 type PersistedTaggedValue = {
   [PERSISTED_TYPE_TAG]: PersistedTaggedValueType
   [PERSISTED_VALUE_TAG]: string
@@ -271,6 +284,9 @@ const persistedTaggedValueTypes = new Set<PersistedTaggedValueType>([
   `nan`,
   `infinity`,
   `-infinity`,
+  `string`,
+  `Temporal.Instant`,
+  `Temporal.PlainDate`,
 ])
 
 const orderByObjectIds = new WeakMap<object, number>()
@@ -333,6 +349,9 @@ function encodePersistedJsonValue(value: unknown): unknown {
     return serializeSQLiteBigInt(value) satisfies PersistedTaggedValue
   }
 
+  const temporal = serializeSQLiteTemporal(value)
+  if (temporal) return temporal
+
   if (value instanceof Date) {
     return {
       [PERSISTED_TYPE_TAG]: `date`,
@@ -375,6 +394,13 @@ function encodePersistedJsonValue(value: unknown): unknown {
         encodedRecord[key] = encodedValue
       }
     }
+    // Escape the marker field itself, leaving ordinary nested JSON paths intact.
+    if (typeof recordValue[PERSISTED_TYPE_TAG] === `string`) {
+      encodedRecord[PERSISTED_TYPE_TAG] = {
+        [PERSISTED_TYPE_TAG]: `string`,
+        [PERSISTED_VALUE_TAG]: recordValue[PERSISTED_TYPE_TAG],
+      }
+    }
     return encodedRecord
   }
 
@@ -388,6 +414,14 @@ function decodePersistedJsonValue(value: unknown): unknown {
 
   if (isPersistedTaggedValue(value)) {
     switch (value[PERSISTED_TYPE_TAG]) {
+      case `string`:
+        return value[PERSISTED_VALUE_TAG]
+      case `Temporal.Instant`:
+      case `Temporal.PlainDate`:
+        return reviveSQLiteTemporal(
+          value[PERSISTED_TYPE_TAG],
+          value[PERSISTED_VALUE_TAG],
+        )
       case `bigint`:
         return BigInt(value[PERSISTED_VALUE_TAG])
       case `date`: {
@@ -459,7 +493,8 @@ function toSqliteParameterValue(value: unknown): SqliteSupportedValue {
     return value.toISOString()
   }
 
-  return serializePersistedRowValue(value)
+  const temporal = serializeSQLiteTemporal(value)
+  return temporal?.order ?? serializePersistedRowValue(value)
 }
 
 function toSqliteLiteral(value: SqliteSupportedValue): string {
@@ -471,6 +506,10 @@ function toSqliteLiteral(value: SqliteSupportedValue): string {
     return Number.isFinite(value) ? String(value) : `NULL`
   }
 
+  if (value.includes(`\u0000`)) {
+    // JSON escapes NUL before SQL parsing and matches stored-string extraction.
+    return `json_extract(${toSqliteLiteral(JSON.stringify(value))}, '$')`
+  }
   return `'${value.replace(/'/g, `''`)}'`
 }
 
@@ -563,6 +602,10 @@ function compareOrderByValues(
     return left.getTime() - right.getTime()
   }
 
+  if (sqliteTemporalKind(left) && sqliteTemporalKind(right)) {
+    return compareTemporalValues(left, right)
+  }
+
   const leftIsObject = typeof left === `object`
   const rightIsObject = typeof right === `object`
   if (leftIsObject || rightIsObject) {
@@ -602,6 +645,39 @@ function createJsonPath(path: Array<string>): string | null {
   }
 
   return jsonPath
+}
+
+const MAX_INDEXED_NUMERIC_PATH_SEGMENTS = 3
+
+function hasDeepNumericPath(expression: IR.BasicExpression): boolean {
+  if (expression.type === `ref`) {
+    return (
+      IR.getPropRefPropertyPath(expression).filter((segment) =>
+        /^[0-9]+$/.test(String(segment)),
+      ).length > MAX_INDEXED_NUMERIC_PATH_SEGMENTS
+    )
+  }
+  return expression.type === `func` && expression.args.some(hasDeepNumericPath)
+}
+
+function createJsonPathVariants(path: Array<string>): Array<string> | null {
+  const canonical = createJsonPath(path)
+  if (!canonical) return null
+
+  let paths = [`$`]
+  for (const segment of path) {
+    if (/^[A-Za-z_][A-Za-z0-9_]*$/.test(segment)) {
+      paths = paths.map((prefix) => `${prefix}.${segment}`)
+    } else if (/^[0-9]+$/.test(segment)) {
+      if (paths.length >= 2 ** MAX_INDEXED_NUMERIC_PATH_SEGMENTS)
+        return [canonical]
+      paths = paths.flatMap((prefix) => [
+        `${prefix}[${segment}]`,
+        `${prefix}."${segment}"`,
+      ])
+    }
+  }
+  return paths
 }
 
 function getLiteralValueKind(value: unknown): CompiledValueKind {
@@ -687,16 +763,23 @@ function compileRefExpressionSql(jsonPath: string): CompiledSqlFragment {
   const taggedValuePathSql = toSqliteLiteral(taggedValuePath)
   const jsonPathSql = toSqliteLiteral(jsonPath)
 
-  return {
-    supported: true,
-    sql: `(CASE json_extract(value, ${typePathSql})
+  const typeSql = `json_extract(value, ${typePathSql})`
+  const orderPathSql = toSqliteLiteral(`${jsonPath}.order`)
+  const sql = `(CASE ${typeSql}
       WHEN 'bigint' THEN CAST(json_extract(value, ${taggedValuePathSql}) AS NUMERIC)
       WHEN 'date' THEN json_extract(value, ${taggedValuePathSql})
+      WHEN 'string' THEN json_extract(value, ${taggedValuePathSql})
+      WHEN 'Temporal.Instant' THEN json_extract(value, ${orderPathSql})
+      WHEN 'Temporal.PlainDate' THEN json_extract(value, ${orderPathSql})
       WHEN 'nan' THEN NULL
       WHEN 'infinity' THEN NULL
       WHEN '-infinity' THEN NULL
       ELSE json_extract(value, ${jsonPathSql})
-    END)`,
+    END)`
+  return {
+    supported: true,
+    sql,
+    identitySql: `(CASE WHEN ${typeSql} IN ('Temporal.Instant', 'Temporal.PlainDate') THEN ${typeSql} || ':' || json_extract(value, ${taggedValuePathSql}) ELSE ${sql} END)`,
     params: [],
     valueKind: `unknown`,
   }
@@ -748,6 +831,13 @@ function stableStringify(value: unknown): string {
   return serializePersistedRowValue(value)
 }
 
+/** Balance disjunctions so a large membership index stays below SQL depth limits. */
+function joinSqlDisjunction(parts: ReadonlyArray<string>): string {
+  if (parts.length === 1) return parts[0]!
+  const middle = Math.floor(parts.length / 2)
+  return `(${joinSqlDisjunction(parts.slice(0, middle))} OR ${joinSqlDisjunction(parts.slice(middle))})`
+}
+
 function argumentCompilationContext(
   parentName: string,
   argumentIndex: number,
@@ -782,31 +872,78 @@ function argumentCompilationContext(
   }
 }
 
+function hasUnpairedSurrogate(value: string): boolean {
+  // With /u, paired surrogates form one code point; lone surrogates still match.
+  return /[\uD800-\uDFFF]/u.test(value)
+}
+
+function isSafeEqualityLiteral(value: unknown): boolean {
+  return (
+    typeof value === `string` ||
+    typeof value === `boolean` ||
+    typeof value === `bigint` ||
+    sqliteTemporalKind(value) !== undefined
+  )
+}
+
+function isSafeCoalesceOperand(
+  expression: IR.BasicExpression | undefined,
+): boolean {
+  return (
+    expression?.type === `func` &&
+    expression.name === `coalesce` &&
+    expression.args.length === 2 &&
+    expression.args[0]?.type === `ref` &&
+    expression.args[1]?.type === `val` &&
+    isSafeEqualityLiteral(expression.args[1].value) &&
+    !(
+      typeof expression.args[1].value === `string` &&
+      hasUnpairedSurrogate(expression.args[1].value)
+    )
+  )
+}
+
 function compileSqlExpression(
   expression: IR.BasicExpression,
   context: SqlExpressionCompilationContext = `predicate`,
 ): CompiledSqlFragment {
   if (expression.type === `val`) {
-    const valueKind = getLiteralValueKind(expression.value)
+    if (
+      context === `predicate` &&
+      typeof expression.value === `string` &&
+      hasUnpairedSurrogate(expression.value)
+    ) {
+      // JSON extraction changes lone surrogates in stored strings. Apply the
+      // same extraction to the binding so an indexed equality keeps its row.
+      return {
+        supported: true,
+        sql: `json_extract(?, '$')`,
+        params: [JSON.stringify(expression.value)],
+      }
+    }
+    const temporal = serializeSQLiteTemporal(expression.value)
+    const value = temporal?.order ?? toSqliteParameterValue(expression.value)
     return {
+      identitySql: temporal
+        ? toSqliteLiteral(sqliteTemporalIdentity(temporal))
+        : undefined,
       supported: true,
       sql:
         context === `index-expression`
-          ? toSqliteExpressionLiteral(expression.value)
+          ? toSqliteExpressionLiteral(
+              typeof expression.value === `bigint` ? expression.value : value,
+            )
           : `?`,
-      params:
-        context === `predicate`
-          ? [toSqliteParameterValue(expression.value)]
-          : [],
-      valueKind,
+      params: context === `predicate` ? [value] : [],
+      valueKind: getLiteralValueKind(expression.value),
     }
   }
 
   if (expression.type === `ref`) {
-    const jsonPath = createJsonPath(
+    const jsonPaths = createJsonPathVariants(
       IR.getPropRefPropertyPath(expression).map(String),
     )
-    if (!jsonPath) {
+    if (!jsonPaths) {
       return {
         supported: false,
         sql: ``,
@@ -814,10 +951,21 @@ function compileSqlExpression(
       }
     }
 
-    return compileRefExpressionSql(jsonPath)
+    if (jsonPaths.length === 1) return compileRefExpressionSql(jsonPaths[0]!)
+    const variants = jsonPaths.map(compileRefExpressionSql)
+    return {
+      supported: true,
+      identitySql: `COALESCE(${variants.map((variant) => variant.identitySql).join(`, `)})`,
+      sql: `COALESCE(${variants.map((variant) => variant.sql).join(`, `)})`,
+      params: [],
+      valueKind: `unknown`,
+    }
   }
 
-  const compiledArgs = expression.args.map((arg, index) =>
+  // IN owns its list encoding; compiling that list as a scalar discards work.
+  const args =
+    expression.name === `in` ? expression.args.slice(0, 1) : expression.args
+  const compiledArgs = args.map((arg, index) =>
     compileSqlExpression(
       arg,
       argumentCompilationContext(expression.name, index, arg, context),
@@ -867,38 +1015,49 @@ function compileSqlExpression(
         lte: `<=`,
       }
 
+      const comparison = compileComparisonSql(
+        operatorByName[expression.name],
+        expression.args[0]!,
+        expression.args[1]!,
+        argSql[0],
+        argSql[1],
+        valueKind,
+        getCompiledValueKind(compiledArgs[0]),
+        getCompiledValueKind(compiledArgs[1]),
+      )
+      // Native order ties need canonical identity, including in persisted
+      // expressions. Ordinary string predicates keep one binding; residual
+      // filtering removes native order-key collisions from their candidate set.
+      const needsIdentity =
+        expression.name === `eq` &&
+        expression.args.every(
+          (arg) =>
+            arg.type !== `val` ||
+            sqliteTemporalKind(arg.value) ||
+            (context === `index-expression` && typeof arg.value === `string`),
+        )
       return {
         supported: true,
-        sql: compileComparisonSql(
-          operatorByName[expression.name],
-          expression.args[0]!,
-          expression.args[1]!,
-          argSql[0],
-          argSql[1],
-          valueKind,
-          getCompiledValueKind(compiledArgs[0]),
-          getCompiledValueKind(compiledArgs[1]),
-        ),
+        sql: needsIdentity
+          ? `(${comparison} AND (${compiledArgs[0].identitySql ?? argSql[0]} = ${compiledArgs[1].identitySql ?? argSql[1]}))`
+          : comparison,
         params,
       }
     }
-    case `and`: {
-      if (argSql.length < 2) {
-        return { supported: false, sql: ``, params: [] }
-      }
-      return {
-        supported: true,
-        sql: argSql.map((sql) => `(${sql})`).join(` AND `),
-        params,
-      }
-    }
+    case `and`:
     case `or`: {
-      if (argSql.length < 2) {
-        return { supported: false, sql: ``, params: [] }
+      if (argSql.length === 0) {
+        return {
+          supported: true,
+          sql: expression.name === `and` ? `(1 = 1)` : `(0 = 1)`,
+          params: [],
+        }
       }
       return {
         supported: true,
-        sql: argSql.map((sql) => `(${sql})`).join(` OR `),
+        sql: argSql
+          .map((sql) => `(${sql})`)
+          .join(expression.name === `and` ? ` AND ` : ` OR `),
         params,
       }
     }
@@ -932,54 +1091,54 @@ function compileSqlExpression(
         return { supported: false, sql: ``, params: [] }
       }
 
+      // Order and identity are two projections of one validated native encoding.
+      const values = listValue.map((value) => {
+        const temporal = serializeSQLiteTemporal(value)
+        return {
+          value:
+            typeof value === `bigint`
+              ? assertSQLiteBigIntInRange(value)
+              : (temporal?.order ?? toSqliteParameterValue(value)),
+          identity: temporal ? sqliteTemporalIdentity(temporal) : undefined,
+        }
+      })
+      let identity = ``
+      if (
+        listValue.some(
+          (value) =>
+            sqliteTemporalKind(value) ||
+            (context === `index-expression` && typeof value === `string`),
+        )
+      ) {
+        const leftIdentity = compiledArgs[0]?.identitySql ?? leftSql
+        // Index expressions cannot contain subqueries. Both forms preserve
+        // correlated membership and SQL's three-valued Boolean semantics.
+        identity =
+          context === `index-expression`
+            ? ` AND (${joinSqlDisjunction(values.map(({ value, identity: nativeIdentity }) => `(${leftSql} = ${toSqliteExpressionLiteral(value)} AND ${leftIdentity} = ${toSqliteExpressionLiteral(nativeIdentity ?? value)})`))})`
+            : ` AND ((${leftSql}, ${leftIdentity}) IN (VALUES ${[...new Set(values.map(({ value, identity: nativeIdentity }) => `(${toSqliteExpressionLiteral(value)}, ${toSqliteExpressionLiteral(nativeIdentity ?? value)})`))].join(`, `)}))`
+      }
       if (context === `index-expression`) {
         return {
           supported: true,
-          sql: `(${leftSql} IN (${listValue
-            .map((value) => toSqliteExpressionLiteral(value))
-            .join(`, `)}))`,
+          sql: `(${leftSql} IN (${values
+            .map(({ value }) => toSqliteExpressionLiteral(value))
+            .join(`, `)})${identity})`,
           params: leftParams,
         }
       }
 
-      if (listValue.length > SQLITE_MAX_IN_BATCH_SIZE) {
-        const chunkClauses: Array<string> = []
-        const batchedParams: Array<SqliteSupportedValue> = []
-
-        for (
-          let startIndex = 0;
-          startIndex < listValue.length;
-          startIndex += SQLITE_MAX_IN_BATCH_SIZE
-        ) {
-          const chunkValues = listValue.slice(
-            startIndex,
-            startIndex + SQLITE_MAX_IN_BATCH_SIZE,
-          )
-          const chunkParams: Array<SqliteSupportedValue> = []
-          const chunkValueSql = chunkValues.map((value) => {
-            chunkParams.push(toSqliteParameterValue(value))
-            return typeof value === `bigint` ? `CAST(? AS NUMERIC)` : `?`
-          })
-          chunkClauses.push(`(${leftSql} IN (${chunkValueSql.join(`, `)}))`)
-          batchedParams.push(...leftParams, ...chunkParams)
-        }
-
-        return {
-          supported: true,
-          sql: `(${chunkClauses.join(` OR `)})`,
-          params: batchedParams,
-        }
-      }
-
-      const listParams: Array<SqliteSupportedValue> = []
-      const listValueSql = listValue.map((value) => {
-        listParams.push(toSqliteParameterValue(value))
-        return typeof value === `bigint` ? `CAST(? AS NUMERIC)` : `?`
-      })
+      const jsonList = `[${values
+        .map(({ value }) =>
+          typeof value === `bigint`
+            ? assertSQLiteBigIntInRange(value).toString()
+            : JSON.stringify(value),
+        )
+        .join(`,`)}]`
       return {
         supported: true,
-        sql: `(${leftSql} IN (${listValueSql.join(`, `)}))`,
-        params: [...leftParams, ...listParams],
+        sql: `(${leftSql} IN (SELECT value FROM json_each(?))${identity})`,
+        params: [...leftParams, jsonList],
       }
     }
     case `like`:
@@ -1006,7 +1165,12 @@ function compileSqlExpression(
     case `concat`:
       return { supported: true, sql: `(${argSql.join(` || `)})`, params }
     case `coalesce`:
-      return { supported: true, sql: `COALESCE(${argSql.join(`, `)})`, params }
+      return {
+        supported: true,
+        sql: `COALESCE(${argSql.join(`, `)})`,
+        identitySql: `COALESCE(${compiledArgs.map((arg) => arg.identitySql ?? arg.sql).join(`, `)})`,
+        params,
+      }
     case `add`:
       return { supported: true, sql: `(${argSql[0]} + ${argSql[1]})`, params }
     case `subtract`:
@@ -1042,6 +1206,235 @@ function compileSqlExpression(
         params: [],
       }
   }
+}
+
+/** A raw ref/native-literal leaf has exact native truth before prefilter broadening. */
+function nativeComparisonRef(
+  expression: IR.BasicExpression,
+): IR.PropRef | undefined {
+  if (expression.type !== `func` || expression.args.length !== 2)
+    return undefined
+  const [left, right] = expression.args
+  if (expression.name === `in`) {
+    return left?.type === `ref` &&
+      right?.type === `val` &&
+      Array.isArray(right.value) &&
+      right.value.length > 0 &&
+      right.value.every((value) => sqliteTemporalKind(value))
+      ? left
+      : undefined
+  }
+  if (![`eq`, `gt`, `gte`, `lt`, `lte`].includes(expression.name))
+    return undefined
+  if (
+    left?.type === `ref` &&
+    right?.type === `val` &&
+    sqliteTemporalKind(right.value)
+  )
+    return left
+  if (
+    right?.type === `ref` &&
+    left?.type === `val` &&
+    sqliteTemporalKind(left.value)
+  )
+    return right
+  return undefined
+}
+
+function compileNativeRefGuard(ref: IR.PropRef): string {
+  const paths = createJsonPathVariants(
+    IR.getPropRefPropertyPath(ref).map(String),
+  )!
+  const kinds = paths.map(
+    (path) =>
+      `json_extract(value, ${toSqliteLiteral(`${path}.${PERSISTED_TYPE_TAG}`)})`,
+  )
+  const kind = kinds.length === 1 ? kinds[0] : `COALESCE(${kinds.join(`, `)})`
+  return `${kind} IN ('Temporal.Instant', 'Temporal.PlainDate')`
+}
+
+function compileSafeSqlPrefilter(
+  expression: IR.BasicExpression,
+  compiled?: CompiledSqlFragment,
+): CompiledSqlFragment | undefined {
+  // Every public match must pass this SQL candidate before JavaScript applies
+  // the authoritative row predicate. Extra candidates are allowed.
+  const direct = () => {
+    const candidate = compiled ?? compileSqlExpression(expression)
+    return candidate.supported ? candidate : undefined
+  }
+  if (expression.type === `val`) {
+    return typeof expression.value === `boolean` || expression.value == null
+      ? direct()
+      : undefined
+  }
+  if (expression.type === `ref`) return undefined
+
+  if (expression.name === `and` || expression.name === `or`) {
+    if (expression.args.length === 0) return direct()
+    const candidates = expression.args.map((argument) =>
+      compileSafeSqlPrefilter(argument),
+    )
+    if (expression.name === `or` && candidates.some((candidate) => !candidate))
+      return undefined
+    const selected = candidates.filter(
+      (candidate): candidate is CompiledSqlFragment => candidate !== undefined,
+    )
+    if (selected.length === 0) return undefined
+    return {
+      supported: true,
+      sql: selected
+        .map(({ sql }) => `(${sql})`)
+        .join(expression.name === `and` ? ` AND ` : ` OR `),
+      params: selected.flatMap(({ params }) => params),
+    }
+  }
+
+  // More than three digit segments need too many alternative JSON paths.
+  // Keep their prefilter unbounded rather than exclude an object-key match.
+  if (hasDeepNumericPath(expression)) return undefined
+  compiled ??= compileSqlExpression(expression)
+  if (!compiled.supported) return undefined
+  const [left, right] = expression.args
+  if (
+    expression.name === `not` &&
+    expression.args.length === 1 &&
+    left &&
+    nativeComparisonRef(left)
+  ) {
+    // Negate the original leaf, never a broadened prefilter. Nonfinite stored
+    // scalars project to NULL; retaining them also retains valid NOT matches.
+    return { ...compiled, sql: `COALESCE(${compiled.sql}, 1)` }
+  }
+  if (expression.args.length === 2) {
+    const nativeRef = nativeComparisonRef(expression)
+    if (nativeRef) {
+      if (expression.name === `eq` || expression.name === `in`) return compiled
+      // NaN orders above native values in the core evaluator. NULL candidates
+      // also preserve that law with either operand direction.
+      const fieldSql = compileSqlExpression(nativeRef, `index-expression`).sql
+      return { ...compiled, sql: `(${compiled.sql} OR ${fieldSql} IS NULL)` }
+    }
+    if (
+      expression.name === `eq` &&
+      left?.type === `ref` &&
+      right?.type === `ref`
+    ) {
+      // Ref/ref scalar coercions are not generally SQL-exact. Restrict only
+      // native pairs; leave every other pair to the authoritative evaluator.
+      return {
+        ...compiled,
+        sql: `(CASE WHEN ${compileNativeRefGuard(left)} AND ${compileNativeRefGuard(right)} THEN ${compiled.sql} ELSE 1 END)`,
+      }
+    }
+    if (
+      [`gt`, `gte`, `lt`, `lte`].includes(expression.name) &&
+      (left?.type === `ref` || right?.type === `ref`)
+    ) {
+      const field =
+        left?.type === `ref` ? left : right?.type === `ref` ? right : undefined
+      const literal = field === left ? right : left
+      if (
+        field &&
+        literal?.type === `val` &&
+        ((typeof literal.value === `number` &&
+          Number.isSafeInteger(literal.value)) ||
+          typeof literal.value === `bigint`)
+      ) {
+        const fieldSql = compileSqlExpression(field, `index-expression`).sql
+        const literalSql = compileSqlExpression(
+          literal,
+          typeof literal.value === `bigint` ? `index-expression` : `predicate`,
+        )
+        const greaterSide =
+          (field === left && [`gt`, `gte`].includes(expression.name)) ||
+          (field === right && [`lt`, `lte`].includes(expression.name))
+        const unsafeBigInt =
+          typeof literal.value === `bigint` &&
+          !Number.isSafeInteger(Number(literal.value))
+        const roundedNumberCandidates = unsafeBigInt
+          ? literal.value > 0n
+            ? ` OR ${fieldSql} >= ${Number.MAX_SAFE_INTEGER}`
+            : ` OR ${fieldSql} <= -${Number.MAX_SAFE_INTEGER}`
+          : ``
+        return {
+          supported: true,
+          sql: greaterSide
+            ? `(${fieldSql} >= ${literalSql.sql} OR ${fieldSql} IS NULL${roundedNumberCandidates})`
+            : `(${fieldSql} <= ${literalSql.sql} OR ${fieldSql} IS NULL OR ${fieldSql} >= ''${roundedNumberCandidates})`,
+          params: literalSql.params,
+        }
+      }
+    }
+    if (expression.name === `eq`) {
+      if (
+        ((left?.type === `ref` || isSafeCoalesceOperand(left)) &&
+          right?.type === `val` &&
+          isSafeEqualityLiteral(right.value)) ||
+        ((right?.type === `ref` || isSafeCoalesceOperand(right)) &&
+          left?.type === `val` &&
+          isSafeEqualityLiteral(left.value))
+      ) {
+        return compiled
+      }
+      const lower =
+        left?.type === `func` && left.name === `lower`
+          ? left
+          : right?.type === `func` && right.name === `lower`
+            ? right
+            : undefined
+      const literal = lower === left ? right : left
+      if (
+        lower?.args.length === 1 &&
+        lower.args[0]?.type === `ref` &&
+        literal?.type === `val` &&
+        typeof literal.value === `string` &&
+        [...literal.value].every((char) => char.charCodeAt(0) <= 0x7f) &&
+        !literal.value.includes(`\u0000`)
+      ) {
+        const lowerSql = compileSqlExpression(lower, `index-expression`).sql
+        return {
+          supported: true,
+          sql: `(${compiled.sql} OR (${lowerSql} >= ? AND ${lowerSql} GLOB '*[^ -~]*'))`,
+          params: [...compiled.params, literal.value],
+        }
+      }
+    }
+  }
+  if (
+    expression.name === `in` &&
+    expression.args.length === 2 &&
+    right?.type === `val` &&
+    Array.isArray(right.value)
+  ) {
+    if (right.value.length === 0) return compiled
+    if (left?.type === `ref`) {
+      if (right.value.every((value) => typeof value === `bigint`))
+        return compiled
+      if (right.value.every((value) => typeof value === `string`)) {
+        // Both sides pass through SQLite's JSON decoder; one binding keeps
+        // large string scopes within the host parameter limit, even in OR.
+        return {
+          supported: true,
+          sql: `(${compileSqlExpression(left, `index-expression`).sql} IN (SELECT value FROM json_each(?)))`,
+          params: [JSON.stringify(right.value)],
+        }
+      }
+    }
+  }
+  if (
+    expression.name === `like` &&
+    expression.args.length === 2 &&
+    left?.type === `ref` &&
+    right?.type === `val` &&
+    typeof right.value === `string` &&
+    /^[\x20-\x7e]*%$/.test(right.value) &&
+    !right.value.slice(0, -1).includes(`%`) &&
+    !right.value.includes(`_`)
+  ) {
+    return compiled
+  }
+  return undefined
 }
 
 function compileOrderByClauses(
@@ -1167,6 +1560,39 @@ function mergeObjectRows<T extends object>(existing: unknown, incoming: T): T {
     return Object.assign({}, existing as Record<string, unknown>, incoming) as T
   }
   return incoming
+}
+
+function* batches<T>(
+  changes: ReadonlyArray<T>,
+  maxSize: number,
+): Generator<Array<T>> {
+  for (let offset = 0; offset < changes.length; offset += maxSize) {
+    yield changes.slice(offset, offset + maxSize)
+  }
+}
+
+function lastMetadataByKey<
+  T extends { type: `set` | `delete`; value?: unknown },
+>(
+  changes: ReadonlyArray<T>,
+  keyOf: (change: T) => string,
+  undefinedSetIsNull = false,
+): Array<T> {
+  const latest = new Map<string, T>()
+  for (const change of changes) {
+    const key = keyOf(change)
+    const previous = latest.get(key)
+    if (
+      previous?.type === `set` &&
+      (previous.value !== undefined || !undefinedSetIsNull) &&
+      (serializePersistedRowValue(previous.value) as string | undefined) ===
+        undefined
+    ) {
+      throw new TypeError(`Metadata value cannot be bound to SQLite`)
+    }
+    latest.set(key, change)
+  }
+  return [...latest.values()]
 }
 
 function buildIndexName(collectionId: string, signature: string): string {
@@ -1666,58 +2092,134 @@ export class SQLiteCorePersistenceAdapter implements PersistenceAdapter {
         await transactionDriver.run(`DELETE FROM ${tombstoneTableSql}`)
       }
 
-      const replacementKeys = replacesPersistedBaseline
-        ? tx.mutations.map((mutation) =>
-            encodePersistedStorageKey(mutation.key),
-          )
-        : []
-      const batchReplacement =
-        replacesPersistedBaseline &&
-        tx.mutations.length > 0 &&
-        tx.mutations.every((mutation) => mutation.type !== `delete`) &&
-        new Set(replacementKeys).size === replacementKeys.length
-
-      if (batchReplacement) {
-        const finalRowMetadata = new Map<string, unknown>()
-        for (const mutation of tx.rowMetadataMutations ?? []) {
-          finalRowMetadata.set(
-            encodePersistedStorageKey(mutation.key),
-            mutation.type === `delete` ? undefined : mutation.value,
-          )
+      const rowMutations = new Map<string, PersistedTx[`mutations`][number]>()
+      for (const mutation of tx.mutations) {
+        const key = encodePersistedStorageKey(mutation.key)
+        const previous = rowMutations.get(key)
+        if (!previous) {
+          rowMutations.set(key, mutation)
+          continue
         }
 
-        for (
-          let start = 0;
-          start < tx.mutations.length;
-          start += this.replacementBatchSize
+        // A superseded action still had to serialize successfully.
+        serializePersistedRowValue(previous.value)
+        if (
+          previous.type !== `delete` &&
+          previous.metadataChanged === true &&
+          previous.metadata !== undefined
         ) {
-          const mutations = tx.mutations.slice(
-            start,
-            start + this.replacementBatchSize,
+          serializePersistedRowValue(previous.metadata)
+        }
+        if (mutation.type === `delete`) {
+          rowMutations.set(key, mutation)
+          continue
+        }
+        const value =
+          mutation.type === `insert` || previous.type === `delete`
+            ? mutation.value
+            : mergeObjectRows(previous.value, mutation.value)
+        const metadataChanged =
+          mutation.metadataChanged === true ||
+          previous.type === `delete` ||
+          previous.metadataChanged === true
+        const metadata =
+          mutation.metadataChanged === true
+            ? mutation.metadata
+            : previous.type === `delete`
+              ? undefined
+              : previous.metadata
+        const next = { key: mutation.key, value, metadataChanged, metadata }
+        rowMutations.set(
+          key,
+          mutation.type === `insert` || previous.type !== `update`
+            ? { type: `insert`, ...next }
+            : { type: `update`, ...next },
+        )
+      }
+
+      for (const batch of batches(
+        [...rowMutations.values()],
+        this.replacementBatchSize,
+      )) {
+        const writes = batch.filter((mutation) => mutation.type !== `delete`)
+        const deletes = batch.filter((mutation) => mutation.type === `delete`)
+        const readKeys = writes
+          .filter(
+            (mutation) =>
+              mutation.type === `update` || mutation.metadataChanged !== true,
           )
-          const keys = replacementKeys.slice(
-            start,
-            start + this.replacementBatchSize,
-          )
+          .map((mutation) => encodePersistedStorageKey(mutation.key))
+        const existingRows =
+          readKeys.length > 0
+            ? await transactionDriver.query<{
+                key: string
+                value: string
+                metadata: string | null
+              }>(
+                `SELECT key, value, metadata
+               FROM ${collectionTableSql}
+               WHERE key IN (${readKeys.map(() => `?`).join(`, `)})`,
+                readKeys,
+              )
+            : []
+        const existing = new Map(existingRows.map((row) => [row.key, row]))
+        const writeKeys = writes.map((mutation) =>
+          encodePersistedStorageKey(mutation.key),
+        )
+        const deleteKeys = deletes.map((mutation) =>
+          encodePersistedStorageKey(mutation.key),
+        )
+
+        if (tracksPersistedKeySet && writeKeys.length > 0) {
           await transactionDriver.run(
             `INSERT INTO collection_expected_keys (collection_id, key)
-             VALUES ${keys.map(() => `(?, ?)`).join(`, `)}`,
-            keys.flatMap((key) => [collectionId, key]),
+             VALUES ${writeKeys.map(() => `(?, ?)`).join(`, `)}
+             ON CONFLICT(collection_id, key) DO NOTHING`,
+            writeKeys.flatMap((key) => [collectionId, key]),
           )
+        }
+        if (tracksPersistedKeySet && deleteKeys.length > 0) {
+          await transactionDriver.run(
+            `DELETE FROM collection_expected_keys
+             WHERE collection_id = ? AND key IN (${deleteKeys.map(() => `?`).join(`, `)})`,
+            [collectionId, ...deleteKeys],
+          )
+        }
+        if (deleteKeys.length > 0) {
+          await transactionDriver.run(
+            `DELETE FROM ${collectionTableSql}
+             WHERE key IN (${deleteKeys.map(() => `?`).join(`, `)})`,
+            deleteKeys,
+          )
+        }
+        if (writeKeys.length > 0) {
           await transactionDriver.run(
             `INSERT INTO ${collectionTableSql} (key, value, metadata, row_version)
-             VALUES ${keys.map(() => `(?, ?, ?, ?)`).join(`, `)}`,
-            mutations.flatMap((mutation, index) => {
-              const key = keys[index]!
-              const metadata = finalRowMetadata.has(key)
-                ? finalRowMetadata.get(key)
-                : mutation.type !== `delete` &&
-                    mutation.metadataChanged === true
-                  ? mutation.metadata
+             VALUES ${writeKeys.map(() => `(?, ?, ?, ?)`).join(`, `)}
+             ON CONFLICT(key) DO UPDATE SET
+               value = excluded.value,
+               metadata = excluded.metadata,
+               row_version = excluded.row_version`,
+            writes.flatMap((mutation, index) => {
+              const previous = existing.get(writeKeys[index]!)
+              const previousValue = previous?.value
+                ? deserializePersistedRowValue(previous.value)
+                : undefined
+              const previousMetadata =
+                previous?.metadata != null
+                  ? deserializePersistedRowValue(previous.metadata)
                   : undefined
+              const value =
+                mutation.type === `update`
+                  ? mergeObjectRows(previousValue, mutation.value)
+                  : mutation.value
+              const metadata =
+                mutation.metadataChanged === true
+                  ? mutation.metadata
+                  : previousMetadata
               return [
-                key,
-                serializePersistedRowValue(mutation.value),
+                writeKeys[index]!,
+                serializePersistedRowValue(value),
                 metadata === undefined
                   ? null
                   : serializePersistedRowValue(metadata),
@@ -1725,143 +2227,85 @@ export class SQLiteCorePersistenceAdapter implements PersistenceAdapter {
               ]
             }),
           )
-        }
-      }
-
-      for (const mutation of batchReplacement ? [] : tx.mutations) {
-        const encodedKey = encodePersistedStorageKey(mutation.key)
-        if (mutation.type === `delete`) {
-          if (tracksPersistedKeySet) {
-            await transactionDriver.run(
-              `DELETE FROM collection_expected_keys
-               WHERE collection_id = ? AND key = ?`,
-              [collectionId, encodedKey],
-            )
-          }
           await transactionDriver.run(
-            `DELETE FROM ${collectionTableSql}
-             WHERE key = ?`,
-            [encodedKey],
+            `DELETE FROM ${tombstoneTableSql}
+             WHERE key IN (${writeKeys.map(() => `?`).join(`, `)})`,
+            writeKeys,
           )
+        }
+        if (deletes.length > 0) {
           await transactionDriver.run(
             `INSERT INTO ${tombstoneTableSql} (key, value, row_version, deleted_at)
-             VALUES (?, ?, ?, ?)
+             VALUES ${deleteKeys.map(() => `(?, ?, ?, ?)`).join(`, `)}
              ON CONFLICT(key) DO UPDATE SET
                value = excluded.value,
                row_version = excluded.row_version,
                deleted_at = excluded.deleted_at`,
-            [
-              encodedKey,
+            deletes.flatMap((mutation, index) => [
+              deleteKeys[index]!,
               serializePersistedRowValue(mutation.value),
               nextRowVersion,
               new Date().toISOString(),
-            ],
+            ]),
           )
-          continue
         }
+      }
 
-        const existingRows = await transactionDriver.query<{
-          value: string
-          metadata: string | null
-        }>(
-          `SELECT value, metadata
-           FROM ${collectionTableSql}
-           WHERE key = ?
-           LIMIT 1`,
-          [encodedKey],
+      for (const batch of batches(
+        lastMetadataByKey(
+          tx.rowMetadataMutations ?? [],
+          (mutation) => encodePersistedStorageKey(mutation.key),
+          true,
+        ),
+        this.replacementBatchSize,
+      )) {
+        const keys = batch.map((mutation) =>
+          encodePersistedStorageKey(mutation.key),
         )
-        const existingValue = existingRows[0]?.value
-          ? deserializePersistedRowValue(existingRows[0].value)
-          : undefined
-        const existingMetadata =
-          existingRows[0]?.metadata != null
-            ? deserializePersistedRowValue(existingRows[0].metadata)
-            : undefined
-        const mergedValue =
-          mutation.type === `update`
-            ? mergeObjectRows(existingValue, mutation.value)
-            : mutation.value
-        const nextMetadata =
-          mutation.metadataChanged === true
-            ? mutation.metadata
-            : existingMetadata
-
-        if (tracksPersistedKeySet) {
-          await transactionDriver.run(
-            `INSERT INTO collection_expected_keys (collection_id, key)
-             VALUES (?, ?)
-             ON CONFLICT(collection_id, key) DO NOTHING`,
-            [collectionId, encodedKey],
-          )
-        }
         await transactionDriver.run(
-          `INSERT INTO ${collectionTableSql} (key, value, metadata, row_version)
-           VALUES (?, ?, ?, ?)
-           ON CONFLICT(key) DO UPDATE SET
-             value = excluded.value,
-             metadata = excluded.metadata,
-             row_version = excluded.row_version`,
+          `UPDATE ${collectionTableSql}
+           SET metadata = CASE key ${keys.map(() => `WHEN ? THEN ?`).join(` `)} END
+           WHERE key IN (${keys.map(() => `?`).join(`, `)})`,
           [
-            encodedKey,
-            serializePersistedRowValue(mergedValue),
-            nextMetadata === undefined
-              ? null
-              : serializePersistedRowValue(nextMetadata),
-            nextRowVersion,
+            ...batch.flatMap((mutation, index) => [
+              keys[index]!,
+              mutation.type === `delete` || mutation.value === undefined
+                ? null
+                : serializePersistedRowValue(mutation.value),
+            ]),
+            ...keys,
           ],
         )
-        await transactionDriver.run(
-          `DELETE FROM ${tombstoneTableSql}
-           WHERE key = ?`,
-          [encodedKey],
-        )
       }
 
-      for (const rowMetadataMutation of batchReplacement
-        ? []
-        : (tx.rowMetadataMutations ?? [])) {
-        const encodedKey = encodePersistedStorageKey(rowMetadataMutation.key)
-        if (rowMetadataMutation.type === `delete`) {
-          await transactionDriver.run(
-            `UPDATE ${collectionTableSql}
-             SET metadata = NULL
-             WHERE key = ?`,
-            [encodedKey],
-          )
-        } else {
-          await transactionDriver.run(
-            `UPDATE ${collectionTableSql}
-             SET metadata = ?
-             WHERE key = ?`,
-            [
-              rowMetadataMutation.value === undefined
-                ? null
-                : serializePersistedRowValue(rowMetadataMutation.value),
-              encodedKey,
-            ],
-          )
-        }
-      }
-
-      for (const metadataMutation of tx.collectionMetadataMutations ?? []) {
-        if (metadataMutation.type === `delete`) {
+      for (const batch of batches(
+        lastMetadataByKey(
+          tx.collectionMetadataMutations ?? [],
+          (mutation) => mutation.key,
+        ),
+        this.replacementBatchSize,
+      )) {
+        const deletes = batch.filter((mutation) => mutation.type === `delete`)
+        const sets = batch.filter((mutation) => mutation.type === `set`)
+        if (deletes.length > 0) {
           await transactionDriver.run(
             `DELETE FROM collection_metadata
-             WHERE collection_id = ? AND key = ?`,
-            [collectionId, metadataMutation.key],
+             WHERE collection_id = ? AND key IN (${deletes.map(() => `?`).join(`, `)})`,
+            [collectionId, ...deletes.map((mutation) => mutation.key)],
           )
-        } else {
+        }
+        if (sets.length > 0) {
           await transactionDriver.run(
             `INSERT INTO collection_metadata (collection_id, key, value, updated_at)
-             VALUES (?, ?, ?, CAST(strftime('%s', 'now') AS INTEGER))
+             VALUES ${sets.map(() => `(?, ?, ?, CAST(strftime('%s', 'now') AS INTEGER))`).join(`, `)}
              ON CONFLICT(collection_id, key) DO UPDATE SET
                value = excluded.value,
                updated_at = excluded.updated_at`,
-            [
+            sets.flatMap((mutation) => [
               collectionId,
-              metadataMutation.key,
-              serializePersistedRowValue(metadataMutation.value),
-            ],
+              mutation.key,
+              serializePersistedRowValue(mutation.value),
+            ]),
           )
         }
       }
@@ -2413,22 +2857,35 @@ export class SQLiteCorePersistenceAdapter implements PersistenceAdapter {
     driver: SQLiteDriver = this.driver,
   ): Promise<Array<InMemoryRow<string | number, Record<string, unknown>>>> {
     const collectionTableSql = quoteIdentifier(tableMapping.tableName)
+    // Compile even when SQL cannot safely prefilter: invalid bindings must
+    // reject before the in-memory fallback reads rows.
     const whereCompiled = options.where
       ? compileSqlExpression(options.where)
-      : { supported: true, sql: ``, params: [] as Array<SqliteSupportedValue> }
+      : { supported: false, sql: ``, params: [] as Array<SqliteSupportedValue> }
+    const safePrefilter = options.where
+      ? compileSafeSqlPrefilter(options.where, whereCompiled)
+      : undefined
     const orderByCompiled = compileOrderByClauses(options.orderBy)
 
     const queryParams: Array<SqliteSupportedValue> = []
     let sql = `SELECT key, value, metadata, row_version FROM ${collectionTableSql}`
 
-    if (options.where && whereCompiled.supported) {
-      sql = `${sql} WHERE ${whereCompiled.sql}`
-      queryParams.push(...whereCompiled.params)
+    if (safePrefilter) {
+      sql = `${sql} WHERE ${safePrefilter.sql}`
+      queryParams.push(...safePrefilter.params)
     }
 
     if (options.orderBy && orderByCompiled.supported) {
       sql = `${sql} ORDER BY ${orderByCompiled.sql}, key ASC`
       queryParams.push(...orderByCompiled.params)
+    }
+
+    if (
+      queryParams.length >
+      (driver.maxBoundParameters ?? this.driver.maxBoundParameters ?? 999)
+    ) {
+      sql = `SELECT key, value, metadata, row_version FROM ${collectionTableSql}`
+      queryParams.length = 0
     }
 
     const storedRows = await driver.query<StoredSqliteRow>(sql, queryParams)

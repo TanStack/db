@@ -3,7 +3,7 @@ id: SyncConfig
 title: SyncConfig
 ---
 
-Defined in: [packages/db/src/types.ts:422](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L422)
+Defined in: [packages/db/src/types.ts:419](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L419)
 
 ## Type Parameters
 
@@ -23,7 +23,7 @@ Defined in: [packages/db/src/types.ts:422](https://github.com/TanStack/db/blob/m
 optional exportSyncMeta: () => unknown;
 ```
 
-Defined in: [packages/db/src/types.ts:470](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L470)
+Defined in: [packages/db/src/types.ts:460](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L460)
 
 Export adapter-specific metadata that lets hydration/persistence resume sync.
 The payload shape is owned by the adapter.
@@ -40,7 +40,7 @@ The payload shape is owned by the adapter.
 optional getSyncMetadata: () => Record<string, unknown>;
 ```
 
-Defined in: [packages/db/src/types.ts:464](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L464)
+Defined in: [packages/db/src/types.ts:454](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L454)
 
 Get the sync metadata for insert operations
 
@@ -58,7 +58,7 @@ Record containing relation information
 optional importSyncMeta: (meta) => void;
 ```
 
-Defined in: [packages/db/src/types.ts:475](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L475)
+Defined in: [packages/db/src/types.ts:465](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L465)
 
 Import adapter-specific metadata produced by exportSyncMeta.
 
@@ -80,7 +80,7 @@ Import adapter-specific metadata produced by exportSyncMeta.
 optional mergeSyncMeta: (current, incoming) => unknown;
 ```
 
-Defined in: [packages/db/src/types.ts:480](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L480)
+Defined in: [packages/db/src/types.ts:470](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L470)
 
 Merge two adapter-specific metadata payloads during hydration.
 
@@ -106,7 +106,7 @@ Merge two adapter-specific metadata payloads during hydration.
 optional rowUpdateMode: "full" | "partial";
 ```
 
-Defined in: [packages/db/src/types.ts:489](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L489)
+Defined in: [packages/db/src/types.ts:479](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L479)
 
 The row update mode used to sync to the collection.
 
@@ -130,7 +130,7 @@ sync: (params) =>
   | SyncConfigRes;
 ```
 
-Defined in: [packages/db/src/types.ts:426](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L426)
+Defined in: [packages/db/src/types.ts:423](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L423)
 
 #### Parameters
 
@@ -138,7 +138,7 @@ Defined in: [packages/db/src/types.ts:426](https://github.com/TanStack/db/blob/m
 
 ###### begin
 
-(`options?`) => `void`
+() => `void`
 
 Begin a new sync transaction.
 
@@ -150,17 +150,14 @@ Begin a new sync transaction.
 
 (`signal?`) => [`SyncAppliedReceipt`](../type-aliases/SyncAppliedReceipt.md)
 
-Commit the active sync transaction in FIFO order.
-Returns `true` when the writes and events are already visible. Otherwise
-returns a receipt that resolves after they become visible. If collection
-cleanup or an optional request abort abandons the transaction first, the
-receipt rejects with an error named `AbortError`. If cancellation of an
-earlier transaction invalidates this transaction's insert admission, the
-receipt rejects with `DuplicateKeySyncError`.
-If cancellation removes a row required by this transaction's partial
-update, its receipt rejects with an error named `AbortError`.
-Pass a signal only for request-scoped work that must not publish after
-cancellation. Aborting after application has no effect.
+Commit the active sync transaction in FIFO order. Core accepts it at
+once, and an accepted transaction always applies. Returns `true` when
+its writes are visible, or a receipt that resolves when they become
+visible. While an optimistic transaction is persisting, it becomes
+visible when that transaction settles, together with the drop of its
+optimistic state. A signal that is already aborted abandons the
+transaction before acceptance, and the receipt rejects with an error
+named `AbortError`. Aborting after acceptance has no effect.
 
 ###### markError
 
@@ -181,7 +178,12 @@ Signal that a usable initial or recovered snapshot is available.
 
 ###### truncate
 
-() => `void`
+`truncate({ markReady: false })` replaces synced rows without changing Collection
+status. Omitting the option preserves the default behavior of marking the
+Collection ready. The last truncate in one transaction supplies its readiness
+intent; the last replacement in one published batch supplies that batch's intent.
+
+(options?: { markReady?: boolean }) => `void`
 
 ###### write
 

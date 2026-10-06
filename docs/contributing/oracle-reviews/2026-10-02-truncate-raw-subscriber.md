@@ -57,7 +57,7 @@ direct delete retires on the next sync commit. When an active optimistic
 insert covered the key, retirement added the key to the changed keys without
 the row that subscribers last saw, so the commit inserted it again. Upsert
 retirement already recorded that row. Both loops now share one helper. A
-pinned replay in `optimistic-history-publication.test.ts` fails on `main` for
+pinned replay in `optimistic-history-publication-oracle.test.ts` fails on `main` for
 an immediate commit. A non-immediate commit waits for the active insert, so
 it passes on both.
 

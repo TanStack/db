@@ -1,6 +1,9 @@
 /* eslint-disable @typescript-eslint/no-unnecessary-condition */
 import { Store } from '@tanstack/store'
-import { withCollectionConfigFactory } from '@tanstack/db'
+import {
+  LoadSubsetOperationAbortedError,
+  withCollectionConfigFactory,
+} from '@tanstack/db'
 import {
   ExpectedDeleteTypeError,
   ExpectedInsertTypeError,
@@ -201,8 +204,11 @@ export function trailBaseCollectionOptions<
       const cursors = new Map<string | number, string>()
 
       // Load (more) data.
+      // A caller that aborts sees `AbortError`. Pages a commit accepted still
+      // apply, and the load waits until they are visible; cleanup is quiet.
       async function load(opts: LoadSubsetOptions) {
-        if (cancelled || opts.signal?.aborted) return
+        if (cancelled) return
+        if (opts.signal?.aborted) throw new LoadSubsetOperationAbortedError()
 
         const lastKey = opts.cursor?.lastKey
         let cursor: string | undefined =
@@ -238,10 +244,13 @@ export function trailBaseCollectionOptions<
               filters,
             })
           } catch (error) {
-            if (cancelled || opts.signal?.aborted) return
+            if (cancelled) return
+            if (opts.signal?.aborted) break
             throw error
           }
-          if (cancelled || opts.signal?.aborted) return
+          if (cancelled) return
+          // Check the signal before commit to discard a stale page.
+          if (opts.signal?.aborted) break
 
           const length = response.records.length
           if (length === 0) {
@@ -258,11 +267,12 @@ export function trailBaseCollectionOptions<
             })
           }
 
+          // An accepted page always applies.
           const applied = commit(opts.signal)
           if (applied !== true) {
             appliedPages.push(applied)
           }
-          if (cancelled || opts.signal?.aborted) return
+          if (cancelled || opts.signal?.aborted) break
 
           remaining -= length
 
@@ -286,6 +296,9 @@ export function trailBaseCollectionOptions<
         }
 
         await Promise.all(appliedPages)
+        // An accepted page applies, but a caller that aborted still sees
+        // `AbortError`.
+        if (opts.signal?.aborted) throw new LoadSubsetOperationAbortedError()
       }
 
       // Afterwards subscribe.
@@ -431,8 +444,15 @@ export function trailBaseCollectionOptions<
       }) as const,
   }
 
+  const {
+    recordApi: _recordApi,
+    parse: _parse,
+    serialize: _serialize,
+    ...collectionConfig
+  } = config
+
   const options = {
-    ...config,
+    ...collectionConfig,
     sync,
     getKey,
     onInsert: async (

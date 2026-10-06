@@ -10,6 +10,7 @@ import {
   getLoadSubsetDemandKey,
   validateSyncPersistenceCapability,
   warnOnce,
+  whenSyncAccepted,
   withCollectionConfigFactory,
   withCollectionSyncConfigFactory,
 } from '@tanstack/db'
@@ -1009,6 +1010,19 @@ export function queryCollectionOptions(
     string,
     { data: unknown; dataUpdateCount: number }
   >()
+  // An eager fetch that started before a direct write returns older server
+  // data. Count direct writes, and record the count when each fetch starts.
+  let directWriteGeneration = 0
+  const fetchStartGenerations = new Map<string, number>()
+  // The generation of the latest direct write to each key.
+  const directWriteKeyGenerations = new Map<string | number, number>()
+  // Direct writes that wait for earlier commits. A result that arrives
+  // meanwhile is handled after them.
+  let pendingDirectWrites: Promise<void> | undefined
+  // True while a direct write puts its accepted rows into the cache.
+  let writingDirectCache = false
+  // Results deferred behind direct writes that have not applied yet.
+  let deferredResults = 0
 
   // queryKey → reference count (how many loadSubset calls are active)
   // Reference counting for QueryObserver lifecycle management
@@ -1297,13 +1311,12 @@ export function queryCollectionOptions(
     const scheduleDeferredResultSettlement = (
       hashedQueryKey: string,
       result: QueryObserverResult<unknown, unknown>,
-      barrier: Promise<void>,
+      refresh: Promise<QueryObserverResult<unknown, unknown>>,
     ): ExceptionalResultSettlement & { type: `pending` } => {
       const existing = readExceptionalResultSettlement(result)
       if (existing?.type === `pending`) return existing
 
       let rejectSettlement!: (error: unknown) => void
-      const refresh = getDeferredRefresh(hashedQueryKey, barrier)
       const promise = new Promise<QueryObserverResult<unknown, unknown>>(
         (resolve, reject) => {
           rejectSettlement = reject
@@ -1862,7 +1875,16 @@ export function queryCollectionOptions(
         }),
         ...initialDataObserverOptions,
         queryKey: key,
-        queryFn: queryFunction,
+        queryFn:
+          syncMode === `on-demand`
+            ? queryFunction
+            : (context: Parameters<typeof queryFunction>[0]) => {
+                fetchStartGenerations.set(
+                  hashKey(context.queryKey),
+                  directWriteGeneration,
+                )
+                return queryFunction(context)
+              },
         meta: extendedMeta,
         structuralSharing: true,
         notifyOnChangeProps: `all`,
@@ -1978,6 +2000,30 @@ export function queryCollectionOptions(
       return { items: newItemsArray }
     }
 
+    /**
+     * Rows of a fetch that started at `fetchStart`: each key that an accepted
+     * direct write claimed after that start takes its accepted row, and every
+     * other key takes the fetched row.
+     */
+    const mergeOlderRows = (
+      items: Array<any>,
+      fetchStart: number,
+    ): Array<any> => {
+      const rows = new Map(items.map((row) => [getKey(row), row]))
+      for (const [key, generation] of directWriteKeyGenerations) {
+        if (generation <= fetchStart) continue
+        const accepted = collection._state.getAcceptedSyncedRow(key)
+        if (accepted === undefined) rows.delete(key)
+        else rows.set(key, accepted)
+      }
+      return Array.from(rows.values())
+    }
+
+    /** Settles once no direct write waits for earlier commits. */
+    const directWritesSettled = async (): Promise<void> => {
+      while (pendingDirectWrites) await pendingDirectWrites
+    }
+
     const validateSuccessfulResultItemsForApplication = (
       resultQueryKey: QueryKey,
       result: QueryObserverResult<any, any>,
@@ -2021,8 +2067,10 @@ export function queryCollectionOptions(
         validatedItems ??
         validateSuccessfulResultItemsForApplication(queryKey, result)
 
+      // Diff against accepted rows: an earlier result or direct write can be
+      // accepted while it waits behind a persisting optimistic transaction.
       const currentSyncedItems: Map<string | number, any> = new Map(
-        collection._state.syncedData.entries(),
+        collection._state.acceptedSyncedEntries(),
       )
       const shouldUsePersistedBaseline = persistedBaseline !== undefined
       const previouslyOwnedRows = shouldUsePersistedBaseline
@@ -2134,19 +2182,18 @@ export function queryCollectionOptions(
           const oldItem = shouldUsePersistedBaseline
             ? persistedBaseline.get(key)?.value
             : currentSyncedItems.get(key)
-          if (!oldItem) {
-            return
-          }
           const newItem = newItemsMap.get(key)
           if (!newItem) {
             const owners = getPersistedOwners(key)
             owners.delete(hashedQueryKey)
             setPersistedOwners(key, owners)
             const needToRemove = removeRowOwner(key, hashedQueryKey)
+            // A superseded result's row can still be waiting for durable
+            // storage, so delete by key even when no stored row is known.
             if (needToRemove) {
-              write({ type: `delete`, value: oldItem })
+              write({ type: `delete`, key })
             }
-          } else if (!deepEquals(oldItem, newItem)) {
+          } else if (oldItem && !deepEquals(oldItem, newItem)) {
             write({ type: `update`, value: newItem })
           }
         })
@@ -2177,20 +2224,25 @@ export function queryCollectionOptions(
         if (isMutationPublicationBlocked()) {
           applicationToken.settleRefetchAtFetchBoundary?.()
         }
-        const applied = commit(signal)
+        // An accepted sync transaction always applies, so a later result or
+        // cleanup must not cancel it or roll back the ownership it records.
+        const applied = commit()
+        applicationToken.rollback = undefined
         transactionActive = false
         retainedQueriesPendingRevalidation.delete(hashedQueryKey)
         cancelPersistedRetentionExpiry(hashedQueryKey)
 
-        // Readiness is publication: do not expose it until the establishing
-        // transaction's rows and events are visible.
+        // Readiness counts accepted rows; the application, which settles a
+        // subset load, waits for them to be visible.
         const finishApplication = () => {
           if (!signal?.aborted) markReady()
         }
+        const accepted = whenSyncAccepted(applied)
+        if (accepted === true) finishApplication()
+        else void accepted.then(finishApplication, () => undefined)
         if (applied !== true) {
-          return applied.then(finishApplication, failApplication)
+          return applied.then(() => undefined, failApplication)
         }
-        finishApplication()
         return true
       } catch (error) {
         return failApplication(error)
@@ -2367,6 +2419,68 @@ export function queryCollectionOptions(
             requiredFetchStarts.delete(hashedQueryKey)
           }
         }
+        if (
+          syncMode !== `on-demand` &&
+          result.isSuccess &&
+          !result.isFetching &&
+          !writingDirectCache &&
+          (pendingDirectWrites !== undefined ||
+            (fetchStartGenerations.get(hashedQueryKey) ??
+              directWriteGeneration) < directWriteGeneration)
+        ) {
+          // This fetch started before a direct write, or a direct write still
+          // waits. Once no write waits, take the keys that accepted writes
+          // claimed after this fetch started from the accepted rows, and the
+          // rest from this result. Settle its waiter after those rows apply.
+          const query = observer?.getCurrentQuery()
+          const fetchStart = fetchStartGenerations.get(hashedQueryKey) ?? 0
+          if (readExceptionalResultSettlement(result)?.type === `pending`)
+            return
+          const validation = validateSuccessfulResultItems(queryKey, result)
+          if (query && `items` in validation) {
+            deferredResults++
+            const refresh = (async () => {
+              await directWritesSettled()
+              const current = state.observers.get(hashedQueryKey)
+              if (current?.getCurrentQuery() !== query) {
+                throw new CancelledError()
+              }
+              // Subscribe before the cache update, so its notification
+              // cannot be missed.
+              let unsubscribe = () => {}
+              const notified = new Promise<void>((resolve) => {
+                unsubscribe = current.subscribe(() => resolve())
+              })
+              const before = current.getCurrentResult()
+              try {
+                fetchStartGenerations.set(hashedQueryKey, directWriteGeneration)
+                updateCacheDataForKey(
+                  queryKey,
+                  mergeOlderRows(validation.items, fetchStart),
+                )
+                // Rows equal to the cache leave the current result unchanged,
+                // so no notification follows. Handle it now: it is no longer
+                // stale.
+                if (current.getCurrentResult() === before)
+                  handleQueryResult(before)
+                else await notified
+              } finally {
+                unsubscribe()
+              }
+              // Let the handler classify the merged result first.
+              await new Promise<void>((resolve) => queueMicrotask(resolve))
+              const application = getResultApplicationSettlement(hashedQueryKey)
+              if (application !== true) await application
+              return current.getCurrentResult()
+            })()
+            const settled = () => {
+              deferredResults--
+            }
+            void refresh.then(settled, settled)
+            scheduleDeferredResultSettlement(hashedQueryKey, result, refresh)
+            return
+          }
+        }
         if (result.isSuccess) {
           // Skip processing this result while data refreshes are deferred.
           // Optimistic state covers the gap. Once the barrier resolves,
@@ -2382,7 +2496,7 @@ export function queryCollectionOptions(
             scheduleDeferredResultSettlement(
               hashedQueryKey,
               result,
-              collection.deferDataRefresh,
+              getDeferredRefresh(hashedQueryKey, collection.deferDataRefresh),
             )
             return
           }
@@ -2601,8 +2715,9 @@ export function queryCollectionOptions(
       const rowsToDelete: Array<any> = []
 
       nextOwnersByRow.forEach((nextOwners, rowKey) => {
-        if (nextOwners.size === 0 && collection.has(rowKey)) {
-          rowsToDelete.push(collection.get(rowKey))
+        const row = collection._state.getAcceptedSyncedRow(rowKey)
+        if (nextOwners.size === 0 && row) {
+          rowsToDelete.push(row)
         }
       })
 
@@ -3164,7 +3279,60 @@ export function queryCollectionOptions(
    * and remove every other scoped entry so a later owner fetches it again.
    * Eager collections retain their single full-result cache patch.
    */
+  // A direct write takes its position when it is called, so a fetch that
+  // starts later counts as newer even if the write applies later.
+  const reserveDirectWrite = (): number => {
+    directWriteGeneration++
+    // A query that is not fetching holds no rows older than this write. A
+    // deferred result keeps its own fetch start until it is merged.
+    for (const [hashedQueryKey, observer] of state.observers) {
+      if (observer.getCurrentQuery().state.fetchStatus !== `fetching`)
+        fetchStartGenerations.set(hashedQueryKey, directWriteGeneration)
+    }
+    return directWriteGeneration
+  }
+
+  // Only an accepted write gains precedence over an older fetch.
+  const claimDirectWriteKeys = (
+    keys: Array<string | number>,
+    position: number,
+  ): void => {
+    // Only a fetch in flight, or a deferred result, can return rows older
+    // than this write. Without one, the per-key positions are not needed.
+    let older = deferredResults > 0 || pendingDirectWrites !== undefined
+    for (const observer of state.observers.values()) {
+      if (observer.getCurrentQuery().state.fetchStatus === `fetching`)
+        older = true
+    }
+    if (!older) directWriteKeyGenerations.clear()
+    else for (const key of keys) directWriteKeyGenerations.set(key, position)
+  }
+
+  const noteWaitingDirectWrite = (waiting: Promise<void>): void => {
+    const tail: Promise<void> = Promise.all([
+      pendingDirectWrites,
+      waiting,
+    ]).then(
+      () => {
+        if (pendingDirectWrites === tail) pendingDirectWrites = undefined
+      },
+      () => {
+        if (pendingDirectWrites === tail) pendingDirectWrites = undefined
+      },
+    )
+    pendingDirectWrites = tail
+  }
+
   const updateCacheData = (getItems: () => Array<any>): void => {
+    writingDirectCache = true
+    try {
+      writeDirectCache(getItems)
+    } finally {
+      writingDirectCache = false
+    }
+  }
+
+  const writeDirectCache = (getItems: () => Array<any>): void => {
     if (syncMode === `on-demand`) {
       const deferredRefresh = writeContext?.collection.deferDataRefresh
       const revalidatingQueries = new Set<AnyQuery>()
@@ -3359,11 +3527,38 @@ export function queryCollectionOptions(
     write: (message: Omit<ChangeMessage<any>, `key`>) => void
     commit: () => SyncAppliedReceipt
     updateCacheData?: (getItems: () => Array<any>) => void
+    reserveDirectWrite?: () => number
+    claimDirectWriteKeys?: (
+      keys: Array<string | number>,
+      position: number,
+    ) => void
+    noteWaitingDirectWrite?: (waiting: Promise<void>) => void
+    earlierCommits?: () => Promise<void> | undefined
   } | null = null
 
   // Enhanced internalSync that captures write functions for manual use
-  const enhancedInternalSync: SyncConfig<any>[`sync`] = (params) => {
-    const { begin, write, commit, collection } = params
+  const enhancedInternalSync: SyncConfig<any>[`sync`] = (syncParams) => {
+    // A direct write validates against every earlier commit, so track when
+    // the last commit is accepted.
+    let earlierCommits: Promise<void> | undefined
+    const commit: typeof syncParams.commit = (signal) => {
+      const applied = syncParams.commit(signal)
+      const accepted = whenSyncAccepted(applied)
+      if (accepted !== true) {
+        const tail = accepted.then(
+          () => {
+            if (earlierCommits === tail) earlierCommits = undefined
+          },
+          () => {
+            if (earlierCommits === tail) earlierCommits = undefined
+          },
+        )
+        earlierCommits = tail
+      }
+      return applied
+    }
+    const params = { ...syncParams, commit }
+    const { begin, write, collection } = params
     let queryClientMounted = false
 
     const mountQueryClient = () => {
@@ -3398,6 +3593,10 @@ export function queryCollectionOptions(
       write,
       commit,
       updateCacheData,
+      reserveDirectWrite,
+      claimDirectWriteKeys,
+      noteWaitingDirectWrite,
+      earlierCommits: () => earlierCommits,
     }
     writeContext = currentWriteContext
 

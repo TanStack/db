@@ -5,6 +5,7 @@ const baseCapability = {
   protocol: `@tanstack/db/sync-persistence`,
   version: 1,
   hydrateBaseline: () => Promise.resolve(),
+  reserveCommitTurn: () => {},
   scanPersistedRows: () => Promise.resolve([]),
 } as const
 

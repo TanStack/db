@@ -1,7 +1,39 @@
+/**
+ * What does a sync listener see when it starts sync work during a publication?
+ *
+ * Contract: a publication is not reentrant. Work a listener commits while a
+ * batch publishes queues behind that batch. It applies after the batch closes,
+ * in staging order, and publishes once as the next batch. A commit whose signal
+ * is already aborted cancels only that open, last transaction and rejects its
+ * receipt. A transaction the listener leaves open stays queued, applies
+ * nothing, and publishes when it commits. Layout marks, truncates, and errors
+ * raised by a listener follow the same queue order.
+ *
+ * Model: for the generated listener histories, the expected applied keys and
+ * batches come from the scenario alone. The outer key publishes first. The
+ * keys of the committed actions follow as one batch, in action order. The
+ * open key, if any, publishes alone after its commit. Every aborted action
+ * rejects and applies nothing. The grammar places up to two commit or abort
+ * actions before and after an optional open transaction. A bounded loop
+ * enumerates every such history; the fixed and random seeds sample the same
+ * grammar.
+ *
+ * Production path and observation: public sync `begin`, `write`, and
+ * `commit`, and `subscribeChanges`. The driver records the keys written to the
+ * synced base, each batch's keys, the listener nesting depth, and receipt
+ * outcomes. It compares them after the outer commit returns and after the
+ * receipts settle.
+ *
+ * Limits: the pinned tests cover layout marks, truncates, listener errors, and
+ * subset release. The generated grammar covers only listener commits, aborts,
+ * and one open transaction. Optimistic settlement belongs to
+ * `optimistic-history-oracle.ts`.
+ */
 import { fc, test as fcTest } from '@fast-check/vitest'
 import { describe, expect, it, vi } from 'vitest'
 import { CollectionChangesManager } from '../src/collection/changes.js'
 import { createCollection } from '../src/collection/index.js'
+import { createLiveQueryCollection, eq } from '../src/query/index.js'
 import { createDeferred } from '../src/deferred.js'
 import { oracleRandomParameters, readOracleRunConfig } from './oracle-config.js'
 import { flushPromises } from './utils.js'
@@ -95,17 +127,13 @@ function createSyncHarness(id: string) {
   }
 }
 
-function stageInsert(
-  sync: SyncOps,
-  row: Row,
-  options?: { immediate?: boolean },
-): void {
-  sync.begin(options)
+function stageInsert(sync: SyncOps, row: Row): void {
+  sync.begin()
   sync.write({ type: `insert`, value: row })
 }
 
 function installInitialOrderedRows(sync: OrderedSync): void {
-  sync.begin({ immediate: true })
+  sync.begin()
   sync.write({
     type: `insert`,
     value: { id: 1, value: `one`, rank: 0 },
@@ -186,6 +214,9 @@ async function runListenerScenario(scenario: ListenerScenario): Promise<void> {
     stageInsert(harness.sync, { id: 1, value: `outer` })
     harness.sync.commit()
 
+    // The listener's committed work applies after the outer batch closes and
+    // publishes as one batch; listener delivery never nests.
+
     expect(appliedKeys).toEqual([1, ...committedKeys])
     expect(batches).toEqual([
       [1],
@@ -259,10 +290,10 @@ describe(`sync publication reentrancy`, () => {
 
     try {
       const outer = collection._deferPublication()
-      stageInsert(harness.sync, { id: 1, value: `first` }, { immediate: true })
+      stageInsert(harness.sync, { id: 1, value: `first` })
       harness.sync.commit()
       const inner = collection._deferPublication()
-      harness.sync.begin({ immediate: true })
+      harness.sync.begin()
       harness.sync.write({
         type: `update`,
         value: { id: 1, value: `second` },
@@ -292,12 +323,12 @@ describe(`sync publication reentrancy`, () => {
 
     try {
       const first = collection._deferPublication()
-      stageInsert(harness.sync, { id: 1, value: `first` }, { immediate: true })
+      stageInsert(harness.sync, { id: 1, value: `first` })
       harness.sync.commit()
       first.publish()
 
       const second = collection._deferPublication()
-      harness.sync.begin({ immediate: true })
+      harness.sync.begin()
       harness.sync.write({
         type: `update`,
         value: { id: 1, value: `second` },
@@ -323,17 +354,13 @@ describe(`sync publication reentrancy`, () => {
 
     try {
       const discarded = collection._deferPublication()
-      stageInsert(
-        harness.sync,
-        { id: 1, value: `discarded` },
-        { immediate: true },
-      )
+      stageInsert(harness.sync, { id: 1, value: `discarded` })
       harness.sync.commit()
       discarded.discard()
       expect(callbacks).toEqual([])
 
       const published = collection._deferPublication()
-      harness.sync.begin({ immediate: true })
+      harness.sync.begin()
       harness.sync.write({
         type: `update`,
         value: { id: 1, value: `published` },
@@ -357,7 +384,7 @@ describe(`sync publication reentrancy`, () => {
     }> = []
     const initialRevision = collection._stateRevision
     const write = (type: `insert` | `update`, value: string) => {
-      harness.sync.begin({ immediate: true })
+      harness.sync.begin()
       harness.sync.write({ type, value: { id: 1, value } })
       harness.sync.commit()
     }
@@ -411,7 +438,7 @@ describe(`sync publication reentrancy`, () => {
       sync: {
         sync: (ops) => {
           sync = ops
-          ops.begin({ immediate: true })
+          ops.begin()
           for (let id = 1; id <= 5; id++) {
             ops.write({
               type: `insert`,
@@ -439,7 +466,7 @@ describe(`sync publication reentrancy`, () => {
 
     try {
       const revisionBeforeSwap = collection._layoutRevision
-      sync.begin({ immediate: true })
+      sync.begin()
       sync.write({
         type: `update`,
         value: { id: 3, value: `value-3`, rank: 4 },
@@ -464,196 +491,6 @@ describe(`sync publication reentrancy`, () => {
       ])
     } finally {
       subscription.unsubscribe()
-      await collection.cleanup()
-    }
-  })
-
-  it(`compares layout with the public state before an immediate prefix drain`, async () => {
-    const updatePersistence = createDeferred<void>()
-    const insertPersistence = createDeferred<void>()
-    let sync!: OrderedSync
-    const collection = createCollection<OrderedRow, number>({
-      id: `layout-prefix-drain`,
-      getKey: (row) => row.id,
-      compare: (left, right) => left.rank - right.rank,
-      startSync: true,
-      sync: {
-        sync: (ops) => {
-          sync = ops
-          ops.begin({ immediate: true })
-          ops.write({
-            type: `insert`,
-            value: { id: 1, value: `one`, rank: 0 },
-          })
-          ops.write({
-            type: `insert`,
-            value: { id: 2, value: `two`, rank: 1 },
-          })
-          ops.commit()
-          ops.markReady()
-        },
-      },
-      onUpdate: () => updatePersistence.promise,
-      onInsert: () => insertPersistence.promise,
-    })
-    const callbacks: Array<{
-      changes: Array<number>
-      keys: Array<number>
-      values: Array<string>
-    }> = []
-    const subscription = collection.subscribeChanges(
-      (changes) => {
-        callbacks.push({
-          changes: changes.map(({ key }) => key),
-          keys: [...collection.keys()],
-          values: collection.toArray.map(({ value }) => value),
-        })
-      },
-      { includeInitialState: false },
-    )
-    const update = collection.update(1, (draft) => {
-      draft.value = `optimistic-one`
-    })
-    let insert: ReturnType<typeof collection.insert> | undefined
-
-    try {
-      sync.begin()
-      sync.write({
-        type: `update`,
-        value: { id: 1, value: `one`, rank: 2 },
-      })
-      sync.collection._markLayoutChange()
-      const firstReceipt = sync.commit()
-      expect(firstReceipt).not.toBe(true)
-
-      insert = collection.insert({
-        id: 3,
-        value: `optimistic-three`,
-        rank: 3,
-      })
-      callbacks.length = 0
-      const revisionBeforeDrain = collection._layoutRevision
-      expect([...collection.keys()]).toEqual([1, 2, 3])
-
-      sync.begin({ immediate: true })
-      sync.write({
-        type: `update`,
-        value: { id: 1, value: `one`, rank: 0 },
-      })
-      sync.collection._markLayoutChange()
-      const secondReceipt = sync.commit()
-
-      expect([...collection.keys()]).toEqual([1, 2, 3])
-      expect(collection.toArray.map(({ value }) => value)).toEqual([
-        `optimistic-one`,
-        `two`,
-        `optimistic-three`,
-      ])
-      expect(callbacks).toEqual([])
-      expect(collection._layoutRevision).toBe(revisionBeforeDrain)
-      await Promise.all(
-        [firstReceipt, secondReceipt]
-          .filter((receipt) => receipt !== true)
-          .map((receipt) => receipt),
-      )
-
-      updatePersistence.resolve()
-      insertPersistence.resolve()
-      await Promise.all([
-        update.isPersisted.promise,
-        insert.isPersisted.promise,
-      ])
-    } finally {
-      updatePersistence.resolve()
-      insertPersistence.resolve()
-      await update.isPersisted.promise.catch(() => undefined)
-      await insert?.isPersisted.promise.catch(() => undefined)
-      subscription.unsubscribe()
-      await collection.cleanup()
-    }
-  })
-
-  it(`uses the post-removal public layout before an unmarked prefix drain`, async () => {
-    const updatePersistence = createDeferred<void>()
-    const deletePersistence = createDeferred<void>()
-    let sync!: OrderedSync
-    const collection = createCollection<OrderedRow, number>({
-      id: `layout-prefix-removal-drain`,
-      getKey: (row) => row.id,
-      compare: (left, right) => left.rank - right.rank,
-      startSync: true,
-      sync: {
-        sync: (ops) => {
-          sync = ops
-          installInitialOrderedRows(ops)
-        },
-      },
-      onUpdate: () => updatePersistence.promise,
-      onDelete: () => deletePersistence.promise,
-    })
-    const callbacks: Array<LayoutCallback> = []
-    let parkedReceiptSettled = false
-    const subscription = collection.subscribeChanges(
-      (changes) => {
-        callbacks.push({
-          changes: changes.map(({ key }) => key),
-          keys: [...collection.keys()],
-          values: collection.toArray.map(({ value }) => value),
-          markedReceiptSettled: parkedReceiptSettled,
-          revision: collection._layoutRevision,
-        })
-      },
-      { includeInitialState: false },
-    )
-    const update = collection.update(2, (draft) => {
-      draft.value = `optimistic-two`
-    })
-    let deletion: ReturnType<typeof collection.delete> | undefined
-
-    try {
-      sync.begin()
-      sync.write({
-        type: `update`,
-        value: { id: 1, value: `one`, rank: 2 },
-      })
-      sync.collection._markLayoutChange()
-      const parkedReceipt = sync.commit()
-      expect(parkedReceipt).not.toBe(true)
-      if (parkedReceipt !== true) {
-        void parkedReceipt.then(() => {
-          parkedReceiptSettled = true
-        })
-      }
-
-      deletion = collection.delete(1)
-      callbacks.length = 0
-      const revisionBeforeDrain = collection._layoutRevision
-      await Promise.resolve()
-      expect(parkedReceiptSettled).toBe(false)
-      expect([...collection.keys()]).toEqual([2])
-
-      sync.begin({ immediate: true })
-      sync.write({
-        type: `update`,
-        value: { id: 2, value: `server-two`, rank: 1 },
-      })
-      const drainReceipt = sync.commit()
-
-      expect(drainReceipt).toBe(true)
-      expect([...collection.keys()]).toEqual([2])
-      expect(collection.toArray.map(({ value }) => value)).toEqual([
-        `optimistic-two`,
-      ])
-      expect(collection._layoutRevision).toBe(revisionBeforeDrain)
-      expect(callbacks).toEqual([])
-      if (parkedReceipt !== true) await parkedReceipt
-      expect(parkedReceiptSettled).toBe(true)
-    } finally {
-      subscription.unsubscribe()
-      updatePersistence.resolve()
-      deletePersistence.resolve()
-      await update.isPersisted.promise.catch(() => undefined)
-      await deletion?.isPersisted.promise.catch(() => undefined)
       await collection.cleanup()
     }
   })
@@ -747,137 +584,6 @@ describe(`sync publication reentrancy`, () => {
       await collection.cleanup()
     }
   })
-
-  it.each([`first`, `middle`, `last`, `first-and-middle`] as const)(
-    `honors %s layout marks in an immediate causal prefix`,
-    async (markPosition) => {
-      const updatePersistence = createDeferred<void>()
-      const insertPersistence = createDeferred<void>()
-      let sync!: OrderedSync
-      const collection = createCollection<OrderedRow, number>({
-        id: `layout-prefix-immediate-${markPosition}`,
-        getKey: (row) => row.id,
-        compare: (left, right) => left.rank - right.rank,
-        startSync: true,
-        sync: {
-          sync: (ops) => {
-            sync = ops
-            installInitialOrderedRows(ops)
-          },
-        },
-        onUpdate: () => updatePersistence.promise,
-        onInsert: () => insertPersistence.promise,
-      })
-      let firstReceiptSettled = false
-      const callbacks: Array<LayoutCallback> = []
-      const subscription = collection.subscribeChanges(
-        (changes) => {
-          callbacks.push({
-            changes: changes.map(({ key }) => key),
-            keys: [...collection.keys()],
-            values: collection.toArray.map(({ value }) => value),
-            markedReceiptSettled: firstReceiptSettled,
-            revision: collection._layoutRevision,
-          })
-        },
-        { includeInitialState: false },
-      )
-      const update = collection.update(2, (draft) => {
-        draft.value = `optimistic-two`
-      })
-      let insert: ReturnType<typeof collection.insert> | undefined
-
-      try {
-        sync.begin()
-        sync.write({
-          type: `update`,
-          value:
-            markPosition === `first` || markPosition === `first-and-middle`
-              ? { id: 1, value: `one`, rank: 2 }
-              : { id: 2, value: `server-two-a`, rank: 1 },
-        })
-        if (markPosition === `first` || markPosition === `first-and-middle`) {
-          sync.collection._markLayoutChange()
-        }
-        const firstReceipt = sync.commit()
-        expect(firstReceipt).not.toBe(true)
-        if (firstReceipt !== true) {
-          void firstReceipt.then(() => {
-            firstReceiptSettled = true
-          })
-        }
-        await Promise.resolve()
-        expect(firstReceiptSettled).toBe(false)
-
-        insert = collection.insert({
-          id: 3,
-          value: `optimistic-three`,
-          rank: 3,
-        })
-
-        sync.begin()
-        sync.write({
-          type: `update`,
-          value:
-            markPosition === `middle`
-              ? { id: 1, value: `one`, rank: 2 }
-              : { id: 2, value: `server-two-b`, rank: 1 },
-        })
-        if (markPosition === `middle` || markPosition === `first-and-middle`) {
-          sync.collection._markLayoutChange()
-        }
-        const middleReceipt = sync.commit()
-        expect(middleReceipt).not.toBe(true)
-
-        callbacks.length = 0
-        const revisionBeforeDrain = collection._layoutRevision
-        expect([...collection.keys()]).toEqual([1, 2, 3])
-
-        sync.begin({ immediate: true })
-        sync.write({
-          type: `update`,
-          value:
-            markPosition === `last`
-              ? { id: 1, value: `one`, rank: 2 }
-              : { id: 2, value: `server-two-c`, rank: 1 },
-        })
-        if (markPosition === `last`) sync.collection._markLayoutChange()
-        const lastReceipt = sync.commit()
-
-        expect(lastReceipt).toBe(true)
-        expect([...collection.keys()]).toEqual([2, 1, 3])
-        expect(collection.toArray.map(({ value }) => value)).toEqual([
-          `optimistic-two`,
-          `one`,
-          `optimistic-three`,
-        ])
-        expect(collection._layoutRevision).toBe(revisionBeforeDrain + 1)
-        expect(callbacks).toEqual([
-          {
-            changes: [1],
-            keys: [2, 1, 3],
-            values: [`optimistic-two`, `one`, `optimistic-three`],
-            markedReceiptSettled: false,
-            revision: revisionBeforeDrain + 1,
-          },
-        ])
-
-        await Promise.all(
-          [firstReceipt, middleReceipt]
-            .filter((receipt) => receipt !== true)
-            .map((receipt) => receipt),
-        )
-        expect(firstReceiptSettled).toBe(true)
-      } finally {
-        subscription.unsubscribe()
-        updatePersistence.resolve()
-        insertPersistence.resolve()
-        await update.isPersisted.promise.catch(() => undefined)
-        await insert?.isPersisted.promise.catch(() => undefined)
-        await collection.cleanup()
-      }
-    },
-  )
 
   it(`honors a parked layout mark when truncate drains its causal prefix`, async () => {
     const updatePersistence = createDeferred<void>()
@@ -984,17 +690,275 @@ describe(`sync publication reentrancy`, () => {
     }
   })
 
-  // The truncate marks the Collection ready before it publishes its changed
-  // keys. A ready callback that edits a replaced key adds an optimistic upsert
-  // that the truncate batch has not published, so the batch must still
-  // insert that key.
-  it.each([`onFirstReady`, `status:change`] as const)(
-    `publishes a replaced key that a %s callback edits during truncate`,
-    async (hook) => {
-      const updatePersistence = createDeferred<void>()
+  // A truncate marks the Collection ready before it publishes its batch, and a
+  // ready callback can write in that window. The callback's messages and the
+  // truncate batch together must be valid for every subscriber, and must end
+  // at the Collection's rows, whatever optimistic requests were already
+  // active. A subscriber without initial state has no sent-key filter to hide
+  // a repeated message. A filtered subscriber keeps only rows whose value is
+  // `one`, so a removal must reach it with the row it holds. Subscribers
+  // receive the truncate's messages only after the Collection is ready. A
+  // message that carries a source row is synced and remote unless a prior
+  // request owns its key. A subscriber that the callback creates starts from
+  // the rows it sees, and a live query becomes ready showing replaced rows.
+  //
+  // The model overlays active intents, in order, over source rows. Before the
+  // truncate, the source holds keys 1 and 4. The replacement holds 1 and 2, so
+  // key 4's prefix delete must remain. A prior request is active before the
+  // truncate. The callback then writes once against the rows it can see.
+  type ReadyIntent =
+    | { type: `update` | `insert`; key: number; value: string }
+    | { type: `delete`; key: number }
+  const overlay = (
+    rows: ReadonlyArray<readonly [number, string]>,
+    intents: ReadonlyArray<ReadyIntent | undefined>,
+  ) => {
+    const visible = new Map(rows)
+    for (const intent of intents) {
+      if (!intent) continue
+      if (intent.type === `delete`) visible.delete(intent.key)
+      else visible.set(intent.key, intent.value)
+    }
+    return visible
+  }
+  const sourceBefore = [
+    [1, `one`],
+    [4, `four`],
+  ] as const
+  const replacement = [
+    [1, `one-again`],
+    [2, `two`],
+  ] as const
+  const priorIntents: Record<string, ReadyIntent | undefined> = {
+    none: undefined,
+    'update 1': { type: `update`, key: 1, value: `prior-one` },
+    'delete 1': { type: `delete`, key: 1 },
+    'insert 3': { type: `insert`, key: 3, value: `prior-three` },
+  }
+  const callbackIntents = (visible: ReadonlyMap<number, string>) =>
+    [1, 2, 3, 4].flatMap((key): Array<ReadyIntent> =>
+      visible.has(key)
+        ? [
+            { type: `update`, key, value: `callback-${key}` },
+            { type: `delete`, key },
+          ]
+        : [{ type: `insert`, key, value: `callback-${key}` }],
+    )
+  const sourceValues = new Set<string>(
+    [...sourceBefore, ...replacement].map(([, value]) => value),
+  )
+  const describeIntent = (intent: ReadyIntent | undefined) =>
+    intent ? `${intent.type} ${intent.key}` : `none`
+  const readyCases = ([`onFirstReady`, `status:change`] as const).flatMap(
+    (hook) =>
+      Object.entries(priorIntents).flatMap(([priorName, prior]) =>
+        callbackIntents(overlay(replacement, [prior])).flatMap((callback) =>
+          ([`initial`, `raw`, `filtered`] as const).map((subscriber) => ({
+            hook,
+            priorName,
+            prior,
+            callback,
+            callbackName: describeIntent(callback),
+            subscriber,
+          })),
+        ),
+      ),
+  )
+
+  it(`enumerates prior requests and legal ready-callback writes`, () => {
+    // none and update 1 allow 6 writes, delete 1 allows 5, insert 3 allows 7.
+    expect(readyCases).toHaveLength(2 * 24 * 3)
+    const labels = new Set(
+      readyCases.map(
+        ({ priorName, callbackName }) => `${priorName} / ${callbackName}`,
+      ),
+    )
+    for (const witness of [
+      `none / delete 1`,
+      `none / delete 2`,
+      `none / insert 4`,
+      `update 1 / delete 1`,
+      `none / insert 3`,
+      `insert 3 / delete 3`,
+      `delete 1 / insert 1`,
+    ])
+      expect(labels).toContain(witness)
+    expect(labels).not.toContain(`delete 1 / delete 1`)
+    expect(labels).not.toContain(`insert 3 / insert 3`)
+  })
+
+  it.each(readyCases)(
+    `publishes valid truncate messages when a $hook callback runs $callbackName after prior $priorName ($subscriber subscriber)`,
+    async ({ hook, prior, callback, subscriber }) => {
+      const persistence = createDeferred<void>()
       let sync!: SyncOps
       const collection = createCollection<Row, number>({
-        id: `truncate-ready-reentrant-${hook}`,
+        id: `truncate-ready-${hook}-${describeIntent(prior)}-${describeIntent(callback)}-${subscriber}`,
+        getKey: (row) => row.id,
+        startSync: true,
+        sync: {
+          sync: (ops) => {
+            sync = ops
+            ops.begin()
+            for (const [id, value] of sourceBefore)
+              ops.write({ type: `insert`, value: { id, value } })
+            ops.commit()
+          },
+        },
+        onInsert: () => persistence.promise,
+        onUpdate: () => persistence.promise,
+        onDelete: () => persistence.promise,
+      })
+      const requests: Array<{ isPersisted: { promise: Promise<unknown> } }> = []
+      const apply = (intent: ReadyIntent) => {
+        requests.push(
+          intent.type === `delete`
+            ? collection.delete(intent.key)
+            : intent.type === `insert`
+              ? collection.insert({ id: intent.key, value: intent.value })
+              : collection.update(intent.key, (draft) => {
+                  draft.value = intent.value
+                }),
+        )
+      }
+      await flushPromises()
+      const keeps = (value: string) =>
+        subscriber !== `filtered` || value === `one`
+      // A subscriber without initial state starts from the rows it can see.
+      const mirror = new Map<number, string>(
+        subscriber === `initial`
+          ? []
+          : [...collection.state]
+              .map(([key, row]) => [key, row.value] as const)
+              .filter(([, value]) => keeps(value)),
+      )
+      const violations: Array<string> = []
+      let truncating = false
+      const subscription = collection.subscribeChanges(
+        (changes) => {
+          if (truncating && collection.status !== `ready`)
+            violations.push(`delivered while ${collection.status}`)
+          for (const change of changes) {
+            if (mirror.has(change.key) === (change.type === `insert`))
+              violations.push(`${change.type} ${change.key}`)
+            if (
+              change.type !== `delete` &&
+              sourceValues.has(change.value.value) &&
+              prior?.key !== change.key &&
+              (!change.value.$synced || change.value.$origin !== `remote`)
+            )
+              violations.push(`source row ${change.key} published as local`)
+            if (change.type === `delete`) mirror.delete(change.key)
+            else mirror.set(change.key, change.value.value)
+          }
+        },
+        subscriber === `filtered`
+          ? {
+              includeInitialState: false,
+              where: (row) => eq(row.value, `one`),
+            }
+          : { includeInitialState: subscriber === `initial` },
+      )
+      let callbackRan = false
+      let callbackSubscription: { unsubscribe: () => void } | undefined
+      const write = () => {
+        if (callbackRan) return
+        callbackRan = true
+        apply(callback)
+        const seen = new Set(collection.state.keys())
+        callbackSubscription = collection.subscribeChanges(
+          (changes) => {
+            for (const change of changes) {
+              if (seen.has(change.key) === (change.type === `insert`))
+                violations.push(
+                  `callback subscriber ${change.type} ${change.key}`,
+                )
+              if (change.type === `delete`) seen.delete(change.key)
+              else seen.add(change.key)
+            }
+          },
+          { includeInitialState: false },
+        )
+      }
+      const live = createLiveQueryCollection((q) => q.from({ row: collection }))
+      let liveAtReady: Array<readonly [number, string]> | undefined
+      live.onFirstReady(() => {
+        liveAtReady = [...live.state]
+          .map(([key, row]) => [key as number, row.value] as const)
+          .sort(([a], [b]) => a - b)
+      })
+      void live.preload()
+      if (hook === `onFirstReady`) collection.onFirstReady(write)
+      else
+        collection.on(`status:change`, ({ status }) => {
+          if (status === `ready`) write()
+        })
+
+      try {
+        if (prior) apply(prior)
+        expect(
+          [...collection.state].map(([key, row]) => [key, row.value]),
+        ).toEqual([...overlay(sourceBefore, [prior])])
+
+        sync.begin()
+        sync.truncate()
+        for (const [id, value] of replacement)
+          sync.write({ type: `insert`, value: { id, value } })
+        truncating = true
+        expect(sync.commit()).toBe(true)
+
+        expect(callbackRan).toBe(true)
+        await flushPromises()
+        expect(violations).toEqual([])
+        const expected = [...overlay(replacement, [prior, callback])].sort(
+          ([a], [b]) => a - b,
+        )
+        const replaced = [...overlay(replacement, [prior])].sort(
+          ([a], [b]) => a - b,
+        )
+        expect([replaced, expected]).toContainEqual(liveAtReady)
+        expect([...mirror].sort(([a], [b]) => a - b)).toEqual(
+          expected.filter(([, value]) => keeps(value)),
+        )
+        expect(
+          [...collection.state]
+            .map(([key, row]) => [key, row.value] as const)
+            .sort(([a], [b]) => a - b),
+        ).toEqual(expected)
+      } finally {
+        subscription.unsubscribe()
+        callbackSubscription?.unsubscribe()
+        await live.cleanup()
+        persistence.resolve()
+        await Promise.all(
+          requests.map((request) =>
+            request.isPersisted.promise.catch(() => undefined),
+          ),
+        )
+        await collection.cleanup()
+      }
+    },
+  )
+
+  // A subscriber or a ready callback can throw while a truncate makes the
+  // Collection ready. The commit must still settle every receipt it applied
+  // and report the error, as it does when the Collection is already ready.
+  it.each(
+    // An already-ready Collection runs no ready callbacks, so only a
+    // subscriber can throw there.
+    [
+      { alreadyReady: false, thrower: `subscriber` },
+      { alreadyReady: false, thrower: `ready callback` },
+      { alreadyReady: true, thrower: `subscriber` },
+    ] as const,
+  )(
+    `settles applied receipts when a $thrower throws during a truncate (alreadyReady: $alreadyReady)`,
+    async ({ alreadyReady, thrower }) => {
+      const failure = new Error(`${thrower} failure`)
+      const persistence = createDeferred<void>()
+      let sync!: SyncOps
+      const collection = createCollection<Row, number>({
+        id: `truncate-ready-throw-${thrower}-${alreadyReady}`,
         getKey: (row) => row.id,
         startSync: true,
         sync: {
@@ -1003,60 +967,96 @@ describe(`sync publication reentrancy`, () => {
             ops.begin()
             ops.write({ type: `insert`, value: { id: 1, value: `one` } })
             ops.commit()
+            if (alreadyReady) ops.markReady()
           },
         },
-        onUpdate: () => updatePersistence.promise,
+        onUpdate: () => persistence.promise,
       })
-      const mirror = new Map<number, string>()
-      const violations: Array<string> = []
-      const subscription = collection.subscribeChanges(
-        (changes) => {
-          for (const change of changes) {
-            if (mirror.has(change.key) === (change.type === `insert`))
-              violations.push(`${change.type} ${change.key}`)
-            if (change.type === `delete`) mirror.delete(change.key)
-            else mirror.set(change.key, change.value.value)
-          }
-        },
-        { includeInitialState: true },
-      )
-      let update: ReturnType<typeof collection.update> | undefined
-      const edit = () => {
-        update ??= collection.update(1, (draft) => {
-          draft.value = `optimistic-one`
-        })
-      }
-      if (hook === `onFirstReady`) collection.onFirstReady(edit)
-      else
-        collection.on(`status:change`, ({ status }) => {
-          if (status === `ready`) edit()
-        })
-
+      await flushPromises()
+      const blocker = collection.update(1, (draft) => {
+        draft.value = `optimistic`
+      })
+      let subscription: { unsubscribe: () => void } | undefined
       try {
-        await flushPromises()
+        sync.begin()
+        sync.write({ type: `insert`, value: { id: 2, value: `two` } })
+        const held = sync.commit()
+        expect(held).not.toBe(true)
+        let heldSettled = false
+        if (held !== true)
+          void held.then(
+            () => (heldSettled = true),
+            () => (heldSettled = true),
+          )
+        if (thrower === `subscriber`) {
+          subscription = collection.subscribeChanges(() => {
+            throw failure
+          })
+        } else {
+          collection.onFirstReady(() => {
+            throw failure
+          })
+        }
+
         sync.begin()
         sync.truncate()
-        sync.write({ type: `insert`, value: { id: 1, value: `one-again` } })
-        sync.write({ type: `insert`, value: { id: 2, value: `two` } })
-        expect(sync.commit()).toBe(true)
+        sync.write({ type: `insert`, value: { id: 3, value: `three` } })
+        expect(() => sync.commit()).toThrow(failure)
+        await flushPromises()
 
-        expect(update).toBeDefined()
-        expect(violations).toEqual([])
-        expect([...mirror].sort(([a], [b]) => a - b)).toEqual([
-          [1, `optimistic-one`],
-          [2, `two`],
-        ])
+        expect(heldSettled).toBe(true)
+        expect(collection.status).toBe(`ready`)
         expect(
-          [...collection.state].map(([key, row]) => [key, row.value]),
+          [...collection.state]
+            .map(([key, row]) => [key, row.value] as const)
+            .sort(([left], [right]) => left - right),
         ).toEqual([
-          [1, `optimistic-one`],
-          [2, `two`],
+          [1, `optimistic`],
+          [3, `three`],
         ])
       } finally {
-        subscription.unsubscribe()
-        updatePersistence.resolve()
-        await update?.isPersisted.promise.catch(() => undefined)
+        subscription?.unsubscribe()
+        persistence.resolve()
+        await blocker.isPersisted.promise.catch(() => undefined)
         await collection.cleanup()
+      }
+    },
+  )
+
+  // A sync function can make the Collection ready by calling markReady or
+  // by committing a truncate. If a ready callback throws during sync entry,
+  // the error surfaces once the sync function returns: the sync function
+  // finishes, and the Collection stays ready with the rows it committed.
+  it.each([`markReady`, `truncate commit`, `truncate commit, then markReady`])(
+    `defers a ready callback error until sync entry returns: %s`,
+    async (entry) => {
+      const failure = new Error(`ready callback failure`)
+      let finished = false
+      const collection = createCollection<Row, number>({
+        id: `sync-entry-ready-failure-${entry}`,
+        getKey: (row) => row.id,
+        startSync: false,
+        sync: {
+          sync: (ops) => {
+            ops.begin()
+            if (entry !== `markReady`) ops.truncate()
+            ops.write({ type: `insert`, value: { id: 1, value: `one` } })
+            ops.commit()
+            if (entry !== `truncate commit`) ops.markReady()
+            finished = true
+          },
+        },
+      })
+      try {
+        collection.onFirstReady(() => {
+          throw failure
+        })
+        expect(() => collection.startSyncImmediate()).toThrow(failure)
+        expect(finished).toBe(true)
+        expect(collection.status).toBe(`ready`)
+        expect([...collection.state.keys()]).toEqual([1])
+      } finally {
+        await collection.cleanup().catch(() => undefined)
       }
     },
   )
@@ -1118,7 +1118,7 @@ describe(`sync publication reentrancy`, () => {
 
     try {
       const revisionBeforeDrain = collection._layoutRevision
-      sync.begin({ immediate: true })
+      sync.begin()
       sync.write({
         type: `update`,
         value: { id: 1, value: `one`, rank: 2 },
@@ -1454,53 +1454,6 @@ describe(`sync publication reentrancy`, () => {
     } finally {
       owner.unsubscribe()
       observer.unsubscribe()
-      await collection.cleanup()
-    }
-  })
-
-  it(`keeps normal listener sync work queued behind optimistic persistence`, async () => {
-    let sync!: SyncOps
-    const mutation = createDeferred<void>()
-    const collection = createCollection<Row, number>({
-      id: `listener-sync-with-optimistic-work`,
-      getKey: (row) => row.id,
-      startSync: true,
-      sync: {
-        sync: (ops) => {
-          sync = ops
-          ops.markReady()
-        },
-      },
-      onInsert: () => mutation.promise,
-    })
-    const optimisticTransaction = collection.insert({
-      id: 2,
-      value: `optimistic`,
-    })
-    let stagedInnerTransaction = false
-    const subscription = collection.subscribeChanges((changes) => {
-      if (stagedInnerTransaction || !changes.some(({ key }) => key === 1)) {
-        return
-      }
-      stagedInnerTransaction = true
-      stageInsert(sync, { id: 3, value: `queued` })
-      sync.commit()
-    })
-
-    try {
-      stageInsert(sync, { id: 1, value: `outer` }, { immediate: true })
-      sync.commit()
-
-      expect(stagedInnerTransaction).toBe(true)
-      expect(collection.get(3)).toBeUndefined()
-
-      mutation.resolve()
-      await optimisticTransaction.isPersisted.promise
-
-      expect(collection.get(3)).toMatchObject({ id: 3, value: `queued` })
-    } finally {
-      mutation.resolve()
-      subscription.unsubscribe()
       await collection.cleanup()
     }
   })

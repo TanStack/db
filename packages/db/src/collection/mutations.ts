@@ -22,7 +22,6 @@ import {
   UndefinedKeyError,
   UpdateKeyNotFoundError,
 } from '../errors'
-import { DIRECT_TRANSACTION_METADATA_KEY } from './transaction-metadata.js'
 import type { Collection, CollectionImpl } from './index.js'
 import type { StandardSchemaV1 } from '@standard-schema/spec'
 import type {
@@ -190,17 +189,7 @@ export class CollectionMutationsManager<
       throw new InvalidKeyError(key, item)
     }
 
-    return `KEY::${this.id}/${key}`
-  }
-
-  private markPendingLocalChanges(
-    mutations: Array<PendingMutation<TOutput>>,
-  ): void {
-    for (const mutation of mutations) {
-      // The handler can sync synchronously before its transaction is registered.
-      // This is provisional; only completed mutations retain a local origin.
-      this.state.pendingLocalChanges.add(mutation.key as TKey)
-    }
+    return `KEY::${JSON.stringify([this.id, typeof key, String(key)])}`
   }
 
   /**
@@ -227,7 +216,6 @@ export class CollectionMutationsManager<
     }
     const transaction = this.createTransaction<TOutput>({
       autoCommit: false,
-      metadata: { [DIRECT_TRANSACTION_METADATA_KEY]: true },
       mutationFn: () => Promise.resolve(),
     })
     transaction.applyMutations(mutations)
@@ -318,7 +306,6 @@ export class CollectionMutationsManager<
       if (localOnly) return localOnly
       // Create a new transaction with a mutation function that calls the onInsert handler
       const directOpTransaction = this.createTransaction<TOutput>({
-        metadata: { [DIRECT_TRANSACTION_METADATA_KEY]: true },
         mutationFn: async (params) => {
           // Call the onInsert handler with the transaction and collection
           return await this.config.onInsert!({
@@ -339,7 +326,6 @@ export class CollectionMutationsManager<
 
       // Apply mutations to the new transaction
       directOpTransaction.applyMutations(mutations)
-      this.markPendingLocalChanges(mutations)
       // The Collection owns the request before its handler can write through
       // sync, so a confirmation written by the handler waits for settlement.
       state.transactions.set(directOpTransaction.id, directOpTransaction)
@@ -532,7 +518,6 @@ export class CollectionMutationsManager<
 
     // Create a new transaction with a mutation function that calls the onUpdate handler
     const directOpTransaction = this.createTransaction<TOutput>({
-      metadata: { [DIRECT_TRANSACTION_METADATA_KEY]: true },
       mutationFn: async (params) => {
         // Call the onUpdate handler with the transaction and collection
         return this.config.onUpdate!({
@@ -553,7 +538,6 @@ export class CollectionMutationsManager<
 
     // Apply mutations to the new transaction
     directOpTransaction.applyMutations(mutations)
-    this.markPendingLocalChanges(mutations)
     // Own the request before its handler runs; see insert.
     state.transactions.set(directOpTransaction.id, directOpTransaction)
     state.scheduleTransactionCleanup(directOpTransaction)
@@ -645,7 +629,6 @@ export class CollectionMutationsManager<
     // Create a new transaction with a mutation function that calls the onDelete handler
     const directOpTransaction = this.createTransaction<TOutput>({
       autoCommit: true,
-      metadata: { [DIRECT_TRANSACTION_METADATA_KEY]: true },
       mutationFn: async (params) => {
         // Call the onDelete handler with the transaction and collection
         return this.config.onDelete!({
@@ -666,7 +649,6 @@ export class CollectionMutationsManager<
 
     // Apply mutations to the new transaction
     directOpTransaction.applyMutations(mutations)
-    this.markPendingLocalChanges(mutations)
     // Own the request before its handler runs; see insert.
     state.transactions.set(directOpTransaction.id, directOpTransaction)
     state.scheduleTransactionCleanup(directOpTransaction)

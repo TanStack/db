@@ -3,7 +3,7 @@ id: StorageError
 title: StorageError
 ---
 
-Defined in: [packages/db/src/errors.ts:724](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L724)
+Defined in: [packages/db/src/errors.ts:735](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L735)
 
 ## Extends
 
@@ -22,7 +22,7 @@ Defined in: [packages/db/src/errors.ts:724](https://github.com/TanStack/db/blob/
 new StorageError(message): StorageError;
 ```
 
-Defined in: [packages/db/src/errors.ts:725](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L725)
+Defined in: [packages/db/src/errors.ts:736](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L736)
 
 #### Parameters
 

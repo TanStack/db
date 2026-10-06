@@ -1,0 +1,315 @@
+{
+  "baseHead": "34eb98b16d6174d1722878de3cb3b2cd5dc4dabe",
+  "scope": "Working-tree implementation before follow-up commit; replay commands normalize invocation and may omit reporter-only flags. No universal interleaving or liveness claim. Browser baseline and corrected subset jointly cover 156 distinct cases.",
+  "results": [
+    {
+      "name": "adapter",
+      "observedResult": "passed",
+      "cases": 2406,
+      "replayCommand": "node ../../node_modules/vitest/vitest.mjs run --coverage.enabled=false",
+      "replayDirectory": "packages/indexeddb-db-collection",
+      "receipt": "receipts/adapter.txt",
+      "sourceLog": "/tmp/pr1179-complete-green.log",
+      "sourceSha256": "7773700bad6ce616b7eb4b273159f32d27292a09ac9aadfe079676835e4b38a4"
+    },
+    {
+      "name": "core",
+      "observedResult": "passed",
+      "cases": 129,
+      "replayCommand": "node ../../node_modules/vitest/vitest.mjs run tests/truncate-readiness-oracle.test.ts tests/collection-truncate.test.ts tests/optimistic-history-publication-oracle.test.ts tests/optimistic-history-outcomes-oracle.test.ts tests/optimistic-settlement-boundaries-oracle.test.ts --coverage.enabled=false",
+      "replayDirectory": "packages/db",
+      "receipt": "receipts/core.txt",
+      "sourceLog": "/tmp/pr1179-core-related.log",
+      "sourceSha256": "ef9eab848853d4263d896a7bfb2536e269b7d65c2718b5d9900089ecc85646e1"
+    },
+    {
+      "name": "declarations",
+      "observedResult": "passed",
+      "cases": 12,
+      "replayCommand": "pnpm_config_verify_deps_before_run=warn pnpm --filter @tanstack/indexeddb-db-collection test:package",
+      "replayDirectory": ".",
+      "receipt": "receipts/declarations.txt",
+      "sourceLog": "/tmp/pr1179-package-declarations.log",
+      "sourceSha256": "7266a17b13c86cfc8d9f55bfe4903a6852bb10588d2942d967cff8391f019607"
+    },
+    {
+      "name": "browser-baseline",
+      "observedResult": "138 passed; 18 failed overstrong abort-event assertion subsequently corrected",
+      "cases": 156,
+      "replayCommand": "pnpm exec playwright test",
+      "replayDirectory": "packages/indexeddb-db-collection",
+      "receipt": "receipts/browser-baseline.txt",
+      "sourceLog": "/tmp/pr1179-browser-green.log",
+      "sourceSha256": "3320a850b5a968afbd54d53f31eb916acf2b57e34b88dd2087cc019615ce0ff3"
+    },
+    {
+      "name": "browser-corrected",
+      "observedResult": "passed all 18 corrected cases in three engines",
+      "cases": 18,
+      "replayCommand": "pnpm exec playwright test --grep 'native admitted (clear|import) aborts'",
+      "replayDirectory": "packages/indexeddb-db-collection",
+      "receipt": "receipts/browser-corrected.txt",
+      "sourceLog": "/tmp/pr1179-browser-corrected.log",
+      "sourceSha256": "6e59b39cfe1c3dabee999ceb0713d1f7867ac2bfc2ff2b8fbd711eba64d79a17"
+    },
+    {
+      "name": "source-types",
+      "observedResult": "passed",
+      "cases": null,
+      "replayCommand": "pnpm exec tsc --noEmit -p tsconfig.test.json",
+      "replayDirectory": "packages/indexeddb-db-collection",
+      "receipt": "receipts/source-types.txt",
+      "sourceLog": "/tmp/pr1179-type-complete.log",
+      "sourceSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "name": "adapter-lint",
+      "observedResult": "passed",
+      "cases": null,
+      "replayCommand": "pnpm exec eslint .",
+      "replayDirectory": "packages/indexeddb-db-collection",
+      "receipt": "receipts/adapter-lint.txt",
+      "sourceLog": "/tmp/pr1179-lint-complete.log",
+      "sourceSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "name": "core-lint",
+      "observedResult": "passed",
+      "cases": null,
+      "replayCommand": "pnpm exec eslint packages/db/src/collection/state.ts packages/db/src/collection/sync.ts packages/db/src/types.ts packages/db/tests/truncate-readiness-oracle.test.ts",
+      "replayDirectory": ".",
+      "receipt": "receipts/core-lint.txt",
+      "sourceLog": "/tmp/pr1179-core-lint.log",
+      "sourceSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "name": "fresh-vitest-types",
+      "observedResult": "passed",
+      "cases": 24,
+      "replayCommand": "pnpm exec vitest run --typecheck.only --coverage.enabled=false",
+      "replayDirectory": "packages/indexeddb-db-collection",
+      "receipt": "receipts/fresh-vitest-types.txt",
+      "sourceLog": "/tmp/pr1179-vitest-type-fresh.log",
+      "sourceSha256": "1d9d5945985cb7432bf5460be688e8d5b13d486be84a3230c1f9fef4d218dd87"
+    },
+    {
+      "name": "provider-counterexample",
+      "observedResult": "expected historical failure: fake-indexeddb admits premature deletion success; includes old abort-event assertion failures",
+      "cases": 884,
+      "replayCommand": null,
+      "replayDirectory": "packages/indexeddb-db-collection",
+      "receipt": "receipts/provider-counterexample.txt",
+      "sourceLog": "/tmp/pr1179-refinement-green.log",
+      "sourceSha256": "ae5f9b5c08ac428b233c936adec58a6cccf3d2870f3d97f6b946392643974f0e"
+    },
+    {
+      "name": "adapter-red",
+      "observedResult": "historical RED before production repair",
+      "receipt": "receipts/adapter-red.txt",
+      "sourceLog": "/Users/kyle.mathews/.codex/worktrees/pr-1179-review/tanstack-db/review-evidence/deletion-refinement/adapter-red.log",
+      "sourceSha256": "853337da53ad3da780d17bc5da658c80508ce5bb2044a4595b8bc78062ee3d68"
+    },
+    {
+      "name": "core-red",
+      "observedResult": "historical RED before production repair",
+      "receipt": "receipts/core-red.txt",
+      "sourceLog": "/Users/kyle.mathews/.codex/worktrees/pr-1179-review/tanstack-db/review-evidence/deletion-refinement/core-red.log",
+      "sourceSha256": "9e034d30683953616f5835afe44249120f619b235c8092d7c1af6fc9ab653055"
+    },
+    {
+      "name": "chromium-red",
+      "observedResult": "historical RED before production repair",
+      "receipt": "receipts/chromium-red.txt",
+      "sourceLog": "/Users/kyle.mathews/.codex/worktrees/pr-1179-review/tanstack-db/review-evidence/deletion-refinement/chromium-red.log",
+      "sourceSha256": "fa0549ec9231c6589d6aa304975e80ad4d69099fa297179e663623c77bb1dd16"
+    },
+    {
+      "name": "mutant-explicitClose",
+      "fault": "explicitClose",
+      "selector": "confirms native-committed update",
+      "exit": 1,
+      "assertionKill": true,
+      "receipt": "receipts/mutant-explicitClose.txt",
+      "sourceLog": "/Users/kyle.mathews/.codex/worktrees/pr-1179-review/tanstack-db/review-evidence/deletion-refinement/calibration/explicitClose.log",
+      "sourceSha256": "f566b5b3d0a5770444954752beb39bdb13bac3bf8e7520023b69d34372ae7a59"
+    },
+    {
+      "name": "mutant-lateRead",
+      "fault": "lateRead",
+      "selector": "rejects late replacement publication after explicit",
+      "exit": 1,
+      "assertionKill": true,
+      "receipt": "receipts/mutant-lateRead.txt",
+      "sourceLog": "/Users/kyle.mathews/.codex/worktrees/pr-1179-review/tanstack-db/review-evidence/deletion-refinement/calibration/lateRead.log",
+      "sourceSha256": "6632dba6830d51ff7ac5398a9df94f7e27514854093a8307a4e11db6427450ce"
+    },
+    {
+      "name": "mutant-truncateReady",
+      "fault": "truncateReady",
+      "selector": "confirms native-committed import",
+      "exit": 1,
+      "assertionKill": true,
+      "receipt": "receipts/mutant-truncateReady.txt",
+      "sourceLog": "/Users/kyle.mathews/.codex/worktrees/pr-1179-review/tanstack-db/review-evidence/deletion-refinement/calibration/truncateReady.log",
+      "sourceSha256": "e507fdbc6026b3f2b6bf4c914cd042dd11be1ef00338dddd1da9d4fafb25b552"
+    },
+    {
+      "name": "mutant-lateReady",
+      "fault": "lateReady",
+      "selector": "does not admit a resolved handler after explicit",
+      "exit": 1,
+      "assertionKill": true,
+      "receipt": "receipts/mutant-lateReady.txt",
+      "sourceLog": "/Users/kyle.mathews/.codex/worktrees/pr-1179-review/tanstack-db/review-evidence/deletion-refinement/calibration/lateReady.log",
+      "sourceSha256": "a19e369368e35a5385e8c44a2e6c7fd5223266dedb14567f49838eb1079e3204"
+    },
+    {
+      "name": "mutant-admitClosed",
+      "fault": "admitClosed",
+      "selector": "does not admit a resolved handler after explicit",
+      "exit": 1,
+      "assertionKill": true,
+      "receipt": "receipts/mutant-admitClosed.txt",
+      "sourceLog": "/Users/kyle.mathews/.codex/worktrees/pr-1179-review/tanstack-db/review-evidence/deletion-refinement/calibration/admitClosed.log",
+      "sourceSha256": "a15dcfce4e5991878c9f3dbd02d5af1e67ff32f9710b34f30fdd34038fa41333"
+    },
+    {
+      "name": "mutant-notifyBeforeClose",
+      "fault": "notifyBeforeClose",
+      "selector": "closes native admission before exposing explicit",
+      "exit": 1,
+      "assertionKill": true,
+      "receipt": "receipts/mutant-notifyBeforeClose.txt",
+      "sourceLog": "/Users/kyle.mathews/.codex/worktrees/pr-1179-review/tanstack-db/review-evidence/deletion-refinement/calibration/notifyBeforeClose.log",
+      "sourceSha256": "69abc306f9acda6006ea8831c04f1a95334e0bd695b5aaba09722f3937e20272"
+    },
+    {
+      "name": "mutant-dropAccepted",
+      "fault": "dropAccepted",
+      "selector": "publishes accepted update before caller settlement after explicit",
+      "exit": 1,
+      "assertionKill": true,
+      "receipt": "receipts/mutant-dropAccepted.txt",
+      "sourceLog": "/Users/kyle.mathews/.codex/worktrees/pr-1179-review/tanstack-db/review-evidence/deletion-refinement/calibration/dropAccepted.log",
+      "sourceSha256": "76cd35966a8e1ca2f3873a64d7a14e896ebf949bab4595cbd012f0c497e3c16d"
+    },
+    {
+      "name": "mutant-rejectCommitted",
+      "fault": "rejectCommitted",
+      "selector": "first.*insert.*second.*insert.*explicit.*false",
+      "exit": 1,
+      "assertionKill": true,
+      "receipt": "receipts/mutant-rejectCommitted.txt",
+      "sourceLog": "/Users/kyle.mathews/.codex/worktrees/pr-1179-review/tanstack-db/review-evidence/deletion-refinement/calibration/rejectCommitted.log",
+      "sourceSha256": "98d45d95734e4bfc68f29e28ce6acba8feea22d22ccb43b34284ae2fe3dd6ef4"
+    },
+    {
+      "name": "mutant-prematureSuccess",
+      "fault": "prematureSuccess",
+      "selector": "first.*insert.*second.*insert.*explicit.*false",
+      "exit": 1,
+      "assertionKill": true,
+      "receipt": "receipts/mutant-prematureSuccess.txt",
+      "sourceLog": "/Users/kyle.mathews/.codex/worktrees/pr-1179-review/tanstack-db/review-evidence/deletion-refinement/calibration/prematureSuccess.log",
+      "sourceSha256": "03bdfd1ae878839e2d6ad1e42f52659f9975eba70b08f74145dc68a6e5911f03"
+    },
+    {
+      "name": "mutant-obsoleteProtocol",
+      "fault": "obsoleteProtocol",
+      "selector": "ignores the retired database-deleted message protocol",
+      "exit": 1,
+      "assertionKill": true,
+      "receipt": "receipts/mutant-obsoleteProtocol.txt",
+      "sourceLog": "/Users/kyle.mathews/.codex/worktrees/pr-1179-review/tanstack-db/review-evidence/deletion-refinement/calibration/obsoleteProtocol.log",
+      "sourceSha256": "e3366322ced75d52f1dfc8ec56038a4f6c86fa61a4f532d7332b3b433cf2730f"
+    },
+    {
+      "name": "formatting",
+      "observedResult": "passed",
+      "receipt": "receipts/formatting.txt",
+      "replayCommand": "node node_modules/prettier/bin/prettier.cjs --check <changed source/test/package/changeset files>",
+      "sourceLog": "/tmp/pr1179-format-final.log",
+      "sourceSha256": "17aa973d3f004560237d9a95171210b0671deff23d61628eecf7322ff5938f20"
+    },
+    {
+      "name": "whitespace",
+      "observedResult": "passed",
+      "replayCommand": "git diff --check"
+    }
+  ],
+  "sourceSha256": {
+    "packages/db/src/collection/state.ts": "d0a278e8a1544c75327de9e5b9421066da9dfb598c1d646c0d2811f2dfb1f7f5",
+    "packages/db/src/collection/sync.ts": "5166c1922d1999ea1bc7c91d4541760b165b74e7bcde2a89518fdff00c524a84",
+    "packages/db/src/types.ts": "e58970a7dcf8a6a510889bd5e02cc6ed9677a5a70b58e64fbdc8f57a80a2c79e",
+    "packages/indexeddb-db-collection/src/indexeddb.ts": "829215a68e46e81f165b274795e93523ffd0ea2ae0eec2bd51754cd9f387e75b",
+    "packages/indexeddb-db-collection/src/wrapper.ts": "9435242c76c8acf88f27b252c668daf16bca6a67b6a71926cec94bef9610e3f1",
+    "packages/db/tests/truncate-readiness-oracle.test.ts": "d70dbd169971af199d392b8c29f84ad0e373b58520113615ee689f59eb054426",
+    "packages/indexeddb-db-collection/tests/retirement-oracle.test.ts": "ead2bd350e0f9437cfdbb35588d2f1dc0f544af200a99736d40e3761b54c6a62",
+    "packages/indexeddb-db-collection/tests/deletion-queue-oracle.test.ts": "8b5b476ddf19e85db7c4c52da9332be2be3726d45449b4fe957a70e7105c36fe",
+    "packages/indexeddb-db-collection/e2e/browser.ts": "4d48493d71654c23caaed7aa7a9be015fcc4bc2c778156ff52e69d1385617c22",
+    "packages/indexeddb-db-collection/e2e/cross-tab-oracle.spec.ts": "4ea42357f2ee5b9a068206ce8c4a1e4f964b1023d018be3ee7c39d1045d350ef"
+  },
+  "postMainMerge": {
+    "main": "65992aacda530fde89f4c8ffa803b60cd708c425",
+    "prParent": "e6a2b8b48513c484ad7a4c0266d74a681cc09c63",
+    "conflict": "packages/db/package.json; preserved both oracle registrations",
+    "results": [
+      {
+        "name": "adapter",
+        "cases": 2406,
+        "result": "passed",
+        "receipt": "receipts/merge-adapter.txt",
+        "sourceSha256": "b86ffedbd344d316b622cf78898b8ce6b6ba0e04cede40268b174b5f0aff8bd6"
+      },
+      {
+        "name": "core",
+        "cases": 300,
+        "result": "passed",
+        "receipt": "receipts/merge-core.txt",
+        "sourceSha256": "afcd5d32e4f6334bed095de79e1d091714700b6e9fdffd49d6d2e7ef06856327"
+      },
+      {
+        "name": "browser",
+        "cases": 156,
+        "result": "passed",
+        "receipt": "receipts/merge-browser.txt",
+        "sourceSha256": "ad1f45bcc8989b4b15c83371ecb10b1e69fb3ccd69a7e8ca7e77fa05a0c63e00"
+      },
+      {
+        "name": "declarations",
+        "cases": 12,
+        "result": "passed",
+        "receipt": "receipts/merge-declarations.txt",
+        "sourceSha256": "c316735e0b3a1143fe5140f7935e5b4eca2a9f2183d82f98f3f62f05d10a6713"
+      },
+      {
+        "name": "format",
+        "cases": null,
+        "result": "passed",
+        "receipt": "receipts/merge-format.txt",
+        "sourceSha256": "17aa973d3f004560237d9a95171210b0671deff23d61628eecf7322ff5938f20"
+      },
+      {
+        "name": "lint",
+        "cases": null,
+        "result": "passed",
+        "receipt": "receipts/merge-lint.txt",
+        "sourceSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      }
+    ],
+    "sourceSha256": {
+      "packages/db/src/collection/state.ts": "d0a278e8a1544c75327de9e5b9421066da9dfb598c1d646c0d2811f2dfb1f7f5",
+      "packages/db/src/collection/sync.ts": "831c1851cf0d5daed991d7598d0ab50e77b5d74d6c937ae50fe6ff66df0742e9",
+      "packages/db/src/types.ts": "e58970a7dcf8a6a510889bd5e02cc6ed9677a5a70b58e64fbdc8f57a80a2c79e",
+      "packages/indexeddb-db-collection/src/indexeddb.ts": "829215a68e46e81f165b274795e93523ffd0ea2ae0eec2bd51754cd9f387e75b",
+      "packages/indexeddb-db-collection/src/wrapper.ts": "9435242c76c8acf88f27b252c668daf16bca6a67b6a71926cec94bef9610e3f1",
+      "packages/db/tests/truncate-readiness-oracle.test.ts": "d70dbd169971af199d392b8c29f84ad0e373b58520113615ee689f59eb054426",
+      "packages/indexeddb-db-collection/tests/retirement-oracle.test.ts": "ead2bd350e0f9437cfdbb35588d2f1dc0f544af200a99736d40e3761b54c6a62",
+      "packages/indexeddb-db-collection/tests/deletion-queue-oracle.test.ts": "8b5b476ddf19e85db7c4c52da9332be2be3726d45449b4fe957a70e7105c36fe",
+      "packages/indexeddb-db-collection/e2e/browser.ts": "4d48493d71654c23caaed7aa7a9be015fcc4bc2c778156ff52e69d1385617c22",
+      "packages/indexeddb-db-collection/e2e/cross-tab-oracle.spec.ts": "4ea42357f2ee5b9a068206ce8c4a1e4f964b1023d018be3ee7c39d1045d350ef",
+      "packages/db/src/collection/lifecycle.ts": "c6b03d5476fa21c1368799479c2c2e28acae971107e0d8a996b8eed713e32732",
+      "packages/db/package.json": "61e56976597593c7e2c47769b79a05c67b40adbd1de98f18809da478cbde2749"
+    }
+  }
+}

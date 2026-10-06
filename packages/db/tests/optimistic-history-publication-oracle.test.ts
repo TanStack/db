@@ -27,10 +27,9 @@ it.each([false, true])(
         type: `sync`,
         rows: [{ id: 2, a: 0, b: 0, c: -1 }],
         truncate: false,
-        immediate: false,
         copies: 1,
       },
-      { type: `sync`, rows: [], truncate: true, immediate: false, copies: 1 },
+      { type: `sync`, rows: [], truncate: true, copies: 1 },
     ])
   },
 )
@@ -41,7 +40,6 @@ const history = (success: boolean): Array<OptimisticStep> => [
     type: `sync`,
     rows: initial.map((row) => ({ ...row, b: 2 })),
     truncate: false,
-    immediate: false,
     copies: 1,
   },
   { type: `settle`, slot: 0, success, cascade: false },
@@ -56,7 +54,6 @@ it.each([false, true])(
         type: `sync`,
         rows: replace ? initial : [],
         truncate: true,
-        immediate: false,
         copies: 1,
       },
     ])
@@ -87,26 +84,18 @@ it.each([
   )
 })
 
-// Found by the raw subscriber in a random campaign. A completed direct delete
-// retires on the next sync commit while an active insert covers the key.
-// Subscribers last saw the insert, so retirement must not insert the key again.
-it.each([true, false])(
-  `retires an accepted delete under an active insert once (immediate=%s)`,
-  async (immediate) => {
-    await runOptimisticHistory(
-      [{ id: 1, a: 0, b: 0, c: 0 }],
-      [
-        { type: `delete`, key: 1, optimistic: true },
-        { type: `settle`, slot: 0, success: true, cascade: false },
-        { type: `edit`, key: 1, fields: { b: 1 }, optimistic: true },
-        {
-          type: `sync`,
-          rows: [],
-          truncate: false,
-          immediate,
-          copies: 1,
-        },
-      ],
-    )
-  },
-)
+// Found by the raw subscriber in a random campaign. A settled delete drops,
+// and a later active edit covers the key while a sync transaction waits.
+// The key must publish once when the edit's overlay and the sync apply.
+it(`publishes a key once after a settled delete beneath a later active edit`, async () => {
+  await runOptimisticHistory(
+    [{ id: 1, a: 0, b: 0, c: 0 }],
+    [
+      { type: `delete`, key: 1, optimistic: true },
+      { type: `settle`, slot: 0, success: true, cascade: false },
+      { type: `edit`, key: 1, fields: { b: 1 }, optimistic: true },
+      { type: `sync`, rows: [], truncate: false, copies: 1 },
+      { type: `settle`, slot: 0, success: true, cascade: false },
+    ],
+  )
+})

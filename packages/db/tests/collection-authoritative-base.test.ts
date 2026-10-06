@@ -69,25 +69,18 @@ it(`reads the exposed authoritative base without optimistic rows`, async () => {
     expect(base.has(2)).toBe(true)
     expect(base.has(3)).toBe(false)
 
-    sync.begin({ immediate: true })
-    sync.write({
-      type: `update`,
-      value: { id: 1, value: 10 },
-      previousValue: { id: 1, value: 0 },
-    })
-    expect(sync.commit()).toBe(true)
-    expect(base.get(1)).toEqual({ id: 1, value: 10 })
-    expect(collection.get(1)?.value).toBe(100)
-
+    // A sync transaction held by the persisting mutation is accepted but not
+    // part of the applied base yet.
     sync.begin()
     sync.write({
       type: `update`,
       value: { id: 1, value: 20 },
-      previousValue: { id: 1, value: 10 },
+      previousValue: { id: 1, value: 0 },
     })
     const queuedReceipt = sync.commit()
     expect(queuedReceipt).toBeInstanceOf(Promise)
-    expect(base.get(1)).toEqual({ id: 1, value: 10 })
+    expect(base.get(1)).toEqual({ id: 1, value: 0 })
+    expect(collection.get(1)?.value).toBe(100)
 
     releaseMutation()
     await commit

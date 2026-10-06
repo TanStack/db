@@ -315,15 +315,14 @@ describe(`local-only fallbacks for every operation type`, () => {
   type Kind = `insert` | `update` | `delete`
   // However the fallback is reached, the write must stay visible and must
   // not report completion before the optimistic stage confirms it.
-  const write: Record<Kind, (orders: Orders) => ReturnType<Orders[`insert`]>> =
-    {
-      insert: (orders) => orders.insert({ id: 5, value: `direct` }),
-      update: (orders) =>
-        orders.update(1, (draft) => {
-          draft.value = `direct`
-        }),
-      delete: (orders) => orders.delete(1),
-    }
+  const write: Record<Kind, (orders: Orders) => ReturnType<Orders[Kind]>> = {
+    insert: (orders) => orders.insert({ id: 5, value: `direct` }),
+    update: (orders) =>
+      orders.update(1, (draft) => {
+        draft.value = `direct`
+      }),
+    delete: (orders) => orders.delete(1),
+  }
   const rollbackBatches: Record<Kind, Array<Array<string>>> = {
     insert: [[`insert:1`], [`insert:5`], [`delete:5`]],
     update: [[`insert:1`], [`update:1`], [`update:1`]],
