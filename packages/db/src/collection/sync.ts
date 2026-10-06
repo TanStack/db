@@ -29,7 +29,7 @@ import type {
   SyncMetadataApi,
 } from '../types'
 import type { CollectionImpl } from './index.js'
-import type { CollectionStateManager } from './state'
+import type { CollectionStateManager, PendingMetadataWrite } from './state'
 import type { CollectionLifecycleManager } from './lifecycle'
 import type { CollectionEventsManager } from './events.js'
 import type { LiveQueryCollectionUtils } from '../query/live/collection-config-builder.js'
@@ -336,7 +336,7 @@ export class CollectionSyncManager<
             // Clear all operations from the current transaction
             pendingTransaction.operations = []
             pendingTransaction.rowMetadataWrites.clear()
-            pendingTransaction.explicitRowMetadataWrites?.clear()
+            pendingTransaction.explicitRowMetadataWrites.clear()
             pendingTransaction.invalidationError = undefined
             // Intentionally preserve collectionMetadataWrites across truncate.
             // Collection-scoped metadata (for example persisted resume/reset
@@ -474,10 +474,10 @@ export class CollectionSyncManager<
   /** Record an explicit row metadata write and its place among the operations. */
   private writeExplicitRowMetadata(
     key: TKey,
-    write: { type: `set`; value: unknown } | { type: `delete` },
+    write: PendingMetadataWrite,
   ): void {
     const pendingTransaction = this.getActivePendingSyncTransaction()
-    pendingTransaction.explicitRowMetadataWrites?.set(key, {
+    pendingTransaction.explicitRowMetadataWrites.set(key, {
       position: pendingTransaction.operations.length,
       write,
     })

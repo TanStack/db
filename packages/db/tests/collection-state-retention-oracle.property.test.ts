@@ -934,6 +934,7 @@ it(`throws an invariant error when replay finds an invalid committed transaction
       },
     ],
     rowMetadataWrites: new Map(),
+    explicitRowMetadataWrites: new Map(),
     collectionMetadataWrites: new Map(),
     applied,
   }

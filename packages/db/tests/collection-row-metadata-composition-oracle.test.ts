@@ -447,31 +447,35 @@ describe(`row metadata composition oracle`, () => {
     )
   })
 
-  it(`matches last-write-wins metadata on the nested path`, async () => {
-    const mismatches: Array<string> = []
-    for (const [index, { start, sequence }] of nestedHistories.entries()) {
-      const label = `${start}: ${sequence.map(describeWrite).join(`, `)}`
-      let actual: unknown
-      try {
-        actual = await observeMetadata(
-          `nested`,
-          start,
-          sequence,
-          `row-metadata-composition-nested-${index}`,
-        )
-      } catch (error) {
-        mismatches.push(`${label} threw ${String(error)}`)
-        continue
+  it(
+    `matches last-write-wins metadata on the nested path`,
+    { timeout: 120_000 },
+    async () => {
+      const mismatches: Array<string> = []
+      for (const [index, { start, sequence }] of nestedHistories.entries()) {
+        const label = `${start}: ${sequence.map(describeWrite).join(`, `)}`
+        let actual: unknown
+        try {
+          actual = await observeMetadata(
+            `nested`,
+            start,
+            sequence,
+            `row-metadata-composition-nested-${index}`,
+          )
+        } catch (error) {
+          mismatches.push(`${label} threw ${String(error)}`)
+          continue
+        }
+        const { present, metadata } = afterNestedWrite(start)
+        const expected = foldMetadata(metadata, reclassify(present, sequence))
+        if (JSON.stringify(actual) !== JSON.stringify(expected))
+          mismatches.push(
+            `${label} read ${JSON.stringify(actual)}, expected ${JSON.stringify(expected)}`,
+          )
       }
-      const { present, metadata } = afterNestedWrite(start)
-      const expected = foldMetadata(metadata, reclassify(present, sequence))
-      if (JSON.stringify(actual) !== JSON.stringify(expected))
-        mismatches.push(
-          `${label} read ${JSON.stringify(actual)}, expected ${JSON.stringify(expected)}`,
-        )
-    }
-    expect(mismatches).toEqual([])
-  })
+      expect(mismatches).toEqual([])
+    },
+  )
 
   it.each([`immediate`, `held`, `rebuilt`] as const)(
     `matches last-write-wins metadata on the %s path`,

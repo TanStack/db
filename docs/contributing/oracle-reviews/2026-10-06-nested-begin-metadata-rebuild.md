@@ -77,6 +77,27 @@ production state. The lane runs 252 histories.
 A mutant that records hydrated metadata at position 0 fails `DbClient >
 hydrates pending collection rows when the collection materializes`.
 
+## Review outcomes
+
+A medium code review found no correctness bug and seven items. A simplifier
+pass found one item, the same as item 5.
+
+1. `explicitRowMetadataWrites` was optional, though every constructor supplies
+   it. Fixed: the field is required, and two test fixtures now supply it.
+2. `metadata.row.set` still writes to a transaction that a replay has
+   invalidated, while `write` ignores it. This predates the fix, and the commit
+   discards the transaction. Open: it belongs with round 4's SY8 survivor,
+   writes after invalidation, in the round 4 gaps change.
+3. Hydration could carry metadata on its operations instead of a parallel
+   map. Not adopted: an insert without metadata would then clear metadata
+   that a source kept for an absent key, which changes hydration.
+4. An ordered log of metadata writes would avoid positions. Not adopted: a
+   transaction only appends operations, and a truncate clears both lists
+   together.
+5. Hydration and the new helper spelled out `PendingMetadataWrite`. Fixed.
+6. The exported type was not formatted. Fixed.
+7. The nested lane had no timeout, unlike the other lanes. Fixed.
+
 ## ORC outcomes
 
 - **ORC-001: met.** The contract is the metadata oracle's opening prose. Its
