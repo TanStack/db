@@ -40,14 +40,21 @@
  * has resumed.
  */
 import { describe, expect, it } from 'vitest'
-import { BTreeIndex, createCollection, createLiveQueryCollection } from '../src'
+import {
+  BTreeIndex,
+  Query,
+  createCollection,
+  createLiveQueryCollection,
+  eq,
+} from '../src'
+import { createPooledLiveQuery } from '../src/query/pooled-live-query.js'
 import type { Collection } from '../src'
 
-type Row = { id: string; rank: number }
+type Row = { id: string; rank: number; group: string }
 const ROWS: Array<Row> = [
-  { id: `a`, rank: 1 },
-  { id: `b`, rank: 2 },
-  { id: `c`, rank: 3 },
+  { id: `a`, rank: 1, group: `g` },
+  { id: `b`, rank: 2, group: `g` },
+  { id: `c`, rank: 3, group: `g` },
 ]
 
 /**
@@ -417,6 +424,87 @@ describe(`live-query deferred acquisition`, () => {
           })
         }
       }
+    }
+  }
+})
+
+/**
+ * ## Pooled live queries
+ *
+ * A pooled live query serves an `eq` query on one eager source Collection from
+ * an equality partition. Building its view during a render subscribes the
+ * partition to the source Collection, so the same law applies: the partition's
+ * subscription defers acquisition until a view has a subscriber or a preload.
+ * Only eager source states apply, and pooled cleanup releases a shared
+ * partition, so this block uses the histories without cleanup. `start` is
+ * building the view.
+ */
+describe(`pooled live-query deferred acquisition`, () => {
+  const pooledHistories: Record<string, Array<Command>> = {
+    'build and read without a subscriber': [`start`, `read`],
+    'subscribe after build': [`start`, `read`, `subscribe`],
+    'preload after build': [`start`, `preload`],
+  }
+  for (const state of [`eager-idle`, `eager-running`] as const) {
+    for (const [name, commands] of Object.entries(pooledHistories)) {
+      it(`${state}: ${name}`, async () => {
+        const { collection: source, counts } = makeSource(state)
+        let view: any
+        let model = initialModel(state)
+        let subscription: { unsubscribe: () => void } | undefined
+        try {
+          for (const [step, command] of commands.entries()) {
+            const before = { ...counts }
+            switch (command) {
+              case `start`:
+                view = createPooledLiveQuery(
+                  new Query()
+                    .from({ row: source })
+                    .where(({ row }) => eq(row.group, `g`))
+                    .orderBy(({ row }) => row.rank, `asc`),
+                  { gcTime: 0 },
+                )
+                expect(view, `the query is poolable`).toBeDefined()
+                break
+              case `read`:
+                break
+              case `subscribe`:
+                subscription = view.subscribeChanges(() => {})
+                break
+              case `preload`:
+                await view.preload()
+                break
+              default:
+                throw new Error(`pooled history uses no ${command}`)
+            }
+            await settle()
+            const result = applyModel(state, `all`, 1, model, command)
+            model = result.next
+            const { expected } = result
+            const where = `${command} at step ${step}`
+            expect(
+              counts.starts - before.starts,
+              `${where}: source sync-run starts`,
+            ).toBe(expected.startsAdded)
+            if (expected.ready !== `unchecked`) {
+              expect(
+                view.status === `ready`,
+                `${where}: initial-query readiness (status ${view.status})`,
+              ).toBe(expected.ready)
+            }
+            if (expected.ids !== `unchecked`) {
+              expect(
+                Array.from(view.entries(), ([, row]: [unknown, Row]) => row.id),
+                `${where}: rows`,
+              ).toEqual(expected.ids)
+            }
+          }
+        } finally {
+          subscription?.unsubscribe()
+          await view?.cleanup()
+          await source.cleanup()
+        }
+      })
     }
   }
 })
