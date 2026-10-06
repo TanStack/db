@@ -4321,24 +4321,33 @@ describe(`ordered source work oracle`, () => {
  *   of the eligible source rows, sorted by rank and then id. The model is a
  *   plain array of the current source rows, filtered and sorted here; it shares
  *   no code with the loader or the index.
- * - **Work:** with an index, the source delivers at most a bounded number of
- *   rows per change, independent of the source size. The bound is
- *   `2 * (offset + limit) + tied rows + 1`: one reacquired prefix of the
- *   window, the tie group at its boundary, one refill of at most the window,
- *   and the changed row itself. The
- *   source holds 200 eligible filler rows outside every window. A loader that
- *   resends every eligible row on each repair delivers more than 200 rows and
- *   fails. Without an index, or while a NaN or null rank is present (such a
- *   boundary cannot be expressed as a cursor), the loader legitimately reads the full
- *   source, so only the rows law applies there.
+ * - **Work:** with an index on a single order term, the source delivers at
+ *   most a bounded number of rows per change, independent of the source size.
+ *   The bound is `2 * (offset + limit) + boundary ties + 1`: one reacquired
+ *   prefix of the window, the rows tied with a boundary value, one refill of
+ *   at most the window, and the changed row itself. A boundary value is the
+ *   rank of the last window row or the first row after the window, before or
+ *   after the change. The source holds 200 eligible filler rows outside every
+ *   window, and its domain holds up to 20 more. A loader that resends every
+ *   eligible row on each repair, or every domain row, exceeds the bound and
+ *   fails. The initial load has the same bound. Without an index, or when a
+ *   boundary value is NaN or null (such a
+ *   boundary cannot be expressed as a cursor), the loader legitimately reads
+ *   the full source, so only the rows law and the scan law apply there.
+ * - **Scan:** whatever the plan, a change visits each installed source row at
+ *   most once. A second order term keeps the loader on its full read, which
+ *   is one pass; a bounded read that then sorts the whole source in memory
+ *   makes a second pass and fails.
  *
  * The grammar crosses the sync path (sync writes, or local-only direct writes),
- * the index (present or absent), the direction, limit 1..3, offset 0..1, and a
- * history of upserts and deletes over ids 0..9 and ranks 0..3, NaN, or null, so ties,
- * deletes inside and at the edge of the window, and rank changes across its
- * boundary all occur. The observation point is after each change and a flush.
- * Work is counted at the Collection's `currentStateAsChanges` boundary, which
- * every snapshot read uses; index-cursor reads count their delivered rows.
+ * the index (present or absent), the direction, one or two order terms (rank,
+ * then ascending id), limit 1..3, offset 0..1, and a history of upserts and
+ * deletes over ids 0..29 and ranks 0..15, NaN, or null, so ties, deletes
+ * inside and at the edge of the window, and rank changes across its boundary
+ * all occur. The observation point is after each change and a flush. Work is
+ * counted as the rows the source delivers to the query's subscription, so
+ * snapshot reads and index refills both count. Scan is counted as the rows
+ * the Collection's `entries()` yields.
  * This owner does not cover on-demand providers, which have their own work
  * laws above.
  */
@@ -4350,6 +4359,7 @@ type EagerCase = {
   path: `sync` | `local-only`
   indexed: boolean
   direction: `asc` | `desc`
+  terms: 1 | 2
   limit: number
   offset: number
   initial: Array<{ id: number; rank: number; eligible: boolean }>
@@ -4370,10 +4380,10 @@ function fillerRows(direction: `asc` | `desc`): Array<Row> {
 }
 
 const eagerRow = fc.record({
-  id: fc.integer({ min: 0, max: 9 }),
+  id: fc.integer({ min: 0, max: 29 }),
   // NaN and null exercise comparator placement outside the integer order.
   rank: fc.oneof(
-    { weight: 6, arbitrary: fc.integer({ min: 0, max: 3 }) },
+    { weight: 6, arbitrary: fc.integer({ min: 0, max: 15 }) },
     { weight: 1, arbitrary: fc.constant(Number.NaN) },
     { weight: 1, arbitrary: fc.constant(null as unknown as number) },
   ),
@@ -4384,28 +4394,29 @@ const eagerCase: fc.Arbitrary<EagerCase> = fc.record({
   path: fc.constantFrom(`sync` as const, `local-only` as const),
   indexed: fc.boolean(),
   direction: fc.constantFrom(`asc` as const, `desc` as const),
+  terms: fc.constantFrom(1 as const, 2 as const),
   limit: fc.integer({ min: 1, max: 3 }),
   offset: fc.integer({ min: 0, max: 1 }),
   initial: fc.uniqueArray(eagerRow, {
     selector: (row) => row.id,
-    maxLength: 8,
+    maxLength: 20,
   }),
   history: fc.array(
     fc.oneof(
       eagerRow.map((row) => ({ type: `upsert` as const, ...row })),
       fc.record({
         type: fc.constant(`delete` as const),
-        id: fc.integer({ min: 0, max: 9 }),
+        id: fc.integer({ min: 0, max: 29 }),
       }),
     ),
     { minLength: 1, maxLength: 12 },
   ),
 })
 
-function eagerWindow(
+function eagerOrder(
   rows: ReadonlyMap<number, Row>,
-  { direction, limit, offset }: EagerCase,
-): Array<number> {
+  { direction }: EagerCase,
+): Array<Row> {
   // Documented order (live-queries guide): nulls first in either direction;
   // NaN is greater than every other non-null value; ties by ascending id.
   const position = (rank: number | null): [number, number] => {
@@ -4422,8 +4433,26 @@ function eagerWindow(
         leftGroup - rightGroup || leftValue - rightValue || left.id - right.id
       )
     })
-    .slice(offset, offset + limit)
+}
+
+function eagerWindow(
+  rows: ReadonlyMap<number, Row>,
+  testCase: EagerCase,
+): Array<number> {
+  return eagerOrder(rows, testCase)
+    .slice(testCase.offset, testCase.offset + testCase.limit)
     .map((row) => row.id)
+}
+
+/** Ranks of the last window row and the first row after the window. */
+function boundaryRanks(
+  rows: ReadonlyMap<number, Row>,
+  testCase: EagerCase,
+): Array<number> {
+  const end = testCase.offset + testCase.limit
+  return eagerOrder(rows, testCase)
+    .slice(end - 1, end + 1)
+    .map((row) => row.rank)
 }
 
 async function checkEagerWindow(testCase: EagerCase): Promise<void> {
@@ -4471,32 +4500,66 @@ async function checkEagerWindow(testCase: EagerCase): Promise<void> {
   if (testCase.indexed) {
     source.createIndex((row) => row.rank, { indexType: BTreeIndex })
   }
+  // Work: rows the source delivers to the query, from snapshots and refills.
   let delivered = 0
-  const read = source.currentStateAsChanges.bind(source)
-  source.currentStateAsChanges = ((...args) => {
-    const result = read(...args)
-    delivered += result?.length ?? 0
-    return result
-  }) as typeof source.currentStateAsChanges
+  const subscribe = source.subscribeChanges.bind(source)
+  source.subscribeChanges = ((callback, options) =>
+    subscribe((changes) => {
+      delivered += changes.length
+      callback(changes)
+    }, options)) as typeof source.subscribeChanges
+  // Scan: installed rows a change visits.
+  let scanned = 0
+  const entries = source.entries.bind(source)
+  source.entries = function* () {
+    for (const entry of entries()) {
+      scanned++
+      yield entry
+    }
+  } as typeof source.entries
   const query = createLiveQueryCollection({
     startSync: true,
-    query: (q) =>
-      q
+    query: (q) => {
+      const ordered = q
         .from({ row: source })
         .where(({ row }) => eq(row.eligible, true))
         .orderBy(({ row }) => row.rank, testCase.direction)
+      return (
+        testCase.terms === 2 ? ordered.orderBy(({ row }) => row.id) : ordered
+      )
         .offset(testCase.offset)
-        .limit(testCase.limit),
+        .limit(testCase.limit)
+    },
   })
+  const window = testCase.offset + testCase.limit
+  // The bound for one load: a prefix, the boundary ties, a refill, and the
+  // changed row. Null when a boundary value cannot be expressed as a cursor.
+  const workBound = (boundary: Array<number>): number | undefined => {
+    if (!testCase.indexed || testCase.terms !== 1) return undefined
+    if (boundary.some((rank) => rank === null || Number.isNaN(rank))) return
+    const ties = [...rows.values()].filter((row) =>
+      boundary.some((rank) => Object.is(rank, row.rank)),
+    ).length
+    return 2 * window + ties + 1
+  }
   try {
     await query.preload()
     expect(query.toArray.map((row) => row.id)).toEqual(
       eagerWindow(rows, testCase),
     )
-    const window = testCase.offset + testCase.limit
+    const initialBound = workBound(boundaryRanks(rows, testCase))
+    if (initialBound !== undefined) {
+      expect(
+        delivered,
+        `rows delivered by the initial load`,
+      ).toBeLessThanOrEqual(initialBound)
+    }
     for (const [step, command] of testCase.history.entries()) {
       const before = rows.get(command.id)
+      const boundaryBefore = boundaryRanks(rows, testCase)
+      const sizeBefore = rows.size
       delivered = 0
+      scanned = 0
       if (command.type === `delete`) {
         if (!before) continue
         rows.delete(command.id)
@@ -4536,20 +4599,19 @@ async function checkEagerWindow(testCase: EagerCase): Promise<void> {
         query.toArray.map((row) => row.id),
         `rows after step ${step}`,
       ).toEqual(eagerWindow(rows, testCase))
+      expect(scanned, `rows scanned by step ${step}`).toBeLessThanOrEqual(
+        Math.max(sizeBefore, rows.size),
+      )
       // A NaN or null boundary cannot be expressed as a cursor
       // (canExpressCursorOrder), so the loader takes the documented
-      // full-source fallback; only the rows law applies then.
-      const hasInexpressibleRank = [...rows.values()].some(
-        (row) => row.rank === null || Number.isNaN(row.rank),
-      )
-      if (testCase.indexed && !hasInexpressibleRank) {
-        const ties = [...rows.values()].filter((row) =>
-          [...rows.values()].some(
-            (other) => Object.is(other.rank, row.rank) && other.id !== row.id,
-          ),
-        ).length
+      // full-source fallback; only the rows and scan laws apply then.
+      const bound = workBound([
+        ...boundaryBefore,
+        ...boundaryRanks(rows, testCase),
+      ])
+      if (bound !== undefined) {
         expect(delivered, `rows delivered by step ${step}`).toBeLessThanOrEqual(
-          2 * window + ties + 1,
+          bound,
         )
       }
     }
@@ -4568,6 +4630,7 @@ describe(`eager indexed ordered windows`, () => {
       path: `sync`,
       indexed: true,
       direction: `desc`,
+      terms: 1,
       limit: 1,
       offset: 0,
       initial: [{ id: 0, rank: null as unknown as number, eligible: true }],
@@ -4580,6 +4643,7 @@ describe(`eager indexed ordered windows`, () => {
       path: `local-only`,
       indexed: true,
       direction: `desc`,
+      terms: 1,
       limit: 2,
       offset: 0,
       initial: [

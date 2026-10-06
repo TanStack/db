@@ -1164,9 +1164,11 @@ export class CollectionSubscription
       // An eager source's installed rows are the whole source, so its indexed
       // prefix needs only the first `limit` local rows. An on-demand source
       // must still resend every loaded row: its repair chain relies on them.
+      // A second order term would sort the whole source in memory, so it
+      // keeps the full read.
       if (
         this.orderByIndex &&
-        opts.orderBy &&
+        opts.orderBy?.length === 1 &&
         opts.limit !== undefined &&
         this.collection.config.syncMode !== `on-demand`
       ) {
