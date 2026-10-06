@@ -55,6 +55,7 @@
     "typescript": ">=4.7"
   },
   "devDependencies": {
+    "@tanstack/node-db-sqlite-persistence": "workspace:*",
     "@tanstack/offline-transactions": "workspace:*",
     "@tanstack/query-core": "^5.90.20",
     "@vitest/coverage-istanbul": "^3.2.4",

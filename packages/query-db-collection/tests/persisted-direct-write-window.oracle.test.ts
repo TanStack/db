@@ -2,6 +2,8 @@ import { describe, expect, it, vi } from 'vitest'
 import { QueryClient } from '@tanstack/query-core'
 import { createCollection } from '@tanstack/db'
 import { persistedCollectionOptions } from '../../db-sqlite-persistence-core/src'
+import { createNodeSQLitePersistence } from '../../node-db-sqlite-persistence/src'
+import { BetterSqlite3SQLiteDriver } from '../../node-db-sqlite-persistence/src/node-driver'
 import { queryCollectionOptions } from '../src/query'
 import type { QueryCollectionUtils } from '../src/query'
 
@@ -29,7 +31,8 @@ import type { QueryCollectionUtils } from '../src/query'
  * | validation sees earlier commits | 4 write types x 2 lock holders x 2 key cases | utils.write* -> manual-sync -> persisted commit | outcome of the write: `ok` or the error name | this oracle |
  * | the write applies on top | the same | the same | visible rows after every promise settles | this oracle |
  * | the Query cache agrees | the same | updateCacheData | Query cache rows after settlement | this oracle |
- * | storage agrees | the same | persisted durable write | adapter rows after settlement equal the visible rows | this oracle; the adapter is an in-memory fake, not SQLite |
+ * | storage agrees | the same | persisted durable write | stored rows after settlement equal the visible rows | this oracle |
+ * | real SQLite receives the same | a subset: each write type, `refetch-only`, `source-write`, and the ordering cases | the same, over the node SQLite adapter | the same observations | this oracle; the full matrix runs over an in-memory fake adapter |
  *
  * Lock holders:
  *
@@ -140,6 +143,44 @@ async function outcomeOf(
   }
 }
 
+/**
+ * Run a driver, then every cleanup step. A cleanup failure must not hide the
+ * driver's failure: when both fail, the result is an AggregateError whose
+ * `cause` is the driver's failure and whose `errors` list it first, then each
+ * cleanup failure.
+ */
+async function checked<T>(
+  body: () => Promise<T>,
+  cleanups: Array<() => unknown>,
+): Promise<T> {
+  let primary: { error: unknown } | undefined
+  try {
+    return await body()
+  } catch (error) {
+    primary = { error }
+    throw error
+  } finally {
+    const failures: Array<unknown> = []
+    for (const cleanup of cleanups) {
+      try {
+        await cleanup()
+      } catch (error) {
+        failures.push(error)
+      }
+    }
+    if (failures.length > 0) {
+      // eslint-disable-next-line no-unsafe-finally
+      throw primary
+        ? new AggregateError(
+            [primary.error, ...failures],
+            `driver failed: ${String((primary.error as Error).message)}; cleanup also failed`,
+            { cause: primary.error },
+          )
+        : new AggregateError(failures, `cleanup failed`)
+    }
+  }
+}
+
 function createAdapter(seed: Array<Row>) {
   const rows = new Map(seed.map((row) => [row.id, row]))
   const rowMetadata = new Map<string, unknown>()
@@ -206,6 +247,58 @@ function createAdapter(seed: Array<Row>) {
   }
 }
 
+type StorageKind = `fake` | `sqlite`
+
+/**
+ * Storage for the persisted driver. The fake adapter holds rows in memory.
+ * The `sqlite` storage uses the node SQLite adapter over an in-memory
+ * database, and starts empty, so the first fetch stores the base rows.
+ */
+function createStorage(
+  kind: StorageKind,
+  seed: Array<Row>,
+  collectionId: string,
+) {
+  if (kind === `fake`) {
+    const adapter = createAdapter(seed)
+    return {
+      adapter,
+      persistence: { adapter },
+      storedRows: (_collectionId: string) =>
+        Promise.resolve(sortRows(adapter.rows.values())),
+      close: () => {},
+    }
+  }
+  const driver = new BetterSqlite3SQLiteDriver({ filename: `:memory:` })
+  // A Query Collection is sync-present. Resolve that adapter, so the gate
+  // below wraps the adapter the collection writes through.
+  const resolved = createNodeSQLitePersistence({
+    database: driver.getDatabase(),
+  }).resolvePersistenceForCollection!({
+    collectionId,
+    mode: `sync-present`,
+    schemaVersion: undefined,
+  })
+  const persistence = {
+    adapter: resolved.adapter,
+    coordinator: resolved.coordinator,
+  }
+  const adapter = resolved.adapter as unknown as ReturnType<
+    typeof createAdapter
+  > & {
+    scanRows: (
+      collectionId: string,
+    ) => Promise<Array<{ key: unknown; value: Row }>>
+  }
+  return {
+    adapter,
+    persistence,
+    storedRows: async (collectionId: string) =>
+      sortRows((await adapter.scanRows(collectionId)).map((row) => row.value)),
+    close: () => driver.close(),
+  }
+}
+
 function newQueryClient() {
   return new QueryClient({
     defaultOptions: { queries: { staleTime: 0, gcTime: 0, retry: false } },
@@ -231,7 +324,7 @@ async function reference(op: Op, keyCase: KeyCase): Promise<Observation> {
       startSync: true,
     }),
   )
-  try {
+  return checked(async () => {
     await collection.preload()
     server = next
     await collection.utils.refetch()
@@ -241,12 +334,10 @@ async function reference(op: Op, keyCase: KeyCase): Promise<Observation> {
       outcome,
       visible: sortRows(collection.values()),
       cache: sortRows(
-        (queryClient.getQueryData(queryKey) as Array<Row> | undefined) ?? [],
+        (queryClient.getQueryData(queryKey)) ?? [],
       ),
     }
-  } finally {
-    await collection.cleanup()
-  }
+  }, [() => collection.cleanup()])
 }
 
 /**
@@ -257,20 +348,23 @@ async function persisted(
   op: Op,
   holder: Holder,
   keyCase: KeyCase,
+  kind: StorageKind = `fake`,
 ): Promise<
   Observation & { stored: Array<Row>; timing: string; waited: boolean }
 > {
   const { base, next } = scenario(keyCase)
-  const adapter = createAdapter(base)
+  const id = `persisted-${kind}-${op}-${holder}-${keyCase}`
+  const storage = createStorage(kind, base, id)
+  const adapter = storage.adapter
   const queryClient = newQueryClient()
-  const queryKey = [`persisted`, op, holder, keyCase]
+  const queryKey = [`persisted`, kind, op, holder, keyCase]
   const release = deferred()
   const entered = deferred()
   let server = base
   let hold = false
 
   if (holder === `source-write`) {
-    const applyCommittedTx = adapter.applyCommittedTx
+    const applyCommittedTx = adapter.applyCommittedTx.bind(adapter)
     adapter.applyCommittedTx = async (...args) => {
       if (hold && args[1].mutations.length > 0) {
         hold = false
@@ -303,18 +397,18 @@ async function persisted(
       QueryCollectionUtils<Row>
     >({
       ...queryCollectionOptions<Row>({
-        id: `persisted-${op}-${holder}-${keyCase}`,
+        id,
         queryKey,
         queryFn: () => Promise.resolve(server.map((row) => ({ ...row }))),
         queryClient,
         getKey: (row) => row.id,
         startSync: true,
       }),
-      persistence: { adapter },
+      persistence: storage.persistence,
     }),
   )
   const pending: Array<Promise<unknown>> = []
-  try {
+  return checked(async () => {
     if (holder === `source-write`) {
       await collection.preload()
       // R1 changes `a` and holds the lock in its durable write.
@@ -333,13 +427,14 @@ async function persisted(
     await vi.waitFor(() =>
       expect(
         sortRows(
-          (queryClient.getQueryData(queryKey) as Array<Row> | undefined) ?? [],
+          (queryClient.getQueryData(queryKey)) ?? [],
         ),
       ).toEqual(sortRows(next)),
     )
     // The window: the refetch is committed, but its durable write has not
     // finished, because another task holds the lock.
-    const waited = adapter.rows.get(`k`)?.value !== 5
+    const waited =
+      (await storage.storedRows(id)).find((row) => row.id === `k`)?.value !== 5
     const settled = outcomeOf(() => write(collection.utils, op))
     release.resolve()
     const { outcome, timing } = await settled
@@ -352,15 +447,16 @@ async function persisted(
       waited,
       visible: sortRows(collection.values()),
       cache: sortRows(
-        (queryClient.getQueryData(queryKey) as Array<Row> | undefined) ?? [],
+        (queryClient.getQueryData(queryKey)) ?? [],
       ),
-      stored: sortRows(adapter.rows.values()),
+      stored: await storage.storedRows(id),
     }
-  } finally {
-    release.resolve()
-    errors.mockRestore()
-    await collection.cleanup()
-  }
+  }, [
+    () => release.resolve(),
+    () => errors.mockRestore(),
+    () => collection.cleanup(),
+    () => storage.close(),
+  ])
 }
 
 describe(`persisted direct writes behind a waiting refetch`, () => {
@@ -447,7 +543,7 @@ function heldQueryFn(rows: () => Array<Row>) {
 }
 
 async function referenceOrder(start: Start, touch: Touch): Promise<Array<Row>> {
-  let server: Array<Row> = [
+  const server: Array<Row> = [
     { id: `a`, value: 2 },
     { id: `k`, value: 5 },
   ]
@@ -463,7 +559,7 @@ async function referenceOrder(start: Start, touch: Touch): Promise<Array<Row>> {
       startSync: true,
     }),
   )
-  try {
+  return checked(async () => {
     await collection.preload()
     let r3: Promise<unknown> | undefined
     if (start === `before`) {
@@ -483,26 +579,27 @@ async function referenceOrder(start: Start, touch: Touch): Promise<Array<Row>> {
     await flush()
     await flush()
     return sortRows(collection.values())
-  } finally {
-    await collection.cleanup()
-  }
+  }, [() => collection.cleanup()])
 }
 
 async function persistedOrder(
   start: Start,
   touch: Touch,
+  kind: StorageKind = `fake`,
 ): Promise<{ visible: Array<Row>; stored: Array<Row>; waited: boolean }> {
   const base: Array<Row> = [
     { id: `a`, value: 1 },
     { id: `k`, value: 1 },
   ]
-  const adapter = createAdapter(base)
+  const id = `persisted-order-${kind}-${start}-${touch}`
+  const storage = createStorage(kind, base, id)
+  const adapter = storage.adapter
   let server = base
   const held = heldQueryFn(() => server)
   const release = deferred()
   const entered = deferred()
   let hold = false
-  const applyCommittedTx = adapter.applyCommittedTx
+  const applyCommittedTx = adapter.applyCommittedTx.bind(adapter)
   adapter.applyCommittedTx = async (...args) => {
     if (hold && args[1].mutations.length > 0) {
       hold = false
@@ -521,18 +618,18 @@ async function persistedOrder(
       QueryCollectionUtils<Row>
     >({
       ...queryCollectionOptions<Row>({
-        id: `persisted-order-${start}-${touch}`,
+        id,
         queryKey: [`persisted-order`, start, touch],
         queryFn: held.queryFn,
         queryClient,
         getKey: (row) => row.id,
         startSync: true,
       }),
-      persistence: { adapter },
+      persistence: storage.persistence,
     }),
   )
   const pending: Array<Promise<unknown>> = []
-  try {
+  return checked(async () => {
     await collection.preload()
     // R1 holds the lock; R2 (a=2, k=5) commits and waits behind it.
     hold = true
@@ -550,12 +647,12 @@ async function persistedOrder(
     await vi.waitFor(() =>
       expect(
         sortRows(
-          (queryClient.getQueryData([`persisted-order`, start, touch]) as
-            Array<Row> | undefined) ?? [],
+          (queryClient.getQueryData([`persisted-order`, start, touch])) ?? [],
         ),
       ).toEqual(sortRows(server)),
     )
-    const waited = adapter.rows.get(`k`)?.value !== 5
+    const waited =
+      (await storage.storedRows(id)).find((row) => row.id === `k`)?.value !== 5
     if (start === `before`) {
       held.arm()
       pending.push(collection.utils.refetch())
@@ -579,14 +676,15 @@ async function persistedOrder(
     for (let i = 0; i < 20; i++) await flush()
     return {
       visible: sortRows(collection.values()),
-      stored: sortRows(adapter.rows.values()),
+      stored: await storage.storedRows(id),
       waited,
     }
-  } finally {
-    release.resolve()
-    errors.mockRestore()
-    await collection.cleanup()
-  }
+  }, [
+    () => release.resolve(),
+    () => errors.mockRestore(),
+    () => collection.cleanup(),
+    () => storage.close(),
+  ])
 }
 
 describe(`a later refetch while a persisted direct write waits`, () => {
@@ -601,6 +699,58 @@ describe(`a later refetch while a persisted direct write waits`, () => {
           `persisted ${JSON.stringify(actual.visible)} != reference ${JSON.stringify(expected)}`,
         ).toEqual(expected)
         expect(actual.stored, `storage matches the visible rows`).toEqual(
+          actual.visible,
+        )
+      })
+    }
+  }
+})
+
+/**
+ * ## Real SQLite receives the same law
+ *
+ * The matrix above runs over an in-memory fake adapter, which supplies the
+ * durable-write delay. This subset runs the same drivers over the node SQLite
+ * adapter, gated the same way: each write type with the key that only the
+ * waiting refetch holds and an earlier refetch's durable write holding the
+ * lock, plus the four ordering cases.
+ */
+describe(`real SQLite: persisted direct writes behind a waiting refetch`, () => {
+  for (const op of ops) {
+    it(`${op} with source-write holding the lock, key refetch-only`, async () => {
+      const expected = await reference(op, `refetch-only`)
+      const actual = await persisted(
+        op,
+        `source-write`,
+        `refetch-only`,
+        `sqlite`,
+      )
+      expect(actual.waited, `the refetch waited on the lock`).toBe(true)
+      const observed = {
+        outcome: actual.outcome,
+        visible: actual.visible,
+        cache: actual.cache,
+      }
+      expect(
+        observed,
+        `sqlite ${JSON.stringify(observed)} != reference ${JSON.stringify(expected)}`,
+      ).toEqual(expected)
+      expect(actual.stored, `SQLite matches the visible rows`).toEqual(
+        actual.visible,
+      )
+    })
+  }
+  for (const start of [`before`, `after`] as const) {
+    for (const touch of [`same`, `different`] as const) {
+      it(`R3 started ${start} the write, ${touch} key`, async () => {
+        const expected = await referenceOrder(start, touch)
+        const actual = await persistedOrder(start, touch, `sqlite`)
+        expect(actual.waited, `the write waited on the lock`).toBe(true)
+        expect(
+          actual.visible,
+          `sqlite ${JSON.stringify(actual.visible)} != reference ${JSON.stringify(expected)}`,
+        ).toEqual(expected)
+        expect(actual.stored, `SQLite matches the visible rows`).toEqual(
           actual.visible,
         )
       })
@@ -648,7 +798,7 @@ describe(`a persisted direct insert of an existing key`, () => {
         persistence: { adapter },
       }),
     )
-    try {
+    await checked(async () => {
       await reference.preload()
       await persistedCollection.preload()
       const expected = await outcomeOf(() =>
@@ -663,9 +813,33 @@ describe(`a persisted direct insert of an existing key`, () => {
         sortRows(reference.values()),
       )
       expect(sortRows(adapter.rows.values())).toEqual([{ id: `k`, value: 1 }])
-    } finally {
-      await reference.cleanup()
-      await persistedCollection.cleanup()
-    }
+    }, [() => reference.cleanup(), () => persistedCollection.cleanup()])
+  })
+})
+
+describe(`the oracle harness keeps the primary failure`, () => {
+  it(`reports the driver's failure when cleanup also fails`, async () => {
+    const report = await checked(() => {
+      expect(1, `the driver's assertion`).toBe(2)
+      return Promise.resolve()
+    }, [
+      () => {
+        throw new Error(`cleanup failed on purpose`)
+      },
+    ]).then(
+      () => undefined,
+      (error: unknown) => error,
+    )
+    expect(report).toBeInstanceOf(AggregateError)
+    const aggregate = report as AggregateError
+    expect((aggregate.cause as Error).message).toContain(
+      `the driver's assertion`,
+    )
+    expect(aggregate.message).toContain(`the driver's assertion`)
+    expect(aggregate.errors).toHaveLength(2)
+    expect(aggregate.errors[0]).toBe(aggregate.cause)
+    expect((aggregate.errors[1] as Error).message).toBe(
+      `cleanup failed on purpose`,
+    )
   })
 })
