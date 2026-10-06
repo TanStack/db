@@ -50,7 +50,8 @@ import type { CollectionConfig, SyncConfig } from '../src/types.js'
  * A sync transaction still open when a transaction settles is not accepted:
  * it holds no completed row and attributes nothing. If it later commits, its
  * writes are `'remote'` unless a persisting transaction touches their key; if
- * it aborts, its writes never apply.
+ * it aborts, its writes never apply, and both its receipt and its acceptance
+ * moment (`whenSyncAccepted`) reject.
  *
  * A mutation handler can write a sync transaction before it returns, and can
  * await that write's acceptance. It is the same event as a sync transaction
@@ -1004,6 +1005,11 @@ export async function runOptimisticHistory(
               Promise,
             )
             await expect(receipt).rejects.toMatchObject({ name: `AbortError` })
+            // Core never accepted the batch, so its acceptance moment rejects too.
+            await expect(
+              Promise.resolve(whenSyncAccepted(receipt)),
+              `aborted open batch acceptance`,
+            ).rejects.toMatchObject({ name: `AbortError` })
             counts.abortedBatches++
           }
         } else {

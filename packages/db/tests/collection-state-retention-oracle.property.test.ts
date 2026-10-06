@@ -9,6 +9,7 @@ import {
 import { BTreeIndex } from '../src/indexes/btree-index.js'
 import { createDeferred } from '../src/deferred.js'
 import { createTransaction } from '../src/transactions.js'
+import { whenSyncAccepted } from '../src/sync-receipt.js'
 import { oraclePropertyOptions, oracleRuns } from './oracle-config.js'
 import { runOptimisticHistory } from './optimistic-history-oracle.js'
 import type { OptimisticStep } from './optimistic-history-oracle.js'
@@ -28,7 +29,9 @@ import type { SyncConfig, TransactionState } from '../src/types.js'
  *
  * The oracle compares retained source data, public rows, indexes, events, and
  * sync-run ownership after every cut. This makes stale-sync-run writes and rows
- * that vanish or reappear only after unrelated work observable.
+ * that vanish or reappear only after unrelated work observable. After each
+ * restart, the old run writes and commits a row. Cleanup ended that run, so
+ * the row never appears and the commit returns `true`.
  */
 
 type RetainedRow = {
@@ -215,9 +218,15 @@ async function runRetentionHistory(
     expectRetainedState(collection, model)
     for (const action of actions) {
       if (action.type === `restart`) {
+        const oldSync = harness.sync
         await collection.cleanup()
         collection.startSyncImmediate()
         model.clear()
+        // Cleanup ended the old run, so its retained actions are inert. Its
+        // commit returns `true`: the caller has nothing to wait for.
+        oldSync.begin()
+        oldSync.write({ type: `insert`, value: { id: 0, value: 9 } })
+        expect(oldSync.commit(), `stale sync run commit`).toBe(true)
       } else if (action.type === `reentrantRestart`) {
         const oldSync = harness.sync
         const triggerType = model.has(action.row.id) ? `update` : `insert`
@@ -894,12 +903,77 @@ it(`rejects an open transaction that a later nested commit invalidates`, async (
     const rejected = sync.commit()
     expect(rejected).toBeInstanceOf(Promise)
     await expect(rejected).rejects.toBeInstanceOf(DuplicateKeySyncError)
+    // Core never accepted the transaction, so its acceptance moment rejects too.
+    await expect(
+      Promise.resolve(whenSyncAccepted(rejected)),
+    ).rejects.toBeInstanceOf(DuplicateKeySyncError)
     expect(collection.get(1)?.value).toBe(2)
     expect(collection._state.pendingSyncedTransactions).toHaveLength(0)
   } finally {
     await collection.cleanup()
   }
 })
+
+// After a replay invalidates the open transaction, its later writes must not
+// change what a newer transaction sees. Each write below would leak into the
+// projection: an insert of key 9 would make the newer insert of key 9 a
+// duplicate, and a delete of key 1 would let the newer insert of key 1 pass.
+// The newer transaction sees only the accepted row 1, as if the invalidated
+// transaction wrote nothing after its invalidation.
+it.each([
+  {
+    late: { type: `insert`, value: { id: 9, value: 1 } },
+    newer: { id: 9, value: 3 },
+    duplicate: false,
+  },
+  {
+    late: { type: `delete`, key: 1 },
+    newer: { id: 1, value: 3 },
+    duplicate: true,
+  },
+] as const)(
+  `ignores writes to an invalidated transaction: late $late.type`,
+  async ({ late, newer, duplicate }) => {
+    let sync!: Parameters<SyncConfig<RetainedRow, number>[`sync`]>[0]
+    const collection = createCollection<RetainedRow, number>({
+      getKey: (row) => row.id,
+      startSync: true,
+      sync: {
+        sync: (actions) => {
+          sync = actions
+          actions.markReady()
+        },
+      },
+    })
+    try {
+      await collection.stateWhenReady()
+      sync.begin()
+      sync.write({ type: `insert`, value: { id: 1, value: 1 } })
+      sync.begin()
+      sync.write({ type: `update`, value: { id: 1, value: 2 } })
+      expect(sync.commit()).toBe(true)
+      sync.write(late)
+      sync.begin()
+      const write = () => sync.write({ type: `insert`, value: newer })
+      if (duplicate) expect(write).toThrow(DuplicateKeySyncError)
+      else write()
+      expect(sync.commit()).toBe(true)
+      await expect(sync.commit()).rejects.toBeInstanceOf(DuplicateKeySyncError)
+      expect(
+        [...collection.state.values()].map(({ id, value }) => [id, value]),
+      ).toEqual(
+        duplicate
+          ? [[1, 2]]
+          : [
+              [1, 2],
+              [newer.id, newer.value],
+            ],
+      )
+    } finally {
+      await collection.cleanup()
+    }
+  },
+)
 
 // No public path can make a committed queued transaction invalid on replay:
 // only the open last transaction can be canceled. A replay that finds one is

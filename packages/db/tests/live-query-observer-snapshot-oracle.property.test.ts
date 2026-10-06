@@ -15,7 +15,8 @@ import type { LiveQuerySnapshot } from '../src/live-query-observer.js'
  * Collection changed and after newer snapshots were built. The contract: the
  * first read, in either order, shows the rows that were visible when the
  * snapshot was built. `data` lists the same rows as `state.values()`, in the
- * same order. A single-result query keeps only the first such row: `state`
+ * same order. Every later read returns the same `data` and `state` objects as
+ * the first. A single-result query keeps only the first such row: `state`
  * holds that row, and `data` is that row or `undefined`.
  *
  * The model is a sorted map from key to version. Each history step changes the
@@ -30,6 +31,7 @@ import type { LiveQuerySnapshot } from '../src/live-query-observer.js'
 | --- | --- | --- | --- | --- |
 | point-in-time first read | insert, update, delete, capture; keys a..d, versions 0..9 | observer getSnapshot -> rebuild | retained snapshot `data`/`state`, first read after all later writes | this generated oracle |
 | data/state agreement | the same histories | the same | `data` order equals `state.values()` order at the end | this generated oracle |
+| stable identity | the same histories | the same | a second read of `data` and `state` returns the first read's objects | this generated oracle |
 | single result | the same histories over `findOne()` | isSingleResultCollection branch | `data` equals the first recorded row or `undefined` | this generated oracle |
 | attached and detached reads | a subscriber is present or absent | publication cache vs refreshDetachedState | the same observations | this generated oracle; listener delivery belongs to `live-query-observer-history-oracle.property.test.ts` |
 
@@ -90,9 +92,7 @@ function setup(shape: Shape) {
       return shape === `single` ? ordered.findOne() : ordered
     },
   })
-  const observer = createLiveQueryObserver(query as any) as ReturnType<
-    typeof createLiveQueryObserver<Row, string>
-  >
+  const observer = createLiveQueryObserver(query as any)
   return { source, query, observer }
 }
 
@@ -180,6 +180,9 @@ function checkRead(
       ...(read.state?.values() ?? []),
     ])
   }
+  // A snapshot is one value: later reads return the same objects.
+  expect(entry.snapshot.state, `${label}: state identity`).toBe(read.state)
+  expect(entry.snapshot.data, `${label}: data identity`).toBe(read.data)
 }
 
 async function checkHistory(
