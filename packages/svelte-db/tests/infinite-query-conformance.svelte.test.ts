@@ -13,7 +13,7 @@ import {
   createLiveQueryWindowController,
   gt,
 } from '@tanstack/db'
-import { flushSync } from 'svelte'
+import { flushSync, untrack } from 'svelte'
 import { describe, expect, it } from 'vitest'
 import { mockSyncCollectionOptions } from '../../db/tests/utils'
 import { runInfiniteQuerySuite } from '../../db/tests/conformance/infinite-suite-oracle'
@@ -24,6 +24,7 @@ import type {
   InfiniteQueryConfig,
   InfiniteQueryDriver,
   InfiniteQueryHandle,
+  InfiniteQueryObservation,
 } from '../../db/tests/conformance/infinite-contract'
 import type {
   QueryBuild,
@@ -73,11 +74,37 @@ async function settle(): Promise<void> {
   flushSync()
 }
 
+type Observations = Array<InfiniteQueryObservation>
+
+function observe(result: any): InfiniteQueryObservation {
+  return {
+    status: result.status,
+    ids: result.data.map((row: { id: string }) => row.id),
+    pages: result.pages.map((page: Array<{ id: string }>) =>
+      page.map((row) => row.id),
+    ),
+    hasNextPage: result.hasNextPage,
+  }
+}
+
+// Svelte's first render reads the construction value, before the hook's
+// subscribing effect runs. Later values reach the template before each
+// pre-effect run, which records what the template would render.
+function recordPublications(getResult: () => any, log: Observations): void {
+  log.push(observe(getResult()))
+  $effect.pre(() => {
+    const observation = observe(getResult())
+    untrack(() => log.push(observation))
+  })
+}
+
 function makeHandle(
   getResult: () => any,
   dispose: () => void,
+  log: Observations,
 ): InfiniteQueryHandle {
   return {
+    observations: () => log,
     current() {
       const result = getResult()
       return {
@@ -102,31 +129,14 @@ function makeHandle(
 }
 
 function mount(build: QueryBuild, config: InfiniteQueryConfig = {}) {
+  const log: Observations = []
   let result: any
   const dispose = $effect.root(() => {
     result = useLiveInfiniteQuery(build as any, config as any)
+    recordPublications(() => result, log)
   })
   finishSetup(dispose)
-  return makeHandle(() => result, dispose)
-}
-
-function mountObserved(build: QueryBuild, config: InfiniteQueryConfig = {}) {
-  // Svelte's first render reads the construction snapshot, before the
-  // subscribing $effect attaches on flush. Capture that first paint now.
-  let firstPaint: { status: string; ids: Array<string> }
-  let result: any
-  const dispose = $effect.root(() => {
-    result = useLiveInfiniteQuery(build as any, config as any)
-    firstPaint = {
-      status: result.status,
-      ids: result.data.map((row: any) => row.id),
-    }
-  })
-  finishSetup(dispose)
-  return {
-    ...makeHandle(() => result, dispose),
-    firstPaint: () => firstPaint,
-  }
+  return makeHandle(() => result, dispose, log)
 }
 
 function mountControllable<P>(
@@ -134,6 +144,7 @@ function mountControllable<P>(
   initial: P,
   config: InfiniteQueryConfig = {},
 ) {
+  const log: Observations = []
   let result: any
   let setParam!: (next: P) => void
   const dispose = $effect.root(() => {
@@ -144,39 +155,44 @@ function mountControllable<P>(
     result = useLiveInfiniteQuery((q: any) => build(q, param), config as any, [
       () => param,
     ])
+    recordPublications(() => result, log)
     setParam = (next) => {
       param = next
     }
   })
   finishSetup(dispose)
-  const handle = makeHandle(() => result, dispose)
+  const handle = makeHandle(() => result, dispose, log)
   return { ...handle, setParamSync: setParam }
 }
 
 function mountCollection(collection: any, config: InfiniteQueryConfig = {}) {
+  const log: Observations = []
   let result: any
   const dispose = $effect.root(() => {
     result = useLiveInfiniteQuery(collection, config as any)
+    recordPublications(() => result, log)
   })
   finishSetup(dispose)
-  return makeHandle(() => result, dispose)
+  return makeHandle(() => result, dispose, log)
 }
 
 function mountCollectionControllable(
   initial: any,
   config: InfiniteQueryConfig = {},
 ) {
+  const log: Observations = []
   let result: any
   let replaceCollection!: (next: any) => void
   const dispose = $effect.root(() => {
     let collection = $state(initial)
     result = useLiveInfiniteQuery(() => collection, config as any)
+    recordPublications(() => result, log)
     replaceCollection = (next) => {
       collection = next
     }
   })
   finishSetup(dispose)
-  const handle = makeHandle(() => result, dispose)
+  const handle = makeHandle(() => result, dispose, log)
   return { ...handle, replaceCollectionSync: replaceCollection }
 }
 
@@ -184,11 +200,13 @@ function mountConfigControllable(
   build: QueryBuild,
   initial: InfiniteQueryConfig,
 ) {
+  const log: Observations = []
   let result: any
   let setConfig!: (next: InfiniteQueryConfig) => void
   const dispose = $effect.root(() => {
     const config = $state({ ...initial })
     result = useLiveInfiniteQuery(build as any, config as any)
+    recordPublications(() => result, log)
     setConfig = (next) => {
       delete config.pageSize
       delete config.initialPageParam
@@ -196,7 +214,7 @@ function mountConfigControllable(
     }
   })
   finishSetup(dispose)
-  const handle = makeHandle(() => result, dispose)
+  const handle = makeHandle(() => result, dispose, log)
   return { ...handle, setConfigSync: setConfig }
 }
 
@@ -205,6 +223,7 @@ function mountInputControllable(
   build: QueryBuild,
   config: InfiniteQueryConfig = {},
 ) {
+  const log: Observations = []
   let result: any
   let setInputKind!: (next: `collection` | `query`) => void
   const dispose = $effect.root(() => {
@@ -214,12 +233,13 @@ function mountInputControllable(
       config as any,
       [() => kind],
     )
+    recordPublications(() => result, log)
     setInputKind = (next) => {
       kind = next
     }
   })
   finishSetup(dispose)
-  const handle = makeHandle(() => result, dispose)
+  const handle = makeHandle(() => result, dispose, log)
   return { ...handle, setInputKindSync: setInputKind }
 }
 
@@ -232,7 +252,6 @@ const svelteInfiniteDriver: InfiniteQueryDriver = {
   makePrecreated,
   makeWindowController: createLiveQueryWindowController,
   mount,
-  mountObserved,
   mountControllable,
   mountCollection,
   mountCollectionControllable,

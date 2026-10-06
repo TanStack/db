@@ -180,6 +180,47 @@ Evidence, produced on the working tree above that commit:
 Svelte's retained-page window was fixed by the same rule, but no test observes
 an intermediate Svelte value. The coverage map lists that cell.
 
+## Addendum: publication laws in the shared oracle
+
+This entry moves the laws found in the earlier reviews into the shared
+infinite-query suite where they are framework-independent, and leaves only
+pre-commit work to the drivers.
+
+| Law | Owner |
+| --- | --- |
+| A synchronous source's first published value is ready with the first page. | Shared `first-paint-ready` |
+| Every ready value in a fixed-source, fixed-query scenario equals the source prefix for its own page count, with matching pages and continuation. | Shared, in 11 scenarios including `equal-dependency-depth` and `circular-dependency` |
+| A mount requests an on-demand first window once. | Shared `on-demand-paging` |
+| A render that never commits, or a superseded pre-commit recompute, does not acquire an on-demand source, direct or wrapped; commit does. | React `infinite-query-render-cuts.test.tsx`, Svelte hook tests |
+| A StrictMode double render requests an on-demand first window once. | React render cuts |
+| After GC reclaims an abandoned render's collection, the retry's first commit is the ready first page. | React render cuts |
+
+Each shared handle now records every value its framework published, which
+replaces the single first-paint recorder. Pre-commit work stays in drivers,
+because Vue's setup is its commit.
+
+Evidence, produced on the working tree above `0f0e05cbb`:
+
+- With a one-page replacement window, `equal-dependency-depth` and
+  `circular-dependency` fail in React and in Svelte. The Svelte half of the
+  retained-page regression was real; no earlier test could observe it.
+- With `startSync: false`, `first-paint-ready` fails in React and Svelte.
+- In the React render-cuts file, removing the nested walk fails only the
+  wrapped abandoned-render test. Starting every source in render also fails the
+  StrictMode test.
+- The four React-only files from earlier entries are merged into one. Their
+  retained-page test is dropped, because the shared law covers it in every
+  driver.
+- Local suites: react-db 335, vue-db 121, svelte-db 119, and the db infinite
+  calibration 9.
+
+A probe found one more open cell. A supplied collection that has not started
+publishes an idle first value in React and Svelte, and a ready one in Vue.
+`useLiveQuery` starts a supplied collection in render. The infinite hook does
+not, and a React test requires that an abandoned render leave a supplied
+collection unsubscribed. Closing this cell changes that contract, so it is
+recorded for decision rather than changed here.
+
 ## Revision index
 
 Each entry's evidence applies to the revision named here. The first section's
@@ -191,4 +232,5 @@ table and closure apply to `415a8d4a1`.
 | Duplicate pre-commit render fix | `a4af6a251` |
 | Cleaned-up reuse liveness check | `fc5f136a5` |
 | Start-sync gate replaces render-time reuse | `b31b84ff9` |
-| Nested on-demand sources and retained-page windows | the commit that adds this entry, on top of `725e37a28` |
+| Nested on-demand sources and retained-page windows | `2b461f8cd` |
+| Publication laws in the shared oracle | the commit that adds this entry, on top of `0f0e05cbb` |

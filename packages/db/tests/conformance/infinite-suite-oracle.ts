@@ -6,7 +6,9 @@
  * expectation is a finite ordered prefix sliced into fixed-size pages; the
  * on-demand fixture recomputes requests from immutable source data rather than
  * borrowing the hook's page cache. Every checkpoint checks the whole public
- * page ledger, not only its newest page.
+ * page ledger, not only its newest page. Scenarios with a fixed source and
+ * query also check every ready value the binding published along the way, so a
+ * truncated intermediate value fails even when the settled ledger recovers.
  *
  * A driver may differ in how its framework reaches the checkpoint. It may not
  * differ in the value and lifecycle facts visible there. The suite tracks all
@@ -56,6 +58,37 @@ function expectedOverlappingWindow(
     isFetchingNextPage: !pageSucceeded,
     error: preloadFailed ? failure : undefined,
     status: preloadFailed ? `error` : `ready`,
+  }
+}
+
+/**
+ * Publication law for a fixed source and query: every ready value the binding
+ * published equals the source prefix for that value's own page count. The
+ * expectation comes from the immutable source rows and page size, not from the
+ * controller, so a ready value that holds fewer rows than its pages, splits
+ * them at the wrong boundary, or reports a false end of list fails here even
+ * when the settled state later recovers.
+ */
+function expectReadyObservationsMatchSource(
+  handle: InfiniteQueryHandle,
+  source: ReadonlyArray<InfiniteRow>,
+  pageSize: number,
+): void {
+  const ready = handle
+    .observations()
+    .filter((observation) => observation.status === `ready`)
+  expect(ready.length).toBeGreaterThan(0)
+  for (const observation of ready) {
+    const pageCount = observation.pages.length
+    const visible = source.slice(0, pageCount * pageSize).map((row) => row.id)
+    expect(observation).toEqual({
+      status: `ready`,
+      ids: visible,
+      pages: Array.from({ length: pageCount }, (_, page) =>
+        visible.slice(page * pageSize, (page + 1) * pageSize),
+      ),
+      hasNextPage: source.length > pageCount * pageSize,
+    })
   }
 }
 
@@ -116,8 +149,6 @@ export function runInfiniteQuerySuite(rawDriver: InfiniteQueryDriver): void {
       sources!.track(rawDriver.makeOnDemandSource(data, delay)),
     makePrecreated: (build) => sources!.track(rawDriver.makePrecreated(build)),
     mount: (build, config) => track(rawDriver.mount(build, config)),
-    mountObserved: (build, config) =>
-      track(rawDriver.mountObserved(build, config)),
     mountControllable: (build, initial, config) =>
       track(rawDriver.mountControllable(build, initial, config)),
     mountCollection: (collection, config) =>
@@ -169,7 +200,7 @@ export function runInfiniteQuerySuite(rawDriver: InfiniteQueryDriver): void {
         // framework must not commit one. Reading only the final settled state
         // would hide such a flash, so this asserts the first recorded paint.
         const source = driver.makeSource(rows(8))
-        const handle = driver.mountObserved(
+        const handle = driver.mount(
           (q) =>
             q
               .from({ items: source.collection })
@@ -178,10 +209,13 @@ export function runInfiniteQuerySuite(rawDriver: InfiniteQueryDriver): void {
         )
         await handle.flush()
 
-        expect(handle.firstPaint()).toEqual({
+        expect(handle.observations()[0]).toEqual({
           status: `ready`,
           ids: [`1`, `2`, `3`],
+          pages: [[`1`, `2`, `3`]],
+          hasNextPage: true,
         })
+        expectReadyObservationsMatchSource(handle, rows(8), 3)
       },
     )
 
@@ -230,6 +264,7 @@ export function runInfiniteQuerySuite(rawDriver: InfiniteQueryDriver): void {
         expect(handle.current().pageParams).toEqual([4, 5, 6])
         expectPageRows(handle.current(), rows(8), 3)
         expect(handle.current().hasNextPage).toBe(false)
+        expectReadyObservationsMatchSource(handle, rows(8), 3)
       },
     )
 
@@ -252,6 +287,7 @@ export function runInfiniteQuerySuite(rawDriver: InfiniteQueryDriver): void {
         expect(handle.current().pages.map((page) => page.length)).toEqual([2])
         expectPageRows(handle.current(), rows(2), 3)
         expect(handle.current().hasNextPage).toBe(false)
+        expectReadyObservationsMatchSource(handle, rows(2), 3)
       },
     )
 
@@ -273,6 +309,7 @@ export function runInfiniteQuerySuite(rawDriver: InfiniteQueryDriver): void {
         expect(handle.current().pages).toEqual([[]])
         expectPageRows(handle.current(), [], 3)
         expect(handle.current().hasNextPage).toBe(false)
+        expectReadyObservationsMatchSource(handle, [], 3)
       },
     )
 
@@ -297,6 +334,7 @@ export function runInfiniteQuerySuite(rawDriver: InfiniteQueryDriver): void {
         ])
         expect(handle.current().hasNextPage).toBe(false)
         expectPageRows(handle.current(), rows(6), 3)
+        expectReadyObservationsMatchSource(handle, rows(6), 3)
       },
     )
 
@@ -574,7 +612,8 @@ export function runInfiniteQuerySuite(rawDriver: InfiniteQueryDriver): void {
         )
         await handle.flush()
 
-        expect(source.calls.some((call) => call.limit === 4)).toBe(true)
+        // One mount requests its first peek-ahead window exactly once.
+        expect(source.calls.filter((call) => call.limit === 4)).toHaveLength(1)
         expectPageRows(handle.current(), rows(8).slice(0, 3), 3)
         expect(handle.current().data.map((row) => row.id)).toEqual([
           `1`,
@@ -591,6 +630,7 @@ export function runInfiniteQuerySuite(rawDriver: InfiniteQueryDriver): void {
         ])
         expect(handle.current().hasNextPage).toBe(false)
         expectPageRows(handle.current(), rows(8), 3)
+        expectReadyObservationsMatchSource(handle, rows(8), 3)
       },
     )
 
@@ -618,6 +658,7 @@ export function runInfiniteQuerySuite(rawDriver: InfiniteQueryDriver): void {
         ])
         expect(handle.current().isFetchingNextPage).toBe(false)
         expectPageRows(handle.current(), rows(8).slice(0, 6), 3)
+        expectReadyObservationsMatchSource(handle, rows(8), 3)
       },
     )
 
@@ -886,6 +927,9 @@ export function runInfiniteQuerySuite(rawDriver: InfiniteQueryDriver): void {
           3, 3,
         ])
         expectPageRows(handle.current(), rows(10).slice(0, 6), 3)
+        // The replacement must not publish a truncated ready value on its way to
+        // the retained depth. `minimum: 0` admits every row.
+        expectReadyObservationsMatchSource(handle, rows(10), 3)
       },
     )
 
@@ -917,6 +961,7 @@ export function runInfiniteQuerySuite(rawDriver: InfiniteQueryDriver): void {
           3, 3,
         ])
         expectPageRows(handle.current(), rows(8).slice(0, 6), 3)
+        expectReadyObservationsMatchSource(handle, rows(8), 3)
       },
     )
 
@@ -1014,6 +1059,7 @@ export function runInfiniteQuerySuite(rawDriver: InfiniteQueryDriver): void {
           expect(handle.current().pages[0]).toHaveLength(20)
           expectPageRows(handle.current(), rows(21).slice(0, 20), 20)
           expect(handle.current().hasNextPage).toBe(true)
+          expectReadyObservationsMatchSource(handle, rows(21), 20)
           handle.unmount()
         }
       },
@@ -1184,6 +1230,7 @@ export function runInfiniteQuerySuite(rawDriver: InfiniteQueryDriver): void {
         expect(calls).toBe(1)
         expect(handle.current().data).toHaveLength(3)
         expectPageRows(handle.current(), rows(4).slice(0, 3), 3)
+        expectReadyObservationsMatchSource(handle, rows(4), 3)
       },
     )
 

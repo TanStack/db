@@ -19,6 +19,7 @@ import {
   reactive,
   ref,
   shallowRef,
+  watch,
 } from 'vue'
 import { describe, expect, it } from 'vitest'
 import { mockSyncCollectionOptions } from '../../db/tests/utils'
@@ -30,6 +31,7 @@ import type {
   InfiniteQueryConfig,
   InfiniteQueryDriver,
   InfiniteQueryHandle,
+  InfiniteQueryObservation,
 } from '../../db/tests/conformance/infinite-contract'
 import type {
   QueryBuild,
@@ -86,11 +88,41 @@ function runInScope<R>(fn: () => R) {
   return { result, scope }
 }
 
+type Observations = Array<InfiniteQueryObservation>
+
+function observe(result: any): InfiniteQueryObservation {
+  return {
+    status: result.status.value,
+    ids: result.data.value.map((row: { id: string }) => row.id),
+    pages: result.pages.value.map((page: Array<{ id: string }>) =>
+      page.map((row) => row.id),
+    ),
+    hasNextPage: result.hasNextPage.value,
+  }
+}
+
+// Vue renders the value present after setup, then at each pre-flush. A
+// pre-flush watcher sees what a component would render, not each synchronous
+// intermediate write that the same tick overwrites.
+function recordPublications<R>(result: R, log: Observations): R {
+  log.push(observe(result))
+  watch(
+    () => observe(result),
+    (observation) => {
+      log.push(observation)
+    },
+    { flush: `pre` },
+  )
+  return result
+}
+
 function makeHandle(
   result: any,
   scope: ReturnType<typeof effectScope>,
+  log: Observations,
 ): InfiniteQueryHandle {
   return {
+    observations: () => log,
     current() {
       return {
         data: result.data.value,
@@ -116,25 +148,11 @@ function makeHandle(
 }
 
 function mount(build: QueryBuild, config: InfiniteQueryConfig = {}) {
+  const log: Observations = []
   const { result, scope } = runInScope(() =>
-    useLiveInfiniteQuery(build as any, config as any),
+    recordPublications(useLiveInfiniteQuery(build as any, config as any), log),
   )
-  return makeHandle(result, scope)
-}
-
-function mountObserved(build: QueryBuild, config: InfiniteQueryConfig = {}) {
-  // Vue renders after setup; its sync watchEffect has already produced the
-  // first paint value by the time the hook returns.
-  let firstPaint: { status: string; ids: Array<string> }
-  const { result, scope } = runInScope(() => {
-    const r = useLiveInfiniteQuery(build as any, config as any)
-    firstPaint = {
-      status: r.status.value,
-      ids: r.data.value.map((row: any) => row.id),
-    }
-    return r
-  })
-  return { ...makeHandle(result, scope), firstPaint: () => firstPaint }
+  return makeHandle(result, scope, log)
 }
 
 function mountControllable<P>(
@@ -143,12 +161,16 @@ function mountControllable<P>(
   config: InfiniteQueryConfig = {},
 ) {
   const param = ref(initial) as { value: P }
+  const log: Observations = []
   const { result, scope } = runInScope(() =>
-    useLiveInfiniteQuery((q: any) => build(q, param.value), config as any, [
-      param,
-    ]),
+    recordPublications(
+      useLiveInfiniteQuery((q: any) => build(q, param.value), config as any, [
+        param,
+      ]),
+      log,
+    ),
   )
-  const handle = makeHandle(result, scope)
+  const handle = makeHandle(result, scope, log)
   return {
     ...handle,
     setParamSync(next: P) {
@@ -158,10 +180,11 @@ function mountControllable<P>(
 }
 
 function mountCollection(collection: any, config: InfiniteQueryConfig = {}) {
+  const log: Observations = []
   const { result, scope } = runInScope(() =>
-    useLiveInfiniteQuery(collection, config as any),
+    recordPublications(useLiveInfiniteQuery(collection, config as any), log),
   )
-  return makeHandle(result, scope)
+  return makeHandle(result, scope, log)
 }
 
 function mountCollectionControllable(
@@ -169,10 +192,11 @@ function mountCollectionControllable(
   config: InfiniteQueryConfig = {},
 ) {
   const collection = shallowRef(initial)
+  const log: Observations = []
   const { result, scope } = runInScope(() =>
-    useLiveInfiniteQuery(collection, config as any),
+    recordPublications(useLiveInfiniteQuery(collection, config as any), log),
   )
-  const handle = makeHandle(result, scope)
+  const handle = makeHandle(result, scope, log)
   return {
     ...handle,
     replaceCollectionSync(next: any) {
@@ -186,10 +210,11 @@ function mountConfigControllable(
   initial: InfiniteQueryConfig,
 ) {
   const config = reactive({ ...initial })
+  const log: Observations = []
   const { result, scope } = runInScope(() =>
-    useLiveInfiniteQuery(build as any, config as any),
+    recordPublications(useLiveInfiniteQuery(build as any, config as any), log),
   )
-  const handle = makeHandle(result, scope)
+  const handle = makeHandle(result, scope, log)
   return {
     ...handle,
     setConfigSync(next: InfiniteQueryConfig) {
@@ -206,14 +231,18 @@ function mountInputControllable(
   config: InfiniteQueryConfig = {},
 ) {
   const kind = ref<`collection` | `query`>(`collection`)
+  const log: Observations = []
   const { result, scope } = runInScope(() =>
-    useLiveInfiniteQuery(
-      (q: any) => (kind.value === `collection` ? collection : build(q)),
-      config as any,
-      [kind],
+    recordPublications(
+      useLiveInfiniteQuery(
+        (q: any) => (kind.value === `collection` ? collection : build(q)),
+        config as any,
+        [kind],
+      ),
+      log,
     ),
   )
-  const handle = makeHandle(result, scope)
+  const handle = makeHandle(result, scope, log)
   return {
     ...handle,
     setInputKindSync(next: `collection` | `query`) {
@@ -231,7 +260,6 @@ const vueInfiniteDriver: InfiniteQueryDriver = {
   makePrecreated,
   makeWindowController: createLiveQueryWindowController,
   mount,
-  mountObserved,
   mountControllable,
   mountCollection,
   mountCollectionControllable,
