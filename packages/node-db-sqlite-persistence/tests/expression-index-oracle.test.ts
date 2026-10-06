@@ -21,6 +21,13 @@
  * numeric object keys and array indexes through three digit segments, and
  * Unicode lowercase matches around NUL. The numeric-path cases also check
  * named-index use; deeper digit paths retain a full candidate read.
+ * Native fixture families add EQ/IN, same-kind ranges, raw-ref NOT leaves,
+ * native field pairs, wrapper coalesce indexes, and numeric array/object paths.
+ * Rank/text expectations are independent of the SQL compiler. Mixed cases
+ * include NaN, null/missing, ordinary strings and alternate native kinds.
+ * SQL candidates must contain every expected match; exact native fixtures also
+ * check raw keys and supported index plans. NOT/coalesce and scalar
+ * eq(in(...), true) retain the safe classifier's full-read fallback.
  * Explicitly qualified refs lower to the same JSON field expression
  * without reinterpreting legacy nested paths. Known omissions: null, arbitrary
  * raw SQL, and native-host planning. Generated BigInts stay inside SQLite's
@@ -46,17 +53,29 @@
  * retained fixed campaign reconstructs the known valid matrix. The bounds
  * above state its range; exact grammar checks reject missing, duplicate, and
  * unexpected axes as nearby invalid matrices. The focused overbroad and former
- * four-path-binding controls remain independent. In-memory SQLite teardown
+ * path-binding controls remain independent. In-memory SQLite teardown
  * retains the semantic failure if cleanup also fails.
  */
 import fc from 'fast-check'
-import { describe, expect, it as vitestIt } from 'vitest'
-import { IR } from '@tanstack/db'
+import { describe, expect, vi, it as vitestIt } from 'vitest'
+import {
+  BasicIndex,
+  IR,
+  coalesce as coalesceExpression,
+  createCollection,
+} from '@tanstack/db'
 import {
   createPersistedTableName,
   createSQLiteCorePersistenceAdapter,
   decodePersistedStorageKey,
+  persistedCollectionOptions,
 } from '@tanstack/db-sqlite-persistence-core'
+import {
+  Temporal,
+  temporalFamilies,
+  temporalQueryCases,
+  temporalValue,
+} from '../../db-sqlite-persistence-core/tests/temporal-value-oracle'
 import { BetterSqlite3SQLiteDriver } from '../src/node-driver'
 import type {
   PersistedTx,
@@ -265,13 +284,30 @@ function sqliteScalarParameter(value: OracleScalar): number | string {
 }
 
 function serializeIndexExpression(expression: IR.BasicExpression): string {
-  return JSON.stringify(expression, (_key, value: unknown) =>
-    typeof value === `bigint`
-      ? {
-          [PERSISTED_TYPE_TAG]: `bigint`,
-          [PERSISTED_VALUE_TAG]: value.toString(),
+  return JSON.stringify(
+    expression,
+    function (this: Record<string, unknown>, key, value: unknown) {
+      // Read the original before Temporal.toJSON converts it to an ordinary string.
+      const original = this[key]
+      if (
+        original instanceof Temporal.Instant ||
+        original instanceof Temporal.PlainDate
+      ) {
+        return {
+          [PERSISTED_TYPE_TAG]:
+            original instanceof Temporal.Instant
+              ? `Temporal.Instant`
+              : `Temporal.PlainDate`,
+          [PERSISTED_VALUE_TAG]: original.toString(),
         }
-      : value,
+      }
+      return typeof value === `bigint`
+        ? {
+            [PERSISTED_TYPE_TAG]: `bigint`,
+            [PERSISTED_VALUE_TAG]: value.toString(),
+          }
+        : value
+    },
   )
 }
 
@@ -307,13 +343,14 @@ function createQueryObservingDriver(
   return wrap(inner)
 }
 
-async function withFailurePreservingCleanup(
-  body: () => void | Promise<void>,
+async function withFailurePreservingCleanup<T>(
+  body: () => T | Promise<T>,
   cleanups: ReadonlyArray<() => void | Promise<void>>,
-): Promise<void> {
+): Promise<T> {
   let primary: { error: unknown } | undefined
+  let result: T
   try {
-    await body()
+    result = await body()
   } catch (error) {
     primary = { error }
   }
@@ -342,6 +379,7 @@ async function withFailurePreservingCleanup(
     )
   }
   if (primary) throw primary.error
+  return result!
 }
 
 function planUsesNamedIndex(
@@ -379,6 +417,8 @@ function sqlitePlanIdentifierPattern(identifier: string): string {
 }
 
 type ExpressionIndexScenario = {
+  viaWrapper?: boolean
+  observeIndexValues?: boolean
   label: string
   indexExpression: IR.BasicExpression
   where?: IR.BasicExpression<boolean>
@@ -428,6 +468,8 @@ type GeneratedExpressionIndexScenario = ExpressionIndexScenario & {
 }
 
 type ExpressionIndexObservation = {
+  indexSql: unknown
+  indexValues?: Array<{ key: string; value: unknown }>
   adapterKeys: Array<string>
   directSqlKeys: Array<string>
   indexName: string
@@ -437,6 +479,8 @@ type ExpressionIndexObservation = {
 }
 
 async function observeExpressionIndexScenario({
+  viaWrapper = false,
+  observeIndexValues = false,
   label,
   indexExpression,
   where,
@@ -448,7 +492,8 @@ async function observeExpressionIndexScenario({
 }: ExpressionIndexScenario): Promise<ExpressionIndexObservation> {
   const baseDriver = new BetterSqlite3SQLiteDriver({ filename: `:memory:` })
   const collectionId = `expression-index-${label}`
-  const signature = `generated-expression`
+  let signature = `generated-expression`
+  let cleanupCollection: (() => Promise<void>) | undefined
   const tableName = createPersistedTableName(collectionId, `c`)
   let predicateQuery: CapturedQuery | undefined
 
@@ -474,7 +519,7 @@ async function observeExpressionIndexScenario({
     driver: observingDriver,
   })
 
-  try {
+  return withFailurePreservingCleanup(async () => {
     await adapter.applyCommittedTx(collectionId, {
       txId: `seed-${label}`,
       term: 1,
@@ -487,9 +532,57 @@ async function observeExpressionIndexScenario({
       })),
     })
     await preparePreviousIndex?.(adapter, collectionId, signature)
-    await adapter.ensureIndex(collectionId, signature, {
-      expressionSql: [serializeIndexExpression(indexExpression)],
-    })
+    if (viaWrapper) {
+      if (
+        indexExpression.type !== `func` ||
+        indexExpression.name !== `coalesce` ||
+        indexExpression.args[1]?.type !== `val`
+      )
+        throw new Error(`Expected coalesce wrapper witness`)
+      const fallback = indexExpression.args[1].value
+      const collection = createCollection(
+        persistedCollectionOptions<Record<string, unknown>, string>({
+          id: collectionId,
+          getKey: (row) => String(row.id),
+          defaultIndexType: BasicIndex,
+          sync: {
+            sync: ({ markReady }) => {
+              markReady()
+            },
+          },
+          persistence: { adapter },
+        }),
+      )
+      cleanupCollection = () => collection.cleanup()
+      collection.createIndex((row) => coalesceExpression(row.stamp, fallback))
+      const metadata = collection.getIndexMetadata()[0]!
+      signature = metadata.signature
+      expect(metadata.expression.type).toBe(`func`)
+      if (
+        metadata.expression.type !== `func` ||
+        metadata.expression.args[1]?.type !== `val`
+      )
+        throw new Error(`Missing native literal`)
+      expect(metadata.expression.args[1].value).toBeInstanceOf(
+        fallback instanceof Temporal.Instant
+          ? Temporal.Instant
+          : Temporal.PlainDate,
+      )
+      const adjacent =
+        fallback instanceof Temporal.Instant
+          ? fallback.add({ nanoseconds: 1 })
+          : (fallback as Temporal.PlainDate).add({ days: 1 })
+      const second = collection.createIndex((row) =>
+        coalesceExpression(row.stamp, new IR.Value(adjacent)),
+      )
+      expect(collection.getIndexMetadata()[1]!.signature).not.toBe(signature)
+      collection.removeIndex(second)
+      await collection.preload()
+    } else {
+      await adapter.ensureIndex(collectionId, signature, {
+        expressionSql: [serializeIndexExpression(indexExpression)],
+      })
+    }
 
     const adapterRows = await adapter.loadSubset(collectionId, {
       ...(where ? { where } : {}),
@@ -506,10 +599,11 @@ async function observeExpressionIndexScenario({
     const registryRow = baseDriver
       .getDatabase()
       .prepare(
-        `SELECT index_name FROM persisted_index_registry
+        `SELECT index_name, expression_sql FROM persisted_index_registry
            WHERE collection_id = ? AND signature = ?`,
       )
-      .get(collectionId, signature) as { index_name: string } | undefined
+      .get(collectionId, signature) as
+      { index_name: string; expression_sql: string } | undefined
     if (!registryRow) {
       throw new Error(`expression index registry checkpoint was not reached`)
     }
@@ -522,7 +616,28 @@ async function observeExpressionIndexScenario({
     const normalizeKeys = (keys: Array<string>): Array<string> =>
       preserveResultOrder ? keys : keys.sort()
 
+    const expressionSql = (
+      JSON.parse(registryRow.expression_sql) as Array<string>
+    )[0]!
+    const indexValues = observeIndexValues
+      ? (
+          baseDriver
+            .getDatabase()
+            .prepare(
+              `SELECT key, ${expressionSql} AS value FROM "${tableName}" ORDER BY key`,
+            )
+            .all() as Array<{ key: string; value: unknown }>
+        ).map((row) => ({
+          key: String(decodePersistedStorageKey(row.key)),
+          value: row.value,
+        }))
+      : undefined
     return {
+      indexValues,
+      indexSql: baseDriver
+        .getDatabase()
+        .prepare(`SELECT sql FROM sqlite_master WHERE name = ?`)
+        .get(registryRow.index_name),
       adapterKeys: normalizeKeys(adapterRows.map((row) => String(row.key))),
       directSqlKeys: normalizeKeys(
         directSqlRows.map((row) => String(decodePersistedStorageKey(row.key))),
@@ -532,14 +647,12 @@ async function observeExpressionIndexScenario({
       predicateQuery,
       tableName,
     }
-  } finally {
-    baseDriver.close()
-  }
+  }, [() => cleanupCollection?.(), () => baseDriver.close()])
 }
 
 function makeOverbroadEqualityMutation(query: CapturedQuery): CapturedQuery {
   if (!query.sql.includes(` WHERE `)) return query
-  const sql = query.sql.replace(/ = \?\)$/, ` >= ?)`)
+  const sql = query.sql.replace(/ = \?/g, ` >= ?`)
   if (sql === query.sql) {
     throw new Error(`overbroad equality mutation did not reach the predicate`)
   }
@@ -549,20 +662,27 @@ function makeOverbroadEqualityMutation(query: CapturedQuery): CapturedQuery {
 function makeLegacyPathBindingMutation(query: CapturedQuery): CapturedQuery {
   if (!query.sql.includes(` WHERE `)) return query
 
-  const pathParams: Array<string> = []
+  const params: Array<unknown> = []
+  let pathCount = 0
+  let bindingIndex = 0
   const sql = query.sql.replace(
-    /json_extract\(value, ('(?:''|[^'])+')\)/g,
-    (_match, literal: string) => {
-      pathParams.push(literal.slice(1, -1).replace(/''/g, `'`))
+    /json_extract\(value, ('(?:''|[^'])+')\)|\?/g,
+    (match, literal: string | undefined) => {
+      if (literal === undefined) {
+        params.push(query.params[bindingIndex++])
+        return match
+      }
+      pathCount++
+      params.push(literal.slice(1, -1).replace(/''/g, `'`))
       return `json_extract(value, ?)`
     },
   )
-  if (pathParams.length !== 4) {
+  if (pathCount === 0 || bindingIndex !== query.params.length) {
     throw new Error(
-      `legacy path-binding mutation expected four ref paths, got ${pathParams.length}`,
+      `legacy path-binding mutation did not reach all reference paths and bindings`,
     )
   }
-  return { sql, params: [...pathParams, ...query.params] }
+  return { sql, params }
 }
 
 function planUsesNamedIndexForOrdering(
@@ -893,7 +1013,7 @@ function mutateGeneratedScenarioQuery(
   switch (kind) {
     case `eq`:
       return (query) => {
-        const sql = query.sql.replace(/ = \?(\)?)$/, ` != ?$1`)
+        const sql = query.sql.replace(/ = \?/g, ` != ?`)
         if (sql === query.sql) return unreached(`the equality operator`)
         return { sql, params: query.params }
       }
@@ -1253,6 +1373,25 @@ describe(`SQLite expression-index oracle`, () => {
       expectedKeys: [`missing`],
     },
     {
+      label: `string-membership-constant`,
+      indexExpression: new IR.Func(`in`, [
+        new IR.PropRef([`nickname`]),
+        new IR.Value([`Ada`, `Grace`]),
+      ]),
+      where: new IR.Func<boolean>(`eq`, [
+        new IR.Func(`in`, [
+          new IR.PropRef([`nickname`]),
+          new IR.Value([`Ada`, `Grace`]),
+        ]),
+        new IR.Value(true),
+      ]),
+      rows: [
+        { key: `matching`, value: { nickname: `Ada` } },
+        { key: `different`, value: { nickname: `Linus` } },
+      ],
+      expectedKeys: [`matching`],
+    },
+    {
       label: `strftime-constant`,
       indexExpression: new IR.Func(`strftime`, [
         new IR.Value(`%Y-%m-%d`),
@@ -1319,7 +1458,8 @@ describe(`SQLite expression-index oracle`, () => {
       expect(observation.adapterKeys).toEqual(expectedKeys)
       if (
         scenario.label === `strftime-constant` ||
-        scenario.label === `add-constant`
+        scenario.label === `add-constant` ||
+        scenario.label === `string-membership-constant`
       ) {
         expect(observation.predicateQuery.sql).not.toContain(` WHERE `)
         expect(observation.directSqlKeys).toEqual(
@@ -1340,6 +1480,161 @@ describe(`SQLite expression-index oracle`, () => {
       ).toBe(true)
     },
   )
+
+  // Literal positions and polarity come from the string contract, not SQL.
+  it.each([`\u0000ab`, `a\u0000b`, `ab\u0000`])(
+    `preserves ordinary NUL strings / %j`,
+    async (target) => {
+      const ref = new IR.PropRef([`stamp`])
+      const literal = new IR.Value(target)
+      const eq = new IR.Func<boolean>(`eq`, [ref, literal])
+      for (const where of [
+        eq,
+        new IR.Func<boolean>(`eq`, [literal, ref]),
+        new IR.Func<boolean>(`in`, [ref, new IR.Value([target, `other`])]),
+        new IR.Func<boolean>(`and`, [eq, new IR.Value(true)]),
+        new IR.Func<boolean>(`or`, [eq, new IR.Value(false)]),
+      ]) {
+        const result = await observeExpressionIndexScenario({
+          label: `NUL`,
+          indexExpression: ref,
+          where,
+          rows: [
+            { key: `match`, value: { stamp: target } },
+            { key: `different`, value: { stamp: `absent` } },
+          ],
+        })
+        expect(result.adapterKeys).toEqual([`match`])
+        expect(result.directSqlKeys).toEqual([`match`])
+      }
+    },
+  )
+
+  // Distinct native/ordinary fallback meanings must retain separate persisted
+  // indexes. The wrapper receives both public definitions before preload; the
+  // registry and sqlite_master checkpoints expose a signature collision even
+  // when residual query evaluation could still return correct rows.
+  it(`persists separate indexes for native and ordinary tagged literals`, async () => {
+    vi.stubGlobal(`Temporal`, Temporal)
+    const driver = new BetterSqlite3SQLiteDriver({ filename: `:memory:` })
+    const adapter = createSQLiteCorePersistenceAdapter({ driver })
+    const collectionId = `native-tag-indexes`
+    const collection = createCollection(
+      persistedCollectionOptions<{ id: string; stamp: unknown }, string>({
+        id: collectionId,
+        getKey: (row) => row.id,
+        defaultIndexType: BasicIndex,
+        sync: { sync: ({ markReady }) => markReady() },
+        persistence: { adapter },
+      }),
+    )
+    try {
+      await withFailurePreservingCleanup(async () => {
+        const native = Temporal.Instant.from(`2026-01-02T00:00:00Z`)
+        for (const value of [
+          native,
+          { __type: `Temporal.Instant`, value: String(native) },
+        ]) {
+          collection.createIndex((row) =>
+            coalesceExpression(row.stamp, new IR.Value(value)),
+          )
+        }
+        await collection.preload()
+        const entries = driver
+          .getDatabase()
+          .prepare(
+            `SELECT index_name FROM persisted_index_registry WHERE collection_id = ? AND removed = 0`,
+          )
+          .all(collectionId) as Array<{ index_name: string }>
+        expect(entries).toHaveLength(2)
+        expect(new Set(entries.map((entry) => entry.index_name)).size).toBe(2)
+        for (const entry of entries) {
+          expect(
+            driver
+              .getDatabase()
+              .prepare(
+                `SELECT name FROM sqlite_master WHERE type = 'index' AND name = ?`,
+              )
+              .all(entry.index_name),
+          ).toHaveLength(1)
+        }
+      }, [() => collection.cleanup(), () => driver.close()])
+    } finally {
+      vi.unstubAllGlobals()
+    }
+  })
+
+  // A NUL string stays ordinary text in both bound predicates and index DDL.
+  // Enumerate string-only and native-mixed membership, with positive/negative
+  // predicates. Expected keys come from fixture membership; stored index values
+  // independently observe the DDL before residual filtering can hide a mismatch.
+  it.each([`\u0000ab`, `a\u0000b`, `ab\u0000`, `é'\u0000𐀀`])(
+    `preserves NUL membership literals in index definitions / %j`,
+    async (target) => {
+      vi.stubGlobal(`Temporal`, Temporal)
+      try {
+        const native = Temporal.Instant.from(`2026-01-02T00:00:00Z`)
+        for (const mixed of [false, true]) {
+          const membership = new IR.Func<boolean>(`in`, [
+            new IR.PropRef([`stamp`]),
+            new IR.Value(mixed ? [target, native] : [target]),
+          ])
+          for (const negate of [false, true]) {
+            const result = await observeExpressionIndexScenario({
+              label: `NUL-membership`,
+              indexExpression: membership,
+              observeIndexValues: true,
+              where: negate ? new IR.Func(`not`, [membership]) : membership,
+              rows: [
+                { key: `match`, value: { stamp: target } },
+                { key: `native`, value: { stamp: native } },
+                { key: `other`, value: { stamp: `absent` } },
+              ],
+            })
+            const matches = mixed ? [`match`, `native`] : [`match`]
+            const expected = negate
+              ? [`match`, `native`, `other`].filter(
+                  (key) => !matches.includes(key),
+                )
+              : matches
+            expect(result.adapterKeys).toEqual(expected)
+            expect(result.directSqlKeys).toEqual(
+              expect.arrayContaining(expected),
+            )
+            expect(result.indexValues).toEqual([
+              { key: `match`, value: 1 },
+              { key: `native`, value: mixed ? 1 : 0 },
+              { key: `other`, value: 0 },
+            ])
+          }
+        }
+      } finally {
+        vi.unstubAllGlobals()
+      }
+    },
+  )
+
+  it(`keeps large string membership indexes within SQLite expression depth`, async () => {
+    const membership = new IR.Func(`in`, [
+      new IR.PropRef([`nickname`]),
+      new IR.Value(Array.from({ length: 1025 }, (_, index) => `name-${index}`)),
+    ])
+    const observation = await observeExpressionIndexScenario({
+      label: `large-string-membership`,
+      indexExpression: membership,
+      where: new IR.Func<boolean>(`eq`, [membership, new IR.Value(true)]),
+      rows: [
+        { key: `matching`, value: { nickname: `name-1024` } },
+        { key: `different`, value: { nickname: `absent` } },
+      ],
+    })
+    expect(observation.adapterKeys).toEqual([`matching`])
+    // The DDL remains valid at large arity. The safe classifier deliberately
+    // leaves eq(in(...), true) to residual filtering, as for other scalar functions.
+    expect(observation.indexSql).toBeDefined()
+    expect(observation.directSqlKeys).toEqual([`different`, `matching`])
+    expect(observation.predicateQuery.sql).not.toContain(` WHERE `)
+  })
 
   it(`rebuilds a persisted BigInt-constant index when its normalized spec changes`, async () => {
     const indexExpression = new IR.Func(`coalesce`, [
@@ -3002,4 +3297,382 @@ describe(`SQLite expression-index oracle`, () => {
       expect(replay.error, replayEvidence).toContain(`"kind": "${kind}"`)
     },
   )
+})
+
+// Native values add a bounded rank/text dimension to this SQL/plan owner.
+// The common model is independent; this driver observes real SQL before cleanup.
+describe(`Temporal expression-index refinement`, () => {
+  const it = requestedReplay === undefined ? vitestIt : vitestIt.skip
+  it.each(temporalFamilies)(
+    `uses native keys and identity for $kind / $name`,
+    async (family) => {
+      vi.stubGlobal(`Temporal`, Temporal)
+      try {
+        for (const query of temporalQueryCases(family)) {
+          const result = await observeExpressionIndexScenario({
+            label: `${family.name}-${query.name}`,
+            indexExpression: new IR.PropRef([`stamp`]),
+            where: query.where,
+            rows: family.texts.map((_, i) => ({
+              key: `row-${i}`,
+              value: {
+                stamp: temporalValue(family, i),
+                target: temporalValue(family, 1),
+              },
+            })),
+          })
+          expect(result.adapterKeys, query.name).toEqual(query.expectedKeys)
+          expect(result.directSqlKeys, query.name).toEqual(query.expectedKeys)
+          if (query.name === `in` || query.name === `batched-in`)
+            expect(result.predicateQuery.params).toHaveLength(1)
+          if (
+            [
+              `eq`,
+              `in`,
+              `batched-in`,
+              `gt`,
+              `gte`,
+              `lt`,
+              `lte`,
+              `and`,
+            ].includes(query.name)
+          ) {
+            expect(
+              planUsesNamedIndex(
+                result.plan,
+                result.tableName,
+                result.indexName,
+              ),
+              query.name,
+            ).toBe(true)
+            expect(
+              planScansTable(result.plan, result.tableName),
+              query.name,
+            ).toBe(false)
+          }
+        }
+      } finally {
+        vi.unstubAllGlobals()
+      }
+    },
+  )
+
+  it.each(temporalFamilies)(
+    `preserves wrapper-created native coalesce literals / $name`,
+    async (family) => {
+      vi.stubGlobal(`Temporal`, Temporal)
+      try {
+        const expression = new IR.Func(`coalesce`, [
+          new IR.PropRef([`stamp`]),
+          new IR.Value(temporalValue(family, 1)),
+        ])
+        const result = await observeExpressionIndexScenario({
+          label: `wrapper-${family.name}`,
+          viaWrapper: true,
+          indexExpression: expression,
+          where: new IR.Func<boolean>(`eq`, [
+            expression,
+            new IR.Value(temporalValue(family, 1)),
+          ]),
+          rows: family.texts.map((_, i) => ({
+            key: `row-${i}`,
+            value: {
+              id: `row-${i}`,
+              stamp: i === 1 ? null : temporalValue(family, i),
+            },
+          })),
+        })
+        expect(result.adapterKeys).toEqual([`row-1`])
+        expect(result.directSqlKeys).toEqual([`row-1`])
+        expect(
+          planUsesNamedIndex(result.plan, result.tableName, result.indexName),
+          JSON.stringify(result),
+        ).toBe(true)
+        expect(planScansTable(result.plan, result.tableName)).toBe(false)
+      } finally {
+        vi.unstubAllGlobals()
+      }
+    },
+  )
+  // Independent fixture rank/text rules also judge mixed-domain candidates.
+  // SQL may retain extras, but NOT must never invert an approximate prefilter.
+  it.each(temporalFamilies)(
+    `retains mixed-domain matches under native predicate polarity / $name`,
+    async (family) => {
+      vi.stubGlobal(`Temporal`, Temporal)
+      try {
+        const ref = new IR.PropRef([`stamp`])
+        const literal = new IR.Value(temporalValue(family, 1))
+        const nativeRows = family.texts.map((_, i) => ({
+          key: `row-${i}`,
+          value: { stamp: temporalValue(family, i) },
+        }))
+        const nullableRows = [
+          ...nativeRows,
+          { key: `nan`, value: { stamp: NaN } },
+          { key: `null`, value: { stamp: null } },
+          { key: `missing`, value: {} },
+        ]
+        for (const operator of [`gt`, `gte`, `lt`, `lte`] as const) {
+          for (const reverse of [false, true]) {
+            for (const negate of [false, true]) {
+              const comparison = new IR.Func<boolean>(
+                operator,
+                reverse ? [literal, ref] : [ref, literal],
+              )
+              const where = negate
+                ? new IR.Func<boolean>(`not`, [comparison])
+                : comparison
+              const expectedKeys = nullableRows
+                .flatMap((row) => {
+                  if (row.key === `null` || row.key === `missing`) return []
+                  const rank =
+                    row.key === `nan`
+                      ? Infinity
+                      : family.ranks[Number(row.key.slice(4))]!
+                  const a = reverse ? family.ranks[1] : rank
+                  const b = reverse ? rank : family.ranks[1]
+                  const match =
+                    operator === `gt`
+                      ? a > b
+                      : operator === `gte`
+                        ? a >= b
+                        : operator === `lt`
+                          ? a < b
+                          : a <= b
+                  return match !== negate ? [row.key] : []
+                })
+                .sort()
+              const result = await observeExpressionIndexScenario({
+                label: `native-polarity`,
+                indexExpression: ref,
+                where,
+                rows: nullableRows,
+              })
+              expect(
+                result.adapterKeys,
+                `${operator}/${reverse}/${negate}`,
+              ).toEqual(expectedKeys)
+              expect(result.directSqlKeys).toEqual(
+                expect.arrayContaining(expectedKeys),
+              )
+            }
+          }
+        }
+        const otherKind =
+          family.kind === `Instant`
+            ? Temporal.PlainDate.from(`2026-01-02`)
+            : Temporal.Instant.from(`2026-01-02T00:00:00Z`)
+        const rows = [
+          ...nullableRows,
+          ...[
+            otherKind,
+            0,
+            false,
+            new Date(0),
+            `10000000000000000000001`,
+            `${family.kind === `Instant` ? `Temporal.Instant` : `Temporal.PlainDate`}:${family.texts[1]}`,
+            `\u0000tanstack-db:temporal:Temporal.${family.kind}:${family.texts[1]}`,
+          ].map((stamp, i) => ({ key: `other-${i}`, value: { stamp } })),
+        ]
+        for (const operator of [`eq`, `in`] as const) {
+          const comparison = new IR.Func<boolean>(operator, [
+            ref,
+            operator === `eq`
+              ? literal
+              : new IR.Value([temporalValue(family, 1)]),
+          ])
+          for (const negate of [false, true]) {
+            const where = negate
+              ? new IR.Func<boolean>(`not`, [comparison])
+              : comparison
+            const expectedKeys = rows
+              .filter(
+                (row) =>
+                  ![`null`, `missing`].includes(row.key) &&
+                  (row.key === `row-1`) !== negate,
+              )
+              .map((row) => row.key)
+              .sort()
+            const result = await observeExpressionIndexScenario({
+              label: `native-equality-polarity`,
+              indexExpression: ref,
+              where,
+              rows,
+            })
+            expect(result.adapterKeys).toEqual(expectedKeys)
+            expect(result.directSqlKeys).toEqual(
+              expect.arrayContaining(expectedKeys),
+            )
+          }
+        }
+        // A string can equal a native SQL order key without equaling the native
+        // value. The scalar candidate uses one binding and residual cleanup owns
+        // that distinction; persisted Boolean expressions still retain identity.
+        const orderKey = `10000000000000000000001`
+        const stringEquality = new IR.Func<boolean>(`eq`, [
+          ref,
+          new IR.Value(orderKey),
+        ])
+        const scalar = await observeExpressionIndexScenario({
+          label: `string-native-order-key`,
+          indexExpression: stringEquality,
+          where: stringEquality,
+          rows,
+          observeIndexValues: true,
+        })
+        expect(scalar.adapterKeys).toEqual([`other-4`])
+        expect(scalar.directSqlKeys).toEqual(
+          expect.arrayContaining([`other-4`]),
+        )
+        expect(scalar.predicateQuery.params).toEqual([orderKey])
+        expect(
+          scalar.indexValues
+            ?.filter((row) => row.value === 1)
+            .map((row) => row.key),
+        ).toEqual([`other-4`])
+
+        const selected = new IR.Func(`coalesce`, [ref, literal])
+        const equality = new IR.Func<boolean>(`eq`, [selected, literal])
+        const fallback = await observeExpressionIndexScenario({
+          label: `native-coalesce-negation`,
+          indexExpression: selected,
+          where: new IR.Func<boolean>(`not`, [equality]),
+          rows: nullableRows,
+        })
+        expect(fallback.adapterKeys).toEqual([`nan`, `row-0`, `row-2`])
+        expect(fallback.predicateQuery.sql).not.toContain(` WHERE `)
+        const paired = await observeExpressionIndexScenario({
+          label: `native-field-pairs`,
+          indexExpression: ref,
+          where: new IR.Func<boolean>(`eq`, [ref, new IR.PropRef([`target`])]),
+          rows: [
+            {
+              key: `native`,
+              value: {
+                stamp: temporalValue(family, 1),
+                target: temporalValue(family, 1),
+              },
+            },
+            {
+              key: `different`,
+              value: {
+                stamp: temporalValue(family, 0),
+                target: temporalValue(family, 1),
+              },
+            },
+            { key: `date-number`, value: { stamp: new Date(0), target: 0 } },
+          ],
+        })
+        expect(paired.adapterKeys).toEqual([`date-number`, `native`])
+        expect(paired.directSqlKeys).toEqual(
+          expect.arrayContaining(paired.adapterKeys),
+        )
+      } finally {
+        vi.unstubAllGlobals()
+      }
+    },
+  )
+
+  it.each(temporalFamilies)(
+    `retains native identity through numeric array and object paths / $name`,
+    async (family) => {
+      vi.stubGlobal(`Temporal`, Temporal)
+      try {
+        const ref = new IR.PropRef([`dates`, `0`])
+        for (const carrier of [`array`, `object`] as const) {
+          const rows = family.texts.map((_, i) => ({
+            key: `row-${i}`,
+            value: {
+              dates:
+                carrier === `array`
+                  ? [temporalValue(family, i)]
+                  : { 0: temporalValue(family, i) },
+            },
+          }))
+          for (const operator of [`eq`, `in`] as const) {
+            const expression = new IR.Func<boolean>(operator, [
+              ref,
+              new IR.Value(
+                operator === `eq`
+                  ? temporalValue(family, 1)
+                  : [temporalValue(family, 1)],
+              ),
+            ])
+            const result = await observeExpressionIndexScenario({
+              label: `${family.name}-${carrier}-${operator}`,
+              indexExpression: expression,
+              where: expression,
+              rows,
+              observeIndexValues: true,
+            })
+            expect(result.adapterKeys).toEqual([`row-1`])
+            expect(result.directSqlKeys).toEqual([`row-1`])
+            expect(result.indexValues).toEqual(
+              family.texts.map((_, i) => ({
+                key: `row-${i}`,
+                value: i === 1 ? 1 : 0,
+              })),
+            )
+          }
+        }
+      } finally {
+        vi.unstubAllGlobals()
+      }
+    },
+  )
+
+  it(`preserves the primary failure and still closes SQLite`, async () => {
+    const { CollectionImpl } = await import('../../db/src/collection/index')
+    const primary = new Error(`primary metadata failure`)
+    const cleanup = new Error(`secondary cleanup failure`)
+    const cleanupOriginal = CollectionImpl.prototype.cleanup
+    const execOriginal = BetterSqlite3SQLiteDriver.prototype.exec
+    let driver: BetterSqlite3SQLiteDriver | undefined
+    const execSpy = vi
+      .spyOn(BetterSqlite3SQLiteDriver.prototype, `exec`)
+      .mockImplementation(function (this: BetterSqlite3SQLiteDriver, sql) {
+        driver = this
+        return execOriginal.call(this, sql)
+      })
+    const closeSpy = vi.spyOn(BetterSqlite3SQLiteDriver.prototype, `close`)
+    const cleanupSpy = vi
+      .spyOn(CollectionImpl.prototype, `cleanup`)
+      .mockImplementation(async function (
+        this: InstanceType<typeof CollectionImpl>,
+      ) {
+        await cleanupOriginal.call(this)
+        throw cleanup
+      })
+    const metadataSpy = vi
+      .spyOn(CollectionImpl.prototype, `getIndexMetadata`)
+      .mockImplementation(() => {
+        throw primary
+      })
+    vi.stubGlobal(`Temporal`, Temporal)
+    try {
+      const result = await observeExpressionIndexScenario({
+        label: `prep-cleanup`,
+        viaWrapper: true,
+        indexExpression: new IR.Func(`coalesce`, [
+          new IR.PropRef([`stamp`]),
+          new IR.Value(Temporal.Instant.from(`2026-01-01T00:00:00Z`)),
+        ]),
+        rows: [],
+      }).then(
+        () => undefined,
+        (error) => error,
+      )
+      expect.soft(result).toBeInstanceOf(AggregateError)
+      expect.soft(result?.errors).toEqual([primary, cleanup])
+      expect.soft(closeSpy).toHaveBeenCalledTimes(1)
+    } finally {
+      metadataSpy.mockRestore()
+      cleanupSpy.mockRestore()
+      closeSpy.mockRestore()
+      execSpy.mockRestore()
+      driver?.close()
+      vi.unstubAllGlobals()
+    }
+  })
 })

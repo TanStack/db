@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { createCollection } from '../src/collection/index.js'
+import { DbClient, collectionOptions } from '../src/client.js'
 import type { SyncConfig } from '../src/types.js'
 
 /**
@@ -23,8 +24,11 @@ import type { SyncConfig } from '../src/types.js'
  * - `metadata.row.set` after a delete or a truncate keeps metadata for the
  *   absent row.
  *
- * This oracle covers one key, one transaction of up to three writes, and three
- * production paths. It does not judge collection metadata, metadata-only
+ * This oracle covers one key, one transaction of up to three writes, and four
+ * lanes: immediate, held, rebuilt, and nested. The nested lane applies a
+ * nested transaction or a hydration seed before the open transaction. When a
+ * rebuild changes an insert into an equal re-insert, or the reverse, the rule
+ * follows the write that applies. The model judges the reclassified sequence. It does not judge collection metadata, metadata-only
  * publication batches, or other keys. The collection-metadata publication
  * oracle owns those.
  */
@@ -163,6 +167,120 @@ const rebuiltHistories = starts.flatMap((start) => {
   )
 })
 
+/**
+ * The nested lane opens a transaction, T1, and writes up to three writes to
+ * key 1. Then a nested write applies before T1 commits:
+ *
+ * - `delete`: a transaction begun inside T1 deletes the present row.
+ * - `insert`: a transaction begun inside T1 inserts the absent row with its
+ *   own metadata.
+ * - `seed`: a hydration seed inserts the absent row with its own metadata.
+ *   The Collection places a seed ahead of the first open transaction.
+ *
+ * A nested transaction can also call `metadata.row.set` after its row write.
+ *
+ * T1 applies after the nested write, so the Collection reclassifies each of
+ * T1's inserts against the rows that the nested write leaves. An insert of a
+ * present key is an equal re-insert, and an insert of an absent key is an
+ * insert. Every row write in this lane writes one value, so a reclassified
+ * insert is never a duplicate.
+ *
+ * A history is legal when T1's writes are legal both where T1 writes them and
+ * where they apply. An insert is legal in either place. An update or a delete
+ * needs the row present in both. A truncate leaves the row absent in both.
+ */
+type NestedWrite = `delete` | `insert` | `seed`
+type NestedHistory = {
+  start: Start
+  nested: NestedWrite
+  nestedSet: boolean
+  sequence: Array<Write>
+}
+const nestedMetadata = { m: `nested` }
+const nestedSetMetadata = { m: `nested-set` }
+// The model decides which inserts are re-inserts, so T1 writes only inserts.
+const nestedCandidates = writes.filter((write) => write.kind !== `reinsert`)
+function isNestedLegal(
+  writePresent: boolean,
+  applyPresent: boolean,
+  sequence: ReadonlyArray<Write>,
+): boolean {
+  for (const write of sequence) {
+    if (write.kind === `truncate`) writePresent = applyPresent = false
+    else if (write.kind === `insert`) writePresent = applyPresent = true
+    else if (write.kind === `update` || write.kind === `delete`) {
+      if (!writePresent || !applyPresent) return false
+      if (write.kind === `delete`) writePresent = applyPresent = false
+    }
+  }
+  return true
+}
+const nestedVariants: ReadonlyArray<Omit<NestedHistory, `sequence`>> = [
+  ...([`present-with-metadata`, `present-without-metadata`] as const).flatMap(
+    (start) =>
+      [false, true].map((nestedSet) => ({
+        start,
+        nested: `delete` as const,
+        nestedSet,
+      })),
+  ),
+  { start: `absent`, nested: `insert`, nestedSet: false },
+  { start: `absent`, nested: `insert`, nestedSet: true },
+  { start: `absent`, nested: `seed`, nestedSet: false },
+]
+const nestedHistories: Array<NestedHistory> = nestedVariants.flatMap(
+  (variant) => {
+    const writePresent = variant.start !== `absent`
+    const applyPresent = variant.nested !== `delete`
+    const sequences: Array<Array<Write>> = []
+    const extend = (sequence: Array<Write>) => {
+      if (
+        sequence.length > 0 &&
+        isNestedLegal(writePresent, applyPresent, sequence)
+      )
+        sequences.push(sequence)
+      if (sequence.length < 3)
+        for (const write of nestedCandidates) extend([...sequence, write])
+    }
+    extend([])
+    return sequences.map((sequence) => ({ ...variant, sequence }))
+  },
+)
+/**
+ * An insert of the row is a re-insert exactly when the row is present. A
+ * delete or a truncate leaves the row absent.
+ */
+const reclassify = (
+  present: boolean,
+  sequence: ReadonlyArray<Write>,
+): Array<Write> =>
+  sequence.map((write) => {
+    if (write.kind === `delete` || write.kind === `truncate`) present = false
+    if (write.kind !== `insert`) return write
+    const kind = present ? `reinsert` : `insert`
+    present = true
+    return { kind, metadata: write.metadata }
+  })
+/** The model's expected value: T1's writes fold over the nested write's. */
+function expectedNestedMetadata(history: NestedHistory): unknown {
+  const metadata = history.nestedSet
+    ? nestedSetMetadata
+    : history.nested === `delete`
+      ? undefined
+      : nestedMetadata
+  return foldMetadata(
+    metadata,
+    reclassify(history.nested !== `delete`, history.sequence),
+  )
+}
+const describeNested = ({
+  start,
+  nested,
+  nestedSet,
+  sequence,
+}: NestedHistory) =>
+  `${start}, nested ${nested}${nestedSet ? `+set` : ``}: ${sequence.map(describeWrite).join(`, `)}`
+
 const describeWrite = (write: Write) =>
   write.kind === `set` || write.kind === `unset` || write.kind === `truncate`
     ? write.kind
@@ -287,6 +405,90 @@ async function observeMetadata(
   }
 }
 
+/**
+ * The nested driver writes T1 through a real Collection's sync API, then
+ * applies the nested write and commits both. A seed goes through
+ * `DbClient.hydrate`, so that history uses a Collection that a `DbClient`
+ * owns. The driver reads `metadata.row.get` after T1 applies.
+ */
+async function observeNested(
+  { start, nested, nestedSet, sequence }: NestedHistory,
+  id: string,
+): Promise<unknown> {
+  let sync!: SyncActions
+  const row = { id: 1, v: 0 }
+  const config = {
+    id,
+    getKey: (value: Row) => value.id,
+    sync: {
+      sync: (actions: SyncActions) => {
+        sync = actions
+        actions.begin()
+        if (start !== `absent`)
+          actions.write({
+            type: `insert`,
+            value: row,
+            ...(start === `present-with-metadata`
+              ? { metadata: startMetadata }
+              : {}),
+          })
+        actions.commit()
+        actions.markReady()
+      },
+    },
+  }
+  const client = new DbClient()
+  const collection =
+    nested === `seed`
+      ? client.collection(collectionOptions<Row, number>(config))
+      : createCollection<Row, number>({ ...config, startSync: true })
+  try {
+    await collection.stateWhenReady()
+    sync.begin()
+    sequence.forEach((write, step) => {
+      const metadata = writeMetadata(step)
+      if (write.kind === `set`) sync.metadata!.row.set(1, metadata)
+      else if (write.kind === `unset`) sync.metadata!.row.delete(1)
+      else if (write.kind === `truncate`) sync.truncate()
+      else if (write.kind === `delete`)
+        sync.write({
+          type: `delete`,
+          key: 1,
+          ...(write.metadata ? { metadata } : {}),
+        })
+      else
+        sync.write({
+          type: write.kind === `update` ? `update` : `insert`,
+          value: row,
+          ...(write.metadata ? { metadata } : {}),
+        })
+    })
+    let nestedReceipt: true | Promise<void> = true
+    if (nested === `seed`)
+      client.hydrate({
+        collections: [
+          {
+            collectionId: id,
+            rows: [{ key: 1, value: row, metadata: nestedMetadata }],
+          },
+        ],
+      })
+    else {
+      sync.begin()
+      if (nested === `delete`) sync.write({ type: `delete`, key: 1 })
+      else sync.write({ type: `insert`, value: row, metadata: nestedMetadata })
+      if (nestedSet) sync.metadata!.row.set(1, nestedSetMetadata)
+      nestedReceipt = sync.commit()
+    }
+    const receipt = sync.commit()
+    await nestedReceipt
+    await receipt
+    return sync.metadata!.row.get(1)
+  } finally {
+    await collection.cleanup()
+  }
+}
+
 describe(`row metadata composition oracle`, () => {
   it(`enumerates every legal one-key history of up to three writes`, () => {
     expect(histories).toHaveLength(1457)
@@ -353,6 +555,81 @@ describe(`row metadata composition oracle`, () => {
       ),
     ).toBe(true)
   })
+
+  it(`enumerates nested histories for every nested write`, () => {
+    const labels = new Set(nestedHistories.map(describeNested))
+    // 275 sequences for each of the seven nested variants.
+    expect(nestedHistories).toHaveLength(1925)
+    expect(labels.size).toBe(nestedHistories.length)
+    // Each variant must keep the writes that reclassify or reorder positions.
+    for (const witness of [
+      `present-with-metadata, nested delete: set, insert`,
+      `absent, nested insert: set, insert`,
+      `absent, nested seed: set, insert`,
+      `absent, nested insert+set: insert+metadata`,
+      `present-without-metadata, nested delete: insert, set, delete`,
+      `absent, nested insert: set, truncate, insert`,
+      `absent, nested seed: insert, update, set`,
+    ])
+      expect(labels).toContain(witness)
+    // An update needs the row present where T1 writes it and where it applies.
+    expect(labels).not.toContain(`absent, nested insert: update`)
+    expect(labels).not.toContain(`present-with-metadata, nested delete: update`)
+    // A set, then an insert that is now an insert: the insert clears it.
+    expect(
+      expectedNestedMetadata({
+        start: `present-with-metadata`,
+        nested: `delete`,
+        nestedSet: false,
+        sequence: [{ kind: `set` }, { kind: `insert`, metadata: false }],
+      }),
+    ).toBeUndefined()
+    // A set, then an insert that is now an equal re-insert: the set holds.
+    expect(
+      expectedNestedMetadata({
+        start: `absent`,
+        nested: `seed`,
+        nestedSet: false,
+        sequence: [{ kind: `set` }, { kind: `insert`, metadata: false }],
+      }),
+    ).toEqual(writeMetadata(0))
+    // T1 applies after the nested set, so T1's later write wins.
+    expect(
+      expectedNestedMetadata({
+        start: `absent`,
+        nested: `insert`,
+        nestedSet: true,
+        sequence: [{ kind: `insert`, metadata: true }],
+      }),
+    ).toEqual(writeMetadata(0))
+  })
+
+  it(
+    `matches last-write-wins metadata after a nested write`,
+    { timeout: 120_000 },
+    async () => {
+      const mismatches: Array<string> = []
+      for (const [index, history] of nestedHistories.entries()) {
+        const label = describeNested(history)
+        let actual: unknown
+        try {
+          actual = await observeNested(
+            history,
+            `row-metadata-composition-nested-${index}`,
+          )
+        } catch (error) {
+          mismatches.push(`${label} threw ${String(error)}`)
+          continue
+        }
+        const expected = expectedNestedMetadata(history)
+        if (JSON.stringify(actual) !== JSON.stringify(expected))
+          mismatches.push(
+            `${label} read ${JSON.stringify(actual)}, expected ${JSON.stringify(expected)}`,
+          )
+      }
+      expect(mismatches).toEqual([])
+    },
+  )
 
   it.each([`immediate`, `held`, `rebuilt`] as const)(
     `matches last-write-wins metadata on the %s path`,

@@ -7,6 +7,7 @@ import {
   NoPendingSyncTransactionCommitError,
   NoPendingSyncTransactionWriteError,
   SyncTransactionAbortedError,
+  coalesce,
   collectionOptions,
   createCollection,
   createLiveQueryCollection,
@@ -32,7 +33,9 @@ import {
   encodePersistedStorageKey,
   persistedCollectionOptions,
   toTransportedLoadSubsetOptions,
+  validateRemoteSubsetOptions,
 } from '../src'
+import { Temporal } from './temporal-value-oracle'
 import type {
   CollectionReset,
   PersistedCollectionCoordinator,
@@ -3226,6 +3229,221 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
       }),
     ).toThrowError(/options\.where\.args\[0\]\.sourceAlias/)
   })
+
+  // A projection is a detached snapshot at one call boundary. A later call on
+  // reused input must observe its current data, without changing the first
+  // snapshot. This distinguishes safe per-call reuse from a global identity cache.
+  it(`takes a fresh detached wire snapshot on each projection`, () => {
+    const literal = new IR.Value({ label: `before` })
+    const options = {
+      where: new IR.Func(`eq`, [new IR.PropRef([`value`]), literal]),
+    }
+    const first = toTransportedLoadSubsetOptions(options)
+    literal.value.label = `after`
+    const second = toTransportedLoadSubsetOptions(options)
+    expect(first.where).toMatchObject({
+      args: [{}, { value: { label: `before` } }],
+    })
+    expect(second.where).toMatchObject({
+      args: [{}, { value: { label: `after` } }],
+    })
+    expect(first).not.toBe(second)
+  })
+
+  // Read-only admission is a law about caller state, including builtin internal
+  // slots that Object.freeze cannot protect. Capture expectations before either
+  // traversal, and retain them when a later invalid field rejects the request.
+  // Fresh snapshots must preserve internal aliases but share no mutable payload
+  // with the caller or a later projection. These are two call-boundary histories,
+  // not a reference implementation of the encoder.
+  it.each([false, true])(
+    `preserves caller state and detached snapshots / rejected suffix %s`,
+    (rejectedSuffix) => {
+      const date = new Date(`2026-09-16T12:34:56.123Z`)
+      const buffer = new Uint8Array([7, 8]).buffer
+      const shared = { label: `before` }
+      const payload = {
+        date,
+        buffer,
+        view: new Uint8Array(buffer),
+        map: new Map([[shared, date]]),
+        set: new Set([shared]),
+        first: shared,
+        second: shared,
+      }
+      // Compare values and aliases explicitly. In jsdom, structuredClone can
+      // return a buffer from another realm, which Vitest's object comparison
+      // does not equate with this realm's otherwise identical ArrayBuffer.
+      // These observations preserve contents, order, multiplicity and identity
+      // relationships without requiring cross-realm object equality.
+      const observe = (value: typeof payload) => ({
+        keys: Reflect.ownKeys(value),
+        recordKeys: [
+          Reflect.ownKeys(value.first),
+          Reflect.ownKeys(value.second),
+        ],
+        date: value.date.getTime(),
+        bytes: Array.from(new Uint8Array(value.buffer)),
+        view: Array.from(value.view),
+        map: [...value.map].map(([key, entry]) => ({
+          label: key.label,
+          date: entry.getTime(),
+          keyIsFirst: key === value.first,
+          valueIsDate: entry === value.date,
+        })),
+        set: [...value.set].map((entry) => ({
+          label: entry.label,
+          isFirst: entry === value.first,
+        })),
+        first: value.first.label,
+        second: value.second.label,
+        sharedRecord: value.first === value.second,
+        sharedBuffer: value.view.buffer === value.buffer,
+      })
+      const before = {
+        keys: [`date`, `buffer`, `view`, `map`, `set`, `first`, `second`],
+        recordKeys: [[`label`], [`label`]],
+        date: Date.UTC(2026, 8, 16, 12, 34, 56, 123),
+        bytes: [7, 8],
+        view: [7, 8],
+        map: [
+          {
+            label: `before`,
+            date: Date.UTC(2026, 8, 16, 12, 34, 56, 123),
+            keyIsFirst: true,
+            valueIsDate: true,
+          },
+        ],
+        set: [{ label: `before`, isFirst: true }],
+        first: `before`,
+        second: `before`,
+        sharedRecord: true,
+        sharedBuffer: true,
+      }
+      // Calibrate the fixture before entering either production traversal.
+      expect(observe(payload)).toEqual(before)
+      const options = {
+        where: new IR.Func(`eq`, [
+          new IR.PropRef([`payload`]),
+          new IR.Value(payload),
+        ]),
+        ...(rejectedSuffix ? { limit: -1 } : {}),
+      }
+      if (rejectedSuffix) {
+        for (const visit of [
+          validateRemoteSubsetOptions,
+          toTransportedLoadSubsetOptions,
+        ]) {
+          expect(() => visit(options)).toThrowError(
+            expect.objectContaining({
+              name: `RemoteSubsetWireValueError`,
+              path: `options.limit`,
+            }),
+          )
+          expect(observe(payload)).toEqual(before)
+        }
+        return
+      }
+      expect(validateRemoteSubsetOptions(options)).toBeUndefined()
+      expect(observe(payload)).toEqual(before)
+      const first = toTransportedLoadSubsetOptions(options)
+      expect(observe(payload)).toEqual(before)
+      date.setTime(1)
+      new Uint8Array(buffer)[0] = 9
+      shared.label = `after`
+      payload.map.clear()
+      payload.set.clear()
+      const after = {
+        ...before,
+        date: 1,
+        bytes: [9, 8],
+        view: [9, 8],
+        map: [],
+        set: [],
+        first: `after`,
+        second: `after`,
+      }
+      expect(observe(payload)).toEqual(after)
+      expect(validateRemoteSubsetOptions(options)).toBeUndefined()
+      expect(observe(payload)).toEqual(after)
+      const second = toTransportedLoadSubsetOptions(options)
+      expect(observe(payload)).toEqual(after)
+      for (const [snapshot, expected] of [
+        [first, before],
+        [second, after],
+      ] as const) {
+        if (snapshot.where?.type !== `func`)
+          throw new Error(`missing predicate`)
+        const literal = snapshot.where.args[1]
+        if (literal?.type !== `val`) throw new Error(`missing literal`)
+        const value = literal.value as typeof payload
+        expect(observe(value)).toEqual(expected)
+        expect(value.first).toBe(value.second)
+        expect(value.view.buffer).toBe(value.buffer)
+        for (const key of Object.keys(payload) as Array<keyof typeof payload>)
+          expect(value[key]).not.toBe(payload[key])
+      }
+    },
+  )
+
+  // Both modes enforce the complete request schema. Validation must only read
+  // the caller's frozen graph; projection still returns detached request data.
+  it.each([`lexical`, `locale`] as const)(
+    `validates frozen request fields without projecting or rewriting them / %s`,
+    (stringSort) => {
+      const reference = new IR.PropRef([`todos`, `title`], `todos`)
+      const literal = new IR.Value({ label: `unchanged` })
+      const where = new IR.Func(`eq`, [reference, literal])
+      const compareOptions = {
+        direction: `asc` as const,
+        nulls: `last` as const,
+        stringSort,
+        locale: `en`,
+        localeOptions: { sensitivity: `base` as const },
+      }
+      const clause = { expression: reference, compareOptions }
+      const options = {
+        where,
+        orderBy: [clause, clause],
+        cursor: { whereFrom: where, whereCurrent: where, lastKey: `last` },
+        limit: 0,
+        offset: Number.MAX_SAFE_INTEGER,
+        signal: new AbortController().signal,
+      }
+      for (const value of [
+        options,
+        where,
+        where.args,
+        reference,
+        reference.path,
+        literal,
+        literal.value,
+        options.orderBy,
+        clause,
+        compareOptions,
+        compareOptions.localeOptions,
+        options.cursor,
+      ])
+        Object.freeze(value)
+      expect(validateRemoteSubsetOptions(options)).toBeUndefined()
+      const result = toTransportedLoadSubsetOptions(options)
+      expect(result).toMatchObject({
+        limit: 0,
+        offset: Number.MAX_SAFE_INTEGER,
+      })
+      expect(result.where).not.toBe(where)
+      expect(result.cursor?.whereFrom).toBe(result.where)
+      expect(result.cursor?.whereCurrent).toBe(result.where)
+      expect(result.orderBy?.[0]).toBe(result.orderBy?.[1])
+      expect(result.orderBy?.[0]?.compareOptions).toEqual(
+        stringSort === `lexical`
+          ? { direction: `asc`, nulls: `last`, stringSort }
+          : compareOptions,
+      )
+      expect(options.cursor.whereFrom).toBe(where)
+      expect(options.orderBy[0]).toBe(clause)
+    },
+  )
 
   it(`projects lexical comparison options without locale-only wire fields`, () => {
     const projected = toTransportedLoadSubsetOptions({
@@ -16340,6 +16558,562 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
     },
   )
 
+  // Remote admission must validate without constructing a discarded wire
+  // snapshot. The authorized work bound is at most one detached payload copy per
+  // coordinator attempt, and none when hydration retires the demand first.
+  // This extends the persisted owner with construction work, not elapsed time.
+  // The controlled coordinator calls the real wire encoder; browser/Electron
+  // owners separately establish actual transport and local lifecycle delivery.
+  it.sequential.each(
+    [
+      `follower`,
+      `leader-to-follower`,
+      `retry`,
+      `abort`,
+      `release`,
+      `recovery`,
+    ].flatMap((routing) => [0, 1, 33].map((size) => ({ routing, size }))),
+  )(
+    `copies a wire payload only for a coordinator attempt / $routing / $size bytes`,
+    async ({ routing, size }) => {
+      const id = `wire-copy-work-${routing}-${size}`
+      const adapter = createRecordingAdapter()
+      const coordinator = createFailStopCoordinatorHarness(id)
+      let leader = routing === `leader-to-follower` || routing === `recovery`
+      coordinator.isLeader = () => leader
+      const hydrationStarted = createDeferred()
+      const hydrationGate = createDeferred()
+      const retryFinished = createDeferred()
+      const holdHydration = [`leader-to-follower`, `abort`, `release`].includes(
+        routing,
+      )
+      if (holdHydration) {
+        const hydrate = adapter.loadSubset
+        adapter.loadSubset = async (...args) => {
+          hydrationStarted.resolve()
+          await hydrationGate.promise
+          return hydrate(...args)
+        }
+      }
+      const buffer = new ArrayBuffer(size)
+      new Uint8Array(buffer)[0] = 7
+      const label = `wire-copy-work-${routing}-${size}`
+      const literal = Object.freeze({
+        label,
+        buffer,
+        view: new Uint8Array(buffer),
+      })
+      const controller = new AbortController()
+      const options: LoadSubsetOptions = {
+        where: new IR.Func(`eq`, [
+          new IR.PropRef([`payload`]),
+          new IR.Value(literal),
+        ]),
+        signal: controller.signal,
+      }
+      const snapshots: Array<
+        ReturnType<typeof toTransportedLoadSubsetOptions>
+      > = []
+      const offline = new Error(`transient transport failure`)
+      coordinator.requestEnsureRemoteSubset = (_id, request) => {
+        expect(request).toBe(options)
+        snapshots.push(toTransportedLoadSubsetOptions(request))
+        if (routing === `retry` && snapshots.length === 1) {
+          return Promise.reject(offline)
+        }
+        retryFinished.resolve()
+        return Promise.resolve()
+      }
+      const collection = createCollection(
+        persistedCollectionOptions<Todo, string>({
+          id,
+          syncMode: `on-demand`,
+          getKey: (row) => row.id,
+          sync: {
+            sync: ({ markReady }) => {
+              markReady()
+              return {}
+            },
+          },
+          persistence: { adapter, coordinator },
+        }),
+      )
+      const warning = vi.spyOn(console, `warn`).mockImplementation(() => {})
+      // Track descendants too: copying a prepared copy is still duplicate work.
+      // The positive control fails if the encoder stops using this copy seam.
+      const buffers = new WeakSet([buffer])
+      const slice = ArrayBuffer.prototype.slice
+      let copies = 0
+      const copy = vi
+        .spyOn(ArrayBuffer.prototype, `slice`)
+        .mockImplementation(function (this: ArrayBuffer, start, end) {
+          const result = slice.call(this, start, end)
+          if (buffers.has(this)) {
+            buffers.add(result)
+            copies++
+          }
+          return result
+        })
+      const defineProperty = Object.defineProperty
+      let recordCopies = 0
+      const recordCopy = vi
+        .spyOn(Object, `defineProperty`)
+        .mockImplementation((target, key, descriptor) => {
+          if (key === `label` && descriptor.value === label) recordCopies++
+          return defineProperty(target, key, descriptor)
+        })
+      let hasPrimaryFailure = false
+      try {
+        toTransportedLoadSubsetOptions(options)
+        expect({ copies, recordCopies }).toEqual({ copies: 1, recordCopies: 1 })
+        copies = 0
+        recordCopies = 0
+        collection.startSyncImmediate()
+        await flushAsyncWork()
+        const load = Promise.resolve(collection._sync.loadSubset(options))
+        if (holdHydration) {
+          await hydrationStarted.promise
+          if (routing === `leader-to-follower`) leader = false
+          if (routing === `abort`) controller.abort()
+          if (routing === `release`) collection._sync.unloadSubset(options)
+          hydrationGate.resolve()
+        }
+        if (routing === `retry`) {
+          await expect(load).rejects.toBe(offline)
+          await retryFinished.promise
+        } else {
+          await load
+        }
+        if (routing === `recovery`) {
+          expect(snapshots).toHaveLength(0)
+          leader = false
+          coordinator.emit({
+            type: `tx:committed`,
+            term: 1,
+            seq: 2,
+            txId: `gap`,
+            latestRowVersion: 2,
+            changedRows: [],
+            deletedKeys: [],
+            requiresFullReload: true,
+          })
+          await retryFinished.promise
+        }
+        // The independent schedule predicts the number of transport attempts.
+        // At settlement, each snapshot must retain its bytes and shared backing
+        // buffer after the caller changes its input. Identity remains local.
+        const attempts =
+          routing === `retry`
+            ? 2
+            : routing === `abort` || routing === `release`
+              ? 0
+              : 1
+        expect(snapshots).toHaveLength(attempts)
+        new Uint8Array(buffer)[0] = 99
+        for (const snapshot of snapshots) {
+          const expression = snapshot.where
+          expect(expression?.type).toBe(`func`)
+          if (expression?.type !== `func`)
+            throw new Error(`missing wire predicate`)
+          const value = expression.args[1]
+          expect(value?.type).toBe(`val`)
+          if (value?.type !== `val`) throw new Error(`missing wire literal`)
+          const received = value.value as typeof literal
+          expect(received).not.toBe(literal)
+          expect(received.label).toBe(label)
+          expect(received.buffer).not.toBe(buffer)
+          expect(received.view.buffer).toBe(received.buffer)
+          expect(Array.from(received.view)).toEqual(
+            Array.from({ length: size }, (_, index) => (index === 0 ? 7 : 0)),
+          )
+          expect(snapshot).not.toHaveProperty(`signal`)
+        }
+        expect(options.signal).toBe(controller.signal)
+        expect(copies).toBeLessThanOrEqual(attempts)
+        expect(recordCopies).toBeLessThanOrEqual(attempts)
+      } catch (error) {
+        hasPrimaryFailure = true
+        throw error
+      } finally {
+        hydrationGate.resolve()
+        await cleanupPersistedOracle(
+          [
+            () => copy.mockRestore(),
+            () => recordCopy.mockRestore(),
+            () => warning.mockRestore(),
+            () => collection.cleanup(),
+          ],
+          hasPrimaryFailure,
+        )
+      }
+    },
+  )
+
+  // Wire-domain rejection precedes admission to the remote-demand retry path.
+  // Ownerless leaders can become followers while hydration waits; string
+  // controls must dispatch exactly once, while native input never dispatches.
+  // Existing transient-failure histories below retain retry as a separate law.
+  it.each([
+    [`Instant`, `immediate`],
+    [`PlainDate`, `immediate`],
+    [`Instant`, `leader-to-follower`],
+    [`PlainDate`, `leader-to-follower`],
+    [`string`, `immediate`],
+    [`string`, `leader-to-follower`],
+  ] as const)(
+    `applies wire admission before coordinator dispatch / %s / %s`,
+    async (kind, routing) => {
+      const id = `native-wire-${kind}-${routing}`
+      const adapter = createRecordingAdapter()
+      const coordinator = createFailStopCoordinatorHarness(id)
+      const hydrationStarted = createDeferred()
+      const hydrationGate = createDeferred()
+      let isLeader = true
+      coordinator.isLeader = () => isLeader
+      if (routing === `leader-to-follower`) {
+        const hydrate = adapter.loadSubset
+        adapter.loadSubset = async (...args) => {
+          hydrationStarted.resolve()
+          await hydrationGate.promise
+          return hydrate(...args)
+        }
+      }
+      const ensure = vi.fn(
+        (_collectionId: string, options: LoadSubsetOptions) => {
+          toTransportedLoadSubsetOptions(options)
+          return Promise.resolve()
+        },
+      )
+      coordinator.requestEnsureRemoteSubset = ensure
+      const loadSubset = vi.fn()
+      const collection = createCollection(
+        persistedCollectionOptions<Todo, string>({
+          id,
+          syncMode: `on-demand`,
+          getKey: (row) => row.id,
+          sync: {
+            sync: ({ markReady }) => {
+              markReady()
+              return routing === `immediate` ? { loadSubset } : {}
+            },
+          },
+          persistence: { adapter, coordinator },
+        }),
+      )
+      try {
+        collection.startSyncImmediate()
+        await flushAsyncWork()
+        const value =
+          kind === `Instant`
+            ? Temporal.Instant.from(`2026-01-02T00:00:00Z`)
+            : kind === `PlainDate`
+              ? Temporal.PlainDate.from(`2026-01-02`)
+              : `2026-01-02`
+        const options: LoadSubsetOptions = {
+          where: new IR.Func(`eq`, [
+            new IR.PropRef([`stamp`]),
+            new IR.Value(value),
+          ]),
+        }
+        const load = Promise.resolve().then(async () => {
+          await collection._sync.loadSubset(options)
+        })
+        if (routing === `leader-to-follower`) {
+          await hydrationStarted.promise
+          isLeader = false
+          hydrationGate.resolve()
+        }
+        if (kind === `string`) {
+          await expect(load).resolves.toBeUndefined()
+        } else {
+          await expect(load).rejects.toMatchObject({
+            name: `RemoteSubsetWireValueError`,
+          })
+        }
+        await flushAsyncWork(120)
+        expect(ensure).toHaveBeenCalledTimes(kind === `string` ? 1 : 0)
+        expect(loadSubset).not.toHaveBeenCalled()
+        expect(coordinator.remoteReleaseCalls).toEqual([])
+      } finally {
+        hydrationGate.resolve()
+        await collection.cleanup()
+      }
+    },
+  )
+
+  // A completed local acquisition remains active across a later role change.
+  // Gap recovery must validate that retained demand before retry admission.
+  it.each([`Instant`, `PlainDate`, `string`] as const)(
+    `validates retained demand after local success and follower recovery / %s`,
+    async (kind) => {
+      const id = `native-post-load-${kind}`
+      const adapter = createRecordingAdapter()
+      const coordinator = createFailStopCoordinatorHarness(id)
+      let leader = true
+      coordinator.isLeader = () => leader
+      const ensure = vi.fn((_id: string, options: LoadSubsetOptions) => {
+        toTransportedLoadSubsetOptions(options)
+        return Promise.resolve()
+      })
+      coordinator.requestEnsureRemoteSubset = ensure
+      const warning = vi.spyOn(console, `warn`).mockImplementation(() => {})
+      const collection = createCollection(
+        persistedCollectionOptions<Todo, string>({
+          id,
+          syncMode: `on-demand`,
+          getKey: (row) => row.id,
+          sync: {
+            sync: ({ markReady }) => {
+              markReady()
+              return {}
+            },
+          },
+          persistence: { adapter, coordinator },
+        }),
+      )
+      try {
+        collection.startSyncImmediate()
+        await flushAsyncWork()
+        const value =
+          kind === `Instant`
+            ? Temporal.Instant.from(`2026-01-02T00:00:00Z`)
+            : kind === `PlainDate`
+              ? Temporal.PlainDate.from(`2026-01-02`)
+              : `2026-01-02`
+        const options: LoadSubsetOptions = {
+          where: new IR.Func(`eq`, [
+            new IR.PropRef([`stamp`]),
+            new IR.Value(value),
+          ]),
+        }
+        await collection._sync.loadSubset(options)
+        expect(ensure).not.toHaveBeenCalled()
+        leader = false
+        coordinator.emit({
+          type: `tx:committed`,
+          term: 1,
+          seq: 2,
+          txId: `gap`,
+          latestRowVersion: 2,
+          changedRows: [],
+          deletedKeys: [],
+          requiresFullReload: true,
+        })
+        await flushAsyncWork()
+        if (kind === `string`) {
+          expect(collection.status).toBe(`ready`)
+          expect(ensure).toHaveBeenCalledTimes(1)
+        } else {
+          expect(collection.status).toBe(`error`)
+          await expect(
+            Promise.resolve().then(async () => {
+              await collection._sync.loadSubset(options)
+            }),
+          ).rejects.toMatchObject({ name: `RemoteSubsetWireValueError` })
+          expect(ensure).not.toHaveBeenCalled()
+        }
+      } finally {
+        await collection.cleanup()
+        warning.mockRestore()
+      }
+    },
+  )
+
+  // M7 selects Collection-wide fail-stop for failed fallback gap recovery.
+  // Admission is ordered: a valid prefix may already be in flight, but a
+  // retained invalid demand terminates the run and fences every later demand.
+  // Abort cancels admission without retiring its lease; release retires it.
+  // This bounded model names two demands independently of runtime queues.
+  // It judges dispatch coverage, not retry-attempt multiplicity. Successful
+  // pullSince replay and real-host election timing have separate owners.
+  it.each(
+    ([`Instant`, `PlainDate`, `string`] as const).flatMap((kind) =>
+      ([`candidate-first`, `candidate-last`] as const).flatMap((order) =>
+        ([`retained`, `aborted`, `released`] as const).map((lifetime) => ({
+          kind,
+          order,
+          lifetime,
+        })),
+      ),
+    ),
+  )(
+    `preserves the recovery failure boundary for mixed demands / $kind / $order / $lifetime`,
+    async ({ kind, order, lifetime }) => {
+      const terminal = kind !== `string` && lifetime === `retained`
+      const expectedDispatches =
+        terminal && order === `candidate-first`
+          ? []
+          : lifetime !== `retained` || terminal
+            ? [`sibling`]
+            : [`candidate`, `sibling`]
+      const id = `mixed-recovery-${kind}-${order}-${lifetime}`
+      const adapter = createRecordingAdapter()
+      const coordinator = createFailStopCoordinatorHarness(id)
+      let leader = true
+      coordinator.isLeader = () => leader
+      const controller = new AbortController()
+      const value =
+        kind === `Instant`
+          ? Temporal.Instant.from(`2026-01-02T00:00:00Z`)
+          : kind === `PlainDate`
+            ? Temporal.PlainDate.from(`2026-01-02`)
+            : `2026-01-02`
+      const candidate: LoadSubsetOptions = {
+        signal: controller.signal,
+        where: new IR.Func(`eq`, [
+          new IR.PropRef([`stamp`]),
+          new IR.Value(value),
+        ]),
+      }
+      const sibling: LoadSubsetOptions = { limit: 1 }
+      const demands =
+        order === `candidate-first`
+          ? [candidate, sibling]
+          : [sibling, candidate]
+      const remoteSettlement = createEventGate()
+      // Observe attempted dispatch before the transport settles. A late
+      // rejection after fail-stop must not resurrect the valid prefix's retry.
+      const attempts: Array<LoadSubsetOptions> = []
+      coordinator.requestEnsureRemoteSubset = (_id, options) => {
+        attempts.push(options)
+        toTransportedLoadSubsetOptions(options)
+        return remoteSettlement.promise
+      }
+      const errorReported = createEventGate()
+      const reported: Array<unknown> = []
+      let reentrantFailure: Promise<unknown> | undefined
+      const warning = vi.spyOn(console, `warn`).mockImplementation(() => {})
+      const collection = createCollection(
+        persistedCollectionOptions<Todo, string>({
+          id,
+          syncMode: `on-demand`,
+          getKey: (row) => row.id,
+          sync: {
+            sync: ({ markReady }) => {
+              markReady()
+              return {}
+            },
+          },
+          persistence: { adapter, coordinator },
+        }),
+      )
+      const markError = collection._lifecycle.markError.bind(
+        collection._lifecycle,
+      )
+      const report = vi
+        .spyOn(collection._lifecycle, `markError`)
+        .mockImplementation((error) => {
+          reported.push(error)
+          // Invoke while the error is being reported, before core marks the
+          // Collection failed. The runtime must already reject this sibling.
+          reentrantFailure = Promise.resolve(
+            collection._sync.loadSubset(sibling),
+          ).catch((reason: unknown) => reason)
+          markError(error)
+          errorReported.resolve()
+        })
+      let hasPrimaryFailure = false
+      try {
+        await collection.stateWhenReady()
+        for (const demand of demands) await collection._sync.loadSubset(demand)
+        expect(attempts).toEqual([])
+        if (lifetime === `aborted`) controller.abort()
+        if (lifetime === `released`) collection._sync.unloadSubset(candidate)
+        leader = false
+        const emitGap = (seq: number) =>
+          coordinator.emit({
+            type: `tx:committed`,
+            term: 1,
+            seq,
+            txId: `gap-${seq}`,
+            latestRowVersion: seq,
+            changedRows: [],
+            deletedKeys: [],
+            requiresFullReload: true,
+          })
+        emitGap(2)
+        // Recording-adapter I/O is immediate. Drain the turn while transport
+        // remains held; this is not a real-host timing or latency assertion.
+        await flushAsyncWork()
+        expect(collection.status).toBe(terminal ? `error` : `ready`)
+        if (terminal) {
+          await atPersistedOracleCheckpoint(
+            errorReported.promise,
+            `mixed recovery error reported`,
+          )
+        } else {
+          // Successful remote work may drain serially. Demand coverage is
+          // required after the prefix settles, not while it remains held.
+          remoteSettlement.resolve()
+          await flushAsyncWork()
+        }
+        const names = attempts.map((options) => {
+          expect(demands).toContain(options)
+          return options === candidate ? `candidate` : `sibling`
+        })
+        expect([...new Set(names)].sort()).toEqual(
+          expectedDispatches.slice().sort(),
+        )
+        const failure = collection._lifecycle.getSyncError()
+        if (terminal) {
+          expect(failure).toMatchObject({ name: `RemoteSubsetWireValueError` })
+          expect(reported).toHaveLength(1)
+          expect(reported[0]).toBe(failure)
+          await expect(reentrantFailure).resolves.toBe(failure)
+          const loads = adapter.loadSubsetCalls.length
+          const dispatched = attempts.length
+          vi.useFakeTimers()
+          if (dispatched > 0) {
+            remoteSettlement.reject(new Error(`late transport failure`))
+          } else {
+            remoteSettlement.resolve()
+          }
+          await vi.advanceTimersByTimeAsync(0)
+          emitGap(3)
+          emitGap(4)
+          await vi.advanceTimersByTimeAsync(1_000)
+          await expect(
+            Promise.resolve(collection._sync.loadSubset(sibling)),
+          ).rejects.toBe(failure)
+          expect(adapter.loadSubsetCalls).toHaveLength(loads)
+          expect(attempts).toHaveLength(dispatched)
+          expect(reported).toHaveLength(1)
+          vi.useRealTimers()
+        } else {
+          expect(failure).toBeUndefined()
+          expect(reported).toEqual([])
+        }
+        // Every retained lease remains releasable, including after abort or
+        // Collection failure. Compare object identity, not structural equality.
+        for (const demand of demands) {
+          if (lifetime !== `released` || demand !== candidate) {
+            collection._sync.unloadSubset(demand)
+          }
+        }
+        const releases =
+          lifetime === `released` ? [candidate, sibling] : demands
+        expect(coordinator.remoteReleaseCalls).toHaveLength(releases.length)
+        releases.forEach((options, index) => {
+          expect(coordinator.remoteReleaseCalls[index]).toBe(options)
+        })
+      } catch (error) {
+        hasPrimaryFailure = true
+        throw error
+      } finally {
+        vi.useRealTimers()
+        remoteSettlement.resolve()
+        await cleanupPersistedOracle(
+          [
+            () => report.mockRestore(),
+            () => collection.cleanup(),
+            () => warning.mockRestore(),
+          ],
+          hasPrimaryFailure,
+        )
+      }
+    },
+  )
+
   it(`retries queued remote subset ensure after transient failures`, async () => {
     const adapter = createRecordingAdapter()
     let ensureCalls = 0
@@ -18277,6 +19051,280 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
       await collection.cleanup()
     }
   })
+
+  // Persisted indexes are optional query accelerators: the existing adapter
+  // failure law keeps rows and readiness available when an index cannot be
+  // stored. Spec construction belongs to that same best-effort boundary.
+  // These histories add real serialization rejection before adapter entry,
+  // both at bootstrap and at index:added, with a healthy sibling and supported
+  // native control. Rows use ordinary strings; no unsupported row write is
+  // admitted. At settled index work, compare readiness, rows, warnings, and the
+  // exact signatures that reached the adapter and coordinator.
+  it.sequential.each(
+    [`startup`, `runtime`].flatMap((phase) =>
+      [
+        `Instant`,
+        `PlainDate`,
+        `ZonedDateTime`,
+        `Duration`,
+        `missing-global`,
+        `missing-global-date`,
+      ].map((kind) => ({ phase, kind })),
+    ),
+  )(
+    `keeps index serialization failure best-effort / $phase / $kind`,
+    async ({ phase, kind }) => {
+      const originalTemporal = Object.getOwnPropertyDescriptor(
+        globalThis,
+        `Temporal`,
+      )
+      Object.defineProperty(globalThis, `Temporal`, {
+        value: kind.startsWith(`missing-global`) ? undefined : Temporal,
+        configurable: true,
+        writable: true,
+      })
+      const value =
+        kind === `PlainDate` || kind === `missing-global-date`
+          ? Temporal.PlainDate.from(`2026-01-02`)
+          : kind === `ZonedDateTime`
+            ? Temporal.ZonedDateTime.from(`2026-01-02T00:00:00+00:00[UTC]`)
+            : kind === `Duration`
+              ? Temporal.Duration.from(`PT1H`)
+              : Temporal.Instant.from(`2026-01-02T00:00:00Z`)
+      const accepted = kind === `Instant` || kind === `PlainDate`
+      const row = { id: `persisted`, title: `ordinary row` }
+      const adapter = createRecordingAdapter([row])
+      const coordinator = createCoordinatorHarness()
+      const remoteSignatures: Array<string> = []
+      coordinator.requestEnsurePersistedIndex = (_id, signature) => {
+        remoteSignatures.push(signature)
+        return Promise.resolve()
+      }
+      const warning = vi.spyOn(console, `warn`).mockImplementation(() => {})
+      const collection = createCollection(
+        persistedCollectionOptions<Todo, string>({
+          id: `index-serialization-${phase}-${kind}`,
+          getKey: (item) => item.id,
+          defaultIndexType: BasicIndex,
+          sync: { sync: ({ markReady }) => markReady() },
+          persistence: { adapter, coordinator },
+        }),
+      )
+      let hasPrimaryFailure = false
+      try {
+        if (phase === `runtime`) await collection.preload()
+        const index = collection.createIndex((item) =>
+          coalesce(item.title, new IR.Value(value)),
+        )
+        const healthy = collection.createIndex((item) => item.id)
+        const metadata = collection.getIndexMetadata()
+        const signature = metadata.find(
+          (entry) => entry.indexId === index.id,
+        )!.signature
+        const healthySignature = metadata.find(
+          (entry) => entry.indexId === healthy.id,
+        )!.signature
+        if (phase === `startup`)
+          await expect(collection.preload()).resolves.toBeUndefined()
+        await flushAsyncWork()
+        expect(collection.status).toBe(`ready`)
+        expect(stripVirtualProps(collection.get(row.id))).toEqual(row)
+        const expectedSignatures = accepted
+          ? [signature, healthySignature]
+          : [healthySignature]
+        expect(adapter.ensureIndexCalls.map((call) => call.signature)).toEqual(
+          expectedSignatures,
+        )
+        expect(remoteSignatures).toEqual(expectedSignatures)
+        expect(warning.mock.calls).toHaveLength(accepted ? 0 : 2)
+        if (!accepted) {
+          expect(warning.mock.calls.map(([message]) => message)).toEqual([
+            `Failed to ensure persisted index in adapter:`,
+            `Failed to ensure persisted index through coordinator:`,
+          ])
+          for (const [, error] of warning.mock.calls) {
+            expect(error).toMatchObject({
+              name: `InvalidPersistedCollectionConfigError`,
+            })
+          }
+        }
+        // A following ordinary subset load is still usable after the skipped index.
+        await collection._sync.loadSubset({ limit: 1 })
+        expect(stripVirtualProps(collection.get(row.id))).toEqual(row)
+      } catch (error) {
+        hasPrimaryFailure = true
+        throw error
+      } finally {
+        await cleanupPersistedOracle(
+          [
+            () => warning.mockRestore(),
+            () => collection.cleanup(),
+            () => {
+              if (originalTemporal)
+                Object.defineProperty(globalThis, `Temporal`, originalTemporal)
+              else Reflect.deleteProperty(globalThis, `Temporal`)
+            },
+          ],
+          hasPrimaryFailure,
+        )
+      }
+    },
+  )
+
+  // Optional index failure isolation also applies after serializer admission.
+  // The model is a product of independent collaborator outcomes, not runtime
+  // control flow: local success alone authorizes a completion marker; either
+  // collaborator may fail without failing rows, readiness, or a healthy sibling.
+  // A held local promise supplies the intermediate observation: its coordinator
+  // request cannot claim completed work before that promise settles. Startup
+  // visits indexes serially; runtime additions may overlap, so only per-index
+  // causality and exact call multiplicity are promised, not global call order.
+  it.sequential.each(
+    [`startup`, `runtime`].flatMap((phase) =>
+      [`local`, `coordinator`, `both`].flatMap((boundary) =>
+        [`throw`, `held`].flatMap((settlement) =>
+          [false, true].map((fails) => ({
+            phase,
+            boundary,
+            settlement,
+            fails,
+          })),
+        ),
+      ),
+    ),
+  )(
+    `isolates optional index outcomes / $phase / $boundary / $settlement / fails $fails`,
+    async ({ phase, boundary, settlement, fails }) => {
+      const row = { id: `row`, title: `available` }
+      const adapter = createRecordingAdapter([row])
+      const coordinator = createCoordinatorHarness()
+      const entered = createDeferred()
+      const gate = createDeferred()
+      const failure = new Error(`optional index rejected`)
+      const localNames: Array<string> = []
+      const remote: Array<{ name: string; completed: boolean }> = []
+      const unhandled: Array<unknown> = []
+      const onUnhandled = (error: unknown) => unhandled.push(error)
+      const warning = vi.spyOn(console, `warn`).mockImplementation(() => {})
+      const settle = () => {
+        entered.resolve()
+        if (settlement === `held`)
+          return gate.promise.then(() => {
+            if (fails) throw failure
+          })
+        if (fails) throw failure
+        return Promise.resolve()
+      }
+      adapter.ensureIndex = (_id, _signature, spec) => {
+        const name = String(spec.metadata?.name)
+        localNames.push(name)
+        return name === `target` && boundary !== `coordinator`
+          ? settle()
+          : Promise.resolve()
+      }
+      coordinator.requestEnsurePersistedIndex = (
+        _id,
+        _signature,
+        spec,
+        completedAdapter,
+        completed,
+      ) => {
+        const name = String(spec.metadata?.name)
+        // The flag and adapter capability must agree, including failed locals.
+        expect(completedAdapter).toBe(completed ? adapter : undefined)
+        remote.push({ name, completed: completed === true })
+        return name === `target` && boundary !== `local`
+          ? settle()
+          : Promise.resolve()
+      }
+      const collection = createCollection(
+        persistedCollectionOptions<Todo, string>({
+          id: `optional-index-${phase}-${boundary}-${settlement}-${fails}`,
+          getKey: (item) => item.id,
+          defaultIndexType: BasicIndex,
+          sync: { sync: ({ markReady }) => markReady() },
+          persistence: { adapter, coordinator },
+        }),
+      )
+      let preload: Promise<void> | undefined
+      let hasPrimaryFailure = false
+      process.on(`unhandledRejection`, onUnhandled)
+      try {
+        if (phase === `runtime`) await collection.preload()
+        collection.createIndex((item) => item.title, { name: `target` })
+        collection.createIndex((item) => item.id, { name: `healthy` })
+        if (phase === `startup`) {
+          preload = Promise.resolve(collection.preload())
+          void preload.catch(() => undefined)
+        }
+        await entered.promise
+        await flushAsyncWork()
+        expect(collection.status).not.toBe(`error`)
+        if (phase === `runtime`) {
+          expect(collection.status).toBe(`ready`)
+          expect(stripVirtualProps(collection.get(row.id))).toEqual(row)
+        }
+        if (settlement === `held`) {
+          expect(warning).not.toHaveBeenCalled()
+          if (boundary !== `coordinator`)
+            expect(remote.filter((entry) => entry.name === `target`)).toEqual(
+              [],
+            )
+        }
+        gate.resolve()
+        await preload
+        await flushAsyncWork()
+        expect(collection.status).toBe(`ready`)
+        expect(stripVirtualProps(collection.get(row.id))).toEqual(row)
+        expect([...localNames].sort()).toEqual([`healthy`, `target`])
+        expect(
+          [...remote].sort((a, b) => a.name.localeCompare(b.name)),
+        ).toEqual([
+          { name: `healthy`, completed: true },
+          { name: `target`, completed: !(fails && boundary !== `coordinator`) },
+        ])
+        expect(warning.mock.calls).toEqual(
+          fails
+            ? [
+                ...(boundary !== `coordinator`
+                  ? [[`Failed to ensure persisted index in adapter:`, failure]]
+                  : []),
+                ...(boundary !== `local`
+                  ? [
+                      [
+                        `Failed to ensure persisted index through coordinator:`,
+                        failure,
+                      ],
+                    ]
+                  : []),
+              ]
+            : [],
+        )
+        for (const [, error] of warning.mock.calls) expect(error).toBe(failure)
+        expect(unhandled).toEqual([])
+        await collection._sync.loadSubset({ limit: 1 })
+        expect(stripVirtualProps(collection.get(row.id))).toEqual(row)
+      } catch (error) {
+        hasPrimaryFailure = true
+        throw error
+      } finally {
+        gate.resolve()
+        await cleanupPersistedOracle(
+          [
+            () => preload?.catch(() => undefined),
+            // Drain held rejection delivery before this case releases its observer.
+            () => flushAsyncWork(),
+            () => warning.mockRestore(),
+            () => collection.cleanup(),
+            () => {
+              process.off(`unhandledRejection`, onUnhandled)
+            },
+          ],
+          hasPrimaryFailure,
+        )
+      }
+    },
+  )
 
   it(`only signals completed leader-local index work after local success`, async () => {
     const adapter = createRecordingAdapter()
