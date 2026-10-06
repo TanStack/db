@@ -744,11 +744,11 @@ function applyOptimizations(
   const optimizedJoins = query.join
     ? query.join.map((joinClause) => ({
         ...joinClause,
-        from: optimizeJoinFromWithTracking(
+        from: optimizeFromWithTracking(
           joinClause.from,
           pushableSingleSource,
           actuallyOptimized,
-        ),
+        ) as CollectionRefClass | QueryRefClass,
       }))
     : undefined
 
@@ -796,12 +796,7 @@ function applyOptimizations(
 
   // Preserve untouched query options while replacing the optimized clauses.
   const optimizedQuery: QueryIR = {
-    ...query,
-    groupBy: query.groupBy ? [...query.groupBy] : undefined,
-    having: query.having ? [...query.having] : undefined,
-    orderBy: query.orderBy ? [...query.orderBy] : undefined,
-    fnWhere: query.fnWhere ? [...query.fnWhere] : undefined,
-    fnHaving: query.fnHaving ? [...query.fnHaving] : undefined,
+    ...copyClauseArrays(query),
     from: optimizedFrom,
     join: optimizedJoins,
     where: finalWhere.length > 0 ? finalWhere : [],
@@ -821,16 +816,25 @@ function applyOptimizations(
  */
 function deepCopyQuery(query: QueryIR): QueryIR {
   return {
-    ...query,
+    ...copyClauseArrays(query),
     from: deepCopyFrom(query.from),
     join: query.join
       ? query.join.map((joinClause) => ({
           type: joinClause.type,
           on: joinClause.on,
-          from: deepCopyJoinFrom(joinClause.from),
+          from: deepCopyFrom(joinClause.from) as
+            | CollectionRefClass
+            | QueryRefClass,
         }))
       : undefined,
     where: query.where ? [...query.where] : undefined,
+  }
+}
+
+/** A copy of the query whose clause arrays are new arrays. */
+function copyClauseArrays(query: QueryIR): QueryIR {
+  return {
+    ...query,
     groupBy: query.groupBy ? [...query.groupBy] : undefined,
     having: query.having ? [...query.having] : undefined,
     orderBy: query.orderBy ? [...query.orderBy] : undefined,
@@ -863,11 +867,6 @@ function deepCopyFrom(from: From): From {
   )
 }
 
-function deepCopyJoinFrom(
-  from: CollectionRefClass | QueryRefClass,
-): CollectionRefClass | QueryRefClass {
-  return deepCopyFrom(from) as CollectionRefClass | QueryRefClass
-}
 
 function optimizeNestedFrom(from: From): From {
   if (from.type === `queryRef`) {
@@ -909,11 +908,11 @@ function optimizeFromWithTracking(
   if (from.type === `unionFrom`) {
     return new UnionFromClass(
       from.sources.map((source) =>
-        optimizeJoinFromWithTracking(
+        optimizeFromWithTracking(
           source,
           singleSourceClauses,
           actuallyOptimized,
-        ),
+        ) as CollectionRefClass | QueryRefClass,
       ),
     )
   }
@@ -1022,55 +1021,6 @@ function remapWhereForSubquery(
   return remapExpression(whereClause) as BasicExpression<boolean>
 }
 
-function optimizeJoinFromWithTracking(
-  from: CollectionRefClass | QueryRefClass,
-  singleSourceClauses: Map<string, BasicExpression<boolean>>,
-  actuallyOptimized: Set<string>,
-): CollectionRefClass | QueryRefClass {
-  return optimizeFromWithTracking(
-    from,
-    singleSourceClauses,
-    actuallyOptimized,
-  ) as CollectionRefClass | QueryRefClass
-}
-
-function unsafeSelect(
-  query: QueryIR,
-  whereClause: BasicExpression<boolean>,
-  outerAlias: string,
-): boolean {
-  if (!query.select) return false
-
-  return (
-    containsAggregate(query.select) ||
-    whereReferencesComputedSelectFields(query.select, whereClause, outerAlias)
-  )
-}
-
-function unsafeGroupBy(query: QueryIR) {
-  return query.groupBy && query.groupBy.length > 0
-}
-
-function unsafeHaving(query: QueryIR) {
-  return query.having && query.having.length > 0
-}
-
-function unsafeOrderBy(query: QueryIR) {
-  return (
-    query.orderBy &&
-    query.orderBy.length > 0 &&
-    (query.limit !== undefined || query.offset !== undefined)
-  )
-}
-
-function unsafeFnSelect(query: QueryIR) {
-  return (
-    query.fnSelect ||
-    (query.fnWhere && query.fnWhere.length > 0) ||
-    (query.fnHaving && query.fnHaving.length > 0)
-  )
-}
-
 function isSafeToPushIntoExistingSubquery(
   query: QueryIR,
   whereClause: BasicExpression<boolean>,
@@ -1078,11 +1028,20 @@ function isSafeToPushIntoExistingSubquery(
 ): boolean {
   return !(
     query.distinct ||
-    unsafeSelect(query, whereClause, outerAlias) ||
-    unsafeGroupBy(query) ||
-    unsafeHaving(query) ||
-    unsafeOrderBy(query) ||
-    unsafeFnSelect(query)
+    (query.select &&
+      (containsAggregate(query.select) ||
+        whereReferencesComputedSelectFields(
+          query.select,
+          whereClause,
+          outerAlias,
+        ))) ||
+    query.groupBy?.length ||
+    query.having?.length ||
+    (query.orderBy?.length &&
+      (query.limit !== undefined || query.offset !== undefined)) ||
+    query.fnSelect ||
+    query.fnWhere?.length ||
+    query.fnHaving?.length
   )
 }
 

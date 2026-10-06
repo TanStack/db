@@ -637,11 +637,12 @@ export class CollectionStateManager<
     this.optimisticDeletes.clear()
     this.pendingLocalChanges.clear()
 
+    // Applying a sync transaction releases its held rows, so a held row
+    // always has a queued sync transaction.
     for (const [key, { row }] of this.heldOptimisticRows) {
-      if (!pendingSyncKeys.has(key)) {
-        this.heldOptimisticRows.delete(key)
-        this.pendingLocalOrigins.delete(key)
-      } else if (row === undefined) this.optimisticDeletes.add(key)
+      if (!pendingSyncKeys.has(key))
+        throw new SyncQueueInvariantError(`a held row has no queued sync write`)
+      if (row === undefined) this.optimisticDeletes.add(key)
       else this.optimisticUpserts.set(key, row)
     }
 
