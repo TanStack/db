@@ -888,8 +888,9 @@ export class SingleProcessCoordinator implements PersistedCollectionCoordinator 
   public async requestApplyCommittedTx(
     collectionId: string,
     tx: PersistedTx,
+    scopedAdapter?: HydrationPersistenceAdapter,
   ): Promise<ApplyCommittedTxResponse> {
-    const adapter = this.collectionAdapters.get(collectionId)
+    const adapter = scopedAdapter ?? this.collectionAdapters.get(collectionId)
     if (!adapter) {
       throw new InvalidPersistedCollectionConfigError(
         `SingleProcessCoordinator has no persistence adapter configured for collection "${collectionId}"`,

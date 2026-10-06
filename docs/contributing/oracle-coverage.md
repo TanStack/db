@@ -612,6 +612,64 @@ exclusive OPFS ownership. The
 [review record](oracle-reviews/issue-1754-live-electric-hydration-straddle.md)
 preserves the live-host and mutant evidence.
 
+### Source durability inside a shared hydration scope
+
+The `hydration source durability routing` owner in
+`packages/db-sqlite-persistence-core/tests/persisted-oracle.test.ts` now runs
+144 bounded histories: startup/subscription/after-ready × scoped/unscheduled ×
+empty/shared-key baseline × twelve transaction templates. Its independent edit
+log covers full upsert, same-key order/delete, truncate/replacement, row and
+collection metadata set/delete, truly empty work, atomic multi-row batches,
+independent pre-abort, and first/second durability failure. It checks each
+acceptance and applied receipt separately, exact durable admission and prefixes,
+sequence allocation, current scoped-adapter identity/lifetime, ordinary next
+use, a second on-demand scope, and durable reopen. Four cleanup/restart histories
+and one early-receipt checker calibration supplement the matrix. Existing
+startup-read failure, request-local failed-read/retry, and optimistic causal
+replay witnesses now supply distinct scoped adapters as well.
+
+The receiving
+`packages/browser-db-sqlite-persistence/e2e/hydration-commit-oracle.opfs.spec.ts`
+runs 24 real Chromium OPFS histories plus one cleanup-failure calibration.
+It crosses the original phases/coordinators/baselines with single-insert and
+rich source histories, and checks three distinct Collection schemas, a cold
+peer, an ordinary peer write during the held read, exact owning-scope exit,
+metadata, durable rows, and reopen. Cycle detection ties the same transaction
+to the supplied live scope and its erroneous scheduled call; temporal overlap
+alone is insufficient. Captured primary evidence survives cleanup failures.
+
+The default coordinator now uses the supplied scoped adapter for that call,
+without caching it. Against main at `a37e69ab`, the original implementation
+reaches **48 core routing assertion failures and eight actual scheduler-cycle
+assertion failures**. The retained repair passes all 614 persisted-oracle tests
+(with one existing todo) and all 25 Chromium OPFS checks. Eight hostile repairs
+are rejected by assertions and challenge premature receipt settlement,
+cached scope loans, omitted data, reverse FIFO and suppressed/misclassified
+failure. The
+[loss audit and exact content bindings](oracle-reviews/issue-2046-hydration-loss-audit.md)
+preserve all source recoveries, decisions, commands, calibration and limits;
+the [initial review](oracle-reviews/issue-2046-hydration-commit-deadlock.md)
+retains the original issue ledger.
+
+- [ ] **Scoped lifecycle compositions.** The persisted-history owner needs
+      distinct-scope witnesses for dependent and post-publication aborts,
+      buffered partial-update recovery, row metadata from different owning
+      reads, arbitrary queued reloads, and late already-issued storage results
+      after replacement. Existing semantic owners remain authoritative. The
+      new queued-cleanup witness does not promise rollback of issued writes.
+- [ ] **Nested work under fairness backlog.** The shared-driver fairness owner
+      (`tests/shared-driver-fairness-oracle.ts` in the browser package, with its
+      OPFS receiver) needs a nested source commit inside a hydrate while both
+      lanes retain a backlog that distinguishes K=1 from K=2. Finite peer
+      progress here does not establish that composition.
+- [ ] **Elected-owner/host handoffs.** The per-Collection coordinator owner
+      retains transfer/cross-tab RPC while nested durability is pending. The
+      OPFS receiver owns provider-supplied physical failure and abort/cleanup
+      witnesses; other browsers and native hosts need their own receivers.
+      Distinct-schema isolation on this host is now checked.
+- [ ] **Historical attribution.** A package bisect is still needed for the
+      earliest affected release; this work checks the stated `origin/main`.
+
 ### SQLite boolean predicate arity and row work
 
 `packages/db-sqlite-persistence-core/tests/sqlite-boolean-arity-oracle.test.ts`
