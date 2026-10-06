@@ -230,6 +230,8 @@ TanStack DB provides several built-in collection types for different data source
 
 **Local Collections**
 
+- **[IndexedDB Collection](./collections/indexeddb-collection.md)** — Persist local browser data in IndexedDB with asynchronous writes and cross-tab notifications.
+
 - **[LocalStorageCollection](./collections/local-storage-collection.md)** — Store small amounts of local-only state that persists across sessions and syncs across browser tabs.
 
 - **[LocalOnlyCollection](./collections/local-only-collection.md)** — Manage in-memory client data or UI state that doesn't need persistence or cross-tab sync.

@@ -1,0 +1,62 @@
+{
+  "name": "@tanstack/indexeddb-db-collection",
+  "version": "0.0.2",
+  "description": "IndexedDB collection for TanStack DB",
+  "author": "Ravi Atluri",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/TanStack/db.git",
+    "directory": "packages/indexeddb-db-collection"
+  },
+  "homepage": "https://tanstack.com/db",
+  "keywords": [
+    "indexeddb",
+    "tanstack",
+    "optimistic",
+    "typescript",
+    "offline"
+  ],
+  "scripts": {
+    "build": "vite build",
+    "dev": "vite build --watch",
+    "lint": "eslint .",
+    "test": "vitest run",
+    "test:oracles": "vitest run tests/persistence-oracle.test.ts tests/settlement-oracle.test.ts tests/transport-oracle.test.ts tests/wrapper.test.ts tests/compatibility-oracle.test.ts tests/cross-tab-history-oracle.test.ts tests/cross-tab-boundary-oracle.test.ts tests/pending-history-oracle.test.ts tests/local-write-order-oracle.test.ts --coverage.enabled=false tests/retirement-oracle.test.ts tests/deletion-queue-oracle.test.ts tests/wrapper-settlement-oracle.test.ts tests/persistence-values-oracle.test.ts",
+    "typecheck": "tsc --noEmit -p tsconfig.test.json",
+    "test:oracles:stress": "TANSTACK_INDEXEDDB_ORACLE_PROFILE=stress vitest run tests/cross-tab-history-oracle.test.ts tests/pending-history-oracle.test.ts --coverage.enabled=false",
+    "test:browser": "playwright test",
+    "test:package": "pnpm --filter @tanstack/indexeddb-db-collection... build && vitest run --config vitest.package.config.ts"
+  },
+  "type": "module",
+  "main": "dist/cjs/index.cjs",
+  "module": "dist/esm/index.js",
+  "types": "dist/esm/index.d.ts",
+  "exports": {
+    ".": {
+      "import": {
+        "types": "./dist/esm/index.d.ts",
+        "default": "./dist/esm/index.js"
+      },
+      "require": {
+        "types": "./dist/cjs/index.d.cts",
+        "default": "./dist/cjs/index.cjs"
+      }
+    },
+    "./package.json": "./package.json"
+  },
+  "sideEffects": false,
+  "files": [
+    "dist",
+    "src"
+  ],
+  "dependencies": {
+    "@standard-schema/spec": "^1.1.0",
+    "@tanstack/db": "workspace:*"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.60.0",
+    "@vitest/coverage-istanbul": "^3.2.4",
+    "fake-indexeddb": "^6.0.0"
+  }
+}

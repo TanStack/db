@@ -1,0 +1,38 @@
+Source log: /Users/kyle.mathews/.codex/worktrees/pr-1179-review/tanstack-db/review-evidence/deletion-refinement/calibration/obsoleteProtocol.log
+SHA-256 of full source: e3366322ced75d52f1dfc8ec56038a4f6c86fa61a4f532d7332b3b433cf2730f
+Receipt transformation: calibration; progress-only dot lines omitted; trailing whitespace normalized.
+
+
+ RUN  v3.2.4 /Users/kyle.mathews/.codex/worktrees/pr-1179-review/tanstack-db/packages/indexeddb-db-collection
+
+ × |@tanstack/indexeddb-db-collection| tests/retirement-oracle.test.ts > ignores the retired database-deleted message protocol before storage work 8ms
+   → expected [ { mode: 'readonly', …(2) } ] to have a length of +0 but got 1
+
+ Test Files  1 failed (1)
+      Tests  1 failed | 1614 skipped (1615)
+   Start at  08:17:09
+   Duration  896ms (transform 331ms, setup 13ms, collect 488ms, tests 9ms, environment 190ms, prepare 62ms)
+
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  |@tanstack/indexeddb-db-collection| tests/retirement-oracle.test.ts > ignores the retired database-deleted message protocol before storage work
+AssertionError: expected [ { mode: 'readonly', …(2) } ] to have a length of +0 but got 1
+
+- Expected
++ Received
+
+- 0
++ 1
+
+ ❯ tests/retirement-oracle.test.ts:746:28
+    744|     sender.close()
+    745|     await Channel.drain()
+    746|     expect(native.entries).toHaveLength(0)
+       |                            ^
+    747|     expect(c.status).toBe('ready')
+    748|     assertRows(c.values(), [], 'obsolete message has no authority')
+ ❯ withHarness tests/harness.ts:184:5
+ ❯ tests/retirement-oracle.test.ts:731:3
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯

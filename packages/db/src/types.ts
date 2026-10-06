@@ -443,7 +443,13 @@ export interface SyncConfig<
      * When supplied, `error` is preserved as the rejection reason from `preload()`.
      */
     markError: (error?: unknown) => void
-    truncate: () => void
+    /**
+     * Replace the synced rows. By default the replacement also marks the
+     * Collection ready. Set markReady:false to publish without changing status,
+     * for example when confirming a committed write from a closed source.
+     * The last truncate in a transaction supplies its readiness intent.
+     */
+    truncate: (options?: { markReady?: boolean }) => void
     metadata?: SyncMetadataApi<TKey>
   }) => void | CleanupFn | SyncConfigRes
 

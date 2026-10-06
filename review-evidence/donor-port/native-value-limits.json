@@ -1,0 +1,28 @@
+[
+  {
+    "test": "preserves supported blob values or reports native rejection",
+    "project": "webkit",
+    "evidence": {
+      "kind": "blob",
+      "native": {
+        "outcome": "rejected",
+        "name": "UnknownError",
+        "message": "Error preparing Blob/File data to be stored in object store"
+      },
+      "law": "truthful rejection and successful suffix; value preservation not reached"
+    }
+  },
+  {
+    "test": "preserves supported nested values or reports native rejection",
+    "project": "webkit",
+    "evidence": {
+      "kind": "nested",
+      "native": {
+        "outcome": "rejected",
+        "name": "UnknownError",
+        "message": "Error preparing Blob/File data to be stored in object store"
+      },
+      "law": "truthful rejection and successful suffix; value preservation not reached"
+    }
+  }
+]

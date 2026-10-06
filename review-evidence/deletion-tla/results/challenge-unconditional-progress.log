@@ -1,0 +1,235 @@
+TLC2 Version 2.19 of 08 August 2024 (rev: 5a47802)
+Running breadth-first search Model-Checking with fp 0 and seed 1 with 1 worker on 18 cores with 981MB heap and 64MB offheap memory [pid: 95553] (Mac OS X 26.6.2 aarch64, Eclipse Adoptium 21.0.12.1 x86_64, MSBDiskFPSet, DiskStateQueue).
+Parsing file /private/tmp/pr1179-tla/retirement_oracle.tla
+Parsing file /private/var/folders/zy/zxh2j5n97vq2tt8d8q7_1t5r0000gp/T/Naturals.tla
+Parsing file /private/var/folders/zy/zxh2j5n97vq2tt8d8q7_1t5r0000gp/T/Sequences.tla
+Parsing file /private/var/folders/zy/zxh2j5n97vq2tt8d8q7_1t5r0000gp/T/FiniteSets.tla
+Parsing file /private/var/folders/zy/zxh2j5n97vq2tt8d8q7_1t5r0000gp/T/TLC.tla
+Semantic processing of module Naturals
+Semantic processing of module Sequences
+Semantic processing of module FiniteSets
+Semantic processing of module TLC
+Semantic processing of module retirement_oracle
+Starting... (2026-10-05 22:34:33)
+Implied-temporal checking--satisfiability problem has 1 branches.
+Computing initial states...
+Computed 2 initial states...
+Computed 4 initial states...
+Finished computing initial states: 8 distinct states generated at 2026-10-05 22:34:33.
+Progress(11) at 2026-10-05 22:34:34: 7,892 states generated, 3,496 distinct states found, 0 states left on queue.
+Checking temporal properties for the complete state space with 3496 total distinct states at (2026-10-05 22:34:34)
+Error: Temporal properties were violated.
+
+Error: The following behavior constitutes a counter-example:
+
+State 1: <Initial predicate>
+s = [ readKind |-> "initial",
+  open |-> TRUE,
+  retired |-> FALSE,
+  closeReason |-> "none",
+  status |-> <<"loading">>,
+  kind |-> <<"put">>,
+  readPending |-> TRUE,
+  readPublishedAfterClose |-> FALSE,
+  late |-> "absent",
+  decision |-> <<"pending">>,
+  native |-> <<"none">>,
+  nativeQueue |-> <<>>,
+  admittedAfterClose |-> {},
+  nativeCommits |-> <<>>,
+  confirmation |-> <<"none">>,
+  accepted |-> {},
+  pendingSync |-> {},
+  published |-> {},
+  publishedAfterClose |-> {},
+  handlerDone |-> {},
+  caller |-> <<"pending">> ]
+
+State 2: <Close line 65, col 3 to line 71, col 40 of module retirement_oracle>
+s = [ readKind |-> "initial",
+  open |-> FALSE,
+  retired |-> TRUE,
+  closeReason |-> "explicit",
+  status |-> <<"error">>,
+  kind |-> <<"put">>,
+  readPending |-> TRUE,
+  readPublishedAfterClose |-> FALSE,
+  late |-> "absent",
+  decision |-> <<"pending">>,
+  native |-> <<"none">>,
+  nativeQueue |-> <<>>,
+  admittedAfterClose |-> {},
+  nativeCommits |-> <<>>,
+  confirmation |-> <<"none">>,
+  accepted |-> {},
+  pendingSync |-> {},
+  published |-> {},
+  publishedAfterClose |-> {},
+  handlerDone |-> {},
+  caller |-> <<"pending">> ]
+
+State 3: <RegisterLate line 81, col 3 to line 83, col 39 of module retirement_oracle>
+s = [ readKind |-> "initial",
+  open |-> FALSE,
+  retired |-> TRUE,
+  closeReason |-> "explicit",
+  status |-> <<"error">>,
+  kind |-> <<"put">>,
+  readPending |-> TRUE,
+  readPublishedAfterClose |-> FALSE,
+  late |-> "loading",
+  decision |-> <<"pending">>,
+  native |-> <<"none">>,
+  nativeQueue |-> <<>>,
+  admittedAfterClose |-> {},
+  nativeCommits |-> <<>>,
+  confirmation |-> <<"none">>,
+  accepted |-> {},
+  pendingSync |-> {},
+  published |-> {},
+  publishedAfterClose |-> {},
+  handlerDone |-> {},
+  caller |-> <<"pending">> ]
+
+State 4: <FinishLateStartup line 86, col 3 to line 87, col 78 of module retirement_oracle>
+s = [ readKind |-> "initial",
+  open |-> FALSE,
+  retired |-> TRUE,
+  closeReason |-> "explicit",
+  status |-> <<"error">>,
+  kind |-> <<"put">>,
+  readPending |-> TRUE,
+  readPublishedAfterClose |-> FALSE,
+  late |-> "error",
+  decision |-> <<"pending">>,
+  native |-> <<"none">>,
+  nativeQueue |-> <<>>,
+  admittedAfterClose |-> {},
+  nativeCommits |-> <<>>,
+  confirmation |-> <<"none">>,
+  accepted |-> {},
+  pendingSync |-> {},
+  published |-> {},
+  publishedAfterClose |-> {},
+  handlerDone |-> {},
+  caller |-> <<"pending">> ]
+
+State 5: <FinishRead line 74, col 3 to line 78, col 70 of module retirement_oracle>
+s = [ readKind |-> "initial",
+  open |-> FALSE,
+  retired |-> TRUE,
+  closeReason |-> "explicit",
+  status |-> <<"error">>,
+  kind |-> <<"put">>,
+  readPending |-> FALSE,
+  readPublishedAfterClose |-> FALSE,
+  late |-> "error",
+  decision |-> <<"pending">>,
+  native |-> <<"none">>,
+  nativeQueue |-> <<>>,
+  admittedAfterClose |-> {},
+  nativeCommits |-> <<>>,
+  confirmation |-> <<"none">>,
+  accepted |-> {},
+  pendingSync |-> {},
+  published |-> {},
+  publishedAfterClose |-> {},
+  handlerDone |-> {},
+  caller |-> <<"pending">> ]
+
+State 6: <Decide line 90, col 3 to line 92, col 43 of module retirement_oracle>
+s = [ readKind |-> "initial",
+  open |-> FALSE,
+  retired |-> TRUE,
+  closeReason |-> "explicit",
+  status |-> <<"error">>,
+  kind |-> <<"put">>,
+  readPending |-> FALSE,
+  readPublishedAfterClose |-> FALSE,
+  late |-> "error",
+  decision |-> <<"rejected">>,
+  native |-> <<"none">>,
+  nativeQueue |-> <<>>,
+  admittedAfterClose |-> {},
+  nativeCommits |-> <<>>,
+  confirmation |-> <<"none">>,
+  accepted |-> {},
+  pendingSync |-> {},
+  published |-> {},
+  publishedAfterClose |-> {},
+  handlerDone |-> {},
+  caller |-> <<"pending">> ]
+
+State 7: <Admit line 95, col 3 to line 102, col 76 of module retirement_oracle>
+s = [ readKind |-> "initial",
+  open |-> FALSE,
+  retired |-> TRUE,
+  closeReason |-> "explicit",
+  status |-> <<"error">>,
+  kind |-> <<"put">>,
+  readPending |-> FALSE,
+  readPublishedAfterClose |-> FALSE,
+  late |-> "error",
+  decision |-> <<"rejected">>,
+  native |-> <<"notAdmitted">>,
+  nativeQueue |-> <<>>,
+  admittedAfterClose |-> {},
+  nativeCommits |-> <<>>,
+  confirmation |-> <<"none">>,
+  accepted |-> {},
+  pendingSync |-> {},
+  published |-> {},
+  publishedAfterClose |-> {},
+  handlerDone |-> {},
+  caller |-> <<"pending">> ]
+
+State 8: <Confirm line 121, col 3 to line 133, col 40 of module retirement_oracle>
+s = [ readKind |-> "initial",
+  open |-> FALSE,
+  retired |-> TRUE,
+  closeReason |-> "explicit",
+  status |-> <<"error">>,
+  kind |-> <<"put">>,
+  readPending |-> FALSE,
+  readPublishedAfterClose |-> FALSE,
+  late |-> "error",
+  decision |-> <<"rejected">>,
+  native |-> <<"notAdmitted">>,
+  nativeQueue |-> <<>>,
+  admittedAfterClose |-> {},
+  nativeCommits |-> <<>>,
+  confirmation |-> <<"suppressed">>,
+  accepted |-> {},
+  pendingSync |-> {},
+  published |-> {},
+  publishedAfterClose |-> {},
+  handlerDone |-> {},
+  caller |-> <<"pending">> ]
+
+State 9: <FinishHandler line 139, col 3 to line 147, col 74 of module retirement_oracle>
+s = [ readKind |-> "initial",
+  open |-> FALSE,
+  retired |-> TRUE,
+  closeReason |-> "explicit",
+  status |-> <<"error">>,
+  kind |-> <<"put">>,
+  readPending |-> FALSE,
+  readPublishedAfterClose |-> FALSE,
+  late |-> "error",
+  decision |-> <<"rejected">>,
+  native |-> <<"notAdmitted">>,
+  nativeQueue |-> <<>>,
+  admittedAfterClose |-> {},
+  nativeCommits |-> <<>>,
+  confirmation |-> <<"suppressed">>,
+  accepted |-> {},
+  pendingSync |-> {},
+  published |-> {},
+  publishedAfterClose |-> {},
+  handlerDone |-> {1},
+  caller |-> <<"pending">> ]
+
+State 10: Stuttering
+Finished checking temporal properties in 00s at 2026-10-05 22:34:34
+7892 states generated, 3496 distinct states found, 0 states left on queue.
+Finished in 00s at (2026-10-05 22:34:34)

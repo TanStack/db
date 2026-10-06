@@ -1,0 +1,169 @@
+Testing types with tsc and vue-tsc is an experimental feature.
+Breaking changes might not follow SemVer, please pin Vitest's version when using it.
+
+ RUN  v3.2.4 /Users/kyle.mathews/.codex/worktrees/pr-1179-review/tanstack-db/packages/indexeddb-db-collection
+
+ ❯ |@tanstack/indexeddb-db-collection| tests/compatibility-oracle.test.ts (31 tests | 6 failed | 25 skipped) 69ms
+   ↓ persists and broadcasts with randomUUID available
+   ↓ persists and broadcasts with getRandomValues available
+   ↓ keeps descriptor clients independent after first cleanup
+   ↓ keeps descriptor clients independent after second cleanup
+   ↓ uses a custom factory with global IDBKeyRange true
+   ↓ uses a custom factory with global IDBKeyRange false
+   ↓ distinguishes requested stores from existing stores at an unchanged version
+   ↓ persists its own mutations with an id set on options through automatic
+   ↓ persists its own mutations with an id set on options through manual
+   ↓ persists its own mutations with an id set on options through after-cleanup
+   ↓ persists its own mutations with an id set on collection through automatic
+   ↓ persists its own mutations with an id set on collection through manual
+   ↓ persists its own mutations with an id set on collection through after-cleanup
+   ↓ partitions owners with shared id false, cleanup false, order 0,1
+   ↓ partitions owners with shared id false, cleanup false, order 1,0
+   ↓ partitions owners with shared id false, cleanup true, order 0,1
+   ↓ partitions owners with shared id false, cleanup true, order 1,0
+   ↓ partitions owners with shared id true, cleanup false, order 0,1
+   ↓ partitions owners with shared id true, cleanup false, order 1,0
+   ↓ partitions owners with shared id true, cleanup true, order 0,1
+   ↓ partitions owners with shared id true, cleanup true, order 1,0
+   × preserves store isolation under legal name items 35ms
+     → version ownership: expected [ [ 'anchor', '0' ], …(2) ] to deeply equal [ [ 'anchor', '0' ], …(4) ]
+   × preserves store isolation under legal name constructor 8ms
+     → version ownership: expected [ [ 'anchor', '0' ], …(2) ] to deeply equal [ [ 'anchor', '0' ], …(4) ]
+   × preserves store isolation under legal name __proto__ 7ms
+     → version ownership: expected [ [ '__proto__', 2 ], …(2) ] to deeply equal [ [ '__proto__-neighbor', '0' ], …(4) ]
+   × preserves store isolation under legal name toString 6ms
+     → version ownership: expected [ [ 'anchor', '0' ], …(2) ] to deeply equal [ [ 'anchor', '0' ], …(4) ]
+   × preserves store isolation under legal name 雪/é 6ms
+     → version ownership: expected [ [ 'anchor', '0' ], …(2) ] to deeply equal [ [ 'anchor', '0' ], …(4) ]
+   × preserves store isolation under legal name a:b[0] 6ms
+     → version ownership: expected [ [ 'a:b[0]', 2 ], …(2) ] to deeply equal [ [ 'a:b[0]-neighbor', '0' ], …(4) ]
+   ↓ initializes 2 concurrent first opens with shared name true
+   ↓ initializes 2 concurrent first opens with shared name false
+   ↓ initializes 3 concurrent first opens with shared name true
+   ↓ initializes 3 concurrent first opens with shared name false
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 6 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  |@tanstack/indexeddb-db-collection| tests/compatibility-oracle.test.ts > preserves store isolation under legal name items
+ FAIL  |@tanstack/indexeddb-db-collection| tests/compatibility-oracle.test.ts > preserves store isolation under legal name constructor
+ FAIL  |@tanstack/indexeddb-db-collection| tests/compatibility-oracle.test.ts > preserves store isolation under legal name toString
+ FAIL  |@tanstack/indexeddb-db-collection| tests/compatibility-oracle.test.ts > preserves store isolation under legal name 雪/é
+AssertionError: version ownership: expected [ [ 'anchor', '0' ], …(2) ] to deeply equal [ [ 'anchor', '0' ], …(4) ]
+
+- Expected
++ Received
+
+@@ -6,17 +6,9 @@
+    [
+      "anchor",
+      0,
+    ],
+    [
+-     "items-neighbor",
+-     "0",
+-   ],
+-   [
+-     "items-neighbor",
+-     0,
+-   ],
+-   [
+      "items",
+      2,
+    ],
+  ]
+
+ ❯ expectDurableStores tests/compatibility-oracle.test.ts:148:61
+    146|   const keyOrder = (a: unknown, b: unknown) =>
+    147|     JSON.stringify(a).localeCompare(JSON.stringify(b))
+    148|   expect(versions.keys.sort(keyOrder), 'version ownership').toEqual(
+       |                                                             ^
+    149|     expectedKeys.sort(keyOrder),
+    150|   )
+ ❯ checkpoint tests/compatibility-oracle.test.ts:411:9
+ ❯ tests/compatibility-oracle.test.ts:434:7
+ ❯ withHarness tests/harness.ts:184:5
+ ❯ tests/compatibility-oracle.test.ts:396:5
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/6]⎯
+
+ FAIL  |@tanstack/indexeddb-db-collection| tests/compatibility-oracle.test.ts > preserves store isolation under legal name __proto__
+AssertionError: version ownership: expected [ [ '__proto__', 2 ], …(2) ] to deeply equal [ [ '__proto__-neighbor', '0' ], …(4) ]
+
+- Expected
++ Received
+
+@@ -1,15 +1,7 @@
+  [
+    [
+-     "__proto__-neighbor",
+-     "0",
+-   ],
+-   [
+-     "__proto__-neighbor",
+-     0,
+-   ],
+-   [
+      "__proto__",
+      2,
+    ],
+    [
+      "anchor",
+
+ ❯ expectDurableStores tests/compatibility-oracle.test.ts:148:61
+    146|   const keyOrder = (a: unknown, b: unknown) =>
+    147|     JSON.stringify(a).localeCompare(JSON.stringify(b))
+    148|   expect(versions.keys.sort(keyOrder), 'version ownership').toEqual(
+       |                                                             ^
+    149|     expectedKeys.sort(keyOrder),
+    150|   )
+ ❯ checkpoint tests/compatibility-oracle.test.ts:411:9
+ ❯ tests/compatibility-oracle.test.ts:434:7
+ ❯ withHarness tests/harness.ts:184:5
+ ❯ tests/compatibility-oracle.test.ts:396:5
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/6]⎯
+
+ FAIL  |@tanstack/indexeddb-db-collection| tests/compatibility-oracle.test.ts > preserves store isolation under legal name a:b[0]
+AssertionError: version ownership: expected [ [ 'a:b[0]', 2 ], …(2) ] to deeply equal [ [ 'a:b[0]-neighbor', '0' ], …(4) ]
+
+- Expected
++ Received
+
+@@ -1,15 +1,7 @@
+  [
+    [
+-     "a:b[0]-neighbor",
+-     "0",
+-   ],
+-   [
+-     "a:b[0]-neighbor",
+-     0,
+-   ],
+-   [
+      "a:b[0]",
+      2,
+    ],
+    [
+      "anchor",
+
+ ❯ expectDurableStores tests/compatibility-oracle.test.ts:148:61
+    146|   const keyOrder = (a: unknown, b: unknown) =>
+    147|     JSON.stringify(a).localeCompare(JSON.stringify(b))
+    148|   expect(versions.keys.sort(keyOrder), 'version ownership').toEqual(
+       |                                                             ^
+    149|     expectedKeys.sort(keyOrder),
+    150|   )
+ ❯ checkpoint tests/compatibility-oracle.test.ts:411:9
+ ❯ tests/compatibility-oracle.test.ts:434:7
+ ❯ withHarness tests/harness.ts:184:5
+ ❯ tests/compatibility-oracle.test.ts:396:5
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[3/6]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  6 failed | 25 skipped (31)
+Type Errors  no errors
+   Start at  09:54:41
+   Duration  1.30s (transform 426ms, setup 23ms, collect 594ms, tests 69ms, environment 378ms, prepare 87ms)
+
