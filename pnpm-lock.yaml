@@ -1518,6 +1518,9 @@ importers:
         specifier: '>=4.7'
         version: 5.9.3
     devDependencies:
+      '@tanstack/node-db-sqlite-persistence':
+        specifier: workspace:*
+        version: link:../node-db-sqlite-persistence
       '@tanstack/offline-transactions':
         specifier: workspace:*
         version: link:../offline-transactions
