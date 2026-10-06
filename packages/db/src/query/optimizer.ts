@@ -823,8 +823,7 @@ function deepCopyQuery(query: QueryIR): QueryIR {
           type: joinClause.type,
           on: joinClause.on,
           from: deepCopyFrom(joinClause.from) as
-            | CollectionRefClass
-            | QueryRefClass,
+            CollectionRefClass | QueryRefClass,
         }))
       : undefined,
     where: query.where ? [...query.where] : undefined,
