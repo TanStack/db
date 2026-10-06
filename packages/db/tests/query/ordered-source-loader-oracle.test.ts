@@ -58,6 +58,8 @@ function createOrderByInfo(
     index: {} as NonNullable<OrderByOptimizationInfo[`index`]>,
     dataNeeded: () => 1,
     requiresFullSource: false,
+    // A finite provider, not an eager source: its rows are not all installed.
+    sourceHoldsAllRows: false,
     ...overrides,
   }
 }

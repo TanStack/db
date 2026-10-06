@@ -51,7 +51,7 @@ export type OrderByOptimizationInfo = {
    */
   requiresFullSource: boolean
   /** Whether the ordered source's installed rows are the whole source. */
-  sourceHoldsAllRows?: boolean
+  sourceHoldsAllRows: boolean
   /** Source whose lazy demand must settle before a joined-filter page. */
   joinedFilterSourceId?: string
 }
