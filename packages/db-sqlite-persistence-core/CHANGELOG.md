@@ -1,5 +1,24 @@
 # @tanstack/db-sqlite-persistence-core
 
+## 0.4.5
+
+### Patch Changes
+
+- Fix stalled collection hydration when source transactions arrive during a SQLite hydration read. Ensure buffered transactions are durable before hydration completes. ([#2049](https://github.com/TanStack/db/pull/2049))
+
+- Preserve native `Temporal.Instant` and `Temporal.PlainDate` values in SQLite rows, metadata, replay, and expression indexes when Temporal constructors are registered globally. Retain nanosecond precision, calendar identity, and native literals in Collection index metadata. ([#2039](https://github.com/TanStack/db/pull/2039))
+
+  Keep native index signatures distinct from ordinary tagged records, isolate mutable index metadata snapshots, and preserve NUL-bearing literals in SQLite expression indexes. Reuse each native query literal encoding for its order and identity.
+
+  Validate remote subset admission without constructing discarded wire snapshots, while preserving fresh coordinator snapshots and the existing wire-value restrictions.
+
+  Keep optional persisted index serialization failures inside existing warning boundaries so startup and ordinary reads remain available.
+
+- Preserve accepted sync transactions while they wait behind persisted reads, including transactions that began during an earlier read. Keep newer sync-adapter changes after the persisted baseline and preserve the order of truncate replay. ([#2037](https://github.com/TanStack/db/pull/2037))
+
+- Updated dependencies [[`d029833`](https://github.com/TanStack/db/commit/d0298332ec98ef99e8bf6e08cc32c8e1cd345fab), [`aa1b58e`](https://github.com/TanStack/db/commit/aa1b58e960421479c0fe1ffc243d49feada3c1c7), [`c3a4e4a`](https://github.com/TanStack/db/commit/c3a4e4a008ead8a2a910c9d965a1f3a77a0f2606), [`2376eb5`](https://github.com/TanStack/db/commit/2376eb581d66d1d52d2ab8fd1619060c74be5311), [`a37e69a`](https://github.com/TanStack/db/commit/a37e69ab6aa35fd6a2a72d727de2b5168d10b1a0), [`d029833`](https://github.com/TanStack/db/commit/d0298332ec98ef99e8bf6e08cc32c8e1cd345fab), [`d029833`](https://github.com/TanStack/db/commit/d0298332ec98ef99e8bf6e08cc32c8e1cd345fab), [`de8d0f1`](https://github.com/TanStack/db/commit/de8d0f1bffefb2885c4fe244c317c81d1ddc9117)]:
+  - @tanstack/db@0.12.1
+
 ## 0.4.4
 
 ### Patch Changes

@@ -1,5 +1,41 @@
 # @tanstack/db
 
+## 0.12.1
+
+### Patch Changes
+
+- Fix CommonJS declaration imports so Node16 and NodeNext TypeScript consumers can resolve the public APIs. Preserve ESM module references and string-literal types. ([#1179](https://github.com/TanStack/db/pull/1179))
+
+- Evaluate `inArray` over a constant list with a Set lookup instead of comparing the value with every list item. A join that loads matching rows through a source with no index sends one large constant list, so a cold join over 10,000 rows no longer compares each row with every key. ([#2045](https://github.com/TanStack/db/pull/2045))
+
+- Build a live query's keyed `state` map only when code reads it. Most callers read only `data`, so an update no longer builds a second copy of the results: ([#2043](https://github.com/TanStack/db/pull/2043))
+
+  - The shared live query snapshot and the infinite query window build `state` on first read.
+  - `useLiveInfiniteQuery` in React reads `state` only when your code reads it.
+  - Vue and Svelte `useLiveQuery` build their `data` array from the snapshot's ordered rows instead of from `state`.
+
+  A retained snapshot still shows the rows from the time it was built.
+
+- Keep last-write-wins row metadata when a sync transaction begun inside an open one commits first. The open transaction's inserts are reclassified against the new rows. An explicit `metadata.row.set` followed by an insert that becomes a real insert is now cleared, and one followed by an insert that becomes an equal re-insert is now kept. ([#2048](https://github.com/TanStack/db/pull/2048))
+
+- Preserve native `Temporal.Instant` and `Temporal.PlainDate` values in SQLite rows, metadata, replay, and expression indexes when Temporal constructors are registered globally. Retain nanosecond precision, calendar identity, and native literals in Collection index metadata. ([#2039](https://github.com/TanStack/db/pull/2039))
+
+  Keep native index signatures distinct from ordinary tagged records, isolate mutable index metadata snapshots, and preserve NUL-bearing literals in SQLite expression indexes. Reuse each native query literal encoding for its order and identity.
+
+  Validate remote subset admission without constructing discarded wire snapshots, while preserving fresh coordinator snapshots and the existing wire-value restrictions.
+
+  Keep optional persisted index serialization failures inside existing warning boundaries so startup and ordinary reads remain available.
+
+- Keep numeric and string keys distinct within mutation transactions. Detach supported buffers and views at the update snapshot boundary while preserving bytes, ranges, aliases, and custom typed-array construction compatibility. ([#1179](https://github.com/TanStack/db/pull/1179))
+
+- Allow sync adapters to replace rows with `truncate({ markReady: false })` while ([#1179](https://github.com/TanStack/db/pull/1179))
+  preserving Collection status. Keep the existing default readiness behavior.
+
+- Fix a ready callback error from a sync truncate committed inside the sync function. The error now surfaces when the sync function returns, as it does for `markReady()`, instead of stopping the sync function and moving the collection to `error`. ([#2040](https://github.com/TanStack/db/pull/2040))
+
+- Updated dependencies [[`d029833`](https://github.com/TanStack/db/commit/d0298332ec98ef99e8bf6e08cc32c8e1cd345fab)]:
+  - @tanstack/db-ivm@0.1.26
+
 ## 0.12.0
 
 ### Minor Changes

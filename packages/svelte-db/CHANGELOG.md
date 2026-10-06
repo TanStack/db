@@ -1,5 +1,20 @@
 # @tanstack/svelte-db
 
+## 0.5.5
+
+### Patch Changes
+
+- Build a live query's keyed `state` map only when code reads it. Most callers read only `data`, so an update no longer builds a second copy of the results: ([#2043](https://github.com/TanStack/db/pull/2043))
+
+  - The shared live query snapshot and the infinite query window build `state` on first read.
+  - `useLiveInfiniteQuery` in React reads `state` only when your code reads it.
+  - Vue and Svelte `useLiveQuery` build their `data` array from the snapshot's ordered rows instead of from `state`.
+
+  A retained snapshot still shows the rows from the time it was built.
+
+- Updated dependencies [[`d029833`](https://github.com/TanStack/db/commit/d0298332ec98ef99e8bf6e08cc32c8e1cd345fab), [`aa1b58e`](https://github.com/TanStack/db/commit/aa1b58e960421479c0fe1ffc243d49feada3c1c7), [`c3a4e4a`](https://github.com/TanStack/db/commit/c3a4e4a008ead8a2a910c9d965a1f3a77a0f2606), [`2376eb5`](https://github.com/TanStack/db/commit/2376eb581d66d1d52d2ab8fd1619060c74be5311), [`a37e69a`](https://github.com/TanStack/db/commit/a37e69ab6aa35fd6a2a72d727de2b5168d10b1a0), [`d029833`](https://github.com/TanStack/db/commit/d0298332ec98ef99e8bf6e08cc32c8e1cd345fab), [`d029833`](https://github.com/TanStack/db/commit/d0298332ec98ef99e8bf6e08cc32c8e1cd345fab), [`de8d0f1`](https://github.com/TanStack/db/commit/de8d0f1bffefb2885c4fe244c317c81d1ddc9117)]:
+  - @tanstack/db@0.12.1
+
 ## 0.5.4
 
 ### Patch Changes
