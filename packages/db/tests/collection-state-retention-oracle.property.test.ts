@@ -29,9 +29,10 @@ import type { SyncConfig, TransactionState } from '../src/types.js'
  *
  * The oracle compares retained source data, public rows, indexes, events, and
  * sync-run ownership after every cut. This makes stale-sync-run writes and rows
- * that vanish or reappear only after unrelated work observable. After each
- * restart, the old run writes and commits a row. Cleanup ended that run, so
- * the row never appears and the commit returns `true`.
+ * that vanish or reappear only after unrelated work observable. After a plain
+ * restart, and while a reentrant restart's new transaction is still open, the
+ * old run writes and commits a row. Cleanup ended that run, so the row never
+ * appears and the commit returns `true`.
  */
 
 type RetainedRow = {
@@ -184,6 +185,16 @@ function applyAction(
   expect(sync.commit()).toBe(true)
 }
 
+/**
+ * Write and commit from a sync run that cleanup ended. Key 9 is outside the
+ * generated keys, so a leaked write shows as an extra row.
+ */
+function writeFromEndedRun(sync: SyncActions): void {
+  sync.begin()
+  sync.write({ type: `insert`, value: { id: 9, value: 9 } })
+  expect(sync.commit(), `stale sync run commit`).toBe(true)
+}
+
 function expectRetainedState(
   collection: Collection<RetainedRow, number>,
   model: ReadonlyMap<number, RetainedRow>,
@@ -224,9 +235,7 @@ async function runRetentionHistory(
         model.clear()
         // Cleanup ended the old run, so its retained actions are inert. Its
         // commit returns `true`: the caller has nothing to wait for.
-        oldSync.begin()
-        oldSync.write({ type: `insert`, value: { id: 0, value: 9 } })
-        expect(oldSync.commit(), `stale sync run commit`).toBe(true)
+        writeFromEndedRun(oldSync)
       } else if (action.type === `reentrantRestart`) {
         const oldSync = harness.sync
         const triggerType = model.has(action.row.id) ? `update` : `insert`
@@ -304,6 +313,9 @@ async function runRetentionHistory(
           expect(restartedReceipt).toBeDefined()
           if (restartedReceipt !== true) await restartedReceipt
         } else {
+          // The new run's transaction is open here, so a stale write that
+          // reached it would apply with the new run's commit.
+          writeFromEndedRun(oldSync)
           expect(restartedSync.commit()).toBe(true)
         }
         const triggerRows = new Map(model)
@@ -952,6 +964,10 @@ it.each([
       sync.begin()
       sync.write({ type: `update`, value: { id: 1, value: 2 } })
       expect(sync.commit()).toBe(true)
+      // The premise: the replay has already invalidated the open transaction.
+      expect(
+        collection._state.pendingSyncedTransactions.at(-1)?.invalidationError,
+      ).toBeInstanceOf(DuplicateKeySyncError)
       sync.write(late)
       sync.begin()
       const write = () => sync.write({ type: `insert`, value: newer })

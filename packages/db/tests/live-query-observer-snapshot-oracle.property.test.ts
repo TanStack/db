@@ -92,7 +92,7 @@ function setup(shape: Shape) {
       return shape === `single` ? ordered.findOne() : ordered
     },
   })
-  const observer = createLiveQueryObserver(query as any)
+  const observer = createLiveQueryObserver<Row, string>(query as any)
   return { source, query, observer }
 }
 

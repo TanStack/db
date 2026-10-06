@@ -216,20 +216,26 @@ describe(`createLiveQueryWindowController`, () => {
   // A snapshot is one value. Code that compares `state` by identity, such as
   // a React dependency list, must see one Map for one snapshot.
   it(`returns the same state map on every read of one snapshot`, async () => {
-    const lq = makeOrderedLiveQuery(makeSource(), 2)
+    const source = makeSource()
+    const lq = makeOrderedLiveQuery(source, 2)
     const controller = createLiveQueryWindowController<Row, string>(lq as any, {
       pageSize: 2,
     })
-    controller.subscribe(() => {})
-    await lq.preload()
-    await flush()
+    try {
+      controller.subscribe(() => {})
+      await lq.preload()
+      await flush()
 
-    const snap = controller.getSnapshot()
-    const state = snap.state
-    expect(state?.size).toBeGreaterThan(0)
-    expect(snap.state).toBe(state)
-    expect(controller.getSnapshot().state).toBe(state)
-    controller.dispose()
+      const snap = controller.getSnapshot()
+      const state = snap.state
+      expect(state?.size).toBeGreaterThan(0)
+      expect(snap.state).toBe(state)
+      expect(controller.getSnapshot().state).toBe(state)
+    } finally {
+      controller.dispose()
+      await lq.cleanup()
+      await source.cleanup()
+    }
   })
 
   it(`loads further pages via fetchNextPage until the source is exhausted`, async () => {

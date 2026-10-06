@@ -45,11 +45,14 @@ write a late insert and a late delete. The newer transaction must see only
 the accepted row. Both fail under SY8.
 
 **A stale run's commit (SY13).** The retention oracle's lifecycle driver
-committed from an old run only while that run was still current. Its
-`restart` action now also writes and commits a row from the old run after
-cleanup ends it. The commit must return `true`, and the row must not appear.
-The fixed and random retention campaigns fail under SY13. They also fail
-under a mutant that stops ignoring a stale run's writes.
+committed from an old run only while that run was still current. Now the old
+run also writes and commits a row after cleanup ends it, at two points: after
+a plain `restart`, and while a reentrant restart's new transaction is still
+open. The commit must return `true`, and the row must not appear. The fixed
+and random retention campaigns fail under SY13. A mutant that routes a stale
+run's write into the new run's open transaction fails both pinned
+`afterOldReturn` histories, because the row appears. After a plain restart no
+transaction is open, so there a stale write fails only by throwing.
 
 **Acceptance of an abandoned receipt (X3).** A commit that core never
 accepts, because its signal was aborted or a replay invalidated it, returns a
@@ -57,17 +60,22 @@ bare receipt with no acceptance moment. `whenSyncAccepted` must then wait for
 that receipt, which rejects. The optimistic-history oracle's aborted batches
 and the retention oracle's invalidation replay now check that the acceptance
 moment rejects too. Under X3, the invalidation replay, the open-at-settlement
-histories, and the fixed and random optimistic-history campaigns fail. The
-persistence packages wrap receipts through `withAcceptedReceipt` with their
-durable step, so X3 does not reach them. This review did not run their suites.
+histories, and the fixed and random optimistic-history campaigns fail. X3 also
+reaches every adapter that calls `whenSyncAccepted` on a core receipt:
+SQLite persistence, Query DB, Electric, and PowerSync. Under X3 those callers
+would treat an abandoned write as accepted. This review did not run their
+suites under X3. The core witnesses above own the fallback rule.
 
 **State identity (X4, X5).** Before #2043, `state` was a field of the
 snapshot. The lazy getter must keep that identity: one snapshot has one
 `state` map. Consumers that compare by identity, such as a React dependency
 list, rely on it. The snapshot oracle now checks that a second read of `data`
-and `state` returns the first read's objects, and all five of its tests fail
-under X4. A witness in `live-query-window-controller.test.ts` checks the
-window snapshot and fails under both X4 and X5.
+and `state` returns the first read's objects. Five of its six tests fail
+under X4. The sixth is the calibration test, which replaces the `state`
+getter. `data` is a plain field today, so its identity check has no
+demonstrated kill. It guards a future lazy `data`. A witness in
+`live-query-window-controller.test.ts` checks the window snapshot and fails
+under both X4 and X5.
 
 ## ST27: an unreachable branch
 
@@ -89,6 +97,24 @@ peek-ahead row that `data` omits. `useLiveInfiniteQuery` in React returns that
 map. This predates #2043. This review does not decide whether `state` should
 match `data`.
 
+## Review
+
+A medium code review found eight items. Each is fixed here.
+
+1. A commit hook's ESLint run removed a type assertion from the snapshot
+   oracle, and `tsc` then failed. The setup now passes type arguments.
+2. The record said X3 cannot reach the persistence packages. It can reach
+   every adapter that calls `whenSyncAccepted`. Corrected above.
+3. The window witness did not clean up in a `finally` block. Fixed.
+4. The stale-run row check could not fail on its own after a plain restart.
+   The driver now also writes from the ended run while a new transaction is
+   open, and a routing mutant fails there.
+5. The `data` identity check has no demonstrated kill. Stated above.
+6. Reentrant restarts never reached the stale commit. Fixed with item 4.
+7. The snapshot oracle has six tests, not five. Corrected.
+8. The SY8 witnesses did not check their premise. They now check that the
+   open transaction is invalid before the late write.
+
 ## ORC outcomes
 
 - **ORC-001: met.** SY8 follows the comment on the guard: a commit receipt
@@ -100,9 +126,12 @@ match `data`.
 - **ORC-002: met.** The witnesses expect fixed outcomes or use the existing
   independent models.
 - **ORC-003: met.** Each change has prose beside its code.
-- **ORC-004: met.** The `restart` action is in the existing generated
-  grammar, so every restart history reaches the stale commit. The other
-  changes add observations, not grammar.
+- **ORC-004: met.** The `restart` and `reentrantRestart` actions are in the
+  existing generated grammar. Every plain restart and every `afterOldReturn`
+  reentrant restart reaches the stale commit. An `insideListener` reentrant
+  restart commits the new run inside the listener, so no open transaction
+  remains for a stale write to reach. The other changes add observations,
+  not grammar.
 - **ORC-005: met.** Each witness drives a real Collection, observer, or
   window controller and observes public results.
 - **ORC-006: met.** Each closed mutant fails the tests named above.
@@ -111,9 +140,11 @@ match `data`.
 - **ORC-008: not applicable.** No model gained state.
 - **ORC-009: met.** "Acceptance moment" is the value `whenSyncAccepted`
   returns.
-- **ORC-010: met.** Each witness cleans up in a `finally` block.
+- **ORC-010: met.** Each witness cleans up its Collection, live query, or
+  controller in a `finally` block.
 - **ORC-011: not applicable.**
 - **ORC-012: met by this record.**
 - **ORC-013: met.** The SY8 witnesses cover both directions of the leak: one
-  makes a valid insert throw, and one lets a duplicate insert pass.
+  makes a valid insert throw, and one lets a duplicate insert pass. Each
+  first checks that the replay already invalidated the open transaction.
 - **ORC-014: not applicable.**
