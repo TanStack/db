@@ -902,8 +902,9 @@ relies on that delivery. An eager source's installed rows are the whole source,
 so an indexed request with one order term reads only the first `limit` matching
 local rows; a row in the source's first `limit` is also in the local first
 `limit`. A second order term keeps the full local read, because an index on the
-first term cannot order its ties. When every request in an eager source's
-ordered-prefix repair returns literal `true`, the repair settles synchronously,
+first term cannot order its ties. When every request in a bounded prefix
+repair (an eager source, an index, one order term) returns literal `true`, the
+repair settles synchronously,
 so its tie and refill steps finish inside the same graph run and a window move
 that consumes the repair still publishes once. A full-source request, initial
 or repair, keeps its asynchronous settlement. The
@@ -1094,7 +1095,7 @@ delta, but `onBatch`/`onEnter`/`onUpdate`/`onExit` callbacks retain the last
 complete result. Prefix, tie, and refill promises join one continuous gate;
 the final successful participant schedules one flush of the accumulated delta.
 A synchronous adapter result still contributes the loader's wrapped repair
-participant, except in an eager source's synchronous ordered-prefix repair:
+participant, except in a synchronous bounded prefix repair:
 that repair finishes inside the graph run that publishes its window, so no
 callback can observe a partial window and no participant is needed. At flush, equal insert/delete counts are classified against the
 last callback-visible membership and value: absent-to-absent produces no event,
@@ -1189,7 +1190,7 @@ remaining synchronous ordered continuations and graph work before the
 initiating call stack returns. The live-query Collection rows and initial-query
 readiness are observable at that cut. A Promise result keeps that acquisition
 asynchronous. This cut does not apply to explicit window moves, full-source
-requests, repair other than an eager source's ordered-prefix repair, truncate
+requests, repair other than a bounded prefix repair, truncate
 replay, or framework render timing, and it proves neither source exhaustion
 nor broader source coverage.
 

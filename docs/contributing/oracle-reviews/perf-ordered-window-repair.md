@@ -153,3 +153,20 @@ and the mutant runs are in the PR evidence; this section records the outcomes.
 After these fixes, the original predicate-only read, `limit + 1`, the
 resend-domain mutant and the unbounded refill all fail. `limit - 1` (M1)
 still survives, as above.
+
+## Second review follow-up (2026-10-06)
+
+A high-effort code review of `308bb12b9` raised nine findings. Each was
+checked with a probe on this branch and on `main`, or with a mutant.
+
+| Finding | Outcome |
+| --- | --- |
+| 1: a synchronous prefix repair holds no publication gate, so a later asynchronous step could publish a partial window | Refuted for both named paths. A repair whose boundary enters a NaN tie group falls back to a full-source read (204 rows delivered) and publishes `[61,62]` once, as on `main`. A blocked LEFT-joined filter publishes nothing while blocked and `[2,3]` once after release, as on `main`. The eager-window oracle now asserts one publication per change whose window equals the model, and pins the NaN tie-group repair. A mutant with `main`'s asynchronous gate also passes this law: single-change histories publish once under both designs, and the pagination laws own window moves. |
+| 2: `ReverseIndex` requires `nullsFirst` | Low. `ReverseIndex` is a read-time wrapper that `findIndexForField` builds; no caller outside this package constructs it. The parameter now defaults to `false`. |
+| 3: a bounded read skips stale rows kept after a failed truncate replay | Refuted. An eager collection never calls `loadSubset`, so it has no replay demand to fail (the probe recorded no calls). Source cleanup puts every dependent live query in its terminal error, on this branch and on `main`. |
+| 4: two-term and unindexed eager repairs settled synchronously | Fixed. The loader oracle pins that an eager prefix repair settles synchronously only for a bounded read. RED on `308bb12b9`: the two-term and unindexed cases settled before `loadMore` returned. The gate now uses the same bounded-read fact as the subscription; the old gate fails 2 cases. |
+| 5: the source-holds-all-rows rule was coded twice | Fixed. The loader computes the bounded-read fact once and passes it to `requestSnapshot`, which no longer checks the sync mode, the index or the term count. A subscription that ignores the flag reads 206 rows where the bound is 5. |
+| 6: the bounded read repeats index discovery and could fall back to a full sort | Partly confirmed. Index discovery per repair costs one scan of the collection's index list and is kept. A silent fall back to a full sort was not caught: the scan law allowed one pass. A bounded step must now scan no more rows than its work bound; a mutant that disables the index read in `getOrderedKeys` fails (406 > 204). |
+| 7: each reversed read gathers the nullish group | Accepted design (see Unresolved). |
+| 8: two tie-key orders cut through a NaN tie group | Duplicate of R7. A NaN boundary cannot be a cursor, so the loader reads the full source whatever the tie order, and the window publishes once with the right rows. |
+| 9: `sourceHoldsAllRows` defaulted to true for an unknown source | Fixed. It reads the resolved source collection, which is never undefined there. |
