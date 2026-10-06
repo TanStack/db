@@ -42,9 +42,11 @@
 import { describe, expect, it } from 'vitest'
 import {
   BTreeIndex,
+  DbClient,
   Query,
   createCollection,
   createLiveQueryCollection,
+  createLiveQueryObserver,
   eq,
 } from '../src'
 import { createPooledLiveQuery } from '../src/query/pooled-live-query.js'
@@ -507,5 +509,46 @@ describe(`pooled live-query deferred acquisition`, () => {
         }
       })
     }
+  }
+})
+
+/**
+ * ## A preload answered by a DbClient stream
+ *
+ * During SSR streaming, a DbClient may already hold a pending or settled
+ * stream for a query. The observer's preload then returns that stream instead
+ * of preloading the live-query Collection. It is still a request for the
+ * Collection's data, so it counts as a preload: deferred acquisition resumes
+ * and the idle source Collection starts its sync run.
+ */
+describe(`preload answered by a DbClient stream`, () => {
+  for (const stream of [`pending`, `success`] as const) {
+    it(`a ${stream} stream still resumes deferred acquisition`, async () => {
+      const { collection: source, counts } = makeSource(`eager-idle`)
+      const { outer } = makeLiveQuery(source, `all`, 1)
+      const client = new DbClient()
+      const queryHash = `deferred-acquisition-stream-${stream}`
+      const registered = client._registerLiveQuery(
+        queryHash,
+        stream === `pending`
+          ? new Promise<never>(() => {})
+          : Promise.resolve(undefined as never),
+      )
+      if (stream === `success`) await registered
+      const observer = createLiveQueryObserver(outer, { client, queryHash })
+      try {
+        outer.startSyncImmediate()
+        await settle()
+        expect(counts.starts, `before the preload`).toBe(0)
+        void observer.preload()
+        await settle()
+        expect(counts.starts, `after the preload`).toBe(1)
+        expect(outer.toArray.map((row) => row.id)).toEqual(EXPECTED_IDS.all)
+      } finally {
+        observer.dispose()
+        await outer.cleanup()
+        await source.cleanup()
+      }
+    })
   }
 })
