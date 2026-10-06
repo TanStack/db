@@ -43,12 +43,12 @@ import { describe, expect, it } from 'vitest'
 import {
   BTreeIndex,
   DbClient,
-  Query,
   createCollection,
   createLiveQueryCollection,
   createLiveQueryObserver,
   eq,
 } from '../src'
+import { Query } from '../src/query/builder/index.js'
 import { createPooledLiveQuery } from '../src/query/pooled-live-query.js'
 import type { Collection } from '../src'
 
@@ -442,6 +442,14 @@ describe(`live-query deferred acquisition`, () => {
  * partition, so this block uses the histories without cleanup. `start` is
  * building the view.
  */
+// The pooled entry point takes the internal builder, as its own oracle does.
+const pooledQuery =
+  (source: Collection<Row, string | number, any>) => (q: any) =>
+    q
+      .from({ row: source })
+      .where(({ row }: any) => eq(row.group, `g`))
+      .orderBy(({ row }: any) => row.rank, `asc`)
+
 describe(`pooled live-query deferred acquisition`, () => {
   const pooledHistories: Record<string, Array<Command>> = {
     'build and read without a subscriber': [`start`, `read`],
@@ -460,13 +468,9 @@ describe(`pooled live-query deferred acquisition`, () => {
             const before = { ...counts }
             switch (command) {
               case `start`:
-                view = createPooledLiveQuery(
-                  new Query()
-                    .from({ row: source })
-                    .where(({ row }) => eq(row.group, `g`))
-                    .orderBy(({ row }) => row.rank, `asc`),
-                  { gcTime: 0 },
-                )
+                view = createPooledLiveQuery(pooledQuery(source)(new Query()), {
+                  gcTime: 0,
+                })
                 expect(view, `the query is poolable`).toBeDefined()
                 break
               case `read`:
