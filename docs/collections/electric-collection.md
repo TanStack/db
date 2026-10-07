@@ -366,7 +366,8 @@ Eager and progressive recovery fetch a full snapshot. Cached rows remain visible
 until that replacement completes; a partial batch or subset completion cannot
 publish it early. An on-demand collection with the current SQLite persistence
 wrapper instead retains cached rows on disk but clears the source Collection's
-uncertified rows. It starts a changes-only stream at the current position and
+uncertified rows. That local clear does not mark the Collection ready. Electric
+source evidence supplies readiness. It starts a changes-only stream at the current position and
 requests snapshots for active subset demands. Each demand completes after its
 snapshot rows apply, including an empty snapshot. Later demands cannot rehydrate
 old cache rows without a fresh source snapshot. With no active demand, recovery

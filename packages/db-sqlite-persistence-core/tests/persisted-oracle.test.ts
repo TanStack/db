@@ -18045,6 +18045,90 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
     expect(adapter.loadSubsetCalls).toEqual([])
   })
 
+  // A local cache clear supplies no source-readiness evidence. The model starts
+  // loading, accepts the scoped truncate, and remains loading until the source
+  // explicitly marks ready. This wrapper-path check observes status after the
+  // truncate commit, where the core default could otherwise publish readiness.
+  it(`keeps initial Collection loading through a scoped cache clear`, async () => {
+    const adapter = createRecordingAdapter()
+    let source!: TodoSyncParams
+    const collection = createCollection(
+      persistedCollectionOptions<Todo, string>({
+        id: `scoped-clear-readiness`,
+        syncMode: `on-demand`,
+        getKey: (row) => row.id,
+        sync: {
+          sync: (params) => {
+            source = params
+          },
+        },
+        persistence: { adapter },
+      }),
+    )
+
+    try {
+      collection.startSyncImmediate()
+      await flushAsyncWork()
+      expect(collection.status).toBe(`loading`)
+      await source.metadata!.persistence!.startScopedRecovery!()
+      expect(collection.status).toBe(`loading`)
+      source.markReady()
+      await flushAsyncWork()
+      expect(collection.status).toBe(`ready`)
+    } finally {
+      await collection.cleanup()
+    }
+  })
+
+  // Core applies an accepted truncate even while a local optimistic handler
+  // persists. The source may continue after this accepted clear; a later subset
+  // still waits for its own applied rows. This held-handler cut tests the
+  // review's proposed acceptance/application cycle on the actual wrapper path.
+  it(`accepts a scoped cache clear while an optimistic handler is held`, async () => {
+    const adapter = createRecordingAdapter()
+    const entered = createDeferred()
+    const release = createDeferred()
+    let source!: TodoSyncParams
+    const collection = createCollection(
+      persistedCollectionOptions<Todo, string>({
+        id: `scoped-clear-held-handler`,
+        syncMode: `on-demand`,
+        getKey: (row) => row.id,
+        sync: {
+          sync: (params) => {
+            source = params
+            params.markReady()
+          },
+        },
+        persistence: { adapter },
+        onInsert: async () => {
+          entered.resolve()
+          await release.promise
+        },
+      }),
+    )
+    let mutation: ReturnType<typeof collection.insert> | undefined
+
+    try {
+      collection.startSyncImmediate()
+      await collection.stateWhenReady()
+      mutation = collection.insert({ id: `local`, title: `Pending` })
+      await entered.promise
+      const recovery = observeSettlement(
+        source.metadata!.persistence!.startScopedRecovery!(),
+      )
+      await flushAsyncWork()
+      expect(recovery.read()).toEqual({ status: `fulfilled` })
+      expect(collection.get(`local`)).toBeDefined()
+      release.resolve()
+      await mutation.isPersisted.promise
+    } finally {
+      release.resolve()
+      await mutation?.isPersisted.promise.catch(() => undefined)
+      await collection.cleanup()
+    }
+  })
+
   it(`fail-stops queued and later work when reset reload fails after truncation`, async () => {
     const seed = { id: `seed`, title: `durable baseline` }
     const adapter = createRecordingAdapter([seed])

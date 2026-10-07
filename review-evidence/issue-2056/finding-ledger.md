@@ -1,6 +1,6 @@
 # Issue 2056 append-only evaluation ledger
 
-Source: https://github.com/TanStack/db/issues/2056; raw body in evaluate-2056-raw.json.
+Source: https://github.com/TanStack/db/issues/2056; raw body in raw-issue.json.
 Reviewed head: f43a16522c990134ae993235a312d2d5e433dc8a (main, 2026-10-06).
 Scope: reproduce by strengthening oracles, audit laws/enforcement, compare candidate fixes; production repair awaits user selection.
 All initial verdicts are pending evidence. No claim is omitted for overlap.

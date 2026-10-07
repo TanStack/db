@@ -756,7 +756,7 @@ type SyncControlFns<T extends object, TKey extends string | number> = {
       ) => void)
     | null
   commit: ((signal?: AbortSignal) => SyncAppliedReceipt) | null
-  truncate: (() => void) | null
+  truncate: ((options?: { markReady?: boolean }) => void) | null
   metadata: SyncMetadataApi<TKey> | null
   markError: ((error: unknown) => void) | null
 }
@@ -1732,7 +1732,7 @@ class PersistedCollectionRuntime<
     if (!this.syncControls.begin || !this.syncControls.commit) return
     const applied = this.withInternalApply(() => {
       this.syncControls.begin?.()
-      this.syncControls.truncate?.()
+      this.syncControls.truncate?.({ markReady: false })
       return this.syncControls.commit?.() ?? true
     })
     if (applied !== true) await applied

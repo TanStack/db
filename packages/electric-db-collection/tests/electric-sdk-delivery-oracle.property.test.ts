@@ -1155,6 +1155,8 @@ fixedCase.each(
  * reads, public rows, and acquisition settlement at each cut. The controlled
  * provider supplies authoritative responses for the requested predicates;
  * live-server framing and native storage remain separate receiving boundaries.
+ * A local cache clear is not source readiness: the restarted Collection stays
+ * loading at the stream-request cut, before Electric sends source evidence.
  */
 fixedCase.each([
   { cause: `lost tags`, tagged: true, nextTable: `rows` },
@@ -1290,6 +1292,7 @@ fixedCase.each([
       expect(resumed.url.searchParams.get(`log`)).toBe(`changes_only`)
       expect(resumed.url.searchParams.get(`offset`)).toBe(`now`)
       expect(publicRows(current), `before active demand`).toEqual([])
+      expect(current.status, `before source readiness`).toBe(`loading`)
       expect(baselineReads, `startup metadata read`).toHaveBeenCalled()
       expect(
         baselineReads.mock.calls.every(

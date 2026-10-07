@@ -4,7 +4,7 @@ Review record, revision 1 — 2026-10-06. Reviewed head: `f43a16522c990134ae9932
 
 Source: [issue #2056](https://github.com/TanStack/db/issues/2056), including its workaround, test offer, and #811 reference. The issue has no comments. This is an issue evaluation, not a PR review. The user authorized oracle changes, reproduction, and comparison of fixes; production implementation remains for their decision.
 
-Worktree: `/Users/kyle.mathews/.codex/worktrees/evaluate-2056/tanstack-db`, branch `codex/evaluate-2056`, based on fetched `origin/main`. Dependencies installed from the lockfile offline with install scripts disabled. No branch or commit was pushed. Production source is restored byte-for-byte to the reviewed head. The changed tests intentionally fail on that head.
+Branch: `codex/evaluate-2056`, based on fetched `origin/main`. Dependencies installed from the lockfile offline with install scripts disabled. No branch or commit was pushed. Production source is restored byte-for-byte to the reviewed head. The changed tests intentionally fail on that head.
 
 ## Verdict and reviewer assessment
 
@@ -12,7 +12,7 @@ The reported capability mismatch is real and merits P1 treatment: a valid persis
 
 The report overstates one causal step on current main. `subscribe()` already starts the stream. The receiving witness observes the full HTTP request before acquiring demand, then observes a ready source Collection with the correct replacement row alongside the rejected demand. Permanent `loading` and the necessity of deleting local data are not established here. The original Expo reproduction may have additional scheduling or version conditions.
 
-Accuracy and signal are high; the report identifies the key mismatch, gives a useful restart sequence, and separates its workaround from a durable optimization. Analysis of settlement is incomplete. Readiness alone cannot discharge an applied-receipt obligation, and a one-time gate cannot cover later reset cycles. Hire recommendation from this debugging sample: **yes**, with a reservation about lifecycle and promise-boundary analysis; this single report does not assess broader engineering performance.
+Accuracy and signal are high; the report identifies the key mismatch, gives a useful restart sequence, and separates its workaround from a durable optimization. Analysis of settlement is incomplete. Readiness alone cannot discharge an applied-receipt obligation, and a one-time gate cannot cover later reset cycles.
 
 ## Finding ledger
 
@@ -247,3 +247,40 @@ warnings. The changed files passed formatting after the final oracle edit.
 The coverage map names remaining native SQLite, real cross-tab transport,
 live-service, and wider scheduling witnesses. This review closes the observed
 controlled coordinator counterexample, not the whole scoped-recovery class.
+
+## PR review: scoped-clear readiness
+
+CodeRabbit review 5445467738 examined PR #2069 at `8a1f590e0`. It identified
+an initial-readiness error: the scoped cache clear called core `truncate()`
+without an option, and core marks a truncated Collection ready by default.
+Clearing uncertified cache rows supplies no Electric source evidence. The
+wrapper now passes `markReady: false` through its internal sync control, so the
+Collection remains loading until the source marks it ready.
+
+The new persistence owner reaches that wrapper call before source readiness.
+On the reviewed implementation, the public status assertion received `ready`
+instead of `loading`. With the repair, it observes loading after the clear and
+ready after the source signal. The installed-SDK restart receiver adds the same
+pre-response observation for lost tags, changed shape, and malformed resume
+state. A temporary old-call mutant failed all three at that status assertion.
+The core truncate-readiness owner separately crosses loading, ready, error,
+and held optimistic state with explicit readiness intent. These observations
+enforce the initial scoped-clear law in the controlled wrapper and SDK paths.
+Native Expo and a live Electric service remain outside those paths.
+
+The review also proposed waiting only for acceptance of the scoped truncate.
+Its suggested deadlock requires core to hold that truncate behind a persisting
+optimistic transaction. Core instead applies committed truncates immediately,
+including their preceding committed work. A held-handler wrapper cut confirmed
+that `startScopedRecovery()` fulfilled before the handler released on the
+reviewed implementation. The proposed cycle was not reproduced, so this PR
+keeps the existing applied wait. Subset success still waits for applied rows.
+The review's two documentation findings were fixed: the historical audit no
+longer exposes a local path or a personal hiring judgment, and the raw-issue
+ledger now cites its committed filename.
+
+After this review repair, the persistence oracle passed 647 tests with one
+existing TODO. The Electric package passed 647 tests. The core truncate-readiness
+and persistence-capability tests passed 69 tests. The review's four actionable
+items are accounted for as three fixes and one refuted deadlock claim. These
+finite checks do not establish arbitrary provider or native-host scheduling.

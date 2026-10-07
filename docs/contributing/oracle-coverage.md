@@ -1721,6 +1721,11 @@ paginated scoped snapshot. The persistence owner crosses targeted, paginated,
 full-reload, and reset notifications after an active source row. Its
 post-invalidation public-row checks distinguish source authority from durable
 cache; the non-scoped paginated reload remains a neighboring control.
+The persistence owner also checks that a scoped cache clear preserves initial
+Collection loading until the source marks ready. A held optimistic handler
+checks that the same clear settles before the handler releases: core applies a
+truncate immediately, so the proposed accepted-versus-applied deadlock does
+not arise on this path. Its subset settlement law remains separate.
 `electric-resume-snapshot-races.test.ts` also holds a real SQLite metadata
 read across row loss or a committed replacement. Unknown and missing key-set
 evidence start changes-only without publishing the cached rows; a row-1 demand
