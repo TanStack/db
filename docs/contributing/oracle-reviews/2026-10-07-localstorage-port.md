@@ -67,8 +67,9 @@ while the previously durable row was replaced. The repaired adapter rejects the
 write, retains the durable row, accepts a later independent write, and restores
 both accepted rows in a fresh Collection. The same histories deliver a storage
 event under a failed read and check that the public snapshot remains intact.
-Startup remains best-effort; an absent storage key is the only empty snapshot
-for a new write or event. The final peer oracle passes both cases.
+At that reviewed commit, startup remained best-effort; an absent storage key
+was the only empty snapshot for a new write or event. The medium-review
+follow-up below changes startup to fail on an unreadable snapshot.
 
 The final `@tanstack/db` oracle campaign passed 67 files and 4,542 tests.
 The full package suite passed 254 files and 9,103 tests with no type errors.
@@ -82,3 +83,52 @@ mutation-order contract already chosen for this adapter makes that await
 impossible to satisfy. The public guide names the limit. A neighboring oracle
 history admits a nested write without awaiting it, then checks the held storage
 cut and both ordered snapshots after release.
+
+## Medium-effort review follow-up
+
+Review intake head: `cd4b707beb533e278697981b7bcf05519c1b43b0`.
+Reviewed repair head: `b94fea53c20b4ff89d891898d6792175cbc53f8a`.
+The reviewer reported eight code-reading findings and ran no verification.
+The user approved three contract decisions: fail malformed persisted restore
+without changing stored bytes; make manual acceptance awaitable and ordered;
+and publish removal of accepted rows when `clearStorage()` returns.
+
+| ID | Technical verdict and evidence | Disposition and durable value |
+| --- | --- | --- |
+| M1 | Confirmed: a malformed value yielded a ready, empty, permanently unwritable Collection. Legacy arrays, empty strings, and one invalid row beside a valid row reproduced it. | `fixed-now`. Startup now rejects before readiness, preserves exact bytes, and can restart after explicit repair or clear. The peer oracle owns malformed and transient-read histories. |
+| M2 | Confirmed dependency cycle when an earlier handler awaits a later same-Collection persistence receipt. A never-settling handler also holds the ordered slot. | `accepted-design`. Strict mutation order was approved earlier; the guide names the cycle and the order oracle checks legal nested fire-and-forget admission. No timeout or cancellation recovery contract exists. |
+| M3 | Confirmed: manual acceptance could settle and write a newer value ahead of a held automatic handler, then the older value replaced it. | `fixed-now`. `acceptMutations()` returns `Promise<void>` and enters the same write order; callers await it. The order oracle crosses same/disjoint keys and both earlier-handler decisions. |
+| M4 | Confirmed: handler-free insert, update, and delete returned before synchronous Storage was updated. | `fixed-now`. The order oracle checks each direct return boundary and a later handler-free write held behind an earlier handler. |
+| M5 | The reported throws occur, but `null` is the Storage API's missing-key value. An existing empty string is malformed data; `undefined` violates the declared `StorageApi` type. | `refuted` as a bug. The peer oracle distinguishes null from empty content and requires failed writes to preserve the empty bytes. Treating empty as absent would lose data. |
+| M6 | Confirmed: a later failed handler's receipt and optimistic rollback waited for an unrelated earlier handler. | `fixed-now`. The order oracle checks prompt failure and rollback at the held-handler checkpoint for same and disjoint keys. |
+| M7 | Confirmed: `clearStorage()` removed durable rows but left them publicly visible, including after a later write. Direct same-tab raw Storage edits also have no browser event. | `fixed-now` for the supported utility; it now publishes removal locally, with a peer delivery and fresh-restore witness. Direct raw edits are outside the adapter's event contract and the guide says so. A pending optimistic mutation remains visible and may later persist under the Collection's existing contract. |
+| M8 | Confirmed work count: a present-key write parses one full snapshot and stringifies another. No latency threshold or measured user regression was supplied. | `accepted-design`. Each write rereads storage to preserve intervening peer rows and reject read failures. Sharing a parsed snapshot across writes without detecting peer changes would break that law; no cache state was added. |
+
+The primary order oracle derives expected rows from authored operations and
+application decisions; it does not read the adapter's queue. Its driver reaches
+the direct-call, held-handler, transaction-receipt, durable, public, and fresh-
+restore checkpoints. The primary peer oracle classifies absent, valid, and
+malformed bytes independently of the adapter parser and controls peer event
+delivery. It checks startup status and byte preservation, clear publication,
+peer publication, later settlement, and restore. These are bounded finite
+histories, not a claim about simultaneous cross-tab read-modify-write races,
+native event timing, or arbitrary long histories. The coverage map retains
+those limits and the pre-sync manual identity fallback.
+
+The original implementation failed M1 at the startup-readiness assertion, M3
+at manual settlement while the predecessor was held, M4 at direct call return,
+M6 at prompt failure settlement, and M7 at public/durable agreement after
+clear. The repaired oracles pass 29 order and 15 peer cases, including nearby
+accepted/rejected and same/disjoint regimes. The full `@tanstack/db` suite
+passed 254 files and 9,119 tests with no type errors. The package build,
+changed-file ESLint, Prettier, and whitespace checks passed. The docs link
+checker reported 12 links outside `/docs` that already exist in the intake
+head; this follow-up introduced none of them.
+
+The review was high-signal for an unverified medium-effort pass: five real
+product bugs, one useful invalid-data distinction, and two genuine trade-offs.
+Its suggested missing-key fallback and shared-read optimization would weaken
+data safety. Recommendation: retain this reviewer for code-reading discovery,
+with executable verification required before accepting fixes. Loss audit:
+eight raw items equal five `fixed-now`, two `accepted-design`, and one
+`refuted`; no item is deferred or omitted.
