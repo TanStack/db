@@ -23,7 +23,13 @@ export function createSerialPacer(wait: number) {
     pending = undefined
     persisting = true
     nextStartAt = Date.now() + wait
-    void callback().then(settled, settled)
+    try {
+      void callback().then(settled, settled)
+    } catch (error) {
+      persisting = false
+      queueMicrotask(drain)
+      throw error
+    }
   }
 
   function settled(): void {

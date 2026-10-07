@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { createCollection } from '../src/collection'
 import { createDeferred } from '../src/deferred'
 import { createPacedMutations } from '../src/paced-mutations'
+import { createSerialPacer } from '../src/strategies/serial-pacer'
 import {
   debounceStrategy,
   queueStrategy,
@@ -76,6 +77,46 @@ beforeEach(() => {
 
 afterEach(() => {
   vi.useRealTimers()
+})
+
+/**
+ * A callback can throw before returning a persistence promise. The serial
+ * pacer's two-call law surfaces that same error and keeps the next eligible
+ * callback runnable. This direct scheduler seam isolates the throw boundary;
+ * public paced histories below check transaction and receipt behavior.
+ */
+it(`serial pacing stays usable after a synchronous callback error`, async () => {
+  const pacer = createSerialPacer(0)
+  const failure = new Error(`callback failed`)
+  const starts: Array<number> = []
+  expect(() =>
+    pacer.schedule(() => {
+      throw failure
+    }),
+  ).toThrow(failure)
+  pacer.schedule(() => {
+    starts.push(2)
+    return Promise.resolve()
+  })
+  await vi.advanceTimersByTimeAsync(0)
+  expect(starts, `second eligible callback starts`).toEqual([2])
+})
+
+it(`serial pacing drains a successor scheduled before its callback throws`, async () => {
+  const pacer = createSerialPacer(0)
+  const failure = new Error(`callback failed`)
+  const starts: Array<number> = []
+  expect(() =>
+    pacer.schedule(() => {
+      pacer.schedule(() => {
+        starts.push(2)
+        return Promise.resolve()
+      })
+      throw failure
+    }),
+  ).toThrow(failure)
+  await vi.advanceTimersByTimeAsync(0)
+  expect(starts, `the reentrant successor remains admitted`).toEqual([2])
 })
 
 // The queue's documented position policy is list insertion/removal. The first
@@ -2221,4 +2262,234 @@ describe(`paced admission reentry`, () => {
         })
       })
     })
+})
+
+/**
+ * A failed onMutate that changed no row admits no work and consumes no leading
+ * edge. This two-action model starts the next valid call at the same clock
+ * instant. The production driver catches the user's original error, then
+ * observes the next receipt and handler start before any timer can expire.
+ */
+describe(`paced admission after an optimistic callback throws`, () => {
+  for (const kind of [`debounce`, `throttle`] as const)
+    for (const trailing of [false, true])
+      it(`${kind} trailing ${trailing} leaves its leading edge available after a failed call`, async () => {
+        const collection = await createReadyCollection()
+        const strategy =
+          kind === `debounce`
+            ? debounceStrategy({ wait: 10, leading: true, trailing })
+            : throttleStrategy({ wait: 10, leading: true, trailing })
+        const failure = new Error(`optimistic callback failed`)
+        const starts: Array<number> = []
+        const mutate = createPacedMutations<number, { id: number }>({
+          strategy,
+          onMutate: (id) => {
+            if (id === 1) throw failure
+            collection.insert({ id })
+          },
+          mutationFn: ({ transaction }) => {
+            starts.push(transaction.mutations[0].modified.id)
+            return Promise.resolve()
+          },
+        })
+        await withCleanup(strategy, collection, async () => {
+          expect(() => mutate(1)).toThrow(failure)
+          const next = mutate(2)
+          const receipt = observeReceipt(next)
+          await vi.advanceTimersByTimeAsync(0)
+          expect(starts, `failed call did not consume leading edge`).toEqual([
+            2,
+          ])
+          expect(receipt).toMatchObject({
+            outcome: `fulfilled`,
+            returnedSame: true,
+          })
+        })
+      })
+})
+
+/**
+ * A failed onMutate can change a row before it throws. The reference retains
+ * only successful calls. At the throw cut, the failed row is absent and the
+ * earlier admitted transaction is still pending. After its timer and any held
+ * handler complete, the backend sees only that earlier call. This checks the
+ * transaction rollback rule through both paced admission paths.
+ */
+for (const kind of [`debounce`, `throttle`] as const)
+  it(`${kind} keeps an earlier admitted call when a joined callback changes a row then throws`, async () => {
+    const collection = await createReadyCollection()
+    const strategy =
+      kind === `debounce`
+        ? debounceStrategy({ wait: 10, leading: false, trailing: true })
+        : throttleStrategy({ wait: 10, leading: true, trailing: true })
+    const firstWrite = createDeferred<void>()
+    const starts: Array<Array<number>> = []
+    const failure = new Error(`optimistic callback failed`)
+    const mutate = createPacedMutations<number, { id: number }>({
+      strategy,
+      onMutate: (id) => {
+        collection.insert({ id })
+        if (id === 3) throw failure
+      },
+      mutationFn: ({ transaction }) => {
+        const ids = transaction.mutations.map(
+          (mutation) => mutation.modified.id,
+        )
+        starts.push(ids)
+        return ids.includes(1) ? firstWrite.promise : Promise.resolve()
+      },
+    })
+    await withCleanup(
+      strategy,
+      collection,
+      async () => {
+        const first = mutate(1)
+        const firstReceipt = observeReceipt(first)
+        await vi.advanceTimersByTimeAsync(kind === `debounce` ? 1 : 1)
+        const second = mutate(2)
+        const secondReceipt = observeReceipt(second)
+        expect(() => mutate(3)).toThrow(failure)
+        expect(
+          collection.get(3),
+          `failed row is absent at throw cut`,
+        ).toBeUndefined()
+        expect(collection.get(2)?.id).toBe(2)
+        expect(second.state).toBe(`pending`)
+        await vi.advanceTimersByTimeAsync(10)
+        firstWrite.resolve()
+        await vi.advanceTimersByTimeAsync(0)
+        expect(starts, `only successful calls reach handlers`).toEqual(
+          kind === `debounce` ? [[1, 2]] : [[1], [2]],
+        )
+        expect([firstReceipt.outcome, secondReceipt.outcome]).toEqual([
+          `fulfilled`,
+          `fulfilled`,
+        ])
+      },
+      async () => {
+        firstWrite.resolve()
+        await vi.advanceTimersByTimeAsync(30)
+      },
+    )
+  })
+
+/**
+ * An admitted leading call is eligible before a later call renews debounce's
+ * quiet period. While an older handler runs, the later call can merge into the
+ * pending transaction, but cannot revoke its eligible start. The model starts
+ * the merged successor when the held handler returns, before the quiet timer.
+ */
+for (const releaseAt of [12, 24])
+  it(`debounce keeps an eligible leading write when the held handler releases at ${releaseAt}`, async () => {
+    const collection = await createReadyCollection()
+    const strategy = debounceStrategy({
+      wait: 10,
+      leading: true,
+      trailing: true,
+    })
+    const firstWrite = createDeferred<void>()
+    const starts: Array<Array<number>> = []
+    const mutate = createPacedMutations<number, { id: number }>({
+      strategy,
+      onMutate: (id) => collection.insert({ id }),
+      mutationFn: ({ transaction }) => {
+        const ids = transaction.mutations.map(
+          (mutation) => mutation.modified.id,
+        )
+        starts.push(ids)
+        return ids.includes(1) ? firstWrite.promise : Promise.resolve()
+      },
+    })
+    await withCleanup(
+      strategy,
+      collection,
+      async () => {
+        const first = mutate(1)
+        const firstReceipt = observeReceipt(first)
+        await vi.advanceTimersByTimeAsync(11)
+        const second = mutate(2)
+        const secondReceipt = observeReceipt(second)
+        await vi.advanceTimersByTimeAsync(1)
+        const third = mutate(3)
+        expect(third).toBe(second)
+        expect(starts).toEqual([[1]])
+        await vi.advanceTimersByTimeAsync(releaseAt - 12)
+        firstWrite.resolve()
+        await vi.advanceTimersByTimeAsync(0)
+        expect(starts, `leading eligibility survives later call`).toEqual([
+          [1],
+          [2, 3],
+        ])
+        expect([firstReceipt.outcome, secondReceipt.outcome]).toEqual([
+          `fulfilled`,
+          `fulfilled`,
+        ])
+        await vi.advanceTimersByTimeAsync(20)
+        expect(starts, `renewed quiet timer cannot repeat the write`).toEqual([
+          [1],
+          [2, 3],
+        ])
+      },
+      async () => {
+        firstWrite.resolve()
+        await vi.advanceTimersByTimeAsync(30)
+      },
+    )
+  })
+
+/**
+ * A throttle timer transfers one eligible transaction to serial persistence.
+ * A later call while that transaction waits for a held handler joins it. The
+ * model has one pending transaction and no timer after the transfer. At the
+ * release cut, the handler receives both rows once; no later timer repeats it.
+ */
+it(`throttle merges a pending serial write without a stale trailing timer`, async () => {
+  const collection = await createReadyCollection()
+  const strategy = throttleStrategy({ wait: 10, leading: true, trailing: true })
+  const firstWrite = createDeferred<void>()
+  const starts: Array<Array<number>> = []
+  const mutate = createPacedMutations<number, { id: number }>({
+    strategy,
+    onMutate: (id) => collection.insert({ id }),
+    mutationFn: ({ transaction }) => {
+      const ids = transaction.mutations.map((mutation) => mutation.modified.id)
+      starts.push(ids)
+      return ids.includes(1) ? firstWrite.promise : Promise.resolve()
+    },
+  })
+  await withCleanup(
+    strategy,
+    collection,
+    async () => {
+      const first = mutate(1)
+      const firstReceipt = observeReceipt(first)
+      await vi.advanceTimersByTimeAsync(1)
+      const second = mutate(2)
+      const secondReceipt = observeReceipt(second)
+      await vi.advanceTimersByTimeAsync(10)
+      const third = mutate(3)
+      expect(third).toBe(second)
+      expect(second.state).toBe(`pending`)
+      expect([...collection.keys()].sort()).toEqual([1, 2, 3])
+      firstWrite.resolve()
+      await vi.advanceTimersByTimeAsync(0)
+      expect(starts, `release starts the one pending transaction`).toEqual([
+        [1],
+        [2, 3],
+      ])
+      expect([firstReceipt.outcome, secondReceipt.outcome]).toEqual([
+        `fulfilled`,
+        `fulfilled`,
+      ])
+      await vi.advanceTimersByTimeAsync(30)
+      expect(starts, `no stale timer repeats the transaction`).toEqual([
+        [1],
+        [2, 3],
+      ])
+    },
+    async () => {
+      firstWrite.resolve()
+      await vi.advanceTimersByTimeAsync(30)
+    },
+  )
 })

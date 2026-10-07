@@ -413,7 +413,8 @@ class Transaction<T extends object = Record<string, unknown>> {
    * Async work should happen in `mutationFn`; collection operations after `await` boundaries
    * inside this callback will not be part of this transaction. For manual transactions, call
    * `mutate` multiple times before committing to add more synchronous operations to the same
-   * transaction.
+   * transaction. If this callback throws, its mutations are removed before the
+   * error reaches the caller; mutations from earlier successful calls remain.
    * @returns This transaction for chaining
    * @example
    * // Group multiple operations
@@ -469,8 +470,34 @@ class Transaction<T extends object = Record<string, unknown>> {
       scope.registerTransaction(this)
     }
 
+    const previousMutations = [...this.mutations]
     try {
       callback()
+    } catch (error) {
+      // Keep successful earlier callbacks when this one fails after changing
+      // one or more Collections. The original mutation objects are immutable
+      // snapshots; later same-key merges replace them rather than editing them.
+      const touched = new Set(
+        [...previousMutations, ...this.mutations].map(
+          (mutation) => mutation.collection,
+        ),
+      )
+      this.mutations.splice(0, this.mutations.length, ...previousMutations)
+      const restorationErrors: Array<unknown> = []
+      for (const collection of touched) {
+        try {
+          collection._state.onTransactionStateChange()
+        } catch (restorationError) {
+          restorationErrors.push(restorationError)
+        }
+      }
+      if (restorationErrors.length)
+        throw new AggregateError(
+          [error, ...restorationErrors],
+          `Mutation callback and restoration failed`,
+          { cause: error },
+        )
+      throw error
     } finally {
       registeredScopes.add(getTransactionScope(this))
       for (const scope of registeredScopes) {

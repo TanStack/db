@@ -20,6 +20,8 @@ import type { ChangeMessage, SyncConfig } from '../src/types.js'
  * A transaction may author insert, update, and delete operations in any order.
  * Same-key operations collapse to one net request, but the request must retain
  * every authored field and the correct original and modified snapshots.
+ * A synchronous `mutate` callback that throws contributes no lasting intent;
+ * earlier successful callbacks remain pending and a later callback can commit.
  * Each synchronous authored operation may publish its complete draft prefix.
  * The later mixed-key sync acknowledgement publishes one complete cut, so
  * observers must not see a partial acknowledgement.
@@ -49,6 +51,218 @@ type Scenario = {
   value: number
   note: string
 }
+
+/**
+ * A failed synchronous mutate callback contributes no lasting intent. This
+ * bounded history may author a valid update, then throws after a same-key
+ * update, a distinct insert, or a delete. The reference retains only the
+ * successful callbacks. The real manual transaction must expose those rows
+ * and payload at the throw cut, then persist only successful callbacks. A
+ * second witness crosses two Collections, including a subscriber failure
+ * during restoration. This pending-transaction grammar does not claim to hide
+ * events emitted during the failed callback.
+ */
+describe(`failed manual mutation callback`, () => {
+  for (const failure of [
+    `same-key update`,
+    `distinct insert`,
+    `same-key delete`,
+  ] as const)
+    for (const prior of [false, true])
+      it(`restores ${prior ? `earlier intent` : `the base`} after ${failure}`, async () => {
+        const collection = createCollection<Row>({
+          getKey: (row) => row.id,
+          sync: {
+            sync: (actions) => {
+              actions.begin()
+              actions.write({
+                type: `insert`,
+                value: { id: 1, value: 0, note: `base` },
+              })
+              actions.commit()
+              actions.markReady()
+            },
+          },
+        })
+        const payloads: Array<Array<{ id: number; value: number }>> = []
+        const tx = createTransaction<Row>({
+          autoCommit: false,
+          mutationFn: ({ transaction }) => {
+            payloads.push(
+              transaction.mutations.map(({ modified }) => ({
+                id: modified.id,
+                value: modified.value,
+              })),
+            )
+            return Promise.resolve()
+          },
+        })
+        await withHistoryCleanup(
+          async () => {
+            await collection.preload()
+            if (prior)
+              tx.mutate(() =>
+                collection.update(1, (draft) => {
+                  draft.value = 1
+                }),
+              )
+            const failureReason = new Error(`callback failed`)
+            expect(() =>
+              tx.mutate(() => {
+                if (failure === `same-key update`)
+                  collection.update(1, (draft) => {
+                    draft.value = 2
+                  })
+                else if (failure === `distinct insert`)
+                  collection.insert({ id: 2, value: 2, note: `failed` })
+                else collection.delete(1)
+                throw failureReason
+              }),
+            ).toThrow(failureReason)
+            expect(collection.get(1)?.value, `successful row survives`).toBe(
+              prior ? 1 : 0,
+            )
+            expect(collection.get(2), `failed insert is absent`).toBeUndefined()
+            const survivingIntent = prior ? [{ id: 1, value: 1 }] : []
+            expect(
+              tx.mutations.map(({ modified }) => ({
+                id: modified.id,
+                value: modified.value,
+              })),
+              `failed intent is absent`,
+            ).toEqual(survivingIntent)
+            tx.mutate(() =>
+              collection.insert({ id: 3, value: 3, note: `later` }),
+            )
+            await tx.commit()
+            expect(payloads).toEqual([
+              [...survivingIntent, { id: 3, value: 3 }],
+            ])
+          },
+          () => [() => collection.cleanup()],
+        )
+      })
+
+  it(`restores every touched Collection and keeps earlier intent`, async () => {
+    const makeCollection = (id: string, initial: Array<Row>) =>
+      createCollection<Row>({
+        id,
+        getKey: (row) => row.id,
+        sync: {
+          sync: (actions) => {
+            actions.begin()
+            for (const row of initial)
+              actions.write({ type: `insert`, value: row })
+            actions.commit()
+            actions.markReady()
+          },
+        },
+      })
+    const first = makeCollection(`failed-callback-first`, [
+      { id: 1, value: 0, note: `base` },
+    ])
+    const second = makeCollection(`failed-callback-second`, [])
+    const tx = createTransaction<Row>({
+      autoCommit: false,
+      mutationFn: () => Promise.resolve(),
+    })
+    await withHistoryCleanup(
+      async () => {
+        await Promise.all([first.preload(), second.preload()])
+        tx.mutate(() =>
+          first.update(1, (draft) => {
+            draft.value = 1
+          }),
+        )
+        const failureReason = new Error(`callback failed`)
+        expect(() =>
+          tx.mutate(() => {
+            first.update(1, (draft) => {
+              draft.value = 2
+            })
+            second.insert({ id: 2, value: 2, note: `failed` })
+            throw failureReason
+          }),
+        ).toThrow(failureReason)
+        expect(first.get(1)?.value).toBe(1)
+        expect(second.get(2)).toBeUndefined()
+        expect(tx.mutations).toHaveLength(1)
+        await tx.commit()
+      },
+      () => [() => first.cleanup(), () => second.cleanup()],
+    )
+  })
+
+  it(`restores every Collection when one restoration listener throws`, async () => {
+    const makeCollection = (id: string) =>
+      createCollection<Row>({
+        id,
+        getKey: (row) => row.id,
+        sync: {
+          sync: (actions) => {
+            actions.begin()
+            actions.write({
+              type: `insert`,
+              value: { id: 1, value: 0, note: `base` },
+            })
+            actions.commit()
+            actions.markReady()
+          },
+        },
+      })
+    const first = makeCollection(`failed-listener-first`)
+    const second = makeCollection(`failed-listener-second`)
+    const tx = createTransaction<Row>({
+      autoCommit: false,
+      mutationFn: () => Promise.resolve(),
+    })
+    let subscription: ReturnType<typeof first.subscribeChanges> | undefined
+    await withHistoryCleanup(
+      async () => {
+        await Promise.all([first.preload(), second.preload()])
+        tx.mutate(() =>
+          first.update(1, (draft) => {
+            draft.value = 1
+          }),
+        )
+        const listenerFailure = new Error(`restoration listener failed`)
+        subscription = first.subscribeChanges(
+          (batch) => {
+            if (batch.some((change) => change.value.value === 1))
+              throw listenerFailure
+          },
+          { includeInitialState: false },
+        )
+        const callbackFailure = new Error(`callback failed`)
+        let thrown: unknown
+        try {
+          tx.mutate(() => {
+            first.update(1, (draft) => {
+              draft.value = 2
+            })
+            second.update(1, (draft) => {
+              draft.value = 2
+            })
+            throw callbackFailure
+          })
+        } catch (error) {
+          thrown = error
+        }
+        expect(thrown).toBeInstanceOf(AggregateError)
+        expect((thrown as AggregateError).cause).toBe(callbackFailure)
+        expect((thrown as AggregateError).errors).toContain(listenerFailure)
+        expect(first.get(1)?.value).toBe(1)
+        expect(second.get(1)?.value).toBe(0)
+        expect(tx.mutations.map(({ modified }) => modified.value)).toEqual([1])
+      },
+      () => [
+        () => subscription?.unsubscribe(),
+        () => first.cleanup(),
+        () => second.cleanup(),
+      ],
+    )
+  })
+})
 type ObservationFault =
   | `missing-delete`
   | `untouched-field`

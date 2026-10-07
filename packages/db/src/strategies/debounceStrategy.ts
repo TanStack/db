@@ -1,4 +1,5 @@
 import { createSerialPacer } from './serial-pacer'
+import { runWithCommitCompletion } from './commit-completion'
 import type { DebounceStrategy, DebounceStrategyOptions } from './types'
 import type { Transaction } from '../transactions'
 
@@ -32,6 +33,7 @@ export function debounceStrategy(
   const trailing = options.trailing ?? true
   const serial = createSerialPacer(0)
   let canLead = true
+  let leadingPending = false
   let timeout: ReturnType<typeof setTimeout> | undefined
 
   return {
@@ -42,29 +44,37 @@ export function debounceStrategy(
       onAdmit?: () => void,
       onCommit?: () => Promise<unknown> | undefined,
     ) => {
+      const run = () => runWithCommitCompletion(fn, onCommit)
       const leadingCall = leading && canLead
       const admitted = leadingCall || trailing
+      const joinsPendingLeading = leadingPending && !leadingCall
       // Reserve the edge before optimistic mutation can reenter execute.
+      const wasLeadAvailable = canLead
       canLead = false
-      if (admitted) onAdmit?.()
+      try {
+        if (admitted) onAdmit?.()
+      } catch (error) {
+        // A nested admitted call may have installed its own quiet timer.
+        if (timeout === undefined) canLead = wasLeadAvailable
+        throw error
+      }
       if (timeout !== undefined) clearTimeout(timeout)
       // A new call renews the quiet period, including after an earlier timer
       // became eligible while persistence was held.
-      if (trailing) serial.cancel()
+      if (trailing && !leadingPending) serial.cancel()
       timeout = setTimeout(() => {
         timeout = undefined
         canLead = true
-        if (trailing && !leadingCall)
-          serial.schedule(() => {
-            const transaction = fn()
-            return onCommit?.() ?? transaction.isPersisted.promise
-          })
+        if (trailing && !leadingCall && !joinsPendingLeading)
+          serial.schedule(run)
       }, options.wait)
-      if (leadingCall)
+      if (leadingCall) {
+        leadingPending = true
         serial.schedule(() => {
-          const transaction = fn()
-          return onCommit?.() ?? transaction.isPersisted.promise
+          leadingPending = false
+          return run()
         })
+      }
       if (!admitted) return false
       return
     },

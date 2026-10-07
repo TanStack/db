@@ -885,6 +885,15 @@ captured by the manual transaction. The collection's `onInsert`, `onUpdate`, and
 manual transaction's `mutationFn` is responsible for persisting
 `transaction.mutations`.
 
+If a `tx.mutate()` callback throws, that call's optimistic changes are removed
+before the error reaches the caller. Earlier successful `tx.mutate()` calls
+remain in the pending transaction. Collection operations can notify subscribers
+while the callback runs, so a subscriber may see a change followed by its
+restoration when a later operation throws.
+If a subscriber also throws during restoration, `mutate()` throws an
+`AggregateError` whose cause is the original callback error; it still restores
+every touched Collection.
+
 This makes manual transactions a good fit for draft-style workflows where local
 state should update immediately, but persistence should wait for a later user
 action such as Save or Blur. Each `tx.mutate()` call updates the optimistic

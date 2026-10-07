@@ -1,5 +1,6 @@
 import { LiteQueuer } from '@tanstack/pacer-lite/lite-queuer'
 import { QueueDisposedError } from '../errors'
+import { runWithCommitCompletion } from './commit-completion'
 import type { QueueStrategy, QueueStrategyOptions } from './types'
 import type { Transaction } from '../transactions'
 
@@ -69,9 +70,8 @@ export function queueStrategy(options?: QueueStrategyOptions): QueueStrategy {
       // Chain each transaction to the previous one's completion
       processingChain = processingChain
         .then(async () => {
-          const transaction = run()
           // A rolled-back receipt can settle before its backend handler returns.
-          await (onCommit?.() ?? transaction.isPersisted.promise)
+          await runWithCommitCompletion(run, onCommit)
         })
         .catch(() => {
           // Errors are handled via transaction.isPersisted.promise and surfaced there.

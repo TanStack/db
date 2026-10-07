@@ -1,4 +1,5 @@
 import { createSerialPacer } from './serial-pacer'
+import { runWithCommitCompletion } from './commit-completion'
 import type { ThrottleStrategy, ThrottleStrategyOptions } from './types'
 import type { Transaction } from '../transactions'
 
@@ -57,6 +58,11 @@ export function throttleStrategy(
   let trailingTimeout: ReturnType<typeof setTimeout> | undefined
   let pendingCallback: (() => Promise<unknown>) | undefined
 
+  // onAdmit can reenter execute and install a trailing timer.
+  function hasTrailingTimer(): boolean {
+    return trailingTimeout !== undefined
+  }
+
   function discardNestedTrailing(): void {
     if (trailingTimeout !== undefined) clearTimeout(trailingTimeout)
     trailingTimeout = undefined
@@ -71,15 +77,19 @@ export function throttleStrategy(
       onAdmit?: () => void,
       onCommit?: () => Promise<unknown> | undefined,
     ) => {
-      const run = () => {
-        const transaction = fn()
-        return onCommit?.() ?? transaction.isPersisted.promise
-      }
+      const run = () => runWithCommitCompletion(fn, onCommit)
       const now = Date.now()
       if (leading && trailingTimeout === undefined && now >= nextAllowedAt) {
         // Reserve the edge before optimistic mutation can reenter execute.
+        const previousAllowedAt = nextAllowedAt
         nextAllowedAt = now + options.wait
-        onAdmit?.()
+        try {
+          onAdmit?.()
+        } catch (error) {
+          // Keep a nested admitted trailing call's window if it installed one.
+          if (!hasTrailingTimer()) nextAllowedAt = previousAllowedAt
+          throw error
+        }
         discardNestedTrailing()
         serial.schedule(run)
         return
