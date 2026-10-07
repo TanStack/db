@@ -13,6 +13,14 @@
  * The production driver controls event delivery after both `isPersisted`
  * promises fulfill. The durable checkpoint precedes delivery; public and
  * fresh-restore checkpoints follow it.
+ *
+ * The startup and clear histories use a second simple law: only a valid whole
+ * stored snapshot can establish readiness; clear removes that snapshot and
+ * publishes empty synced rows. Their model classifies absent, valid, and
+ * malformed bytes without using the adapter's parser or mirror. The driver
+ * checks startup status, unchanged malformed bytes, local clear publication,
+ * peer delivery, later write settlement, and fresh restore. Direct same-tab
+ * edits through the raw Storage API are outside the adapter's event contract.
  */
 import { describe, expect, it } from 'vitest'
 import { createCollection } from '../src/collection/index'
@@ -151,10 +159,9 @@ it('manual acceptance keeps equal-ID Collections in their own stores', async () 
       await Promise.all([first.preload(), second.preload()])
       const transaction = createTransaction({
         autoCommit: false,
-        mutationFn: ({ transaction: pending }) => {
-          first.utils.acceptMutations(pending)
-          second.utils.acceptMutations(pending)
-          return Promise.resolve()
+        mutationFn: async ({ transaction: pending }) => {
+          await first.utils.acceptMutations(pending)
+          await second.utils.acceptMutations(pending)
         },
       })
       transaction.mutate(() => {
@@ -203,6 +210,213 @@ it('cleanup releases its storage listener and restart installs one listener', as
   )
   expect(host.listenerCount()).toBe(0)
 })
+
+/** The supported clear utility removes and publishes the empty snapshot. The
+ * independent model starts with one row, clears it, then inserts a new row;
+ * the authored final snapshot contains only the new row. The production
+ * driver delivers peer events after each durable change. Local publication
+ * is checked at clear return; both peers and fresh restore at settlement. */
+it('does not retain cleared rows after the next local write settles', async () => {
+  const host = createHost()
+  const collection = makeCollection(host, 'shared', 'writer')
+  const peer = makeCollection(host, 'shared', 'peer')
+  let reopened: ReturnType<typeof makeCollection> | undefined
+  await withHistoryCleanup(
+    async () => {
+      await Promise.all([collection.preload(), peer.preload()])
+      await collection.insert({ id: 'old', value: 1 }).isPersisted.promise
+      host.deliver('shared')
+      expect(publicRows(peer)).toEqual([{ id: 'old', value: 1 }])
+      collection.utils.clearStorage()
+      expect(host.storage.getItem('shared')).toBeNull()
+      expect(
+        publicRows(collection),
+        'clear publishes the empty snapshot',
+      ).toEqual([])
+      host.deliver('shared')
+      expect(publicRows(peer)).toEqual([])
+      await collection.insert({ id: 'new', value: 2 }).isPersisted.promise
+      const expected = [{ id: 'new', value: 2 }]
+      expect(durableRows(host, 'shared')).toEqual(expected)
+      expect(publicRows(collection)).toEqual(expected)
+      host.deliver('shared')
+      expect(publicRows(peer)).toEqual(expected)
+      reopened = makeCollection(host, 'shared', 'reopened')
+      await reopened.preload()
+      expect(publicRows(reopened)).toEqual(expected)
+    },
+    () => [
+      () => reopened?.cleanup(),
+      () => peer.cleanup(),
+      () => collection.cleanup(),
+    ],
+  )
+})
+
+/** Clear removes accepted synced rows, while an already pending optimistic
+ * mutation still owns its intent. The independent history clears the durable
+ * row before releasing that handler; its later accepted write restores only
+ * its own row. This distinguishes clear publication from cancellation. */
+it('keeps a pending mutation through clear until it settles', async () => {
+  const host = createHost()
+  const entered = createDeferred<void>()
+  const release = createDeferred<void>()
+  const collection = createCollection(
+    localStorageCollectionOptions<Row>({
+      storageKey: 'shared',
+      storage: host.storage,
+      storageEventApi: host.events,
+      getKey: (row) => row.id,
+      onUpdate: async () => {
+        entered.resolve()
+        await release.promise
+      },
+    }),
+  )
+  await withHistoryCleanup(
+    async () => {
+      await collection.preload()
+      await collection.insert({ id: 'pending', value: 1 }).isPersisted.promise
+      const update = collection.update('pending', (draft) => {
+        draft.value = 2
+      })
+      await entered.promise
+      collection.utils.clearStorage()
+      expect(host.storage.getItem('shared')).toBeNull()
+      expect(publicRows(collection)).toEqual([{ id: 'pending', value: 2 }])
+      release.resolve()
+      await update.isPersisted.promise
+      expect(durableRows(host, 'shared')).toEqual([{ id: 'pending', value: 2 }])
+      expect(publicRows(collection)).toEqual([{ id: 'pending', value: 2 }])
+    },
+    () => [() => release.resolve(), () => collection.cleanup()],
+  )
+})
+
+/** The Storage API uses null for a missing key. An existing empty string is
+ * malformed stored content, so the model permits a first insert from null
+ * but forbids silently replacing the empty string after startup. The failed
+ * receipt and unchanged bytes are the observations; explicit removal then
+ * permits a successful new write. */
+it('distinguishes a missing storage key from malformed empty content', async () => {
+  const host = createHost()
+  const collection = makeCollection(host, 'shared', 'writer')
+  await withHistoryCleanup(
+    async () => {
+      await collection.preload()
+      await collection.insert({ id: 'first', value: 1 }).isPersisted.promise
+      expect(durableRows(host, 'shared')).toEqual([{ id: 'first', value: 1 }])
+      host.storage.setItem('shared', '')
+      const rejected = collection.insert({ id: 'second', value: 2 })
+      await expect(rejected.isPersisted.promise).rejects.toThrow(SyntaxError)
+      expect(host.storage.getItem('shared')).toBe('')
+      collection.utils.clearStorage()
+      await collection.insert({ id: 'third', value: 3 }).isPersisted.promise
+      expect(durableRows(host, 'shared')).toEqual([{ id: 'third', value: 3 }])
+    },
+    () => [() => collection.cleanup()],
+  )
+})
+
+/** A persisted restore has either read a valid whole snapshot or failed.
+ * The independent model classifies these malformed bytes as no authoritative
+ * snapshot; it never substitutes an empty one. Startup must report Collection
+ * error before readiness, leave the bytes intact, and allow a new Collection
+ * to restore after an explicit clear. This grammar includes malformed JSON,
+ * an old array shape, and one bad row beside a valid row. */
+for (const [name, raw] of [
+  ['empty string', ''],
+  ['legacy array', '[{"id":"old","value":1}]'],
+  [
+    'mixed row versions',
+    JSON.stringify({
+      's:valid': {
+        versionKey: 'valid-version',
+        data: { id: 'valid', value: 1 },
+      },
+      's:invalid': { data: { id: 'invalid', value: 2 } },
+    }),
+  ],
+] as const) {
+  it(`fails persisted restore without replacing ${name}`, async () => {
+    const host = createHost()
+    host.storage.setItem('shared', raw)
+    const collection = makeCollection(host, 'shared', 'reader')
+    let reopened: ReturnType<typeof makeCollection> | undefined
+    await withHistoryCleanup(
+      async () => {
+        await expect(collection.preload()).rejects.toThrow()
+        expect(collection.status).toBe('error')
+        expect(host.storage.getItem('shared')).toBe(raw)
+        collection.utils.clearStorage()
+        reopened = makeCollection(host, 'shared', 'reopened')
+        await reopened.preload()
+        expect(publicRows(reopened)).toEqual([])
+      },
+      () => [() => reopened?.cleanup(), () => collection.cleanup()],
+    )
+  })
+}
+
+// A transient read failure is also insufficient evidence for an empty
+// persisted restore. Unlike malformed bytes, the existing valid snapshot can
+// be read on restart without clearing it. The first preload must fail before
+// readiness; the next sync run must publish the original durable row.
+for (const failureKind of ['storage', 'parser'] as const) {
+  it(`restarts persisted restore after a transient ${failureKind} read failure`, async () => {
+    const host = createHost()
+    const stored = JSON.stringify({
+      's:kept': {
+        versionKey: 'kept-version',
+        data: { id: 'kept', value: 1 },
+      },
+    })
+    host.storage.setItem('shared', stored)
+    const originalGet = host.storage.getItem
+    let fail = true
+    const storage: StorageApi = {
+      ...host.storage,
+      getItem: (key) => {
+        if (fail && failureKind === 'storage') {
+          fail = false
+          throw new Error('transient storage read')
+        }
+        return originalGet(key)
+      },
+    }
+    const collection = createCollection(
+      localStorageCollectionOptions<Row>({
+        id: 'reader',
+        storageKey: 'shared',
+        storage,
+        storageEventApi: host.events,
+        parser: {
+          parse: (raw) => {
+            if (fail && failureKind === 'parser') {
+              fail = false
+              throw new Error('transient parser read')
+            }
+            return JSON.parse(raw)
+          },
+          stringify: JSON.stringify,
+        },
+        getKey: (row) => row.id,
+      }),
+    )
+    await withHistoryCleanup(
+      async () => {
+        await expect(collection.preload()).rejects.toThrow('transient')
+        expect(collection.status).toBe('error')
+        expect(host.storage.getItem('shared')).toBe(stored)
+        await collection.cleanup()
+        collection.startSyncImmediate()
+        expect(collection.status).toBe('ready')
+        expect(publicRows(collection)).toEqual([{ id: 'kept', value: 1 }])
+      },
+      () => [() => collection.cleanup()],
+    )
+  })
+}
 
 /** An accepted peer insert may reach the source while a local insert has only
  * optimistic state. The ordered durable writes are peer then local. The model

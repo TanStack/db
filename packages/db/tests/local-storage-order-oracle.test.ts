@@ -15,13 +15,22 @@
  * Collection must equal that fold. The held-handler checkpoint verifies that
  * no later mutation reports persistence ahead of its undecided predecessor.
  * A handler may admit a nested automatic mutation without awaiting it. Awaiting
- * that mutation's persistence from the earlier handler would form a cycle under
- * the order law, so the public guide excludes that usage.
+ * that mutation's persistence or a later manual acceptance from the earlier
+ * handler would form a cycle under the order law; the guide excludes both.
+ * With no earlier write or handler, a direct mutation reaches synchronous
+ * Storage before its method returns. A failed later handler releases its own
+ * optimistic state promptly, even while an earlier accepted handler is held.
+ * An automatic write enters this order when its mutation is submitted; a
+ * manual write enters when `acceptMutations` is called. The mixed grammar
+ * varies same/disjoint keys and the earlier handler's decision. Its manual
+ * receipt and durable effect wait behind that handler; otherwise the older
+ * automatic value could replace a later accepted value.
  */
 import { describe, expect, it } from 'vitest'
 import { createCollection } from '../src/collection/index'
 import { createDeferred } from '../src/deferred'
 import { localStorageCollectionOptions } from '../src/local-storage'
+import { createTransaction } from '../src/transactions'
 import { withHistoryCleanup } from './optimistic-history-oracle'
 
 type Row = { id: string; value: number }
@@ -141,6 +150,239 @@ function makeSeededStorage() {
     ),
   )
   return storage
+}
+
+// Storage is synchronous. The model applies each handler-free mutation before
+// the corresponding direct Collection call returns. These return checkpoints
+// catch a regression that final persistence receipts cannot detect.
+it('persists handler-free direct mutations before their calls return', async () => {
+  const storage = makeStorage()
+  const collection = createCollection(
+    localStorageCollectionOptions<Row>({
+      storageKey: 'rows',
+      storage,
+      storageEventApi: { addEventListener() {}, removeEventListener() {} },
+      getKey: (row) => row.id,
+    }),
+  )
+  await withHistoryCleanup(
+    async () => {
+      await collection.preload()
+      const insert = collection.insert({ id: 'a', value: 1 })
+      expect(storedRows(storage.getItem('rows'))).toEqual([
+        { id: 'a', value: 1 },
+      ])
+      await insert.isPersisted.promise
+      const update = collection.update('a', (draft) => {
+        draft.value = 2
+      })
+      expect(storedRows(storage.getItem('rows'))).toEqual([
+        { id: 'a', value: 2 },
+      ])
+      await update.isPersisted.promise
+      const deletion = collection.delete('a')
+      expect(storedRows(storage.getItem('rows'))).toEqual([])
+      await deletion.isPersisted.promise
+    },
+    () => [() => collection.cleanup()],
+  )
+})
+
+// The synchronous rule is conditional on the absence of a predecessor. A
+// handler-free update submitted while an insert handler is held must wait for
+// that insert's storage slot, then both accepted effects reach durable state.
+it('holds a handler-free write behind an earlier pending handler', async () => {
+  const storage = makeSeededStorage()
+  const entered = createDeferred<void>()
+  const release = createDeferred<void>()
+  const collection = createCollection(
+    localStorageCollectionOptions<Row>({
+      storageKey: 'rows',
+      storage,
+      storageEventApi: { addEventListener() {}, removeEventListener() {} },
+      getKey: (row) => row.id,
+      onInsert: async () => {
+        entered.resolve()
+        await release.promise
+      },
+    }),
+  )
+  await withHistoryCleanup(
+    async () => {
+      await collection.preload()
+      const first = collection.insert({ id: 'new', value: 3 })
+      await entered.promise
+      const second = collection.update('a', (draft) => {
+        draft.value = 2
+      })
+      expect(storedRows(storage.getItem('rows'))).toEqual(initial)
+      release.resolve()
+      await Promise.all([first.isPersisted.promise, second.isPersisted.promise])
+      expect(storedRows(storage.getItem('rows'))).toEqual([
+        { id: 'a', value: 2 },
+        { id: 'b', value: 0 },
+        { id: 'new', value: 3 },
+      ])
+    },
+    () => [() => release.resolve(), () => collection.cleanup()],
+  )
+})
+
+// The model folds an automatic insert decision, then a manual same-key update
+// or disjoint insert. Rejection removes only the automatic effect. The manual
+// receipt remains pending while the earlier handler is held; after both
+// decisions, storage, public rows, and fresh restore match the authored fold.
+for (const sameKey of [true, false]) {
+  for (const firstAccepted of [true, false]) {
+    it(`orders manual ${sameKey ? 'same-key update' : 'disjoint insert'} after an ${firstAccepted ? 'accepted' : 'rejected'} automatic insert`, async () => {
+      const storage = makeStorage()
+      const entered = createDeferred<void>()
+      const release = createDeferred<void>()
+      const makeCollection = (withHandler: boolean) =>
+        createCollection(
+          localStorageCollectionOptions<Row>({
+            storageKey: 'rows',
+            storage,
+            storageEventApi: {
+              addEventListener() {},
+              removeEventListener() {},
+            },
+            getKey: (row) => row.id,
+            ...(withHandler
+              ? {
+                  onInsert: async () => {
+                    entered.resolve()
+                    await release.promise
+                  },
+                }
+              : {}),
+          }),
+        )
+      const collection = makeCollection(true)
+      let reopened: ReturnType<typeof makeCollection> | undefined
+      await withHistoryCleanup(
+        async () => {
+          await collection.preload()
+          const first = collection.insert({ id: 'k', value: 1 })
+          const firstOutcome = first.isPersisted.promise.then(
+            () => true,
+            () => false,
+          )
+          await entered.promise
+          const manual = createTransaction({
+            autoCommit: false,
+            mutationFn: async ({ transaction }) => {
+              await collection.utils.acceptMutations(transaction)
+            },
+          })
+          manual.mutate(() => {
+            if (sameKey) {
+              collection.update('k', (draft) => {
+                draft.value = 2
+              })
+            } else {
+              collection.insert({ id: 'other', value: 2 })
+            }
+          })
+          let manualSettled = false
+          const manualReceipt = manual.commit().then(() => {
+            manualSettled = true
+          })
+          await new Promise((resolve) => setTimeout(resolve, 0))
+          expect(
+            manualSettled,
+            'manual acceptance waits for its predecessor',
+          ).toBe(false)
+          expect(storage.getItem('rows')).toBeNull()
+          if (firstAccepted) release.resolve()
+          else release.reject(new Error('automatic insert rejected'))
+          const [actualFirst] = await Promise.all([firstOutcome, manualReceipt])
+          expect(actualFirst).toBe(firstAccepted)
+          const expected = sameKey
+            ? [{ id: 'k', value: 2 }]
+            : [
+                ...(firstAccepted ? [{ id: 'k', value: 1 }] : []),
+                { id: 'other', value: 2 },
+              ].sort((a, b) => a.id.localeCompare(b.id))
+          expect(storedRows(storage.getItem('rows'))).toEqual(expected)
+          expect(sortedRows(collection.values())).toEqual(expected)
+          reopened = makeCollection(false)
+          await reopened.preload()
+          expect(sortedRows(reopened.values())).toEqual(expected)
+        },
+        () => [
+          () => release.resolve(),
+          () => reopened?.cleanup(),
+          () => collection.cleanup(),
+        ],
+      )
+    })
+  }
+}
+
+// Handler rejection contributes no durable effect and releases its optimistic
+// row at its own decision checkpoint for same and disjoint keys. The earlier
+// held handler still owns the next storage slot, not the later failure receipt.
+for (const secondId of ['a', 'b']) {
+  it(`rejects a later failed ${secondId === 'a' ? 'same-key' : 'disjoint-key'} handler while an earlier handler is held`, async () => {
+    const storage = makeSeededStorage()
+    const firstEntered = createDeferred<void>()
+    const releaseFirst = createDeferred<void>()
+    const secondFailed = createDeferred<void>()
+    const collection = createCollection(
+      localStorageCollectionOptions<Row>({
+        storageKey: 'rows',
+        storage,
+        storageEventApi: { addEventListener() {}, removeEventListener() {} },
+        getKey: (row) => row.id,
+        onUpdate: async ({ transaction }) => {
+          if (transaction.mutations[0].modified.value === 1) {
+            firstEntered.resolve()
+            await releaseFirst.promise
+          } else {
+            secondFailed.resolve()
+            throw new Error('rejected second update')
+          }
+        },
+      }),
+    )
+    await withHistoryCleanup(
+      async () => {
+        await collection.preload()
+        const first = collection.update('a', (draft) => {
+          draft.value = 1
+        })
+        await firstEntered.promise
+        const second = collection.update(secondId, (draft) => {
+          draft.value = 2
+        })
+        const rejected = second.isPersisted.promise.then(
+          () => false,
+          () => true,
+        )
+        let settled = false
+        void rejected.then(() => {
+          settled = true
+        })
+        await secondFailed.promise
+        await new Promise((resolve) => setTimeout(resolve, 0))
+        expect(settled, 'the failed handler owns its receipt').toBe(true)
+        expect(await rejected).toBe(true)
+        expect(sortedRows(collection.values())).toEqual([
+          { id: 'a', value: 1 },
+          { id: 'b', value: 0 },
+        ])
+        expect(storedRows(storage.getItem('rows'))).toEqual(initial)
+        releaseFirst.resolve()
+        await first.isPersisted.promise
+        expect(storedRows(storage.getItem('rows'))).toEqual([
+          { id: 'a', value: 1 },
+          { id: 'b', value: 0 },
+        ])
+      },
+      () => [() => releaseFirst.resolve(), () => collection.cleanup()],
+    )
+  })
 }
 
 // This finite grammar covers same-key and disjoint-key updates and both handler

@@ -26,7 +26,7 @@ be shared across tabs when using the in-memory fallback.
 
 **Using with Manual Transactions:**
 
-For manual transactions, you must call `utils.acceptMutations()` in your transaction's `mutationFn`
+For manual transactions, you must await `utils.acceptMutations()` in your transaction's `mutationFn`
 to persist changes made during `tx.mutate()`. This is necessary because local-storage collections
 don't participate in the standard mutation handler flow for manual transactions.
 
@@ -106,7 +106,7 @@ const tx = createTransaction({
     await api.updateUserProfile({ settings: settingsMutations[0]?.modified })
 
     // Persist local-storage mutations after API success
-    localSettings.utils.acceptMutations(transaction)
+    await localSettings.utils.acceptMutations(transaction)
   }
 })
 
@@ -141,7 +141,7 @@ be shared across tabs when using the in-memory fallback.
 
 **Using with Manual Transactions:**
 
-For manual transactions, you must call `utils.acceptMutations()` in your transaction's `mutationFn`
+For manual transactions, you must await `utils.acceptMutations()` in your transaction's `mutationFn`
 to persist changes made during `tx.mutate()`. This is necessary because local-storage collections
 don't participate in the standard mutation handler flow for manual transactions.
 
@@ -221,7 +221,7 @@ const tx = createTransaction({
     await api.updateUserProfile({ settings: settingsMutations[0]?.modified })
 
     // Persist local-storage mutations after API success
-    localSettings.utils.acceptMutations(transaction)
+    await localSettings.utils.acceptMutations(transaction)
   }
 })
 

@@ -329,7 +329,7 @@ describe(`localStorage collection`, () => {
       subscription.unsubscribe()
     })
 
-    it(`should handle corrupted storage data gracefully`, async () => {
+    it(`rejects corrupted storage until explicit clear and restart`, async () => {
       // Set invalid JSON data
       mockStorage.setItem(`todos`, `invalid json data`)
 
@@ -343,24 +343,23 @@ describe(`localStorage collection`, () => {
       )
 
       const reads = vi.spyOn(mockStorage, `getItem`)
-      const warnings = vi.spyOn(console, `warn`).mockImplementation(() => {})
       try {
-        await collection.preload()
+        await expect(collection.preload()).rejects.toThrow(SyntaxError)
         expect(reads).toHaveBeenCalledWith(`todos`)
-        expect(warnings).toHaveBeenCalledExactlyOnceWith(
-          `[LocalStorageCollection] Error loading data from storage key "todos":`,
-          expect.any(SyntaxError),
-        )
-        expect(collection.isReady()).toBe(true)
+        expect(collection.status).toBe(`error`)
+        expect(mockStorage.getItem(`todos`)).toBe(`invalid json data`)
         expect([...collection.values()]).toEqual([])
-        mockStorageEventApi.triggerStorageEvent(installRemoteTodo(mockStorage))
+        collection.utils.clearStorage()
+        await collection.cleanup()
+        installRemoteTodo(mockStorage)
+        collection.startSyncImmediate()
+        expect(collection.isReady()).toBe(true)
         expect([...collection.values()]).toEqual([publicRemoteTodo])
       } finally {
         try {
           await collection.cleanup()
         } finally {
           reads.mockRestore()
-          warnings.mockRestore()
         }
       }
     })
@@ -973,7 +972,7 @@ describe(`localStorage collection`, () => {
           // Simulate API call success
           await Promise.resolve()
           // Accept mutations for local-storage collection
-          collection.utils.acceptMutations(transaction)
+          await collection.utils.acceptMutations(transaction)
         },
         autoCommit: false,
       })
@@ -1038,7 +1037,7 @@ describe(`localStorage collection`, () => {
       const transaction = createTransaction({
         autoCommit: false,
         mutationFn: ({ transaction: committed }: any) =>
-          Promise.resolve(collection.utils.acceptMutations(committed)),
+          collection.utils.acceptMutations(committed),
       })
 
       try {
@@ -1108,7 +1107,7 @@ describe(`localStorage collection`, () => {
         mutationFn: async ({ transaction }: any) => {
           await Promise.resolve()
           // Only accept mutations for collection1
-          collection1.utils.acceptMutations(transaction)
+          await collection1.utils.acceptMutations(transaction)
         },
         autoCommit: false,
       })
@@ -1169,7 +1168,7 @@ describe(`localStorage collection`, () => {
       const tx = createTransaction({
         mutationFn: async ({ transaction }: any) => {
           await Promise.resolve()
-          collection.utils.acceptMutations(transaction)
+          await collection.utils.acceptMutations(transaction)
         },
         autoCommit: false,
       })
@@ -1227,7 +1226,7 @@ describe(`localStorage collection`, () => {
       const tx = createTransaction({
         mutationFn: async ({ transaction }: any) => {
           await Promise.resolve()
-          collection.utils.acceptMutations(transaction)
+          await collection.utils.acceptMutations(transaction)
         },
         autoCommit: false,
       })
@@ -1361,7 +1360,7 @@ describe(`localStorage collection`, () => {
           // Simulate API call
           await Promise.resolve()
           // Accept mutations AFTER API call (recommended for consistency)
-          collection.utils.acceptMutations(transaction)
+          await collection.utils.acceptMutations(transaction)
         },
         autoCommit: false,
       })
@@ -1470,7 +1469,7 @@ describe(`localStorage collection`, () => {
         const tx = createTransaction({
           mutationFn: async ({ transaction }: any) => {
             await Promise.resolve()
-            collection.utils.acceptMutations(transaction)
+            await collection.utils.acceptMutations(transaction)
           },
           autoCommit: false,
         })
@@ -1657,7 +1656,7 @@ describe(`localStorage collection`, () => {
           mutationFn: async ({ transaction }: any) => {
             await Promise.resolve()
             // This should handle the case where sync isn't ready
-            collection.utils.acceptMutations(transaction)
+            await collection.utils.acceptMutations(transaction)
           },
           autoCommit: false,
         })
@@ -1714,7 +1713,7 @@ describe(`localStorage collection`, () => {
         const tx = createTransaction({
           mutationFn: async ({ transaction }: any) => {
             await Promise.resolve()
-            collection.utils.acceptMutations(transaction)
+            await collection.utils.acceptMutations(transaction)
           },
           autoCommit: false,
         })

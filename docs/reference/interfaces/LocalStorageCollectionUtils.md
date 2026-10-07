@@ -22,13 +22,13 @@ LocalStorage collection utilities type
 ### acceptMutations()
 
 ```ts
-acceptMutations: (transaction) => void;
+acceptMutations: (transaction) => Promise<void>;
 ```
 
 Defined in: [packages/db/src/local-storage.ts:122](https://github.com/TanStack/db/blob/main/packages/db/src/local-storage.ts#L122)
 
 Accepts mutations from a transaction that belong to this collection and persists them to localStorage.
-This should be called in your transaction's mutationFn to persist local-storage data.
+Await this in your transaction's mutationFn so its persistence receipt follows the storage write.
 
 #### Parameters
 
@@ -42,7 +42,7 @@ The transaction containing mutations to accept
 
 #### Returns
 
-`void`
+`Promise`\<`void`\>
 
 #### Example
 
@@ -54,7 +54,7 @@ const tx = createTransaction({
     // Make API call first
     await api.save(...)
     // Then persist local-storage mutations after success
-    localSettings.utils.acceptMutations(transaction)
+    await localSettings.utils.acceptMutations(transaction)
   }
 })
 ```

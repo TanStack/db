@@ -1018,7 +1018,7 @@ const tx = createTransaction({
     )
 
     // After server mutations succeed, accept local collection mutations
-    localSettings.utils.acceptMutations(transaction)
+    await localSettings.utils.acceptMutations(transaction)
   },
 })
 
@@ -1043,7 +1043,7 @@ await tx.commit()
 ```ts
 mutationFn: async ({ transaction }) => {
   await api.save(data)  // API call first
-  localData.utils.acceptMutations(transaction)  // Persist after success
+  await localData.utils.acceptMutations(transaction)  // Persist after success
 }
 ```
 
@@ -1053,7 +1053,7 @@ mutationFn: async ({ transaction }) => {
 **Before API call (for independent local state):**
 ```ts
 mutationFn: async ({ transaction }) => {
-  localData.utils.acceptMutations(transaction)  // Persist first
+  await localData.utils.acceptMutations(transaction)  // Persist first
   await api.save(data)  // Then API call
 }
 ```
@@ -1065,7 +1065,7 @@ Choose based on whether your local data should be independent of or coupled to r
 
 #### Best Practices
 
-- Always call `utils.acceptMutations()` for local collections in manual transactions
+- Always call `utils.acceptMutations()` for local collections in manual transactions; await it for LocalStorage collections so transaction settlement follows the storage write
 - Call `acceptMutations` **after** API success if you want transactional consistency
 - Call `acceptMutations` **before** API calls if local state should persist regardless
 - Filter mutations by collection if you need to process them separately

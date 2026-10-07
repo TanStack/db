@@ -103,8 +103,9 @@ export interface LocalStorageCollectionUtils extends UtilsRecord {
   clearStorage: ClearStorageFn
   getStorageSize: GetStorageSizeFn
   /**
-   * Accepts mutations from a transaction that belong to this collection and persists them to localStorage.
-   * This should be called in your transaction's mutationFn to persist local-storage data.
+   * Accepts this Collection's manual mutations in write order and persists
+   * them to localStorage. Await this in the transaction's mutationFn so its
+   * persistence receipt cannot settle before the storage write.
    *
    * @param transaction - The transaction containing mutations to accept
    * @example
@@ -115,13 +116,13 @@ export interface LocalStorageCollectionUtils extends UtilsRecord {
    *     // Make API call first
    *     await api.save(...)
    *     // Then persist local-storage mutations after success
-   *     localSettings.utils.acceptMutations(transaction)
+   *     await localSettings.utils.acceptMutations(transaction)
    *   }
    * })
    */
   acceptMutations: (transaction: {
     mutations: Array<PendingMutation<Record<string, unknown>>>
-  }) => void
+  }) => Promise<void>
 }
 
 /**
@@ -245,7 +246,7 @@ function createNoOpStorageEventApi(): StorageEventApi {
  *
  * **Using with Manual Transactions:**
  *
- * For manual transactions, you must call `utils.acceptMutations()` in your transaction's `mutationFn`
+ * For manual transactions, you must await `utils.acceptMutations()` in your transaction's `mutationFn`
  * to persist changes made during `tx.mutate()`. This is necessary because local-storage collections
  * don't participate in the standard mutation handler flow for manual transactions.
  *
@@ -302,7 +303,7 @@ function createNoOpStorageEventApi(): StorageEventApi {
  *     await api.updateUserProfile({ settings: settingsMutations[0]?.modified })
  *
  *     // Persist local-storage mutations after API success
- *     localSettings.utils.acceptMutations(transaction)
+ *     await localSettings.utils.acceptMutations(transaction)
  *   }
  * })
  *
@@ -418,10 +419,12 @@ export function localStorageCollectionOptions(
   }
 
   /**
-   * Removes all collection data from the configured storage
+   * Removes the stored snapshot and publishes removal of accepted synced rows.
+   * Pending optimistic mutations can still settle afterward.
    */
   const clearStorage: ClearStorageFn = (): void => {
     storage.removeItem(config.storageKey)
+    sync.manualTrigger?.()
   }
 
   /**
@@ -458,37 +461,99 @@ export function localStorageCollectionOptions(
     sync.confirmOperationsSync(mutations)
   }
 
-  // Reserve each automatic write before calling its handler. Handlers may
-  // finish out of order, but a later mutation cannot persist ahead of an
-  // earlier one from this Collection. A rejected handler still releases its
-  // place after its predecessor so accepted successors keep author order.
-  let automaticWriteTail = Promise.resolve()
-  const persistAutomatic = async (
-    mutations: Array<PendingMutation<Record<string, unknown>>>,
-    handler: () => unknown | Promise<unknown>,
-  ) => {
-    const previous = automaticWriteTail
+  // Reserve automatic and manual writes in acceptance order. A rejected
+  // handler releases only its storage slot after its predecessor, while its
+  // own transaction receipt can reject immediately.
+  let writeTail = Promise.resolve()
+  let reservedWrites = 0
+  const reserveWrite = () => {
+    const previous = writeTail
     let release!: () => void
-    automaticWriteTail = new Promise<void>((resolve) => {
+    writeTail = new Promise<void>((resolve) => {
       release = resolve
     })
-    try {
-      const result = (await handler()) ?? {}
-      await previous
-      persistMutations(mutations)
-      return result
-    } finally {
-      await previous
+    reservedWrites++
+    const unblocked = reservedWrites === 1
+    const retire = () => {
+      reservedWrites--
       release()
     }
+    return { previous, unblocked, retire }
+  }
+
+  const persistAutomatic = (
+    mutations: Array<PendingMutation<Record<string, unknown>>>,
+    handler?: () => unknown | Promise<unknown>,
+  ): Promise<unknown> => {
+    const { previous, unblocked, retire } = reserveWrite()
+
+    // Native Storage writes synchronously. With no handler or earlier write,
+    // preserve that direct-mutation return boundary.
+    if (!handler && unblocked) {
+      try {
+        persistMutations(mutations)
+        return Promise.resolve({})
+      } catch (error) {
+        return Promise.reject(error)
+      } finally {
+        retire()
+      }
+    }
+
+    let result: unknown
+    try {
+      result = handler?.()
+    } catch (error) {
+      void previous.then(retire)
+      return Promise.reject(error)
+    }
+    return Promise.resolve(result).then(
+      async (value) => {
+        await previous
+        try {
+          persistMutations(mutations)
+          return value ?? {}
+        } finally {
+          retire()
+        }
+      },
+      (error: unknown) => {
+        // Rejection belongs to this transaction immediately. Only its empty
+        // storage slot must wait for the earlier accepted write to retire.
+        void previous.then(retire)
+        throw error
+      },
+    )
+  }
+
+  const persistManual = (
+    mutations: Array<PendingMutation<Record<string, unknown>>>,
+  ): Promise<void> => {
+    const { previous, unblocked, retire } = reserveWrite()
+    if (unblocked) {
+      try {
+        persistMutations(mutations)
+        return Promise.resolve()
+      } finally {
+        retire()
+      }
+    }
+    return previous.then(() => {
+      try {
+        persistMutations(mutations)
+      } finally {
+        retire()
+      }
+    })
   }
 
   const wrappedOnInsert = (params: InsertMutationFnParams<any>) => {
     params.transaction.mutations.forEach((mutation) => {
       validateJsonSerializable(parser, mutation.modified, `insert`)
     })
-    return persistAutomatic(params.transaction.mutations, () =>
-      config.onInsert?.(params),
+    return persistAutomatic(
+      params.transaction.mutations,
+      config.onInsert ? () => config.onInsert!(params) : undefined,
     )
   }
 
@@ -496,14 +561,16 @@ export function localStorageCollectionOptions(
     params.transaction.mutations.forEach((mutation) => {
       validateJsonSerializable(parser, mutation.modified, `update`)
     })
-    return persistAutomatic(params.transaction.mutations, () =>
-      config.onUpdate?.(params),
+    return persistAutomatic(
+      params.transaction.mutations,
+      config.onUpdate ? () => config.onUpdate!(params) : undefined,
     )
   }
 
   const wrappedOnDelete = (params: DeleteMutationFnParams<any>) =>
-    persistAutomatic(params.transaction.mutations, () =>
-      config.onDelete?.(params),
+    persistAutomatic(
+      params.transaction.mutations,
+      config.onDelete ? () => config.onDelete!(params) : undefined,
     )
 
   // Extract standard Collection config properties
@@ -524,11 +591,12 @@ export function localStorageCollectionOptions(
   const collectionId = id ?? `local-collection:${config.storageKey}`
 
   /**
-   * Accepts mutations from a transaction that belong to this collection and persists them to storage
+   * Accepts this Collection's manual mutations in write order and resolves
+   * after their storage write. The caller must await it in mutationFn.
    */
   const acceptMutations = (transaction: {
     mutations: Array<PendingMutation<Record<string, unknown>>>
-  }) => {
+  }): Promise<void> => {
     // Filter mutations that belong to this collection
     // Use collection ID for filtering if collection reference isn't available yet
     const collectionMutations = transaction.mutations.filter((m) => {
@@ -539,7 +607,7 @@ export function localStorageCollectionOptions(
     })
 
     if (collectionMutations.length === 0) {
-      return
+      return Promise.resolve()
     }
 
     // Validate all mutations can be serialized before modifying storage
@@ -555,7 +623,7 @@ export function localStorageCollectionOptions(
       }
     }
 
-    persistMutations(collectionMutations)
+    return persistManual(collectionMutations)
   }
 
   const options = {
@@ -624,24 +692,6 @@ function readFromStorage<T extends object>(
   }
 
   return dataMap
-}
-
-// Startup preserves its existing best-effort behavior. A write or event must
-// use readFromStorage so read failure cannot authorize an empty replacement.
-function loadFromStorage<T extends object>(
-  storageKey: string,
-  storage: StorageApi,
-  parser: Parser,
-): Map<string | number, StoredItem<T>> {
-  try {
-    return readFromStorage<T>(storageKey, storage, parser)
-  } catch (error) {
-    console.warn(
-      `[LocalStorageCollection] Error loading data from storage key "${storageKey}":`,
-      error,
-    )
-    return new Map()
-  }
 }
 
 /**
@@ -756,12 +806,12 @@ function createLocalStorageSync<T extends object>(
     sync: (params: Parameters<SyncConfig<T>[`sync`]>[0]) => {
       const { begin, write, commit, markReady } = params
 
-      // Store sync params and collection for later use
+      // A failed restore cannot establish an empty authoritative snapshot.
+      // Read before retaining this sync run's callbacks so startup failure
+      // leaves no stale adapter state.
+      const initialData = readFromStorage<T>(storageKey, storage, parser)
       syncParams = params
       collection = params.collection
-
-      // Initial load
-      const initialData = loadFromStorage<T>(storageKey, storage, parser)
       if (initialData.size > 0) {
         begin()
         initialData.forEach((storedItem) => {

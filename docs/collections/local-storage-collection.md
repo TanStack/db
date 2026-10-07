@@ -88,16 +88,27 @@ const settingsCollection = createCollection(
 Automatic mutations in one Collection persist in mutation order, even if their
 optional handlers finish in another order. A handler that rejects does not write
 its mutation. Other tabs see accepted changes when their storage events arrive.
+Without a handler or earlier pending write, a direct mutation writes to
+localStorage before the mutation method returns. A later handler failure rejects
+its transaction promptly, even if an earlier handler is still pending.
 
 A handler can start another mutation on the same Collection, then return without
-awaiting that mutation's `isPersisted` promise. Do not await that promise inside
-the earlier handler. The later write waits for the earlier handler to return,
-so awaiting it would leave both mutations pending.
+awaiting that mutation's `isPersisted` promise. Do not await that promise or a
+later `acceptMutations()` call inside the earlier handler. Those writes wait for
+the earlier handler to return, so awaiting them would leave both pending.
 
 Each write stores a complete storage snapshot under one storage key. A
 write preserves disjoint peer rows already present in storage, even when that
 peer's event has not arrived yet. Truly simultaneous writes from separate tabs
 are not an atomic transaction; localStorage has no compare-and-swap operation.
+
+Startup requires a valid stored snapshot. Malformed JSON or a row missing its
+version information puts the Collection in an error state and leaves the stored
+bytes intact. Repair or remove that value, then restart the Collection.
+`utils.clearStorage()` removes the stored snapshot and immediately publishes
+removal of its accepted rows. A pending optimistic mutation can remain visible
+and later persist. Edit the Collection through its mutation methods;
+direct same-tab edits to its storage key do not produce browser storage events.
 Use an IndexedDB Collection when several tabs need stronger write coordination.
 
 If storage cannot be read, the mutation rejects and existing stored rows remain.
@@ -203,7 +214,7 @@ const preferencesCollection = createCollection(
 
 ## Manual Transactions
 
-When using LocalStorage collections with manual transactions (created via `createTransaction`), you must call `utils.acceptMutations()` to persist the changes:
+When using LocalStorage collections with manual transactions (created via `createTransaction`), await `utils.acceptMutations()` in `mutationFn`. Manual acceptance joins the same write order, and awaiting it keeps the transaction's persistence receipt behind the storage write:
 
 ```typescript
 import { createTransaction } from '@tanstack/react-db'
@@ -237,7 +248,7 @@ const tx = createTransaction({
     )
 
     // After server mutations succeed, persist local collection mutations
-    localData.utils.acceptMutations(transaction)
+    await localData.utils.acceptMutations(transaction)
   },
 })
 
