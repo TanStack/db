@@ -32,9 +32,13 @@ function distinctiveLiteral(message) {
   return longest.slice(0, 40)
 }
 
+const source = await readFile(path.join(root, 'packages/db/src/errors.ts'), 'utf8')
+
+// A literal counts only if the source holds it verbatim; a stretch that runs
+// into a sample input's value is not template text.
 const literals = Object.keys(codes)
   .map((name) => [name, distinctiveLiteral(messages[name][0])])
-  .filter(([, literal]) => literal.length >= 16)
+  .filter(([, literal]) => literal.length >= 16 && source.includes(literal))
 assert.ok(
   literals.length > 60,
   `too few distinctive literals: ${literals.length}`,

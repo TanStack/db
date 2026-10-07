@@ -55,6 +55,10 @@
           "to": "guides/error-handling"
         },
         {
+          "label": "Error Codes",
+          "to": "errors"
+        },
+        {
           "label": "Creating Collection Options Creators",
           "to": "guides/collection-options-creator"
         }
