@@ -11,8 +11,8 @@ input gap, not permission to infer a promise from production.
 With several supplied reports or examples, ask whether one caller-visible
 obligation predicts their different symptoms. Name its common preconditions,
 check an apparent outlier and a nearby case it should permit, and split the
-proposal if those cases require different promises. Shared code is a clue, not
-contract authority.
+proposal if those cases require different promises. A descriptive cluster is a
+lead, not evidence that one contract governs every item.
 
 ## Operation
 
