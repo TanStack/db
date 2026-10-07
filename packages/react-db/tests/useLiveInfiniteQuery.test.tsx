@@ -33,14 +33,6 @@ function createMockPosts(count: number): Array<Post> {
   return posts
 }
 
-// Subscriptions that keep a source from garbage collection, including a
-// live query that asks for no data yet. `subscriberCount` counts only
-// subscribers that ask for data.
-function retainers(collection: unknown): number {
-  return (collection as { _changes: { activeSubscribersCount: number } })
-    ._changes.activeSubscribersCount
-}
-
 describe(`useLiveInfiniteQuery`, () => {
   it(`reclaims a query-function collection abandoned before it commits`, async () => {
     const source = createCollection(
@@ -48,6 +40,8 @@ describe(`useLiveInfiniteQuery`, () => {
         id: `abandoned-infinite-query`,
         getKey: (post) => post.id,
         initialData: createMockPosts(10),
+        // Reclaimed as soon as nothing holds it.
+        gcTime: 1,
       }),
     )
     const never = new Promise<void>(() => {})
@@ -72,8 +66,9 @@ describe(`useLiveInfiniteQuery`, () => {
     // Like useLiveQuery, the hook starts sync during render. The render asks
     // for no data, but its collection holds the source until GC reclaims it.
     expect(source.subscriberCount).toBe(0)
-    expect(retainers(source)).toBeGreaterThan(0)
-    await waitFor(() => expect(retainers(source)).toBe(0))
+    await new Promise((resolve) => setTimeout(resolve, 10))
+    expect(source.status).not.toBe(`cleaned-up`)
+    await waitFor(() => expect(source.status).toBe(`cleaned-up`))
     rendered.unmount()
   })
 
@@ -91,6 +86,8 @@ describe(`useLiveInfiniteQuery`, () => {
         id: `abandoned-supplied-infinite-query`,
         getKey: (post) => post.id,
         initialData: createMockPosts(10),
+        // Reclaimed as soon as nothing holds it.
+        gcTime: 1,
       }),
     )
     const liveQuery = createLiveQueryCollection({
@@ -112,8 +109,9 @@ describe(`useLiveInfiniteQuery`, () => {
     )
 
     expect(source.subscriberCount).toBe(0)
-    expect(retainers(source)).toBeGreaterThan(0)
-    await waitFor(() => expect(retainers(source)).toBe(0))
+    await new Promise((resolve) => setTimeout(resolve, 10))
+    expect(source.status).not.toBe(`cleaned-up`)
+    await waitFor(() => expect(source.status).toBe(`cleaned-up`))
     rendered.unmount()
   })
 

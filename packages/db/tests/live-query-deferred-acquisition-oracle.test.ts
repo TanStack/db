@@ -878,3 +878,44 @@ describe(`a deferring live query is not a subscriber of its sources`, () => {
     })
   }
 })
+
+/**
+ * ## A request that arrives while a source subscription is created
+ *
+ * A live-query Collection decides that a source subscription defers when it
+ * creates it. Creating it can run user code: subscribing to an inner
+ * live-query Collection starts that Collection, whose status handlers run
+ * before the outer subscription returns. If such a handler preloads or
+ * subscribes to the outer live query, the request arrives after the decision
+ * but before the outer one listens for it. It still resumes the source.
+ */
+describe(`a request that arrives while a source subscription is created`, () => {
+  for (const request of [`preload`, `subscribe`] as const) {
+    it(`an inner status handler that ${request}s the outer live query resumes it`, async () => {
+      const { collection: source, counts } = makeSource(`on-demand-idle`)
+      const { outer, collections } = makeLiveQuery(source, `window`, 2)
+      const inner = collections[1]!
+      let subscription: { unsubscribe: () => void } | undefined
+      let requested = false
+      const stop = inner.on(`status:change`, () => {
+        if (requested) return
+        requested = true
+        if (request === `preload`) void outer.preload()
+        else subscription = outer.subscribeChanges(() => {})
+      })
+      try {
+        outer.startSyncImmediate()
+        await settle()
+        expect(requested, `the handler ran`).toBe(true)
+        expect(counts.acquisitions, `acquisition attempts`).toBeGreaterThan(0)
+        expect(outer.status).toBe(`ready`)
+        expect(outer.toArray.map((row) => row.id)).toEqual(EXPECTED_IDS.window)
+      } finally {
+        stop()
+        subscription?.unsubscribe()
+        for (const collection of collections) await collection.cleanup()
+        await source.cleanup()
+      }
+    })
+  }
+})

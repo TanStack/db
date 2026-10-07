@@ -1266,6 +1266,11 @@ export class CollectionConfigBuilder<
             subscription.resumeDeferredAcquisition(),
           ),
         )
+        // Creating the subscription can run user code, such as an inner live
+        // query's status handler, that already requested this one's data.
+        if (this.hasSubscriberOrPreload()) {
+          subscription.resumeDeferredAcquisition()
+        }
       }
 
       const lazyCallbacks = this.lazySourcesCallbacks[sourceId]
