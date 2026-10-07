@@ -33,7 +33,7 @@ Live query results include computed, read-only virtual properties on every row:
 
 - `$hasPendingWrites`: `true` while a pending local optimistic mutation affects the row; otherwise `false`. It is always `false` for local-only collections. It does not indicate server acknowledgement.
 - `$synced` (deprecated): the inverse of `$hasPendingWrites`. It will be removed in the 1.0 RC. Replace `row.$synced` with `!row.$hasPendingWrites`, and `eq(row.$synced, true)` with `eq(row.$hasPendingWrites, false)`.
-- `$origin`: `"local"` if the last confirmed change came from this client, otherwise `"remote"`. A sync write counts as a local confirmation only if it was committed while the mutation was still persisting, before its optimistic state dropped. A sync write committed after the mutation settles is `"remote"`.
+- `$origin`: Collection attribution for the current row. Optimistic rows are `"local"`. With one local mutation and no truncate, the first queued same-key source transaction published when that mutation succeeds consumes local attribution. Its surviving row is `"local"`; later source transactions are `"remote"`. A failed mutation gives those queued writes no local attribution. A truncate can publish while the mutation is active, leaving its same-key row `"local"` even if the mutation later fails. This field uses key and timing, not a source client ID: a peer write may be `"local"`, and your later confirmation may be `"remote"`. Local-only Collections always use `"local"`.
 - `$key`: the row key for the result.
 - `$collectionId`: the source collection ID.
 

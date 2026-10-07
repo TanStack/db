@@ -783,15 +783,45 @@ The post-merge review added three missing domains to existing owners:
   Sync transactions committed while it persisted are held and publish with
   that drop; `isPersisted` settles after that publication. Handler sync writes
   are generated at every cut, with and without awaiting their acceptance.
-  Receipts stay pending until visible. A confirmation committed while the
-  transaction persists is `$origin: 'local'`; one committed after settlement
-  is `'remote'`. The earlier accepted-snapshot retention law and its
-  truncate-capture ownership refinement were retired with this contract; the
+  Receipts stay pending until visible. With one local mutation and no
+  truncate, the first queued same-key source transaction consumes local
+  attribution at settlement if that mutation succeeds. An absent-key delete
+  consumes it without leaving a row. Later queued source transactions are
+  `'remote'` without another local owner. A truncate can publish while the
+  mutation remains active and label its same-key row `'local'` even if that
+  mutation later fails. Attribution uses key and timing; `SyncConfig.write`
+  has no causal client identity. The earlier accepted-snapshot retention law
+  and its truncate-capture ownership refinement were retired with this
+  contract; the
   [PR #1907 review record](oracle-reviews/pr-1907-accepted-delete-ownership.md)
   is historical; the [settlement-drop review record](oracle-reviews/2026-10-03-settlement-drop.md)
   holds the RED/GREEN and mutant evidence. A handler that awaits a visibility receipt held by its own
   transaction, such as an on-demand load of its own Collection, waits for
   itself; that history is outside the generated grammar.
+
+- The [issue #2071 review](oracle-reviews/issue-2071-refused-insert.md)
+  checks a rejecting `onInsert` through the persisted wrapper. Four controlled
+  histories cross source insert/delete with acceptance before/after rejection.
+  They compare live rows, exposed base, durable rows, origin, and a held source
+  receipt at mutation settlement and after source application. The
+  [real SQLite receiver](../../packages/db-sqlite-persistence-core/tests/persisted-real-adapter-lifecycle.test.ts)
+  checks two same-key continuations. Each reopens the same file with a new
+  Collection, adapter, and SQLite driver. Both the reported release and this
+  review tree pass these bounded histories. The reporter's private bridge
+  sequence is unavailable; these witnesses do not establish its behavior,
+  other mutation kinds, on-demand sync, other SQLite hosts, or an OS process
+  restart. The persisted wrapper owner needs the bridge callback and write
+  sequence to reach that path.
+
+- The [optimistic publication owner](../../packages/db/tests/optimistic-history-publication-oracle.test.ts)
+  distinguishes one and two queued same-key source transactions during a
+  successful local mutation, an absent-key delete before a source insert, and
+  a truncate published before a mutation fails. The persisted wrapper receives
+  the one/two queued transaction pair. These histories establish key-and-timing
+  attribution for one local mutation; they do not
+  establish causal authorship or every overlapping mutation schedule. A
+  causal `$origin` guarantee would require an explicit source signal and a new
+  core-owner model and provider receiving witness.
 
 | Issue obligation           | Implemented evidence                                                                                                                                                        | Limit                                                                                        |
 | -------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------- |

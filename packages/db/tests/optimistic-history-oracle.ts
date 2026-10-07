@@ -25,16 +25,19 @@ import type { CollectionConfig, SyncConfig } from '../src/types.js'
  * Commit receipts, subset loads, and readiness wait for visibility. A handler
  * that awaits a visibility receipt held by its own transaction, such as an
  * on-demand load of its own Collection, waits for itself and never returns.
- * Queued sync
- * transactions apply when no optimistic transaction is persisting, in the
- * same publication that drops the settling transaction's optimistic state.
- * A completed transaction's optimistic row is held only while a queued sync
- * transaction touches its key, so that drop and that sync transaction
- * publish together. A sync write committed while the transaction persists
- * is attributed `$origin: 'local'`; one committed after its optimistic state
- * drops is `'remote'`. `isPersisted` fulfills after that publication. A truncate
- * applies at once, with every queued sync transaction before it, and the
- * still-persisting transactions overlay the replacement.
+ * Queued sync transactions apply when no optimistic transaction is
+ * persisting, in the same publication that drops the settling transaction's
+ * optimistic state. A successful transaction's optimistic row is held only
+ * while a queued sync transaction touches its key, so that drop and that sync
+ * transaction publish together. With one local mutation and no truncate, the
+ * first queued same-key source transaction consumes local attribution at
+ * settlement, even if a peer supplied it. A later one is `'remote'` without
+ * another local owner. A failed mutation gives those queued source writes no
+ * local attribution. `isPersisted` settles after that publication.
+ * A truncate applies at once, with every queued sync transaction before it.
+ * Its same-key source row can receive local attribution while a mutation still
+ * persists, even if that mutation later fails. Still-persisting transactions
+ * overlay the replacement.
  *
  * The reference model has three small parts: the applied synced rows, an
  * ordered list of optimistic transactions with one mutation each, and a queue
@@ -137,7 +140,7 @@ type ModelTransaction = {
   // Settled while a queued sync transaction touched its key. The drain that
   // applies that queue ends the hold.
   held: boolean
-  // A held confirmation of this completed transaction is local.
+  // The first queued same-key source transaction can consume local attribution.
   originPending: boolean
 }
 type ObservedRow = HistoryRow & {
@@ -241,8 +244,8 @@ class HistoryModel {
     const transaction = this.transactions[index]!
     transaction.state = success ? `completed` : `failed`
     transaction.held = success && this.queuedKeys().has(transaction.key)
-    // Only a confirmation committed before the optimistic state drops, and
-    // so held at this boundary, is local.
+    // A successful mutation grants one queued same-key source transaction
+    // local attribution when that transaction is held at this boundary.
     transaction.originPending = transaction.held
     // This grammar submits direct operations immediately. Rollback cascades
     // affect pending (not already persisting) peer transactions, so none of
@@ -256,6 +259,8 @@ class HistoryModel {
   }
 
   private drain() {
+    // A truncate can drain before a mutation settles. Its same-key source row
+    // uses the active mutation's attribution, regardless of later settlement.
     const persistingKeys = new Set(
       this.transactions
         .filter((entry) => entry.state === `persisting`)

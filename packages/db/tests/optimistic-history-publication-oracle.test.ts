@@ -67,6 +67,97 @@ it.each([true, false])(
   },
 )
 
+// A source has no causal-origin field. The model therefore gives the first
+// queued same-key sync transaction local attribution at successful settlement,
+// even when an independent peer supplied it. A later transaction on that key
+// replaces its row with remote attribution. These histories make that limit
+// visible at the settlement publication.
+it.each([1, 2] as const)(
+  `attributes only the first of %i queued same-key source transactions locally`,
+  async (sourceTransactions) => {
+    const steps: Array<OptimisticStep> = [
+      { type: `edit`, key: 1, fields: { a: 1 }, optimistic: true },
+      {
+        type: `sync`,
+        rows: [{ id: 1, a: 2, b: 0, c: 0 }],
+        truncate: false,
+        copies: 1,
+      },
+      ...(sourceTransactions === 2
+        ? [
+            {
+              type: `sync` as const,
+              rows: [{ id: 1, a: 3, b: 0, c: 0 }],
+              truncate: false,
+              copies: 1,
+            },
+          ]
+        : []),
+      { type: `settle`, slot: 0, success: true, cascade: false },
+    ]
+    const counts = await runOptimisticHistory([], steps)
+    expect(counts).toMatchObject({
+      edits: 1,
+      settlements: 1,
+      queued: sourceTransactions,
+      sourceInserts: 1,
+    })
+  },
+)
+
+// A source delete also touches the key even when that source held no row.
+// It consumes the one local attribution, so a later source insert is remote.
+it(`consumes local attribution with an absent-key source delete`, async () => {
+  const counts = await runOptimisticHistory(
+    [],
+    [
+      { type: `edit`, key: 1, fields: { a: 1 }, optimistic: true },
+      { type: `sync`, rows: [], deletes: [1], truncate: false, copies: 1 },
+      {
+        type: `sync`,
+        rows: [{ id: 1, a: 2, b: 0, c: 0 }],
+        truncate: false,
+        copies: 1,
+      },
+      { type: `settle`, slot: 0, success: true, cascade: false },
+    ],
+  )
+  expect(counts).toMatchObject({
+    edits: 1,
+    settlements: 1,
+    queued: 2,
+    sourceDeletes: 1,
+    absentSourceDeletes: 1,
+    sourceInserts: 1,
+  })
+})
+
+// Unlike an ordinary queued batch, a truncate publishes while the mutation
+// still persists. A same-key source row can therefore receive local attribution
+// even if that mutation later fails. The model compares both publication cuts.
+it(`retains active-mutation attribution from a truncate after failure`, async () => {
+  const counts = await runOptimisticHistory(
+    [],
+    [
+      { type: `edit`, key: 1, fields: { a: 1 }, optimistic: true },
+      {
+        type: `sync`,
+        rows: [{ id: 1, a: 2, b: 0, c: 0 }],
+        truncate: true,
+        copies: 1,
+      },
+      { type: `settle`, slot: 0, success: false, cascade: false },
+    ],
+  )
+  expect(counts).toMatchObject({
+    edits: 1,
+    settlements: 1,
+    replacements: 1,
+    failures: 1,
+    sourceInserts: 1,
+  })
+})
+
 it.each([
   `wrong-key`,
   `transient-field`,
