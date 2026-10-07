@@ -15,8 +15,9 @@ export function devBuild(): boolean {
 
 /**
  * A production message: the code, the inputs it can show as JSON, and its docs
- * anchor. Symbols and bigints show as strings. Objects other than arrays and
- * errors are not shown.
+ * anchor. Symbols and bigints show as strings; `undefined`, `NaN`, and the
+ * infinities show as themselves. Objects other than arrays and errors are not
+ * shown.
  */
 export function codedMessage(
   code: number,
@@ -29,6 +30,9 @@ export function codedMessage(
           ? JSON.stringify(value.message)
           : typeof value === `symbol` || typeof value === `bigint`
             ? JSON.stringify(String(value))
+            : value === undefined ||
+                (typeof value === `number` && !Number.isFinite(value))
+              ? String(value)
             : value === null ||
                 typeof value !== `object` ||
                 Array.isArray(value)

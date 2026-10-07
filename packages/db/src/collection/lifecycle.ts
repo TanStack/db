@@ -442,7 +442,7 @@ export class CollectionLifecycleManager<
                         ? syncFailure
                           ? `Adapter cleanup and local teardown both failed`
                           : `Multiple local teardown steps failed`
-                        : codedMessage(173, { syncFailure }),
+                        : codedMessage(173, { syncFailure: syncFailure !== undefined }),
                       { cause: failures[0] },
                     ),
             }

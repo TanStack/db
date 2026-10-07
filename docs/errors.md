@@ -1081,7 +1081,7 @@ Operation ${operation} not supported by BTreeIndex
 Development builds show this message, with `${...}` replaced by values:
 
 ```text
-A live query must be a QueryBuilder, LiveQueryCollectionConfig, Collection, undefined, or null. Got: ${typeofvalue}
+A live query must be a QueryBuilder, LiveQueryCollectionConfig, Collection, undefined, or null. Got: ${typeof value}
 ```
 
 <a id="error-103"></a>
@@ -1091,7 +1091,7 @@ A live query must be a QueryBuilder, LiveQueryCollectionConfig, Collection, unde
 Development builds show this message, with `${...}` replaced by values:
 
 ```text
-useLiveInfiniteQuery: First argument must be either a pre-created live query collection or a query function. Received: ${typeofinput}
+useLiveInfiniteQuery: First argument must be either a pre-created live query collection or a query function. Received: ${typeof input}
 ```
 
 <a id="error-104"></a>
@@ -1421,7 +1421,7 @@ Source collection '${collectionId}' entered error state
 Development builds show this message, with `${...}` replaced by values:
 
 ```text
-No handler provided for operator: ${name}. Available handlers: ${Object.keys(handlers).join(`,`)}
+No handler provided for operator: ${name}. Available handlers: ${Object.keys(handlers).join(`, `)}
 ```
 
 <a id="error-137"></a>
@@ -1561,7 +1561,7 @@ scheduleGraphRun called without active sync run. This should not happen.
 Development builds show this message, with `${...}` replaced by values:
 
 ```text
-Live query result key ${String(key)} changed by ${inserts-deletes} rows in one flush; a key has at most one result row.
+Live query result key ${String(key)} changed by ${inserts - deletes} rows in one flush; a key has at most one result row.
 ```
 
 <a id="error-151"></a>
@@ -1671,7 +1671,7 @@ Failed to extract collection. Invalid FROM clause: ${JSON.stringify(query)}
 Development builds show this message, with `${...}` replaced by values:
 
 ```text
-Scheduler detected unresolved dependencies for context ${String(contextId,)}.
+Scheduler detected unresolved dependencies for context ${String(contextId)}.
 ```
 
 <a id="error-162"></a>
@@ -1791,7 +1791,7 @@ Source collection '${collectionId}' entered error state
 Development builds show this message, with `${...}` replaced by values:
 
 ```text
-${syncFailure?Adapter cleanup and local teardown both failed:Multiple local teardown steps failed}
+${syncFailure ? Adapter cleanup and local teardown both failed : Multiple local teardown steps failed}
 ```
 
 <a id="error-174"></a>

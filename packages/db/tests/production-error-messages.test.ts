@@ -104,6 +104,9 @@ const hostileInputs: Array<unknown> = [
   [Object.create(null)],
   null,
   1n,
+  NaN,
+  Infinity,
+  undefined,
   `a\nb, c=d)`,
   `a\u2028b\u2029c`,
 ]
@@ -290,8 +293,10 @@ describe(`production error messages`, () => {
     })
   })
 
-  // A symbol or bigint has no JSON form, but production logs still need it.
-  it(`shows a symbol or bigint in a shown position as its string`, () => {
+  // JSON cannot show these values faithfully, but production logs need them:
+  // a symbol or bigint shows as a quoted string, and `undefined`, `NaN`, and
+  // the infinities show as themselves rather than as `null` or nothing.
+  it(`shows values that JSON cannot encode in a shown position`, () => {
     const codes: Record<string, number> = JSON.parse(
       readFileSync(codesPath, `utf8`),
     )
@@ -301,14 +306,18 @@ describe(`production error messages`, () => {
         args.forEach((arg, position) => {
           if (typeof arg !== `string` || arg.length < 3) return
           if (!devMessages[name]![index]!.includes(arg)) return
-          for (const value of [Symbol(`probe`), 7n]) {
+          for (const [value, shown] of [
+            [Symbol(`probe`), `"Symbol(probe)"`],
+            [7n, `"7"`],
+            [undefined, `=undefined`],
+            [NaN, `=NaN`],
+            [-Infinity, `=-Infinity`],
+          ] as const) {
             const replaced = args.map((original, at) =>
               at === position ? value : original,
             )
             const message = construct(name, replaced, `production`).message
-            expect(message, `${name} argument ${position}`).toContain(
-              JSON.stringify(String(value)),
-            )
+            expect(message, `${name} argument ${position}`).toContain(shown)
           }
         })
       })

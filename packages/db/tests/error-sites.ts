@@ -11,8 +11,9 @@
  *   `new Error(String(error))`, is the caller's text and is not a site.
  *
  * Messages are compared as templates: literal text with each interpolated
- * expression written `${...}` without whitespace. Reformatting the source does
- * not change a template; changing its text or its interpolations does.
+ * expression written `${...}` in a canonical token form. Reformatting the
+ * source does not change a template; changing its text, a literal inside an
+ * interpolation, or an interpolated expression does.
  */
 import { readFileSync, readdirSync } from 'node:fs'
 import { join, relative } from 'node:path'
@@ -46,10 +47,38 @@ const messagePosition = new Map([
   [`RangeError`, 0],
   [`AggregateError`, 1],
 ])
-const guard = `devBuild()&&process.env.NODE_ENV!==\`production\``
+const guard = `devBuild() && process.env.NODE_ENV !== \`production\``
 
-const compact = (node: ts.Node, sourceFile: ts.SourceFile) =>
-  node.getText(sourceFile).replace(/\s+/g, ``)
+const wordLike = /^[\w$]/
+const closing = new Set([`)`, `]`, `}`])
+const spaced = new Set([`&&`, `||`, `??`, `!==`, `===`, `?`, `:`, `+`, `-`])
+
+/**
+ * An expression's tokens in a fixed layout: literals keep their exact text,
+ * binary operators get single spaces, trailing commas and all other
+ * whitespace go away.
+ */
+function compact(node: ts.Node, sourceFile: ts.SourceFile): string {
+  const scanner = ts.createScanner(
+    ts.ScriptTarget.Latest,
+    true,
+    ts.LanguageVariant.Standard,
+    node.getText(sourceFile),
+  )
+  const tokens: Array<string> = []
+  while (scanner.scan() !== ts.SyntaxKind.EndOfFileToken)
+    tokens.push(scanner.getTokenText())
+  let text = ``
+  tokens.forEach((token, index) => {
+    if (token === `,` && closing.has(tokens[index + 1] ?? ``)) return
+    const previous = text.at(-1) ?? ``
+    if (spaced.has(token) || spaced.has(tokens[index - 1] ?? ``))
+      text += text ? ` ` : ``
+    else if (wordLike.test(token) && /[\w$]/.test(previous)) text += ` `
+    text += token
+  })
+  return text.replace(/ +/g, ` `)
+}
 
 function sourceFiles(directory: string): Array<string> {
   return readdirSync(directory, { withFileTypes: true }).flatMap((entry) => {
@@ -97,7 +126,7 @@ export function messageTemplate(
       messageTemplate(node.right, sourceFile)
     )
   if (ts.isConditionalExpression(node))
-    return `\${${compact(node.condition, sourceFile)}?${messageTemplate(node.whenTrue, sourceFile)}:${messageTemplate(node.whenFalse, sourceFile)}}`
+    return `\${${compact(node.condition, sourceFile)} ? ${messageTemplate(node.whenTrue, sourceFile)} : ${messageTemplate(node.whenFalse, sourceFile)}}`
   return `\${${compact(node, sourceFile)}}`
 }
 

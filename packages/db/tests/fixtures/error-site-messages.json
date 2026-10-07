@@ -57,11 +57,11 @@
   },
   "102": {
     "file": "live-query-options.ts",
-    "template": "A live query must be a QueryBuilder, LiveQueryCollectionConfig, Collection, undefined, or null. Got: ${typeofvalue}"
+    "template": "A live query must be a QueryBuilder, LiveQueryCollectionConfig, Collection, undefined, or null. Got: ${typeof value}"
   },
   "103": {
     "file": "live-query-window-controller.ts",
-    "template": "useLiveInfiniteQuery: First argument must be either a pre-created live query collection or a query function. Received: ${typeofinput}"
+    "template": "useLiveInfiniteQuery: First argument must be either a pre-created live query collection or a query function. Received: ${typeof input}"
   },
   "104": {
     "file": "live-query-window-controller.ts",
@@ -193,7 +193,7 @@
   },
   "136": {
     "file": "query/expression-helpers.ts",
-    "template": "No handler provided for operator: ${name}. Available handlers: ${Object.keys(handlers).join(`,`)}"
+    "template": "No handler provided for operator: ${name}. Available handlers: ${Object.keys(handlers).join(`, `)}"
   },
   "137": {
     "file": "query/expression-helpers.ts",
@@ -249,7 +249,7 @@
   },
   "150": {
     "file": "query/live/collection-config-builder.ts",
-    "template": "Live query result key ${String(key)} changed by ${inserts-deletes} rows in one flush; a key has at most one result row."
+    "template": "Live query result key ${String(key)} changed by ${inserts - deletes} rows in one flush; a key has at most one result row."
   },
   "151": {
     "file": "query/live/collection-config-builder.ts",
@@ -293,7 +293,7 @@
   },
   "161": {
     "file": "scheduler.ts",
-    "template": "Scheduler detected unresolved dependencies for context ${String(contextId,)}."
+    "template": "Scheduler detected unresolved dependencies for context ${String(contextId)}."
   },
   "162": {
     "file": "transactions.ts",
@@ -341,7 +341,7 @@
   },
   "173": {
     "file": "collection/lifecycle.ts",
-    "template": "${syncFailure?Adapter cleanup and local teardown both failed:Multiple local teardown steps failed}"
+    "template": "${syncFailure ? Adapter cleanup and local teardown both failed : Multiple local teardown steps failed}"
   },
   "174": {
     "file": "transactions.ts",
