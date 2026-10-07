@@ -11,7 +11,11 @@
  * version records after rejection. Native receiving lives in e2e/value-oracle.spec.ts.
  */
 import { expect, it } from 'vitest'
-import { createCollection, createIndexedDB, indexedDBCollectionOptions  } from '../../src'
+import {
+  createCollection,
+  createIndexedDB,
+  indexedDBCollectionOptions,
+} from '../../src'
 import { Channel, deferred, readStore, withHarness } from './harness'
 import {
   createValue,

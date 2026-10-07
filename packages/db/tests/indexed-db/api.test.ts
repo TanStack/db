@@ -1,11 +1,13 @@
 import { expect, it, vi } from 'vitest'
 import { z } from 'zod'
-import { ObjectStoreNotFoundError,
+import {
+  ObjectStoreNotFoundError,
   createCollection,
   createIndexedDB,
   deleteDatabase,
   indexedDBCollectionOptions,
-  openDatabase } from '../../src'
+  openDatabase,
+} from '../../src'
 import { withHarness } from './harness'
 import type { IndexedDBCollectionConfig } from '../../src'
 import type { Row } from './harness'

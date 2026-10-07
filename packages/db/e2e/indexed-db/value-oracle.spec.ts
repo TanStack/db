@@ -6,7 +6,10 @@
  * does not claim every browser failure/interleaving.
  */
 import { expect } from '@playwright/test'
-import { expectedValueRows, valueKinds } from '../../tests/indexed-db/structured-clone-oracle'
+import {
+  expectedValueRows,
+  valueKinds,
+} from '../../tests/indexed-db/structured-clone-oracle'
 import { test } from './browser-test'
 import type {} from './coverage-browser'
 import type { Page } from '@playwright/test'

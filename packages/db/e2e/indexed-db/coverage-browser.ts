@@ -7,9 +7,18 @@ import {
   createIndexedDB,
   indexedDBCollectionOptions,
 } from '@tanstack/db'
-import { holdStore, observeTransactions } from '../../tests/indexed-db/idb-driver'
-import { createValue, observeValueRows } from '../../tests/indexed-db/structured-clone-oracle'
-import type { ValueKind, ValueRow } from '../../tests/indexed-db/structured-clone-oracle'
+import {
+  holdStore,
+  observeTransactions,
+} from '../../tests/indexed-db/idb-driver'
+import {
+  createValue,
+  observeValueRows,
+} from '../../tests/indexed-db/structured-clone-oracle'
+import type {
+  ValueKind,
+  ValueRow,
+} from '../../tests/indexed-db/structured-clone-oracle'
 import type { IndexedDBInstance } from '@tanstack/db'
 
 const descriptors: Array<IndexedDBInstance> = []

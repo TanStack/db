@@ -1,9 +1,15 @@
 import { expect, vi } from 'vitest'
-import { createCollection, createIndexedDB, indexedDBCollectionOptions  } from '../../src'
-import type { Collection,
+import {
+  createCollection,
+  createIndexedDB,
+  indexedDBCollectionOptions,
+} from '../../src'
+import type {
+  Collection,
   IndexedDBCollectionConfig,
   IndexedDBCollectionUtils,
-  IndexedDBInstance } from '../../src'
+  IndexedDBInstance,
+} from '../../src'
 
 export type Row = {
   id: string | number

@@ -25,7 +25,7 @@ import {
   createTransaction,
   deleteDatabase,
   executeTransaction,
-  indexedDBCollectionOptions
+  indexedDBCollectionOptions,
 } from '../../src'
 import {
   Channel,

@@ -8,7 +8,7 @@
  * Native scheduling itself is received separately by the browser suite.
  */
 import { expect, it } from 'vitest'
-import { createCollection, indexedDBCollectionOptions  } from '../../src'
+import { createCollection, indexedDBCollectionOptions } from '../../src'
 import { Channel, seed, withHarness } from './harness'
 import { holdStore, observeTransactions } from './idb-driver'
 import {
