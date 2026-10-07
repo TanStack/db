@@ -10,12 +10,12 @@ export class ReverseIndex<
   /**
    * @param nullsFirst - Whether nullish values come first in the reversed
    * order. The original index keeps them at the opposite end, so reversing
-   * it alone would move them; ordered reads put them back. The default keeps
-   * them where a plain reversed read puts them.
+   * it alone would move them; ordered reads put them back. Omit it to read
+   * the original index's plain reversed walk, as earlier releases did.
    */
   constructor(
     index: IndexInterface<TKey>,
-    private readonly nullsFirst = false,
+    private readonly nullsFirst?: boolean,
   ) {
     this.originalIndex = index
   }
@@ -47,10 +47,16 @@ export class ReverseIndex<
   // grows with the number of nullish keys.
 
   take(n: number, from: any, filterFn?: (key: TKey) => boolean): Array<TKey> {
+    if (this.nullsFirst === undefined) {
+      return this.originalIndex.takeReversed(n, from, filterFn)
+    }
     return this.read(n, filterFn, from ?? null)
   }
 
   takeFromStart(n: number, filterFn?: (key: TKey) => boolean): Array<TKey> {
+    if (this.nullsFirst === undefined) {
+      return this.originalIndex.takeReversedFromEnd(n, filterFn)
+    }
     return this.read(n, filterFn)
   }
 
@@ -60,9 +66,11 @@ export class ReverseIndex<
     filterFn?: (key: TKey) => boolean,
     from?: unknown,
   ): Array<TKey> {
+    // Every index implements `equalityLookup`; an `eq` lookup need not be
+    // advertised by an index that ordered reads accept.
     const nullish = new Set([
-      ...this.originalIndex.lookup(`eq`, null),
-      ...this.originalIndex.lookup(`eq`, undefined),
+      ...this.originalIndex.equalityLookup(null),
+      ...this.originalIndex.equalityLookup(undefined),
     ])
     const keep = (key: TKey) => filterFn?.(key) ?? true
     const accept = (key: TKey) => !nullish.has(key) && keep(key)

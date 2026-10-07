@@ -902,8 +902,14 @@ relies on that delivery. An eager source's installed rows are the whole source,
 so an indexed request with one order term reads only the first `limit` matching
 local rows; a row in the source's first `limit` is also in the local first
 `limit`. A second order term keeps the full local read, because an index on the
-first term cannot order its ties. When every request in a bounded prefix
-repair (an eager source, an index, one order term) returns literal `true`, the
+first term cannot order its ties. A filter on a LEFT-joined source also keeps
+the full local read: it drops rows only after the source's `limit`, so a full
+window after a bounded read would not prove that it holds the first eligible
+rows. A row that entered the graph through an earlier live update could fill
+the window in place of an eligible row the bounded read never sent. When every
+request in a bounded prefix
+repair (an eager source, an index, one order term, no joined filter) returns
+literal `true`, the
 repair settles synchronously,
 so its tie and refill steps finish inside the same graph run and a window move
 that consumes the repair still publishes once. A full-source request, initial

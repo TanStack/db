@@ -102,10 +102,13 @@ export class OrderedSourceLoader {
     private readonly hasPendingJoinedWork: () => boolean = () => false,
   ) {
     this.info.isRequesting = () => this.requesting
+    // A joined filter drops rows after the source's limit, so a full window
+    // after a bounded read would not prove it holds the first eligible rows.
     this.readsBoundedPrefix =
       info.sourceHoldsAllRows &&
       info.index !== undefined &&
-      info.orderBy.length === 1
+      info.orderBy.length === 1 &&
+      info.joinedFilterSourceId === undefined
   }
 
   /** Derive invalidation from actual contributions, not a second cursor. */
