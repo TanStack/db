@@ -225,10 +225,15 @@ identity and opaque public group keys keep their own runtime scope because
 equivalent query plans and retained public keys must survive graph replacement.
 For grouping, the equality token is the D2 group key. The group retains a raw
 value from a currently positive contributor only as the projected
-representative. The representative is chosen by stable source-row identity, so
-restoring the same source state restores the same value regardless of update
-history. D2 sees only safe exact-value identity for that representative, not
-the raw value itself. A separate public group key preserves primitive keys and
+representative. The representative is the contributor with the smallest exact
+value: a number before an object (a Date, a binary array, or a Temporal value);
+an ordinary number before -0, and -0 before NaN; objects by type name. Objects
+of one type and content are one exact value, so either instance may be
+projected. The choice does not depend on row keys or on update history, and
+contributors with one exact value consolidate in D2, so a change does not
+re-read the group. A correlated include's route representative also carries
+no row key: equal route identities mean equal routes. D2 sees only safe
+exact-value identity for a representative, not the raw value itself. A separate public group key preserves primitive keys and
 serializes opaque equality identity; graph-local identity tokens never cross
 the Collection boundary. Compiler group fields use a query-local namespace
 disjoint from every selected alias. Direct correlated joins canonicalize both

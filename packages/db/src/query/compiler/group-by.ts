@@ -13,6 +13,8 @@ import {
   isExpressionLike,
 } from '../ir.js'
 import { isRefProxy } from '../builder/ref-proxy-identity.js'
+import { isTemporal } from '../../utils.js'
+import { isUint8Array, normalizeValue } from '../../utils/comparison.js'
 import {
   AggregateFunctionNotInSelectError,
   NonAggregateExpressionNotInGroupByError,
@@ -114,16 +116,31 @@ function attachPublicGroupKey(
 }
 
 function createRepresentative<T>(
-  rowKey: string,
   value: T,
   identity: unknown,
 ): Representative<T> {
   // Encode once per contribution, not once per member on every group change.
+  // Members with equal identities consolidate, so a change does not re-read
+  // the group.
   const representative = {
-    key: serializeValue([rowKey, identity]),
+    key: serializeValue(identity),
   } as Representative<T>
   Object.defineProperty(representative, RAW_REPRESENTATIVE, { value })
   return representative
+}
+
+/**
+ * Members equal under query equality supply the value with the smallest exact
+ * identity. A number sorts before an object, and an object of one type and
+ * content is one exact value, whichever instance supplies it.
+ */
+function exactValueIdentity(
+  value: unknown,
+  valueIdentity: ValueIdentity,
+): unknown {
+  return value instanceof Date || isTemporal(value) || isUint8Array(value)
+    ? [`object`, value.constructor.name, normalizeValue(value)]
+    : valueIdentity.exact(value)
 }
 
 function getRepresentative<T>(
@@ -171,9 +188,11 @@ function addCorrelationRouteAggregate(
   valueIdentity: ValueIdentity,
 ): void {
   aggregates[fields.route] = {
-    preMap: ([rowKey, row]: [string, NamespacedRow]) => {
+    preMap: ([, row]: [string, NamespacedRow]) => {
       const route = getNamespacedRouteMetadata(row, mainSource)
-      return createRepresentative(rowKey, route, [
+      // Equal route identities mean equal routes, so members need no row
+      // key and consolidate into one contribution.
+      return createRepresentative(route, [
         valueIdentity.exact(route?.correlationKey),
         getParentContextIdentity(route?.parentContext),
       ])
@@ -379,9 +398,12 @@ export function processGroupBy(
   for (let i = 0; i < compiledGroupByExpressions.length; i++) {
     const compiledExpr = compiledGroupByExpressions[i]!
     aggregates[fields.groupValues[i]!] = {
-      preMap: ([rowKey, row]: [string, NamespacedRow]) => {
+      preMap: ([, row]: [string, NamespacedRow]) => {
         const value = compiledExpr(row)
-        return createRepresentative(rowKey, value, valueIdentity.exact(value))
+        return createRepresentative(
+          value,
+          exactValueIdentity(value, valueIdentity),
+        )
       },
       reduce: getRepresentative,
       postMap: unwrapRepresentative,

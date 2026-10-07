@@ -411,6 +411,13 @@ or during that deferral. The includes publication owner still needs a
 compiled includes witness for cleanup during a discarded source deferral,
 followed by a parent or child publication at its callback boundary.
 
+`packages/db/tests/query/group-by-work.test.ts` owns the work law for grouped
+aggregates: a change costs the same number of iterator steps at every group
+size, for a `groupBy` count and for an include count. `group-by.test.ts`
+checks which member supplies the value of a group whose members are equal
+under query equality but differ exactly, in both arrival orders
+([review](oracle-reviews/group-representative-exact-value.md)).
+
 The [Temporal group-key oracle](https://github.com/TanStack/db/blob/main/packages/db-ivm/tests/temporal-group-key-oracle.test.ts)
 owns the db-ivm `groupBy` value boundary for the eight Temporal kinds recognized
 by structural hashing. It compares public group counts with fixture-defined
