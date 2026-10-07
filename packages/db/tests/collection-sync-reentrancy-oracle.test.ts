@@ -29,9 +29,9 @@
  * applied. A snapshot delivery is a publication too: work committed inside it
  * publishes to that subscriber as the next batch, exactly as for a change
  * listener. It runs outside any drain, so its commits apply at once and
- * return `true`; only their publication waits for the snapshot. A separate lane with its own seed generates the snapshot
- * histories, filtered and unfiltered, so the change-listener seed keeps its
- * histories.
+ * return `true`; only their publication waits for the snapshot. A separate
+ * lane with its own seed generates the snapshot histories, filtered and
+ * unfiltered, so the change-listener seed keeps its histories.
  *
  * Limits: the pinned tests cover layout marks, truncates, listener errors, and
  * subset release. The generated grammar covers only listener commits, aborts,
