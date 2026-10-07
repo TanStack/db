@@ -295,5 +295,8 @@
   ],
   "LoadSubsetOperationAbortedError": [
     "Load subset operation was aborted before its result became visible"
+  ],
+  "PacedTransactionManualCommitError": [
+    "Paced mutations are committed by their strategy. Await the transaction receipt or roll it back instead."
   ]
 }

@@ -891,3 +891,13 @@ Development builds show the full message. For example:
 ```text
 setWindow() cannot run reentrantly. Wait for the current window operation to return before starting another one.
 ```
+
+<a id="error-86"></a>
+
+## Error 86: `PacedTransactionManualCommitError`
+
+Development builds show the full message. For example:
+
+```text
+Paced mutations are committed by their strategy. Await the transaction receipt or roll it back instead.
+```

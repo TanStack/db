@@ -56,6 +56,7 @@ export const errorSampleArguments: Record<string, Array<any[]>> = {
 
   // Transaction errors
   TransactionError: [['Transaction error']],
+  PacedTransactionManualCommitError: [[]],
   QueueCapacityExceededError: [[]],
   QueueDisposedError: [[]],
   ThrottleCallDroppedError: [[]],

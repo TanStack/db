@@ -83,5 +83,6 @@
   "CannotCombineEmptyExpressionListError": 82,
   "MissingAliasInputsError": 83,
   "SetWindowRequiresOrderByError": 84,
-  "SetWindowReentrancyError": 85
+  "SetWindowReentrancyError": 85,
+  "PacedTransactionManualCommitError": 86
 }
