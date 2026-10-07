@@ -9,7 +9,7 @@ reasoning step or a fixed workflow.
 | --------------------------------------------------------------------- | ------------------------------------------- | ----------------------------------------------------------------------------- |
 | What behavior should this subsystem promise?                          | [Law discovery](law-discovery.md)           | A sourced candidate law, competing predictions, and a distinguishing witness. |
 | Could the implementation, model, or law itself be wrong?              | [Adversarial review](adversarial-review.md) | Concrete attacks at named levels, their evidence, and repair conditions.      |
-| Would a plausible wrong implementation still pass the oracle?          | [Mutant gap hunt](mutant-gap-hunt.md)       | A semantic mutant, public distinguishing history or equivalence invariant, and an oracle-gap verdict. |
+| Would a plausible wrong implementation still pass the oracle?          | [Mutant gap hunt](mutant-gap-hunt.md)       | A semantic mutant, public distinction or scoped equivalence, and a contract-supported verdict. |
 | Do sound obligations conflict under the same conditions?              | [Tension scan](tension-scan.md)             | A traced collision, missing distinction, or no supported tension.             |
 | Should these laws or concepts be merged, split, replaced, or removed? | [Law restructuring](law-restructuring.md)   | An alternative organization and a check of what it preserves or loses.        |
 
