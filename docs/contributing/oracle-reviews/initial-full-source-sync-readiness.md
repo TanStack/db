@@ -2,6 +2,8 @@
 
 Reviewed source head: `a73a35bac` on `fix-full-source-sync-readiness`.
 The oracle commit is `bc2c9438b`; the production fix is `a73a35bac`.
+Re-reviewed after merging `main` with #2055 (merge `5d4802052`); the merged
+results are in "After merging #2055" below.
 
 ## Contract and evidence
 
@@ -57,6 +59,55 @@ The truncate replay cells do not distinguish the kind-based mutant: replay
 publishes through the subscription's replay barrier, not this loader gate. The
 warm readiness case is the distinguishing neighbour for that design.
 
+## After merging #2055
+
+**Main check.** Before the merge, this branch's witnesses ran on `main` at
+`25201da6c` (which includes #2027 and #2055). All 8 synchronous full-source
+cells and the React first-commit witness still failed, for example
+`Expected {"rows":[1,2],"status":"ready"}, received {"rows":[],"status":"loading"}`
+and `expected { ids: [], status: 'loading' } to deeply equal { ids: [ '1', '2' ],
+status: 'ready' }`. #2027 changed the infinite-query hooks' `startSync`, not this
+gate, so the gap remained.
+
+**Combined gate.** An initial load of any kind, and an eager bounded
+ordered-prefix repair (#2055), settle synchronously on literal `true`:
+
+```ts
+(!isAuthoritativeRepair ||
+  isInitialFullSource ||
+  (this.readsBoundedPrefix && !isFullSource))
+```
+
+**Changed expectation.** #2055 added `keeps an eager full-source ordered window
+loading until its load settles`, pinning `main`'s asynchronous timing while its
+own scope stayed narrow. Recorded predictions before the edit: `main` and #2055
+predict `{loading, 0 rows}` at creation; this branch's law predicts
+`{ready, [4, 3]}`. The authority is #1896's rule and the user's decision to close
+this gap. The test is now `publishes an eager full-source ordered window at
+creation`.
+
+**Joined-filter interaction.** `keeps the first eligible joined rows after a
+synchronous full-source load` combines a function filter with #2055's
+LEFT-joined filter history: a label-only update to distant row 10, then a delete
+of visible row 2. The window moves from `[2]` to `[4]`. A function filter makes
+the plan read its whole source, so the graph holds every row and the top-K can
+always reach the next eligible row. A mutant that sends this plan through the
+bounded prefix path (and ignores the joined filter) survives: it is equivalent
+within this domain, because #2055's hazard needs a bounded read that left an
+eligible row out. `main`'s gate fails the witness at creation.
+
+**Mutants on the merged code** (ordered-lifecycle, loader, ordered-work and
+pagination oracles, 724 tests):
+
+| Mutant | Outcome |
+| --- | --- |
+| Every `full-source` request settles synchronously | Assertion failure, 1 test: warm readiness, `expected 'ready' to be 'loading'` |
+| No settled-request check | Assertion failure, 1 test: warm readiness |
+| Promise results settle synchronously | Assertion failures, 275 tests |
+| Initial full-source excluded (`main`) | Assertion failures, 9 tests |
+| Bounded prefix repair disjunct dropped (pre-#2055) | Assertion failures, 2 tests (#2055's loader and NaN pagination cases) |
+| Full-source repair on a bounded-prefix plan settles synchronously | Survival, permitted by the contract. #1896's cut "does not apply to repair", which scopes the promise rather than requiring asynchronous timing. The narrow gate keeps `main`'s timing by choice. |
+
 ## ORC-012 requirement audit
 
 | Requirement | Outcome |
@@ -81,3 +132,6 @@ warm readiness case is the distinguishing neighbour for that design.
   readiness case's inexpressible null boundary, stays asynchronous. #1896's
   oracle pins that timing; making it synchronous would be a separate decision.
 - `groupBy` and `having` set `requiresFullSource` but were not added as cells.
+- No law fixes the timing of a full-source repair on an eager source. The gate
+  keeps `main`'s asynchronous timing; making it synchronous would be a separate
+  decision with its own publication evidence.

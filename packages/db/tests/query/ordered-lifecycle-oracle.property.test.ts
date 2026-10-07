@@ -4,7 +4,12 @@ import { fc, test as fcTest } from '@fast-check/vitest'
 import { createCollection } from '../../src/collection/index.js'
 import { createDeferred } from '../../src/deferred.js'
 import { BTreeIndex } from '../../src/indexes/btree-index.js'
-import { createLiveQueryCollection, eq } from '../../src/query/index.js'
+import {
+  createLiveQueryCollection,
+  eq,
+  isUndefined,
+  not,
+} from '../../src/query/index.js'
 import { evaluateReferenceExpression } from '../reference-expression-oracle.js'
 import { flushPromises } from '../utils.js'
 import {
@@ -1003,7 +1008,10 @@ describe(`synchronous initial settlement refinement`, () => {
   // must read its whole source first (here a function filter) keeps its
   // asynchronous initial settlement, even over an eager source whose rows
   // are already installed. The eager prefix-repair cut must not widen it.
-  it(`keeps an eager full-source ordered window loading until its load settles`, async () => {
+  // #2055 pinned main's asynchronous timing here while its repair change stayed
+  // narrow. The initial full-source load now shares the initial synchronous
+  // cut, so the same query is ready at creation.
+  it(`publishes an eager full-source ordered window at creation`, async () => {
     const source = createCollection<{ id: number; rank: number }, number>({
       id: `full-source-initial-${Math.random()}`,
       getKey: (row) => row.id,
@@ -1031,15 +1039,101 @@ describe(`synchronous initial settlement refinement`, () => {
           .limit(2),
     })
     try {
-      expect({ status: query.status, rows: query.toArray.length }).toEqual({
-        status: `loading`,
-        rows: 0,
-      })
-      await query.preload()
-      expect(query.toArray.map((row) => row.id)).toEqual([4, 3])
+      expect({
+        status: query.status,
+        rows: query.toArray.map((row) => row.id),
+      }).toEqual({ status: `ready`, rows: [4, 3] })
     } finally {
       await query.cleanup()
       await source.cleanup()
+    }
+  })
+
+  // The initial full-source cut and #2055's joined-filter rule meet here. A
+  // function filter makes the plan read its whole source, so its synchronous
+  // initial load installs every source row. #2055's hazard needs a bounded read
+  // that left an eligible row out; after a full read the window can always
+  // reach the next eligible row, even when a distant row entered through a live
+  // update first. This pins that the synchronous initial load keeps that
+  // property through later changes.
+  it(`keeps the first eligible joined rows after a synchronous full-source load`, async () => {
+    type Row = { id: number; rank: number; label: string }
+    let source: Parameters<SyncConfig<Row, number>[`sync`]>[0] | undefined
+    const writeRow = (
+      message: { type: `update`; value: Row } | { type: `delete`; key: number },
+    ) => {
+      source!.begin()
+      source!.write(message)
+      source!.commit()
+    }
+    const rows = createCollection<Row, number>({
+      id: `full-source-joined-rows-${Math.random()}`,
+      getKey: (row) => row.id,
+      syncMode: `eager`,
+      startSync: true,
+      sync: {
+        sync: (params) => {
+          source = params
+          params.begin()
+          for (let id = 1; id <= 10; id++) {
+            params.write({
+              type: `insert`,
+              value: { id, rank: id, label: `a` },
+            })
+          }
+          params.commit()
+          params.markReady()
+        },
+      },
+    })
+    rows.createIndex((row) => row.rank, { indexType: BTreeIndex })
+    const markers = createCollection<{ id: number; rowId: number }, number>({
+      id: `full-source-joined-markers-${Math.random()}`,
+      getKey: (marker) => marker.id,
+      syncMode: `eager`,
+      startSync: true,
+      sync: {
+        sync: ({ begin, write, commit, markReady }) => {
+          begin()
+          for (let id = 2; id <= 10; id += 2) {
+            write({ type: `insert`, value: { id, rowId: id } })
+          }
+          commit()
+          markReady()
+        },
+      },
+    })
+    const query = createLiveQueryCollection({
+      startSync: true,
+      query: (q) =>
+        q
+          .from({ row: rows })
+          .leftJoin({ marker: markers }, ({ row, marker }) =>
+            eq(row.id, marker.rowId),
+          )
+          .where(({ marker }) => not(isUndefined(marker.rowId)))
+          .fn.where(({ row }) => row.rank > 0)
+          .orderBy(({ row }) => row.rank)
+          .limit(1),
+    })
+    const ids = () => query.toArray.map((result) => result.row.id)
+    try {
+      expect({ status: query.status, ids: ids() }).toEqual({
+        status: `ready`,
+        ids: [2],
+      })
+      // A label-only update brings the distant row 10 into the graph.
+      writeRow({ type: `update`, value: { id: 10, rank: 10, label: `b` } })
+      await flushPromises()
+      expect(ids()).toEqual([2])
+      // Deleting the visible row must expose the next eligible row, 4.
+      writeRow({ type: `delete`, key: 2 })
+      await flushPromises()
+      expect(ids()).toEqual([4])
+    } finally {
+      await query.cleanup()
+      await markers.cleanup()
+      await rows.cleanup()
     }
   })
 
