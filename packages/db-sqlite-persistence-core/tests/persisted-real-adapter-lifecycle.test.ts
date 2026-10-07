@@ -404,52 +404,37 @@ it.each([
         expect.objectContaining({ type: `delete`, key: `local` }),
       ])
 
-      if (history === `reopens before later source writes`) {
-        await collection.cleanup()
-        const reopenedAdapter = createAdapter()
-        reopened = createCollection(
-          persistedCollectionOptions<Row, string>({
-            id,
-            getKey: (row) => row.id,
-            persistence: { adapter: reopenedAdapter },
-            sync: { sync: ({ markReady }) => markReady() },
-          }),
-        )
-        await reopened.stateWhenReady()
-        expect(reopened.has(`local`)).toBe(false)
-        expect(await reopenedAdapter.loadSubset(id, {})).toEqual([])
-        return
+      if (history === `applies later same-key source writes`) {
+        source.begin()
+        source.write({
+          type: `insert`,
+          value: { id: `local`, title: `first source row` },
+        })
+        await Promise.resolve(source.commit())
+        expect(collection.get(`local`)?.title).toBe(`first source row`)
+        expect(
+          (await adapter.loadSubset(id, {})).map(({ value }) => value),
+        ).toEqual([{ id: `local`, title: `first source row` }])
+
+        source.begin()
+        source.write({ type: `delete`, key: `local` })
+        await Promise.resolve(source.commit())
+        expect(collection.has(`local`)).toBe(false)
+        expect(await adapter.loadSubset(id, {})).toEqual([])
+
+        source.begin()
+        source.write({
+          type: `insert`,
+          value: { id: `local`, title: `later source row` },
+        })
+        await Promise.resolve(source.commit())
+        expect(collection.get(`local`)?.title).toBe(`later source row`)
+        expect(collection.get(`local`)?.$origin).toBe(`remote`)
+        expect(collection.base.get(`local`)?.title).toBe(`later source row`)
+        expect(
+          (await adapter.loadSubset(id, {})).map(({ value }) => value),
+        ).toEqual([{ id: `local`, title: `later source row` }])
       }
-
-      source.begin()
-      source.write({
-        type: `insert`,
-        value: { id: `local`, title: `first source row` },
-      })
-      await Promise.resolve(source.commit())
-      expect(collection.get(`local`)?.title).toBe(`first source row`)
-      expect(
-        (await adapter.loadSubset(id, {})).map(({ value }) => value),
-      ).toEqual([{ id: `local`, title: `first source row` }])
-
-      source.begin()
-      source.write({ type: `delete`, key: `local` })
-      await Promise.resolve(source.commit())
-      expect(collection.has(`local`)).toBe(false)
-      expect(await adapter.loadSubset(id, {})).toEqual([])
-
-      source.begin()
-      source.write({
-        type: `insert`,
-        value: { id: `local`, title: `later source row` },
-      })
-      await Promise.resolve(source.commit())
-      expect(collection.get(`local`)?.title).toBe(`later source row`)
-      expect(collection.get(`local`)?.$origin).toBe(`remote`)
-      expect(collection.base.get(`local`)?.title).toBe(`later source row`)
-      expect(
-        (await adapter.loadSubset(id, {})).map(({ value }) => value),
-      ).toEqual([{ id: `local`, title: `later source row` }])
 
       await collection.cleanup()
       const reopenedAdapter = createAdapter()
@@ -462,10 +447,15 @@ it.each([
         }),
       )
       await reopened.stateWhenReady()
-      expect(reopened.get(`local`)?.title).toBe(`later source row`)
-      expect(
-        (await reopenedAdapter.loadSubset(id, {})).map(({ value }) => value),
-      ).toEqual([{ id: `local`, title: `later source row` }])
+      if (history === `reopens before later source writes`) {
+        expect(reopened.has(`local`)).toBe(false)
+        expect(await reopenedAdapter.loadSubset(id, {})).toEqual([])
+      } else {
+        expect(reopened.get(`local`)?.title).toBe(`later source row`)
+        expect(
+          (await reopenedAdapter.loadSubset(id, {})).map(({ value }) => value),
+        ).toEqual([{ id: `local`, title: `later source row` }])
+      }
     } catch (error) {
       hasPrimaryFailure = true
       throw error

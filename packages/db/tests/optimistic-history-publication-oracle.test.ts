@@ -105,6 +105,33 @@ it.each([1, 2] as const)(
   },
 )
 
+// Attribution belongs to one atomic source transaction, even when it writes
+// the same key twice. Its final row keeps the attribution of its first write.
+it(`keeps local attribution through repeated same-key writes in one source transaction`, async () => {
+  const counts = await runOptimisticHistory(
+    [{ id: 1, a: 0, b: 0, c: 0 }],
+    [
+      { type: `edit`, key: 1, fields: { a: 1 }, optimistic: true },
+      {
+        type: `sync`,
+        rows: [
+          { id: 1, a: 2, b: 0, c: 0 },
+          { id: 1, a: 3, b: 0, c: 0 },
+        ],
+        truncate: false,
+        copies: 1,
+      },
+      { type: `settle`, slot: 0, success: true, cascade: false },
+    ],
+  )
+  expect(counts).toMatchObject({
+    edits: 1,
+    queued: 1,
+    settlements: 1,
+    sourceInserts: 0,
+  })
+})
+
 // A source delete also touches the key even when that source held no row.
 // It consumes the one local attribution, so a later source insert is remote.
 it(`consumes local attribution with an absent-key source delete`, async () => {

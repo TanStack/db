@@ -786,18 +786,21 @@ The post-merge review added three missing domains to existing owners:
   Receipts stay pending until visible. With one local mutation and no
   truncate, the first queued same-key source transaction consumes local
   attribution at settlement if that mutation succeeds. An absent-key delete
-  consumes it without leaving a row. Later queued source transactions are
-  `'remote'` without another local owner. A truncate can publish while the
+  consumes it without leaving a row. Repeated same-key writes in that first
+  atomic source transaction keep its attribution. Later source transactions
+  are `'remote'` without another local owner. A truncate can publish while the
   mutation remains active and label its same-key row `'local'` even if that
   mutation later fails. Attribution uses key and timing; `SyncConfig.write`
   has no causal client identity. The earlier accepted-snapshot retention law
   and its truncate-capture ownership refinement were retired with this
-  contract; the
+  contract. The
   [PR #1907 review record](oracle-reviews/pr-1907-accepted-delete-ownership.md)
-  is historical; the [settlement-drop review record](oracle-reviews/2026-10-03-settlement-drop.md)
+  is historical. The [settlement-drop review record](oracle-reviews/2026-10-03-settlement-drop.md)
   holds the RED/GREEN and mutant evidence. A handler that awaits a visibility receipt held by its own
   transaction, such as an on-demand load of its own Collection, waits for
   itself; that history is outside the generated grammar.
+
+Issue #2071 adds two focused checks to this acceptance map:
 
 - The [issue #2071 review](oracle-reviews/issue-2071-refused-insert.md)
   checks a rejecting `onInsert` through the persisted wrapper. Four controlled
@@ -815,11 +818,12 @@ The post-merge review added three missing domains to existing owners:
 
 - The [optimistic publication owner](https://github.com/TanStack/db/blob/main/packages/db/tests/optimistic-history-publication-oracle.test.ts)
   distinguishes one and two queued same-key source transactions during a
-  successful local mutation, an absent-key delete before a source insert, and
-  a truncate published before a mutation fails. The persisted wrapper receives
-  the one/two queued transaction pair. These histories establish key-and-timing
-  attribution for one local mutation; they do not
-  establish causal authorship or every overlapping mutation schedule. A
+  successful local mutation, two same-key writes inside one atomic transaction,
+  an absent-key delete before a source insert, and a truncate published before
+  a mutation fails. The persisted wrapper receives the one/two transaction
+  pair. These histories establish key-and-timing attribution for one local
+  mutation; they do not establish mixed delete/reinsert order inside one source
+  transaction, causal authorship, or every overlapping mutation schedule. A
   causal `$origin` guarantee would require an explicit source signal and a new
   core-owner model and provider receiving witness.
 

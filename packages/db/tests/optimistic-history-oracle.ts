@@ -31,8 +31,9 @@ import type { CollectionConfig, SyncConfig } from '../src/types.js'
  * while a queued sync transaction touches its key, so that drop and that sync
  * transaction publish together. With one local mutation and no truncate, the
  * first queued same-key source transaction consumes local attribution at
- * settlement, even if a peer supplied it. A later one is `'remote'` without
- * another local owner. A failed mutation gives those queued source writes no
+ * settlement, even if a peer supplied it. Every same-key write in that atomic
+ * transaction keeps that attribution. A later transaction is `'remote'`
+ * without another local owner. A failed mutation gives queued source writes no
  * local attribution. `isPersisted` settles after that publication.
  * A truncate applies at once, with every queued sync transaction before it.
  * Its same-key source row can receive local attribution while a mutation still
@@ -272,12 +273,16 @@ class HistoryModel {
         .map((entry) => entry.key),
     )
     for (const batch of this.queue) {
+      // One atomic source transaction has one attribution per key. Snapshot
+      // ownership at its start, then consume it for later transactions only.
+      // Repeated writes within this batch retain the same attribution.
+      const batchLocalKeys = new Set([...attributed, ...persistingKeys])
       if (batch.truncate) {
         this.base.clear()
         this.origins.clear()
       }
       for (const row of batch.rows) {
-        const local = attributed.has(row.id) || persistingKeys.has(row.id)
+        const local = batchLocalKeys.has(row.id)
         const held = this.base.get(row.id)
         // The default row update mode merges a partial update into the
         // source row, so an omitted `c` keeps the held value.
