@@ -6,16 +6,17 @@
  * and the SSR guide's factory-descriptor promise. Concrete-config descriptors
  * are intentionally outside the two-client law.
  *
- * Model: each client owns a plain map of rows. An insert into one map changes
+ * Model: each client owns a plain map of rows. A write to one map changes
  * only that client's expected result. The model never calls the query builder,
  * materializer, or live-query engine to calculate expected rows.
  *
- * Legal history: build once, mount under two clients, insert into the first,
- * insert into the second, then switch one mounted hook to the other client
- * and back. The public observation at each settled cut is
- * the complete projected row bag from each useLiveQuery hook. The independent
- * rows distinguish binding at construction or caching only by query hash from
- * binding at consumption. This bounded driver does not prove every query
+ * Legal histories: one has disjoint row keys across clients; the other has the
+ * same key with different values in both clients. Build once, mount under two
+ * clients, write independently to each, then switch one mounted hook to the
+ * other client and back. The public observation at each settled cut is the
+ * complete projected row bag and row key from each useLiveQuery hook. The
+ * colliding-key history rejects a row-ID-only cross-client cache that the
+ * disjoint history could miss. This bounded driver does not prove every query
  * clause, on-demand load, or framework adapter.
  */
 import { act, renderHook, waitFor } from '@testing-library/react'
@@ -33,6 +34,35 @@ import type { ReactNode } from 'react'
 
 type Row = { id: string; value: string }
 
+const histories = [
+  {
+    name: `disjoint keys`,
+    initial: {
+      first: { id: `a`, value: `first` },
+      second: { id: `b`, value: `second` },
+    },
+    writes: {
+      first: { id: `c`, value: `first write` },
+      second: { id: `d`, value: `second write` },
+    },
+  },
+  {
+    name: `colliding keys`,
+    initial: {
+      first: { id: `shared`, value: `first` },
+      second: { id: `shared`, value: `second` },
+    },
+    writes: {
+      first: { id: `shared`, value: `first write` },
+      second: { id: `shared`, value: `second write` },
+    },
+  },
+] satisfies ReadonlyArray<{
+  name: string
+  initial: { first: Row; second: Row }
+  writes: { first: Row; second: Row }
+}>
+
 function expectedRows(rows: ReadonlyMap<string, Row>): Array<Row> {
   return [...rows.values()].sort((left, right) =>
     left.id.localeCompare(right.id),
@@ -40,109 +70,121 @@ function expectedRows(rows: ReadonlyMap<string, Row>): Array<Row> {
 }
 
 describe(`standalone descriptor query binding`, () => {
-  it(`binds one prebuilt Query to each receiving DbClient`, async () => {
-    const descriptor = collectionOptions(
-      `standalone-descriptor-rows`,
-      (client) =>
-        mockSyncCollectionOptions<Row>({
-          id: `standalone-descriptor-rows`,
-          getKey: (row) => row.id,
-          initialData: client.requireDependency<Array<Row>>(`rows`),
-        }),
-    )
-    // Definition happens outside React and before either DbClient exists.
-    const query = new Query()
-      .from({ item: descriptor })
-      .select(({ item }) => ({ id: item.id, value: item.value }))
-    const firstModel = new Map<string, Row>([
-      [`a`, { id: `a`, value: `first` }],
-    ])
-    const secondModel = new Map<string, Row>([
-      [`b`, { id: `b`, value: `second` }],
-    ])
-    const firstClient = new DbClient({ rows: expectedRows(firstModel) })
-    const secondClient = new DbClient({ rows: expectedRows(secondModel) })
-    const planIdentity = getStableQueryBuilderHash(query)
-    const boundShape = (client: DbClient) =>
-      new Query()
-        .from({ item: client.collection(descriptor) })
+  it.each(histories)(
+    `binds one prebuilt Query to each receiving DbClient with $name`,
+    async ({ name, initial, writes }) => {
+      const descriptor = collectionOptions(
+        `standalone-descriptor-rows-${name}`,
+        (client) =>
+          mockSyncCollectionOptions<Row>({
+            id: `standalone-descriptor-rows-${name}`,
+            getKey: (row) => row.id,
+            initialData: client.requireDependency<Array<Row>>(`rows`),
+          }),
+      )
+      // Definition happens outside React and before either DbClient exists.
+      const query = new Query()
+        .from({ item: descriptor })
         .select(({ item }) => ({ id: item.id, value: item.value }))
-    expect(planIdentity).toBe(
-      getStableQueryBuilderHash(boundShape(firstClient)),
-    )
-    expect(planIdentity).toBe(
-      getStableQueryBuilderHash(boundShape(secondClient)),
-    )
-    let firstReceivingClient = firstClient
-    const first = renderHook(() => useLiveQuery({ query }), {
-      wrapper: ({ children }: { children: ReactNode }) => (
-        <DbProvider client={firstReceivingClient}>{children}</DbProvider>
-      ),
-    })
-    const second = renderHook(() => useLiveQuery({ query }), {
-      wrapper: ({ children }: { children: ReactNode }) => (
-        <DbProvider client={secondClient}>{children}</DbProvider>
-      ),
-    })
-
-    // Compare after each publication. The same descriptor ID and query shape
-    // must not make either provider observe the other provider's Collection.
-    const check = async () => {
-      await waitFor(() => {
-        for (const [observed, model] of [
-          [first.result.current.data, firstModel],
-          [second.result.current.data, secondModel],
-        ] as const) {
-          expect(
-            observed
-              .map(({ id, value }) => ({ id, value }))
-              .sort((left, right) => left.id.localeCompare(right.id)),
-          ).toEqual(expectedRows(model))
-          for (const row of observed) {
-            expect(Object.keys(row).sort()).toEqual(
-              [
-                `$collectionId`,
-                `$hasPendingWrites`,
-                `$key`,
-                `$origin`,
-                `$synced`,
-                `id`,
-                `value`,
-              ].sort(),
-            )
-          }
-        }
+      const firstModel = new Map<string, Row>([
+        [initial.first.id, initial.first],
+      ])
+      const secondModel = new Map<string, Row>([
+        [initial.second.id, initial.second],
+      ])
+      const seedRows = (model: ReadonlyMap<string, Row>) =>
+        expectedRows(model).map((row) => ({ ...row }))
+      const firstClient = new DbClient({ rows: seedRows(firstModel) })
+      const secondClient = new DbClient({ rows: seedRows(secondModel) })
+      const planIdentity = getStableQueryBuilderHash(query)
+      const boundShape = (client: DbClient) =>
+        new Query()
+          .from({ item: client.collection(descriptor) })
+          .select(({ item }) => ({ id: item.id, value: item.value }))
+      expect(planIdentity).toBe(
+        getStableQueryBuilderHash(boundShape(firstClient)),
+      )
+      expect(planIdentity).toBe(
+        getStableQueryBuilderHash(boundShape(secondClient)),
+      )
+      let firstReceivingClient = firstClient
+      const first = renderHook(() => useLiveQuery({ query }), {
+        wrapper: ({ children }: { children: ReactNode }) => (
+          <DbProvider client={firstReceivingClient}>{children}</DbProvider>
+        ),
       })
-    }
-    await check()
-    expect(firstClient.collection(descriptor)).not.toBe(
-      secondClient.collection(descriptor),
-    )
+      const second = renderHook(() => useLiveQuery({ query }), {
+        wrapper: ({ children }: { children: ReactNode }) => (
+          <DbProvider client={secondClient}>{children}</DbProvider>
+        ),
+      })
 
-    const addedToFirst = { id: `c`, value: `first write` }
-    firstModel.set(addedToFirst.id, addedToFirst)
-    act(() => firstClient.collection(descriptor).insert(addedToFirst))
-    await check()
+      // Compare after each publication. The same descriptor ID and query shape
+      // must not make either provider observe the other provider's Collection.
+      const check = async (
+        firstScopeModel: ReadonlyMap<string, Row> = firstModel,
+      ) => {
+        await waitFor(() => {
+          for (const [observed, model] of [
+            [first.result.current.data, firstScopeModel],
+            [second.result.current.data, secondModel],
+          ] as const) {
+            expect(
+              observed
+                .map(({ id, value }) => ({ id, value }))
+                .sort((left, right) => left.id.localeCompare(right.id)),
+            ).toEqual(expectedRows(model))
+            for (const row of observed) {
+              expect(row.$key).toBe(row.id)
+              expect(Object.keys(row).sort()).toEqual(
+                [
+                  `$collectionId`,
+                  `$hasPendingWrites`,
+                  `$key`,
+                  `$origin`,
+                  `$synced`,
+                  `id`,
+                  `value`,
+                ].sort(),
+              )
+            }
+          }
+        })
+      }
+      await check()
+      expect(firstClient.collection(descriptor)).not.toBe(
+        secondClient.collection(descriptor),
+      )
 
-    const addedToSecond = { id: `d`, value: `second write` }
-    secondModel.set(addedToSecond.id, addedToSecond)
-    act(() => secondClient.collection(descriptor).insert(addedToSecond))
-    await check()
+      const write = (client: DbClient, model: Map<string, Row>, next: Row) => {
+        act(() => {
+          const collection = client.collection(descriptor)
+          if (model.has(next.id)) {
+            collection.update(next.id, (draft) => {
+              draft.value = next.value
+            })
+          } else {
+            collection.insert({ ...next })
+          }
+        })
+        model.set(next.id, { ...next })
+      }
 
-    firstReceivingClient = secondClient
-    first.rerender()
-    await waitFor(() =>
-      expect(
-        first.result.current.data
-          .map(({ id, value }) => ({ id, value }))
-          .sort((left, right) => left.id.localeCompare(right.id)),
-      ).toEqual(expectedRows(secondModel)),
-    )
-    firstReceivingClient = firstClient
-    first.rerender()
-    await check()
+      write(firstClient, firstModel, writes.first)
+      await check()
 
-    first.unmount()
-    second.unmount()
-  })
+      write(secondClient, secondModel, writes.second)
+      await check()
+
+      firstReceivingClient = secondClient
+      first.rerender()
+      await check(secondModel)
+      firstReceivingClient = firstClient
+      first.rerender()
+      await check()
+
+      first.unmount()
+      second.unmount()
+    },
+  )
 })

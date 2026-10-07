@@ -241,9 +241,11 @@ comment and the current API/architecture contract before extending its model.
 For standalone descriptor queries, the primary owner is
 `packages/react-db/tests/descriptor-query-binding-oracle.test.tsx`. It checks
 one prebuilt Query with a reusable factory descriptor under two DbProvider
-clients, comparing independent initial rows, writes, and one mounted provider
-switch with plain per-client maps at each settled cut. It also checks exact
-public keys and identity equality with direct Collection formulations.
+clients. Disjoint-key inserts and same-key updates with different client values
+are compared against plain per-client maps after initial publication, each
+write, and a mounted A→B→A provider switch. It checks the public `$key` against
+each projected row ID, exact public key sets, and identity equality with direct
+Collection formulations.
 `packages/db/tests/db-client.test.ts` supplies a
 focused nested-query preload witness across two clients, including equal query
 hashes and distinct dehydrated rows. Concrete-config descriptors, on-demand

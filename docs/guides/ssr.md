@@ -395,7 +395,7 @@ result, and pass that state to a client hydration boundary:
 ```tsx
 export default function Page() {
   const dbClient = new DbClient()
-  void dbClient.preloadLiveQuery(openTodosQuery)
+  void dbClient.preloadLiveQuery({ query: openTodosQuery })
 
   const state = dbClient.dehydrate({
     shouldDehydrateCollection: () => false,
@@ -715,7 +715,7 @@ Preload a live query when the browser only needs the rendered result:
 
 ```tsx
 const dbClient = new DbClient()
-await dbClient.preloadLiveQuery(openTodosQuery)
+await dbClient.preloadLiveQuery({ query: openTodosQuery })
 
 return {
   dbState: dbClient.dehydrate(),
