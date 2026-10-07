@@ -5894,7 +5894,7 @@ describe(`QueryCollection`, () => {
       expect(stripVirtualProps(collection.get(`1`))).toEqual(initialData[0])
       expect(stripVirtualProps(collection.get(`2`))).toEqual(initialData[1])
 
-      // Manual write operations work and clear error state
+      // Manual writes change rows without establishing a successful fetch.
       const newItem = { id: `3`, name: `Manual Item` }
       collection.utils.writeInsert(newItem)
       expect(collection.size).toBe(3)
@@ -5902,12 +5902,11 @@ describe(`QueryCollection`, () => {
 
       await flushPromises()
 
-      // Manual writes clear error state
-      expect(collection.utils.lastError).toBeUndefined()
-      expect(collection.utils.isError).toBe(false)
-      expect(collection.utils.errorCount).toBe(0)
+      expect(collection.utils.lastError).toBe(testError)
+      expect(collection.utils.isError).toBe(true)
+      expect(collection.utils.errorCount).toBe(1)
 
-      // Create error state again for persistence test
+      // Another failed fetch increments the recorded error count.
       await collection.utils.refetch()
       await vi.waitFor(() => expect(collection.utils.isError).toBe(true))
 
@@ -9658,6 +9657,7 @@ describe(`QueryCollection`, () => {
 
           await collection.utils.writeUpdate({ id: `1`, name: `Manual` })
           expect(collection.get(`1`)?.name).toBe(`Manual`)
+          expect(scopedQuery.state.dataUpdateCount).toBe(1)
           expect(queryFn).toHaveBeenCalledTimes(1)
           const refresh = collection.utils.refetch({ throwOnError: true })
           await vi.waitFor(() => expect(queryFn).toHaveBeenCalledTimes(2))
@@ -9671,7 +9671,7 @@ describe(`QueryCollection`, () => {
           await refresh
           await vi.waitFor(() => {
             expect(collection.get(`1`)?.name).toBe(`Authoritative`)
-            expect(scopedQuery.state.dataUpdateCount).toBe(3)
+            expect(scopedQuery.state.dataUpdateCount).toBe(2)
           })
         } finally {
           refetchResult.resolve([authoritative])

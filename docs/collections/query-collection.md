@@ -382,15 +382,16 @@ preserving the envelope in the Query cache.
 
 This differs from TanStack Query's observer-level `select`: query-db-collection uses this option to bridge Query's response object into DB's normalized row store.
 
-In eager mode, direct write utilities such as `writeInsert`, `writeUpdate`, and `writeDelete` make a best-effort attempt to update the matching row array inside wrapped Query cache entries while preserving wrapper metadata. In on-demand mode, they patch rows already present in active raw arrays or arrays exposed as a direct response property by `select`. They remove inactive entries under the Collection's query-key prefix unless another Collection or observer retains them. They do not reconstruct a scoped result from the full collection.
+In eager mode, direct write utilities such as `writeInsert`, `writeUpdate`, and `writeDelete` make a best-effort attempt to update the matching row array inside wrapped Query cache entries while preserving wrapper metadata. In on-demand mode, they patch rows already present in active raw arrays or arrays exposed as a direct response property by `select`. They remove inactive entries under the Collection's query-key prefix unless another Collection or observer retains them. They do not reconstruct a scoped result from the full collection. A retained outside observer can therefore keep an inactive cache entry with old rows.
 
-This works automatically for simple wrappers such as:
+This works automatically when `select` returns the wrapper's array property itself, as in these simple wrappers:
 
 - `{ data: [...] }`
 - `{ items: [...] }`
 - `{ results: [...] }`
 
-Derived projections, such as `select: (response) => response.edges.map((edge) => edge.node)`, are read-side row extraction only. query-db-collection cannot generally reconstruct the original response envelope from updated rows, so direct writes leave that cached envelope unchanged. The Collection still receives the direct write. Refetch or invalidate the query if the wrapped cache must reflect that write.
+Derived projections, such as `select: (response) => response.edges.map((edge) => edge.node)`, are read-side row extraction only. query-db-collection cannot generally reconstruct the original response envelope from updated rows, so direct writes leave that cached envelope unchanged. The Collection still receives the direct write, and resubscribing does not replay the unchanged envelope over it. Refetch or invalidate the query if the wrapped cache must reflect that write.
+This also applies to derived arrays such as `select: (response) => response.data.filter(Boolean)`.
 
 ### Collection Options
 
@@ -1191,7 +1192,7 @@ This pattern allows you to:
 
 Direct writes update the collection when their sync commit is accepted, or when a running mutation handler settles. They do not start a Query refetch. In eager mode, they also patch the full-result TanStack Query cache in place.
 
-In on-demand mode, each Query cache entry may represent a different predicate, order, limit, or offset. A direct write patches changed keys already present in active raw arrays or arrays exposed as a direct response property by `select`. It leaves derived projections unchanged and removes inactive entries under the Collection's query-key prefix when no other Collection or observer retains them. Keep unrelated Query entries outside that prefix. A direct write cannot infer whether an inserted row belongs in a scoped result or which row replaces a deleted item in a limited window. A new direct insert has no inferred subset owner and can survive subset unload; callers must manage its lifetime unless a later Query result takes ownership. A later `queryFn` result may reconcile or replace a direct write. Treat this as a lower-level API: use `collection.utils.refetch()` when the server must reestablish exact scoped results.
+In on-demand mode, each Query cache entry may represent a different predicate, order, limit, or offset. A direct write patches changed keys already present in active raw arrays or arrays exposed as a direct response property by `select`. It leaves derived projections unchanged and removes inactive entries under the Collection's query-key prefix when no other Collection or observer retains them. Keep unrelated Query entries outside that prefix. A direct write cannot infer whether an inserted row belongs in a scoped result or which row replaces a deleted item in a limited window. A new direct insert has no inferred subset owner and can survive subset unload; callers must manage its lifetime unless a later Query result takes ownership. A fetch started before an accepted direct write preserves that write's claimed keys in its result; a fetch started later may reconcile or replace the write. Cache patches do not clear a recorded Query error, pending invalidation, or staleness. Treat this as a lower-level API: use `collection.utils.refetch()` when the server must reestablish exact scoped results. If an older request is still in flight, that explicit refetch starts a new request.
 
 To use direct writes with persistence handlers, return `{ refetch: false }` to avoid the handler's separate automatic refetch during the pre-1.0 transition. An on-demand `queryFn` still needs to return the complete current result for its pushed-down predicate, order, limit, and offset when it does run. For robust real-time synchronization, use a collection backed by a sync engine that owns snapshot and change-stream ordering.
 

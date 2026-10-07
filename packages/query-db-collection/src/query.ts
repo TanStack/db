@@ -967,6 +967,9 @@ export function queryCollectionOptions(
   let pendingDirectWrites: Promise<void> | undefined
   // True while a direct write puts its accepted rows into the cache.
   let writingDirectCache = false
+  // A derived select can leave an older cache envelope untouched. Its current
+  // successful result must not be replayed after a direct write.
+  const unpatchedCacheVersions = new WeakMap<AnyQuery, number>()
   // Results deferred behind direct writes that have not applied yet.
   let deferredResults = 0
 
@@ -1804,16 +1807,13 @@ export function queryCollectionOptions(
         }),
         ...initialDataObserverOptions,
         queryKey: key,
-        queryFn:
-          syncMode === `on-demand`
-            ? queryFunction
-            : (context: Parameters<typeof queryFunction>[0]) => {
-                fetchStartGenerations.set(
-                  hashKey(context.queryKey),
-                  directWriteGeneration,
-                )
-                return queryFunction(context)
-              },
+        queryFn: (context: Parameters<typeof queryFunction>[0]) => {
+          fetchStartGenerations.set(
+            hashKey(context.queryKey),
+            directWriteGeneration,
+          )
+          return queryFunction(context)
+        },
         meta: extendedMeta,
         structuralSharing: true,
         notifyOnChangeProps: `all`,
@@ -1931,10 +1931,18 @@ export function queryCollectionOptions(
     const mergeOlderRows = (
       items: Array<any>,
       fetchStart: number,
+      hashedQueryKey: string,
     ): Array<any> => {
       const rows = new Map(items.map((row) => [getKey(row), row]))
       for (const [key, generation] of directWriteKeyGenerations) {
         if (generation <= fetchStart) continue
+        // A scoped result must not acquire an unrelated direct insert.
+        if (
+          syncMode === `on-demand` &&
+          !rows.has(key) &&
+          !queryToRows.get(hashedQueryKey)?.has(key)
+        )
+          continue
         const accepted = collection._state.getAcceptedSyncedRow(key)
         if (accepted === undefined) rows.delete(key)
         else rows.set(key, accepted)
@@ -2322,11 +2330,20 @@ export function queryCollectionOptions(
         if (observer && observedQuery) {
           trackOwnedCacheQuery(observedQuery, hashedQueryKey)
         }
+        // The Collection already applied this direct write. The cache
+        // notification must not supersede a pending fetched result or clear
+        // a recorded fetch error.
+        if (writingDirectCache) return
+        if (observedQuery && result.isSuccess) {
+          const unpatchedVersion = unpatchedCacheVersions.get(observedQuery)
+          if (unpatchedVersion !== undefined) {
+            if (observedQuery.state.dataUpdateCount <= unpatchedVersion) return
+            unpatchedCacheVersions.delete(observedQuery)
+          }
+        }
         if (
-          syncMode !== `on-demand` &&
           result.isSuccess &&
           !result.isFetching &&
-          !writingDirectCache &&
           (pendingDirectWrites !== undefined ||
             (fetchStartGenerations.get(hashedQueryKey) ??
               directWriteGeneration) < directWriteGeneration)
@@ -2359,7 +2376,7 @@ export function queryCollectionOptions(
                 fetchStartGenerations.set(hashedQueryKey, directWriteGeneration)
                 updateCacheDataForKey(
                   queryKey,
-                  mergeOlderRows(validation.items, fetchStart),
+                  mergeOlderRows(validation.items, fetchStart, hashedQueryKey),
                 )
                 // Rows equal to the cache leave the current result unchanged,
                 // so no notification follows. Handle it now: it is no longer
@@ -2389,9 +2406,6 @@ export function queryCollectionOptions(
           // Optimistic state covers the gap. Once the barrier resolves,
           // trigger a fresh refetch to get authoritative data.
           if (collection.deferDataRefresh) {
-            // The direct write already applied its row. Its cache patch is not
-            // a fetched result and must not schedule a request on release.
-            if (writingDirectCache) return
             if (result.isFetching) {
               void getDeferredRefresh(
                 hashedQueryKey,
@@ -2984,6 +2998,15 @@ export function queryCollectionOptions(
       let fetchRecord: FetchApplicationRecord | undefined
       let result: QueryObserverResult<any, any>
       try {
+        if (
+          query.state.fetchStatus === `fetching` &&
+          (fetchStartGenerations.get(hashedQueryKey) ?? directWriteGeneration) <
+            directWriteGeneration
+        ) {
+          // Query Core reuses an empty-cache in-flight fetch. A refetch after
+          // a direct write needs a request that starts after that write.
+          await query.cancel({ silent: true })
+        }
         const fetch = queryObserver.refetch({
           throwOnError: opts?.throwOnError,
         })
@@ -3093,29 +3116,53 @@ export function queryCollectionOptions(
    * and wrapped response formats (when `select` is used).
    */
   const updateCacheDataForKey = (key: QueryKey, items: Array<any>): void => {
+    const query = queryClient
+      .getQueryCache()
+      .find({ queryKey: key, exact: true })
+    const markUnpatchable = (): void => {
+      if (query) unpatchedCacheVersions.set(query, query.state.dataUpdateCount)
+    }
+    const writeCache = (data: unknown): void => {
+      if (query) {
+        // A direct edit changes cached rows, not Query's fetch authority,
+        // error, invalidation, or freshness timestamp.
+        query.setState({ data })
+        unpatchedCacheVersions.delete(query)
+      } else {
+        queryClient.setQueryData(key, data)
+      }
+    }
     if (select) {
       const oldData = queryClient.getQueryData(key)
-      if (!oldData || typeof oldData !== `object`) return
+      if (!oldData || typeof oldData !== `object`) {
+        markUnpatchable()
+        return
+      }
       if (Array.isArray(oldData)) {
-        queryClient.setQueryData(key, items)
+        writeCache(items)
         return
       }
 
       // Only a direct array property can be replaced without an inverse for
       // select. A derived projection may change each row's response shape.
       const selectedArray = select(oldData)
-      if (!Array.isArray(selectedArray)) return
+      if (!Array.isArray(selectedArray)) {
+        markUnpatchable()
+        return
+      }
       const property = Object.keys(oldData).find(
         (name) => (oldData as Record<string, unknown>)[name] === selectedArray,
       )
-      if (property === undefined) return
-      queryClient.setQueryData(key, { ...oldData, [property]: items })
+      if (property === undefined) {
+        markUnpatchable()
+        return
+      }
+      writeCache({ ...oldData, [property]: items })
     } else {
       // Raw row writes must not overwrite a different cache format. Avoid even
       // a no-op setQueryData: it marks unrelated data fresh and clears invalidation.
       const previous = queryClient.getQueryData(key)
-      if (previous === undefined || Array.isArray(previous))
-        queryClient.setQueryData(key, items)
+      if (previous === undefined || Array.isArray(previous)) writeCache(items)
     }
   }
 
@@ -3190,12 +3237,25 @@ export function queryCollectionOptions(
       const accepted = new Map(
         getItems(changedKeys).map((item) => [getKey(item), item]),
       )
+      const affectedOwners = new Set(
+        changedKeys.flatMap((key) => [...(rowToQueries.get(key) ?? [])]),
+      )
       const activeQueries = new Set<AnyQuery>()
 
       for (const [hashedQueryKey, observer] of state.observers) {
         if ((queryRefCounts.get(hashedQueryKey) ?? 0) <= 0) continue
         const query = observer.getCurrentQuery()
+        if (activeQueries.has(query)) continue
         activeQueries.add(query)
+        // Resolved disjoint scopes cannot contain this accepted key. A query
+        // still fetching or awaiting its first result may hold provisional
+        // cached rows, so inspect those entries before their owner is known.
+        if (
+          !affectedOwners.has(hashedQueryKey) &&
+          queryToRows.has(hashedQueryKey) &&
+          query.state.fetchStatus !== `fetching`
+        )
+          continue
         const data = query.state.data
         const rows = select && data !== undefined ? select(data) : data
         if (!Array.isArray(rows)) continue

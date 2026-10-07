@@ -1,5 +1,6 @@
 import {
   QueryClient,
+  QueryObserver,
   focusManager,
   hashKey,
   isCancelledError,
@@ -7326,6 +7327,387 @@ describe(`query collection ownership lifecycle`, () => {
     ])
     expect(collection.get(initial.id)?.name).toBe(`After`)
     expect(queryFn).toHaveBeenCalledTimes(1)
+  })
+
+  /**
+   * A derived selected response has no safe inverse for a direct cache edit.
+   * Its old cached envelope may remain, but remounting a live query without
+   * a new provider result must not replay that envelope over an accepted
+   * direct write. The independent reference keeps the accepted row until a
+   * later fetch; this history observes both the public row and request count
+   * after the live-query subscriber returns.
+   */
+  it(`does not replay an unpatchable eager cache response on resubscribe`, async () => {
+    type Row = { id: string; name: string }
+    const id = `derived-eager-resubscribe`
+    const response = { data: [{ id: `x`, name: `before` }] }
+    const queryClient = createQueryClient()
+    const queryFn = vi.fn(() => Promise.resolve(structuredClone(response)))
+    const collection = createCollection(
+      queryCollectionOptions({
+        id,
+        queryClient,
+        queryKey: [id],
+        queryFn,
+        select: (value: typeof response) => value.data.filter(Boolean),
+        getKey: (row: Row) => row.id,
+        syncMode: `eager`,
+        startSync: true,
+      }),
+    )
+    const createLive = () =>
+      createLiveQueryCollection({
+        query: (query) => query.from({ row: collection }),
+      })
+    const first = createLive()
+    const liveQueries = [first]
+    cleanups.push(async () => {
+      await Promise.all(liveQueries.map((query) => query.cleanup()))
+      await collection.cleanup()
+      queryClient.clear()
+    })
+
+    await first.preload()
+    await collection.utils.writeUpdate({ id: `x`, name: `after` })
+    expect(queryClient.getQueryData<typeof response>([id])).toEqual(response)
+    await first.cleanup()
+    const second = createLive()
+    liveQueries.push(second)
+    await second.preload()
+    expect(collection.get(`x`)?.name).toBe(`after`)
+    expect(queryFn).toHaveBeenCalledTimes(1)
+  })
+
+  /**
+   * An outside Query observer may retain an inactive A cache with an older
+   * row. The Collection row is independently held by active subset B. A
+   * direct update changes that public row; remounting A and then releasing B
+   * must not restore the old value. The retained cache is allowed to stay
+   * stale, so this checks the ownership boundary rather than requiring a
+   * cache patch the Collection cannot safely infer.
+   */
+  it(`keeps a direct row when a foreign-retained subset remounts`, async () => {
+    type Row = { id: string; name: string; category: string }
+    const id = `foreign-retained-subset-remount`
+    const queryClient = createQueryClient()
+    const initial = { id: `x`, name: `before`, category: `A` }
+    const queryFn = vi.fn(() => Promise.resolve([{ ...initial }]))
+    const collection = createCollection(
+      queryCollectionOptions<Row>({
+        id,
+        queryClient,
+        queryKey: [id],
+        queryFn,
+        getKey: (row) => row.id,
+        syncMode: `on-demand`,
+        startSync: true,
+      }),
+    )
+    const a = { where: eq(`category`, `A`) }
+    const b = { where: eq(`id`, `x`) }
+    let unsubscribe = () => {}
+    cleanups.push(async () => {
+      unsubscribe()
+      await collection.cleanup()
+      queryClient.clear()
+    })
+    await collection._sync.loadSubset(a)
+    const aQuery = queryClient.getQueryCache().findAll({ queryKey: [id] })[0]!
+    await collection._sync.loadSubset(b)
+    const foreign = new QueryObserver(queryClient, {
+      queryKey: aQuery.queryKey,
+      queryFn,
+      staleTime: Infinity,
+      retry: false,
+    })
+    unsubscribe = foreign.subscribe(() => {})
+    collection._sync.unloadSubset(a)
+    await collection.utils.writeUpdate({ id: `x`, name: `after` })
+    expect(
+      queryClient.getQueryData<Array<Row>>(aQuery.queryKey)?.[0]?.name,
+    ).toBe(`before`)
+    await collection._sync.loadSubset(a)
+    collection._sync.unloadSubset(b)
+    expect(collection.get(`x`)?.name).toBe(`after`)
+    expect(queryFn).toHaveBeenCalledTimes(2)
+  })
+
+  /**
+   * An explicit refetch after a direct write asks the provider for a result
+   * newer than that write. The reference is request order: a request begun
+   * before the write cannot discharge the later refetch, even when Query Core
+   * has no cached data and would normally reuse the pending request. The
+   * legal history holds the initial request, writes a row, deletes it, then
+   * refetches. At settlement, the public row set must equal the second
+   * provider response and the provider must have received two requests.
+   */
+  it(`starts a post-write request for explicit refetch during an empty-cache fetch`, async () => {
+    type Row = { id: string; name: string }
+    const id = `post-write-explicit-refetch`
+    const first = createDeferred<Array<Row>>()
+    const started = createDeferred<void>()
+    const queryClient = createQueryClient()
+    const queryFn = vi.fn(() => {
+      if (queryFn.mock.calls.length === 1) {
+        started.resolve()
+        return first.promise
+      }
+      return Promise.resolve([] as Array<Row>)
+    })
+    const collection = createCollection(
+      queryCollectionOptions<Row>({
+        id,
+        queryClient,
+        queryKey: [id],
+        queryFn,
+        getKey: (row) => row.id,
+        syncMode: `on-demand`,
+        startSync: true,
+      }),
+    )
+    cleanups.push(async () => {
+      first.resolve([])
+      await collection.cleanup()
+      queryClient.clear()
+    })
+
+    await collection.utils.writeInsert({ id: `x`, name: `local` })
+    const load = Promise.resolve(collection._sync.loadSubset({}))
+    void load.catch(() => undefined)
+    await started.promise
+    await collection.utils.writeDelete(`x`)
+    const refetch = collection.utils.refetch({ throwOnError: true })
+    first.resolve([{ id: `x`, name: `stale` }])
+    await refetch
+    expect(queryFn).toHaveBeenCalledTimes(2)
+    expect(collection.has(`x`)).toBe(false)
+    await load.catch(() => undefined)
+  })
+
+  /**
+   * A fetched result and accepted direct writes form a per-key ordered merge.
+   * The independent reference overlays writes accepted after fetch start onto
+   * fetched rows, but does not add unrelated keys to an on-demand scope. This
+   * history covers a previously owned row, a held explicit refetch, a later
+   * direct update, and an unrelated direct insert. The Collection rows and Query cache are compared when
+   * the refetch settles; the eager sibling above covers the other sync mode.
+   */
+  it(`keeps a later on-demand direct update over an older refetch row`, async () => {
+    type Row = { id: string; name: string }
+    const id = `on-demand-older-fetch-write`
+    const held = createDeferred<Array<Row>>()
+    const started = createDeferred<void>()
+    const queryClient = createQueryClient()
+    const queryFn = vi.fn(() => {
+      if (queryFn.mock.calls.length === 1)
+        return Promise.resolve([{ id: `x`, name: `before` }])
+      started.resolve()
+      return held.promise
+    })
+    const collection = createCollection(
+      queryCollectionOptions<Row>({
+        id,
+        queryClient,
+        queryKey: [id],
+        queryFn,
+        getKey: (row) => row.id,
+        syncMode: `on-demand`,
+        startSync: true,
+      }),
+    )
+    cleanups.push(async () => {
+      held.resolve([])
+      await collection.cleanup()
+      queryClient.clear()
+    })
+
+    await collection._sync.loadSubset({})
+    const refetch = collection.utils.refetch({ throwOnError: true })
+    await started.promise
+    await collection.utils.writeUpdate({ id: `x`, name: `after` })
+    await collection.utils.writeInsert({ id: `y`, name: `outside scope` })
+    held.resolve([{ id: `x`, name: `before` }])
+    await refetch
+    expect(collection.get(`x`)?.name).toBe(`after`)
+    expect(collection.get(`y`)?.name).toBe(`outside scope`)
+    expect(queryClient.getQueryData<Array<Row>>([id])).toEqual([
+      { id: `x`, name: `after` },
+    ])
+  })
+
+  /**
+   * A direct cache edit is a notification, not a Query result. Its independent
+   * reference keeps the last fetch error and Query's invalidation/freshness
+   * metadata while replacing only an already cached row. The grammar here
+   * covers an error, a pending invalidation, and an expired timestamp; the checkpoints are
+   * Collection utilities, Query cache state, and the accepted Collection row.
+   */
+  it.each([`error`, `invalidation`, `stale`] as const)(
+    `preserves Query %s state across a direct cache patch`,
+    async (cut) => {
+      type Row = { id: string; name: string }
+      const id = `direct-cache-${cut}`
+      const queryClient = createQueryClient(false, 1000)
+      const fetchError = new Error(`fetch failed`)
+      const queryFn = vi
+        .fn()
+        .mockResolvedValueOnce([{ id: `x`, name: `before` }])
+        .mockRejectedValueOnce(fetchError)
+      const collection = createCollection(
+        queryCollectionOptions<Row>({
+          id,
+          queryClient,
+          queryKey: [id],
+          queryFn,
+          getKey: (row) => row.id,
+          syncMode: `on-demand`,
+          startSync: true,
+        }),
+      )
+      cleanups.push(async () => {
+        await collection.cleanup()
+        queryClient.clear()
+      })
+      await collection._sync.loadSubset({})
+      const query = queryClient
+        .getQueryCache()
+        .find({ queryKey: [id], exact: true })!
+      if (cut === `error`) {
+        await collection.utils.refetch()
+        expect(collection.utils.lastError).toBe(fetchError)
+      } else {
+        if (cut === `invalidation`) {
+          await queryClient.invalidateQueries({
+            queryKey: [id],
+            exact: true,
+            refetchType: `none`,
+          })
+          expect(query.state.isInvalidated).toBe(true)
+        } else {
+          query.setState({ dataUpdatedAt: Date.now() - 60_000 })
+          expect(query.isStale()).toBe(true)
+        }
+      }
+      const updatedAt = query.state.dataUpdatedAt
+      await collection.utils.writeUpdate({ id: `x`, name: `after` })
+      expect(collection.get(`x`)?.name).toBe(`after`)
+      expect(query.state.dataUpdatedAt).toBe(updatedAt)
+      if (cut === `error`) {
+        expect(collection.utils.lastError).toBe(fetchError)
+        expect(collection.utils.errorCount).toBe(1)
+      } else if (cut === `invalidation`) {
+        expect(query.state.isInvalidated).toBe(true)
+      } else {
+        expect(query.isStale()).toBe(true)
+      }
+    },
+  )
+
+  /**
+   * One physical Query has one cache-patch obligation per direct write. Two
+   * distinct subset demands may alias the same Query under a custom Query
+   * hash. The model counts physical Queries, not logical demand hashes. The
+   * driver observes Query cache notifications and the public row after one write.
+   */
+  it(`patches a shared physical Query once per direct write`, async () => {
+    type Row = { id: string; name: string; category: string }
+    const id = `shared-physical-query-write`
+    const queryClient = new QueryClient({
+      defaultOptions: {
+        queries: {
+          retry: false,
+          staleTime: Infinity,
+          gcTime: Infinity,
+          queryKeyHashFn: () => `shared-physical-query`,
+        },
+      },
+    })
+    const queryFn = vi.fn(() =>
+      Promise.resolve([{ id: `x`, name: `before`, category: `A` }]),
+    )
+    const collection = createCollection(
+      queryCollectionOptions<Row>({
+        id,
+        queryClient,
+        queryKey: [id],
+        queryFn,
+        getKey: (row) => row.id,
+        syncMode: `on-demand`,
+        startSync: true,
+      }),
+    )
+    cleanups.push(async () => {
+      await collection.cleanup()
+      queryClient.clear()
+    })
+    await collection._sync.loadSubset({ where: eq(`category`, `A`) })
+    await collection._sync.loadSubset({ where: eq(`id`, `x`) })
+    const queries = queryClient.getQueryCache().getAll()
+    expect(queries).toHaveLength(1)
+    let notifications = 0
+    const unsubscribe = queryClient.getQueryCache().subscribe((event) => {
+      if (event.type === `updated` && event.query === queries[0])
+        notifications++
+    })
+    await collection.utils.writeUpdate({ id: `x`, name: `after` })
+    unsubscribe()
+    expect(notifications).toBe(1)
+    expect(collection.get(`x`)?.name).toBe(`after`)
+  })
+
+  /**
+   * A direct update to an owned row needs work in its owner's cached scope,
+   * not in every disjoint scope. The independent category partition has ten
+   * scopes of 1,000 rows and exactly one owner for the changed key. After
+   * preload, a counted getKey boundary bounds one write to three owner-sized
+   * passes plus fixed overhead. This counts actual adapter key extraction,
+   * rather than timing or provider work.
+   */
+  it(`bounds direct cache patch work by the changed row's owners`, async () => {
+    type Row = { id: string; category: string; name: string }
+    const id = `direct-cache-owner-work`
+    const queryClient = createQueryClient()
+    let getKeyCalls = 0
+    const source = Array.from({ length: 10 }, (_, category) =>
+      Array.from({ length: 1000 }, (_, index) => ({
+        id: `${category}-${index}`,
+        category: String(category),
+        name: `before`,
+      })),
+    ).flat()
+    const queryFn = vi.fn((context: QueryFunctionContext) => {
+      const where = context.meta?.loadSubsetOptions?.where
+      const lastArg = where?.type === `func` ? where.args.at(-1) : undefined
+      const category = lastArg?.type === `val` ? lastArg.value : undefined
+      return Promise.resolve(source.filter((row) => row.category === category))
+    })
+    const collection = createCollection(
+      queryCollectionOptions<Row>({
+        id,
+        queryClient,
+        queryKey: [id],
+        queryFn,
+        getKey: (row) => {
+          getKeyCalls++
+          return row.id
+        },
+        syncMode: `on-demand`,
+        startSync: true,
+      }),
+    )
+    cleanups.push(async () => {
+      await collection.cleanup()
+      queryClient.clear()
+    })
+    for (let category = 0; category < 10; category++)
+      await collection._sync.loadSubset({
+        where: eq(`category`, String(category)),
+      })
+    getKeyCalls = 0
+    await collection.utils.writeUpdate({ id: `3-0`, name: `after` })
+    expect(collection.get(`3-0`)?.name).toBe(`after`)
+    expect(queryFn).toHaveBeenCalledTimes(10)
+    expect(getKeyCalls).toBeLessThanOrEqual(3010)
   })
 
   it(`emits metadata for every owner of rows shared by overlapping queries`, async () => {

@@ -294,8 +294,9 @@ keeps a manually written row after its queried peer retires; assigning every
 insert to the active subset fails that public-row checkpoint. Existing sibling
 cache witnesses reject retaining inactive entries under the Collection's base
 query-key prefix, including entries seeded before sync starts. The load-lifecycle oracle
-separately owns explicit refetch settlement; it does not require a fetch to
-become authoritative merely because a direct write occurred. These bounded
+separately owns explicit refetch settlement; the ownership oracle checks that
+an explicit refetch after a direct write starts a post-write request when the
+initial fetch is still pending. A direct write alone starts no request. These bounded
 witnesses do not establish exact Query cache membership, ordering, or window
 replacement after a direct write. The ownership oracle owns future scoped-cache
 witnesses; the cursor-pagination oracle owns windowed receiving cases. The
@@ -303,6 +304,19 @@ offline-transactions owner still needs a full reconnect-replay witness for its
 real `deferDataRefresh` premise. The ownership oracle also owns a later-remount
 witness after an inactive prefetched entry is evicted, and direct-insert
 retention across persisted restore remains with its persisted-owner histories.
+
+The ownership oracle also checks per-key precedence when a held on-demand
+refetch meets a later direct update, error and invalidation/freshness metadata
+across cache patches, one patch per physical Query under a colliding hash, and
+owner-bounded key extraction for ten disjoint 1,000-row subsets. An eager
+derived-`select` remount witness rejects replaying its stale envelope over a
+direct write; a foreign-observer witness permits an old inactive cache value
+while requiring the public row to survive remount and release of another owner.
+These controlled Query Core histories do not establish arbitrary `select`
+inverses, exact scoped membership or window replacement, every custom hash
+collision, or unbounded performance. The Query DB ownership oracle owns
+further direct-write cache histories; cursor pagination owns windowed receiving
+behavior.
 A caller using direct writes must accept the
 scoped-cache limits or request an explicit refetch.
 
