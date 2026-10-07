@@ -1716,6 +1716,9 @@ first. A third launch with no demand starts no full-shape transport or
 unrestricted local subset read. Another receiving witness rejects concurrent
 SDK snapshot invocation on the shared cursor. Compatible untagged resumes and
 the true full-mode fallback remain separate controls.
+An installed-SDK abort witness holds subset HTTP across external stream
+retirement, then returns a valid row. The demand rejects, the row stays absent,
+and an identical demand is not certified as loaded.
 The two-launch receiver also delivers a coordinator invalidation after a
 paginated scoped snapshot. The persistence owner crosses targeted, paginated,
 full-reload, and reset notifications after an active source row. Its
@@ -1745,13 +1748,24 @@ Held optimistic application distinguishes readiness from subset completion for
 demand both before and after readiness. A later same-run reset distinguishes a
 current replacement obligation from a permanently fulfilled startup gate.
 Concurrent initial-error and cleanup cuts observe settlement and lifecycle
-authority. These full-mode obligations still apply when scoped recovery is
-unavailable; the scoped path uses SDK snapshots and applied receipts.
+authority; cleanup quietly settles in-flight adapter loads. A sibling-demand
+abort cut requires one canceled demand to reject promptly while its sibling
+and a replacement of the canceled demand wait for the full source snapshot and
+succeed after its row applies. A separate external stream abort rejects its
+current full-log demand and never certifies an identical later demand as loaded.
+These full-log wait obligations still apply when scoped recovery is unavailable;
+the scoped path uses SDK snapshots and applied receipts.
+The changes-only path has the same refusal both when a subset transport returns
+after stream retirement and when an applied receipt is held across that
+retirement.
 The full-mode retry histories now reject their pre-error demand, then require a
 new demand to succeed after a same-run recovered snapshot, both with and
 without a held applied receipt. An installed-SDK controlled-HTTP receiver
 exhausts 503 backoff, invokes the user's retry
-handler, delivers a new full-log up-to-date, and checks that later demand. The
+handler, and acquires a new demand while the retry HTTP request is open. It
+requires that demand to wait, then succeed after the new full-log up-to-date.
+A missing-header response checks that the SDK's refusal to retry rejects later
+demands rather than leaving a renewed gate pending. The
 scoped reset history acquires a snapshot before must-refetch, then requires
 subset-end to apply its row before demand success without waiting for a full
 up-to-date. The neighboring full-mode reset retains that stronger wait. The
@@ -1762,8 +1776,8 @@ Remaining witnesses before broader closure:
 
 - Electric tag/history owners: unknown or missing key-set evidence combined
   with tagged scoped demand, multiple resets overlapping held application,
-  independently aborted sibling demands, and partial updates arriving before
-  a scoped baseline. Repeated provider errors, nonretryable SDK errors, and a
+  and partial updates arriving before a scoped baseline. Repeated provider
+  errors, SDK retry-loop exhaustion, and a
   scoped reset overlapping a held applied receipt also need witnesses. The
   untagged SQLite metadata-read race is covered above.
 - Persistence/coordinator owners: native SQLite reads, browser/electron

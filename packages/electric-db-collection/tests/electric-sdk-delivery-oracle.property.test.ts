@@ -64,7 +64,7 @@ import type { Message } from '@electric-sql/client'
  *
  * These finite HTTP fixtures do not prove that a live Electric service emits
  * the authored snapshot or move frames, nor do they cover multiple row keys,
- * network retries, native persistence hosts, or arbitrary provider schedules.
+ * arbitrary retry schedules, native persistence hosts, or arbitrary provider schedules.
  * Dropped rows and reactivation controls prove the named comparisons are live.
  */
 
@@ -282,6 +282,29 @@ const headers = (offset: number) => ({
   }),
 })
 let sequence = 0
+
+function resetResumeMetadata(): SyncMetadataApi<string | number> {
+  const stored = new Map<string, unknown>([
+    [`electric:resume`, { kind: `reset`, updatedAt: 1 }],
+  ])
+  return {
+    persistence: null,
+    row: { get: () => undefined, set: () => {}, delete: () => {} },
+    collection: {
+      get: (key) => stored.get(key),
+      set: (key, value) => {
+        stored.set(key, value)
+      },
+      delete: (key) => {
+        stored.delete(key)
+      },
+      list: (prefix) =>
+        Array.from(stored, ([key, value]) => ({ key, value })).filter(
+          ({ key }) => !prefix || key.startsWith(prefix),
+        ),
+    },
+  }
+}
 
 async function checkSnapshots(
   width: number,
@@ -674,6 +697,70 @@ fixedCase(`lets requestSnapshot own the warm transport`, async () => {
 })
 
 /**
+ * The installed SDK can finish a subset HTTP response after the shared stream
+ * was externally aborted. The stream can no longer apply that row, so the
+ * adapter must reject the demand and leave its predicate uncertified. This
+ * receives the oracle's external-abort law through the real requestSnapshot
+ * transport rather than relying on a mocked provider promise.
+ */
+fixedCase(`does not certify an aborted SDK subset snapshot`, async () => {
+  const http = controlledHttp()
+  const external = new AbortController()
+  const collection = createCollection(
+    electricCollectionOptions<Item>({
+      id: `sdk-subset-abort-${++sequence}`,
+      shapeOptions: {
+        url: `http://test-url/subset-abort-${sequence}`,
+        params: { table: `rows` },
+        fetchClient: http.fetchClient,
+        signal: external.signal,
+      },
+      syncMode: `on-demand`,
+      startSync: true,
+      getKey: (row) => row.id,
+    }),
+  )
+
+  await withElectricCleanup(async () => {
+    await atCheckpoint(http.take(), `abortable live transport`)
+    const first = Promise.resolve(collection._sync.loadSubset({ limit: 1 }))
+    void first.catch(() => undefined)
+    const request = await atCheckpoint(http.take(true), `abortable subset HTTP`)
+    external.abort()
+    request.respond(
+      new Response(
+        JSON.stringify({
+          metadata: {
+            xmin: `10`,
+            xmax: `20`,
+            xip_list: [],
+            database_lsn: `10`,
+            snapshot_mark: 1,
+          },
+          data: [
+            {
+              key: `1`,
+              value: { id: `1`, name: `discarded` },
+              headers: { operation: `insert` },
+            },
+          ],
+        }),
+        { headers: headers(2) },
+      ),
+    )
+    await expect(
+      atCheckpoint(first, `externally aborted SDK subset`),
+    ).rejects.toMatchObject({ name: `AbortError` })
+    expect(collection.has(1)).toBe(false)
+    const second = collection._sync.loadSubset({ limit: 1 })
+    expect(second).not.toBe(true)
+    await expect(Promise.resolve(second)).rejects.toMatchObject({
+      name: `AbortError`,
+    })
+  }, [() => collection.cleanup(), () => http.close()])
+})
+
+/**
  * Two active demands share one ShapeStream cursor. The source model gives each
  * predicate one row and increasing offsets. The second provider snapshot may
  * start only after the first settles; otherwise an older HTTP response can
@@ -761,8 +848,9 @@ fixedCase(
 /**
  * The controlled provider exhausts SDK backoff with one 503, then the user's
  * onError retry continues the same ShapeStream. The independent demand model
- * rejects the pre-error attempt and accepts a new demand after the complete
- * retried snapshot applies. This receives the adapter law through the actual
+ * rejects the pre-error attempt and keeps a new demand pending while the retry
+ * transport is open, then accepts it after the complete snapshot applies.
+ * This receives the adapter law through the actual
  * installed SDK, including its retry decision and HTTP delivery boundary.
  * Live service timing and nonretryable SDK errors remain outside this case.
  */
@@ -770,26 +858,7 @@ fixedCase(
   `settles a new full recovery demand after SDK error retry`,
   async () => {
     const http = controlledHttp()
-    const stored = new Map<string, unknown>([
-      [`electric:resume`, { kind: `reset`, updatedAt: 1 }],
-    ])
-    const metadata: SyncMetadataApi<string | number> = {
-      persistence: null,
-      row: { get: () => undefined, set: () => {}, delete: () => {} },
-      collection: {
-        get: (key) => stored.get(key),
-        set: (key, value) => {
-          stored.set(key, value)
-        },
-        delete: (key) => {
-          stored.delete(key)
-        },
-        list: (prefix) =>
-          Array.from(stored, ([key, value]) => ({ key, value })).filter(
-            ({ key }) => !prefix || key.startsWith(prefix),
-          ),
-      },
-    }
+    const metadata = resetResumeMetadata()
     let errors = 0
     const options = electricCollectionOptions<Item>({
       id: `sdk-full-retry-${++sequence}`,
@@ -832,6 +901,22 @@ fixedCase(
 
       const retry = await atCheckpoint(http.take(), `full retry HTTP`)
       expect(retry.url.searchParams.get(`log`)).toBe(`full`)
+      // The provider has accepted a retry transport but has not supplied a
+      // replacement source snapshot. A new demand must wait for that evidence;
+      // it cannot inherit the prior attempt's 503 rejection.
+      let duringRetryOutcome = `pending`
+      const duringRetry = Promise.resolve(
+        collection._sync.loadSubset({ limit: 3 }),
+      ).then(
+        () => {
+          duringRetryOutcome = `fulfilled`
+        },
+        () => {
+          duringRetryOutcome = `rejected`
+        },
+      )
+      await new Promise<void>((resolve) => setTimeout(resolve, 0))
+      expect(duringRetryOutcome).toBe(`pending`)
       retry.respond(
         new Response(
           JSON.stringify([
@@ -846,11 +931,67 @@ fixedCase(
         ),
       )
       await vi.waitFor(() => expect(collection.status).toBe(`ready`))
+      await atCheckpoint(duringRetry, `retry-interval full demand`)
+      expect(duringRetryOutcome).toBe(`fulfilled`)
       await atCheckpoint(
         Promise.resolve(collection._sync.loadSubset({ limit: 2 })),
         `post-retry full demand`,
       )
       expect(collection.get(1)?.name).toBe(`recovered`)
+    }, [() => collection.cleanup(), () => http.close()])
+  },
+)
+
+// The SDK can refuse the user's retry object for a non-retryable protocol
+// error. The model then has no future source snapshot: both the first and any
+// later demand reject instead of waiting forever on a renewed gate. This HTTP
+// response omits required Electric headers to exercise that SDK decision.
+fixedCase(
+  `rejects later full recovery demand when SDK declines retry`,
+  async () => {
+    const http = controlledHttp()
+    const metadata = resetResumeMetadata()
+    let errors = 0
+    const options = electricCollectionOptions<Item>({
+      id: `sdk-full-terminal-${++sequence}`,
+      shapeOptions: {
+        url: `http://test-url/full-terminal`,
+        params: { table: `rows` },
+        fetchClient: http.fetchClient,
+        onError: () => {
+          errors++
+          return {}
+        },
+      },
+      syncMode: `on-demand`,
+      startSync: true,
+      getKey: (row) => row.id,
+    })
+    const originalSync = options.sync
+    const collection = createCollection({
+      ...options,
+      sync: {
+        sync: (params: Parameters<typeof originalSync.sync>[0]) =>
+          originalSync.sync({ ...params, metadata }),
+      },
+    })
+
+    await withElectricCleanup(async () => {
+      const first = Promise.resolve(collection._sync.loadSubset({ limit: 1 }))
+      void first.catch(() => undefined)
+      const initial = await atCheckpoint(http.take(), `terminal full HTTP`)
+      initial.respond(
+        new Response(JSON.stringify([{ headers: { control: `up-to-date` } }])),
+      )
+      await vi.waitFor(() => expect(errors).toBe(1))
+      await expect(first).rejects.toThrow(/required headers/)
+      await expect(
+        atCheckpoint(
+          Promise.resolve(collection._sync.loadSubset({ limit: 2 })),
+          `terminal full demand`,
+        ),
+      ).rejects.toThrow(/required headers/)
+      expect(http.activeCount()).toBe(0)
     }, [() => collection.cleanup(), () => http.close()])
   },
 )

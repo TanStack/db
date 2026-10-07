@@ -563,7 +563,11 @@ function createOracleCollection(
   id: string,
   syncMode: ElectricSyncMode,
   metadata: SyncMetadataApi<string | number>,
-  shapeResumeOptions: { offset?: Offset; handle?: string } = {},
+  shapeResumeOptions: {
+    offset?: Offset
+    handle?: string
+    signal?: AbortSignal
+  } = {},
 ) {
   let subscriber!: (messages: Array<Message<OracleRow>>) => void
   const unsubscribe = vi.fn()
@@ -5345,9 +5349,9 @@ describeUnlessQueuedPresenceReplay(`Electric adapter laws`, () => {
   })
 
   // Initial failure rejects all current waiters with the original error.
-  // Cleanup settles them and invalidates subsequent callbacks. A provider
-  // error alone does not make its future callbacks obsolete; retry semantics
-  // remain outside this initial-settlement check.
+  // Cleanup quietly settles adapter loads and invalidates later callbacks.
+  // A provider error alone does not make its future callbacks obsolete;
+  // retry semantics are checked by the neighboring recovery laws.
   it.each([`failure`, `cleanup`] as const)(
     `full recovery retires concurrent demand on %s`,
     async (terminal) => {
@@ -5389,7 +5393,10 @@ describeUnlessQueuedPresenceReplay(`Electric adapter laws`, () => {
           ])
           expect(trace.collection.status).toBe(`error`)
         } else {
-          expect(results).toHaveLength(2)
+          expect(results).toEqual([
+            { kind: `fulfilled` },
+            { kind: `fulfilled` },
+          ])
           expect(trace.collection.status).toBe(`cleaned-up`)
           trace.subscriber([change(`insert`, 1, `abandoned`), upToDate])
           expect(trace.collection.has(1)).toBe(false)
@@ -5397,6 +5404,195 @@ describeUnlessQueuedPresenceReplay(`Electric adapter laws`, () => {
       }, [() => trace.collection.cleanup(), () => loggedError.mockRestore()])
     },
   )
+
+  // Each demand owns its cancellation even while full-log source evidence is
+  // shared. Aborting one demand ends that load before up-to-date; its sibling
+  // and a replacement of the canceled demand still wait for the source
+  // snapshot and succeed after the row applies.
+  it(`cancels one full recovery demand without settling its sibling`, async () => {
+    const trace = createOracleCollection(
+      `full-recovery-one-abort`,
+      `on-demand`,
+      createMetadata(
+        new Map([[`electric:resume`, { kind: `reset`, updatedAt: 1 }]]),
+      ).api,
+    )
+    const controller = new AbortController()
+    const canceled = Promise.resolve(
+      trace.collection._sync.loadSubset({
+        limit: 1,
+        signal: controller.signal,
+      }),
+    )
+    void canceled.catch(() => undefined)
+    let siblingOutcome = `pending`
+    const sibling = Promise.resolve(
+      trace.collection._sync.loadSubset({ limit: 2 }),
+    ).then(
+      () => {
+        siblingOutcome = `fulfilled`
+      },
+      () => {
+        siblingOutcome = `rejected`
+      },
+    )
+
+    await withElectricCleanup(async () => {
+      controller.abort()
+      await expect(
+        atCheckpoint(canceled, `canceled full recovery demand`),
+      ).rejects.toMatchObject({ name: `AbortError` })
+      expect(siblingOutcome).toBe(`pending`)
+
+      // Cancellation cannot mark this predicate complete or poison a later
+      // acquisition of the same demand key.
+      const replacement = Promise.resolve(
+        trace.collection._sync.loadSubset({ limit: 1 }),
+      )
+      let replacementOutcome = `pending`
+      const observedReplacement = replacement.then(
+        () => {
+          replacementOutcome = `fulfilled`
+        },
+        () => {
+          replacementOutcome = `rejected`
+        },
+      )
+      await Promise.resolve()
+      expect(replacementOutcome).toBe(`pending`)
+
+      trace.subscriber([change(`insert`, 1, `source row`), upToDate])
+      await atCheckpoint(
+        Promise.all([sibling, observedReplacement]),
+        `remaining full recovery demands`,
+      )
+      expect(siblingOutcome).toBe(`fulfilled`)
+      expect(replacementOutcome).toBe(`fulfilled`)
+      expect(trace.collection.get(1)).toMatchObject({ name: `source row` })
+    }, [() => trace.collection.cleanup()])
+  })
+
+  // An external ShapeStream abort is a provider failure, not Collection
+  // cleanup. It cannot fulfill an in-flight demand or certify its key as
+  // loaded when no source snapshot arrived. A second identical demand must
+  // therefore remain a failing acquisition rather than deduplicated success.
+  it(`does not certify a full recovery demand after external stream abort`, async () => {
+    const external = new AbortController()
+    const trace = createOracleCollection(
+      `full-recovery-external-abort`,
+      `on-demand`,
+      createMetadata(
+        new Map([[`electric:resume`, { kind: `reset`, updatedAt: 1 }]]),
+      ).api,
+      { signal: external.signal },
+    )
+    const first = Promise.resolve(
+      trace.collection._sync.loadSubset({ limit: 1 }),
+    )
+    void first.catch(() => undefined)
+
+    await withElectricCleanup(async () => {
+      external.abort()
+      await expect(
+        atCheckpoint(first, `externally aborted full recovery demand`),
+      ).rejects.toMatchObject({ name: `StreamAbortedError` })
+      const second = trace.collection._sync.loadSubset({ limit: 1 })
+      expect(second).not.toBe(true)
+      await expect(Promise.resolve(second)).rejects.toMatchObject({
+        name: `AbortError`,
+      })
+      expect(trace.collection.size).toBe(0)
+    }, [() => trace.collection.cleanup()])
+  })
+
+  // A subset transport may return after the shared stream retires. Its
+  // messages cannot apply to that lifecycle, so transport settlement alone
+  // cannot certify the demand or its deduplication key.
+  it(`does not certify a subset snapshot after external stream abort`, async () => {
+    const external = new AbortController()
+    const trace = createOracleCollection(
+      `subset-external-abort`,
+      `on-demand`,
+      createMetadata(new Map()).api,
+      { signal: external.signal },
+    )
+    const snapshot = createDeferred<void>()
+    mockStream.requestSnapshot.mockReturnValueOnce(snapshot.promise)
+    const first = Promise.resolve(
+      trace.collection._sync.loadSubset({ limit: 1 }),
+    )
+    void first.catch(() => undefined)
+
+    await withElectricCleanup(async () => {
+      await vi.waitFor(() =>
+        expect(mockStream.requestSnapshot).toHaveBeenCalledOnce(),
+      )
+      external.abort()
+      snapshot.resolve()
+      await expect(
+        atCheckpoint(first, `externally aborted subset snapshot`),
+      ).rejects.toMatchObject({ name: `AbortError` })
+      const second = trace.collection._sync.loadSubset({ limit: 1 })
+      expect(second).not.toBe(true)
+      await expect(Promise.resolve(second)).rejects.toMatchObject({
+        name: `AbortError`,
+      })
+      expect(trace.collection.size).toBe(0)
+    }, [() => snapshot.resolve(), () => trace.collection.cleanup()])
+  })
+
+  // Even a completed transport cannot certify a demand while its accepted
+  // source commit is waiting for application. Retiring the stream during that
+  // wait leaves no visible source row, so the demand must fail when the held
+  // applied receipt finally settles.
+  it(`does not certify an externally aborted subset during applied settlement`, async () => {
+    const external = new AbortController()
+    const trace = createOracleCollection(
+      `subset-held-external-abort`,
+      `on-demand`,
+      createMetadata(new Map()).api,
+      { signal: external.signal },
+    )
+    const persistence = createDeferred<void>()
+    const transaction = createTransaction({
+      mutationFn: () => persistence.promise,
+    })
+    transaction.mutate(() =>
+      trace.collection.insert({
+        id: 99,
+        name: `optimistic`,
+        stable: `stable-99`,
+      }),
+    )
+    const snapshot = createDeferred<void>()
+    mockStream.requestSnapshot.mockReturnValueOnce(snapshot.promise)
+    const first = Promise.resolve(
+      trace.collection._sync.loadSubset({ limit: 1 }),
+    )
+    void first.catch(() => undefined)
+
+    await withElectricCleanup(async () => {
+      await vi.waitFor(() =>
+        expect(mockStream.requestSnapshot).toHaveBeenCalledOnce(),
+      )
+      trace.subscriber([change(`insert`, 1, `source row`), subsetEnd])
+      snapshot.resolve()
+      await new Promise<void>((resolve) => setTimeout(resolve, 0))
+      expect(trace.collection.has(1), `applied receipt is held`).toBe(false)
+      external.abort()
+      persistence.resolve()
+      await transaction.isPersisted.promise
+      await expect(
+        atCheckpoint(first, `externally aborted held subset`),
+      ).rejects.toMatchObject({ name: `AbortError` })
+      const second = trace.collection._sync.loadSubset({ limit: 1 })
+      expect(second).not.toBe(true)
+    }, [
+      () => snapshot.resolve(),
+      () => persistence.resolve(),
+      () => trace.collection.cleanup(),
+    ])
+  })
 
   it(`drops a held receipt's rows when cleanup abandons it`, async () => {
     const metadata = createMetadata(new Map())

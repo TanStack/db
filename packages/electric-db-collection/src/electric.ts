@@ -658,6 +658,7 @@ function createLoadSubsetDedupe<T extends Row<unknown>>({
   collectionId,
   encodeColumnName,
   signal,
+  isCleanupAbort,
   beforeSnapshot,
 }: {
   stream: ShapeStream<T>
@@ -685,6 +686,7 @@ function createLoadSubsetDedupe<T extends Row<unknown>>({
    * When aborted, errors from requestSnapshot are silently ignored.
    */
   signal: AbortSignal
+  isCleanupAbort: () => boolean
   beforeSnapshot?: () => Promise<void>
 }): DeduplicatedLoadSubset | null {
   if (syncMode === `eager`) {
@@ -705,7 +707,7 @@ function createLoadSubsetDedupe<T extends Row<unknown>>({
    * handled (signal aborted during cleanup), false if it should be re-thrown.
    */
   function handleSnapshotError(error: unknown, operation: string): boolean {
-    if (signal.aborted) {
+    if (signal.aborted && isCleanupAbort()) {
       debug(`${logPrefix}Ignoring ${operation} error during cleanup: %o`, error)
       return true
     }
@@ -718,6 +720,11 @@ function createLoadSubsetDedupe<T extends Row<unknown>>({
     const throwIfAborted = () => {
       if (signal.aborted) throw abortReason(signal)
       if (opts.signal?.aborted) throw abortReason(opts.signal)
+    }
+    const stopAfterStreamAbort = () => {
+      if (!signal.aborted) return false
+      if (!isCleanupAbort()) throw abortReason(signal)
+      return true
     }
     const requestSnapshotInOrder = (
       params: Parameters<typeof stream.requestSnapshot>[0],
@@ -740,8 +747,29 @@ function createLoadSubsetDedupe<T extends Row<unknown>>({
     }
 
     if (waitForFullSnapshot) {
-      await waitForFullSnapshot()
-      throwIfAborted()
+      const snapshot = waitForFullSnapshot()
+      const demandSignal = opts.signal
+      let removeAbortListener: (() => void) | undefined
+      const aborted = demandSignal
+        ? new Promise<never>((_, reject) => {
+            const onAbort = () => reject(abortReason(demandSignal))
+            demandSignal.addEventListener(`abort`, onAbort, { once: true })
+            removeAbortListener = () =>
+              demandSignal.removeEventListener(`abort`, onAbort)
+            if (demandSignal.aborted) onAbort()
+          })
+        : undefined
+      try {
+        await (aborted ? Promise.race([snapshot, aborted]) : snapshot)
+      } catch (error) {
+        if (signal.aborted && isCleanupAbort()) return
+        if (demandSignal?.aborted) throw abortReason(demandSignal)
+        throw error
+      } finally {
+        removeAbortListener?.()
+      }
+      if (signal.aborted && isCleanupAbort()) return
+      if (demandSignal?.aborted) throw abortReason(demandSignal)
       return
     }
 
@@ -834,7 +862,9 @@ function createLoadSubsetDedupe<T extends Row<unknown>>({
       }
       throw error
     }
+    if (stopAfterStreamAbort()) return
     await waitForCommitsAfter(commitCursor)
+    if (stopAfterStreamAbort()) return
   }
 
   return new DeduplicatedLoadSubset({ loadSubset })
@@ -1785,10 +1815,8 @@ function createElectricSync<T extends Row<unknown>>(
       let resolveFullSnapshot: (receipt: SyncAppliedReceipt) => void = () => {}
       let rejectFullSnapshot: (error: unknown) => void = () => {}
       let fullSnapshotReady = Promise.resolve()
-      let fullSnapshotFailed = false
       const resetFullSnapshot = () => {
         if (!usesFullLog) return
-        fullSnapshotFailed = false
         fullSnapshotReady = new Promise<void>((resolve, reject) => {
           resolveFullSnapshot = (receipt) =>
             resolve(receipt === true ? undefined : receipt)
@@ -1858,6 +1886,7 @@ function createElectricSync<T extends Row<unknown>>(
 
       // Abort controller for the stream - wraps the signal if provided
       const abortController = new AbortController()
+      let cleanupAbortedStream = false
       const forwardExternalAbort = () => abortController.abort()
 
       if (shapeOptions.signal) {
@@ -1892,9 +1921,8 @@ function createElectricSync<T extends Row<unknown>>(
           shapeOptions.handle ??
           (canUsePersistedResume ? persistedResumeState.handle : undefined),
         signal: abortController.signal,
-        onError: (errorParams) => {
+        onError: async (errorParams) => {
           rejectFullSnapshot(errorParams)
-          if (usesFullLog && !hasReceivedUpToDate) fullSnapshotFailed = true
           streamErrorVersion++
           // Note that Electric sends a 409 error on a `must-refetch` message, but the
           // ShapeStream handled this and it will not reach this handler, therefor
@@ -1905,7 +1933,20 @@ function createElectricSync<T extends Row<unknown>>(
           }
 
           if (shapeOptions.onError) {
-            return shapeOptions.onError(errorParams)
+            const retry = await shapeOptions.onError(errorParams)
+            if (
+              retry &&
+              typeof retry === `object` &&
+              usesFullLog &&
+              !hasReceivedUpToDate &&
+              isActiveLifecycle() &&
+              !abortController.signal.aborted
+            ) {
+              // Current waiters keep the original error. A new demand may
+              // wait for the provider retry before its first batch arrives.
+              resetFullSnapshot()
+            }
+            return retry
           } else {
             console.error(
               `An error occurred while syncing collection: ${collection.id}, \n` +
@@ -2129,8 +2170,10 @@ function createElectricSync<T extends Row<unknown>>(
         // Pass the columnMapper's encode function to transform column names
         // (e.g., camelCase to snake_case) when compiling SQL for subset queries
         encodeColumnName: shapeOptions.columnMapper?.encode,
-        // Pass abort signal so requestSnapshot errors can be ignored during cleanup
+        // Pass abort ownership so cleanup stays quiet without certifying an
+        // externally aborted acquisition as successful.
         signal: abortController.signal,
+        isCleanupAbort: () => cleanupAbortedStream,
         beforeSnapshot: scopedRecoveryPromise
           ? () => scopedRecoveryPromise
           : undefined,
@@ -2194,11 +2237,6 @@ function createElectricSync<T extends Row<unknown>>(
         if (!isActiveLifecycle() || resumeInvalid) {
           return
         }
-
-        // A later provider batch proves that this sync run continued after
-        // the failed request. New demands must wait for its replacement
-        // snapshot rather than inherit the previous request's rejection.
-        if (fullSnapshotFailed && messages.length > 0) resetFullSnapshot()
 
         if (freshSnapshotPending) {
           freshSnapshotPending = false
@@ -2561,13 +2599,20 @@ function createElectricSync<T extends Row<unknown>>(
         }
       }
 
-      unsubscribeStream = stream.subscribe((messages: Array<Message<T>>) => {
-        if (!areResumeKeysReady) {
-          pendingResumeBatches.push([...messages])
-          return
-        }
-        processMessages(messages)
-      })
+      unsubscribeStream = stream.subscribe(
+        (messages: Array<Message<T>>) => {
+          if (!areResumeKeysReady) {
+            pendingResumeBatches.push([...messages])
+            return
+          }
+          processMessages(messages)
+        },
+        (error) => {
+          // The SDK rejected the retry decision or exhausted its retry loop.
+          // In that case no provider batch will settle the renewed gate.
+          rejectFullSnapshot(error)
+        },
+      )
 
       if (!areResumeKeysReady && resumeKeysPromise) {
         void resumeKeysPromise.then(
@@ -2599,6 +2644,7 @@ function createElectricSync<T extends Row<unknown>>(
       return {
         loadSubset: loadSubsetDedupe?.loadSubset,
         cleanup: () => {
+          if (!abortController.signal.aborted) cleanupAbortedStream = true
           shapeOptions.signal?.removeEventListener(
             `abort`,
             forwardExternalAbort,
