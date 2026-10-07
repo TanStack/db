@@ -1,6 +1,6 @@
 # Issue #2072: ancestor alias shadowing
 
-Reviewed tree: `codex/issue-2072-alias-shadowing`, based on `origin/main` at
+Reviewed implementation: `fd7aa208a`, based on `origin/main` at
 `2ab7f3e5`. This record ships with the implementation it reviews. The
 contract owners are `packages/db/src/query/live/ARCHITECTURE.md` §Identity and
 law 1, `packages/db/tests/query/includes-oracle.property.test.ts` with its
