@@ -110,7 +110,12 @@ export class SubsetDemandController {
       if (this.states.get(plan.id) !== state) {
         return { changed: false, empty: false, ready: true }
       }
-      if (!started) throw new Error(devBuild() && process.env.NODE_ENV !== `production` ? `Subset demand snapshot did not start` : codedMessage(159))
+      if (!started)
+        throw new Error(
+          devBuild() && process.env.NODE_ENV !== `production`
+            ? `Subset demand snapshot did not start`
+            : codedMessage(159),
+        )
       if (replace) {
         if (segment.ready instanceof Promise) {
           void segment.ready.then(

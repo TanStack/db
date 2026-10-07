@@ -219,7 +219,9 @@ export class BaseQueryBuilder<TContext extends Context = Context> {
       } else if (hasCollectionOptionsBrand(sourceValue)) {
         if (!this.resolveCollection) {
           throw new Error(
-            devBuild() && process.env.NODE_ENV !== `production` ? `Cannot use collection descriptor "${alias}" as a query source without a DbClient resolver. In React, wrap your tree in <DbProvider>.` : codedMessage(113, { alias }),
+            devBuild() && process.env.NODE_ENV !== `production`
+              ? `Cannot use collection descriptor "${alias}" as a query source without a DbClient resolver. In React, wrap your tree in <DbProvider>.`
+              : codedMessage(113, { alias }),
           )
         }
         ref = new CollectionRef(this.resolveCollection(sourceValue), alias)
@@ -1061,26 +1063,44 @@ function buildNestedSelect(
   }
   if (obj instanceof BaseQueryBuilder) {
     if (!fieldName) {
-      throw new Error(devBuild() && process.env.NODE_ENV !== `production` ? `Conditional include branch is missing a field name` : codedMessage(114))
+      throw new Error(
+        devBuild() && process.env.NODE_ENV !== `production`
+          ? `Conditional include branch is missing a field name`
+          : codedMessage(114),
+      )
     }
     return buildIncludesSubquery(obj, fieldName, parentAliases, `collection`)
   }
   if (obj instanceof ToArrayWrapper) {
     if (!(obj.query instanceof BaseQueryBuilder)) {
-      throw new Error(devBuild() && process.env.NODE_ENV !== `production` ? `toArray() must wrap a subquery builder` : codedMessage(115))
+      throw new Error(
+        devBuild() && process.env.NODE_ENV !== `production`
+          ? `toArray() must wrap a subquery builder`
+          : codedMessage(115),
+      )
     }
     if (!fieldName) {
-      throw new Error(devBuild() && process.env.NODE_ENV !== `production` ? `Conditional toArray() branch is missing a field name` : codedMessage(116))
+      throw new Error(
+        devBuild() && process.env.NODE_ENV !== `production`
+          ? `Conditional toArray() branch is missing a field name`
+          : codedMessage(116),
+      )
     }
     return buildIncludesSubquery(obj.query, fieldName, parentAliases, `array`)
   }
   if (obj instanceof ConcatToArrayWrapper) {
     if (!(obj.query instanceof BaseQueryBuilder)) {
-      throw new Error(devBuild() && process.env.NODE_ENV !== `production` ? `concat(toArray(...)) must wrap a subquery builder` : codedMessage(117))
+      throw new Error(
+        devBuild() && process.env.NODE_ENV !== `production`
+          ? `concat(toArray(...)) must wrap a subquery builder`
+          : codedMessage(117),
+      )
     }
     if (!fieldName) {
       throw new Error(
-        devBuild() && process.env.NODE_ENV !== `production` ? `Conditional concat(toArray(...)) branch is missing a field name` : codedMessage(118),
+        devBuild() && process.env.NODE_ENV !== `production`
+          ? `Conditional concat(toArray(...)) branch is missing a field name`
+          : codedMessage(118),
       )
     }
     return buildIncludesSubquery(obj.query, fieldName, parentAliases, `concat`)
@@ -1102,21 +1122,33 @@ function buildNestedSelect(
     }
     if (v instanceof ToArrayWrapper) {
       if (!(v.query instanceof BaseQueryBuilder)) {
-        throw new Error(devBuild() && process.env.NODE_ENV !== `production` ? `toArray() must wrap a subquery builder` : codedMessage(119))
+        throw new Error(
+          devBuild() && process.env.NODE_ENV !== `production`
+            ? `toArray() must wrap a subquery builder`
+            : codedMessage(119),
+        )
       }
       out[k] = buildIncludesSubquery(v.query, k, parentAliases, `array`)
       continue
     }
     if (v instanceof ConcatToArrayWrapper) {
       if (!(v.query instanceof BaseQueryBuilder)) {
-        throw new Error(devBuild() && process.env.NODE_ENV !== `production` ? `concat(toArray(...)) must wrap a subquery builder` : codedMessage(120))
+        throw new Error(
+          devBuild() && process.env.NODE_ENV !== `production`
+            ? `concat(toArray(...)) must wrap a subquery builder`
+            : codedMessage(120),
+        )
       }
       out[k] = buildIncludesSubquery(v.query, k, parentAliases, `concat`)
       continue
     }
     if (v instanceof MaterializeWrapper) {
       if (!(v.query instanceof BaseQueryBuilder)) {
-        throw new Error(devBuild() && process.env.NODE_ENV !== `production` ? `materialize() must wrap a subquery builder` : codedMessage(121))
+        throw new Error(
+          devBuild() && process.env.NODE_ENV !== `production`
+            ? `materialize() must wrap a subquery builder`
+            : codedMessage(121),
+        )
       }
       const childQuery = v.query._getQuery()
       const materialization: IncludesMaterialization = childQuery.singleResult
@@ -1141,7 +1173,11 @@ function buildConditionalSelect(
 ): ConditionalSelect {
   const args = wrapper.args
   if (args.length < 2) {
-    throw new Error(devBuild() && process.env.NODE_ENV !== `production` ? `caseWhen() requires at least two arguments` : codedMessage(122))
+    throw new Error(
+      devBuild() && process.env.NODE_ENV !== `production`
+        ? `caseWhen() requires at least two arguments`
+        : codedMessage(122),
+    )
   }
 
   const hasDefaultValue = args.length % 2 === 1
@@ -1443,9 +1479,11 @@ function buildIncludesSubquery(
 
   if (!parentRef || !childRef || correlationWhereIndex === -1) {
     throw new Error(
-      devBuild() && process.env.NODE_ENV !== `production` ? `Includes subquery for "${fieldName}" must have a WHERE clause with an eq() condition ` +
-        `that correlates a parent field with a child field. ` +
-        `Example: .where(({child}) => eq(child.parentId, parent.id))` : codedMessage(123, { fieldName }),
+      devBuild() && process.env.NODE_ENV !== `production`
+        ? `Includes subquery for "${fieldName}" must have a WHERE clause with an eq() condition ` +
+            `that correlates a parent field with a child field. ` +
+            `Example: .where(({child}) => eq(child.parentId, parent.id))`
+        : codedMessage(123, { fieldName }),
     )
   }
 
@@ -1515,7 +1553,9 @@ function buildIncludesSubquery(
   if (materialization === `concat`) {
     if (rawChildSelect === undefined || hasObjectSelect) {
       throw new Error(
-        devBuild() && process.env.NODE_ENV !== `production` ? `concat(toArray(...)) for "${fieldName}" requires the subquery to select a scalar value` : codedMessage(124, { fieldName }),
+        devBuild() && process.env.NODE_ENV !== `production`
+          ? `concat(toArray(...)) for "${fieldName}" requires the subquery to select a scalar value`
+          : codedMessage(124, { fieldName }),
       )
     }
   }
@@ -1523,7 +1563,9 @@ function buildIncludesSubquery(
   if (!hasObjectSelect) {
     if (materialization === `collection`) {
       throw new Error(
-        devBuild() && process.env.NODE_ENV !== `production` ? `Includes subquery for "${fieldName}" must select an object when materializing as a Collection` : codedMessage(125, { fieldName }),
+        devBuild() && process.env.NODE_ENV !== `production`
+          ? `Includes subquery for "${fieldName}" must select an object when materializing as a Collection`
+          : codedMessage(125, { fieldName }),
       )
     }
 

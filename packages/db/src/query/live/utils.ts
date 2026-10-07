@@ -50,7 +50,9 @@ export function extractCollectionFromSource(
   }
 
   throw new Error(
-    devBuild() && process.env.NODE_ENV !== `production` ? `Failed to extract collection. Invalid FROM clause: ${JSON.stringify(query)}` : codedMessage(160, { query }),
+    devBuild() && process.env.NODE_ENV !== `production`
+      ? `Failed to extract collection. Invalid FROM clause: ${JSON.stringify(query)}`
+      : codedMessage(160, { query }),
   )
 }
 

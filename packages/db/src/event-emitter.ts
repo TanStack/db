@@ -111,7 +111,13 @@ export class EventEmitter<TEvents extends Record<string, any>> {
         timeoutId = setTimeout(() => {
           timeoutId = undefined
           unsubscribe()
-          reject(new Error(devBuild() && process.env.NODE_ENV !== `production` ? `Timeout waiting for event ${String(event)}` : codedMessage(98, { event })))
+          reject(
+            new Error(
+              devBuild() && process.env.NODE_ENV !== `production`
+                ? `Timeout waiting for event ${String(event)}`
+                : codedMessage(98, { event }),
+            ),
+          )
         }, timeout)
       }
     })

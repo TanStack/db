@@ -138,9 +138,11 @@ export class Scheduler {
 
       if (!ranThisPass) {
         throw new Error(
-          devBuild() && process.env.NODE_ENV !== `production` ? `Scheduler detected unresolved dependencies for context ${String(
-            contextId,
-          )}.` : codedMessage(161, { contextId }),
+          devBuild() && process.env.NODE_ENV !== `production`
+            ? `Scheduler detected unresolved dependencies for context ${String(
+                contextId,
+              )}.`
+            : codedMessage(161, { contextId }),
         )
       }
     }

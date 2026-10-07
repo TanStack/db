@@ -42,6 +42,8 @@ export function safeRandomUUID(): string {
   }
 
   throw new Error(
-    devBuild() && process.env.NODE_ENV !== `production` ? `No secure random number generator available: neither crypto.randomUUID nor crypto.getRandomValues is defined in this environment.` : codedMessage(171),
+    devBuild() && process.env.NODE_ENV !== `production`
+      ? `No secure random number generator available: neither crypto.randomUUID nor crypto.getRandomValues is defined in this environment.`
+      : codedMessage(171),
   )
 }

@@ -302,7 +302,9 @@ export class CollectionChangesManager<
     // Compile where callback to whereExpression if provided
     if (options.where && options.whereExpression) {
       throw new Error(
-        devBuild() && process.env.NODE_ENV !== `production` ? `Cannot specify both 'where' and 'whereExpression' options. Use one or the other.` : codedMessage(95),
+        devBuild() && process.env.NODE_ENV !== `production`
+          ? `Cannot specify both 'where' and 'whereExpression' options. Use one or the other.`
+          : codedMessage(95),
       )
     }
 

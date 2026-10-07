@@ -365,7 +365,11 @@ export class BucketFacadeAdapter {
       getKey: (row) => {
         const key = keys.get(row) ?? row?.$key
         if (typeof key !== `string` && typeof key !== `number`) {
-          throw new Error(devBuild() && process.env.NODE_ENV !== `production` ? `Bucket facade row has no public key` : codedMessage(146))
+          throw new Error(
+            devBuild() && process.env.NODE_ENV !== `production`
+              ? `Bucket facade row has no public key`
+              : codedMessage(146),
+          )
         }
         return key
       },

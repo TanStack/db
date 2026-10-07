@@ -309,7 +309,9 @@ export abstract class BaseIndex<
       return this.evaluateIndexExpression(item)
     } catch (error) {
       throw new Error(
-        devBuild() && process.env.NODE_ENV !== `production` ? `Failed to evaluate index expression for key ${key}: ${error}` : codedMessage(99, { key, error }),
+        devBuild() && process.env.NODE_ENV !== `production`
+          ? `Failed to evaluate index expression for key ${key}: ${error}`
+          : codedMessage(99, { key, error }),
         { cause: error },
       )
     }
