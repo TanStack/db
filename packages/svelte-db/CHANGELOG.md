@@ -1,5 +1,14 @@
 # @tanstack/svelte-db
 
+## 0.5.6
+
+### Patch Changes
+
+- Fix `useLiveInfiniteQuery` showing an empty idle result on its first render for a synchronously loaded source. The hook now starts sync during render, as `useLiveQuery` does, so the first committed render already shows the ready first page instead of flashing empty content before data arrives. This applies to query callbacks and to supplied live query collections whose window is exactly the first page or has no limit. A supplied collection with a wider finite limit waits for the hook to narrow its window at commit, so it never requests rows the hook does not need. Renders that never commit are reclaimed by garbage collection, and a React 19 StrictMode double render reuses one collection instead of starting two. In React, a startup error from a replacement query still reaches the error boundary, and the hook rejects a source replaced by a different collection with the same ID while it is mounted, as `useLiveQuery` does. ([#2027](https://github.com/TanStack/db/pull/2027))
+
+- Updated dependencies [[`043c9b1`](https://github.com/TanStack/db/commit/043c9b141b0e834fcba4ee0a6047ad5094205482), [`25201da`](https://github.com/TanStack/db/commit/25201da6c765a31043601a4f42ed60b74efc7621), [`9e8ed99`](https://github.com/TanStack/db/commit/9e8ed997885fb46ac98ec85906f4ca4f662e7cce), [`25201da`](https://github.com/TanStack/db/commit/25201da6c765a31043601a4f42ed60b74efc7621), [`e753bc7`](https://github.com/TanStack/db/commit/e753bc7d6cf87e2f1b9627dacf66c6e0d8e56341)]:
+  - @tanstack/db@0.12.2
+
 ## 0.5.5
 
 ### Patch Changes
