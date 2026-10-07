@@ -1,0 +1,69 @@
+// Consumer-build contract for production error codes: a production build of
+// the public API carries no full error message text, and a development build
+// keeps it. Authority: packages/db/tests/production-error-messages.test.ts,
+// which owns the message format. This check owns erasure: it bundles the
+// built packages/db/dist the way a consumer's bundler would, with
+// `process.env.NODE_ENV` defined, and searches the output for one distinctive
+// literal from each coded class's frozen development message.
+import assert from 'node:assert/strict'
+import { readFile } from 'node:fs/promises'
+import path from 'node:path'
+import { fileURLToPath } from 'node:url'
+import { build } from 'esbuild'
+import { assertDbDistFresh } from '../packages/db/scripts/assert-dist-fresh.mjs'
+
+const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
+const tests = path.join(root, 'packages/db/tests')
+const builtEntry = await assertDbDistFresh(root)
+const codes = JSON.parse(
+  await readFile(path.join(tests, 'fixtures/error-codes.json'), 'utf8'),
+)
+const messages = JSON.parse(
+  await readFile(path.join(tests, 'fixtures/error-messages.json'), 'utf8'),
+)
+
+/** The longest stretch of a message that holds no sample input or quote. */
+function distinctiveLiteral(message) {
+  const pieces = message.split(/"[^"]*"|`[^`]*`|\b\d+\b|\n/)
+  const longest = pieces.reduce(
+    (a, b) => (b.trim().length > a.length ? b.trim() : a),
+    ``,
+  )
+  return longest.slice(0, 40)
+}
+
+const literals = Object.keys(codes)
+  .map((name) => [name, distinctiveLiteral(messages[name][0])])
+  .filter(([, literal]) => literal.length >= 16)
+assert.ok(
+  literals.length > 60,
+  `too few distinctive literals: ${literals.length}`,
+)
+
+async function bundle(nodeEnv) {
+  const result = await build({
+    stdin: {
+      contents: `export * from ${JSON.stringify(builtEntry)}`,
+      resolveDir: root,
+    },
+    bundle: true,
+    minify: true,
+    format: 'esm',
+    platform: 'neutral',
+    write: false,
+    logLevel: 'error',
+    define: { 'process.env.NODE_ENV': JSON.stringify(nodeEnv) },
+    nodePaths: [path.join(root, 'packages/db/node_modules')],
+  })
+  return result.outputFiles[0].text
+}
+
+const production = await bundle('production')
+const development = await bundle('development')
+const kept = literals.filter(([, literal]) => production.includes(literal))
+const missing = literals.filter(([, literal]) => !development.includes(literal))
+assert.deepEqual(kept, [], 'production build kept full error text')
+assert.deepEqual(missing, [], 'development build lost full error text')
+console.log(
+  `production error text: ${literals.length} literals erased in production and kept in development`,
+)
