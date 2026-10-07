@@ -1185,13 +1185,13 @@ SQLite adapter and local persisted wrapper. Global constructors must be
 registered; other Temporal kinds reject. Existing lifecycle, receipt and
 publication-before-durability laws remain with their current owners.
 
-- The [typed-value owner](../../packages/db-sqlite-persistence-core/tests/sqlite-temporal-value-oracle.test.ts)
+- The [typed-value owner](https://github.com/TanStack/db/blob/main/packages/db-sqlite-persistence-core/tests/sqlite-temporal-value-oracle.test.ts)
   checks real file reopen, direct/nested rows, metadata, replay, equality/range,
   Boolean/IN, large IN, field comparisons, cursor ties/continuation and ordered
   windows. Its directly named rank/text companion supplies independent native
   observations across precision, signed-year, endpoint and calendar families.
   Constructor failures, invalid brands and marker-shaped records are included.
-- The [Node expression-index owner](../../packages/node-db-sqlite-persistence/tests/expression-index-oracle.test.ts)
+- The [Node expression-index owner](https://github.com/TanStack/db/blob/main/packages/node-db-sqlite-persistence/tests/expression-index-oracle.test.ts)
   checks raw SQL before residual cleanup, final adapter keys and actual named
   index use. Wrapper-created coalesce indexes reach Collection metadata/native
   literals and distinguish adjacent-literal signatures. Small and large scalar
@@ -1202,11 +1202,11 @@ publication-before-durability laws remain with their current owners.
   Negated coalesce and scalar eq(in(...), true) keep #1997's full-read fallback.
   Exact replay excludes unrelated native cases; simultaneous semantic/cleanup
   failure retains both errors and still closes SQLite.
-- The [ordinary-work owner](../../packages/db-sqlite-persistence-core/tests/ordinary-transaction-work-oracle.ts)
+- The [ordinary-work owner](https://github.com/TanStack/db/blob/main/packages/db-sqlite-persistence-core/tests/ordinary-transaction-work-oracle.ts)
   adds twelve native repeated-action success/rollback histories and invalid
   superseded actions. Its independent Map model retains immutable native values;
   kind/text observations reject the old structuredClone false-green boundary.
-- The [persisted wrapper owner](../../packages/db-sqlite-persistence-core/tests/persisted-oracle.test.ts)
+- The [persisted wrapper owner](https://github.com/TanStack/db/blob/main/packages/db-sqlite-persistence-core/tests/persisted-oracle.test.ts)
   rejects native remote-subset literals before dispatch/retry, including an
   ownerless leader that becomes a follower while hydration waits or after local
   success followed by sequence-gap recovery. The latter uses the existing
@@ -1298,7 +1298,7 @@ to the following owners:
   indexes on same-schema reopen. A registry-cleanup mutant fails this witness.
   Automatic reclamation without reset and lossless old-byte migration remain
   outside the selected policy; this test does not claim either.
-- The [Collection index-value owner](../../packages/db/tests/collection-index-value-oracle.test.ts)
+- The [Collection index-value owner](https://github.com/TanStack/db/blob/main/packages/db/tests/collection-index-value-oracle.test.ts)
   distinguishes native literals from ordinary tagged records, nested mixtures,
   and the escape envelope while preserving equivalent key orders (BOUNDARY-005).
   Plain and null-prototype own-tag records have isolated metadata snapshots
