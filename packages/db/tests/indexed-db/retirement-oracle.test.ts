@@ -18,7 +18,7 @@
  */
 import { forceCloseDatabase } from 'fake-indexeddb'
 import { describe, expect, it, vi } from 'vitest'
-import { createTransaction, deleteDatabase  } from '../../src'
+import { createTransaction, deleteDatabase } from '../../src'
 import {
   Channel,
   assertRows,

@@ -25,7 +25,9 @@ import {
   DbClient,
   collectionOptions,
   createCollection,
-  createIndexedDB, createTransaction, indexedDBCollectionOptions
+  createIndexedDB,
+  createTransaction,
+  indexedDBCollectionOptions,
 } from '../../src'
 import { Channel, assertRows, readStore, seed, withHarness } from './harness'
 import { holdStore, observeTransactions } from './idb-driver'

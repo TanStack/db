@@ -1,6 +1,10 @@
 import { describe, expectTypeOf, it } from 'vitest'
 import { z } from 'zod'
-import { createCollection, deleteDatabase, indexedDBCollectionOptions  } from '../../src'
+import {
+  createCollection,
+  deleteDatabase,
+  indexedDBCollectionOptions,
+} from '../../src'
 import type {
   DatabaseInfo,
   DeleteMutationFnParams,
@@ -9,7 +13,7 @@ import type {
   IndexedDBInstance,
   InsertMutationFnParams,
   UpdateMutationFnParams,
-  WithVirtualProps
+  WithVirtualProps,
 } from '../../src'
 
 // Mock IndexedDBInstance for type testing

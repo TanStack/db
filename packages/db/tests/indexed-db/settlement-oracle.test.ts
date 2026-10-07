@@ -28,7 +28,11 @@
  */
 import { z } from 'zod'
 import { describe, expect, it, vi } from 'vitest'
-import { createCollection, createTransaction, indexedDBCollectionOptions  } from '../../src'
+import {
+  createCollection,
+  createTransaction,
+  indexedDBCollectionOptions,
+} from '../../src'
 import {
   Channel,
   assertRows,
