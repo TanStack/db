@@ -997,6 +997,50 @@ describe(`synchronous initial settlement refinement`, () => {
     },
   )
 
+  // The synchronous cut covers ordinary ordered requests only. A query that
+  // must read its whole source first (here a function filter) keeps its
+  // asynchronous initial settlement, even over an eager source whose rows
+  // are already installed. The eager prefix-repair cut must not widen it.
+  it(`keeps an eager full-source ordered window loading until its load settles`, async () => {
+    const source = createCollection<{ id: number; rank: number }, number>({
+      id: `full-source-initial-${Math.random()}`,
+      getKey: (row) => row.id,
+      syncMode: `eager`,
+      startSync: true,
+      sync: {
+        sync: ({ begin, write, commit, markReady }) => {
+          begin()
+          for (let id = 0; id < 5; id++) {
+            write({ type: `insert`, value: { id, rank: id } })
+          }
+          commit()
+          markReady()
+        },
+      },
+    })
+    source.createIndex((row) => row.rank, { indexType: BTreeIndex })
+    const query = createLiveQueryCollection({
+      startSync: true,
+      query: (q) =>
+        q
+          .from({ row: source })
+          .fn.where(({ row }) => row.rank >= 0)
+          .orderBy(({ row }) => row.rank, `desc`)
+          .limit(2),
+    })
+    try {
+      expect({ status: query.status, rows: query.toArray.length }).toEqual({
+        status: `loading`,
+        rows: 0,
+      })
+      await query.preload()
+      expect(query.toArray.map((row) => row.id)).toEqual([4, 3])
+    } finally {
+      await query.cleanup()
+      await source.cleanup()
+    }
+  })
+
   it(`rejects the old Promise-wrapped observation at the synchronous checkpoint`, () => {
     expect(() =>
       assertInitialSettlementObservation(

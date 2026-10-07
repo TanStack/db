@@ -61,7 +61,9 @@ export function findIndexForField<TKey extends string | number>(
       index.matchesCompareOptions(compareOpts)
     ) {
       if (!index.matchesDirection(compareOpts.direction)) {
-        return new ReverseIndex(index)
+        // Reversing the index also reverses where it keeps nulls, so the
+        // reader moves them back to the requested end.
+        return new ReverseIndex(index, compareOpts.nulls === `first`)
       }
       return index
     }
