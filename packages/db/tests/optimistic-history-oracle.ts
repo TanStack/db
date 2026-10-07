@@ -73,6 +73,11 @@ import type { CollectionConfig, SyncConfig } from '../src/types.js'
  * source row, so the held `c` remains. The model applies the same merge to its
  * base. Other histories use `full` mode and always write whole rows.
  *
+ * A settled transaction leaves the Collection's tracked transactions, whether
+ * it succeeded or failed. Every per-mutation pass walks them, so their number
+ * is bounded by live work: a persisting transaction, or a completed one whose
+ * row a queued sync transaction still holds.
+ *
  * `runOptimisticHistory` gives the same edit, delete, settle, and sync history
  * to this model and a real Collection. After every step it compares rows,
  * metadata, immutable handler payloads, promise outcomes, the rows visible
@@ -860,6 +865,17 @@ export async function runOptimisticHistory(
           sorted([...downstream.values()].map(plain)),
           `${label}: downstream`,
         ).toEqual(expected.map(plain))
+        // Every per-mutation pass walks the tracked transactions, so their
+        // number is bounded by live work, not by history: a persisting
+        // transaction, or a completed one whose row a queued sync
+        // transaction still holds. A settled or failed one is gone.
+        const live = model.transactions.filter(
+          (entry) => entry.state === `persisting` || entry.held,
+        ).length
+        expect(
+          collection._state.transactions.size,
+          `${label}: tracked transactions are live`,
+        ).toBeLessThanOrEqual(live)
       }
       const initialFrame = publications.at(-1)
       check(`initial`)

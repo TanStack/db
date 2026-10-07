@@ -168,6 +168,50 @@ describe(`Collection`, () => {
     ).toThrow(DuplicateKeySyncError)
   })
 
+  it(`does not track failed or rolled-back transactions after they settle`, async () => {
+    // Every mutation walks the tracked transactions, so a retained failed one
+    // makes each later mutation slower and keeps its rows alive.
+    const options = mockSyncCollectionOptionsNoInitialState<{
+      id: number
+      value: number
+    }>({
+      id: `failed-transaction-retention`,
+      getKey: (item) => item.id,
+      startSync: true,
+    })
+    const collection = createCollection({
+      ...options,
+      onUpdate: () => Promise.reject(new Error(`rejected`)),
+    })
+    options.utils.begin()
+    options.utils.write({ type: `insert`, value: { id: 1, value: 0 } })
+    options.utils.commit()
+    options.utils.markReady()
+    await collection.stateWhenReady()
+
+    for (let cycle = 0; cycle < 200; cycle++) {
+      const failed = collection.update(1, (draft) => {
+        draft.value = cycle + 1
+      })
+      await expect(failed.isPersisted.promise).rejects.toThrow(`rejected`)
+
+      const rolledBack = createTransaction({
+        autoCommit: false,
+        mutationFn: () => Promise.resolve(),
+      })
+      rolledBack.mutate(() =>
+        collection.update(1, (draft) => {
+          draft.value = -cycle
+        }),
+      )
+      rolledBack.rollback()
+      await rolledBack.isPersisted.promise.catch(() => undefined)
+
+      expect(collection._state.transactions.size).toBe(0)
+      expect(collection.get(1)).toMatchObject({ id: 1, value: 0 })
+    }
+  })
+
   it(`keeps ambiguous server-key sync queued while a temp-key optimistic insert is pending`, async () => {
     const options = mockSyncCollectionOptionsNoInitialState<{
       id: number
