@@ -110,6 +110,15 @@ export interface LiveQueryCollectionConfig<
   gcTime?: number
 
   /**
+   * Publish an initial ordered window from available local rows before its
+   * provider requests settle. Defaults to false. Cached order is not
+   * authoritative: missing rows may change the window as loading continues.
+   * Initial-query readiness and preload still wait for provider coverage;
+   * explicit window moves, source replay, and repair remain atomic.
+   */
+  publishUnconfirmedOrderedResults?: boolean
+
+  /**
    * If enabled the collection will return a single object instead of an array
    */
   singleResult?: true

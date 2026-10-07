@@ -92,6 +92,67 @@ const initialIssues: Array<Issue> = [
 ]
 
 describe(`Query Collections`, () => {
+  it.each([false, true])(
+    `forwards provisional ordered publication without reporting readiness (%s)`,
+    async (publishUnconfirmedOrderedResults) => {
+      let resolveLoad!: () => void
+      const pending = new Promise<void>((resolve) => {
+        resolveLoad = resolve
+      })
+      const source = createCollection<{ id: number; rank: number }>({
+        getKey: (row) => row.id,
+        syncMode: `on-demand`,
+        startSync: true,
+        sync: {
+          sync: ({ begin, write, commit, markReady }) => {
+            begin()
+            write({ type: `insert`, value: { id: 2, rank: 2 } })
+            write({ type: `insert`, value: { id: 1, rank: 1 } })
+            commit()
+            markReady()
+            return { loadSubset: () => pending }
+          },
+        },
+      })
+      const hook = renderHook(
+        ({ provisional }) =>
+          useLiveQuery({
+            query: (q) =>
+              q
+                .from({ row: source })
+                .orderBy(({ row }) => row.rank)
+                .limit(1),
+            ...(provisional ? { publishUnconfirmedOrderedResults: true } : {}),
+          }),
+        { initialProps: { provisional: publishUnconfirmedOrderedResults } },
+      )
+      try {
+        await waitFor(() => expect(hook.result.current.status).toBe(`loading`))
+        expect(hook.result.current.data.map(({ id }) => id)).toEqual(
+          publishUnconfirmedOrderedResults ? [1] : [],
+        )
+        expect(hook.result.current.isReady).toBe(false)
+        expect(hook.result.current.isLoading).toBe(true)
+        const original = hook.result.current.collection
+        hook.rerender({ provisional: !publishUnconfirmedOrderedResults })
+        await waitFor(() =>
+          expect(hook.result.current.collection).not.toBe(original),
+        )
+        expect(hook.result.current.data.map(({ id }) => id)).toEqual(
+          publishUnconfirmedOrderedResults ? [] : [1],
+        )
+        expect(hook.result.current.isReady).toBe(false)
+        await act(async () => {
+          resolveLoad()
+        })
+        await waitFor(() => expect(hook.result.current.isReady).toBe(true))
+        expect(hook.result.current.data.map(({ id }) => id)).toEqual([1])
+      } finally {
+        hook.unmount()
+        await source.cleanup()
+      }
+    },
+  )
   it(`should work with basic collection and select`, async () => {
     const collection = createCollection(
       mockSyncCollectionOptions<Person>({

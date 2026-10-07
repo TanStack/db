@@ -110,6 +110,34 @@ const activeUsers = createCollection(liveQueryCollectionOptions({
 | `startSync` | `boolean` (optional) | Whether to start syncing immediately. Defaults to `true`. |
 | `gcTime` | `number` (optional) | Garbage collection time in milliseconds. Defaults to `5000` (5 seconds). |
 
+### Provisional initial ordered results
+
+An ordered on-demand query normally withholds its initial window until the
+required provider requests settle, even when local rows are already available.
+Set `publishUnconfirmedOrderedResults: true` to render those rows while loading:
+
+```tsx
+const { data, isReady } = useLiveQuery({
+  query: (q) => q.from({ todo: todosCollection })
+    .orderBy(({ todo }) => todo.createdAt, 'desc')
+    .limit(20),
+  publishUnconfirmedOrderedResults: true,
+})
+```
+
+The option defaults to `false` and is also accepted by
+`createLiveQueryCollection` and `liveQueryCollectionOptions`. The initial local
+window is provisional: cached order is not authoritative, and missing provider
+rows may change its membership or order. `isReady` stays false and `preload()`
+still waits for all required provider coverage. Render `data` while loading if
+that tradeoff is appropriate; an `isLoading` gate or ordinary Suspense still
+waits for readiness.
+
+This does not bypass source replay, repair, or joined-demand publication holds.
+Explicit window moves retain atomic publication and failure behavior. Persisted
+storage must remain isolated by identity; provisional rows do not establish
+current authorization.
+
 ### Convenience Function
 
 For simpler cases, you can use `createLiveQueryCollection` as a shortcut:

@@ -915,7 +915,11 @@ export class CollectionConfigBuilder<
         this.windowFailed ||
         this.orderedLoadFailed ||
         this.hasPendingSourceRecovery() ||
-        this.pendingOrderedLoads.size > 0 ||
+        // Explicit window moves keep their atomic publication boundary.
+        (this.pendingOrderedLoads.size > 0 &&
+          (!this.config.publishUnconfirmedOrderedResults ||
+            this.liveQueryCollection?.status !== `loading` ||
+            this.activeWindowOperation !== undefined)) ||
         Object.values(this.optimizableOrderByCollections).some(
           (info) =>
             info.joinedFilterSourceId !== undefined &&

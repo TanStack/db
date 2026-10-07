@@ -1712,6 +1712,137 @@ describe(`createLiveQueryCollection`, () => {
       expect(liveQuery.size).toBeGreaterThan(0)
     })
 
+    it.each([
+      { publishUnconfirmedOrderedResults: false, indexed: false },
+      { publishUnconfirmedOrderedResults: true, indexed: false },
+      { publishUnconfirmedOrderedResults: false, indexed: true },
+      { publishUnconfirmedOrderedResults: true, indexed: true },
+    ])(
+      `publishes initial ordered rows according to opt-in $publishUnconfirmedOrderedResults with indexed=$indexed`,
+      async ({ publishUnconfirmedOrderedResults, indexed }) => {
+        let resolveLoad!: () => void
+        let publishProviderRow!: () => void
+        let pending = new Promise<void>((resolve) => {
+          resolveLoad = resolve
+        })
+        const source = createCollection<{ id: number; value: number }>({
+          getKey: (row) => row.id,
+          syncMode: `on-demand`,
+          startSync: true,
+          sync: {
+            sync: ({ begin, write, commit, markReady }) => {
+              begin()
+              for (let id = 1; id <= 3; id++)
+                write({ type: `insert`, value: { id, value: id } })
+              commit()
+              markReady()
+              publishProviderRow = () => {
+                begin()
+                write({ type: `insert`, value: { id: 0, value: 0 } })
+                commit()
+              }
+              return { loadSubset: () => pending }
+            },
+          },
+        })
+        if (indexed)
+          source.createIndex((row) => row.value, { indexType: BTreeIndex })
+        const query = createLiveQueryCollection({
+          query: (q) =>
+            q
+              .from({ row: source })
+              .orderBy(({ row }) => row.value)
+              .limit(1),
+          publishUnconfirmedOrderedResults,
+          startSync: true,
+        })
+        try {
+          await flushPromises()
+          expect(query.toArray.map(({ id }) => id)).toEqual(
+            publishUnconfirmedOrderedResults ? [1] : [],
+          )
+          expect(query.status).toBe(`loading`)
+          expect(query.isReady()).toBe(false)
+          let preloaded = false
+          const preload = query.preload().then(() => {
+            preloaded = true
+          })
+          await flushPromises()
+          expect(preloaded).toBe(false)
+          publishProviderRow()
+          await flushPromises()
+          expect(query.toArray.map(({ id }) => id)).toEqual(
+            publishUnconfirmedOrderedResults ? [0] : [],
+          )
+          expect(query.isReady()).toBe(false)
+          resolveLoad()
+          await preload
+          expect(query.toArray.map(({ id }) => id)).toEqual([0])
+          expect(query.isReady()).toBe(true)
+          pending = new Promise<void>((resolve) => {
+            resolveLoad = resolve
+          })
+          const move = query.utils.setWindow({ offset: 1, limit: 1 })
+          await flushPromises()
+          expect(query.toArray.map(({ id }) => id)).toEqual([0])
+          resolveLoad()
+          await move
+          expect(query.toArray.map(({ id }) => id)).toEqual([1])
+        } finally {
+          await query.cleanup()
+          await source.cleanup()
+        }
+      },
+    )
+
+    it(`keeps an explicit initial window move private with provisional publication enabled`, async () => {
+      let resolveLoad!: () => void
+      const pending = new Promise<void>((resolve) => {
+        resolveLoad = resolve
+      })
+      const source = createCollection<{ id: number; value: number }>({
+        getKey: (row) => row.id,
+        syncMode: `on-demand`,
+        startSync: true,
+        sync: {
+          sync: ({ begin, write, commit, markReady }) => {
+            begin()
+            write({ type: `insert`, value: { id: 1, value: 1 } })
+            write({ type: `insert`, value: { id: 2, value: 2 } })
+            commit()
+            markReady()
+            return { loadSubset: () => pending }
+          },
+        },
+      })
+      const query = createLiveQueryCollection({
+        query: (q) =>
+          q
+            .from({ row: source })
+            .orderBy(({ row }) => row.value)
+            .limit(1),
+        publishUnconfirmedOrderedResults: true,
+        startSync: true,
+      })
+      try {
+        await flushPromises()
+        expect(query.toArray.map(({ id }) => id)).toEqual([1])
+        expect(query.isReady()).toBe(false)
+        const move = query.utils.setWindow({ offset: 1, limit: 1 })
+        await flushPromises()
+        expect(query.toArray.map(({ id }) => id)).toEqual([1])
+        expect(query.isReady()).toBe(false)
+        resolveLoad()
+        await move
+        await query.preload()
+        expect(query.toArray.map(({ id }) => id)).toEqual([2])
+        expect(query.isReady()).toBe(true)
+      } finally {
+        await query.cleanup()
+        await source.cleanup()
+      }
+    })
+
     it(`makes a warm ordered window ready before construction returns when every acquisition is synchronous`, () => {
       const sourceCollection = createCollection<{ id: number; value: number }>({
         id: `source-fully-sync-subset`,
