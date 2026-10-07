@@ -9,6 +9,7 @@ import { normalizeError } from '../utils/error.js'
 import { runAllCallbacks } from '../utils/callbacks.js'
 import { createDeferred } from '../deferred.js'
 import { LoadSubsetOperationAbortedError } from '../errors.js'
+import { codedMessage, devBuild } from '../error-message.js'
 import {
   createFilterFunctionFromExpression,
   createFilteredCallback,
@@ -1386,11 +1387,11 @@ export class CollectionSubscription
     onLoadSubsetResult,
   }: RequestLimitedSnapshotOptions) {
     if (this.unsubscribed) return
-    if (!limit) throw new Error(`limit is required`)
+    if (!limit) throw new Error(devBuild() && process.env.NODE_ENV !== `production` ? `limit is required` : codedMessage(96))
 
     if (!this.orderByIndex) {
       throw new Error(
-        `Ordered snapshot was requested but no index was found. You have to call setOrderByIndex before requesting an ordered snapshot.`,
+        devBuild() && process.env.NODE_ENV !== `production` ? `Ordered snapshot was requested but no index was found. You have to call setOrderByIndex before requesting an ordered snapshot.` : codedMessage(97),
       )
     }
 

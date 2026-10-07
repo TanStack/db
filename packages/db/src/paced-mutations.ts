@@ -7,6 +7,7 @@ import {
   QueueDisposedError,
   ThrottleCallDroppedError,
 } from './errors'
+import { codedMessage, devBuild } from './error-message'
 import type { MutationFn, Transaction } from './types'
 import type { Strategy } from './strategies/types'
 
@@ -137,12 +138,12 @@ export function createPacedMutations<
     if (transaction.state === `failed`) return transaction
     if (transaction.state !== `pending`) {
       throw new Error(
-        `Strategy callback called but transaction is in state "${transaction.state}". Expected "pending".`,
+        devBuild() && process.env.NODE_ENV !== `production` ? `Strategy callback called but transaction is in state "${transaction.state}". Expected "pending".` : codedMessage(107, { state: transaction.state }),
       )
     }
     const strategyCommit = strategyCommits.get(transaction)
     if (!strategyCommit)
-      throw new Error(`Paced transaction has no strategy-owned commit`)
+      throw new Error(devBuild() && process.env.NODE_ENV !== `production` ? `Paced transaction has no strategy-owned commit` : codedMessage(108))
     const completion = strategyCommit()
     onStarted?.(completion)
     completion.catch(() => {

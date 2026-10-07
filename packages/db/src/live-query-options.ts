@@ -10,6 +10,7 @@ import {
   getStableValueHash,
 } from './query/ir-stable-identity.js'
 import { getStringCollationIdentity } from './query/runtime-reference-identity.js'
+import { codedMessage, devBuild } from './error-message.js'
 import type { Collection, CollectionImpl } from './collection/index.js'
 import type { CollectionOptionsIdentity } from './collection-options.js'
 import type { CollectionOptions, DbClient } from './client.js'
@@ -199,6 +200,6 @@ export function resolveLiveQueryValue(
     )
   }
   throw new Error(
-    `A live query must be a QueryBuilder, LiveQueryCollectionConfig, Collection, undefined, or null. Got: ${typeof value}`,
+    devBuild() && process.env.NODE_ENV !== `production` ? `A live query must be a QueryBuilder, LiveQueryCollectionConfig, Collection, undefined, or null. Got: ${typeof value}` : codedMessage(102, { type: typeof value }),
   )
 }

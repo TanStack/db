@@ -1,6 +1,8 @@
 // Writes docs/errors.md, the page production error messages link to. Each
 // coded error class gets an `error-<code>` anchor and its development messages
-// for the sample inputs in packages/db/tests/error-sample-arguments.ts.
+// for the sample inputs in packages/db/tests/error-sample-arguments.ts. Each
+// coded error site, a plain Error thrown elsewhere, gets an anchor, its source
+// file, and its message template.
 // With `--check`, it fails instead of writing when the page is out of date.
 // packages/db/tests/production-error-messages.test.ts checks the headings.
 import { readFile, writeFile } from 'node:fs/promises'
@@ -13,6 +15,7 @@ const read = async (name) =>
   JSON.parse(await readFile(path.join(fixtures, name), 'utf8'))
 const codes = await read('error-codes.json')
 const messages = await read('error-messages.json')
+const sites = await read('error-site-messages.json')
 
 const sections = Object.entries(codes).map(
   ([name, code]) => `<a id="error-${code}"></a>
@@ -22,6 +25,19 @@ const sections = Object.entries(codes).map(
 Development builds show the full message. For example:
 
 ${messages[name].map((message) => `\`\`\`text\n${message}\n\`\`\`\n`).join('\n')}`,
+)
+
+const siteSections = Object.entries(sites).map(
+  ([code, { file, template }]) => `<a id="error-${code}"></a>
+
+## Error ${code}: \`${file}\`
+
+Development builds show this message, with \`\${...}\` replaced by values:
+
+\`\`\`text
+${template}
+\`\`\`
+`,
 )
 
 const pagePath = path.join(root, 'docs/errors.md')
@@ -43,7 +59,13 @@ Development builds keep the full messages below. The error classes, their
 \`name\` values, and their fields are the same in both builds. See
 [Error Handling](./guides/error-handling.md) for how to catch them.
 
-${sections.join('\n')}`
+${sections.join('\n')}
+## Other errors
+
+These errors are plain \`Error\`, \`TypeError\`, or \`RangeError\` values. Each
+heading names the source file under \`packages/db/src\` that throws it.
+
+${siteSections.join('\n')}`
 
 if (process.argv.includes('--check')) {
   const current = await readFile(pagePath, 'utf8').catch(() => '')

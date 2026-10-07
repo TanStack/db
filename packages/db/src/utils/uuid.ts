@@ -1,3 +1,5 @@
+import { codedMessage, devBuild } from '../error-message'
+
 /**
  * Returns a RFC 4122 version 4 UUID.
  *
@@ -40,6 +42,6 @@ export function safeRandomUUID(): string {
   }
 
   throw new Error(
-    `No secure random number generator available: neither crypto.randomUUID nor crypto.getRandomValues is defined in this environment.`,
+    devBuild() && process.env.NODE_ENV !== `production` ? `No secure random number generator available: neither crypto.randomUUID nor crypto.getRandomValues is defined in this environment.` : codedMessage(171),
   )
 }

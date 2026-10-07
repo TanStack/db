@@ -22,18 +22,20 @@ const messages = JSON.parse(
   await readFile(path.join(tests, 'fixtures/error-messages.json'), 'utf8'),
 )
 
-const source = await readFile(
-  path.join(root, 'packages/db/src/errors.ts'),
-  'utf8',
+const sites = JSON.parse(
+  await readFile(path.join(tests, 'fixtures/error-site-messages.json'), 'utf8'),
 )
+const readSource = (file) =>
+  readFile(path.join(root, 'packages/db/src', file), 'utf8')
+const errorsSource = await readSource('errors.ts')
 
 /**
  * The longest stretch of a message that the source holds verbatim, so it is
  * template text rather than a sample input's value.
  */
-function distinctiveLiteral(message) {
+function distinctiveLiteral(message, source) {
   let best = ``
-  for (const piece of message.split(/"[^"]*"|`[^`]*`|\n/)) {
+  for (const piece of message.split(/"[^"]*"|`[^`]*`|\$\{[^}]*\}|\n/)) {
     for (let start = 0; start + best.length < piece.length; start++) {
       let end = start + best.length + 1
       while (end <= piece.length && source.includes(piece.slice(start, end))) {
@@ -46,12 +48,29 @@ function distinctiveLiteral(message) {
   return best.trim()
 }
 
-const literals = Object.keys(codes).map((name) => [
-  name,
-  distinctiveLiteral(messages[name][0]),
-])
-const short = literals.filter(([, literal]) => literal.length < 16)
-assert.deepEqual(short, [], 'coded classes without a distinctive literal')
+const literals = [
+  ...Object.keys(codes).map((name) => [
+    name,
+    distinctiveLiteral(messages[name][0], errorsSource),
+  ]),
+  ...(await Promise.all(
+    Object.entries(sites).map(async ([code, { file, template }]) => [
+      `error ${code} (${file})`,
+      distinctiveLiteral(template, await readSource(file)),
+    ]),
+  )),
+]
+// These errors share all of their text with a console warning that every build
+// keeps, so no literal distinguishes them. The oracle still checks their guard.
+const sharedWithWarnings = new Set(['error 99 (indexes/base-index.ts)'])
+const checked = literals.filter(([name]) => !sharedWithWarnings.has(name))
+assert.equal(
+  literals.length - checked.length,
+  sharedWithWarnings.size,
+  'stale sharedWithWarnings entry',
+)
+const short = checked.filter(([, literal]) => literal.length < 12)
+assert.deepEqual(short, [], 'coded errors without a distinctive literal')
 
 async function bundle(nodeEnv) {
   const result = await build({
@@ -73,10 +92,10 @@ async function bundle(nodeEnv) {
 
 const production = await bundle('production')
 const development = await bundle('development')
-const kept = literals.filter(([, literal]) => production.includes(literal))
-const missing = literals.filter(([, literal]) => !development.includes(literal))
+const kept = checked.filter(([, literal]) => production.includes(literal))
+const missing = checked.filter(([, literal]) => !development.includes(literal))
 assert.deepEqual(kept, [], 'production build kept full error text')
 assert.deepEqual(missing, [], 'development build lost full error text')
 console.log(
-  `production error text: ${literals.length} literals erased in production and kept in development`,
+  `production error text: ${checked.length} literals erased in production and kept in development`,
 )

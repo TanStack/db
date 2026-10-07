@@ -1,3 +1,5 @@
+import { codedMessage, devBuild } from './error-message'
+
 /**
  * Generic type-safe event emitter
  * @template TEvents - Record of event names to event payload types
@@ -109,7 +111,7 @@ export class EventEmitter<TEvents extends Record<string, any>> {
         timeoutId = setTimeout(() => {
           timeoutId = undefined
           unsubscribe()
-          reject(new Error(`Timeout waiting for event ${String(event)}`))
+          reject(new Error(devBuild() && process.env.NODE_ENV !== `production` ? `Timeout waiting for event ${String(event)}` : codedMessage(98, { event })))
         }, timeout)
       }
     })

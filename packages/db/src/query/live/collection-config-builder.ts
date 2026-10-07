@@ -12,6 +12,7 @@ import { deepEquals } from '../../utils.js'
 import { runAllCallbacks } from '../../utils/callbacks.js'
 import { normalizeError } from '../../utils/error.js'
 import { createSourceRecord } from '../../utils/source-record.js'
+import { codedMessage, devBuild } from '../../error-message.js'
 import { CollectionSubscriber } from './collection-subscriber.js'
 import { getCollectionBuilder } from './collection-registry.js'
 import { LIVE_QUERY_INTERNAL } from './internal.js'
@@ -305,7 +306,7 @@ export class CollectionConfigBuilder<
     }
     if (this.hasFailedSourceRecovery()) {
       return Promise.reject(
-        this.lastSubsetError ?? new Error(`Source recovery failed`),
+        this.lastSubsetError ?? new Error(devBuild() && process.env.NODE_ENV !== `production` ? `Source recovery failed` : codedMessage(147)),
       )
     }
     const windowOperationGeneration = ++this.windowOperationGeneration
@@ -576,7 +577,7 @@ export class CollectionConfigBuilder<
     // Should only be called when sync is active
     if (!this.currentSyncConfig || !this.currentSyncState) {
       throw new Error(
-        `maybeRunGraph called without active sync run. This should not happen.`,
+        devBuild() && process.env.NODE_ENV !== `production` ? `maybeRunGraph called without active sync run. This should not happen.` : codedMessage(148),
       )
     }
 
@@ -660,7 +661,7 @@ export class CollectionConfigBuilder<
   scheduleGraphRun(options?: { contextId?: SchedulerContextId }) {
     if (!this.currentSyncConfig || !this.currentSyncState) {
       throw new Error(
-        `scheduleGraphRun called without active sync run. This should not happen.`,
+        devBuild() && process.env.NODE_ENV !== `production` ? `scheduleGraphRun called without active sync run. This should not happen.` : codedMessage(149),
       )
     }
 
@@ -931,7 +932,7 @@ export class CollectionConfigBuilder<
       for (const [key, { inserts, deletes }] of pendingChanges) {
         if (Math.abs(inserts - deletes) > 1) {
           throw new Error(
-            `Live query result key ${String(key)} changed by ${inserts - deletes} rows in one flush; a key has at most one result row.`,
+            devBuild() && process.env.NODE_ENV !== `production` ? `Live query result key ${String(key)} changed by ${inserts - deletes} rows in one flush; a key has at most one result row.` : codedMessage(150, { key, value: inserts - deletes }),
           )
         }
       }
@@ -1058,7 +1059,7 @@ export class CollectionConfigBuilder<
       })
     } else {
       throw new Error(
-        `Could not apply changes: ${JSON.stringify(changes)}. This should never happen.`,
+        devBuild() && process.env.NODE_ENV !== `production` ? `Could not apply changes: ${JSON.stringify(changes)}. This should never happen.` : codedMessage(151, { changes }),
       )
     }
   }
@@ -1077,9 +1078,12 @@ export class CollectionConfigBuilder<
     // Handle error state - any source collection in error puts live query in error
     if (status === `error`) {
       this.erroredSourceIds.add(sourceId)
-      this.setErrorState(
-        `Source collection '${collectionId}' entered error state`,
+      const error = new Error(
+        devBuild() && process.env.NODE_ENV !== `production`
+          ? `Source collection '${collectionId}' entered error state`
+          : codedMessage(172, { collectionId }),
       )
+      this.setErrorState(error.message, error)
       return
     }
 
@@ -1116,8 +1120,8 @@ export class CollectionConfigBuilder<
   private handleSourceCleanupStart(collectionId: string): Error | undefined {
     if (this.fatalQueryError) return
     const error = new Error(
-      `Source collection '${collectionId}' was manually cleaned up while live query '${this.id}' depends on it. ` +
-        `Live queries prevent automatic GC, so this was likely a manual cleanup() call.`,
+      devBuild() && process.env.NODE_ENV !== `production` ? `Source collection '${collectionId}' was manually cleaned up while live query '${this.id}' depends on it. ` +
+        `Live queries prevent automatic GC, so this was likely a manual cleanup() call.` : codedMessage(152, { collectionId, id: this.id }),
     )
     this.transitionToError(error.message, error)
     return error
@@ -1192,7 +1196,7 @@ export class CollectionConfigBuilder<
   ) {
     if (this.collectionSources.length === 0) {
       throw new Error(
-        `Query '${this.id}' has no collection sources. This should not happen; please report.`,
+        devBuild() && process.env.NODE_ENV !== `production` ? `Query '${this.id}' has no collection sources. This should not happen; please report.` : codedMessage(153, { id: this.id }),
       )
     }
 

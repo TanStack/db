@@ -10,6 +10,7 @@ import {
 import { deepEquals } from '../../utils.js'
 import { getParentContextIdentity } from '../equality-value-identity.js'
 import { INCLUDES_ROUTING } from '../compiler/route-metadata.js'
+import { codedMessage, devBuild } from '../../error-message.js'
 import type { ValueIdentity } from '../equality-value-identity.js'
 import type {
   CompilationResult,
@@ -237,12 +238,12 @@ function canonicalizeByPublicKey(
       )
       if (totalMultiplicity === 0) return []
       if (totalMultiplicity < 0) {
-        throw new Error(`Canonical query row has negative multiplicity`)
+        throw new Error(devBuild() && process.env.NODE_ENV !== `production` ? `Canonical query row has negative multiplicity` : codedMessage(154))
       }
 
       const visible = values.find(([, multiplicity]) => multiplicity > 0)?.[0]
       if (!visible) {
-        throw new Error(`Canonical query row has no positive contributor`)
+        throw new Error(devBuild() && process.env.NODE_ENV !== `production` ? `Canonical query row has no positive contributor` : codedMessage(155))
       }
 
       for (const [candidate, multiplicity] of values) {
@@ -276,7 +277,7 @@ function assertCongruentContributors(
     !deepEquals(leftRouting, rightRouting)
   ) {
     throw new Error(
-      `Query contributors for public key ${serializeValue(left.publicKey)} are not congruent`,
+      devBuild() && process.env.NODE_ENV !== `production` ? `Query contributors for public key ${serializeValue(left.publicKey)} are not congruent` : codedMessage(156, { publicKey: left.publicKey }),
     )
   }
 }
@@ -294,7 +295,7 @@ function attachInlineInclude(
       for (const [row, multiplicity] of values) {
         if (multiplicity < 0) {
           throw new Error(
-            `Materialization bucket row has negative multiplicity`,
+            devBuild() && process.env.NODE_ENV !== `production` ? `Materialization bucket row has negative multiplicity` : codedMessage(157),
           )
         }
         for (let index = 0; index < multiplicity; index++) rows.push(row)
@@ -502,7 +503,7 @@ function emptyMaterializedValue(
   if (materialization === `array`) return []
   if (materialization === `concat`) return ``
   if (materialization === `singleton`) return undefined
-  throw new Error(`Collection includes require a bucket facade`)
+  throw new Error(devBuild() && process.env.NODE_ENV !== `production` ? `Collection includes require a bucket facade` : codedMessage(158))
 }
 
 function setNestedValue(

@@ -5,6 +5,7 @@ import {
   createSingleRowRefProxy,
   toExpression,
 } from '../query/builder/ref-proxy.js'
+import { codedMessage, devBuild } from '../error-message.js'
 import { CollectionSubscription } from './subscription.js'
 import type { StandardSchemaV1 } from '@standard-schema/spec'
 import type { ChangeMessage, SubscribeChangesOptions } from '../types'
@@ -291,7 +292,7 @@ export class CollectionChangesManager<
     // Compile where callback to whereExpression if provided
     if (options.where && options.whereExpression) {
       throw new Error(
-        `Cannot specify both 'where' and 'whereExpression' options. Use one or the other.`,
+        devBuild() && process.env.NODE_ENV !== `production` ? `Cannot specify both 'where' and 'whereExpression' options. Use one or the other.` : codedMessage(95),
       )
     }
 

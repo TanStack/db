@@ -1,5 +1,6 @@
 import { isTemporal } from '../utils'
 import { getRuntimeReferenceIdentity } from '../query/runtime-reference-identity'
+import { codedMessage, devBuild } from '../error-message'
 import type { CompareOptions } from '../query/builder/types'
 
 // WeakMap to store stable IDs for objects
@@ -162,7 +163,7 @@ export function makeCheckedComparator(
     const result: unknown = compareFn(a, b)
     if (typeof result !== `number` || Number.isNaN(result))
       throw new TypeError(
-        `Index comparator must return a number, but returned ${String(result)}`,
+        devBuild() && process.env.NODE_ENV !== `production` ? `Index comparator must return a number, but returned ${String(result)}` : codedMessage(166, { result }),
       )
     return result
   }
@@ -312,7 +313,7 @@ export function compareTemporalValues(a: unknown, b: unknown): number {
   const bTag = (b as Record<symbol, unknown>)[Symbol.toStringTag] as string
   if (aTag !== bTag) {
     throw new TypeError(
-      `Cannot order Temporal values of different types: ${aTag} vs ${bTag}`,
+      devBuild() && process.env.NODE_ENV !== `production` ? `Cannot order Temporal values of different types: ${aTag} vs ${bTag}` : codedMessage(167, { aTag, bTag }),
     )
   }
   let compare = temporalCompareByTag.get(aTag)
@@ -326,7 +327,7 @@ export function compareTemporalValues(a: unknown, b: unknown): number {
     temporalCompareByTag.set(aTag, compare)
   }
   if (compare === null) {
-    throw new TypeError(`${aTag} has no defined ordering`)
+    throw new TypeError(devBuild() && process.env.NODE_ENV !== `production` ? `${aTag} has no defined ordering` : codedMessage(168, { aTag }))
   }
   return compare(a, b)
 }

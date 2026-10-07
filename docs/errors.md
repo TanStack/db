@@ -928,3 +928,860 @@ Development builds show the full message. For example:
 ```text
 Query IR is not stably hashable at query.fnSelect: function select
 ```
+
+## Other errors
+
+These errors are plain `Error`, `TypeError`, or `RangeError` values. Each
+heading names the source file under `packages/db/src` that throws it.
+
+<a id="error-88"></a>
+
+## Error 88: `client.ts`
+
+Development builds show this message, with `${...}` replaced by values:
+
+```text
+collectionOptions requires a non-empty explicit id so the descriptor is stable across DbClient instances and SSR boundaries.
+```
+
+<a id="error-89"></a>
+
+## Error 89: `client.ts`
+
+Development builds show this message, with `${...}` replaced by values:
+
+```text
+collectionOptions("${id}") requires a factory as its second argument.
+```
+
+<a id="error-90"></a>
+
+## Error 90: `client.ts`
+
+Development builds show this message, with `${...}` replaced by values:
+
+```text
+Collection descriptor "${id}" was created from a concrete config that cannot be safely reused across DbClient instances. Use collectionOptions("${id}", (client) => adapterCollectionOptions(...)) or an adapter options creator that supports DbClient materialization.
+```
+
+<a id="error-91"></a>
+
+## Error 91: `client.ts`
+
+Development builds show this message, with `${...}` replaced by values:
+
+```text
+Collection descriptor "${id}" materialized a config with id "${materialized.id}". Descriptor and collection ids must match.
+```
+
+<a id="error-92"></a>
+
+## Error 92: `client.ts`
+
+Development builds show this message, with `${...}` replaced by values:
+
+```text
+DbClient is missing the required "${key}" dependency. Pass it explicitly when constructing the client: new DbClient({ ${key} }).
+```
+
+<a id="error-93"></a>
+
+## Error 93: `client.ts`
+
+Development builds show this message, with `${...}` replaced by values:
+
+```text
+Dehydrated live query "${dehydratedQuery.queryHash}" has neither a snapshot nor a promise.
+```
+
+<a id="error-94"></a>
+
+## Error 94: `collection/change-events.ts`
+
+Development builds show this message, with `${...}` replaced by values:
+
+```text
+limit cannot be used without orderBy
+```
+
+<a id="error-95"></a>
+
+## Error 95: `collection/changes.ts`
+
+Development builds show this message, with `${...}` replaced by values:
+
+```text
+Cannot specify both 'where' and 'whereExpression' options. Use one or the other.
+```
+
+<a id="error-96"></a>
+
+## Error 96: `collection/subscription.ts`
+
+Development builds show this message, with `${...}` replaced by values:
+
+```text
+limit is required
+```
+
+<a id="error-97"></a>
+
+## Error 97: `collection/subscription.ts`
+
+Development builds show this message, with `${...}` replaced by values:
+
+```text
+Ordered snapshot was requested but no index was found. You have to call setOrderByIndex before requesting an ordered snapshot.
+```
+
+<a id="error-98"></a>
+
+## Error 98: `event-emitter.ts`
+
+Development builds show this message, with `${...}` replaced by values:
+
+```text
+Timeout waiting for event ${String(event)}
+```
+
+<a id="error-99"></a>
+
+## Error 99: `indexes/base-index.ts`
+
+Development builds show this message, with `${...}` replaced by values:
+
+```text
+Failed to evaluate index expression for key ${key}: ${error}
+```
+
+<a id="error-100"></a>
+
+## Error 100: `indexes/basic-index.ts`
+
+Development builds show this message, with `${...}` replaced by values:
+
+```text
+Operation ${operation} not supported by BasicIndex
+```
+
+<a id="error-101"></a>
+
+## Error 101: `indexes/btree-index.ts`
+
+Development builds show this message, with `${...}` replaced by values:
+
+```text
+Operation ${operation} not supported by BTreeIndex
+```
+
+<a id="error-102"></a>
+
+## Error 102: `live-query-options.ts`
+
+Development builds show this message, with `${...}` replaced by values:
+
+```text
+A live query must be a QueryBuilder, LiveQueryCollectionConfig, Collection, undefined, or null. Got: ${typeof value}
+```
+
+<a id="error-103"></a>
+
+## Error 103: `live-query-window-controller.ts`
+
+Development builds show this message, with `${...}` replaced by values:
+
+```text
+useLiveInfiniteQuery: First argument must be either a pre-created live query collection or a query function. Received: ${typeof input}
+```
+
+<a id="error-104"></a>
+
+## Error 104: `live-query-window-controller.ts`
+
+Development builds show this message, with `${...}` replaced by values:
+
+```text
+useLiveInfiniteQuery: Query function must return a query builder. Disabled null or undefined queries are not supported.
+```
+
+<a id="error-105"></a>
+
+## Error 105: `live-query-window-controller.ts`
+
+Development builds show this message, with `${...}` replaced by values:
+
+```text
+useLiveInfiniteQuery: Infinite queries do not support single-result queries. Remove .findOne().
+```
+
+<a id="error-106"></a>
+
+## Error 106: `live-query-window-controller.ts`
+
+Development builds show this message, with `${...}` replaced by values:
+
+```text
+useLiveInfiniteQuery: Pre-created live query collection must have an ORDER BY (orderBy) clause for infinite pagination to work. Please add .orderBy() to your createLiveQueryCollection query.
+```
+
+<a id="error-107"></a>
+
+## Error 107: `paced-mutations.ts`
+
+Development builds show this message, with `${...}` replaced by values:
+
+```text
+Strategy callback called but transaction is in state "${transaction.state}". Expected "pending".
+```
+
+<a id="error-108"></a>
+
+## Error 108: `paced-mutations.ts`
+
+Development builds show this message, with `${...}` replaced by values:
+
+```text
+Paced transaction has no strategy-owned commit
+```
+
+<a id="error-109"></a>
+
+## Error 109: `proxy.ts`
+
+Development builds show this message, with `${...}` replaced by values:
+
+```text
+forEach callback must be a function
+```
+
+<a id="error-110"></a>
+
+## Error 110: `query/builder/functions.ts`
+
+Development builds show this message, with `${...}` replaced by values:
+
+```text
+concat(toArray(...)) currently supports only a single toArray(...) argument
+```
+
+<a id="error-111"></a>
+
+## Error 111: `query/builder/functions.ts`
+
+Development builds show this message, with `${...}` replaced by values:
+
+```text
+caseWhen() requires at least two arguments
+```
+
+<a id="error-112"></a>
+
+## Error 112: `query/builder/functions.ts`
+
+Development builds show this message, with `${...}` replaced by values:
+
+```text
+caseWhen() conditions must be expression-like values
+```
+
+<a id="error-113"></a>
+
+## Error 113: `query/builder/index.ts`
+
+Development builds show this message, with `${...}` replaced by values:
+
+```text
+Cannot use collection descriptor "${alias}" as a query source without a DbClient resolver. In React, wrap your tree in <DbProvider>.
+```
+
+<a id="error-114"></a>
+
+## Error 114: `query/builder/index.ts`
+
+Development builds show this message, with `${...}` replaced by values:
+
+```text
+Conditional include branch is missing a field name
+```
+
+<a id="error-115"></a>
+
+## Error 115: `query/builder/index.ts`
+
+Development builds show this message, with `${...}` replaced by values:
+
+```text
+toArray() must wrap a subquery builder
+```
+
+<a id="error-116"></a>
+
+## Error 116: `query/builder/index.ts`
+
+Development builds show this message, with `${...}` replaced by values:
+
+```text
+Conditional toArray() branch is missing a field name
+```
+
+<a id="error-117"></a>
+
+## Error 117: `query/builder/index.ts`
+
+Development builds show this message, with `${...}` replaced by values:
+
+```text
+concat(toArray(...)) must wrap a subquery builder
+```
+
+<a id="error-118"></a>
+
+## Error 118: `query/builder/index.ts`
+
+Development builds show this message, with `${...}` replaced by values:
+
+```text
+Conditional concat(toArray(...)) branch is missing a field name
+```
+
+<a id="error-119"></a>
+
+## Error 119: `query/builder/index.ts`
+
+Development builds show this message, with `${...}` replaced by values:
+
+```text
+toArray() must wrap a subquery builder
+```
+
+<a id="error-120"></a>
+
+## Error 120: `query/builder/index.ts`
+
+Development builds show this message, with `${...}` replaced by values:
+
+```text
+concat(toArray(...)) must wrap a subquery builder
+```
+
+<a id="error-121"></a>
+
+## Error 121: `query/builder/index.ts`
+
+Development builds show this message, with `${...}` replaced by values:
+
+```text
+materialize() must wrap a subquery builder
+```
+
+<a id="error-122"></a>
+
+## Error 122: `query/builder/index.ts`
+
+Development builds show this message, with `${...}` replaced by values:
+
+```text
+caseWhen() requires at least two arguments
+```
+
+<a id="error-123"></a>
+
+## Error 123: `query/builder/index.ts`
+
+Development builds show this message, with `${...}` replaced by values:
+
+```text
+Includes subquery for "${fieldName}" must have a WHERE clause with an eq() condition that correlates a parent field with a child field. Example: .where(({child}) => eq(child.parentId, parent.id))
+```
+
+<a id="error-124"></a>
+
+## Error 124: `query/builder/index.ts`
+
+Development builds show this message, with `${...}` replaced by values:
+
+```text
+concat(toArray(...)) for "${fieldName}" requires the subquery to select a scalar value
+```
+
+<a id="error-125"></a>
+
+## Error 125: `query/builder/index.ts`
+
+Development builds show this message, with `${...}` replaced by values:
+
+```text
+Includes subquery for "${fieldName}" must select an object when materializing as a Collection
+```
+
+<a id="error-126"></a>
+
+## Error 126: `query/builder/ref-proxy.ts`
+
+Development builds show this message, with `${...}` replaced by values:
+
+```text
+${name} cannot be used inside expressions (e.g., coalesce(), eq(), not()). Use ${name} directly as a select field value instead.
+```
+
+<a id="error-127"></a>
+
+## Error 127: `query/compiler/evaluators.ts`
+
+Development builds show this message, with `${...}` replaced by values:
+
+```text
+caseWhen() requires at least two arguments
+```
+
+<a id="error-128"></a>
+
+## Error 128: `query/compiler/index.ts`
+
+Development builds show this message, with `${...}` replaced by values:
+
+```text
+fn.select() cannot consume Collection-valued includes. Use toArray() or materialize() in the upstream select(), or use an expression select() to keep live Collections.
+```
+
+<a id="error-129"></a>
+
+## Error 129: `query/compiler/index.ts`
+
+Development builds show this message, with `${...}` replaced by values:
+
+```text
+Query row has negative multiplicity
+```
+
+<a id="error-130"></a>
+
+## Error 130: `query/compiler/index.ts`
+
+Development builds show this message, with `${...}` replaced by values:
+
+```text
+Query row has no positive contributor
+```
+
+<a id="error-131"></a>
+
+## Error 131: `query/compiler/index.ts`
+
+Development builds show this message, with `${...}` replaced by values:
+
+```text
+Query contributors with the same row key are not congruent
+```
+
+<a id="error-132"></a>
+
+## Error 132: `query/compiler/index.ts`
+
+Development builds show this message, with `${...}` replaced by values:
+
+```text
+Duplicate source alias "${source.alias}" in unionAll query branches. Use distinct aliases in each branch before passing them to unionAll().
+```
+
+<a id="error-133"></a>
+
+## Error 133: `query/compiler/index.ts`
+
+Development builds show this message, with `${...}` replaced by values:
+
+```text
+Includes subqueries must be at the top level of select(). Found nested includes at "${parentPath}.${key}".
+```
+
+<a id="error-134"></a>
+
+## Error 134: `query/effect.ts`
+
+Development builds show this message, with `${...}` replaced by values:
+
+```text
+Source collection '${collectionId}' was cleaned up while effect depends on it
+```
+
+<a id="error-135"></a>
+
+## Error 135: `query/effect.ts`
+
+Development builds show this message, with `${...}` replaced by values:
+
+```text
+Source collection '${collectionId}' entered error state
+```
+
+<a id="error-136"></a>
+
+## Error 136: `query/expression-helpers.ts`
+
+Development builds show this message, with `${...}` replaced by values:
+
+```text
+No handler provided for operator: ${name}. Available handlers: ${Object.keys(handlers).join(`, `)}
+```
+
+<a id="error-137"></a>
+
+## Error 137: `query/expression-helpers.ts`
+
+Development builds show this message, with `${...}` replaced by values:
+
+```text
+ORDER BY expression must be a field reference, got: ${clause.expression.type}
+```
+
+<a id="error-138"></a>
+
+## Error 138: `query/expression-helpers.ts`
+
+Development builds show this message, with `${...}` replaced by values:
+
+```text
+extractSimpleComparisons requires a comparison or null check inside 'not' operator.
+```
+
+<a id="error-139"></a>
+
+## Error 139: `query/expression-helpers.ts`
+
+Development builds show this message, with `${...}` replaced by values:
+
+```text
+extractSimpleComparisons requires a field reference for '${arg.name}' operator.
+```
+
+<a id="error-140"></a>
+
+## Error 140: `query/expression-helpers.ts`
+
+Development builds show this message, with `${...}` replaced by values:
+
+```text
+extractSimpleComparisons requires simple field-value comparisons. Found complex expression for 'not(${arg.name})' operator.
+```
+
+<a id="error-141"></a>
+
+## Error 141: `query/expression-helpers.ts`
+
+Development builds show this message, with `${...}` replaced by values:
+
+```text
+extractSimpleComparisons does not support 'not(${arg.name})'. NOT can only wrap comparison operators (eq, gt, gte, lt, lte, in) or null checks (isNull, isUndefined).
+```
+
+<a id="error-142"></a>
+
+## Error 142: `query/expression-helpers.ts`
+
+Development builds show this message, with `${...}` replaced by values:
+
+```text
+extractSimpleComparisons does not support '${e.name}' operator. Use parseWhereExpression with custom handlers for complex expressions.
+```
+
+<a id="error-143"></a>
+
+## Error 143: `query/expression-helpers.ts`
+
+Development builds show this message, with `${...}` replaced by values:
+
+```text
+extractSimpleComparisons requires a field reference for '${e.name}' operator.
+```
+
+<a id="error-144"></a>
+
+## Error 144: `query/expression-helpers.ts`
+
+Development builds show this message, with `${...}` replaced by values:
+
+```text
+extractSimpleComparisons requires simple field-value comparisons. Found complex expression for '${e.name}' operator.
+```
+
+<a id="error-145"></a>
+
+## Error 145: `query/expression-helpers.ts`
+
+Development builds show this message, with `${...}` replaced by values:
+
+```text
+extractSimpleComparisons encountered unknown operator: '${e.name}'
+```
+
+<a id="error-146"></a>
+
+## Error 146: `query/live/bucket-facade-adapter.ts`
+
+Development builds show this message, with `${...}` replaced by values:
+
+```text
+Bucket facade row has no public key
+```
+
+<a id="error-147"></a>
+
+## Error 147: `query/live/collection-config-builder.ts`
+
+Development builds show this message, with `${...}` replaced by values:
+
+```text
+Source recovery failed
+```
+
+<a id="error-148"></a>
+
+## Error 148: `query/live/collection-config-builder.ts`
+
+Development builds show this message, with `${...}` replaced by values:
+
+```text
+maybeRunGraph called without active sync run. This should not happen.
+```
+
+<a id="error-149"></a>
+
+## Error 149: `query/live/collection-config-builder.ts`
+
+Development builds show this message, with `${...}` replaced by values:
+
+```text
+scheduleGraphRun called without active sync run. This should not happen.
+```
+
+<a id="error-150"></a>
+
+## Error 150: `query/live/collection-config-builder.ts`
+
+Development builds show this message, with `${...}` replaced by values:
+
+```text
+Live query result key ${String(key)} changed by ${inserts - deletes} rows in one flush; a key has at most one result row.
+```
+
+<a id="error-151"></a>
+
+## Error 151: `query/live/collection-config-builder.ts`
+
+Development builds show this message, with `${...}` replaced by values:
+
+```text
+Could not apply changes: ${JSON.stringify(changes)}. This should never happen.
+```
+
+<a id="error-152"></a>
+
+## Error 152: `query/live/collection-config-builder.ts`
+
+Development builds show this message, with `${...}` replaced by values:
+
+```text
+Source collection '${collectionId}' was manually cleaned up while live query '${this.id}' depends on it. Live queries prevent automatic GC, so this was likely a manual cleanup() call.
+```
+
+<a id="error-153"></a>
+
+## Error 153: `query/live/collection-config-builder.ts`
+
+Development builds show this message, with `${...}` replaced by values:
+
+```text
+Query '${this.id}' has no collection sources. This should not happen; please report.
+```
+
+<a id="error-154"></a>
+
+## Error 154: `query/live/materialized-pipeline.ts`
+
+Development builds show this message, with `${...}` replaced by values:
+
+```text
+Canonical query row has negative multiplicity
+```
+
+<a id="error-155"></a>
+
+## Error 155: `query/live/materialized-pipeline.ts`
+
+Development builds show this message, with `${...}` replaced by values:
+
+```text
+Canonical query row has no positive contributor
+```
+
+<a id="error-156"></a>
+
+## Error 156: `query/live/materialized-pipeline.ts`
+
+Development builds show this message, with `${...}` replaced by values:
+
+```text
+Query contributors for public key ${serializeValue(left.publicKey)} are not congruent
+```
+
+<a id="error-157"></a>
+
+## Error 157: `query/live/materialized-pipeline.ts`
+
+Development builds show this message, with `${...}` replaced by values:
+
+```text
+Materialization bucket row has negative multiplicity
+```
+
+<a id="error-158"></a>
+
+## Error 158: `query/live/materialized-pipeline.ts`
+
+Development builds show this message, with `${...}` replaced by values:
+
+```text
+Collection includes require a bucket facade
+```
+
+<a id="error-159"></a>
+
+## Error 159: `query/live/subset-demand-controller.ts`
+
+Development builds show this message, with `${...}` replaced by values:
+
+```text
+Subset demand snapshot did not start
+```
+
+<a id="error-160"></a>
+
+## Error 160: `query/live/utils.ts`
+
+Development builds show this message, with `${...}` replaced by values:
+
+```text
+Failed to extract collection. Invalid FROM clause: ${JSON.stringify(query)}
+```
+
+<a id="error-161"></a>
+
+## Error 161: `scheduler.ts`
+
+Development builds show this message, with `${...}` replaced by values:
+
+```text
+Scheduler detected unresolved dependencies for context ${String(
+            contextId,
+          )}.
+```
+
+<a id="error-162"></a>
+
+## Error 162: `transactions.ts`
+
+Development builds show this message, with `${...}` replaced by values:
+
+```text
+A transaction created with createTransaction() cannot mutate collections from multiple DbClient instances. Use dbClient.createTransaction() for explicit client scope.
+```
+
+<a id="error-163"></a>
+
+## Error 163: `transactions.ts`
+
+Development builds show this message, with `${...}` replaced by values:
+
+```text
+Transaction is not associated with a TransactionScope.
+```
+
+<a id="error-164"></a>
+
+## Error 164: `transactions.ts`
+
+Development builds show this message, with `${...}` replaced by values:
+
+```text
+Transaction is not associated with an ambient scope.
+```
+
+<a id="error-165"></a>
+
+## Error 165: `transactions.ts`
+
+Development builds show this message, with `${...}` replaced by values:
+
+```text
+Unhandled mutation combination: ${_exhaustive}
+```
+
+<a id="error-166"></a>
+
+## Error 166: `utils/comparison.ts`
+
+Development builds show this message, with `${...}` replaced by values:
+
+```text
+Index comparator must return a number, but returned ${String(result)}
+```
+
+<a id="error-167"></a>
+
+## Error 167: `utils/comparison.ts`
+
+Development builds show this message, with `${...}` replaced by values:
+
+```text
+Cannot order Temporal values of different types: ${aTag} vs ${bTag}
+```
+
+<a id="error-168"></a>
+
+## Error 168: `utils/comparison.ts`
+
+Development builds show this message, with `${...}` replaced by values:
+
+```text
+${aTag} has no defined ordering
+```
+
+<a id="error-169"></a>
+
+## Error 169: `utils/cursor.ts`
+
+Development builds show this message, with `${...}` replaced by values:
+
+```text
+Only leading-column cursors are supported
+```
+
+<a id="error-170"></a>
+
+## Error 170: `utils/error.ts`
+
+Development builds show this message, with `${...}` replaced by values:
+
+```text
+Unknown error
+```
+
+<a id="error-171"></a>
+
+## Error 171: `utils/uuid.ts`
+
+Development builds show this message, with `${...}` replaced by values:
+
+```text
+No secure random number generator available: neither crypto.randomUUID nor crypto.getRandomValues is defined in this environment.
+```
+
+<a id="error-172"></a>
+
+## Error 172: `query/live/collection-config-builder.ts`
+
+Development builds show this message, with `${...}` replaced by values:
+
+```text
+Source collection '${collectionId}' entered error state
+```

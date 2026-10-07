@@ -26,11 +26,23 @@
  * - **Docs:** `docs/errors.md` has a heading for every code that names its
  *   class.
  *
+ * - **Error sites:** code outside `errors.ts` also throws plain `Error`,
+ *   `TypeError`, and `RangeError` values with library text. Each such site
+ *   keeps its class and switches its message with the same check. Its
+ *   development message expression is the source text frozen on `main` in
+ *   `fixtures/error-site-messages.json`, with its code; equal source text in
+ *   the same scope gives the same message for every input. Every value its
+ *   message interpolates is passed to the code line. A message built only from
+ *   a caller's value, such as `new Error(String(error))`, is not a site.
+ *
  * The model is the frozen fixtures and the format above; nothing here reads
  * codes from `src/errors.ts`. The production path is every error class that the
  * public package entry exports, wherever it is defined, constructed directly
  * under `vi.stubEnv('NODE_ENV', ...)`. Errors that production code builds
- * elsewhere reach users through the same constructors.
+ * elsewhere reach users through the same constructors. For error sites, the
+ * observation is the source itself, read by `error-sites.ts`: a site cannot be
+ * constructed alone, and the shared `codedMessage` is checked through the
+ * classes.
  *
  * Limits: the sample inputs per class, and a fixed set of hostile inputs
  * substituted one argument at a time. Messages a caller passes to a base class
@@ -43,12 +55,14 @@ import { fileURLToPath } from 'node:url'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import * as Errors from '../src/index'
 import { errorSampleArguments } from './error-sample-arguments'
+import { findErrorSites } from './error-sites'
 
 const testsDirectory = dirname(fileURLToPath(import.meta.url))
 const devMessages: Record<string, Array<string>> = JSON.parse(
   readFileSync(resolve(testsDirectory, `fixtures/error-messages.json`), `utf8`),
 )
 const codesPath = resolve(testsDirectory, `fixtures/error-codes.json`)
+const sitesPath = resolve(testsDirectory, `fixtures/error-site-messages.json`)
 const docsPath = resolve(testsDirectory, `../../../docs/errors.md`)
 const docsUrl = `https://tanstack.com/db/latest/docs/errors`
 
@@ -236,6 +250,51 @@ describe(`production error messages`, () => {
     }
   })
 
+  describe(`error sites`, () => {
+    const sites = findErrorSites(resolve(testsDirectory, `../src`))
+    const frozen: Record<string, { file: string; message: string }> =
+      JSON.parse(readFileSync(sitesPath, `utf8`))
+
+    it(`codes every site that throws library text`, () => {
+      expect(sites.plain).toEqual([])
+    })
+
+    it(`keeps each site's development message and code`, () => {
+      const current = Object.fromEntries(
+        sites.coded.map(({ code, file, development }) => [
+          code,
+          { file, message: development },
+        ]),
+      )
+      expect(sites.coded).toHaveLength(Object.keys(current).length)
+      expect(current).toEqual(
+        Object.fromEntries(
+          Object.entries(frozen).map(([code, { file, message }]) => [
+            code,
+            { file, message },
+          ]),
+        ),
+      )
+    })
+
+    it(`passes every interpolated value to the code line`, () => {
+      for (const site of sites.coded)
+        for (const interpolation of site.interpolations)
+          expect(
+            site.values.some((value) => interpolation.includes(value)),
+            `${site.file} error ${site.code} drops \${${interpolation}}`,
+          ).toBe(true)
+    })
+
+    it(`never reuses a class code`, () => {
+      const codes: Record<string, number> = JSON.parse(
+        readFileSync(codesPath, `utf8`),
+      )
+      const classCodes = new Set(Object.values(codes))
+      expect(sites.coded.filter(({ code }) => classCodes.has(code))).toEqual([])
+    })
+  })
+
   it(`documents every code with its class`, () => {
     const codes: Record<string, number> = JSON.parse(
       readFileSync(codesPath, `utf8`),
@@ -244,6 +303,13 @@ describe(`production error messages`, () => {
     for (const [name, code] of Object.entries(codes)) {
       const heading = new RegExp(`^## Error ${code}\\b.*${name}`, `m`)
       expect(docs, `${name} (${code})`).toMatch(heading)
+    }
+    const sites: Record<string, { file: string }> = JSON.parse(
+      readFileSync(sitesPath, `utf8`),
+    )
+    for (const [code, { file }] of Object.entries(sites)) {
+      const heading = new RegExp(`^## Error ${code}\\b.*${file}`, `m`)
+      expect(docs, `error ${code} (${file})`).toMatch(heading)
     }
   })
 })
