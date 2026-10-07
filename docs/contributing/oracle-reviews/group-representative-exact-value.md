@@ -1,8 +1,12 @@
 # Group representative work and exact-value choice review
 
-Evidence by revision, on `perf-aggregate-representatives` from `origin/main`
-`ea51b67b0`: the RED results ran on `ea51b67b0` with the new tests, and the
-GREEN and mutant results ran on the branch's production change.
+Evidence by revision, on `perf-aggregate-representatives`:
+
+- First campaign: tests `ef9d4dad4`, production change `9b021bbdc`. The RED
+  results ran on `ea51b67b0` with the new tests.
+- Review follow-up: tests `871bdea11`, production fix `e5449edc2`. The RED
+  results ran on `9b021bbdc` and the GREEN and mutant results on `e5449edc2`.
+  `f67789cd3` merges `origin/main` without changes to these files.
 
 ## Laws and authority
 
@@ -13,21 +17,30 @@ GREEN and mutant results ran on the branch's production change.
    incremental view maintenance. A count changes by the multiplicity of the
    delta, so the result does not need a re-read of each member.
 2. **Route law.** One representative carries the whole correlation route.
-   The route has two fields, `correlationKey` and `parentContext`. Its exact
-   identity is the exact identity of the correlation key and the parent
-   context identity. The parent context identity contains the exact identity
-   of each projected parent value. Thus two members with equal route identities
-   have the same correlation key and parent values, and the route needs no row
-   key to select one member.
+   The route has two fields, `correlationKey` and `parentContext`. Members of
+   one route share the correlation key instance and the parent context
+   instance, so the representative's identity is the exact identity of those
+   two instances. The first campaign used the parent context's equality
+   identity instead, which does not distinguish exactly different parent
+   values (review finding F4).
+4. **Positive-contributor law.** A projected group value, and a `min` or `max`
+   result, is an exact value that a currently positive member holds
+   (`ARCHITECTURE.md`, "Value identity"). D2 consolidates contributions whose
+   hashes match, its hash treats `-0` as `0` and equal Dates as one value, and
+   a consolidated entry keeps the record of its latest change. Thus a
+   contribution must carry the exact identity of every value it can supply.
 3. **Group-value law (revised by a product decision).** When several members
    are equal under query equality but differ exactly, the projected value comes
    from the member with the smallest exact value:
-   - a number before an object (a Date, a binary array, or a Temporal value);
-   - an ordinary number before `-0`, and `-0` before `NaN`;
-   - objects by type name, so `Buffer` before `Date` before `Uint8Array`.
+   - another number before `-0`, and every primitive before an object;
+   - objects by an explicit type tag: `Buffer`, `Date`, a Temporal type, then
+     `Uint8Array`. The tags do not come from constructor names, so
+     minification cannot change the order (review finding F7).
 
-   Objects of one type and content are one exact value, so either instance can
-   be projected. The previous law selected the member with the smallest row key.
+   `-0` and `NaN` are never equal under query equality, so their order is not
+   observable. Members of one tag are equal in content, and any positive
+   instance can be projected. The previous law selected the member with the
+   smallest row key.
 
 ## Old and new predictions
 
@@ -91,11 +104,56 @@ in the original order. In the reversed order, the old code projected the
 | ORC-013 | Applicable. The work law is a scaling law. Four sizes over two orders of magnitude separate a constant cost from a cost per member. |
 | ORC-014 | Inapplicable. No controlled provider supplies a premise. |
 
+## Review follow-up
+
+A high-effort review of `9b021bbdc` raised ten findings. Probes and the
+extended oracle confirmed the product defects:
+
+| Finding | Verdict | Evidence on `9b021bbdc` | Disposition |
+| --- | --- | --- | --- |
+| F1 `min`/`max` returns a deleted row's value | Confirmed | Rows `0` and `-0`, delete `0`: `min` and `max` return `0`. On `main`: `-0`. Two equal Dates: the deleted row's instance. | Fixed: contributions carry the exact identity of each sum, avg, min, or max input |
+| F2 projected value is a deleted row's instance | Confirmed | Two `Date(0)` instances, delete row 1: the deleted instance is projected | Fixed: the representative key holds the instance identity |
+| F3 oracle compares only a type label | Confirmed | The F2 defect passed the old oracle | Fixed: the oracle requires a positive member's instance |
+| F4 route identity uses parent equality | Evidence gap | An include aggregate cannot project a parent field, so no public observation was found. The mutant that restores the equality identity survives | Uses the parent context instance; recorded as unobserved |
+| F5 Date and binary correlation keys never consolidate | Confirmed, accepted | Reference identity keeps distinct key instances apart | Limit below: correctness needs instance identity |
+| F6 work law over-promises | Confirmed | Only identical inputs consolidate | The law, changeset and architecture text now state the scope |
+| F7 order depends on constructor names and serialization | Confirmed by source | — | Fixed: explicit type tags |
+| F8 binary contents serialized into each key | Confirmed | A 1 MiB group value is encoded twice per insert (12.6 MB); `main` encodes it once | Fixed: once, which is the group key's existing cost |
+| F9 counter misses array walks | Confirmed by source | — | Fixed: the counter also counts array iteration and callbacks |
+| F10 architecture text contradicted | Confirmed | — | Rewritten |
+
+Measured with the investigation probe (`NODE_ENV=production`, an include
+count over one issue, median per comment insert, two runs each):
+
+| Comments | `main` `2c98b4992` | Branch `f67789cd3` |
+| ---: | ---: | ---: |
+| 10 | 0.109 / 0.125 ms | 0.168 / 0.162 ms |
+| 100 | 0.096 / 0.095 ms | 0.129 / 0.113 ms |
+| 1,000 | 0.175 / 0.153 ms | 0.098 / 0.108 ms |
+| 5,000 | 0.557 / 0.439 ms | 0.101 / 0.091 ms |
+
+The 10-comment size runs first in each process, so it includes warm-up.
+
+Review mutants on `e5449edc2`:
+
+| Mutant | Outcome |
+| --- | --- |
+| No exact-input identity (merged retraction kept) | Assertion failure, 4 tests |
+| No instance identity in the group-value representative | Assertion failure, 4 tests |
+| Binary contents in the order key | Assertion failure, 1 test (binary encoding) |
+| Parent context equality identity in the route | Survived: no public observation (F4) |
+| `NaN` ordered before `-0` | Equivalent: the two never share a group |
+
 ## Limits
 
-- The iterator-step counter observes Map and Set iteration only. A re-read
-  through array iteration would not count. The reduce operator reads its group
-  through a Map, so the counter reaches the regression.
+- The work counter observes Map, Set and array iteration and array callbacks.
+  A walk through an indexed `for` loop would not count.
+- Contributions consolidate only when their inputs are exactly identical. A
+  sum, avg, min, or max over distinct values, and an include correlated on
+  Date, binary, or Temporal key instances, keep one contribution per distinct
+  input or instance.
+- The group key serializes a large binary group value's contents once per
+  member. That cost predates this change.
 - A `groupBy` over values whose exact identity is a reference, such as plain
   objects, still has one contribution per distinct object. Equality for those
   values is also by reference, so each such group holds one value.
