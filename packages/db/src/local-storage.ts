@@ -436,7 +436,9 @@ export function localStorageCollectionOptions(
   const persistMutations = (
     mutations: Array<PendingMutation<Record<string, unknown>>>,
   ): void => {
-    const staged = new Map(lastKnownData)
+    // A peer may have written after our last storage event. Start from the
+    // current durable snapshot so this write preserves untouched peer rows.
+    const staged = loadFromStorage(config.storageKey, storage, parser)
     for (const mutation of mutations) {
       if (mutation.type === `delete`) staged.delete(mutation.key)
       else
@@ -446,62 +448,63 @@ export function localStorageCollectionOptions(
         })
     }
     saveToStorage(staged)
-    // Sync and storage-event handling share this Map. Promote only after the
-    // write succeeds, so rejected mutations cannot contaminate a later save.
-    lastKnownData.clear()
-    for (const [key, value] of staged) lastKnownData.set(key, value)
+    // Promote only our own writes after success. Peer rows remain unknown
+    // until their storage event publishes them to this Collection.
+    for (const mutation of mutations) {
+      const storedItem = staged.get(mutation.key)
+      if (storedItem) lastKnownData.set(mutation.key, storedItem)
+      else lastKnownData.delete(mutation.key)
+    }
     sync.confirmOperationsSync(mutations)
   }
 
-  /*
-   * Create wrapper handlers for direct persistence operations that perform actual storage operations
-   * Wraps the user's onInsert handler to also save changes to localStorage
-   */
-  const wrappedOnInsert = async (params: InsertMutationFnParams<any>) => {
-    // Validate that all values in the transaction can be JSON serialized
+  // Reserve each automatic write before calling its handler. Handlers may
+  // finish out of order, but a later mutation cannot persist ahead of an
+  // earlier one from this Collection. A rejected handler still releases its
+  // place after its predecessor so accepted successors keep author order.
+  let automaticWriteTail = Promise.resolve()
+  const persistAutomatic = async (
+    mutations: Array<PendingMutation<Record<string, unknown>>>,
+    handler: () => unknown | Promise<unknown>,
+  ) => {
+    const previous = automaticWriteTail
+    let release!: () => void
+    automaticWriteTail = new Promise<void>((resolve) => {
+      release = resolve
+    })
+    try {
+      const result = (await handler()) ?? {}
+      await previous
+      persistMutations(mutations)
+      return result
+    } finally {
+      await previous
+      release()
+    }
+  }
+
+  const wrappedOnInsert = (params: InsertMutationFnParams<any>) => {
     params.transaction.mutations.forEach((mutation) => {
       validateJsonSerializable(parser, mutation.modified, `insert`)
     })
-
-    // Call the user handler BEFORE persisting changes (if provided)
-    let handlerResult: any = {}
-    if (config.onInsert) {
-      handlerResult = (await config.onInsert(params)) ?? {}
-    }
-
-    persistMutations(params.transaction.mutations)
-
-    return handlerResult
+    return persistAutomatic(params.transaction.mutations, () =>
+      config.onInsert?.(params),
+    )
   }
 
-  const wrappedOnUpdate = async (params: UpdateMutationFnParams<any>) => {
-    // Validate that all values in the transaction can be JSON serialized
+  const wrappedOnUpdate = (params: UpdateMutationFnParams<any>) => {
     params.transaction.mutations.forEach((mutation) => {
       validateJsonSerializable(parser, mutation.modified, `update`)
     })
-
-    // Call the user handler BEFORE persisting changes (if provided)
-    let handlerResult: any = {}
-    if (config.onUpdate) {
-      handlerResult = (await config.onUpdate(params)) ?? {}
-    }
-
-    persistMutations(params.transaction.mutations)
-
-    return handlerResult
+    return persistAutomatic(params.transaction.mutations, () =>
+      config.onUpdate?.(params),
+    )
   }
 
-  const wrappedOnDelete = async (params: DeleteMutationFnParams<any>) => {
-    // Call the user handler BEFORE persisting changes (if provided)
-    let handlerResult: any = {}
-    if (config.onDelete) {
-      handlerResult = (await config.onDelete(params)) ?? {}
-    }
-
-    persistMutations(params.transaction.mutations)
-
-    return handlerResult
-  }
+  const wrappedOnDelete = (params: DeleteMutationFnParams<any>) =>
+    persistAutomatic(params.transaction.mutations, () =>
+      config.onDelete?.(params),
+    )
 
   // Extract standard Collection config properties
   // Remove localStorage-specific properties so they don't leak into the CollectionConfig
@@ -530,10 +533,8 @@ export function localStorageCollectionOptions(
     // Use collection ID for filtering if collection reference isn't available yet
     const collectionMutations = transaction.mutations.filter((m) => {
       // Try to match by collection reference first
-      if (sync.collection && m.collection === sync.collection) {
-        return true
-      }
-      // Fall back to matching by collection ID
+      if (sync.collection) return m.collection === sync.collection
+      // Before the first sync run, Collection identity is not available.
       return m.collection.id === collectionId
     })
 
@@ -779,8 +780,12 @@ function createLocalStorageSync<T extends object>(
 
       // Add storage event listener for cross-tab sync
       storageEventApi.addEventListener(`storage`, handleStorageEvent)
-
-      // Note: Cleanup is handled automatically by the collection when it's disposed
+      return {
+        cleanup: () => {
+          storageEventApi.removeEventListener(`storage`, handleStorageEvent)
+          if (syncParams === params) syncParams = null
+        },
+      }
     },
 
     /**
@@ -819,7 +824,10 @@ function createLocalStorageSync<T extends object>(
     begin()
     mutations.forEach((mutation: any) => {
       write({
-        type: mutation.type,
+        // A peer may have inserted the same key while this local mutation
+        // was pending. Full-row update confirms the accepted stored value in
+        // either case without a duplicate insert.
+        type: mutation.type === `delete` ? `delete` : `update`,
         value:
           mutation.type === `delete` ? mutation.original : mutation.modified,
       })
@@ -829,6 +837,9 @@ function createLocalStorageSync<T extends object>(
 
   return {
     ...syncConfig,
+    get collection() {
+      return collection
+    },
     confirmOperationsSync,
   }
 }

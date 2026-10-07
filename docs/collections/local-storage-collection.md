@@ -85,6 +85,16 @@ const settingsCollection = createCollection(
 // This works automatically via storage events
 ```
 
+Automatic mutations in one Collection persist in mutation order, even if their
+optional handlers finish in another order. A handler that rejects does not write
+its mutation. Other tabs see accepted changes when their storage events arrive.
+
+Each write stores a complete storage snapshot under one storage key. A
+write preserves disjoint peer rows already present in storage, even when that
+peer's event has not arrived yet. Truly simultaneous writes from separate tabs
+are not an atomic transaction; localStorage has no compare-and-swap operation.
+Use an IndexedDB Collection when several tabs need stronger write coordination.
+
 ## Using SessionStorage
 
 You can use `sessionStorage` instead of `localStorage` for session-only persistence:
