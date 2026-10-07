@@ -31,6 +31,9 @@ from the [instrument library](../../../docs/contributing/instruments/index.md):
 - **Tension scan** examines demands that collide under a concrete condition.
 - **Law restructuring** tests whether merging, splitting, replacing, or removing
   laws gives a better account while preserving necessary obligations.
+- **Mutant gap hunt** tests whether a plausible wrong implementation can pass
+  the owner and traces survivors to a missing distinction or an equivalence
+  invariant.
 
 Choose attacks for the actual uncertainty; do not run every card or require a
 finding at every level. Use a fresh reviewer for an independent challenge when

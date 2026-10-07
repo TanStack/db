@@ -30,6 +30,9 @@ When execution is authorized and practical, run the discriminating experiment.
 A hostile control must reach the intended comparison to demonstrate rejection.
 Use the oracle guide's calibration and mutant-outcome rules. A source-level
 argument can remain useful when execution is unavailable; label it accurately.
+For a systematic search across plausible wrong implementations, use the
+[mutant gap hunt](mutant-gap-hunt.md) to design semantic edits and classify
+survivors.
 
 **Return:** supported defects, design objections, and untested hypotheses as
 separate kinds of finding, with sources, witnesses, outcomes, and repair

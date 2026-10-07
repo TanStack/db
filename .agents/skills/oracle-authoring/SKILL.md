@@ -26,6 +26,8 @@ there is no required sequence or instrument quota.
 - When obligations collide, use **Tension scan**. When laws overlap or their
   concepts seem wrong, use **Law restructuring** to propose and check a better
   organization.
+- When an oracle is green but may accept a plausible wrong implementation,
+  use **Mutant gap hunt** to design a semantic edit and classify any survivor.
 
 Keep the chosen law and its authority visible beside the independent model.
 A counterexample can indict production, the model, the history grammar, the
