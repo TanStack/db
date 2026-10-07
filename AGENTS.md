@@ -2,6 +2,32 @@
 
 This guide provides principles and patterns for AI agents contributing to the TanStack DB codebase. These guidelines are derived from PR review patterns and reflect the quality standards expected in this project.
 
+## Think like a scientist
+
+Treat the code as an implementation of laws about observable behavior. Before
+changing a subsystem, articulate the law, its authority, and the conditions
+under which it applies. Think hard about whether it is the right law and whether
+we fully enforce it. Existing behavior is evidence about the implementation;
+it is not, by itself, authority for the promise.
+
+Use oracles as instruments: a small independent model enacts a law, legal
+histories exercise it, and public observations test production against it.
+Seek cases that distinguish plausible explanations. A mismatch can expose a
+production bug, a wrong model, an incomplete law, or an unsuitable observation
+checkpoint. Investigate which account failed before changing expectations.
+
+Challenge the laws themselves when the task warrants it: their suitability,
+interactions, and underlying concepts can need revision. Keep proposed design
+changes distinct from defects under the accepted contract. Preserve useful
+implementation freedom and state what the evidence does and does not establish.
+
+Before creating or editing an oracle, load
+[oracle-authoring](.agents/skills/oracle-authoring/SKILL.md). Before reviewing an
+oracle, load [oracle-review](.agents/skills/oracle-review/SKILL.md). Both use the
+oracle guide below and a small [instrument library](docs/contributing/instruments/index.md)
+that is also available for other design work. Select instruments as needed;
+routine work does not require a full instrument sequence.
+
 ## Required reading: live-query materialization
 
 Before reading, analyzing, or modifying correlated live-query materialization
@@ -44,9 +70,9 @@ Read these stable entry points before the narrower owner:
   framework's scheduling cut does not prove another's.
 
 The opening prose states the contract. The small model states the expected
-behavior. The production driver proves that the implementation refines the
-model. If a change revises one of these contracts, update all three in the same
-pull request. Do not update only the assertions to match new production output.
+behavior. The production driver and comparison check whether the implementation
+refines the model for the exercised histories and observations. If a change
+revises one of these contracts, update all three in the same pull request. Do not update only the assertions to match new production output.
 
 ## Table of Contents
 
