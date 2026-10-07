@@ -612,8 +612,15 @@ export class CollectionStateManager<
         pendingSyncKeys.add(operation.key as TKey)
       }
     }
-    for (const transaction of this.transactions.values()) {
+    // A settled transaction is needed only until this pass records its held
+    // rows, so it leaves `transactions` after the pass, by its own entry.
+    // Every way into the map, including offline restoration, settles through
+    // a recompute.
+    const settled: Array<string> = []
+    for (const [id, transaction] of this.transactions) {
+      if (transaction.state === `failed`) settled.push(id)
       if (transaction.state !== `completed`) continue
+      settled.push(id)
       for (const mutation of transaction.mutations) {
         if (
           !this.isThisCollection(mutation.collection) ||
@@ -632,6 +639,7 @@ export class CollectionStateManager<
         })
       }
     }
+    for (const id of settled) this.transactions.delete(id)
 
     // Clear current optimistic state
     this.optimisticUpserts.clear()
@@ -1491,23 +1499,6 @@ export class CollectionStateManager<
       // no longer suppressed by a sync transaction that will never publish.
       this.recomputeOptimisticState(false)
     }
-  }
-
-  /**
-   * Schedule cleanup of a transaction when it completes
-   */
-  public scheduleTransactionCleanup(transaction: Transaction<any>): void {
-    // Only schedule cleanup for transactions that aren't already completed
-    if (transaction.state === `completed`) {
-      this.transactions.delete(transaction.id)
-      return
-    }
-
-    // A settled transaction leaves the map either way. Rollback has already
-    // recomputed and published through touchCollection() before the
-    // rejection handler runs.
-    const remove = () => this.transactions.delete(transaction.id)
-    transaction.isPersisted.promise.then(remove, remove)
   }
 
   /**

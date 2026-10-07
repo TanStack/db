@@ -234,7 +234,6 @@ export class CollectionMutationsManager<
     // The Collection owns the request before its handler can write through
     // sync, so a confirmation written by the handler waits for settlement.
     this.state.transactions.set(transaction.id, transaction)
-    this.state.scheduleTransactionCleanup(transaction)
     this.state.recomputeOptimisticState(true)
   }
 
@@ -514,8 +513,6 @@ export class CollectionMutationsManager<
       })
       // Errors still propagate through tx.isPersisted.promise; suppress the background commit from warning
       emptyTransaction.commit().catch(() => undefined)
-      // Schedule cleanup for empty transaction
-      state.scheduleTransactionCleanup(emptyTransaction)
       return emptyTransaction
     }
 

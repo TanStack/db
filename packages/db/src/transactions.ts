@@ -664,19 +664,27 @@ class Transaction<T extends object = Record<string, unknown>> {
 
   // Tell collection that something has changed with the transaction
   touchCollection(): void {
+    // A failure in one Collection must not leave the others showing this
+    // transaction's settled optimistic state, so every Collection recomputes
+    // before the first error is rethrown.
     const hasCalled = new Set()
+    let failure: { error: unknown } | undefined
     for (const mutation of this.mutations) {
       if (!hasCalled.has(mutation.collection.id)) {
-        mutation.collection._state.onTransactionStateChange()
-
-        // Only call commitPendingTransactions if there are pending sync transactions
-        if (mutation.collection._state.pendingSyncedTransactions.length > 0) {
-          mutation.collection._state.commitPendingTransactions()
-        }
-
         hasCalled.add(mutation.collection.id)
+        try {
+          mutation.collection._state.onTransactionStateChange()
+
+          // Only call commitPendingTransactions if there are pending sync transactions
+          if (mutation.collection._state.pendingSyncedTransactions.length > 0) {
+            mutation.collection._state.commitPendingTransactions()
+          }
+        } catch (error) {
+          failure ??= { error }
+        }
       }
     }
+    if (failure) throw failure.error
   }
 
   /**
