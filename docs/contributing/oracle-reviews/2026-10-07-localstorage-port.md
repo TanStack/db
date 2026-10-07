@@ -69,3 +69,7 @@ both accepted rows in a fresh Collection. The same histories deliver a storage
 event under a failed read and check that the public snapshot remains intact.
 Startup remains best-effort; an absent storage key is the only empty snapshot
 for a new write or event. The final peer oracle passes both cases.
+
+The final `@tanstack/db` oracle campaign passed 67 files and 4,541 tests.
+The full package suite passed 254 files and 9,102 tests with no type errors.
+The package build, lint check, and changed-file formatting check passed.
