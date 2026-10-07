@@ -137,7 +137,10 @@ function interpolations(node: ts.Expression, sourceFile: ts.SourceFile) {
     const all = [compact(expression, sourceFile)]
     ts.forEachChild(expression, (child) => {
       // A property name is not a value: `materialized.id` does not pass `id`.
-      if (ts.isPropertyAccessExpression(expression) && child === expression.name)
+      if (
+        ts.isPropertyAccessExpression(expression) &&
+        child === expression.name
+      )
         return
       if (ts.isExpression(child)) all.push(...parts(child))
     })

@@ -904,7 +904,9 @@ export function compileQuery(
   if (materializeSelectInput) {
     if (!inputIncludes.every(isInlineInclude)) {
       throw new Error(
-        devBuild() && process.env.NODE_ENV !== `production` ? `fn.select() cannot consume Collection-valued includes. Use toArray() or materialize() in the upstream select(), or use an expression select() to keep live Collections.` : codedMessage(128),
+        devBuild() && process.env.NODE_ENV !== `production`
+          ? `fn.select() cannot consume Collection-valued includes. Use toArray() or materialize() in the upstream select(), or use an expression select() to keep live Collections.`
+          : codedMessage(128),
       )
     }
     // Input paths belong before the callback: its arbitrary output may rename
@@ -1284,11 +1286,20 @@ function canonicalizeSelectedRows(
       )
       if (totalMultiplicity === 0) return []
       if (totalMultiplicity < 0) {
-        throw new Error(devBuild() && process.env.NODE_ENV !== `production` ? `Query row has negative multiplicity` : codedMessage(129))
+        throw new Error(
+          devBuild() && process.env.NODE_ENV !== `production`
+            ? `Query row has negative multiplicity`
+            : codedMessage(129),
+        )
       }
 
       const visible = values.find(([, multiplicity]) => multiplicity > 0)?.[0]
-      if (!visible) throw new Error(devBuild() && process.env.NODE_ENV !== `production` ? `Query row has no positive contributor` : codedMessage(130))
+      if (!visible)
+        throw new Error(
+          devBuild() && process.env.NODE_ENV !== `production`
+            ? `Query row has no positive contributor`
+            : codedMessage(130),
+        )
       const visibleSignature = signature(visible)
 
       for (const [candidate, multiplicity] of values) {
@@ -1297,7 +1308,9 @@ function canonicalizeSelectedRows(
           !deepEquals(visibleSignature, signature(candidate))
         ) {
           throw new Error(
-            devBuild() && process.env.NODE_ENV !== `production` ? `Query contributors with the same row key are not congruent` : codedMessage(131),
+            devBuild() && process.env.NODE_ENV !== `production`
+              ? `Query contributors with the same row key are not congruent`
+              : codedMessage(131),
           )
         }
       }
@@ -1636,8 +1649,10 @@ function processUnionAll(
     for (const source of getAllSources(branch)) {
       if (branchAliases.has(source.alias)) {
         throw new Error(
-          devBuild() && process.env.NODE_ENV !== `production` ? `Duplicate source alias "${source.alias}" in unionAll query branches. ` +
-            `Use distinct aliases in each branch before passing them to unionAll().` : codedMessage(132, { alias: source.alias }),
+          devBuild() && process.env.NODE_ENV !== `production`
+            ? `Duplicate source alias "${source.alias}" in unionAll query branches. ` +
+                `Use distinct aliases in each branch before passing them to unionAll().`
+            : codedMessage(132, { alias: source.alias }),
         )
       }
       branchAliases.add(source.alias)
@@ -2330,8 +2345,10 @@ function assertNoNestedIncludes(
     if (key.startsWith(`__SPREAD_SENTINEL__`)) continue
     if (value instanceof IncludesSubquery) {
       throw new Error(
-        devBuild() && process.env.NODE_ENV !== `production` ? `Includes subqueries must be at the top level of select(). ` +
-          `Found nested includes at "${parentPath}.${key}".` : codedMessage(133, { parentPath, key }),
+        devBuild() && process.env.NODE_ENV !== `production`
+          ? `Includes subqueries must be at the top level of select(). ` +
+              `Found nested includes at "${parentPath}.${key}".`
+          : codedMessage(133, { parentPath, key }),
       )
     }
     if (isNestedSelectObject(value)) {

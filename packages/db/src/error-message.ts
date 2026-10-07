@@ -33,11 +33,11 @@ export function codedMessage(
             : value === undefined ||
                 (typeof value === `number` && !Number.isFinite(value))
               ? String(value)
-            : value === null ||
-                typeof value !== `object` ||
-                Array.isArray(value)
-              ? JSON.stringify(value)
-              : undefined
+              : value === null ||
+                  typeof value !== `object` ||
+                  Array.isArray(value)
+                ? JSON.stringify(value)
+                : undefined
       return text === undefined ? [] : [`${name}=${text}`]
     } catch {
       return []

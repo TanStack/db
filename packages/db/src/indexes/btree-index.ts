@@ -245,7 +245,11 @@ export class BTreeIndex<
         result = this.inArrayLookup(value)
         break
       default:
-        throw new Error(devBuild() && process.env.NODE_ENV !== `production` ? `Operation ${operation} not supported by BTreeIndex` : codedMessage(101, { operation }))
+        throw new Error(
+          devBuild() && process.env.NODE_ENV !== `production`
+            ? `Operation ${operation} not supported by BTreeIndex`
+            : codedMessage(101, { operation }),
+        )
     }
     return result
   }

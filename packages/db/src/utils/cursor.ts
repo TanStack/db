@@ -47,7 +47,11 @@ export function buildCursor(
 ): BasicExpression<boolean> | undefined {
   if (values.length === 0) return undefined
   if (orderBy.length === 0 || values.length !== 1) {
-    throw new Error(devBuild() && process.env.NODE_ENV !== `production` ? `Only leading-column cursors are supported` : codedMessage(169))
+    throw new Error(
+      devBuild() && process.env.NODE_ENV !== `production`
+        ? `Only leading-column cursors are supported`
+        : codedMessage(169),
+    )
   }
   return followsBoundary(orderBy[0]!, values[0])
 }

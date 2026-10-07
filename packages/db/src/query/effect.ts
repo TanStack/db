@@ -659,7 +659,9 @@ class EffectPipelineRunner<TRow extends object, TKey extends string | number> {
         if (this.disposed) return
         this.onSourceError(
           new Error(
-            devBuild() && process.env.NODE_ENV !== `production` ? `Source collection '${collectionId}' was cleaned up while effect depends on it` : codedMessage(134, { collectionId }),
+            devBuild() && process.env.NODE_ENV !== `production`
+              ? `Source collection '${collectionId}' was cleaned up while effect depends on it`
+              : codedMessage(134, { collectionId }),
           ),
         )
       }
@@ -674,7 +676,9 @@ class EffectPipelineRunner<TRow extends object, TKey extends string | number> {
         if (status === `error`) {
           this.onSourceError(
             new Error(
-              devBuild() && process.env.NODE_ENV !== `production` ? `Source collection '${collectionId}' entered error state` : codedMessage(135, { collectionId }),
+              devBuild() && process.env.NODE_ENV !== `production`
+                ? `Source collection '${collectionId}' entered error state`
+                : codedMessage(135, { collectionId }),
             ),
           )
           return

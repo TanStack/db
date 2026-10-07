@@ -1430,11 +1430,18 @@ export class CollectionSubscription
     onLoadSubsetResult,
   }: RequestLimitedSnapshotOptions) {
     if (this.unsubscribed) return
-    if (!limit) throw new Error(devBuild() && process.env.NODE_ENV !== `production` ? `limit is required` : codedMessage(96))
+    if (!limit)
+      throw new Error(
+        devBuild() && process.env.NODE_ENV !== `production`
+          ? `limit is required`
+          : codedMessage(96),
+      )
 
     if (!this.orderByIndex) {
       throw new Error(
-        devBuild() && process.env.NODE_ENV !== `production` ? `Ordered snapshot was requested but no index was found. You have to call setOrderByIndex before requesting an ordered snapshot.` : codedMessage(97),
+        devBuild() && process.env.NODE_ENV !== `production`
+          ? `Ordered snapshot was requested but no index was found. You have to call setOrderByIndex before requesting an ordered snapshot.`
+          : codedMessage(97),
       )
     }
 

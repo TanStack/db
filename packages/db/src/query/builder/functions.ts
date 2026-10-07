@@ -319,7 +319,9 @@ export function concat(
   if (toArrayArg) {
     if (args.length !== 1) {
       throw new Error(
-        devBuild() && process.env.NODE_ENV !== `production` ? `concat(toArray(...)) currently supports only a single toArray(...) argument` : codedMessage(110),
+        devBuild() && process.env.NODE_ENV !== `production`
+          ? `concat(toArray(...)) currently supports only a single toArray(...) argument`
+          : codedMessage(110),
       )
     }
     return new ConcatToArrayWrapper(toArrayArg.query)
@@ -584,14 +586,22 @@ export function caseWhen<
 ): any
 export function caseWhen(...args: Array<CaseWhenValue>): any {
   if (args.length < 2) {
-    throw new Error(devBuild() && process.env.NODE_ENV !== `production` ? `caseWhen() requires at least two arguments` : codedMessage(111))
+    throw new Error(
+      devBuild() && process.env.NODE_ENV !== `production`
+        ? `caseWhen() requires at least two arguments`
+        : codedMessage(111),
+    )
   }
 
   const pairCount = Math.floor(args.length / 2)
   for (let i = 0; i < pairCount; i++) {
     const condition = args[i * 2]
     if (!isConditionValue(condition)) {
-      throw new Error(devBuild() && process.env.NODE_ENV !== `production` ? `caseWhen() conditions must be expression-like values` : codedMessage(112))
+      throw new Error(
+        devBuild() && process.env.NODE_ENV !== `production`
+          ? `caseWhen() conditions must be expression-like values`
+          : codedMessage(112),
+      )
     }
   }
 

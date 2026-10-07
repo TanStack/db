@@ -64,7 +64,9 @@ export class TransactionScope {
     }
     if (owner !== this) {
       throw new Error(
-        devBuild() && process.env.NODE_ENV !== `production` ? `A transaction created with createTransaction() cannot mutate collections from multiple DbClient instances. Use dbClient.createTransaction() for explicit client scope.` : codedMessage(162),
+        devBuild() && process.env.NODE_ENV !== `production`
+          ? `A transaction created with createTransaction() cannot mutate collections from multiple DbClient instances. Use dbClient.createTransaction() for explicit client scope.`
+          : codedMessage(162),
       )
     }
 
@@ -144,7 +146,11 @@ const transactionAmbientScopes = new WeakMap<object, TransactionScope>()
 function getTransactionScope(transaction: object): TransactionScope {
   const scope = transactionScopes.get(transaction)
   if (!scope) {
-    throw new Error(devBuild() && process.env.NODE_ENV !== `production` ? `Transaction is not associated with a TransactionScope.` : codedMessage(163))
+    throw new Error(
+      devBuild() && process.env.NODE_ENV !== `production`
+        ? `Transaction is not associated with a TransactionScope.`
+        : codedMessage(163),
+    )
   }
   return scope
 }
@@ -152,7 +158,11 @@ function getTransactionScope(transaction: object): TransactionScope {
 function getTransactionAmbientScope(transaction: object): TransactionScope {
   const scope = transactionAmbientScopes.get(transaction)
   if (!scope) {
-    throw new Error(devBuild() && process.env.NODE_ENV !== `production` ? `Transaction is not associated with an ambient scope.` : codedMessage(164))
+    throw new Error(
+      devBuild() && process.env.NODE_ENV !== `production`
+        ? `Transaction is not associated with an ambient scope.`
+        : codedMessage(164),
+    )
   }
   return scope
 }
@@ -263,7 +273,11 @@ function mergePendingMutations<T extends object>(
     default: {
       // Exhaustiveness check
       const _exhaustive: never = `${existing.type}-${incoming.type}` as never
-      throw new Error(devBuild() && process.env.NODE_ENV !== `production` ? `Unhandled mutation combination: ${_exhaustive}` : codedMessage(165, { combination: _exhaustive }))
+      throw new Error(
+        devBuild() && process.env.NODE_ENV !== `production`
+          ? `Unhandled mutation combination: ${_exhaustive}`
+          : codedMessage(165, { combination: _exhaustive }),
+      )
     }
   }
 }

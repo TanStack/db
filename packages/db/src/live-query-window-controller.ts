@@ -45,8 +45,10 @@ export function getLiveQueryWindowInputKind(
   if (isCollection(input)) return `collection`
   if (typeof input === `function`) return `query`
   throw new Error(
-    devBuild() && process.env.NODE_ENV !== `production` ? `useLiveInfiniteQuery: First argument must be either a pre-created live query collection or a query function. ` +
-      `Received: ${typeof input}` : codedMessage(103, { type: typeof input }),
+    devBuild() && process.env.NODE_ENV !== `production`
+      ? `useLiveInfiniteQuery: First argument must be either a pre-created live query collection or a query function. ` +
+          `Received: ${typeof input}`
+      : codedMessage(103, { type: typeof input }),
   )
 }
 
@@ -80,8 +82,10 @@ export function resolveLiveQueryWindowInput<TContext extends Context>(
     typeof (value as { offset?: unknown }).offset !== `function`
   ) {
     throw new Error(
-      devBuild() && process.env.NODE_ENV !== `production` ? `useLiveInfiniteQuery: Query function must return a query builder. ` +
-        `Disabled null or undefined queries are not supported.` : codedMessage(104),
+      devBuild() && process.env.NODE_ENV !== `production`
+        ? `useLiveInfiniteQuery: Query function must return a query builder. ` +
+            `Disabled null or undefined queries are not supported.`
+        : codedMessage(104),
     )
   }
   return { kind: `query`, query: value as QueryBuilder<TContext> }
@@ -406,7 +410,9 @@ export function assertLiveQueryWindowManyResult(
 ): void {
   if (isSingleResultCollection(collection)) {
     throw new Error(
-      devBuild() && process.env.NODE_ENV !== `production` ? `useLiveInfiniteQuery: Infinite queries do not support single-result queries. Remove .findOne().` : codedMessage(105),
+      devBuild() && process.env.NODE_ENV !== `production`
+        ? `useLiveInfiniteQuery: Infinite queries do not support single-result queries. Remove .findOne().`
+        : codedMessage(105),
     )
   }
 }
@@ -434,8 +440,10 @@ export function getLiveQueryWindowCollectionWarning(
   assertLiveQueryWindowManyResult(collection)
   if (!isLiveQueryWindowCollection(collection)) {
     throw new Error(
-      devBuild() && process.env.NODE_ENV !== `production` ? `useLiveInfiniteQuery: Pre-created live query collection must have an ORDER BY (orderBy) clause for infinite pagination to work. ` +
-        `Please add .orderBy() to your createLiveQueryCollection query.` : codedMessage(106),
+      devBuild() && process.env.NODE_ENV !== `production`
+        ? `useLiveInfiniteQuery: Pre-created live query collection must have an ORDER BY (orderBy) clause for infinite pagination to work. ` +
+            `Please add .orderBy() to your createLiveQueryCollection query.`
+        : codedMessage(106),
     )
   }
 

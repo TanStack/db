@@ -229,7 +229,9 @@ export function parseWhereExpression<T = any>(
       return onUnknownOperator(name, args)
     }
     throw new Error(
-      devBuild() && process.env.NODE_ENV !== `production` ? `No handler provided for operator: ${name}. Available handlers: ${Object.keys(handlers).join(`, `)}` : codedMessage(136, { name, handlers: Object.keys(handlers) }),
+      devBuild() && process.env.NODE_ENV !== `production`
+        ? `No handler provided for operator: ${name}. Available handlers: ${Object.keys(handlers).join(`, `)}`
+        : codedMessage(136, { name, handlers: Object.keys(handlers) }),
     )
   }
 
@@ -277,7 +279,9 @@ export function parseOrderByExpression(
 
     if (!field) {
       throw new Error(
-        devBuild() && process.env.NODE_ENV !== `production` ? `ORDER BY expression must be a field reference, got: ${clause.expression.type}` : codedMessage(137, { type: clause.expression.type }),
+        devBuild() && process.env.NODE_ENV !== `production`
+          ? `ORDER BY expression must be a field reference, got: ${clause.expression.type}`
+          : codedMessage(137, { type: clause.expression.type }),
       )
     }
 
@@ -350,7 +354,9 @@ export function extractSimpleComparisons(
         const [arg] = e.args
         if (!arg || arg.type !== `func`) {
           throw new Error(
-            devBuild() && process.env.NODE_ENV !== `production` ? `extractSimpleComparisons requires a comparison or null check inside 'not' operator.` : codedMessage(138),
+            devBuild() && process.env.NODE_ENV !== `production`
+              ? `extractSimpleComparisons requires a comparison or null check inside 'not' operator.`
+              : codedMessage(138),
           )
         }
 
@@ -368,7 +374,9 @@ export function extractSimpleComparisons(
             })
           } else {
             throw new Error(
-              devBuild() && process.env.NODE_ENV !== `production` ? `extractSimpleComparisons requires a field reference for '${arg.name}' operator.` : codedMessage(139, { name: arg.name }),
+              devBuild() && process.env.NODE_ENV !== `production`
+                ? `extractSimpleComparisons requires a field reference for '${arg.name}' operator.`
+                : codedMessage(139, { name: arg.name }),
             )
           }
           return
@@ -389,7 +397,9 @@ export function extractSimpleComparisons(
             })
           } else {
             throw new Error(
-              devBuild() && process.env.NODE_ENV !== `production` ? `extractSimpleComparisons requires simple field-value comparisons. Found complex expression for 'not(${arg.name})' operator.` : codedMessage(140, { name: arg.name }),
+              devBuild() && process.env.NODE_ENV !== `production`
+                ? `extractSimpleComparisons requires simple field-value comparisons. Found complex expression for 'not(${arg.name})' operator.`
+                : codedMessage(140, { name: arg.name }),
             )
           }
           return
@@ -397,7 +407,9 @@ export function extractSimpleComparisons(
 
         // NOT can only wrap simple comparisons or null checks
         throw new Error(
-          devBuild() && process.env.NODE_ENV !== `production` ? `extractSimpleComparisons does not support 'not(${arg.name})'. NOT can only wrap comparison operators (eq, gt, gte, lt, lte, in) or null checks (isNull, isUndefined).` : codedMessage(141, { name: arg.name }),
+          devBuild() && process.env.NODE_ENV !== `production`
+            ? `extractSimpleComparisons does not support 'not(${arg.name})'. NOT can only wrap comparison operators (eq, gt, gte, lt, lte, in) or null checks (isNull, isUndefined).`
+            : codedMessage(141, { name: arg.name }),
         )
       }
 
@@ -420,7 +432,9 @@ export function extractSimpleComparisons(
       ]
       if (unsupportedOps.includes(e.name)) {
         throw new Error(
-          devBuild() && process.env.NODE_ENV !== `production` ? `extractSimpleComparisons does not support '${e.name}' operator. Use parseWhereExpression with custom handlers for complex expressions.` : codedMessage(142, { name: e.name }),
+          devBuild() && process.env.NODE_ENV !== `production`
+            ? `extractSimpleComparisons does not support '${e.name}' operator. Use parseWhereExpression with custom handlers for complex expressions.`
+            : codedMessage(142, { name: e.name }),
         )
       }
 
@@ -440,7 +454,9 @@ export function extractSimpleComparisons(
           })
         } else {
           throw new Error(
-            devBuild() && process.env.NODE_ENV !== `production` ? `extractSimpleComparisons requires a field reference for '${e.name}' operator.` : codedMessage(143, { name: e.name }),
+            devBuild() && process.env.NODE_ENV !== `production`
+              ? `extractSimpleComparisons requires a field reference for '${e.name}' operator.`
+              : codedMessage(143, { name: e.name }),
           )
         }
         return
@@ -463,13 +479,17 @@ export function extractSimpleComparisons(
           })
         } else {
           throw new Error(
-            devBuild() && process.env.NODE_ENV !== `production` ? `extractSimpleComparisons requires simple field-value comparisons. Found complex expression for '${e.name}' operator.` : codedMessage(144, { name: e.name }),
+            devBuild() && process.env.NODE_ENV !== `production`
+              ? `extractSimpleComparisons requires simple field-value comparisons. Found complex expression for '${e.name}' operator.`
+              : codedMessage(144, { name: e.name }),
           )
         }
       } else {
         // Unknown operator
         throw new Error(
-          devBuild() && process.env.NODE_ENV !== `production` ? `extractSimpleComparisons encountered unknown operator: '${e.name}'` : codedMessage(145, { name: e.name }),
+          devBuild() && process.env.NODE_ENV !== `production`
+            ? `extractSimpleComparisons encountered unknown operator: '${e.name}'`
+            : codedMessage(145, { name: e.name }),
         )
       }
     }

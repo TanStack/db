@@ -138,12 +138,18 @@ export function createPacedMutations<
     if (transaction.state === `failed`) return transaction
     if (transaction.state !== `pending`) {
       throw new Error(
-        devBuild() && process.env.NODE_ENV !== `production` ? `Strategy callback called but transaction is in state "${transaction.state}". Expected "pending".` : codedMessage(107, { state: transaction.state }),
+        devBuild() && process.env.NODE_ENV !== `production`
+          ? `Strategy callback called but transaction is in state "${transaction.state}". Expected "pending".`
+          : codedMessage(107, { state: transaction.state }),
       )
     }
     const strategyCommit = strategyCommits.get(transaction)
     if (!strategyCommit)
-      throw new Error(devBuild() && process.env.NODE_ENV !== `production` ? `Paced transaction has no strategy-owned commit` : codedMessage(108))
+      throw new Error(
+        devBuild() && process.env.NODE_ENV !== `production`
+          ? `Paced transaction has no strategy-owned commit`
+          : codedMessage(108),
+      )
     const completion = strategyCommit()
     onStarted?.(completion)
     completion.catch(() => {

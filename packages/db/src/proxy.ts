@@ -127,7 +127,11 @@ function createMapSetIteratorHandler<T extends object>(
     if (methodName === `forEach`) {
       const callback = args[0]
       if (typeof callback !== `function`)
-        throw new TypeError(devBuild() && process.env.NODE_ENV !== `production` ? `forEach callback must be a function` : codedMessage(109))
+        throw new TypeError(
+          devBuild() && process.env.NODE_ENV !== `production`
+            ? `forEach callback must be a function`
+            : codedMessage(109),
+        )
       return copy.forEach((value, key) => {
         const tracked = track(value)
         callback.call(args[1], tracked, isMap ? key : tracked, collectionProxy)

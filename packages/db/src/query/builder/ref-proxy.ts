@@ -392,8 +392,10 @@ export function toExpression(value: any): BasicExpression<any> {
   const name = getWrapperExpressionName(value)
   if (name) {
     throw new Error(
-      devBuild() && process.env.NODE_ENV !== `production` ? `${name} cannot be used inside expressions (e.g., coalesce(), eq(), not()). ` +
-        `Use ${name} directly as a select field value instead.` : codedMessage(126, { name }),
+      devBuild() && process.env.NODE_ENV !== `production`
+        ? `${name} cannot be used inside expressions (e.g., coalesce(), eq(), not()). ` +
+            `Use ${name} directly as a select field value instead.`
+        : codedMessage(126, { name }),
     )
   }
   // Only constructed expressions are IR; user values may have the same fields.

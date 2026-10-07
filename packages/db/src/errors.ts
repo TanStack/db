@@ -601,9 +601,7 @@ export class InvalidSourceError extends QueryBuilderError {
 }
 
 export type SourceClauseContext =
-  | `from clause`
-  | `unionAll clause`
-  | `join clause`
+  `from clause` | `unionAll clause` | `join clause`
 
 export class InvalidSourceTypeError extends QueryBuilderError {
   constructor(context: SourceClauseContext, type: string) {

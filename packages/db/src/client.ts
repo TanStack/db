@@ -228,13 +228,17 @@ export function collectionOptions(
 
   if (!id) {
     throw new Error(
-      devBuild() && process.env.NODE_ENV !== `production` ? `collectionOptions requires a non-empty explicit id so the descriptor is stable across DbClient instances and SSR boundaries.` : codedMessage(88),
+      devBuild() && process.env.NODE_ENV !== `production`
+        ? `collectionOptions requires a non-empty explicit id so the descriptor is stable across DbClient instances and SSR boundaries.`
+        : codedMessage(88),
     )
   }
 
   if (typeof optionsOrId === `string` && !explicitFactory) {
     throw new Error(
-      devBuild() && process.env.NODE_ENV !== `production` ? `collectionOptions("${id}") requires a factory as its second argument.` : codedMessage(89, { id }),
+      devBuild() && process.env.NODE_ENV !== `production`
+        ? `collectionOptions("${id}") requires a factory as its second argument.`
+        : codedMessage(89, { id }),
     )
   }
 
@@ -255,8 +259,10 @@ export function collectionOptions(
     } else {
       if (owner && owner !== client) {
         throw new Error(
-          devBuild() && process.env.NODE_ENV !== `production` ? `Collection descriptor "${id}" was created from a concrete config that cannot be safely reused across DbClient instances. ` +
-            `Use collectionOptions("${id}", (client) => adapterCollectionOptions(...)) or an adapter options creator that supports DbClient materialization.` : codedMessage(90, { id }),
+          devBuild() && process.env.NODE_ENV !== `production`
+            ? `Collection descriptor "${id}" was created from a concrete config that cannot be safely reused across DbClient instances. ` +
+                `Use collectionOptions("${id}", (client) => adapterCollectionOptions(...)) or an adapter options creator that supports DbClient materialization.`
+            : codedMessage(90, { id }),
         )
       }
       owner = client
@@ -265,7 +271,9 @@ export function collectionOptions(
 
     if (materialized.id !== undefined && materialized.id !== id) {
       throw new Error(
-        devBuild() && process.env.NODE_ENV !== `production` ? `Collection descriptor "${id}" materialized a config with id "${materialized.id}". Descriptor and collection ids must match.` : codedMessage(91, { id, materializedId: materialized.id }),
+        devBuild() && process.env.NODE_ENV !== `production`
+          ? `Collection descriptor "${id}" materialized a config with id "${materialized.id}". Descriptor and collection ids must match.`
+          : codedMessage(91, { id, materializedId: materialized.id }),
       )
     }
 
@@ -333,7 +341,9 @@ export class DbClient {
     const dependency = this.getDependency<T>(key)
     if (dependency === undefined) {
       throw new Error(
-        devBuild() && process.env.NODE_ENV !== `production` ? `DbClient is missing the required "${key}" dependency. Pass it explicitly when constructing the client: new DbClient({ ${key} }).` : codedMessage(92, { key }),
+        devBuild() && process.env.NODE_ENV !== `production`
+          ? `DbClient is missing the required "${key}" dependency. Pass it explicitly when constructing the client: new DbClient({ ${key} }).`
+          : codedMessage(92, { key }),
       )
     }
     return dependency
@@ -756,7 +766,9 @@ export class DbClient {
     } else {
       record.fail(
         new Error(
-          devBuild() && process.env.NODE_ENV !== `production` ? `Dehydrated live query "${dehydratedQuery.queryHash}" has neither a snapshot nor a promise.` : codedMessage(93, { queryHash: dehydratedQuery.queryHash }),
+          devBuild() && process.env.NODE_ENV !== `production`
+            ? `Dehydrated live query "${dehydratedQuery.queryHash}" has neither a snapshot nor a promise.`
+            : codedMessage(93, { queryHash: dehydratedQuery.queryHash }),
         ),
       )
     }
