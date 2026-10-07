@@ -1,4 +1,4 @@
-import { hasCollectionOptionsBrand } from '../collection-options.js'
+import { hasCollectionOptionsBrandValue } from '../collection-options-brand.js'
 import { isRefProxy } from './builder/ref-proxy-identity.js'
 
 /*
@@ -96,11 +96,11 @@ export class CollectionRef extends BaseExpression {
 
   get descriptor():
     CollectionOptionsIdentity<any, string | number, any, any, any> | undefined {
-    return hasCollectionOptionsBrand(this.source) ? this.source : undefined
+    return hasCollectionOptionsBrandValue(this.source) ? this.source : undefined
   }
 
   get collection(): CollectionImpl {
-    if (!hasCollectionOptionsBrand(this.source)) return this.source
+    if (!hasCollectionOptionsBrandValue(this.source)) return this.source
     throw new Error(
       `Collection descriptor "${this.alias}" requires a DbClient when the query is consumed. In React, wrap the consumer in <DbProvider> or pass a client.`,
     )
