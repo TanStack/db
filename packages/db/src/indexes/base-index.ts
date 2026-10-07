@@ -301,6 +301,18 @@ export abstract class BaseIndex<
       compileSingleRowExpression(this.expression))
     return evaluator(item as Record<string, unknown>)
   }
+
+  /** The indexed value of a row being added. A throwing expression fails the write. */
+  protected evaluateAddedValue(key: TKey, item: any): any {
+    try {
+      return this.evaluateIndexExpression(item)
+    } catch (error) {
+      throw new Error(
+        `Failed to evaluate index expression for key ${key}: ${error}`,
+        { cause: error },
+      )
+    }
+  }
 }
 
 function rangeValueDomain(value: unknown): string | undefined {

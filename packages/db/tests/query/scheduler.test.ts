@@ -985,19 +985,17 @@ describe(`live query scheduler`, () => {
       })
     }).toThrowError(`boom`)
 
+    // The failed callback restores its authored mutations before its scope
+    // flushes. No stale graph job may later publish the abandoned join.
+    expect(users.get(31)).toBeUndefined()
+    expect(tasks.get(41)).toBeUndefined()
+    expect([...assignments]).toEqual([])
+    const batchesAtThrow = [...recorder.batches]
     tx.rollback()
-
-    const batchesBeforeFlush = recorder.batches.length
     transactionScopedScheduler.flush(tx.id)
-    expect(recorder.batches.length).toBeGreaterThanOrEqual(batchesBeforeFlush)
-    if (recorder.batches.length > batchesBeforeFlush) {
-      const latestBatch = recorder.batches.at(-1)!
-      expect(latestBatch[0]?.type).toBe(`delete`)
-    }
+    expect(recorder.batches).toEqual(batchesAtThrow)
     expect(hasPendingJobs(transactionScopedScheduler, tx.id)).toBe(false)
-    // We emit the optimistic insert and, after the explicit rollback, possibly a
-    // compensating delete – but no duplicate inserts.
-    expect(recorder.batches[0]![0]).toMatchObject({ type: `insert` })
+    expect([...assignments]).toEqual([])
 
     recorder.unsubscribe()
   })
