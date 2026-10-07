@@ -98,7 +98,7 @@ const activeUsers = createCollection(liveQueryCollectionOptions({
         name: user.name,
       })),
   getKey: (user) => user.id, // Optional: uses stream key if not provided
-  startSync: true, // Optional: starts sync immediately
+  startSync: true, // Optional: starts the live query's sync run immediately
 }))
 ```
 | Option | Type | Description |
@@ -107,7 +107,7 @@ const activeUsers = createCollection(liveQueryCollectionOptions({
 | `query` | `QueryBuilder` or function | The query definition, this is either a `Query` instance or a function that returns a `Query` instance. |
 | `getKey` | `(item) => string \| number` (optional) | A function that extracts a unique key from each row. If not provided, the stream's internal key will be used. For simple cases this is the key from the parent collection, but in the case of joins, the auto-generated key will be a composite of the parent keys. Using `getKey` is useful when you want to use a specific key from a parent collection for the resulting collection. |
 | `schema` | `Schema` (optional) | Optional schema for validation |
-| `startSync` | `boolean` (optional) | Whether to start syncing immediately. Defaults to `true`. |
+| `startSync` | `boolean` (optional) | Whether to start the live query's sync run immediately. Defaults to `false`. A live query reads local memory: until it has a subscriber or a preload, it shows only rows its source collections already hold and starts no network work for them. |
 | `gcTime` | `number` (optional) | Garbage collection time in milliseconds. Defaults to `5000` (5 seconds). |
 
 ### Convenience Function

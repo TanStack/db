@@ -77,6 +77,15 @@ type CollectionSubscriptionOptions = {
   /** Callback for subset-load failures scoped to this subscription. */
   onLoadSubsetError?: (event: SubscriptionLoadSubsetErrorEvent) => void
   truncateReplayPublication?: TruncateReplayPublicationControl
+  /**
+   * Whether this subscription defers provider work: it starts no idle source
+   * sync run and no acquisition attempt until its acquisition resumes. A
+   * live-query Collection defers its source subscriptions until it has a
+   * subscriber or a preload in its current sync run.
+   */
+  deferAcquisition?: boolean
+  /** Called once when deferred acquisition resumes. */
+  onResumeAcquisition?: () => void
 }
 
 type TruncateReplayPublicationControl = Readonly<{
@@ -199,6 +208,7 @@ export class CollectionSubscription
   >()
   private truncateReplacementPending = false
   private unsubscribed = false
+  private defersAcquisition: boolean
 
   public get status(): SubscriptionStatus {
     return this._status
@@ -214,6 +224,7 @@ export class CollectionSubscription
     private options: CollectionSubscriptionOptions,
   ) {
     super()
+    this.defersAcquisition = options.deferAcquisition === true
     if (options.onUnsubscribe) {
       this.on(`unsubscribed`, options.onUnsubscribe)
     }
@@ -275,6 +286,27 @@ export class CollectionSubscription
     )
   }
 
+  /** Whether this subscription still defers provider work. */
+  public isDeferringAcquisition(): boolean {
+    return this.defersAcquisition
+  }
+
+  /**
+   * Resume deferred acquisition: provider work may now start. This may start
+   * an idle source Collection's sync run, then starts acquisition attempts for
+   * the on-demand demand that stayed detached while acquisition was deferred.
+   */
+  public resumeDeferredAcquisition(): void {
+    if (!this.defersAcquisition || this.unsubscribed) return
+    // Start the source first: if its start throws, this subscription still
+    // defers rather than claiming acquisition it never began.
+    this.options.onResumeAcquisition?.()
+    this.defersAcquisition = false
+    if (this.collection.status !== `idle`) {
+      this.restartDetachedDemands(this.collection._sync.getSyncRunGeneration())
+    }
+  }
+
   /** Detach logical demand from work owned by a discarded sync run. */
   private handleCollectionCleanup(): void {
     this.discardTruncateReplay()
@@ -302,6 +334,9 @@ export class CollectionSubscription
   private restartDetachedDemands(syncRunGeneration: number): void {
     if (
       this.unsubscribed ||
+      // Deferred demand stays detached until acquisition resumes, even when
+      // another consumer starts the source.
+      this.defersAcquisition ||
       !this.isSyncRunGenerationCurrent(syncRunGeneration)
     ) {
       return
@@ -357,7 +392,12 @@ export class CollectionSubscription
   private handleTruncate() {
     // Without a loader, replay only reconciles rows retained across cleanup.
     const hasLoadSubsetHandler = this.collection._sync.syncLoadSubsetFn !== null
-    const demandsToReload = hasLoadSubsetHandler ? [...this.subsetDemands] : []
+    // Deferred demand never acquired, so a truncate gives it nothing to
+    // reload; it acquires the replacement rows when acquisition resumes.
+    const demandsToReload =
+      hasLoadSubsetHandler && !this.defersAcquisition
+        ? [...this.subsetDemands]
+        : []
 
     // Retained rows still need the committed replacement even without demand.
     if (demandsToReload.length === 0 && this.stalePublishedRows.size === 0) {
@@ -1001,6 +1041,9 @@ export class CollectionSubscription
     }
     if (
       this.collection.status === `cleaned-up` ||
+      // A deferring subscription starts no acquisition attempt until it resumes.
+      (this.defersAcquisition &&
+        this.collection.config.syncMode === `on-demand`) ||
       // Ready/error callbacks can run before sync returns its loader. Idle
       // deferred starts still acquire through the sync manager's queue.
       (this.collection.config.syncMode === `on-demand` &&

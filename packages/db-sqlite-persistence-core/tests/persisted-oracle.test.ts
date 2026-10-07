@@ -13991,13 +13991,16 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
       createLiveQueryCollection({
         query: (q) =>
           q.from({ todo: source }).where(({ todo }) => eq(todo.id, `1`)),
-        startSync: true,
       })
     const owner = query()
     let sibling: ReturnType<typeof query> | undefined
     try {
       await owner.preload()
       sibling = query()
+      // A live query is ready only after a subscriber or a preload asks for
+      // its data. Its first preload starts its sync run, so the retained demand
+      // makes it ready before that call returns.
+      void sibling.preload()
       expect(sibling.status).toBe(`ready`)
       expect(sibling.toArray.map(({ id }) => id)).toEqual([`1`])
     } finally {
@@ -14022,13 +14025,16 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
       createLiveQueryCollection({
         query: (q) =>
           q.from({ todo: source }).where(({ todo }) => eq(todo.id, `1`)),
-        startSync: true,
       })
     const owner = query()
     let sibling: ReturnType<typeof query> | undefined
     try {
       await owner.preload()
       sibling = query()
+      // A live query is ready only after a subscriber or a preload asks for
+      // its data. Its first preload starts its sync run, so the retained demand
+      // makes it ready before that call returns.
+      void sibling.preload()
       expect(sibling.status).toBe(`ready`)
       expect(sibling.toArray.map(({ id }) => id)).toEqual([`1`])
     } finally {

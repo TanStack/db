@@ -1094,6 +1094,15 @@ export interface SubscribeChangesOptions<
   /** Pre-compiled expression for filtering changes */
   whereExpression?: BasicExpression<boolean>
   /**
+   * Whether this subscription defers provider work. It keeps the Collection
+   * alive and reads its local rows, but starts no idle source sync run and no
+   * acquisition attempt until `subscription.resumeDeferredAcquisition()`. A
+   * live-query Collection defers its source subscriptions until it has a
+   * subscriber or a preload in its current sync run.
+   * @internal
+   */
+  deferAcquisition?: boolean
+  /**
    * Listener for subscription status changes.
    * Registered BEFORE any snapshot is requested, ensuring no status transitions are missed.
    * @internal

@@ -178,7 +178,11 @@ function poolConfig(
 
 export function resolveLiveQueryValue(
   value: unknown,
-  { gcTime, pool = true }: { gcTime?: number; pool?: boolean } = {},
+  {
+    gcTime,
+    pool = true,
+    startSync = true,
+  }: { gcTime?: number; pool?: boolean; startSync?: boolean } = {},
 ): Collection<any, any, any> | null {
   if (value === undefined || value === null) return null
   if (isCollection(value)) {
@@ -188,14 +192,14 @@ export function resolveLiveQueryValue(
   if (value instanceof BaseQueryBuilder) {
     return (
       (pool ? createPooledLiveQuery(value, { gcTime }) : undefined) ??
-      createLiveQueryCollection({ query: value, startSync: true, gcTime })
+      createLiveQueryCollection({ query: value, startSync, gcTime })
     )
   }
   if (typeof value === `object`) {
     const config = value as LiveQueryCollectionConfig<any>
     return (
       (pool ? poolConfig(config, gcTime) : undefined) ??
-      createLiveQueryCollection({ startSync: true, gcTime, ...config })
+      createLiveQueryCollection({ startSync, gcTime, ...config })
     )
   }
   throw new Error(
