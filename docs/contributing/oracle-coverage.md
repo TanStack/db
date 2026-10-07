@@ -289,14 +289,21 @@ one upsert. A held `deferDataRefresh` barrier adds a request checkpoint after
 release; the pre-review implementation made an unwanted request there. A
 derived-`select` witness checks that a direct write cannot replace an `edges`
 array with node objects. It permits a stale cache row while requiring a valid
-response envelope and the accepted public row. The load-lifecycle oracle
+response envelope and the accepted public row. A direct-insert/unload witness
+keeps a manually written row after its queried peer retires; assigning every
+insert to the active subset fails that public-row checkpoint. Existing sibling
+cache witnesses reject retaining inactive entries under the Collection's base
+query-key prefix, including entries seeded before sync starts. The load-lifecycle oracle
 separately owns explicit refetch settlement; it does not require a fetch to
 become authoritative merely because a direct write occurred. These bounded
 witnesses do not establish exact Query cache membership, ordering, or window
 replacement after a direct write. The ownership oracle owns future scoped-cache
 witnesses; the cursor-pagination oracle owns windowed receiving cases. The
 offline-transactions owner still needs a full reconnect-replay witness for its
-real `deferDataRefresh` premise. A caller using direct writes must accept the
+real `deferDataRefresh` premise. The ownership oracle also owns a later-remount
+witness after an inactive prefetched entry is evicted, and direct-insert
+retention across persisted restore remains with its persisted-owner histories.
+A caller using direct writes must accept the
 scoped-cache limits or request an explicit refetch.
 
 The [React source ID reuse oracle](https://github.com/TanStack/db/blob/main/packages/react-db/tests/source-id-reuse-oracle.test.tsx) ([review](oracle-reviews/issue-1991-react-source-id.md))

@@ -97,3 +97,51 @@ bounded by these histories. Under ORC-014, `OfflineExecutor` supplies a real
 `deferDataRefresh` barrier during reconnect replay, but no full
 OfflineExecutor receiving witness ran. The offline-transactions owner retains
 that integration check in the coverage map.
+
+## CodeRabbit review follow-up
+
+CodeRabbit review `5444119327` examined commit `c173d4bdc8e5fc2af360f65549ab362ddffd0db9`.
+Its three comments are recorded in source order:
+
+| ID | Claim | Verdict and action |
+| --- | --- | --- |
+| CR1 | The changeset implies every active on-demand cache is patched. | Confirmed; fixed the release wording to exclude derived `select` projections. |
+| CR2 | Direct inserts have no Query row owner and can remain after subset unload; add ownership or retention. | The observation is true. It is the accepted direct-write contract: a caller may surgically insert a Collection row without establishing Query subset membership. The new ownership-oracle witness keeps that row after its fetched peer retires and removes it by explicit `writeDelete`. Documentation now names the caller's retention responsibility. |
+| CR3 | A direct write evicts an unobserved cache entry under the base prefix even if this Collection has not yet observed it; gate eviction on `ownedCacheQueries`. | The observation is true, but the proposed gate contradicts the documented query-key prefix convention and the existing inactive-sibling oracle. A matching-prefix cache entry can seed a later subset; keeping stale data would let it revive a deleted row. The documentation and PR description now say matching-prefix entries rather than collection-owned entries. |
+
+For CR2, the legal history loads one subset, accepts a direct insert, unloads
+the subset, then explicitly deletes the inserted row. A standalone expected-key
+set keeps the direct row and retires the fetched row. The real QueryClient and
+public `writeInsert`/`writeDelete` path reaches all three public-row
+checkpoints without a new provider call. A hostile mutant that assigned every
+accepted direct key to the active Query owner failed at unload: it returned no
+rows where the reference required the direct row. The restored implementation
+passed. This bounded witness does not settle the lifetime of unowned direct
+rows across persisted restore or every later Query result.
+
+For CR3, three existing ownership-oracle cases establish that direct writes
+evict inactive matching-prefix entries, including pre-sync and restart seeds.
+They passed on the reviewed commit. CodeRabbit's proposed `ownedCacheQueries`
+gate was run as a hostile mutant; all three failed at their cache observation
+because the stale sibling remained. Restoring the implementation made them
+pass. The check concerns Query cache entries under the Collection's declared
+prefix, not arbitrary unrelated keys elsewhere in the QueryClient. A later
+remount that proves the stale row would become public is a useful further
+witness for the ownership oracle; the current tests assert the cache boundary.
+
+ORC-001 rests on the prior direct-write promise and the documented query-key
+prefix convention. ORC-002 uses an independent key set for CR2, while CR3's
+expected cache absence follows from the prefix contract and the authored
+stale response. ORC-003 places the direct-insert law, history, path, and
+checkpoints beside its executable witness. ORC-004, ORC-007, and ORC-008 do
+not apply: these are fixed histories and no reference-model state changed.
+ORC-005 reaches real QueryClient and public Collection observations. ORC-006
+has the two assertion-failing hostile mutants described above. ORC-009 uses
+the glossary's Collection, row, and subset-owner terms. ORC-010 uses the
+existing aggregate cleanup harness. ORC-011 adds no second formulation:
+neither review claim named a fault the independent key set or authored cache
+response could share with production. ORC-012 limits the claims to the named
+histories and records the remount gap in the coverage map. ORC-013's nearby
+distinction is fetched versus directly inserted row for CR2, and active versus
+inactive matching-prefix entries for CR3. ORC-014 makes no cross-provider
+claim; the boundary is the real QueryClient with an authored query function.

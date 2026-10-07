@@ -3176,8 +3176,10 @@ export function queryCollectionOptions(
   }
 
   // A direct write patches keys already present in active on-demand cache
-  // entries. It cannot infer membership or window replacements from one row.
-  // Unobserved inactive entries are removed so a later owner fetches its scope.
+  // entries. It cannot infer membership or window replacements from one row,
+  // so inserted rows acquire no subset owner. Inactive entries under the base
+  // key are removed so a later owner fetches its scope instead of reviving
+  // stale rows. Unrelated Query entries belong outside that key prefix.
   // Eager collections retain their full-result cache patch.
   const writeDirectCache = (
     getItems: (keys?: Array<string | number>) => Array<any>,

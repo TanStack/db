@@ -7012,6 +7012,42 @@ describe(`query collection ownership lifecycle`, () => {
   })
 
   /**
+   * A direct insert changes the Collection independently of Query result
+   * ownership. The previous direct-write contract permits this surgical
+   * change even though the adapter cannot infer a subset owner for the row.
+   * In this legal history, the fetched row belongs to one loaded subset and
+   * the direct row belongs to no subset. The independent expected-key set
+   * removes only the fetched row when that subset unloads. The production
+   * driver uses the public write utilities and a real QueryClient; after the
+   * accepted write, unload, and explicit delete, compare public Collection
+   * keys and provider calls. This does not promise a bounded lifetime for an
+   * unowned direct row that the caller never deletes.
+   */
+  it(`keeps a direct insert after its queried subset unloads`, async () => {
+    const { collection, queryFn } = createOwnershipFixture({
+      id: `direct-insert-without-query-owner`,
+      results: [[shared]],
+    })
+    const subset = { where: eq(`category`, `shared`) }
+    const inserted = { id: `direct`, category: `shared`, name: `Direct` }
+    const expectedKeys = new Set([shared.id])
+
+    await collection._sync.loadSubset(subset)
+    await collection.utils.writeInsert(inserted)
+    expectedKeys.add(inserted.id)
+    expect(rows(collection)).toEqual([...expectedKeys].sort())
+
+    collection._sync.unloadSubset(subset)
+    expectedKeys.delete(shared.id)
+    expect(rows(collection)).toEqual([...expectedKeys].sort())
+    expect(queryFn).toHaveBeenCalledOnce()
+
+    await collection.utils.writeDelete(inserted.id)
+    expectedKeys.delete(inserted.id)
+    expect(rows(collection)).toEqual([...expectedKeys].sort())
+  })
+
+  /**
    * Direct writes previously promised to change the synced rows without an
    * automatic Query refetch. The pre-#1826 user guide and QueryCollectionUtils
    * API comments stated that promise. It lets a caller apply one server event
