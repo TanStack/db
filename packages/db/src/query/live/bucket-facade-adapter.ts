@@ -34,17 +34,16 @@ type FacadeEntry = {
   currentOrder: Map<string | number, string | undefined>
 }
 
+type SnapshotRow = {
+  key: string | number
+  value: object
+  order: string | undefined
+}
+
 type FacadeSnapshot = {
   activeBuckets: Map<string, Set<string>>
   entries: Map<string, Map<string, FacadeEntry>>
-  rows: Map<
-    FacadeEntry,
-    Array<{
-      key: string | number
-      value: object
-      order: string | undefined
-    }>
-  >
+  rows: Map<FacadeEntry, Array<SnapshotRow>>
 }
 
 export type FacadePublication = {
@@ -104,9 +103,12 @@ export class BucketFacadeAdapter {
     const snapshot = this.snapshot()
     const deferredEntries = new Set<FacadeEntry>()
     const publications: Array<PublicationDeferral> = []
+    // Every write path defers an entry before its first write, so copy the
+    // entry's rows there: a rollback reads only the entries the flush wrote.
     const deferPublication = (entry: FacadeEntry) => {
       if (deferredEntries.has(entry)) return
       deferredEntries.add(entry)
+      snapshot.rows.set(entry, this.copyRows(entry))
       publications.push(entry.collection._deferPublication())
     }
     const newBaselines: Array<FacadeEntry> = []
@@ -226,27 +228,15 @@ export class BucketFacadeAdapter {
     rows.set(key, change)
   }
 
+  private copyRows(entry: FacadeEntry): Array<SnapshotRow> {
+    return [...entry.collection._state.syncedData].map(([key, value]) => ({
+      key,
+      value,
+      order: entry.currentOrder.get(key),
+    }))
+  }
+
   private snapshot(): FacadeSnapshot {
-    const rows = new Map<
-      FacadeEntry,
-      Array<{
-        key: string | number
-        value: object
-        order: string | undefined
-      }>
-    >()
-    for (const byBucket of this.entries.values()) {
-      for (const entry of byBucket.values()) {
-        rows.set(
-          entry,
-          [...entry.collection._state.syncedData].map(([key, value]) => ({
-            key,
-            value,
-            order: entry.currentOrder.get(key),
-          })),
-        )
-      }
-    }
     return {
       activeBuckets: new Map(
         [...this.activeBuckets].map(([edgeId, buckets]) => [
@@ -260,7 +250,7 @@ export class BucketFacadeAdapter {
           new Map(byBucket),
         ]),
       ),
-      rows,
+      rows: new Map(),
     }
   }
 
