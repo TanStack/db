@@ -233,7 +233,12 @@ export class CollectionMutationsManager<
     transaction.applyMutations(mutations)
     // The Collection owns the request before its handler can write through
     // sync, so a confirmation written by the handler waits for settlement.
-    this.state.transactions.set(transaction.id, transaction)
+    // A rejection the caller never observes is not an unhandled rejection;
+    // the caller reads it from `isPersisted` or `when('settled')`.
+    if (this.state.transactions.get(transaction.id) !== transaction) {
+      this.state.transactions.set(transaction.id, transaction)
+      transaction.isPersisted.promise.catch(() => undefined)
+    }
     this.state.recomputeOptimisticState(true)
   }
 
