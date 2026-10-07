@@ -264,6 +264,7 @@ type OwnershipFixtureOptions = {
   syncMode?: `eager` | `on-demand`
   customHash?: boolean
   staleTime?: number
+  persistedGcTime?: number
   metadataRecorder?: MetadataRecorder
   setupMetadata?: (metadata: SyncMetadataApi<string | number>) => void
   scanPersistedRows?: () => Promise<
@@ -1026,6 +1027,7 @@ function createOwnershipFixture({
   scanPersistedRows,
   customHash,
   staleTime,
+  persistedGcTime,
 }: OwnershipFixtureOptions): OwnershipFixture {
   const queryClient = createQueryClient(customHash, staleTime)
   const queryFn = vi.fn<() => Promise<Array<Item>>>()
@@ -1041,6 +1043,7 @@ function createOwnershipFixture({
     getKey,
     syncMode,
     startSync: true,
+    persistedGcTime,
   })
   const originalSync = baseOptions.sync
   let pendingSetup = setupMetadata
@@ -7720,6 +7723,63 @@ describe(`query collection ownership lifecycle`, () => {
   })
 
   /**
+   * Persisted retention may keep an unfinished Query after its final observer
+   * lease ends. Its fetch-start position must survive that interval so a later
+   * lease can compare the request with a direct write. Once the detached fetch
+   * settles or its Query leaves the cache, no request can reuse that position.
+   * The reference holds one position at unload and zero at either terminal
+   * checkpoint. The driver records the same map as the retirement witness.
+   */
+  it.each([`settlement`, `cache removal`] as const)(
+    `retires a persisted Query's fetch-start position after detached %s`,
+    async (ending) => {
+      const id = `retained-fetch-start-retirement`
+      const queryHash = hashKey([id])
+      const pending = createDeferred<Array<Item>>()
+      const { collection, queryClient, queryFn } = createOwnershipFixture({
+        id,
+        results: [pending.promise],
+        persistedGcTime: Number.POSITIVE_INFINITY,
+        scanPersistedRows: () => Promise.resolve([]),
+      })
+      const originalSet = Map.prototype.set
+      const stamped = new Set<Map<unknown, unknown>>()
+      const setSpy = vi
+        .spyOn(Map.prototype, `set`)
+        .mockImplementation(function (
+          this: Map<unknown, unknown>,
+          key: unknown,
+          value: unknown,
+        ) {
+          if (key === queryHash && value === 0) stamped.add(this)
+          return originalSet.call(this, key, value)
+        })
+      const load = Promise.resolve(collection._sync.loadSubset({}))
+      void load.catch(() => undefined)
+      try {
+        await vi.waitFor(() => expect(queryFn).toHaveBeenCalledOnce())
+      } finally {
+        setSpy.mockRestore()
+      }
+      expect(stamped.size).toBe(1)
+      const fetchStarts = [...stamped][0]!
+      const query = queryClient.getQueryCache().find({ queryKey: [id] })!
+      collection._sync.unloadSubset({})
+      expect(query.state.fetchStatus).toBe(`fetching`)
+      expect(fetchStarts.has(queryHash)).toBe(true)
+      if (ending === `settlement`) {
+        pending.resolve([])
+        await vi.waitFor(() => expect(query.state.fetchStatus).toBe(`idle`))
+      } else {
+        queryClient.removeQueries({ queryKey: [id], exact: true })
+      }
+      expect(fetchStarts.has(queryHash)).toBe(false)
+      pending.resolve([])
+      await load.catch(() => undefined)
+    },
+  )
+
+  /**
    * An explicit refetch after a direct write asks the provider for a result
    * newer than that write. The reference is request order: a request begun
    * before the write cannot discharge the later refetch, even when Query Core
@@ -7769,6 +7829,60 @@ describe(`query collection ownership lifecycle`, () => {
     expect(queryFn).toHaveBeenCalledTimes(2)
     expect(collection.has(`x`)).toBe(false)
     await load.catch(() => undefined)
+  })
+
+  /**
+   * Retiring a subset can retain its persisted rows while Query Core keeps an
+   * unfinished, empty-cache request. Reacquiring that subset does not make the
+   * old request newer. The reference is request order: after an accepted direct
+   * delete, an explicit refetch must start a post-write request, and its public
+   * settlement must observe that request's rows. Without a later write, the
+   * refetch may reuse the request. Hold it across unload and reacquisition in
+   * both histories to distinguish this from an ordinary active fetch. This
+   * controlled Query Core driver does not model a native SQLite adapter.
+   */
+  it.each([
+    {
+      name: `starts a post-write refetch after reacquiring a retained in-flight Query`,
+      writeAfterStart: true,
+      requestCount: 2,
+    },
+    {
+      name: `reuses a retained in-flight Query without a later write`,
+      writeAfterStart: false,
+      requestCount: 1,
+    },
+  ])(`$name`, async ({ writeAfterStart, requestCount }) => {
+    const id = `retained-post-write-refetch`
+    const stale = { ...shared, name: `Stale` }
+    const first = createDeferred<Array<Item>>()
+    const { collection, queryClient, queryFn } = createOwnershipFixture({
+      id,
+      results: [first.promise, []],
+      persistedGcTime: Number.POSITIVE_INFINITY,
+      scanPersistedRows: () => Promise.resolve([]),
+    })
+
+    await collection.utils.writeInsert(shared)
+    const initialLoad = Promise.resolve(collection._sync.loadSubset({}))
+    void initialLoad.catch(() => undefined)
+    await vi.waitFor(() => expect(queryFn).toHaveBeenCalledTimes(1))
+    const query = queryClient.getQueryCache().find({ queryKey: [id] })!
+    collection._sync.unloadSubset({})
+    expect(query.state.fetchStatus).toBe(`fetching`)
+    expect(query.getObserversCount()).toBe(0)
+
+    const reacquiredLoad = Promise.resolve(collection._sync.loadSubset({}))
+    void reacquiredLoad.catch(() => undefined)
+    expect(queryClient.getQueryCache().find({ queryKey: [id] })).toBe(query)
+    expect(queryFn).toHaveBeenCalledTimes(1)
+    if (writeAfterStart) await collection.utils.writeDelete(shared.id)
+    const refetch = collection.utils.refetch({ throwOnError: true })
+    first.resolve([stale])
+    await refetch
+    expect(queryFn).toHaveBeenCalledTimes(requestCount)
+    if (writeAfterStart) expect(collection.has(shared.id)).toBe(false)
+    await Promise.allSettled([initialLoad, reacquiredLoad])
   })
 
   /**

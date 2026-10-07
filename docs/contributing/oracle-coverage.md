@@ -334,6 +334,13 @@ seams. They do not establish every derived response shape, arbitrary
 overlapping refetch schedule, native SQLite timing for the queued-result cut,
 or unbounded cache-memory growth. This owner retains those boundaries; the
 persisted direct-write oracle owns native durable-order receiving cases.
+The retained-Query witness holds an empty-cache fetch across subset unload and
+reacquisition. A direct delete then requires an explicit refetch to start a
+post-write request and preserve the deleted public row at settlement; without
+a later write, the same refetch may reuse the in-flight request. A separate
+checkpoint keeps the detached fetch-start position until that request settles
+and retires it afterward. These controlled histories do not establish every
+persisted adapter or Query cache-removal schedule.
 
 The [React source ID reuse oracle](https://github.com/TanStack/db/blob/main/packages/react-db/tests/source-id-reuse-oracle.test.tsx) ([review](oracle-reviews/issue-1991-react-source-id.md))
 checks that a mounted derived-identity hook rejects a different same-ID

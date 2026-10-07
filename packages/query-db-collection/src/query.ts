@@ -2775,7 +2775,10 @@ export function queryCollectionOptions(
         unsubscribes.get(hashedQueryKey)?.()
         unsubscribes.delete(hashedQueryKey)
         state.observers.delete(hashedQueryKey)
-        fetchStartGenerations.delete(hashedQueryKey)
+        // Query Core may keep an empty-cache fetch alive without an observer.
+        // A later lease can reuse that request, so keep its start position.
+        if (observer?.getCurrentQuery().state.fetchStatus !== `fetching`)
+          fetchStartGenerations.delete(hashedQueryKey)
         hashToQueryKey.delete(hashedQueryKey)
         queryRefCounts.set(hashedQueryKey, 0)
         return
@@ -2867,6 +2870,15 @@ export function queryCollectionOptions(
         // Ownership uses our stable key, not the Query client's optional
         // custom cache hash function.
         const hashedKey = hashKey(event.query.queryKey)
+        // A retained fetch no longer needs its start position once it settles
+        // or leaves the cache while the subset has no observer lease.
+        if (
+          !state.observers.has(hashedKey) &&
+          (event.type === `removed` ||
+            event.query.state.fetchStatus !== `fetching`)
+        ) {
+          fetchStartGenerations.delete(hashedKey)
+        }
         if (event.type === `removed`) {
           trackedCacheQueries.delete(event.query)
           // Only cleanup if this is OUR query (we track it)

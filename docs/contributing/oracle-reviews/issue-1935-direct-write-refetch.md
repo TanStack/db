@@ -145,3 +145,55 @@ histories and records the remount gap in the coverage map. ORC-013's nearby
 distinction is fetched versus directly inserted row for CR2, and active versus
 inactive matching-prefix entries for CR3. ORC-014 makes no cross-provider
 claim; the boundary is the real QueryClient with an authored query function.
+
+## Retained in-flight Query follow-up
+
+CodeRabbit review `5445111669` examined `afb8ac348c29983dc20e38375f4bb0ebe0f3c54f`.
+Its one inline finding was correct: persisted retention removed a fetch-start
+position while Query Core kept an empty-cache request in flight. A later subset
+lease reused that Query, so a direct delete followed by explicit refetch also
+reused the request that began before the delete. The new ownership-oracle
+witness failed on the reviewed implementation at the refetch-settlement
+checkpoint: expected two provider requests, observed one. The public row
+assertion also requires the accepted delete to survive settlement.
+
+The repair keeps the fetch-start position while the detached Query still
+fetches. Cache settlement or removal retires it when no observer owns that
+subset. The same retained-refetch witness passes after repair. Its nearby
+no-later-write history expects only one request, rejecting an implementation
+that cancels every retained fetch. A second witness observes the position at
+unload and after detached settlement or cache removal. Removing the terminal
+cleanup was a hostile mutant: the settlement branch failed by assertion with
+one position remaining, not by timeout or setup failure. The original deletion
+is the hostile control for the post-write request comparison.
+
+The law is the documented explicit-refetch contract: after an accepted direct
+write, an older in-flight request cannot satisfy a refetch that asks the server
+to reestablish exact results. The independent reference uses request order,
+not Query Core's cache-state or cancellation branches. Legal controlled
+histories here retain an empty-cache fetch across subset unload and
+reacquisition, with and without a later direct delete. The production driver
+uses the real QueryClient, on-demand Collection, persisted-retention metadata,
+and public `writeDelete` and `utils.refetch`. It compares provider calls and
+the public row at refetch settlement. The retirement witness observes the
+internal position only for the separate space law. These finite histories do
+not cover arbitrary custom hashes, every cache-removal schedule, or native
+SQLite persistence timing; the ownership oracle retains those Query-boundary
+cases in the coverage map.
+
+| Guide requirement | Review outcome |
+| --- | --- |
+| ORC-001 | The Query Collection guide promises a post-write explicit refetch despite an older in-flight request; the controlled history and external-provider limit are stated above. |
+| ORC-002 | Request order and the accepted direct delete determine the expected requests and public row independently of Query Core's fetch-state logic. The retirement count is a separate resource law. |
+| ORC-003 | The witness comments state law, limits, reference, legal history, real driver, observations, and settlement checkpoints beside the code. |
+| ORC-004 | Not triggered: the new histories are fixed controls, not a generated grammar coverage claim. |
+| ORC-005 | The tests call the real on-demand Collection and QueryClient; assertions compare provider requests and public rows at refetch settlement, plus position count at unload and terminal cuts. |
+| ORC-006 | The reviewed implementation failed the two-request assertion. A terminal-cleanup mutant failed the zero-position assertion. Both reached the intended checkpoint. |
+| ORC-007 | Not triggered: no important generated property changed. |
+| ORC-008 | Not triggered: the independent request-order rule introduces no stateful reference model. |
+| ORC-009 | The witness uses the glossary's Collection, observer lease, request, settlement, and generation terms; request order is the reference abstraction for the production fetch-start position. |
+| ORC-010 | Controlled promises are resolved in the test, and the existing harness cleans up the Collection and QueryClient. No shrinking or capture applies. |
+| ORC-011 | No shared semantic classifier is used to compute the request-order reference. A second formulation is not required for this bounded Query Core boundary. |
+| ORC-012 | This versioned record ties the repair to the reviewed commit and states both enforced and open boundaries. |
+| ORC-013 | A later direct delete requires two requests; no later write permits one. The original implementation fails the triggering case. |
+| ORC-014 | The claim is limited to real Query Core with controlled persisted metadata; it does not claim native SQLite timing. |
