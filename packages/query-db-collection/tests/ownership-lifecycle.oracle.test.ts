@@ -7147,6 +7147,151 @@ describe(`query collection ownership lifecycle`, () => {
     )
   })
 
+  /**
+   * A deferred refresh barrier is legal during offline replay. It delays
+   * application of fetched data, but it does not turn a direct write into a
+   * request. No Query request is in flight in this history, so the independent
+   * reference keeps the accepted event row. The history loads one on-demand
+   * Query, holds the barrier, writes, then releases it. It observes public
+   * rows and real queryFn calls after the accepted write and barrier release;
+   * it does not model the full OfflineExecutor.
+   */
+  it(`does not refetch a direct write after a deferred refresh barrier`, async () => {
+    const id = `deferred-direct-write-no-refetch`
+    const initial = { id: `row`, category: `A`, name: `Before` }
+    const queryClient = createQueryClient()
+    const queryFn = vi.fn(() => Promise.resolve([structuredClone(initial)]))
+    const collection = createCollection(
+      queryCollectionOptions<Item>({
+        id,
+        queryClient,
+        queryKey: [id],
+        queryFn,
+        getKey: (item) => item.id,
+        syncMode: `on-demand`,
+        startSync: true,
+      }),
+    )
+    const barrier = createDeferred<void>()
+    const release = barrier.promise.finally(() => {
+      collection.deferDataRefresh = null
+    })
+    cleanups.push(async () => {
+      barrier.resolve()
+      await release
+      await collection.cleanup()
+      queryClient.clear()
+    })
+
+    await collection._sync.loadSubset({})
+    expect(queryFn).toHaveBeenCalledTimes(1)
+    collection.deferDataRefresh = barrier.promise
+    await collection.utils.writeUpdate({ id: initial.id, name: `After` })
+    expect(collection.get(initial.id)?.name).toBe(`After`)
+    expect(queryFn).toHaveBeenCalledTimes(1)
+
+    barrier.resolve()
+    await release
+    for (let turn = 0; turn < 20; turn++) await Promise.resolve()
+    expect(queryFn).toHaveBeenCalledTimes(1)
+    expect(collection.get(initial.id)?.name).toBe(`After`)
+  })
+
+  /**
+   * A directly selected array is a writable part of the Query response.
+   * Unlike a derived projection, replacing this property preserves the
+   * envelope. The authored response predicts both the changed row and the
+   * unchanged metadata after an accepted on-demand direct write.
+   */
+  it(`patches a directly selected on-demand cache array without refetching`, async () => {
+    const id = `direct-select-direct-write`
+    const initial = { id: `row`, category: `A`, name: `Before` }
+    const response = { items: [initial], pageInfo: { hasNextPage: false } }
+    const queryClient = createQueryClient()
+    const queryFn = vi.fn(() => Promise.resolve(structuredClone(response)))
+    const collection = createCollection(
+      queryCollectionOptions({
+        id,
+        queryClient,
+        queryKey: [id],
+        queryFn,
+        select: (value: typeof response) => value.items,
+        getKey: (item: Item) => item.id,
+        syncMode: `on-demand`,
+        startSync: true,
+      }),
+    )
+    cleanups.push(async () => {
+      await collection.cleanup()
+      queryClient.clear()
+    })
+
+    await collection._sync.loadSubset({})
+    await collection.utils.writeUpdate({ id: initial.id, name: `After` })
+
+    expect(queryClient.getQueryData([id])).toEqual({
+      items: [{ ...initial, name: `After` }],
+      pageInfo: response.pageInfo,
+    })
+    expect(collection.get(initial.id)?.name).toBe(`After`)
+    expect(queryFn).toHaveBeenCalledTimes(1)
+  })
+
+  /**
+   * A derived select reads rows from an envelope but gives no inverse for a
+   * direct cache write. The documented edges-to-nodes projection is legal.
+   * A direct write may leave its Query cache row stale, but the cached value
+   * must remain a valid response for select. The response shape is the
+   * independent reference; the driver loads it through a real QueryClient,
+   * then checks the cache, public Collection row, and request count after the
+   * accepted write. This does not require an inverse projection.
+   */
+  it(`keeps a derived selected cache response valid after a direct write`, async () => {
+    const id = `derived-select-direct-write`
+    const initial = { id: `row`, category: `A`, name: `Before` }
+    const response = {
+      edges: [{ cursor: `cursor-1`, node: initial }],
+      pageInfo: { hasNextPage: false },
+    }
+    const select = (value: typeof response) =>
+      value.edges.map((edge) => edge.node)
+    const queryClient = createQueryClient()
+    const queryFn = vi.fn(() => Promise.resolve(structuredClone(response)))
+    const collection = createCollection(
+      queryCollectionOptions({
+        id,
+        queryClient,
+        queryKey: [id],
+        queryFn,
+        select,
+        getKey: (item: Item) => item.id,
+        syncMode: `on-demand`,
+        startSync: true,
+      }),
+    )
+    cleanups.push(async () => {
+      await collection.cleanup()
+      queryClient.clear()
+    })
+
+    await collection._sync.loadSubset({})
+    expect(queryClient.getQueryData([id])).toEqual(response)
+    await collection.utils.writeUpdate({ id: initial.id, name: `After` })
+
+    const cached = queryClient.getQueryData<typeof response>([id])!
+    expect(cached.edges).toEqual([
+      expect.objectContaining({
+        cursor: `cursor-1`,
+        node: expect.objectContaining({ id: initial.id }),
+      }),
+    ])
+    expect(select(cached)).toEqual([
+      expect.objectContaining({ id: initial.id }),
+    ])
+    expect(collection.get(initial.id)?.name).toBe(`After`)
+    expect(queryFn).toHaveBeenCalledTimes(1)
+  })
+
   it(`emits metadata for every owner of rows shared by overlapping queries`, async () => {
     const metadata: MetadataRecorder = { rows: new Map(), writes: [] }
     const { collection } = createOwnershipFixture({
@@ -7340,7 +7485,7 @@ describe(`query collection ownership lifecycle`, () => {
     expect(persistedOwners(metadata.rows, shared.id)).toEqual([queryHash])
   })
 
-  it(`uses the replacement Query when the cache is cleared before refetch`, async () => {
+  it(`uses the replacement Query when the cache is cleared before an explicit refetch`, async () => {
     const barrier = createDeferred<void>()
     const thirdFetch = createDeferred<Array<Item>>()
     const authoritative = { ...shared, name: `Authoritative` }
@@ -7360,7 +7505,9 @@ describe(`query collection ownership lifecycle`, () => {
 
       barrier.resolve()
       await barrierCompletion
+      const refresh = collection.utils.refetch({ throwOnError: true })
       await vi.waitFor(() => expect(queryFn).toHaveBeenCalledTimes(2))
+      await refresh
       for (let turn = 0; turn < 30; turn++) await Promise.resolve()
 
       expect(queryFn).toHaveBeenCalledTimes(2)

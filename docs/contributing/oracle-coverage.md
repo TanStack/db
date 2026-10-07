@@ -285,13 +285,19 @@ Its real QueryClient witness loads ten disjoint on-demand subsets, then checks
 `writeBatch`. After each accepted write it compares public live-query rows with
 an independent category filter and checks that no provider request started.
 The pre-repair implementation failed this request check with ten requests after
-one upsert. The load-lifecycle oracle separately owns explicit refetch
-settlement; it does not require a fetch to become authoritative merely because
-a direct write occurred. These bounded witnesses do not establish exact Query
-cache membership, ordering, or window replacement after a direct write. The
-ownership oracle owns future scoped-cache witnesses; the cursor-pagination
-oracle owns windowed receiving cases. A caller using direct writes must accept
-those limits or request an explicit refetch.
+one upsert. A held `deferDataRefresh` barrier adds a request checkpoint after
+release; the pre-review implementation made an unwanted request there. A
+derived-`select` witness checks that a direct write cannot replace an `edges`
+array with node objects. It permits a stale cache row while requiring a valid
+response envelope and the accepted public row. The load-lifecycle oracle
+separately owns explicit refetch settlement; it does not require a fetch to
+become authoritative merely because a direct write occurred. These bounded
+witnesses do not establish exact Query cache membership, ordering, or window
+replacement after a direct write. The ownership oracle owns future scoped-cache
+witnesses; the cursor-pagination oracle owns windowed receiving cases. The
+offline-transactions owner still needs a full reconnect-replay witness for its
+real `deferDataRefresh` premise. A caller using direct writes must accept the
+scoped-cache limits or request an explicit refetch.
 
 The [React source ID reuse oracle](https://github.com/TanStack/db/blob/main/packages/react-db/tests/source-id-reuse-oracle.test.tsx) ([review](oracle-reviews/issue-1991-react-source-id.md))
 checks that a mounted derived-identity hook rejects a different same-ID

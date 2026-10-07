@@ -2389,6 +2389,9 @@ export function queryCollectionOptions(
           // Optimistic state covers the gap. Once the barrier resolves,
           // trigger a fresh refetch to get authoritative data.
           if (collection.deferDataRefresh) {
+            // The direct write already applied its row. Its cache patch is not
+            // a fetched result and must not schedule a request on release.
+            if (writingDirectCache) return
             if (result.isFetching) {
               void getDeferredRefresh(
                 hashedQueryKey,
@@ -3091,55 +3094,22 @@ export function queryCollectionOptions(
    */
   const updateCacheDataForKey = (key: QueryKey, items: Array<any>): void => {
     if (select) {
-      // When `select` is used, the cache contains a wrapped response (e.g., { data: [...], meta: {...} })
-      // We need to update the cache while preserving the wrapper structure
-      queryClient.setQueryData(key, (oldData: any) => {
-        if (!oldData || typeof oldData !== `object`) {
-          // No existing cache or not an object - don't corrupt the cache
-          return oldData
-        }
+      const oldData = queryClient.getQueryData(key)
+      if (!oldData || typeof oldData !== `object`) return
+      if (Array.isArray(oldData)) {
+        queryClient.setQueryData(key, items)
+        return
+      }
 
-        if (Array.isArray(oldData)) {
-          // Cache is already a raw array (shouldn't happen with select, but handle it)
-          return items
-        }
-
-        // Use the select function to identify which property contains the items array.
-        // This is more robust than guessing based on property order.
-        const selectedArray = select(oldData)
-
-        if (Array.isArray(selectedArray)) {
-          // Find the property that matches the selected array by reference equality
-          for (const propKey of Object.keys(oldData)) {
-            if (oldData[propKey] === selectedArray) {
-              // Found the exact property - create a shallow copy with updated items
-              return { ...oldData, [propKey]: items }
-            }
-          }
-        }
-
-        // Fallback: check common property names used for data arrays
-        if (Array.isArray(oldData.data)) {
-          return { ...oldData, data: items }
-        }
-        if (Array.isArray(oldData.items)) {
-          return { ...oldData, items: items }
-        }
-        if (Array.isArray(oldData.results)) {
-          return { ...oldData, results: items }
-        }
-
-        // Last resort: find first array property
-        for (const propKey of Object.keys(oldData)) {
-          if (Array.isArray(oldData[propKey])) {
-            return { ...oldData, [propKey]: items }
-          }
-        }
-
-        // Couldn't safely identify the array property - don't corrupt the cache
-        // Return oldData unchanged to avoid breaking select
-        return oldData
-      })
+      // Only a direct array property can be replaced without an inverse for
+      // select. A derived projection may change each row's response shape.
+      const selectedArray = select(oldData)
+      if (!Array.isArray(selectedArray)) return
+      const property = Object.keys(oldData).find(
+        (name) => (oldData as Record<string, unknown>)[name] === selectedArray,
+      )
+      if (property === undefined) return
+      queryClient.setQueryData(key, { ...oldData, [property]: items })
     } else {
       // Raw row writes must not overwrite a different cache format. Avoid even
       // a no-op setQueryData: it marks unrelated data fresh and clears invalidation.
@@ -3149,10 +3119,6 @@ export function queryCollectionOptions(
     }
   }
 
-  // A direct write patches keys already present in active on-demand cache
-  // entries. It cannot infer membership or window replacements from one row.
-  // Inactive entries are removed so a later owner fetches its own scope.
-  // Eager collections retain their full-result cache patch.
   // A direct write takes its position when it is called, so a fetch that
   // starts later counts as newer even if the write applies later.
   const reserveDirectWrite = (): number => {
@@ -3209,6 +3175,10 @@ export function queryCollectionOptions(
     }
   }
 
+  // A direct write patches keys already present in active on-demand cache
+  // entries. It cannot infer membership or window replacements from one row.
+  // Unobserved inactive entries are removed so a later owner fetches its scope.
+  // Eager collections retain their full-result cache patch.
   const writeDirectCache = (
     getItems: (keys?: Array<string | number>) => Array<any>,
     changedKeys: Array<string | number>,
