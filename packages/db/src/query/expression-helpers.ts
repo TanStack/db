@@ -229,7 +229,7 @@ export function parseWhereExpression<T = any>(
       return onUnknownOperator(name, args)
     }
     throw new Error(
-      devBuild() && process.env.NODE_ENV !== `production` ? `No handler provided for operator: ${name}. Available handlers: ${Object.keys(handlers).join(`, `)}` : codedMessage(136, { name, value: Object.keys(handlers).join(`, `) }),
+      devBuild() && process.env.NODE_ENV !== `production` ? `No handler provided for operator: ${name}. Available handlers: ${Object.keys(handlers).join(`, `)}` : codedMessage(136, { name, handlers: Object.keys(handlers) }),
     )
   }
 

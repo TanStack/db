@@ -222,7 +222,7 @@ export class InvalidKeyError extends CollectionOperationError {
     super(
       devBuild() && process.env.NODE_ENV !== `production`
         ? `getKey returned an invalid key type. Expected string or number, but got ${key === null ? `null` : typeof key}: ${JSON.stringify(key)}. Item: ${JSON.stringify(item)}`
-        : codedMessage(15, { key }),
+        : codedMessage(15, { key, type: key === null ? `null` : typeof key }),
     )
   }
 }

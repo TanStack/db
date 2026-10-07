@@ -5,6 +5,7 @@ import {
   CollectionRequiresConfigError,
   CollectionRequiresSyncConfigError,
 } from '../errors'
+import { devBuild } from '../error-message'
 import { validateCollectionConfig } from './validate-config'
 import { currentStateAsChanges } from './change-events'
 
@@ -347,18 +348,8 @@ export function createCollection(
     schema?: StandardSchemaV1
   },
 ): Collection<any, string | number, UtilsRecord, any, any> {
-  // The pure probe supports unbundled browsers. Keep the literal comparison
-  // outside it so production bundlers can erase the entire check and import.
-  if (
-    /* @__PURE__ */ (() => {
-      try {
-        return process.env.NODE_ENV !== `production`
-      } catch {
-        return false
-      }
-    })() &&
-    process.env.NODE_ENV !== `production`
-  ) {
+  // The literal comparison lets production bundlers erase the check and import.
+  if (devBuild() && process.env.NODE_ENV !== `production`) {
     validateCollectionConfig(options)
   }
 

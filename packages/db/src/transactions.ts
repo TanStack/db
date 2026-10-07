@@ -263,7 +263,7 @@ function mergePendingMutations<T extends object>(
     default: {
       // Exhaustiveness check
       const _exhaustive: never = `${existing.type}-${incoming.type}` as never
-      throw new Error(devBuild() && process.env.NODE_ENV !== `production` ? `Unhandled mutation combination: ${_exhaustive}` : codedMessage(165, { _exhaustive }))
+      throw new Error(devBuild() && process.env.NODE_ENV !== `production` ? `Unhandled mutation combination: ${_exhaustive}` : codedMessage(165, { combination: _exhaustive }))
     }
   }
 }
@@ -513,7 +513,9 @@ class Transaction<T extends object = Record<string, unknown>> {
       if (restorationErrors.length)
         throw new AggregateError(
           [error, ...restorationErrors],
-          `Mutation callback and restoration failed`,
+          devBuild() && process.env.NODE_ENV !== `production`
+            ? `Mutation callback and restoration failed`
+            : codedMessage(174),
           { cause: error },
         )
       throw error

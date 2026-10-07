@@ -265,7 +265,7 @@ export function collectionOptions(
 
     if (materialized.id !== undefined && materialized.id !== id) {
       throw new Error(
-        devBuild() && process.env.NODE_ENV !== `production` ? `Collection descriptor "${id}" materialized a config with id "${materialized.id}". Descriptor and collection ids must match.` : codedMessage(91, { id, id2: materialized.id }),
+        devBuild() && process.env.NODE_ENV !== `production` ? `Collection descriptor "${id}" materialized a config with id "${materialized.id}". Descriptor and collection ids must match.` : codedMessage(91, { id, materializedId: materialized.id }),
       )
     }
 

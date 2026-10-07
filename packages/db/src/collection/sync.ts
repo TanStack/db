@@ -12,6 +12,7 @@ import {
   SyncTransactionAlreadyCommittedWriteError,
 } from '../errors'
 import { createDeferred } from '../deferred'
+import { devBuild } from '../error-message'
 import { withAcceptedReceipt } from '../sync-receipt'
 import { isPromiseLike } from '../utils/type-guards'
 import { LIVE_QUERY_INTERNAL } from '../query/live/internal.js'
@@ -58,16 +59,6 @@ function shallowEqual(
     keys.length === Object.keys(right).length &&
     keys.every((key) => Object.is(left[key], right[key]))
   )
-}
-
-// Bundlers inline `process.env.NODE_ENV`; without a bundler or `process`,
-// the development checks stay off.
-function isDevelopment(): boolean {
-  try {
-    return process.env.NODE_ENV !== `production`
-  } catch {
-    return false
-  }
 }
 
 export class CollectionSyncManager<
@@ -264,7 +255,7 @@ export class CollectionSyncManager<
               messageType = disposition
             }
 
-            if (`value` in messageWithOptionalKey && isDevelopment()) {
+            if (`value` in messageWithOptionalKey && devBuild()) {
               this.checkReusedRow(key, messageType, messageWithOptionalKey)
             }
 

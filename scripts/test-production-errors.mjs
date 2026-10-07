@@ -35,7 +35,7 @@ const errorsSource = await readSource('errors.ts')
  */
 function distinctiveLiteral(message, source) {
   let best = ``
-  for (const piece of message.split(/"[^"]*"|`[^`]*`|\$\{[^}]*\}|\n/)) {
+  for (const piece of message.split(/"[^"]*"|`[^`]*`|\$\{[^}?]*\??|\}|\n/)) {
     for (let start = 0; start + best.length < piece.length; start++) {
       let end = start + best.length + 1
       while (end <= piece.length && source.includes(piece.slice(start, end))) {

@@ -1,427 +1,350 @@
 {
   "88": {
     "file": "client.ts",
-    "message": "`collectionOptions requires a non-empty explicit id so the descriptor is stable across DbClient instances and SSR boundaries.`",
     "template": "collectionOptions requires a non-empty explicit id so the descriptor is stable across DbClient instances and SSR boundaries."
   },
   "89": {
     "file": "client.ts",
-    "message": "`collectionOptions(\"${id}\") requires a factory as its second argument.`",
     "template": "collectionOptions(\"${id}\") requires a factory as its second argument."
   },
   "90": {
     "file": "client.ts",
-    "message": "`Collection descriptor \"${id}\" was created from a concrete config that cannot be safely reused across DbClient instances. ` +\n            `Use collectionOptions(\"${id}\", (client) => adapterCollectionOptions(...)) or an adapter options creator that supports DbClient materialization.`",
     "template": "Collection descriptor \"${id}\" was created from a concrete config that cannot be safely reused across DbClient instances. Use collectionOptions(\"${id}\", (client) => adapterCollectionOptions(...)) or an adapter options creator that supports DbClient materialization."
   },
   "91": {
     "file": "client.ts",
-    "message": "`Collection descriptor \"${id}\" materialized a config with id \"${materialized.id}\". Descriptor and collection ids must match.`",
     "template": "Collection descriptor \"${id}\" materialized a config with id \"${materialized.id}\". Descriptor and collection ids must match."
   },
   "92": {
     "file": "client.ts",
-    "message": "`DbClient is missing the required \"${key}\" dependency. Pass it explicitly when constructing the client: new DbClient({ ${key} }).`",
     "template": "DbClient is missing the required \"${key}\" dependency. Pass it explicitly when constructing the client: new DbClient({ ${key} })."
   },
   "93": {
     "file": "client.ts",
-    "message": "`Dehydrated live query \"${dehydratedQuery.queryHash}\" has neither a snapshot nor a promise.`",
     "template": "Dehydrated live query \"${dehydratedQuery.queryHash}\" has neither a snapshot nor a promise."
   },
   "94": {
     "file": "collection/change-events.ts",
-    "message": "`limit cannot be used without orderBy`",
     "template": "limit cannot be used without orderBy"
   },
   "95": {
     "file": "collection/changes.ts",
-    "message": "`Cannot specify both 'where' and 'whereExpression' options. Use one or the other.`",
     "template": "Cannot specify both 'where' and 'whereExpression' options. Use one or the other."
   },
   "96": {
     "file": "collection/subscription.ts",
-    "message": "`limit is required`",
     "template": "limit is required"
   },
   "97": {
     "file": "collection/subscription.ts",
-    "message": "`Ordered snapshot was requested but no index was found. You have to call setOrderByIndex before requesting an ordered snapshot.`",
     "template": "Ordered snapshot was requested but no index was found. You have to call setOrderByIndex before requesting an ordered snapshot."
   },
   "98": {
     "file": "event-emitter.ts",
-    "message": "`Timeout waiting for event ${String(event)}`",
     "template": "Timeout waiting for event ${String(event)}"
   },
   "99": {
     "file": "indexes/base-index.ts",
-    "message": "`Failed to evaluate index expression for key ${key}: ${error}`",
     "template": "Failed to evaluate index expression for key ${key}: ${error}"
   },
   "100": {
     "file": "indexes/basic-index.ts",
-    "message": "`Operation ${operation} not supported by BasicIndex`",
     "template": "Operation ${operation} not supported by BasicIndex"
   },
   "101": {
     "file": "indexes/btree-index.ts",
-    "message": "`Operation ${operation} not supported by BTreeIndex`",
     "template": "Operation ${operation} not supported by BTreeIndex"
   },
   "102": {
     "file": "live-query-options.ts",
-    "message": "`A live query must be a QueryBuilder, LiveQueryCollectionConfig, Collection, undefined, or null. Got: ${typeof value}`",
-    "template": "A live query must be a QueryBuilder, LiveQueryCollectionConfig, Collection, undefined, or null. Got: ${typeof value}"
+    "template": "A live query must be a QueryBuilder, LiveQueryCollectionConfig, Collection, undefined, or null. Got: ${typeofvalue}"
   },
   "103": {
     "file": "live-query-window-controller.ts",
-    "message": "`useLiveInfiniteQuery: First argument must be either a pre-created live query collection or a query function. ` +\n      `Received: ${typeof input}`",
-    "template": "useLiveInfiniteQuery: First argument must be either a pre-created live query collection or a query function. Received: ${typeof input}"
+    "template": "useLiveInfiniteQuery: First argument must be either a pre-created live query collection or a query function. Received: ${typeofinput}"
   },
   "104": {
     "file": "live-query-window-controller.ts",
-    "message": "`useLiveInfiniteQuery: Query function must return a query builder. ` +\n        `Disabled null or undefined queries are not supported.`",
     "template": "useLiveInfiniteQuery: Query function must return a query builder. Disabled null or undefined queries are not supported."
   },
   "105": {
     "file": "live-query-window-controller.ts",
-    "message": "`useLiveInfiniteQuery: Infinite queries do not support single-result queries. Remove .findOne().`",
     "template": "useLiveInfiniteQuery: Infinite queries do not support single-result queries. Remove .findOne()."
   },
   "106": {
     "file": "live-query-window-controller.ts",
-    "message": "`useLiveInfiniteQuery: Pre-created live query collection must have an ORDER BY (orderBy) clause for infinite pagination to work. ` +\n        `Please add .orderBy() to your createLiveQueryCollection query.`",
     "template": "useLiveInfiniteQuery: Pre-created live query collection must have an ORDER BY (orderBy) clause for infinite pagination to work. Please add .orderBy() to your createLiveQueryCollection query."
   },
   "107": {
     "file": "paced-mutations.ts",
-    "message": "`Strategy callback called but transaction is in state \"${transaction.state}\". Expected \"pending\".`",
     "template": "Strategy callback called but transaction is in state \"${transaction.state}\". Expected \"pending\"."
   },
   "108": {
     "file": "paced-mutations.ts",
-    "message": "`Paced transaction has no strategy-owned commit`",
     "template": "Paced transaction has no strategy-owned commit"
   },
   "109": {
     "file": "proxy.ts",
-    "message": "`forEach callback must be a function`",
     "template": "forEach callback must be a function"
   },
   "110": {
     "file": "query/builder/functions.ts",
-    "message": "`concat(toArray(...)) currently supports only a single toArray(...) argument`",
     "template": "concat(toArray(...)) currently supports only a single toArray(...) argument"
   },
   "111": {
     "file": "query/builder/functions.ts",
-    "message": "`caseWhen() requires at least two arguments`",
     "template": "caseWhen() requires at least two arguments"
   },
   "112": {
     "file": "query/builder/functions.ts",
-    "message": "`caseWhen() conditions must be expression-like values`",
     "template": "caseWhen() conditions must be expression-like values"
   },
   "113": {
     "file": "query/builder/index.ts",
-    "message": "`Cannot use collection descriptor \"${alias}\" as a query source without a DbClient resolver. In React, wrap your tree in <DbProvider>.`",
     "template": "Cannot use collection descriptor \"${alias}\" as a query source without a DbClient resolver. In React, wrap your tree in <DbProvider>."
   },
   "114": {
     "file": "query/builder/index.ts",
-    "message": "`Conditional include branch is missing a field name`",
     "template": "Conditional include branch is missing a field name"
   },
   "115": {
     "file": "query/builder/index.ts",
-    "message": "`toArray() must wrap a subquery builder`",
     "template": "toArray() must wrap a subquery builder"
   },
   "116": {
     "file": "query/builder/index.ts",
-    "message": "`Conditional toArray() branch is missing a field name`",
     "template": "Conditional toArray() branch is missing a field name"
   },
   "117": {
     "file": "query/builder/index.ts",
-    "message": "`concat(toArray(...)) must wrap a subquery builder`",
     "template": "concat(toArray(...)) must wrap a subquery builder"
   },
   "118": {
     "file": "query/builder/index.ts",
-    "message": "`Conditional concat(toArray(...)) branch is missing a field name`",
     "template": "Conditional concat(toArray(...)) branch is missing a field name"
   },
   "119": {
     "file": "query/builder/index.ts",
-    "message": "`toArray() must wrap a subquery builder`",
     "template": "toArray() must wrap a subquery builder"
   },
   "120": {
     "file": "query/builder/index.ts",
-    "message": "`concat(toArray(...)) must wrap a subquery builder`",
     "template": "concat(toArray(...)) must wrap a subquery builder"
   },
   "121": {
     "file": "query/builder/index.ts",
-    "message": "`materialize() must wrap a subquery builder`",
     "template": "materialize() must wrap a subquery builder"
   },
   "122": {
     "file": "query/builder/index.ts",
-    "message": "`caseWhen() requires at least two arguments`",
     "template": "caseWhen() requires at least two arguments"
   },
   "123": {
     "file": "query/builder/index.ts",
-    "message": "`Includes subquery for \"${fieldName}\" must have a WHERE clause with an eq() condition ` +\n        `that correlates a parent field with a child field. ` +\n        `Example: .where(({child}) => eq(child.parentId, parent.id))`",
     "template": "Includes subquery for \"${fieldName}\" must have a WHERE clause with an eq() condition that correlates a parent field with a child field. Example: .where(({child}) => eq(child.parentId, parent.id))"
   },
   "124": {
     "file": "query/builder/index.ts",
-    "message": "`concat(toArray(...)) for \"${fieldName}\" requires the subquery to select a scalar value`",
     "template": "concat(toArray(...)) for \"${fieldName}\" requires the subquery to select a scalar value"
   },
   "125": {
     "file": "query/builder/index.ts",
-    "message": "`Includes subquery for \"${fieldName}\" must select an object when materializing as a Collection`",
     "template": "Includes subquery for \"${fieldName}\" must select an object when materializing as a Collection"
   },
   "126": {
     "file": "query/builder/ref-proxy.ts",
-    "message": "`${name} cannot be used inside expressions (e.g., coalesce(), eq(), not()). ` +\n        `Use ${name} directly as a select field value instead.`",
     "template": "${name} cannot be used inside expressions (e.g., coalesce(), eq(), not()). Use ${name} directly as a select field value instead."
   },
   "127": {
     "file": "query/compiler/evaluators.ts",
-    "message": "`caseWhen() requires at least two arguments`",
     "template": "caseWhen() requires at least two arguments"
   },
   "128": {
     "file": "query/compiler/index.ts",
-    "message": "`fn.select() cannot consume Collection-valued includes. Use toArray() or materialize() in the upstream select(), or use an expression select() to keep live Collections.`",
     "template": "fn.select() cannot consume Collection-valued includes. Use toArray() or materialize() in the upstream select(), or use an expression select() to keep live Collections."
   },
   "129": {
     "file": "query/compiler/index.ts",
-    "message": "`Query row has negative multiplicity`",
     "template": "Query row has negative multiplicity"
   },
   "130": {
     "file": "query/compiler/index.ts",
-    "message": "`Query row has no positive contributor`",
     "template": "Query row has no positive contributor"
   },
   "131": {
     "file": "query/compiler/index.ts",
-    "message": "`Query contributors with the same row key are not congruent`",
     "template": "Query contributors with the same row key are not congruent"
   },
   "132": {
     "file": "query/compiler/index.ts",
-    "message": "`Duplicate source alias \"${source.alias}\" in unionAll query branches. ` +\n            `Use distinct aliases in each branch before passing them to unionAll().`",
     "template": "Duplicate source alias \"${source.alias}\" in unionAll query branches. Use distinct aliases in each branch before passing them to unionAll()."
   },
   "133": {
     "file": "query/compiler/index.ts",
-    "message": "`Includes subqueries must be at the top level of select(). ` +\n          `Found nested includes at \"${parentPath}.${key}\".`",
     "template": "Includes subqueries must be at the top level of select(). Found nested includes at \"${parentPath}.${key}\"."
   },
   "134": {
     "file": "query/effect.ts",
-    "message": "`Source collection '${collectionId}' was cleaned up while effect depends on it`",
     "template": "Source collection '${collectionId}' was cleaned up while effect depends on it"
   },
   "135": {
     "file": "query/effect.ts",
-    "message": "`Source collection '${collectionId}' entered error state`",
     "template": "Source collection '${collectionId}' entered error state"
   },
   "136": {
     "file": "query/expression-helpers.ts",
-    "message": "`No handler provided for operator: ${name}. Available handlers: ${Object.keys(handlers).join(`, `)}`",
-    "template": "No handler provided for operator: ${name}. Available handlers: ${Object.keys(handlers).join(`, `)}"
+    "template": "No handler provided for operator: ${name}. Available handlers: ${Object.keys(handlers).join(`,`)}"
   },
   "137": {
     "file": "query/expression-helpers.ts",
-    "message": "`ORDER BY expression must be a field reference, got: ${clause.expression.type}`",
     "template": "ORDER BY expression must be a field reference, got: ${clause.expression.type}"
   },
   "138": {
     "file": "query/expression-helpers.ts",
-    "message": "`extractSimpleComparisons requires a comparison or null check inside 'not' operator.`",
     "template": "extractSimpleComparisons requires a comparison or null check inside 'not' operator."
   },
   "139": {
     "file": "query/expression-helpers.ts",
-    "message": "`extractSimpleComparisons requires a field reference for '${arg.name}' operator.`",
     "template": "extractSimpleComparisons requires a field reference for '${arg.name}' operator."
   },
   "140": {
     "file": "query/expression-helpers.ts",
-    "message": "`extractSimpleComparisons requires simple field-value comparisons. Found complex expression for 'not(${arg.name})' operator.`",
     "template": "extractSimpleComparisons requires simple field-value comparisons. Found complex expression for 'not(${arg.name})' operator."
   },
   "141": {
     "file": "query/expression-helpers.ts",
-    "message": "`extractSimpleComparisons does not support 'not(${arg.name})'. NOT can only wrap comparison operators (eq, gt, gte, lt, lte, in) or null checks (isNull, isUndefined).`",
     "template": "extractSimpleComparisons does not support 'not(${arg.name})'. NOT can only wrap comparison operators (eq, gt, gte, lt, lte, in) or null checks (isNull, isUndefined)."
   },
   "142": {
     "file": "query/expression-helpers.ts",
-    "message": "`extractSimpleComparisons does not support '${e.name}' operator. Use parseWhereExpression with custom handlers for complex expressions.`",
     "template": "extractSimpleComparisons does not support '${e.name}' operator. Use parseWhereExpression with custom handlers for complex expressions."
   },
   "143": {
     "file": "query/expression-helpers.ts",
-    "message": "`extractSimpleComparisons requires a field reference for '${e.name}' operator.`",
     "template": "extractSimpleComparisons requires a field reference for '${e.name}' operator."
   },
   "144": {
     "file": "query/expression-helpers.ts",
-    "message": "`extractSimpleComparisons requires simple field-value comparisons. Found complex expression for '${e.name}' operator.`",
     "template": "extractSimpleComparisons requires simple field-value comparisons. Found complex expression for '${e.name}' operator."
   },
   "145": {
     "file": "query/expression-helpers.ts",
-    "message": "`extractSimpleComparisons encountered unknown operator: '${e.name}'`",
     "template": "extractSimpleComparisons encountered unknown operator: '${e.name}'"
   },
   "146": {
     "file": "query/live/bucket-facade-adapter.ts",
-    "message": "`Bucket facade row has no public key`",
     "template": "Bucket facade row has no public key"
   },
   "147": {
     "file": "query/live/collection-config-builder.ts",
-    "message": "`Source recovery failed`",
     "template": "Source recovery failed"
   },
   "148": {
     "file": "query/live/collection-config-builder.ts",
-    "message": "`maybeRunGraph called without active sync run. This should not happen.`",
     "template": "maybeRunGraph called without active sync run. This should not happen."
   },
   "149": {
     "file": "query/live/collection-config-builder.ts",
-    "message": "`scheduleGraphRun called without active sync run. This should not happen.`",
     "template": "scheduleGraphRun called without active sync run. This should not happen."
   },
   "150": {
     "file": "query/live/collection-config-builder.ts",
-    "message": "`Live query result key ${String(key)} changed by ${inserts - deletes} rows in one flush; a key has at most one result row.`",
-    "template": "Live query result key ${String(key)} changed by ${inserts - deletes} rows in one flush; a key has at most one result row."
+    "template": "Live query result key ${String(key)} changed by ${inserts-deletes} rows in one flush; a key has at most one result row."
   },
   "151": {
     "file": "query/live/collection-config-builder.ts",
-    "message": "`Could not apply changes: ${JSON.stringify(changes)}. This should never happen.`",
     "template": "Could not apply changes: ${JSON.stringify(changes)}. This should never happen."
   },
   "152": {
     "file": "query/live/collection-config-builder.ts",
-    "message": "`Source collection '${collectionId}' was manually cleaned up while live query '${this.id}' depends on it. ` +\n        `Live queries prevent automatic GC, so this was likely a manual cleanup() call.`",
     "template": "Source collection '${collectionId}' was manually cleaned up while live query '${this.id}' depends on it. Live queries prevent automatic GC, so this was likely a manual cleanup() call."
   },
   "153": {
     "file": "query/live/collection-config-builder.ts",
-    "message": "`Query '${this.id}' has no collection sources. This should not happen; please report.`",
     "template": "Query '${this.id}' has no collection sources. This should not happen; please report."
   },
   "154": {
     "file": "query/live/materialized-pipeline.ts",
-    "message": "`Canonical query row has negative multiplicity`",
     "template": "Canonical query row has negative multiplicity"
   },
   "155": {
     "file": "query/live/materialized-pipeline.ts",
-    "message": "`Canonical query row has no positive contributor`",
     "template": "Canonical query row has no positive contributor"
   },
   "156": {
     "file": "query/live/materialized-pipeline.ts",
-    "message": "`Query contributors for public key ${serializeValue(left.publicKey)} are not congruent`",
     "template": "Query contributors for public key ${serializeValue(left.publicKey)} are not congruent"
   },
   "157": {
     "file": "query/live/materialized-pipeline.ts",
-    "message": "`Materialization bucket row has negative multiplicity`",
     "template": "Materialization bucket row has negative multiplicity"
   },
   "158": {
     "file": "query/live/materialized-pipeline.ts",
-    "message": "`Collection includes require a bucket facade`",
     "template": "Collection includes require a bucket facade"
   },
   "159": {
     "file": "query/live/subset-demand-controller.ts",
-    "message": "`Subset demand snapshot did not start`",
     "template": "Subset demand snapshot did not start"
   },
   "160": {
     "file": "query/live/utils.ts",
-    "message": "`Failed to extract collection. Invalid FROM clause: ${JSON.stringify(query)}`",
     "template": "Failed to extract collection. Invalid FROM clause: ${JSON.stringify(query)}"
   },
   "161": {
     "file": "scheduler.ts",
-    "message": "`Scheduler detected unresolved dependencies for context ${String(\n            contextId,\n          )}.`",
-    "template": "Scheduler detected unresolved dependencies for context ${String(\n            contextId,\n          )}."
+    "template": "Scheduler detected unresolved dependencies for context ${String(contextId,)}."
   },
   "162": {
     "file": "transactions.ts",
-    "message": "`A transaction created with createTransaction() cannot mutate collections from multiple DbClient instances. Use dbClient.createTransaction() for explicit client scope.`",
     "template": "A transaction created with createTransaction() cannot mutate collections from multiple DbClient instances. Use dbClient.createTransaction() for explicit client scope."
   },
   "163": {
     "file": "transactions.ts",
-    "message": "`Transaction is not associated with a TransactionScope.`",
     "template": "Transaction is not associated with a TransactionScope."
   },
   "164": {
     "file": "transactions.ts",
-    "message": "`Transaction is not associated with an ambient scope.`",
     "template": "Transaction is not associated with an ambient scope."
   },
   "165": {
     "file": "transactions.ts",
-    "message": "`Unhandled mutation combination: ${_exhaustive}`",
     "template": "Unhandled mutation combination: ${_exhaustive}"
   },
   "166": {
     "file": "utils/comparison.ts",
-    "message": "`Index comparator must return a number, but returned ${String(result)}`",
     "template": "Index comparator must return a number, but returned ${String(result)}"
   },
   "167": {
     "file": "utils/comparison.ts",
-    "message": "`Cannot order Temporal values of different types: ${aTag} vs ${bTag}`",
     "template": "Cannot order Temporal values of different types: ${aTag} vs ${bTag}"
   },
   "168": {
     "file": "utils/comparison.ts",
-    "message": "`${aTag} has no defined ordering`",
     "template": "${aTag} has no defined ordering"
   },
   "169": {
     "file": "utils/cursor.ts",
-    "message": "`Only leading-column cursors are supported`",
     "template": "Only leading-column cursors are supported"
   },
   "170": {
     "file": "utils/error.ts",
-    "message": "`Unknown error`",
     "template": "Unknown error"
   },
   "171": {
     "file": "utils/uuid.ts",
-    "message": "`No secure random number generator available: neither crypto.randomUUID nor crypto.getRandomValues is defined in this environment.`",
     "template": "No secure random number generator available: neither crypto.randomUUID nor crypto.getRandomValues is defined in this environment."
   },
   "172": {
     "file": "query/live/collection-config-builder.ts",
-    "message": "`Source collection '${collectionId}' entered error state`",
     "template": "Source collection '${collectionId}' entered error state"
+  },
+  "173": {
+    "file": "collection/lifecycle.ts",
+    "template": "${syncFailure?Adapter cleanup and local teardown both failed:Multiple local teardown steps failed}"
+  },
+  "174": {
+    "file": "transactions.ts",
+    "template": "Mutation callback and restoration failed"
   }
 }

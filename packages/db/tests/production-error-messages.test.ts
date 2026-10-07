@@ -29,11 +29,13 @@
  * - **Error sites:** code outside `errors.ts` also throws plain `Error`,
  *   `TypeError`, and `RangeError` values with library text. Each such site
  *   keeps its class and switches its message with the same check. Its
- *   development message expression is the source text frozen on `main` in
- *   `fixtures/error-site-messages.json`, with its code; equal source text in
- *   the same scope gives the same message for every input. Every value its
- *   message interpolates is passed to the code line. A message built only from
- *   a caller's value, such as `new Error(String(error))`, is not a site.
+ *   development message is the template frozen on `main` in
+ *   `fixtures/error-site-messages.json`, with its code: the literal text and
+ *   the interpolated expressions, independent of formatting. The same
+ *   expressions in the same scope give the same message for every input.
+ *   Every interpolated expression, or one of its sub-expressions, is passed to
+ *   the code line. `AggregateError` messages count too. A message built only
+ *   from a caller's value, such as `new Error(String(error))`, is not a site.
  *
  * The model is the frozen fixtures and the format above; nothing here reads
  * codes from `src/errors.ts`. The production path is every error class that the
@@ -252,7 +254,7 @@ describe(`production error messages`, () => {
 
   describe(`error sites`, () => {
     const sites = findErrorSites(resolve(testsDirectory, `../src`))
-    const frozen: Record<string, { file: string; message: string }> =
+    const frozen: Record<string, { file: string; template: string }> =
       JSON.parse(readFileSync(sitesPath, `utf8`))
 
     it(`codes every site that throws library text`, () => {
@@ -261,28 +263,21 @@ describe(`production error messages`, () => {
 
     it(`keeps each site's development message and code`, () => {
       const current = Object.fromEntries(
-        sites.coded.map(({ code, file, development }) => [
+        sites.coded.map(({ code, file, template }) => [
           code,
-          { file, message: development },
+          { file, template },
         ]),
       )
       expect(sites.coded).toHaveLength(Object.keys(current).length)
-      expect(current).toEqual(
-        Object.fromEntries(
-          Object.entries(frozen).map(([code, { file, message }]) => [
-            code,
-            { file, message },
-          ]),
-        ),
-      )
+      expect(current).toEqual(frozen)
     })
 
     it(`passes every interpolated value to the code line`, () => {
       for (const site of sites.coded)
         for (const interpolation of site.interpolations)
           expect(
-            site.values.some((value) => interpolation.includes(value)),
-            `${site.file} error ${site.code} drops \${${interpolation}}`,
+            site.values.some((value) => interpolation.parts.includes(value)),
+            `${site.file} error ${site.code} drops \${${interpolation.expression}}`,
           ).toBe(true)
     })
 
@@ -293,6 +288,31 @@ describe(`production error messages`, () => {
       const classCodes = new Set(Object.values(codes))
       expect(sites.coded.filter(({ code }) => classCodes.has(code))).toEqual([])
     })
+  })
+
+  // A symbol or bigint has no JSON form, but production logs still need it.
+  it(`shows a symbol or bigint in a shown position as its string`, () => {
+    const codes: Record<string, number> = JSON.parse(
+      readFileSync(codesPath, `utf8`),
+    )
+    for (const [name, argSets] of Object.entries(errorSampleArguments)) {
+      if (!(name in codes)) continue
+      argSets.forEach((args, index) => {
+        args.forEach((arg, position) => {
+          if (typeof arg !== `string` || arg.length < 3) return
+          if (!devMessages[name]![index]!.includes(arg)) return
+          for (const value of [Symbol(`probe`), 7n]) {
+            const replaced = args.map((original, at) =>
+              at === position ? value : original,
+            )
+            const message = construct(name, replaced, `production`).message
+            expect(message, `${name} argument ${position}`).toContain(
+              JSON.stringify(String(value)),
+            )
+          }
+        })
+      })
+    }
   })
 
   it(`documents every code with its class`, () => {

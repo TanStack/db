@@ -1,38 +1,55 @@
 /**
- * Finds every `Error`, `TypeError`, and `RangeError` that `src` constructs with
- * library text, outside the error classes in `src/errors.ts`. The production
- * error message oracle uses it to check that each such site is coded.
+ * Finds every error message that `src` builds from library text outside the
+ * error classes in `src/errors.ts`. The production error message oracle uses
+ * it to check that each such message is coded.
  *
- * A site has library text when its message expression contains a string or
- * template literal. A message built only from a caller's value, such as
- * `new Error(String(error))`, is the caller's text and is not a site.
+ * - A **coded site** is any `devBuild() && NODE_ENV !== 'production' ? dev :
+ *   codedMessage(code, values)` expression, wherever the message goes.
+ * - A **plain site** is an `Error`, `TypeError`, or `RangeError` message, or an
+ *   `AggregateError` message, that contains a string or template literal and
+ *   is not coded. A message built only from a caller's value, such as
+ *   `new Error(String(error))`, is the caller's text and is not a site.
+ *
+ * Messages are compared as templates: literal text with each interpolated
+ * expression written `${...}` without whitespace. Reformatting the source does
+ * not change a template; changing its text or its interpolations does.
  */
 import { readFileSync, readdirSync } from 'node:fs'
 import { join, relative } from 'node:path'
 import ts from 'typescript'
 
-/** A site whose message is `devBuild() && NODE_ENV !== 'production' ? dev : coded`. */
 export type CodedSite = {
   file: string
   code: number
-  /** Source text of the development message expression. */
-  development: string
-  /** Template-span expressions in the development message. */
-  interpolations: Array<string>
-  /** Value expressions passed to `codedMessage`. */
+  /** The development message as a template. */
+  template: string
+  /**
+   * For each interpolation, its expression and every sub-expression, without
+   * whitespace. A value passed to `codedMessage` covers the interpolation when
+   * it is one of these.
+   */
+  interpolations: Array<{ expression: string; parts: Array<string> }>
+  /** Value expressions passed to `codedMessage`, without whitespace. */
   values: Array<string>
 }
 
-/** A site that still builds library text in every build. */
 export type PlainSite = {
   file: string
   line: number
-  /** Source text of the message expression. */
-  message: string
+  template: string
 }
 
-const errorConstructors = new Set([`Error`, `TypeError`, `RangeError`])
-const guard = `devBuild() && process.env.NODE_ENV !== \`production\``
+/** Constructor name to the position of its message argument. */
+const messagePosition = new Map([
+  [`Error`, 0],
+  [`TypeError`, 0],
+  [`RangeError`, 0],
+  [`AggregateError`, 1],
+])
+const guard = `devBuild()&&process.env.NODE_ENV!==\`production\``
+
+const compact = (node: ts.Node, sourceFile: ts.SourceFile) =>
+  node.getText(sourceFile).replace(/\s+/g, ``)
 
 function sourceFiles(directory: string): Array<string> {
   return readdirSync(directory, { withFileTypes: true }).flatMap((entry) => {
@@ -52,18 +69,78 @@ function hasLibraryText(node: ts.Node): boolean {
   return ts.forEachChild(node, hasLibraryText) ?? false
 }
 
-function interpolations(node: ts.Node, sourceFile: ts.SourceFile) {
-  const spans: Array<string> = []
+/** A message expression as literal text with `${expression}` holes. */
+export function messageTemplate(
+  node: ts.Expression,
+  sourceFile: ts.SourceFile,
+): string {
+  if (ts.isParenthesizedExpression(node))
+    return messageTemplate(node.expression, sourceFile)
+  if (ts.isStringLiteral(node) || ts.isNoSubstitutionTemplateLiteral(node))
+    return node.text
+  if (ts.isTemplateExpression(node))
+    return (
+      node.head.text +
+      node.templateSpans
+        .map(
+          (span) =>
+            `\${${compact(span.expression, sourceFile)}}${span.literal.text}`,
+        )
+        .join(``)
+    )
+  if (
+    ts.isBinaryExpression(node) &&
+    node.operatorToken.kind === ts.SyntaxKind.PlusToken
+  )
+    return (
+      messageTemplate(node.left, sourceFile) +
+      messageTemplate(node.right, sourceFile)
+    )
+  if (ts.isConditionalExpression(node))
+    return `\${${compact(node.condition, sourceFile)}?${messageTemplate(node.whenTrue, sourceFile)}:${messageTemplate(node.whenFalse, sourceFile)}}`
+  return `\${${compact(node, sourceFile)}}`
+}
+
+/** Expressions a message interpolates, with their sub-expressions. */
+function interpolations(node: ts.Expression, sourceFile: ts.SourceFile) {
+  const found: CodedSite[`interpolations`] = []
+  const parts = (expression: ts.Node): Array<string> => {
+    const all = [compact(expression, sourceFile)]
+    ts.forEachChild(expression, (child) => {
+      // A property name is not a value: `materialized.id` does not pass `id`.
+      if (ts.isPropertyAccessExpression(expression) && child === expression.name)
+        return
+      if (ts.isExpression(child)) all.push(...parts(child))
+    })
+    return all
+  }
   const visit = (child: ts.Node) => {
     if (ts.isTemplateSpan(child))
-      spans.push(child.expression.getText(sourceFile))
+      found.push({
+        expression: compact(child.expression, sourceFile),
+        parts: parts(child.expression),
+      })
     ts.forEachChild(child, visit)
   }
   visit(node)
-  return spans
+  return found
 }
 
-/** Every error site under `sourceRoot`, coded or plain. */
+function codedValues(
+  values: ts.Expression | undefined,
+  sourceFile: ts.SourceFile,
+): Array<string> {
+  if (!values || !ts.isObjectLiteralExpression(values)) return []
+  return values.properties.map((property) =>
+    ts.isShorthandPropertyAssignment(property)
+      ? property.name.text
+      : ts.isPropertyAssignment(property)
+        ? compact(property.initializer, sourceFile)
+        : compact(property, sourceFile),
+  )
+}
+
+/** Every coded and plain error site under `sourceRoot`. */
 export function findErrorSites(sourceRoot: string): {
   coded: Array<CodedSite>
   plain: Array<PlainSite>
@@ -79,46 +156,36 @@ export function findErrorSites(sourceRoot: string): {
       ts.ScriptTarget.Latest,
       true,
     )
+    const isCoded = (node: ts.Node): node is ts.ConditionalExpression =>
+      ts.isConditionalExpression(node) &&
+      compact(node.condition, sourceFile) === guard &&
+      ts.isCallExpression(node.whenFalse) &&
+      node.whenFalse.expression.getText(sourceFile) === `codedMessage`
     const visit = (node: ts.Node) => {
-      if (
+      if (isCoded(node)) {
+        const call = node.whenFalse as ts.CallExpression
+        coded.push({
+          file,
+          code: Number(call.arguments[0]!.getText(sourceFile)),
+          template: messageTemplate(node.whenTrue, sourceFile),
+          interpolations: interpolations(node.whenTrue, sourceFile),
+          values: codedValues(call.arguments[1], sourceFile),
+        })
+      } else if (
         ts.isNewExpression(node) &&
         ts.isIdentifier(node.expression) &&
-        errorConstructors.has(node.expression.text) &&
-        node.arguments?.[0]
+        messagePosition.has(node.expression.text)
       ) {
-        const message = node.arguments[0]
-        if (
-          ts.isConditionalExpression(message) &&
-          message.condition.getText(sourceFile) === guard &&
-          ts.isCallExpression(message.whenFalse) &&
-          message.whenFalse.expression.getText(sourceFile) === `codedMessage`
-        ) {
-          const [code, values] = message.whenFalse.arguments
-          coded.push({
-            file,
-            code: Number(code!.getText(sourceFile)),
-            development: message.whenTrue.getText(sourceFile),
-            interpolations: interpolations(message.whenTrue, sourceFile),
-            values:
-              values && ts.isObjectLiteralExpression(values)
-                ? values.properties.map((property) =>
-                    ts.isShorthandPropertyAssignment(property)
-                      ? property.name.text
-                      : ts.isPropertyAssignment(property)
-                        ? property.initializer.getText(sourceFile)
-                        : property.getText(sourceFile),
-                  )
-                : [],
-          })
-        } else if (hasLibraryText(message)) {
+        const message =
+          node.arguments?.[messagePosition.get(node.expression.text)!]
+        if (message && !isCoded(message) && hasLibraryText(message))
           plain.push({
             file,
             line:
               sourceFile.getLineAndCharacterOfPosition(message.getStart())
                 .line + 1,
-            message: message.getText(sourceFile),
+            template: messageTemplate(message, sourceFile),
           })
-        }
       }
       ts.forEachChild(node, visit)
     }

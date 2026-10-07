@@ -932,7 +932,7 @@ export class CollectionConfigBuilder<
       for (const [key, { inserts, deletes }] of pendingChanges) {
         if (Math.abs(inserts - deletes) > 1) {
           throw new Error(
-            devBuild() && process.env.NODE_ENV !== `production` ? `Live query result key ${String(key)} changed by ${inserts - deletes} rows in one flush; a key has at most one result row.` : codedMessage(150, { key, value: inserts - deletes }),
+            devBuild() && process.env.NODE_ENV !== `production` ? `Live query result key ${String(key)} changed by ${inserts - deletes} rows in one flush; a key has at most one result row.` : codedMessage(150, { key, change: inserts - deletes }),
           )
         }
       }
@@ -1078,12 +1078,11 @@ export class CollectionConfigBuilder<
     // Handle error state - any source collection in error puts live query in error
     if (status === `error`) {
       this.erroredSourceIds.add(sourceId)
-      const error = new Error(
+      this.setErrorState(
         devBuild() && process.env.NODE_ENV !== `production`
           ? `Source collection '${collectionId}' entered error state`
           : codedMessage(172, { collectionId }),
       )
-      this.setErrorState(error.message, error)
       return
     }
 

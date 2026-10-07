@@ -15,7 +15,8 @@ export function devBuild(): boolean {
 
 /**
  * A production message: the code, the inputs it can show as JSON, and its docs
- * anchor. Objects other than arrays and errors are not shown.
+ * anchor. Symbols and bigints show as strings. Objects other than arrays and
+ * errors are not shown.
  */
 export function codedMessage(
   code: number,
@@ -26,9 +27,13 @@ export function codedMessage(
       const text =
         value instanceof Error
           ? JSON.stringify(value.message)
-          : value === null || typeof value !== `object` || Array.isArray(value)
-            ? JSON.stringify(value)
-            : undefined
+          : typeof value === `symbol` || typeof value === `bigint`
+            ? JSON.stringify(String(value))
+            : value === null ||
+                typeof value !== `object` ||
+                Array.isArray(value)
+              ? JSON.stringify(value)
+              : undefined
       return text === undefined ? [] : [`${name}=${text}`]
     } catch {
       return []

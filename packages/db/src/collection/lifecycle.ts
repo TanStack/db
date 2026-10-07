@@ -9,6 +9,7 @@ import {
 } from '../utils/browser-polyfills'
 import { runAllCallbacks } from '../utils/callbacks'
 import { createDeferred } from '../deferred'
+import { codedMessage, devBuild } from '../error-message'
 import { CleanupQueue } from './cleanup-queue'
 import type { IdleCallbackDeadline } from '../utils/browser-polyfills'
 import type { StandardSchemaV1 } from '@standard-schema/spec'
@@ -437,9 +438,11 @@ export class CollectionLifecycleManager<
                   ? failures[0]
                   : new AggregateError(
                       failures,
-                      syncFailure
-                        ? `Adapter cleanup and local teardown both failed`
-                        : `Multiple local teardown steps failed`,
+                      devBuild() && process.env.NODE_ENV !== `production`
+                        ? syncFailure
+                          ? `Adapter cleanup and local teardown both failed`
+                          : `Multiple local teardown steps failed`
+                        : codedMessage(173, { syncFailure }),
                       { cause: failures[0] },
                     ),
             }
