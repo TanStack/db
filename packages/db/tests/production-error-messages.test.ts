@@ -16,6 +16,10 @@
  *   string, number, or `null` input that the full message shows, alone or in
  *   an array, also appears in the code line, so production logs keep keys and
  *   collection ids. Building the line never throws, whatever the inputs.
+ * - **Full-text exception:** `SchemaValidationError` keeps its development
+ *   message in production too. Its text is mostly the schema library's issue
+ *   messages, which apps show to users, so a code would save little and lose
+ *   the feedback (maintainer decision, 2026-10-07).
  * - **Both:** the class, its `name`, `instanceof`, and its extra fields are the
  *   same. The switch is an inline `process.env.NODE_ENV` check, so a production
  *   bundler drops the full text; a separate bundle check owns that.
@@ -71,6 +75,9 @@ const callerMessageClasses = new Set([
   `LocalStorageCollectionError`,
   `QueryOptimizerError`,
 ])
+
+/** Classes whose production message is their full development message. */
+const fullMessageClasses = new Set([`SchemaValidationError`])
 
 /** Inputs that a careless formatter could throw on or break the line with. */
 const hostileInputs: Array<unknown> = [
@@ -130,8 +137,22 @@ describe(`production error messages`, () => {
     )
     const uncoded = exportedErrorClasses
       .map(([name]) => name)
-      .filter((name) => !(name in codes) && !callerMessageClasses.has(name))
+      .filter(
+        (name) =>
+          !(name in codes) &&
+          !callerMessageClasses.has(name) &&
+          !fullMessageClasses.has(name),
+      )
     expect(uncoded).toEqual([])
+  })
+
+  it(`keeps the full message in production for full-text classes`, () => {
+    for (const name of fullMessageClasses)
+      errorSampleArguments[name]!.forEach((args, index) => {
+        expect(construct(name, args, `production`).message, name).toBe(
+          devMessages[name]![index],
+        )
+      })
   })
 
   it(`has sample inputs for every exported error class`, () => {
@@ -169,7 +190,7 @@ describe(`production error messages`, () => {
     )
     const seen = new Map<number, string>()
     for (const [name, argSets] of Object.entries(errorSampleArguments)) {
-      if (callerMessageClasses.has(name)) continue
+      if (!(name in codes)) continue
       argSets.forEach((args, index) => {
         const message = construct(name, args, `production`).message
         const match = productionLine.exec(message)
@@ -192,7 +213,7 @@ describe(`production error messages`, () => {
       readFileSync(codesPath, `utf8`),
     )
     for (const [name, argSets] of Object.entries(errorSampleArguments)) {
-      if (callerMessageClasses.has(name)) continue
+      if (!(name in codes)) continue
       for (const args of argSets)
         args.forEach((_, position) => {
           for (const hostile of hostileInputs) {

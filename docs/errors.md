@@ -16,17 +16,6 @@ Development builds keep the full messages below. The error classes, their
 `name` values, and their fields are the same in both builds. See
 [Error Handling](./guides/error-handling.md) for how to catch them.
 
-<a id="error-1"></a>
-
-## Error 1: `SchemaValidationError`
-
-Development builds show the full message. For example:
-
-```text
-Insert validation failed: 
-- Invalid field - path: name
-```
-
 <a id="error-2"></a>
 
 ## Error 2: `DuplicateDbInstanceError`

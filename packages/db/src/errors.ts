@@ -66,14 +66,11 @@ export class SchemaValidationError extends TanStackDBError {
     }>,
     message?: string,
   ) {
-    super(
-      message ||
-        (devBuild() && process.env.NODE_ENV !== `production`
-          ? `${type === `insert` ? `Insert` : `Update`} validation failed: ${issues
-              .map((issue) => `\n- ${issue.message} - path: ${issue.path}`)
-              .join(``)}`
-          : codedMessage(1, { type })),
-    )
+    const defaultMessage = `${type === `insert` ? `Insert` : `Update`} validation failed: ${issues
+      .map((issue) => `\n- ${issue.message} - path: ${issue.path}`)
+      .join(``)}`
+
+    super(message || defaultMessage)
     this.name = `SchemaValidationError`
     this.type = type
     this.issues = issues

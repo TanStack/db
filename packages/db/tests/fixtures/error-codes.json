@@ -1,5 +1,4 @@
 {
-  "SchemaValidationError": 1,
   "DuplicateDbInstanceError": 2,
   "InvalidSyncPersistenceCapabilityError": 3,
   "CollectionRequiresConfigError": 4,
