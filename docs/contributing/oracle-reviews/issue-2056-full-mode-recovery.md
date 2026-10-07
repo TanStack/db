@@ -145,6 +145,10 @@ cached rows remain visible through a cold full-shape replacement. Eager and
 progressive recovery keep that promise and the full snapshot. The on-demand
 full-stream fallback remains for a wrapper without scoped recovery support.
 
+The implementation and its executable evidence are committed at
+`7c2e6a4f640bbbef64c1045362b22346a8c46e21`. This audit reference is a
+documentation follow-up, so the cited code revision remains immutable.
+
 The first new receiver prediction was RED on the merged base: tagged direct
 demand and live-query preload expected `log=changes_only` but observed `full`
 (two failures, two compatible-resume controls passing). With the implementation,
