@@ -804,7 +804,7 @@ The post-merge review added three missing domains to existing owners:
   histories cross source insert/delete with acceptance before/after rejection.
   They compare live rows, exposed base, durable rows, origin, and a held source
   receipt at mutation settlement and after source application. The
-  [real SQLite receiver](../../packages/db-sqlite-persistence-core/tests/persisted-real-adapter-lifecycle.test.ts)
+  [real SQLite receiver](https://github.com/TanStack/db/blob/main/packages/db-sqlite-persistence-core/tests/persisted-real-adapter-lifecycle.test.ts)
   checks two same-key continuations. Each reopens the same file with a new
   Collection, adapter, and SQLite driver. Both the reported release and this
   review tree pass these bounded histories. The reporter's private bridge
@@ -813,7 +813,7 @@ The post-merge review added three missing domains to existing owners:
   restart. The persisted wrapper owner needs the bridge callback and write
   sequence to reach that path.
 
-- The [optimistic publication owner](../../packages/db/tests/optimistic-history-publication-oracle.test.ts)
+- The [optimistic publication owner](https://github.com/TanStack/db/blob/main/packages/db/tests/optimistic-history-publication-oracle.test.ts)
   distinguishes one and two queued same-key source transactions during a
   successful local mutation, an absent-key delete before a source insert, and
   a truncate published before a mutation fails. The persisted wrapper receives
