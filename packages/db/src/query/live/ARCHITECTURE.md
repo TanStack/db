@@ -895,11 +895,28 @@ finite coverage.
 
 “Bounded prefix” describes the adapter acquisition, not the subscription's
 immediate local replay. `requestSnapshot()` composes the subscription and
-request predicates for both legs, but its local snapshot is predicate-only: it
-may deliver every matching row already installed in the Collection without
-applying the request's order or limit. The ordered graph's top-K operator owns
-the local result window. Provider transfer remains bounded by `orderBy` and
-`limit`; local delivery cardinality is a separate observation.
+request predicates for both legs. For an on-demand source its local snapshot is
+predicate-only: it may deliver every matching row already installed in the
+Collection without applying the request's order or limit, and the repair chain
+relies on that delivery. An eager source's installed rows are the whole source,
+so an indexed request with one order term reads only the first `limit` matching
+local rows; a row in the source's first `limit` is also in the local first
+`limit`. A second order term keeps the full local read, because an index on the
+first term cannot order its ties. A filter on a LEFT-joined source also keeps
+the full local read: it drops rows only after the source's `limit`, so a full
+window after a bounded read would not prove that it holds the first eligible
+rows. A row that entered the graph through an earlier live update could fill
+the window in place of an eligible row the bounded read never sent. When every
+request in a bounded prefix
+repair (an eager source, an index, one order term, no joined filter) returns
+literal `true`, the
+repair settles synchronously,
+so its tie and refill steps finish inside the same graph run and a window move
+that consumes the repair still publishes once. A full-source request, initial
+or repair, keeps its asynchronous settlement. The
+ordered graph's top-K operator owns the local result window. Provider transfer
+remains bounded by `orderBy` and `limit`; local delivery cardinality is a
+separate observation.
 
 Bounded repair is available only when a provider prefix is sufficient for the
 local plan. Core requires full-source recovery for an indirect order
@@ -1084,7 +1101,9 @@ delta, but `onBatch`/`onEnter`/`onUpdate`/`onExit` callbacks retain the last
 complete result. Prefix, tie, and refill promises join one continuous gate;
 the final successful participant schedules one flush of the accumulated delta.
 A synchronous adapter result still contributes the loader's wrapped repair
-participant. At flush, equal insert/delete counts are classified against the
+participant, except in a synchronous bounded prefix repair:
+that repair finishes inside the graph run that publishes its window, so no
+callback can observe a partial window and no participant is needed. At flush, equal insert/delete counts are classified against the
 last callback-visible membership and value: absent-to-absent produces no event,
 while present-to-present produces an update only when the value changed.
 If truncate replay aborts an obsolete repair participant, its replacement
@@ -1201,9 +1220,10 @@ acquisition needed for its completed initial window returns literal
 remaining synchronous ordered continuations and graph work before the
 initiating call stack returns. The live-query Collection rows and initial-query
 readiness are observable at that cut. A Promise result keeps that acquisition
-asynchronous. This cut does not apply to explicit window moves, repair,
-truncate replay, or framework render timing, and it proves neither source
-exhaustion nor broader source coverage.
+asynchronous. This cut does not apply to explicit window moves, full-source
+requests, repair other than a bounded prefix repair, truncate
+replay, or framework render timing, and it proves neither source exhaustion
+nor broader source coverage.
 
 If any source subscriber adds input to the graph during a synchronous ordered
 continuation, core returns to graph work before deciding whether that ordered

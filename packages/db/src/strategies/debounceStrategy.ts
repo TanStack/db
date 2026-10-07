@@ -1,4 +1,5 @@
-import { LiteDebouncer } from '@tanstack/pacer-lite/lite-debouncer'
+import { createSerialPacer } from './serial-pacer'
+import { runWithCommitCompletion } from './commit-completion'
 import type { DebounceStrategy, DebounceStrategyOptions } from './types'
 import type { Transaction } from '../transactions'
 
@@ -28,32 +29,94 @@ import type { Transaction } from '../transactions'
 export function debounceStrategy(
   options: DebounceStrategyOptions,
 ): DebounceStrategy {
+  const leading = options.leading ?? false
   const trailing = options.trailing ?? true
-  const debouncer = new LiteDebouncer(
-    (callback: () => Transaction) => callback(),
-    {
-      ...options,
-      leading: options.leading ?? false,
-      trailing,
-    },
-  )
+  const serial = createSerialPacer(0)
+  let canLead = true
+  let leadingPending = false
+  let leadingOwner: object | undefined
+  let timeout: ReturnType<typeof setTimeout> | undefined
+  const trailingRuns = new Map<
+    object,
+    { run: () => Promise<unknown>; isCanceled: () => boolean }
+  >()
 
   return {
     _type: `debounce`,
     options,
     execute: <T extends object = Record<string, unknown>>(
       fn: () => Transaction<T>,
+      onAdmit?: () => Transaction<T> | void,
+      onCommit?: () => Promise<unknown> | undefined,
     ) => {
-      const execution = { happened: false }
-      debouncer.maybeExecute(() => {
-        execution.happened = true
-        return (fn as () => Transaction)()
-      })
-      if (!trailing && !execution.happened) return false
+      const run = () => runWithCommitCompletion(fn, onCommit)
+      const leadingCall = leading && canLead
+      const admitted = leadingCall || trailing
+      // Reserve the edge before optimistic mutation can reenter execute.
+      const wasLeadAvailable = canLead
+      canLead = false
+      let owner: object = fn
+      let transaction: Transaction<T> | undefined
+      try {
+        if (admitted) {
+          const admittedOwner = onAdmit?.()
+          if (admittedOwner) {
+            transaction = admittedOwner
+            owner = admittedOwner
+          }
+        }
+      } catch (error) {
+        // A nested admitted call may have installed its own quiet timer.
+        if (timeout === undefined) canLead = wasLeadAvailable
+        throw error
+      }
+      // A replacement transaction after rollback cannot inherit a canceled
+      // leading callback's eligibility. It needs its own quiet-edge schedule.
+      const joinsPendingLeading =
+        leadingPending && !leadingCall && owner === leadingOwner
+      if (timeout !== undefined) clearTimeout(timeout)
+      // A new call renews the quiet period, including after an earlier timer
+      // became eligible while persistence was held.
+      if (trailing)
+        for (const pendingOwner of trailingRuns.keys())
+          serial.cancel(pendingOwner)
+      if (trailing && admitted && !leadingCall && !joinsPendingLeading) {
+        trailingRuns.set(owner, {
+          run,
+          isCanceled: () => transaction?.state === `failed`,
+        })
+      }
+      timeout = setTimeout(() => {
+        timeout = undefined
+        canLead = true
+        for (const [pendingOwner, pending] of trailingRuns) {
+          if (pending.isCanceled()) {
+            trailingRuns.delete(pendingOwner)
+            continue
+          }
+          serial.schedule(() => {
+            trailingRuns.delete(pendingOwner)
+            return pending.run()
+          }, pendingOwner)
+        }
+      }, options.wait)
+      if (leadingCall) {
+        // A same-manager reentrant trailing call joins this leading transaction.
+        // A different manager's trailing transaction keeps the shared edge.
+        trailingRuns.delete(owner)
+        leadingPending = true
+        leadingOwner = owner
+        serial.schedule(() => {
+          leadingPending = false
+          leadingOwner = undefined
+          return run()
+        }, owner)
+      }
+      if (!admitted) return false
       return
     },
     cleanup: () => {
-      // Keep pending work scheduled until its quiet-period callback runs.
+      // Admitted work retains its timer and persistence obligation.
     },
   }
 }

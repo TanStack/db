@@ -312,6 +312,15 @@ export class TransactionError extends TanStackDBError {
   }
 }
 
+export class PacedTransactionManualCommitError extends TransactionError {
+  constructor() {
+    super(
+      `Paced mutations are committed by their strategy. Await the transaction receipt or roll it back instead.`,
+    )
+    this.name = `PacedTransactionManualCommitError`
+  }
+}
+
 export class QueueCapacityExceededError extends TransactionError {
   constructor() {
     super(`Queue capacity exceeded; the mutation was not admitted`)

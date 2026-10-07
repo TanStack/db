@@ -81,14 +81,20 @@ export class TransactionScope {
     this.transactionStack.push(transaction)
   }
 
-  unregisterTransaction(transaction: Transaction<any>): void {
+  unregisterTransaction(
+    transaction: Transaction<any>,
+    contextAlreadyCleared = false,
+  ): void {
     try {
       transactionScopedScheduler.flush(transaction.id)
     } finally {
-      this.transactionStack = this.transactionStack.filter(
-        (candidate) => candidate.id !== transaction.id,
-      )
+      if (!contextAlreadyCleared) this.clearTransactionContext(transaction)
     }
+  }
+
+  clearTransactionContext(transaction: Transaction<any>): void {
+    const index = this.transactionStack.lastIndexOf(transaction)
+    if (index !== -1) this.transactionStack.splice(index, 1)
   }
 
   removeTransaction(transaction: Transaction<any>): void {
@@ -339,6 +345,7 @@ class Transaction<T extends object = Record<string, unknown>> {
   public state: TransactionState
   public mutationFn: MutationFn<T>
   public mutations: Array<PendingMutation<T>>
+  private captureMutations?: () => void
   /**
    * Deferred that settles when this transaction settles.
    *
@@ -413,7 +420,8 @@ class Transaction<T extends object = Record<string, unknown>> {
    * Async work should happen in `mutationFn`; collection operations after `await` boundaries
    * inside this callback will not be part of this transaction. For manual transactions, call
    * `mutate` multiple times before committing to add more synchronous operations to the same
-   * transaction.
+   * transaction. If this callback throws, its mutations are removed before the
+   * error reaches the caller; mutations from earlier successful calls remain.
    * @returns This transaction for chaining
    * @example
    * // Group multiple operations
@@ -469,12 +477,50 @@ class Transaction<T extends object = Record<string, unknown>> {
       scope.registerTransaction(this)
     }
 
+    let previousMutations: Array<PendingMutation<T>> | undefined
+    const captureOuter = this.captureMutations
+    this.captureMutations = () => {
+      captureOuter?.()
+      previousMutations ??= [...this.mutations]
+    }
+    let contextAlreadyCleared = false
     try {
       callback()
+    } catch (error) {
+      // Keep successful earlier callbacks when this one fails after changing
+      // one or more Collections. The original mutation objects are immutable
+      // snapshots; later same-key merges replace them rather than editing them.
+      const before = previousMutations ?? this.mutations
+      const touched = new Set(
+        [...before, ...this.mutations].map((mutation) => mutation.collection),
+      )
+      if (previousMutations)
+        this.mutations.splice(0, this.mutations.length, ...previousMutations)
+      // Restoration publishes outside the failed callback's transaction
+      // context. A subscriber's new write must not join this transaction.
+      registeredScopes.add(getTransactionScope(this))
+      for (const scope of registeredScopes) scope.clearTransactionContext(this)
+      contextAlreadyCleared = true
+      const restorationErrors: Array<unknown> = []
+      for (const collection of touched) {
+        try {
+          collection._state.onTransactionStateChange()
+        } catch (restorationError) {
+          restorationErrors.push(restorationError)
+        }
+      }
+      if (restorationErrors.length)
+        throw new AggregateError(
+          [error, ...restorationErrors],
+          `Mutation callback and restoration failed`,
+          { cause: error },
+        )
+      throw error
     } finally {
+      this.captureMutations = captureOuter
       registeredScopes.add(getTransactionScope(this))
       for (const scope of registeredScopes) {
-        scope.unregisterTransaction(this)
+        scope.unregisterTransaction(this, contextAlreadyCleared)
       }
     }
 
@@ -507,6 +553,7 @@ class Transaction<T extends object = Record<string, unknown>> {
    * @param mutations - Array of new mutations to apply
    */
   applyMutations(mutations: Array<PendingMutation<any>>): void {
+    this.captureMutations?.()
     // Merge via a globalKey-keyed map rather than a findIndex scan per
     // mutation, which is O(n²) for bulk operations (e.g. inserting many rows
     // in one call). Map preserves insertion order, matching the previous

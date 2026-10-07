@@ -1993,7 +1993,8 @@ describe(`CollectionSubscription replay oracle`, () => {
       const index = collection.createIndex((row) => row.value, {
         indexType: BTreeIndex,
       })
-      const orderedIndex = direction === `asc` ? index : new ReverseIndex(index)
+      const orderedIndex =
+        direction === `asc` ? index : new ReverseIndex(index, true)
       const orderBy: OrderBy = [
         {
           expression: new PropRef([`value`]),
