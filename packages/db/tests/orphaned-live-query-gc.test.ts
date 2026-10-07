@@ -5,10 +5,9 @@ import { mockSyncCollectionOptions, resetCleanupQueue } from './utils.js'
 
 // Subscriptions that keep a source from garbage collection, including a live
 // query that asks for no data yet.
-function retainers(collection: {
-  _changes: { activeSubscribersCount: number }
-}) {
-  return collection._changes.activeSubscribersCount
+function retainers(collection: unknown): number {
+  return (collection as { _changes: { activeSubscribersCount: number } })
+    ._changes.activeSubscribersCount
 }
 
 type Person = { id: string; name: string }
