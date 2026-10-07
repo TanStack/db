@@ -59,3 +59,41 @@ The report's four source-order items are preserved in the task's evaluation
 ledger. The subscription proposal remains a separate API design decision. The
 reported `setQueryData` workaround was not executed here; it remains an
 external adapter observation, not evidence for cache safety.
+
+## Prep-PR review extension
+
+The independent review of `ebde2066d` found two reachable histories outside
+the ten-subset witness. The follow-up implementation commit is
+`aaca3ec0af4d3c5ac74c95c1b23942a562d593dc`.
+
+First, the documented `edges.map(edge => edge.node)` projection has no inverse
+cache mapping. A direct write replaced `edges` with node objects. The new
+ownership-oracle comparison failed on the envelope shape and production logged
+`InvalidQueryResultError`. The repair updates a wrapped cache only when
+`select` returns a direct array property by identity. The same oracle now
+passes, while the new direct-property on-demand control preserves the patchable
+case. A derived cache may be stale; it must remain valid input to `select`.
+
+Second, a direct write under a held `deferDataRefresh` barrier made one provider
+request after barrier release. The new ownership-oracle assertion failed at
+that checkpoint with two total calls instead of one. The repair prevents a
+direct-cache notification from scheduling the deferred refetch. The same
+barrier history now passes. The adjacent replacement-Query case still checks
+the cache-clear path through an explicit refetch.
+
+For ORC-001 through ORC-006, the added laws are the existing no-refetch promise
+at the barrier checkpoint and the documented read-only nature of derived
+`select` projections. The authored envelope supplies the independent expected
+shape. The production driver uses a real QueryClient and public direct write.
+The assertions observe cache shape, public Collection row, and provider calls.
+Both original faults failed at their intended assertions; the cache fault also
+caused a logged application error. ORC-007 and ORC-008 remain inapplicable
+because these are fixed histories without model-state changes. ORC-009 and
+ORC-010 follow the existing vocabulary and cleanup harness. For ORC-011
+through ORC-013, the directly selected wrapper control distinguishes safe
+patching from the derived projection, and the held barrier distinguishes a
+post-release request from the ordinary no-barrier case. The claim remains
+bounded by these histories. Under ORC-014, `OfflineExecutor` supplies a real
+`deferDataRefresh` barrier during reconnect replay, but no full
+OfflineExecutor receiving witness ran. The offline-transactions owner retains
+that integration check in the coverage map.
