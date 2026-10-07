@@ -9339,11 +9339,8 @@ describe(`QueryCollection`, () => {
     })
   })
 
-  describe(`On-demand collection directWrite cache revalidation`, () => {
-    it(`should revalidate an active computed queryKey after writeUpdate`, async () => {
-      // Ensures writeUpdate on on-demand collections revalidates the active
-      // computed query key so the authoritative result survives a remount.
-
+  describe(`On-demand direct writes and cache ownership`, () => {
+    it(`keeps an updated computed queryKey through remount without refetching`, async () => {
       const serverItems: Array<CategorisedItem> = [
         { id: `1`, name: `Item 1`, category: `A` },
         { id: `2`, name: `Item 2`, category: `A` },
@@ -9407,7 +9404,7 @@ describe(`QueryCollection`, () => {
         // Verify the collection reflects the update
         expect(collection.get(`1`)?.name).toBe(`Updated Item 1`)
 
-        await vi.waitFor(() => expect(queryFn).toHaveBeenCalledTimes(2))
+        expect(queryFn).toHaveBeenCalledTimes(1)
 
         // IMPORTANT: Simulate remount by cleaning up and recreating the live query
         // This is where the bug manifests - the updated data should persist
@@ -9430,8 +9427,9 @@ describe(`QueryCollection`, () => {
           expect(collection.size).toBe(2)
         })
 
-        // After remount, the authoritative updated data should persist.
+        // The key-scoped cache patch keeps the direct write on remount.
         expect(collection.get(`1`)?.name).toBe(`Updated Item 1`)
+        expect(queryFn).toHaveBeenCalledTimes(1)
       } finally {
         await query2?.cleanup()
         await query1.cleanup()
@@ -9440,7 +9438,7 @@ describe(`QueryCollection`, () => {
       }
     })
 
-    it(`should revalidate a scoped static queryKey after writeUpdate`, async () => {
+    it(`keeps an updated scoped static queryKey through remount without refetching`, async () => {
       // Scenario: static queryKey + on-demand mode + where clause
       // The where clause causes a computed query key to be generated
 
@@ -9498,7 +9496,7 @@ describe(`QueryCollection`, () => {
 
         expect(collection.get(`1`)?.name).toBe(`Updated Item 1`)
 
-        await vi.waitFor(() => expect(queryFn).toHaveBeenCalledTimes(2))
+        expect(queryFn).toHaveBeenCalledTimes(1)
 
         // Simulate remount
         await query1.cleanup()
@@ -9520,6 +9518,7 @@ describe(`QueryCollection`, () => {
 
         // After remount, the updated data should persist
         expect(collection.get(`1`)?.name).toBe(`Updated Item 1`)
+        expect(queryFn).toHaveBeenCalledTimes(1)
       } finally {
         await query2?.cleanup()
         await query1.cleanup()
@@ -9528,7 +9527,7 @@ describe(`QueryCollection`, () => {
       }
     })
 
-    it(`should revalidate a constant function queryKey after writeUpdate`, async () => {
+    it(`keeps an updated constant function queryKey through remount without refetching`, async () => {
       // Scenario: function queryKey that returns same value
       // This creates an undefined entry in the cache
 
@@ -9581,7 +9580,7 @@ describe(`QueryCollection`, () => {
 
         expect(collection.get(`1`)?.name).toBe(`Updated Item 1`)
 
-        await vi.waitFor(() => expect(queryFn).toHaveBeenCalledTimes(2))
+        expect(queryFn).toHaveBeenCalledTimes(1)
 
         // Simulate remount
         await query1.cleanup()
@@ -9599,6 +9598,7 @@ describe(`QueryCollection`, () => {
 
         // After remount, the updated data should persist
         expect(collection.get(`1`)?.name).toBe(`Updated Item 1`)
+        expect(queryFn).toHaveBeenCalledTimes(1)
       } finally {
         await query2?.cleanup()
         await query1.cleanup()
@@ -9656,17 +9656,22 @@ describe(`QueryCollection`, () => {
           const scopedQuery = customQueryClient.getQueryCache().getAll()[0]!
           expect(scopedQuery.state.dataUpdateCount).toBe(1)
 
-          collection.utils.writeUpdate({ id: `1`, name: `Manual` })
+          await collection.utils.writeUpdate({ id: `1`, name: `Manual` })
           expect(collection.get(`1`)?.name).toBe(`Manual`)
+          expect(queryFn).toHaveBeenCalledTimes(1)
+          const refresh = collection.utils.refetch({ throwOnError: true })
           await vi.waitFor(() => expect(queryFn).toHaveBeenCalledTimes(2))
 
           expect(collection.get(`1`)?.name).toBe(`Manual`)
-          expect(scopedQuery.state.data).toEqual([initial])
+          expect(scopedQuery.state.data).toEqual([
+            { ...initial, name: `Manual` },
+          ])
 
           refetchResult.resolve([authoritative])
+          await refresh
           await vi.waitFor(() => {
             expect(collection.get(`1`)?.name).toBe(`Authoritative`)
-            expect(scopedQuery.state.dataUpdateCount).toBe(2)
+            expect(scopedQuery.state.dataUpdateCount).toBe(3)
           })
         } finally {
           refetchResult.resolve([authoritative])
@@ -9763,7 +9768,7 @@ describe(`QueryCollection`, () => {
           name: `Outside A scope`,
           category: `outside`,
         })
-        await vi.waitFor(() => expect(queryA).toHaveBeenCalledTimes(2))
+        expect(queryA).toHaveBeenCalledTimes(1)
 
         const afterAWrite = {
           queryPresent:
@@ -9968,6 +9973,7 @@ describe(`QueryCollection`, () => {
 
         barrier.resolve()
         await barrierCompletion
+        await foreignObserver.refetch()
         for (let turn = 0; turn < 20; turn++) await Promise.resolve()
 
         expect(
@@ -9987,7 +9993,7 @@ describe(`QueryCollection`, () => {
       }
     })
 
-    it(`evicts an owned custom-hash alias outside the base-key prefix`, async () => {
+    it(`leaves a custom-hash cache alias for the caller to evict`, async () => {
       const foreignKey = [`custom-hash-foreign-retained-key`]
       const baseKey = [`custom-hash-owned-base-key`]
       let enabled = false
@@ -10055,7 +10061,9 @@ describe(`QueryCollection`, () => {
 
         expect(
           customQueryClient.getQueryCache().getAll().includes(aliasedQuery),
-        ).toBe(false)
+        ).toBe(true)
+        expect(queryFn).not.toHaveBeenCalled()
+        customQueryClient.removeQueries({ queryKey: foreignKey, exact: true })
 
         enabled = true
         await first.cleanup()
@@ -10150,93 +10158,7 @@ describe(`QueryCollection`, () => {
       }
     })
 
-    it(`does not ready a remounted co-owner from a shared pre-write result`, async () => {
-      const refetchResult = createDeferred<Array<CategorisedItem>>()
-      const refetchStarted = createDeferred<void>()
-      const queryFn = vi
-        .fn<() => Promise<Array<CategorisedItem>>>()
-        .mockResolvedValueOnce([{ id: `1`, name: `Initial`, category: `A` }])
-        .mockImplementationOnce(() => {
-          refetchStarted.resolve()
-          return refetchResult.promise
-        })
-      const sharedQueryClient = new QueryClient({
-        defaultOptions: {
-          queries: {
-            gcTime: Number.POSITIVE_INFINITY,
-            staleTime: Number.POSITIVE_INFINITY,
-            retry: false,
-          },
-        },
-      })
-      const createSharedCollection = (id: string) =>
-        createCollection(
-          queryCollectionOptions<CategorisedItem>({
-            id,
-            queryClient: sharedQueryClient,
-            queryKey: [`shared-pre-write-result`],
-            queryFn,
-            getKey: (row) => row.id,
-            syncMode: `on-demand`,
-            startSync: true,
-          }),
-        )
-      const collectionA = createSharedCollection(`shared-write-owner-a`)
-      const collectionB = createSharedCollection(`shared-write-owner-b`)
-      const createActive = (collection: typeof collectionA) =>
-        createLiveQueryCollection({
-          query: (query) =>
-            query
-              .from({ row: collection })
-              .where(({ row }) => eq(row.category, `A`)),
-        })
-      const activeA = createActive(collectionA)
-      const firstB = createActive(collectionB)
-      let remountedB: ReturnType<typeof createActive> | undefined
-
-      try {
-        await Promise.all([activeA.preload(), firstB.preload()])
-
-        collectionA.utils.writeUpdate({ id: `1`, name: `Manual` })
-        await refetchStarted.promise
-        await firstB.cleanup()
-        expect(collectionB.size).toBe(0)
-
-        remountedB = createActive(collectionB)
-        let preloadSettled = false
-        let rowsAtSettlement: Array<string> | undefined
-        const preload = remountedB.preload().then(() => {
-          rowsAtSettlement = remountedB!.toArray.map((row) => row.name)
-          preloadSettled = true
-        })
-        await flushPromises()
-
-        expect(queryFn).toHaveBeenCalledTimes(2)
-        expect(sharedQueryClient.isFetching()).toBe(1)
-        expect(remountedB.toArray).toEqual([])
-        expect(preloadSettled).toBe(false)
-
-        refetchResult.resolve([
-          { id: `1`, name: `Authoritative`, category: `A` },
-        ])
-        await preload
-
-        expect(rowsAtSettlement).toEqual([`Authoritative`])
-        expect(remountedB.toArray.map((row) => row.name)).toEqual([
-          `Authoritative`,
-        ])
-      } finally {
-        refetchResult.resolve([])
-        await remountedB?.cleanup()
-        await firstB.cleanup()
-        await activeA.cleanup()
-        await collectionA.cleanup()
-        await collectionB.cleanup()
-        sharedQueryClient.clear()
-      }
-    })
-
-    it(`evicts a protected scoped Query when its owner unloads before deferred revalidation`, async () => {
+    it(`retains an explicitly refreshed scoped Query after its owner unloads`, async () => {
       const barrier = createDeferred<void>()
       let serverRows: Array<CategorisedItem> = [
         { id: `1`, name: `Initial`, category: `A` },
@@ -10282,13 +10204,14 @@ describe(`QueryCollection`, () => {
         await first.preload()
         collection.deferDataRefresh = barrier.promise
         serverRows = [{ id: `1`, name: `Authoritative`, category: `A` }]
-        collection.utils.writeUpdate({ id: `1`, name: `Manual` })
+        await collection.utils.writeUpdate({ id: `1`, name: `Manual` })
+        void collection.utils.refetch({ throwOnError: true }).catch(() => {})
         await first.cleanup()
 
         barrier.resolve()
         await barrierCompletion
 
-        expect(customQueryClient.getQueryCache().getAll()).toEqual([])
+        expect(customQueryClient.getQueryCache().getAll()).toHaveLength(1)
 
         remounted = createActive()
         await remounted.preload()
@@ -10306,7 +10229,7 @@ describe(`QueryCollection`, () => {
       }
     })
 
-    it(`requires post-write authority when an initial request is reused`, async () => {
+    it(`does not start a replacement request for a direct write during initial fetch`, async () => {
       const initialResult = createDeferred<Array<CategorisedItem>>()
       const postWriteResult = createDeferred<Array<CategorisedItem>>()
       const initialStarted = createDeferred<void>()
@@ -10356,9 +10279,7 @@ describe(`QueryCollection`, () => {
         })
 
         let preloadSettled = false
-        let rowsAtSettlement: Array<string> | undefined
         const preload = active.preload().then(() => {
-          rowsAtSettlement = active.toArray.map((row) => row.name)
           preloadSettled = true
         })
         await initialStarted.promise
@@ -10369,25 +10290,18 @@ describe(`QueryCollection`, () => {
         initialResult.resolve([{ id: `1`, name: `Stale`, category: `A` }])
         for (let turn = 0; turn < 30; turn++) await Promise.resolve()
 
-        expect({
-          providerCalls: queryFn.mock.calls.length,
-          preloadSettled,
-          materializedName: collection.get(`1`)?.name,
-          rowsAtSettlement,
-        }).toEqual({
-          providerCalls: 2,
-          preloadSettled: false,
-          materializedName: undefined,
-          rowsAtSettlement: undefined,
-        })
+        await preload
+        expect(queryFn).toHaveBeenCalledTimes(1)
+        expect(preloadSettled).toBe(true)
 
+        const refresh = collection.utils.refetch({ throwOnError: true })
         await postWriteStarted.promise
         postWriteResult.resolve([
           { id: `1`, name: `Authoritative`, category: `A` },
         ])
-        await preload
+        await refresh
 
-        expect(rowsAtSettlement).toEqual([`Authoritative`])
+        expect(active.toArray.map((row) => row.name)).toEqual([`Authoritative`])
       } finally {
         initialResult.resolve([])
         postWriteResult.resolve([])
@@ -10475,7 +10389,8 @@ describe(`QueryCollection`, () => {
             ?.state.dataUpdateCount,
         ).toBe(1)
 
-        collection.utils.writeUpdate({ id: `1`, name: `Manual` })
+        await collection.utils.writeUpdate({ id: `1`, name: `Manual` })
+        void collection.utils.refetch({ throwOnError: true }).catch(() => {})
         await writeRefetchStarted.promise
         expect(active.toArray.map((row) => row.name)).toEqual([`Manual`])
 
@@ -10598,6 +10513,7 @@ describe(`QueryCollection`, () => {
 
         barrier.resolve()
         await barrierCompletion
+        const refresh = outside.refetch()
         for (let turn = 0; turn < 30; turn++) await Promise.resolve()
 
         expect(queryFn).toHaveBeenCalledTimes(2)
@@ -10605,6 +10521,7 @@ describe(`QueryCollection`, () => {
         secondResult.resolve([
           { id: `1`, name: `Authoritative`, category: `A` },
         ])
+        await refresh
         await outsideUpdated.promise
 
         expect(outside.getCurrentResult().data?.[0]?.name).toBe(`Authoritative`)
@@ -10764,14 +10681,15 @@ describe(`QueryCollection`, () => {
         await active.preload()
         expect(queryFn).not.toHaveBeenCalled()
 
-        collection.utils.writeInsert({
+        await collection.utils.writeInsert({
           id: `outside`,
           name: `Outside`,
           category: `B`,
         })
-        expect(customQueryClient.getQueryCache().findAll({ queryKey })).toEqual(
-          [],
-        )
+        expect(
+          customQueryClient.getQueryCache().findAll({ queryKey }),
+        ).toHaveLength(1)
+        expect(queryFn).not.toHaveBeenCalled()
 
         await collection.utils.refetch({ throwOnError: true })
         expect(queryFn).toHaveBeenCalledTimes(1)
@@ -10823,11 +10741,12 @@ describe(`QueryCollection`, () => {
             ?.state.dataUpdateCount,
         ).toBe(1)
 
-        collection.utils.writeInsert({
+        await collection.utils.writeInsert({
           id: `outside`,
           name: `Outside`,
           category: `B`,
         })
+        void collection.utils.refetch({ throwOnError: true }).catch(() => {})
         await vi.waitFor(() => expect(queryFn).toHaveBeenCalledTimes(2))
 
         await customQueryClient.resetQueries({ queryKey, exact: true })
@@ -10851,7 +10770,7 @@ describe(`QueryCollection`, () => {
       }
     })
 
-    it(`waits for recovery rows when remounting after a write-triggered refetch error`, async () => {
+    it(`waits for recovery rows when remounting after an explicit refetch error`, async () => {
       const initialResult = createDeferred<Array<CategorisedItem>>()
       const failedRefetch = createDeferred<Array<CategorisedItem>>()
       const recoveryResult = createDeferred<Array<CategorisedItem>>()
@@ -10860,7 +10779,7 @@ describe(`QueryCollection`, () => {
       const recoveryStarted = createDeferred<void>()
       const refetchErrored = createDeferred<void>()
       const recoverySucceeded = createDeferred<void>()
-      const failure = new Error(`write-triggered refetch failed`)
+      const failure = new Error(`explicit refetch failed`)
       const queryKey = [`error-remount-recovery`]
       const customQueryClient = new QueryClient({
         defaultOptions: {
@@ -10935,7 +10854,8 @@ describe(`QueryCollection`, () => {
         await initialPreload
         expect(first.toArray.map((row) => row.name)).toEqual([`Initial`])
 
-        collection.utils.writeUpdate({ id: `1`, name: `Manual` })
+        await collection.utils.writeUpdate({ id: `1`, name: `Manual` })
+        void collection.utils.refetch({ throwOnError: true }).catch(() => {})
         await failedRefetchStarted.promise
         failedRefetch.reject(failure)
         await refetchErrored.promise
@@ -11043,6 +10963,8 @@ describe(`QueryCollection`, () => {
           if (outcome === `resolve`) barrier.resolve()
           else barrier.reject(failure)
           await barrierSettlement
+          expect(queryFn).toHaveBeenCalledTimes(1)
+          await collection.utils.refetch({ throwOnError: true })
 
           await vi.waitFor(() => {
             expect(queryFn).toHaveBeenCalledTimes(2)

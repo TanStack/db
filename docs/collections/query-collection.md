@@ -341,8 +341,8 @@ derived Query cache entries instead.
 If a stale initial response triggers a fetch, the initial rows remain available
 while it is in flight. A successful response reconciles them through the normal
 row ownership pipeline; an error retains the initial rows. Direct writes patch
-the eager Query cache in place. On-demand direct writes revalidate scoped
-entries as described below.
+the eager Query cache in place. On-demand direct writes patch existing cached
+row keys on a best-effort basis, as described below.
 
 ### Selecting Rows from Wrapped Responses
 
@@ -382,7 +382,7 @@ preserving the envelope in the Query cache.
 
 This differs from TanStack Query's observer-level `select`: query-db-collection uses this option to bridge Query's response object into DB's normalized row store.
 
-In eager mode, direct write utilities such as `writeInsert`, `writeUpdate`, and `writeDelete` make a best-effort attempt to update the matching row array inside wrapped Query cache entries while preserving wrapper metadata. In on-demand mode, they revalidate active scoped queries and remove inactive or disabled cache entries instead of patching them with the full collection snapshot.
+In eager mode, direct write utilities such as `writeInsert`, `writeUpdate`, and `writeDelete` make a best-effort attempt to update the matching row array inside wrapped Query cache entries while preserving wrapper metadata. In on-demand mode, they patch rows already present in active scoped cache entries by key and remove inactive collection-owned entries unless another owner or observer retains them. They do not reconstruct a scoped result from the full collection.
 
 This works automatically for simple wrappers such as:
 
@@ -687,7 +687,7 @@ Normal collection operations (insert, update, delete) create optimistic mutation
 - Rolled back automatically if the server request fails
 - Replaced with server data when the query refetches
 
-Direct writes bypass this system entirely and write directly to the synced data store, making them useful for handling real-time updates from alternative sources. Active on-demand queries still refetch so each scoped cache remains authoritative for its own request.
+Direct writes bypass this system entirely and write directly to the synced data store, making them useful for handling real-time updates from alternative sources. They do not automatically refetch Query results. The caller is responsible for deciding when a scoped result needs fresh server authority.
 
 ### When to Use Direct Writes
 
@@ -729,9 +729,9 @@ These operations:
 - Return a promise that resolves when the sync commit is accepted, including any configured persistence write. Await it in a mutation handler before returning so the server response is stored before the optimistic state drops.
 - While a mutation handler is running, wait behind it and become visible when its optimistic transaction settles, in the same update that drops its optimistic state
 - In eager mode, update the full-result TanStack Query cache in place without refetching
-- In on-demand mode, refetch active enabled queries and remove inactive or disabled cache entries
+- In on-demand mode, patch changed keys already present in active Query cache entries and remove inactive entries when no other owner or observer retains them, without refetching
 
-The promise does not wait for on-demand Query revalidation. If a handler returns before it writes the server response, its optimistic state drops and the row shows the previous server value until the response arrives.
+The promise does not wait for a separately requested Query refetch. If a handler returns before it writes the server response, its optimistic state drops and the row shows the previous server value until the response arrives.
 After Collection cleanup starts, direct writes fail with `SyncNotInitializedError` until a new sync run starts.
 
 ### Batch Operations
@@ -777,9 +777,9 @@ ws.on("todos:update", (changes) => {
 })
 ```
 
-- In eager mode, these writes patch the cached query result without a
-  refetch. In on-demand mode, each direct write refetches the active queries.
-  See [Direct Writes and Query Sync](#direct-writes-and-query-sync).
+- Direct writes do not refetch. In eager mode, they patch the full-result
+  cache. In on-demand mode, they patch rows already present in active scoped
+  caches. See [Direct Writes and Query Sync](#direct-writes-and-query-sync).
 - A direct write is validated against the synced store after every earlier
   sync commit is accepted. `writeUpdate` and `writeDelete` reject their
   promise if the row is not in the synced store, and `writeInsert` rejects if
@@ -1189,15 +1189,11 @@ This pattern allows you to:
 
 ### Direct Writes and Query Sync
 
-Direct writes update the collection immediately, or when a running mutation handler settles. In eager mode, they also patch the full-result TanStack Query cache in place.
+Direct writes update the collection when their sync commit is accepted, or when a running mutation handler settles. They do not start a Query refetch. In eager mode, they also patch the full-result TanStack Query cache in place.
 
-In on-demand mode, each Query cache entry may represent a different predicate, order, limit, or offset. A full collection snapshot cannot safely replace those scoped results. Direct writes therefore refetch active enabled queries and remove inactive or disabled entries. A successful `queryFn` result remains authoritative and may reconcile or replace a direct write.
+In on-demand mode, each Query cache entry may represent a different predicate, order, limit, or offset. A direct write patches changed keys that already appear in active cached row arrays and removes inactive collection-owned entries when no other owner or observer retains them. It cannot infer whether an inserted row belongs in a scoped result or which row replaces a deleted item in a limited window. A later `queryFn` result may reconcile or replace the direct write. Treat this as a lower-level API: use `collection.utils.refetch()` when the server must reestablish exact scoped results.
 
-To handle this properly:
-
-1. Use `{ refetch: false }` in persistence handlers to avoid the handler's additional refetch after a direct write. On-demand cache revalidation still runs.
-2. Make sure an on-demand `queryFn` returns the current server result for its pushed-down predicate, order, limit, and offset.
-3. Use eager mode when direct writes must update one complete cached result without a network request.
+To use direct writes with persistence handlers, return `{ refetch: false }` to avoid the handler's separate automatic refetch during the pre-1.0 transition. An on-demand `queryFn` still needs to return the complete current result for its pushed-down predicate, order, limit, and offset when it does run. For robust real-time synchronization, use a collection backed by a sync engine that owns snapshot and change-stream ordering.
 
 ## Complete Direct Write API Reference
 

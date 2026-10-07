@@ -53,7 +53,10 @@ export interface SyncContext<
    * Handles both direct array caches and wrapped response formats (when `select` is used).
    * If not provided, falls back to directly setting the cache with the raw array.
    */
-  updateCacheData?: (getItems: () => Array<TRow>) => void
+  updateCacheData?: (
+    getItems: (keys?: Array<TKey>) => Array<TRow>,
+    changedKeys: Array<TKey>,
+  ) => void
   /**
    * Gives a direct write its position when it is called. A fetch that starts
    * later counts as newer than the write.
@@ -288,12 +291,20 @@ function applyWriteOperations<
   // cache holds accepted rows.
   const accepted = whenSyncAccepted(applied)
   const updateCache = () => {
-    const getItems = () =>
-      Array.from(
-        ctx.collection._state.acceptedSyncedEntries(),
-        ([, row]) => row,
+    const getItems = (keys?: Array<TKey>): Array<TRow> =>
+      keys
+        ? keys
+            .map((key) => ctx.collection._state.getAcceptedSyncedRow(key))
+            .filter((row): row is TRow => row !== undefined)
+        : Array.from(
+            ctx.collection._state.acceptedSyncedEntries(),
+            ([, row]) => row,
+          )
+    if (ctx.updateCacheData)
+      ctx.updateCacheData(
+        getItems,
+        normalized.map((op) => op.key),
       )
-    if (ctx.updateCacheData) ctx.updateCacheData(getItems)
     else ctx.queryClient.setQueryData(ctx.queryKey, getItems())
   }
   if (accepted === true) updateCache()

@@ -1,6 +1,5 @@
 import {
   QueryClient,
-  QueryObserver,
   focusManager,
   hashKey,
   isCancelledError,
@@ -43,7 +42,7 @@ import type { QueryCollectionUtils } from '../src/query.js'
  * Mutation refetches add a second authority path but do not bypass those rules.
  *
  * The reference view is an ownership graph: query scope and demand nodes point
- * to row keys. Sync-run lifetime fences, post-write-refetch generations, and
+ * to row keys. Sync-run lifetime fences, direct-write key positions, and
  * defer-result barriers govern competing results. Publication and persistence
  * are separate commit boundaries. Tests use real QueryClient
  * observers, cache events, collection metadata, persisted scans, and live
@@ -62,12 +61,9 @@ import type { QueryCollectionUtils } from '../src/query.js'
  * immediate results, valid empty results, invalid shapes, eager recovery,
  * overlapping defer generations, replacement results, cleanup retirement, and
  * same-result subscriber reentry with a controlled nested applied receipt.
- * The production driver crosses eager and on-demand ownership, including
- * post-write fetch authority, and observes only public promise settlement plus
- * public rows at the settlement checkpoint.
- * `refresh-retired` records a replacement that lost authority to a newer write;
- * that result is terminal, but the public operation still waits for its next
- * replacement. It does not model Query fetch counters or observer scheduling.
+ * The production driver crosses eager and on-demand ownership. It observes
+ * public promise settlement and public rows at the settlement checkpoint.
+ * The model does not track Query fetch counters or observer scheduling.
  *
  * The file is large because it crosses the real Query cache boundary, not
  * because it duplicates Query internals. Each history names one ownership edge
@@ -81,7 +77,7 @@ import type { QueryCollectionUtils } from '../src/query.js'
  * settles when its sync commit applies. The controlled persisted-owner history
  * below holds that commit after the initial fetch, then checks the returned
  * promise and stored row before and after release. It does not model native
- * SQLite failure or overlapping on-demand revalidation.
+ * SQLite failure or overlapping on-demand explicit refetches.
  * Direct writes belong to the current sync run. Cleanup start invalidates that
  * run, so later writes must fail without changing storage. Restart admits
  * writes through a new run. The fixed history below checks each boundary.
@@ -127,7 +123,6 @@ type ResultSettlementModelAction =
       rowCount?: 0 | 1
       deferOn?: string
     }
-  | { type: `refresh-retired`; barrier: string }
   | { type: `retire` }
 
 type PublicRefetchObservation =
@@ -157,10 +152,7 @@ function advanceResultSettlementModel(
     return next
   }
 
-  if (
-    action.type === `refresh-succeeded` ||
-    action.type === `refresh-retired`
-  ) {
+  if (action.type === `refresh-succeeded`) {
     const waiting = [...next].filter(
       ([, operation]) =>
         operation.phase === `waiting-for-refresh` &&
@@ -169,7 +161,6 @@ function advanceResultSettlementModel(
     if (waiting.length === 0) {
       throw new Error(`A replacement result requires its defer generation`)
     }
-    if (action.type === `refresh-retired`) return next
     waiting.forEach(([id]) => {
       next.set(
         id,
@@ -2475,9 +2466,9 @@ describe(`query collection ownership lifecycle`, () => {
     },
   )
 
-  it(`settles an authority-gated eager refetch at fetch while a mutation persists`, async () => {
+  it(`settles an eager refetch at fetch while another collection refetches`, async () => {
     const queryClient = createQueryClient()
-    const automaticResult = createDeferred<Array<Item>>()
+    const concurrentResult = createDeferred<Array<Item>>()
     const explicitResult = createDeferred<Array<Item>>()
     const persistence = createDeferred<void>()
     const initial = { ...shared, name: `Initial` }
@@ -2486,7 +2477,7 @@ describe(`query collection ownership lifecycle`, () => {
     const queryFn = vi.fn(() => {
       call++
       if (call === 1) return Promise.resolve([initial])
-      if (call === 2) return automaticResult.promise
+      if (call === 2) return concurrentResult.promise
       return explicitResult.promise
     })
     const eager = createCollection(
@@ -2516,7 +2507,7 @@ describe(`query collection ownership lifecycle`, () => {
     })
     let transactionStarted = false
     cleanups.push(async () => {
-      automaticResult.resolve([authoritative])
+      concurrentResult.resolve([authoritative])
       explicitResult.resolve([authoritative])
       persistence.resolve()
       if (transactionStarted) {
@@ -2535,6 +2526,7 @@ describe(`query collection ownership lifecycle`, () => {
       })
     })
     onDemand.utils.writeUpdate({ ...shared, name: `Manual` })
+    void onDemand.utils.refetch({ throwOnError: true }).catch(() => {})
     await vi.waitFor(() => expect(queryFn).toHaveBeenCalledTimes(2))
 
     let model: MutationRefreshLivenessModel = {
@@ -3626,11 +3618,6 @@ describe(`query collection ownership lifecycle`, () => {
       result: `applicable`,
       deferOn: `barrier-b`,
     })
-    const retired = advanceResultSettlementModel(deferred, {
-      type: `refresh-retired`,
-      barrier: `barrier-a`,
-    })
-
     expect(() =>
       expectPublicRefetchObservation(deferred, deferredOperation, {
         settled: true,
@@ -3652,13 +3639,6 @@ describe(`query collection ownership lifecycle`, () => {
     ).toThrow()
     expect(() =>
       expectPublicRefetchObservation(rebound, deferredOperation, {
-        settled: true,
-        outcome: `fulfilled`,
-        rowCount: 1,
-      }),
-    ).toThrow()
-    expect(() =>
-      expectPublicRefetchObservation(retired, deferredOperation, {
         settled: true,
         outcome: `fulfilled`,
         rowCount: 1,
@@ -4074,123 +4054,6 @@ describe(`query collection ownership lifecycle`, () => {
     await vi.waitFor(() => {
       expect(collection.get(shared.id)?.name).toBe(replacement.name)
     })
-  })
-
-  it(`waits for an authoritative on-demand replacement before settling a deferred result`, async () => {
-    const queryKey = [`deferred-result-post-write-authority`]
-    const replacementBarrier = createDeferred<void>()
-    const writerBarrier = createDeferred<void>()
-    const replacementResult = createDeferred<Array<Item>>()
-    const initial = { ...shared, name: `Initial` }
-    const skipped = { ...shared, name: `Skipped` }
-    const authoritative = { ...shared, name: `Authoritative` }
-    const queryClient = createQueryClient()
-    const queryFn = vi
-      .fn<() => Promise<Array<Item>>>()
-      .mockResolvedValueOnce([initial])
-      .mockResolvedValueOnce([skipped])
-      .mockImplementationOnce(() => replacementResult.promise)
-      .mockResolvedValue([authoritative])
-    const reader = createCollection(
-      queryCollectionOptions<Item>({
-        id: `deferred-result-authority-reader`,
-        queryClient,
-        queryKey,
-        queryFn,
-        getKey: (item) => item.id,
-        syncMode: `on-demand`,
-        startSync: true,
-      }),
-    )
-    const writer = createCollection(
-      queryCollectionOptions<Item>({
-        id: `deferred-result-authority-writer`,
-        queryClient,
-        queryKey,
-        queryFn,
-        getKey: (item) => item.id,
-        syncMode: `on-demand`,
-        startSync: true,
-      }),
-    )
-    const consoleError = vi.spyOn(console, `error`).mockImplementation(() => {})
-    cleanups.push(async () => {
-      consoleError.mockRestore()
-      reader.deferDataRefresh = null
-      writer.deferDataRefresh = null
-      replacementBarrier.resolve()
-      writerBarrier.resolve()
-      replacementResult.resolve([])
-      await Promise.allSettled([reader.cleanup(), writer.cleanup()])
-      queryClient.clear()
-    })
-
-    await writer._sync.loadSubset({})
-    await reader._sync.loadSubset({})
-    reader.deferDataRefresh = replacementBarrier.promise
-    writer.deferDataRefresh = writerBarrier.promise
-
-    let observation: PublicRefetchObservation = { settled: false }
-    const refetch = reader.utils.refetch({ throwOnError: true }).then(
-      () => {
-        observation = {
-          settled: true,
-          outcome: `fulfilled`,
-          rowCount: reader.size,
-        }
-        return undefined
-      },
-      (error: unknown) => {
-        observation = { settled: true, outcome: `rejected` }
-        return error
-      },
-    )
-    await vi.waitFor(() => expect(queryFn).toHaveBeenCalledTimes(2))
-    for (let turn = 0; turn < 20; turn++) await Promise.resolve()
-
-    const operation = `deferred-post-write-authority`
-    let expected = advanceResultSettlementModel(
-      startResultSettlementModel(operation),
-      {
-        type: `query-succeeded`,
-        operation,
-        result: `applicable`,
-        rowCount: 1,
-        deferOn: `replacement-barrier`,
-      },
-    )
-    expectPublicRefetchObservation(expected, operation, observation)
-
-    reader.deferDataRefresh = null
-    replacementBarrier.resolve()
-    await vi.waitFor(() => expect(queryFn).toHaveBeenCalledTimes(3))
-
-    // This write begins after the replacement fetch, so that result cannot
-    // satisfy the newer shared authority requirement. The public call must
-    // remain pending for the authoritative follow-up behind the writer barrier.
-    writer.utils.writeUpdate({ ...shared, name: `Manual` })
-    replacementResult.resolve([null] as unknown as Array<Item>)
-    expected = advanceResultSettlementModel(expected, {
-      type: `refresh-retired`,
-      barrier: `replacement-barrier`,
-    })
-    for (let turn = 0; turn < 20; turn++) await Promise.resolve()
-    expectPublicRefetchObservation(expected, operation, observation)
-
-    writer.deferDataRefresh = null
-    writerBarrier.resolve()
-    await vi.waitFor(() => expect(queryFn).toHaveBeenCalledTimes(5))
-
-    await refetch
-    expected = advanceResultSettlementModel(expected, {
-      type: `refresh-succeeded`,
-      barrier: `replacement-barrier`,
-      result: `applicable`,
-      rowCount: 1,
-    })
-    expectPublicRefetchObservation(expected, operation, observation)
-    expect(queryFn).toHaveBeenCalledTimes(5)
-    expect(reader.get(shared.id)?.name).toBe(authoritative.name)
   })
 
   it(`cancels a deferred public refetch when cleanup retires it`, async () => {
@@ -7148,6 +7011,142 @@ describe(`query collection ownership lifecycle`, () => {
     }
   })
 
+  /**
+   * Direct writes previously promised to change the synced rows without an
+   * automatic Query refetch. The pre-#1826 user guide and QueryCollectionUtils
+   * API comments stated that promise. It lets a caller apply one server event
+   * without requesting every active subset again. A later, independently
+   * scheduled queryFn result may still replace the write.
+   *
+   * The independent reference filters the event-updated rows by category.
+   * The legal history loads ten disjoint live queries, then upserts, updates,
+   * deletes, inserts, and batches rows across their scopes. The production
+   * driver records real queryFn requests. After each accepted write, public
+   * rows must reflect the event and no new provider request may have started
+   * because of the write. This does not promise that direct writes
+   * maintain exact Query cache entries for arbitrary scoped or windowed
+   * requests; the caller controls that lower-level consistency risk.
+   */
+  it(`direct write changes one row without requesting active subsets`, async () => {
+    const id = `scoped-direct-write-work`
+    const queryClient = createQueryClient()
+    const categories = Array.from(
+      { length: 10 },
+      (_, index) => `category-${index}`,
+    )
+    const providerRows = new Map<string, Item>(
+      categories.map((category) => [
+        category,
+        { id: category, category, name: `Before` },
+      ]),
+    )
+    const providerCalls: Array<string> = []
+    const queryFn = vi.fn((context: QueryFunctionContext) => {
+      const where = context.meta?.loadSubsetOptions?.where
+      const category =
+        where?.type === `func`
+          ? where.args.find((arg) => arg.type === `val`)?.value
+          : undefined
+      if (typeof category !== `string`) {
+        throw new Error(`Expected an equality subset with a category`)
+      }
+      providerCalls.push(category)
+      return Promise.resolve(
+        [...providerRows.values()]
+          .filter((row) => row.category === category)
+          .map((row) => structuredClone(row)),
+      )
+    })
+    const collection = createCollection(
+      queryCollectionOptions<Item>({
+        id,
+        queryClient,
+        queryKey: [id],
+        queryFn,
+        getKey: (item) => item.id,
+        syncMode: `on-demand`,
+        startSync: true,
+      }),
+    )
+    const liveQueries = categories.map((category) =>
+      createLiveQueryCollection({
+        query: (query) =>
+          query
+            .from({ item: collection })
+            .where(({ item }) => eq(item.category, category)),
+      }),
+    )
+    cleanups.push(async () => {
+      await Promise.all(liveQueries.map((query) => query.cleanup()))
+      await collection.cleanup()
+      queryClient.clear()
+    })
+
+    await Promise.all(liveQueries.map((query) => query.preload()))
+    expect(providerCalls).toHaveLength(categories.length)
+
+    const expectDirectWrite = async (write: () => Promise<void>) => {
+      const callsBeforeWrite = providerCalls.length
+      await write()
+      for (const [index, category] of categories.entries()) {
+        const expectedRows = [...providerRows.values()].filter(
+          (row) => row.category === category,
+        )
+        expect(
+          liveQueries[index]!.toArray.map((row) => row.name).sort(),
+        ).toEqual(expectedRows.map((row) => row.name).sort())
+      }
+      expect(providerCalls.slice(callsBeforeWrite)).toEqual([])
+    }
+
+    const changed = {
+      ...providerRows.get(categories[3]!)!,
+      name: `After`,
+    }
+    providerRows.set(changed.id, changed)
+    await expectDirectWrite(() =>
+      collection.utils.writeUpsert(structuredClone(changed)),
+    )
+
+    const updated = { ...changed, name: `Updated` }
+    providerRows.set(updated.id, updated)
+    await expectDirectWrite(() =>
+      collection.utils.writeUpdate({ id: updated.id, name: updated.name }),
+    )
+
+    providerRows.delete(updated.id)
+    await expectDirectWrite(() => collection.utils.writeDelete(updated.id))
+
+    const inserted = {
+      id: `inserted`,
+      category: categories[3]!,
+      name: `Inserted`,
+    }
+    providerRows.set(inserted.id, inserted)
+    await expectDirectWrite(() => collection.utils.writeInsert(inserted))
+
+    const batched = {
+      id: `batched`,
+      category: categories[4]!,
+      name: `Batched`,
+    }
+    const batchUpdated = {
+      ...providerRows.get(categories[4]!)!,
+      name: `Batch updated`,
+    }
+    providerRows.set(batched.id, batched)
+    providerRows.set(batchUpdated.id, batchUpdated)
+    await expectDirectWrite(() =>
+      collection.utils.writeBatch(() => {
+        collection.utils.writeInsert(batched)
+        collection.utils.writeUpdate({
+          id: batchUpdated.id,
+          name: batchUpdated.name,
+        })
+      }),
+    )
+  })
+
   it(`emits metadata for every owner of rows shared by overlapping queries`, async () => {
     const metadata: MetadataRecorder = { rows: new Map(), writes: [] }
     const { collection } = createOwnershipFixture({
@@ -7341,141 +7340,12 @@ describe(`query collection ownership lifecycle`, () => {
     expect(persistedOwners(metadata.rows, shared.id)).toEqual([queryHash])
   })
 
-  it(`stops after one failed post-write refetch`, async () => {
-    const failedRefetch = createDeferred<Array<Item>>()
-    const consoleError = vi.spyOn(console, `error`).mockImplementation(() => {})
-    const { collection, queryFn } = createOwnershipFixture({
-      id: `failed-post-write-refetch`,
-      results: [[shared], failedRefetch.promise],
-    })
-
-    try {
-      await collection._sync.loadSubset({})
-      collection.utils.writeUpdate({ ...shared, name: `Manual` })
-      await vi.waitFor(() => expect(queryFn).toHaveBeenCalledTimes(2))
-
-      failedRefetch.reject(new Error(`Controlled refetch failure`))
-      for (let turn = 0; turn < 30; turn++) await Promise.resolve()
-
-      expect(queryFn).toHaveBeenCalledTimes(2)
-      expect(consoleError).toHaveBeenCalledTimes(1)
-    } finally {
-      consoleError.mockRestore()
-    }
-  })
-
-  it(`keeps overlapping post-write refetches bounded`, async () => {
-    const id = `overlapping-post-write-refetches`
-    const queryClient = createQueryClient()
-    const firstWriteResult = createDeferred<Array<Item>>()
-    const secondWriteResult = createDeferred<Array<Item>>()
-    const firstWriteStarted = createDeferred<void>()
-    const secondWriteStarted = createDeferred<void>()
-    let starts = 0
-    let aborts = 0
-    const queryFn = vi.fn((context: QueryFunctionContext) => {
-      starts++
-      if (starts === 1) return Promise.resolve([shared])
-      context.signal.addEventListener(`abort`, () => aborts++, { once: true })
-      if (starts === 2) {
-        firstWriteStarted.resolve()
-        return firstWriteResult.promise
-      }
-      secondWriteStarted.resolve()
-      return secondWriteResult.promise
-    })
-    const collection = createCollection(
-      queryCollectionOptions<Item>({
-        id,
-        queryClient,
-        queryKey: [id],
-        queryFn,
-        getKey: (item) => item.id,
-        syncMode: `on-demand`,
-        startSync: true,
-      }),
-    )
-    cleanups.push(async () => {
-      firstWriteResult.resolve([])
-      secondWriteResult.resolve([])
-      await collection.cleanup()
-      queryClient.clear()
-    })
-
-    await collection._sync.loadSubset({})
-    collection.utils.writeUpdate({ ...shared, name: `First write` })
-    await firstWriteStarted.promise
-    collection.utils.writeUpdate({ ...shared, name: `Second write` })
-    await secondWriteStarted.promise
-    for (let turn = 0; turn < 30; turn++) await Promise.resolve()
-
-    expect({ starts, aborts }).toEqual({ starts: 3, aborts: 1 })
-    secondWriteResult.resolve([{ ...shared, name: `Authoritative` }])
-    await vi.waitFor(() => {
-      expect(collection.get(shared.id)?.name).toBe(`Authoritative`)
-    })
-  })
-
-  it(`accepts a successful foreign fetch as post-write authority`, async () => {
-    const id = `foreign-post-write-authority`
-    const queryClient = createQueryClient()
-    const siblingOptions = categorySubset(`detail`)
-    const siblingKey = [id, getLoadSubsetDemandKey(siblingOptions)]
-    queryClient.setQueryData(siblingKey, [detailOnly])
-
-    const foreignResult = { ...detailOnly, name: `Foreign authority` }
-    const foreignQueryFn = vi.fn(() => Promise.resolve([foreignResult]))
-    const foreignObserver = new QueryObserver(queryClient, {
-      queryKey: siblingKey,
-      queryFn: foreignQueryFn,
-      staleTime: Number.POSITIVE_INFINITY,
-      retry: false,
-    })
-    const unsubscribeForeign = foreignObserver.subscribe(() => {})
-    const queryFn = vi.fn(() => Promise.resolve([shared]))
-    const collection = createCollection(
-      queryCollectionOptions<Item>({
-        id,
-        queryClient,
-        queryKey: [id],
-        queryFn,
-        getKey: (item) => item.id,
-        syncMode: `on-demand`,
-        startSync: true,
-      }),
-    )
-    cleanups.push(async () => {
-      unsubscribeForeign()
-      await collection.cleanup()
-      queryClient.clear()
-    })
-
-    await collection._sync.loadSubset({})
-    collection.utils.writeUpdate({ ...shared, name: `Manual` })
-    await vi.waitFor(() => expect(foreignQueryFn).toHaveBeenCalledTimes(1))
-
-    let settled = false
-    const load = collection._sync.loadSubset(siblingOptions)
-    void Promise.resolve(load === true ? undefined : load).then(
-      () => {
-        settled = true
-      },
-      () => {
-        settled = true
-      },
-    )
-    for (let turn = 0; turn < 30; turn++) await Promise.resolve()
-
-    expect(settled).toBe(true)
-    expect(foreignObserver.getCurrentResult().data).toEqual([foreignResult])
-  })
-
   it(`uses the replacement Query when the cache is cleared before refetch`, async () => {
     const barrier = createDeferred<void>()
     const thirdFetch = createDeferred<Array<Item>>()
     const authoritative = { ...shared, name: `Authoritative` }
     const { collection, queryClient, queryFn } = createOwnershipFixture({
-      id: `clear-before-post-write-refetch`,
+      id: `clear-before-explicit-refetch`,
       results: [[shared], [authoritative], thirdFetch.promise],
     })
     const barrierCompletion = barrier.promise.then(() => {
@@ -7500,60 +7370,6 @@ describe(`query collection ownership lifecycle`, () => {
       collection.deferDataRefresh = null
       thirdFetch.resolve([])
     }
-  })
-
-  it(`requires another fetch after cancellation reverts a raw result`, async () => {
-    const id = `cancelled-post-write-refetch`
-    const queryClient = createQueryClient()
-    const cancelledResult = createDeferred<Array<Item>>()
-    const cancelledStarted = createDeferred<void>()
-    const authoritativeStarted = createDeferred<void>()
-    const authoritative = { ...shared, name: `Authoritative` }
-    let call = 0
-    const queryFn = vi.fn((context: QueryFunctionContext) => {
-      call++
-      if (call === 1) return Promise.resolve([shared])
-      if (call === 2) {
-        void context.signal.aborted
-        cancelledStarted.resolve()
-        return cancelledResult.promise
-      }
-      authoritativeStarted.resolve()
-      return Promise.resolve([authoritative])
-    })
-    const collection = createCollection(
-      queryCollectionOptions<Item>({
-        id,
-        queryClient,
-        queryKey: [id],
-        queryFn,
-        getKey: (item) => item.id,
-        syncMode: `on-demand`,
-        startSync: true,
-      }),
-    )
-    cleanups.push(async () => {
-      cancelledResult.resolve([])
-      await collection.cleanup()
-      queryClient.clear()
-    })
-
-    await collection._sync.loadSubset({})
-    collection.utils.writeUpdate({ ...shared, name: `Manual` })
-    await cancelledStarted.promise
-
-    const query = queryClient.getQueryCache().find({
-      queryKey: [id],
-      exact: true,
-    })!
-    await query.cancel({ revert: true })
-    cancelledResult.resolve([{ ...shared, name: `Cancelled raw result` }])
-
-    await authoritativeStarted.promise
-    await vi.waitFor(() => {
-      expect(queryFn).toHaveBeenCalledTimes(3)
-      expect(collection.get(shared.id)?.name).toBe(`Authoritative`)
-    })
   })
 
   it(`removes unobserved sibling scopes without scanning or snapshots`, async () => {
