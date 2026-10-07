@@ -55,6 +55,8 @@ import type { Transaction } from '../src/transactions'
  * drain at its own quiet edge; the latter keeps its admission-time decision.
  * They also compare both orders of synchronous onMutate reentry, canceled
  * pending work, and rollback while a persistence callback remains active.
+ * If a dropped call's optimistic callback partially writes and then throws,
+ * those writes roll back without canceling an earlier admitted group.
  *
  * Model `pendingIds` combines the production active optimistic transaction's
  * mutations. Model `ready` is an ordered list of queue calls, not pacer-lite's
@@ -289,7 +291,9 @@ function observeReceipt<T extends object>(transaction: Transaction<T>) {
   return receipt
 }
 
-function mutationIds(transaction: Transaction<{ id: number }>): Array<number> {
+function mutationIds<T extends { id: number }>(
+  transaction: Transaction<T>,
+): Array<number> {
   return transaction.mutations.map((mutation) => {
     const id = mutation.changes.id
     if (typeof id !== `number`) throw new Error(`Missing mutation ID`)
@@ -1721,6 +1725,115 @@ describe(`paced mutation timeline oracle`, () => {
             outcome: `fulfilled`,
             returnedSame: true,
           })
+        },
+        async () => {
+          for (const release of releases) release()
+          await vi.advanceTimersByTimeAsync(0)
+        },
+      )
+    })
+  }
+
+  // A rejected call owns a separate optimistic transaction. Failure during
+  // its authoring must remove every partial write while leaving the admitted
+  // pending group's shared row and later persistence intact.
+  for (const { name, strategyFactory } of [
+    {
+      name: `debounce`,
+      strategyFactory: () =>
+        debounceStrategy({ wait: 10, leading: true, trailing: false }),
+    },
+    {
+      name: `throttle`,
+      strategyFactory: () =>
+        throttleStrategy({ wait: 10, leading: true, trailing: false }),
+    },
+  ]) {
+    it(`${name} rolls back a partially authored dropped call without disturbing admitted work`, async () => {
+      const collection = createCollection(
+        mockSyncCollectionOptionsNoInitialState<{
+          id: number
+          value: number
+        }>({
+          id: `paced-${name}-partial-drop`,
+          getKey: (item) => item.id,
+        }),
+      )
+      const preload = collection.preload()
+      collection.utils.begin()
+      collection.utils.commit()
+      collection.utils.markReady()
+      await preload
+      const strategy = strategyFactory()
+      const failure =
+        name === `debounce`
+          ? new Error(`optimistic authoring failed`)
+          : `optimistic authoring failed`
+      const starts: Array<Start> = []
+      const releases: Array<() => void> = []
+      const mutate = createPacedMutations<
+        number,
+        { id: number; value: number }
+      >({
+        onMutate: (id) => {
+          collection.insert({ id, value: id })
+          if (id === 3) {
+            collection.update(2, (draft) => {
+              draft.value = 30
+            })
+            throw failure
+          }
+        },
+        mutationFn: ({ transaction }) => {
+          starts.push({
+            at: Date.now() - origin,
+            ids: mutationIds(transaction),
+          })
+          return new Promise<void>((resolve) => releases.push(resolve))
+        },
+        strategy,
+      })
+
+      await withCleanup(
+        strategy,
+        collection,
+        async () => {
+          const first = mutate(1)
+          const firstReceipt = observeReceipt(first)
+          await vi.advanceTimersByTimeAsync(11)
+          const admitted = mutate(2)
+          const admittedReceipt = observeReceipt(admitted)
+          await vi.advanceTimersByTimeAsync(1)
+
+          let thrown: unknown
+          try {
+            mutate(3)
+          } catch (error) {
+            thrown = error
+          }
+          expect(thrown).toBe(failure)
+          expect(collection.get(3)).toBeUndefined()
+          expect(collection.get(2)?.value).toBe(2)
+          expect(admitted.state).toBe(`pending`)
+          expect(starts).toEqual([{ at: 0, ids: [1] }])
+
+          releases[0]?.()
+          await vi.advanceTimersByTimeAsync(0)
+          expect(firstReceipt).toMatchObject({
+            outcome: `fulfilled`,
+            returnedSame: true,
+          })
+          expect(starts).toEqual([
+            { at: 0, ids: [1] },
+            { at: 12, ids: [2] },
+          ])
+          releases[1]?.()
+          await vi.advanceTimersByTimeAsync(0)
+          expect(admittedReceipt).toMatchObject({
+            outcome: `fulfilled`,
+            returnedSame: true,
+          })
+          expect(collection.get(3)).toBeUndefined()
         },
         async () => {
           for (const release of releases) release()

@@ -205,7 +205,15 @@ export function createPacedMutations<
         mutationFn,
         autoCommit: false,
       })
-      dropped.mutate(() => onMutate(variables))
+      try {
+        dropped.mutate(() => onMutate(variables))
+      } catch (error) {
+        dropped.rollback({
+          error: error instanceof Error ? error : undefined,
+          isSecondaryRollback: true,
+        })
+        throw error
+      }
       // A throttle drop is decided at call admission. A synchronous onMutate
       // can cross the wall-clock window, but a dropped throttle call does not
       // change its timer, so there is nothing to execute after that callback.
