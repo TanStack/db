@@ -24,6 +24,15 @@
  * outcomes. It compares them after the outer commit returns and after the
  * receipts settle.
  *
+ * The listener is either a change listener reacting to the outer batch or the
+ * initial-snapshot callback of a subscription created after the outer row
+ * applied. A snapshot delivery is a publication too: work committed inside it
+ * publishes to that subscriber as the next batch, exactly as for a change
+ * listener. It runs outside any drain, so its commits apply at once and
+ * return `true`; only their publication waits for the snapshot. A separate lane with its own seed generates the snapshot
+ * histories, filtered and unfiltered, so the change-listener seed keeps its
+ * histories.
+ *
  * Limits: the pinned tests cover layout marks, truncates, listener errors, and
  * subset release. The generated grammar covers only listener commits, aborts,
  * and one open transaction. Optimistic settlement belongs to
@@ -33,7 +42,7 @@ import { fc, test as fcTest } from '@fast-check/vitest'
 import { describe, expect, it, vi } from 'vitest'
 import { CollectionChangesManager } from '../src/collection/changes.js'
 import { createCollection } from '../src/collection/index.js'
-import { createLiveQueryCollection, eq } from '../src/query/index.js'
+import { createLiveQueryCollection, eq, gt } from '../src/query/index.js'
 import { createDeferred } from '../src/deferred.js'
 import { oracleRandomParameters, readOracleRunConfig } from './oracle-config.js'
 import { flushPromises } from './utils.js'
@@ -58,6 +67,12 @@ type LayoutCallback = {
 }
 
 type ListenerAction = `commit` | `abort`
+
+/**
+ * Who runs the listener actions: a change listener, or the initial-snapshot
+ * callback of a new subscription, with or without a where clause.
+ */
+type ListenerSource = `change` | `snapshot` | `filtered-snapshot`
 
 type ListenerScenario = {
   beforeOpen: ReadonlyArray<ListenerAction>
@@ -146,7 +161,10 @@ function installInitialOrderedRows(sync: OrderedSync): void {
   sync.markReady()
 }
 
-async function runListenerScenario(scenario: ListenerScenario): Promise<void> {
+async function runListenerScenario(
+  scenario: ListenerScenario,
+  source: ListenerSource = `change`,
+): Promise<void> {
   const harness = createSyncHarness(
     `generated-listener-sync-${generatedHarnessId++}`,
   )
@@ -164,6 +182,7 @@ async function runListenerScenario(scenario: ListenerScenario): Promise<void> {
   const batches: Array<Array<number>> = []
   const committedKeys: Array<number> = []
   const committedReceipts: Array<Promise<void>> = []
+  let immediateCommits = 0
   const abortedReceipts: Array<PromiseSettledResult<void>> = []
   let openKey: number | undefined
   let nextKey = 2
@@ -178,6 +197,7 @@ async function runListenerScenario(scenario: ListenerScenario): Promise<void> {
       committedKeys.push(key)
       const receipt = harness.sync.commit()
       if (receipt !== true) committedReceipts.push(receipt)
+      else immediateCommits++
       return
     }
 
@@ -192,7 +212,14 @@ async function runListenerScenario(scenario: ListenerScenario): Promise<void> {
     }
   }
 
-  const subscription = collection.subscribeChanges((changes) => {
+  if (source !== `change`) {
+    // The outer row applies before the subscription exists, so it reaches
+    // the listener through the initial snapshot.
+    stageInsert(harness.sync, { id: 1, value: `outer` })
+    harness.sync.commit()
+  }
+
+  const listener = (changes: Array<{ key: number }>) => {
     listenerDepth++
     maxListenerDepth = Math.max(maxListenerDepth, listenerDepth)
     batches.push(changes.map((change) => change.key))
@@ -208,11 +235,22 @@ async function runListenerScenario(scenario: ListenerScenario): Promise<void> {
     }
 
     listenerDepth--
-  })
+  }
+  const subscription =
+    source === `change`
+      ? collection.subscribeChanges(listener)
+      : collection.subscribeChanges(listener, {
+          includeInitialState: true,
+          ...(source === `filtered-snapshot`
+            ? { where: (row) => gt(row.id, 0) }
+            : {}),
+        })
 
   try {
-    stageInsert(harness.sync, { id: 1, value: `outer` })
-    harness.sync.commit()
+    if (source === `change`) {
+      stageInsert(harness.sync, { id: 1, value: `outer` })
+      harness.sync.commit()
+    }
 
     // The listener's committed work applies after the outer batch closes and
     // publishes as one batch; listener delivery never nests.
@@ -225,7 +263,14 @@ async function runListenerScenario(scenario: ListenerScenario): Promise<void> {
     expect(maxListenerDepth).toBe(1)
     await Promise.all(committedReceipts)
     await flushPromises()
-    expect(committedReceipts).toHaveLength(committedKeys.length)
+    // A change listener runs inside the drain, so its commits queue and
+    // return receipts. A snapshot callback runs outside any drain, so its
+    // commits apply at once and return `true`; only their publication waits.
+    if (source === `change`) {
+      expect(committedReceipts).toHaveLength(committedKeys.length)
+    } else {
+      expect(immediateCommits).toBe(committedKeys.length)
+    }
     expect(abortedReceipts).toHaveLength(
       scenario.beforeOpen.filter((action) => action === `abort`).length +
         scenario.afterOpen.filter((action) => action === `abort`).length,
@@ -736,13 +781,14 @@ describe(`sync publication reentrancy`, () => {
     'insert 3': { type: `insert`, key: 3, value: `prior-three` },
   }
   const callbackIntents = (visible: ReadonlyMap<number, string>) =>
-    [1, 2, 3, 4].flatMap((key): Array<ReadyIntent> =>
-      visible.has(key)
-        ? [
-            { type: `update`, key, value: `callback-${key}` },
-            { type: `delete`, key },
-          ]
-        : [{ type: `insert`, key, value: `callback-${key}` }],
+    [1, 2, 3, 4].flatMap(
+      (key): Array<ReadyIntent> =>
+        visible.has(key)
+          ? [
+              { type: `update`, key, value: `callback-${key}` },
+              { type: `delete`, key },
+            ]
+          : [{ type: `insert`, key, value: `callback-${key}` }],
     )
   const sourceValues = new Set<string>(
     [...sourceBefore, ...replacement].map(([, value]) => value),
@@ -1458,11 +1504,42 @@ describe(`sync publication reentrancy`, () => {
     }
   })
 
-  it(`matches every bounded reentrant listener history`, async () => {
-    for (const scenario of exhaustiveListenerScenarios) {
-      await runListenerScenario(scenario)
-    }
-  })
+  it.each([`change`, `snapshot`, `filtered-snapshot`] as const)(
+    `matches every bounded reentrant listener history (%s listener)`,
+    async (source) => {
+      for (const scenario of exhaustiveListenerScenarios) {
+        await runListenerScenario(scenario, source)
+      }
+    },
+  )
+
+  // The snapshot lane draws its own histories so the change-listener seed is
+  // unchanged.
+  fcTest.prop(
+    [
+      listenerScenarioArbitrary,
+      fc.constantFrom<ListenerSource>(`snapshot`, `filtered-snapshot`),
+    ],
+    { numRuns: generatedRuns, seed: 1775 },
+  )(
+    `matches the reentrant drain laws for snapshot listeners with a fixed seed`,
+    (scenario, source) => runListenerScenario(scenario, source),
+  )
+
+  fcTest.prop(
+    [
+      listenerScenarioArbitrary,
+      fc.constantFrom<ListenerSource>(`snapshot`, `filtered-snapshot`),
+    ],
+    oracleRandomParameters(
+      generatedRuns,
+      replay,
+      `collection-sync.reentrant-drain-snapshot`,
+    ),
+  )(
+    `matches the reentrant drain laws for snapshot listeners with a random or replayed seed`,
+    (scenario, source) => runListenerScenario(scenario, source),
+  )
 
   fcTest.prop([listenerScenarioArbitrary], {
     numRuns: generatedRuns,
