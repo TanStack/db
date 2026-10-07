@@ -53,3 +53,15 @@ revision before any change.
 | Pooled `preload()` leaves the partition deferring | Refuted at the precondition | The partition unsubscribes when its source's cleanup starts, so no survivor is miscounted | No change |
 | The change manager special-cases live-query Collections | Design | Source inspection | No change; a config-level capability would add surface for one caller |
 | A test comment is out of order | Maintainability | Source inspection | Fixed |
+
+## Third review, at `9fb2d810a`
+
+| Finding | Kind | Evidence | Outcome |
+| --- | --- | --- | --- |
+| A failed source start cannot be retried in the same sync run | Refuted under the accepted contract | Pinned block: the failed start puts the source and its live query in `error`; cleanup and a new preload start the source again and load it | No change; the block keeps the supported recovery path |
+| A Suspense render could hang after a failed start | Refuted at the premise | The live query does enter `error`, so `useLiveSuspenseQuery` surfaces it | No change |
+| A subscriber or preload during a source's `subscribe()` is missed | Plausible, unwitnessed | Source inspection; no legal reentrant history was constructed | Open: needs a witness where a status handler subscribes during the first source subscription |
+| A ready read returns partial local rows | Pre-existing contract | Both reads resolve at once when the Collection holds rows; they now also request the rest | No change; waiting instead would change every Collection's ready reads |
+| A preload rejected during cleanup leaves the flag set | Refuted at the precondition | A live query's cleanup completes before the next call, so the preload was accepted and the restart acquired nothing extra | No change |
+| Pooled `preload()` does not resume the partition | Refuted | Pooled views serve eager sources only, whose demand never detaches; the oracle's "preload after build" cases pass | No change |
+| Patch changeset, layering, the `?? true` fallback | Already decided or recorded above | | No change |

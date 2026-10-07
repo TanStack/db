@@ -732,6 +732,60 @@ describe(`reads that wait for readiness`, () => {
  * contract and never throws.
  */
 describe(`a source whose start throws on resumption`, () => {
+  it(`a retried preload resumes a source whose first start failed`, async () => {
+    let attempts = 0
+    let loads = 0
+    const flaky = createCollection<Row>({
+      id: `deferred-acquisition-flaky-${sequence++}`,
+      getKey: (row) => row.id,
+      syncMode: `on-demand`,
+      autoIndex: `eager`,
+      defaultIndexType: BTreeIndex,
+      gcTime: 0,
+      sync: {
+        sync: ({ begin, write, commit, markReady }) => {
+          if (++attempts === 1) throw new Error(`transient start failure`)
+          markReady()
+          return {
+            loadSubset: () => {
+              loads++
+              begin()
+              for (const row of ROWS) write({ type: `insert`, value: row })
+              commit()
+              return true
+            },
+          }
+        },
+      },
+    })
+    const live = createLiveQueryCollection({
+      query: (q) => q.from({ row: flaky }).orderBy(({ row }) => row.rank),
+      gcTime: 0,
+    })
+    const consoleError = vi.spyOn(console, `error`).mockImplementation(() => {})
+    try {
+      live.startSyncImmediate()
+      await expect(live.preload(), `the first preload fails`).rejects.toThrow(
+        `transient start failure`,
+      )
+      // The failed start puts the source and its live query in error, so the
+      // supported recovery is cleanup and a new sync run, not a retry in place.
+      expect(live.status).toBe(`error`)
+      await live.cleanup()
+      await flaky.cleanup()
+      // A new preload after cleanup starts a new sync run and must resume.
+      await live.preload()
+      await settle()
+      expect(attempts, `the source started again`).toBe(2)
+      expect(loads, `the retry loaded the source`).toBeGreaterThan(0)
+      expect(live.status).toBe(`ready`)
+    } finally {
+      consoleError.mockRestore()
+      await live.cleanup()
+      await flaky.cleanup()
+    }
+  })
+
   it(`rejects the preload and still resumes the other source`, async () => {
     const failing = createCollection<Row>({
       id: `deferred-acquisition-throwing-${sequence++}`,
