@@ -4320,7 +4320,13 @@ describe(`ordered source work oracle`, () => {
  * - **Rows:** the visible window equals the first `limit` rows after `offset`
  *   of the eligible source rows, sorted by rank and then id. The model is a
  *   plain array of the current source rows, filtered and sorted here; it shares
- *   no code with the loader or the index.
+ *   no code with the loader or the index. The guide orders rows only by the
+ *   query's `orderBy` terms, so a joined plan, whose ties follow the joined
+ *   result key, may return any rows that tie on rank: its window must have the
+ *   model's ranks in sequence, each from a distinct eligible row. A full window
+ *   is not evidence by itself: a filter that drops rows after the source's
+ *   limit can leave a row an earlier live update sent in place of an eligible
+ *   row the bounded read never sent.
  * - **Work:** with an index on a single order term, the source delivers at
  *   most a bounded number of rows per change, independent of the source size.
  *   The bound is `2 * (offset + limit) + boundary ties + 1`: one reacquired
@@ -4330,21 +4336,31 @@ describe(`ordered source work oracle`, () => {
  *   after the change. The source holds 200 eligible filler rows outside every
  *   window, and its domain holds up to 20 more. A loader that resends every
  *   eligible row on each repair, or every domain row, exceeds the bound and
- *   fails. The initial load has the same bound. Without an index, or when a
+ *   fails. The initial load has the same bound. A joined or function filter
+ *   keeps the full read, so the work law covers source-predicate plans. Without
+ *   an index, or when a
  *   boundary value is NaN or null (such a
  *   boundary cannot be expressed as a cursor), the loader legitimately reads
  *   the full source, so only the rows law and the scan law apply there.
- * - **Scan:** whatever the plan, a change visits each installed source row at
- *   most once. A second order term keeps the loader on its full read, which
- *   is one pass; a bounded read that then sorts the whole source in memory
- *   makes a second pass and fails.
+ * - **Scan:** for a source-predicate plan, a change visits each installed
+ *   source row at most once. A second order term keeps the loader on its full
+ *   read, which is one pass; a bounded read that then sorts the whole source in
+ *   memory makes a second pass and fails. A joined plan reads its full source
+ *   twice per change on `main` too, so the scan law does not cover it.
  *
  * The grammar crosses the sync path (sync writes, or local-only direct writes),
- * the index (present or absent), the direction, one or two order terms (rank,
- * then ascending id), limit 1..3, offset 0..1, and a history of upserts and
- * deletes over ids 0..29 and ranks 0..15, NaN, or null, so ties, deletes
- * inside and at the edge of the window, and rank changes across its boundary
- * all occur. The observation point is after each change and a flush. Work is
+ * the filter (a predicate on the source, a function filter, or a filter on a
+ * LEFT-joined marker per eligible row; the last two drop rows after the
+ * source's limit), the index (present or absent), the direction, one or two
+ * order terms (rank, then ascending id), limit 1..3, offset 0..1, and a history
+ * of upserts, deletes, deletes of the first visible row, and label-only
+ * touches over ids 0..29 and ranks 0..15, NaN, or null, so ties, deletes
+ * inside and at the edge of the window, rank changes across its boundary, and
+ * distant rows the query has already received all occur. A second campaign
+ * fixes the premise of the joined law: a joined filter, an index and one order
+ * term. A joined step can change a row and its marker in two commits; each
+ * commit publishes at most once, and the last publication shows the final
+ * window. The observation point is after each change and a flush. Work is
  * counted twice, and both counts are bounded: rows a local snapshot returns
  * from the Collection's `currentStateAsChanges`, and rows the source delivers
  * to the query's subscription, which include index refills. Scan is counted
@@ -4355,9 +4371,17 @@ describe(`ordered source work oracle`, () => {
 type EagerCommand =
   | { type: `upsert`; id: number; rank: number; eligible: boolean }
   | { type: `delete`; id: number }
+  // Changes only the label, so a row outside the window enters the query's
+  // input without changing which rows are eligible or their order.
+  | { type: `touch`; id: number }
+  | { type: `delete-visible` }
 
 type EagerCase = {
   path: `sync` | `local-only`
+  // Where eligibility is decided: a predicate on the ordered source itself,
+  // a JavaScript function filter, or a filter on a LEFT-joined marker. The
+  // last two drop rows only after the source's limit.
+  filter: `source` | `function` | `joined`
   indexed: boolean
   direction: `asc` | `desc`
   terms: 1 | 2
@@ -4393,6 +4417,11 @@ const eagerRow = fc.record({
 
 const eagerCase: fc.Arbitrary<EagerCase> = fc.record({
   path: fc.constantFrom(`sync` as const, `local-only` as const),
+  filter: fc.constantFrom(
+    `source` as const,
+    `function` as const,
+    `joined` as const,
+  ),
   indexed: fc.boolean(),
   direction: fc.constantFrom(`asc` as const, `desc` as const),
   terms: fc.constantFrom(1 as const, 2 as const),
@@ -4409,10 +4438,25 @@ const eagerCase: fc.Arbitrary<EagerCase> = fc.record({
         type: fc.constant(`delete` as const),
         id: fc.integer({ min: 0, max: 29 }),
       }),
+      fc.record({
+        type: fc.constant(`touch` as const),
+        id: fc.integer({ min: 0, max: 29 }),
+      }),
+      // Deletes the first visible row, so a repair runs on most histories.
+      fc.constant({ type: `delete-visible` as const }),
     ),
     { minLength: 1, maxLength: 12 },
   ),
 })
+
+// The premise of the joined-filter law: an indexed single-term plan whose
+// filter drops rows after the bounded read.
+const eagerJoinedCase: fc.Arbitrary<EagerCase> = eagerCase.map((testCase) => ({
+  ...testCase,
+  filter: `joined` as const,
+  indexed: true,
+  terms: 1 as const,
+}))
 
 function eagerOrder(
   rows: ReadonlyMap<number, Row>,
@@ -4443,6 +4487,33 @@ function eagerWindow(
   return eagerOrder(rows, testCase)
     .slice(testCase.offset, testCase.offset + testCase.limit)
     .map((row) => row.id)
+}
+
+/**
+ * The visible window agrees with the model. The guide promises order only by
+ * the query's `orderBy` terms; rows that tie on every term may appear in any
+ * order. A source-filter plan's ties follow the source key, which the model
+ * also uses, so its window must match exactly. A joined plan's ties follow the
+ * joined result key, so its window must be any valid first `limit` rows: the
+ * same order values in sequence, each from an eligible row with that value.
+ */
+function expectEagerWindow(
+  actual: Array<number>,
+  rows: ReadonlyMap<number, Row>,
+  testCase: EagerCase,
+  label: string,
+): void {
+  const expected = eagerWindow(rows, testCase)
+  if (testCase.filter !== `joined`) {
+    expect(actual, label).toEqual(expected)
+    return
+  }
+  const rank = (id: number) => {
+    const row = rows.get(id)
+    return row?.eligible ? row.rank : `ineligible ${id}`
+  }
+  expect(actual.map(rank), label).toEqual(expected.map(rank))
+  expect(new Set(actual).size, `${label}: distinct rows`).toBe(actual.length)
 }
 
 /** Ranks of the last window row and the first row after the window. */
@@ -4502,6 +4573,28 @@ async function checkEagerWindow(testCase: EagerCase): Promise<void> {
   if (testCase.indexed) {
     source.createIndex((row) => row.rank, { indexType: BTreeIndex })
   }
+  // A joined filter keeps eligibility on a marker per eligible row.
+  const markers = createCollection(
+    localOnlyCollectionOptions<{ rowId: number }, number>({
+      id: `${id}-markers`,
+      getKey: (marker) => marker.rowId,
+      initialData:
+        testCase.filter === `joined`
+          ? [...rows.values()]
+              .filter((row) => row.eligible)
+              .map((row) => ({ rowId: row.id }))
+          : [],
+    }),
+  )
+  // Source changes committed by the current step. A joined step can change a
+  // row and its marker in two commits, and each commit may publish.
+  let commits = 0
+  const setMarker = async (rowId: number, eligible: boolean) => {
+    if (testCase.filter !== `joined` || markers.has(rowId) === eligible) return
+    commits++
+    await (eligible ? markers.insert({ rowId }) : markers.delete(rowId))
+      .isPersisted.promise
+  }
   // Work has two counts: rows a local snapshot reads for the query, and rows
   // the source delivers to it, which include index refills. Both are bounded.
   let read = 0
@@ -4530,10 +4623,18 @@ async function checkEagerWindow(testCase: EagerCase): Promise<void> {
   const query = createLiveQueryCollection({
     startSync: true,
     query: (q) => {
-      const ordered = q
-        .from({ row: source })
-        .where(({ row }) => eq(row.eligible, true))
-        .orderBy(({ row }) => row.rank, testCase.direction)
+      const ordered = (
+        testCase.filter === `joined`
+          ? q
+              .from({ row: source })
+              .leftJoin({ marker: markers }, ({ row, marker }) =>
+                eq(row.id, marker.rowId),
+              )
+              .where(({ marker }) => not(isUndefined(marker.rowId)))
+          : testCase.filter === `function`
+            ? q.from({ row: source }).fn.where(({ row }) => row.eligible)
+            : q.from({ row: source }).where(({ row }) => eq(row.eligible, true))
+      ).orderBy(({ row }) => row.rank, testCase.direction)
       return (
         testCase.terms === 2 ? ordered.orderBy(({ row }) => row.id) : ordered
       )
@@ -4541,11 +4642,22 @@ async function checkEagerWindow(testCase: EagerCase): Promise<void> {
         .limit(testCase.limit)
     },
   })
+  // A joined query's rows nest the source row under its alias.
+  const visibleIds = () =>
+    query.toArray.map((result) =>
+      testCase.filter === `joined`
+        ? (result as unknown as { row: Row }).row.id
+        : (result as Row).id,
+    )
   const window = testCase.offset + testCase.limit
   // The bound for one load: a prefix, the boundary ties, a refill, and the
   // changed row. Null when a boundary value cannot be expressed as a cursor.
   const workBound = (boundary: Array<number | null>): number | undefined => {
+    // A joined or function filter drops rows after the source's limit, so a
+    // bounded prefix cannot prove the window is the first eligible rows; the
+    // loader reads the full source and only the rows law applies.
     if (!testCase.indexed || testCase.terms !== 1) return undefined
+    if (testCase.filter !== `source`) return undefined
     if (boundary.some((rank) => rank === null || Number.isNaN(rank))) return
     // Rows in a tie group, of two or more equal ranks, at a boundary value.
     const all = [...rows.values()]
@@ -4564,11 +4676,9 @@ async function checkEagerWindow(testCase: EagerCase): Promise<void> {
   let unsubscribe: (() => void) | undefined
   try {
     await query.preload()
-    expect(query.toArray.map((row) => row.id)).toEqual(
-      eagerWindow(rows, testCase),
-    )
+    expectEagerWindow(visibleIds(), rows, testCase, `initial rows`)
     const subscription = query.subscribeChanges(() => {
-      published.push(query.toArray.map((row) => row.id))
+      published.push(visibleIds())
     })
     unsubscribe = () => subscription.unsubscribe()
     const initialBound = workBound(boundaryRanks(rows, testCase))
@@ -4581,7 +4691,16 @@ async function checkEagerWindow(testCase: EagerCase): Promise<void> {
         `rows delivered by the initial load`,
       ).toBeLessThanOrEqual(initialBound)
     }
-    for (const [step, command] of testCase.history.entries()) {
+    for (const [step, generated] of testCase.history.entries()) {
+      // Resolve a visible-row delete against the model's current window.
+      const visibleId = eagerWindow(rows, testCase)[0]
+      if (generated.type === `delete-visible` && visibleId === undefined) {
+        continue
+      }
+      const command: Exclude<EagerCommand, { type: `delete-visible` }> =
+        generated.type === `delete-visible`
+          ? { type: `delete`, id: visibleId! }
+          : generated
       const before = rows.get(command.id)
       const boundaryBefore = boundaryRanks(rows, testCase)
       const sizeBefore = rows.size
@@ -4589,6 +4708,7 @@ async function checkEagerWindow(testCase: EagerCase): Promise<void> {
       delivered = 0
       scanned = 0
       published.length = 0
+      commits = 1
       if (command.type === `delete`) {
         if (!before) continue
         rows.delete(command.id)
@@ -4598,6 +4718,20 @@ async function checkEagerWindow(testCase: EagerCase): Promise<void> {
           syncControls!.commit()
         } else {
           await source.delete(command.id).isPersisted.promise
+        }
+        await setMarker(command.id, false)
+      } else if (command.type === `touch`) {
+        if (!before) continue
+        const next = { ...before, label: `touched-${step}` }
+        rows.set(command.id, next)
+        if (testCase.path === `sync`) {
+          syncControls!.begin()
+          syncControls!.write({ type: `update`, value: next })
+          syncControls!.commit()
+        } else {
+          await source.update(command.id, (draft) => {
+            draft.label = next.label
+          }).isPersisted.promise
         }
       } else {
         const next = {
@@ -4622,24 +4756,33 @@ async function checkEagerWindow(testCase: EagerCase): Promise<void> {
         } else {
           await source.insert(next).isPersisted.promise
         }
+        await setMarker(command.id, next.eligible)
       }
       await flushPromises()
-      expect(
-        query.toArray.map((row) => row.id),
-        `rows after step ${step}`,
-      ).toEqual(eagerWindow(rows, testCase))
+      expectEagerWindow(visibleIds(), rows, testCase, `rows after step ${step}`)
+      // Each commit publishes at most once, and the commit that completes
+      // the step publishes the final window. With one commit, every batch
+      // shows it.
       expect(
         published.length,
         `publications by step ${step}`,
-      ).toBeLessThanOrEqual(1)
-      for (const window of published) {
-        expect(window, `published window at step ${step}`).toEqual(
-          eagerWindow(rows, testCase),
+      ).toBeLessThanOrEqual(commits)
+      for (const window of commits === 1 ? published : published.slice(-1)) {
+        expectEagerWindow(
+          window,
+          rows,
+          testCase,
+          `published window at step ${step}`,
         )
       }
-      expect(scanned, `rows scanned by step ${step}`).toBeLessThanOrEqual(
-        Math.max(sizeBefore, rows.size),
-      )
+      // A post-limit filter plan reads its full source more than once per
+      // change on main too (402 of 201 rows here), so the scan law covers
+      // source-filter plans, whose bounded read could add a second pass.
+      if (testCase.filter === `source`) {
+        expect(scanned, `rows scanned by step ${step}`).toBeLessThanOrEqual(
+          Math.max(sizeBefore, rows.size),
+        )
+      }
       // A NaN or null boundary cannot be expressed as a cursor
       // (canExpressCursorOrder), so the loader takes the documented
       // full-source fallback; only the rows and scan laws apply then.
@@ -4663,6 +4806,7 @@ async function checkEagerWindow(testCase: EagerCase): Promise<void> {
     unsubscribe?.()
     await query.cleanup()
     await source.cleanup()
+    await markers.cleanup()
   }
 }
 
@@ -4673,6 +4817,7 @@ describe(`eager indexed ordered windows`, () => {
   it(`places null ranks first in an indexed descending window`, async () => {
     await checkEagerWindow({
       path: `sync`,
+      filter: `source`,
       indexed: true,
       direction: `desc`,
       terms: 1,
@@ -4686,6 +4831,7 @@ describe(`eager indexed ordered windows`, () => {
   it(`refills after a visible delete without resending the source`, async () => {
     await checkEagerWindow({
       path: `local-only`,
+      filter: `source`,
       indexed: true,
       direction: `desc`,
       terms: 1,
@@ -4712,6 +4858,7 @@ describe(`eager indexed ordered windows`, () => {
       // cursor, so the repair falls back to a full-source read.
       await checkEagerWindow({
         path,
+        filter: `source`,
         indexed: true,
         direction: `desc`,
         terms: 1,
@@ -4731,6 +4878,33 @@ describe(`eager indexed ordered windows`, () => {
     },
   )
 
+  it.each([`sync`, `local-only`] as const)(
+    `refills a joined-filter window past a retained distant row (%s)`,
+    async (path) => {
+      // A label update brings eligible row 10 into the query's input. After
+      // row 2 leaves, a prefix of one root row (row 1) fails the joined
+      // filter, and row 10 must not stand in for row 4.
+      await checkEagerWindow({
+        path,
+        filter: `joined`,
+        indexed: true,
+        direction: `asc`,
+        terms: 1,
+        limit: 1,
+        offset: 0,
+        initial: Array.from({ length: 10 }, (_, index) => ({
+          id: index + 1,
+          rank: index + 1,
+          eligible: (index + 1) % 2 === 0,
+        })),
+        history: [
+          { type: `touch`, id: 10 },
+          { type: `delete`, id: 2 },
+        ],
+      })
+    },
+  )
+
   fcTest.prop([eagerCase], { numRuns: runs, seed: 2044 })(
     `keeps rows and per-change work bounded for a fixed seed`,
     checkEagerWindow,
@@ -4741,6 +4915,19 @@ describe(`eager indexed ordered windows`, () => {
     oracleRandomParameters(runs, replay, `ordered-work.eager-indexed-window`),
   )(
     `keeps rows and per-change work bounded for a random or replayed seed`,
+    checkEagerWindow,
+  )
+
+  fcTest.prop([eagerJoinedCase], { numRuns: runs, seed: 2059 })(
+    `keeps a joined-filter window to the first eligible rows for a fixed seed`,
+    checkEagerWindow,
+  )
+
+  fcTest.prop(
+    [eagerJoinedCase],
+    oracleRandomParameters(runs, replay, `ordered-work.eager-joined-window`),
+  )(
+    `keeps a joined-filter window to the first eligible rows for a random or replayed seed`,
     checkEagerWindow,
   )
 })
