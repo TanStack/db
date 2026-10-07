@@ -466,9 +466,12 @@ export class CollectionChangesManager<
    * This can be called manually or automatically by garbage collection
    */
   public cleanup(): void {
-    // A subscriber or preload belongs to one sync run. A restarted live-query
-    // Collection defers acquisition again until a new one arrives.
-    this.subscriberOrPreload = false
+    // A preload belongs to one sync run, but subscriptions survive cleanup. A
+    // restarted live-query Collection defers acquisition again unless one of
+    // its surviving subscribers already asks for data.
+    this.subscriberOrPreload = [...this.changeSubscriptions].some(
+      (subscription) => !subscription.isDeferringAcquisition(),
+    )
     // Cleanup clears visible state without publishing row changes. Detached
     // consumers may miss every status transition before an empty restart.
     this.stateRevision++

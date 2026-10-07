@@ -1363,8 +1363,11 @@ create recursive Collection machinery.
     promise.
 15. **Deferred acquisition:** a live-query Collection or pooled live query
     starts no source Collection's sync run and no acquisition attempt until it
-    has a subscriber or a preload in its current sync run; before that it reads
-    only rows its sources already hold.
+    has a subscriber that asks for data, or a preload in its current sync run;
+    before that it reads only rows its sources already hold. A subscriber that
+    survives cleanup still asks for data. Another consumer starting a source,
+    or a source truncate, resumes nothing. A read that waits for readiness
+    counts as a preload.
 
 ## Glossary
 

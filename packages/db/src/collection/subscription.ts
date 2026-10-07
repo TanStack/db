@@ -330,6 +330,9 @@ export class CollectionSubscription
   private restartDetachedDemands(syncRunGeneration: number): void {
     if (
       this.unsubscribed ||
+      // Deferred demand stays detached until acquisition resumes, even when
+      // another consumer starts the source.
+      this.defersAcquisition ||
       !this.isSyncRunGenerationCurrent(syncRunGeneration)
     ) {
       return
@@ -385,7 +388,12 @@ export class CollectionSubscription
   private handleTruncate() {
     // Without a loader, replay only reconciles rows retained across cleanup.
     const hasLoadSubsetHandler = this.collection._sync.syncLoadSubsetFn !== null
-    const demandsToReload = hasLoadSubsetHandler ? [...this.subsetDemands] : []
+    // Deferred demand never acquired, so a truncate gives it nothing to
+    // reload; it acquires the replacement rows when acquisition resumes.
+    const demandsToReload =
+      hasLoadSubsetHandler && !this.defersAcquisition
+        ? [...this.subsetDemands]
+        : []
 
     // Retained rows still need the committed replacement even without demand.
     if (demandsToReload.length === 0 && this.stalePublishedRows.size === 0) {

@@ -5,8 +5,11 @@
  * its own. Provider work comes from a source Collection whose sync run started
  * because of its own `startSync: true`, a subscriber, or a preload. A
  * live-query Collection's own subscriptions to its source Collections defer
- * acquisition until the live-query Collection has a subscriber or a preload in
- * its current sync run. Deferred subscriptions start no idle source
+ * acquisition until the live-query Collection has a subscriber that asks for
+ * data, or a preload in its current sync run. A subscriber that survives
+ * cleanup still asks for data; one that itself defers does not. Nothing else
+ * resumes acquisition: not another consumer starting the source, and not a
+ * source truncate. Deferred subscriptions start no idle source
  * Collection's sync run and no acquisition attempt. Their demand stays active.
  * The rule is transitive: a live-query Collection over another one resumes the
  * inner Collection's acquisition only when it resumes its own.
@@ -35,9 +38,12 @@
  *
  * Limits: source Collections load synchronously, so every checkpoint is
  * settled. The grammar crosses five source states, two query shapes, and one or
- * two live-query levels. It does not generate concurrent consumers, failure,
- * or truncate; the subscription lifecycle oracle owns those once acquisition
- * has resumed.
+ * two live-query levels, with one peer consumer and one truncate before the
+ * first subscriber. It does not generate source failure, asynchronous loads,
+ * or several live-query consumers; the subscription lifecycle oracle owns
+ * those once acquisition has resumed. Pinned blocks cover pooled views,
+ * `DbClient` stream preloads, a subscriber that outlives cleanup, and reads
+ * that wait for readiness.
  */
 import { describe, expect, it } from 'vitest'
 import {
@@ -104,11 +110,22 @@ const EXPECTED_IDS: Record<QueryShape, Array<string>> = {
  * Commands act on the outermost live-query Collection, which is the only
  * public Collection in the history. `start` starts its sync run, as a
  * framework render or `startSync: true` does. `subscribe` adds a subscriber.
- * `preload` asks for its data. `cleanup` ends its sync run. Each history is
+ * `preload` asks for its data. `cleanup` ends its sync run. Two commands act
+ * on the source Collection instead, and neither is a subscriber or a preload
+ * of the live-query Collection: `peer` adds another consumer that subscribes
+ * to the source directly, which may start its sync run, and `truncate` makes a
+ * running source replace its rows, as a must-refetch does. Each history is
  * legal: it never subscribes twice or unsubscribes without a subscription.
  */
 type Command =
-  `start` | `read` | `subscribe` | `unsubscribe` | `preload` | `cleanup`
+  | `start`
+  | `read`
+  | `subscribe`
+  | `unsubscribe`
+  | `preload`
+  | `cleanup`
+  | `peer`
+  | `truncate`
 
 const HISTORIES: Record<string, Array<Command>> = {
   'start and read without a subscriber': [`start`, `read`],
@@ -121,6 +138,18 @@ const HISTORIES: Record<string, Array<Command>> = {
     `read`,
     `cleanup`,
     `start`,
+    `subscribe`,
+  ],
+  'a peer starts the source before a subscriber, then subscribe': [
+    `start`,
+    `read`,
+    `peer`,
+    `subscribe`,
+  ],
+  'the source truncates before a subscriber, then subscribe': [
+    `start`,
+    `read`,
+    `truncate`,
     `subscribe`,
   ],
   'restart after a run with a subscriber': [
@@ -211,10 +240,22 @@ function applyModel(
       next.subscriberOrPreload = false
       next.syncRunning = false
       break
+    case `peer`:
+      // The peer's own subscription starts an idle source; an eager source
+      // then holds every row. The live-query Collection gained no subscriber.
+      if (!model.sourceStarted) {
+        next.sourceStarted = true
+        if (!onDemand) next.sourceHoldsRows = true
+      }
+      break
+    case `truncate`:
+      // A running source drops its rows; an eager source writes them again.
+      if (model.sourceStarted && onDemand) next.sourceHoldsRows = false
+      break
   }
   const firstSubscriberOrPreload =
     next.subscriberOrPreload && !model.subscriberOrPreload
-  let startsAdded = 0
+  let startsAdded = command === `peer` && !model.sourceStarted ? 1 : 0
   if (firstSubscriberOrPreload && !next.sourceStarted) {
     startsAdded = 1
     next.sourceStarted = true
@@ -269,6 +310,9 @@ function makeSource(state: SourceState) {
   const counts = { starts: 0, acquisitions: 0 }
   const onDemand = state.startsWith(`on-demand`)
   const written = new Set<string>()
+  // Set while a sync run is active: replaces the source's rows, as a
+  // must-refetch does. An eager source writes every row again.
+  let truncateRows: (() => void) | undefined
   const collection = createCollection<Row>({
     id: `deferred-acquisition-${sequence++}`,
     getKey: (row) => row.id,
@@ -278,7 +322,7 @@ function makeSource(state: SourceState) {
     defaultIndexType: BTreeIndex,
     gcTime: 0,
     sync: {
-      sync: ({ begin, write, commit, markReady }) => {
+      sync: ({ begin, write, commit, markReady, truncate }) => {
         counts.starts++
         const writeAll = () => {
           begin()
@@ -290,6 +334,13 @@ function makeSource(state: SourceState) {
           commit()
         }
         if (!onDemand || state === `on-demand-holding`) writeAll()
+        truncateRows = () => {
+          begin()
+          truncate()
+          commit()
+          written.clear()
+          if (!onDemand) writeAll()
+        }
         markReady()
         if (!onDemand) return
         return {
@@ -302,7 +353,7 @@ function makeSource(state: SourceState) {
       },
     },
   })
-  return { collection, counts }
+  return { collection, counts, truncate: () => truncateRows?.() }
 }
 
 function makeLiveQuery(
@@ -347,8 +398,13 @@ describe(`live-query deferred acquisition`, () => {
       for (const depth of [1, 2] as const) {
         for (const [name, commands] of Object.entries(HISTORIES)) {
           it(`${state}, ${shape}, depth ${depth}: ${name}`, async () => {
-            const { collection: source, counts } = makeSource(state)
+            const {
+              collection: source,
+              counts,
+              truncate: truncateSource,
+            } = makeSource(state)
             const { outer, collections } = makeLiveQuery(source, shape, depth)
+            let peer: { unsubscribe: () => void } | undefined
             let model = initialModel(state)
             let subscription: { unsubscribe: () => void } | undefined
             try {
@@ -377,6 +433,12 @@ describe(`live-query deferred acquisition`, () => {
                     subscription?.unsubscribe()
                     subscription = undefined
                     pending = outer.cleanup()
+                    break
+                  case `peer`:
+                    peer = source.subscribeChanges(() => {})
+                    break
+                  case `truncate`:
+                    truncateSource()
                     break
                 }
                 const statusAtCall = outer.status
@@ -421,6 +483,7 @@ describe(`live-query deferred acquisition`, () => {
               }
             } finally {
               subscription?.unsubscribe()
+              peer?.unsubscribe()
               for (const collection of collections) await collection.cleanup()
               await source.cleanup()
             }
@@ -550,6 +613,108 @@ describe(`preload answered by a DbClient stream`, () => {
         expect(outer.toArray.map((row) => row.id)).toEqual(EXPECTED_IDS.all)
       } finally {
         observer.dispose()
+        await outer.cleanup()
+        await source.cleanup()
+      }
+    })
+  }
+})
+
+/**
+ * ## A subscriber that outlives cleanup
+ *
+ * Cleanup ends a live-query Collection's sync run but keeps its subscriptions.
+ * A subscriber that survives is still a subscriber in the next sync run, so a
+ * restarted live-query Collection acquires for it at once instead of
+ * deferring until another subscriber or preload arrives. The generated grammar
+ * unsubscribes before cleanup, so this block pins the history: subscribe,
+ * clean up while subscribed, restart, then settle.
+ */
+describe(`a subscriber that outlives cleanup`, () => {
+  for (const state of [
+    `eager-idle`,
+    `on-demand-idle`,
+    `on-demand-running`,
+  ] as const) {
+    for (const shape of QUERY_SHAPES) {
+      it(`${state}, ${shape}: the restarted live query serves its subscriber`, async () => {
+        const { collection: source, counts } = makeSource(state)
+        const { outer } = makeLiveQuery(source, shape, 1)
+        const subscription = outer.subscribeChanges(() => {}, {
+          includeInitialState: true,
+        })
+        try {
+          await settle()
+          expect(outer.status, `before cleanup`).toBe(`ready`)
+          await outer.cleanup()
+          const before = counts.acquisitions
+          outer.startSyncImmediate()
+          await settle()
+          if (state.startsWith(`on-demand`)) {
+            expect(
+              counts.acquisitions - before,
+              `the restart acquires for the surviving subscriber`,
+            ).toBeGreaterThan(0)
+          }
+          expect(outer.status, `after restart`).toBe(`ready`)
+          expect(outer.toArray.map((row) => row.id)).toEqual(
+            EXPECTED_IDS[shape],
+          )
+        } finally {
+          subscription.unsubscribe()
+          await outer.cleanup()
+          await source.cleanup()
+        }
+      })
+    }
+  }
+
+  // A surviving subscriber that itself defers is not a request for data: an
+  // unsubscribed outer live query keeps its deferring subscription to the
+  // inner one across the inner one's cleanup.
+  it(`on-demand-idle: a surviving deferring subscriber does not resume a restart`, async () => {
+    const { collection: source, counts } = makeSource(`on-demand-idle`)
+    const { outer, collections } = makeLiveQuery(source, `window`, 2)
+    const inner = collections[1]!
+    try {
+      outer.startSyncImmediate()
+      await settle()
+      await inner.cleanup()
+      inner.startSyncImmediate()
+      await settle()
+      expect(counts.starts, `source sync-run starts`).toBe(0)
+      expect(counts.acquisitions, `acquisition attempts`).toBe(0)
+    } finally {
+      for (const collection of collections) await collection.cleanup()
+      await source.cleanup()
+    }
+  })
+})
+
+/**
+ * ## Reads that wait for readiness
+ *
+ * `toArrayWhenReady()` and `stateWhenReady()` ask for a Collection's data:
+ * when it holds no rows they preload it. They are requests for data in either
+ * branch, so they count as a preload. A deferring live-query Collection that
+ * already shows its source's local rows returns those rows at once and resumes
+ * acquisition for the rest.
+ */
+describe(`reads that wait for readiness`, () => {
+  for (const read of [`toArrayWhenReady`, `stateWhenReady`] as const) {
+    it(`${read} resumes a deferring live query that already shows local rows`, async () => {
+      const { collection: source, counts } = makeSource(`on-demand-holding`)
+      const { outer } = makeLiveQuery(source, `all`, 1)
+      try {
+        outer.startSyncImmediate()
+        await settle()
+        expect(outer.toArray.length, `local rows before the read`).toBe(3)
+        expect(counts.acquisitions, `no request before the read`).toBe(0)
+        await outer[read]()
+        await settle()
+        expect(counts.acquisitions, `the read requests data`).toBeGreaterThan(0)
+        expect(outer.status).toBe(`ready`)
+      } finally {
         await outer.cleanup()
         await source.cleanup()
       }

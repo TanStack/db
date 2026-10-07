@@ -61,6 +61,12 @@ export class CollectionSubscriber<
     )
   }
 
+  // A live-query Collection starts no provider work on its own: it defers
+  // acquisition until it has a subscriber or a preload.
+  private defersAcquisition(): boolean {
+    return !this.collectionConfigBuilder.hasSubscriberOrPreload()
+  }
+
   private subscribeToChanges(whereExpression?: BasicExpression<boolean>) {
     const orderByInfo =
       this.collectionConfigBuilder.optimizableOrderByCollections[this.sourceId]
@@ -263,9 +269,7 @@ export class CollectionSubscriber<
       whereExpression,
       onStatusChange,
       onLoadSubsetError,
-      // A live-query Collection starts no provider work on its own: it defers
-      // acquisition until it has a subscriber or a preload.
-      deferAcquisition: !this.collectionConfigBuilder.hasSubscriberOrPreload(),
+      deferAcquisition: this.defersAcquisition(),
       truncateReplayPublication: this.truncateReplayPublicationControl(),
       orderBy: hints.orderBy,
       limit: hints.limit,
@@ -305,9 +309,7 @@ export class CollectionSubscriber<
       whereExpression,
       onStatusChange,
       onLoadSubsetError,
-      // A live-query Collection starts no provider work on its own: it defers
-      // acquisition until it has a subscriber or a preload.
-      deferAcquisition: !this.collectionConfigBuilder.hasSubscriberOrPreload(),
+      deferAcquisition: this.defersAcquisition(),
       truncateReplayPublication: this.truncateReplayPublicationControl(() => {
         // Recovery favors a simple, authoritative rebuild over resuming a
         // fragile cursor. The retained full-source demand is replayed on later

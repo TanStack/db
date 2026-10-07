@@ -749,7 +749,15 @@ export function runInfiniteQuerySuite(rawDriver: InfiniteQueryDriver): void {
             .orderBy(({ items }: any) => items.rank, `desc`)
             .limit(4),
         ).collection
-        await collection.preload()
+        // A preload that does not count as demand never settles; bound the
+        // wait so that failure reaches an assertion instead of the timeout.
+        const preloaded = await Promise.race([
+          collection.preload().then(() => true),
+          new Promise<boolean>((resolve) =>
+            setTimeout(() => resolve(false), 200),
+          ),
+        ])
+        expect(preloaded, `the preload settles`).toBe(true)
         const requestsBeforeMount = source.calls.length
         expect(
           source.calls.filter((call) => call.limit === 4),

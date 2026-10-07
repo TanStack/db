@@ -1054,8 +1054,10 @@ export class CollectionImpl<
    * @returns Promise that resolves to a Map containing all items in the collection
    */
   stateWhenReady(): Promise<Map<TKey, WithVirtualProps<TOutput, TKey>>> {
-    // If we already have data or collection is ready, resolve immediately
+    // If we already have data or collection is ready, resolve immediately.
+    // This read still asks for data, so it counts as a preload.
     if (this.size > 0 || this.isReady()) {
+      this._markPreload()
       return Promise.resolve(this.state)
     }
 
@@ -1079,8 +1081,10 @@ export class CollectionImpl<
    * @returns Promise that resolves to an Array containing all items in the collection
    */
   toArrayWhenReady(): Promise<Array<WithVirtualProps<TOutput, TKey>>> {
-    // If we already have data or collection is ready, resolve immediately
+    // If we already have data or collection is ready, resolve immediately.
+    // This read still asks for data, so it counts as a preload.
     if (this.size > 0 || this.isReady()) {
+      this._markPreload()
       return Promise.resolve(this.toArray)
     }
 
