@@ -213,8 +213,7 @@ function interpolations(
       )
         refs.push(current)
       ts.forEachChild(current, (child) => {
-        if (ts.isCallExpression(current) && child === current.expression)
-          return
+        if (ts.isCallExpression(current) && child === current.expression) return
         if (ts.isPropertyAccessExpression(current) && child === current.name)
           return
         walk(child)
