@@ -63,7 +63,7 @@ jobs:
           --filter '@tanstack/react-router-with-db...'
           --filter '@tanstack/electric-db-collection...'
           --filter '@tanstack/query-db-collection...'
-          --filter '@tanstack/indexeddb-db-collection...'
+          --filter '@tanstack/db...'
           build
 
       - name: Build desktop dependencies
@@ -111,22 +111,22 @@ jobs:
 
       - name: Install IndexedDB oracle browsers
         if: matrix.group == 'browser'
-        working-directory: packages/indexeddb-db-collection
+        working-directory: packages/db
         run: pnpm exec playwright install --with-deps chromium firefox webkit
         env:
           PLAYWRIGHT_SKIP_BROWSER_GC: '1'
 
       - name: Run IndexedDB native cross-tab oracles
         if: matrix.group == 'browser'
-        working-directory: packages/indexeddb-db-collection
-        run: pnpm test:browser
+        working-directory: packages/db
+        run: pnpm test:indexed-db:browser
 
       - name: Upload IndexedDB oracle evidence
         if: always() && matrix.group == 'browser'
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: indexeddb-oracle-evidence
-          path: packages/indexeddb-db-collection/test-results/
+          path: packages/db/test-results/indexed-db/
           retention-days: 7
 
       - name: Run Browser SQLite OPFS fairness E2E tests

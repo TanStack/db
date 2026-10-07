@@ -30,7 +30,7 @@ lifecycle or authority policy.
 
 ## Sensitivity and test-first evidence
 
-[`review-evidence/donor-port`](../../../review-evidence/donor-port/) contains the
+[`review-evidence/donor-port`](https://github.com/TanStack/db/tree/main/review-evidence/donor-port/) contains the
 replay script, source hash, classifications and complete receipts.
 
 - `name-prefix`: change exact metadata-store matching to `startsWith`.
