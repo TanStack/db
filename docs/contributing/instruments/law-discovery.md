@@ -1,11 +1,18 @@
 # Law discovery
 
 **Use when:** a bug, example, or implementation exists but the promised behavior
-is unclear; or an existing law might conflate distinct obligations.
+is unclear; several supplied reports may share a law; or an existing law might
+conflate distinct obligations.
 
 **Inputs:** the question, contract sources, known examples, existing oracle owner
 and limits, and the public observation that matters. A missing authority is an
 input gap, not permission to infer a promise from production.
+
+With several supplied reports or examples, ask whether one caller-visible
+obligation predicts their different symptoms. Name its common preconditions,
+check an apparent outlier and a nearby case it should permit, and split the
+proposal if those cases require different promises. Shared code is a clue, not
+contract authority.
 
 ## Operation
 
