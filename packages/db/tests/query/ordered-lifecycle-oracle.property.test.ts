@@ -1004,13 +1004,11 @@ describe(`synchronous initial settlement refinement`, () => {
     },
   )
 
-  // The synchronous cut covers ordinary ordered requests only. A query that
-  // must read its whole source first (here a function filter) keeps its
-  // asynchronous initial settlement, even over an eager source whose rows
-  // are already installed. The eager prefix-repair cut must not widen it.
-  // #2055 pinned main's asynchronous timing here while its repair change stayed
-  // narrow. The initial full-source load now shares the initial synchronous
-  // cut, so the same query is ready at creation.
+  // The synchronous cut covers the initial load. For a query that must read
+  // its whole source first (here a function filter), the initial load is its
+  // first full-source request. When the source answers with literal `true`,
+  // the query is ready with its rows at creation. A later full-source fallback
+  // and a full-source repair keep their asynchronous settlement.
   it(`publishes an eager full-source ordered window at creation`, async () => {
     const source = createCollection<{ id: number; rank: number }, number>({
       id: `full-source-initial-${Math.random()}`,

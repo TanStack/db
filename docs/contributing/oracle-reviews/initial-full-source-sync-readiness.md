@@ -1,9 +1,15 @@
 # Initial full-source ordered load readiness review
 
-Reviewed source head: `a73a35bac` on `fix-full-source-sync-readiness`.
-The oracle commit is `bc2c9438b`; the production fix is `a73a35bac`.
-Re-reviewed after merging `main` with #2055 (merge `5d4802052`); the merged
-results are in "After merging #2055" below.
+Evidence by revision, on `fix-full-source-sync-readiness`:
+
+- First campaign: oracle commit `bc2c9438b`, production fix `a73a35bac`. The
+  RED results on `main` and the first mutant results refer to this campaign.
+- After merging `main` with #2055 (merge `5d4802052`): the eager and
+  joined-filter witnesses and the merged-code mutant results in "After merging
+  #2055" were run on `afef46744`, which adds those witnesses to `5d4802052`.
+- After merging `main` with #2060 (merge `a0537aa0e`): the ordered-lifecycle
+  and loader oracles (332 tests) and every CI test group passed on
+  `a0537aa0e`. The production gate is unchanged from `afef46744`.
 
 ## Contract and evidence
 
