@@ -320,6 +320,21 @@ behavior.
 A caller using direct writes must accept the
 scoped-cache limits or request an explicit refetch.
 
+The ownership oracle also checks five later boundaries from PR #2065 review:
+a derived `select` still applies a held fetch's rows and settles eager
+readiness after a direct insert; overlapping explicit refetch callers follow
+the replacement request after a silent cancellation; a fetched result queued
+behind a persisted-baseline scan cannot overwrite a later accepted write; a
+zero-lease subset observer retained by a listener receives a direct cache
+patch before reacquisition; and eight retired on-demand subsets leave no
+fetch-start positions (removing the retirement call fails at eight retained
+entries). The Query error, invalidation, and staleness checks now cover both
+eager and on-demand modes. These are controlled Query Core and persistence
+seams. They do not establish every derived response shape, arbitrary
+overlapping refetch schedule, native SQLite timing for the queued-result cut,
+or unbounded cache-memory growth. This owner retains those boundaries; the
+persisted direct-write oracle owns native durable-order receiving cases.
+
 The [React source ID reuse oracle](https://github.com/TanStack/db/blob/main/packages/react-db/tests/source-id-reuse-oracle.test.tsx) ([review](oracle-reviews/issue-1991-react-source-id.md))
 checks that a mounted derived-identity hook rejects a different same-ID
 source Collection directly, after an intervening ID and predicate, within one

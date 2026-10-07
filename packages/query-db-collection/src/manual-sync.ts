@@ -37,6 +37,14 @@ export type SyncOperation<
   | { type: `delete`; key: TKey | Array<TKey> }
   | { type: `upsert`; data: Partial<TRow> | Array<Partial<TRow>> }
 
+export type UpdateCacheData<
+  TRow extends object,
+  TKey extends string | number = string | number,
+> = (
+  getItems: (keys?: Array<TKey>) => Array<TRow>,
+  changedKeys: Array<TKey>,
+) => void
+
 export interface SyncContext<
   TRow extends object,
   TKey extends string | number = string | number,
@@ -53,10 +61,7 @@ export interface SyncContext<
    * Handles both direct array caches and wrapped response formats (when `select` is used).
    * If not provided, falls back to directly setting the cache with the raw array.
    */
-  updateCacheData?: (
-    getItems: (keys?: Array<TKey>) => Array<TRow>,
-    changedKeys: Array<TKey>,
-  ) => void
+  updateCacheData?: UpdateCacheData<TRow, TKey>
   /**
    * Gives a direct write its position when it is called. A fetch that starts
    * later counts as newer than the write.

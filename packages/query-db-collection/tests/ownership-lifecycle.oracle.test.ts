@@ -6045,6 +6045,9 @@ describe(`query collection ownership lifecycle`, () => {
         const ready = collection.preload()
         await vi.waitFor(() => expect(held).toHaveLength(1))
         await collection.utils.writeInsert({ id: `3`, value: `c` })
+        expect(
+          queryClient.getQueryCache().find({ queryKey: [id] })?.state.status,
+        ).toBe(`pending`)
         held[0]!.resolve()
         await ready
         expected = merge(fetched, [{ id: `3`, value: `c` }])
@@ -6085,6 +6088,58 @@ describe(`query collection ownership lifecycle`, () => {
       expect(cached()).toEqual(expected)
     },
   )
+
+  /**
+   * A fetched result can finish before its persisted baseline scan. Its
+   * source rows retain their fetch-start position while that application is
+   * queued. The reference overlays a later accepted direct write on those
+   * rows, even if the scan returns that newly written row. Check public rows
+   * when initial readiness settles, after the held scan is released.
+   */
+  it(`keeps a direct write made after fetch completion but before application`, async () => {
+    const id = `queued-older-result-direct-write`
+    const queryHash = hashKey([id])
+    const older = { ...shared, name: `Older fetch` }
+    const manual = { ...shared, name: `Manual` }
+    const persistedScan =
+      createDeferred<
+        Array<{ key: string | number; value: Item; metadata?: unknown }>
+      >()
+    const scanPersistedRows = vi.fn(() => persistedScan.promise)
+    const { collection, queryFn } = createOwnershipFixture({
+      id,
+      syncMode: `eager`,
+      results: [[older]],
+      scanPersistedRows,
+      setupMetadata: (metadata) => {
+        metadata.collection.set(`queryCollection:gc:${queryHash}`, {
+          queryHash,
+          mode: `until-revalidated`,
+        })
+      },
+    })
+    cleanups.push(() => {
+      persistedScan.resolve([])
+      return Promise.resolve()
+    })
+
+    const ready = collection.stateWhenReady()
+    await vi.waitFor(() => {
+      expect(queryFn).toHaveBeenCalledOnce()
+      expect(scanPersistedRows).toHaveBeenCalledOnce()
+    })
+    await collection.utils.writeInsert(manual)
+    expect(collection.get(manual.id)?.name).toBe(`Manual`)
+    persistedScan.resolve([
+      {
+        key: manual.id,
+        value: manual,
+        metadata: { queryCollection: { owners: { [queryHash]: true } } },
+      },
+    ])
+    await ready
+    expect(collection.get(manual.id)?.name).toBe(`Manual`)
+  })
 
   it(`settles a direct write only after its persisted commit applies`, async () => {
     const id = `persisted-direct-write-receipt`
@@ -7330,6 +7385,137 @@ describe(`query collection ownership lifecycle`, () => {
   })
 
   /**
+   * A fetched source snapshot still owns every row it returned when a direct
+   * write lands during its request. The reference overlays the accepted write
+   * on that snapshot. A derived `select` has no inverse into the cached
+   * envelope, so this checks public rows and initial readiness after the held
+   * fetch settles without requiring a rewritten Query cache response.
+   */
+  it.each([`eager`, `on-demand`] as const)(
+    `applies a derived selected %s fetch that began before a direct write`,
+    async (syncMode) => {
+      type Row = { id: string; name: string }
+      const id = `derived-select-older-fetch-${syncMode}`
+      const fetched = { edges: [{ node: { id: `server`, name: `Fetched` } }] }
+      const gate = createDeferred<typeof fetched>()
+      const queryClient = createQueryClient()
+      const queryFn = vi.fn(() => gate.promise)
+      const collection = createCollection(
+        queryCollectionOptions({
+          id,
+          queryClient,
+          queryKey: [id],
+          queryFn,
+          select: (response: typeof fetched) =>
+            response.edges.map((edge) => edge.node),
+          getKey: (row: Row) => row.id,
+          syncMode,
+          startSync: true,
+        }),
+      )
+      cleanups.push(async () => {
+        gate.resolve(fetched)
+        await collection.cleanup()
+        queryClient.clear()
+      })
+
+      const ready =
+        syncMode === `eager`
+          ? collection.preload()
+          : Promise.resolve(collection._sync.loadSubset({}))
+      await vi.waitFor(() => expect(queryFn).toHaveBeenCalledTimes(1))
+      await collection.utils.writeInsert({ id: `manual`, name: `Written` })
+      gate.resolve(fetched)
+      await vi.waitFor(() =>
+        expect(collection.get(`server`)?.name).toBe(`Fetched`),
+      )
+      await ready
+      expect(
+        Object.fromEntries(
+          Array.from(collection.values(), (row) => [row.id, row.name]),
+        ),
+      ).toEqual({ server: `Fetched`, manual: `Written` })
+      expect(queryFn).toHaveBeenCalledTimes(1)
+    },
+  )
+
+  /**
+   * A silent cancellation that replaces a Query fetch lets public Collection
+   * refetch callers follow the successor, as Query Core does for its own
+   * `cancelRefetch` path. The reference is the successor's applied row at
+   * both public refetch settlements. A raw QueryClient `fetchQuery` waiter
+   * holds the retryer promise instead and may receive `CancelledError`; that
+   * is Query Core's separate boundary. Holding the first fetch distinguishes
+   * a synchronous replacement from a cancellation awaited before replacement.
+   */
+  it(`settles overlapping explicit refetch callers on the replacement`, async () => {
+    type Row = { id: string; name: string }
+    const id = `overlapping-post-write-refetch`
+    const first = createDeferred<Array<Row>>()
+    const replacement = createDeferred<Array<Row>>()
+    const queryClient = createQueryClient()
+    const queryFn = vi
+      .fn()
+      .mockResolvedValueOnce([{ id: `x`, name: `Initial` }])
+      .mockImplementationOnce(() => first.promise)
+      .mockImplementation(() => replacement.promise)
+    const collection = createCollection(
+      queryCollectionOptions<Row>({
+        id,
+        queryClient,
+        queryKey: [id],
+        queryFn,
+        getKey: (row) => row.id,
+        syncMode: `eager`,
+        startSync: true,
+      }),
+    )
+    cleanups.push(async () => {
+      first.resolve([{ id: `x`, name: `Old` }])
+      replacement.resolve([{ id: `x`, name: `Server` }])
+      await collection.cleanup()
+      queryClient.clear()
+    })
+
+    await collection.preload()
+    let earlierOutcome = `pending`
+    const earlier = collection.utils.refetch({ throwOnError: true }).then(
+      () => {
+        earlierOutcome = `resolved`
+        return { outcome: earlierOutcome, row: collection.get(`x`)?.name }
+      },
+      (error) => {
+        earlierOutcome = isCancelledError(error) ? `cancelled` : `rejected`
+        return { outcome: earlierOutcome, row: collection.get(`x`)?.name }
+      },
+    )
+    await vi.waitFor(() => expect(queryFn).toHaveBeenCalledTimes(2))
+    let externalOutcome = `pending`
+    const external = queryClient
+      .fetchQuery({ queryKey: [id], queryFn, staleTime: 0 })
+      .then(
+        (rows) => {
+          externalOutcome = `resolved`
+          return { outcome: externalOutcome, row: rows[0]?.name }
+        },
+        (error) => {
+          externalOutcome = isCancelledError(error) ? `cancelled` : `rejected`
+          return { outcome: externalOutcome, row: undefined }
+        },
+      )
+    await collection.utils.writeUpdate({ id: `x`, name: `Written` })
+    const later = collection.utils.refetch({ throwOnError: true })
+    await vi.waitFor(() => expect(queryFn).toHaveBeenCalledTimes(3))
+    expect(earlierOutcome).toBe(`pending`)
+    expect(externalOutcome).toBe(`pending`)
+    replacement.resolve([{ id: `x`, name: `Server` }])
+    await later
+    expect(await earlier).toEqual({ outcome: `resolved`, row: `Server` })
+    expect(await external).toEqual({ outcome: `cancelled`, row: undefined })
+    expect(collection.get(`x`)?.name).toBe(`Server`)
+  })
+
+  /**
    * A derived selected response has no safe inverse for a direct cache edit.
    * Its old cached envelope may remain, but remounting a live query without
    * a new provider result must not replay that envelope over an accepted
@@ -7430,6 +7616,107 @@ describe(`query collection ownership lifecycle`, () => {
     collection._sync.unloadSubset(b)
     expect(collection.get(`x`)?.name).toBe(`after`)
     expect(queryFn).toHaveBeenCalledTimes(2)
+  })
+
+  /**
+   * A Query observer can retain a listener after its last subset lease ends.
+   * The independent row rule is that an accepted direct update wins until a
+   * newer provider result arrives. Keep that observer alive, update the row,
+   * then reacquire the subset without a new request. Both its cached and
+   * public row must reflect the write at that checkpoint.
+   */
+  it(`patches a zero-lease observer retained by a listener`, async () => {
+    type Row = { id: string; name: string }
+    const id = `listener-retained-direct-write`
+    const queryClient = createQueryClient()
+    const queryFn = vi.fn(() => Promise.resolve([{ id: `x`, name: `before` }]))
+    const collection = createCollection(
+      queryCollectionOptions<Row>({
+        id,
+        queryClient,
+        queryKey: [id],
+        queryFn,
+        getKey: (row) => row.id,
+        syncMode: `on-demand`,
+        startSync: true,
+        staleTime: Number.POSITIVE_INFINITY,
+      }),
+    )
+    let releaseListener = () => {}
+    cleanups.push(async () => {
+      releaseListener()
+      await collection.cleanup()
+      queryClient.clear()
+    })
+
+    await collection._sync.loadSubset({})
+    const query = queryClient.getQueryCache().find({ queryKey: [id] })!
+    const observer = query.observers[0]!
+    releaseListener = observer.subscribe(() => {})
+    collection._sync.unloadSubset({})
+    await collection.utils.writeUpdate({ id: `x`, name: `after` })
+    expect(query.state.data).toEqual([{ id: `x`, name: `after` }])
+    await collection._sync.loadSubset({})
+    expect(collection.get(`x`)?.name).toBe(`after`)
+    expect(queryFn).toHaveBeenCalledTimes(1)
+  })
+
+  /**
+   * A fetch-start position is needed only while its subset observer remains
+   * live. The reference count after retiring eight distinct subset leases is
+   * zero. Instrument the map receiving each fetch-start stamp (keyed by this
+   * fixture's unique Query hash and initial generation zero), then compare
+   * its retained entries with that count after every subset unloads.
+   */
+  it(`retires fetch-start positions with their subset observers`, async () => {
+    type Row = { id: string }
+    const id = `fetch-start-retirement`
+    const queryClient = createQueryClient()
+    const queryFn = vi.fn(() => Promise.resolve([] as Array<Row>))
+    const collection = createCollection(
+      queryCollectionOptions<Row>({
+        id,
+        queryClient,
+        queryKey: [id],
+        queryFn,
+        getKey: (row) => row.id,
+        syncMode: `on-demand`,
+        startSync: true,
+      }),
+    )
+    cleanups.push(async () => {
+      await collection.cleanup()
+      queryClient.clear()
+    })
+    const originals = Map.prototype.set
+    const stamped = new Set<Map<unknown, unknown>>()
+    const setSpy = vi.spyOn(Map.prototype, `set`).mockImplementation(function (
+      this: Map<unknown, unknown>,
+      key: unknown,
+      value: unknown,
+    ) {
+      if (typeof key === `string` && key.includes(id) && value === 0) {
+        stamped.add(this)
+      }
+      return originals.call(this, key, value)
+    })
+    const demands = Array.from({ length: 8 }, (_, index) => ({
+      where: eq(`id`, String(index)),
+    }))
+    try {
+      for (const demand of demands) await collection._sync.loadSubset(demand)
+    } finally {
+      setSpy.mockRestore()
+    }
+    expect(stamped.size).toBe(1)
+    const fetchStarts = [...stamped][0]!
+    expect(
+      [...fetchStarts.keys()].filter((key) => String(key).includes(id)),
+    ).toHaveLength(8)
+    for (const demand of demands) collection._sync.unloadSubset(demand)
+    expect(
+      [...fetchStarts.keys()].filter((key) => String(key).includes(id)),
+    ).toHaveLength(0)
   })
 
   /**
@@ -7542,9 +7829,16 @@ describe(`query collection ownership lifecycle`, () => {
    * covers an error, a pending invalidation, and an expired timestamp; the checkpoints are
    * Collection utilities, Query cache state, and the accepted Collection row.
    */
-  it.each([`error`, `invalidation`, `stale`] as const)(
-    `preserves Query %s state across a direct cache patch`,
-    async (cut) => {
+  it.each(
+    ([`eager`, `on-demand`] as const).flatMap((syncMode) =>
+      ([`error`, `invalidation`, `stale`] as const).map((cut) => ({
+        syncMode,
+        cut,
+      })),
+    ),
+  )(
+    `preserves Query $cut state across a $syncMode direct cache patch`,
+    async ({ syncMode, cut }) => {
       type Row = { id: string; name: string }
       const id = `direct-cache-${cut}`
       const queryClient = createQueryClient(false, 1000)
@@ -7560,7 +7854,7 @@ describe(`query collection ownership lifecycle`, () => {
           queryKey: [id],
           queryFn,
           getKey: (row) => row.id,
-          syncMode: `on-demand`,
+          syncMode,
           startSync: true,
         }),
       )
@@ -7568,7 +7862,8 @@ describe(`query collection ownership lifecycle`, () => {
         await collection.cleanup()
         queryClient.clear()
       })
-      await collection._sync.loadSubset({})
+      if (syncMode === `eager`) await collection.preload()
+      else await collection._sync.loadSubset({})
       const query = queryClient
         .getQueryCache()
         .find({ queryKey: [id], exact: true })!

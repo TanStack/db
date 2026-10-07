@@ -384,6 +384,12 @@ This differs from TanStack Query's observer-level `select`: query-db-collection 
 
 In eager mode, direct write utilities such as `writeInsert`, `writeUpdate`, and `writeDelete` make a best-effort attempt to update the matching row array inside wrapped Query cache entries while preserving wrapper metadata. In on-demand mode, they patch rows already present in active raw arrays or arrays exposed as a direct response property by `select`. They remove inactive entries under the Collection's query-key prefix unless another Collection or observer retains them. They do not reconstruct a scoped result from the full collection. A retained outside observer can therefore keep an inactive cache entry with old rows.
 
+In both modes, a direct cache patch leaves Query's error, invalidation, and
+freshness state intact. A direct write is not a successful fetch: an eager
+query that failed still reports that error, and a stale eager query may fetch
+on remount. Use `utils.clearError()` to retry after an error, or
+`utils.refetch()` when you need fresh server results.
+
 This works automatically when `select` returns the wrapper's array property itself, as in these simple wrappers:
 
 - `{ data: [...] }`
