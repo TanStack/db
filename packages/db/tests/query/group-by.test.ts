@@ -257,6 +257,45 @@ const equalityEquivalentGroupValues: Array<
   ],
 ]
 
+/**
+ * Which member supplies a group's projected value when several members are
+ * equal under query equality but differ exactly?
+ *
+ * Law: the member with the smallest exact value. Exact values are ordered by
+ * kind first: a number before an object (a Date, a binary array, or a
+ * Temporal value). Among numbers, an ordinary number comes before -0, and
+ * -0 before NaN. Among objects, the type name decides (`Buffer` before
+ * `Date` before `Uint8Array`). Objects of one type with the same content are
+ * the same exact value, so either instance may be projected. The choice does
+ * not depend on row keys or on the order in which rows arrived.
+ *
+ * Before this law, the member with the smallest row key supplied the value.
+ * That choice made every member's contribution distinct, so each change
+ * re-read the whole group.
+ */
+function exactRank(value: unknown): [number, number | string] {
+  if (typeof value === `number`) {
+    if (Object.is(value, -0)) return [0, 1]
+    if (Number.isNaN(value)) return [0, 2]
+    return [0, 0]
+  }
+  const typeName =
+    value !== null && typeof value === `object`
+      ? value.constructor.name
+      : typeof value
+  return [1, typeName]
+}
+
+function smallestExact(values: ReadonlyArray<unknown>): unknown {
+  return values.reduce((best, value) => {
+    const [kind, sub] = exactRank(value)
+    const [bestKind, bestSub] = exactRank(best)
+    return kind < bestKind || (kind === bestKind && sub < bestSub)
+      ? value
+      : best
+  })
+}
+
 function representativeSignature(value: unknown): string {
   if (value instanceof Date) return `date`
   if (Buffer.isBuffer(value)) return `buffer`
@@ -345,10 +384,24 @@ function createGroupByTests(autoIndex: `off` | `eager`): void {
     test.each(equalityEquivalentGroupValues)(
       `groups %s by query equality`,
       (_name, createValues) => {
-        const [left, right] = createValues()
+        for (const reversed of [false, true]) {
+          checkEqualityGroup(createValues, reversed)
+        }
+      },
+    )
+
+    function checkEqualityGroup(
+      createValues: () => readonly [unknown, unknown],
+      reversed: boolean,
+    ): void {
+      {
+        // Both arrival orders: the projected value must not depend on which
+        // member arrived first or which has the smaller row key.
+        const [first, second] = createValues()
+        const [left, right] = reversed ? [second, first] : [first, second]
         const valuesCollection = createCollection(
           mockSyncCollectionOptions<{ id: number; value: unknown }>({
-            id: `equality-group-values-${autoIndex}`,
+            id: `equality-group-values-${autoIndex}-${reversed}`,
             getKey: (row) => row.id,
             initialData: [
               { id: 1, value: left },
@@ -381,7 +434,7 @@ function createGroupByTests(autoIndex: `off` | `eager`): void {
           )
         }
 
-        expectSingleGroup(2, left)
+        expectSingleGroup(2, smallestExact([left, right]))
 
         valuesCollection.utils.begin()
         valuesCollection.utils.write({
@@ -397,9 +450,9 @@ function createGroupByTests(autoIndex: `off` | `eager`): void {
           value: { id: 1, value: left },
         })
         valuesCollection.utils.commit()
-        expectSingleGroup(2, left)
-      },
-    )
+        expectSingleGroup(2, smallestExact([left, right]))
+      }
+    }
 
     test.each([
       `__group_value_0`,
