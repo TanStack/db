@@ -1503,17 +1503,11 @@ export class CollectionStateManager<
       return
     }
 
-    // Schedule cleanup when the transaction completes
-    transaction.isPersisted.promise
-      .then(() => {
-        // Transaction completed successfully, remove it immediately
-        this.transactions.delete(transaction.id)
-      })
-      .catch(() => {
-        // Transaction failed, but we want to keep failed transactions for reference
-        // so don't remove it.
-        // Rollback already triggers state recomputation via touchCollection().
-      })
+    // A settled transaction leaves the map either way. Rollback has already
+    // recomputed and published through touchCollection() before the
+    // rejection handler runs.
+    const remove = () => this.transactions.delete(transaction.id)
+    transaction.isPersisted.promise.then(remove, remove)
   }
 
   /**
