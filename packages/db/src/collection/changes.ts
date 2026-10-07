@@ -311,13 +311,11 @@ export class CollectionChangesManager<
     this.addSubscriber()
 
     let subscription: CollectionSubscription | undefined
-    const setupState = { closed: false }
     try {
       subscription = new CollectionSubscription(this.collection, callback, {
         ...opts,
         whereExpression,
         onUnsubscribe: () => {
-          setupState.closed = true
           this.removeSubscriber()
           if (subscription) this.changeSubscriptions.delete(subscription)
         },
