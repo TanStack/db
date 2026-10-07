@@ -29,7 +29,6 @@ const groups = {
   ],
   collections: [
     `@tanstack/electric-db-collection`,
-    `@tanstack/indexeddb-db-collection`,
     `@tanstack/query-db-collection`,
     `@tanstack/powersync-db-collection`,
     `@tanstack/rxdb-db-collection`,
@@ -108,19 +107,19 @@ if (command === `check`) {
     ]
   }
   execFileSync(`pnpm`, args, { cwd: root, stdio: `inherit` })
-  if (command === `test` && group === `collections`) {
+  if (command === `test` && group === `db-1`) {
     // The group build is complete. Verify published declarations after runtime
     // suites finish, without rebuilding a dependency they could still read.
     execFileSync(
       `pnpm`,
       [
         `--filter`,
-        `@tanstack/indexeddb-db-collection`,
+        `@tanstack/db`,
         `exec`,
         `vitest`,
         `run`,
         `--config`,
-        `vitest.package.config.ts`,
+        `vitest.indexed-db.package.config.ts`,
         `--maxWorkers=2`,
       ],
       { cwd: root, stdio: `inherit` },
