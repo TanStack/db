@@ -3,6 +3,9 @@ linkWorkspacePackages: true
 preferWorkspacePackages: true
 blockExoticSubdeps: true
 trustPolicy: 'no-downgrade'
+trustPolicyExclude:
+  # Expo 53 still pulls this 2023 release without provenance.
+  - 'semver@6.3.1'
 
 packages:
   - packages/**
