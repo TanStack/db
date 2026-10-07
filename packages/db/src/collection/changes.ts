@@ -330,21 +330,27 @@ export class CollectionChangesManager<
         subscription.on(`status:change`, options.onStatusChange)
       }
 
-      if (options.includeInitialState) {
-        subscription.requestSnapshot({
-          trackLoadSubsetPromise: false,
-          orderBy: options.orderBy,
-          limit: options.limit,
-          onLoadSubsetResult: options.onLoadSubsetResult,
-        })
-      } else if (options.includeInitialState === false) {
-        // When explicitly set to false (not just undefined), mark all state as "seen"
-        // so that all future changes (including deletes) pass through unfiltered.
-        subscription.markAllStateAsSeen()
+      // Register before the snapshot so work committed inside its callback
+      // reaches this subscriber. The deferral publishes that work after the
+      // snapshot, as the next batch, never inside it.
+      this.changeSubscriptions.add(subscription)
+      const deferral = this.deferPublication()
+      try {
+        if (options.includeInitialState) {
+          subscription.requestSnapshot({
+            trackLoadSubsetPromise: false,
+            orderBy: options.orderBy,
+            limit: options.limit,
+            onLoadSubsetResult: options.onLoadSubsetResult,
+          })
+        } else if (options.includeInitialState === false) {
+          // When explicitly set to false (not just undefined), mark all state as "seen"
+          // so that all future changes (including deletes) pass through unfiltered.
+          subscription.markAllStateAsSeen()
+        }
+      } finally {
+        deferral.publish()
       }
-
-      // Add to batched listeners
-      if (!setupState.closed) this.changeSubscriptions.add(subscription)
     } catch (error) {
       if (subscription) {
         try {
