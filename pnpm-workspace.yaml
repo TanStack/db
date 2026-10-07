@@ -12,6 +12,8 @@ packages:
   - examples/**/*
 
 overrides:
+  # Chokidar 4.0.2 and 4.0.3 fail the trust policy; 4.0.1 satisfies v4 consumers.
+  'chokidar@^4.0.0': '4.0.1'
   metro: '0.82.5'
   metro-babel-transformer: '0.82.5'
   metro-cache: '0.82.5'
