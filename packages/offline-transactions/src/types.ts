@@ -102,14 +102,17 @@ export interface OfflineConfig {
   maxConcurrency?: number
   jitter?: boolean
   /**
-   * Custom retry policy controlling whether a failed transaction is retried and
-   * how long to back off between attempts.
+   * Replaces the default decision and delay for mutation function failures.
    *
-   * Defaults to {@link DefaultRetryPolicy} (infinite retries with exponential
-   * backoff; `jitter` is forwarded to it). Provide your own implementation — or
-   * subclass `DefaultRetryPolicy` and override `shouldRetry` — to customize the
-   * classification of non-retryable errors (e.g. treat a 401 as transient and
-   * keep retrying instead of dropping the transaction).
+   * `shouldRetry` receives the original error and current retry count. A retry
+   * retains the durable FIFO head and leaves its caller pending; a terminal
+   * decision rejects with that error after outbox removal. The delay must be
+   * finite milliseconds; negative values are treated as zero.
+   *
+   * When omitted, {@link DefaultRetryPolicy} keeps its existing classification
+   * and exponential backoff. `jitter` only configures that default. A custom
+   * policy also replaces its handling of `NonRetriableError` and `AbortError`;
+   * delegate to `DefaultRetryPolicy` to retain those decisions.
    */
   retryPolicy?: RetryPolicy
   beforeRetry?: (
@@ -136,7 +139,9 @@ export interface StorageAdapter {
 }
 
 export interface RetryPolicy {
+  /** Finite milliseconds until the next attempt; negative values become zero. */
   calculateDelay: (retryCount: number) => number
+  /** Decide whether to retry the original mutation function error. */
   shouldRetry: (error: Error, retryCount: number) => boolean
 }
 

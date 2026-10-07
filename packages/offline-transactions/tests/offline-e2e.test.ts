@@ -181,7 +181,7 @@ describe(`offline executor end-to-end`, () => {
     )
   })
 
-  it(`uses a custom retryPolicy provided via config`, async () => {
+  it(`keeps a 401 transaction queued under a configured retry policy`, async () => {
     // The DefaultRetryPolicy classifies any error whose message includes "401"
     // as a permanent failure. A custom policy passed via config overrides that:
     // here it keeps retrying, so the transaction survives the 401 and succeeds
@@ -201,10 +201,8 @@ describe(`offline executor end-to-end`, () => {
           },
         },
       },
-      mutationFn: async (params) => {
-        const mutations = params.transaction.mutations as Array<
-          PendingMutation<TestItem>
-        >
+      mutationFn: (params) => {
+        const mutations = params.transaction.mutations
         if (!online) {
           throw new Error(`HTTP 401 Unauthorized`)
         }
@@ -231,9 +229,13 @@ describe(`offline executor end-to-end`, () => {
 
     // Despite the 401 (non-retryable under the default policy), the custom
     // policy is consulted and keeps the transaction queued for retry.
-    await waitUntil(() => env.mutationCalls.length >= 1)
+    await waitUntil(
+      async () => (await env.executor.peekOutbox())[0]?.retryCount === 1,
+    )
     expect(shouldRetryCalled).toBe(true)
-    expect(await env.executor.peekOutbox()).toHaveLength(1)
+    expect(await env.executor.peekOutbox()).toMatchObject([
+      { retryCount: 1, lastError: { message: `HTTP 401 Unauthorized` } },
+    ])
 
     // Backend recovers; the retries the custom policy allowed now succeed.
     online = true

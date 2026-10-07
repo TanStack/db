@@ -2,6 +2,4 @@
 '@tanstack/offline-transactions': minor
 ---
 
-Allow overriding the retry policy via `OfflineConfig.retryPolicy`.
-
-`startOfflineExecutor` previously always used the built-in `DefaultRetryPolicy`, whose `shouldRetry` hard-codes which errors are treated as non-retryable (it drops any error whose message includes `400`/`401`/`403`/`422`), with no way to change it. You can now pass a `retryPolicy` to `OfflineConfig` to control retry classification and backoff — or subclass the exported `DefaultRetryPolicy` and override `shouldRetry`. When omitted, behavior is unchanged.
+Allow applications to set `OfflineConfig.retryPolicy` to choose retry classification and backoff for mutation function failures. The existing default remains unchanged when the option is omitted. A custom policy must return a finite delay; invalid policy results fail before a retry record is published.
