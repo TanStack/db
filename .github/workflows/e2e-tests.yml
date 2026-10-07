@@ -126,7 +126,9 @@ jobs:
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: indexeddb-oracle-evidence
-          path: packages/db/test-results/indexed-db/
+          path: |
+            packages/db/test-results/indexed-db/
+            packages/db/test-results/oracles/
           retention-days: 7
 
       - name: Run Browser SQLite OPFS fairness E2E tests

@@ -77,8 +77,8 @@ confirms whole durable snapshots.
 
 Atomic failed replacement is an explicit repair decision: import preserves the
 existing snapshot and versions if validation or persistence fails, strengthening
-the original clear-then-write implementation. The test and README carry that
-decision together. Separate per-Collection acceptance calls are not atomic
+the original clear-then-write implementation. The test and IndexedDB Collection
+guide carry that decision together. Separate per-Collection acceptance calls are not atomic
 across Collections.
 
 ## Repaired boundary laws
@@ -213,7 +213,7 @@ From this package directory:
 
 ```sh
 INDEXEDDB_ORACLE_SEED=1179001 INDEXEDDB_ORACLE_PATH=0:1:0:0:2:2 \
-  pnpm exec vitest run tests/persistence-oracle.test.ts \
+  pnpm exec vitest run tests/indexed-db/persistence-oracle.test.ts \
   -t 'replay histories' --coverage.enabled=false --typecheck.enabled=false
 ```
 
@@ -281,7 +281,7 @@ The executable companions keep distinct responsibilities:
 | `pending-history-oracle.test.ts`                                                 | One held multi-row intent, durable rows, exposed base, queued source batches and acknowledgement attribution; public/raw/downstream snapshots at handler entry, each peer step and settlement | 24 CRUD × peer action × decision cases, with all actual peer CRUD operations reached; 30+30 generated histories of up to four peer actions, 1–3 local rows; stress 300+300 |
 | `persistence-oracle.test.ts`                                                     | Three distinct Collection owners, mixed deletes/inserts, two stores and version isolation after each acceptance                                                                               | All six acceptance orders; no cross-Collection atomicity or same-ID identity policy                                                                                        |
 | `settlement-oracle.test.ts`                                                      | Failure before, within and after valid rows in a three-row native batch                                                                                                                       | First/middle/last clone failures × automatic/manual/import, with populated replacement rollback                                                                            |
-| `e2e/cross-tab-oracle.spec.ts`                                                   | Native IndexedDB and BroadcastChannel, independent same-origin pages, runner-owned raw evidence                                                                                               | Chromium, Firefox and WebKit; pinned receiving matrix and 10 fixed + 10 fresh histories per engine                                                                         |
+| `e2e/indexed-db/cross-tab-oracle.spec.ts`                                        | Native IndexedDB and BroadcastChannel, independent same-origin pages, runner-owned raw evidence                                                                                               | Chromium, Firefox and WebKit; pinned receiving matrix and 10 fixed + 10 fresh histories per engine                                                                         |
 
 The transport model combines exposed base and public rows only when local
 mutations have settled. The pending companion keeps them separate. It adapts
@@ -354,14 +354,14 @@ if replay cannot recover its timing. Browser attachments retain raw events and
 cleanup errors outside the page. CI uploads these artifacts even on failure.
 
 ```sh
-pnpm test:oracles
-pnpm test:oracles:stress
+pnpm test:indexed-db:oracles
+TANSTACK_INDEXEDDB_ORACLE_PROFILE=stress pnpm test:indexed-db:oracles
 pnpm exec playwright install chromium firefox webkit
-pnpm test:browser
+pnpm test:indexed-db:browser
 # Direct selected history; fixed/fresh campaigns do not run first:
-TANSTACK_INDEXEDDB_ORACLE_SEED=<seed> TANSTACK_INDEXEDDB_ORACLE_PATH=<path> pnpm test:oracles
-TANSTACK_INDEXEDDB_PENDING_SEED=<seed> TANSTACK_INDEXEDDB_PENDING_PATH=<path> pnpm test:oracles
-TANSTACK_INDEXEDDB_BROWSER_SEED=<seed> TANSTACK_INDEXEDDB_BROWSER_PATH=<path> pnpm test:browser --project=chromium
+TANSTACK_INDEXEDDB_ORACLE_SEED=<seed> TANSTACK_INDEXEDDB_ORACLE_PATH=<path> pnpm test:indexed-db:oracles
+TANSTACK_INDEXEDDB_PENDING_SEED=<seed> TANSTACK_INDEXEDDB_PENDING_PATH=<path> pnpm test:indexed-db:oracles
+TANSTACK_INDEXEDDB_BROWSER_SEED=<seed> TANSTACK_INDEXEDDB_BROWSER_PATH=<path> pnpm test:indexed-db:browser --project=chromium
 ```
 
 ### Remaining boundaries
@@ -414,9 +414,9 @@ non-truncating full-row comparison. Automatic writes intentionally wait for
 their predecessor; they can no longer supply that old fixture schedule.
 
 Runtime/type tests resolve workspace source with no dependency build. The
-separate package lane compiles published ESM/CJS consumers after complete builds.
+packed-package lane tests ESM/CJS consumers after complete builds.
 The review evidence and guide audit are in
-[`2026-10-05-indexeddb-xhigh.md`](../../../docs/contributing/oracle-reviews/2026-10-05-indexeddb-xhigh.md).
+[`2026-10-05-indexeddb-xhigh.md`](../../../../docs/contributing/oracle-reviews/2026-10-05-indexeddb-xhigh.md).
 
 ## Law enforcement audit after the xhigh review
 
@@ -453,7 +453,7 @@ all three at their own boundaries.
 
 These are bounded laws with explicit production paths and observation cuts.
 The current evidence is recorded in
-[`2026-10-05-indexeddb-law-audit.md`](../../../docs/contributing/oracle-reviews/2026-10-05-indexeddb-law-audit.md).
+[`2026-10-05-indexeddb-law-audit.md`](../../../../docs/contributing/oracle-reviews/2026-10-05-indexeddb-law-audit.md).
 An accounting-complete review is not proof of every cross-tab history.
 
 That earlier audit exposed a deletion-authority counterexample: an old native
@@ -481,7 +481,7 @@ and a valid suffix. Inputs never share mutable objects with the expected result.
 The approved capture extension below adds post-submission ownership. Cycles
 and arbitrary custom prototypes remain outside this adapter value corpus.
 
-`e2e/value-oracle.spec.ts` receives those value and first-open premises through
+`e2e/indexed-db/value-oracle.spec.ts` receives those value and first-open premises through
 native IndexedDB and BroadcastChannel. Observations inspect rich values inside
 the page before serialization. Raw native Blob preparation fails in the local
 Playwright WebKit provider; those two cells prove matching adapter rejection,
@@ -490,13 +490,13 @@ attaches that limitation. The added persistent WebKit project requires successfu
 and receives those same preservation histories. Other engines receive the full corpus.
 
 `packed-consumer.test.ts` is an integration companion, not a Collection oracle.
-It installs actual adapter/core/dependency tarballs into a temporary consumer and
+It installs actual `@tanstack/db` and dependency tarballs into a temporary consumer and
 executes ESM and CommonJS persist/reopen paths. Missing-export controls prove
-workspace resolution cannot rescue missing files. `e2e/packed-consumer.spec.ts`
+workspace resolution cannot rescue missing files. `e2e/indexed-db/packed-consumer.spec.ts`
 bundles that consumer with no aliases and runs it in the three native engines.
 Completed builds are reused; the ordinary runtime suite does not build or pack.
 
-The [port audit](../../../docs/contributing/oracle-reviews/2026-10-06-indexeddb-donor-port.md)
+The [port audit](../../../../docs/contributing/oracle-reviews/2026-10-06-indexeddb-donor-port.md)
 records three assertion-killed production mutants and the finite coverage bounds.
 It keeps the known core numeric/string same-transaction collision separate from
 this adapter's legal-name coverage. No production or product-policy change is
@@ -525,7 +525,7 @@ both property orders and existing one-argument subclass construction. Browser
 iframe witnesses receive foreign standard values; concurrent shared-memory
 writers and detached/resizable buffers are not modeled.
 
-The host owner in `e2e/host-oracle.spec.ts` uses authored per-store arrays across
+The host owner in `e2e/indexed-db/host-oracle.spec.ts` uses authored per-store arrays across
 six legal names, prefix neighbors and anchor stores. It receives numeric and
 string keys together in a single transaction, peer updates, import, clear,
 export and fresh restore. The core payload owner independently checks both key
@@ -540,6 +540,6 @@ terminal settlement. Omitting managed-factory forwarding fails the independent
 blocked checkpoint. The native durability default and lack of a cross-Collection
 atomic read-modify-write API remain explicit accepted design boundaries.
 
-See the [follow-up audit](../../../docs/contributing/oracle-reviews/2026-10-06-indexeddb-donor-followup.md)
+See the [follow-up audit](../../../../docs/contributing/oracle-reviews/2026-10-06-indexeddb-donor-followup.md)
 for calibration and final verification. The preceding port record is historical;
 its then-open decisions and provider gaps are superseded only by these named laws.

@@ -8,7 +8,7 @@
  *
  * The driver uses real Collection APIs and fake-IDB, with controlled delivery.
  * Every checkpoint compares public, peer, export and raw durable values, plus
- * version records after rejection. Native receiving lives in e2e/value-oracle.spec.ts.
+ * version records after rejection. Native receiving lives in e2e/indexed-db/value-oracle.spec.ts.
  */
 import { expect, it } from 'vitest'
 import {

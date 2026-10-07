@@ -5,7 +5,8 @@ description: >
   queryCollectionOptions (REST/TanStack Query), electricCollectionOptions
   (ElectricSQL real-time sync), powerSyncCollectionOptions (PowerSync SQLite),
   rxdbCollectionOptions (RxDB), trailBaseCollectionOptions (TrailBase),
-  localOnlyCollectionOptions, localStorageCollectionOptions. CollectionConfig
+  localOnlyCollectionOptions, localStorageCollectionOptions,
+  indexedDBCollectionOptions. CollectionConfig
   options: getKey, schema, sync, gcTime, autoIndex (default off), defaultIndexType,
   syncMode (eager/on-demand, plus progressive for Electric). StandardSchema validation
   with Zod/Valibot/ArkType. Collection lifecycle (idle/loading/ready/error).
@@ -23,6 +24,7 @@ sources:
   - 'TanStack/db:docs/collections/powersync-collection.md'
   - 'TanStack/db:docs/collections/rxdb-collection.md'
   - 'TanStack/db:docs/collections/trailbase-collection.md'
+  - 'TanStack/db:docs/collections/indexed-db-collection.md'
   - 'TanStack/db:packages/db/src/collection/index.ts'
 ---
 
@@ -84,6 +86,7 @@ const todoCollection = createCollection(
 | TrailBase (event streaming)      | `trailBaseCollectionOptions`    | `@tanstack/trailbase-db-collection` |
 | No backend (UI state)            | `localOnlyCollectionOptions`    | `@tanstack/db`                      |
 | Browser localStorage             | `localStorageCollectionOptions` | `@tanstack/db`                      |
+| Browser IndexedDB                | `indexedDBCollectionOptions`    | `@tanstack/db`                      |
 
 If the user specifies a backend (e.g. Electric, PowerSync), use that adapter directly. Only use `localOnlyCollectionOptions` when there is no backend yet — the collection API is uniform, so swapping to a real adapter later only changes the options creator.
 

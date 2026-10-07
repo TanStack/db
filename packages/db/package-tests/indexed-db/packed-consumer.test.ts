@@ -3,7 +3,7 @@
  * Actual tarballs and Node's ESM/CJS loaders judge export paths; a persisted
  * row survives cleanup and a new descriptor. This fixed integration lane does
  * not model Collection histories or claim every package-manager configuration.
- * e2e/packed-consumer.spec.ts runs the same consumer through a browser bundler.
+ * e2e/indexed-db/packed-consumer.spec.ts runs the same consumer through a browser bundler.
  */
 import { execFileSync, spawnSync } from 'node:child_process'
 import { readFileSync, writeFileSync } from 'node:fs'
