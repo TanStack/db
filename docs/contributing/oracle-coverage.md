@@ -1172,13 +1172,13 @@ SQLite adapter and local persisted wrapper. Global constructors must be
 registered; other Temporal kinds reject. Existing lifecycle, receipt and
 publication-before-durability laws remain with their current owners.
 
-- The [typed-value owner](../../packages/db-sqlite-persistence-core/tests/sqlite-temporal-value-oracle.test.ts)
+- The [typed-value owner](https://github.com/TanStack/db/blob/main/packages/db-sqlite-persistence-core/tests/sqlite-temporal-value-oracle.test.ts)
   checks real file reopen, direct/nested rows, metadata, replay, equality/range,
   Boolean/IN, large IN, field comparisons, cursor ties/continuation and ordered
   windows. Its directly named rank/text companion supplies independent native
   observations across precision, signed-year, endpoint and calendar families.
   Constructor failures, invalid brands and marker-shaped records are included.
-- The [Node expression-index owner](../../packages/node-db-sqlite-persistence/tests/expression-index-oracle.test.ts)
+- The [Node expression-index owner](https://github.com/TanStack/db/blob/main/packages/node-db-sqlite-persistence/tests/expression-index-oracle.test.ts)
   checks raw SQL before residual cleanup, final adapter keys and actual named
   index use. Wrapper-created coalesce indexes reach Collection metadata/native
   literals and distinguish adjacent-literal signatures. Small and large scalar
@@ -1189,11 +1189,11 @@ publication-before-durability laws remain with their current owners.
   Negated coalesce and scalar eq(in(...), true) keep #1997's full-read fallback.
   Exact replay excludes unrelated native cases; simultaneous semantic/cleanup
   failure retains both errors and still closes SQLite.
-- The [ordinary-work owner](../../packages/db-sqlite-persistence-core/tests/ordinary-transaction-work-oracle.ts)
+- The [ordinary-work owner](https://github.com/TanStack/db/blob/main/packages/db-sqlite-persistence-core/tests/ordinary-transaction-work-oracle.ts)
   adds twelve native repeated-action success/rollback histories and invalid
   superseded actions. Its independent Map model retains immutable native values;
   kind/text observations reject the old structuredClone false-green boundary.
-- The [persisted wrapper owner](../../packages/db-sqlite-persistence-core/tests/persisted-oracle.test.ts)
+- The [persisted wrapper owner](https://github.com/TanStack/db/blob/main/packages/db-sqlite-persistence-core/tests/persisted-oracle.test.ts)
   rejects native remote-subset literals before dispatch/retry, including an
   ownerless leader that becomes a follower while hydration waits or after local
   success followed by sequence-gap recovery. The latter uses the existing
@@ -1285,7 +1285,7 @@ to the following owners:
   indexes on same-schema reopen. A registry-cleanup mutant fails this witness.
   Automatic reclamation without reset and lossless old-byte migration remain
   outside the selected policy; this test does not claim either.
-- The [Collection index-value owner](../../packages/db/tests/collection-index-value-oracle.test.ts)
+- The [Collection index-value owner](https://github.com/TanStack/db/blob/main/packages/db/tests/collection-index-value-oracle.test.ts)
   distinguishes native literals from ordinary tagged records, nested mixtures,
   and the escape envelope while preserving equivalent key orders (BOUNDARY-005).
   Plain and null-prototype own-tag records have isolated metadata snapshots
@@ -1309,7 +1309,7 @@ question has an owner—not that there can be no more bugs.
 
 ## IndexedDB Collection persistence
 
-Owner: [IndexedDB oracle portfolio](https://github.com/TanStack/db/blob/main/packages/indexeddb-db-collection/tests/ORACLE.md).
+Owner: [IndexedDB oracle portfolio](https://github.com/TanStack/db/blob/main/packages/db/tests/indexed-db/ORACLE.md).
 Settled histories compare independently authored scalar rows with public,
 subscription, peer, export, raw durable and fresh-restored snapshots. Imports
 check changed-value versions; detached driver inputs protect authored truth.
@@ -1325,7 +1325,7 @@ must match authored durable operation order after controlled delivery. A raw
 unseen row makes excluded-notification handling observable. These cases repair
 specific convergence laws; they do not establish arbitrary concurrent receivers.
 
-The [compatibility owner](https://github.com/TanStack/db/blob/main/packages/indexeddb-db-collection/tests/compatibility-oracle.test.ts)
+The [compatibility owner](https://github.com/TanStack/db/blob/main/packages/db/tests/indexed-db/compatibility-oracle.test.ts)
 checks full versus getRandomValues-only crypto through write/broadcast, one
 reusable descriptor across independent DbClients and cleanup, and injected
 factories without ambient IndexedDB globals across typed-key multi-store
@@ -1580,7 +1580,7 @@ records the subsequent calibration and closes the stored-field/type cleanup.
 
 ### IndexedDB connection closure: TLA+ refinement owners
 
-`packages/indexeddb-db-collection/tests/retirement-oracle.test.ts` owns the finish
+`packages/db/tests/indexed-db/retirement-oracle.test.ts` owns the finish
 policy's row, caller, admission, read-authority, accepted-work and error-status
 laws. `deletion-queue-oracle.test.ts` owns administrative receipt authority across
 delete/recreate/delete. `packages/db/tests/truncate-readiness-oracle.test.ts`
@@ -1603,7 +1603,7 @@ the TypeScript suite or that finite tests prove unconditional progress.
 
 ### IndexedDB wrapper observer composition
 
-`packages/indexeddb-db-collection/tests/wrapper-settlement-oracle.test.ts` owns
+`packages/db/tests/indexed-db/wrapper-settlement-oracle.test.ts` owns
 callback/native settlement independently of native event-observer registration.
 Its 20-case matrix crosses native complete/abort, none/additive/property/replaced/
 cleared observers and immediate/held callbacks. It checks caller outcome at native

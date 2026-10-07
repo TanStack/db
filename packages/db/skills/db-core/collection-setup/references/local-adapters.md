@@ -1,6 +1,6 @@
 # Local Adapters Reference
 
-Both adapters are included in the core package.
+All three adapters are included in the core package.
 
 ## Install
 
@@ -159,17 +159,26 @@ Same as LocalOnly -- call `collection.utils.acceptMutations(transaction)` in man
 
 ---
 
+## indexedDBCollectionOptions
+
+Persists structured values in browser IndexedDB and synchronizes changes across
+active tabs and dedicated workers. Open a database with `createIndexedDB`, then
+create a Collection for one of its stores. See the
+[IndexedDB Collection guide](https://tanstack.com/db/latest/docs/collections/indexed-db-collection)
+for setup, connection ownership, and mutation behavior.
+
+---
+
 ## Comparison
 
-| Feature         | LocalOnly        | LocalStorage |
-| --------------- | ---------------- | ------------ |
-| Persistence     | None (in-memory) | localStorage |
-| Cross-tab sync  | No               | Yes          |
-| Survives reload | No               | Yes          |
-| Performance     | Fastest          | Fast         |
-| Size limits     | Memory           | ~5-10MB      |
+| Feature         | LocalOnly        | LocalStorage | IndexedDB                          |
+| --------------- | ---------------- | ------------ | ---------------------------------- |
+| Persistence     | None (in-memory) | localStorage | IndexedDB                          |
+| Cross-tab sync  | No               | Yes          | Yes                                |
+| Survives reload | No               | Yes          | Yes                                |
+| Storage limits  | Memory           | ~5-10MB      | Browser quota; subject to eviction |
 
-## Complete Example
+## LocalOnly and LocalStorage Example
 
 ```typescript
 import {
