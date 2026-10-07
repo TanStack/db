@@ -602,13 +602,20 @@ export class OrderedSourceLoader {
     const orderedLoadGeneration = this.orderedLoadGeneration
     const orderingInvalidationGeneration = this.orderingInvalidationGeneration
     const settlesAsync = result instanceof Promise
+    // A requiresFullSource plan's first full-source request is its initial
+    // load, not a repair, so it shares the initial synchronous cut.
+    const isInitialFullSource =
+      isFullSource && !this.hasSettledSourceRequest && !this.needsOrderingRepair
     const canSettleSynchronously =
       !settlesAsync &&
       windowOperationGeneration === undefined &&
-      // A bounded prefix repair reads only installed rows, so its whole chain
-      // can finish inside the graph run that publishes the window. A
-      // full-source request keeps its asynchronous settlement.
-      (!isAuthoritativeRepair || (this.readsBoundedPrefix && !isFullSource)) &&
+      // An initial full-source load shares the initial synchronous cut. A
+      // bounded prefix repair reads only installed rows, so its whole chain
+      // can finish inside the graph run that publishes the window. Every other
+      // repair, including a full-source repair, keeps asynchronous settlement.
+      (!isAuthoritativeRepair ||
+        isInitialFullSource ||
+        (this.readsBoundedPrefix && !isFullSource)) &&
       requestGraphInputRevision !== undefined
     let synchronousCompletionFailure: { error: unknown } | undefined
     const continuation = (
