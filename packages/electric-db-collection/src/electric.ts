@@ -1785,8 +1785,10 @@ function createElectricSync<T extends Row<unknown>>(
       let resolveFullSnapshot: (receipt: SyncAppliedReceipt) => void = () => {}
       let rejectFullSnapshot: (error: unknown) => void = () => {}
       let fullSnapshotReady = Promise.resolve()
+      let fullSnapshotFailed = false
       const resetFullSnapshot = () => {
         if (!usesFullLog) return
+        fullSnapshotFailed = false
         fullSnapshotReady = new Promise<void>((resolve, reject) => {
           resolveFullSnapshot = (receipt) =>
             resolve(receipt === true ? undefined : receipt)
@@ -1892,6 +1894,7 @@ function createElectricSync<T extends Row<unknown>>(
         signal: abortController.signal,
         onError: (errorParams) => {
           rejectFullSnapshot(errorParams)
+          if (usesFullLog && !hasReceivedUpToDate) fullSnapshotFailed = true
           streamErrorVersion++
           // Note that Electric sends a 409 error on a `must-refetch` message, but the
           // ShapeStream handled this and it will not reach this handler, therefor
@@ -2192,6 +2195,11 @@ function createElectricSync<T extends Row<unknown>>(
           return
         }
 
+        // A later provider batch proves that this sync run continued after
+        // the failed request. New demands must wait for its replacement
+        // snapshot rather than inherit the previous request's rejection.
+        if (fullSnapshotFailed && messages.length > 0) resetFullSnapshot()
+
         if (freshSnapshotPending) {
           freshSnapshotPending = false
           beginSourceTransaction()
@@ -2388,6 +2396,7 @@ function createElectricSync<T extends Row<unknown>>(
         // A subset completion cannot publish a partial cold-recovery snapshot.
         if (
           requiresFreshSourceEvidence &&
+          !scopedRecovery &&
           isResettingSnapshot &&
           commitPoint === `subset-end`
         )

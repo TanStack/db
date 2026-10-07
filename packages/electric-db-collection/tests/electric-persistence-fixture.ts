@@ -67,13 +67,17 @@ export function tagPersistence() {
         if (mutation.type === `delete`) rows.delete(mutation.key)
         else
           rows.set(mutation.key, {
-            value: {
-              ...rows.get(mutation.key)?.value,
-              ...structuredClone(mutation.value),
-            } as TestRow,
-            metadata: structuredClone(
-              mutation.metadata ?? rows.get(mutation.key)?.metadata,
-            ),
+            value:
+              mutation.type === `insert`
+                ? (structuredClone(mutation.value) as TestRow)
+                : ({
+                    ...rows.get(mutation.key)?.value,
+                    ...structuredClone(mutation.value),
+                  } as TestRow),
+            metadata:
+              mutation.metadataChanged === true
+                ? structuredClone(mutation.metadata)
+                : structuredClone(rows.get(mutation.key)?.metadata),
           })
       }
       for (const mutation of transaction.rowMetadataMutations ?? []) {

@@ -1676,6 +1676,7 @@ class PersistedCollectionRuntime<
       await this.ensureStarted()
       if (lifecycleGeneration !== this.lifecycleGeneration) return
       if (this.syncMode !== `on-demand`) return
+      if (this.scopedRecovery) return
 
       const appliedCursor = await this.applyMutex.run(async () => {
         const result = await this.runInHydrationScope((adapter) =>
@@ -2380,7 +2381,7 @@ class PersistedCollectionRuntime<
       this.hydratingGeneration = config.lifecycleGeneration
       try {
         let rows: Array<{ key: TKey; value: T; metadata?: unknown }>
-        if (config.bindKeySetEvidence) {
+        if (config.bindKeySetEvidence && !this.scopedRecovery) {
           const snapshot = await adapter.loadResumeSnapshot(this.collectionId, {
             requiredIndexSignatures: this.getRequiredIndexSignatures(),
             includeRows: true,
@@ -2512,24 +2513,24 @@ class PersistedCollectionRuntime<
               getPresence(key) === `unknown`
             ) {
               if (snapshotRows === undefined) {
-                const snapshot = await adapter.loadResumeSnapshot(
-                  this.collectionId,
-                  {
-                    requiredIndexSignatures: this.getRequiredIndexSignatures(),
-                    includeRows: true,
-                  },
-                )
+                const snapshot = this.scopedRecovery
+                  ? undefined
+                  : await adapter.loadResumeSnapshot(this.collectionId, {
+                      requiredIndexSignatures:
+                        this.getRequiredIndexSignatures(),
+                      includeRows: true,
+                    })
                 this.throwIfLifecycleReplaced(lifecycleGeneration)
                 if (transaction.signal?.aborted) break
-                snapshotRows = new Map(
-                  (
-                    snapshot.rows as Array<{
-                      key: TKey
-                      value: T
-                      metadata?: unknown
-                    }>
-                  ).map((row) => [row.key, row]),
-                )
+                const rows =
+                  snapshot && !this.scopedRecovery
+                    ? (snapshot.rows as Array<{
+                        key: TKey
+                        value: T
+                        metadata?: unknown
+                      }>)
+                    : []
+                snapshotRows = new Map(rows.map((row) => [row.key, row]))
               }
               const baseline = snapshotRows.get(key)
               if (baseline === undefined) {

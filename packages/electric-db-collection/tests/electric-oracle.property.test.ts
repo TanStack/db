@@ -5195,6 +5195,155 @@ describeUnlessQueuedPresenceReplay(`Electric adapter laws`, () => {
     }, [() => trace.collection.cleanup()])
   })
 
+  /**
+   * A provider error ends current acquisition attempts, but does not end the
+   * sync run when the provider retries. The model has two obligations: the
+   * first demand rejects with its error; after a later source snapshot and
+   * up-to-date, a new demand succeeds with those applied rows. The controlled
+   * ShapeStream delivers that legal same-run history; this cut observes both
+   * demand settlements and the public Collection, not SDK retry policy. A
+   * held optimistic transaction varies whether the recovered commit is only
+   * accepted or already applied when the new demand begins.
+   */
+  it.each([false, true])(
+    `renews full recovery demand after a retried provider error, held=%s`,
+    async (held) => {
+      let subscriber!: (messages: Array<Message<OracleRow>>) => void
+      mockSubscribe.mockImplementationOnce((callback) => {
+        subscriber = callback
+        return vi.fn()
+      })
+      const metadata = createMetadata(
+        new Map([[`electric:resume`, { kind: `reset`, updatedAt: 1 }]]),
+      )
+      const options = electricCollectionOptions<OracleRow>({
+        id: `full-recovery-retry`,
+        shapeOptions: {
+          url: `http://test-url`,
+          params: { table: `test_table` },
+          onError: () => ({}),
+        },
+        syncMode: `on-demand`,
+        getKey: (row) => row.id,
+        startSync: true,
+      })
+      const originalSync = options.sync
+      const collection = createCollection({
+        ...options,
+        sync: {
+          sync: (params: Parameters<typeof originalSync.sync>[0]) =>
+            originalSync.sync({ ...params, metadata: metadata.api }),
+        },
+      })
+      const error = new Error(`transient provider error`)
+      const persistence = createDeferred<void>()
+      const transaction = createTransaction({
+        mutationFn: () => persistence.promise,
+      })
+
+      await withElectricCleanup(async () => {
+        if (held)
+          transaction.mutate(() =>
+            collection.insert({
+              id: 99,
+              name: `optimistic`,
+              stable: `stable-99`,
+            }),
+          )
+        const first = Promise.resolve(collection._sync.loadSubset({ limit: 1 }))
+        const streamOptions = vi.mocked(ShapeStream).mock.calls.at(-1)?.[0] as
+          { onError?: (error: unknown) => unknown } | undefined
+        expect(streamOptions?.onError).toBeTypeOf(`function`)
+        streamOptions!.onError!(error)
+        await expect(first).rejects.toBe(error)
+
+        subscriber([change(`insert`, 1, `recovered`), upToDate])
+        await collection.stateWhenReady()
+        let outcome = `pending`
+        const second = Promise.resolve(
+          collection._sync.loadSubset({ limit: 2 }),
+        ).then(() => {
+          outcome = `fulfilled`
+        })
+        void second.catch(() => undefined)
+        if (held) {
+          await new Promise<void>((resolve) => setTimeout(resolve, 0))
+          expect(outcome).toBe(`pending`)
+          expect(collection.has(1)).toBe(false)
+          persistence.resolve()
+          await transaction.isPersisted.promise
+        }
+        await atCheckpoint(second, `retried full recovery demand`)
+        expect(outcome).toBe(`fulfilled`)
+        expect(collection.get(1)).toMatchObject({
+          id: 1,
+          name: `recovered`,
+          stable: `stable-1`,
+        })
+      }, [() => persistence.resolve(), () => collection.cleanup()])
+    },
+  )
+
+  /**
+   * A scoped source snapshot owes applied settlement at subset-end, even
+   * when must-refetch opened a truncate replay. The independent model knows
+   * one inserted source row and no other rows; it predicts that a successful
+   * demand observes that row. This driver acquires through the real persisted
+   * wrapper before reset, delivers a subset-end without up-to-date, and checks
+   * public visibility at demand settlement. Full-mode replay's distinct
+   * up-to-date obligation is checked by neighboring laws.
+   */
+  it(`applies a scoped reset subset before its demand succeeds`, async () => {
+    let subscriber: ((messages: Array<Message<OracleRow>>) => void) | undefined
+    mockSubscribe.mockImplementationOnce((callback) => {
+      subscriber = callback
+      return vi.fn()
+    })
+    const adapter = createPersistedAdapter(
+      new Map([[`electric:resume`, { kind: `reset`, updatedAt: 1 }]]),
+      new Map(),
+    )
+    const options = electricCollectionOptions<OracleRow>({
+      id: `scoped-reset-applied-settlement`,
+      shapeOptions: {
+        url: `http://test-url`,
+        params: { table: `test_table` },
+      },
+      syncMode: `on-demand`,
+      getKey: (row) => row.id,
+      startSync: true,
+    })
+    const collection = createCollection(
+      persistedCollectionOptions<
+        OracleRow,
+        string | number,
+        never,
+        ElectricCollectionUtils<OracleRow>
+      >({ ...options, persistence: { adapter } }),
+    )
+    const snapshot = createDeferred<void>()
+    mockStream.requestSnapshot.mockReturnValueOnce(snapshot.promise)
+
+    await withElectricCleanup(async () => {
+      collection.startSyncImmediate()
+      await vi.waitFor(() => expect(subscriber).toBeTypeOf(`function`))
+      const demand = Promise.resolve(collection._sync.loadSubset({ limit: 1 }))
+      void demand.catch(() => undefined)
+      await vi.waitFor(() =>
+        expect(mockStream.requestSnapshot).toHaveBeenCalledOnce(),
+      )
+      subscriber!([mustRefetch])
+      subscriber!([change(`insert`, 1, `scoped replacement`), subsetEnd])
+      snapshot.resolve()
+      await atCheckpoint(demand, `scoped reset applied settlement`)
+      expect(collection.get(1)).toMatchObject({
+        id: 1,
+        name: `scoped replacement`,
+        stable: `stable-1`,
+      })
+    }, [() => snapshot.resolve(), () => collection.cleanup()])
+  })
+
   // Initial failure rejects all current waiters with the original error.
   // Cleanup settles them and invalidates subsequent callbacks. A provider
   // error alone does not make its future callbacks obsolete; retry semantics

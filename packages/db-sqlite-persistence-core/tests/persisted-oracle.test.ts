@@ -18045,6 +18045,128 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
     expect(adapter.loadSubsetCalls).toEqual([])
   })
 
+  // Scoped recovery removes durable rows' authority to enter the public
+  // Collection. The model contains one stale durable row and no source rows:
+  // after the scoped clear, even a later baseline capability call owes an
+  // empty public snapshot. This driver calls the real wrapper capability and
+  // checks both public visibility and the adapter read boundary. A normal
+  // startup baseline is covered by the neighboring persisted restore laws.
+  it(`does not hydrate durable baseline rows during scoped recovery`, async () => {
+    const adapter = createRecordingAdapter([
+      { id: `1`, title: `Stale durable row` },
+    ])
+    let source!: TodoSyncParams
+    const collection = createCollection(
+      persistedCollectionOptions<Todo, string>({
+        id: `scoped-baseline-quarantine`,
+        syncMode: `on-demand`,
+        getKey: (row) => row.id,
+        sync: {
+          sync: (params) => {
+            source = params
+            params.markReady()
+          },
+        },
+        persistence: { adapter },
+      }),
+    )
+
+    try {
+      collection.startSyncImmediate()
+      await flushAsyncWork()
+      const capability = source.metadata!.persistence!
+      await capability.startScopedRecovery!()
+      expect(collection.get(`1`)).toBeUndefined()
+      await capability.hydrateBaseline()
+      expect(collection.get(`1`)).toBeUndefined()
+      expect(
+        adapter.loadResumeSnapshotCalls.filter(
+          (call) => call.includeRows === true,
+        ),
+      ).toEqual([])
+    } finally {
+      await collection.cleanup()
+    }
+  })
+
+  // A local load can begin before scoped recovery claims the Collection.
+  // When that load fails, queued partial source work may ask for a durable
+  // baseline. The independent source model permits the partial source fields,
+  // but no old durable field has authority after the scoped clear. The gate
+  // fixes the order at the adapter boundary; the observations are the stale
+  // public field and full-row read count.
+  it(`keeps a failed local load from restoring scoped durable rows`, async () => {
+    const adapter = createRecordingAdapter([
+      { id: `shared`, title: `Stale durable`, detail: `stale detail` },
+    ])
+    const loadEntered = createEventGate()
+    const rejectLoad = createEventGate()
+    const localFailure = new Error(`local load failed`)
+    adapter.loadSubset = async () => {
+      loadEntered.resolve()
+      await rejectLoad.promise
+      throw localFailure
+    }
+    let source!: TodoSyncParams
+    const collection = createCollection(
+      persistedCollectionOptions<Todo, string>({
+        id: `scoped-failed-local-load`,
+        syncMode: `on-demand`,
+        getKey: (row) => row.id,
+        sync: {
+          rowUpdateMode: `partial`,
+          sync: (params) => {
+            source = params
+            params.markReady()
+            return { loadSubset: () => true }
+          },
+        },
+        persistence: { adapter },
+      }),
+    )
+    let load: Promise<unknown> | undefined
+    let receipt: Promise<unknown> | undefined
+    let scoped: Promise<void> | undefined
+    try {
+      await atPersistedOracleCheckpoint(
+        collection.stateWhenReady(),
+        `scoped failed local load startup`,
+      )
+      load = Promise.resolve(collection._sync.loadSubset({ limit: 1 }))
+      void load.catch(() => undefined)
+      await atPersistedOracleCheckpoint(
+        loadEntered.promise,
+        `scoped failed local load entered`,
+      )
+      source.begin()
+      source.write({
+        type: `update`,
+        value: { id: `shared`, title: `Partial source` } as Todo,
+      })
+      receipt = Promise.resolve(source.commit())
+      void receipt.catch(() => undefined)
+      scoped = source.metadata!.persistence!.startScopedRecovery!()
+      rejectLoad.resolve()
+      await expect(load).rejects.toBe(localFailure)
+      await atPersistedOracleCheckpoint(scoped, `scoped failed load clear`)
+      await Promise.allSettled([receipt])
+      expect(collection.get(`shared`)).toMatchObject({
+        id: `shared`,
+        title: `Partial source`,
+      })
+      expect(collection.get(`shared`)?.detail).toBeUndefined()
+      expect(
+        adapter.loadResumeSnapshotCalls.filter(
+          (call) => call.includeRows === true,
+        ),
+      ).toEqual([])
+    } finally {
+      rejectLoad.resolve()
+      await Promise.allSettled([load, receipt, scoped])
+      await collection.cleanup()
+    }
+  })
+
   // A local cache clear supplies no source-readiness evidence. The model starts
   // loading, accepts the scoped truncate, and remains loading until the source
   // explicitly marks ready. This wrapper-path check observes status after the

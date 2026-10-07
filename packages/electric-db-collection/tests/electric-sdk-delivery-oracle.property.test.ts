@@ -24,7 +24,7 @@ import {
 } from './electric-oracle-lifecycle'
 import type { TestRow } from './electric-persistence-fixture'
 import type { ElectricCollectionUtils } from '../src/electric'
-import type { SyncPersistenceCapabilityV1 } from '@tanstack/db'
+import type { SyncMetadataApi, SyncPersistenceCapabilityV1 } from '@tanstack/db'
 import type {
   ProtocolEnvelope,
   TxCommitted,
@@ -755,6 +755,103 @@ fixedCase(
       () => requestSnapshot.mockRestore(),
       () => expect(http.activeCount()).toBe(0),
     ])
+  },
+)
+
+/**
+ * The controlled provider exhausts SDK backoff with one 503, then the user's
+ * onError retry continues the same ShapeStream. The independent demand model
+ * rejects the pre-error attempt and accepts a new demand after the complete
+ * retried snapshot applies. This receives the adapter law through the actual
+ * installed SDK, including its retry decision and HTTP delivery boundary.
+ * Live service timing and nonretryable SDK errors remain outside this case.
+ */
+fixedCase(
+  `settles a new full recovery demand after SDK error retry`,
+  async () => {
+    const http = controlledHttp()
+    const stored = new Map<string, unknown>([
+      [`electric:resume`, { kind: `reset`, updatedAt: 1 }],
+    ])
+    const metadata: SyncMetadataApi<string | number> = {
+      persistence: null,
+      row: { get: () => undefined, set: () => {}, delete: () => {} },
+      collection: {
+        get: (key) => stored.get(key),
+        set: (key, value) => {
+          stored.set(key, value)
+        },
+        delete: (key) => {
+          stored.delete(key)
+        },
+        list: (prefix) =>
+          Array.from(stored, ([key, value]) => ({ key, value })).filter(
+            ({ key }) => !prefix || key.startsWith(prefix),
+          ),
+      },
+    }
+    let errors = 0
+    const options = electricCollectionOptions<Item>({
+      id: `sdk-full-retry-${++sequence}`,
+      shapeOptions: {
+        url: `http://test-url/full-retry`,
+        params: { table: `rows` },
+        fetchClient: http.fetchClient,
+        backoffOptions: {
+          initialDelay: 0,
+          maxDelay: 0,
+          multiplier: 1,
+          maxRetries: 0,
+        },
+        onError: () => {
+          errors++
+          return {}
+        },
+      },
+      syncMode: `on-demand`,
+      startSync: true,
+      getKey: (row) => row.id,
+    })
+    const originalSync = options.sync
+    const collection = createCollection({
+      ...options,
+      sync: {
+        sync: (params: Parameters<typeof originalSync.sync>[0]) =>
+          originalSync.sync({ ...params, metadata }),
+      },
+    })
+
+    await withElectricCleanup(async () => {
+      const first = Promise.resolve(collection._sync.loadSubset({ limit: 1 }))
+      void first.catch(() => undefined)
+      const initial = await atCheckpoint(http.take(), `full retry initial HTTP`)
+      expect(initial.url.searchParams.get(`log`)).toBe(`full`)
+      initial.respond(new Response(`transient`, { status: 503 }))
+      await vi.waitFor(() => expect(errors).toBe(1))
+      await expect(first).rejects.toThrow(/503/)
+
+      const retry = await atCheckpoint(http.take(), `full retry HTTP`)
+      expect(retry.url.searchParams.get(`log`)).toBe(`full`)
+      retry.respond(
+        new Response(
+          JSON.stringify([
+            {
+              key: `1`,
+              value: { id: `1`, name: `recovered` },
+              headers: { operation: `insert` },
+            },
+            { headers: { control: `up-to-date`, global_last_seen_lsn: `1` } },
+          ]),
+          { headers: headers(1) },
+        ),
+      )
+      await vi.waitFor(() => expect(collection.status).toBe(`ready`))
+      await atCheckpoint(
+        Promise.resolve(collection._sync.loadSubset({ limit: 2 })),
+        `post-retry full demand`,
+      )
+      expect(collection.get(1)?.name).toBe(`recovered`)
+    }, [() => collection.cleanup(), () => http.close()])
   },
 )
 

@@ -48,6 +48,45 @@ const { replayPath, replayProperty } = readOracleRunConfig()
 const fixedCase = replayPath === undefined ? it : it.skip
 const fixedDescribe = replayPath === undefined ? describe : describe.skip
 
+// The durable fixture is a driver, not the independent tag model. It must
+// preserve the SQLite adapter's mutation algebra: an insert replaces the old
+// value, while metadataChanged clears metadata even when the new value is
+// undefined. Otherwise the tag oracle could falsely accept stale columns or
+// stale membership after a fresh source snapshot.
+fixedCase(`replaces stale durable columns and metadata on insert`, async () => {
+  const { adapter, rows } = tagPersistence()
+  rows.set(1, {
+    value: {
+      id: 1,
+      name: `old`,
+      stable: `old-stable`,
+      obsolete: `must disappear`,
+    } as TestRow,
+    metadata: { tags: [`stale`] },
+  })
+
+  await adapter.applyCommittedTx(`fixture-insert-law`, {
+    txId: `fresh-insert`,
+    term: 1,
+    seq: 1,
+    rowVersion: 1,
+    mutations: [
+      {
+        type: `insert`,
+        key: 1,
+        value: { id: 1, name: `fresh`, stable: `fresh-stable` },
+        metadataChanged: true,
+        metadata: undefined,
+      },
+    ],
+  })
+
+  expect(rows.get(1)).toEqual({
+    value: { id: 1, name: `fresh`, stable: `fresh-stable` },
+    metadata: undefined,
+  })
+})
+
 type TagExposure = { cut: string; rows: Array<TestRow> }
 
 function expectMoveOutCheckpoint(observation: {

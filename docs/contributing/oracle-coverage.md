@@ -1726,6 +1726,14 @@ Collection loading until the source marks ready. A held optimistic handler
 checks that the same clear settles before the handler releases: core applies a
 truncate immediately, so the proposed accepted-versus-applied deadlock does
 not arise on this path. Its subset settlement law remains separate.
+The persistence owner now calls baseline hydration after starting scoped
+recovery with a stale durable row. It requires that no row enter the public
+Collection and that no full-row resume snapshot be read. This is a direct
+capability-ordering witness; ordinary Electric startup does not call baseline
+hydration after choosing scoped recovery. The buffered partial-update recovery
+read has a gated failed-local-load history: a partial source update may appear,
+but it cannot inherit stale durable fields. Removing the scoped read guard
+fails at that public-field checkpoint.
 `electric-resume-snapshot-races.test.ts` also holds a real SQLite metadata
 read across row loss or a committed replacement. Unknown and missing key-set
 evidence start changes-only without publishing the cached rows; a row-1 demand
@@ -1739,13 +1747,25 @@ current replacement obligation from a permanently fulfilled startup gate.
 Concurrent initial-error and cleanup cuts observe settlement and lifecycle
 authority. These full-mode obligations still apply when scoped recovery is
 unavailable; the scoped path uses SDK snapshots and applied receipts.
+The full-mode retry histories now reject their pre-error demand, then require a
+new demand to succeed after a same-run recovered snapshot, both with and
+without a held applied receipt. An installed-SDK controlled-HTTP receiver
+exhausts 503 backoff, invokes the user's retry
+handler, delivers a new full-log up-to-date, and checks that later demand. The
+scoped reset history acquires a snapshot before must-refetch, then requires
+subset-end to apply its row before demand success without waiting for a full
+up-to-date. The neighboring full-mode reset retains that stronger wait. The
+Electric durable fixture has an adversarial insert check that rejects retained
+old columns or tag metadata; it is driver validation, not a new model owner.
 
 Remaining witnesses before broader closure:
 
 - Electric tag/history owners: unknown or missing key-set evidence combined
   with tagged scoped demand, multiple resets overlapping held application,
   independently aborted sibling demands, and partial updates arriving before
-  a scoped baseline. The untagged SQLite metadata-read race is covered above.
+  a scoped baseline. Repeated provider errors, nonretryable SDK errors, and a
+  scoped reset overlapping a held applied receipt also need witnesses. The
+  untagged SQLite metadata-read race is covered above.
 - Persistence/coordinator owners: native SQLite reads, browser/electron
   cross-tab transport delivering an invalidation during cache quarantine, and
   source versus local-only truncate durability. Controlled coordinator
