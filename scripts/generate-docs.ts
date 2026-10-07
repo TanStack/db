@@ -64,21 +64,6 @@ await generateReferenceDocs({
       exclude: [`packages/db/**/*`],
     },
     {
-      name: `indexeddb-db-collection`,
-      entryPoints: [
-        resolve(__dirname, `../packages/indexeddb-db-collection/src/index.ts`),
-      ],
-      tsconfig: resolve(
-        __dirname,
-        `../packages/indexeddb-db-collection/tsconfig.docs.json`,
-      ),
-      outputDir: resolve(
-        __dirname,
-        `../docs/reference/indexeddb-db-collection`,
-      ),
-      exclude: [`packages/db/**/*`],
-    },
-    {
       name: `react-db`,
       entryPoints: [resolve(__dirname, `../packages/react-db/src/index.ts`)],
       tsconfig: resolve(__dirname, `../packages/react-db/tsconfig.docs.json`),
