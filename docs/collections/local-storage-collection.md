@@ -89,6 +89,11 @@ Automatic mutations in one Collection persist in mutation order, even if their
 optional handlers finish in another order. A handler that rejects does not write
 its mutation. Other tabs see accepted changes when their storage events arrive.
 
+A handler can start another mutation on the same Collection, then return without
+awaiting that mutation's `isPersisted` promise. Do not await that promise inside
+the earlier handler. The later write waits for the earlier handler to return,
+so awaiting it would leave both mutations pending.
+
 Each write stores a complete storage snapshot under one storage key. A
 write preserves disjoint peer rows already present in storage, even when that
 peer's event has not arrived yet. Truly simultaneous writes from separate tabs

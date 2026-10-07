@@ -14,6 +14,9 @@
  * At the final settlement checkpoint, public rows, durable rows, and a fresh
  * Collection must equal that fold. The held-handler checkpoint verifies that
  * no later mutation reports persistence ahead of its undecided predecessor.
+ * A handler may admit a nested automatic mutation without awaiting it. Awaiting
+ * that mutation's persistence from the earlier handler would form a cycle under
+ * the order law, so the public guide excludes that usage.
  */
 import { describe, expect, it } from 'vitest'
 import { createCollection } from '../src/collection/index'
@@ -41,6 +44,61 @@ function expectedRows(
   })
   return [...rows.values()].sort((a, b) => a.id.localeCompare(b.id))
 }
+
+// The outer handler admits a nested write while it is held. The independent
+// authored fold expects the outer row before the inner row. The storage trace
+// checks that order, while the held checkpoint rules out early inner persistence.
+it('persists a nested fire-and-forget mutation after its handler returns', async () => {
+  const storage = makeSeededStorage()
+  const snapshots: Array<Array<Row>> = []
+  const setItem = storage.setItem
+  storage.setItem = (key, value) => {
+    setItem(key, value)
+    snapshots.push(storedRows(value))
+  }
+  const entered = createDeferred<void>()
+  const release = createDeferred<void>()
+  let nestedReceipt: Promise<unknown> | undefined
+  const collection = createCollection(
+    localStorageCollectionOptions<Row>({
+      storageKey: 'rows',
+      storage,
+      storageEventApi: { addEventListener() {}, removeEventListener() {} },
+      getKey: (row) => row.id,
+      onInsert: async ({ transaction }) => {
+        if (transaction.mutations[0].modified.id === 'outer') {
+          nestedReceipt = collection.insert({ id: 'inner', value: 2 })
+            .isPersisted.promise
+          entered.resolve()
+          await release.promise
+        }
+      },
+    }),
+  )
+  await withHistoryCleanup(
+    async () => {
+      await collection.preload()
+      const outer = collection.insert({ id: 'outer', value: 1 })
+      await entered.promise
+      expect(nestedReceipt, 'nested mutation was admitted').toBeDefined()
+      expect(snapshots, 'no write before the outer handler returns').toEqual([])
+      release.resolve()
+      await Promise.all([outer.isPersisted.promise, nestedReceipt])
+      expect(snapshots).toEqual([
+        expectedRows([{ id: 'outer', value: 1 }], [true]),
+        expectedRows(
+          [
+            { id: 'outer', value: 1 },
+            { id: 'inner', value: 2 },
+          ],
+          [true, true],
+        ),
+      ])
+      expect(sortedRows(collection.values())).toEqual(snapshots[1])
+    },
+    () => [() => release.resolve(), () => collection.cleanup()],
+  )
+})
 
 function sortedRows(values: Iterable<Row>) {
   return [...values]

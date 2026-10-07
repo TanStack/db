@@ -70,6 +70,15 @@ event under a failed read and check that the public snapshot remains intact.
 Startup remains best-effort; an absent storage key is the only empty snapshot
 for a new write or event. The final peer oracle passes both cases.
 
-The final `@tanstack/db` oracle campaign passed 67 files and 4,541 tests.
-The full package suite passed 254 files and 9,102 tests with no type errors.
+The final `@tanstack/db` oracle campaign passed 67 files and 4,542 tests.
+The full package suite passed 254 files and 9,103 tests with no type errors.
 The package build, lint check, and changed-file formatting check passed.
+
+The prep reviewer also identified a nested-handler dependency cycle. A
+controlled probe admitted a second automatic write from the first handler,
+then awaited the second receipt. Both transactions stayed `persisting` and
+storage stayed empty until a separate signal released the first handler. The
+mutation-order contract already chosen for this adapter makes that await
+impossible to satisfy. The public guide names the limit. A neighboring oracle
+history admits a nested write without awaiting it, then checks the held storage
+cut and both ordered snapshots after release.
