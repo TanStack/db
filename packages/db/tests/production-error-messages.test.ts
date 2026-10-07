@@ -33,8 +33,9 @@
  *   `fixtures/error-site-messages.json`, with its code: the literal text and
  *   the interpolated expressions, independent of formatting. The same
  *   expressions in the same scope give the same message for every input.
- *   Every interpolated expression, or one of its sub-expressions, is passed to
- *   the code line. `AggregateError` messages count too. A message built only
+ *   Every interpolated expression whose values production can show, or one of
+ *   its sub-expressions, is passed to the code line. Plain objects, such as
+ *   rows, never reach it (maintainer decision, 2026-10-07). `AggregateError` messages count too. A message built only
  *   from a caller's value, such as `new Error(String(error))`, is not a site.
  *
  * The model is the frozen fixtures and the format above; nothing here reads
@@ -275,13 +276,27 @@ describe(`production error messages`, () => {
       expect(current).toEqual(frozen)
     })
 
-    it(`passes every interpolated value to the code line`, () => {
+    it(`passes every showable interpolated value to the code line`, () => {
       for (const site of sites.coded)
-        for (const interpolation of site.interpolations)
+        for (const interpolation of site.interpolations.filter(
+          ({ showable }) => showable,
+        ))
           expect(
-            site.values.some((value) => interpolation.parts.includes(value)),
+            site.values.some(({ expression }) =>
+              interpolation.parts.includes(expression),
+            ),
             `${site.file} error ${site.code} drops \${${interpolation.expression}}`,
           ).toBe(true)
+    })
+
+    // Production lines never carry plain objects, such as rows.
+    it(`passes only values that the code line can show`, () => {
+      const hidden = sites.coded.flatMap(({ file, code, values }) =>
+        values
+          .filter(({ showable }) => !showable)
+          .map(({ expression }) => `${file} error ${code}: ${expression}`),
+      )
+      expect(hidden).toEqual([])
     })
 
     it(`never reuses a class code`, () => {

@@ -1070,7 +1070,7 @@ export class CollectionConfigBuilder<
       })
     } else {
       throw new Error(
-        devBuild() && process.env.NODE_ENV !== `production` ? `Could not apply changes: ${JSON.stringify(changes)}. This should never happen.` : codedMessage(151, { changes }),
+        devBuild() && process.env.NODE_ENV !== `production` ? `Could not apply changes: ${JSON.stringify(changes)}. This should never happen.` : codedMessage(151),
       )
     }
   }
