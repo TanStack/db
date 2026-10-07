@@ -37,6 +37,10 @@ npm install @tanstack/db
 
 The examples use `@tanstack/db`. Framework packages such as `@tanstack/react-db` also export `createCollection` and `createTransaction`.
 
+### Upgrading from the standalone package
+
+Replace imports from `@tanstack/indexeddb-db-collection` with imports from `@tanstack/db`, then remove the standalone dependency. Existing rows stay in the same IndexedDB database and object stores. The generated Collection ID now starts with `indexed-db-collection:`. If your app refers to the former `indexeddb-collection:` ID, pass that ID explicitly with the `id` option.
+
 ## Basic Usage
 
 Open one database with the stores your app needs, then share that database instance between Collections. Each Collection uses one store.
