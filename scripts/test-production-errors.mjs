@@ -6,7 +6,7 @@
 // `process.env.NODE_ENV` defined, and searches the output for one distinctive
 // literal from each coded class's frozen development message.
 import assert from 'node:assert/strict'
-import { readFile } from 'node:fs/promises'
+import { readFile, readdir } from 'node:fs/promises'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { build } from 'esbuild'
@@ -27,7 +27,14 @@ const sites = JSON.parse(
 )
 const readSource = (file) =>
   readFile(path.join(root, 'packages/db/src', file), 'utf8')
-const errorsSource = await readSource('errors.ts')
+// Error classes live in errors.ts and in a few feature modules.
+const classSource = (
+  await Promise.all(
+    (await readdir(path.join(root, 'packages/db/src'), { recursive: true }))
+      .filter((file) => file.endsWith('.ts'))
+      .map(readSource),
+  )
+).join('\n')
 
 /**
  * The longest stretch of a message that the source holds verbatim, so it is
@@ -51,18 +58,23 @@ function distinctiveLiteral(message, source) {
 const literals = [
   ...Object.keys(codes).map((name) => [
     name,
-    distinctiveLiteral(messages[name][0], errorsSource),
+    distinctiveLiteral(messages[name][0], classSource),
   ]),
   ...(await Promise.all(
-    Object.entries(sites).map(async ([code, { file, template }]) => [
+    Object.entries(sites).map(async ([code, { file, literals }]) => [
       `error ${code} (${file})`,
-      distinctiveLiteral(template, await readSource(file)),
+      distinctiveLiteral(literals.join('\n'), await readSource(file)),
     ]),
   )),
 ]
-// These errors share all of their text with a console warning that every build
-// keeps, so no literal distinguishes them. The oracle still checks their guard.
-const sharedWithWarnings = new Set(['error 99 (indexes/base-index.ts)'])
+// These errors share all of their text with text that every build keeps, so no
+// literal distinguishes them. The oracle still checks their guard.
+const sharedWithWarnings = new Set([
+  // console.warn in basic-index.ts and btree-index.ts
+  'error 99 (indexes/base-index.ts)',
+  // the IndexedDB request-failure fallback in indexed-db-wrapper.ts
+  'error 170 (utils/error.ts)',
+])
 const checked = literals.filter(([name]) => !sharedWithWarnings.has(name))
 assert.equal(
   literals.length - checked.length,

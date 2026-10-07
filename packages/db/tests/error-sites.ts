@@ -4,10 +4,11 @@
  * it to check that each such message is coded.
  *
  * - A **coded site** is any `devBuild() && NODE_ENV !== 'production' ? dev :
- *   codedMessage(code, values)` expression, wherever the message goes.
+ *   codedMessage(code, values)` expression, wherever the message goes, except
+ *   an error class's `super(...)` message.
  * - A **plain site** is an `Error`, `TypeError`, or `RangeError` message, or an
- *   `AggregateError` message, that contains a string or template literal and
- *   is not coded. A message built only from a caller's value, such as
+ *   `AggregateError` message, that contains a string or template literal with
+ *   a letter and is not coded. A message built only from a caller's value, such as
  *   `new Error(String(error))`, is the caller's text and is not a site.
  *
  * Values are typed with the TypeScript checker. A value is **showable** when
@@ -29,6 +30,8 @@ export type CodedSite = {
   code: number
   /** The development message as a template. */
   template: string
+  /** Its literal text pieces, outside interpolations. */
+  literals: Array<string>
   /**
    * For each interpolation, its expression and every sub-expression, without
    * whitespace. A value passed to `codedMessage` covers the interpolation when
@@ -54,6 +57,7 @@ export type PlainSite = {
   file: string
   line: number
   template: string
+  literals: Array<string>
 }
 
 /** Constructor name to the position of its message argument. */
@@ -104,11 +108,16 @@ function sourceFiles(directory: string): Array<string> {
   })
 }
 
+/** Literal text with a letter; `${a}: ${b}` only joins other text. */
 function hasLibraryText(node: ts.Node): boolean {
+  const letters = (text: string) => /[A-Za-z]/.test(text)
+  if (ts.isStringLiteral(node) || ts.isNoSubstitutionTemplateLiteral(node))
+    return letters(node.text)
   if (
-    ts.isStringLiteral(node) ||
-    ts.isNoSubstitutionTemplateLiteral(node) ||
-    ts.isTemplateExpression(node)
+    ts.isTemplateExpression(node) &&
+    [node.head, ...node.templateSpans.map((span) => span.literal)].some(
+      (part) => letters(part.text),
+    )
   )
     return true
   return ts.forEachChild(node, hasLibraryText) ?? false
@@ -179,6 +188,26 @@ function isShowable(type: ts.Type, checker: ts.TypeChecker, error: ts.Type) {
     )
   }
   return visit(type)
+}
+
+/**
+ * The literal text pieces of a message, outside its interpolations. The bundle
+ * check searches builds for them; code inside `${...}` is not message text.
+ */
+export function messageLiterals(node: ts.Expression): Array<string> {
+  if (ts.isParenthesizedExpression(node)) return messageLiterals(node.expression)
+  if (ts.isStringLiteral(node) || ts.isNoSubstitutionTemplateLiteral(node))
+    return [node.text]
+  if (ts.isTemplateExpression(node))
+    return [node.head.text, ...node.templateSpans.map((span) => span.literal.text)]
+  if (
+    ts.isBinaryExpression(node) &&
+    node.operatorToken.kind === ts.SyntaxKind.PlusToken
+  )
+    return [...messageLiterals(node.left), ...messageLiterals(node.right)]
+  if (ts.isConditionalExpression(node))
+    return [...messageLiterals(node.whenTrue), ...messageLiterals(node.whenFalse)]
+  return []
 }
 
 /** Expressions a message interpolates, with their sub-expressions. */
@@ -280,18 +309,24 @@ export function findErrorSites(sourceRoot: string): {
     const file = relative(sourceRoot, path)
     if (file === `errors.ts`) continue
     const sourceFile = program.getSourceFile(path)!
+    // A guard passed to `super(...)` is an error class's message; the class
+    // oracle owns it.
+    const isClassMessage = (node: ts.Node) =>
+      ts.isCallExpression(node.parent) &&
+      node.parent.expression.kind === ts.SyntaxKind.SuperKeyword
     const isCoded = (node: ts.Node): node is ts.ConditionalExpression =>
       ts.isConditionalExpression(node) &&
       compact(node.condition, sourceFile) === guard &&
       ts.isCallExpression(node.whenFalse) &&
       node.whenFalse.expression.getText(sourceFile) === `codedMessage`
     const visit = (node: ts.Node) => {
-      if (isCoded(node)) {
+      if (isCoded(node) && !isClassMessage(node)) {
         const call = node.whenFalse as ts.CallExpression
         coded.push({
           file,
           code: Number(call.arguments[0]!.getText(sourceFile)),
           template: messageTemplate(node.whenTrue, sourceFile),
+          literals: messageLiterals(node.whenTrue),
           interpolations: interpolations(node.whenTrue, sourceFile, showable),
           values: codedValues(call.arguments[1], sourceFile, showable),
         })
@@ -309,6 +344,7 @@ export function findErrorSites(sourceRoot: string): {
               sourceFile.getLineAndCharacterOfPosition(message.getStart())
                 .line + 1,
             template: messageTemplate(message, sourceFile),
+            literals: messageLiterals(message),
           })
       }
       ts.forEachChild(node, visit)

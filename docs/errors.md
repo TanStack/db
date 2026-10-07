@@ -929,6 +929,46 @@ Development builds show the full message. For example:
 Query IR is not stably hashable at query.fnSelect: function select
 ```
 
+<a id="error-175"></a>
+
+## Error 175: `DatabaseRequiredError`
+
+Development builds show the full message. For example:
+
+```text
+IndexedDB collection requires a "db" configuration option. Create a database instance using createIndexedDB() and pass it to the collection.
+```
+
+<a id="error-176"></a>
+
+## Error 176: `ObjectStoreNotFoundError`
+
+Development builds show the full message. For example:
+
+```text
+Object store "todos" not found in database "app". Available stores: [users, posts]. Add "todos" to the stores array when calling createIndexedDB().
+```
+
+<a id="error-177"></a>
+
+## Error 177: `NameRequiredError`
+
+Development builds show the full message. For example:
+
+```text
+IndexedDB collection requires a "name" configuration option. This is the name of the object store within the database.
+```
+
+<a id="error-178"></a>
+
+## Error 178: `GetKeyRequiredError`
+
+Development builds show the full message. For example:
+
+```text
+IndexedDB collection requires a "getKey" configuration option. This function extracts the unique key from each item.
+```
+
 ## Other errors
 
 These errors are plain `Error`, `TypeError`, or `RangeError` values. Each
@@ -1802,4 +1842,234 @@ Development builds show this message, with `${...}` replaced by values:
 
 ```text
 Mutation callback and restoration failed
+```
+
+<a id="error-179"></a>
+
+## Error 179: `indexed-db-wrapper.ts`
+
+Development builds show this message, with `${...}` replaced by values:
+
+```text
+IndexedDB is not available in this environment. Ensure you are running in a browser or provide a custom IDBFactory for testing.
+```
+
+<a id="error-182"></a>
+
+## Error 182: `indexed-db-wrapper.ts`
+
+Development builds show this message, with `${...}` replaced by values:
+
+```text
+Failed to open IndexedDB database "${name}": ${error instanceof Error ? error.message : String(error)}
+```
+
+<a id="error-183"></a>
+
+## Error 183: `indexed-db-wrapper.ts`
+
+Development builds show this message, with `${...}` replaced by values:
+
+```text
+Database upgrade failed for "${name}": ${error instanceof Error ? error.message : String(error)}
+```
+
+<a id="error-184"></a>
+
+## Error 184: `indexed-db-wrapper.ts`
+
+Development builds show this message, with `${...}` replaced by values:
+
+```text
+Failed to open IndexedDB database "${name}": ${errorMessage}
+```
+
+<a id="error-185"></a>
+
+## Error 185: `indexed-db-wrapper.ts`
+
+Development builds show this message, with `${...}` replaced by values:
+
+```text
+Cannot create object store "${storeName}": This operation is only allowed during a database upgrade. Ensure you are calling createObjectStore within the onUpgrade callback of openDatabase.
+```
+
+<a id="error-186"></a>
+
+## Error 186: `indexed-db-wrapper.ts`
+
+Development builds show this message, with `${...}` replaced by values:
+
+```text
+Object store "${storeName}" already exists in the database. Check the database version and only create stores when needed.
+```
+
+<a id="error-187"></a>
+
+## Error 187: `indexed-db-wrapper.ts`
+
+Development builds show this message, with `${...}` replaced by values:
+
+```text
+Failed to create object store "${storeName}": ${error instanceof Error ? error.message : String(error)}
+```
+
+<a id="error-188"></a>
+
+## Error 188: `indexed-db-wrapper.ts`
+
+Development builds show this message, with `${...}` replaced by values:
+
+```text
+Failed to create transaction for stores [${storeNamesArray.join(', ')}]: ${error instanceof Error ? error.message : String(error)}
+```
+
+<a id="error-189"></a>
+
+## Error 189: `indexed-db-wrapper.ts`
+
+Development builds show this message, with `${...}` replaced by values:
+
+```text
+Object store "${storeName}" not found in the database. Ensure the store was created during the database upgrade.
+```
+
+<a id="error-190"></a>
+
+## Error 190: `indexed-db-wrapper.ts`
+
+Development builds show this message, with `${...}` replaced by values:
+
+```text
+Transaction was aborted
+```
+
+<a id="error-191"></a>
+
+## Error 191: `indexed-db-wrapper.ts`
+
+Development builds show this message, with `${...}` replaced by values:
+
+```text
+Failed to delete IndexedDB database "${name}": ${error instanceof Error ? error.message : String(error)}
+```
+
+<a id="error-192"></a>
+
+## Error 192: `indexed-db-wrapper.ts`
+
+Development builds show this message, with `${...}` replaced by values:
+
+```text
+Failed to delete IndexedDB database "${name}": ${errorMessage}
+```
+
+<a id="error-193"></a>
+
+## Error 193: `indexed-db.ts`
+
+Development builds show this message, with `${...}` replaced by values:
+
+```text
+createIndexedDB requires at least one store in the stores array.
+```
+
+<a id="error-194"></a>
+
+## Error 194: `indexed-db.ts`
+
+Development builds show this message, with `${...}` replaced by values:
+
+```text
+createIndexedDB stores array contains duplicate store names.
+```
+
+<a id="error-195"></a>
+
+## Error 195: `indexed-db.ts`
+
+Development builds show this message, with `${...}` replaced by values:
+
+```text
+The "_versions" store is reserved for IndexedDB Collection metadata.
+```
+
+<a id="error-196"></a>
+
+## Error 196: `indexed-db.ts`
+
+Development builds show this message, with `${...}` replaced by values:
+
+```text
+createIndexedDB stores array contains invalid store names. Each store name must be a non-empty string.
+```
+
+<a id="error-197"></a>
+
+## Error 197: `indexed-db.ts`
+
+Development builds show this message, with `${...}` replaced by values:
+
+```text
+IndexedDB connection "${name}" closed. Recreate its Collections with a new database instance.
+```
+
+<a id="error-198"></a>
+
+## Error 198: `indexed-db.ts`
+
+Development builds show this message, with `${...}` replaced by values:
+
+```text
+The "_versions" store is reserved for IndexedDB Collection metadata.
+```
+
+<a id="error-199"></a>
+
+## Error 199: `indexed-db.ts`
+
+Development builds show this message, with `${...}` replaced by values:
+
+```text
+Duplicate imported key: ${key}
+```
+
+<a id="error-200"></a>
+
+## Error 200: `indexed-db-wrapper.ts`
+
+Development builds show this message, with `${...}` replaced by values:
+
+```text
+Failed to get all keys from object store "${objectStore.name}"
+```
+
+<a id="error-201"></a>
+
+## Error 201: `indexed-db-wrapper.ts`
+
+Development builds show this message, with `${...}` replaced by values:
+
+```text
+Failed to write item to object store "${objectStore.name}"
+```
+
+<a id="error-202"></a>
+
+## Error 202: `indexed-db-wrapper.ts`
+
+Development builds show this message, with `${...}` replaced by values:
+
+```text
+Failed to delete item with key "${String(key)}" from object store "${objectStore.name}"
+```
+
+<a id="error-203"></a>
+
+## Error 203: `indexed-db-wrapper.ts`
+
+Development builds show this message, with `${...}` replaced by values:
+
+```text
+Failed to clear object store "${objectStore.name}"
 ```

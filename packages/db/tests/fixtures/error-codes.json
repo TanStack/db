@@ -84,5 +84,9 @@
   "SetWindowRequiresOrderByError": 84,
   "SetWindowReentrancyError": 85,
   "PacedTransactionManualCommitError": 86,
-  "UnhashableQueryIRError": 87
+  "UnhashableQueryIRError": 87,
+  "DatabaseRequiredError": 175,
+  "ObjectStoreNotFoundError": 176,
+  "NameRequiredError": 177,
+  "GetKeyRequiredError": 178
 }

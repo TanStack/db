@@ -258,7 +258,10 @@ describe(`production error messages`, () => {
 
   describe(`error sites`, () => {
     const sites = findErrorSites(resolve(testsDirectory, `../src`))
-    const frozen: Record<string, { file: string; template: string }> =
+    const frozen: Record<
+      string,
+      { file: string; template: string; literals: Array<string> }
+    > =
       JSON.parse(readFileSync(sitesPath, `utf8`))
 
     it(`codes every site that throws library text`, () => {
@@ -267,9 +270,13 @@ describe(`production error messages`, () => {
 
     it(`keeps each site's development message and code`, () => {
       const current = Object.fromEntries(
-        sites.coded.map(({ code, file, template }) => [
+        sites.coded.map(({ code, file, template, literals }) => [
           code,
-          { file, template },
+          {
+            file,
+            template,
+            literals: literals.filter((text) => /[A-Za-z]/.test(text)),
+          },
         ]),
       )
       expect(sites.coded).toHaveLength(Object.keys(current).length)

@@ -157,6 +157,10 @@ export const errorSampleArguments: Record<string, Array<Array<unknown>>> = {
 
   // Window errors
   UnhashableQueryIRError: [['query.fnSelect', 'function select']],
+  DatabaseRequiredError: [[]],
+  ObjectStoreNotFoundError: [['todos', 'app', ['users', 'posts']]],
+  NameRequiredError: [[]],
+  GetKeyRequiredError: [[]],
   SetWindowReentrancyError: [[]],
 
   // Error classes with just message parameter (no special handling)
