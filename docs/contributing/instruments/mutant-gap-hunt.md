@@ -28,8 +28,8 @@ distinguish a mistake. Keep test bodies and assertions out of the design brief.
    unchanged, pinned baseline, then restore the checkout exactly. Use `main`
    when measuring what the existing suite catches; use a PR revision when
    challenging its new coverage. Do not combine those kill claims. A full-suite
-   kill can locate an existing witness, but a crash, timeout, setup error, or
-   unreached edit is not a kill at the promised comparison. Record that
+   kill can locate an existing witness, but a crash outside the comparison,
+   timeout, setup error, or unreached edit is not a kill there. Record that
    distinction, not a mutation score. Re-run carried-over survivors when the
    baseline revision moves.
 3. **Interrogate every survivor.** Find a legal public history and checkpoint
@@ -58,12 +58,14 @@ distinguish a mistake. Keep test bodies and assertions out of the design brief.
    rejecting a legal alternative. For a bug on the baseline, demonstrate the
    production RED before its repair. Update the coverage map when the owner's
    reach or limits change. For a claimed oracle repair, follow
-   [ORC-012](../oracle-tests.md#orc-012-review-evidence): its versioned review
-   record ties the verdict to the exact reviewed head and names the executable
-   revision of every campaign, witness, and review-fix run behind its claims.
+   [ORC-012](../oracle-tests.md#orc-012-review-evidence): at closeout,
+   verdict-critical evidence outside the executable oracle belongs in a
+   versioned review record tied to the exact reviewed head. This card also asks
+   the record to name the executable revision of every campaign, witness, and
+   review-fix run behind its claims.
 
 **Return:** each chosen mutant's pinned revision, exact edit, observed run
-outcome using [ORC-006's six categories](../oracle-tests.md#orc-006-checker-calibration),
+outcome using [ORC-006's categories](../oracle-tests.md#orc-006-checker-calibration),
 public distinction or scoped equivalence argument, and disposition: oracle gap,
 product bug, permitted difference, equivalence at a stated grade, or unresolved.
 Keep raw run logs and result tables task-local unless the task explicitly asks

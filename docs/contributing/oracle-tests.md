@@ -141,8 +141,9 @@ presence of a preferred heading, class, comment template, or helper.
 - **Not required:** Modifying production, checking in a mutant, or running a
   production mutation campaign for every oracle.
 - **Conditional obligation:** When a mutant is run, the evidence MUST classify
-  its outcome as assertion failure, timeout, setup failure, an unreached path,
-  survival, or equivalence within the tested domain.
+  its outcome as assertion failure, timeout, setup failure, runtime failure
+  after setup outside the intended comparison, an unreached path, survival, or
+  equivalence within the tested domain.
 
 ### ORC-007: Fixed and random campaigns with direct replay
 
@@ -875,6 +876,7 @@ Mutation testing changes production code deliberately to challenge tests. Record
 - A value assertion rejected the intended wrong answer.
 - A timeout exposed a missing progress obligation.
 - Setup failed before reaching the comparison.
+- Execution failed outside the intended comparison after setup, such as a crash.
 - The changed code never ran.
 - The mutant survived, or the change was equivalent within the tested domain.
 
