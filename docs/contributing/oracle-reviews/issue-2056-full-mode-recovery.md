@@ -210,6 +210,7 @@ within the executed histories; the coverage map retains the other cells.
 ## Prep-PR review: coordinator authority during scoped recovery
 
 Review continuation — 2026-10-07. Reviewed implementation head: `6f3149bf6`.
+The review repair and its witnesses are committed at `5579d3005`.
 The prep-PR review found a P1 counterexample to the scoped-source contract:
 after an applied Electric subset snapshot, a coordinator notification could
 reload an active paginated subset from empty SQLite cache and remove the public
