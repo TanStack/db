@@ -533,10 +533,11 @@ export class CollectionImpl<
   }
 
   /**
-   * Get the number of subscribers to the collection
+   * Get the number of subscribers that ask for this collection's data. A live
+   * query that has no subscriber or preload of its own does not count.
    */
   public get subscriberCount(): number {
-    return this._changes.activeSubscribersCount
+    return this._changes.acquiringSubscribersCount
   }
 
   /**
@@ -653,7 +654,38 @@ export class CollectionImpl<
    * Multiple concurrent calls will share the same promise
    */
   public preload(): Promise<void> {
-    return this._sync.preload()
+    // Preload asks for this Collection's data, so provider work may start.
+    return this.afterPreloadMark(() => this._sync.preload())
+  }
+
+  // Records a request for data, then continues. A source whose start throws
+  // on resumption rejects the returned promise instead of throwing.
+  private afterPreloadMark<T>(next: () => Promise<T>): Promise<T> {
+    try {
+      this._markPreload()
+    } catch (error) {
+      return Promise.reject(error)
+    }
+    return next()
+  }
+
+  /**
+   * @internal Record a preload without starting one, for a caller whose data
+   * request another promise answers, such as a DbClient stream for the same
+   * query. The request still counts: deferred acquisition may now resume.
+   */
+  public _markPreload(): void {
+    this._changes.markSubscriberOrPreload()
+  }
+
+  /** @internal Whether this Collection had a subscriber or a preload in this sync run. */
+  public _hasSubscriberOrPreload(): boolean {
+    return this._changes.hasSubscriberOrPreload()
+  }
+
+  /** @internal Listen for the first subscriber or preload in this sync run. */
+  public _onFirstSubscriberOrPreload(listener: () => void): () => void {
+    return this._changes.onFirstSubscriberOrPreload(listener)
   }
 
   /**
@@ -1024,9 +1056,10 @@ export class CollectionImpl<
    * @returns Promise that resolves to a Map containing all items in the collection
    */
   stateWhenReady(): Promise<Map<TKey, WithVirtualProps<TOutput, TKey>>> {
-    // If we already have data or collection is ready, resolve immediately
+    // If we already have data or collection is ready, resolve immediately.
+    // This read still asks for data, so it counts as a preload.
     if (this.size > 0 || this.isReady()) {
-      return Promise.resolve(this.state)
+      return this.afterPreloadMark(() => Promise.resolve(this.state))
     }
 
     // Use preload to ensure the collection starts loading, then return the state
@@ -1049,9 +1082,10 @@ export class CollectionImpl<
    * @returns Promise that resolves to an Array containing all items in the collection
    */
   toArrayWhenReady(): Promise<Array<WithVirtualProps<TOutput, TKey>>> {
-    // If we already have data or collection is ready, resolve immediately
+    // If we already have data or collection is ready, resolve immediately.
+    // This read still asks for data, so it counts as a preload.
     if (this.size > 0 || this.isReady()) {
-      return Promise.resolve(this.toArray)
+      return this.afterPreloadMark(() => Promise.resolve(this.toArray))
     }
 
     // Use preload to ensure the collection starts loading, then return the array

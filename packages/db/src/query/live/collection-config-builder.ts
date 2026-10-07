@@ -119,6 +119,17 @@ export class CollectionConfigBuilder<
   // Reference to the live query collection for error state transitions
   public liveQueryCollection?: Collection<TResult, any, any>
 
+  /**
+   * Whether this live-query Collection had a subscriber or a preload in its
+   * current sync run. Until then it reads its source Collections without
+   * starting provider work.
+   */
+  hasSubscriberOrPreload(): boolean {
+    // A builder driven without its Collection, as its own tests do, has no
+    // subscriber state to defer on.
+    return this.liveQueryCollection?._hasSubscriberOrPreload() ?? true
+  }
+
   private windowFn: ((options: WindowOptions) => void) | undefined
   private readonly initialWindow: WindowOptions | undefined
   private currentWindow: WindowOptions | undefined
@@ -1250,6 +1261,20 @@ export class CollectionConfigBuilder<
 
       const subscription = collectionSubscriber.subscribe()
       this.subscriptions[sourceId] = subscription
+      if (subscription.isDeferringAcquisition()) {
+        // No subscriber or preload yet: source reads stay local, and the
+        // deferred provider work starts when the first one arrives.
+        syncState.unsubscribeCallbacks.add(
+          this.liveQueryCollection!._onFirstSubscriberOrPreload(() =>
+            subscription.resumeDeferredAcquisition(),
+          ),
+        )
+        // Creating the subscription can run user code, such as an inner live
+        // query's status handler, that already requested this one's data.
+        if (this.hasSubscriberOrPreload()) {
+          subscription.resumeDeferredAcquisition()
+        }
+      }
 
       const lazyCallbacks = this.lazySourcesCallbacks[sourceId]
       if (lazyCallbacks) {

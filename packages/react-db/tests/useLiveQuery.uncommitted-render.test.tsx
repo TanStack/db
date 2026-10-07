@@ -21,6 +21,9 @@ function makeSource(id: string) {
       id,
       getKey: (p) => p.id,
       initialData: [{ id: `1`, name: `A` }],
+      // Reclaimed as soon as nothing holds it, so its status shows whether a
+      // live query still holds it.
+      gcTime: 1,
     }),
   )
   collections.push(source)
@@ -80,11 +83,15 @@ describe(`live queries across uncommitted renders`, () => {
         <Route />
       </Suspense>,
     )
-    expect(source.subscriberCount).toBeGreaterThan(0)
+    // The abandoned render asks for no data, but its live query holds the
+    // source until GC reclaims it.
+    expect(source.subscriberCount).toBe(0)
+    await advanceTime(10)
+    expect(source.status).not.toBe(`cleaned-up`)
 
     await advanceTime(100)
 
-    expect(source.subscriberCount).toBe(0)
+    expect(source.status).toBe(`cleaned-up`)
   })
 
   it(`releases the source when the render throws after the hook ran`, async () => {
@@ -109,11 +116,15 @@ describe(`live queries across uncommitted renders`, () => {
       </Boundary>,
     )
     expect(view.getByText(`Failed`)).toBeDefined()
-    expect(source.subscriberCount).toBeGreaterThan(0)
+    // The abandoned render asks for no data, but its live query holds the
+    // source until GC reclaims it.
+    expect(source.subscriberCount).toBe(0)
+    await advanceTime(10)
+    expect(source.status).not.toBe(`cleaned-up`)
 
     await advanceTime(100)
 
-    expect(source.subscriberCount).toBe(0)
+    expect(source.status).toBe(`cleaned-up`)
   })
 
   it(`keeps a committed query active until unmount`, async () => {

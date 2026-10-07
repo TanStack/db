@@ -300,6 +300,7 @@ type MockSyncCollectionConfig<T extends object = Record<string, unknown>> = {
   syncMode?: `eager` | `on-demand`
   defaultStringCollation?: StringCollationConfig
   defaultIndexType?: IndexConstructor
+  gcTime?: number
 }
 
 /**

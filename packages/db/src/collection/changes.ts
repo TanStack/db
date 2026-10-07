@@ -6,6 +6,7 @@ import {
   toExpression,
 } from '../query/builder/ref-proxy.js'
 import { codedMessage, devBuild } from '../error-message.js'
+import { getBuilderFromConfig } from '../query/live/collection-registry.js'
 import { CollectionSubscription } from './subscription.js'
 import type { StandardSchemaV1 } from '@standard-schema/spec'
 import type { ChangeMessage, SubscribeChangesOptions } from '../types'
@@ -34,6 +35,10 @@ export class CollectionChangesManager<
   private state!: CollectionStateManager<TOutput, TKey, TSchema, TInput>
 
   public activeSubscribersCount = 0
+  // Subscribers that ask for data: every one except a subscription that still
+  // defers acquisition. `subscriberCount` and `subscribers:change` report it;
+  // garbage collection uses `activeSubscribersCount`.
+  public acquiringSubscribersCount = 0
   public changeSubscriptions = new Set<CollectionSubscription>()
   public batchedEvents: Array<ChangeMessage<TOutput, TKey>> = []
   public shouldBatchEvents = false
@@ -50,6 +55,11 @@ export class CollectionChangesManager<
       }
     | undefined
   private layoutChangeListeners = new Set<() => void>()
+  // Whether this Collection has had a subscriber or a preload in its current
+  // sync run. A live-query Collection defers acquisition on its own source
+  // subscriptions until then.
+  private subscriberOrPreload = false
+  private subscriberOrPreloadListeners = new Set<() => void>()
 
   /**
    * Monotonic revision of the collection's visible state, advanced once per
@@ -309,7 +319,8 @@ export class CollectionChangesManager<
 
     // Acquire ownership only after all fallible option validation and
     // user-provided predicate compilation has completed.
-    this.addSubscriber()
+    const defersAcquisition = opts.deferAcquisition === true
+    this.addSubscriber(defersAcquisition)
 
     let subscription: CollectionSubscription | undefined
     const setupState = { closed: false }
@@ -317,9 +328,11 @@ export class CollectionChangesManager<
       subscription = new CollectionSubscription(this.collection, callback, {
         ...opts,
         whereExpression,
+        deferAcquisition: defersAcquisition,
+        onResumeAcquisition: () => this.resumeSubscriber(),
         onUnsubscribe: () => {
           setupState.closed = true
-          this.removeSubscriber()
+          this.removeSubscriber(subscription?.isDeferringAcquisition() ?? false)
           if (subscription) this.changeSubscriptions.delete(subscription)
         },
       })
@@ -355,7 +368,7 @@ export class CollectionChangesManager<
           // ownership and attempts every subset unload before it throws.
         }
       } else {
-        this.removeSubscriber()
+        this.removeSubscriber(defersAcquisition)
       }
       throw error
     }
@@ -363,21 +376,78 @@ export class CollectionChangesManager<
     return subscription
   }
 
+  /** Whether this Collection had a subscriber or a preload in this sync run. */
+  public hasSubscriberOrPreload(): boolean {
+    return this.subscriberOrPreload
+  }
+
+  /** Listen for the first subscriber or preload in the current sync run. */
+  public onFirstSubscriberOrPreload(listener: () => void): () => void {
+    this.subscriberOrPreloadListeners.add(listener)
+    return () => this.subscriberOrPreloadListeners.delete(listener)
+  }
+
   /**
-   * Increment the active subscribers count and start sync if needed
+   * Record a subscriber or a preload in the current sync run. A live-query
+   * Collection listens for the first one to resume deferred acquisition on its
+   * own source subscriptions.
    */
-  private addSubscriber(): void {
+  public markSubscriberOrPreload(): void {
+    if (this.subscriberOrPreload) return
+    this.subscriberOrPreload = true
+    // One source's failed start must not keep the others deferred.
+    const errors: Array<unknown> = []
+    for (const listener of [...this.subscriberOrPreloadListeners]) {
+      try {
+        listener()
+      } catch (error) {
+        errors.push(error)
+      }
+    }
+    if (errors.length) throw errors[0]
+  }
+
+  /** A deferring subscription resumed: it may now start this sync run. */
+  private resumeSubscriber(): void {
+    // Mark first, so a sync run that starts now builds non-deferred demand.
+    this.markSubscriberOrPreload()
+    this.startSyncIfStopped()
+    this.changeAcquiringSubscribers(1)
+  }
+
+  private changeAcquiringSubscribers(delta: 1 | -1): void {
+    const previous = this.acquiringSubscribersCount
+    this.acquiringSubscribersCount += delta
+    this.events.emitSubscribersChange(this.acquiringSubscribersCount, previous)
+  }
+
+  private startSyncIfStopped(): void {
+    if (
+      this.lifecycle.status === `cleaned-up` ||
+      this.lifecycle.status === `idle`
+    ) {
+      this.sync.startSync()
+    }
+  }
+
+  /**
+   * Increment the active subscribers count and start sync if needed. A
+   * subscriber that defers acquisition starts no provider work. It still
+   * starts a live-query Collection, whose sync run reads local memory and
+   * defers its own acquisition, but no other Collection's sync run.
+   */
+  private addSubscriber(defersAcquisition: boolean): void {
     const previousSubscriberCount = this.activeSubscribersCount
     this.activeSubscribersCount++
     this.lifecycle.cancelGCTimer()
 
     try {
-      // Start sync if collection was cleaned up
-      if (
-        this.lifecycle.status === `cleaned-up` ||
-        this.lifecycle.status === `idle`
-      ) {
-        this.sync.startSync()
+      if (!defersAcquisition) {
+        // Mark first, so a sync run that starts now builds non-deferred demand.
+        this.markSubscriberOrPreload()
+        this.startSyncIfStopped()
+      } else if (getBuilderFromConfig(this.collection.config)) {
+        this.startSyncIfStopped()
       }
     } catch (error) {
       this.activeSubscribersCount = previousSubscriberCount
@@ -387,17 +457,14 @@ export class CollectionChangesManager<
       throw error
     }
 
-    this.events.emitSubscribersChange(
-      this.activeSubscribersCount,
-      previousSubscriberCount,
-    )
+    // A deferring subscriber asks for no data, so adapters do not see it.
+    if (!defersAcquisition) this.changeAcquiringSubscribers(1)
   }
 
   /**
    * Decrement the active subscribers count and start GC timer if needed
    */
-  private removeSubscriber(): void {
-    const previousSubscriberCount = this.activeSubscribersCount
+  private removeSubscriber(wasDeferring: boolean): void {
     this.activeSubscribersCount--
 
     if (this.activeSubscribersCount === 0) {
@@ -406,10 +473,7 @@ export class CollectionChangesManager<
       throw new NegativeActiveSubscribersError()
     }
 
-    this.events.emitSubscribersChange(
-      this.activeSubscribersCount,
-      previousSubscriberCount,
-    )
+    if (!wasDeferring) this.changeAcquiringSubscribers(-1)
   }
 
   /**
@@ -417,6 +481,12 @@ export class CollectionChangesManager<
    * This can be called manually or automatically by garbage collection
    */
   public cleanup(): void {
+    // A preload belongs to one sync run, but subscriptions survive cleanup. A
+    // restarted live-query Collection defers acquisition again unless one of
+    // its surviving subscribers already asks for data.
+    this.subscriberOrPreload = [...this.changeSubscriptions].some(
+      (subscription) => !subscription.isDeferringAcquisition(),
+    )
     // Cleanup clears visible state without publishing row changes. Detached
     // consumers may miss every status transition before an empty restart.
     this.stateRevision++

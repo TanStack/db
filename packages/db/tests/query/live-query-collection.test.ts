@@ -1612,6 +1612,9 @@ describe(`createLiveQueryCollection`, () => {
             .limit(2),
         startSync: true,
       })
+      // A live-query Collection starts no provider work until it has a
+      // subscriber or a preload. This subscriber starts its acquisition.
+      liveQuery.subscribeChanges(() => {})
 
       // Wait a bit for the subscription to start and trigger loadSubset
       await flushPromises()
@@ -1690,6 +1693,9 @@ describe(`createLiveQueryCollection`, () => {
             .limit(2),
         startSync: true,
       })
+      // A live-query Collection starts no provider work until it has a
+      // subscriber or a preload. This subscriber starts its acquisition.
+      liveQuery.subscribeChanges(() => {})
 
       // Wait for everything to settle
       await flushPromises()
@@ -1712,7 +1718,7 @@ describe(`createLiveQueryCollection`, () => {
       expect(liveQuery.size).toBeGreaterThan(0)
     })
 
-    it(`makes a warm ordered window ready before construction returns when every acquisition is synchronous`, () => {
+    it(`makes a warm ordered window ready before its first preload returns when every acquisition is synchronous`, () => {
       const sourceCollection = createCollection<{ id: number; value: number }>({
         id: `source-fully-sync-subset`,
         getKey: (item) => item.id,
@@ -1736,9 +1742,13 @@ describe(`createLiveQueryCollection`, () => {
             .from({ item: sourceCollection })
             .orderBy(({ item }) => item.value, `asc`)
             .limit(1),
-        startSync: true,
       })
 
+      // Construction starts no provider work. The first preload starts the
+      // sync run, and every acquisition attempt returns true, so the window is
+      // ready before preload returns: the synchronous observation cut.
+      expect(liveQuery.status).toBe(`idle`)
+      void liveQuery.preload()
       expect(liveQuery.isLoadingSubset).toBe(false)
       expect(liveQuery.status).toBe(`ready`)
       expect(liveQuery.toArray.map(({ id }) => id)).toEqual([1])
@@ -3450,6 +3460,10 @@ describe(`createLiveQueryCollection`, () => {
         query: (q) => q.from({ item: sourceCollection }),
         startSync: true,
       })
+      // A live-query Collection starts no provider work until it has a
+      // subscriber or a preload. This subscriber starts its acquisition.
+      liveQuery1.subscribeChanges(() => {})
+      liveQuery2.subscribeChanges(() => {})
 
       // Wait for both subscriptions to start and trigger loadSubset
       await flushPromises()

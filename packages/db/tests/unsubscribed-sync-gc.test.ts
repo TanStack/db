@@ -43,7 +43,10 @@ describe(`collections that start syncing without a subscriber`, () => {
 
     await vi.advanceTimersByTimeAsync(49)
     expect(live.status).toBe(`ready`)
-    expect(source.subscriberCount).toBe(1)
+    // Without a subscriber the live query asks for no data, so it is not the
+    // source's subscriber, but it still holds the source.
+    expect(source.subscriberCount).toBe(0)
+    expect(source.status).not.toBe(`cleaned-up`)
 
     const subscription = live.subscribeChanges(() => {})
     await vi.advanceTimersByTimeAsync(100)
@@ -87,7 +90,9 @@ describe(`collections that start syncing without a subscriber`, () => {
 
       await vi.advanceTimersByTimeAsync(300001)
       expect(live.status).toBe(`ready`)
-      expect(source.subscriberCount).toBe(1)
+      // The live query asks for no data, but it still holds its source.
+      expect(source.subscriberCount).toBe(0)
+      expect(source.status).not.toBe(`cleaned-up`)
     },
   )
 
@@ -98,7 +103,9 @@ describe(`collections that start syncing without a subscriber`, () => {
       expect(source.subscriberCount).toBe(0)
 
       await live[method]()
-      expect(source.subscriberCount).toBe(1)
+      // A preload asks for data and counts as the source's subscriber; a
+      // start alone reads local memory and does not.
+      expect(source.subscriberCount).toBe(method === `preload` ? 1 : 0)
       await vi.advanceTimersByTimeAsync(51)
       expect(live.status).toBe(`cleaned-up`)
       expect(source.subscriberCount).toBe(0)

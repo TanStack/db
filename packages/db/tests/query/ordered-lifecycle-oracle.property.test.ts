@@ -4,13 +4,19 @@ import { fc, test as fcTest } from '@fast-check/vitest'
 import { createCollection } from '../../src/collection/index.js'
 import { createDeferred } from '../../src/deferred.js'
 import { BTreeIndex } from '../../src/indexes/btree-index.js'
-import { createLiveQueryCollection, eq } from '../../src/query/index.js'
+import {
+  createLiveQueryCollection,
+  eq,
+  isUndefined,
+  not,
+} from '../../src/query/index.js'
 import { evaluateReferenceExpression } from '../reference-expression-oracle.js'
 import { flushPromises } from '../utils.js'
 import {
   oracleRandomParameters,
   readOracleRunConfig,
 } from '../oracle-config.js'
+import type { Collection } from '../../src/collection/index.js'
 import type { LoadSubsetOptions, SyncConfig } from '../../src/types.js'
 
 /**
@@ -18,13 +24,14 @@ import type { LoadSubsetOptions, SyncConfig } from '../../src/types.js'
  *
  * The live-query architecture owns applied settlement, ordered continuation,
  * and atomic window publication. This refinement covers one narrower initial
- * query-readiness cut: an ordinary ordered request whose adapter returns
- * literal `true`, after synchronously applying every establishing receipt,
- * installs its completed window before the initiating call stack returns.
- * Promise settlement remains asynchronous. This does not make a successful
- * request prove source exhaustion or broader coverage, and it does not change
- * explicit window, full-source fallback, repair, replay, or framework
- * render-time contracts.
+ * query-readiness cut: an initial ordered load whose adapter returns literal
+ * `true`, after synchronously applying every establishing receipt, installs its
+ * completed window before the initiating call stack returns. The initial load
+ * is an ordinary ordered request or, for a requiresFullSource plan, its first
+ * full-source request. Promise settlement remains asynchronous. This does not
+ * make a successful request prove source exhaustion or broader coverage, and it
+ * does not change explicit window, later full-source fallback, repair, replay,
+ * or framework render-time contracts.
  *
  * Ordered acquisition has six independent control dimensions: acquisition
  * path, delivery time, window change, provider-response outcome, sync run, and
@@ -997,11 +1004,12 @@ describe(`synchronous initial settlement refinement`, () => {
     },
   )
 
-  // The synchronous cut covers ordinary ordered requests only. A query that
-  // must read its whole source first (here a function filter) keeps its
-  // asynchronous initial settlement, even over an eager source whose rows
-  // are already installed. The eager prefix-repair cut must not widen it.
-  it(`keeps an eager full-source ordered window loading until its load settles`, async () => {
+  // The synchronous cut covers the initial load. For a query that must read
+  // its whole source first (here a function filter), the initial load is its
+  // first full-source request. When the source answers with literal `true`,
+  // the query is ready with its rows at creation. A later full-source fallback
+  // and a full-source repair keep their asynchronous settlement.
+  it(`publishes an eager full-source ordered window at creation`, async () => {
     const source = createCollection<{ id: number; rank: number }, number>({
       id: `full-source-initial-${Math.random()}`,
       getKey: (row) => row.id,
@@ -1029,15 +1037,101 @@ describe(`synchronous initial settlement refinement`, () => {
           .limit(2),
     })
     try {
-      expect({ status: query.status, rows: query.toArray.length }).toEqual({
-        status: `loading`,
-        rows: 0,
-      })
-      await query.preload()
-      expect(query.toArray.map((row) => row.id)).toEqual([4, 3])
+      expect({
+        status: query.status,
+        rows: query.toArray.map((row) => row.id),
+      }).toEqual({ status: `ready`, rows: [4, 3] })
     } finally {
       await query.cleanup()
       await source.cleanup()
+    }
+  })
+
+  // The initial full-source cut and #2055's joined-filter rule meet here. A
+  // function filter makes the plan read its whole source, so its synchronous
+  // initial load installs every source row. #2055's hazard needs a bounded read
+  // that left an eligible row out; after a full read the window can always
+  // reach the next eligible row, even when a distant row entered through a live
+  // update first. This pins that the synchronous initial load keeps that
+  // property through later changes.
+  it(`keeps the first eligible joined rows after a synchronous full-source load`, async () => {
+    type Row = { id: number; rank: number; label: string }
+    let source: Parameters<SyncConfig<Row, number>[`sync`]>[0] | undefined
+    const writeRow = (
+      message: { type: `update`; value: Row } | { type: `delete`; key: number },
+    ) => {
+      source!.begin()
+      source!.write(message)
+      source!.commit()
+    }
+    const rows = createCollection<Row, number>({
+      id: `full-source-joined-rows-${Math.random()}`,
+      getKey: (row) => row.id,
+      syncMode: `eager`,
+      startSync: true,
+      sync: {
+        sync: (params) => {
+          source = params
+          params.begin()
+          for (let id = 1; id <= 10; id++) {
+            params.write({
+              type: `insert`,
+              value: { id, rank: id, label: `a` },
+            })
+          }
+          params.commit()
+          params.markReady()
+        },
+      },
+    })
+    rows.createIndex((row) => row.rank, { indexType: BTreeIndex })
+    const markers = createCollection<{ id: number; rowId: number }, number>({
+      id: `full-source-joined-markers-${Math.random()}`,
+      getKey: (marker) => marker.id,
+      syncMode: `eager`,
+      startSync: true,
+      sync: {
+        sync: ({ begin, write, commit, markReady }) => {
+          begin()
+          for (let id = 2; id <= 10; id += 2) {
+            write({ type: `insert`, value: { id, rowId: id } })
+          }
+          commit()
+          markReady()
+        },
+      },
+    })
+    const query = createLiveQueryCollection({
+      startSync: true,
+      query: (q) =>
+        q
+          .from({ row: rows })
+          .leftJoin({ marker: markers }, ({ row, marker }) =>
+            eq(row.id, marker.rowId),
+          )
+          .where(({ marker }) => not(isUndefined(marker.rowId)))
+          .fn.where(({ row }) => row.rank > 0)
+          .orderBy(({ row }) => row.rank)
+          .limit(1),
+    })
+    const ids = () => query.toArray.map((result) => result.row.id)
+    try {
+      expect({ status: query.status, ids: ids() }).toEqual({
+        status: `ready`,
+        ids: [2],
+      })
+      // A label-only update brings the distant row 10 into the graph.
+      writeRow({ type: `update`, value: { id: 10, rank: 10, label: `b` } })
+      await flushPromises()
+      expect(ids()).toEqual([2])
+      // Deleting the visible row must expose the next eligible row, 4.
+      writeRow({ type: `delete`, key: 2 })
+      await flushPromises()
+      expect(ids()).toEqual([4])
+    } finally {
+      await query.cleanup()
+      await markers.cleanup()
+      await rows.cleanup()
     }
   })
 
@@ -1405,7 +1499,6 @@ describe(`warm ordered readiness oracle`, () => {
             .orderBy(({ row }) => row.tie, `asc`)
             .offset(1)
             .limit(2),
-        startSync: true,
       })
     const owner = query()
     try {
@@ -1413,6 +1506,11 @@ describe(`warm ordered readiness oracle`, () => {
       cold = false
       const sibling = query()
       try {
+        // Construction starts no provider work. The sibling's first preload
+        // starts its sync run, and both warm acquisitions return true, so it
+        // is ready before preload returns: the synchronous observation cut.
+        expect(warmRequests).toEqual([])
+        void sibling.preload()
         expect(sibling.status).toBe(`ready`)
         expect(sibling.toArray.map(({ id }) => id)).toEqual([2, 3])
         expect(warmRequests).toEqual([
@@ -1650,5 +1748,355 @@ describe(`nullable multi-term lifecycle product`, () => {
     `matches nullable multi-term lifecycle histories for a random or replayed seed`,
     assertNullableHistory,
     nullableTimeout,
+  )
+})
+
+/**
+ * ## Initial full-source loads share the synchronous readiness cut
+ *
+ * A plan whose window cannot come from a provider prefix (an inner join, a
+ * functional predicate, `distinct`, or a custom string comparator) loads its
+ * ordered source with one filtered full-source request and orders locally.
+ * That request is still the query's initial load. When it returns literal
+ * `true` after its establishing receipts apply, the live query is ready with
+ * its complete window before the initiating call returns, exactly as for the
+ * ordinary ordered request above. A Promise result stays asynchronous.
+ *
+ * The model is the same two-valued reference as the ordinary cut: synchronous
+ * settlement predicts ready with ids [1, 2] at the immediate checkpoint, and
+ * Promise settlement predicts loading with no rows. The rows come from a
+ * three-row source ordered by rank, so the expectation does not read the
+ * production comparator. The driver also records the provider request, which
+ * must be the predicate-only full-source shape, so a plan that silently took
+ * the ordered path cannot pass.
+ *
+ * A later full-source fallback is also outside this cut. The warm readiness
+ * oracle below pins one: an ordinary ordered chain whose null boundary cannot be
+ * expressed as a cursor falls back to a full-source request after its first
+ * request settles, and stays `loading` until that fallback settles. It rejects a
+ * gate keyed on the request kind rather than the initial load.
+ *
+ * Replay is outside this cut. After the initial window settles, a truncate
+ * replays the same full-source request. Even when its provider answers with
+ * literal `true`, the prior window stays published at the call that started
+ * the replay and the replacement publishes a task later. This neighbouring case
+ * distinguishes a purpose-based gate (initial load versus later authoritative
+ * work) from a kind-based one that would make every full-source request
+ * synchronous. A requiresFullSource plan holds every source row locally, so an
+ * ordinary visible delete recomputes its window without any repair request.
+ */
+
+type FullSourceFeature =
+  `inner-join` | `fn-where` | `distinct` | `custom-collation`
+type FullSourceRow = { id: number; rank: number; label: string; tag: string }
+
+const fullSourceRows: ReadonlyArray<FullSourceRow> = [
+  { id: 1, rank: 1, label: `a`, tag: `x` },
+  { id: 2, rank: 2, label: `b`, tag: `x` },
+  { id: 3, rank: 3, label: `c`, tag: `x` },
+]
+const fullSourceFeatures: ReadonlyArray<FullSourceFeature> = [
+  `inner-join`,
+  `fn-where`,
+  `distinct`,
+  `custom-collation`,
+]
+const labelRank = new Map([
+  [`a`, 1],
+  [`b`, 2],
+  [`c`, 3],
+])
+
+function createFullSourceQuery(
+  feature: FullSourceFeature,
+  source: Collection<FullSourceRow, number>,
+  tags: Collection<{ tag: string }, string>,
+) {
+  return createLiveQueryCollection({
+    startSync: false,
+    query: (q) => {
+      const base = q.from({ row: source })
+      switch (feature) {
+        case `inner-join`:
+          return base
+            .innerJoin({ tag: tags }, ({ row, tag }) => eq(row.tag, tag.tag))
+            .orderBy(({ row }) => row.rank)
+            .limit(2)
+            .select(({ row }) => ({ id: row.id }))
+        case `fn-where`:
+          return base.fn
+            .where(({ row }) => row.id > 0)
+            .orderBy(({ row }) => row.rank)
+            .limit(2)
+            .select(({ row }) => ({ id: row.id }))
+        case `distinct`:
+          return base
+            .orderBy(({ row }) => row.rank)
+            .limit(2)
+            .select(({ row }) => ({ id: row.id }))
+            .distinct()
+        case `custom-collation`:
+          return base
+            .orderBy(({ row }) => row.label, {
+              direction: `asc`,
+              stringSort: `custom`,
+              compare: (a, b) => labelRank.get(a)! - labelRank.get(b)!,
+            })
+            .limit(2)
+            .select(({ row }) => ({ id: row.id }))
+      }
+    },
+  })
+}
+
+function assertFullSourceRequest(request: LoadSubsetOptions | undefined): void {
+  if (
+    request === undefined ||
+    request.orderBy !== undefined ||
+    request.limit !== undefined ||
+    request.cursor !== undefined ||
+    request.offset !== undefined
+  ) {
+    throw new Error(
+      `Expected one predicate-only full-source request, received ${JSON.stringify(request)}`,
+    )
+  }
+}
+
+async function observeFullSourceSettlement(
+  feature: FullSourceFeature,
+  settlement: InitialSettlementShape,
+) {
+  const delivered = new Set<number>()
+  const requests: Array<LoadSubsetOptions> = []
+  let sync!: Parameters<SyncConfig<FullSourceRow, number>[`sync`]>[0]
+  const source = createCollection<FullSourceRow, number>({
+    id: `ordered-full-source-${feature}-${settlement}`,
+    getKey: ({ id }) => id,
+    syncMode: `on-demand`,
+    sync: {
+      sync: (operations) => {
+        sync = operations
+        operations.markReady()
+        return {
+          loadSubset: (options) => {
+            requests.push(options)
+            const fresh = fullSourceRows.filter(({ id }) => !delivered.has(id))
+            if (fresh.length > 0) {
+              sync.begin()
+              for (const value of fresh) {
+                delivered.add(value.id)
+                sync.write({ type: `insert`, value })
+              }
+              expect(sync.commit()).toBe(true)
+            }
+            return settlement === `synchronous` ? true : Promise.resolve()
+          },
+        }
+      },
+    },
+  })
+  const tags = createCollection<{ tag: string }, string>({
+    id: `ordered-full-source-tags-${feature}-${settlement}`,
+    getKey: ({ tag }) => tag,
+    sync: {
+      sync: ({ begin, write, commit, markReady }) => {
+        begin()
+        write({ type: `insert`, value: { tag: `x` } })
+        commit()
+        markReady()
+      },
+    },
+  })
+  const live = createFullSourceQuery(feature, source, tags)
+  const subscription = live.subscribeChanges(() => {}, {
+    includeInitialState: false,
+  })
+  const observeCurrent = (): InitialSettlementObservation => ({
+    rows: live.toArray.map(({ id }) => id),
+    status: live.status,
+  })
+  let observation:
+    | {
+        immediate: InitialSettlementObservation
+        settled: InitialSettlementObservation
+        requests: Array<LoadSubsetOptions>
+      }
+    | undefined
+  let primaryFailure: CapturedOracleFailure | undefined
+  try {
+    const preload = live.preload()
+    const immediate = observeCurrent()
+    await preload
+    observation = { immediate, settled: observeCurrent(), requests }
+  } catch (error) {
+    primaryFailure = { error }
+  }
+  await finishOracleCleanup(
+    primaryFailure,
+    [
+      () => subscription.unsubscribe(),
+      () => live.cleanup(),
+      () => tags.cleanup(),
+      () => source.cleanup(),
+    ],
+    `Full-source settlement oracle cleanup failed`,
+  )
+  return observation!
+}
+
+async function observeFullSourceReplay(feature: FullSourceFeature) {
+  let served: ReadonlyArray<FullSourceRow> = fullSourceRows
+  let sync!: Parameters<SyncConfig<FullSourceRow, number>[`sync`]>[0]
+  const source = createCollection<FullSourceRow, number>({
+    id: `ordered-full-source-replay-${feature}`,
+    getKey: ({ id }) => id,
+    syncMode: `on-demand`,
+    sync: {
+      sync: (operations) => {
+        sync = operations
+        operations.markReady()
+        return {
+          loadSubset: () => {
+            const missing = served.filter(({ id }) => !source.has(id))
+            if (missing.length > 0) {
+              sync.begin()
+              for (const value of missing) sync.write({ type: `insert`, value })
+              expect(sync.commit()).toBe(true)
+            }
+            return true
+          },
+        }
+      },
+    },
+  })
+  const tags = createCollection<{ tag: string }, string>({
+    id: `ordered-full-source-replay-tags-${feature}`,
+    getKey: ({ tag }) => tag,
+    sync: {
+      sync: ({ begin, write, commit, markReady }) => {
+        begin()
+        write({ type: `insert`, value: { tag: `x` } })
+        commit()
+        markReady()
+      },
+    },
+  })
+  const live = createFullSourceQuery(feature, source, tags)
+  let primaryFailure: CapturedOracleFailure | undefined
+  let observation:
+    { immediate: Array<number>; settled: Array<number> } | undefined
+  try {
+    await live.preload()
+    // The source drops row 1 and replays its replacement through a truncate.
+    served = fullSourceRows.slice(1)
+    sync.begin()
+    sync.truncate()
+    sync.commit()
+    const immediate = live.toArray.map(({ id }) => id)
+    await flushPromises()
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    observation = { immediate, settled: live.toArray.map(({ id }) => id) }
+  } catch (error) {
+    primaryFailure = { error }
+  }
+  await finishOracleCleanup(
+    primaryFailure,
+    [() => live.cleanup(), () => tags.cleanup(), () => source.cleanup()],
+    `Full-source replay oracle cleanup failed`,
+  )
+  return observation!
+}
+
+async function observeEagerFullSourceSettlement(feature: FullSourceFeature) {
+  const source = createCollection<FullSourceRow, number>({
+    id: `ordered-full-source-eager-${feature}`,
+    getKey: ({ id }) => id,
+    sync: {
+      sync: ({ begin, write, commit, markReady }) => {
+        begin()
+        for (const value of fullSourceRows) write({ type: `insert`, value })
+        commit()
+        markReady()
+      },
+    },
+  })
+  const tags = createCollection<{ tag: string }, string>({
+    id: `ordered-full-source-eager-tags-${feature}`,
+    getKey: ({ tag }) => tag,
+    sync: {
+      sync: ({ begin, write, commit, markReady }) => {
+        begin()
+        write({ type: `insert`, value: { tag: `x` } })
+        commit()
+        markReady()
+      },
+    },
+  })
+  const live = createFullSourceQuery(feature, source, tags)
+  let primaryFailure: CapturedOracleFailure | undefined
+  let immediate: InitialSettlementObservation | undefined
+  try {
+    const preload = live.preload()
+    immediate = {
+      rows: live.toArray.map(({ id }) => id),
+      status: live.status,
+    }
+    await preload
+  } catch (error) {
+    primaryFailure = { error }
+  }
+  await finishOracleCleanup(
+    primaryFailure,
+    [() => live.cleanup(), () => tags.cleanup(), () => source.cleanup()],
+    `Eager full-source settlement oracle cleanup failed`,
+  )
+  return immediate!
+}
+
+describe(`synchronous initial full-source settlement refinement`, () => {
+  const cells = fullSourceFeatures.flatMap((feature) =>
+    ([`synchronous`, `promise`] as const).map((settlement) => ({
+      feature,
+      settlement,
+    })),
+  )
+
+  it(`enumerates every full-source feature and settlement cell exactly once`, () => {
+    expect(cells).toHaveLength(8)
+    expect(new Set(cells.map((cell) => JSON.stringify(cell))).size).toBe(8)
+  })
+
+  it.each(cells)(
+    `publishes the complete initial $feature window at the $settlement checkpoint`,
+    async ({ feature, settlement }) => {
+      const observed = await observeFullSourceSettlement(feature, settlement)
+      assertFullSourceRequest(observed.requests[0])
+      assertInitialSettlementObservation(observed.immediate, settlement)
+      expect(observed.settled).toEqual({ rows: [1, 2], status: `ready` })
+    },
+  )
+
+  it.each(fullSourceFeatures)(
+    `publishes the complete initial %s window over an eager source at the synchronous checkpoint`,
+    async (feature) => {
+      // An eager source answers every local snapshot synchronously.
+      assertInitialSettlementObservation(
+        await observeEagerFullSourceSettlement(feature),
+        `synchronous`,
+      )
+    },
+  )
+
+  it.each(fullSourceFeatures)(
+    `keeps the %s full-source truncate replay behind its publication barrier`,
+    async (feature) => {
+      const observed = await observeFullSourceReplay(feature)
+      // Replay is excluded from the synchronous cut: the prior window stays
+      // published at the call that started the replay, even though the
+      // provider answers it with literal `true`.
+      expect(observed.immediate).toEqual([1, 2])
+      expect(observed.settled).toEqual([2, 3])
+    },
   )
 })

@@ -197,8 +197,8 @@ export function useLiveInfiniteQuery<TContext extends Context>(
     })
     assertLiveQueryWindowManyResult(collection)
     // Like useLiveQuery, start sync during construction once the query is
-    // valid, so a synchronously loaded source is published on the first render
-    // instead of an empty idle snapshot before the subscribing effect attaches.
+    // valid. Construction reads only rows the sources already hold and sends
+    // no request until the subscribing effect attaches.
     collection.startSyncImmediate()
     const currentController = createLiveQueryWindowController(collection, {
       pageSize,

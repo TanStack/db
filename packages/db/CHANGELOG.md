@@ -1,5 +1,26 @@
 # @tanstack/db
 
+## 0.12.3
+
+### Patch Changes
+
+- A live query no longer starts network work for its source collections before it has a subscriber or a preload. Rendering a component that never commits, or creating a live query with `startSync: true`, reads only the rows its sources already hold; the first subscriber or `preload()` starts the sources' sync and loads on-demand data. This applies to nested live queries and pooled `eq` queries too. `useLiveSuspenseQuery` preloads during render, so a source that already holds the rows still renders without suspending. A source collection's `subscriberCount` and `subscribers:change` now count only subscribers that ask for data, so a live query waiting for its first subscriber no longer makes a Query Collection refetch. ([#2060](https://github.com/TanStack/db/pull/2060))
+
+## 0.12.2
+
+### Patch Changes
+
+- Share duplicated code in direct mutations, index writes, and the query optimizer. The full public API bundle is about 1.4 KB smaller when minified. Errors from a failed `BTreeIndex` expression now carry the original error as `cause`, as `BasicIndex` errors already did. ([#2057](https://github.com/TanStack/db/pull/2057))
+
+- Refill an ordered, limited live query over an eager, indexed source in bounded work. Before, deleting a visible row or changing a visible row's order value made the source resend every matching row to the query. For example, a 50-row window over 10,000 rows resent about 5,000 rows on each such change. The query now reads only the first rows of the window from the index, when the query orders by one term. On-demand sources, queries with more than one order term, queries that filter on a LEFT-joined source, and queries that need the whole source (an inner join, a function filter, or a custom collation) keep their existing behavior. ([#2055](https://github.com/TanStack/db/pull/2055))
+
+- Fix `useLiveInfiniteQuery` showing an empty idle result on its first render for a synchronously loaded source. The hook now starts sync during render, as `useLiveQuery` does, so the first committed render already shows the ready first page instead of flashing empty content before data arrives. This applies to query callbacks and to supplied live query collections whose window is exactly the first page or has no limit. A supplied collection with a wider finite limit waits for the hook to narrow its window at commit, so it never requests rows the hook does not need. Renders that never commit are reclaimed by garbage collection, and a React 19 StrictMode double render reuses one collection instead of starting two. In React, a startup error from a replacement query still reaches the error boundary, and the hook rejects a source replaced by a different collection with the same ID while it is mounted, as `useLiveQuery` does. ([#2027](https://github.com/TanStack/db/pull/2027))
+
+- Place null values first in a descending ordered query that uses an ascending index. Before, the query reversed the index and put rows with a null order value after every non-null row, while the documented order, and the same query without an index, put them first. ([#2055](https://github.com/TanStack/db/pull/2055))
+
+- Keep paced mutation persistence serial while a backend write is pending, including after rollback. Preserve every admitted write when managers share one strategy. Reject manual commits that bypass strategy timing. ([#2062](https://github.com/TanStack/db/pull/2062))
+  Restore a transaction's prior optimistic changes when a synchronous `mutate` callback throws. Reject all receipts in a failed group of paced mutations.
+
 ## 0.12.1
 
 ### Patch Changes
