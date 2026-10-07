@@ -5,6 +5,7 @@ Reviewed implementation: `fd7aa208a`, based on `origin/main` at
 contract owners are `packages/db/src/query/live/ARCHITECTURE.md` §Identity and
 law 1, `packages/db/tests/query/includes-oracle.property.test.ts` with its
 scope companion, and `packages/db/tests/query/includes-alias-shadowing-oracle.test.ts`.
+The independent oracle-enforcement correction below reviews `c0e42b168`.
 
 ## Question and rival predictions
 
