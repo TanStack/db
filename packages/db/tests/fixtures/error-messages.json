@@ -1,46 +1,28 @@
 {
-  "TanStackDBError": [
-    "Test error message"
-  ],
-  "NonRetriableError": [
-    "Non retriable error"
-  ],
+  "TanStackDBError": ["Test error message"],
+  "NonRetriableError": ["Non retriable error"],
   "SchemaValidationError": [
     "Insert validation failed: \n- Invalid field - path: name"
   ],
   "DuplicateDbInstanceError": [
     "Multiple instances of @tanstack/db detected!\n\nThis causes transaction context to be lost because each instance maintains its own transaction stack.\n\nCommon causes:\n1. Different versions of @tanstack/db installed\n2. Incompatible peer dependency versions in packages\n3. Module resolution issues in bundler configuration\n\nTo fix:\n1. Check installed versions: npm list @tanstack/db (or pnpm/yarn list)\n2. Force a single version using package manager overrides:\n   - npm: \"overrides\" in package.json\n   - pnpm: \"pnpm.overrides\" in package.json\n   - yarn: \"resolutions\" in package.json\n3. Clear node_modules and lockfile, then reinstall\n\nTo temporarily disable this check (not recommended):\nSet environment variable: TANSTACK_DB_DISABLE_DUP_CHECK=1\n\nSee: https://tanstack.com/db/latest/docs/troubleshooting#duplicate-instances"
   ],
-  "CollectionConfigurationError": [
-    "Configuration error"
-  ],
+  "CollectionConfigurationError": ["Configuration error"],
   "InvalidSyncPersistenceCapabilityError": [
     "Invalid sync persistence capability at metadata.persistence: reason. Custom sync wrappers must forward metadata.persistence unchanged."
   ],
-  "CollectionRequiresConfigError": [
-    "Collection requires a config"
-  ],
-  "CollectionRequiresSyncConfigError": [
-    "Collection requires a sync config"
-  ],
-  "InvalidSchemaError": [
-    "Schema must implement the standard-schema interface"
-  ],
-  "SchemaMustBeSynchronousError": [
-    "Schema validation must be synchronous"
-  ],
-  "CollectionStateError": [
-    "State error"
-  ],
+  "CollectionRequiresConfigError": ["Collection requires a config"],
+  "CollectionRequiresSyncConfigError": ["Collection requires a sync config"],
+  "InvalidSchemaError": ["Schema must implement the standard-schema interface"],
+  "SchemaMustBeSynchronousError": ["Schema validation must be synchronous"],
+  "CollectionStateError": ["State error"],
   "CollectionInErrorStateError": [
     "Cannot perform operation on collection \"collection-1\" - collection is in error state. Try calling cleanup() and restarting the collection."
   ],
   "InvalidCollectionStatusTransitionError": [
     "Invalid collection status transition from \"pending\" to \"ready\" for collection \"collection-1\""
   ],
-  "CollectionIsInErrorStateError": [
-    "Collection is in error state"
-  ],
+  "CollectionIsInErrorStateError": ["Collection is in error state"],
   "NegativeActiveSubscribersError": [
     "Active subscribers count is negative - this should never happen"
   ],
@@ -50,9 +32,7 @@
   "LiveQueryWindowControllerDisposedError": [
     "Cannot subscribe to a disposed LiveQueryWindowController"
   ],
-  "CollectionOperationError": [
-    "Operation error"
-  ],
+  "CollectionOperationError": ["Operation error"],
   "UndefinedKeyError": [
     "An object was created without a defined key: {\"name\":\"item\"}"
   ],
@@ -68,27 +48,19 @@
     "Cannot insert document with key \"key-1\" from sync because it already exists in the collection \"collection-1\". This collection uses a custom getKey with .distinct(). The .distinct() operator deduplicates by the ENTIRE selected object (standard SQL behavior), but your custom getKey extracts only a subset of fields. This causes multiple distinct rows (with different values in non-key fields) to receive the same key. To fix this, either: (1) ensure your SELECT only includes fields that uniquely identify each row, (2) use .groupBy() with min()/max() aggregates to select one value per group, or (3) remove the custom getKey to use the default key behavior.",
     "Cannot insert document with key \"key-1\" from sync because it already exists in the collection \"collection-1\". This collection uses a custom getKey with joined queries. Joined queries can produce multiple rows with the same key when relationships are not 1:1. Consider: (1) using a composite key in your getKey function (e.g., `${item.key1}-${item.key2}`), (2) ensuring your join produces unique rows per key, or (3) removing the custom getKey to use the default composite key behavior."
   ],
-  "MissingUpdateArgumentError": [
-    "The first argument to update is missing"
-  ],
-  "NoKeysPassedToUpdateError": [
-    "No keys were passed to update"
-  ],
+  "MissingUpdateArgumentError": ["The first argument to update is missing"],
+  "NoKeysPassedToUpdateError": ["No keys were passed to update"],
   "UpdateKeyNotFoundError": [
     "The key \"key-1\" was passed to update but an object for this key was not found in the collection"
   ],
   "KeyUpdateNotAllowedError": [
     "Updating the key of an item is not allowed. Original key: \"old-key\", Attempted new key: \"new-key\". Please delete the old item and create a new one if a key change is necessary."
   ],
-  "NoKeysPassedToDeleteError": [
-    "No keys were passed to delete"
-  ],
+  "NoKeysPassedToDeleteError": ["No keys were passed to delete"],
   "DeleteKeyNotFoundError": [
     "Collection.delete was called with key 'key-1' but there is no item in the collection with this key"
   ],
-  "MissingHandlerError": [
-    "Missing handler"
-  ],
+  "MissingHandlerError": ["Missing handler"],
   "MissingInsertHandlerError": [
     "Collection.insert called directly (not within an explicit transaction) but no 'onInsert' handler is configured."
   ],
@@ -98,9 +70,7 @@
   "MissingDeleteHandlerError": [
     "Collection.delete called directly (not within an explicit transaction) but no 'onDelete' handler is configured."
   ],
-  "TransactionError": [
-    "Transaction error"
-  ],
+  "TransactionError": ["Transaction error"],
   "QueueCapacityExceededError": [
     "Queue capacity exceeded; the mutation was not admitted"
   ],
@@ -143,12 +113,8 @@
   "SyncTransactionAlreadyCommittedError": [
     "The pending sync transaction is already committed, you can't commit it again."
   ],
-  "SyncQueueInvariantError": [
-    "Sync queue invariant failed: invariant detail"
-  ],
-  "QueryBuilderError": [
-    "Query error"
-  ],
+  "SyncQueueInvariantError": ["Sync queue invariant failed: invariant detail"],
+  "QueryBuilderError": ["Query error"],
   "OnlyOneSourceAllowedError": [
     "Only one source is allowed in the join clause"
   ],
@@ -166,21 +132,15 @@
   "JoinConditionMustBeEqualityError": [
     "Join condition must be an equality expression or a nonempty conjunction of equality expressions"
   ],
-  "QueryMustHaveFromClauseError": [
-    "Query must have a from clause"
-  ],
+  "QueryMustHaveFromClauseError": ["Query must have a from clause"],
   "InvalidWhereExpressionError": [
     "Invalid where() expression: Expected a query expression, but received a boolean. This usually happens when using JavaScript's comparison operators (===, !==, <, >, etc.) directly. Instead, use the query builder functions:\n\n  ❌ .where(({ user }) => user.id === 'abc')\n  ✅ .where(({ user }) => eq(user.id, 'abc'))\n\nAvailable comparison functions: eq, gt, gte, lt, lte, and, or, not, like, ilike, isNull, isUndefined"
   ],
-  "QueryCompilationError": [
-    "Compilation error"
-  ],
+  "QueryCompilationError": ["Compilation error"],
   "UnsafeAliasPathError": [
     "Unsafe alias path segment \"__proto__\" is not allowed in .select(). Aliases must not contain \"__proto__\", \"prototype\", or \"constructor\"."
   ],
-  "DistinctRequiresSelectError": [
-    "DISTINCT requires a SELECT clause."
-  ],
+  "DistinctRequiresSelectError": ["DISTINCT requires a SELECT clause."],
   "FnSelectWithGroupByError": [
     "fn.select() cannot be used with groupBy(). groupBy requires the compiler to statically analyze aggregate functions (count, sum, max, etc.) in the SELECT clause, which is not possible with fn.select() since it is an opaque function. Use .select() instead of .fn.select() when combining with groupBy()."
   ],
@@ -190,9 +150,7 @@
   "UnsupportedRootScalarSelectError": [
     "Top-level scalar select() is not supported by createLiveQueryCollection() or queryOnce(). Return an object from .select(), or use the scalar query inside toArray(...) or concat(toArray(...))."
   ],
-  "HavingRequiresGroupByError": [
-    "HAVING clause requires GROUP BY clause"
-  ],
+  "HavingRequiresGroupByError": ["HAVING clause requires GROUP BY clause"],
   "LimitOffsetRequireOrderByError": [
     "LIMIT and OFFSET require an ORDER BY clause to ensure deterministic results"
   ],
@@ -203,27 +161,15 @@
   "DuplicateAliasInSubqueryError": [
     "Subquery uses alias \"alias\" which is already used in the parent query. Each alias must be unique across parent and subquery contexts. Parent query aliases: parent1, parent2. Please rename \"alias\" in either the parent query or subquery to avoid conflicts."
   ],
-  "UnsupportedFromTypeError": [
-    "Unsupported FROM type: string"
-  ],
-  "UnknownExpressionTypeError": [
-    "Unknown expression type: custom"
-  ],
-  "EmptyReferencePathError": [
-    "Reference path cannot be empty"
-  ],
-  "UnknownFunctionError": [
-    "Unknown function: customFn"
-  ],
+  "UnsupportedFromTypeError": ["Unsupported FROM type: string"],
+  "UnknownExpressionTypeError": ["Unknown expression type: custom"],
+  "EmptyReferencePathError": ["Reference path cannot be empty"],
+  "UnknownFunctionError": ["Unknown function: customFn"],
   "JoinCollectionNotFoundError": [
     "Collection \"collection-1\" not found during compilation of join"
   ],
-  "JoinError": [
-    "Join error"
-  ],
-  "UnsupportedJoinTypeError": [
-    "Unsupported join type: OUTER"
-  ],
+  "JoinError": ["Join error"],
+  "UnsupportedJoinTypeError": ["Unsupported join type: OUTER"],
   "InvalidJoinConditionSameSourceError": [
     "Invalid join condition: both expressions refer to the same source \"todos\""
   ],
@@ -236,15 +182,9 @@
   "InvalidJoinConditionRightSourceError": [
     "Invalid join condition: right expression does not refer to the joined source \"comments\""
   ],
-  "InvalidJoinCondition": [
-    "Invalid join condition"
-  ],
-  "UnsupportedJoinSourceTypeError": [
-    "Unsupported join source type: custom"
-  ],
-  "GroupByError": [
-    "Group error"
-  ],
+  "InvalidJoinCondition": ["Invalid join condition"],
+  "UnsupportedJoinSourceTypeError": ["Unsupported join source type: custom"],
+  "GroupByError": ["Group error"],
   "NonAggregateExpressionNotInGroupByError": [
     "Non-aggregate expression 'field' in SELECT must also appear in GROUP BY clause"
   ],
@@ -257,15 +197,11 @@
   "UnknownHavingExpressionTypeError": [
     "Unknown expression type in HAVING clause: custom"
   ],
-  "StorageError": [
-    "Storage error"
-  ],
+  "StorageError": ["Storage error"],
   "SerializationError": [
     "Cannot write item because it cannot be JSON serialized: circular reference"
   ],
-  "LocalStorageCollectionError": [
-    "Storage error"
-  ],
+  "LocalStorageCollectionError": ["Storage error"],
   "StorageKeyRequiredError": [
     "[LocalStorageCollection] storageKey must be provided."
   ],
@@ -279,9 +215,7 @@
     "Collection \"collection-1\" sync cleanup function threw an error: Cleanup failed",
     "Collection \"collection-1\" sync cleanup function threw an error: Cleanup threw"
   ],
-  "QueryOptimizerError": [
-    "Optimizer error"
-  ],
+  "QueryOptimizerError": ["Optimizer error"],
   "CannotCombineEmptyExpressionListError": [
     "Cannot combine empty expression list"
   ],

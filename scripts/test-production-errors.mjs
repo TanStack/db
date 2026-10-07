@@ -22,7 +22,10 @@ const messages = JSON.parse(
   await readFile(path.join(tests, 'fixtures/error-messages.json'), 'utf8'),
 )
 
-const source = await readFile(path.join(root, 'packages/db/src/errors.ts'), 'utf8')
+const source = await readFile(
+  path.join(root, 'packages/db/src/errors.ts'),
+  'utf8',
+)
 
 /**
  * The longest stretch of a message that the source holds verbatim, so it is
