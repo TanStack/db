@@ -88,6 +88,18 @@ order. The review also asked whether the subscription lifecycle grammar oracle
 should own this. Its subscription ownership and replay contract does not
 change; the new law is a publication reentrancy law, which this oracle owns.
 
+## CodeRabbit review
+
+CodeRabbit found that the second gate ended its hold before it delivered the
+held batches. A commit that the subscriber's callback made on a held batch then
+published before the batches still held. The gate now holds while it drains,
+so such a commit queues behind the rest.
+
+A smaller design was also tried: register the subscription before the snapshot
+and hold nothing. It delivers the right rows in order, but a commit inside the
+snapshot callback calls that callback again before it returns. That breaks the
+oracle's non-reentrant publication law, so it is rejected.
+
 ## Why the oracles missed it
 
 The reentrancy oracle generated listener work only from change listeners. No
@@ -115,12 +127,16 @@ Pinned witnesses cover setup paths the grammar does not generate:
 - A snapshot callback that commits and then throws fails `subscribeChanges`,
   and the subscriber receives nothing more.
 - Two commits to one key inside the callback arrive as two batches.
+- A commit that the callback makes on a held batch arrives after the batches
+  still held, and the callback is never re-entered.
 
 | Revision | Snapshot lanes | Pinned witnesses |
 | --- | --- | --- |
 | `main` | 4 of 4 fail: the committed batches never arrive | restart and same-key fail |
 | Collection-wide deferral (first design) | 4 of 4 fail: the observer's batches are late and flattened | load fails: `update 1` repeated |
 | first gate (one merged batch, cleanup counter) | 4 of 4 fail | restart and same-key fail |
+| second gate (hold ends before the drain) | pass | drain fails: `[1], [2], [4], [3]` |
+| register before the snapshot, no hold | 4 of 4 fail: listener depth 2 | load, cleanup, and throw fail |
 | this fix | pass | pass |
 | cleanup keeps held batches | pass | both cleanup cases fail |
 | gate drops held batches | 4 of 4 fail | restart fails |

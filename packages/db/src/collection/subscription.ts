@@ -1118,14 +1118,17 @@ export class CollectionSubscription
   }
 
   emitEvents(changes: Array<ChangeMessage<any, any>>): boolean {
-    if (this.unsubscribed) return false
     // The snapshot not yet read already includes these changes. Batches
     // published inside its callback reach this subscriber after it, in order.
-    if (this.setupBatches === null) return false
-    if (this.setupBatches) {
-      this.setupBatches.push(changes)
+    if (this.setupBatches !== undefined) {
+      this.setupBatches?.push(changes)
       return false
     }
+    return this.deliverEvents(changes)
+  }
+
+  private deliverEvents(changes: Array<ChangeMessage<any, any>>): boolean {
+    if (this.unsubscribed) return false
     const newChanges = this.filterAndFlipChanges(changes)
 
     // Reconciliation can reduce a source delta to no visible change. Do not
@@ -1143,21 +1146,18 @@ export class CollectionSubscription
    * callback ran. A failed setup delivers none of them.
    */
   requestInitialSnapshot(options: RequestSnapshotOptions): void {
-    this.setupBatches = null
+    // Widened: publishSnapshot opens the hold while requestSnapshot runs.
+    this.setupBatches = null as typeof this.setupBatches
     try {
       this.requestSnapshot(options)
-    } catch (error) {
-      this.takeSetupBatches()
-      throw error
+      // Hold while draining, so a batch a held batch's callback publishes
+      // queues behind the rest.
+      while (this.setupBatches?.length) {
+        this.deliverEvents(this.setupBatches.shift()!)
+      }
+    } finally {
+      this.setupBatches = undefined
     }
-    for (const batch of this.takeSetupBatches()) this.emitEvents(batch)
-  }
-
-  /** End setup and return the batches it held. */
-  private takeSetupBatches(): Array<Array<ChangeMessage<any, any>>> {
-    const batches = this.setupBatches ?? []
-    this.setupBatches = undefined
-    return batches
   }
 
   /** Keep direct snapshot reads private while an authoritative replay is open. */

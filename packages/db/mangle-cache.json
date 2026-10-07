@@ -384,5 +384,5 @@
   "applyOwnedMutations": "bX",
   "commitDirect": "cn",
   "setupBatches": "c_",
-  "takeSetupBatches": "dH"
+  "deliverEvents": "dH"
 }

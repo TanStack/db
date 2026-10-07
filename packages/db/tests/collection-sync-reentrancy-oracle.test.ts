@@ -813,14 +813,13 @@ describe(`sync publication reentrancy`, () => {
     'insert 3': { type: `insert`, key: 3, value: `prior-three` },
   }
   const callbackIntents = (visible: ReadonlyMap<number, string>) =>
-    [1, 2, 3, 4].flatMap(
-      (key): Array<ReadyIntent> =>
-        visible.has(key)
-          ? [
-              { type: `update`, key, value: `callback-${key}` },
-              { type: `delete`, key },
-            ]
-          : [{ type: `insert`, key, value: `callback-${key}` }],
+    [1, 2, 3, 4].flatMap((key): Array<ReadyIntent> =>
+      visible.has(key)
+        ? [
+            { type: `update`, key, value: `callback-${key}` },
+            { type: `delete`, key },
+          ]
+        : [{ type: `insert`, key, value: `callback-${key}` }],
     )
   const sourceValues = new Set<string>(
     [...sourceBefore, ...replacement].map(([, value]) => value),
@@ -1698,6 +1697,40 @@ describe(`sync publication reentrancy`, () => {
     try {
       expect(batches).toEqual([[`insert 1`], [`insert 5`], [`update 5`]])
       expect(collection.get(5)?.value).toBe(`updated`)
+    } finally {
+      subscription.unsubscribe()
+      await collection.cleanup()
+    }
+  })
+
+  // A held batch's callback can commit too. That commit queues behind the
+  // batches still held, so the subscriber sees every batch in commit order and
+  // its callback is never re-entered.
+  it(`queues a commit made while held batches drain behind the rest`, async () => {
+    const harness = createSyncHarness(`snapshot-drain-commit`)
+    const { collection } = harness
+    stageInsert(harness.sync, { id: 1, value: `outer` })
+    harness.sync.commit()
+    const batches: Array<Array<number>> = []
+    let depth = 0
+    let maxDepth = 0
+    const subscription = collection.subscribeChanges(
+      (changes) => {
+        maxDepth = Math.max(maxDepth, ++depth)
+        const keys = changes.map(({ key }) => key)
+        batches.push(keys)
+        const next = keys[0] === 1 ? [2, 3] : keys[0] === 2 ? [4] : []
+        for (const id of next) {
+          stageInsert(harness.sync, { id, value: `inside` })
+          harness.sync.commit()
+        }
+        depth--
+      },
+      { includeInitialState: true },
+    )
+    try {
+      expect(batches).toEqual([[1], [2], [3], [4]])
+      expect(maxDepth).toBe(1)
     } finally {
       subscription.unsubscribe()
       await collection.cleanup()
