@@ -628,75 +628,6 @@ async function expectDeferredRefetchWaitsForApplication(
   }
 }
 
-async function expectRefetchWaitsForPostWriteAuthority(): Promise<void> {
-  const queryClient = createQueryClient()
-  const id = `load-subset-refetch-authority-${collectionSequence++}`
-  const initialResult = createDeferred<Array<Row>>()
-  const authoritativeResult = createDeferred<Array<Row>>()
-  const initialStarted = createDeferred<void>()
-  const authoritativeStarted = createDeferred<void>()
-  let calls = 0
-  const queryFn = vi.fn(() => {
-    calls++
-    if (calls === 1) {
-      initialStarted.resolve()
-      return initialResult.promise
-    }
-    authoritativeStarted.resolve()
-    return authoritativeResult.promise
-  })
-  const collection = createCollection(
-    queryCollectionOptions<Row>({
-      id,
-      queryClient,
-      queryKey: [id],
-      queryFn,
-      getKey: (row) => row.id,
-      startSync: true,
-      syncMode: `on-demand`,
-      retry: false,
-    }),
-  )
-  let initialDemand: Promise<void> | undefined
-  let refetchDemand: Promise<void> | undefined
-
-  try {
-    collection.utils.writeInsert({ id: `optimistic` })
-    initialDemand = collection._sync.loadSubset({}) as Promise<void>
-    await initialStarted.promise
-
-    collection.utils.writeDelete(`optimistic`)
-    refetchDemand = collection._sync.loadSubset({
-      refetch: true,
-    }) as Promise<void>
-    let refetchFulfilled = false
-    void refetchDemand.then(() => {
-      refetchFulfilled = true
-    })
-
-    initialResult.resolve([{ id: `stale` }])
-    await authoritativeStarted.promise
-    await new Promise<void>((resolve) => setTimeout(resolve, 0))
-
-    expect(queryFn).toHaveBeenCalledTimes(2)
-    expect(refetchFulfilled).toBe(false)
-    expect(collection.has(`stale`)).toBe(false)
-
-    authoritativeResult.resolve([{ id: `authoritative` }])
-    await Promise.all([initialDemand, refetchDemand])
-    expect(collection.has(`authoritative`)).toBe(true)
-  } finally {
-    initialResult.resolve([])
-    authoritativeResult.resolve([])
-    await Promise.allSettled([
-      initialDemand ?? Promise.resolve(),
-      refetchDemand ?? Promise.resolve(),
-    ])
-    await collection.cleanup()
-    queryClient.clear()
-  }
-}
-
 async function expectReleasedRefetchRejects(): Promise<void> {
   const queryClient = createQueryClient()
   const id = `load-subset-refetch-release-${collectionSequence++}`
@@ -1371,10 +1302,6 @@ describe(`loadSubset lifecycle oracle`, () => {
       await expectDeferredRefetchWaitsForApplication(demand)
     },
   )
-
-  it(`keeps refetch pending until a post-write fetch becomes authoritative`, async () => {
-    await expectRefetchWaitsForPostWriteAuthority()
-  })
 
   it(`rejects a refetch after its final acquisition is released`, async () => {
     await expectReleasedRefetchRejects()

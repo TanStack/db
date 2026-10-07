@@ -280,6 +280,83 @@ comment and the current API/architecture contract before extending its model.
 | Boundary refinements                         | [cleanup/restart](https://github.com/TanStack/db/blob/main/packages/db/tests/collection-cleanup-restart-oracle.test.ts), [idle cleanup](https://github.com/TanStack/db/blob/main/packages/db/tests/collection-idle-cleanup.test.ts), [issue #1891 async-cleanup review](oracle-reviews/issue-1891-async-cleanup.md), [issue #1891 cleanup-start follow-up](oracle-reviews/issue-1891-cleanup-start-followup.md), [metadata publication](https://github.com/TanStack/db/blob/main/packages/db/tests/collection-metadata-publication-oracle.property.test.ts), [row metadata composition](https://github.com/TanStack/db/blob/main/packages/db/tests/collection-row-metadata-composition-oracle.test.ts), [nested-begin metadata rebuild review](oracle-reviews/2026-10-06-nested-begin-metadata-rebuild.md), [state mutation round 4](oracle-reviews/2026-10-06-state-mutation-round-4.md), [state retention](https://github.com/TanStack/db/blob/main/packages/db/tests/collection-state-retention-oracle.property.test.ts), [acquisition cells](https://github.com/TanStack/db/blob/main/packages/db/tests/collection-subscription-lifecycle-oracle.test.ts), [D2 source reconciliation](https://github.com/TanStack/db/blob/main/packages/db/tests/d2-source-reconciliation-oracle.property.test.ts), [top-K support windows](https://github.com/TanStack/db/blob/main/packages/db-ivm/tests/operators/topk-support-window-oracle.test.ts), [nested Query work](https://github.com/TanStack/db/blob/main/packages/query-db-collection/tests/includes-work-counter-oracle.test.ts)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           | Explicit lifecycle products, independent source maps and weighted relations, exact publication cuts, support/multiplicity, and value-plus-work observations. These refine the larger subsystem models; they do not replace them.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
 | Small structures and test mechanics          | [SortedMap](https://github.com/TanStack/db/blob/main/packages/db/tests/SortedMap-oracle.test.ts), [cleanup queue](https://github.com/TanStack/db/blob/main/packages/db/tests/cleanup-queue-oracle.property.test.ts), [live-query GC clock](https://github.com/TanStack/db/blob/main/packages/db/tests/collection-gc-clock.test.ts), [guarded replay](https://github.com/TanStack/db/blob/main/packages/db/tests/oracle-replay.test.ts)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            | Map/full-sort and elapsed appointment-list models with executed target/seed/path checks. SortedMap also checks deferred bulk writes, array-movement work, scan reuse, live iterators, runtime `undefined` keys, and public single-transaction and queued-transaction Collection sync paths. It does not settle the contract for comparator-observed values mutated after publication or every legal iterator/mutation interleaving. Wall-clock steps do not move due times, and a focused public witness checks source subscription release. Callback-reentrant scheduling, OS suspend/resume, environments without `performance.now()`, and fake/real Performance clock replacement while GC is pending remain outside this coverage. Tests must drain or reset pending GC before switching timer providers.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
 
+The Query DB ownership oracle owns the direct-write no-automatic-refetch law
+([review](oracle-reviews/issue-1935-direct-write-refetch.md)).
+Its real QueryClient witness loads ten disjoint on-demand subsets, then checks
+`writeUpsert`, `writeUpdate`, `writeDelete`, `writeInsert`, and a mixed
+`writeBatch`. After each accepted write it compares public live-query rows with
+an independent category filter and checks that no provider request started.
+The pre-repair implementation failed this request check with ten requests after
+one upsert. A held `deferDataRefresh` barrier adds a request checkpoint after
+release; the pre-review implementation made an unwanted request there. A
+derived-`select` witness checks that a direct write cannot replace an `edges`
+array with node objects. It permits a stale cache row while requiring a valid
+response envelope and the accepted public row. A direct-insert/unload witness
+keeps a manually written row after its queried peer retires; assigning every
+insert to the active subset fails that public-row checkpoint. Existing sibling
+cache witnesses reject retaining inactive entries under the Collection's base
+query-key prefix, including entries seeded before sync starts. The load-lifecycle oracle
+separately owns explicit refetch settlement; the ownership oracle checks that
+an explicit refetch after a direct write starts a post-write request when the
+initial fetch is still pending. A direct write alone starts no request. These bounded
+witnesses do not establish exact Query cache membership, ordering, or window
+replacement after a direct write. The ownership oracle owns future scoped-cache
+witnesses; the cursor-pagination oracle owns windowed receiving cases. The
+offline-transactions owner still needs a full reconnect-replay witness for its
+real `deferDataRefresh` premise. The ownership oracle also owns a later-remount
+witness after an inactive prefetched entry is evicted, and direct-insert
+retention across persisted restore remains with its persisted-owner histories.
+
+The ownership oracle also checks per-key precedence when a held on-demand
+refetch meets a later direct update, error and invalidation/freshness metadata
+across cache patches, one patch per physical Query under a colliding hash, and
+owner-bounded key extraction for ten disjoint 1,000-row subsets. An eager
+derived-`select` remount witness rejects replaying its stale envelope over a
+direct write; a foreign-observer witness permits an old inactive cache value
+while requiring the public row to survive remount and release of another owner.
+These controlled Query Core histories do not establish arbitrary `select`
+inverses, exact scoped membership or window replacement, every custom hash
+collision, or unbounded performance. The Query DB ownership oracle owns
+further direct-write cache histories; cursor pagination owns windowed receiving
+behavior.
+A caller using direct writes must accept the
+scoped-cache limits or request an explicit refetch.
+
+The ownership oracle also checks five later boundaries from PR #2065 review:
+a derived `select` still applies a held fetch's rows and settles eager
+readiness after a direct insert; overlapping explicit refetch callers follow
+the replacement request after a silent cancellation; a fetched result queued
+behind a persisted-baseline scan cannot overwrite a later accepted write; a
+zero-lease subset observer retained by a listener receives a direct cache
+patch before reacquisition; and eight retired on-demand subsets leave no
+fetch-start positions (removing the retirement call fails at eight retained
+entries). The Query error, invalidation, and staleness checks now cover both
+eager and on-demand modes. These are controlled Query Core and persistence
+seams. They do not establish every derived response shape, arbitrary
+overlapping refetch schedule, native SQLite timing for the queued-result cut,
+or unbounded cache-memory growth. This owner retains those boundaries; the
+persisted direct-write oracle owns native durable-order receiving cases.
+The retained-Query witness holds an empty-cache fetch across subset unload and
+reacquisition. A direct delete then requires an explicit refetch to start a
+post-write request and preserve the deleted public row at settlement; without
+a later write, the same refetch may reuse the in-flight request. A separate
+checkpoint keeps the detached fetch-start position until that request settles
+and retires it afterward. These controlled histories do not establish every
+persisted adapter or Query cache-removal schedule.
+The [PR #2065 review at 74e399150](oracle-reviews/pr-2065-74e399-review.md)
+adds ordinary-unload and unobserved-fetch histories to that request-order law.
+The ownership oracle also checks derived-select reacquisition and eager restart,
+explicit subset refetch, a derived result held behind `deferDataRefresh`, a
+provisional cache row awaiting persisted application, aliased physical Queries,
+and the boundary between an in-flight pending Query and an idle empty cache
+entry. The cursor-pagination integration oracle supplies the idle-entry control.
+The ordinary-unload, provisional-row, and alias tests reject their respective
+hostile classifiers at public-row or cache checkpoints. These finite histories
+do not establish every persistence schedule, every Query hash collision, or a
+full offline replay; those remain owned by the Query DB ownership and offline
+receiving oracles. Query Core 5.90.20 is the tested cancellation boundary;
+older supported versions are excluded by the package peer minimum.
+
 The [React source ID reuse oracle](https://github.com/TanStack/db/blob/main/packages/react-db/tests/source-id-reuse-oracle.test.tsx) ([review](oracle-reviews/issue-1991-react-source-id.md))
 checks that a mounted derived-identity hook rejects a different same-ID
 source Collection directly, after an intervening ID and predicate, within one
@@ -1172,13 +1249,13 @@ SQLite adapter and local persisted wrapper. Global constructors must be
 registered; other Temporal kinds reject. Existing lifecycle, receipt and
 publication-before-durability laws remain with their current owners.
 
-- The [typed-value owner](../../packages/db-sqlite-persistence-core/tests/sqlite-temporal-value-oracle.test.ts)
+- The [typed-value owner](https://github.com/TanStack/db/blob/main/packages/db-sqlite-persistence-core/tests/sqlite-temporal-value-oracle.test.ts)
   checks real file reopen, direct/nested rows, metadata, replay, equality/range,
   Boolean/IN, large IN, field comparisons, cursor ties/continuation and ordered
   windows. Its directly named rank/text companion supplies independent native
   observations across precision, signed-year, endpoint and calendar families.
   Constructor failures, invalid brands and marker-shaped records are included.
-- The [Node expression-index owner](../../packages/node-db-sqlite-persistence/tests/expression-index-oracle.test.ts)
+- The [Node expression-index owner](https://github.com/TanStack/db/blob/main/packages/node-db-sqlite-persistence/tests/expression-index-oracle.test.ts)
   checks raw SQL before residual cleanup, final adapter keys and actual named
   index use. Wrapper-created coalesce indexes reach Collection metadata/native
   literals and distinguish adjacent-literal signatures. Small and large scalar
@@ -1189,11 +1266,11 @@ publication-before-durability laws remain with their current owners.
   Negated coalesce and scalar eq(in(...), true) keep #1997's full-read fallback.
   Exact replay excludes unrelated native cases; simultaneous semantic/cleanup
   failure retains both errors and still closes SQLite.
-- The [ordinary-work owner](../../packages/db-sqlite-persistence-core/tests/ordinary-transaction-work-oracle.ts)
+- The [ordinary-work owner](https://github.com/TanStack/db/blob/main/packages/db-sqlite-persistence-core/tests/ordinary-transaction-work-oracle.ts)
   adds twelve native repeated-action success/rollback histories and invalid
   superseded actions. Its independent Map model retains immutable native values;
   kind/text observations reject the old structuredClone false-green boundary.
-- The [persisted wrapper owner](../../packages/db-sqlite-persistence-core/tests/persisted-oracle.test.ts)
+- The [persisted wrapper owner](https://github.com/TanStack/db/blob/main/packages/db-sqlite-persistence-core/tests/persisted-oracle.test.ts)
   rejects native remote-subset literals before dispatch/retry, including an
   ownerless leader that becomes a follower while hydration waits or after local
   success followed by sequence-gap recovery. The latter uses the existing
@@ -1285,7 +1362,7 @@ to the following owners:
   indexes on same-schema reopen. A registry-cleanup mutant fails this witness.
   Automatic reclamation without reset and lossless old-byte migration remain
   outside the selected policy; this test does not claim either.
-- The [Collection index-value owner](../../packages/db/tests/collection-index-value-oracle.test.ts)
+- The [Collection index-value owner](https://github.com/TanStack/db/blob/main/packages/db/tests/collection-index-value-oracle.test.ts)
   distinguishes native literals from ordinary tagged records, nested mixtures,
   and the escape envelope while preserving equivalent key orders (BOUNDARY-005).
   Plain and null-prototype own-tag records have isolated metadata snapshots
