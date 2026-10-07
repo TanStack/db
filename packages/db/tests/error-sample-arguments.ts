@@ -156,6 +156,7 @@ export const errorSampleArguments: Record<string, Array<Array<unknown>>> = {
   SetWindowRequiresOrderByError: [[]],
 
   // Window errors
+  UnhashableQueryIRError: [['query.fnSelect', 'function select']],
   SetWindowReentrancyError: [[]],
 
   // Error classes with just message parameter (no special handling)

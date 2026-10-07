@@ -83,5 +83,6 @@
   "MissingAliasInputsError": 83,
   "SetWindowRequiresOrderByError": 84,
   "SetWindowReentrancyError": 85,
-  "PacedTransactionManualCommitError": 86
+  "PacedTransactionManualCommitError": 86,
+  "UnhashableQueryIRError": 87
 }

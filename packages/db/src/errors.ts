@@ -1176,3 +1176,17 @@ export class SetWindowReentrancyError extends TanStackDBError {
     this.name = `SetWindowReentrancyError`
   }
 }
+
+export class UnhashableQueryIRError extends Error {
+  constructor(
+    public readonly path: string,
+    public readonly reason: string,
+  ) {
+    super(
+      devBuild() && process.env.NODE_ENV !== `production`
+        ? `Query IR is not stably hashable at ${path}: ${reason}`
+        : codedMessage(87, { path, reason }),
+    )
+    this.name = `UnhashableQueryIRError`
+  }
+}

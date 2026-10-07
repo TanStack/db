@@ -27,9 +27,10 @@
  *   class.
  *
  * The model is the frozen fixtures and the format above; nothing here reads
- * codes from `src/errors.ts`. The production path is the exported error
- * classes constructed directly under `vi.stubEnv('NODE_ENV', ...)`. Errors that
- * production code builds elsewhere reach users through the same constructors.
+ * codes from `src/errors.ts`. The production path is every error class that the
+ * public package entry exports, wherever it is defined, constructed directly
+ * under `vi.stubEnv('NODE_ENV', ...)`. Errors that production code builds
+ * elsewhere reach users through the same constructors.
  *
  * Limits: the sample inputs per class, and a fixed set of hostile inputs
  * substituted one argument at a time. Messages a caller passes to a base class
@@ -40,7 +41,7 @@ import { readFileSync } from 'node:fs'
 import { dirname, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import * as Errors from '../src/errors'
+import * as Errors from '../src/index'
 import { errorSampleArguments } from './error-sample-arguments'
 
 const testsDirectory = dirname(fileURLToPath(import.meta.url))

@@ -918,3 +918,13 @@ Development builds show the full message. For example:
 ```text
 Paced mutations are committed by their strategy. Await the transaction receipt or roll it back instead.
 ```
+
+<a id="error-87"></a>
+
+## Error 87: `UnhashableQueryIRError`
+
+Development builds show the full message. For example:
+
+```text
+Query IR is not stably hashable at query.fnSelect: function select
+```
