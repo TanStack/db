@@ -43,10 +43,10 @@ describe(`DifferenceStreamReader and DifferenceStreamWriter`, () => {
 
     expect(messages1).toHaveLength(2)
     expect(messages2).toHaveLength(2)
-    expect(messages1[0].getInner()).toEqual([[1, 1]])
-    expect(messages2[0].getInner()).toEqual([[1, 1]])
-    expect(messages1[1].getInner()).toEqual([[2, 1]])
-    expect(messages2[1].getInner()).toEqual([[2, 1]])
+    expect(messages1[0]!.getInner()).toEqual([[1, 1]])
+    expect(messages2[0]!.getInner()).toEqual([[1, 1]])
+    expect(messages1[1]!.getInner()).toEqual([[2, 1]])
+    expect(messages2[1]!.getInner()).toEqual([[2, 1]])
   })
 
   test(`drain empties the queue`, () => {

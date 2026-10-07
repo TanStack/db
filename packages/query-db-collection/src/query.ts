@@ -1,27 +1,40 @@
-import { QueryObserver, hashKey } from '@tanstack/query-core'
-import { deepEquals } from '@tanstack/db'
+import {
+  CancelledError,
+  QueryObserver,
+  hashKey,
+  partialMatchKey,
+} from '@tanstack/query-core'
+import {
+  LoadSubsetOperationAbortedError,
+  deepEquals,
+  getLoadSubsetDemandKey,
+  validateSyncPersistenceCapability,
+  warnOnce,
+  whenSyncAccepted,
+  withCollectionConfigFactory,
+  withCollectionSyncConfigFactory,
+} from '@tanstack/db'
 import {
   GetKeyRequiredError,
+  InitialDataInOnDemandModeError,
+  InvalidQueryResultError,
   QueryClientRequiredError,
   QueryFnRequiredError,
   QueryKeyRequiredError,
 } from './errors'
 import { createWriteUtils } from './manual-sync'
-import { serializeLoadSubsetOptions } from './serialization'
+import { runCleanupWithLocalTeardown } from './cleanup'
 import type {
   BaseCollectionConfig,
   ChangeMessage,
   CollectionConfig,
-  DeleteMutationFnParams,
-  InsertMutationFnParams,
   LoadSubsetOptions,
+  SyncAppliedReceipt,
   SyncConfig,
-  SyncMetadataApi,
-  UpdateMutationFnParams,
-  UtilsRecord,
 } from '@tanstack/db'
 import type {
   FetchStatus,
+  Query,
   QueryClient,
   QueryFunctionContext,
   QueryKey,
@@ -49,6 +62,40 @@ type InferSchemaInput<T> = T extends StandardSchemaV1
 
 type TQueryKeyBuilder<TQueryKey> = (opts: LoadSubsetOptions) => TQueryKey
 
+const queryObserverOptionKeys = [
+  `enabled`,
+  `refetchInterval`,
+  `retry`,
+  `retryDelay`,
+  `staleTime`,
+  `gcTime`,
+  `refetchOnWindowFocus`,
+  `refetchOnReconnect`,
+  `refetchOnMount`,
+  `networkMode`,
+] as const
+
+type QueryObserverOptionKey = (typeof queryObserverOptionKeys)[number]
+
+type QueryObserverOptionValues = Pick<
+  QueryObserverOptions<Array<any>, any, Array<any>, Array<any>, any>,
+  QueryObserverOptionKey
+>
+
+function pickDefinedQueryObserverOptions(
+  config: Partial<QueryObserverOptionValues>,
+): Partial<QueryObserverOptionValues> {
+  const options: Partial<QueryObserverOptionValues> = {}
+
+  for (const key of queryObserverOptionKeys) {
+    if (config[key] !== undefined) {
+      ;(options as Record<QueryObserverOptionKey, unknown>)[key] = config[key]
+    }
+  }
+
+  return options
+}
+
 /**
  * Configuration options for creating a Query Collection
  * @template T - The explicit type of items stored in the collection
@@ -68,7 +115,17 @@ export interface QueryCollectionConfig<
   TKey extends string | number = string | number,
   TSchema extends StandardSchemaV1 = never,
   TQueryData = Awaited<ReturnType<TQueryFn>>,
-> extends BaseCollectionConfig<T, TKey, TSchema> {
+> extends BaseCollectionConfig<
+  T,
+  TKey,
+  TSchema,
+  QueryCollectionUtils<
+    T,
+    TKey,
+    [TSchema] extends [never] ? T : InferSchemaInput<TSchema>,
+    TError
+  >
+> {
   /** The query key used by TanStack Query to identify this query */
   queryKey: TQueryKey | TQueryKeyBuilder<TQueryKey>
   /** Function that fetches data from the server. Must return the complete collection state */
@@ -77,7 +134,10 @@ export interface QueryCollectionConfig<
   ) => Promise<Array<any>> | Array<any>
     ? (context: QueryFunctionContext<TQueryKey>) => Promise<Array<T>> | Array<T>
     : TQueryFn
-  /* Function that extracts array items from wrapped API responses (e.g metadata, pagination)  */
+  /**
+   * Extracts the row array TanStack DB materializes from the Query response.
+   * The Query cache keeps the original response shape.
+   */
   select?: (data: TQueryData) => Array<T>
   /** The TanStack Query client instance */
   queryClient: QueryClient
@@ -126,6 +186,54 @@ export interface QueryCollectionConfig<
     TQueryData,
     TQueryKey
   >[`gcTime`]
+  refetchOnWindowFocus?: QueryObserverOptions<
+    TQueryData,
+    TError,
+    Array<T>,
+    TQueryData,
+    TQueryKey
+  >[`refetchOnWindowFocus`]
+  refetchOnReconnect?: QueryObserverOptions<
+    TQueryData,
+    TError,
+    Array<T>,
+    TQueryData,
+    TQueryKey
+  >[`refetchOnReconnect`]
+  refetchOnMount?: QueryObserverOptions<
+    TQueryData,
+    TError,
+    Array<T>,
+    TQueryData,
+    TQueryKey
+  >[`refetchOnMount`]
+  networkMode?: QueryObserverOptions<
+    TQueryData,
+    TError,
+    Array<T>,
+    TQueryData,
+    TQueryKey
+  >[`networkMode`]
+  /**
+   * Data used to initialize the TanStack Query cache for an eager collection.
+   * The value has the original Query response shape and is projected through
+   * the collection's select option before rows are materialized.
+   */
+  initialData?: QueryObserverOptions<
+    TQueryData,
+    TError,
+    Array<T>,
+    TQueryData,
+    TQueryKey
+  >[`initialData`]
+  /** The timestamp TanStack Query uses to determine initialData freshness. */
+  initialDataUpdatedAt?: QueryObserverOptions<
+    TQueryData,
+    TError,
+    Array<T>,
+    TQueryData,
+    TQueryKey
+  >[`initialDataUpdatedAt`]
   persistedGcTime?: number
 
   /**
@@ -153,7 +261,19 @@ export interface QueryCollectionConfig<
 
 /**
  * Type for the refetch utility function
- * Returns the QueryObserverResult from TanStack Query
+ * Returns QueryObserverResults from TanStack Query after the applicable
+ * boundary. Normally this waits until each accepted result has been applied to
+ * the Collection. While a user mutation is persisting or its handler is
+ * active, refetch retains the Query fetch boundary because normal application
+ * is queued behind that transaction. At the application boundary,
+ * `throwOnError` applies to both Query fetch and Collection application
+ * failures. At the fetch boundary it applies only to Query fetch failure; a
+ * later application failure is recorded by the Collection error utilities.
+ * At the application boundary, a successful Query result that the adapter
+ * cannot apply rejects with `InvalidQueryResultError` regardless of
+ * `throwOnError`. At the fetch boundary, that failure is recorded by the
+ * Collection error utilities. If application is deferred at the application
+ * boundary, the promise waits for the replacement result to apply.
  */
 export type RefetchFn = (opts?: {
   throwOnError?: boolean
@@ -161,7 +281,8 @@ export type RefetchFn = (opts?: {
 
 /**
  * Utility methods available on Query Collections for direct writes and manual operations.
- * Direct writes bypass the normal query/mutation flow and write directly to the synced data store.
+ * Direct writes bypass optimistic mutations and write to the synced data store.
+ * Eager collections patch Query cache; on-demand collections revalidate scoped entries.
  * @template TItem - The type of items stored in the collection
  * @template TKey - The type of the item keys
  * @template TInsertInput - The type accepted for insert operations
@@ -172,28 +293,32 @@ export interface QueryCollectionUtils<
   TKey extends string | number = string | number,
   TInsertInput extends object = TItem,
   TError = unknown,
-> extends UtilsRecord {
-  /** Manually trigger a refetch of the query */
+> {
+  // Keep this interface closed: extending UtilsRecord would make every
+  // nonexistent adapter utility appear as `any`.
+  /** Manually refetch and await the applicable fetch or application boundary. */
   refetch: RefetchFn
-  /** Insert one or more items directly into the synced data store without triggering a query refetch or optimistic update */
-  writeInsert: (data: TInsertInput | Array<TInsertInput>) => void
-  /** Update one or more items directly in the synced data store without triggering a query refetch or optimistic update */
-  writeUpdate: (updates: Partial<TItem> | Array<Partial<TItem>>) => void
-  /** Delete one or more items directly from the synced data store without triggering a query refetch or optimistic update */
-  writeDelete: (keys: TKey | Array<TKey>) => void
-  /** Insert or update one or more items directly in the synced data store without triggering a query refetch or optimistic update */
-  writeUpsert: (data: Partial<TItem> | Array<Partial<TItem>>) => void
-  /** Execute multiple write operations as a single atomic batch to the synced data store */
-  writeBatch: (callback: () => void) => void
+  /** Insert items without an optimistic update. Resolves when the sync commit applies. */
+  writeInsert: (data: TInsertInput | Array<TInsertInput>) => Promise<void>
+  /** Update items without an optimistic update. Resolves when the sync commit applies. */
+  writeUpdate: (
+    updates: Partial<TItem> | Array<Partial<TItem>>,
+  ) => Promise<void>
+  /** Delete items without an optimistic update. Resolves when the sync commit applies. */
+  writeDelete: (keys: TKey | Array<TKey>) => Promise<void>
+  /** Insert or update items without an optimistic update. Resolves when the sync commit applies. */
+  writeUpsert: (data: Partial<TItem> | Array<Partial<TItem>>) => Promise<void>
+  /** Execute direct writes as one atomic batch. Resolves when the sync commit applies. */
+  writeBatch: (callback: () => void) => Promise<void>
 
   // Query Observer State (getters)
-  /** Get the last error encountered by the query (if any); reset on success */
+  /** Get the last error encountered by the query (if any); reset after a successful result applies */
   lastError: TError | undefined
   /** Check if the collection is in an error state */
   isError: boolean
   /**
    * Get the number of consecutive sync failures.
-   * Incremented only when query fails completely (not per retry attempt); reset on success.
+   * Incremented only when query fails completely (not per retry attempt); reset after a successful result applies.
    */
   errorCount: number
   /** Check if query is currently fetching (initial or background) */
@@ -204,12 +329,19 @@ export interface QueryCollectionUtils<
   isLoading: boolean
   /** Get timestamp of last successful data update (in milliseconds) */
   dataUpdatedAt: number
-  /** Get current fetch status */
+  /**
+   * Get the aggregate observer fetch status. Returns `fetching` if any
+   * observer is fetching, otherwise `paused` if any observer is paused, and
+   * `idle` when every observer is idle or no observers exist.
+   */
   fetchStatus: `fetching` | `paused` | `idle`
 
   /**
-   * Clear the error state and trigger a refetch of the query
-   * @returns Promise that resolves when the refetch completes successfully
+   * Refetch, retaining errors until a successful result applies. While a user
+   * mutation is persisting or its handler is active, this retains the Query
+   * fetch boundary so it cannot wait on publication blocked by that
+   * transaction.
+   * @returns Promise that resolves when the applicable refetch boundary completes
    * @throws Error if the refetch fails
    */
   clearError: () => Promise<void>
@@ -221,7 +353,6 @@ export interface QueryCollectionUtils<
 interface QueryCollectionState {
   lastError: any
   errorCount: number
-  lastErrorUpdatedAt: number
   observers: Map<
     string,
     QueryObserver<Array<any>, any, Array<any>, Array<any>, any>
@@ -241,37 +372,29 @@ type PersistedQueryRetentionEntry =
 
 const QUERY_COLLECTION_GC_PREFIX = `queryCollection:gc:`
 
-type PersistedScannedRowForQuery<TItem extends object> = {
-  key: string | number
-  value: TItem
-  metadata?: unknown
-}
+type AnyQuery = Query<any, any, any, any>
 
-type QuerySyncMetadataWithPersistedScan<TItem extends object> = SyncMetadataApi<
-  string | number
-> & {
-  row: SyncMetadataApi<string | number>[`row`] & {
-    scanPersisted?: (options?: {
-      metadataOnly?: boolean
-    }) => Promise<Array<PersistedScannedRowForQuery<TItem>>>
-  }
-}
+let nextQueryCollectionFetchStart = 0
+const queryCollectionFetchActionStarts = new WeakMap<object, number>()
+const queryCollectionCurrentFetchStarts = new WeakMap<AnyQuery, number>()
+const queryCollectionSuccessfulFetchStarts = new WeakMap<AnyQuery, number>()
+const queryCollectionRequiredFetchStarts = new WeakMap<AnyQuery, number>()
+const queryCollectionCacheOwners = new WeakMap<AnyQuery, Set<object>>()
 
 /**
  * Implementation class for QueryCollectionUtils with explicit dependency injection
  * for better testability and architectural clarity
  */
-class QueryCollectionUtilsImpl {
+class QueryCollectionUtilsImpl implements QueryCollectionUtils {
   private state: QueryCollectionState
-  private refetchFn: RefetchFn
 
   // Write methods
   public refetch: RefetchFn
-  public writeInsert: any
-  public writeUpdate: any
-  public writeDelete: any
-  public writeUpsert: any
-  public writeBatch: any
+  public writeInsert: QueryCollectionUtils[`writeInsert`]
+  public writeUpdate: QueryCollectionUtils[`writeUpdate`]
+  public writeDelete: QueryCollectionUtils[`writeDelete`]
+  public writeUpsert: QueryCollectionUtils[`writeUpsert`]
+  public writeBatch: QueryCollectionUtils[`writeBatch`]
 
   constructor(
     state: QueryCollectionState,
@@ -279,7 +402,6 @@ class QueryCollectionUtilsImpl {
     writeUtils: ReturnType<typeof createWriteUtils>,
   ) {
     this.state = state
-    this.refetchFn = refetch
 
     // Initialize methods to use passed dependencies
     this.refetch = refetch
@@ -291,10 +413,7 @@ class QueryCollectionUtilsImpl {
   }
 
   public async clearError() {
-    this.state.lastError = undefined
-    this.state.errorCount = 0
-    this.state.lastErrorUpdatedAt = 0
-    await this.refetchFn({ throwOnError: true })
+    await this.refetch({ throwOnError: true })
   }
 
   // Getters for error state
@@ -342,10 +461,14 @@ class QueryCollectionUtilsImpl {
     )
   }
 
-  public get fetchStatus(): Array<FetchStatus> {
-    return Array.from(this.state.observers.values()).map(
-      (observer) => observer.getCurrentResult().fetchStatus,
-    )
+  public get fetchStatus(): FetchStatus {
+    let aggregate: FetchStatus = `idle`
+    for (const observer of this.state.observers.values()) {
+      const fetchStatus = observer.getCurrentResult().fetchStatus
+      if (fetchStatus === `fetching`) return `fetching`
+      if (fetchStatus === `paused`) aggregate = `paused`
+    }
+    return aggregate
   }
 }
 
@@ -443,16 +566,20 @@ export function queryCollectionOptions<
   TKey extends string | number = string | number,
   TQueryData = Awaited<ReturnType<TQueryFn>>,
 >(
-  config: QueryCollectionConfig<
-    InferSchemaOutput<T>,
-    TQueryFn,
-    TError,
-    TQueryKey,
-    TKey,
-    T
+  config: Omit<
+    QueryCollectionConfig<
+      InferSchemaOutput<T>,
+      TQueryFn,
+      TError,
+      TQueryKey,
+      TKey,
+      T,
+      TQueryData
+    >,
+    `select`
   > & {
     schema: T
-    select: (data: TQueryData) => Array<InferSchemaInput<T>>
+    select: (data: TQueryData) => Array<InferSchemaOutput<T>>
   },
 ): CollectionConfig<
   InferSchemaOutput<T>,
@@ -586,6 +713,12 @@ export function queryCollectionOptions(
     retryDelay,
     staleTime,
     gcTime,
+    refetchOnWindowFocus,
+    refetchOnReconnect,
+    refetchOnMount,
+    networkMode,
+    initialData,
+    initialDataUpdatedAt,
     persistedGcTime,
     getKey,
     onInsert,
@@ -597,6 +730,35 @@ export function queryCollectionOptions(
 
   // Default to eager sync mode if not provided
   const syncMode = baseCollectionConfig.syncMode ?? `eager`
+
+  if (
+    syncMode === `on-demand` &&
+    (initialData !== undefined || initialDataUpdatedAt !== undefined)
+  ) {
+    throw new InitialDataInOnDemandModeError()
+  }
+
+  const initialDataObserverOptions =
+    syncMode === `eager`
+      ? {
+          ...(initialData !== undefined && { initialData }),
+          ...(initialDataUpdatedAt !== undefined && {
+            initialDataUpdatedAt,
+          }),
+          // Placeholder data is observer-local UI state in TanStack Query. It
+          // must not be exposed as collection-wide normalized rows, including
+          // when supplied through QueryClient defaults.
+          placeholderData: undefined,
+        }
+      : {
+          // A collection-wide initializer cannot establish membership for
+          // arbitrary on-demand subsets. A defined initializer is needed to
+          // override a QueryClient default because Query Core can apply
+          // defaults again while constructing each Query.
+          initialData: () => undefined,
+          initialDataUpdatedAt: undefined,
+          placeholderData: undefined,
+        }
 
   // Compute the base query key once for cache lookups.
   // All derived keys (from on-demand predicates or function-based queryKey) must
@@ -651,17 +813,191 @@ export function queryCollectionOptions(
   const state: QueryCollectionState = {
     lastError: undefined as any,
     errorCount: 0,
-    lastErrorUpdatedAt: 0,
     observers: new Map<
       string,
       QueryObserver<Array<any>, any, Array<any>, Array<any>, any>
     >(),
   }
+  let activeMutationHandlerCount = 0
+
+  // Query Cache fetch actions give each request a stable identity. Observer
+  // results and their exact Collection applications are attached to that
+  // identity so unrelated same-key cache work cannot become a refetch
+  // obligation merely because it happened before the call returned.
+  type FetchApplicationRecord = {
+    result?: QueryObserverResult<any, any>
+    settlement?: Promise<void>
+  }
+  const resultApplicationSettlements = new WeakMap<
+    QueryObserverResult<any, any>,
+    Map<string, Promise<void>>
+  >()
+  const fetchApplicationRecords = new WeakMap<
+    AnyQuery,
+    Map<number, Map<string, FetchApplicationRecord>>
+  >()
+  // Query-cache ownership is scoped to this sync run and keyed by the
+  // actual Query object. Weak membership survives subset unload without
+  // retaining entries after Query Core garbage-collects them.
+  let ownedCacheQueries = new WeakSet<AnyQuery>()
+  const cacheOwnerToken = {}
+  let trackedCacheQueries: Set<AnyQuery>
+  const logicalHashesByQuery = new WeakMap<AnyQuery, Set<string>>()
+
+  // Manual writes require a successful fetch which started after the write.
+  // Observe Query Core's fetch/success actions so foreign query functions and
+  // initialPromise fetches count, while cancelled/reverted requests do not.
+  const requiredFetchStarts = new Map<string, number>()
+  const postWriteRefetchGenerations = new Map<string, number>()
+
+  const trackCacheQuery = (query: AnyQuery, logicalHash?: string): void => {
+    trackedCacheQueries.add(query)
+    if (logicalHash !== undefined) {
+      const hashes = logicalHashesByQuery.get(query) ?? new Set<string>()
+      hashes.add(logicalHash)
+      logicalHashesByQuery.set(query, hashes)
+    }
+  }
+
+  const trackOwnedCacheQuery = (query: AnyQuery, logicalHash: string): void => {
+    ownedCacheQueries.add(query)
+    trackCacheQuery(query, logicalHash)
+    const owners = queryCollectionCacheOwners.get(query) ?? new Set<object>()
+    owners.add(cacheOwnerToken)
+    queryCollectionCacheOwners.set(query, owners)
+  }
+
+  const getLogicalHashes = (query: AnyQuery): Set<string> =>
+    logicalHashesByQuery.get(query) ?? new Set([hashKey(query.queryKey)])
+
+  const getFetchApplicationRecord = (
+    query: AnyQuery,
+    fetchStart: number,
+    hashedQueryKey: string,
+  ): FetchApplicationRecord => {
+    const recordsByStart =
+      fetchApplicationRecords.get(query) ??
+      new Map<number, Map<string, FetchApplicationRecord>>()
+    fetchApplicationRecords.set(query, recordsByStart)
+    const recordsByHash =
+      recordsByStart.get(fetchStart) ??
+      new Map<string, FetchApplicationRecord>()
+    recordsByStart.set(fetchStart, recordsByHash)
+    const record = recordsByHash.get(hashedQueryKey) ?? {}
+    recordsByHash.set(hashedQueryKey, record)
+    return record
+  }
+
+  const getRecordedResultApplicationSettlement = (
+    hashedQueryKey: string,
+    result: QueryObserverResult<any, any>,
+  ): Promise<void> | undefined =>
+    resultApplicationSettlements.get(result)?.get(hashedQueryKey)
+
+  const recordResultApplicationSettlement = (
+    hashedQueryKey: string,
+    result: QueryObserverResult<any, any>,
+    settlement: Promise<void>,
+  ): void => {
+    const settlementsByHash =
+      resultApplicationSettlements.get(result) ?? new Map()
+    settlementsByHash.set(hashedQueryKey, settlement)
+    resultApplicationSettlements.set(result, settlementsByHash)
+  }
+
+  const captureFetchResult = (query: AnyQuery, fetchStart: number): void => {
+    for (const hashedQueryKey of getLogicalHashes(query)) {
+      const observer = state.observers.get(hashedQueryKey)
+      if (!observer || observer.getCurrentQuery() !== query) continue
+      const result = observer.getCurrentResult()
+      const record = getFetchApplicationRecord(
+        query,
+        fetchStart,
+        hashedQueryKey,
+      )
+      record.result = result
+      const settlement = getRecordedResultApplicationSettlement(
+        hashedQueryKey,
+        result,
+      )
+      if (settlement) record.settlement = settlement
+    }
+  }
+
+  const captureFetchApplications = (
+    query: AnyQuery,
+    fetchStart: number,
+  ): void => {
+    const recordsByHash = fetchApplicationRecords.get(query)?.get(fetchStart)
+    if (!recordsByHash) return
+    for (const [hashedQueryKey, record] of recordsByHash) {
+      if (!record.result) continue
+      const settlement = getRecordedResultApplicationSettlement(
+        hashedQueryKey,
+        record.result,
+      )
+      if (settlement) record.settlement = settlement
+    }
+  }
+
+  const retireFetchApplicationRecords = (
+    query: AnyQuery,
+    fetchStarts: ReadonlyArray<number>,
+  ): void => {
+    const recordsByStart = fetchApplicationRecords.get(query)
+    if (!recordsByStart) return
+    for (const fetchStart of fetchStarts) recordsByStart.delete(fetchStart)
+    if (recordsByStart.size === 0) fetchApplicationRecords.delete(query)
+  }
+
+  const hasPostWriteAuthority = (
+    hashedQueryKey: string,
+    query: AnyQuery,
+  ): boolean => {
+    const localRequiredStart = requiredFetchStarts.get(hashedQueryKey)
+    const sharedRequiredStart = queryCollectionRequiredFetchStarts.get(query)
+    const requiredStart = Math.max(
+      localRequiredStart ?? 0,
+      sharedRequiredStart ?? 0,
+    )
+    return (
+      (localRequiredStart === undefined && sharedRequiredStart === undefined) ||
+      (queryCollectionSuccessfulFetchStarts.get(query) ?? 0) > requiredStart
+    )
+  }
+
+  const requirePostWriteAuthority = (
+    hashedQueryKey: string,
+    query: AnyQuery,
+  ): number => {
+    requiredFetchStarts.set(hashedQueryKey, nextQueryCollectionFetchStart)
+    queryCollectionRequiredFetchStarts.set(
+      query,
+      Math.max(
+        queryCollectionRequiredFetchStarts.get(query) ?? 0,
+        nextQueryCollectionFetchStart,
+      ),
+    )
+    const postWriteRefetchGeneration =
+      (postWriteRefetchGenerations.get(hashedQueryKey) ?? 0) + 1
+    postWriteRefetchGenerations.set(hashedQueryKey, postWriteRefetchGeneration)
+    return postWriteRefetchGeneration
+  }
+
+  const isObserverEnabled = (
+    observer: QueryObserver<Array<any>, any, Array<any>, Array<any>, any>,
+  ): boolean => {
+    const observerEnabled = observer.options.enabled
+    return typeof observerEnabled === `function`
+      ? observerEnabled(observer.getCurrentQuery()) !== false
+      : observerEnabled !== false
+  }
 
   // hashedQueryKey → queryKey
   const hashToQueryKey = new Map<string, QueryKey>()
 
-  // queryKey → Set<RowKey>
+  // queryKey → Set<RowKey>. Entry presence means ownership is resolved;
+  // an empty set represents a resolved query that currently owns no rows.
   const queryToRows = new Map<string, Set<string | number>>()
 
   // RowKey → Set<queryKey>
@@ -669,6 +1005,24 @@ export function queryCollectionOptions(
 
   // queryKey → QueryObserver's unsubscribe function
   const unsubscribes = new Map<string, () => void>()
+  const pendingReadyUnsubscribes = new Map<string, Set<() => void>>()
+  const manualWriteSnapshots = new Map<
+    string,
+    { data: unknown; dataUpdateCount: number }
+  >()
+  // An eager fetch that started before a direct write returns older server
+  // data. Count direct writes, and record the count when each fetch starts.
+  let directWriteGeneration = 0
+  const fetchStartGenerations = new Map<string, number>()
+  // The generation of the latest direct write to each key.
+  const directWriteKeyGenerations = new Map<string | number, number>()
+  // Direct writes that wait for earlier commits. A result that arrives
+  // meanwhile is handled after them.
+  let pendingDirectWrites: Promise<void> | undefined
+  // True while a direct write puts its accepted rows into the cache.
+  let writingDirectCache = false
+  // Results deferred behind direct writes that have not applied yet.
+  let deferredResults = 0
 
   // queryKey → reference count (how many loadSubset calls are active)
   // Reference counting for QueryObserver lifecycle management
@@ -687,40 +1041,137 @@ export function queryCollectionOptions(
   // 3. Decrements refcount and GCs rows where count reaches 0
   const queryRefCounts = new Map<string, number>()
 
-  // Helper function to add a row to the internal state
-  const addRow = (rowKey: string | number, hashedQueryKey: string) => {
-    const rowToQueriesSet = rowToQueries.get(rowKey) || new Set()
-    rowToQueriesSet.add(hashedQueryKey)
-    rowToQueries.set(rowKey, rowToQueriesSet)
+  // Eager startup holds one reference until cleanup. Cache removal detaches
+  // observation, not that ownership or its rows.
+  let ensureEagerSubscription = () => {}
+  let applyRefetchResultWhenUnsubscribed = (
+    _hashedQueryKey: string,
+    _result: QueryObserverResult<any, any>,
+  ): boolean => false
 
-    const queryToRowsSet = queryToRows.get(hashedQueryKey) || new Set()
-    queryToRowsSet.add(rowKey)
-    queryToRows.set(hashedQueryKey, queryToRowsSet)
+  type ExceptionalResultSettlement =
+    | {
+        type: `pending`
+        promise: Promise<QueryObserverResult<unknown, unknown>>
+        reject: (error: unknown) => void
+      }
+    | { type: `rejected`; error: unknown }
+  let getExceptionalResultSettlement = (
+    _result: QueryObserverResult<unknown, unknown>,
+  ): ExceptionalResultSettlement | undefined => undefined
+  let activeSyncSession: object | undefined
+
+  const addRowOwner = (rowKey: string | number, hashedQueryKey: string) => {
+    const owners = rowToQueries.get(rowKey) || new Set<string>()
+    owners.add(hashedQueryKey)
+    rowToQueries.set(rowKey, owners)
+
+    const ownedRows =
+      queryToRows.get(hashedQueryKey) || new Set<string | number>()
+    ownedRows.add(rowKey)
+    queryToRows.set(hashedQueryKey, ownedRows)
   }
 
-  // Helper function to remove a row from the internal state
-  const removeRow = (rowKey: string | number, hashedQuerKey: string) => {
-    const rowToQueriesSet = rowToQueries.get(rowKey) || new Set()
-    rowToQueriesSet.delete(hashedQuerKey)
-    rowToQueries.set(rowKey, rowToQueriesSet)
+  const addRowOwners = (rowKey: string | number, owners: Set<string>) => {
+    if (owners.size === 0) {
+      rowToQueries.delete(rowKey)
+      return
+    }
 
-    const queryToRowsSet = queryToRows.get(hashedQuerKey) || new Set()
-    queryToRowsSet.delete(rowKey)
-    queryToRows.set(hashedQuerKey, queryToRowsSet)
+    rowToQueries.set(rowKey, new Set(owners))
+    owners.forEach((owner) => {
+      const ownedRows = queryToRows.get(owner) || new Set<string | number>()
+      ownedRows.add(rowKey)
+      queryToRows.set(owner, ownedRows)
+    })
+  }
 
-    return rowToQueriesSet.size === 0
+  const removeRowOwner = (rowKey: string | number, hashedQueryKey: string) => {
+    const owners = rowToQueries.get(rowKey)
+    owners?.delete(hashedQueryKey)
+    if (!owners?.size) {
+      rowToQueries.delete(rowKey)
+    }
+
+    const ownedRows = queryToRows.get(hashedQueryKey)
+    ownedRows?.delete(rowKey)
+
+    return !owners?.size
+  }
+
+  const removeQueryOwnership = (hashedQueryKey: string) => {
+    const nextOwnersByRow = new Map<string | number, Set<string>>()
+
+    const rowKeys =
+      queryToRows.get(hashedQueryKey) ?? new Set<string | number>()
+
+    rowKeys.forEach((rowKey) => {
+      const owners = rowToQueries.get(rowKey)
+
+      if (!owners) {
+        return
+      }
+
+      const nextOwners = new Set(owners)
+      nextOwners.delete(hashedQueryKey)
+      nextOwnersByRow.set(rowKey, nextOwners)
+    })
+
+    return nextOwnersByRow
   }
 
   const internalSync: SyncConfig<any>[`sync`] = (params) => {
-    const { begin, write, commit, markReady, collection, metadata } = params
-    const persistedMetadata = metadata as
-      | QuerySyncMetadataWithPersistedScan<any>
-      | undefined
+    const syncSession = {}
+    activeSyncSession = syncSession
+    // Rebuild on every start so caches created while sync was stopped are owned.
+    trackedCacheQueries = new Set(
+      queryClient.getQueryCache().findAll({ queryKey: baseKey }),
+    )
+    const { begin, write, commit, markReady, markError, collection, metadata } =
+      params
+    const persistence =
+      metadata === undefined
+        ? null
+        : validateSyncPersistenceCapability(metadata.persistence)
 
     // Track whether sync has been started
     let syncStarted = false
     let startupRetentionSettled = false
+    const pendingStartupLoads = new Map<LoadSubsetOptions, Set<object>>()
     const retainedQueriesPendingRevalidation = new Set<string>()
+    const pendingResultApplications = new Map<string, Promise<void>>()
+    const observedErrorUpdates = new WeakMap<AnyQuery, number>()
+    let errorRevision = 0
+    const failedResultApplications = new Map<string, unknown>()
+    const exceptionalResultSettlements = new WeakMap<
+      QueryObserverResult<unknown, unknown>,
+      ExceptionalResultSettlement
+    >()
+    const pendingExceptionalResultSettlements = new Set<
+      ExceptionalResultSettlement & { type: `pending` }
+    >()
+    const deferredRefreshes = new Map<
+      Promise<void>,
+      Map<string, Promise<QueryObserverResult<unknown, unknown>>>
+    >()
+    const readExceptionalResultSettlement = (
+      result: QueryObserverResult<unknown, unknown>,
+    ) => exceptionalResultSettlements.get(result)
+    const writeExceptionalResultSettlement = (
+      result: QueryObserverResult<unknown, unknown>,
+      settlement: ExceptionalResultSettlement,
+    ) => {
+      exceptionalResultSettlements.set(result, settlement)
+    }
+    getExceptionalResultSettlement = readExceptionalResultSettlement
+    type ResultApplicationController = AbortController & {
+      rollback?: () => void
+      settleRefetchAtFetchBoundary?: () => void
+    }
+    const resultApplicationControllers = new Map<
+      string,
+      ResultApplicationController
+    >()
     const effectivePersistedGcTimes = new Map<string, number>()
     const persistedRetentionTimers = new Map<
       string,
@@ -728,16 +1179,201 @@ export function queryCollectionOptions(
     >()
     let persistedRetentionMaintenance = Promise.resolve()
 
+    const invalidatePendingResultApplication = (hashedQueryKey: string) => {
+      const controller = resultApplicationControllers.get(hashedQueryKey)
+      controller?.rollback?.()
+      pendingResultApplications.delete(hashedQueryKey)
+      failedResultApplications.delete(hashedQueryKey)
+      resultApplicationControllers.delete(hashedQueryKey)
+      controller?.abort()
+    }
+
+    const waitForCurrentResultApplication = async (
+      hashedQueryKey: string,
+    ): Promise<void> => {
+      for (;;) {
+        const application = pendingResultApplications.get(hashedQueryKey)
+        if (!application) return
+        try {
+          await application
+        } catch (error) {
+          if (
+            pendingResultApplications.get(hashedQueryKey) === application ||
+            (failedResultApplications.has(hashedQueryKey) &&
+              failedResultApplications.get(hashedQueryKey) === error)
+          ) {
+            throw error
+          }
+        }
+      }
+    }
+
+    const waitForAuthoritativeObserverResult = (
+      observer: QueryObserver<Array<any>, any, Array<any>, Array<any>, any>,
+      hashedQueryKey: string,
+      createCancellationError: () => Error,
+    ): Promise<QueryObserverResult<Array<any>, any>> =>
+      new Promise((resolve, reject) => {
+        let active = true
+        let unsubscribe = () => {}
+        const pending =
+          pendingReadyUnsubscribes.get(hashedQueryKey) ?? new Set()
+        const finish = (settle: () => void) => {
+          if (!active) return
+          active = false
+          unsubscribe()
+          pending.delete(cancel)
+          if (pending.size === 0) {
+            pendingReadyUnsubscribes.delete(hashedQueryKey)
+          }
+          settle()
+        }
+        const cancel = () => {
+          finish(() => reject(createCancellationError()))
+        }
+        pending.add(cancel)
+        pendingReadyUnsubscribes.set(hashedQueryKey, pending)
+
+        unsubscribe = observer.subscribe((result) => {
+          // Query observers notify before cache subscribers record authority.
+          queueMicrotask(() => {
+            const query = observer.getCurrentQuery()
+            if (
+              (result.isSuccess &&
+                hasPostWriteAuthority(hashedQueryKey, query) &&
+                !collection.deferDataRefresh) ||
+              (result.isError && !result.isFetching)
+            ) {
+              finish(() => resolve(result))
+            }
+          })
+        })
+      })
+
+    const getDeferredRefresh = (
+      hashedQueryKey: string,
+      barrier: Promise<void>,
+    ): Promise<QueryObserverResult<unknown, unknown>> => {
+      const barrierRefreshes = deferredRefreshes.get(barrier) ?? new Map()
+      const existing = barrierRefreshes.get(hashedQueryKey)
+      if (existing) return existing
+
+      const refresh = barrier.then(async () => {
+        const observer = state.observers.get(hashedQueryKey)
+        if (!observer) throw new CancelledError()
+
+        let replacement = await observer.refetch()
+        for (;;) {
+          if (!replacement.isSuccess) return replacement
+          // Query observers report success before the Query cache records
+          // fetch authority. Let an on-demand handler classify the replacement
+          // before deciding whether its Collection application settled.
+          await new Promise<void>((resolve) => queueMicrotask(resolve))
+          if (
+            !hasPostWriteAuthority(
+              hashedQueryKey,
+              observer.getCurrentQuery(),
+            ) ||
+            collection.deferDataRefresh
+          ) {
+            replacement = await waitForAuthoritativeObserverResult(
+              observer,
+              hashedQueryKey,
+              () => new CancelledError(),
+            )
+            continue
+          }
+          const replacementSettlement =
+            readExceptionalResultSettlement(replacement)
+          if (replacementSettlement?.type === `rejected`) {
+            throw replacementSettlement.error
+          }
+          if (replacementSettlement?.type === `pending`) {
+            return replacementSettlement.promise
+          }
+          const application = getResultApplicationSettlement(hashedQueryKey)
+          if (application !== true) await application
+          return replacement
+        }
+      })
+
+      barrierRefreshes.set(hashedQueryKey, refresh)
+      deferredRefreshes.set(barrier, barrierRefreshes)
+      const removeRefresh = () => {
+        if (barrierRefreshes.get(hashedQueryKey) !== refresh) return
+        barrierRefreshes.delete(hashedQueryKey)
+        if (barrierRefreshes.size === 0) deferredRefreshes.delete(barrier)
+      }
+      void refresh.then(removeRefresh, removeRefresh)
+      return refresh
+    }
+
+    const scheduleDeferredResultSettlement = (
+      hashedQueryKey: string,
+      result: QueryObserverResult<unknown, unknown>,
+      refresh: Promise<QueryObserverResult<unknown, unknown>>,
+    ): ExceptionalResultSettlement & { type: `pending` } => {
+      const existing = readExceptionalResultSettlement(result)
+      if (existing?.type === `pending`) return existing
+
+      let rejectSettlement!: (error: unknown) => void
+      const promise = new Promise<QueryObserverResult<unknown, unknown>>(
+        (resolve, reject) => {
+          rejectSettlement = reject
+          void refresh.then(resolve, reject)
+        },
+      )
+      // Automatic refreshes may have no public waiter. Their Query and
+      // application paths retain diagnostics; this prevents an unhandled
+      // rejection while preserving the rejection for a public refetch waiter.
+      void promise.catch(() => {})
+      const settlement = {
+        type: `pending` as const,
+        promise,
+        reject: rejectSettlement,
+      }
+      writeExceptionalResultSettlement(result, settlement)
+      pendingExceptionalResultSettlements.add(settlement)
+
+      void promise.then(
+        () => {
+          pendingExceptionalResultSettlements.delete(settlement)
+        },
+        () => {
+          pendingExceptionalResultSettlements.delete(settlement)
+        },
+      )
+
+      return settlement
+    }
+
+    const getResultApplicationSettlement = (
+      hashedQueryKey: string,
+    ): true | Promise<void> => {
+      const pending = pendingResultApplications.get(hashedQueryKey)
+      if (pending) {
+        return waitForCurrentResultApplication(hashedQueryKey)
+      }
+
+      if (failedResultApplications.has(hashedQueryKey)) {
+        return Promise.reject(failedResultApplications.get(hashedQueryKey))
+      }
+
+      return true
+    }
+
     const getRowMetadata = (rowKey: string | number) => {
       return (metadata?.row.get(rowKey) ??
         collection._state.syncedMetadata.get(rowKey)) as
-        | Record<string, unknown>
-        | undefined
+        Record<string, unknown> | undefined
     }
 
-    const getPersistedOwners = (rowKey: string | number) => {
-      const rowMetadata = getRowMetadata(rowKey)
-      const queryMetadata = rowMetadata?.queryCollection
+    const getOwnersFromMetadata = (rowMetadata: unknown) => {
+      if (!rowMetadata || typeof rowMetadata !== `object`) {
+        return new Set<string>()
+      }
+      const queryMetadata = (rowMetadata as Record<string, unknown>)
+        .queryCollection
       if (!queryMetadata || typeof queryMetadata !== `object`) {
         return new Set<string>()
       }
@@ -749,6 +1385,9 @@ export function queryCollectionOptions(
 
       return new Set(Object.keys(owners as Record<string, true>))
     }
+
+    const getPersistedOwners = (rowKey: string | number) =>
+      getOwnersFromMetadata(getRowMetadata(rowKey))
 
     const setPersistedOwners = (
       rowKey: string | number,
@@ -843,12 +1482,7 @@ export function queryCollectionOptions(
           continue
         }
 
-        rowToQueries.set(rowKey, new Set(owners))
-        owners.forEach((owner) => {
-          const queryToRowsSet = queryToRows.get(owner) || new Set()
-          queryToRowsSet.add(rowKey)
-          queryToRows.set(owner, queryToRowsSet)
-        })
+        addRowOwners(rowKey, owners)
 
         if (owners.has(hashedQueryKey)) {
           ownedRows.add(rowKey)
@@ -890,7 +1524,7 @@ export function queryCollectionOptions(
         return baseline
       }
 
-      const scanPersisted = persistedMetadata?.row.scanPersisted
+      const scanPersisted = persistence?.scanPersistedRows
       if (!scanPersisted) {
         const baseline = new Map<
           string | number,
@@ -934,12 +1568,7 @@ export function queryCollectionOptions(
           return
         }
 
-        rowToQueries.set(row.key, new Set(ownerSet))
-        ownerSet.forEach((owner) => {
-          const queryToRowsSet = queryToRows.get(owner) || new Set()
-          queryToRowsSet.add(row.key)
-          queryToRows.set(owner, queryToRowsSet)
-        })
+        addRowOwners(row.key, ownerSet)
 
         if (ownerSet.has(hashedQueryKey)) {
           baseline.set(row.key, {
@@ -965,7 +1594,7 @@ export function queryCollectionOptions(
       baseline.forEach(({ value: oldItem, owners }, rowKey) => {
         owners.delete(hashedQueryKey)
         setPersistedOwners(rowKey, owners)
-        const needToRemove = removeRow(rowKey, hashedQueryKey)
+        const needToRemove = removeRowOwner(rowKey, hashedQueryKey)
         if (needToRemove) {
           rowsToDelete.push(oldItem)
         }
@@ -979,6 +1608,7 @@ export function queryCollectionOptions(
         `${QUERY_COLLECTION_GC_PREFIX}${hashedQueryKey}`,
       )
       commit()
+      queryToRows.delete(hashedQueryKey)
     }
 
     const schedulePersistedRetentionExpiry = (
@@ -1048,13 +1678,15 @@ export function queryCollectionOptions(
      */
     const generateQueryKeyFromOptions = (opts: LoadSubsetOptions): QueryKey => {
       if (typeof queryKey === `function`) {
-        // Function-based queryKey: use it to build the key from opts
-        return queryKey(opts)
+        // Refetch starts another acquisition for the same semantic demand. It
+        // must not create a second Query cache or unload identity.
+        const { refetch: _refetch, ...queryKeyOptions } = opts
+        return queryKey(queryKeyOptions)
       } else if (syncMode === `on-demand`) {
-        // Static queryKey in on-demand mode: automatically append serialized predicates
-        // to create separate cache entries for different predicate combinations
-        const serialized = serializeLoadSubsetOptions(opts)
-        return serialized !== undefined ? [...queryKey, serialized] : queryKey
+        // A static on-demand key is extended by exact semantic demand so
+        // equivalent predicates share one entry while distinct windows do not.
+        const demandKey = getLoadSubsetDemandKey(opts)
+        return demandKey !== undefined ? [...queryKey, demandKey] : queryKey
       } else {
         // Static queryKey in eager mode: use as-is
         return queryKey
@@ -1078,12 +1710,84 @@ export function queryCollectionOptions(
             }
           })
 
+    const waitForQueryReady = (
+      observer: QueryObserver<Array<any>, any, Array<any>, Array<any>, any>,
+      hashedQueryKey: string,
+    ): Promise<void> =>
+      waitForAuthoritativeObserverResult(
+        observer,
+        hashedQueryKey,
+        () => new LoadSubsetOperationAbortedError(),
+      ).then((result) => {
+        if (result.isError) throw result.error
+      })
+
+    const waitForQueryReadyAndApplied = (
+      observer: QueryObserver<Array<any>, any, Array<any>, Array<any>, any>,
+      hashedQueryKey: string,
+    ): Promise<void> =>
+      waitForQueryReady(observer, hashedQueryKey).then(() => {
+        const settlement = getResultApplicationSettlement(hashedQueryKey)
+        return settlement === true ? undefined : settlement
+      })
+
+    const refetchAndWaitForApplication = async (
+      observer: QueryObserver<Array<any>, any, Array<any>, Array<any>, any>,
+      hashedQueryKey: string,
+    ): Promise<void> =>
+      new Promise<void>((resolve, reject) => {
+        let active = true
+        const pending =
+          pendingReadyUnsubscribes.get(hashedQueryKey) ?? new Set()
+        const finish = (settle: () => void) => {
+          if (!active) return
+          active = false
+          pending.delete(cancel)
+          if (pending.size === 0) {
+            pendingReadyUnsubscribes.delete(hashedQueryKey)
+          }
+          settle()
+        }
+        const cancel = () => {
+          finish(() => reject(new LoadSubsetOperationAbortedError()))
+        }
+        pending.add(cancel)
+        pendingReadyUnsubscribes.set(hashedQueryKey, pending)
+
+        const refetch = async () => {
+          const waitsForDeferredApplication = !!collection.deferDataRefresh
+          await observer.refetch({ throwOnError: true })
+          if (
+            waitsForDeferredApplication ||
+            !hasPostWriteAuthority(hashedQueryKey, observer.getCurrentQuery())
+          ) {
+            await waitForQueryReadyAndApplied(observer, hashedQueryKey)
+            return
+          }
+          const settlement = getResultApplicationSettlement(hashedQueryKey)
+          if (settlement !== true) await settlement
+        }
+        void refetch().then(
+          () => finish(resolve),
+          (error: unknown) => finish(() => reject(error)),
+        )
+      })
+
     const createQueryFromOpts = (
       opts: LoadSubsetOptions = {},
       queryFunction: typeof queryFn = queryFn,
     ): true | Promise<void> => {
       if (!startupRetentionSettled) {
+        // Immutable request data may be reused; ownership belongs to each call.
+        const acquisition = {}
+        const pending = pendingStartupLoads.get(opts) ?? new Set<object>()
+        pending.add(acquisition)
+        pendingStartupLoads.set(opts, pending)
         return startupRetentionMaintenancePromise.then(() => {
+          if (!pendingStartupLoads.get(opts)?.delete(acquisition)) {
+            throw new LoadSubsetOperationAbortedError()
+          }
+          if (pending.size === 0) pendingStartupLoads.delete(opts)
           const resumed = createQueryFromOpts(opts, queryFunction)
           return resumed === true ? undefined : resumed
         })
@@ -1092,7 +1796,19 @@ export function queryCollectionOptions(
       // Generate key using common function
       const key = generateQueryKeyFromOptions(opts)
       const hashedQueryKey = hashKey(key)
-      const extendedMeta = { ...meta, loadSubsetOptions: opts }
+      const {
+        subscription: _subscription,
+        refetch: _refetch,
+        ...requestOptions
+      } = opts
+      const extendedMeta = { ...meta }
+      // Query functions need request options, but SSR must not serialize them.
+      Object.defineProperty(extendedMeta, `loadSubsetOptions`, {
+        value: requestOptions,
+        enumerable: false,
+        configurable: true,
+        writable: true,
+      })
       const retainedEntry = metadata?.collection.get(
         `${QUERY_COLLECTION_GC_PREFIX}${hashedQueryKey}`,
       )
@@ -1118,37 +1834,23 @@ export function queryCollectionOptions(
         const observer = state.observers.get(hashedQueryKey)!
         const currentResult = observer.getCurrentResult()
 
-        if (currentResult.isSuccess) {
-          // Data is already available, return true synchronously
-          return true
-        } else if (currentResult.isError) {
+        if (opts.refetch) {
+          return refetchAndWaitForApplication(observer, hashedQueryKey)
+        }
+
+        if (
+          currentResult.isSuccess &&
+          hasPostWriteAuthority(hashedQueryKey, observer.getCurrentQuery())
+        ) {
+          if (collection.deferDataRefresh) {
+            return waitForQueryReadyAndApplied(observer, hashedQueryKey)
+          }
+          return getResultApplicationSettlement(hashedQueryKey)
+        } else if (currentResult.isError && !currentResult.isFetching) {
           // Error already occurred, reject immediately
           return Promise.reject(currentResult.error)
         } else {
-          // Check QueryClient cache directly - observer's getCurrentResult() may show
-          // a loading state even when data exists in cache. This happens because observer
-          // state can lag behind the QueryClient cache during unsubscribe/resubscribe
-          // cycles (e.g., when a live query is cleaned up and recreated).
-          const cachedData = queryClient.getQueryData(key)
-          if (cachedData !== undefined) {
-            return true
-          }
-
-          // Query is still loading, wait for the first result
-          return new Promise<void>((resolve, reject) => {
-            const unsubscribe = observer.subscribe((result) => {
-              // Use a microtask in case `subscribe` is called synchronously, before `unsubscribe` is initialized
-              queueMicrotask(() => {
-                if (result.isSuccess) {
-                  unsubscribe()
-                  resolve()
-                } else if (result.isError) {
-                  unsubscribe()
-                  reject(result.error)
-                }
-              })
-            })
-          })
+          return waitForQueryReadyAndApplied(observer, hashedQueryKey)
         }
       }
 
@@ -1159,19 +1861,33 @@ export function queryCollectionOptions(
         Array<any>,
         any
       > = {
+        ...pickDefinedQueryObserverOptions({
+          enabled,
+          refetchInterval,
+          retry,
+          retryDelay,
+          staleTime,
+          gcTime,
+          refetchOnWindowFocus,
+          refetchOnReconnect,
+          refetchOnMount,
+          networkMode,
+        }),
+        ...initialDataObserverOptions,
         queryKey: key,
-        queryFn: queryFunction,
+        queryFn:
+          syncMode === `on-demand`
+            ? queryFunction
+            : (context: Parameters<typeof queryFunction>[0]) => {
+                fetchStartGenerations.set(
+                  hashKey(context.queryKey),
+                  directWriteGeneration,
+                )
+                return queryFunction(context)
+              },
         meta: extendedMeta,
         structuralSharing: true,
         notifyOnChangeProps: `all`,
-
-        // Only include options that are explicitly defined to allow QueryClient defaultOptions to be used
-        ...(enabled !== undefined && { enabled }),
-        ...(refetchInterval !== undefined && { refetchInterval }),
-        ...(retry !== undefined && { retry }),
-        ...(retryDelay !== undefined && { retryDelay }),
-        ...(staleTime !== undefined && { staleTime }),
-        ...(gcTime !== undefined && { gcTime }),
       }
 
       const localObserver = new QueryObserver<
@@ -1181,6 +1897,8 @@ export function queryCollectionOptions(
         Array<any>,
         any
       >(queryClient, observerOptions)
+      const localQuery = localObserver.getCurrentQuery()
+      trackOwnedCacheQuery(localQuery, hashedQueryKey)
       const resolvedQueryGcTime = queryClient.getQueryCache().find({
         queryKey: key,
         exact: true,
@@ -1210,24 +1928,33 @@ export function queryCollectionOptions(
         if (syncStarted || collection.subscriberCount > 0) {
           subscribeToQuery(localObserver, hashedQueryKey)
         }
-        return true
+        const currentResult = localObserver.getCurrentResult()
+        if (opts.refetch) {
+          return refetchAndWaitForApplication(localObserver, hashedQueryKey)
+        }
+        if (currentResult.isError && !currentResult.isFetching) {
+          return Promise.reject(currentResult.error)
+        }
+        if (
+          !currentResult.isSuccess ||
+          !hasPostWriteAuthority(
+            hashedQueryKey,
+            localObserver.getCurrentQuery(),
+          )
+        ) {
+          return waitForQueryReadyAndApplied(localObserver, hashedQueryKey)
+        }
+        if (collection.deferDataRefresh) {
+          return waitForQueryReadyAndApplied(localObserver, hashedQueryKey)
+        }
+        return getResultApplicationSettlement(hashedQueryKey)
       }
 
       // Create a promise that resolves when the query result is first available
-      const readyPromise = new Promise<void>((resolve, reject) => {
-        const unsubscribe = localObserver.subscribe((result) => {
-          // Use a microtask in case `subscribe` is called synchronously, before `unsubscribe` is initialized
-          queueMicrotask(() => {
-            if (result.isSuccess) {
-              unsubscribe()
-              resolve()
-            } else if (result.isError) {
-              unsubscribe()
-              reject(result.error)
-            }
-          })
-        })
-      })
+      const readyPromise = waitForQueryReadyAndApplied(
+        localObserver,
+        hashedQueryKey,
+      )
 
       // If sync has started or there are subscribers to the collection, subscribe to the query straight away
       // This creates the main subscription that handles data updates
@@ -1240,9 +1967,82 @@ export function queryCollectionOptions(
 
     type UpdateHandler = Parameters<QueryObserver[`subscribe`]>[0]
 
+    const validateSuccessfulResultItems = (
+      resultQueryKey: QueryKey,
+      result: QueryObserverResult<any, any>,
+    ): { items: Array<any> } | { error: InvalidQueryResultError } => {
+      const rawData = result.data
+      const newItemsArray = select ? select(rawData) : rawData
+
+      const source = select ? `select()` : `queryFn`
+      if (!Array.isArray(newItemsArray)) {
+        return {
+          error: new InvalidQueryResultError(
+            `@tanstack/query-db-collection: ${source} must return an array of objects. Got: ${typeof newItemsArray} for queryKey ${JSON.stringify(resultQueryKey)}`,
+          ),
+        }
+      }
+
+      const invalidItemIndex = newItemsArray.findIndex(
+        (item) => item === null || typeof item !== `object`,
+      )
+      if (invalidItemIndex !== -1) {
+        const invalidItem = newItemsArray[invalidItemIndex]
+        const invalidItemDescription =
+          invalidItem === null ? `null` : typeof invalidItem
+        return {
+          error: new InvalidQueryResultError(
+            `@tanstack/query-db-collection: ${source} must return an array of objects. Invalid item at index ${invalidItemIndex}: ${invalidItemDescription} for queryKey ${JSON.stringify(resultQueryKey)}`,
+          ),
+        }
+      }
+
+      return { items: newItemsArray }
+    }
+
+    /**
+     * Rows of a fetch that started at `fetchStart`: each key that an accepted
+     * direct write claimed after that start takes its accepted row, and every
+     * other key takes the fetched row.
+     */
+    const mergeOlderRows = (
+      items: Array<any>,
+      fetchStart: number,
+    ): Array<any> => {
+      const rows = new Map(items.map((row) => [getKey(row), row]))
+      for (const [key, generation] of directWriteKeyGenerations) {
+        if (generation <= fetchStart) continue
+        const accepted = collection._state.getAcceptedSyncedRow(key)
+        if (accepted === undefined) rows.delete(key)
+        else rows.set(key, accepted)
+      }
+      return Array.from(rows.values())
+    }
+
+    /** Settles once no direct write waits for earlier commits. */
+    const directWritesSettled = async (): Promise<void> => {
+      while (pendingDirectWrites) await pendingDirectWrites
+    }
+
+    const validateSuccessfulResultItemsForApplication = (
+      resultQueryKey: QueryKey,
+      result: QueryObserverResult<any, any>,
+    ): Array<any> => {
+      const validation = validateSuccessfulResultItems(resultQueryKey, result)
+      if (`error` in validation) {
+        writeExceptionalResultSettlement(result, {
+          type: `rejected`,
+          error: validation.error,
+        })
+        throw validation.error
+      }
+      return validation.items
+    }
+
     const applySuccessfulResult = (
       queryKey: QueryKey,
       result: QueryObserverResult<any, any>,
+      applicationToken: ResultApplicationController,
       persistedBaseline?: Map<
         string | number,
         {
@@ -1250,144 +2050,526 @@ export function queryCollectionOptions(
           owners: Set<string>
         }
       >,
-    ) => {
+      signal?: AbortSignal,
+      validatedItems?: Array<any>,
+    ): true | Promise<void> => {
       const hashedQueryKey = hashKey(queryKey)
 
-      if (collection.status === `cleaned-up`) {
-        return
+      if (collection.status === `cleaned-up` || signal?.aborted) {
+        throw new LoadSubsetOperationAbortedError()
       }
 
-      // Clear error state
-      state.lastError = undefined
-      state.errorCount = 0
-
-      const rawData = result.data
-      const newItemsArray = select ? select(rawData) : rawData
-
-      if (
-        !Array.isArray(newItemsArray) ||
-        newItemsArray.some((item) => typeof item !== `object`)
-      ) {
-        const errorMessage = select
-          ? `@tanstack/query-db-collection: select() must return an array of objects. Got: ${typeof newItemsArray} for queryKey ${JSON.stringify(queryKey)}`
-          : `@tanstack/query-db-collection: queryFn must return an array of objects. Got: ${typeof newItemsArray} for queryKey ${JSON.stringify(queryKey)}`
-
-        console.error(errorMessage)
-        return
+      if (isMutationPublicationBlocked()) {
+        applicationToken.settleRefetchAtFetchBoundary?.()
       }
 
+      const newItemsArray =
+        validatedItems ??
+        validateSuccessfulResultItemsForApplication(queryKey, result)
+
+      // Diff against accepted rows: an earlier result or direct write can be
+      // accepted while it waits behind a persisting optimistic transaction.
       const currentSyncedItems: Map<string | number, any> = new Map(
-        collection._state.syncedData.entries(),
+        collection._state.acceptedSyncedEntries(),
       )
       const shouldUsePersistedBaseline = persistedBaseline !== undefined
       const previouslyOwnedRows = shouldUsePersistedBaseline
         ? new Set(persistedBaseline.keys())
         : getHydratedOwnedRowsForQueryBaseline(hashedQueryKey)
+
       const newItemsMap = new Map<string | number, any>()
       newItemsArray.forEach((item) => {
         const key = getKey(item)
         newItemsMap.set(key, item)
       })
 
-      begin()
-      if (metadata) {
-        metadata.collection.delete(
-          `${QUERY_COLLECTION_GC_PREFIX}${hashedQueryKey}`,
-        )
-      }
+      const previousOwnedRows = queryToRows.has(hashedQueryKey)
+        ? new Set(queryToRows.get(hashedQueryKey))
+        : undefined
+      const affectedRowKeys = new Set([
+        ...previouslyOwnedRows,
+        ...newItemsMap.keys(),
+      ])
+      const previousOwnersByRow = new Map<
+        string | number,
+        Set<string> | undefined
+      >()
+      affectedRowKeys.forEach((key) => {
+        const owners = rowToQueries.get(key)
+        previousOwnersByRow.set(key, owners ? new Set(owners) : undefined)
+      })
+      let transactionActive = false
+      let resultTransaction: { applicationStarted: boolean } | undefined
 
-      previouslyOwnedRows.forEach((key) => {
-        const oldItem = shouldUsePersistedBaseline
-          ? persistedBaseline.get(key)?.value
-          : currentSyncedItems.get(key)
-        if (!oldItem) {
+      const restoreOwnershipTracking = () => {
+        // Core flips this at its no-cancel point before publication can reenter.
+        if (resultTransaction?.applicationStarted) return
+        // A wrapped sync may reserve and apply its core transaction entirely
+        // inside commit(), so there is no pending transaction to capture above.
+        // In that case the collection's committed metadata is the publication
+        // boundary; pending wrapper metadata is intentionally not consulted.
+        if (
+          resultTransaction === undefined &&
+          Array.from(affectedRowKeys).every((key) => {
+            const trackedOwners = rowToQueries.get(key) ?? new Set<string>()
+            const publishedOwners = getOwnersFromMetadata(
+              collection._state.syncedMetadata.get(key),
+            )
+            return (
+              trackedOwners.size === publishedOwners.size &&
+              Array.from(trackedOwners).every((owner) =>
+                publishedOwners.has(owner),
+              )
+            )
+          })
+        ) {
           return
         }
-        const newItem = newItemsMap.get(key)
-        if (!newItem) {
-          const owners = getPersistedOwners(key)
-          owners.delete(hashedQueryKey)
-          setPersistedOwners(key, owners)
-          const needToRemove = removeRow(key, hashedQueryKey)
-          if (needToRemove) {
-            write({ type: `delete`, value: oldItem })
+        if (!state.observers.has(hashedQueryKey)) return
+        if (
+          resultApplicationControllers.get(hashedQueryKey) !== applicationToken
+        ) {
+          return
+        }
+
+        if (previousOwnedRows === undefined) {
+          queryToRows.delete(hashedQueryKey)
+        } else {
+          queryToRows.set(hashedQueryKey, previousOwnedRows)
+        }
+        previousOwnersByRow.forEach((owners, key) => {
+          if (owners === undefined) {
+            rowToQueries.delete(key)
+          } else {
+            rowToQueries.set(key, owners)
           }
-        } else if (!deepEquals(oldItem, newItem)) {
-          write({ type: `update`, value: newItem })
-        }
-      })
+        })
+      }
+      applicationToken.rollback = restoreOwnershipTracking
 
-      newItemsMap.forEach((newItem, key) => {
-        const owners = getPersistedOwners(key)
-        if (!owners.has(hashedQueryKey)) {
-          owners.add(hashedQueryKey)
-          setPersistedOwners(key, owners)
-        }
-        addRow(key, hashedQueryKey)
-        if (!currentSyncedItems.has(key)) {
-          write({ type: `insert`, value: newItem })
-        }
-      })
+      const failApplication = (error: unknown): never => {
+        restoreOwnershipTracking()
 
-      commit()
-      retainedQueriesPendingRevalidation.delete(hashedQueryKey)
-      cancelPersistedRetentionExpiry(hashedQueryKey)
+        if (transactionActive) {
+          const cancellation = new AbortController()
+          cancellation.abort()
+          try {
+            commit(cancellation.signal)
+          } catch {
+            // Preserve the application error that caused the rollback.
+          }
+        }
+        throw error
+      }
 
-      // Mark collection as ready after first successful query result
-      markReady()
+      try {
+        // From this point onward the result, including an empty result, is the
+        // authoritative ownership baseline until this query is cleaned up.
+        queryToRows.set(
+          hashedQueryKey,
+          queryToRows.get(hashedQueryKey) ?? new Set<string | number>(),
+        )
+
+        begin()
+        transactionActive = true
+        if (metadata) {
+          metadata.collection.delete(
+            `${QUERY_COLLECTION_GC_PREFIX}${hashedQueryKey}`,
+          )
+        }
+
+        previouslyOwnedRows.forEach((key) => {
+          const oldItem = shouldUsePersistedBaseline
+            ? persistedBaseline.get(key)?.value
+            : currentSyncedItems.get(key)
+          const newItem = newItemsMap.get(key)
+          if (!newItem) {
+            const owners = getPersistedOwners(key)
+            owners.delete(hashedQueryKey)
+            setPersistedOwners(key, owners)
+            const needToRemove = removeRowOwner(key, hashedQueryKey)
+            // A superseded result's row can still be waiting for durable
+            // storage, so delete by key even when no stored row is known.
+            if (needToRemove) {
+              write({ type: `delete`, key })
+            }
+          } else if (oldItem && !deepEquals(oldItem, newItem)) {
+            write({ type: `update`, value: newItem })
+          }
+        })
+
+        newItemsMap.forEach((newItem, key) => {
+          const owners = getPersistedOwners(key)
+          const addsOwner = !owners.has(hashedQueryKey)
+          const insertsRow = !currentSyncedItems.has(key)
+          if (addsOwner) {
+            owners.add(hashedQueryKey)
+          }
+          addRowOwner(key, hashedQueryKey)
+          if (insertsRow) {
+            write({ type: `insert`, value: newItem })
+          }
+          if (addsOwner || insertsRow) {
+            // An insert clears stale metadata for its key. Stage ownership
+            // afterward so rows and ownership commit as one state change.
+            setPersistedOwners(key, owners)
+          }
+        })
+
+        resultTransaction = collection._state.pendingSyncedTransactions.at(-1)
+        // No asynchronous work occurs between this check and commit. If a
+        // mutation started during fetch or baseline loading, explicit refetch
+        // callers stop at the Query fetch boundary while the application stays
+        // in the normal publication queue.
+        if (isMutationPublicationBlocked()) {
+          applicationToken.settleRefetchAtFetchBoundary?.()
+        }
+        // An accepted sync transaction always applies, so a later result or
+        // cleanup must not cancel it or roll back the ownership it records.
+        const applied = commit()
+        applicationToken.rollback = undefined
+        transactionActive = false
+        retainedQueriesPendingRevalidation.delete(hashedQueryKey)
+        cancelPersistedRetentionExpiry(hashedQueryKey)
+
+        // Readiness counts accepted rows; the application, which settles a
+        // subset load, waits for them to be visible.
+        const finishApplication = () => {
+          if (!signal?.aborted) markReady()
+        }
+        const accepted = whenSyncAccepted(applied)
+        if (accepted === true) finishApplication()
+        else void accepted.then(finishApplication, () => undefined)
+        if (applied !== true) {
+          return applied.then(() => undefined, failApplication)
+        }
+        return true
+      } catch (error) {
+        return failApplication(error)
+      }
     }
 
     const reconcileSuccessfulResult = async (
       queryKey: QueryKey,
       result: QueryObserverResult<any, any>,
+      applicationToken: ResultApplicationController,
+      signal: AbortSignal,
     ) => {
       const hashedQueryKey = hashKey(queryKey)
+      // Validate before persistence I/O so the public refetch can observe this
+      // result's application rejection instead of fulfilling early.
+      const validatedItems = validateSuccessfulResultItemsForApplication(
+        queryKey,
+        result,
+      )
       const persistedBaseline =
         await loadPersistedBaselineForQuery(hashedQueryKey)
-      if (collection.status === `cleaned-up`) {
+      if (
+        collection.status === `cleaned-up` ||
+        resultApplicationControllers.get(hashedQueryKey) !== applicationToken
+      ) {
+        throw new LoadSubsetOperationAbortedError()
+      }
+      await applySuccessfulResult(
+        queryKey,
+        result,
+        applicationToken,
+        persistedBaseline,
+        signal,
+        validatedItems,
+      )
+    }
+
+    const trackResultApplication = (
+      hashedQueryKey: string,
+      application: Promise<void>,
+      isFetching: boolean,
+      applicationErrorRevision: number,
+    ): void => {
+      pendingResultApplications.set(hashedQueryKey, application)
+      const finish = () => {
+        if (pendingResultApplications.get(hashedQueryKey) === application) {
+          pendingResultApplications.delete(hashedQueryKey)
+          return true
+        }
+        return false
+      }
+      void application.then(
+        () => {
+          if (finish()) {
+            failedResultApplications.delete(hashedQueryKey)
+            // Applying cached data during a fetch does not establish recovery.
+            if (!isFetching && applicationErrorRevision === errorRevision) {
+              state.lastError = undefined
+              state.errorCount = 0
+            }
+          }
+        },
+        (error) => {
+          if (!finish()) return
+          failedResultApplications.set(hashedQueryKey, error)
+          state.lastError = error
+          state.errorCount++
+          errorRevision++
+          console.error(
+            `[QueryCollection] Error applying query ${String(hashToQueryKey.get(hashedQueryKey))}:`,
+            error,
+          )
+          if (collection.status === `loading`) {
+            markError(error)
+          }
+        },
+      )
+    }
+
+    const enqueueResultApplication = (
+      hashedQueryKey: string,
+      result: QueryObserverResult<any, any>,
+      apply: (
+        signal: AbortSignal,
+        applicationToken: ResultApplicationController,
+      ) => true | Promise<void>,
+    ): void => {
+      invalidatePendingResultApplication(hashedQueryKey)
+      const currentErrorRevision = errorRevision
+      const controller: ResultApplicationController = new AbortController()
+      let settleRefetchAtFetchBoundary = () => {}
+      const fetchBoundary = new Promise<void>((resolve) => {
+        settleRefetchAtFetchBoundary = resolve
+      })
+      controller.settleRefetchAtFetchBoundary = settleRefetchAtFetchBoundary
+      resultApplicationControllers.set(hashedQueryKey, controller)
+      let application: true | Promise<void>
+      try {
+        application = apply(controller.signal, controller)
+      } catch (error) {
+        application = Promise.reject(error)
+      }
+      if (application === true) {
+        // Keep a causal witness for refetch callers without turning the
+        // Collection's synchronous readiness signal back into a Promise.
+        if (resultApplicationControllers.get(hashedQueryKey) === controller) {
+          recordResultApplicationSettlement(
+            hashedQueryKey,
+            result,
+            Promise.resolve(),
+          )
+          resultApplicationControllers.delete(hashedQueryKey)
+          failedResultApplications.delete(hashedQueryKey)
+          if (!result.isFetching && currentErrorRevision === errorRevision) {
+            state.lastError = undefined
+            state.errorCount = 0
+          }
+        }
         return
       }
-      applySuccessfulResult(queryKey, result, persistedBaseline)
+      const refetchSettlement = Promise.race([application, fetchBoundary])
+      // Most applications are observer-driven and have no explicit refetch
+      // caller. Keep their derived settlement from becoming an unhandled
+      // rejection; a refetch that captures this promise still observes the
+      // original rejection when throwOnError is enabled.
+      void refetchSettlement.catch(() => undefined)
+      recordResultApplicationSettlement(
+        hashedQueryKey,
+        result,
+        refetchSettlement,
+      )
+      const cleanupController = () => {
+        if (resultApplicationControllers.get(hashedQueryKey) === controller) {
+          resultApplicationControllers.delete(hashedQueryKey)
+        }
+      }
+      void application.then(cleanupController, cleanupController)
+      if (resultApplicationControllers.get(hashedQueryKey) === controller) {
+        trackResultApplication(
+          hashedQueryKey,
+          application,
+          result.isFetching,
+          currentErrorRevision,
+        )
+      }
     }
 
     // eslint-disable-next-line no-shadow
     const makeQueryResultHandler = (queryKey: QueryKey) => {
       const hashedQueryKey = hashKey(queryKey)
       const handleQueryResult: UpdateHandler = (result) => {
+        const observer = state.observers.get(hashedQueryKey)
+        const observedQuery = observer?.getCurrentQuery()
+        if (observer && observedQuery) {
+          trackOwnedCacheQuery(observedQuery, hashedQueryKey)
+          if (result.isSuccess) {
+            if (!hasPostWriteAuthority(hashedQueryKey, observedQuery)) {
+              // Query observers are notified before Query Cache subscribers.
+              // Recheck after the cache success action records fetch authority.
+              queueMicrotask(() => {
+                const currentObserver = state.observers.get(hashedQueryKey)
+                if (
+                  currentObserver === observer &&
+                  hasPostWriteAuthority(
+                    hashedQueryKey,
+                    currentObserver.getCurrentQuery(),
+                  )
+                ) {
+                  handleQueryResult(currentObserver.getCurrentResult())
+                }
+              })
+              return
+            }
+            requiredFetchStarts.delete(hashedQueryKey)
+          }
+        }
+        if (
+          syncMode !== `on-demand` &&
+          result.isSuccess &&
+          !result.isFetching &&
+          !writingDirectCache &&
+          (pendingDirectWrites !== undefined ||
+            (fetchStartGenerations.get(hashedQueryKey) ??
+              directWriteGeneration) < directWriteGeneration)
+        ) {
+          // This fetch started before a direct write, or a direct write still
+          // waits. Once no write waits, take the keys that accepted writes
+          // claimed after this fetch started from the accepted rows, and the
+          // rest from this result. Settle its waiter after those rows apply.
+          const query = observer?.getCurrentQuery()
+          const fetchStart = fetchStartGenerations.get(hashedQueryKey) ?? 0
+          if (readExceptionalResultSettlement(result)?.type === `pending`)
+            return
+          const validation = validateSuccessfulResultItems(queryKey, result)
+          if (query && `items` in validation) {
+            deferredResults++
+            const refresh = (async () => {
+              await directWritesSettled()
+              const current = state.observers.get(hashedQueryKey)
+              if (current?.getCurrentQuery() !== query) {
+                throw new CancelledError()
+              }
+              // Subscribe before the cache update, so its notification
+              // cannot be missed.
+              let unsubscribe = () => {}
+              const notified = new Promise<void>((resolve) => {
+                unsubscribe = current.subscribe(() => resolve())
+              })
+              const before = current.getCurrentResult()
+              try {
+                fetchStartGenerations.set(hashedQueryKey, directWriteGeneration)
+                updateCacheDataForKey(
+                  queryKey,
+                  mergeOlderRows(validation.items, fetchStart),
+                )
+                // Rows equal to the cache leave the current result unchanged,
+                // so no notification follows. Handle it now: it is no longer
+                // stale.
+                if (current.getCurrentResult() === before)
+                  handleQueryResult(before)
+                else await notified
+              } finally {
+                unsubscribe()
+              }
+              // Let the handler classify the merged result first.
+              await new Promise<void>((resolve) => queueMicrotask(resolve))
+              const application = getResultApplicationSettlement(hashedQueryKey)
+              if (application !== true) await application
+              return current.getCurrentResult()
+            })()
+            const settled = () => {
+              deferredResults--
+            }
+            void refresh.then(settled, settled)
+            scheduleDeferredResultSettlement(hashedQueryKey, result, refresh)
+            return
+          }
+        }
         if (result.isSuccess) {
           // Skip processing this result while data refreshes are deferred.
           // Optimistic state covers the gap. Once the barrier resolves,
           // trigger a fresh refetch to get authoritative data.
           if (collection.deferDataRefresh) {
-            collection.deferDataRefresh.then(() => {
-              const observer = state.observers.get(hashedQueryKey)
-              if (observer) {
-                observer.refetch().catch(() => {
-                  // Errors handled by the next handleQueryResult invocation
-                })
-              }
-            })
+            if (result.isFetching) {
+              void getDeferredRefresh(
+                hashedQueryKey,
+                collection.deferDataRefresh,
+              )
+              return
+            }
+            scheduleDeferredResultSettlement(
+              hashedQueryKey,
+              result,
+              getDeferredRefresh(hashedQueryKey, collection.deferDataRefresh),
+            )
             return
           }
 
-          if (retainedQueriesPendingRevalidation.has(hashedQueryKey)) {
-            void reconcileSuccessfulResult(queryKey, result).catch((error) => {
-              console.error(
-                `[QueryCollection] Error reconciling query ${String(queryKey)}:`,
-                error,
-              )
-            })
-          } else {
-            applySuccessfulResult(queryKey, result)
+          const manualWriteSnapshot = manualWriteSnapshots.get(hashedQueryKey)
+          if (manualWriteSnapshot) {
+            const currentQuery = state.observers
+              .get(hashedQueryKey)
+              ?.getCurrentQuery()
+            if (
+              currentQuery?.state.dataUpdateCount ===
+                manualWriteSnapshot.dataUpdateCount &&
+              currentQuery.state.data === manualWriteSnapshot.data
+            ) {
+              return
+            }
+            manualWriteSnapshots.delete(hashedQueryKey)
           }
-        } else if (result.isError) {
+
+          if (retainedQueriesPendingRevalidation.has(hashedQueryKey)) {
+            const query = queryClient.getQueryCache().find({
+              queryKey,
+              exact: true,
+            })
+            if (query?.state.dataUpdateCount === 0) {
+              // Initial data seeds Query state without a fetch. It must not
+              // satisfy persistence retention that lasts until revalidation.
+              if (!result.isFetching) {
+                state.observers
+                  .get(hashedQueryKey)
+                  ?.refetch()
+                  .catch(() => {
+                    // Errors handled by the next handleQueryResult invocation
+                  })
+              }
+              return
+            }
+            if (result.isFetching) return
+
+            enqueueResultApplication(hashedQueryKey, result, (signal, token) =>
+              reconcileSuccessfulResult(queryKey, result, token, signal),
+            )
+          } else {
+            enqueueResultApplication(hashedQueryKey, result, (signal, token) =>
+              applySuccessfulResult(queryKey, result, token, undefined, signal),
+            )
+          }
+        } else {
+          // A reset/recreation can reuse a dataUpdateCount. Retire the old
+          // snapshot marker on the intervening non-success notification so a
+          // fresh authoritative result cannot be mistaken for stale data.
+          manualWriteSnapshots.delete(hashedQueryKey)
+        }
+
+        if (
+          observedQuery &&
+          result.errorUpdateCount <
+            (observedErrorUpdates.get(observedQuery) ?? 0)
+        ) {
+          observedErrorUpdates.delete(observedQuery)
+        }
+        // Retry attempts can re-notify the previous error before the fetch settles.
+        if (result.isError && result.fetchStatus === `idle`) {
           const isNewError =
-            result.errorUpdatedAt !== state.lastErrorUpdatedAt ||
-            result.error !== state.lastError
+            !observedQuery ||
+            result.errorUpdateCount !== observedErrorUpdates.get(observedQuery)
           if (isNewError) {
+            if (observedQuery) {
+              observedErrorUpdates.set(observedQuery, result.errorUpdateCount)
+            }
             state.lastError = result.error
             state.errorCount++
-            state.lastErrorUpdatedAt = result.errorUpdatedAt
+            errorRevision++
           }
 
           console.error(
@@ -1395,8 +2577,12 @@ export function queryCollectionOptions(
             result.error,
           )
 
-          // Mark collection as ready even on error to avoid blocking apps
-          markReady()
+          // A failure before the first successful snapshot leaves no usable
+          // collection state. Later refetch failures keep the last ready
+          // snapshot available while utils expose the error.
+          if (collection.status === `loading`) {
+            markError(result.error)
+          }
         }
       }
       return handleQueryResult
@@ -1406,11 +2592,22 @@ export function queryCollectionOptions(
       return unsubscribes.has(hashedQueryKey)
     }
 
+    applyRefetchResultWhenUnsubscribed = (hashedQueryKey, result) => {
+      if (isSubscribed(hashedQueryKey)) return false
+      const trackedQueryKey = hashToQueryKey.get(hashedQueryKey)
+      if (!trackedQueryKey) return false
+      makeQueryResultHandler(trackedQueryKey)(result)
+      return true
+    }
+
     const subscribeToQuery = (
       observer: QueryObserver<Array<any>, any, Array<any>, Array<any>, any>,
       hashedQueryKey: string,
     ) => {
       if (!isSubscribed(hashedQueryKey)) {
+        // Cache removal does not retire eager ownership. Reattach the observer
+        // to the current cache entry before subscribing to its updates.
+        if (syncMode === `eager`) observer.setOptions(observer.options)
         const cachedQueryKey = hashToQueryKey.get(hashedQueryKey)!
         const handleQueryResult = makeQueryResultHandler(cachedQueryKey)
         const unsubscribeFn = observer.subscribe(handleQueryResult)
@@ -1436,6 +2633,16 @@ export function queryCollectionOptions(
       unsubscribes.clear()
     }
 
+    ensureEagerSubscription = () => {
+      if (syncMode !== `eager`) return
+      state.observers.forEach((observer, key) => {
+        const query = observer.getCurrentQuery()
+        if (queryClient.getQueryCache().get(query.queryHash) !== query) {
+          subscribeToQuery(observer, key)
+        }
+      })
+    }
+
     // Mark that sync has started
     syncStarted = true
 
@@ -1453,11 +2660,10 @@ export function queryCollectionOptions(
 
     // If syncMode is eager, create the initial query without any predicates
     if (syncMode === `eager`) {
-      // Catch any errors to prevent unhandled rejections
-      const initialResult = createQueryFromOpts({})
-      if (initialResult instanceof Promise) {
-        initialResult.catch(() => {
-          // Errors are already handled by the query result handler
+      const result = createQueryFromOpts({})
+      if (result instanceof Promise) {
+        void result.catch(() => {
+          // Errors are handled by the query result handler.
         })
       }
     } else {
@@ -1467,7 +2673,9 @@ export function queryCollectionOptions(
         // In on-demand mode, there is no initial query, but retained-placeholder
         // maintenance still needs to finish before the collection is treated as ready.
         void startupRetentionMaintenancePromise.then(() => {
-          markReady()
+          if (collection.status === `loading`) {
+            markReady()
+          }
         })
       }
     }
@@ -1487,35 +2695,39 @@ export function queryCollectionOptions(
      * Perform row-level cleanup and remove all tracking for a query.
      * Callers are responsible for ensuring the query is safe to cleanup.
      */
+    const unsubscribePendingReadyListeners = (hashedQueryKey: string) => {
+      pendingReadyUnsubscribes.get(hashedQueryKey)?.forEach((unsubscribe) => {
+        unsubscribe()
+      })
+      pendingReadyUnsubscribes.delete(hashedQueryKey)
+    }
+
     const cleanupQueryInternal = (hashedQueryKey: string) => {
       unsubscribes.get(hashedQueryKey)?.()
       unsubscribes.delete(hashedQueryKey)
+      unsubscribePendingReadyListeners(hashedQueryKey)
       cancelPersistedRetentionExpiry(hashedQueryKey)
       retainedQueriesPendingRevalidation.delete(hashedQueryKey)
+      invalidatePendingResultApplication(hashedQueryKey)
+      manualWriteSnapshots.delete(hashedQueryKey)
 
-      const rowKeys = queryToRows.get(hashedQueryKey) ?? new Set()
-      const nextOwnersByRow = new Map<string | number, Set<string>>()
+      const nextOwnersByRow = removeQueryOwnership(hashedQueryKey)
       const rowsToDelete: Array<any> = []
 
-      rowKeys.forEach((rowKey) => {
-        const queries = rowToQueries.get(rowKey)
-
-        if (!queries) {
-          return
-        }
-
-        const nextOwners = new Set(queries)
-        nextOwners.delete(hashedQueryKey)
-        nextOwnersByRow.set(rowKey, nextOwners)
-
-        if (nextOwners.size === 0 && collection.has(rowKey)) {
-          rowsToDelete.push(collection.get(rowKey))
+      nextOwnersByRow.forEach((nextOwners, rowKey) => {
+        const row = collection._state.getAcceptedSyncedRow(rowKey)
+        if (nextOwners.size === 0 && row) {
+          rowsToDelete.push(row)
         }
       })
 
       const shouldWriteMetadata =
         metadata !== undefined && nextOwnersByRow.size > 0
-      const needsTransaction = shouldWriteMetadata || rowsToDelete.length > 0
+      const retentionKey = `${QUERY_COLLECTION_GC_PREFIX}${hashedQueryKey}`
+      const hasRetentionMarker =
+        metadata?.collection.get(retentionKey) !== undefined
+      const needsTransaction =
+        shouldWriteMetadata || rowsToDelete.length > 0 || hasRetentionMarker
       if (needsTransaction) {
         begin()
       }
@@ -1536,6 +2748,10 @@ export function queryCollectionOptions(
         rowsToDelete.forEach((row) => {
           write({ type: `delete`, value: row })
         })
+      }
+
+      if (hasRetentionMarker) {
+        metadata.collection.delete(retentionKey)
       }
 
       if (needsTransaction) {
@@ -1563,10 +2779,16 @@ export function queryCollectionOptions(
         // Drop our subscription so hasListeners reflects only active consumers
         unsubscribes.get(hashedQueryKey)?.()
         unsubscribes.delete(hashedQueryKey)
+        unsubscribePendingReadyListeners(hashedQueryKey)
+      }
+
+      // Refcounts are explicit ownership tokens. A cache event can remove the
+      // observer while an active acquisition still owns this query.
+      if (refcount > 0) {
+        return
       }
 
       const hasListeners = observer?.hasListeners() ?? false
-
       if (hasListeners) {
         // During invalidateQueries, TanStack Query keeps internal listeners alive.
         // Leave refcount at 0 but keep observer so it can resubscribe.
@@ -1574,21 +2796,13 @@ export function queryCollectionOptions(
         return
       }
 
-      // No listeners means the query is truly idle.
-      // Even if refcount > 0, we treat hasListeners as authoritative to prevent leaks.
-      // This can happen if subscriptions are GC'd without calling unloadSubset.
-      if (refcount > 0) {
-        console.warn(
-          `[cleanupQueryIfIdle] Invariant violation: refcount=${refcount} but no listeners. Cleaning up to prevent leak.`,
-          { hashedQueryKey },
-        )
-      }
-
       if (
         effectivePersistedGcTime !== undefined &&
         metadata &&
-        persistedMetadata?.row.scanPersisted
+        persistence?.scanPersistedRows
       ) {
+        invalidatePendingResultApplication(hashedQueryKey)
+        manualWriteSnapshots.delete(hashedQueryKey)
         begin()
         metadata.collection.set(
           `${QUERY_COLLECTION_GC_PREFIX}${hashedQueryKey}`,
@@ -1634,10 +2848,90 @@ export function queryCollectionOptions(
     const unsubscribeQueryCache = queryClient
       .getQueryCache()
       .subscribe((event) => {
-        const hashedKey = event.query.queryHash
+        if (
+          event.type === `added` &&
+          partialMatchKey(event.query.queryKey, baseKey)
+        ) {
+          trackCacheQuery(event.query)
+        }
+
+        if (!trackedCacheQueries.has(event.query)) return
+
+        if (event.type === `updated`) {
+          if (event.action.type === `fetch`) {
+            let fetchStart = queryCollectionFetchActionStarts.get(event.action)
+            if (fetchStart === undefined) {
+              fetchStart = ++nextQueryCollectionFetchStart
+              queryCollectionFetchActionStarts.set(event.action, fetchStart)
+            }
+            queryCollectionCurrentFetchStarts.set(event.query, fetchStart)
+            const obsoleteFetchStarts = [
+              ...(fetchApplicationRecords.get(event.query)?.keys() ?? []),
+            ].filter((start) => start !== fetchStart)
+            if (obsoleteFetchStarts.length > 0) {
+              queueMicrotask(() =>
+                retireFetchApplicationRecords(event.query, obsoleteFetchStarts),
+              )
+            }
+            captureFetchResult(event.query, fetchStart)
+          } else if (event.action.type === `success` && !event.action.manual) {
+            const fetchStart = queryCollectionCurrentFetchStarts.get(
+              event.query,
+            )
+            if (fetchStart !== undefined) {
+              queryCollectionSuccessfulFetchStarts.set(event.query, fetchStart)
+              captureFetchResult(event.query, fetchStart)
+              // An authority-gated observer schedules its result handler before
+              // this cache listener records the successful fetch. Capture once
+              // more after that handler has attached the application promise.
+              queueMicrotask(() => {
+                captureFetchApplications(event.query, fetchStart)
+                retireFetchApplicationRecords(event.query, [fetchStart])
+              })
+            }
+          } else if (event.action.type === `error`) {
+            const fetchStart = queryCollectionCurrentFetchStarts.get(
+              event.query,
+            )
+            if (fetchStart !== undefined) {
+              captureFetchResult(event.query, fetchStart)
+              queueMicrotask(() =>
+                retireFetchApplicationRecords(event.query, [fetchStart]),
+              )
+            }
+          } else if (
+            event.action.type === `setState` &&
+            event.action.state.fetchStatus === `idle`
+          ) {
+            // Query Core uses a setState action, not an error action, when a
+            // reverted cancellation restores the pre-fetch state. Reset also
+            // reaches this terminal state. Neither path should retain causal
+            // fetch records until another fetch happens.
+            const fetchStart = queryCollectionCurrentFetchStarts.get(
+              event.query,
+            )
+            if (fetchStart !== undefined) {
+              queueMicrotask(() =>
+                retireFetchApplicationRecords(event.query, [fetchStart]),
+              )
+            }
+          }
+        }
+
+        // Ownership uses our stable key, not the Query client's optional
+        // custom cache hash function.
+        const hashedKey = hashKey(event.query.queryKey)
         if (event.type === `removed`) {
+          trackedCacheQueries.delete(event.query)
           // Only cleanup if this is OUR query (we track it)
           if (hashToQueryKey.has(hashedKey)) {
+            if (syncMode === `eager`) {
+              unsubscribes.get(hashedKey)?.()
+              unsubscribes.delete(hashedKey)
+              unsubscribePendingReadyListeners(hashedKey)
+              if (collection.subscriberCount > 0) ensureEagerSubscription()
+              return
+            }
             // TanStack Query GC'd this query after gcTime expired.
             // Use the guarded cleanup path to avoid deleting rows for active queries.
             cleanupQueryIfIdle(hashedKey)
@@ -1645,16 +2939,30 @@ export function queryCollectionOptions(
         }
       })
 
-    const cleanup = async () => {
+    const cleanup = () => {
+      if (activeSyncSession === syncSession) activeSyncSession = undefined
+      pendingStartupLoads.clear()
+      ensureEagerSubscription = () => {}
+      applyRefetchResultWhenUnsubscribed = () => false
       unsubscribeFromCollectionEvents()
       unsubscribeFromQueries()
       persistedRetentionTimers.forEach((timer) => {
         clearTimeout(timer)
       })
       persistedRetentionTimers.clear()
+      pendingExceptionalResultSettlements.forEach((settlement) => {
+        settlement.reject(new CancelledError())
+      })
+      pendingExceptionalResultSettlements.clear()
+      deferredRefreshes.clear()
+      if (getExceptionalResultSettlement === readExceptionalResultSettlement) {
+        getExceptionalResultSettlement = () => undefined
+      }
 
-      const allQueryKeys = [...hashToQueryKey.values()]
-      const allHashedKeys = [...state.observers.keys()]
+      const allHashedKeys = new Set([
+        ...state.observers.keys(),
+        ...queryToRows.keys(),
+      ])
 
       // Force cleanup all queries (explicit cleanup path)
       // This ignores hasListeners and always cleans up
@@ -1665,13 +2973,25 @@ export function queryCollectionOptions(
       // Unsubscribe from cache events (cleanup already happened above)
       unsubscribeQueryCache()
 
-      // Remove queries from TanStack Query cache
-      await Promise.all(
-        allQueryKeys.map(async (qKey) => {
-          await queryClient.cancelQueries({ queryKey: qKey, exact: true })
-          queryClient.removeQueries({ queryKey: qKey, exact: true })
-        }),
-      )
+      // Removing a Query destroys it and synchronously cancels its retryer.
+      // Finish this before a later collection sync can create a replacement.
+      for (const query of [...trackedCacheQueries]) {
+        const belongsToCleanup = [...getLogicalHashes(query)].some((hash) =>
+          allHashedKeys.has(hash),
+        )
+        if (
+          belongsToCleanup &&
+          (syncMode === `eager` ||
+            (ownedCacheQueries.has(query) && query.getObserversCount() === 0))
+        ) {
+          queryClient.getQueryCache().remove(query)
+        }
+      }
+      for (const query of trackedCacheQueries) {
+        queryCollectionCacheOwners.get(query)?.delete(cacheOwnerToken)
+      }
+      trackedCacheQueries.clear()
+      ownedCacheQueries = new WeakSet<AnyQuery>()
     }
 
     /**
@@ -1694,11 +3014,19 @@ export function queryCollectionOptions(
      * - But observer.hasListeners() is still true (TanStack Query's internal listeners)
      * - We skip cleanup and reset refcount, allowing resubscribe to succeed
      *
-     * We don't cancel in-flight requests. Unsubscribing from the observer is sufficient
-     * to prevent late-arriving data from being processed. The request completes and is cached
-     * by TanStack Query, allowing quick remounts to restore data without refetching.
+     * Ordinary in-flight requests may continue after this observer unsubscribes and remain
+     * cached by TanStack Query. A pending explicit refetch is acquisition-scoped: releasing
+     * its final owner rejects that caller and unsubscribes this observer, which lets Query
+     * cancel the transport when no peer observer still owns it.
      */
     const unloadSubset = (options: LoadSubsetOptions) => {
+      // No observer lease exists until startup maintenance has finished.
+      const pending = pendingStartupLoads.get(options)
+      if (pending) {
+        pending.delete(pending.values().next().value!)
+        if (pending.size === 0) pendingStartupLoads.delete(options)
+        return
+      }
       // 1. Same predicates → 2. Same queryKey
       const key = generateQueryKeyFromOptions(options)
       const hashedQueryKey = hashKey(key)
@@ -1746,19 +3074,137 @@ export function queryCollectionOptions(
    * - utils.refetch() - for explicit user-triggered refetches
    * - Internal handlers (onInsert/onUpdate/onDelete) - after mutations to get fresh data
    *
-   * @returns Promise that resolves when the refetch is complete, with QueryObserverResult
+   * Calls wait for each accepted Query result to be applied to Collection rows
+   * unless a user mutation is persisting or its handler is active. Normal
+   * publication is blocked behind that transaction, so those calls retain the
+   * Query fetch boundary.
+   *
+   * @returns Promise that resolves with each QueryObserverResult
    */
-  const refetch: RefetchFn = async (opts) => {
+  const refetchQueryResults = async (
+    opts: Parameters<RefetchFn>[0],
+    awaitApplications: boolean,
+  ): ReturnType<RefetchFn> => {
     const allQueryKeys = [...hashToQueryKey.values()]
-    const refetchPromises = allQueryKeys.map((qKey) => {
-      const queryObserver = state.observers.get(hashKey(qKey))!
-      return queryObserver.refetch({
-        throwOnError: opts?.throwOnError,
-      })
+
+    // A replaced eager Query must reattach before refetch. An idle observer
+    // on the same Query is applied explicitly below to avoid an extra fetch.
+    ensureEagerSubscription()
+    const syncSession = activeSyncSession
+    const refetchPromises = allQueryKeys.map(async (trackedQueryKey) => {
+      const hashedQueryKey = hashKey(trackedQueryKey)
+      const queryObserver = state.observers.get(hashedQueryKey)
+      if (!queryObserver) return undefined
+      const readExceptionalSettlement = getExceptionalResultSettlement
+
+      let query = queryObserver.getCurrentQuery()
+      let startingResult: QueryObserverResult<any, any>
+      let fetchRecord: FetchApplicationRecord | undefined
+      let result: QueryObserverResult<any, any>
+      try {
+        const fetch = queryObserver.refetch({
+          throwOnError: opts?.throwOnError,
+        })
+        query = queryObserver.getCurrentQuery()
+        startingResult = queryObserver.getCurrentResult()
+        const fetchStart = queryCollectionCurrentFetchStarts.get(query)
+        if (fetchStart !== undefined) {
+          fetchRecord = getFetchApplicationRecord(
+            query,
+            fetchStart,
+            hashedQueryKey,
+          )
+        }
+        result = await fetch
+      } catch (error) {
+        const currentResult = queryObserver.getCurrentResult()
+        const appliedUnsubscribed = applyRefetchResultWhenUnsubscribed(
+          hashedQueryKey,
+          currentResult,
+        )
+        const causalResult = appliedUnsubscribed
+          ? currentResult
+          : (fetchRecord?.result ?? currentResult)
+        if (fetchRecord) {
+          fetchRecord.result = causalResult
+          fetchRecord.settlement ??= getRecordedResultApplicationSettlement(
+            hashedQueryKey,
+            causalResult,
+          )
+        }
+        throw error
+      }
+
+      const appliedUnsubscribed = applyRefetchResultWhenUnsubscribed(
+        hashedQueryKey,
+        result,
+      )
+      const causalResult = appliedUnsubscribed
+        ? result
+        : (fetchRecord?.result ?? result)
+      if (fetchRecord) {
+        fetchRecord.result = causalResult
+        fetchRecord.settlement ??= getRecordedResultApplicationSettlement(
+          hashedQueryKey,
+          causalResult,
+        )
+      }
+
+      // Query observers can report success before the Query cache records the
+      // fetch authority used by the result handler. Let that queued handler
+      // classify this result before reading its exceptional settlement.
+      await new Promise<void>((resolve) => queueMicrotask(resolve))
+      const exceptionalSettlement =
+        readExceptionalSettlement(causalResult) ??
+        readExceptionalSettlement(result)
+      const settlement =
+        fetchRecord?.settlement ??
+        getRecordedResultApplicationSettlement(hashedQueryKey, result) ??
+        getRecordedResultApplicationSettlement(hashedQueryKey, startingResult)
+      if (
+        activeSyncSession !== syncSession &&
+        exceptionalSettlement === undefined &&
+        settlement === undefined
+      ) {
+        throw new CancelledError()
+      }
+      if (awaitApplications) {
+        if (exceptionalSettlement?.type === `rejected`) {
+          throw exceptionalSettlement.error
+        }
+        if (exceptionalSettlement?.type === `pending`) {
+          const replacement = await exceptionalSettlement.promise
+          if (!replacement.isSuccess && opts?.throwOnError) {
+            throw replacement.error
+          }
+          return replacement
+        }
+      }
+
+      if (awaitApplications && !isMutationPublicationBlocked() && settlement) {
+        if (opts?.throwOnError) {
+          await settlement
+        } else {
+          await settlement.catch(() => undefined)
+        }
+      }
+      return causalResult
     })
 
-    return Promise.all(refetchPromises)
+    return await Promise.all(refetchPromises)
   }
+
+  const isMutationPublicationBlocked = (): boolean => {
+    if (activeMutationHandlerCount > 0) return true
+    for (const transaction of writeContext?.collection._state.transactions.values() ??
+      []) {
+      if (transaction.state === `persisting`) return true
+    }
+    return false
+  }
+
+  const refetch: RefetchFn = (opts) =>
+    refetchQueryResults(opts, !isMutationPublicationBlocked())
 
   /**
    * Updates a single query key in the cache with new items, handling both direct arrays
@@ -1816,26 +3262,249 @@ export function queryCollectionOptions(
         return oldData
       })
     } else {
-      // No select - cache contains raw array, just set it directly
-      queryClient.setQueryData(key, items)
+      // Raw row writes must not overwrite a different cache format. Avoid even
+      // a no-op setQueryData: it marks unrelated data fresh and clears invalidation.
+      const previous = queryClient.getQueryData(key)
+      if (previous === undefined || Array.isArray(previous))
+        queryClient.setQueryData(key, items)
     }
   }
 
   /**
-   * Updates the query cache with new items for ALL query keys matching this collection,
-   * including stale/inactive cache entries from destroyed observers.
+   * Updates Query cache state after a manual write.
    *
-   * This prevents ghost items: when an observer is destroyed but gcTime > 0, TanStack Query
-   * keeps the cached data. If syncedData changes (via writeDelete/writeInsert/writeUpdate)
-   * after the observer is destroyed, the stale cache becomes inconsistent. When a new observer
-   * later picks up this stale cache, makeQueryResultHandler would create spurious sync
-   * operations (re-inserting deleted items, reverting updated values, etc).
-   *
-   * By updating all cache entries (active and stale), we ensure the cache always reflects
-   * the current syncedData state.
+   * An on-demand cache entry belongs to one exact queryFn result and may be
+   * predicate-, order-, or window-scoped. A normalized collection snapshot
+   * cannot preserve that shape. Revalidate actively owned, enabled observers
+   * and remove every other scoped entry so a later owner fetches it again.
+   * Eager collections retain their single full-result cache patch.
    */
-  const updateCacheData = (items: Array<any>): void => {
-    const allCached = queryClient.getQueryCache().findAll({ queryKey: baseKey })
+  // A direct write takes its position when it is called, so a fetch that
+  // starts later counts as newer even if the write applies later.
+  const reserveDirectWrite = (): number => {
+    directWriteGeneration++
+    // A query that is not fetching holds no rows older than this write. A
+    // deferred result keeps its own fetch start until it is merged.
+    for (const [hashedQueryKey, observer] of state.observers) {
+      if (observer.getCurrentQuery().state.fetchStatus !== `fetching`)
+        fetchStartGenerations.set(hashedQueryKey, directWriteGeneration)
+    }
+    return directWriteGeneration
+  }
+
+  // Only an accepted write gains precedence over an older fetch.
+  const claimDirectWriteKeys = (
+    keys: Array<string | number>,
+    position: number,
+  ): void => {
+    // Only a fetch in flight, or a deferred result, can return rows older
+    // than this write. Without one, the per-key positions are not needed.
+    let older = deferredResults > 0 || pendingDirectWrites !== undefined
+    for (const observer of state.observers.values()) {
+      if (observer.getCurrentQuery().state.fetchStatus === `fetching`)
+        older = true
+    }
+    if (!older) directWriteKeyGenerations.clear()
+    else for (const key of keys) directWriteKeyGenerations.set(key, position)
+  }
+
+  const noteWaitingDirectWrite = (waiting: Promise<void>): void => {
+    const tail: Promise<void> = Promise.all([
+      pendingDirectWrites,
+      waiting,
+    ]).then(
+      () => {
+        if (pendingDirectWrites === tail) pendingDirectWrites = undefined
+      },
+      () => {
+        if (pendingDirectWrites === tail) pendingDirectWrites = undefined
+      },
+    )
+    pendingDirectWrites = tail
+  }
+
+  const updateCacheData = (getItems: () => Array<any>): void => {
+    writingDirectCache = true
+    try {
+      writeDirectCache(getItems)
+    } finally {
+      writingDirectCache = false
+    }
+  }
+
+  const writeDirectCache = (getItems: () => Array<any>): void => {
+    if (syncMode === `on-demand`) {
+      const deferredRefresh = writeContext?.collection.deferDataRefresh
+      const revalidatingQueries = new Set<AnyQuery>()
+      const ownObserverCounts = new Map<AnyQuery, number>()
+
+      for (const observer of state.observers.values()) {
+        const query = observer.getCurrentQuery()
+        ownObserverCounts.set(query, (ownObserverCounts.get(query) ?? 0) + 1)
+      }
+
+      const refetchTrackedQuery = async (
+        query: AnyQuery,
+        logicalHashes: Set<string>,
+        postWriteRefetchGenerationByHash: Map<string, number>,
+      ): Promise<void> => {
+        try {
+          await query.fetch(undefined, { cancelRefetch: false })
+        } catch {
+          // A failed post-write refetch is terminal for this attempt.
+          return
+        }
+
+        const stillNeedsAuthority = [...logicalHashes].some(
+          (hashedQueryKey) =>
+            postWriteRefetchGenerations.get(hashedQueryKey) ===
+              postWriteRefetchGenerationByHash.get(hashedQueryKey) &&
+            !hasPostWriteAuthority(hashedQueryKey, query),
+        )
+        if (
+          stillNeedsAuthority &&
+          queryClient.getQueryCache().get(query.queryHash) === query &&
+          !query.isDisabled()
+        ) {
+          try {
+            // The first call may have reused a request which began before the
+            // write. One bounded follow-up then establishes authority.
+            await query.fetch(undefined, { cancelRefetch: false })
+          } catch {
+            // The Query result owns error publication.
+          }
+        }
+      }
+
+      for (const [hashedQueryKey, observer] of state.observers) {
+        if ((queryRefCounts.get(hashedQueryKey) ?? 0) <= 0) {
+          continue
+        }
+
+        const query = observer.getCurrentQuery()
+        if (!isObserverEnabled(observer)) {
+          continue
+        }
+
+        const postWriteRefetchGeneration = requirePostWriteAuthority(
+          hashedQueryKey,
+          query,
+        )
+        revalidatingQueries.add(query)
+        const ownedAtSchedule = ownedCacheQueries.has(query)
+        query.invalidate()
+        manualWriteSnapshots.set(hashedQueryKey, {
+          data: query.state.data,
+          dataUpdateCount: query.state.dataUpdateCount,
+        })
+
+        const retireProtectedQuery = () => {
+          if (!ownedAtSchedule) return
+          if (queryClient.getQueryCache().get(query.queryHash) !== query) return
+          if (query.getObserversCount() > 0) {
+            query.invalidate()
+            if (!query.isDisabled()) {
+              const logicalHashes = new Set([hashedQueryKey])
+              const postWriteRefetchGenerationByHash = new Map([
+                [hashedQueryKey, postWriteRefetchGeneration],
+              ])
+              void refetchTrackedQuery(
+                query,
+                logicalHashes,
+                postWriteRefetchGenerationByHash,
+              )
+            }
+          } else {
+            queryClient.getQueryCache().remove(query)
+          }
+        }
+
+        const refetchObserver = async () => {
+          if (
+            state.observers.get(hashedQueryKey) !== observer ||
+            (queryRefCounts.get(hashedQueryKey) ?? 0) <= 0
+          ) {
+            retireProtectedQuery()
+            return
+          }
+
+          if (
+            hasPostWriteAuthority(hashedQueryKey, observer.getCurrentQuery())
+          ) {
+            return
+          }
+
+          const result = await observer.refetch().catch(() => undefined)
+          if (
+            result?.isError ||
+            postWriteRefetchGenerations.get(hashedQueryKey) !==
+              postWriteRefetchGeneration
+          ) {
+            return
+          }
+
+          const currentQuery = observer.getCurrentQuery()
+          if (hasPostWriteAuthority(hashedQueryKey, currentQuery)) return
+          if (
+            state.observers.get(hashedQueryKey) === observer &&
+            (queryRefCounts.get(hashedQueryKey) ?? 0) > 0 &&
+            isObserverEnabled(observer)
+          ) {
+            // A cancellation/revert or a reused pre-write request can resolve
+            // without authority. Retry once; errors end the attempt.
+            await observer.refetch().catch(() => undefined)
+          } else {
+            retireProtectedQuery()
+          }
+        }
+
+        if (deferredRefresh) {
+          void deferredRefresh.then(refetchObserver, refetchObserver)
+        } else {
+          void refetchObserver()
+        }
+      }
+
+      for (const query of [...trackedCacheQueries]) {
+        if (revalidatingQueries.has(query)) continue
+
+        const ownedByAnotherCollection = [
+          ...(queryCollectionCacheOwners.get(query) ?? []),
+        ].some((owner) => owner !== cacheOwnerToken)
+        if (ownedByAnotherCollection) continue
+
+        const ownObservers = ownObserverCounts.get(query) ?? 0
+        if (query.getObserversCount() > ownObservers) {
+          // A disabled collection observer must not authorize a foreign
+          // observer to refetch on the collection's behalf.
+          if (ownObservers > 0) continue
+
+          const logicalHashes = getLogicalHashes(query)
+          const postWriteRefetchGenerationByHash = new Map<string, number>()
+          for (const hashedQueryKey of logicalHashes) {
+            postWriteRefetchGenerationByHash.set(
+              hashedQueryKey,
+              requirePostWriteAuthority(hashedQueryKey, query),
+            )
+          }
+          query.invalidate()
+          if (!query.isDisabled()) {
+            void refetchTrackedQuery(
+              query,
+              logicalHashes,
+              postWriteRefetchGenerationByHash,
+            )
+          }
+          continue
+        }
+
+        queryClient.getQueryCache().remove(query)
+      }
+      return
+    }
+
+    const items = getItems()
+    const allCached = [...trackedCacheQueries]
 
     if (allCached.length > 0) {
       for (const query of allCached) {
@@ -1856,13 +3525,57 @@ export function queryCollectionOptions(
     getKey: (item: any) => string | number
     begin: () => void
     write: (message: Omit<ChangeMessage<any>, `key`>) => void
-    commit: () => void
-    updateCacheData?: (items: Array<any>) => void
+    commit: () => SyncAppliedReceipt
+    updateCacheData?: (getItems: () => Array<any>) => void
+    reserveDirectWrite?: () => number
+    claimDirectWriteKeys?: (
+      keys: Array<string | number>,
+      position: number,
+    ) => void
+    noteWaitingDirectWrite?: (waiting: Promise<void>) => void
+    earlierCommits?: () => Promise<void> | undefined
   } | null = null
 
   // Enhanced internalSync that captures write functions for manual use
-  const enhancedInternalSync: SyncConfig<any>[`sync`] = (params) => {
-    const { begin, write, commit, collection } = params
+  const enhancedInternalSync: SyncConfig<any>[`sync`] = (syncParams) => {
+    // A direct write validates against every earlier commit, so track when
+    // the last commit is accepted.
+    let earlierCommits: Promise<void> | undefined
+    const commit: typeof syncParams.commit = (signal) => {
+      const applied = syncParams.commit(signal)
+      const accepted = whenSyncAccepted(applied)
+      if (accepted !== true) {
+        const tail = accepted.then(
+          () => {
+            if (earlierCommits === tail) earlierCommits = undefined
+          },
+          () => {
+            if (earlierCommits === tail) earlierCommits = undefined
+          },
+        )
+        earlierCommits = tail
+      }
+      return applied
+    }
+    const params = { ...syncParams, commit }
+    const { begin, write, collection } = params
+    let queryClientMounted = false
+
+    const mountQueryClient = () => {
+      if (!queryClientMounted) {
+        queryClient.mount()
+        queryClientMounted = true
+      }
+    }
+
+    const unmountQueryClient = () => {
+      if (queryClientMounted) {
+        queryClient.unmount()
+        queryClientMounted = false
+      }
+    }
+
+    mountQueryClient()
 
     // Get the base query key for the context (handle both static and function-based keys)
     const contextQueryKey =
@@ -1871,7 +3584,7 @@ export function queryCollectionOptions(
         : (queryKey as unknown as Array<unknown>)
 
     // Store references for manual write operations
-    writeContext = {
+    const currentWriteContext = {
       collection,
       queryClient,
       queryKey: contextQueryKey,
@@ -1880,10 +3593,31 @@ export function queryCollectionOptions(
       write,
       commit,
       updateCacheData,
+      reserveDirectWrite,
+      claimDirectWriteKeys,
+      noteWaitingDirectWrite,
+      earlierCommits: () => earlierCommits,
     }
+    writeContext = currentWriteContext
 
-    // Call the original internalSync logic
-    return internalSync(params)
+    // Call the original internalSync logic, pairing QueryClient mount with the
+    // collection sync lifecycle so focus/reconnect managers dispatch events for
+    // standalone QueryClient usage.
+    const syncResult = internalSync(params)
+    const sync =
+      typeof syncResult === `function`
+        ? { cleanup: syncResult }
+        : typeof syncResult === `object`
+          ? syncResult
+          : {}
+
+    return {
+      ...sync,
+      cleanup: () => {
+        if (writeContext === currentWriteContext) writeContext = null
+        return runCleanupWithLocalTeardown(sync.cleanup, unmountQueryClient)
+      },
+    }
   }
 
   // Create write utils using the manual-sync module
@@ -1891,60 +3625,119 @@ export function queryCollectionOptions(
     () => writeContext,
   )
 
+  // Helper to handle deprecated auto-refetch behavior with warnings
+  async function handleDeprecatedAutoRefetch(
+    handlerResult: unknown,
+  ): Promise<void> {
+    const canHaveProperties =
+      (typeof handlerResult === `object` && handlerResult !== null) ||
+      typeof handlerResult === `function`
+    const explicitRefetchFalse =
+      canHaveProperties &&
+      'refetch' in handlerResult &&
+      (handlerResult as Record<string, unknown>).refetch === false
+
+    if (explicitRefetchFalse) {
+      return
+    } else {
+      warnOnce(
+        'query-collection-auto-refetch',
+        '[TanStack DB] DEPRECATED: QueryCollection handlers currently auto-refetch after completion. ' +
+          'This behavior will be removed in v1.0. To prepare: ' +
+          '(1) Add `await collection.utils.refetch()` and temporarily return `{ refetch: false }` to avoid a second refetch, or ' +
+          "(2) Return `{ refetch: false }` to opt out now if you don't need it. " +
+          'See: https://tanstack.com/db/latest/docs/collections/query-collection#controlling-refetch-behavior',
+      )
+      await refetchQueryResults(undefined, false)
+    }
+  }
+
+  const runMutationHandler = async <TParams>(
+    handler: (params: TParams) => unknown,
+    params: TParams,
+  ): Promise<unknown> => {
+    activeMutationHandlerCount++
+    try {
+      return await handler(params)
+    } finally {
+      activeMutationHandlerCount--
+    }
+  }
+
   // Create wrapper handlers for direct persistence operations that handle refetching
+  // These wrappers process deprecated return values but don't pass them through
   const wrappedOnInsert = onInsert
-    ? async (params: InsertMutationFnParams<any>) => {
-        const handlerResult = (await onInsert(params)) ?? {}
-        const shouldRefetch =
-          (handlerResult as { refetch?: boolean }).refetch !== false
-
-        if (shouldRefetch) {
-          await refetch()
-        }
-
-        return handlerResult
+    ? async (
+        params: Parameters<NonNullable<typeof onInsert>>[0],
+      ): Promise<void> => {
+        const handlerResult = (await runMutationHandler(onInsert, params)) ?? {}
+        await handleDeprecatedAutoRefetch(handlerResult)
       }
     : undefined
 
   const wrappedOnUpdate = onUpdate
-    ? async (params: UpdateMutationFnParams<any>) => {
-        const handlerResult = (await onUpdate(params)) ?? {}
-        const shouldRefetch =
-          (handlerResult as { refetch?: boolean }).refetch !== false
-
-        if (shouldRefetch) {
-          await refetch()
-        }
-
-        return handlerResult
+    ? async (
+        params: Parameters<NonNullable<typeof onUpdate>>[0],
+      ): Promise<void> => {
+        const handlerResult = (await runMutationHandler(onUpdate, params)) ?? {}
+        await handleDeprecatedAutoRefetch(handlerResult)
       }
     : undefined
 
   const wrappedOnDelete = onDelete
-    ? async (params: DeleteMutationFnParams<any>) => {
-        const handlerResult = (await onDelete(params)) ?? {}
-        const shouldRefetch =
-          (handlerResult as { refetch?: boolean }).refetch !== false
-
-        if (shouldRefetch) {
-          await refetch()
-        }
-
-        return handlerResult
+    ? async (
+        params: Parameters<NonNullable<typeof onDelete>>[0],
+      ): Promise<void> => {
+        const handlerResult = (await runMutationHandler(onDelete, params)) ?? {}
+        await handleDeprecatedAutoRefetch(handlerResult)
       }
     : undefined
 
   // Create utils instance with state and dependencies passed explicitly
-  const utils: any = new QueryCollectionUtilsImpl(state, refetch, writeUtils)
+  const utils: QueryCollectionUtils = new QueryCollectionUtilsImpl(
+    state,
+    refetch,
+    writeUtils,
+  )
 
-  return {
+  const sync = withCollectionSyncConfigFactory(
+    { sync: enhancedInternalSync },
+    (source, utilities, startSyncIfIdle) => {
+      const boundUtilities = utilities as Record<
+        string,
+        (...args: Array<any>) => any
+      >
+      for (const name of Object.keys(writeUtils)) {
+        const write = boundUtilities[name]!
+        boundUtilities[name] = (...args) => {
+          startSyncIfIdle()
+          return write(...args)
+        }
+      }
+      return source
+    },
+  )
+
+  const options = {
     ...baseCollectionConfig,
     getKey,
     syncMode,
-    sync: { sync: enhancedInternalSync },
+    sync,
     onInsert: wrappedOnInsert,
     onUpdate: wrappedOnUpdate,
     onDelete: wrappedOnDelete,
     utils,
   }
+
+  return withCollectionConfigFactory(
+    options,
+    (client) =>
+      queryCollectionOptions({
+        ...config,
+        queryClient:
+          client.getDependency<QueryClient>(`queryClient`) ??
+          config.queryClient,
+        id: options.id,
+      }) as typeof options,
+  )
 }

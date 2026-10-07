@@ -1,0 +1,6 @@
+Source log: /tmp/pr1179-merge-format.log
+SHA-256 of full source: 17aa973d3f004560237d9a95171210b0671deff23d61628eecf7322ff5938f20
+Progress dot lines omitted; trailing whitespace normalized.
+
+Checking formatting...
+All matched files use Prettier code style!

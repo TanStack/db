@@ -1,3 +1,5 @@
+import { safeRandomUUID } from './utils/uuid'
+import { withCollectionConfigFactory } from './client.js'
 import type {
   BaseCollectionConfig,
   CollectionConfig,
@@ -182,10 +184,14 @@ export function localOnlyCollectionOptions<
   const { initialData, onInsert, onUpdate, onDelete, id, ...restConfig } =
     config
 
-  const collectionId = id ?? crypto.randomUUID()
+  const collectionId = id ?? safeRandomUUID()
 
   // Create the sync configuration with transaction confirmation capability
-  const syncResult = createLocalOnlySync<T, TKey>(initialData)
+  const directTypes = new Set<OperationType>()
+  if (!onInsert) directTypes.add(`insert`)
+  if (!onUpdate) directTypes.add(`update`)
+  if (!onDelete) directTypes.add(`delete`)
+  const syncResult = createLocalOnlySync<T, TKey>(initialData, directTypes)
 
   /**
    * Create wrapper handlers that call user handlers first, then confirm transactions
@@ -263,7 +269,7 @@ export function localOnlyCollectionOptions<
     )
   }
 
-  return {
+  const options = {
     ...restConfig,
     id: collectionId,
     sync: syncResult.sync,
@@ -278,6 +284,17 @@ export function localOnlyCollectionOptions<
   } as LocalOnlyCollectionOptionsResult<T, TKey, TSchema> & {
     schema?: StandardSchemaV1
   }
+
+  return withCollectionConfigFactory(options, () =>
+    (
+      localOnlyCollectionOptions as (
+        nextConfig: LocalOnlyCollectionConfig<T, TSchema, TKey>,
+      ) => typeof options
+    )({
+      ...config,
+      id: collectionId,
+    }),
+  )
 }
 
 /**
@@ -291,7 +308,9 @@ export function localOnlyCollectionOptions<
  * @returns Object with sync configuration and confirmOperationsSync function
  */
 function createLocalOnlySync<T extends object, TKey extends string | number>(
-  initialData?: Array<T>,
+  initialData: Array<T> | undefined,
+  // Operation types without a user handler, which confirm synchronously.
+  directTypes: ReadonlySet<OperationType>,
 ) {
   // Capture sync functions and collection for transaction confirmation
   let syncBegin: (() => void) | null = null
@@ -301,6 +320,7 @@ function createLocalOnlySync<T extends object, TKey extends string | number>(
   let collection: Collection<T, TKey, LocalOnlyCollectionUtils> | null = null
 
   const sync: SyncConfig<T, TKey> = {
+    rowUpdateMode: `full`,
     /**
      * Sync function that captures sync parameters and applies initial data
      * @param params - Sync parameters containing begin, write, and commit functions
@@ -315,6 +335,10 @@ function createLocalOnlySync<T extends object, TKey extends string | number>(
       syncCommit = commit
       collection = params.collection
       params.collection._state.isLocalOnly = true
+      params.collection._state.localOnlyDirectWrite = {
+        types: directTypes,
+        write: confirmOperationsSync,
+      }
 
       // Apply initial data if provided
       if (initialData && initialData.length > 0) {

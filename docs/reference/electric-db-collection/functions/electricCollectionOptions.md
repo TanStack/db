@@ -3,15 +3,13 @@ id: electricCollectionOptions
 title: electricCollectionOptions
 ---
 
-# Function: electricCollectionOptions()
-
 ## Call Signature
 
 ```ts
-function electricCollectionOptions<T>(config): Omit<CollectionConfig<InferSchemaOutput<T>, string | number, T, UtilsRecord>, "utils" | "onInsert" | "onUpdate" | "onDelete"> & Pick<ElectricCollectionConfig<InferSchemaOutput<T>, T>, "onInsert" | "onUpdate" | "onDelete"> & object;
+function electricCollectionOptions<T>(config): Omit<CollectionConfig<InferSchemaOutput<T>, string | number, T, UtilsRecord>, "onInsert" | "onUpdate" | "onDelete" | "utils"> & Pick<ElectricCollectionConfig<InferSchemaOutput<T>, T>, "onInsert" | "onUpdate" | "onDelete"> & object;
 ```
 
-Defined in: [packages/electric-db-collection/src/electric.ts:576](https://github.com/TanStack/db/blob/main/packages/electric-db-collection/src/electric.ts#L576)
+Defined in: [packages/electric-db-collection/src/electric.ts:1088](https://github.com/TanStack/db/blob/main/packages/electric-db-collection/src/electric.ts#L1088)
 
 Creates Electric collection options for use with a standard Collection
 
@@ -33,17 +31,17 @@ Configuration options for the Electric collection
 
 ### Returns
 
-`Omit`\<`CollectionConfig`\<`InferSchemaOutput`\<`T`\>, `string` \| `number`, `T`, `UtilsRecord`\>, `"utils"` \| `"onInsert"` \| `"onUpdate"` \| `"onDelete"`\> & `Pick`\<[`ElectricCollectionConfig`](../interfaces/ElectricCollectionConfig.md)\<`InferSchemaOutput`\<`T`\>, `T`\>, `"onInsert"` \| `"onUpdate"` \| `"onDelete"`\> & `object`
+`Omit`\<`CollectionConfig`\<`InferSchemaOutput`\<`T`\>, `string` \| `number`, `T`, `UtilsRecord`\>, `"onInsert"` \| `"onUpdate"` \| `"onDelete"` \| `"utils"`\> & `Pick`\<[`ElectricCollectionConfig`](../interfaces/ElectricCollectionConfig.md)\<`InferSchemaOutput`\<`T`\>, `T`\>, `"onInsert"` \| `"onUpdate"` \| `"onDelete"`\> & `object`
 
 Collection options with utilities
 
 ## Call Signature
 
 ```ts
-function electricCollectionOptions<T>(config): Omit<CollectionConfig<T, string | number, never, UtilsRecord>, "utils" | "onInsert" | "onUpdate" | "onDelete"> & Pick<ElectricCollectionConfig<T, never>, "onInsert" | "onUpdate" | "onDelete"> & object;
+function electricCollectionOptions<T>(config): Omit<CollectionConfig<T, string | number, never, UtilsRecord>, "onInsert" | "onUpdate" | "onDelete" | "utils"> & Pick<ElectricCollectionConfig<T, never>, "onInsert" | "onUpdate" | "onDelete"> & object;
 ```
 
-Defined in: [packages/electric-db-collection/src/electric.ts:594](https://github.com/TanStack/db/blob/main/packages/electric-db-collection/src/electric.ts#L594)
+Defined in: [packages/electric-db-collection/src/electric.ts:1106](https://github.com/TanStack/db/blob/main/packages/electric-db-collection/src/electric.ts#L1106)
 
 Creates Electric collection options for use with a standard Collection
 
@@ -65,6 +63,6 @@ Configuration options for the Electric collection
 
 ### Returns
 
-`Omit`\<`CollectionConfig`\<`T`, `string` \| `number`, `never`, `UtilsRecord`\>, `"utils"` \| `"onInsert"` \| `"onUpdate"` \| `"onDelete"`\> & `Pick`\<[`ElectricCollectionConfig`](../interfaces/ElectricCollectionConfig.md)\<`T`, `never`\>, `"onInsert"` \| `"onUpdate"` \| `"onDelete"`\> & `object`
+`Omit`\<`CollectionConfig`\<`T`, `string` \| `number`, `never`, `UtilsRecord`\>, `"onInsert"` \| `"onUpdate"` \| `"onDelete"` \| `"utils"`\> & `Pick`\<[`ElectricCollectionConfig`](../interfaces/ElectricCollectionConfig.md)\<`T`, `never`\>, `"onInsert"` \| `"onUpdate"` \| `"onDelete"`\> & `object`
 
 Collection options with utilities

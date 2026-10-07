@@ -12,24 +12,28 @@ import type {
   SQLiteCoreAdapterOptions,
   SQLiteDriver,
 } from '@tanstack/db-sqlite-persistence-core'
-import type { OpSQLiteDatabaseLike } from './op-sqlite-driver'
+import type {
+  OpSQLiteArrayResultMode,
+  OpSQLiteDatabaseLike,
+} from './op-sqlite-driver'
 
-export type { OpSQLiteDatabaseLike } from './op-sqlite-driver'
+export type {
+  OpSQLiteArrayResultMode,
+  OpSQLiteDatabaseLike,
+} from './op-sqlite-driver'
 
 type MobileSQLiteCoreSchemaMismatchPolicy =
-  | `sync-present-reset`
-  | `sync-absent-error`
-  | `reset`
+  `sync-present-reset` | `sync-absent-error` | `reset`
 
 export type MobileSQLiteSchemaMismatchPolicy =
-  | MobileSQLiteCoreSchemaMismatchPolicy
-  | `throw`
+  MobileSQLiteCoreSchemaMismatchPolicy | `throw`
 
 type MobileSQLitePersistenceBaseOptions = Omit<
   SQLiteCoreAdapterOptions,
   `driver` | `schemaVersion` | `schemaMismatchPolicy`
 > & {
   database: OpSQLiteDatabaseLike
+  arrayResultMode?: OpSQLiteArrayResultMode
   coordinator?: PersistedCollectionCoordinator
   schemaMismatchPolicy?: MobileSQLiteSchemaMismatchPolicy
 }
@@ -71,6 +75,7 @@ function createInternalSQLiteDriver(
 ): SQLiteDriver {
   return new OpSQLiteDriver({
     database: options.database,
+    arrayResultMode: options.arrayResultMode,
   })
 }
 

@@ -1,4 +1,6 @@
 import { CollectionImpl } from '../../collection/index.js'
+import { hasCollectionOptionsBrand } from '../../collection-options.js'
+import { isPlainObject as isRecord } from '../../utils/type-guards.js'
 import {
   Aggregate as AggregateExpr,
   CollectionRef,
@@ -10,18 +12,19 @@ import {
   QueryRef,
   UnionAll,
   UnionFrom,
-  Value as ValueExpr,
   isExpressionLike,
 } from '../ir.js'
 import {
   InvalidSourceError,
   InvalidSourceTypeError,
   InvalidWhereExpressionError,
-  JoinConditionMustBeEqualityError,
   OnlyOneSourceAllowedError,
   QueryMustHaveFromClauseError,
   SubQueryMustHaveFromClauseError,
 } from '../../errors.js'
+import { validateJoinConditions } from '../join-conditions.js'
+import { getQueryIR } from './query-ir.js'
+import { cloneQueryForPlacement } from './clone-query.js'
 import {
   createRefProxy,
   createRefProxyWithSelected,
@@ -36,6 +39,7 @@ import {
 } from './functions.js'
 import type { SourceClauseContext } from '../../errors.js'
 import type { NamespacedRow, SingleResult } from '../../types.js'
+import type { CollectionOptionsIdentity } from '../../collection-options.js'
 import type {
   Aggregate,
   BasicExpression,
@@ -75,11 +79,82 @@ import type {
 
 const UNION_ALL_SOURCE_CONTEXT = `unionAll clause` satisfies SourceClauseContext
 
-export class BaseQueryBuilder<TContext extends Context = Context> {
-  private readonly query: Partial<QueryIR> = {}
+type CollectionResolver = (
+  options: CollectionOptionsIdentity<any, string | number, any, any, any>,
+) => CollectionImpl<any, string | number, any, any, any>
 
-  constructor(query: Partial<QueryIR> = {}) {
-    this.query = { ...query }
+type FnSelectQueryConstructionValue =
+  | QueryBuilder<any>
+  | InitialQueryBuilder
+  | BasicExpression
+  | Aggregate
+  | ToArrayWrapper<any>
+  | ConcatToArrayWrapper<any>
+  | MaterializeWrapper<any, boolean>
+  | CaseWhenWrapper<any>
+
+type IsAnyType<T> = 0 extends 1 & T ? true : false
+
+// Bound recursive inspection so deeply recursive result types do not exceed
+// TypeScript's instantiation limit. The runtime check has no depth limit.
+type ContainsFnSelectQueryConstructionValue<
+  T,
+  TDepth extends ReadonlyArray<unknown> = [],
+> =
+  IsAnyType<T> extends true
+    ? false
+    : T extends FnSelectQueryConstructionValue
+      ? true
+      : TDepth[`length`] extends 8
+        ? false
+        : T extends (...args: Array<any>) => any
+          ? false
+          : T extends ReadonlyArray<infer TItem>
+            ? ContainsFnSelectQueryConstructionValue<
+                TItem,
+                [...TDepth, unknown]
+              >
+            : T extends object
+              ? true extends {
+                  [K in keyof T]-?: ContainsFnSelectQueryConstructionValue<
+                    T[K],
+                    [...TDepth, unknown]
+                  >
+                }[keyof T]
+                ? true
+                : false
+              : false
+
+type InvalidFnSelectResult = {
+  readonly __tanstackDbFnSelectResultError__: `fn.select() cannot return child query builders, query expressions, or query helpers. Use them as direct fields in .select() instead.`
+}
+
+type FnSelectQueryResult<TContext extends Context, TResult> =
+  true extends ContainsFnSelectQueryConstructionValue<TResult>
+    ? InvalidFnSelectResult
+    : QueryBuilder<WithResult<TContext, TResult>>
+
+export class BaseQueryBuilder<TContext extends Context = Context> {
+  private readonly query: Partial<QueryIR>
+
+  constructor(
+    query: Partial<QueryIR> = {},
+    private readonly resolveCollection?: CollectionResolver,
+    /** @internal Whether the builder may keep `query` without copying it. */
+    owned = false,
+  ) {
+    this.query = owned ? query : { ...query }
+  }
+
+  private _clone<TNextContext extends Context = Context>(
+    query: Partial<QueryIR>,
+  ): BaseQueryBuilder<TNextContext> {
+    // Every clone receives a freshly spread query, so it needs no copy.
+    return new BaseQueryBuilder<TNextContext>(
+      query,
+      this.resolveCollection,
+      true,
+    )
   }
 
   /**
@@ -140,8 +215,15 @@ export class BaseQueryBuilder<TContext extends Context = Context> {
 
       if (sourceValue instanceof CollectionImpl) {
         ref = new CollectionRef(sourceValue, alias)
+      } else if (hasCollectionOptionsBrand(sourceValue)) {
+        if (!this.resolveCollection) {
+          throw new Error(
+            `Cannot use collection descriptor "${alias}" as a query source without a DbClient resolver. In React, wrap your tree in <DbProvider>.`,
+          )
+        }
+        ref = new CollectionRef(this.resolveCollection(sourceValue), alias)
       } else if (sourceValue instanceof BaseQueryBuilder) {
-        const subQuery = sourceValue._getQuery()
+        const subQuery = cloneQueryForPlacement(sourceValue._getQuery())
         if (!(subQuery as Partial<QueryIR>).from) {
           throw new SubQueryMustHaveFromClauseError(context)
         }
@@ -177,7 +259,7 @@ export class BaseQueryBuilder<TContext extends Context = Context> {
   ): QueryBuilder<ContextFromSource<TSource>> {
     const [, from] = this._createRefForSource(source, `from clause`)
 
-    return new BaseQueryBuilder({
+    return this._clone({
       ...this.query,
       from,
     }) as any
@@ -209,7 +291,7 @@ export class BaseQueryBuilder<TContext extends Context = Context> {
     ...branches: Array<QueryBuilder<any>>
   ): QueryBuilder<any> {
     if (sourceOrBranch instanceof BaseQueryBuilder) {
-      return new BaseQueryBuilder({
+      return this._clone({
         ...this.query,
         from: new UnionAll(
           [sourceOrBranch, ...branches].map((branch) =>
@@ -226,7 +308,7 @@ export class BaseQueryBuilder<TContext extends Context = Context> {
     const from =
       refs.length === 1 ? refs[0]![1] : new UnionFrom(refs.map((r) => r[1]))
 
-    return new BaseQueryBuilder({
+    return this._clone({
       ...this.query,
       from,
     }) as any
@@ -283,32 +365,12 @@ export class BaseQueryBuilder<TContext extends Context = Context> {
     // Get the join condition expression
     const onExpression = onCallback(refProxy)
 
-    // Extract left and right from the expression
-    // For now, we'll assume it's an eq function with two arguments
-    let left: BasicExpression
-    let right: BasicExpression
-
-    if (
-      onExpression.type === `func` &&
-      onExpression.name === `eq` &&
-      onExpression.args.length === 2
-    ) {
-      left = onExpression.args[0]!
-      right = onExpression.args[1]!
-    } else {
-      throw new JoinConditionMustBeEqualityError()
-    }
-
-    const joinClause: JoinClause = {
-      from,
-      type,
-      left,
-      right,
-    }
+    validateJoinConditions(onExpression)
+    const joinClause: JoinClause = { from, type, on: onExpression }
 
     const existingJoins = this.query.join || []
 
-    return new BaseQueryBuilder({
+    return this._clone({
       ...this.query,
       join: [...existingJoins, joinClause],
     }) as any
@@ -467,7 +529,7 @@ export class BaseQueryBuilder<TContext extends Context = Context> {
 
     const existingWhere = this.query.where || []
 
-    return new BaseQueryBuilder({
+    return this._clone({
       ...this.query,
       where: [...existingWhere, expression],
     }) as any
@@ -527,7 +589,7 @@ export class BaseQueryBuilder<TContext extends Context = Context> {
 
     const existingHaving = this.query.having || []
 
-    return new BaseQueryBuilder({
+    return this._clone({
       ...this.query,
       having: [...existingHaving, expression],
     }) as any
@@ -593,7 +655,7 @@ export class BaseQueryBuilder<TContext extends Context = Context> {
 
     const select = buildNestedSelect(selectObject, aliases)
 
-    return new BaseQueryBuilder({
+    return this._clone({
       ...this.query,
       select: select,
       fnSelect: undefined, // remove the fnSelect clause if it exists
@@ -645,13 +707,22 @@ export class BaseQueryBuilder<TContext extends Context = Context> {
         : {
             direction: options.direction ?? `asc`,
             nulls: options.nulls ?? `first`,
-            stringSort: options.stringSort,
-            locale:
-              options.stringSort === `locale` ? options.locale : undefined,
-            localeOptions:
-              options.stringSort === `locale`
-                ? options.localeOptions
-                : undefined,
+            ...(options.stringSort === `custom`
+              ? {
+                  stringSort: `custom`,
+                  compare: options.compare,
+                }
+              : {
+                  stringSort: options.stringSort,
+                  locale:
+                    options.stringSort === `locale`
+                      ? options.locale
+                      : undefined,
+                  localeOptions:
+                    options.stringSort === `locale`
+                      ? options.localeOptions
+                      : undefined,
+                }),
           }
 
     const makeOrderByClause = (res: any) => {
@@ -668,7 +739,7 @@ export class BaseQueryBuilder<TContext extends Context = Context> {
 
     const existingOrderBy: OrderBy = this.query.orderBy || []
 
-    return new BaseQueryBuilder({
+    return this._clone({
       ...this.query,
       orderBy: [...existingOrderBy, ...orderByClauses],
     }) as any
@@ -713,7 +784,7 @@ export class BaseQueryBuilder<TContext extends Context = Context> {
 
     // Extend existing groupBy expressions (multiple groupBy calls should accumulate)
     const existingGroupBy = this.query.groupBy || []
-    return new BaseQueryBuilder({
+    return this._clone({
       ...this.query,
       groupBy: [...existingGroupBy, ...newExpressions],
     }) as any
@@ -736,7 +807,7 @@ export class BaseQueryBuilder<TContext extends Context = Context> {
    * ```
    */
   limit(count: number): QueryBuilder<TContext> {
-    return new BaseQueryBuilder({
+    return this._clone({
       ...this.query,
       limit: count,
     }) as any
@@ -760,7 +831,7 @@ export class BaseQueryBuilder<TContext extends Context = Context> {
    * ```
    */
   offset(count: number): QueryBuilder<TContext> {
-    return new BaseQueryBuilder({
+    return this._clone({
       ...this.query,
       offset: count,
     }) as any
@@ -781,7 +852,7 @@ export class BaseQueryBuilder<TContext extends Context = Context> {
    * ```
    */
   distinct(): QueryBuilder<TContext> {
-    return new BaseQueryBuilder({
+    return this._clone({
       ...this.query,
       distinct: true,
     }) as any
@@ -801,7 +872,7 @@ export class BaseQueryBuilder<TContext extends Context = Context> {
    *```
    */
   findOne(): QueryBuilder<TContext & SingleResult> {
-    return new BaseQueryBuilder({
+    return this._clone({
       ...this.query,
       // TODO: enforcing return only one result with also a default orderBy if none is specified
       // limit: 1,
@@ -867,11 +938,21 @@ export class BaseQueryBuilder<TContext extends Context = Context> {
        *     age: row.users.age + 1,
        *   }))
        * ```
+       *
+       * Child query builders, query expressions, and helpers such as eq(),
+       * toArray(), and materialize() cannot be returned from fn.select(). Use
+       * them as fields in select() so the compiler can add them to the query
+       * graph.
+       *
+       * Compiled Collection-valued includes cannot be inputs to fn.select(),
+       * including nested descendants. Use toArray() or materialize() in the
+       * upstream select(), or do parent-only functional work before adding
+       * live Collection includes with select().
        */
       select<TFuncSelectResult>(
         callback: (row: TContext[`schema`]) => TFuncSelectResult,
-      ): QueryBuilder<WithResult<TContext, TFuncSelectResult>> {
-        return new BaseQueryBuilder({
+      ): FnSelectQueryResult<TContext, TFuncSelectResult> {
+        return builder._clone({
           ...builder.query,
           select: undefined, // remove the select clause if it exists
           fnSelect: callback,
@@ -895,7 +976,7 @@ export class BaseQueryBuilder<TContext extends Context = Context> {
       where(
         callback: (row: TContext[`schema`]) => any,
       ): QueryBuilder<TContext> {
-        return new BaseQueryBuilder({
+        return builder._clone({
           ...builder.query,
           fnWhere: [
             ...(builder.query.fnWhere || []),
@@ -923,7 +1004,7 @@ export class BaseQueryBuilder<TContext extends Context = Context> {
       having(
         callback: (row: FunctionalHavingRow<TContext>) => any,
       ): QueryBuilder<TContext> {
-        return new BaseQueryBuilder({
+        return builder._clone({
           ...builder.query,
           fnHaving: [
             ...(builder.query.fnHaving || []),
@@ -952,24 +1033,15 @@ function getValueTypeName(value: unknown): string {
 
 // Helper to ensure we have a BasicExpression/Aggregate for a value
 function toExpr(value: any): BasicExpression | Aggregate {
-  if (value === undefined) return toExpression(null)
-  if (
-    value instanceof AggregateExpr ||
-    value instanceof FuncExpr ||
-    value instanceof PropRef ||
-    value instanceof ValueExpr
-  ) {
-    return value as BasicExpression | Aggregate
-  }
-  return toExpression(value)
+  return toExpression(value ?? null)
 }
 
-function isPlainObject(value: any): value is Record<string, any> {
+function isNestedSelectRecord(value: any): value is Record<string, any> {
   return (
-    value !== null &&
-    typeof value === `object` &&
+    isRecord(value) &&
+    !Array.isArray(value) &&
     !isExpressionLike(value) &&
-    !value.__refProxy
+    !isRefProxy(value)
   )
 }
 
@@ -978,6 +1050,14 @@ function buildNestedSelect(
   parentAliases: Array<string> = [],
   fieldName?: string,
 ): any {
+  if (Array.isArray(obj)) {
+    return obj.some((value) => isRefProxy(value) || isExpressionLike(value))
+      ? new FuncExpr(
+          `array`,
+          obj.map((value) => toExpression(value ?? null)),
+        )
+      : toExpr(obj)
+  }
   if (obj instanceof BaseQueryBuilder) {
     if (!fieldName) {
       throw new Error(`Conditional include branch is missing a field name`)
@@ -1007,7 +1087,7 @@ function buildNestedSelect(
   if (obj instanceof CaseWhenWrapper) {
     return buildConditionalSelect(obj, parentAliases, fieldName)
   }
-  if (!isPlainObject(obj)) return toExpr(obj)
+  if (!isNestedSelectRecord(obj)) return toExpr(obj)
   const out: Record<string, any> = {}
   for (const [k, v] of Object.entries(obj)) {
     if (typeof k === `string` && k.startsWith(`__SPREAD_SENTINEL__`)) {
@@ -1084,14 +1164,17 @@ function buildConditionalSelect(
 /**
  * Recursively collects all PropRef nodes from an expression tree.
  */
-function collectRefsFromExpression(expr: BasicExpression): Array<PropRef> {
+function collectRefsFromExpression(
+  expr: BasicExpression | Aggregate,
+): Array<PropRef> {
   const refs: Array<PropRef> = []
   switch (expr.type) {
     case `ref`:
       refs.push(expr)
       break
     case `func`:
-      for (const arg of (expr as any).args ?? []) {
+    case `agg`:
+      for (const arg of expr.args) {
         refs.push(...collectRefsFromExpression(arg))
       }
       break
@@ -1099,6 +1182,162 @@ function collectRefsFromExpression(expr: BasicExpression): Array<PropRef> {
       break
   }
   return refs
+}
+
+function collectRefsFromSelectValue(value: unknown): Array<PropRef> {
+  if (
+    value instanceof PropRef ||
+    value instanceof FuncExpr ||
+    value instanceof AggregateExpr
+  ) {
+    return collectRefsFromExpression(value)
+  }
+  if (value instanceof ConditionalSelect) {
+    return [
+      ...value.branches.flatMap((branch) => [
+        ...collectRefsFromExpression(branch.condition),
+        ...collectRefsFromSelectValue(branch.value),
+      ]),
+      ...(value.defaultValue === undefined
+        ? []
+        : collectRefsFromSelectValue(value.defaultValue)),
+    ]
+  }
+  if (value instanceof IncludesSubquery) {
+    return [
+      value.correlationField,
+      ...(value.parentProjection ?? []),
+      ...collectExternalRefsFromQuery(value.query),
+    ]
+  }
+  if (!isNestedSelectRecord(value)) return []
+  return Object.values(value).flatMap(collectRefsFromSelectValue)
+}
+
+function collectExternalRefsFromQuery(query: QueryIR): Array<PropRef> {
+  const localAliases = new Set(collectQueryAliases(query))
+  const refs: Array<PropRef> = []
+  const addExpression = (expression: BasicExpression | Aggregate) => {
+    refs.push(...collectRefsFromExpression(expression))
+  }
+  const addWhere = (where: Where) => {
+    addExpression(
+      typeof where === `object` && `expression` in where
+        ? where.expression
+        : where,
+    )
+  }
+
+  for (const where of query.where ?? []) addWhere(where)
+  for (const join of query.join ?? []) {
+    addExpression(join.on)
+    if (join.from.type === `queryRef`) {
+      refs.push(...collectExternalRefsFromQuery(join.from.query))
+    }
+  }
+  for (const expression of query.groupBy ?? []) addExpression(expression)
+  for (const having of query.having ?? []) addWhere(having)
+  for (const { expression } of query.orderBy ?? []) addExpression(expression)
+  if (query.select) refs.push(...collectRefsFromSelectValue(query.select))
+
+  if (query.from.type === `queryRef`) {
+    refs.push(...collectExternalRefsFromQuery(query.from.query))
+  } else if (query.from.type === `unionFrom`) {
+    for (const source of query.from.sources) {
+      if (source.type === `queryRef`) {
+        refs.push(...collectExternalRefsFromQuery(source.query))
+      }
+    }
+  } else if (query.from.type === `unionAll`) {
+    for (const branch of query.from.queries) {
+      refs.push(...collectExternalRefsFromQuery(branch))
+    }
+  }
+
+  const seen = new Set<string>()
+  return refs.filter((ref) => {
+    const alias = ref.path.length > 1 ? ref.path[0] : undefined
+    const path = JSON.stringify(ref.path)
+    if (
+      alias == null ||
+      alias === `$selected` ||
+      localAliases.has(alias) ||
+      seen.has(path)
+    ) {
+      return false
+    }
+    seen.add(path)
+    return true
+  })
+}
+
+function collectParentRefsFromQuery(
+  query: QueryIR,
+  parentAliases: Array<string>,
+): Array<PropRef> {
+  const refs: Array<PropRef> = []
+  const addExpression = (expression: BasicExpression | Aggregate) => {
+    refs.push(...collectRefsFromExpression(expression))
+  }
+  const addWhere = (where: Where) => {
+    addExpression(
+      typeof where === `object` && `expression` in where
+        ? where.expression
+        : where,
+    )
+  }
+
+  for (const where of query.where ?? []) addWhere(where)
+  for (const join of query.join ?? []) {
+    addExpression(join.on)
+    if (join.from.type === `queryRef`) {
+      refs.push(...collectParentRefsFromQuery(join.from.query, parentAliases))
+    }
+  }
+  for (const expression of query.groupBy ?? []) addExpression(expression)
+  for (const having of query.having ?? []) addWhere(having)
+  for (const { expression } of query.orderBy ?? []) addExpression(expression)
+  if (query.select) {
+    refs.push(...collectRefsFromSelectValue(query.select))
+  }
+
+  if (query.from.type === `queryRef`) {
+    refs.push(...collectParentRefsFromQuery(query.from.query, parentAliases))
+  } else if (query.from.type === `unionFrom`) {
+    for (const source of query.from.sources) {
+      if (source.type === `queryRef`) {
+        refs.push(...collectParentRefsFromQuery(source.query, parentAliases))
+      }
+    }
+  } else if (query.from.type === `unionAll`) {
+    for (const branch of query.from.queries) {
+      refs.push(...collectParentRefsFromQuery(branch, parentAliases))
+    }
+  }
+
+  const seen = new Set<string>()
+  return refs.filter((ref) => {
+    const path = JSON.stringify(ref.path)
+    if (
+      ref.path[0] == null ||
+      !parentAliases.includes(ref.path[0]) ||
+      seen.has(path)
+    ) {
+      return false
+    }
+    seen.add(path)
+    return true
+  })
+}
+
+function collectExternalParentAliases(query: QueryIR): Array<string> {
+  return [
+    ...new Set(
+      collectExternalRefsFromQuery(query)
+        .map((ref) => ref.path[0])
+        .filter((alias): alias is string => alias !== undefined),
+    ),
+  ]
 }
 
 /**
@@ -1125,10 +1364,13 @@ function buildIncludesSubquery(
   parentAliases: Array<string>,
   materialization: IncludesMaterialization,
 ): IncludesSubquery {
-  const childQuery = childBuilder._getQuery()
+  const childQuery = cloneQueryForPlacement(childBuilder._getQuery())
 
   // Collect child's own aliases
   const childAliases = collectQueryAliases(childQuery)
+  const visibleParentAliases = [
+    ...new Set([...parentAliases, ...collectExternalParentAliases(childQuery)]),
+  ]
 
   // Walk child's WHERE clauses to find the correlation condition.
   // The correlation eq() may be a standalone WHERE or nested inside a top-level and().
@@ -1154,7 +1396,7 @@ function buildIncludesSubquery(
         const result = extractCorrelation(
           expr.args[0]!,
           expr.args[1]!,
-          parentAliases,
+          visibleParentAliases,
           childAliases,
         )
         if (result) {
@@ -1181,7 +1423,7 @@ function buildIncludesSubquery(
             const result = extractCorrelation(
               arg.args[0]!,
               arg.args[1]!,
-              parentAliases,
+              visibleParentAliases,
               childAliases,
             )
             if (result) {
@@ -1242,32 +1484,21 @@ function buildIncludesSubquery(
   const pureChildWhere: Array<Where> = []
   const parentFilters: Array<Where> = []
   for (const w of modifiedWhere) {
-    if (referencesParent(w, parentAliases)) {
+    if (referencesParent(w, visibleParentAliases)) {
       parentFilters.push(w)
     } else {
       pureChildWhere.push(w)
     }
   }
 
-  // Collect distinct parent PropRefs from parent-referencing filters
-  let parentProjection: Array<PropRef> | undefined
-  if (parentFilters.length > 0) {
-    const seen = new Set<string>()
-    parentProjection = []
-    for (const w of parentFilters) {
-      const expr = typeof w === `object` && `expression` in w ? w.expression : w
-      for (const ref of collectRefsFromExpression(expr)) {
-        if (
-          ref.path[0] != null &&
-          parentAliases.includes(ref.path[0]) &&
-          !seen.has(ref.path.join(`.`))
-        ) {
-          seen.add(ref.path.join(`.`))
-          parentProjection.push(ref)
-        }
-      }
-    }
-  }
+  // Every parent input that can affect the child plan belongs to the route
+  // identity, not only the main equality key or residual filters.
+  const projectedParentRefs = collectParentRefsFromQuery(
+    { ...childQuery, where: modifiedWhere },
+    visibleParentAliases,
+  )
+  const parentProjection =
+    projectedParentRefs.length > 0 ? projectedParentRefs : undefined
 
   const modifiedQuery: QueryIR = {
     ...childQuery,
@@ -1276,7 +1507,7 @@ function buildIncludesSubquery(
 
   const rawChildSelect = modifiedQuery.select as any
   const hasObjectSelect =
-    rawChildSelect === undefined || isPlainObject(rawChildSelect)
+    rawChildSelect === undefined || isNestedSelectRecord(rawChildSelect)
   let includesQuery = modifiedQuery
   let scalarField: string | undefined
 
@@ -1383,12 +1614,7 @@ export function buildQuery<TContext extends Context>(
   return getQueryIR(result)
 }
 
-// Internal function to get the QueryIR from a builder
-export function getQueryIR(
-  builder: BaseQueryBuilder | QueryBuilder<any> | InitialQueryBuilder,
-): QueryIR {
-  return (builder as unknown as BaseQueryBuilder)._getQuery()
-}
+export { getQueryIR }
 
 // Type-only exports for the query builder
 export type InitialQueryBuilder = Pick<

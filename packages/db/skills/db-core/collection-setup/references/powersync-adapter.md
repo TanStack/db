@@ -9,7 +9,7 @@ pnpm add @tanstack/powersync-db-collection @powersync/web @journeyapps/wa-sqlite
 ## Required Config
 
 ```typescript
-import { createCollection } from '@tanstack/react-db'
+import { createCollection, safeRandomUUID } from '@tanstack/react-db'
 import { powerSyncCollectionOptions } from '@tanstack/powersync-db-collection'
 import { Schema, Table, column, PowerSyncDatabase } from '@powersync/web'
 
@@ -163,10 +163,12 @@ const APP_SCHEMA = new Schema({
   documents: new Table({ name: column.text }, { trackMetadata: true }),
 })
 
-await collection.insert(
-  { id: crypto.randomUUID(), name: 'Report' },
-  { metadata: { source: 'web-app', userId: 'user-123' } },
-).isPersisted.promise
+await collection
+  .insert(
+    { id: safeRandomUUID(), name: 'Report' },
+    { metadata: { source: 'web-app', userId: 'user-123' } },
+  )
+  .when('settled')
 ```
 
 Metadata appears as `entry.metadata` (stringified JSON) in PowerSync `CrudEntry`.
@@ -187,13 +189,13 @@ const tx = createTransaction({
 })
 tx.mutate(() => {
   documentsCollection.insert({
-    id: crypto.randomUUID(),
+    id: safeRandomUUID(),
     name: 'Doc 1',
     created_at: new Date().toISOString(),
   })
 })
 await tx.commit()
-await tx.isPersisted.promise
+await tx.when('settled')
 ```
 
 ## On-Demand Sync Mode

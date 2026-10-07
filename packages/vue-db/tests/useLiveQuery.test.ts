@@ -99,6 +99,27 @@ async function waitFor(fn: () => void, timeout = 2000, interval = 20) {
 }
 
 describe(`Query Collections`, () => {
+  it(`keeps data and keyed state aligned after collection cleanup`, async () => {
+    const collection = createCollection(
+      mockSyncCollectionOptions<Person>({
+        id: `cleanup-alignment-vue`,
+        getKey: (person) => person.id,
+        initialData: initialPersons,
+      }),
+    )
+    const result = useLiveQuery(collection)
+
+    await waitForVueUpdate()
+    expect(result.data.value).toHaveLength(3)
+    expect(result.state.value.size).toBe(3)
+
+    await collection.cleanup()
+    await nextTick()
+
+    expect(result.data.value).toHaveLength(0)
+    expect(result.state.value.size).toBe(0)
+  })
+
   it(`should work with basic collection and select`, async () => {
     const collection = createCollection(
       mockSyncCollectionOptions<Person>({
@@ -311,19 +332,19 @@ describe(`Query Collections`, () => {
     // Verify that we have the expected joined results
     expect(state.value.size).toBe(3)
 
-    expect(state.value.get(`[1,1]`)).toMatchObject({
+    expect(state.value.get(`["1","1"]`)).toMatchObject({
       id: `1`,
       name: `John Doe`,
       title: `Issue 1`,
     })
 
-    expect(state.value.get(`[2,2]`)).toMatchObject({
+    expect(state.value.get(`["2","2"]`)).toMatchObject({
       id: `2`,
       name: `Jane Doe`,
       title: `Issue 2`,
     })
 
-    expect(state.value.get(`[3,1]`)).toMatchObject({
+    expect(state.value.get(`["3","1"]`)).toMatchObject({
       id: `3`,
       name: `John Doe`,
       title: `Issue 3`,
@@ -345,7 +366,7 @@ describe(`Query Collections`, () => {
     await waitForVueUpdate()
 
     expect(state.value.size).toBe(4)
-    expect(state.value.get(`[4,2]`)).toMatchObject({
+    expect(state.value.get(`["4","2"]`)).toMatchObject({
       id: `4`,
       name: `Jane Doe`,
       title: `Issue 4`,
@@ -367,7 +388,7 @@ describe(`Query Collections`, () => {
     await waitForVueUpdate()
 
     // The updated title should be reflected in the joined results
-    expect(state.value.get(`[2,2]`)).toMatchObject({
+    expect(state.value.get(`["2","2"]`)).toMatchObject({
       id: `2`,
       name: `Jane Doe`,
       title: `Updated Issue 2`,
@@ -389,7 +410,7 @@ describe(`Query Collections`, () => {
     await waitForVueUpdate()
 
     // After deletion, issue 3 should no longer have a joined result
-    expect(state.value.get(`[3,1]`)).toBeUndefined()
+    expect(state.value.get(`["3","1"]`)).toBeUndefined()
     expect(state.value.size).toBe(3)
   })
 
@@ -600,8 +621,8 @@ describe(`Query Collections`, () => {
     watchEffect(() => {
       renderStates.push({
         stateSize: state.value.size,
-        hasTempKey: state.value.has(`[temp-key,1]`),
-        hasPermKey: state.value.has(`[4,1]`),
+        hasTempKey: state.value.has(`["temp-key","1"]`),
+        hasPermKey: state.value.has(`["4","1"]`),
         timestamp: Date.now(),
       })
     })
@@ -673,12 +694,12 @@ describe(`Query Collections`, () => {
 
     // Verify optimistic state is immediately reflected (should be synchronous)
     expect(state.value.size).toBe(4)
-    expect(state.value.get(`[temp-key,1]`)).toMatchObject({
+    expect(state.value.get(`["temp-key","1"]`)).toMatchObject({
       id: `temp-key`,
       name: `John Doe`,
       title: `New Issue`,
     })
-    expect(state.value.get(`[4,1]`)).toBeUndefined()
+    expect(state.value.get(`["4","1"]`)).toBeUndefined()
 
     // Wait for the transaction to be committed
     await transaction.isPersisted.promise
@@ -687,8 +708,8 @@ describe(`Query Collections`, () => {
 
     // Verify the temporary key is replaced by the permanent one
     expect(state.value.size).toBe(4)
-    expect(state.value.get(`[temp-key,1]`)).toBeUndefined()
-    expect(state.value.get(`[4,1]`)).toMatchObject({
+    expect(state.value.get(`["temp-key","1"]`)).toBeUndefined()
+    expect(state.value.get(`["4","1"]`)).toMatchObject({
       id: `4`,
       name: `John Doe`,
       title: `New Issue`,
@@ -1814,6 +1835,15 @@ describe(`Query Collections`, () => {
   })
 
   describe(`Disabled queries`, () => {
+    it(`propagates a query error whose text matches the disabled marker`, () => {
+      const failure = new Error(`__DISABLED_QUERY__`)
+      expect(() =>
+        useLiveQuery(() => {
+          throw failure
+        }),
+      ).toThrow(failure)
+    })
+
     it(`should handle callback returning undefined with proper state`, async () => {
       const collection = createCollection(
         mockSyncCollectionOptions<Person>({
@@ -1911,6 +1941,47 @@ describe(`Query Collections`, () => {
       })
       expect(result.data.value).toHaveLength(1)
       expect(result.isReady.value).toBe(true)
+    })
+
+    /**
+     * Driver: public `useLiveQuery` with a Vue ref. The initial read and each
+     * `waitFor` completion are observation cuts for disabled, enabled, and
+     * disabled-again public results. Collection/state behavior remains in
+     * shared conformance; this test isolates conditional `findOne` data.
+     */
+    it(`keeps conditional findOne data empty while disabled`, async () => {
+      const collection = createCollection(
+        mockSyncCollectionOptions<Person>({
+          id: `disabled-find-one-vue`,
+          getKey: (person: Person) => person.id,
+          initialData: initialPersons,
+        }),
+      )
+      const enabled = ref(false)
+      const result = useLiveQuery(
+        (q) =>
+          enabled.value
+            ? q
+                .from({ collection })
+                .where(({ collection: person }) => eq(person.id, `3`))
+                .findOne()
+            : null,
+        [() => enabled.value],
+      )
+
+      expect(result.status.value).toBe(`disabled`)
+      expect(result.data.value).toEqual([])
+
+      enabled.value = true
+      await waitFor(() => {
+        expect(result.data.value).toMatchObject({ id: `3` })
+      })
+
+      enabled.value = false
+      await waitFor(() => {
+        expect(result.status.value).toBe(`disabled`)
+      })
+      expect(result.data.value).toEqual([])
     })
   })
 })

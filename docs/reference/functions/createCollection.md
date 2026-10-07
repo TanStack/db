@@ -3,15 +3,13 @@ id: createCollection
 title: createCollection
 ---
 
-# Function: createCollection()
-
 ## Call Signature
 
 ```ts
 function createCollection<T, TKey, TUtils>(options): Collection<InferSchemaOutput<T>, TKey, TUtils, T, InferSchemaInput<T>> & NonSingleResult;
 ```
 
-Defined in: [packages/db/src/collection/index.ts:140](https://github.com/TanStack/db/blob/main/packages/db/src/collection/index.ts#L140)
+Defined in: [packages/db/src/collection/index.ts:232](https://github.com/TanStack/db/blob/main/packages/db/src/collection/index.ts#L232)
 
 Creates a new Collection instance with the given configuration
 
@@ -72,7 +70,7 @@ const todos = createCollection({
 
 // Direct usage (handlers manage transactions)
 const tx = todos.insert({ id: "1", text: "Buy milk", completed: false })
-await tx.isPersisted.promise
+await tx.when('settled')
 ```
 
 ```ts
@@ -96,7 +94,7 @@ tx.mutate(() => {
   todos.update("2", draft => { draft.completed = true })
 })
 
-await tx.isPersisted.promise
+await tx.when('settled')
 ```
 
 ```ts
@@ -120,7 +118,7 @@ const todos = createCollection({
 function createCollection<T, TKey, TUtils>(options): Collection<InferSchemaOutput<T>, TKey, Exclude<TUtils, undefined>, T, InferSchemaInput<T>> & NonSingleResult;
 ```
 
-Defined in: [packages/db/src/collection/index.ts:157](https://github.com/TanStack/db/blob/main/packages/db/src/collection/index.ts#L157)
+Defined in: [packages/db/src/collection/index.ts:249](https://github.com/TanStack/db/blob/main/packages/db/src/collection/index.ts#L249)
 
 Creates a new Collection instance with the given configuration
 
@@ -181,7 +179,7 @@ const todos = createCollection({
 
 // Direct usage (handlers manage transactions)
 const tx = todos.insert({ id: "1", text: "Buy milk", completed: false })
-await tx.isPersisted.promise
+await tx.when('settled')
 ```
 
 ```ts
@@ -205,7 +203,7 @@ tx.mutate(() => {
   todos.update("2", draft => { draft.completed = true })
 })
 
-await tx.isPersisted.promise
+await tx.when('settled')
 ```
 
 ```ts
@@ -229,7 +227,7 @@ const todos = createCollection({
 function createCollection<T, TKey, TUtils>(options): Collection<InferSchemaOutput<T>, TKey, TUtils, T, InferSchemaInput<T>> & SingleResult;
 ```
 
-Defined in: [packages/db/src/collection/index.ts:175](https://github.com/TanStack/db/blob/main/packages/db/src/collection/index.ts#L175)
+Defined in: [packages/db/src/collection/index.ts:267](https://github.com/TanStack/db/blob/main/packages/db/src/collection/index.ts#L267)
 
 Creates a new Collection instance with the given configuration
 
@@ -290,7 +288,7 @@ const todos = createCollection({
 
 // Direct usage (handlers manage transactions)
 const tx = todos.insert({ id: "1", text: "Buy milk", completed: false })
-await tx.isPersisted.promise
+await tx.when('settled')
 ```
 
 ```ts
@@ -314,7 +312,7 @@ tx.mutate(() => {
   todos.update("2", draft => { draft.completed = true })
 })
 
-await tx.isPersisted.promise
+await tx.when('settled')
 ```
 
 ```ts
@@ -338,7 +336,7 @@ const todos = createCollection({
 function createCollection<T, TKey, TUtils>(options): Collection<InferSchemaOutput<T>, TKey, TUtils, T, InferSchemaInput<T>> & SingleResult;
 ```
 
-Defined in: [packages/db/src/collection/index.ts:191](https://github.com/TanStack/db/blob/main/packages/db/src/collection/index.ts#L191)
+Defined in: [packages/db/src/collection/index.ts:283](https://github.com/TanStack/db/blob/main/packages/db/src/collection/index.ts#L283)
 
 Creates a new Collection instance with the given configuration
 
@@ -399,7 +397,7 @@ const todos = createCollection({
 
 // Direct usage (handlers manage transactions)
 const tx = todos.insert({ id: "1", text: "Buy milk", completed: false })
-await tx.isPersisted.promise
+await tx.when('settled')
 ```
 
 ```ts
@@ -423,7 +421,7 @@ tx.mutate(() => {
   todos.update("2", draft => { draft.completed = true })
 })
 
-await tx.isPersisted.promise
+await tx.when('settled')
 ```
 
 ```ts
@@ -447,7 +445,7 @@ const todos = createCollection({
 function createCollection<T, TKey, TUtils>(options): Collection<T, TKey, TUtils, never, T> & NonSingleResult;
 ```
 
-Defined in: [packages/db/src/collection/index.ts:204](https://github.com/TanStack/db/blob/main/packages/db/src/collection/index.ts#L204)
+Defined in: [packages/db/src/collection/index.ts:296](https://github.com/TanStack/db/blob/main/packages/db/src/collection/index.ts#L296)
 
 Creates a new Collection instance with the given configuration
 
@@ -508,7 +506,7 @@ const todos = createCollection({
 
 // Direct usage (handlers manage transactions)
 const tx = todos.insert({ id: "1", text: "Buy milk", completed: false })
-await tx.isPersisted.promise
+await tx.when('settled')
 ```
 
 ```ts
@@ -532,7 +530,7 @@ tx.mutate(() => {
   todos.update("2", draft => { draft.completed = true })
 })
 
-await tx.isPersisted.promise
+await tx.when('settled')
 ```
 
 ```ts
@@ -556,7 +554,7 @@ const todos = createCollection({
 function createCollection<T, TKey, TUtils>(options): Collection<T, TKey, TUtils, never, T> & NonSingleResult;
 ```
 
-Defined in: [packages/db/src/collection/index.ts:217](https://github.com/TanStack/db/blob/main/packages/db/src/collection/index.ts#L217)
+Defined in: [packages/db/src/collection/index.ts:309](https://github.com/TanStack/db/blob/main/packages/db/src/collection/index.ts#L309)
 
 Creates a new Collection instance with the given configuration
 
@@ -617,7 +615,7 @@ const todos = createCollection({
 
 // Direct usage (handlers manage transactions)
 const tx = todos.insert({ id: "1", text: "Buy milk", completed: false })
-await tx.isPersisted.promise
+await tx.when('settled')
 ```
 
 ```ts
@@ -641,7 +639,7 @@ tx.mutate(() => {
   todos.update("2", draft => { draft.completed = true })
 })
 
-await tx.isPersisted.promise
+await tx.when('settled')
 ```
 
 ```ts
@@ -665,7 +663,7 @@ const todos = createCollection({
 function createCollection<T, TKey, TUtils>(options): Collection<T, TKey, TUtils, never, T> & SingleResult;
 ```
 
-Defined in: [packages/db/src/collection/index.ts:229](https://github.com/TanStack/db/blob/main/packages/db/src/collection/index.ts#L229)
+Defined in: [packages/db/src/collection/index.ts:321](https://github.com/TanStack/db/blob/main/packages/db/src/collection/index.ts#L321)
 
 Creates a new Collection instance with the given configuration
 
@@ -726,7 +724,7 @@ const todos = createCollection({
 
 // Direct usage (handlers manage transactions)
 const tx = todos.insert({ id: "1", text: "Buy milk", completed: false })
-await tx.isPersisted.promise
+await tx.when('settled')
 ```
 
 ```ts
@@ -750,7 +748,7 @@ tx.mutate(() => {
   todos.update("2", draft => { draft.completed = true })
 })
 
-await tx.isPersisted.promise
+await tx.when('settled')
 ```
 
 ```ts
@@ -774,7 +772,7 @@ const todos = createCollection({
 function createCollection<T, TKey, TUtils>(options): Collection<T, TKey, TUtils, never, T> & SingleResult;
 ```
 
-Defined in: [packages/db/src/collection/index.ts:242](https://github.com/TanStack/db/blob/main/packages/db/src/collection/index.ts#L242)
+Defined in: [packages/db/src/collection/index.ts:334](https://github.com/TanStack/db/blob/main/packages/db/src/collection/index.ts#L334)
 
 Creates a new Collection instance with the given configuration
 
@@ -835,7 +833,7 @@ const todos = createCollection({
 
 // Direct usage (handlers manage transactions)
 const tx = todos.insert({ id: "1", text: "Buy milk", completed: false })
-await tx.isPersisted.promise
+await tx.when('settled')
 ```
 
 ```ts
@@ -859,7 +857,7 @@ tx.mutate(() => {
   todos.update("2", draft => { draft.completed = true })
 })
 
-await tx.isPersisted.promise
+await tx.when('settled')
 ```
 
 ```ts

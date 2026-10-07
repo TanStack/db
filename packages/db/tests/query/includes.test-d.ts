@@ -240,9 +240,10 @@ describe(`includes subquery types`, () => {
       expectTypeOf(result.$origin).toEqualTypeOf<`local` | `remote`>()
       expectTypeOf(result.$key).toEqualTypeOf<string | number>()
       expectTypeOf(result.$collectionId).toEqualTypeOf<string>()
-      expectTypeOf(result.issues[0]!).toMatchTypeOf<
-        WithVirtualProps<{ id: number; title: string }>
-      >()
+      expectTypeOf(result.issues[0]!).toEqualTypeOf<{
+        id: number
+        title: string
+      }>()
     })
 
     test(`toArray includes without select infers child type`, () => {
@@ -295,13 +296,11 @@ describe(`includes subquery types`, () => {
       expectTypeOf(result.$origin).toEqualTypeOf<`local` | `remote`>()
       expectTypeOf(result.$key).toEqualTypeOf<string | number>()
       expectTypeOf(result.$collectionId).toEqualTypeOf<string>()
-      expectTypeOf(result.issues[0]!).toMatchTypeOf<
-        WithVirtualProps<{
-          id: number
-          title: string
-          comments: Array<WithVirtualProps<{ id: number; body: string }>>
-        }>
-      >()
+      expectTypeOf(result.issues[0]!).toEqualTypeOf<{
+        id: number
+        title: string
+        comments: Array<{ id: number; body: string }>
+      }>()
     })
 
     test(`toArray supports scalar child subquery selects`, () => {
@@ -444,8 +443,8 @@ describe(`includes subquery types`, () => {
       const result = collection.toArray[0]!
       expectTypeOf(result.id).toEqualTypeOf<number>()
       expectTypeOf(result.name).toEqualTypeOf<string>()
-      expectTypeOf(result.issues).toMatchTypeOf<
-        Array<WithVirtualProps<{ id: number; title: string }>>
+      expectTypeOf(result.issues).toEqualTypeOf<
+        Array<{ id: number; title: string }>
       >()
     })
 
@@ -470,8 +469,8 @@ describe(`includes subquery types`, () => {
       const result = collection.toArray[0]!
       expectTypeOf(result.id).toEqualTypeOf<number>()
       expectTypeOf(result.title).toEqualTypeOf<string>()
-      expectTypeOf(result.project).toMatchTypeOf<
-        WithVirtualProps<{ id: number; name: string }> | undefined
+      expectTypeOf(result.project).toEqualTypeOf<
+        { id: number; name: string } | undefined
       >()
     })
 
@@ -537,15 +536,11 @@ describe(`includes subquery types`, () => {
       )
 
       const result = collection.toArray[0]!
-      expectTypeOf(result.issues[0]!).toMatchTypeOf<
-        WithVirtualProps<{
-          id: number
-          title: string
-          firstComment:
-            | WithVirtualProps<{ id: number; body: string }>
-            | undefined
-        }>
-      >()
+      expectTypeOf(result.issues[0]!).toEqualTypeOf<{
+        id: number
+        title: string
+        firstComment: { id: number; body: string } | undefined
+      }>()
     })
   })
 })

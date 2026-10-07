@@ -3,9 +3,7 @@ id: QueryCompilationError
 title: QueryCompilationError
 ---
 
-# Class: QueryCompilationError
-
-Defined in: [packages/db/src/errors.ts:423](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L423)
+Defined in: [packages/db/src/errors.ts:509](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L509)
 
 ## Extends
 
@@ -13,8 +11,10 @@ Defined in: [packages/db/src/errors.ts:423](https://github.com/TanStack/db/blob/
 
 ## Extended by
 
+- [`UnsafeAliasPathError`](UnsafeAliasPathError.md)
 - [`DistinctRequiresSelectError`](DistinctRequiresSelectError.md)
 - [`FnSelectWithGroupByError`](FnSelectWithGroupByError.md)
+- [`UnsupportedFnSelectResultError`](UnsupportedFnSelectResultError.md)
 - [`UnsupportedRootScalarSelectError`](UnsupportedRootScalarSelectError.md)
 - [`HavingRequiresGroupByError`](HavingRequiresGroupByError.md)
 - [`LimitOffsetRequireOrderByError`](LimitOffsetRequireOrderByError.md)
@@ -25,8 +25,6 @@ Defined in: [packages/db/src/errors.ts:423](https://github.com/TanStack/db/blob/
 - [`EmptyReferencePathError`](EmptyReferencePathError.md)
 - [`UnknownFunctionError`](UnknownFunctionError.md)
 - [`JoinCollectionNotFoundError`](JoinCollectionNotFoundError.md)
-- [`SubscriptionNotFoundError`](SubscriptionNotFoundError.md)
-- [`AggregateNotSupportedError`](AggregateNotSupportedError.md)
 - [`MissingAliasInputsError`](MissingAliasInputsError.md)
 - [`SetWindowRequiresOrderByError`](SetWindowRequiresOrderByError.md)
 
@@ -38,7 +36,7 @@ Defined in: [packages/db/src/errors.ts:423](https://github.com/TanStack/db/blob/
 new QueryCompilationError(message): QueryCompilationError;
 ```
 
-Defined in: [packages/db/src/errors.ts:424](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L424)
+Defined in: [packages/db/src/errors.ts:510](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L510)
 
 #### Parameters
 

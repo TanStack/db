@@ -163,7 +163,7 @@ function testDistinct() {
   test(`distinct with multiple batches of same key`, () => {
     const graph = new D2()
     const input = graph.newInput<[string, number]>()
-    const messages: Array<MultiSet<[string, number]>> = []
+    const messages: Array<MultiSet<[number, number]>> = []
 
     input.pipe(
       distinct(),
@@ -197,7 +197,7 @@ function testDistinct() {
   test(`distinct with multiple batches of same key that cancel out`, () => {
     const graph = new D2()
     const input = graph.newInput<[string, number]>()
-    const tracker = new MessageTracker<[string, number]>()
+    const tracker = new MessageTracker<[number, number]>()
 
     input.pipe(
       distinct(),

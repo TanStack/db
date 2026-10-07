@@ -3,9 +3,7 @@ id: InvalidJoinConditionLeftSourceError
 title: InvalidJoinConditionLeftSourceError
 ---
 
-# Class: InvalidJoinConditionLeftSourceError
-
-Defined in: [packages/db/src/errors.ts:564](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L564)
+Defined in: [packages/db/src/errors.ts:670](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L670)
 
 ## Extends
 
@@ -19,7 +17,7 @@ Defined in: [packages/db/src/errors.ts:564](https://github.com/TanStack/db/blob/
 new InvalidJoinConditionLeftSourceError(sourceAlias): InvalidJoinConditionLeftSourceError;
 ```
 
-Defined in: [packages/db/src/errors.ts:565](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L565)
+Defined in: [packages/db/src/errors.ts:671](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L671)
 
 #### Parameters
 

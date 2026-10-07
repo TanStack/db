@@ -3,26 +3,74 @@ id: avg
 title: avg
 ---
 
-# Function: avg()
+## Call Signature
 
 ```ts
-function avg<T>(arg): AggregateReturnType<T>;
+function avg<T>(arg): Aggregate<number>;
 ```
 
-Defined in: [packages/db/src/query/builder/functions.ts:370](https://github.com/TanStack/db/blob/main/packages/db/src/query/builder/functions.ts#L370)
+Defined in: [packages/db/src/query/builder/functions.ts:653](https://github.com/TanStack/db/blob/main/packages/db/src/query/builder/functions.ts#L653)
 
-## Type Parameters
+### Type Parameters
 
-### T
+#### T
 
-`T` *extends* `ExpressionLike`
+`T` *extends* `number`
 
-## Parameters
+### Parameters
 
-### arg
+#### arg
 
 `T`
 
-## Returns
+### Returns
 
-`AggregateReturnType`\<`T`\>
+[`Aggregate`](../@tanstack/namespaces/IR/classes/Aggregate.md)\<`number`\>
+
+## Call Signature
+
+```ts
+function avg<T>(arg): Aggregate<number>;
+```
+
+Defined in: [packages/db/src/query/builder/functions.ts:654](https://github.com/TanStack/db/blob/main/packages/db/src/query/builder/functions.ts#L654)
+
+### Type Parameters
+
+#### T
+
+`T`
+
+### Parameters
+
+#### arg
+
+`NumericAggregateWrapperArgument`\<`T`\>
+
+### Returns
+
+[`Aggregate`](../@tanstack/namespaces/IR/classes/Aggregate.md)\<`number`\>
+
+## Call Signature
+
+```ts
+function avg<T>(arg): Aggregate<number>;
+```
+
+Defined in: [packages/db/src/query/builder/functions.ts:657](https://github.com/TanStack/db/blob/main/packages/db/src/query/builder/functions.ts#L657)
+
+### Type Parameters
+
+#### T
+
+`T` *extends* `ExpressionLike`
+
+### Parameters
+
+#### arg
+
+`NumericAggregateArgument`\<`T`\>
+
+### Returns
+
+[`Aggregate`](../@tanstack/namespaces/IR/classes/Aggregate.md)\<`number`\>

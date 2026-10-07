@@ -3,13 +3,37 @@ id: ParsedOrderBy
 title: ParsedOrderBy
 ---
 
-# Interface: ParsedOrderBy
-
 Defined in: [packages/db/src/query/expression-helpers.ts:82](https://github.com/TanStack/db/blob/main/packages/db/src/query/expression-helpers.ts#L82)
 
 Result of parsing an ORDER BY expression
 
 ## Properties
+
+### compare()?
+
+```ts
+optional compare: (a, b) => number;
+```
+
+Defined in: [packages/db/src/query/expression-helpers.ts:93](https://github.com/TanStack/db/blob/main/packages/db/src/query/expression-helpers.ts#L93)
+
+Exact local comparator used by custom string sorting.
+
+#### Parameters
+
+##### a
+
+`string`
+
+##### b
+
+`string`
+
+#### Returns
+
+`number`
+
+***
 
 ### direction
 
@@ -68,9 +92,9 @@ Defined in: [packages/db/src/query/expression-helpers.ts:85](https://github.com/
 ### stringSort?
 
 ```ts
-optional stringSort: "lexical" | "locale";
+optional stringSort: "lexical" | "locale" | "custom";
 ```
 
 Defined in: [packages/db/src/query/expression-helpers.ts:87](https://github.com/TanStack/db/blob/main/packages/db/src/query/expression-helpers.ts#L87)
 
-String sorting method: 'lexical' (default) or 'locale' (locale-aware)
+String sorting method.

@@ -394,7 +394,7 @@ function testJoinType(joinType: JoinType, autoIndex: `off` | `eager`) {
         })
 
         // Initially Dave has null department
-        const daveBefore = joinQuery.get(`[4,undefined]`)
+        const daveBefore = joinQuery.get(`[4,null]`)
         expect(daveBefore).toMatchObject({
           user_name: `Dave`,
           department_name: undefined,
@@ -419,7 +419,7 @@ function testJoinType(joinType: JoinType, autoIndex: `off` | `eager`) {
           department_name: `Engineering`,
         })
 
-        const daveAfter2 = joinQuery.get(`[4,undefined]`)
+        const daveAfter2 = joinQuery.get(`[4,null]`)
         expect(daveAfter2).toBeUndefined()
       })
     }
@@ -2009,6 +2009,9 @@ function createJoinTests(autoIndex: `off` | `eager`): void {
             balance_amount: balance.amount,
           })),
     })
+    // A live-query Collection starts no provider work until it has a
+    // subscriber or a preload. This subscriber starts the idle clients source.
+    chainedJoinQuery.subscribeChanges(() => {})
 
     // Initial state: 3 players, no clients, so left join gives undefined for client and balance
     expect(chainedJoinQuery.toArray).toHaveLength(3)

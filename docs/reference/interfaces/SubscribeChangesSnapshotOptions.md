@@ -3,9 +3,7 @@ id: SubscribeChangesSnapshotOptions
 title: SubscribeChangesSnapshotOptions
 ---
 
-# Interface: SubscribeChangesSnapshotOptions\<T, TKey\>
-
-Defined in: [packages/db/src/types.ts:869](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L869)
+Defined in: [packages/db/src/types.ts:1121](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L1121)
 
 ## Extends
 
@@ -29,7 +27,7 @@ Defined in: [packages/db/src/types.ts:869](https://github.com/TanStack/db/blob/m
 optional limit: number;
 ```
 
-Defined in: [packages/db/src/types.ts:874](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L874)
+Defined in: [packages/db/src/types.ts:1126](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L1126)
 
 **`Internal`**
 
@@ -41,13 +39,43 @@ Optional limit to include in loadSubset for query-specific cache keys.
 
 ***
 
+### onLoadSubsetError()?
+
+```ts
+optional onLoadSubsetError: (event) => void;
+```
+
+Defined in: [packages/db/src/types.ts:1113](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L1113)
+
+**`Internal`**
+
+Receives subset-load failures scoped to this subscription.
+
+#### Parameters
+
+##### event
+
+[`SubscriptionLoadSubsetErrorEvent`](SubscriptionLoadSubsetErrorEvent.md)
+
+#### Returns
+
+`void`
+
+#### Inherited from
+
+```ts
+Omit.onLoadSubsetError
+```
+
+***
+
 ### onLoadSubsetResult()?
 
 ```ts
 optional onLoadSubsetResult: (result) => void;
 ```
 
-Defined in: [packages/db/src/types.ts:866](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L866)
+Defined in: [packages/db/src/types.ts:1111](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L1111)
 
 **`Internal`**
 
@@ -58,7 +86,7 @@ Allows the caller to directly track the loading promise for isReady status.
 
 ##### result
 
-`true` | `Promise`\<`void`\>
+[`LoadSubsetRequestResult`](../type-aliases/LoadSubsetRequestResult.md)
 
 #### Returns
 
@@ -78,7 +106,7 @@ Omit.onLoadSubsetResult
 optional onStatusChange: (event) => void;
 ```
 
-Defined in: [packages/db/src/types.ts:850](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L850)
+Defined in: [packages/db/src/types.ts:1095](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L1095)
 
 **`Internal`**
 
@@ -109,7 +137,7 @@ Omit.onStatusChange
 optional orderBy: OrderBy;
 ```
 
-Defined in: [packages/db/src/types.ts:873](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L873)
+Defined in: [packages/db/src/types.ts:1125](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L1125)
 
 **`Internal`**
 
@@ -121,13 +149,53 @@ Optional orderBy to include in loadSubset for query-specific cache keys.
 
 ***
 
+### truncateReplayPublication?
+
+```ts
+optional truncateReplayPublication: object;
+```
+
+Defined in: [packages/db/src/types.ts:1115](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L1115)
+
+**`Internal`**
+
+Lets a live-query graph retain its last publication during replay.
+
+#### start()
+
+```ts
+readonly start: () => void;
+```
+
+##### Returns
+
+`void`
+
+#### succeed()
+
+```ts
+readonly succeed: () => void;
+```
+
+##### Returns
+
+`void`
+
+#### Inherited from
+
+```ts
+Omit.truncateReplayPublication
+```
+
+***
+
 ### where()?
 
 ```ts
 optional where: (row) => any;
 ```
 
-Defined in: [packages/db/src/types.ts:842](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L842)
+Defined in: [packages/db/src/types.ts:1087](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L1087)
 
 Callback function for filtering changes using a row proxy.
 The callback receives a proxy object that records property access,
@@ -137,7 +205,7 @@ allowing you to use query builder functions like `eq`, `gt`, etc.
 
 ##### row
 
-`SingleRowRefProxy`\<[`WithVirtualProps`](../type-aliases/WithVirtualProps.md)\<`T`, `TKey`\>\>
+`SingleRowRefProxy`\<[`WithVirtualProps`](../type-aliases/WithVirtualProps.md)\<`T`, `TKey`\>, `TKey`, `true`\>
 
 #### Returns
 
@@ -167,7 +235,7 @@ Omit.where
 optional whereExpression: BasicExpression<boolean>;
 ```
 
-Defined in: [packages/db/src/types.ts:844](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L844)
+Defined in: [packages/db/src/types.ts:1089](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L1089)
 
 Pre-compiled expression for filtering changes
 

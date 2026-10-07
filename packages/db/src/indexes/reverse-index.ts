@@ -1,14 +1,22 @@
-import type { CompareOptions } from '../query/builder/types'
-import type { OrderByDirection } from '../query/ir'
-import type { IndexInterface, IndexOperation, IndexStats } from './base-index'
+import { compareKeys } from '@tanstack/db-ivm'
+import type { IndexInterface, IndexOperation, IndexReader } from './base-index'
 import type { RangeQueryOptions } from './btree-index'
 
 export class ReverseIndex<
   TKey extends string | number,
-> implements IndexInterface<TKey> {
+> implements IndexReader<TKey> {
   private originalIndex: IndexInterface<TKey>
 
-  constructor(index: IndexInterface<TKey>) {
+  /**
+   * @param nullsFirst - Whether nullish values come first in the reversed
+   * order. The original index keeps them at the opposite end, so reversing
+   * it alone would move them; ordered reads put them back. Omit it to read
+   * the original index's plain reversed walk, as earlier releases did.
+   */
+  constructor(
+    index: IndexInterface<TKey>,
+    private readonly nullsFirst?: boolean,
+  ) {
     this.originalIndex = index
   }
 
@@ -32,39 +40,57 @@ export class ReverseIndex<
     return this.originalIndex.rangeQueryReversed(options)
   }
 
-  rangeQueryReversed(options: RangeQueryOptions = {}): Set<TKey> {
-    return this.originalIndex.rangeQuery(options)
-  }
+  // Reversing the original index moves its nullish group to the opposite
+  // end, so reads put the group back at the end the query asks for. Nullish
+  // keys come in ascending key order; equal non-null values come in the
+  // reversed walk's order. Each read gathers the nullish group, so its cost
+  // grows with the number of nullish keys.
 
   take(n: number, from: any, filterFn?: (key: TKey) => boolean): Array<TKey> {
-    return this.originalIndex.takeReversed(n, from, filterFn)
+    if (this.nullsFirst === undefined) {
+      return this.originalIndex.takeReversed(n, from, filterFn)
+    }
+    return this.read(n, filterFn, from ?? null)
   }
 
   takeFromStart(n: number, filterFn?: (key: TKey) => boolean): Array<TKey> {
-    return this.originalIndex.takeReversedFromEnd(n, filterFn)
+    if (this.nullsFirst === undefined) {
+      return this.originalIndex.takeReversedFromEnd(n, filterFn)
+    }
+    return this.read(n, filterFn)
   }
 
-  takeReversed(
-    n: number,
-    from: any,
-    filterFn?: (key: TKey) => boolean,
-  ): Array<TKey> {
-    return this.originalIndex.take(n, from, filterFn)
-  }
-
-  takeReversedFromEnd(
+  /** Reads after `from` (`null` is the nullish group), or from the start. */
+  private read(
     n: number,
     filterFn?: (key: TKey) => boolean,
+    from?: unknown,
   ): Array<TKey> {
-    return this.originalIndex.takeFromStart(n, filterFn)
-  }
-
-  get orderedEntriesArray(): Array<[any, Set<TKey>]> {
-    return this.originalIndex.orderedEntriesArrayReversed
-  }
-
-  get orderedEntriesArrayReversed(): Array<[any, Set<TKey>]> {
-    return this.originalIndex.orderedEntriesArray
+    // Every index implements `equalityLookup`; an `eq` lookup need not be
+    // advertised by an index that ordered reads accept.
+    const nullish = new Set([
+      ...this.originalIndex.equalityLookup(null),
+      ...this.originalIndex.equalityLookup(undefined),
+    ])
+    const keep = (key: TKey) => filterFn?.(key) ?? true
+    const accept = (key: TKey) => !nullish.has(key) && keep(key)
+    const values = (count: number) =>
+      count <= 0
+        ? []
+        : from == null
+          ? this.originalIndex.takeReversedFromEnd(count, accept)
+          : this.originalIndex.takeReversed(count, from, accept)
+    const nulls = (count: number) =>
+      count <= 0
+        ? []
+        : [...nullish].sort(compareKeys).filter(keep).slice(0, count)
+    if (from === null) return this.nullsFirst ? values(n) : []
+    if (this.nullsFirst && from === undefined) {
+      const head = nulls(n)
+      return [...head, ...values(n - head.length)]
+    }
+    const keys = values(n)
+    return this.nullsFirst ? keys : [...keys, ...nulls(n - keys.length)]
   }
 
   // All operations below delegate to the original index
@@ -73,59 +99,15 @@ export class ReverseIndex<
     return this.originalIndex.supports(operation)
   }
 
-  matchesField(fieldPath: Array<string>): boolean {
-    return this.originalIndex.matchesField(fieldPath)
+  get supportsRangeOptimization(): boolean {
+    return this.originalIndex.supportsRangeOptimization
   }
 
-  matchesCompareOptions(compareOptions: CompareOptions): boolean {
-    return this.originalIndex.matchesCompareOptions(compareOptions)
-  }
-
-  matchesDirection(direction: OrderByDirection): boolean {
-    return this.originalIndex.matchesDirection(direction)
-  }
-
-  getStats(): IndexStats {
-    return this.originalIndex.getStats()
-  }
-
-  add(key: TKey, item: any): void {
-    this.originalIndex.add(key, item)
-  }
-
-  remove(key: TKey, item: any): void {
-    this.originalIndex.remove(key, item)
-  }
-
-  update(key: TKey, oldItem: any, newItem: any): void {
-    this.originalIndex.update(key, oldItem, newItem)
-  }
-
-  build(entries: Iterable<[TKey, any]>): void {
-    this.originalIndex.build(entries)
-  }
-
-  clear(): void {
-    this.originalIndex.clear()
+  canOptimizeRangeFor(value: unknown): boolean {
+    return this.originalIndex.canOptimizeRangeFor?.(value) ?? true
   }
 
   get keyCount(): number {
     return this.originalIndex.keyCount
-  }
-
-  equalityLookup(value: any): Set<TKey> {
-    return this.originalIndex.equalityLookup(value)
-  }
-
-  inArrayLookup(values: Array<any>): Set<TKey> {
-    return this.originalIndex.inArrayLookup(values)
-  }
-
-  get indexedKeysSet(): Set<TKey> {
-    return this.originalIndex.indexedKeysSet
-  }
-
-  get valueMapData(): Map<any, Set<TKey>> {
-    return this.originalIndex.valueMapData
   }
 }

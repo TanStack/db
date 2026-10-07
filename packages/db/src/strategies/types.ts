@@ -10,11 +10,18 @@ export interface BaseStrategy<TName extends string = string> {
   /**
    * Execute a function according to the strategy's timing rules
    * @param fn - The function to execute
+   * @param onAdmit - Optional synchronous preparation for an admitted call.
+   * Built-in debounce/throttle strategies call it after reserving the current
+   * edge but before invoking fn, and do not call it when returning false.
+   * @param onCommit - Optional promise for the actual commit attempt. It can
+   * outlive the public persistence receipt after a manual rollback.
    * @returns The result of the function execution (if applicable)
    */
   execute: <T extends object = Record<string, unknown>>(
     fn: () => Transaction<T>,
-  ) => void | Promise<void>
+    onAdmit?: () => Transaction<T> | void,
+    onCommit?: () => Promise<unknown> | undefined,
+  ) => void | boolean | Promise<void>
 
   /**
    * Clean up any resources held by the strategy
@@ -50,7 +57,7 @@ export interface DebounceStrategy extends BaseStrategy<`debounce`> {
 export interface QueueStrategyOptions {
   /** Wait time between processing queue items (milliseconds) */
   wait?: number
-  /** Maximum queue size (items are dropped if exceeded) */
+  /** Maximum waiting items. Overflow rejects its transaction; 0 rejects every mutation. */
   maxSize?: number
   /** Where to add new items in the queue */
   addItemsTo?: `front` | `back`
@@ -65,6 +72,12 @@ export interface QueueStrategyOptions {
  */
 export interface QueueStrategy extends BaseStrategy<`queue`> {
   options?: QueueStrategyOptions
+  /** Explicit false rejects the transaction; void preserves custom strategies. */
+  execute: <T extends object = Record<string, unknown>>(
+    fn: () => Transaction<T>,
+    onAdmit?: () => Transaction<T> | void,
+    onCommit?: () => Promise<unknown> | undefined,
+  ) => boolean | void | Promise<void>
 }
 
 /**
@@ -74,9 +87,9 @@ export interface QueueStrategy extends BaseStrategy<`queue`> {
 export interface ThrottleStrategyOptions {
   /** Minimum wait time between executions (milliseconds) */
   wait: number
-  /** Execute immediately on the first call */
+  /** Execute immediately on the first call. Defaults to true unless trailing is explicitly true. */
   leading?: boolean
-  /** Execute on the last call after wait period */
+  /** Execute on the last call after wait period. Defaults to true. Disabled trailing rejects skipped optimistic calls. */
   trailing?: boolean
 }
 
@@ -111,10 +124,7 @@ export interface BatchStrategy extends BaseStrategy<`batch`> {
  * Union type of all available strategies
  */
 export type Strategy =
-  | DebounceStrategy
-  | QueueStrategy
-  | ThrottleStrategy
-  | BatchStrategy
+  DebounceStrategy | QueueStrategy | ThrottleStrategy | BatchStrategy
 
 /**
  * Extract the options type from a strategy

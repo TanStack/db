@@ -1,29 +1,58 @@
 import { compileSingleRowExpression } from '../query/compiler/evaluators.js'
 import { comparisonFunctions } from '../query/builder/functions.js'
 import { DEFAULT_COMPARE_OPTIONS, deepEquals } from '../utils.js'
+import { makeCheckedComparator, makeComparator } from '../utils/comparison.js'
+import type { CompiledSingleRowExpression } from '../query/compiler/evaluators.js'
 import type { RangeQueryOptions } from './btree-index.js'
 import type { CompareOptions } from '../query/builder/types.js'
 import type { BasicExpression, OrderByDirection } from '../query/ir.js'
+
+function normalizeLocaleOptions(options: object | undefined): object {
+  return Object.fromEntries(
+    Object.entries(options ?? {}).filter(([, value]) => value !== undefined),
+  )
+}
+
+function canonicalizeLocale(locale: string | undefined): string | undefined {
+  return locale === undefined ? undefined : Intl.getCanonicalLocales(locale)[0]
+}
+
+type LocaleCompareOptions = CompareOptions & {
+  stringSort: `locale`
+  locale?: string
+  localeOptions?: object
+}
+
+function resolveStringSort(
+  options: CompareOptions,
+): NonNullable<CompareOptions[`stringSort`]> {
+  return options.stringSort ?? DEFAULT_COMPARE_OPTIONS.stringSort!
+}
 
 /**
  * Operations that indexes can support, imported from available comparison functions
  */
 export const IndexOperation = comparisonFunctions
 
+export const builtInIndexResolverNames = new WeakMap<object, string>()
+
 /**
  * Type for index operation values
  */
 export type IndexOperation = (typeof comparisonFunctions)[number]
 
-/**
- * Statistics about index usage and performance
- */
-export interface IndexStats {
-  readonly entryCount: number
-  readonly lookupCount: number
-  readonly averageLookupTime: number
-  readonly lastUpdated: Date
-}
+/** The read-side surface consumers use on a resolved (possibly reversed) index. */
+export type IndexReader<TKey extends string | number = string | number> = Pick<
+  IndexInterface<TKey>,
+  | `lookup`
+  | `rangeQuery`
+  | `take`
+  | `takeFromStart`
+  | `keyCount`
+  | `supports`
+  | `supportsRangeOptimization`
+  | `canOptimizeRangeFor`
+>
 
 export interface IndexInterface<
   TKey extends string | number = string | number,
@@ -45,13 +74,13 @@ export interface IndexInterface<
 
   take: (
     n: number,
-    from: TKey,
+    from: unknown,
     filterFn?: (key: TKey) => boolean,
   ) => Array<TKey>
   takeFromStart: (n: number, filterFn?: (key: TKey) => boolean) => Array<TKey>
   takeReversed: (
     n: number,
-    from: TKey,
+    from: unknown,
     filterFn?: (key: TKey) => boolean,
   ) => Array<TKey>
   takeReversedFromEnd: (
@@ -60,19 +89,27 @@ export interface IndexInterface<
   ) => Array<TKey>
 
   get keyCount(): number
-  get orderedEntriesArray(): Array<[any, Set<TKey>]>
-  get orderedEntriesArrayReversed(): Array<[any, Set<TKey>]>
-
-  get indexedKeysSet(): Set<TKey>
-  get valueMapData(): Map<any, Set<TKey>>
-
   supports: (operation: IndexOperation) => boolean
+
+  /**
+   * Whether range lookups (gt/gte/lt/lte) on this index can be trusted to
+   * return every matching key. Range traversal relies on the index ordering, so
+   * it is unsafe when the index uses a custom comparator, whose order may not
+   * match the WHERE evaluator's relational operators. Callers must fall back to
+   * a full scan when this is `false`.
+   */
+  get supportsRangeOptimization(): boolean
+
+  /**
+   * Whether the live values in this index share the predicate operand's
+   * relational domain. Mixed domains can sort differently in the index and
+   * WHERE evaluator, which can make a range lookup omit matching rows.
+   */
+  canOptimizeRangeFor?: (value: unknown) => boolean
 
   matchesField: (fieldPath: Array<string>) => boolean
   matchesCompareOptions: (compareOptions: CompareOptions) => boolean
   matchesDirection: (direction: OrderByDirection) => boolean
-
-  getStats: () => IndexStats
 }
 
 /**
@@ -85,11 +122,19 @@ export abstract class BaseIndex<
   public readonly name?: string
   public readonly expression: BasicExpression
   public abstract readonly supportedOperations: Set<IndexOperation>
-
-  protected lookupCount = 0
-  protected totalLookupTime = 0
-  protected lastUpdated = new Date()
-  protected compareOptions: CompareOptions
+  protected readonly compareOptions: CompareOptions
+  /**
+   * Orders indexed values. Every result is checked, because a custom
+   * comparator or custom collation may be supplied by the user.
+   */
+  protected readonly compareFn: (a: any, b: any) => number
+  private compiledIndexEvaluator: CompiledSingleRowExpression | undefined
+  /**
+   * A user-supplied comparator's ordering may not match the WHERE evaluator's
+   * relational operators.
+   */
+  protected readonly hasCustomComparator: boolean
+  private rangeValueDomains = new Map<string, number>()
 
   constructor(
     id: number,
@@ -99,7 +144,11 @@ export abstract class BaseIndex<
   ) {
     this.id = id
     this.expression = expression
-    this.compareOptions = DEFAULT_COMPARE_OPTIONS
+    this.compareOptions = options?.compareOptions ?? DEFAULT_COMPARE_OPTIONS
+    this.hasCustomComparator = options?.compareFn != null
+    this.compareFn = makeCheckedComparator(
+      options?.compareFn ?? makeComparator(this.compareOptions),
+    )
     this.name = name
     this.initialize(options)
   }
@@ -113,7 +162,7 @@ export abstract class BaseIndex<
   abstract lookup(operation: IndexOperation, value: any): Set<TKey>
   abstract take(
     n: number,
-    from: TKey,
+    from: unknown,
     filterFn?: (key: TKey) => boolean,
   ): Array<TKey>
   abstract takeFromStart(
@@ -122,7 +171,7 @@ export abstract class BaseIndex<
   ): Array<TKey>
   abstract takeReversed(
     n: number,
-    from: TKey,
+    from: unknown,
     filterFn?: (key: TKey) => boolean,
   ): Array<TKey>
   abstract takeReversedFromEnd(
@@ -133,15 +182,60 @@ export abstract class BaseIndex<
   abstract equalityLookup(value: any): Set<TKey>
   abstract inArrayLookup(values: Array<any>): Set<TKey>
   abstract rangeQuery(options: RangeQueryOptions): Set<TKey>
-  abstract rangeQueryReversed(options: RangeQueryOptions): Set<TKey>
-  abstract get orderedEntriesArray(): Array<[any, Set<TKey>]>
-  abstract get orderedEntriesArrayReversed(): Array<[any, Set<TKey>]>
-  abstract get indexedKeysSet(): Set<TKey>
-  abstract get valueMapData(): Map<any, Set<TKey>>
 
   // Common methods
+  rangeQueryReversed(options: RangeQueryOptions = {}): Set<TKey> {
+    const { from, to, fromInclusive = true, toInclusive = true } = options
+    const reversed: RangeQueryOptions = {}
+    if (`to` in options) {
+      reversed.from = to
+      reversed.fromInclusive = toInclusive
+    }
+    if (`from` in options) {
+      reversed.to = from
+      reversed.toInclusive = fromInclusive
+    }
+    return this.rangeQuery(reversed)
+  }
+
   supports(operation: IndexOperation): boolean {
     return this.supportedOperations.has(operation)
+  }
+
+  get supportsRangeOptimization(): boolean {
+    return !this.hasCustomComparator
+  }
+
+  protected addRangeValue(value: unknown): void {
+    const domain = rangeValueDomain(value)
+    if (domain === undefined) return
+    this.rangeValueDomains.set(
+      domain,
+      (this.rangeValueDomains.get(domain) ?? 0) + 1,
+    )
+  }
+
+  protected removeRangeValue(value: unknown): void {
+    const domain = rangeValueDomain(value)
+    if (domain === undefined) return
+    const count = this.rangeValueDomains.get(domain)
+    if (count === undefined) return
+    if (count === 1) this.rangeValueDomains.delete(domain)
+    else this.rangeValueDomains.set(domain, count - 1)
+  }
+
+  protected clearRangeValues(): void {
+    this.rangeValueDomains.clear()
+  }
+
+  canOptimizeRangeFor(value: unknown): boolean {
+    const domain = rangeValueDomain(value)
+    if (domain === undefined) return true
+    if (!isNativeRangeDomain(domain)) return false
+    return (
+      this.rangeValueDomains.size === 0 ||
+      (this.rangeValueDomains.size === 1 && this.rangeValueDomains.has(domain))
+    )
   }
 
   matchesField(fieldPath: Array<string>): boolean {
@@ -157,18 +251,39 @@ export abstract class BaseIndex<
    * The direction is ignored because the index can be reversed if the direction is different.
    */
   matchesCompareOptions(compareOptions: CompareOptions): boolean {
-    const thisCompareOptionsWithoutDirection = {
-      ...this.compareOptions,
-      direction: undefined,
-    }
-    const compareOptionsWithoutDirection = {
-      ...compareOptions,
-      direction: undefined,
+    const indexCompareOptions = this.compareOptions
+    const indexStringSort = resolveStringSort(indexCompareOptions)
+    const requestedStringSort = resolveStringSort(compareOptions)
+
+    if (
+      indexCompareOptions.nulls !== compareOptions.nulls ||
+      indexStringSort !== requestedStringSort
+    ) {
+      return false
     }
 
-    return deepEquals(
-      thisCompareOptionsWithoutDirection,
-      compareOptionsWithoutDirection,
+    if (indexStringSort === `custom` && requestedStringSort === `custom`) {
+      return (
+        indexCompareOptions.stringSort === `custom` &&
+        compareOptions.stringSort === `custom` &&
+        indexCompareOptions.compare === compareOptions.compare
+      )
+    }
+
+    if (indexStringSort !== `locale` || requestedStringSort !== `locale`) {
+      return true
+    }
+
+    const indexLocaleOptions = indexCompareOptions as LocaleCompareOptions
+    const requestedLocaleOptions = compareOptions as LocaleCompareOptions
+
+    return (
+      canonicalizeLocale(indexLocaleOptions.locale) ===
+        canonicalizeLocale(requestedLocaleOptions.locale) &&
+      deepEquals(
+        normalizeLocaleOptions(indexLocaleOptions.localeOptions),
+        normalizeLocaleOptions(requestedLocaleOptions.localeOptions),
+      )
     )
   }
 
@@ -179,32 +294,41 @@ export abstract class BaseIndex<
     return this.compareOptions.direction === direction
   }
 
-  getStats(): IndexStats {
-    return {
-      entryCount: this.keyCount,
-      lookupCount: this.lookupCount,
-      averageLookupTime:
-        this.lookupCount > 0 ? this.totalLookupTime / this.lookupCount : 0,
-      lastUpdated: this.lastUpdated,
-    }
-  }
-
   protected abstract initialize(options?: any): void
 
   protected evaluateIndexExpression(item: any): any {
-    const evaluator = compileSingleRowExpression(this.expression)
+    const evaluator = (this.compiledIndexEvaluator ??=
+      compileSingleRowExpression(this.expression))
     return evaluator(item as Record<string, unknown>)
   }
 
-  protected trackLookup(startTime: number): void {
-    const duration = performance.now() - startTime
-    this.lookupCount++
-    this.totalLookupTime += duration
+  /** The indexed value of a row being added. A throwing expression fails the write. */
+  protected evaluateAddedValue(key: TKey, item: any): any {
+    try {
+      return this.evaluateIndexExpression(item)
+    } catch (error) {
+      throw new Error(
+        `Failed to evaluate index expression for key ${key}: ${error}`,
+        { cause: error },
+      )
+    }
   }
+}
 
-  protected updateTimestamp(): void {
-    this.lastUpdated = new Date()
-  }
+function rangeValueDomain(value: unknown): string | undefined {
+  if (value == null) return undefined
+  if (value instanceof Date) return `date`
+  return typeof value
+}
+
+function isNativeRangeDomain(domain: string): boolean {
+  return (
+    domain === `number` ||
+    domain === `bigint` ||
+    domain === `boolean` ||
+    domain === `string` ||
+    domain === `date`
+  )
 }
 
 /**

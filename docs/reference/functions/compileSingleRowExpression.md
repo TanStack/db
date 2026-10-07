@@ -3,13 +3,11 @@ id: compileSingleRowExpression
 title: compileSingleRowExpression
 ---
 
-# Function: compileSingleRowExpression()
-
 ```ts
 function compileSingleRowExpression(expr): CompiledSingleRowExpression;
 ```
 
-Defined in: [packages/db/src/query/compiler/evaluators.ts:83](https://github.com/TanStack/db/blob/main/packages/db/src/query/compiler/evaluators.ts#L83)
+Defined in: [packages/db/src/query/compiler/evaluators.ts:108](https://github.com/TanStack/db/blob/main/packages/db/src/query/compiler/evaluators.ts#L108)
 
 Compiles a single-row expression into an optimized evaluator function.
 

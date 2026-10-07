@@ -83,12 +83,14 @@ export interface ParsedOrderBy {
   field: FieldPath
   direction: `asc` | `desc`
   nulls: `first` | `last`
-  /** String sorting method: 'lexical' (default) or 'locale' (locale-aware) */
-  stringSort?: `lexical` | `locale`
+  /** String sorting method. */
+  stringSort?: `lexical` | `locale` | `custom`
   /** Locale for locale-aware string sorting (e.g., 'en-US') */
   locale?: string
   /** Additional options for locale-aware sorting */
   localeOptions?: object
+  /** Exact local comparator used by custom string sorting. */
+  compare?: (a: string, b: string) => number
 }
 
 /**
@@ -294,6 +296,9 @@ export function parseOrderByExpression(
     }
     if (`localeOptions` in clause.compareOptions) {
       result.localeOptions = clause.compareOptions.localeOptions
+    }
+    if (`compare` in clause.compareOptions) {
+      result.compare = clause.compareOptions.compare
     }
 
     return result

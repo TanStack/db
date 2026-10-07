@@ -3,15 +3,13 @@ id: ChangeMessageOrDeleteKeyMessage
 title: ChangeMessageOrDeleteKeyMessage
 ---
 
-# Type Alias: ChangeMessageOrDeleteKeyMessage\<T, TKey\>
-
 ```ts
 type ChangeMessageOrDeleteKeyMessage<T, TKey> = 
   | Omit<ChangeMessage<T>, "key">
 | DeleteKeyMessage<TKey>;
 ```
 
-Defined in: [packages/db/src/types.ts:397](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L397)
+Defined in: [packages/db/src/types.ts:567](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L567)
 
 ## Type Parameters
 

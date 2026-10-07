@@ -3,13 +3,11 @@ id: EagerSyncHooks
 title: EagerSyncHooks
 ---
 
-# Type Alias: EagerSyncHooks
-
 ```ts
 type EagerSyncHooks = object;
 ```
 
-Defined in: [definitions.ts:171](https://github.com/TanStack/db/blob/main/packages/powersync-db-collection/src/definitions.ts#L171)
+Defined in: [definitions.ts:173](https://github.com/TanStack/db/blob/main/packages/powersync-db-collection/src/definitions.ts#L173)
 
 Eager sync mode hooks.
 Called once when the collection sync starts and stops.
@@ -22,7 +20,7 @@ Called once when the collection sync starts and stops.
 optional onLoad: () => CleanupFn | void | Promise<CleanupFn | void>;
 ```
 
-Defined in: [definitions.ts:179](https://github.com/TanStack/db/blob/main/packages/powersync-db-collection/src/definitions.ts#L179)
+Defined in: [definitions.ts:181](https://github.com/TanStack/db/blob/main/packages/powersync-db-collection/src/definitions.ts#L181)
 
 Called when the collection sync starts.
 Use this to set up external data sources (e.g. subscribing to a sync stream).
@@ -41,7 +39,7 @@ A cleanup function that is called when the collection sync is cleaned up.
 optional onLoadSubset: never;
 ```
 
-Defined in: [definitions.ts:180](https://github.com/TanStack/db/blob/main/packages/powersync-db-collection/src/definitions.ts#L180)
+Defined in: [definitions.ts:182](https://github.com/TanStack/db/blob/main/packages/powersync-db-collection/src/definitions.ts#L182)
 
 ***
 
@@ -51,4 +49,4 @@ Defined in: [definitions.ts:180](https://github.com/TanStack/db/blob/main/packag
 optional syncMode: "eager";
 ```
 
-Defined in: [definitions.ts:172](https://github.com/TanStack/db/blob/main/packages/powersync-db-collection/src/definitions.ts#L172)
+Defined in: [definitions.ts:174](https://github.com/TanStack/db/blob/main/packages/powersync-db-collection/src/definitions.ts#L174)

@@ -1,5 +1,243 @@
 # @tanstack/electron-db-sqlite-persistence
 
+## 0.2.8
+
+### Patch Changes
+
+- Updated dependencies []:
+  - @tanstack/db-sqlite-persistence-core@0.4.7
+
+## 0.2.7
+
+### Patch Changes
+
+- Updated dependencies []:
+  - @tanstack/db-sqlite-persistence-core@0.4.6
+
+## 0.2.6
+
+### Patch Changes
+
+- Updated dependencies [[`5b9d434`](https://github.com/TanStack/db/commit/5b9d4340455201a42748f6ec951d543050c51d6f), [`a37e69a`](https://github.com/TanStack/db/commit/a37e69ab6aa35fd6a2a72d727de2b5168d10b1a0), [`4777d20`](https://github.com/TanStack/db/commit/4777d205dfe292b81d047d3886d7a149f3e44552)]:
+  - @tanstack/db-sqlite-persistence-core@0.4.5
+
+## 0.2.5
+
+### Patch Changes
+
+- Updated dependencies [[`dbffea1`](https://github.com/TanStack/db/commit/dbffea1fd4dcba669e4bb959629e2837c3970fbe), [`b6c8540`](https://github.com/TanStack/db/commit/b6c85403cf60aa10e2328f27b3adb04aae718eac), [`4b83aa7`](https://github.com/TanStack/db/commit/4b83aa7e18742a036cc55ef9570e3a9d1d222074), [`eac6e8b`](https://github.com/TanStack/db/commit/eac6e8b6a6150b8e48bdbe61365bceec1e768eb1)]:
+  - @tanstack/db-sqlite-persistence-core@0.4.4
+
+## 0.2.4
+
+### Patch Changes
+
+- Updated dependencies []:
+  - @tanstack/db-sqlite-persistence-core@0.4.3
+
+## 0.2.3
+
+### Patch Changes
+
+- Updated dependencies []:
+  - @tanstack/db-sqlite-persistence-core@0.4.2
+
+## 0.2.2
+
+### Patch Changes
+
+- Updated dependencies []:
+  - @tanstack/db-sqlite-persistence-core@0.4.1
+
+## 0.2.1
+
+### Patch Changes
+
+- Updated dependencies [[`9c62ac3`](https://github.com/TanStack/db/commit/9c62ac3782779dc2a91335dd834ad8eb907db109), [`c0d123b`](https://github.com/TanStack/db/commit/c0d123b86aeb2942d0a2a70a050bf10a3b3dda48)]:
+  - @tanstack/db-sqlite-persistence-core@0.4.0
+
+## 0.2.0
+
+### Minor Changes
+
+- Preserve persisted resume integrity with atomic SQLite baseline evidence and stale-writer rejection, expose persistence sync metadata as one versioned capability, and refresh uncertified Electric baselines before publishing resumed data. ([#1846](https://github.com/TanStack/db/pull/1846))
+
+  This changes the public persistence contracts: custom `PersistenceAdapter` implementations must now implement `loadResumeSnapshot`, and `SyncMetadataApi.persistence` is required with `null` explicitly representing no persistence. Custom sync wrappers that receive metadata must forward `metadata.persistence` unchanged so consumers receive either that sentinel or the complete versioned capability. A direct sync invocation may still omit the optional metadata object entirely, which consumers treat as no persistence. The Electron bridge now transports the atomic resume snapshot through IPC protocol v2; Electron main and renderer integrations must upgrade together because mixed v1/v2 peers fail closed. Node and React Native persistence instances that wrap one database handle now share transaction admission so concurrent collection startup cannot overlap transactions on that connection.
+
+### Patch Changes
+
+- Require coordinators to route complete committed transactions through the per-collection persistence owner, with named fail-stop errors for indeterminate commits and durability failures. Add clone-safe remote-subset leases with exact release, recursive wire validation, and matching Browser and Electron coordination. ([#1845](https://github.com/TanStack/db/pull/1845))
+
+- Request an existing leader's route before the first coordinated write, without sending the mutation. Let leader election finish during scheduled hydration, and reject writes queued under a former leader before persistence. ([#1899](https://github.com/TanStack/db/pull/1899))
+
+- Schedule complete SQLite hydration units fairly without holding coordinator work inside the local hydration scope. Fence stale startup rows after a coordinator reset. Preserve per-Collection leader adapter routing, mutation results across transport retries, terminal coordinator disposal, real-adapter restart order, and promise-discovered shared scheduling. ([#1868](https://github.com/TanStack/db/pull/1868))
+
+- Updated dependencies [[`6e151b0`](https://github.com/TanStack/db/commit/6e151b0e57d63e2535cdf8e02518690d453214bc), [`5108acf`](https://github.com/TanStack/db/commit/5108acf47a0724691a06af8a660014776f9cf716), [`fef53f8`](https://github.com/TanStack/db/commit/fef53f8be7f1cb68f00639a4c3206a6598663de4), [`4b9617c`](https://github.com/TanStack/db/commit/4b9617cfd36c4f0ec14ad55dd6eaa92a2e8c9a8d), [`f09868f`](https://github.com/TanStack/db/commit/f09868ffba3ea401a9b182cc90282435bf832e3c), [`d3c38c8`](https://github.com/TanStack/db/commit/d3c38c8f4e83cef4545e8011dc3419be1fcf527a), [`5218f0c`](https://github.com/TanStack/db/commit/5218f0c385f61ccfa08ff366fb6f487528702017), [`98639f0`](https://github.com/TanStack/db/commit/98639f03a0071ab712d2277ee7e59e33ec6c760d), [`2781581`](https://github.com/TanStack/db/commit/27815817c56b3bca1823703dbd9893a0ef86f6d2), [`3d96614`](https://github.com/TanStack/db/commit/3d96614547cca8b085e89d628c7aa585ac7ddc88), [`f473a36`](https://github.com/TanStack/db/commit/f473a36201abe9af43d36a83492a2649668756d8), [`510cb53`](https://github.com/TanStack/db/commit/510cb538c4706e21a4d70046bf2ab2753f47bfa8)]:
+  - @tanstack/db-sqlite-persistence-core@0.3.0
+
+## 0.1.35
+
+### Patch Changes
+
+- Updated dependencies []:
+  - @tanstack/db-sqlite-persistence-core@0.2.23
+
+## 0.1.34
+
+### Patch Changes
+
+- Updated dependencies [[`a378bd3`](https://github.com/TanStack/db/commit/a378bd3a65f6b9ed0c9a85f793b7dc2e2a59a313), [`ad043b7`](https://github.com/TanStack/db/commit/ad043b7455a5bdc549c36833bc72ddbe9ce8afed)]:
+  - @tanstack/db-sqlite-persistence-core@0.2.22
+
+## 0.1.33
+
+### Patch Changes
+
+- Updated dependencies [[`cfb01ce`](https://github.com/TanStack/db/commit/cfb01cee34de7d0378e008dc8c01c1df5253c1e2)]:
+  - @tanstack/db-sqlite-persistence-core@0.2.21
+
+## 0.1.32
+
+### Patch Changes
+
+- Updated dependencies []:
+  - @tanstack/db-sqlite-persistence-core@0.2.20
+
+## 0.1.31
+
+### Patch Changes
+
+- Updated dependencies []:
+  - @tanstack/db-sqlite-persistence-core@0.2.19
+
+## 0.1.30
+
+### Patch Changes
+
+- Updated dependencies [[`8c5838d`](https://github.com/TanStack/db/commit/8c5838ddd5f08b3c298d4458cae1ce599af80624)]:
+  - @tanstack/db-sqlite-persistence-core@0.2.18
+
+## 0.1.29
+
+### Patch Changes
+
+- Updated dependencies []:
+  - @tanstack/db-sqlite-persistence-core@0.2.17
+
+## 0.1.28
+
+### Patch Changes
+
+- Updated dependencies []:
+  - @tanstack/db-sqlite-persistence-core@0.2.16
+
+## 0.1.27
+
+### Patch Changes
+
+- Updated dependencies []:
+  - @tanstack/db-sqlite-persistence-core@0.2.15
+
+## 0.1.26
+
+### Patch Changes
+
+- Updated dependencies []:
+  - @tanstack/db-sqlite-persistence-core@0.2.14
+
+## 0.1.25
+
+### Patch Changes
+
+- Updated dependencies [[`4b9e8cd`](https://github.com/TanStack/db/commit/4b9e8cdf79551734cf526e6fa4bbdba42ec94575)]:
+  - @tanstack/db-sqlite-persistence-core@0.2.13
+
+## 0.1.24
+
+### Patch Changes
+
+- Updated dependencies []:
+  - @tanstack/db-sqlite-persistence-core@0.2.12
+
+## 0.1.23
+
+### Patch Changes
+
+- Updated dependencies []:
+  - @tanstack/db-sqlite-persistence-core@0.2.11
+
+## 0.1.22
+
+### Patch Changes
+
+- Updated dependencies []:
+  - @tanstack/db-sqlite-persistence-core@0.2.10
+
+## 0.1.21
+
+### Patch Changes
+
+- Updated dependencies []:
+  - @tanstack/db-sqlite-persistence-core@0.2.9
+
+## 0.1.20
+
+### Patch Changes
+
+- Updated dependencies []:
+  - @tanstack/db-sqlite-persistence-core@0.2.8
+
+## 0.1.19
+
+### Patch Changes
+
+- Updated dependencies []:
+  - @tanstack/db-sqlite-persistence-core@0.2.7
+
+## 0.1.18
+
+### Patch Changes
+
+- Updated dependencies [[`f7da776`](https://github.com/TanStack/db/commit/f7da77660b16cbfe30817fb5c938267d696c8d1c)]:
+  - @tanstack/db-sqlite-persistence-core@0.2.6
+
+## 0.1.17
+
+### Patch Changes
+
+- Updated dependencies []:
+  - @tanstack/db-sqlite-persistence-core@0.2.5
+
+## 0.1.16
+
+### Patch Changes
+
+- Updated dependencies []:
+  - @tanstack/db-sqlite-persistence-core@0.2.4
+
+## 0.1.15
+
+### Patch Changes
+
+- Updated dependencies []:
+  - @tanstack/db-sqlite-persistence-core@0.2.3
+
+## 0.1.14
+
+### Patch Changes
+
+- Updated dependencies []:
+  - @tanstack/db-sqlite-persistence-core@0.2.2
+
+## 0.1.13
+
+### Patch Changes
+
+- Use a safe `randomUUID` helper that falls back to `crypto.getRandomValues` when `crypto.randomUUID` is unavailable (non-secure browser contexts such as dev servers reached via a LAN IP over HTTP). Fixes #1541. ([#1593](https://github.com/TanStack/db/pull/1593))
+
+- Updated dependencies [[`00389a4`](https://github.com/TanStack/db/commit/00389a47b258ad58fc3a03c5cc6f66957b9bd2d1)]:
+  - @tanstack/db-sqlite-persistence-core@0.2.1
+
 ## 0.1.12
 
 ### Patch Changes

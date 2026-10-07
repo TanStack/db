@@ -6,7 +6,7 @@ const config = defineConfig({
   test: {
     name: packageJson.name,
     include: [`tests/**/*.test.ts`],
-    exclude: [`tests/sqlite-core-adapter.test.ts`],
+    exclude: [`tests/sqlite-core-adapter-oracle.test.ts`],
     environment: `jsdom`,
     coverage: { enabled: true, provider: `istanbul`, include: [`src/**/*`] },
     typecheck: {
@@ -19,7 +19,7 @@ const config = defineConfig({
 export default mergeConfig(
   config,
   tanstackViteConfig({
-    entry: `./src/index.ts`,
+    entry: [`./src/index.ts`, `./src/broadcast-coordinator.ts`],
     srcDir: `./src`,
   }),
 )

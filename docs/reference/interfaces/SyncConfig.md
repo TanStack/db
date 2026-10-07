@@ -3,9 +3,7 @@ id: SyncConfig
 title: SyncConfig
 ---
 
-# Interface: SyncConfig\<T, TKey\>
-
-Defined in: [packages/db/src/types.ts:327](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L327)
+Defined in: [packages/db/src/types.ts:419](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L419)
 
 ## Type Parameters
 
@@ -19,13 +17,30 @@ Defined in: [packages/db/src/types.ts:327](https://github.com/TanStack/db/blob/m
 
 ## Properties
 
+### exportSyncMeta()?
+
+```ts
+optional exportSyncMeta: () => unknown;
+```
+
+Defined in: [packages/db/src/types.ts:460](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L460)
+
+Export adapter-specific metadata that lets hydration/persistence resume sync.
+The payload shape is owned by the adapter.
+
+#### Returns
+
+`unknown`
+
+***
+
 ### getSyncMetadata()?
 
 ```ts
 optional getSyncMetadata: () => Record<string, unknown>;
 ```
 
-Defined in: [packages/db/src/types.ts:350](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L350)
+Defined in: [packages/db/src/types.ts:454](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L454)
 
 Get the sync metadata for insert operations
 
@@ -37,13 +52,61 @@ Record containing relation information
 
 ***
 
+### importSyncMeta()?
+
+```ts
+optional importSyncMeta: (meta) => void;
+```
+
+Defined in: [packages/db/src/types.ts:465](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L465)
+
+Import adapter-specific metadata produced by exportSyncMeta.
+
+#### Parameters
+
+##### meta
+
+`unknown`
+
+#### Returns
+
+`void`
+
+***
+
+### mergeSyncMeta()?
+
+```ts
+optional mergeSyncMeta: (current, incoming) => unknown;
+```
+
+Defined in: [packages/db/src/types.ts:470](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L470)
+
+Merge two adapter-specific metadata payloads during hydration.
+
+#### Parameters
+
+##### current
+
+`unknown`
+
+##### incoming
+
+`unknown`
+
+#### Returns
+
+`unknown`
+
+***
+
 ### rowUpdateMode?
 
 ```ts
 optional rowUpdateMode: "full" | "partial";
 ```
 
-Defined in: [packages/db/src/types.ts:359](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L359)
+Defined in: [packages/db/src/types.ts:479](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L479)
 
 The row update mode used to sync to the collection.
 
@@ -67,7 +130,7 @@ sync: (params) =>
   | SyncConfigRes;
 ```
 
-Defined in: [packages/db/src/types.ts:331](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L331)
+Defined in: [packages/db/src/types.ts:423](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L423)
 
 #### Parameters
 
@@ -75,7 +138,7 @@ Defined in: [packages/db/src/types.ts:331](https://github.com/TanStack/db/blob/m
 
 ###### begin
 
-(`options?`) => `void`
+() => `void`
 
 Begin a new sync transaction.
 
@@ -85,11 +148,29 @@ Begin a new sync transaction.
 
 ###### commit
 
-() => `void`
+(`signal?`) => [`SyncAppliedReceipt`](../type-aliases/SyncAppliedReceipt.md)
+
+Commit the active sync transaction in FIFO order. Core accepts it at
+once, and an accepted transaction always applies. Returns `true` when
+its writes are visible, or a receipt that resolves when they become
+visible. While an optimistic transaction is persisting, it becomes
+visible when that transaction settles, together with the drop of its
+optimistic state. A signal that is already aborted abandons the
+transaction before acceptance, and the receipt rejects with an error
+named `AbortError`. Aborting after acceptance has no effect.
+
+###### markError
+
+(`error?`) => `void`
+
+Signal that initial sync failed before producing a usable snapshot.
+When supplied, `error` is preserved as the rejection reason from `preload()`.
 
 ###### markReady
 
 () => `void`
+
+Signal that a usable initial or recovered snapshot is available.
 
 ###### metadata?
 
@@ -97,7 +178,12 @@ Begin a new sync transaction.
 
 ###### truncate
 
-() => `void`
+`truncate({ markReady: false })` replaces synced rows without changing Collection
+status. Omitting the option preserves the default behavior of marking the
+Collection ready. The last truncate in one transaction supplies its readiness
+intent; the last replacement in one published batch supplies that batch's intent.
+
+(options?: { markReady?: boolean }) => `void`
 
 ###### write
 

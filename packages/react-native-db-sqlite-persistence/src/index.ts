@@ -1,5 +1,6 @@
 export { createReactNativeSQLitePersistence } from './react-native'
 export type {
+  OpSQLiteArrayResultMode,
   OpSQLiteDatabaseLike,
   ReactNativeSQLitePersistenceOptions,
   ReactNativeSQLiteSchemaMismatchPolicy,

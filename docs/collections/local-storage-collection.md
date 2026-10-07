@@ -2,8 +2,6 @@
 title: LocalStorage Collection
 ---
 
-# LocalStorage Collection
-
 LocalStorage collections store small amounts of local-only state that persists across browser sessions and syncs across browser tabs in real-time.
 
 ## Overview
@@ -263,10 +261,12 @@ export const userPreferencesCollection = createCollection(
 
 // Use in component
 function SettingsPanel() {
-  const { data: prefs } = useLiveQuery((q) =>
-    q.from({ pref: userPreferencesCollection })
-      .where(({ pref }) => eq(pref.id, 'current-user'))
-  )
+  const { data: prefs } = useLiveQuery({
+    query: (q) =>
+      q
+        .from({ pref: userPreferencesCollection })
+        .where(({ pref }) => eq(pref.id, 'current-user')),
+  })
 
   const currentPrefs = prefs[0]
 
@@ -306,6 +306,8 @@ LocalStorage collections are perfect for:
 - Small amounts of cached data
 
 ## Learn More
+
+- [IndexedDB Collection](./indexed-db-collection.md)
 
 - [Optimistic Mutations](../guides/mutations.md)
 - [Live Queries](../guides/live-queries.md)

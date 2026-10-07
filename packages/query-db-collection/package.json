@@ -1,6 +1,6 @@
 {
   "name": "@tanstack/query-db-collection",
-  "version": "1.0.40",
+  "version": "1.4.2",
   "description": "TanStack Query collection for TanStack DB",
   "author": "Kyle Mathews",
   "license": "MIT",
@@ -21,6 +21,7 @@
     "dev": "vite build --watch",
     "lint": "eslint . --fix",
     "test": "vitest run",
+    "test:oracles": "vitest run --coverage.enabled=false tests/includes-work-counter-oracle.test.ts tests/load-subset-lifecycle-oracle.test.ts tests/ownership-lifecycle.oracle.test.ts tests/persisted-direct-write-window.oracle.test.ts tests/ssr-dehydration-oracle.test.ts tests/cursor-pagination.oracle.test.ts tests/cursor-pagination.cache-oracle.test.ts tests/cursor-pagination.publication-oracle.test.ts tests/cursor-pagination.boundary-oracle.test.ts tests/cursor-pagination-oracle.integration.test.ts",
     "test:e2e": "vitest run --config vitest.e2e.config.ts"
   },
   "type": "module",
@@ -54,8 +55,10 @@
     "typescript": ">=4.7"
   },
   "devDependencies": {
+    "@tanstack/node-db-sqlite-persistence": "workspace:*",
     "@tanstack/offline-transactions": "workspace:*",
     "@tanstack/query-core": "^5.90.20",
-    "@vitest/coverage-istanbul": "^3.2.4"
+    "@vitest/coverage-istanbul": "^3.2.4",
+    "seroval": "1.5.3"
   }
 }

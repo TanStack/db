@@ -1,0 +1,40 @@
+Source log: /Users/kyle.mathews/.codex/worktrees/pr-1179-review/tanstack-db/review-evidence/deletion-refinement/calibration/lateReady.log
+SHA-256 of full source: a19e369368e35a5385e8c44a2e6c7fd5223266dedb14567f49838eb1079e3204
+Receipt transformation: calibration; progress-only dot lines omitted; trailing whitespace normalized.
+
+
+ RUN  v3.2.4 /Users/kyle.mathews/.codex/worktrees/pr-1179-review/tanstack-db/packages/indexeddb-db-collection
+
+ × |@tanstack/indexeddb-db-collection| tests/retirement-oracle.test.ts > does not admit a resolved handler after explicit closure 17ms
+   → promise resolved "undefined" instead of rejecting
+
+ Test Files  1 failed (1)
+      Tests  1 failed | 1614 skipped (1615)
+   Start at  08:17:00
+   Duration  937ms (transform 362ms, setup 15ms, collect 516ms, tests 19ms, environment 188ms, prepare 55ms)
+
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  |@tanstack/indexeddb-db-collection| tests/retirement-oracle.test.ts > does not admit a resolved handler after explicit closure
+AssertionError: promise resolved "undefined" instead of rejecting
+
+- Expected:
+Error {
+  "message": "rejected promise",
+}
+
++ Received:
+undefined
+
+ ❯ tests/retirement-oracle.test.ts:311:36
+    309|         const late = h.make()
+    310|         const lateStatuses = recordStatus(late)
+    311|         await expect(late.preload()).rejects.toThrow()
+       |                                    ^
+    312|         closed(late, lateStatuses)
+    313|         expect(native.entries).toHaveLength(0)
+ ❯ withHarness tests/harness.ts:184:5
+ ❯ tests/retirement-oracle.test.ts:278:7
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯

@@ -3,13 +3,11 @@ id: TransactionWithMutations
 title: TransactionWithMutations
 ---
 
-# Type Alias: TransactionWithMutations\<T, TOperation\>
-
 ```ts
-type TransactionWithMutations<T, TOperation> = Omit<Transaction<T>, "mutations"> & object;
+type TransactionWithMutations<T, TOperation, TCollection> = Omit<Transaction<T>, "mutations"> & object;
 ```
 
-Defined in: [packages/db/src/types.ts:142](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L142)
+Defined in: [packages/db/src/types.ts:156](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L156)
 
 Utility type for a Transaction with at least one mutation
 This is used internally by the Transaction.commit method
@@ -19,7 +17,7 @@ This is used internally by the Transaction.commit method
 ### mutations
 
 ```ts
-mutations: NonEmptyArray<PendingMutation<T, TOperation>>;
+mutations: NonEmptyArray<PendingMutation<T, TOperation, TCollection>>;
 ```
 
 We must omit the `mutations` property from `Transaction<T>` before intersecting
@@ -49,3 +47,7 @@ With `Omit`:
 ### TOperation
 
 `TOperation` *extends* [`OperationType`](OperationType.md) = [`OperationType`](OperationType.md)
+
+### TCollection
+
+`TCollection` *extends* [`Collection`](../interfaces/Collection.md)\<`T`, `any`, `any`, `any`, `any`\> = [`Collection`](../interfaces/Collection.md)\<`T`, `any`, `any`, `any`, `any`\>
