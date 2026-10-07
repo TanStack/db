@@ -3,6 +3,8 @@ import {
   toExpression,
 } from '../query/builder/ref-proxy'
 import { CollectionConfigurationError } from '../errors'
+import { isTemporal } from '../utils'
+import { builtInIndexResolverNames } from '../indexes/base-index'
 import type { StandardSchemaV1 } from '@standard-schema/spec'
 import type { BaseIndex, IndexConstructor } from '../indexes/base-index'
 import type { ChangeMessage } from '../types'
@@ -20,6 +22,12 @@ import type {
 
 const INDEX_SIGNATURE_VERSION = 1 as const
 
+function isNativeTemporalIndexValue(value: unknown): boolean {
+  if (!isTemporal(value)) return false
+  const prototype = Object.getPrototypeOf(value)
+  return prototype !== null && prototype !== Object.prototype
+}
+
 function compareStringsCodePoint(left: string, right: string): number {
   if (left === right) {
     return 0
@@ -31,9 +39,10 @@ function compareStringsCodePoint(left: string, right: string): number {
 function resolveResolverMetadata<TKey extends string | number>(
   resolver: IndexConstructor<TKey>,
 ): CollectionIndexResolverMetadata {
+  const name = builtInIndexResolverNames.get(resolver) ?? resolver.name
   return {
     kind: `constructor`,
-    ...(resolver.name ? { name: resolver.name } : {}),
+    ...(name ? { name } : {}),
   }
 }
 
@@ -63,6 +72,13 @@ function toSerializableIndexValue(
 
   if (Array.isArray(value)) {
     return value.map((entry) => toSerializableIndexValue(entry) ?? null)
+  }
+
+  if (isNativeTemporalIndexValue(value)) {
+    return {
+      __type: (value as { [Symbol.toStringTag]: string })[Symbol.toStringTag],
+      value: String(value),
+    }
   }
 
   if (value instanceof Date) {
@@ -125,7 +141,10 @@ function toSerializableIndexValue(
     }
   }
 
-  return serializedObject
+  // Escape ordinary tagged records so they cannot impersonate native signatures.
+  return Object.hasOwn(serializedObject, `__type`)
+    ? { __type: `object`, value: serializedObject }
+    : serializedObject
 }
 
 function stableStringifyCollectionIndexValue(
@@ -163,15 +182,12 @@ function createCollectionIndexMetadata<TKey extends string | number>(
   const resolverMetadata = resolveResolverMetadata(resolver)
   const serializedExpression = toSerializableIndexValue(expression) ?? null
   const serializedOptions = toSerializableIndexValue(options)
-  const signatureInput = toSerializableIndexValue({
+  // Each value is encoded once. Re-encoding would escape our own native tags.
+  const signature = stableStringifyCollectionIndexValue({
     signatureVersion: INDEX_SIGNATURE_VERSION,
     expression: serializedExpression,
     options: serializedOptions ?? null,
   })
-  const normalizedSignatureInput = signatureInput ?? null
-  const signature = stableStringifyCollectionIndexValue(
-    normalizedSignatureInput,
-  )
 
   return {
     signatureVersion: INDEX_SIGNATURE_VERSION,
@@ -202,8 +218,24 @@ function cloneSerializableIndexValue(
   return cloned
 }
 
+function cloneIndexExpressionValue(value: unknown): unknown {
+  // Immutable native values retain their slots; JSON/structuredClone erase them.
+  if (isNativeTemporalIndexValue(value)) return value
+  if (value instanceof Date) return new Date(value.getTime())
+  if (Array.isArray(value)) return value.map(cloneIndexExpressionValue)
+  if (value !== null && typeof value === `object`) {
+    return Object.fromEntries(
+      Object.entries(value).map(([key, entry]) => [
+        key,
+        cloneIndexExpressionValue(entry),
+      ]),
+    )
+  }
+  return value
+}
+
 function cloneExpression(expression: BasicExpression): BasicExpression {
-  return JSON.parse(JSON.stringify(expression)) as BasicExpression
+  return cloneIndexExpressionValue(expression) as BasicExpression
 }
 
 export class CollectionIndexesManager<
@@ -249,13 +281,13 @@ export class CollectionIndexesManager<
    * ```
    */
   public createIndex<TIndexType extends IndexConstructor<TKey>>(
-    indexCallback: (row: SingleRowRefProxy<TOutput>) => any,
+    indexCallback: (row: SingleRowRefProxy<TOutput, TKey, true>) => any,
     config: IndexOptions<TIndexType> = {},
   ): BaseIndex<TKey> {
     this.lifecycle.validateCollectionUsable(`createIndex`)
 
     const indexId = ++this.indexCounter
-    const singleRowRefProxy = createSingleRowRefProxy<TOutput>()
+    const singleRowRefProxy = createSingleRowRefProxy<TOutput, TKey>()
     const indexExpression = indexCallback(singleRowRefProxy)
     const expression = toExpression(indexExpression)
 
@@ -348,24 +380,31 @@ export class CollectionIndexesManager<
    * Updates all indexes when the collection changes
    */
   public updateIndexes(changes: Array<ChangeMessage<TOutput, TKey>>): void {
-    for (const index of this.indexes.values()) {
-      for (const change of changes) {
-        switch (change.type) {
-          case `insert`:
-            index.add(change.key, change.value)
-            break
-          case `update`:
-            if (change.previousValue) {
-              index.update(change.key, change.previousValue, change.value)
-            } else {
+    try {
+      for (const index of this.indexes.values()) {
+        for (const change of changes) {
+          switch (change.type) {
+            case `insert`:
               index.add(change.key, change.value)
-            }
-            break
-          case `delete`:
-            index.remove(change.key, change.value)
-            break
+              break
+            case `update`:
+              if (change.previousValue) {
+                index.update(change.key, change.previousValue, change.value)
+              } else {
+                index.add(change.key, change.value)
+              }
+              break
+            case `delete`:
+              index.remove(change.key, change.value)
+              break
+          }
         }
       }
+    } catch (error) {
+      // Callers have written rows that are not yet published. Crash the
+      // collection instead of leaving it usable with unpublished rows.
+      this.lifecycle.markError(error)
+      throw error
     }
   }
 

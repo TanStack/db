@@ -1,0 +1,3 @@
+Source log: /tmp/pr1179-lint-complete.log
+SHA-256 of full source: e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855
+Receipt transformation: full; progress-only dot lines omitted; trailing whitespace normalized.

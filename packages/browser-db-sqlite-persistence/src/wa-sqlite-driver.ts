@@ -1,4 +1,7 @@
-import { InvalidPersistedCollectionConfigError } from '@tanstack/db-sqlite-persistence-core'
+import {
+  InvalidPersistedCollectionConfigError,
+  SQLITE_DRIVER_SHARED_LOGICAL_SCHEDULING_KEY,
+} from '@tanstack/db-sqlite-persistence-core'
 import type { SQLiteDriver } from '@tanstack/db-sqlite-persistence-core'
 
 export type BrowserWASQLiteDatabase = {
@@ -11,6 +14,32 @@ export type BrowserWASQLiteDatabase = {
 
 export type BrowserWASQLiteDriverOptions = {
   database: BrowserWASQLiteDatabase
+}
+
+type DatabaseExecutionState = {
+  queue: Promise<void>
+  nextSavepointId: number
+}
+
+const databaseExecutionStates = new WeakMap<
+  BrowserWASQLiteDatabase,
+  DatabaseExecutionState
+>()
+
+function getDatabaseExecutionState(
+  database: BrowserWASQLiteDatabase,
+): DatabaseExecutionState {
+  const existing = databaseExecutionStates.get(database)
+  if (existing) {
+    return existing
+  }
+
+  const state: DatabaseExecutionState = {
+    queue: Promise.resolve(),
+    nextSavepointId: 1,
+  }
+  databaseExecutionStates.set(database, state)
+  return state
 }
 
 function assertTransactionCallbackHasDriverArg(
@@ -36,39 +65,44 @@ function assertDatabaseShape(
 }
 
 export class BrowserWASQLiteDriver implements SQLiteDriver {
+  readonly [SQLITE_DRIVER_SHARED_LOGICAL_SCHEDULING_KEY] = {}
   private readonly database: BrowserWASQLiteDatabase
-  private queue: Promise<void> = Promise.resolve()
-  private nextSavepointId = 1
+  private readonly executionState: DatabaseExecutionState
   private closed = false
 
   constructor(options: BrowserWASQLiteDriverOptions) {
     assertDatabaseShape(options.database)
     this.database = options.database
+    this.executionState = getDatabaseExecutionState(this.database)
   }
 
-  async exec(sql: string): Promise<void> {
-    await this.enqueue(async () => {
+  exec(sql: string): Promise<void> {
+    return this.enqueue(async () => {
       await this.database.execute(sql)
     })
   }
 
-  async query<T>(
+  query<T>(
     sql: string,
     params: ReadonlyArray<unknown> = [],
   ): Promise<ReadonlyArray<T>> {
     return this.enqueue(() => this.database.execute<T>(sql, params))
   }
 
-  async run(sql: string, params: ReadonlyArray<unknown> = []): Promise<void> {
-    await this.enqueue(async () => {
+  run(sql: string, params: ReadonlyArray<unknown> = []): Promise<void> {
+    return this.enqueue(async () => {
       await this.database.execute(sql, params)
     })
   }
 
-  async transaction<T>(
+  transaction<T>(
     fn: (transactionDriver: SQLiteDriver) => Promise<T>,
   ): Promise<T> {
-    assertTransactionCallbackHasDriverArg(fn)
+    try {
+      assertTransactionCallbackHasDriverArg(fn)
+    } catch (error) {
+      return Promise.reject(error)
+    }
 
     return this.enqueue(async () => {
       await this.database.execute(`BEGIN IMMEDIATE`)
@@ -87,7 +121,7 @@ export class BrowserWASQLiteDriver implements SQLiteDriver {
     })
   }
 
-  async transactionWithDriver<T>(
+  transactionWithDriver<T>(
     fn: (transactionDriver: SQLiteDriver) => Promise<T>,
   ): Promise<T> {
     return this.transaction(fn)
@@ -128,8 +162,8 @@ export class BrowserWASQLiteDriver implements SQLiteDriver {
   ): Promise<T> {
     assertTransactionCallbackHasDriverArg(fn)
 
-    const savepointName = `tsdb_sp_${this.nextSavepointId}`
-    this.nextSavepointId++
+    const savepointName = `tsdb_sp_${this.executionState.nextSavepointId}`
+    this.executionState.nextSavepointId++
     await this.database.execute(`SAVEPOINT ${savepointName}`)
     try {
       const result = await fn(this.createTransactionDriver())
@@ -143,8 +177,16 @@ export class BrowserWASQLiteDriver implements SQLiteDriver {
   }
 
   private enqueue<T>(operation: () => Promise<T> | T): Promise<T> {
-    const queuedOperation = this.queue.then(operation, operation)
-    this.queue = queuedOperation.then(
+    const queuedOperation = this.executionState.queue.then(operation, operation)
+    // Brand the exact Promise returned to callers. Transparent wrappers may
+    // preserve this identity for late discovery; wrappers that create a new
+    // Promise must forward the driver key before adapter construction.
+    Object.defineProperty(
+      queuedOperation,
+      SQLITE_DRIVER_SHARED_LOGICAL_SCHEDULING_KEY,
+      { value: this[SQLITE_DRIVER_SHARED_LOGICAL_SCHEDULING_KEY] },
+    )
+    this.executionState.queue = queuedOperation.then(
       () => undefined,
       () => undefined,
     )

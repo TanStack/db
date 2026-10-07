@@ -1,0 +1,41 @@
+{
+  "implementationHead": "c4441632c7ac595d11c57061f5c5f9a3ae556de9",
+  "productionBaseline": "fd3c05c818d76489438224e24d4e935751596dc0",
+  "productionLinesChanged": 0,
+  "results": [
+    {
+      "name": "runtime",
+      "cases": 2446,
+      "outcome": "passed",
+      "receipt": "runtime.txt",
+      "sha256": "8bee49c3bf5000238d4206638bfee90291b2deccebd3ef5cbd3dad009caa5e64",
+      "cwd": "packages/indexeddb-db-collection",
+      "command": "node ../../node_modules/vitest/vitest.mjs run --coverage.enabled=false"
+    },
+    {
+      "name": "browser",
+      "cases": 192,
+      "outcome": "passed",
+      "receipt": "browser.txt",
+      "sha256": "4ba135dfc67a7a440945254a7f794e638f738ba423c9bc610b6928d7d2984672",
+      "cwd": "packages/indexeddb-db-collection",
+      "command": "node node_modules/@playwright/test/cli.js test"
+    },
+    {
+      "name": "package",
+      "cases": 16,
+      "outcome": "passed",
+      "receipt": "package.txt",
+      "sha256": "8e24b87a2d8f2769c11fb89d5e8e8d6e08fa1ff91abe12954043ae242dbc807b",
+      "cwd": "packages/indexeddb-db-collection",
+      "command": "node ../../node_modules/vitest/vitest.mjs run --config vitest.package.config.ts"
+    }
+  ],
+  "additionalChecks": [
+    "test-driver TypeScript",
+    "changed-file ESLint",
+    "Prettier",
+    "git diff --check"
+  ],
+  "nativeLimit": "Two WebKit Blob-containing cells prove raw-provider/adapter rejection and a Date suffix, not value preservation."
+}

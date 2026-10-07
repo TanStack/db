@@ -1,0 +1,89 @@
+Testing types with tsc and vue-tsc is an experimental feature.
+Breaking changes might not follow SemVer, please pin Vitest's version when using it.
+
+ RUN  v3.2.4 /Users/kyle.mathews/.codex/worktrees/pr-1179-review/tanstack-db/packages/indexeddb-db-collection
+
+ ❯ |@tanstack/indexeddb-db-collection| tests/compatibility-oracle.test.ts (31 tests | 4 failed | 27 skipped) 14ms
+   ↓ persists and broadcasts with randomUUID available
+   ↓ persists and broadcasts with getRandomValues available
+   ↓ keeps descriptor clients independent after first cleanup
+   ↓ keeps descriptor clients independent after second cleanup
+   ↓ uses a custom factory with global IDBKeyRange true
+   ↓ uses a custom factory with global IDBKeyRange false
+   ↓ distinguishes requested stores from existing stores at an unchanged version
+   ↓ persists its own mutations with an id set on options through automatic
+   ↓ persists its own mutations with an id set on options through manual
+   ↓ persists its own mutations with an id set on options through after-cleanup
+   ↓ persists its own mutations with an id set on collection through automatic
+   ↓ persists its own mutations with an id set on collection through manual
+   ↓ persists its own mutations with an id set on collection through after-cleanup
+   ↓ partitions owners with shared id false, cleanup false, order 0,1
+   ↓ partitions owners with shared id false, cleanup false, order 1,0
+   ↓ partitions owners with shared id false, cleanup true, order 0,1
+   ↓ partitions owners with shared id false, cleanup true, order 1,0
+   ↓ partitions owners with shared id true, cleanup false, order 0,1
+   ↓ partitions owners with shared id true, cleanup false, order 1,0
+   ↓ partitions owners with shared id true, cleanup true, order 0,1
+   ↓ partitions owners with shared id true, cleanup true, order 1,0
+   ↓ preserves store isolation under legal name items
+   ↓ preserves store isolation under legal name constructor
+   ↓ preserves store isolation under legal name __proto__
+   ↓ preserves store isolation under legal name toString
+   ↓ preserves store isolation under legal name 雪/é
+   ↓ preserves store isolation under legal name a:b[0]
+   × initializes 2 concurrent first opens with shared name true 9ms
+     → expected 'ready' to be 'loading' // Object.is equality
+   × initializes 2 concurrent first opens with shared name false 2ms
+     → expected 'ready' to be 'loading' // Object.is equality
+   × initializes 3 concurrent first opens with shared name true 1ms
+     → expected 'ready' to be 'loading' // Object.is equality
+   × initializes 3 concurrent first opens with shared name false 1ms
+     → expected 'ready' to be 'loading' // Object.is equality
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 4 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  |@tanstack/indexeddb-db-collection| tests/compatibility-oracle.test.ts > initializes 2 concurrent first opens with shared name true
+ FAIL  |@tanstack/indexeddb-db-collection| tests/compatibility-oracle.test.ts > initializes 3 concurrent first opens with shared name true
+AssertionError: expected 'ready' to be 'loading' // Object.is equality
+
+Expected: "loading"
+Received: "ready"
+
+ ❯ tests/compatibility-oracle.test.ts:492:73
+    490|             expect(observation.entries.some((entry) => entry.mode === …
+    491|         })
+    492|         for (const collection of collections) expect(collection.status…
+       |                                                                         ^
+    493|         await Promise.all(gates.map((gate) => gate.release()))
+    494|         await Promise.all(ready)
+ ❯ withHarness tests/harness.ts:184:5
+ ❯ tests/compatibility-oracle.test.ts:458:7
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/4]⎯
+
+ FAIL  |@tanstack/indexeddb-db-collection| tests/compatibility-oracle.test.ts > initializes 2 concurrent first opens with shared name false
+ FAIL  |@tanstack/indexeddb-db-collection| tests/compatibility-oracle.test.ts > initializes 3 concurrent first opens with shared name false
+AssertionError: expected 'ready' to be 'loading' // Object.is equality
+
+Expected: "loading"
+Received: "ready"
+
+ ❯ tests/compatibility-oracle.test.ts:492:73
+    490|             expect(observation.entries.some((entry) => entry.mode === …
+    491|         })
+    492|         for (const collection of collections) expect(collection.status…
+       |                                                                         ^
+    493|         await Promise.all(gates.map((gate) => gate.release()))
+    494|         await Promise.all(ready)
+ ❯ withHarness tests/harness.ts:184:5
+ ❯ tests/compatibility-oracle.test.ts:458:7
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/4]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  4 failed | 27 skipped (31)
+Type Errors  no errors
+   Start at  09:54:44
+   Duration  1.31s (transform 525ms, setup 17ms, collect 772ms, tests 14ms, environment 262ms, prepare 82ms)
+

@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest'
+import { describe, expect, expectTypeOf, it } from 'vitest'
 import { CollectionImpl } from '../../../src/collection/index.js'
 import { Query, getQueryIR } from '../../../src/query/builder/index.js'
 import {
@@ -12,6 +12,7 @@ import {
   coalesce,
   concat,
   count,
+  divide,
   eq,
   gt,
   gte,
@@ -23,12 +24,16 @@ import {
   lte,
   max,
   min,
+  multiply,
   not,
   or,
+  subtract,
   sum,
   toArray,
   upper,
 } from '../../../src/query/builder/functions.js'
+import { compileSingleRowExpression } from '../../../src/query/compiler/evaluators.js'
+import type { BasicExpression } from '../../../src/query/ir.js'
 
 // Test schema
 interface Employee {
@@ -323,6 +328,93 @@ describe(`QueryBuilder Functions`, () => {
       const builtQuery = getQueryIR(query)
       const select = builtQuery.select!
       expect((select.salary_plus_bonus as any).name).toBe(`add`)
+    })
+
+    it(`subtract function works`, () => {
+      const query = new Query()
+        .from({ employees: employeesCollection })
+        .select(({ employees }) => ({
+          id: employees.id,
+          salary_minus_tax: subtract(employees.salary, 5000),
+        }))
+
+      const builtQuery = getQueryIR(query)
+      const select = builtQuery.select!
+      expect((select.salary_minus_tax as any).name).toBe(`subtract`)
+    })
+
+    it(`multiply function works`, () => {
+      const query = new Query()
+        .from({ employees: employeesCollection })
+        .select(({ employees }) => ({
+          id: employees.id,
+          double_salary: multiply(employees.salary, 2),
+        }))
+
+      const builtQuery = getQueryIR(query)
+      const select = builtQuery.select!
+      expect((select.double_salary as any).name).toBe(`multiply`)
+    })
+
+    it(`divide function works`, () => {
+      const query = new Query()
+        .from({ employees: employeesCollection })
+        .select(({ employees }) => ({
+          id: employees.id,
+          monthly_salary: divide(employees.salary, 12),
+        }))
+
+      const builtQuery = getQueryIR(query)
+      const select = builtQuery.select!
+      expect((select.monthly_salary as any).name).toBe(`divide`)
+    })
+
+    it(`math functions can be combined for complex calculations`, () => {
+      const query = new Query()
+        .from({ employees: employeesCollection })
+        .select(({ employees }) => ({
+          id: employees.id,
+          // (salary * 1.1) - 500 = 10% raise minus deductions
+          adjusted_salary: subtract(multiply(employees.salary, 1.1), 500),
+        }))
+
+      const builtQuery = getQueryIR(query)
+      const select = builtQuery.select!
+      expect((select.adjusted_salary as any).name).toBe(`subtract`)
+    })
+
+    it(`RED review: nullish operands are coalesced to 0 at runtime but widen types`, () => {
+      const subtractExpression = subtract(10, null)
+      expectTypeOf(subtractExpression).toEqualTypeOf<BasicExpression<number>>()
+
+      const subtractResult = compileSingleRowExpression(subtractExpression)({})
+      expect(subtractResult).toBe(10)
+    })
+
+    it(`RED review: divide can return null for non-null operand types`, () => {
+      const divideExpression = divide(10, 0)
+      expectTypeOf(divideExpression).toEqualTypeOf<
+        BasicExpression<number | null>
+      >()
+
+      const divideResult = compileSingleRowExpression(divideExpression)({})
+      expect(divideResult).toBeNull()
+    })
+
+    it(`math functions can be used in orderBy`, () => {
+      const query = new Query()
+        .from({ employees: employeesCollection })
+        .orderBy(({ employees }) => multiply(employees.salary, 2), `desc`)
+        .select(({ employees }) => ({
+          id: employees.id,
+          salary: employees.salary,
+        }))
+
+      const builtQuery = getQueryIR(query)
+      expect(builtQuery.orderBy).toBeDefined()
+      expect(builtQuery.orderBy).toHaveLength(1)
+      expect((builtQuery.orderBy![0]!.expression as any).name).toBe(`multiply`)
+      expect(builtQuery.orderBy![0]!.compareOptions.direction).toBe(`desc`)
     })
   })
 })

@@ -3,13 +3,11 @@ id: AwaitTxIdFn
 title: AwaitTxIdFn
 ---
 
-# Type Alias: AwaitTxIdFn()
-
 ```ts
 type AwaitTxIdFn = (txId, timeout?) => Promise<boolean>;
 ```
 
-Defined in: [packages/electric-db-collection/src/electric.ts:545](https://github.com/TanStack/db/blob/main/packages/electric-db-collection/src/electric.ts#L545)
+Defined in: [packages/electric-db-collection/src/electric.ts:817](https://github.com/TanStack/db/blob/main/packages/electric-db-collection/src/electric.ts#L817)
 
 Type for the awaitTxId utility function
 

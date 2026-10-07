@@ -1,4 +1,6 @@
 import {
+  DEFAULT_APPLIED_TX_PRUNE_MAX_AGE_SECONDS,
+  DEFAULT_APPLIED_TX_PRUNE_MAX_ROWS,
   SingleProcessCoordinator,
   createSQLiteCorePersistenceAdapter,
 } from '@tanstack/db-sqlite-persistence-core'
@@ -16,13 +18,10 @@ import type { BrowserWASQLiteDatabase } from './wa-sqlite-driver'
 export type { BrowserWASQLiteDatabase } from './wa-sqlite-driver'
 
 type BrowserSQLiteCoreSchemaMismatchPolicy =
-  | `sync-present-reset`
-  | `sync-absent-error`
-  | `reset`
+  `sync-present-reset` | `sync-absent-error` | `reset`
 
 export type BrowserWASQLiteSchemaMismatchPolicy =
-  | BrowserSQLiteCoreSchemaMismatchPolicy
-  | `throw`
+  BrowserSQLiteCoreSchemaMismatchPolicy | `throw`
 
 export type BrowserWASQLitePersistenceOptions = Omit<
   SQLiteCoreAdapterOptions,
@@ -78,8 +77,11 @@ function resolveAdapterBaseOptions(
   `driver` | `schemaVersion` | `schemaMismatchPolicy`
 > {
   return {
-    appliedTxPruneMaxRows: options.appliedTxPruneMaxRows,
-    appliedTxPruneMaxAgeSeconds: options.appliedTxPruneMaxAgeSeconds,
+    appliedTxPruneMaxRows:
+      options.appliedTxPruneMaxRows ?? DEFAULT_APPLIED_TX_PRUNE_MAX_ROWS,
+    appliedTxPruneMaxAgeSeconds:
+      options.appliedTxPruneMaxAgeSeconds ??
+      DEFAULT_APPLIED_TX_PRUNE_MAX_AGE_SECONDS,
     pullSinceReloadThreshold: options.pullSinceReloadThreshold,
   }
 }
@@ -125,34 +127,42 @@ export function createBrowserWASQLitePersistence(
       ...(schemaVersion === undefined ? {} : { schemaVersion }),
     })
     adapterCache.set(cacheKey, adapter)
-
-    // Wire the adapter into the multi-tab coordinator so it can handle
-    // leader-side RPCs (applyCommittedTx, pullSince, ensureIndex, etc.)
-    if (resolvedCoordinator instanceof BrowserCollectionCoordinator) {
-      resolvedCoordinator.setAdapter(adapter)
-    }
-
     return adapter
   }
 
   const createCollectionPersistence = (
+    collectionId: string | undefined,
     mode: PersistedCollectionMode,
     schemaVersion: number | undefined,
-  ): PersistedCollectionPersistence => ({
-    adapter: getAdapterForCollection(mode, schemaVersion),
-    coordinator: resolvedCoordinator,
-  })
+  ): PersistedCollectionPersistence => {
+    const adapter = getAdapterForCollection(mode, schemaVersion)
+    if (resolvedCoordinator instanceof BrowserCollectionCoordinator) {
+      if (collectionId === undefined) {
+        resolvedCoordinator.setAdapter(adapter)
+      } else {
+        resolvedCoordinator.setAdapterForCollection(collectionId, adapter)
+      }
+    }
+    return {
+      adapter,
+      coordinator: resolvedCoordinator,
+    }
+  }
 
   const defaultPersistence = createCollectionPersistence(
+    undefined,
     `sync-absent`,
     undefined,
   )
+  if (resolvedCoordinator instanceof BrowserCollectionCoordinator) {
+    resolvedCoordinator.setAdapter(defaultPersistence.adapter)
+  }
 
   return {
     ...defaultPersistence,
-    resolvePersistenceForCollection: ({ mode, schemaVersion }) =>
-      createCollectionPersistence(mode, schemaVersion),
+    resolvePersistenceForCollection: ({ collectionId, mode, schemaVersion }) =>
+      createCollectionPersistence(collectionId, mode, schemaVersion),
     resolvePersistenceForMode: (mode) =>
-      createCollectionPersistence(mode, undefined),
+      createCollectionPersistence(undefined, mode, undefined),
   }
 }

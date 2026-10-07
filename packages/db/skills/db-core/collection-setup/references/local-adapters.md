@@ -1,6 +1,6 @@
 # Local Adapters Reference
 
-Both adapters are included in the core package.
+All three adapters are included in the core package.
 
 ## Install
 
@@ -24,19 +24,18 @@ import {
 
 const collection = createCollection(
   localOnlyCollectionOptions({
-    id: 'ui-state',
     getKey: (item) => item.id,
   }),
 )
 ```
 
-- `id` -- unique collection identifier
 - `getKey` -- extracts unique key from each item
 
 ### Optional Config
 
 | Option        | Default | Description                            |
 | ------------- | ------- | -------------------------------------- |
+| `id`          | UUID    | Unique collection identifier           |
 | `schema`      | (none)  | StandardSchema validator               |
 | `initialData` | (none)  | Array of items to populate on creation |
 | `onInsert`    | (none)  | Handler before confirming inserts      |
@@ -101,27 +100,26 @@ import {
 
 const collection = createCollection(
   localStorageCollectionOptions({
-    id: 'user-preferences',
     storageKey: 'app-user-prefs',
     getKey: (item) => item.id,
   }),
 )
 ```
 
-- `id` -- unique collection identifier
 - `storageKey` -- localStorage key for all collection data
 - `getKey` -- extracts unique key from each item
 
 ### Optional Config
 
-| Option            | Default        | Description                                                          |
-| ----------------- | -------------- | -------------------------------------------------------------------- |
-| `schema`          | (none)         | StandardSchema validator                                             |
-| `storage`         | `localStorage` | Custom storage (`sessionStorage` or any localStorage-compatible API) |
-| `storageEventApi` | `window`       | Event API for cross-tab sync                                         |
-| `onInsert`        | (none)         | Handler on insert                                                    |
-| `onUpdate`        | (none)         | Handler on update                                                    |
-| `onDelete`        | (none)         | Handler on delete                                                    |
+| Option            | Default          | Description                                                          |
+| ----------------- | ---------------- | -------------------------------------------------------------------- |
+| `id`              | From storage key | `local-collection:${storageKey}`                                     |
+| `schema`          | (none)           | StandardSchema validator                                             |
+| `storage`         | `localStorage`   | Custom storage (`sessionStorage` or any localStorage-compatible API) |
+| `storageEventApi` | `window`         | Event API for cross-tab sync                                         |
+| `onInsert`        | (none)           | Handler on insert                                                    |
+| `onUpdate`        | (none)           | Handler on update                                                    |
+| `onDelete`        | (none)           | Handler on delete                                                    |
 
 ### Using sessionStorage
 
@@ -161,17 +159,26 @@ Same as LocalOnly -- call `collection.utils.acceptMutations(transaction)` in man
 
 ---
 
+## indexedDBCollectionOptions
+
+Persists structured values in browser IndexedDB and synchronizes changes across
+active tabs and dedicated workers. Open a database with `createIndexedDB`, then
+create a Collection for one of its stores. See the
+[IndexedDB Collection guide](https://tanstack.com/db/latest/docs/collections/indexed-db-collection)
+for setup, connection ownership, and mutation behavior.
+
+---
+
 ## Comparison
 
-| Feature         | LocalOnly        | LocalStorage |
-| --------------- | ---------------- | ------------ |
-| Persistence     | None (in-memory) | localStorage |
-| Cross-tab sync  | No               | Yes          |
-| Survives reload | No               | Yes          |
-| Performance     | Fastest          | Fast         |
-| Size limits     | Memory           | ~5-10MB      |
+| Feature         | LocalOnly        | LocalStorage | IndexedDB                          |
+| --------------- | ---------------- | ------------ | ---------------------------------- |
+| Persistence     | None (in-memory) | localStorage | IndexedDB                          |
+| Cross-tab sync  | No               | Yes          | Yes                                |
+| Survives reload | No               | Yes          | Yes                                |
+| Storage limits  | Memory           | ~5-10MB      | Browser quota; subject to eviction |
 
-## Complete Example
+## LocalOnly and LocalStorage Example
 
 ```typescript
 import {

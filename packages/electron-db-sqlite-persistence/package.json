@@ -1,6 +1,6 @@
 {
   "name": "@tanstack/electron-db-sqlite-persistence",
-  "version": "0.1.9",
+  "version": "0.2.8",
   "description": "Electron SQLite persisted collection bridge for TanStack DB",
   "author": "TanStack Team",
   "license": "MIT",
@@ -75,6 +75,6 @@
   },
   "devDependencies": {
     "@vitest/coverage-istanbul": "^3.2.4",
-    "electron": "^40.2.1"
+    "electron": "^41.0.0"
   }
 }

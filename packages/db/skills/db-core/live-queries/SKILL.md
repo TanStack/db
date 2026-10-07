@@ -5,16 +5,18 @@ description: >
   fullJoin, select, fn.select, groupBy, having, orderBy, limit, offset, distinct,
   findOne. Operators: eq, gt, gte, lt, lte, like, ilike, inArray, isNull,
   isUndefined, and, or, not. Aggregates: count, sum, avg, min, max. String
-  functions: upper, lower, length, concat, coalesce. Math: add. $selected
-  namespace. createLiveQueryCollection. Derived collections. Predicate push-down.
+  functions: upper, lower, length, concat. Utility: coalesce, caseWhen. Math:
+  add, subtract, multiply, divide.
+  $selected namespace. createLiveQueryCollection. Derived collections. Predicate push-down.
   Incremental view maintenance via differential dataflow (d2ts). Virtual
-  properties ($synced, $origin, $key, $collectionId). Includes subqueries
-  for hierarchical data. toArray and concat(toArray(...)) scalar includes.
+  properties ($hasPendingWrites, $origin, $key, $collectionId). Includes subqueries
+  for hierarchical data. Collection, toArray, materialize, and
+  concat(toArray(...)) include modes.
   queryOnce for one-shot queries. createEffect for reactive side effects
   (onEnter, onUpdate, onExit, onBatch).
 type: sub-skill
 library: db
-library_version: '0.6.0'
+library_version: '0.6.17'
 sources:
   - 'TanStack/db:docs/guides/live-queries.md'
   - 'TanStack/db:packages/db/src/query/builder/index.ts'
@@ -106,9 +108,14 @@ Boolean column references work directly:
 .where(({ user }) => not(user.suspended)) // negated boolean ref
 ```
 
+Comparisons follow PostgreSQL semantics. Comparisons involving `null` or
+`undefined` are unknown and do not match; use `isNull()` or `isUndefined()`.
+`NaN` (and an invalid `Date`) equals itself and sorts after every other
+non-null value.
+
 ### 2. Joining two collections
 
-Join conditions **must** use `eq()` (equality only -- IVM constraint). Default join type is `left`. Convenience methods: `leftJoin`, `rightJoin`, `innerJoin`, `fullJoin`.
+Join conditions accept `eq()` or a nonempty, possibly nested `and()` of equalities (equality only -- IVM constraint). Default join type is `left`. Convenience methods: `leftJoin`, `rightJoin`, `innerJoin`, `fullJoin`.
 
 ```ts
 import { eq } from '@tanstack/db'
@@ -195,20 +202,38 @@ const activeUserPosts = createLiveQueryCollection((q) =>
 
 Create derived collections once at module scope and reuse them. Do not recreate on every render or navigation.
 
+Live query collections default to `gcTime: 5_000`. An explicit `gcTime: 0` is
+preserved and disables garbage collection for that derived collection --
+including the reclamation of a collection that started syncing and never gained
+a subscriber. Note this is the opposite of `gcTime: 0` in TanStack Query, where
+it collects as soon as the query goes inactive; use a small positive value if
+you want prompt collection here.
+
+Sync started without subscribers has a minimum 50ms GC grace period. Pending
+`preload()` calls retain the collection until they settle; the unused retention
+period then starts. Preloading an already-ready collection refreshes that
+period. Explicit `cleanup()` can still abort a pending preload.
+
 ## Virtual Properties
 
 Live query results include computed, read-only virtual properties on every row:
 
-- `$synced`: `true` when the row is confirmed by sync; `false` when it is still optimistic.
+- `$hasPendingWrites`: `true` while a pending local optimistic write affects
+  the row; `false` otherwise. This is local mutation status, not proof that a
+  backend uploaded, confirmed, or read back the row.
 - `$origin`: `"local"` if the last confirmed change came from this client, otherwise `"remote"`.
 - `$key`: the row key for the result.
 - `$collectionId`: the source collection ID.
 
 These props are added automatically and can be used in `where`, `select`, and `orderBy` clauses. Do not persist them back to storage.
+The deprecated `$synced` alias is the inverse of `$hasPendingWrites` and will
+be removed in the 1.0 RC.
 
 ## Includes (Subqueries in Select)
 
-Embed a correlated subquery inside `select()` to produce hierarchical (nested) data. The subquery must contain a `where` with an `eq()` that correlates a parent field with a child field. Three materialization modes are available.
+Embed a correlated subquery inside `select()` to produce hierarchical (nested)
+data. The subquery must contain a `where` with an `eq()` that correlates a
+parent field with a child field.
 
 ### Collection includes (default)
 
@@ -239,7 +264,7 @@ for (const project of projectsWithIssues) {
 
 ### Array includes with toArray()
 
-Wrap the subquery in `toArray()` to get a plain array of scalar values instead of a Collection:
+Wrap the subquery in `toArray()` to get a plain array instead of a Collection:
 
 ```ts
 import { eq, toArray, createLiveQueryCollection } from '@tanstack/db'
@@ -258,6 +283,32 @@ const messagesWithParts = createLiveQueryCollection((q) =>
 )
 // row.contentParts is string[]
 ```
+
+### Plain values with materialize()
+
+Use `materialize()` when the parent row should hold a plain snapshot rather
+than a child collection:
+
+```ts
+import { eq, materialize, createLiveQueryCollection } from '@tanstack/db'
+
+const issuesWithProject = createLiveQueryCollection((q) =>
+  q.from({ issue: issuesCollection }).select(({ issue }) => ({
+    ...issue,
+    project: materialize(
+      q
+        .from({ project: projectsCollection })
+        .where(({ project }) => eq(project.id, issue.projectId))
+        .findOne(),
+    ),
+  })),
+)
+// row.project is Project | undefined
+```
+
+For a multi-row subquery, `materialize()` returns `Array<T>` like `toArray()`.
+For a subquery ending in `findOne()`, it returns `T | undefined`. In both cases,
+the parent row is re-emitted when the child result changes.
 
 ### Concatenated scalar with concat(toArray())
 
@@ -287,6 +338,9 @@ const messagesWithContent = createLiveQueryCollection((q) =>
 
 - The subquery **must** have a `where` clause with an `eq()` correlating a parent alias with a child alias. The library extracts this automatically as the join condition.
 - `toArray()` works with both scalar selects (e.g., `select(({ c }) => c.text)` → `string[]`) and object selects (e.g., `select(({ c }) => ({ id: c.id, title: c.title }))` → `Array<{id, title}>`).
+- `materialize()` returns an array, or one value for a `findOne()` subquery.
+  Like `toArray()`, it must be a top-level value in `select()` and cannot be
+  nested inside `coalesce()`, `eq()`, or another expression.
 - `concat(toArray())` requires a **scalar** `select` to concatenate into a string.
 - Collection includes (bare subquery) require an **object** `select`.
 - Includes subqueries are compiled into the same incremental pipeline as the parent query -- they are not separate live queries.
@@ -372,20 +426,26 @@ JS `.filter()` / `.map()` on the result array throws away incremental maintenanc
 
 ```ts
 // WRONG -- re-runs filter on every change
-const { data } = useLiveQuery((q) => q.from({ todos: todosCollection }))
+const { data } = useLiveQuery({
+  query: (q) => q.from({ todos: todosCollection }),
+})
 const active = data.filter((t) => t.completed === false)
 
 // CORRECT -- incrementally maintained
-const { data } = useLiveQuery((q) =>
-  q
-    .from({ todos: todosCollection })
-    .where(({ todos }) => eq(todos.completed, false)),
-)
+const { data } = useLiveQuery({
+  query: (q) =>
+    q
+      .from({ todos: todosCollection })
+      .where(({ todos }) => eq(todos.completed, false)),
+})
 ```
 
 ### HIGH: Not using the full operator set
 
-The library provides string functions (`upper`, `lower`, `length`, `concat`), math (`add`), utility (`coalesce`), and aggregates (`count`, `sum`, `avg`, `min`, `max`). All are incrementally maintained. Prefer them over JS equivalents.
+The library provides string functions (`upper`, `lower`, `length`, `concat`),
+math (`add`, `subtract`, `multiply`, `divide`), utility functions (`coalesce`,
+`caseWhen`), and aggregates (`count`, `sum`, `avg`, `min`, `max`). All are
+incrementally maintained. Prefer them over JS equivalents.
 
 ```ts
 // WRONG
@@ -398,8 +458,44 @@ The library provides string functions (`upper`, `lower`, `length`, `concat`), ma
 .select(({ user, order }) => ({
   name: upper(user.name),
   total: add(order.price, order.tax),
+  displayName: coalesce(user.displayName, user.name, 'Unknown'),
 }))
 ```
+
+Math expressions also work in `orderBy()`. When a computed expression is used
+with `limit()`, lazy-loading optimization is skipped and all matching rows load
+before sorting. Literal values such as `Date.now()` are captured when the query
+is created; recreate the query when the value must advance.
+
+### HIGH: Missing conditional expression helpers
+
+Use `coalesce()` for null/undefined fallbacks and `caseWhen()` for conditional
+computed fields. JavaScript operators like `||` or ternaries do not build query
+expressions inside standard `.select()` callbacks.
+
+```ts
+// WRONG -- document.title is a query ref, not a runtime string
+.select(({ document }) => ({
+  displayTitle: document.title || 'Untitled document',
+}))
+
+// CORRECT -- fallback for null/undefined
+.select(({ document }) => ({
+  displayTitle: coalesce(document.title, 'Untitled document'),
+}))
+
+// CORRECT -- fallback for null/undefined and empty string
+.select(({ document }) => ({
+  displayTitle: caseWhen(
+    eq(coalesce(document.title, ''), ''),
+    'Untitled document',
+    document.title,
+  ),
+}))
+```
+
+Use `fn.select()` only when you genuinely need arbitrary JavaScript; it cannot
+be optimized like expression-based `.select()`.
 
 ### HIGH: .distinct() without .select()
 
@@ -431,6 +527,27 @@ q.from({ order: ordersCollection })
   .having(({ order }) => gt(count(order.id), 5))
 ```
 
+### Compound joins and acquisition
+
+```ts
+import { and, eq } from '@tanstack/db'
+
+q.from({ product: productsCollection }).leftJoin(
+  { stock: stockCollection },
+  ({ product, stock }) =>
+    and(eq(product.sku, stock.sku), eq(product.region, stock.region)),
+)
+```
+
+All equalities must match. A nullish component never matches, and outer joins
+retain unmatched rows. For on-demand sources, the first equality supplies
+candidate loading and index selection. Put a selective plain-field equality
+first when creating the live-query Collection. Reordered equalities keep the
+same semantic query identity; a React hook can reuse the existing Collection
+and its original loading plan. Reordering during a rerender does not replan that
+Collection. A computed joined-side operand can disable lazy loading, and a broad
+first field can fetch extra candidates. Later equalities still control matches.
+
 ### HIGH: .limit() / .offset() without .orderBy()
 
 Without deterministic ordering, limit/offset results are non-deterministic and cannot be incrementally maintained. Throws `LimitOffsetRequireOrderByError`.
@@ -445,9 +562,9 @@ q.from({ user: usersCollection })
   .limit(10)
 ```
 
-### HIGH: Join condition using non-eq() operator
+### HIGH: Join condition using OR or a non-equality comparison
 
-The differential dataflow join operator only supports equality joins. Using `gt()`, `like()`, etc. throws `JoinConditionMustBeEqualityError`.
+The differential dataflow join operator supports a single equality or nested `and()` equalities. Using `or()`, `gt()`, `like()`, or empty `and()` throws `JoinConditionMustBeEqualityError`. Each equality must bind the joined source to an available source. Put field-to-literal filters in `.where()`; invalid source bindings fail at compilation.
 
 ```ts
 // WRONG
@@ -475,11 +592,17 @@ q.from(usersCollection)
 q.from({ users: usersCollection })
 ```
 
+### MEDIUM: Using unsafe select alias paths
+
+Select alias path segments named `__proto__`, `prototype`, or `constructor`
+throw `UnsafeAliasPathError`. Use ordinary data-field names; do not suppress
+this prototype-pollution guard.
+
 ## Tension: Query expressiveness vs. IVM constraints
 
 The query builder looks like SQL but has constraints that SQL does not:
 
-- **Equality joins only** -- `eq()` is the only allowed join condition operator.
+- **Equality joins only** -- use `eq()` or nonempty nested `and()` equalities. OR and inequalities are unsupported.
 - **orderBy required for limit/offset** -- non-deterministic pagination cannot be incrementally maintained.
 - **distinct requires select** -- deduplication needs an explicit projection.
 - **fn.select() cannot be used with groupBy()** -- the compiler must statically analyze select to discover aggregate functions.

@@ -3,9 +3,7 @@ id: InvalidItemStructureError
 title: InvalidItemStructureError
 ---
 
-# Class: InvalidItemStructureError
-
-Defined in: [packages/query-db-collection/src/errors.ts:48](https://github.com/TanStack/db/blob/main/packages/query-db-collection/src/errors.ts#L48)
+Defined in: [packages/query-db-collection/src/errors.ts:64](https://github.com/TanStack/db/blob/main/packages/query-db-collection/src/errors.ts#L64)
 
 ## Extends
 
@@ -19,7 +17,7 @@ Defined in: [packages/query-db-collection/src/errors.ts:48](https://github.com/T
 new InvalidItemStructureError(message): InvalidItemStructureError;
 ```
 
-Defined in: [packages/query-db-collection/src/errors.ts:49](https://github.com/TanStack/db/blob/main/packages/query-db-collection/src/errors.ts#L49)
+Defined in: [packages/query-db-collection/src/errors.ts:65](https://github.com/TanStack/db/blob/main/packages/query-db-collection/src/errors.ts#L65)
 
 #### Parameters
 

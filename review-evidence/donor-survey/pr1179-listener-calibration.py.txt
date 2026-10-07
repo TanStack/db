@@ -1,0 +1,14 @@
+from pathlib import Path
+import subprocess
+r=Path('/Users/kyle.mathews/.codex/worktrees/pr-1179-review/tanstack-db')
+p=r/'packages/indexeddb-db-collection/src/wrapper.ts';original=p.read_text()
+anchor="      transaction.addEventListener('complete', () => complete())"
+assert anchor in original
+try:
+ p.write_text(original.replace(anchor,anchor+"\n      transaction.addEventListener('error', () => abort(new Error('request error')))"))
+ result=subprocess.run(['node','../../node_modules/vitest/vitest.mjs','run','tests/wrapper-settlement-oracle.test.ts','--coverage.enabled=false','--typecheck.enabled=false','--reporter=dot','-t','uses terminal outcome'],cwd=r/'packages/indexeddb-db-collection',capture_output=True,text=True)
+ log=result.stdout+result.stderr
+ Path('/tmp/pr1179-request-error-mutant.log').write_text(log)
+ assert result.returncode!=0 and 'AssertionError' in log and 'Test timed out' not in log, log
+ print('Reject-on-request-error mutant killed by settlement assertion.')
+finally:p.write_text(original)

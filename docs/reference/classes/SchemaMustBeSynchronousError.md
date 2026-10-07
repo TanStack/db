@@ -3,9 +3,7 @@ id: SchemaMustBeSynchronousError
 title: SchemaMustBeSynchronousError
 ---
 
-# Class: SchemaMustBeSynchronousError
-
-Defined in: [packages/db/src/errors.ts:96](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L96)
+Defined in: [packages/db/src/errors.ts:106](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L106)
 
 ## Extends
 
@@ -19,7 +17,7 @@ Defined in: [packages/db/src/errors.ts:96](https://github.com/TanStack/db/blob/m
 new SchemaMustBeSynchronousError(): SchemaMustBeSynchronousError;
 ```
 
-Defined in: [packages/db/src/errors.ts:97](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L97)
+Defined in: [packages/db/src/errors.ts:107](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L107)
 
 #### Returns
 

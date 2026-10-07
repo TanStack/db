@@ -9,6 +9,49 @@ const BIG_INT_MARKER = randomHash()
 const NEG_BIG_INT_MARKER = randomHash()
 const SYMBOL_MARKER = randomHash()
 
+type SymbolIdStore = {
+  get: (key: symbol) => number | undefined
+  set: (key: symbol, value: number) => unknown
+}
+
+const symbolIds = createSymbolIdStore()
+const registeredSymbolIds = new Map<string, number>()
+let nextSymbolId = 0
+
+export function getSymbolIdentity(symbol: symbol): number {
+  const registeredKey = Symbol.keyFor(symbol)
+  if (registeredKey !== undefined) {
+    let id = registeredSymbolIds.get(registeredKey)
+    if (id === undefined) {
+      id = ++nextSymbolId
+      registeredSymbolIds.set(registeredKey, id)
+    }
+    return id
+  }
+
+  let id = symbolIds.get(symbol)
+  if (id === undefined) {
+    id = ++nextSymbolId
+    symbolIds.set(symbol, id)
+  }
+  return id
+}
+
+function createSymbolIdStore(): SymbolIdStore {
+  const weakIds = new WeakMap<object, number>() as unknown as SymbolIdStore
+  const probe = Symbol()
+
+  try {
+    weakIds.set(probe, 0)
+    if (weakIds.get(probe) === 0) return weakIds
+  } catch {
+    // Older runtimes reject symbols as weak keys. Retain them rather than
+    // merge distinct symbols and corrupt differential state.
+  }
+
+  return new Map<symbol, number>()
+}
+
 export type Hash = number
 
 export function randomHash() {
@@ -67,16 +110,7 @@ export class MurmurHashStream implements Hasher {
     switch (typeof chunk) {
       case `symbol`: {
         this.update(SYMBOL_MARKER)
-        const description = chunk.description
-        if (!description) {
-          return
-        }
-
-        for (let i = 0; i < description.length; i++) {
-          const code = description.charCodeAt(i)
-          this.writeByte(code & 0xff)
-          this.writeByte((code >>> 8) & 0xff)
-        }
+        this.update(getSymbolIdentity(chunk))
         return
       }
       case `string`:

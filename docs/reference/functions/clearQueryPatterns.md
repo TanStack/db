@@ -3,8 +3,6 @@ id: clearQueryPatterns
 title: clearQueryPatterns
 ---
 
-# Function: clearQueryPatterns()
-
 ```ts
 function clearQueryPatterns(): void;
 ```

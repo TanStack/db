@@ -3,22 +3,17 @@ id: isExpressionLike
 title: isExpressionLike
 ---
 
-# Function: isExpressionLike()
-
 ```ts
 function isExpressionLike(value): boolean;
 ```
 
-Defined in: [packages/db/src/query/ir.ts:159](https://github.com/TanStack/db/blob/main/packages/db/src/query/ir.ts#L159)
-
-Runtime helper to detect IR expression-like objects.
-Prefer this over ad-hoc local implementations to keep behavior consistent.
+Defined in: [packages/db/src/query/ir.ts:243](https://github.com/TanStack/db/blob/main/packages/db/src/query/ir.ts#L243)
 
 ## Parameters
 
 ### value
 
-`any`
+`unknown`
 
 ## Returns
 

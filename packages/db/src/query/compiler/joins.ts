@@ -1,4 +1,9 @@
-import { filter, join as joinOperator, map, tap } from '@tanstack/db-ivm'
+import {
+  join as joinOperator,
+  map,
+  serializeValue,
+  tap,
+} from '@tanstack/db-ivm'
 import {
   CollectionInputNotFoundError,
   InvalidJoinCondition,
@@ -7,15 +12,31 @@ import {
   InvalidJoinConditionSameSourceError,
   InvalidJoinConditionSourceMismatchError,
   JoinCollectionNotFoundError,
-  SubscriptionNotFoundError,
   UnsupportedJoinSourceTypeError,
   UnsupportedJoinTypeError,
 } from '../../errors.js'
-import { normalizeValue } from '../../utils/comparison.js'
+import {
+  getParentContextIdentity,
+  getParentContextValue,
+} from '../equality-value-identity.js'
 import { ensureIndexForField } from '../../indexes/auto-index.js'
-import { PropRef, followRef } from '../ir.js'
-import { inArray } from '../builder/functions.js'
+import { validateJoinConditions } from '../join-conditions.js'
+import { getFromSources } from '../ir.js'
 import { compileExpression } from './evaluators.js'
+import { getSourceAliasesFromExpression } from './expressions.js'
+import { getLazyLoadTargets } from './lazy-targets.js'
+import { crossJoinParentRoutes } from './parent-routes.js'
+import { queriesMatchForCaching } from './query-equivalence.js'
+import {
+  INCLUDES_PUBLIC_KEY,
+  attachRouteMetadata,
+  attachRouteMetadataToResult,
+  getNamespacedRouteMetadata,
+  getRouteMetadata,
+  getRoutedScalarMetadata,
+  stripRouteMetadata,
+} from './route-metadata.js'
+import type { ValueIdentity } from '../equality-value-identity.js'
 import type { CompileQueryFn } from './index.js'
 import type { OrderByOptimizationInfo } from './order-by.js'
 import type {
@@ -35,13 +56,154 @@ import type {
 import type { QueryCache, QueryMapping, WindowOptions } from './types.js'
 import type { CollectionSubscription } from '../../collection/subscription.js'
 
-/** Function type for loading specific keys into a lazy collection */
-export type LoadKeysFn = (key: Set<string | number>) => void
+export type LazyDemandPlan = {
+  id: string
+  path: Array<string>
+  collectionId: string
+  initialKeys: Set<unknown>
+}
 
 /** Callbacks for managing lazy-loaded collections in optimized joins */
 export type LazyCollectionCallbacks = {
-  loadKeys: LoadKeysFn
-  loadInitialState: () => void
+  plans?: Array<LazyDemandPlan>
+  setDemand?: (plan: LazyDemandPlan, keys: Set<unknown>) => void
+}
+
+type JoinInputValue = [
+  originalKey: unknown,
+  namespacedRow: NamespacedRow,
+  joinValue: unknown,
+]
+
+let nextLazyDemandPlanId = 0
+
+function parameterizeJoinInputByParentRoutes(
+  input: KeyedStream,
+  parentKeyStream: KeyedStream,
+  valueIdentity: ValueIdentity,
+): KeyedStream {
+  return crossJoinParentRoutes(
+    input,
+    parentKeyStream,
+    (rowKey, row, correlationKey, parentContext) => {
+      return [
+        serializeValue([
+          valueIdentity.equality(rowKey),
+          valueIdentity.equality(correlationKey),
+          getParentContextIdentity(parentContext),
+        ]),
+        attachRouteMetadata(
+          {
+            ...(row as Record<string, unknown>),
+          },
+          correlationKey,
+          parentContext,
+        ),
+      ]
+    },
+  )
+}
+
+function wrapJoinedInputRow(alias: string, row: any): NamespacedRow {
+  const scalar = getRoutedScalarMetadata(row)
+  if (scalar) {
+    const namespaced = attachRouteMetadata(
+      {
+        [alias]: scalar.value,
+        [INCLUDES_PUBLIC_KEY]: scalar.publicKey,
+      },
+      scalar.correlationKey,
+      scalar.parentContext,
+    ) as unknown as NamespacedRow
+    if (
+      scalar.parentContext != null &&
+      typeof scalar.parentContext === `object`
+    ) {
+      Object.assign(namespaced, getParentContextValue(scalar.parentContext))
+    }
+    return namespaced
+  }
+
+  if (row == null || typeof row !== `object`) {
+    return { [alias]: row }
+  }
+
+  const route = getRouteMetadata(row)
+  const cleanRow = route ? stripRouteMetadata(row) : row
+  const namespaced: NamespacedRow = { [alias]: cleanRow }
+  if (route?.parentContext != null) {
+    Object.assign(namespaced, getParentContextValue(route.parentContext))
+  }
+  if (route) {
+    attachRouteMetadata(namespaced, route.correlationKey, route.parentContext)
+  }
+  return namespaced
+}
+
+function getRouteJoinKey(
+  row: NamespacedRow,
+  source: string,
+  equalityKey: unknown,
+  valueIdentity: ValueIdentity,
+): string {
+  const route = getNamespacedRouteMetadata(row, source)
+  return serializeValue([
+    valueIdentity.equality(route?.correlationKey),
+    getParentContextIdentity(route?.parentContext ?? null),
+    equalityKey,
+  ])
+}
+
+function keyJoinInput(
+  originalKey: unknown,
+  row: NamespacedRow,
+  source: string,
+  side: `main` | `joined`,
+  expressions: Array<(row: NamespacedRow) => unknown>,
+  routeJoinedSource: boolean,
+  valueIdentity: ValueIdentity,
+): [string, JoinInputValue] {
+  const value = expressions[0]!(row)
+  const input: JoinInputValue = [originalKey, row, undefined]
+  // NUL-prefixed side-local keys cannot collide with serializeValue output.
+  // Unsatisfiable tuples retain their row but contribute no lazy demand.
+  const unmatchedKey = side === `main` ? `\0m` : `\0j`
+  if (value == null) return [unmatchedKey, input]
+  let key = valueIdentity.equality(value)
+  // Keep the single-equality path free of temporary operand arrays.
+  if (expressions.length > 1) {
+    const values = [key]
+    for (let index = 1; index < expressions.length; index++) {
+      const component = expressions[index]!(row)
+      if (component == null) return [unmatchedKey, input]
+      values.push(valueIdentity.equality(component))
+    }
+    key = values
+  }
+  // Demand uses the raw value, while matching uses graph-local equality.
+  input[2] = value
+  return [
+    routeJoinedSource
+      ? getRouteJoinKey(row, source, key, valueIdentity)
+      : serializeValue(key),
+    input,
+  ]
+}
+
+export function registerLazyDemandPlan(
+  callbacks: Record<string, LazyCollectionCallbacks>,
+  target: { sourceId: string; path: Array<string>; collection: Collection },
+  initialKeys: Set<unknown> = new Set(),
+): LazyDemandPlan {
+  const plan: LazyDemandPlan = {
+    id: `lazy-demand-${++nextLazyDemandPlanId}`,
+    path: target.path,
+    collectionId: target.collection.id,
+    initialKeys: new Set(initialKeys),
+  }
+  const state = (callbacks[target.sourceId] ??= {})
+  ;(state.plans ??= []).push(plan)
+  return plan
 }
 
 /**
@@ -68,6 +230,9 @@ export function processJoins(
   aliasToCollectionId: Record<string, string>,
   aliasRemapping: Record<string, string>,
   sourceWhereClauses: Map<string, BasicExpression<boolean>>,
+  mainSourceIsParentFiltered: boolean,
+  valueIdentity: ValueIdentity,
+  parentKeyStream?: KeyedStream,
 ): NamespacedAndKeyedStream {
   let resultPipeline = pipeline
 
@@ -92,6 +257,9 @@ export function processJoins(
       aliasToCollectionId,
       aliasRemapping,
       sourceWhereClauses,
+      mainSourceIsParentFiltered,
+      valueIdentity,
+      parentKeyStream,
     )
   }
 
@@ -122,12 +290,39 @@ function processJoin(
   aliasToCollectionId: Record<string, string>,
   aliasRemapping: Record<string, string>,
   sourceWhereClauses: Map<string, BasicExpression<boolean>>,
+  mainSourceIsParentFiltered: boolean,
+  valueIdentity: ValueIdentity,
+  parentKeyStream?: KeyedStream,
 ): NamespacedAndKeyedStream {
   const isCollectionRef = joinClause.from.type === `collectionRef`
 
+  const joinedSource = joinClause.from.alias
+  const availableSources = [...Object.keys(sources), joinedSource]
+  const conditions = validateJoinConditions(joinClause.on).map(
+    ([left, right]) =>
+      analyzeJoinExpressions(
+        left,
+        right,
+        availableSources,
+        joinedSource,
+        rawQuery.from.type === `unionAll`,
+      ),
+  )
+  // The first equality supplies candidate demand; the full tuple decides matches.
+  const { mainExpr, joinedExpr } = conditions[0]!
+  const joinedExpressionUsesParent = conditions.some(
+    ({ joinedExpr: expression }) =>
+      [...getSourceAliasesFromExpression(expression)].some(
+        (alias) => alias !== joinedSource && !sources[alias],
+      ),
+  )
+  const routeJoinedSource =
+    parentKeyStream !== undefined &&
+    (joinClause.from.type === `queryRef` || joinedExpressionUsesParent)
+
   // Get the joined source alias and input stream
   const {
-    alias: joinedSource,
+    alias: processedJoinedSource,
     input: joinedInput,
     collectionId: joinedCollectionId,
   } = processJoinSource(
@@ -145,7 +340,13 @@ function processJoin(
     aliasToCollectionId,
     aliasRemapping,
     sourceWhereClauses,
+    valueIdentity,
+    routeJoinedSource ? parentKeyStream : undefined,
   )
+
+  if (processedJoinedSource !== joinedSource) {
+    throw new InvalidJoinConditionSourceMismatchError()
+  }
 
   // Add the joined source to the sources map
   sources[joinedSource] = joinedInput
@@ -166,54 +367,52 @@ function processJoin(
     throw new JoinCollectionNotFoundError(joinedCollectionId)
   }
 
-  const { activeSource, lazySource } = getActiveAndLazySources(
+  const sourceActivity = getActiveAndLazySources(
     joinClause.type,
     mainCollection,
     joinedCollection,
+    mainSourceIsParentFiltered,
   )
-
-  // Analyze which source each expression refers to and swap if necessary
-  const availableSources = Object.keys(sources)
-  const { mainExpr, joinedExpr } = analyzeJoinExpressions(
-    joinClause.left,
-    joinClause.right,
-    availableSources,
-    joinedSource,
-  )
+  const activeSource = routeJoinedSource
+    ? undefined
+    : sourceActivity.activeSource
+  const lazySource = sourceActivity.lazySource
 
   // Pre-compile the join expressions
-  const compiledMainExpr = compileExpression(mainExpr)
-  const compiledJoinedExpr = compileExpression(joinedExpr)
-
-  // Prepare the main pipeline for joining
-  let mainPipeline = pipeline.pipe(
-    map(([currentKey, namespacedRow]) => {
-      // Extract the join key from the main source expression
-      const mainKey = normalizeValue(compiledMainExpr(namespacedRow))
-
-      // Return [joinKey, [originalKey, namespacedRow]]
-      return [mainKey, [currentKey, namespacedRow]] as [
-        unknown,
-        [string, typeof namespacedRow],
-      ]
-    }),
+  const compiledMainExpressions = conditions.map((condition) =>
+    compileExpression(condition.mainExpr),
+  )
+  const compiledJoinedExpressions = conditions.map((condition) =>
+    compileExpression(condition.joinedExpr),
   )
 
-  // Prepare the joined pipeline
+  // Prepare both sides with the same key and raw-demand rules.
+  let mainPipeline = pipeline.pipe(
+    map(([currentKey, namespacedRow]) =>
+      keyJoinInput(
+        currentKey,
+        namespacedRow,
+        mainSource,
+        `main`,
+        compiledMainExpressions,
+        routeJoinedSource,
+        valueIdentity,
+      ),
+    ),
+  )
+
   let joinedPipeline = joinedInput.pipe(
-    map(([currentKey, row]) => {
-      // Wrap the row in a namespaced structure
-      const namespacedRow: NamespacedRow = { [joinedSource]: row }
-
-      // Extract the join key from the joined source expression
-      const joinedKey = normalizeValue(compiledJoinedExpr(namespacedRow))
-
-      // Return [joinKey, [originalKey, namespacedRow]]
-      return [joinedKey, [currentKey, namespacedRow]] as [
-        unknown,
-        [string, typeof namespacedRow],
-      ]
-    }),
+    map(([currentKey, row]) =>
+      keyJoinInput(
+        currentKey,
+        wrapJoinedInputRow(joinedSource, row),
+        joinedSource,
+        `joined`,
+        compiledJoinedExpressions,
+        routeJoinedSource,
+        valueIdentity,
+      ),
+    ),
   )
 
   // Apply the join operation
@@ -229,110 +428,81 @@ function processJoin(
     const lazyFrom = activeSource === `main` ? joinClause.from : rawQuery.from
     const limitedSubquery =
       lazyFrom.type === `queryRef` &&
-      (lazyFrom.query.limit || lazyFrom.query.offset)
+      (lazyFrom.query.limit !== undefined ||
+        lazyFrom.query.offset !== undefined ||
+        lazyFrom.query.singleResult)
+    const resultUnionLazySide = lazyFrom.type === `unionAll`
 
-    // If join expressions contain computed values (like concat functions)
-    // we don't optimize the join because we don't have an index over the computed values
-    const hasComputedJoinExpr =
-      mainExpr.type === `func` || joinedExpr.type === `func`
+    const lazySourceJoinExpr = activeSource === `main` ? joinedExpr : mainExpr
+    const lazyAlias = activeSource === `main` ? joinedSource : mainSource
+    const lazyTargets = resultUnionLazySide
+      ? []
+      : getLazyLoadTargets(
+          rawQuery,
+          lazyFrom,
+          lazyAlias,
+          lazySourceJoinExpr,
+          lazySource,
+          aliasRemapping,
+        )
 
-    if (!limitedSubquery && !hasComputedJoinExpr) {
+    if (!limitedSubquery && lazyTargets.length > 0) {
       // This join can be optimized by having the active collection
       // dynamically load keys into the lazy collection
       // based on the value of the joinKey and by looking up
       // matching rows in the index of the lazy collection
 
-      // Mark the lazy source alias as lazy
+      // Mark the lazy source aliases as lazy
       // this Set is passed by the liveQueryCollection to the compiler
       // such that the liveQueryCollection can check it after compilation
       // to know which source aliases should load data lazily (not initially)
-      const lazyAlias = activeSource === `main` ? joinedSource : mainSource
-      lazySources.add(lazyAlias)
+      for (const target of lazyTargets) {
+        lazySources.add(target.sourceId)
+      }
+
+      const demandPlans = lazyTargets.map((target) =>
+        registerLazyDemandPlan(callbacks, target),
+      )
+      const demandWeights = new Map<string, { key: unknown; weight: number }>()
 
       const activePipeline =
         activeSource === `main` ? mainPipeline : joinedPipeline
 
-      const lazySourceJoinExpr =
-        activeSource === `main`
-          ? (joinedExpr as PropRef)
-          : (mainExpr as PropRef)
-
-      const followRefResult = followRef(
-        rawQuery,
-        lazySourceJoinExpr,
-        lazySource,
-      )!
-      const followRefCollection = followRefResult.collection
-
-      const fieldName = followRefResult.path[0]
-      if (fieldName) {
-        ensureIndexForField(
-          fieldName,
-          followRefResult.path,
-          followRefCollection,
-        )
+      for (const target of lazyTargets) {
+        const fieldName = target.path[0]
+        if (fieldName) {
+          ensureIndexForField(fieldName, target.path, target.collection)
+        }
       }
 
       // Set up lazy loading: intercept active side's stream and dynamically load
       // matching rows from lazy side based on join keys.
       const activePipelineWithLoading: IStreamBuilder<
-        [key: unknown, [originalKey: string, namespacedRow: NamespacedRow]]
+        [key: string, value: JoinInputValue]
       > = activePipeline.pipe(
         tap((data) => {
-          // Find the subscription for lazy loading.
-          // Subscriptions are keyed by the innermost alias (where the collection subscription
-          // was actually created). For subqueries, the join alias may differ from the inner alias.
-          // aliasRemapping provides a flattened one-hop lookup from outer → innermost alias.
-          // Example: .join({ activeUser: subquery }) where subquery uses .from({ user: collection })
-          // → aliasRemapping['activeUser'] = 'user' (always maps directly to innermost, never recursive)
-          const resolvedAlias = aliasRemapping[lazyAlias] || lazyAlias
-          const lazySourceSubscription = subscriptions[resolvedAlias]
-
-          if (!lazySourceSubscription) {
-            throw new SubscriptionNotFoundError(
-              resolvedAlias,
-              lazyAlias,
-              lazySource.id,
-              Object.keys(subscriptions),
-            )
+          for (const [[joinKey, [, , joinValue]], weight] of data.getInner()) {
+            if (joinValue == null) continue
+            const previous = demandWeights.get(joinKey)
+            const nextWeight = (previous?.weight ?? 0) + weight
+            if (nextWeight === 0) {
+              demandWeights.delete(joinKey)
+            } else {
+              demandWeights.set(joinKey, {
+                key: previous?.key ?? joinValue,
+                weight: nextWeight,
+              })
+            }
           }
 
-          if (lazySourceSubscription.hasLoadedInitialState()) {
-            // Entire state was already loaded because we deoptimized the join
-            return
-          }
-
-          // Deduplicate and filter null keys before requesting snapshot
-          const joinKeys = [
-            ...new Set(
-              data
-                .getInner()
-                .map(([[joinKey]]) => joinKey)
-                .filter((key) => key != null),
-            ),
-          ]
-
-          if (joinKeys.length === 0) {
-            return
-          }
-
-          const lazyJoinRef = new PropRef(followRefResult.path)
-          const loaded = lazySourceSubscription.requestSnapshot({
-            where: inArray(lazyJoinRef, joinKeys),
-            optimizedOnly: true,
-          })
-
-          if (!loaded) {
-            // Snapshot wasn't sent because it could not be loaded from the indexes
-            const collectionId = followRefCollection.id
-            const fieldPath = followRefResult.path.join(`.`)
-            console.warn(
-              `[TanStack DB]${collectionId ? ` [${collectionId}]` : ``} Join requires an index on "${fieldPath}" for efficient loading. ` +
-                `Falling back to loading all data. ` +
-                `Consider creating an index on the collection with collection.createIndex((row) => row.${fieldPath}) ` +
-                `or enable auto-indexing with autoIndex: 'eager' and a defaultIndexType.`,
-            )
-            lazySourceSubscription.requestSnapshot()
+          const keys = new Set(
+            [...demandWeights.values()]
+              .filter(({ weight }) => weight > 0)
+              .map(({ key }) => key),
+          )
+          for (let index = 0; index < lazyTargets.length; index++) {
+            const target = lazyTargets[index]!
+            callbacks[target.sourceId]?.setDemand?.(demandPlans[index]!, keys)
           }
         }),
       )
@@ -347,7 +517,7 @@ function processJoin(
 
   return mainPipeline.pipe(
     joinOperator(joinedPipeline, joinClause.type as JoinType),
-    processJoinResults(joinClause.type),
+    processJoinResults,
   )
 }
 
@@ -360,83 +530,76 @@ function analyzeJoinExpressions(
   right: BasicExpression,
   allAvailableSourceAliases: Array<string>,
   joinedSource: string,
+  allowResultFields: boolean = false,
 ): { mainExpr: BasicExpression; joinedExpr: BasicExpression } {
   // Filter out the joined source alias from the available source aliases
   const availableSources = allAvailableSourceAliases.filter(
     (alias) => alias !== joinedSource,
   )
 
-  const leftSourceAlias = getSourceAliasFromExpression(left)
-  const rightSourceAlias = getSourceAliasFromExpression(right)
+  const leftSourceAliases = getSourceAliasesFromExpression(left)
+  const rightSourceAliases = getSourceAliasesFromExpression(right)
+  const leftReferencesJoined = leftSourceAliases.has(joinedSource)
+  const rightReferencesJoined = rightSourceAliases.has(joinedSource)
+  const leftAvailableAliases = [...leftSourceAliases].filter(
+    (alias) =>
+      availableSources.includes(alias) ||
+      (allowResultFields && alias !== joinedSource),
+  )
+  const rightAvailableAliases = [...rightSourceAliases].filter(
+    (alias) =>
+      availableSources.includes(alias) ||
+      (allowResultFields && alias !== joinedSource),
+  )
 
   // If left expression refers to an available source and right refers to joined source, keep as is
   if (
-    leftSourceAlias &&
-    availableSources.includes(leftSourceAlias) &&
-    rightSourceAlias === joinedSource
+    leftAvailableAliases.length > 0 &&
+    !leftReferencesJoined &&
+    rightReferencesJoined &&
+    rightAvailableAliases.length === 0
   ) {
     return { mainExpr: left, joinedExpr: right }
   }
 
   // If left expression refers to joined source and right refers to an available source, swap them
   if (
-    leftSourceAlias === joinedSource &&
-    rightSourceAlias &&
-    availableSources.includes(rightSourceAlias)
+    leftReferencesJoined &&
+    leftAvailableAliases.length === 0 &&
+    rightAvailableAliases.length > 0 &&
+    !rightReferencesJoined
   ) {
     return { mainExpr: right, joinedExpr: left }
   }
 
   // If one expression doesn't refer to any source, this is an invalid join
-  if (!leftSourceAlias || !rightSourceAlias) {
+  if (leftSourceAliases.size === 0 || rightSourceAliases.size === 0) {
     throw new InvalidJoinConditionSourceMismatchError()
   }
 
   // If both expressions refer to the same alias, this is an invalid join
-  if (leftSourceAlias === rightSourceAlias) {
-    throw new InvalidJoinConditionSameSourceError(leftSourceAlias)
+  if (
+    leftSourceAliases.size === 1 &&
+    rightSourceAliases.size === 1 &&
+    [...leftSourceAliases][0] === [...rightSourceAliases][0]
+  ) {
+    throw new InvalidJoinConditionSameSourceError([...leftSourceAliases][0]!)
   }
 
   // Left side must refer to an available source
   // This cannot happen with the query builder as there is no way to build a ref
   // to an unavailable source, but just in case, but could happen with the IR
-  if (!availableSources.includes(leftSourceAlias)) {
-    throw new InvalidJoinConditionLeftSourceError(leftSourceAlias)
+  if (leftAvailableAliases.length === 0) {
+    throw new InvalidJoinConditionLeftSourceError([...leftSourceAliases][0]!)
   }
 
   // Right side must refer to the joined source
-  if (rightSourceAlias !== joinedSource) {
+  if (!rightReferencesJoined) {
     throw new InvalidJoinConditionRightSourceError(joinedSource)
   }
 
   // This should not be reachable given the logic above, but just in case
   throw new InvalidJoinCondition()
-}
-
-/**
- * Extracts the source alias from a join expression
- */
-function getSourceAliasFromExpression(expr: BasicExpression): string | null {
-  switch (expr.type) {
-    case `ref`:
-      // PropRef path has the source alias as the first element
-      return expr.path[0] || null
-    case `func`: {
-      // For function expressions, we need to check if all arguments refer to the same source
-      const sourceAliases = new Set<string>()
-      for (const arg of expr.args) {
-        const alias = getSourceAliasFromExpression(arg)
-        if (alias) {
-          sourceAliases.add(alias)
-        }
-      }
-      // If all arguments refer to the same source, return that source alias
-      return sourceAliases.size === 1 ? Array.from(sourceAliases)[0]! : null
-    }
-    default:
-      // Values (type='val') don't reference any source
-      return null
-  }
 }
 
 /**
@@ -457,10 +620,12 @@ function processJoinSource(
   aliasToCollectionId: Record<string, string>,
   aliasRemapping: Record<string, string>,
   sourceWhereClauses: Map<string, BasicExpression<boolean>>,
+  valueIdentity: ValueIdentity,
+  parentKeyStream?: KeyedStream,
 ): { alias: string; input: KeyedStream; collectionId: string } {
   switch (from.type) {
     case `collectionRef`: {
-      const input = allInputs[from.alias]
+      const input = allInputs[from.sourceId]
       if (!input) {
         throw new CollectionInputNotFoundError(
           from.alias,
@@ -469,15 +634,29 @@ function processJoinSource(
         )
       }
       aliasToCollectionId[from.alias] = from.collection.id
-      return { alias: from.alias, input, collectionId: from.collection.id }
+      return {
+        alias: from.alias,
+        input: parentKeyStream
+          ? parameterizeJoinInputByParentRoutes(
+              input,
+              parentKeyStream,
+              valueIdentity,
+            )
+          : input,
+        collectionId: from.collection.id,
+      }
     }
     case `queryRef`: {
-      // Find the original query for caching purposes
-      const originalQuery = queryMapping.get(from.query) || from.query
-
-      // Recursively compile the sub-query with cache
+      // Preserve the user-defined query as the cache key when optimization
+      // only copied it. If the optimizer changed the query, compile that IR;
+      // substituting its origin would discard pushed predicates.
+      const originalQuery = queryMapping.get(from.query)
+      const queryToCompile =
+        originalQuery && queriesMatchForCaching(from.query, originalQuery)
+          ? originalQuery
+          : from.query
       const subQueryResult = onCompileSubquery(
-        originalQuery,
+        queryToCompile,
         allInputs,
         collections,
         subscriptions,
@@ -487,6 +666,7 @@ function processJoinSource(
         setWindowFn,
         cache,
         queryMapping,
+        parentKeyStream,
       )
 
       // Pull up alias mappings from subquery to parent scope.
@@ -505,9 +685,11 @@ function processJoinSource(
       // For optimizer-created subqueries, the parent already has the sourceWhereClauses
       // extracted from the original raw query, so pulling up would be redundant.
       const isUserDefinedSubquery = queryMapping.has(from.query)
-      const fromInnerAlias = from.query.from.alias
+      const fromInnerAlias = getFirstFromAlias(from.query)
       const isOptimizerCreated =
-        !isUserDefinedSubquery && from.alias === fromInnerAlias
+        !isUserDefinedSubquery &&
+        fromInnerAlias !== undefined &&
+        from.alias === fromInnerAlias
 
       if (!isOptimizerCreated) {
         for (const [alias, whereClause] of subQueryResult.sourceWhereClauses) {
@@ -542,8 +724,22 @@ function processJoinSource(
       // We need to extract just the value for use in parent queries
       const extractedInput = subQueryInput.pipe(
         map((data: any) => {
-          const [key, [value, _orderByIndex]] = data
-          return [key, value] as [unknown, any]
+          const [
+            key,
+            [value, _orderByIndex, correlationKey, parentContext, publicKey],
+          ] = data
+          if (!parentKeyStream) {
+            return [key, value] as [unknown, any]
+          }
+          return [
+            key,
+            attachRouteMetadataToResult(
+              value,
+              correlationKey,
+              parentContext,
+              publicKey,
+            ),
+          ] as [unknown, any]
         }),
       )
 
@@ -558,71 +754,55 @@ function processJoinSource(
   }
 }
 
-/**
- * Processes the results of a join operation
- */
-function processJoinResults(joinType: string) {
-  return function (
-    pipeline: IStreamBuilder<
-      [
-        key: string,
-        [
-          [string, NamespacedRow] | undefined,
-          [string, NamespacedRow] | undefined,
-        ],
-      ]
-    >,
-  ): NamespacedAndKeyedStream {
-    return pipeline.pipe(
-      // Process the join result and handle nulls
-      filter((result) => {
-        const [_key, [main, joined]] = result
-        const mainNamespacedRow = main?.[1]
-        const joinedNamespacedRow = joined?.[1]
+// JSON prints non-finite numbers as null, the missing-side marker. An object
+// never collides with a source key, which is a string or a number.
+function encodeNonFiniteKey(_: string, value: unknown): unknown {
+  return typeof value === `number` && !Number.isFinite(value)
+    ? { number: String(value) }
+    : value
+}
 
-        // Handle different join types
-        if (joinType === `inner`) {
-          return !!(mainNamespacedRow && joinedNamespacedRow)
-        }
+function getFirstFromAlias(query: QueryIR): string | undefined {
+  return getFromSources(query.from)[0]?.alias
+}
 
-        if (joinType === `left`) {
-          return !!mainNamespacedRow
-        }
+function processJoinResults(
+  pipeline: IStreamBuilder<
+    [key: string, [JoinInputValue | undefined, JoinInputValue | undefined]]
+  >,
+): NamespacedAndKeyedStream {
+  return pipeline.pipe(
+    map((result) => {
+      const [_key, [main, joined]] = result
+      const mainKey = main?.[0]
+      const mainNamespacedRow = main?.[1]
+      const joinedKey = joined?.[0]
+      const joinedNamespacedRow = joined?.[1]
 
-        if (joinType === `right`) {
-          return !!joinedNamespacedRow
-        }
+      // Merge the namespaced rows
+      const mergedNamespacedRow: NamespacedRow = {}
 
-        // For full joins, always include
-        return true
-      }),
-      map((result) => {
-        const [_key, [main, joined]] = result
-        const mainKey = main?.[0]
-        const mainNamespacedRow = main?.[1]
-        const joinedKey = joined?.[0]
-        const joinedNamespacedRow = joined?.[1]
+      // Add main row data if it exists
+      if (mainNamespacedRow) {
+        Object.assign(mergedNamespacedRow, mainNamespacedRow)
+      }
 
-        // Merge the namespaced rows
-        const mergedNamespacedRow: NamespacedRow = {}
+      // Add joined row data if it exists
+      if (joinedNamespacedRow) {
+        Object.assign(mergedNamespacedRow, joinedNamespacedRow)
+      }
 
-        // Add main row data if it exists
-        if (mainNamespacedRow) {
-          Object.assign(mergedNamespacedRow, mainNamespacedRow)
-        }
+      // Combine the main and joined keys without ambiguity: keys may contain
+      // delimiters, numbers and strings may print alike, and a missing outer
+      // side encodes as null, which no source key can be.
+      const resultKey = JSON.stringify(
+        [mainKey ?? null, joinedKey ?? null],
+        encodeNonFiniteKey,
+      )
 
-        // Add joined row data if it exists
-        if (joinedNamespacedRow) {
-          Object.assign(mergedNamespacedRow, joinedNamespacedRow)
-        }
-
-        // We create a composite key that combines the main and joined keys
-        const resultKey = `[${mainKey},${joinedKey}]`
-
-        return [resultKey, mergedNamespacedRow] as [string, NamespacedRow]
-      }),
-    )
-  }
+      return [resultKey, mergedNamespacedRow] as [string, NamespacedRow]
+    }),
+  )
 }
 
 /**
@@ -639,6 +819,7 @@ function getActiveAndLazySources(
   joinType: JoinClause[`type`],
   leftCollection: Collection,
   rightCollection: Collection,
+  mainSourceIsParentFiltered: boolean,
 ):
   | { activeSource: `main` | `joined`; lazySource: Collection }
   | { activeSource: undefined; lazySource: undefined } {
@@ -651,6 +832,13 @@ function getActiveAndLazySources(
     case `right`:
       return { activeSource: `joined`, lazySource: leftCollection }
     case `inner`:
+      // A correlated include has already reduced the main relation to active
+      // parent routes. Keep that relation active and load the joined side from
+      // its keys; reversing the join would create an independent demand plan
+      // that widens the correlated source back to a union of constraints.
+      if (mainSourceIsParentFiltered) {
+        return { activeSource: `main`, lazySource: rightCollection }
+      }
       // The smallest collection should be the active collection
       // and the biggest collection should be lazy
       return leftCollection.size < rightCollection.size

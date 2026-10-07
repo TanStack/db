@@ -1,6 +1,6 @@
 {
   "name": "@tanstack/expo-db-sqlite-persistence",
-  "version": "0.1.9",
+  "version": "0.2.32",
   "description": "Expo SQLite persisted collection adapter for TanStack DB",
   "author": "TanStack Team",
   "license": "MIT",
@@ -62,12 +62,13 @@
     "@tanstack/db-sqlite-persistence-core": "workspace:*"
   },
   "peerDependencies": {
-    "expo-sqlite": "^55.0.10",
+    "expo-sqlite": "^55.0.10 || ^57.0.0",
     "typescript": ">=4.7"
   },
   "devDependencies": {
     "@types/better-sqlite3": "^7.6.13",
     "@vitest/coverage-istanbul": "^3.2.4",
-    "better-sqlite3": "^12.6.2"
+    "better-sqlite3": "^12.6.2",
+    "expo-sqlite-57": "npm:expo-sqlite@57.0.3"
   }
 }

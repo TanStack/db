@@ -1,6 +1,10 @@
 /* eslint-disable @typescript-eslint/no-unnecessary-condition */
 import { Store } from '@tanstack/store'
 import {
+  LoadSubsetOperationAbortedError,
+  withCollectionConfigFactory,
+} from '@tanstack/db'
+import {
   ExpectedDeleteTypeError,
   ExpectedInsertTypeError,
   ExpectedUpdateTypeError,
@@ -29,9 +33,9 @@ type OptionalConversions<
   OutputType extends ShapeOf<InputType>,
 > = {
   // Excludes all keys that require a conversation.
-  [K in keyof InputType as InputType[K] extends OutputType[K]
-    ? K
-    : never]?: Conversion<InputType[K], OutputType[K]>
+  [
+    K in keyof InputType as InputType[K] extends OutputType[K] ? K : never
+  ]?: Conversion<InputType[K], OutputType[K]>
 }
 
 type RequiredConversions<
@@ -39,9 +43,9 @@ type RequiredConversions<
   OutputType extends ShapeOf<InputType>,
 > = {
   // Excludes all keys that do not strictly require a conversation.
-  [K in keyof InputType as InputType[K] extends OutputType[K]
-    ? never
-    : K]: Conversion<InputType[K], OutputType[K]>
+  [
+    K in keyof InputType as InputType[K] extends OutputType[K] ? never : K
+  ]: Conversion<InputType[K], OutputType[K]>
 }
 
 type Conversions<
@@ -170,7 +174,9 @@ export function trailBaseCollectionOptions<
   let eventReader: ReadableStreamDefaultReader<Event> | undefined
   const cancelEventReader = () => {
     if (eventReader) {
-      eventReader.cancel()
+      // An already-errored stream rejects cancellation too. Cleanup still
+      // retires its reader; that rejection must not escape as detached work.
+      void eventReader.cancel().catch(() => undefined)
       eventReader.releaseLock()
       eventReader = undefined
     }
@@ -179,7 +185,18 @@ export function trailBaseCollectionOptions<
   type SyncParams = Parameters<SyncConfig<TItem, TKey>[`sync`]>[0]
   const sync = {
     sync: (params: SyncParams) => {
-      const { begin, write, commit, markReady } = params
+      const { begin, write, commit, markReady, markError, collection } = params
+      let cancelled = false
+      let periodicCleanupTask: ReturnType<typeof setInterval> | undefined
+
+      const cleanup = () => {
+        cancelled = true
+        cancelEventReader()
+        if (periodicCleanupTask !== undefined) {
+          clearInterval(periodicCleanupTask)
+          periodicCleanupTask = undefined
+        }
+      }
 
       // NOTE: We cache cursors from prior fetches. TanStack/db expects that
       // cursors can be derived from a key, which is not true for TB, since
@@ -187,12 +204,19 @@ export function trailBaseCollectionOptions<
       const cursors = new Map<string | number, string>()
 
       // Load (more) data.
+      // A caller that aborts sees `AbortError`. Pages a commit accepted still
+      // apply, and the load waits until they are visible; cleanup is quiet.
       async function load(opts: LoadSubsetOptions) {
+        if (cancelled) return
+        if (opts.signal?.aborted) throw new LoadSubsetOperationAbortedError()
+
         const lastKey = opts.cursor?.lastKey
         let cursor: string | undefined =
           lastKey !== undefined ? cursors.get(lastKey) : undefined
         let offset: number | undefined =
-          (opts.offset ?? 0) > 0 ? opts.offset : undefined
+          cursor === undefined && (opts.offset ?? 0) > 0
+            ? opts.offset
+            : undefined
 
         const order: Array<string> | undefined = buildOrder(opts)
         const filters: Array<FilterOrComposite> | undefined = buildFilters(
@@ -204,18 +228,29 @@ export function trailBaseCollectionOptions<
         if (remaining <= 0) {
           return
         }
+        const appliedPages: Array<Promise<void>> = []
 
         while (true) {
           const limit = Math.min(remaining, 256)
-          const response = await config.recordApi.list({
-            pagination: {
-              limit,
-              offset,
-              cursor,
-            },
-            order,
-            filters,
-          })
+          let response
+          try {
+            response = await config.recordApi.list({
+              pagination: {
+                limit,
+                offset,
+                cursor,
+              },
+              order,
+              filters,
+            })
+          } catch (error) {
+            if (cancelled) return
+            if (opts.signal?.aborted) break
+            throw error
+          }
+          if (cancelled) return
+          // Check the signal before commit to discard a stale page.
+          if (opts.signal?.aborted) break
 
           const length = response.records.length
           if (length === 0) {
@@ -232,7 +267,12 @@ export function trailBaseCollectionOptions<
             })
           }
 
-          commit()
+          // An accepted page always applies.
+          const applied = commit(opts.signal)
+          if (applied !== true) {
+            appliedPages.push(applied)
+          }
+          if (cancelled || opts.signal?.aborted) break
 
           remaining -= length
 
@@ -254,6 +294,11 @@ export function trailBaseCollectionOptions<
             cursor = response.cursor
           }
         }
+
+        await Promise.all(appliedPages)
+        // An accepted page applies, but a caller that aborted still sees
+        // `AbortError`.
+        if (opts.signal?.aborted) throw new LoadSubsetOperationAbortedError()
       }
 
       // Afterwards subscribe.
@@ -262,8 +307,6 @@ export function trailBaseCollectionOptions<
           const { done, value: event } = await reader.read()
 
           if (done || !event) {
-            reader.releaseLock()
-            eventReader = undefined
             return
           }
 
@@ -281,7 +324,7 @@ export function trailBaseCollectionOptions<
           } else {
             console.error(`Error: ${event.Error}`)
           }
-          commit()
+          void commit()
 
           if (value) {
             seenIds.setState((curr: Map<string, number>) => {
@@ -294,32 +337,62 @@ export function trailBaseCollectionOptions<
       }
 
       async function start() {
-        const eventStream = await config.recordApi.subscribe(`*`)
-        const reader = (eventReader = eventStream.getReader())
-
-        // Start listening for subscriptions first. Otherwise, we'd risk a gap
-        // between the initial fetch and starting to listen.
-        listen(reader)
-
+        let reader: ReadableStreamDefaultReader<Event> | undefined
         try {
+          const eventStream = await config.recordApi.subscribe(`*`)
+          if (cancelled) {
+            await eventStream.cancel()
+            return
+          }
+          const subscribedReader = eventStream.getReader()
+          reader = eventReader = subscribedReader
+
+          // Start listening for subscriptions first. Otherwise, we'd risk a gap
+          // between the initial fetch and starting to listen.
+          void listen(subscribedReader)
+            .finally(() => {
+              // A closed stream can still have a final event being processed.
+              // Release only after the listener has finished draining it.
+              // A processing failure can leave the stream open; cancel it too.
+              // Preserve the original failure if the stream already errored.
+              // Error settlement must not wait for transport cleanup.
+              void subscribedReader.cancel().catch(() => undefined)
+              subscribedReader.releaseLock()
+              if (eventReader === subscribedReader) eventReader = undefined
+            })
+            .catch((error: unknown) => {
+              if (!cancelled && collection.status === `loading`) {
+                markError(error)
+              } else if (!cancelled) {
+                console.error(`TrailBase subscription failed`, error)
+              }
+            })
+
           // Eager mode: perform initial fetch to populate everything
           if (internalSyncMode === `eager`) {
             // Load everything on initial load.
             await load({})
+            if (cancelled) return
             fullSyncCompleted = true
           }
-        } catch (e) {
+          if (!cancelled && collection.status === `loading`) {
+            markReady()
+          }
+        } catch (error) {
+          // An abandoned startup must not cancel a replacement session's reader.
+          if (cancelled) return
           cancelEventReader()
-          throw e
-        } finally {
-          // Mark ready both if everything went well or if there's an error to
-          // avoid blocking apps waiting for `.preload()` to finish.
-          markReady()
+          if (collection.status === `loading`) {
+            markError(error)
+          }
+          return
         }
 
         // Lastly, start a periodic cleanup task that will be removed when the
         // reader closes.
-        const periodicCleanupTask = setInterval(() => {
+        if (cancelled || !reader) return
+
+        periodicCleanupTask = setInterval(() => {
           seenIds.setState((curr) => {
             const now = Date.now()
             let anyExpired = false
@@ -337,17 +410,25 @@ export function trailBaseCollectionOptions<
           })
         }, 120 * 1000)
 
-        reader.closed.finally(() => clearInterval(periodicCleanupTask))
+        const clearCleanupTask = () => {
+          if (periodicCleanupTask !== undefined) {
+            clearInterval(periodicCleanupTask)
+            periodicCleanupTask = undefined
+          }
+        }
+        // listen() reports read errors. Observe this separate promise too.
+        void reader.closed.then(clearCleanupTask, clearCleanupTask)
       }
 
-      start()
+      void start()
 
       // Eager mode doesn't need subset loading
       if (internalSyncMode === `eager`) {
-        return
+        return { cleanup }
       }
 
       return {
+        cleanup,
         loadSubset: load,
         getSyncMetadata: () =>
           ({
@@ -363,8 +444,15 @@ export function trailBaseCollectionOptions<
       }) as const,
   }
 
-  return {
-    ...config,
+  const {
+    recordApi: _recordApi,
+    parse: _parse,
+    serialize: _serialize,
+    ...collectionConfig
+  } = config
+
+  const options = {
+    ...collectionConfig,
     sync,
     getKey,
     onInsert: async (
@@ -428,6 +516,11 @@ export function trailBaseCollectionOptions<
       cancel: cancelEventReader,
     },
   }
+
+  return withCollectionConfigFactory(
+    options,
+    () => trailBaseCollectionOptions(config) as typeof options,
+  )
 }
 
 function buildOrder(opts: LoadSubsetOptions): undefined | Array<string> {

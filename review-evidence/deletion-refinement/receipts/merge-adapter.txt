@@ -1,0 +1,36 @@
+Source log: /tmp/pr1179-merge-adapter.log
+SHA-256 of full source: b86ffedbd344d316b622cf78898b8ce6b6ba0e04cede40268b174b5f0aff8bd6
+Progress dot lines omitted; trailing whitespace normalized.
+
+Testing types with tsc and vue-tsc is an experimental feature.
+Breaking changes might not follow SemVer, please pin Vitest's version when using it.
+
+ RUN  v3.2.4 /Users/kyle.mathews/.codex/worktrees/pr-1179-review/tanstack-db/packages/indexeddb-db-collection
+
+····················································································································································stderr | tests/transport-oracle.test.ts > reports connection closure immediately and supports fresh Collections
+[Live Query Error] Source collection 'indexeddb-collection:ac2c75a2-c198-46cc-98a9-1d7b96a640d1:items' entered error state
+
+···················································stdout | tests/persistence-oracle.test.ts > settled histories > matches authored data through fixed histories
+indexeddb.persistence campaign fixed { numRuns: 30, seed: 1179001 }
+
+·················································································stdout | tests/persistence-oracle.test.ts > settled histories > matches authored data through fixed histories
+indexeddb.persistence completed { mode: 'fixed', seed: 1179001, path: null, runs: 30, failed: false }
+
+······stdout | tests/persistence-oracle.test.ts > settled histories > matches authored data through random histories
+indexeddb.persistence campaign random { numRuns: 30 }
+
+····················································································stdout | tests/persistence-oracle.test.ts > settled histories > matches authored data through random histories
+indexeddb.persistence completed {
+  mode: 'random',
+  seed: 574677741,
+  path: null,
+  runs: 30,
+  failed: false
+}
+
+
+ Test Files  13 passed (13)
+      Tests  2406 passed (2406)
+Type Errors  no errors
+   Start at  08:33:05
+   Duration  67.69s (transform 1.01s, setup 397ms, collect 9.41s, tests 71.17s, environment 6.56s, prepare 837ms, typecheck 734ms)

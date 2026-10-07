@@ -3,13 +3,11 @@ id: extractSimpleComparisons
 title: extractSimpleComparisons
 ---
 
-# Function: extractSimpleComparisons()
-
 ```ts
 function extractSimpleComparisons(expr): SimpleComparison[];
 ```
 
-Defined in: [packages/db/src/query/expression-helpers.ts:327](https://github.com/TanStack/db/blob/main/packages/db/src/query/expression-helpers.ts#L327)
+Defined in: [packages/db/src/query/expression-helpers.ts:332](https://github.com/TanStack/db/blob/main/packages/db/src/query/expression-helpers.ts#L332)
 
 Extracts all simple comparisons from a WHERE expression.
 This is useful for simple APIs that only support basic filters.

@@ -3,9 +3,7 @@ id: CollectionInputNotFoundError
 title: CollectionInputNotFoundError
 ---
 
-# Class: CollectionInputNotFoundError
-
-Defined in: [packages/db/src/errors.ts:474](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L474)
+Defined in: [packages/db/src/errors.ts:580](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L580)
 
 Error thrown when a collection input stream is not found during query compilation.
 In self-joins, each alias (e.g., 'employee', 'manager') requires its own input stream.
@@ -25,7 +23,7 @@ new CollectionInputNotFoundError(
    availableKeys?): CollectionInputNotFoundError;
 ```
 
-Defined in: [packages/db/src/errors.ts:475](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L475)
+Defined in: [packages/db/src/errors.ts:581](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L581)
 
 #### Parameters
 

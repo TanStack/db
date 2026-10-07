@@ -10,8 +10,19 @@ export type {
 } from './renderer'
 export { ElectronCollectionCoordinator } from './electron-coordinator'
 export type { ElectronCollectionCoordinatorOptions } from './electron-coordinator'
-export { persistedCollectionOptions } from '@tanstack/db-sqlite-persistence-core'
+export {
+  DuplicateRemoteSubsetOwnerError,
+  IndeterminateCommitError,
+  PersistedCollectionDurabilityError,
+  RemoteSubsetWireValueError,
+  persistedCollectionOptions,
+} from '@tanstack/db-sqlite-persistence-core'
 export type {
   PersistedCollectionCoordinator,
   PersistedCollectionPersistence,
+  IndeterminateCommitRequestType,
+  RemoteSubsetOwner,
+  RemoteSubsetWireExpression,
+  RemoteSubsetWireValue,
+  TransportedLoadSubsetOptions,
 } from '@tanstack/db-sqlite-persistence-core'
