@@ -4,8 +4,8 @@ Reviewed product commit: `39721f20f4a3daa597a81c5172edf0109a4d83c1`.
 Base: `9e8ed997885fb46ac98ec85906f4ca4f662e7cce`.
 The source review supplied ten findings from code reading and no executed
 reproduction. This record evaluates those claims against the reviewed commit
-and the follow-up changes in this PR. The source-order ledger remains in the
-task's uncommitted `review-2058/user-review-10.md` file.
+and the follow-up changes in this PR. Each source-order finding is recorded
+below.
 
 ## Finding dispositions
 

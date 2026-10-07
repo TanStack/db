@@ -2345,7 +2345,7 @@ for (const kind of [`debounce`, `throttle`] as const)
       async () => {
         const first = mutate(1)
         const firstReceipt = observeReceipt(first)
-        await vi.advanceTimersByTimeAsync(kind === `debounce` ? 1 : 1)
+        await vi.advanceTimersByTimeAsync(1)
         const second = mutate(2)
         const secondReceipt = observeReceipt(second)
         expect(() => mutate(3)).toThrow(failure)
