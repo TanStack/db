@@ -48,7 +48,7 @@ function createHost() {
     const event = {
       key,
       storageArea: storage,
-      newValue: storage.getItem(key),
+      newValue: data.get(key) ?? null,
     } as StorageEvent
     for (const listener of [...listeners]) listener(event)
   }
@@ -247,3 +247,76 @@ it('a peer insert during a pending local insert confirms the final local row', a
     () => [() => gate.resolve(), () => peer.cleanup(), () => local.cleanup()],
   )
 })
+
+/** A new whole-store write may only extend a durable snapshot it actually
+ * read. A transient read or parse failure cannot mean "the store is empty":
+ * that would turn a failed read into a successful replacement. A failed event
+ * read also cannot delete public rows. The authored model keeps the prior row,
+ * excludes the rejected row, then adds a successful suffix. Public, durable,
+ * and fresh-restore rows must agree after settlement. */
+for (const failureKind of ['storage', 'parser'] as const) {
+  it(`preserves rows when ${failureKind} reads fail during writes or events`, async () => {
+    const host = createHost()
+    const readError = new Error(`${failureKind} read failed`)
+    let failRead = false
+    const storage = host.storage
+    const getItem = storage.getItem
+    storage.getItem = (key) => {
+      if (failRead && failureKind === 'storage') {
+        failRead = false
+        throw readError
+      }
+      return getItem(key)
+    }
+    const collection = createCollection(
+      localStorageCollectionOptions<Row>({
+        id: 'reader',
+        storageKey: 'shared',
+        storage,
+        storageEventApi: host.events,
+        parser: {
+          parse: (raw) => {
+            if (failRead && failureKind === 'parser') {
+              failRead = false
+              throw readError
+            }
+            return JSON.parse(raw)
+          },
+          stringify: JSON.stringify,
+        },
+        getKey: (row) => row.id,
+      }),
+    )
+    let reopened: ReturnType<typeof makeCollection> | undefined
+    await withHistoryCleanup(
+      async () => {
+        await collection.preload()
+        await collection.insert({ id: 'before', value: 1 }).isPersisted.promise
+        failRead = true
+        await expect(
+          collection.insert({ id: 'rejected', value: 2 }).isPersisted.promise,
+        ).rejects.toBe(readError)
+        expect(durableRows(host, 'shared')).toEqual([
+          { id: 'before', value: 1 },
+        ])
+        failRead = true
+        host.deliver('shared')
+        expect(
+          publicRows(collection),
+          'failed event read retains public rows',
+        ).toEqual([{ id: 'before', value: 1 }])
+        await collection.insert({ id: 'after', value: 3 }).isPersisted.promise
+        const expected = expectedRows([
+          { id: 'before', value: 1 },
+          { id: 'after', value: 3 },
+        ])
+        expect(durableRows(host, 'shared')).toEqual(expected)
+        expect(publicRows(collection)).toEqual(expected)
+        reopened = makeCollection(host, 'shared', 'reopened')
+        await reopened.preload()
+        expect(publicRows(reopened)).toEqual(expected)
+      },
+      () => [() => reopened?.cleanup(), () => collection.cleanup()],
+    )
+  })
+}

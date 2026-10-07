@@ -95,6 +95,10 @@ peer's event has not arrived yet. Truly simultaneous writes from separate tabs
 are not an atomic transaction; localStorage has no compare-and-swap operation.
 Use an IndexedDB Collection when several tabs need stronger write coordination.
 
+If storage cannot be read, the mutation rejects and existing stored rows remain.
+A failed storage-event read leaves current Collection rows unchanged until a
+later event can read storage successfully.
+
 ## Using SessionStorage
 
 You can use `sessionStorage` instead of `localStorage` for session-only persistence:

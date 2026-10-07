@@ -57,3 +57,15 @@ made atomic with localStorage. Manual acceptance before the first sync run still
 uses the existing ID fallback because the adapter does not yet have a Collection
 reference. Arbitrary long histories and native browser event scheduling remain
 outside these owners, as recorded in the coverage map.
+
+## Prep review follow-up
+
+The prep review found that a write-time storage or parser read failure was
+treated as an empty snapshot. The two controlled failure histories reject that
+implementation at the caller-settlement checkpoint: `isPersisted` fulfilled
+while the previously durable row was replaced. The repaired adapter rejects the
+write, retains the durable row, accepts a later independent write, and restores
+both accepted rows in a fresh Collection. The same histories deliver a storage
+event under a failed read and check that the public snapshot remains intact.
+Startup remains best-effort; an absent storage key is the only empty snapshot
+for a new write or event. The final peer oracle passes both cases.

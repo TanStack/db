@@ -69,6 +69,22 @@ function makeStorage() {
   }
 }
 
+function makeSeededStorage() {
+  const storage = makeStorage()
+  storage.setItem(
+    'rows',
+    JSON.stringify(
+      Object.fromEntries(
+        initial.map((row) => [
+          `s:${row.id}`,
+          { versionKey: `initial-${row.id}`, data: row },
+        ]),
+      ),
+    ),
+  )
+  return storage
+}
+
 // This finite grammar covers same-key and disjoint-key updates and both handler
 // completion orders and all decision pairs. It excludes peer writes and
 // manual transactions; those require different event and ownership boundaries.
@@ -82,18 +98,7 @@ for (const secondId of ['a', 'b']) {
     ]) {
       describe(`two ${secondId === 'a' ? 'same-key' : 'disjoint-key'} writes, ${completion} handler first, decisions ${accepted.join('/')}`, () => {
         it('persists and publishes the authored result', async () => {
-          const storage = makeStorage()
-          storage.setItem(
-            'rows',
-            JSON.stringify(
-              Object.fromEntries(
-                initial.map((row) => [
-                  `s:${row.id}`,
-                  { versionKey: `initial-${row.id}`, data: row },
-                ]),
-              ),
-            ),
-          )
+          const storage = makeSeededStorage()
           const gate = [createDeferred<void>(), createDeferred<void>()]
           const entered = [createDeferred<void>(), createDeferred<void>()]
           const edits: Array<Edit> = [
@@ -197,18 +202,7 @@ for (const accepted of [
   [false, false],
 ]) {
   it(`keeps an update followed by delete in author order with decisions ${accepted.join('/')}`, async () => {
-    const storage = makeStorage()
-    storage.setItem(
-      'rows',
-      JSON.stringify(
-        Object.fromEntries(
-          initial.map((row) => [
-            `s:${row.id}`,
-            { versionKey: `initial-${row.id}`, data: row },
-          ]),
-        ),
-      ),
-    )
+    const storage = makeSeededStorage()
     const gate = [createDeferred<void>(), createDeferred<void>()]
     const entered = [createDeferred<void>(), createDeferred<void>()]
     const collection = createCollection(

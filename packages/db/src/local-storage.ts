@@ -438,7 +438,7 @@ export function localStorageCollectionOptions(
   ): void => {
     // A peer may have written after our last storage event. Start from the
     // current durable snapshot so this write preserves untouched peer rows.
-    const staged = loadFromStorage(config.storageKey, storage, parser)
+    const staged = readFromStorage(config.storageKey, storage, parser)
     for (const mutation of mutations) {
       if (mutation.type === `delete`) staged.delete(mutation.key)
       else
@@ -583,52 +583,58 @@ export function localStorageCollectionOptions(
 }
 
 /**
- * Load data from storage and return as a Map
+ * Read data from storage without treating a failed read as an empty snapshot.
  * @param parser - The parser to use for deserializing the data
  * @param storageKey - The key used to store data in the storage API
  * @param storage - The storage API to load from (localStorage, sessionStorage, etc.)
- * @returns Map of stored items with version tracking, or empty Map if loading fails
+ * @returns Map of stored items with version tracking
  */
+function readFromStorage<T extends object>(
+  storageKey: string,
+  storage: StorageApi,
+  parser: Parser,
+): Map<string | number, StoredItem<T>> {
+  const rawData = storage.getItem(storageKey)
+  if (rawData === null) {
+    return new Map()
+  }
+
+  const parsed = parser.parse(rawData)
+  const dataMap = new Map<string | number, StoredItem<T>>()
+
+  // Handle object format where keys map to StoredItem values
+  if (typeof parsed === `object` && parsed !== null && !Array.isArray(parsed)) {
+    Object.entries(parsed).forEach(([encodedKey, value]) => {
+      // Runtime check to ensure the value has the expected StoredItem structure
+      if (
+        value &&
+        typeof value === `object` &&
+        `versionKey` in value &&
+        `data` in value
+      ) {
+        const storedItem = value as StoredItem<T>
+        const decodedKey = decodeStorageKey(encodedKey)
+        dataMap.set(decodedKey, storedItem)
+      } else {
+        throw new InvalidStorageDataFormatError(storageKey, encodedKey)
+      }
+    })
+  } else {
+    throw new InvalidStorageObjectFormatError(storageKey)
+  }
+
+  return dataMap
+}
+
+// Startup preserves its existing best-effort behavior. A write or event must
+// use readFromStorage so read failure cannot authorize an empty replacement.
 function loadFromStorage<T extends object>(
   storageKey: string,
   storage: StorageApi,
   parser: Parser,
 ): Map<string | number, StoredItem<T>> {
   try {
-    const rawData = storage.getItem(storageKey)
-    if (!rawData) {
-      return new Map()
-    }
-
-    const parsed = parser.parse(rawData)
-    const dataMap = new Map<string | number, StoredItem<T>>()
-
-    // Handle object format where keys map to StoredItem values
-    if (
-      typeof parsed === `object` &&
-      parsed !== null &&
-      !Array.isArray(parsed)
-    ) {
-      Object.entries(parsed).forEach(([encodedKey, value]) => {
-        // Runtime check to ensure the value has the expected StoredItem structure
-        if (
-          value &&
-          typeof value === `object` &&
-          `versionKey` in value &&
-          `data` in value
-        ) {
-          const storedItem = value as StoredItem<T>
-          const decodedKey = decodeStorageKey(encodedKey)
-          dataMap.set(decodedKey, storedItem)
-        } else {
-          throw new InvalidStorageDataFormatError(storageKey, encodedKey)
-        }
-      })
-    } else {
-      throw new InvalidStorageObjectFormatError(storageKey)
-    }
-
-    return dataMap
+    return readFromStorage<T>(storageKey, storage, parser)
   } catch (error) {
     console.warn(
       `[LocalStorageCollection] Error loading data from storage key "${storageKey}":`,
@@ -713,7 +719,16 @@ function createLocalStorageSync<T extends object>(
     const { begin, write, commit } = syncParams
 
     // Load the new data
-    const newData = loadFromStorage<T>(storageKey, storage, parser)
+    let newData: Map<string | number, StoredItem<T>>
+    try {
+      newData = readFromStorage<T>(storageKey, storage, parser)
+    } catch (error) {
+      console.warn(
+        `[LocalStorageCollection] Error loading data from storage key "${storageKey}":`,
+        error,
+      )
+      return
+    }
 
     // Find the specific changes
     const changes = findChanges(lastKnownData, newData)
@@ -736,10 +751,7 @@ function createLocalStorageSync<T extends object>(
     }
   }
 
-  const syncConfig: SyncConfig<T> & {
-    manualTrigger?: () => void
-    collection: any
-  } = {
+  const syncConfig: SyncConfig<T> & { manualTrigger?: () => void } = {
     rowUpdateMode: `full`,
     sync: (params: Parameters<SyncConfig<T>[`sync`]>[0]) => {
       const { begin, write, commit, markReady } = params
@@ -802,9 +814,6 @@ function createLocalStorageSync<T extends object>(
 
     // Manual trigger function for local updates
     manualTrigger: processStorageChanges,
-
-    // Collection instance reference
-    collection,
   }
 
   /**
