@@ -195,18 +195,25 @@ function isShowable(type: ts.Type, checker: ts.TypeChecker, error: ts.Type) {
  * check searches builds for them; code inside `${...}` is not message text.
  */
 export function messageLiterals(node: ts.Expression): Array<string> {
-  if (ts.isParenthesizedExpression(node)) return messageLiterals(node.expression)
+  if (ts.isParenthesizedExpression(node))
+    return messageLiterals(node.expression)
   if (ts.isStringLiteral(node) || ts.isNoSubstitutionTemplateLiteral(node))
     return [node.text]
   if (ts.isTemplateExpression(node))
-    return [node.head.text, ...node.templateSpans.map((span) => span.literal.text)]
+    return [
+      node.head.text,
+      ...node.templateSpans.map((span) => span.literal.text),
+    ]
   if (
     ts.isBinaryExpression(node) &&
     node.operatorToken.kind === ts.SyntaxKind.PlusToken
   )
     return [...messageLiterals(node.left), ...messageLiterals(node.right)]
   if (ts.isConditionalExpression(node))
-    return [...messageLiterals(node.whenTrue), ...messageLiterals(node.whenFalse)]
+    return [
+      ...messageLiterals(node.whenTrue),
+      ...messageLiterals(node.whenFalse),
+    ]
   return []
 }
 

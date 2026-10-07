@@ -261,8 +261,7 @@ describe(`production error messages`, () => {
     const frozen: Record<
       string,
       { file: string; template: string; literals: Array<string> }
-    > =
-      JSON.parse(readFileSync(sitesPath, `utf8`))
+    > = JSON.parse(readFileSync(sitesPath, `utf8`))
 
     it(`codes every site that throws library text`, () => {
       expect(sites.plain).toEqual([])
