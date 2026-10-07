@@ -382,5 +382,7 @@
   "readyFailureSink": "gn",
   "writeExplicitRowMetadata": "a8",
   "applyOwnedMutations": "bX",
-  "commitDirect": "cn"
+  "commitDirect": "cn",
+  "setupEvents": "c_",
+  "cleanups": "dH"
 }

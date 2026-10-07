@@ -64,6 +64,8 @@ export class CollectionChangesManager<
    * Observers use it to detect reordered rows whose values did not change.
    */
   public layoutRevision = 0
+  /** Counts cleanups, so subscription setup can tell one happened. */
+  private cleanups = 0
 
   /**
    * Creates a new CollectionChangesManager instance
@@ -328,26 +330,27 @@ export class CollectionChangesManager<
         subscription.on(`status:change`, options.onStatusChange)
       }
 
-      // Register before the snapshot so work committed inside its callback
-      // reaches this subscriber. The deferral publishes that work after the
-      // snapshot, as the next batch, never inside it.
-      this.changeSubscriptions.add(subscription)
-      const deferral = this.deferPublication()
-      try {
-        if (options.includeInitialState) {
-          subscription.requestSnapshot({
-            trackLoadSubsetPromise: false,
-            orderBy: options.orderBy,
-            limit: options.limit,
-            onLoadSubsetResult: options.onLoadSubsetResult,
-          })
-        } else if (options.includeInitialState === false) {
-          // When explicitly set to false (not just undefined), mark all state as "seen"
-          // so that all future changes (including deletes) pass through unfiltered.
+      if (options.includeInitialState) {
+        // Register first so work committed inside the snapshot callback
+        // reaches this subscriber; the subscription holds it until then.
+        this.changeSubscriptions.add(subscription)
+        subscription.beginSnapshotSetup()
+        const cleanups = this.cleanups
+        subscription.requestSnapshot({
+          trackLoadSubsetPromise: false,
+          orderBy: options.orderBy,
+          limit: options.limit,
+          onLoadSubsetResult: options.onLoadSubsetResult,
+        })
+        // Cleanup discards unpublished events, including these.
+        subscription.endSnapshotSetup(cleanups === this.cleanups)
+      } else {
+        // When explicitly set to false (not just undefined), mark all state as "seen"
+        // so that all future changes (including deletes) pass through unfiltered.
+        if (options.includeInitialState === false) {
           subscription.markAllStateAsSeen()
         }
-      } finally {
-        deferral.publish()
+        this.changeSubscriptions.add(subscription)
       }
     } catch (error) {
       if (subscription) {
@@ -422,6 +425,7 @@ export class CollectionChangesManager<
   public cleanup(): void {
     // Cleanup clears visible state without publishing row changes. Detached
     // consumers may miss every status transition before an empty restart.
+    this.cleanups++
     this.stateRevision++
     this.batchedEvents = []
     this.shouldBatchEvents = false

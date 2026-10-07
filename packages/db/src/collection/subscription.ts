@@ -161,6 +161,11 @@ export class CollectionSubscription
 
   // Keep track of the keys we've sent (needed for join and orderBy optimizations)
   private sentKeys = new Set<string | number>()
+  /**
+   * Initial-snapshot setup: `null` until the snapshot is read, then the
+   * events that arrive while its callback runs.
+   */
+  private setupEvents?: Array<ChangeMessage<any, any>> | null
   private publishedRows = new Map<string | number, object>()
   private stalePublishedRows = new Map<string | number, object>()
 
@@ -1112,6 +1117,13 @@ export class CollectionSubscription
 
   emitEvents(changes: Array<ChangeMessage<any, any>>): boolean {
     if (this.unsubscribed) return false
+    // The snapshot not yet read already includes these changes. Changes
+    // committed inside its callback publish after it, as the next batch.
+    if (this.setupEvents === null) return false
+    if (this.setupEvents) {
+      this.setupEvents.push(...changes)
+      return false
+    }
     const newChanges = this.filterAndFlipChanges(changes)
 
     // Reconciliation can reduce a source delta to no visible change. Do not
@@ -1124,8 +1136,21 @@ export class CollectionSubscription
     return this.filteredCallback(newChanges)
   }
 
+  /** Hold this subscriber's events while its initial snapshot is delivered. */
+  beginSnapshotSetup(): void {
+    this.setupEvents = null
+  }
+
+  /** Publish the events committed inside the initial snapshot callback. */
+  endSnapshotSetup(publish: boolean): void {
+    const events = this.setupEvents
+    this.setupEvents = undefined
+    if (publish && events?.length) this.emitEvents(events)
+  }
+
   /** Keep direct snapshot reads private while an authoritative replay is open. */
   private publishSnapshot(changes: Array<ChangeMessage<any, any>>): void {
+    if (this.setupEvents === null) this.setupEvents = []
     if (!this.bufferPrivately(changes)) this.callback(changes)
   }
 
