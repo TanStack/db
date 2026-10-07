@@ -64,8 +64,6 @@ export class CollectionChangesManager<
    * Observers use it to detect reordered rows whose values did not change.
    */
   public layoutRevision = 0
-  /** Counts cleanups, so subscription setup can tell one happened. */
-  private cleanups = 0
 
   /**
    * Creates a new CollectionChangesManager instance
@@ -332,18 +330,14 @@ export class CollectionChangesManager<
 
       if (options.includeInitialState) {
         // Register first so work committed inside the snapshot callback
-        // reaches this subscriber; the subscription holds it until then.
+        // reaches this subscriber, after its snapshot.
         this.changeSubscriptions.add(subscription)
-        subscription.beginSnapshotSetup()
-        const cleanups = this.cleanups
-        subscription.requestSnapshot({
+        subscription.requestInitialSnapshot({
           trackLoadSubsetPromise: false,
           orderBy: options.orderBy,
           limit: options.limit,
           onLoadSubsetResult: options.onLoadSubsetResult,
         })
-        // Cleanup discards unpublished events, including these.
-        subscription.endSnapshotSetup(cleanups === this.cleanups)
       } else {
         // When explicitly set to false (not just undefined), mark all state as "seen"
         // so that all future changes (including deletes) pass through unfiltered.
@@ -425,7 +419,6 @@ export class CollectionChangesManager<
   public cleanup(): void {
     // Cleanup clears visible state without publishing row changes. Detached
     // consumers may miss every status transition before an empty restart.
-    this.cleanups++
     this.stateRevision++
     this.batchedEvents = []
     this.shouldBatchEvents = false

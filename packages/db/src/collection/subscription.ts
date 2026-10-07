@@ -163,9 +163,9 @@ export class CollectionSubscription
   private sentKeys = new Set<string | number>()
   /**
    * Initial-snapshot setup: `null` until the snapshot is read, then the
-   * events that arrive while its callback runs.
+   * batches published while its callback runs.
    */
-  private setupEvents?: Array<ChangeMessage<any, any>> | null
+  private setupBatches?: Array<Array<ChangeMessage<any, any>>> | null
   private publishedRows = new Map<string | number, object>()
   private stalePublishedRows = new Map<string | number, object>()
 
@@ -280,6 +280,8 @@ export class CollectionSubscription
 
   /** Detach logical demand from work owned by a discarded sync run. */
   private handleCollectionCleanup(): void {
+    // Cleanup discards unpublished batches; later ones still publish.
+    this.setupBatches &&= []
     this.discardTruncateReplay()
     this.stalePublishedRows = new Map(this.publishedRows)
     this.pendingLoadSubsetParticipants.clear()
@@ -1117,11 +1119,11 @@ export class CollectionSubscription
 
   emitEvents(changes: Array<ChangeMessage<any, any>>): boolean {
     if (this.unsubscribed) return false
-    // The snapshot not yet read already includes these changes. Changes
-    // committed inside its callback publish after it, as the next batch.
-    if (this.setupEvents === null) return false
-    if (this.setupEvents) {
-      this.setupEvents.push(...changes)
+    // The snapshot not yet read already includes these changes. Batches
+    // published inside its callback reach this subscriber after it, in order.
+    if (this.setupBatches === null) return false
+    if (this.setupBatches) {
+      this.setupBatches.push(changes)
       return false
     }
     const newChanges = this.filterAndFlipChanges(changes)
@@ -1136,21 +1138,31 @@ export class CollectionSubscription
     return this.filteredCallback(newChanges)
   }
 
-  /** Hold this subscriber's events while its initial snapshot is delivered. */
-  beginSnapshotSetup(): void {
-    this.setupEvents = null
+  /**
+   * Deliver the initial snapshot, then the batches published while its
+   * callback ran. A failed setup delivers none of them.
+   */
+  requestInitialSnapshot(options: RequestSnapshotOptions): void {
+    this.setupBatches = null
+    try {
+      this.requestSnapshot(options)
+    } catch (error) {
+      this.takeSetupBatches()
+      throw error
+    }
+    for (const batch of this.takeSetupBatches()) this.emitEvents(batch)
   }
 
-  /** Publish the events committed inside the initial snapshot callback. */
-  endSnapshotSetup(publish: boolean): void {
-    const events = this.setupEvents
-    this.setupEvents = undefined
-    if (publish && events?.length) this.emitEvents(events)
+  /** End setup and return the batches it held. */
+  private takeSetupBatches(): Array<Array<ChangeMessage<any, any>>> {
+    const batches = this.setupBatches ?? []
+    this.setupBatches = undefined
+    return batches
   }
 
   /** Keep direct snapshot reads private while an authoritative replay is open. */
   private publishSnapshot(changes: Array<ChangeMessage<any, any>>): void {
-    if (this.setupEvents === null) this.setupEvents = []
+    if (this.setupBatches === null) this.setupBatches = []
     if (!this.bufferPrivately(changes)) this.callback(changes)
   }
 

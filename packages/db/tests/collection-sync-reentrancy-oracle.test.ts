@@ -26,10 +26,10 @@
  *
  * The listener is either a change listener reacting to the outer batch or the
  * initial-snapshot callback of a subscription created after the outer row
- * applied. A snapshot delivery is a publication too: work committed inside it
- * publishes to that subscriber as the next batch, exactly as for a change
- * listener. It runs outside any drain, so its commits apply at once and
- * return `true`; only their publication waits for the snapshot. An observer
+ * applied. A snapshot callback runs outside any drain, so each of its commits
+ * applies at once, returns `true`, and publishes as its own batch. The new
+ * subscriber receives those batches after its snapshot, in order; no
+ * delivery nests inside the callback. An observer
  * subscribed earlier must still see each such commit at once, as its own
  * batch: the new subscription's setup may not delay other subscribers. The
  * filtered lane's where clause rejects keys from 4 on, and the model drops
@@ -274,10 +274,14 @@ async function runListenerScenario(
 
     expect(appliedKeys).toEqual([1, ...committedKeys])
     const visibleCommitted = committedKeys.filter(visible)
-    expect(batches).toEqual([
-      [1],
-      ...(visibleCommitted.length > 0 ? [visibleCommitted] : []),
-    ])
+    // A change listener's commits drain as one batch. A snapshot callback
+    // runs outside the drain, so each commit publishes on its own; the new
+    // subscriber receives those same batches after its snapshot.
+    expect(batches).toEqual(
+      source === `change`
+        ? [[1], ...(committedKeys.length > 0 ? [committedKeys] : [])]
+        : [[1], ...visibleCommitted.map((key) => [key])],
+    )
     expect(maxListenerDepth).toBe(1)
     // The observer is outside any drain, so each listener commit publishes
     // to it at once, as its own batch.
@@ -1593,29 +1597,111 @@ describe(`sync publication reentrancy`, () => {
   })
 
   // A snapshot callback has no handle to its subscription during setup, so
-  // the public way to end it there is Collection cleanup. Work committed
-  // before that cleanup must not reach the ended subscription.
-  it(`delivers nothing to a subscription cleaned up inside its snapshot callback`, async () => {
-    const harness = createSyncHarness(`snapshot-cleanup`)
+  // the public way to end its sync run there is Collection cleanup. Cleanup
+  // discards batches not yet delivered; work after a restart still arrives.
+  it.each([false, true])(
+    `discards held batches when cleanup runs inside a snapshot callback (restart=%s)`,
+    async (restart) => {
+      const harness = createSyncHarness(`snapshot-cleanup-${restart}`)
+      const { collection } = harness
+      stageInsert(harness.sync, { id: 1, value: `outer` })
+      harness.sync.commit()
+      const batches: Array<Array<string>> = []
+      let cleanup: Promise<void> | undefined
+      const subscription = collection.subscribeChanges(
+        (changes) => {
+          batches.push(changes.map(({ type, key }) => `${type} ${key}`))
+          if (cleanup) return
+          stageInsert(harness.sync, { id: 2, value: `before cleanup` })
+          harness.sync.commit()
+          cleanup = collection.cleanup()
+          if (restart) {
+            collection.startSyncImmediate()
+            stageInsert(harness.sync, { id: 3, value: `after restart` })
+            harness.sync.commit()
+          }
+        },
+        { includeInitialState: true },
+      )
+      try {
+        await cleanup
+        await flushPromises()
+        // The held row 2 never arrives. After a restart, reconciliation reports
+        // the cleared row 1 as deleted, and the new row 3 arrives. Without a
+        // restart, cleanup publishes nothing (see CollectionChangesManager).
+        expect(batches).toEqual(
+          restart ? [[`insert 1`], [`delete 1`], [`insert 3`]] : [[`insert 1`]],
+        )
+      } finally {
+        subscription.unsubscribe()
+        await collection.cleanup()
+      }
+    },
+  )
+
+  // A snapshot callback that throws fails the subscription's setup, as it
+  // does on main. Work it committed before throwing applies, but the failed
+  // subscription receives none of it.
+  it(`delivers nothing to a subscription whose snapshot callback throws`, async () => {
+    const harness = createSyncHarness(`snapshot-throws`)
     const { collection } = harness
     stageInsert(harness.sync, { id: 1, value: `outer` })
     harness.sync.commit()
     const batches: Array<Array<number>> = []
-    let cleanup: Promise<void> | undefined
+    const failure = new Error(`snapshot callback failed`)
+    try {
+      expect(() =>
+        collection.subscribeChanges(
+          (changes) => {
+            batches.push(changes.map((change) => change.key))
+            if (batches.length > 1) return
+            stageInsert(harness.sync, { id: 2, value: `inside` })
+            harness.sync.commit()
+            throw failure
+          },
+          { includeInitialState: true },
+        ),
+      ).toThrow(failure)
+      expect(batches).toEqual([[1]])
+      expect(collection.get(2)?.value).toBe(`inside`)
+      expect(collection.subscriberCount).toBe(0)
+    } finally {
+      await collection.cleanup()
+    }
+  })
+
+  // Separate commits to one key inside a snapshot callback reach the new
+  // subscriber as separate batches, so no batch holds two changes for a key.
+  it(`delivers each snapshot-callback commit to a key as its own batch`, async () => {
+    const harness = createSyncHarness(`snapshot-same-key`)
+    const { collection } = harness
+    stageInsert(harness.sync, { id: 1, value: `outer` })
+    harness.sync.commit()
+    const batches: Array<Array<string>> = []
+    let ran = false
     const subscription = collection.subscribeChanges(
       (changes) => {
-        batches.push(changes.map((change) => change.key))
-        if (cleanup) return
-        stageInsert(harness.sync, { id: 2, value: `inside` })
+        batches.push(changes.map(({ type, key }) => `${type} ${key}`))
+        if (ran) return
+        ran = true
+        stageInsert(harness.sync, { id: 5, value: `inserted` })
         harness.sync.commit()
-        cleanup = collection.cleanup()
+        harness.sync.begin()
+        harness.sync.write({
+          type: `update`,
+          value: { id: 5, value: `updated` },
+        })
+        harness.sync.commit()
       },
       { includeInitialState: true },
     )
-    await cleanup
-    await flushPromises()
-    expect(batches).toEqual([[1]])
-    subscription.unsubscribe()
+    try {
+      expect(batches).toEqual([[`insert 1`], [`insert 5`], [`update 5`]])
+      expect(collection.get(5)?.value).toBe(`updated`)
+    } finally {
+      subscription.unsubscribe()
+      await collection.cleanup()
+    }
   })
 
   // The snapshot lane draws its own histories so the change-listener seed is
