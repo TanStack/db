@@ -38,6 +38,8 @@ type RequestSnapshotOptions = {
   orderBy?: OrderBy
   /** Optional limit to pass to loadSubset for backend optimization */
   limit?: number
+  /** Read only the first `limit` local rows: the source holds every row and an index serves the order. */
+  boundedPrefix?: boolean
   /** Callback that receives the normalized loadSubset result for internal tracking */
   onLoadSubsetResult?: SubsetResultObserver
   /** Called when the local snapshot must fall back from an index to a scan. */
@@ -1160,6 +1162,13 @@ export class CollectionSubscription
         } else {
           stateOpts.where = snapshotWhereExp
         }
+      }
+      // The ordered loader asks for a bounded prefix only when the source
+      // holds every row and an index serves its single order term. Any other
+      // prefix resends every matching row: an on-demand repair relies on them.
+      if (opts.boundedPrefix) {
+        stateOpts.orderBy = opts.orderBy
+        stateOpts.limit = opts.limit
       }
     } else {
       // No options provided so it's loading the entire initial state

@@ -1,6 +1,8 @@
 import { createTransaction } from './transactions'
+import { normalizeError } from './utils/error'
 import {
   DebounceCallDroppedError,
+  PacedTransactionManualCommitError,
   QueueCapacityExceededError,
   QueueDisposedError,
   ThrottleCallDroppedError,
@@ -46,7 +48,10 @@ export interface PacedMutationsConfig<
  *
  * The returned function accepts variables of type TVariables and returns a
  * Transaction object that can be awaited to know when persistence completes
- * or to handle errors.
+ * or to handle errors. The strategy owns `commit()`; calling it on the returned
+ * transaction throws before persistence starts. `rollback()` remains available.
+ * If a synchronous `onMutate` calls this manager again and then throws, every
+ * call merged into that pending transaction rejects together.
  *
  * @param config - Configuration including onMutate, mutationFn and strategy
  * @returns A function that accepts variables and returns a Transaction
@@ -98,105 +103,142 @@ export function createPacedMutations<
 ): (variables: TVariables) => Transaction<T> {
   const { onMutate, mutationFn, strategy, ...transactionConfig } = config
 
-  // The currently active transaction (pending, not yet persisting)
   let activeTransaction: Transaction<T> | null = null
+  const strategyCommits = new WeakMap<
+    Transaction<T>,
+    () => Promise<Transaction<T>>
+  >()
+  let optimisticFrame:
+    { transaction: Transaction<T>; admittedNestedCall: boolean } | undefined
 
-  // Commit callback that the strategy will call when it's time to persist
-  const commitCallback = () => {
-    if (!activeTransaction) {
-      throw new Error(
-        `Strategy callback called but no active transaction exists. This indicates a bug in the strategy implementation.`,
-      )
-    }
-
-    if (activeTransaction.state !== `pending`) {
-      throw new Error(
-        `Strategy callback called but active transaction is in state "${activeTransaction.state}". Expected "pending".`,
-      )
-    }
-
-    const txToCommit = activeTransaction
-
-    // Clear active transaction reference before committing
-    activeTransaction = null
-
-    // Commit the transaction
-    txToCommit.commit().catch(() => {
-      // Errors are handled via transaction.isPersisted.promise
-      // This catch prevents unhandled promise rejections
+  function getTransaction(isolated = false): Transaction<T> {
+    if (!isolated && activeTransaction?.state === `pending`)
+      return activeTransaction
+    const transaction = createTransaction<T>({
+      ...transactionConfig,
+      mutationFn,
+      autoCommit: false,
     })
-
-    return txToCommit
+    strategyCommits.set(transaction, transaction.commit.bind(transaction))
+    transaction.commit = () => {
+      throw new PacedTransactionManualCommitError()
+    }
+    if (!isolated) activeTransaction = transaction
+    return transaction
   }
 
-  /**
-   * Executes a mutation with the given variables. Creates a new transaction if none is active,
-   * or adds to the existing active transaction. The strategy controls when
-   * the transaction is actually committed.
-   */
+  function commit(
+    transaction: Transaction<T>,
+    onStarted?: (completion: Promise<Transaction<T>>) => void,
+  ): Transaction<T> {
+    if (activeTransaction === transaction) activeTransaction = null
+    // A pending transaction can be rolled back directly or by a prior same-key
+    // failure. Its scheduled callback must not revive canceled mutations.
+    if (transaction.state === `failed`) return transaction
+    if (transaction.state !== `pending`) {
+      throw new Error(
+        `Strategy callback called but transaction is in state "${transaction.state}". Expected "pending".`,
+      )
+    }
+    const strategyCommit = strategyCommits.get(transaction)
+    if (!strategyCommit)
+      throw new Error(`Paced transaction has no strategy-owned commit`)
+    const completion = strategyCommit()
+    onStarted?.(completion)
+    completion.catch(() => {
+      // Persistence failures are reported by transaction.isPersisted.promise.
+    })
+    return transaction
+  }
+
+  function applyOptimistic(
+    transaction: Transaction<T>,
+    variables: TVariables,
+    newlyCreated: boolean,
+  ): void {
+    const parent = optimisticFrame
+    if (parent?.transaction === transaction) parent.admittedNestedCall = true
+    const frame = { transaction, admittedNestedCall: false }
+    optimisticFrame = frame
+    try {
+      transaction.mutate(() => onMutate(variables))
+    } catch (error) {
+      if (newlyCreated || frame.admittedNestedCall) {
+        // Calls merged into this pending transaction share a failure. A newly
+        // created transaction also needs release when no receipt was returned.
+        void transaction.isPersisted.promise.catch(() => {})
+        transaction.rollback({
+          error: normalizeError(error),
+          isSecondaryRollback: !frame.admittedNestedCall,
+        })
+        if (activeTransaction === transaction) activeTransaction = null
+      }
+      throw error
+    } finally {
+      optimisticFrame = parent
+    }
+  }
+
   function mutate(variables: TVariables): Transaction<T> {
-    // Create a new transaction if we don't have an active one
-    if (!activeTransaction || activeTransaction.state !== `pending`) {
-      activeTransaction = createTransaction<T>({
-        ...transactionConfig,
-        mutationFn,
-        autoCommit: false,
+    if (strategy._type === `debounce` || strategy._type === `throttle`) {
+      let transaction: Transaction<T> | undefined
+      let completion: Promise<Transaction<T>> | undefined
+      const onAdmit = (): Transaction<T> => {
+        if (transaction) return transaction
+        const previous = activeTransaction
+        transaction = getTransaction()
+        applyOptimistic(transaction, variables, transaction !== previous)
+        return transaction
+      }
+      const admitted = strategy.execute(
+        () => {
+          // Legacy custom strategies may ignore the optional admission callback.
+          return commit(onAdmit(), (started) => {
+            completion = started
+          })
+        },
+        onAdmit,
+        () => completion,
+      )
+      if (admitted !== false) return onAdmit()
+
+      // Rejected calls must never join an already-admitted pending transaction.
+      const dropped = getTransaction(true)
+      applyOptimistic(dropped, variables, true)
+      dropped.rollback({
+        error:
+          strategy._type === `debounce`
+            ? new DebounceCallDroppedError()
+            : new ThrottleCallDroppedError(),
+        isSecondaryRollback: true,
       })
+      return dropped
     }
 
-    // Execute onMutate with variables to apply optimistic updates
-    activeTransaction.mutate(() => {
-      onMutate(variables)
-    })
-
-    // Save reference before calling strategy.execute
-    const txToReturn = activeTransaction
-
-    // For queue strategy, pass a function that commits txToReturn
-    // This prevents the error when commitCallback tries to access the cleared activeTransaction
-    if (strategy._type === `queue`) {
-      activeTransaction = null // Clear so next mutation creates a new transaction
-      let admitted: ReturnType<typeof strategy.execute>
-      try {
-        admitted = strategy.execute(() => {
-          txToReturn.commit().catch(() => {
-            // Errors are handled via transaction.isPersisted.promise
-          })
-          return txToReturn
-        })
-      } catch (error) {
-        if (!(error instanceof QueueDisposedError)) throw error
-        txToReturn.rollback({ error, isSecondaryRollback: true })
-        return txToReturn
-      }
-      if (admitted === false) {
-        // Admission failure belongs to this call; admitted same-key writes
-        // must remain in the queue and keep their optimistic state.
-        txToReturn.rollback({
+    const previous = activeTransaction
+    const transaction = getTransaction(strategy._type === `queue`)
+    applyOptimistic(transaction, variables, transaction !== previous)
+    try {
+      let completion: Promise<Transaction<T>> | undefined
+      const admitted = strategy.execute(
+        () =>
+          commit(transaction, (started) => {
+            completion = started
+          }),
+        undefined,
+        () => completion,
+      )
+      if (strategy._type === `queue` && admitted === false) {
+        transaction.rollback({
           error: new QueueCapacityExceededError(),
           isSecondaryRollback: true,
         })
       }
-    } else {
-      // Debounce/throttle share pending work until commitCallback runs. With
-      // trailing disabled, a skipped optimistic call must be rejected.
-      const executed = strategy.execute(commitCallback)
-      if (
-        (strategy._type === `debounce` || strategy._type === `throttle`) &&
-        executed === false
-      ) {
-        txToReturn.rollback({
-          error:
-            strategy._type === `debounce`
-              ? new DebounceCallDroppedError()
-              : new ThrottleCallDroppedError(),
-          isSecondaryRollback: true,
-        })
-        activeTransaction = null
-      }
+    } catch (error) {
+      if (!(error instanceof QueueDisposedError)) throw error
+      transaction.rollback({ error, isSecondaryRollback: true })
     }
-
-    return txToReturn
+    return transaction
   }
 
   return mutate

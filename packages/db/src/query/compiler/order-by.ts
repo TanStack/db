@@ -50,6 +50,8 @@ export type OrderByOptimizationInfo = {
    * plan, including when a custom local collation defines another order.
    */
   requiresFullSource: boolean
+  /** Whether the ordered source's installed rows are the whole source. */
+  sourceHoldsAllRows: boolean
   /** Source whose lazy demand must settle before a joined-filter page. */
   joinedFilterSourceId?: string
 }
@@ -272,6 +274,8 @@ export function processOrderBy(
         index,
         orderBy: sourceOrderBy,
         joinedFilterSourceId,
+        sourceHoldsAllRows:
+          followRefResult.collection.config.syncMode !== `on-demand`,
         requiresFullSource:
           sourceOrderBy.some(
             ({ compareOptions }) => compareOptions.stringSort === `custom`,
