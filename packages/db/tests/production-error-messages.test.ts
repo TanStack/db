@@ -88,6 +88,7 @@ const hostileInputs: Array<unknown> = [
   null,
   1n,
   `a\nb, c=d)`,
+  `a\u2028b\u2029c`,
 ]
 
 const exportedErrorClasses = Object.entries(Errors).filter(

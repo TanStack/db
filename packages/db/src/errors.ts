@@ -31,7 +31,14 @@ function codedMessage(
       return []
     }
   })
-  return `TanStack DB error ${code}${shown.length ? ` (${shown.join(`, `)})` : ``}: https://tanstack.com/db/latest/docs/errors#error-${code}`
+  // JSON leaves U+2028 and U+2029 unescaped; both end a line.
+  const pairs = shown
+    .join(`, `)
+    .replace(
+      /[\u2028\u2029]/g,
+      (separator) => `\\u${separator.charCodeAt(0).toString(16)}`,
+    )
+  return `TanStack DB error ${code}${pairs && ` (${pairs})`}: https://tanstack.com/db/latest/docs/errors#error-${code}`
 }
 
 // Root error class for all TanStack DB errors
