@@ -226,14 +226,22 @@ equivalent query plans and retained public keys must survive graph replacement.
 For grouping, the equality token is the D2 group key. The group retains a raw
 value from a currently positive contributor only as the projected
 representative. The representative is the contributor with the smallest exact
-value: a number before an object (a Date, a binary array, or a Temporal value);
-an ordinary number before -0, and -0 before NaN; objects by type name. Objects
-of one type and content are one exact value, so either instance may be
-projected. The choice does not depend on row keys or on update history, and
-contributors with one exact value consolidate in D2, so a change does not
-re-read the group. A correlated include's route representative also carries
-no row key: equal route identities mean equal routes. D2 sees only safe
-exact-value identity for a representative, not the raw value itself. A separate public group key preserves primitive keys and
+value: another number before -0, and every primitive before an object. Objects
+are ordered by an explicit type tag (`Buffer`, `Date`, a Temporal type, then
+`Uint8Array`). Contributors of one tag are equal in content, so any positive
+instance may be projected; a deleted contributor's instance never is. The
+choice does not depend on row keys or on update history. D2 consolidates
+contributions whose hashes match, and its hash treats -0 as 0 and equal Dates
+as one value. Each contribution therefore carries the exact identity of every
+value a contributor can supply: the representative's exact value and
+instance, and every sum, avg, min, or max input. Contributions merge only when
+those are identical, so a merged contribution supplies only a value that a
+positive contributor holds. A correlated include's route representative
+carries the correlation key and parent context instances, which every member
+of one route shares. A count over contributions that are identical in this
+sense updates without re-reading the group; a sum, avg, min, or max over
+distinct values keeps one contribution per distinct exact input. D2 sees only
+safe exact-value identity for a representative, not the raw value itself. A separate public group key preserves primitive keys and
 serializes opaque equality identity; graph-local identity tokens never cross
 the Collection boundary. Compiler group fields use a query-local namespace
 disjoint from every selected alias. Direct correlated joins canonicalize both

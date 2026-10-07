@@ -14,7 +14,6 @@ import {
 } from '../ir.js'
 import { isRefProxy } from '../builder/ref-proxy-identity.js'
 import { isTemporal } from '../../utils.js'
-import { isUint8Array, normalizeValue } from '../../utils/comparison.js'
 import {
   AggregateFunctionNotInSelectError,
   NonAggregateExpressionNotInGroupByError,
@@ -62,6 +61,7 @@ function createInternalGroupFields(groupCount: number, selectClause?: Select) {
   return {
     virtual: `${prefix}virtual`,
     route: `${prefix}route`,
+    exactInputs: `${prefix}exact_inputs`,
     correlationIdentity: `${prefix}correlation_identity`,
     parentContextIdentity: `${prefix}parent_context_identity`,
     singleGroup: `${prefix}single_group`,
@@ -120,8 +120,9 @@ function createRepresentative<T>(
   identity: unknown,
 ): Representative<T> {
   // Encode once per contribution, not once per member on every group change.
-  // Members with equal identities consolidate, so a change does not re-read
-  // the group.
+  // D2 consolidates contributions whose hashes match. The identity must
+  // therefore separate every exactly different value, so a merged
+  // contribution never projects a value that no positive member holds.
   const representative = {
     key: serializeValue(identity),
   } as Representative<T>
@@ -131,16 +132,20 @@ function createRepresentative<T>(
 
 /**
  * Members equal under query equality supply the value with the smallest exact
- * identity. A number sorts before an object, and an object of one type and
- * content is one exact value, whichever instance supplies it.
+ * value: another number before -0, and every primitive before an object.
+ * Objects are ordered by an explicit type tag, so the order survives
+ * minification. Members of one tag are equal in content; the instance
+ * identity that follows keeps each instance a separate contribution.
  */
-function exactValueIdentity(
-  value: unknown,
-  valueIdentity: ValueIdentity,
-): unknown {
-  return value instanceof Date || isTemporal(value) || isUint8Array(value)
-    ? [`object`, value.constructor.name, normalizeValue(value)]
-    : valueIdentity.exact(value)
+function exactValueOrder(value: unknown): unknown {
+  if (Object.is(value, -0)) return 1
+  if (value === null || typeof value !== `object`) return 0
+  if (value instanceof Date) return [2, `Date`]
+  if (isTemporal(value)) return [2, (value as any)[Symbol.toStringTag]]
+  if (typeof Buffer !== `undefined` && value instanceof Buffer) {
+    return [2, `Buffer`]
+  }
+  return [2, value instanceof Uint8Array ? `Uint8Array` : `Object`]
 }
 
 function getRepresentative<T>(
@@ -190,11 +195,12 @@ function addCorrelationRouteAggregate(
   aggregates[fields.route] = {
     preMap: ([, row]: [string, NamespacedRow]) => {
       const route = getNamespacedRouteMetadata(row, mainSource)
-      // Equal route identities mean equal routes, so members need no row
-      // key and consolidate into one contribution.
+      // Members of one route share its correlation key and parent context
+      // instances, so they consolidate into one contribution. A changed
+      // parent builds a new context, which stays separate.
       return createRepresentative(route, [
         valueIdentity.exact(route?.correlationKey),
-        getParentContextIdentity(route?.parentContext),
+        valueIdentity.exact(route?.parentContext),
       ])
     },
     reduce: getRepresentative,
@@ -400,13 +406,25 @@ export function processGroupBy(
     aggregates[fields.groupValues[i]!] = {
       preMap: ([, row]: [string, NamespacedRow]) => {
         const value = compiledExpr(row)
-        return createRepresentative(
-          value,
-          exactValueIdentity(value, valueIdentity),
-        )
+        return createRepresentative(value, [
+          exactValueOrder(value),
+          valueIdentity.exact(value),
+        ])
       },
       reduce: getRepresentative,
       postMap: unwrapRepresentative,
+    }
+  }
+
+  // D2 consolidates contributions whose hashes match, and the hash treats -0
+  // as 0 and equal Dates as one value. A sum, avg, min, or max must still see
+  // each exactly different input, so contributions carry those inputs'
+  // exact identities. A count's input is only 0 or 1.
+  const exactInputs: Array<(row: NamespacedRow) => unknown> = []
+  const addAggregate = (alias: string, aggExpr: Aggregate) => {
+    aggregates[alias] = getAggregateFunction(aggExpr)
+    if (aggExpr.name.toLowerCase() !== `count`) {
+      exactInputs.push(compileExpression(aggExpr.args[0]!))
     }
   }
 
@@ -414,7 +432,7 @@ export function processGroupBy(
     // Scan the SELECT clause for aggregate functions
     for (const [alias, expr] of Object.entries(selectClause)) {
       if (expr.type === `agg`) {
-        aggregates[alias] = getAggregateFunction(expr)
+        addAggregate(alias, expr)
       } else if (containsAggregate(expr)) {
         const { transformed, extracted } = extractAndReplaceAggregates(
           expr as SelectValueExpression,
@@ -422,7 +440,7 @@ export function processGroupBy(
           fields.aggregatePrefix,
         )
         for (const [syntheticAlias, aggExpr] of Object.entries(extracted)) {
-          aggregates[syntheticAlias] = getAggregateFunction(aggExpr)
+          addAggregate(syntheticAlias, aggExpr)
         }
         wrappedAggExprs[alias] = compileGroupedSelectValue(
           singleGroup
@@ -434,6 +452,14 @@ export function processGroupBy(
               ),
         )
       }
+    }
+  }
+
+  if (exactInputs.length > 0) {
+    aggregates[fields.exactInputs] = {
+      preMap: ([, row]: [string, NamespacedRow]) =>
+        exactInputs.map((input) => valueIdentity.exact(input(row))),
+      reduce: () => undefined,
     }
   }
 
