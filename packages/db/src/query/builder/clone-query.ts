@@ -18,7 +18,7 @@ export type CollectionResolver = (
 
 type CloneContext = {
   clones: WeakMap<object, object>
-  resolveCollection?: CollectionResolver
+  resolveDescriptor?: CollectionResolver
 }
 
 /**
@@ -34,7 +34,10 @@ export function cloneQueryForPlacement(
   query: QueryIR,
   resolveCollection?: CollectionResolver,
 ): QueryIR {
-  return cloneQuery(query, { clones: new WeakMap(), resolveCollection })
+  return cloneQuery(query, {
+    clones: new WeakMap(),
+    resolveDescriptor: resolveCollection,
+  })
 }
 
 function cloneQuery(query: QueryIR, context: CloneContext): QueryIR {
@@ -80,8 +83,8 @@ function cloneSourceForPlacement(
   if (source.type === `collectionRef`) {
     const descriptor = source.descriptor
     return new CollectionRef(
-      descriptor && context.resolveCollection
-        ? context.resolveCollection(descriptor)
+      descriptor && context.resolveDescriptor
+        ? context.resolveDescriptor(descriptor)
         : source.source,
       source.alias,
     )
