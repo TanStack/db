@@ -3,6 +3,14 @@ import { createCollection } from '../src/collection/index.js'
 import { createLiveQueryCollection } from '../src/query/live-query-collection.js'
 import { mockSyncCollectionOptions, resetCleanupQueue } from './utils.js'
 
+// Subscriptions that keep a source from garbage collection, including a live
+// query that asks for no data yet.
+function retainers(collection: {
+  _changes: { activeSubscribersCount: number }
+}) {
+  return collection._changes.activeSubscribersCount
+}
+
 type Person = { id: string; name: string }
 
 const collections: Array<{ cleanup: () => Promise<void> }> = []
@@ -45,7 +53,10 @@ describe(`live query collections that never gain a subscriber`, () => {
       return orphan
     })
 
-    expect(source.subscriberCount).toBe(orphans.length)
+    // The orphans ask for no data, so they are not counted as subscribers,
+    // but each holds a source subscription until GC reclaims it.
+    expect(source.subscriberCount).toBe(0)
+    expect(retainers(source)).toBe(orphans.length)
     await vi.advanceTimersByTimeAsync(51)
 
     expect(orphans.map((orphan) => orphan.status)).toEqual([
@@ -53,7 +64,7 @@ describe(`live query collections that never gain a subscriber`, () => {
       `cleaned-up`,
       `cleaned-up`,
     ])
-    expect(source.subscriberCount).toBe(0)
+    expect(retainers(source)).toBe(0)
   })
 
   it(`stops evaluating a reclaimed query when its source changes`, async () => {

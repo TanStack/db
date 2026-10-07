@@ -774,3 +774,53 @@ describe(`a source whose start throws on resumption`, () => {
     }
   })
 })
+
+/**
+ * ## A deferring live query is not a subscriber of its sources
+ *
+ * Adapters read a source Collection's `subscriberCount` and
+ * `subscribers:change` as a request for live data: Query Collection
+ * resubscribes its observers, which can refetch. A live-query Collection that
+ * defers asks for no data, so it does not count there. It still keeps its
+ * source Collections from garbage collection, because it reads their rows.
+ * Its first subscriber or preload makes it count.
+ */
+describe(`a deferring live query is not a subscriber of its sources`, () => {
+  for (const state of [`eager-running`, `on-demand-running`] as const) {
+    it(`${state}: counts only once a subscriber asks for data`, async () => {
+      const { collection: source } = makeSource(state)
+      const { outer } = makeLiveQuery(source, `all`, 1)
+      const counts: Array<number> = []
+      const stop = source.on(`subscribers:change`, ({ subscriberCount }) =>
+        counts.push(subscriberCount),
+      )
+      let subscription: { unsubscribe: () => void } | undefined
+      try {
+        outer.startSyncImmediate()
+        await settle()
+        await new Promise((resolve) => setTimeout(resolve, 20))
+        expect(source.subscriberCount, `while deferring`).toBe(0)
+        expect(counts, `no change event while deferring`).toEqual([])
+        expect(source.status, `kept from garbage collection`).not.toBe(
+          `cleaned-up`,
+        )
+        subscription = outer.subscribeChanges(() => {})
+        await settle()
+        expect(source.subscriberCount, `after the first subscriber`).toBe(1)
+        expect(counts).toEqual([1])
+        subscription.unsubscribe()
+        subscription = undefined
+        await settle()
+        expect(
+          counts.at(-1),
+          `the live query keeps its claim until cleanup`,
+        ).toBe(1)
+      } finally {
+        stop()
+        subscription?.unsubscribe()
+        await outer.cleanup()
+        await source.cleanup()
+      }
+    })
+  }
+})

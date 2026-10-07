@@ -542,10 +542,11 @@ export class CollectionImpl<
   }
 
   /**
-   * Get the number of subscribers to the collection
+   * Get the number of subscribers that ask for this collection's data. A live
+   * query that has no subscriber or preload of its own does not count.
    */
   public get subscriberCount(): number {
-    return this._changes.activeSubscribersCount
+    return this._changes.acquiringSubscribersCount
   }
 
   /**

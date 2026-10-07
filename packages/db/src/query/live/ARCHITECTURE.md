@@ -1367,7 +1367,9 @@ create recursive Collection machinery.
     before that it reads only rows its sources already hold. A subscriber that
     survives cleanup still asks for data. Another consumer starting a source,
     or a source truncate, resumes nothing. A read that waits for readiness
-    counts as a preload.
+    counts as a preload. A deferring live query keeps its sources from
+    garbage collection but is not counted in their `subscriberCount` or
+    `subscribers:change`, which adapters read as a request for live data.
 
 ## Glossary
 

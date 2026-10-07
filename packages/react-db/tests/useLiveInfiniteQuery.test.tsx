@@ -33,6 +33,14 @@ function createMockPosts(count: number): Array<Post> {
   return posts
 }
 
+// Subscriptions that keep a source from garbage collection, including a
+// live query that asks for no data yet. `subscriberCount` counts only
+// subscribers that ask for data.
+function retainers(collection: unknown): number {
+  return (collection as { _changes: { activeSubscribersCount: number } })
+    ._changes.activeSubscribersCount
+}
+
 describe(`useLiveInfiniteQuery`, () => {
   it(`reclaims a query-function collection abandoned before it commits`, async () => {
     const source = createCollection(
@@ -61,11 +69,11 @@ describe(`useLiveInfiniteQuery`, () => {
       </Suspense>,
     )
 
-    // Like useLiveQuery, the hook starts sync during render so a synchronously
-    // loaded source is ready on first commit; a render that never commits is
-    // then reclaimed by GC rather than kept out of the source entirely.
-    expect(source.subscriberCount).toBeGreaterThan(0)
-    await waitFor(() => expect(source.subscriberCount).toBe(0))
+    // Like useLiveQuery, the hook starts sync during render. The render asks
+    // for no data, but its collection holds the source until GC reclaims it.
+    expect(source.subscriberCount).toBe(0)
+    expect(retainers(source)).toBeGreaterThan(0)
+    await waitFor(() => expect(retainers(source)).toBe(0))
     rendered.unmount()
   })
 
@@ -103,8 +111,9 @@ describe(`useLiveInfiniteQuery`, () => {
       </Suspense>,
     )
 
-    expect(source.subscriberCount).toBeGreaterThan(0)
-    await waitFor(() => expect(source.subscriberCount).toBe(0))
+    expect(source.subscriberCount).toBe(0)
+    expect(retainers(source)).toBeGreaterThan(0)
+    await waitFor(() => expect(retainers(source)).toBe(0))
     rendered.unmount()
   })
 

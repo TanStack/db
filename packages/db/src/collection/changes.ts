@@ -34,6 +34,10 @@ export class CollectionChangesManager<
   private state!: CollectionStateManager<TOutput, TKey, TSchema, TInput>
 
   public activeSubscribersCount = 0
+  // Subscribers that ask for data: every one except a subscription that still
+  // defers acquisition. `subscriberCount` and `subscribers:change` report it;
+  // garbage collection uses `activeSubscribersCount`.
+  public acquiringSubscribersCount = 0
   public changeSubscriptions = new Set<CollectionSubscription>()
   public batchedEvents: Array<ChangeMessage<TOutput, TKey>> = []
   public shouldBatchEvents = false
@@ -327,7 +331,7 @@ export class CollectionChangesManager<
         onResumeAcquisition: () => this.resumeSubscriber(),
         onUnsubscribe: () => {
           setupState.closed = true
-          this.removeSubscriber()
+          this.removeSubscriber(subscription?.isDeferringAcquisition() ?? false)
           if (subscription) this.changeSubscriptions.delete(subscription)
         },
       })
@@ -363,7 +367,7 @@ export class CollectionChangesManager<
           // ownership and attempts every subset unload before it throws.
         }
       } else {
-        this.removeSubscriber()
+        this.removeSubscriber(defersAcquisition)
       }
       throw error
     }
@@ -407,6 +411,13 @@ export class CollectionChangesManager<
     // Mark first, so a sync run that starts now builds non-deferred demand.
     this.markSubscriberOrPreload()
     this.startSyncIfStopped()
+    this.changeAcquiringSubscribers(1)
+  }
+
+  private changeAcquiringSubscribers(delta: 1 | -1): void {
+    const previous = this.acquiringSubscribersCount
+    this.acquiringSubscribersCount += delta
+    this.events.emitSubscribersChange(this.acquiringSubscribersCount, previous)
   }
 
   private startSyncIfStopped(): void {
@@ -445,17 +456,14 @@ export class CollectionChangesManager<
       throw error
     }
 
-    this.events.emitSubscribersChange(
-      this.activeSubscribersCount,
-      previousSubscriberCount,
-    )
+    // A deferring subscriber asks for no data, so adapters do not see it.
+    if (!defersAcquisition) this.changeAcquiringSubscribers(1)
   }
 
   /**
    * Decrement the active subscribers count and start GC timer if needed
    */
-  private removeSubscriber(): void {
-    const previousSubscriberCount = this.activeSubscribersCount
+  private removeSubscriber(wasDeferring: boolean): void {
     this.activeSubscribersCount--
 
     if (this.activeSubscribersCount === 0) {
@@ -464,10 +472,7 @@ export class CollectionChangesManager<
       throw new NegativeActiveSubscribersError()
     }
 
-    this.events.emitSubscribersChange(
-      this.activeSubscribersCount,
-      previousSubscriberCount,
-    )
+    if (!wasDeferring) this.changeAcquiringSubscribers(-1)
   }
 
   /**

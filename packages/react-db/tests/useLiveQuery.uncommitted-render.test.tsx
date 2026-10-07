@@ -13,6 +13,14 @@ import type { ReactNode } from 'react'
 
 type Person = { id: string; name: string }
 
+// Subscriptions that keep a source from garbage collection, including a
+// live query that asks for no data yet. `subscriberCount` counts only
+// subscribers that ask for data.
+function retainers(collection: unknown): number {
+  return (collection as { _changes: { activeSubscribersCount: number } })
+    ._changes.activeSubscribersCount
+}
+
 const collections: Array<{ cleanup: () => Promise<void> }> = []
 
 function makeSource(id: string) {
@@ -80,11 +88,14 @@ describe(`live queries across uncommitted renders`, () => {
         <Route />
       </Suspense>,
     )
-    expect(source.subscriberCount).toBeGreaterThan(0)
+    // The abandoned render asks for no data, but its live query holds the
+    // source until GC reclaims it.
+    expect(source.subscriberCount).toBe(0)
+    expect(retainers(source)).toBeGreaterThan(0)
 
     await advanceTime(100)
 
-    expect(source.subscriberCount).toBe(0)
+    expect(retainers(source)).toBe(0)
   })
 
   it(`releases the source when the render throws after the hook ran`, async () => {
@@ -109,11 +120,14 @@ describe(`live queries across uncommitted renders`, () => {
       </Boundary>,
     )
     expect(view.getByText(`Failed`)).toBeDefined()
-    expect(source.subscriberCount).toBeGreaterThan(0)
+    // The abandoned render asks for no data, but its live query holds the
+    // source until GC reclaims it.
+    expect(source.subscriberCount).toBe(0)
+    expect(retainers(source)).toBeGreaterThan(0)
 
     await advanceTime(100)
 
-    expect(source.subscriberCount).toBe(0)
+    expect(retainers(source)).toBe(0)
   })
 
   it(`keeps a committed query active until unmount`, async () => {
