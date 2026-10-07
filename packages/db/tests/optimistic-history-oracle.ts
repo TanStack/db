@@ -74,9 +74,10 @@ import type { CollectionConfig, SyncConfig } from '../src/types.js'
  * base. Other histories use `full` mode and always write whole rows.
  *
  * A settled transaction leaves the Collection's tracked transactions, whether
- * it succeeded or failed. Every per-mutation pass walks them, so their number
- * is bounded by live work: a persisting transaction, or a completed one whose
- * row a queued sync transaction still holds.
+ * it succeeded or failed. Every per-mutation pass walks them, so the
+ * Collection tracks exactly its unsettled transactions. A completed row that a
+ * queued sync transaction still holds lives in the held-row layer, which the
+ * transaction does not need to stay tracked for.
  *
  * `runOptimisticHistory` gives the same edit, delete, settle, and sync history
  * to this model and a real Collection. After every step it compares rows,
@@ -865,17 +866,16 @@ export async function runOptimisticHistory(
           sorted([...downstream.values()].map(plain)),
           `${label}: downstream`,
         ).toEqual(expected.map(plain))
-        // Every per-mutation pass walks the tracked transactions, so their
-        // number is bounded by live work, not by history: a persisting
-        // transaction, or a completed one whose row a queued sync
-        // transaction still holds. A settled or failed one is gone.
-        const live = model.transactions.filter(
-          (entry) => entry.state === `persisting` || entry.held,
+        // Every per-mutation pass walks the tracked transactions, so the
+        // Collection tracks exactly its unsettled transactions. A held row
+        // outlives its completed transaction in the held-row layer, not here.
+        const unsettled = model.transactions.filter(
+          (entry) => entry.state === `persisting`,
         ).length
         expect(
           collection._state.transactions.size,
-          `${label}: tracked transactions are live`,
-        ).toBeLessThanOrEqual(live)
+          `${label}: tracked transactions are the unsettled ones`,
+        ).toBe(unsettled)
       }
       const initialFrame = publications.at(-1)
       check(`initial`)

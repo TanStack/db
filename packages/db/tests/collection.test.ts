@@ -212,6 +212,217 @@ describe(`Collection`, () => {
     }
   })
 
+  it(`does the same work per mutation however many transactions rolled back before`, async () => {
+    // The public cost law behind the tracked-transaction bound: a mutation's
+    // work must not grow with settled history. Count Map and Set iteration
+    // steps for one mutation after 0 and after 200 rollbacks.
+    const options = mockSyncCollectionOptionsNoInitialState<{
+      id: number
+      value: number
+    }>({
+      id: `rollback-history-work`,
+      getKey: (item) => item.id,
+      startSync: true,
+    })
+    const collection = createCollection(options)
+    options.utils.begin()
+    options.utils.write({ type: `insert`, value: { id: 1, value: 0 } })
+    options.utils.commit()
+    options.utils.markReady()
+    await collection.stateWhenReady()
+
+    const rollBack = async (count: number) => {
+      for (let cycle = 0; cycle < count; cycle++) {
+        const transaction = createTransaction({
+          autoCommit: false,
+          mutationFn: () => Promise.resolve(),
+        })
+        transaction.mutate(() =>
+          collection.update(1, (draft) => {
+            draft.value = cycle + 1
+          }),
+        )
+        transaction.rollback()
+        await transaction.isPersisted.promise.catch(() => undefined)
+      }
+    }
+    const stepsForOneMutation = async () => {
+      let steps = 0
+      const patched: Array<[object, PropertyKey, unknown]> = []
+      // SortedMap walks a key array and reads each entry with Map#get, so
+      // count Map#get as well as Map and Set iteration steps.
+      const originalGet = Map.prototype.get
+      patched.push([Map.prototype, `get`, originalGet])
+      Map.prototype.get = function (this: Map<unknown, unknown>, key: unknown) {
+        steps++
+        return originalGet.call(this, key)
+      }
+      for (const proto of [Map.prototype, Set.prototype]) {
+        for (const name of [`values`, `entries`, `keys`, Symbol.iterator]) {
+          const original = (proto as any)[name]
+          patched.push([proto, name, original])
+          ;(proto as any)[name] = function (this: unknown) {
+            const iterator = original.call(this)
+            return {
+              next: () => {
+                steps++
+                return iterator.next()
+              },
+              [Symbol.iterator]() {
+                return this
+              },
+            }
+          }
+        }
+      }
+      const transaction = createTransaction({
+        autoCommit: false,
+        mutationFn: () => Promise.resolve(),
+      })
+      try {
+        transaction.mutate(() =>
+          collection.update(1, (draft) => {
+            draft.value = -1
+          }),
+        )
+      } finally {
+        for (const [proto, name, original] of patched)
+          (proto as any)[name] = original
+      }
+      transaction.rollback()
+      await transaction.isPersisted.promise.catch(() => undefined)
+      return steps
+    }
+
+    const fresh = await stepsForOneMutation()
+    await rollBack(200)
+    expect(await stepsForOneMutation()).toBe(fresh)
+  })
+
+  it(`releases every settled transaction found in one recompute`, async () => {
+    // Settled transactions leave the tracked map after the recompute pass.
+    // Deleting inside the pass would skip the entry after each deleted one.
+    const options = mockSyncCollectionOptionsNoInitialState<{
+      id: number
+      value: number
+    }>({ id: `adjacent-settled`, getKey: (item) => item.id, startSync: true })
+    const collection = createCollection(options)
+    options.utils.begin()
+    options.utils.write({ type: `insert`, value: { id: 1, value: 0 } })
+    options.utils.commit()
+    options.utils.markReady()
+    await collection.stateWhenReady()
+
+    const settled = [0, 1, 2].map(() => {
+      const transaction = createTransaction({
+        autoCommit: false,
+        mutationFn: () => Promise.resolve(),
+      })
+      transaction.mutate(() =>
+        collection.update(1, (draft) => {
+          draft.value++
+        }),
+      )
+      return transaction
+    })
+    // Settle all three before the Collection recomputes once.
+    for (const transaction of settled) {
+      transaction.setState(`failed`)
+      transaction.isPersisted.reject(new Error(`settled`))
+      transaction.isPersisted.promise.catch(() => undefined)
+    }
+    collection._state.recomputeOptimisticState(false)
+
+    expect(collection._state.transactions.size).toBe(0)
+    expect(collection.get(1)).toMatchObject({ id: 1, value: 0 })
+  })
+
+  it(`keeps a same-id successor tracked after its predecessor rolls back`, async () => {
+    // `createTransaction` accepts a caller id, so a retry can reuse it before
+    // the rolled-back transaction's settlement handlers run.
+    const options = mockSyncCollectionOptionsNoInitialState<{
+      id: number
+      value: number
+    }>({
+      id: `same-id-successor`,
+      getKey: (item) => item.id,
+      startSync: true,
+    })
+    const collection = createCollection(options)
+    options.utils.begin()
+    options.utils.write({ type: `insert`, value: { id: 1, value: 0 } })
+    options.utils.commit()
+    options.utils.markReady()
+    await collection.stateWhenReady()
+
+    const first = createTransaction({
+      id: `retry`,
+      autoCommit: false,
+      mutationFn: () => Promise.resolve(),
+    })
+    first.mutate(() =>
+      collection.update(1, (draft) => {
+        draft.value = 1
+      }),
+    )
+    first.rollback()
+    const successor = createTransaction({
+      id: `retry`,
+      autoCommit: false,
+      mutationFn: () => Promise.resolve(),
+    })
+    successor.mutate(() =>
+      collection.update(1, (draft) => {
+        draft.value = 2
+      }),
+    )
+    await first.isPersisted.promise.catch(() => undefined)
+    collection._state.recomputeOptimisticState(false)
+
+    expect(collection._state.transactions.get(`retry`)).toBe(successor)
+    expect(collection.get(1)).toMatchObject({ id: 1, value: 2 })
+  })
+
+  it(`recomputes every Collection of a rollback when one recompute throws`, async () => {
+    const make = (id: string) => {
+      const options = mockSyncCollectionOptionsNoInitialState<{
+        id: number
+        value: number
+      }>({ id, getKey: (item) => item.id, startSync: true })
+      const collection = createCollection(options)
+      options.utils.begin()
+      options.utils.write({ type: `insert`, value: { id: 1, value: 0 } })
+      options.utils.commit()
+      options.utils.markReady()
+      return collection
+    }
+    const first = make(`rollback-throw-a`)
+    const second = make(`rollback-throw-b`)
+    await Promise.all([first.stateWhenReady(), second.stateWhenReady()])
+
+    const transaction = createTransaction({
+      autoCommit: false,
+      mutationFn: () => Promise.resolve(),
+    })
+    transaction.mutate(() => {
+      first.update(1, (draft) => {
+        draft.value = 1
+      })
+      second.update(1, (draft) => {
+        draft.value = 1
+      })
+    })
+    first.subscribeChanges(() => {
+      throw new Error(`subscriber failed`)
+    })
+
+    expect(() => transaction.rollback()).toThrow(`subscriber failed`)
+    await transaction.isPersisted.promise.catch(() => undefined)
+
+    expect(second.get(1)).toMatchObject({ id: 1, value: 0 })
+    expect(second._state.transactions.size).toBe(0)
+  })
+
   it(`keeps ambiguous server-key sync queued while a temp-key optimistic insert is pending`, async () => {
     const options = mockSyncCollectionOptionsNoInitialState<{
       id: number
