@@ -1,5 +1,5 @@
 // Writes docs/errors.md, the page production error messages link to. Each
-// coded error class gets an `error-<code>` anchor and its development message
+// coded error class gets an `error-<code>` anchor and its development messages
 // for the sample inputs in packages/db/tests/error-sample-arguments.ts.
 // With `--check`, it fails instead of writing when the page is out of date.
 // packages/db/tests/production-error-messages.test.ts checks the headings.
@@ -21,10 +21,7 @@ const sections = Object.entries(codes).map(
 
 Development builds show the full message. For example:
 
-\`\`\`text
-${messages[name][0]}
-\`\`\`
-`,
+${messages[name].map((message) => `\`\`\`text\n${message}\n\`\`\`\n`).join('\n')}`,
 )
 
 const pagePath = path.join(root, 'docs/errors.md')
@@ -39,7 +36,7 @@ Production builds of TanStack DB shorten error messages to a code, the inputs
 that the error can show, and a link to this page. For example:
 
 \`\`\`text
-TanStack DB error 17 (key=1, collectionId=todos): https://tanstack.com/db/latest/docs/errors#error-17
+TanStack DB error 17 (key=1, collectionId="todos"): https://tanstack.com/db/latest/docs/errors#error-17
 \`\`\`
 
 Development builds keep the full messages below. The error classes, their

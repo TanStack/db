@@ -9,7 +9,7 @@ Production builds of TanStack DB shorten error messages to a code, the inputs
 that the error can show, and a link to this page. For example:
 
 ```text
-TanStack DB error 17 (key=1, collectionId=todos): https://tanstack.com/db/latest/docs/errors#error-17
+TanStack DB error 17 (key=1, collectionId="todos"): https://tanstack.com/db/latest/docs/errors#error-17
 ```
 
 Development builds keep the full messages below. The error classes, their
@@ -187,6 +187,10 @@ Development builds show the full message. For example:
 getKey returned an invalid key type. Expected string or number, but got null: null. Item: {"name":"item"}
 ```
 
+```text
+getKey returned an invalid key type. Expected string or number, but got object: {"id":1}. Item: {"name":"item"}
+```
+
 <a id="error-16"></a>
 
 ## Error 16: `DuplicateKeyError`
@@ -205,6 +209,14 @@ Development builds show the full message. For example:
 
 ```text
 Cannot insert document with key "123" from sync because it already exists in the collection "collection-1"
+```
+
+```text
+Cannot insert document with key "key-1" from sync because it already exists in the collection "collection-1". This collection uses a custom getKey with .distinct(). The .distinct() operator deduplicates by the ENTIRE selected object (standard SQL behavior), but your custom getKey extracts only a subset of fields. This causes multiple distinct rows (with different values in non-key fields) to receive the same key. To fix this, either: (1) ensure your SELECT only includes fields that uniquely identify each row, (2) use .groupBy() with min()/max() aggregates to select one value per group, or (3) remove the custom getKey to use the default key behavior.
+```
+
+```text
+Cannot insert document with key "key-1" from sync because it already exists in the collection "collection-1". This collection uses a custom getKey with joined queries. Joined queries can produce multiple rows with the same key when relationships are not 1:1. Consider: (1) using a composite key in your getKey function (e.g., `${item.key1}-${item.key2}`), (2) ensuring your join produces unique rows per key, or (3) removing the custom getKey to use the default composite key behavior.
 ```
 
 <a id="error-18"></a>
@@ -487,6 +499,14 @@ Development builds show the full message. For example:
 Invalid source for from clause: Expected an object with a single key-value pair like { alias: collection }. For example: .from({ todos: todosCollection }). Got: string
 ```
 
+```text
+Invalid source for join clause: Expected an object with a single key-value pair like { alias: collection }. For example: .join({ todos: todosCollection }, ({ todo, todos }) => eq(todo.id, todos.id)). Got: number
+```
+
+```text
+Invalid source for unionAll clause: Expected an object with one or more key-value pairs like { alias: collection }. For example: .unionAll({ todos: todosCollection, events: eventsCollection }). Got: undefined
+```
+
 <a id="error-46"></a>
 
 ## Error 46: `JoinConditionMustBeEqualityError`
@@ -600,6 +620,10 @@ Development builds show the full message. For example:
 
 ```text
 Input for alias "alias" (collection "collection-1") not found in inputs map. Available keys: key1, key2
+```
+
+```text
+Input for collection "alias" not found in inputs map
 ```
 
 <a id="error-57"></a>
@@ -820,6 +844,10 @@ Development builds show the full message. For example:
 
 ```text
 Collection "collection-1" sync cleanup function threw an error: Cleanup failed
+```
+
+```text
+Collection "collection-1" sync cleanup function threw an error: Cleanup threw
 ```
 
 <a id="error-79"></a>

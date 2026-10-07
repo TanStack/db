@@ -22,27 +22,33 @@ const messages = JSON.parse(
   await readFile(path.join(tests, 'fixtures/error-messages.json'), 'utf8'),
 )
 
-/** The longest stretch of a message that holds no sample input or quote. */
-function distinctiveLiteral(message) {
-  const pieces = message.split(/"[^"]*"|`[^`]*`|\b\d+\b|\n/)
-  const longest = pieces.reduce(
-    (a, b) => (b.trim().length > a.length ? b.trim() : a),
-    ``,
-  )
-  return longest.slice(0, 40)
-}
-
 const source = await readFile(path.join(root, 'packages/db/src/errors.ts'), 'utf8')
 
-// A literal counts only if the source holds it verbatim; a stretch that runs
-// into a sample input's value is not template text.
-const literals = Object.keys(codes)
-  .map((name) => [name, distinctiveLiteral(messages[name][0])])
-  .filter(([, literal]) => literal.length >= 16 && source.includes(literal))
-assert.ok(
-  literals.length > 60,
-  `too few distinctive literals: ${literals.length}`,
-)
+/**
+ * The longest stretch of a message that the source holds verbatim, so it is
+ * template text rather than a sample input's value.
+ */
+function distinctiveLiteral(message) {
+  let best = ``
+  for (const piece of message.split(/"[^"]*"|`[^`]*`|\n/)) {
+    for (let start = 0; start + best.length < piece.length; start++) {
+      let end = start + best.length + 1
+      while (end <= piece.length && source.includes(piece.slice(start, end))) {
+        if (end - start > best.length) best = piece.slice(start, end)
+        if (best.length === 40) return best.trim()
+        end++
+      }
+    }
+  }
+  return best.trim()
+}
+
+const literals = Object.keys(codes).map((name) => [
+  name,
+  distinctiveLiteral(messages[name][0]),
+])
+const short = literals.filter(([, literal]) => literal.length < 16)
+assert.deepEqual(short, [], 'coded classes without a distinctive literal')
 
 async function bundle(nodeEnv) {
   const result = await build({

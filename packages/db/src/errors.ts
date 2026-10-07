@@ -10,25 +10,28 @@ function devBuild(): boolean {
   }
 }
 
-/** A production message: the code, the inputs it can show, and its docs anchor. */
+/**
+ * A production message: the code, the inputs it can show as JSON, and its docs
+ * anchor. Objects other than arrays and errors are not shown.
+ */
 function codedMessage(
   code: number,
   values: Record<string, unknown> = {},
 ): string {
-  const shown = Object.entries(values)
-    .filter(
-      ([, value]) =>
-        value !== undefined &&
-        ((typeof value !== `object` && typeof value !== `function`) ||
-          Array.isArray(value) ||
-          value instanceof Error),
-    )
-    .map(
-      ([name, value]) =>
-        `${name}=${value instanceof Error ? value.message : String(value)}`,
-    )
-    .join(`, `)
-  return `TanStack DB error ${code}${shown && ` (${shown})`}: https://tanstack.com/db/latest/docs/errors#error-${code}`
+  const shown = Object.entries(values).flatMap(([name, value]) => {
+    try {
+      const text =
+        value instanceof Error
+          ? JSON.stringify(value.message)
+          : value === null || typeof value !== `object` || Array.isArray(value)
+            ? JSON.stringify(value)
+            : undefined
+      return text === undefined ? [] : [`${name}=${text}`]
+    } catch {
+      return []
+    }
+  })
+  return `TanStack DB error ${code}${shown.length ? ` (${shown.join(`, `)})` : ``}: https://tanstack.com/db/latest/docs/errors#error-${code}`
 }
 
 // Root error class for all TanStack DB errors
@@ -312,7 +315,7 @@ export class DuplicateKeySyncError extends CollectionOperationError {
             }
             return base
           })()
-        : codedMessage(17, { key, collectionId }),
+        : codedMessage(17, { key, collectionId, ...options }),
     )
   }
 }

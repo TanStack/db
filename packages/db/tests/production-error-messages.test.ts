@@ -12,8 +12,10 @@
  *   `TanStack DB error <code>[ (<name>=<value>, ...)]: <docs URL>#error-<code>`.
  *   The code is a positive integer unique to the error class, and it never
  *   changes once assigned; `fixtures/error-codes.json` records every code.
- *   Every primitive input that the full message shows also appears in the
- *   code line, so production logs keep keys and collection ids.
+ *   Each value is JSON, so a string cannot add a line or a fake pair. Every
+ *   string, number, or `null` input that the full message shows, alone or in
+ *   an array, also appears in the code line, so production logs keep keys and
+ *   collection ids. Building the line never throws, whatever the inputs.
  * - **Both:** the class, its `name`, `instanceof`, and its extra fields are the
  *   same. The switch is an inline `process.env.NODE_ENV` check, so a production
  *   bundler drops the full text; a separate bundle check owns that.
@@ -25,9 +27,10 @@
  * classes constructed directly under `vi.stubEnv('NODE_ENV', ...)`. Errors that
  * production code builds elsewhere reach users through the same constructors.
  *
- * Limits: one set of sample inputs per class; messages a caller passes to a
- * base class (`TanStackDBError`, `CollectionConfigurationError`, ...) are the
- * caller's text and stay unchanged in both modes.
+ * Limits: the sample inputs per class, and a fixed set of hostile inputs
+ * substituted one argument at a time. Messages a caller passes to a base class
+ * (`callerMessageClasses`) are the caller's text and stay unchanged in both
+ * modes; every other exported class must have a code.
  */
 import { readFileSync } from 'node:fs'
 import { dirname, resolve } from 'node:path'
@@ -50,6 +53,35 @@ const productionLine = new RegExp(
 )
 
 type ErrorConstructor = new (...args: Array<any>) => Error
+
+/** Base classes whose message the caller supplies; they have no code. */
+const callerMessageClasses = new Set([
+  `TanStackDBError`,
+  `NonRetriableError`,
+  `CollectionConfigurationError`,
+  `CollectionStateError`,
+  `CollectionOperationError`,
+  `MissingHandlerError`,
+  `TransactionError`,
+  `QueryBuilderError`,
+  `QueryCompilationError`,
+  `JoinError`,
+  `GroupByError`,
+  `StorageError`,
+  `LocalStorageCollectionError`,
+  `QueryOptimizerError`,
+])
+
+/** Inputs that a careless formatter could throw on or break the line with. */
+const hostileInputs: Array<unknown> = [
+  Symbol(`s`),
+  [Symbol(`s`)],
+  Object.create(null),
+  [Object.create(null)],
+  null,
+  1n,
+  `a\nb, c=d)`,
+]
 
 const exportedErrorClasses = Object.entries(Errors).filter(
   ([, value]) =>
@@ -77,19 +109,30 @@ function shape(error: Error) {
   return { constructor: error.constructor, name: error.name, fields }
 }
 
-/** Primitive inputs that the full message shows. */
+/** The JSON of each string, number, or `null` input the full message shows. */
 function shownInputs(args: Array<unknown>, devMessage: string): Array<string> {
   return args
+    .flatMap((arg) => (Array.isArray(arg) ? arg : [arg]))
     .filter(
-      (arg): arg is string | number =>
-        typeof arg === `string` || typeof arg === `number`,
+      (arg): arg is string | number | null =>
+        arg === null || typeof arg === `string` || typeof arg === `number`,
     )
-    .map(String)
-    .filter((text) => text.length > 0 && devMessage.includes(text))
+    .filter((arg) => String(arg).length > 0 && devMessage.includes(String(arg)))
+    .map((arg) => JSON.stringify(arg))
 }
 
 describe(`production error messages`, () => {
   afterEach(() => vi.unstubAllEnvs())
+
+  it(`codes every exported class except the caller-message bases`, () => {
+    const codes: Record<string, number> = JSON.parse(
+      readFileSync(codesPath, `utf8`),
+    )
+    const uncoded = exportedErrorClasses
+      .map(([name]) => name)
+      .filter((name) => !(name in codes) && !callerMessageClasses.has(name))
+    expect(uncoded).toEqual([])
+  })
 
   it(`has sample inputs for every exported error class`, () => {
     const missing = exportedErrorClasses
@@ -126,8 +169,7 @@ describe(`production error messages`, () => {
     )
     const seen = new Map<number, string>()
     for (const [name, argSets] of Object.entries(errorSampleArguments)) {
-      // A caller supplies a base class's message; it is not coded.
-      if (!(name in codes)) continue
+      if (callerMessageClasses.has(name)) continue
       argSets.forEach((args, index) => {
         const message = construct(name, args, `production`).message
         const match = productionLine.exec(message)
@@ -143,6 +185,32 @@ describe(`production error messages`, () => {
       seen.set(codes[name]!, name)
     }
     expect(seen.size).toBeGreaterThan(80)
+  })
+
+  it(`writes one coded line for hostile inputs`, () => {
+    const codes: Record<string, number> = JSON.parse(
+      readFileSync(codesPath, `utf8`),
+    )
+    for (const [name, argSets] of Object.entries(errorSampleArguments)) {
+      if (callerMessageClasses.has(name)) continue
+      for (const args of argSets)
+        args.forEach((_, position) => {
+          for (const hostile of hostileInputs) {
+            const replaced = args.map((arg, index) =>
+              index === position ? hostile : arg,
+            )
+            let message: string
+            try {
+              message = construct(name, replaced, `production`).message
+            } catch (error) {
+              throw new Error(`${name} argument ${position} threw: ${error}`)
+            }
+            const match = productionLine.exec(message)
+            expect(match, `${name}: ${message}`).not.toBeNull()
+            expect(Number(match![1]), name).toBe(codes[name])
+          }
+        })
+    }
   })
 
   it(`documents every code with its class`, () => {

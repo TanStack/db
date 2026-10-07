@@ -3,7 +3,7 @@
  * `src/errors.ts`. The production error message oracle constructs each class
  * with these arguments in development and production modes.
  */
-export const errorSampleArguments: Record<string, Array<any[]>> = {
+export const errorSampleArguments: Record<string, Array<Array<unknown>>> = {
   // Root and base classes (message passed by caller)
   TanStackDBError: [['Test error message']],
   NonRetriableError: [['Non retriable error']],
@@ -38,9 +38,16 @@ export const errorSampleArguments: Record<string, Array<any[]>> = {
   // Collection operation errors
   CollectionOperationError: [['Operation error']],
   UndefinedKeyError: [[{ name: 'item' }]],
-  InvalidKeyError: [[null, { name: 'item' }]],
+  InvalidKeyError: [
+    [null, { name: 'item' }],
+    [{ id: 1 }, { name: 'item' }],
+  ],
   DuplicateKeyError: [['key-1']],
-  DuplicateKeySyncError: [[123, 'collection-1', { hasCustomGetKey: false }]],
+  DuplicateKeySyncError: [
+    [123, 'collection-1', { hasCustomGetKey: false }],
+    ['key-1', 'collection-1', { hasCustomGetKey: true, hasDistinct: true }],
+    ['key-1', 'collection-1', { hasCustomGetKey: true, hasJoins: true }],
+  ],
   MissingUpdateArgumentError: [[]],
   NoKeysPassedToUpdateError: [[]],
   UpdateKeyNotFoundError: [['key-1']],
@@ -78,7 +85,11 @@ export const errorSampleArguments: Record<string, Array<any[]>> = {
   OnlyOneSourceAllowedError: [['join clause']],
   SubQueryMustHaveFromClauseError: [['join clause']],
   InvalidSourceError: [['todos']],
-  InvalidSourceTypeError: [['from clause', 'string']],
+  InvalidSourceTypeError: [
+    ['from clause', 'string'],
+    ['join clause', 'number'],
+    ['unionAll clause', 'undefined'],
+  ],
   JoinConditionMustBeEqualityError: [[]],
   QueryMustHaveFromClauseError: [[]],
   InvalidWhereExpressionError: [['boolean']],
@@ -92,7 +103,10 @@ export const errorSampleArguments: Record<string, Array<any[]>> = {
   UnsupportedRootScalarSelectError: [[]],
   HavingRequiresGroupByError: [[]],
   LimitOffsetRequireOrderByError: [[]],
-  CollectionInputNotFoundError: [['alias', 'collection-1', ['key1', 'key2']]],
+  CollectionInputNotFoundError: [
+    ['alias', 'collection-1', ['key1', 'key2']],
+    ['alias'],
+  ],
   DuplicateAliasInSubqueryError: [['alias', ['parent1', 'parent2']]],
   UnsupportedFromTypeError: [['string']],
   UnknownExpressionTypeError: [['custom']],
@@ -128,7 +142,10 @@ export const errorSampleArguments: Record<string, Array<any[]>> = {
   InvalidStorageObjectFormatError: [['storageKey']],
 
   // Sync cleanup errors
-  SyncCleanupError: [['collection-1', 'Cleanup failed']],
+  SyncCleanupError: [
+    ['collection-1', 'Cleanup failed'],
+    ['collection-1', new Error('Cleanup threw')],
+  ],
 
   // Query optimizer errors
   QueryOptimizerError: [['Optimizer error']],
