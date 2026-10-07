@@ -36,6 +36,7 @@ type ValueIdentityContext =
 
 type AliasScope = {
   bindings: ReadonlyMap<string, number>
+  bindingIds: ReadonlyMap<string, number>
   hasUnqualifiedOutput: boolean
   parent: AliasScope | undefined
 }
@@ -174,6 +175,7 @@ function createAliasScope(
   parent: AliasScope | undefined,
 ): AliasScope {
   const bindings = new Map<string, number>()
+  const bindingIds = new Map<string, number>()
 
   const bindSource = (source: From): void => {
     if (source.type === `unionFrom`) {
@@ -184,12 +186,14 @@ function createAliasScope(
     if (!bindings.has(source.alias)) {
       bindings.set(source.alias, bindings.size)
     }
+    bindingIds.set(source.bindingId, bindings.get(source.alias)!)
   }
 
   bindSource(query.from)
   query.join?.forEach(({ from }) => bindSource(from))
   return {
     bindings,
+    bindingIds,
     hasUnqualifiedOutput: query.from.type === `unionAll`,
     parent,
   }
@@ -198,11 +202,15 @@ function createAliasScope(
 function resolveAliasBinding(
   scope: AliasScope | undefined,
   alias: string,
+  bindingId?: string,
 ): readonly [number, number] | undefined {
   let current = scope
   let parentDistance = 0
   while (current) {
-    const binding = current.bindings.get(alias)
+    const binding =
+      bindingId === undefined
+        ? current.bindings.get(alias)
+        : current.bindingIds.get(bindingId)
     if (binding !== undefined) return [parentDistance, binding]
     // A result-level union has no source alias. Every downstream ref starts at
     // an output field, including nested paths such as profile.id, so it must
@@ -585,7 +593,11 @@ function canonicalizeExpression(
   if (expression.type === `ref`) {
     const explicitAlias = getPropRefSourceAlias(expression)
     if (explicitAlias !== undefined) {
-      const binding = resolveAliasBinding(scope, explicitAlias)
+      const binding = resolveAliasBinding(
+        scope,
+        explicitAlias,
+        expression.bindingId,
+      )
       if (binding !== undefined) {
         return {
           type: `ref`,
@@ -615,7 +627,11 @@ function canonicalizeExpression(
       }
     }
 
-    const binding = resolveAliasBinding(scope, expression.path[0] ?? ``)
+    const binding = resolveAliasBinding(
+      scope,
+      expression.path[0] ?? ``,
+      expression.bindingId,
+    )
     return {
       type: `ref`,
       path:

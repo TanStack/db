@@ -56,221 +56,62 @@ describe(`Alias validation in subqueries`, () => {
     votesCollection = collections.votesCollection
   })
 
-  test(`should throw DuplicateAliasInSubqueryError when subquery reuses a parent query collection alias`, () => {
-    expect(() => {
-      createLiveQueryCollection({
-        startSync: true,
-        query: (q) => {
-          const locksAgg = q
-            .from({ lock: locksCollection })
-            .join({ vote: votesCollection }, ({ lock, vote }) =>
-              eq(lock._id, vote.lockId),
-            )
-            .select(({ lock }) => ({
-              _id: lock._id,
-              lockName: lock.name,
-            }))
-
-          return q
-            .from({ vote: votesCollection }) // Reuses "vote" alias from subquery
-            .join({ lock: locksAgg }, ({ vote, lock }) =>
-              eq(lock._id, vote.lockId),
-            )
-            .select(({ vote, lock }) => ({
-              voteId: vote._id,
-              lockName: lock.lockName,
-            }))
-        },
-      })
-    }).toThrow(/Subquery uses alias "vote"/)
-  })
-
-  test(`should throw DuplicateAliasInSubqueryError when an include reuses a parent alias`, () => {
-    expect(() => {
-      createLiveQueryCollection({
-        startSync: true,
-        query: (q) =>
-          q.from({ lock: locksCollection }).select(({ lock: parentLock }) => ({
-            _id: parentLock._id,
-            votes: q
-              .from({ lock: votesCollection })
-              .where(({ lock: childLock }) =>
-                eq(childLock.lockId, parentLock._id),
-              ),
-          })),
-      })
-    }).toThrow(/Subquery uses alias "lock"/)
-  })
-
-  // The include sees the outer subquery alias, so reusing it would shadow the
-  // parent row. Before this check the correlation silently read the include's
-  // own source and returned empty children.
-  test(`should throw DuplicateAliasInSubqueryError when an include reuses a parent subquery alias`, () => {
-    expect(() => {
-      createLiveQueryCollection({
-        startSync: true,
-        query: (q) => {
-          const namedLocks = q
-            .from({ source: locksCollection })
-            .select(({ source }) => ({ _id: source._id, name: source.name }))
-          return q
-            .from({ lock: namedLocks })
-            .select(({ lock: parentLock }) => ({
-              _id: parentLock._id,
-              votes: q
-                .from({ lock: votesCollection })
-                .where(({ lock: childLock }) =>
-                  eq(childLock.lockId, parentLock._id),
-                ),
-            }))
-        },
-      })
-    }).toThrow(/Subquery uses alias "lock"/)
-  })
-
-  test(`should throw DuplicateAliasInSubqueryError when a nested include reuses a grandparent subquery alias`, () => {
-    expect(() => {
-      createLiveQueryCollection({
-        startSync: true,
-        query: (q) => {
-          const namedLocks = q
-            .from({ source: locksCollection })
-            .select(({ source }) => ({ _id: source._id, name: source.name }))
-          return q.from({ lock: namedLocks }).select(({ lock }) => ({
+  // The reported form: the joined QueryRef and its caller reuse "vote".
+  // Its projected output keeps the join multiplicity and source roles.
+  test(`ancestor alias reuse keeps the joined rows`, async () => {
+    const live = createLiveQueryCollection({
+      startSync: true,
+      query: (q) => {
+        const locksAgg = q
+          .from({ lock: locksCollection })
+          .join({ vote: votesCollection }, ({ lock, vote }) =>
+            eq(lock._id, vote.lockId),
+          )
+          .select(({ lock }) => ({
             _id: lock._id,
-            votes: toArray(
-              q
-                .from({ vote: votesCollection })
-                .where(({ vote }) => eq(vote.lockId, lock._id))
-                .select(({ vote }) => ({
-                  _id: vote._id,
-                  siblings: toArray(
-                    q
-                      .from({ lock: votesCollection })
-                      .where(({ lock: sibling }) =>
-                        eq(sibling.lockId, vote.lockId),
-                      )
-                      .select(({ lock: sibling }) => ({ _id: sibling._id })),
-                  ),
-                })),
-            ),
+            lockName: lock.name,
           }))
-        },
-      })
-    }).toThrow(/Subquery uses alias "lock"/)
+
+        return q
+          .from({ vote: votesCollection })
+          .join({ lock: locksAgg }, ({ vote, lock }) =>
+            eq(lock._id, vote.lockId),
+          )
+          .select(({ vote, lock }) => ({
+            voteId: vote._id,
+            lockName: lock.lockName,
+          }))
+      },
+    })
+    try {
+      expect(
+        live.toArray.map((row) => `${row.voteId}/${row.lockName}`).sort(),
+      ).toEqual([`1/Lock A`, `1/Lock A`, `2/Lock A`, `2/Lock A`, `3/Lock B`])
+    } finally {
+      await live.cleanup()
+    }
   })
 
-  // A unionAll() branch inside an include is part of the include's scope, so
-  // its aliases cannot shadow the parent row either.
-  test(`should throw DuplicateAliasInSubqueryError when an include's unionAll branch reuses a parent subquery alias`, () => {
-    expect(() => {
-      createLiveQueryCollection({
-        startSync: true,
-        query: (q) => {
-          const namedLocks = q
-            .from({ source: locksCollection })
-            .select(({ source }) => ({ _id: source._id, name: source.name }))
-          return q
-            .from({ lock: namedLocks })
-            .select(({ lock: parentLock }) => ({
-              _id: parentLock._id,
-              votes: toArray(
-                q
-                  .unionAll(
-                    q
-                      .from({ lock: votesCollection })
-                      .select(({ lock: vote }) => ({ voteId: vote._id })),
-                    q
-                      .from({ other: votesCollection })
-                      .select(({ other }) => ({ voteId: other._id })),
-                  )
-                  .innerJoin(
-                    { anchor: votesCollection },
-                    ({ voteId, anchor }) => eq(voteId, anchor._id),
-                  )
-                  .where(({ anchor }) => eq(anchor.lockId, parentLock._id))
-                  .select(({ voteId }) => ({ voteId })),
-              ),
-            }))
-        },
-      })
-    }).toThrow(/Subquery uses alias "lock"/)
-  })
-
-  // A from() subquery inside an include can read the parent row through its
-  // callbacks, so it cannot shadow the parent alias either.
-  test(`should throw DuplicateAliasInSubqueryError when an include's from() subquery reuses a parent subquery alias`, () => {
-    expect(() => {
-      createLiveQueryCollection({
-        startSync: true,
-        query: (q) => {
-          const namedLocks = q
-            .from({ source: locksCollection })
-            .select(({ source }) => ({ _id: source._id, name: source.name }))
-          return q
-            .from({ lock: namedLocks })
-            .select(({ lock: parentLock }) => ({
-              _id: parentLock._id,
-              votes: toArray(
-                q
-                  .from({
-                    vote: q
-                      .from({ lock: votesCollection })
-                      .select(({ lock }) => ({
-                        voteId: lock._id,
-                        lockId: lock.lockId,
-                        lockName: parentLock.name,
-                      })),
-                  })
-                  .where(({ vote }) => eq(vote.lockId, parentLock._id))
-                  .select(({ vote }) => ({ voteId: vote.voteId })),
-              ),
-            }))
-        },
-      })
-    }).toThrow(/Subquery uses alias "lock"/)
-  })
-
-  test(`should throw DuplicateAliasInSubqueryError when a from() subquery inside an include's unionAll branch reuses a parent subquery alias`, () => {
-    expect(() => {
-      createLiveQueryCollection({
-        startSync: true,
-        query: (q) => {
-          const namedLocks = q
-            .from({ source: locksCollection })
-            .select(({ source }) => ({ _id: source._id, name: source.name }))
-          return q
-            .from({ lock: namedLocks })
-            .select(({ lock: parentLock }) => ({
-              _id: parentLock._id,
-              votes: toArray(
-                q
-                  .unionAll(
-                    q
-                      .from({
-                        mine: q
-                          .from({ lock: votesCollection })
-                          .select(({ lock }) => ({
-                            voteId: lock._id,
-                            lockName: parentLock.name,
-                          })),
-                      })
-                      .select(({ mine }) => ({ voteId: mine.voteId })),
-                    q
-                      .from({ other: votesCollection })
-                      .select(({ other }) => ({ voteId: other._id })),
-                  )
-                  .innerJoin(
-                    { anchor: votesCollection },
-                    ({ voteId, anchor }) => eq(voteId, anchor._id),
-                  )
-                  .where(({ anchor }) => eq(anchor.lockId, parentLock._id))
-                  .select(({ voteId }) => ({ voteId })),
-              ),
-            }))
-        },
-      })
-    }).toThrow(/Subquery uses alias "lock"/)
+  test(`a reusable child query may repeat its parent's source alias`, async () => {
+    const live = createLiveQueryCollection({
+      startSync: true,
+      query: (q) => {
+        const reusable = q
+          .from({ item: locksCollection })
+          .select(({ item }) => ({ id: item._id }))
+        return q
+          .from({ item: locksCollection })
+          .innerJoin({ child: reusable }, ({ item, child }) =>
+            eq(item._id, child.id),
+          )
+          .select(({ item }) => ({ id: item._id }))
+      },
+    })
+    try {
+      expect(live.toArray.map((row) => row.id).sort()).toEqual([1, 2])
+    } finally {
+      await live.cleanup()
+    }
   })
 
   test(`should reject two joins that use the same alias in one query`, () => {
@@ -289,6 +130,23 @@ describe(`Alias validation in subqueries`, () => {
             .select(({ lock }) => ({ _id: lock._id })),
       })
     }).toThrow(/alias "vote" more than once/)
+  })
+
+  test(`should reject one alias repeated across unionAll branches`, () => {
+    expect(() =>
+      createLiveQueryCollection({
+        startSync: true,
+        query: (q) =>
+          q.unionAll(
+            q
+              .from({ item: locksCollection })
+              .select(({ item }) => ({ _id: item._id })),
+            q
+              .from({ item: votesCollection })
+              .select(({ item }) => ({ _id: item._id })),
+          ),
+      }),
+    ).toThrow(/Duplicate source alias "item" in unionAll query branches/)
   })
 
   // A unionAll() parent row holds the branches' projected fields, not their

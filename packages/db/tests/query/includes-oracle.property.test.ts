@@ -1,6 +1,5 @@
 import { fc, test as fcTest } from '@fast-check/vitest'
 import { describe, expect } from 'vitest'
-import { DuplicateAliasInSubqueryError } from '../../src/errors.js'
 import {
   concat,
   createLiveQueryCollection,
@@ -34,7 +33,6 @@ import type { OracleSyncChange as SyncChange } from './includes-oracle-helpers.j
 import type {
   ScopedAliases,
   ScopedInclude,
-  ScopedNaming,
   ScopedPart,
   ScopedRef,
   ScopedResultRow,
@@ -5590,12 +5588,13 @@ describe(`includes recompute oracle`, () => {
 /**
  * # Does an alias name in one scope leak into another?
  *
- * Law: ARCHITECTURE.md normative law 1. Changing any accepted alias to another
- * legal name cannot change an explicitly projected result. Aliases are lexical
- * names; a `SourceId` is the plan's identity for one Collection reference
- * (§Identity). A `from()` subquery, a `unionAll()` branch, a join subquery,
- * and an include are sibling scopes when neither can see the other's names,
- * so they may reuse names freely.
+ * Law: ARCHITECTURE.md normative law 1. Changing an accepted alias in a
+ * structured plan to another legal name cannot change an explicitly projected
+ * result when its references are renamed with it. Alias-observing functional
+ * callbacks are outside this equivalence. Aliases are lexical names; a
+ * `SourceId` is the plan's identity for one Collection reference
+ * (§Identity). Sibling scopes may reuse names, and a nested scope may shadow
+ * an ancestor while captured references retain their original binding.
  *
  * Bug class: a plan rewrite loses a `SourceId`, or alias text otherwise
  * decides which source's input, request, or remap is used. A sibling source
@@ -5616,12 +5615,12 @@ describe(`includes recompute oracle`, () => {
  * eager or on-demand finite providers. Alias slots draw from a three-name
  * pool, so cross-scope reuse is frequent.
  *
- * Legality follows the documented lexical rules: one scope keeps its names
- * distinct, and no scope inside an include can reuse an alias its ancestors
- * can see. One in four scenarios draws any naming. An illegal naming must be
- * rejected when the query is created; a shadowing naming must be rejected
- * with `DuplicateAliasInSubqueryError`. `validate-aliases.test.ts` pins the
- * named shadowing cases.
+ * Legality follows the documented lexical rules: one scope and the branches
+ * of one `unionAll()` keep their names distinct; ancestor shadowing is legal.
+ * One in four scenarios draws any naming. A same-scope or union-branch repeat
+ * must be rejected when the query is created. The exact-key companion
+ * `includes-alias-shadowing-oracle.test.ts` checks public aliases that this
+ * model intentionally removes from explicitly projected rows.
  *
  * Checks at each checkpoint (after preload and after every source write):
  *
@@ -5633,15 +5632,16 @@ describe(`includes recompute oracle`, () => {
  *    aliases, so they must match exactly as bags.
  *
  * Limits: the model covers this grammar only. Rows and members are compared
- * as bags because no query here promises an order. Publication events,
- * observer timing, unload, and nested includes are outside this owner; the
- * includes publication and recomputation owners cover them for their shapes.
+ * as bags because no query here promises an order. Public key shape,
+ * publication events, observer timing, unload, and nested includes are outside
+ * this owner; the exact-key, publication, and recomputation owners cover their
+ * stated shapes.
  * The review record is
  * `docs/contributing/oracle-reviews/issue-1975-scope-identity.md`.
  */
 async function expectScopedNamingRejected(
   scenario: ScopedScenario,
-  naming: Exclude<ScopedNaming, `legal`>,
+  naming: `sameScope`,
 ) {
   const sources = createScopedSources(scenario)
   let created: ReturnType<typeof createScopedQuery> | undefined
@@ -5651,7 +5651,7 @@ async function expectScopedNamingRejected(
         created = createScopedQuery(scenario.shape, scenario.aliases, sources)
       },
       `${naming} naming ${JSON.stringify(scenario.aliases)} must be rejected`,
-    ).toThrow(naming === `shadowing` ? DuplicateAliasInSubqueryError : Error)
+    ).toThrow()
   } finally {
     await created?.cleanup()
     await Promise.all(
@@ -5665,7 +5665,7 @@ async function expectScopedAlphaRenamingHolds(
   expectedAfterPreload?: Array<ScopedResultRow>,
 ) {
   const naming = classifyScopedNaming(scenario.shape, scenario.aliases)
-  if (naming !== `legal`) {
+  if (naming === `sameScope`) {
     await expectScopedNamingRejected(scenario, naming)
     return
   }
@@ -5872,6 +5872,45 @@ const pinnedScopeWitnesses: Array<[string, ScopedScenario]> = [
     ),
   ],
   [
+    `an include shadows its parent source alias`,
+    {
+      ...pinnedScenario(
+        {
+          topology: `fromSubquery`,
+          subquery: plainSubquery,
+          include: refsInclude,
+        },
+        { outer: `x`, sub: `p`, joined: `j`, noted: `n`, include: `x` },
+      ),
+      writes: [
+        {
+          source: `refs`,
+          type: `put`,
+          row: { id: 40, partId: 2, clientId: 1 },
+        },
+        { source: `parts`, type: `put`, row: { id: 4, active: true } },
+      ],
+    },
+  ],
+  [
+    `a nested include source shadows its outer include source`,
+    pinnedScenario(
+      {
+        topology: `fromSubquery`,
+        subquery: plainSubquery,
+        include: { ...refsInclude, body: `nestedFrom` },
+      },
+      {
+        outer: `o`,
+        sub: `p`,
+        joined: `j`,
+        noted: `n`,
+        includeOuter: `x`,
+        include: `x`,
+      },
+    ),
+  ],
+  [
     `a join subquery reuses the alias of a collapsed pure wrapper`,
     pinnedScenario(
       { topology: `wrapper`, wrapperJoin: `inner` },
@@ -5880,7 +5919,7 @@ const pinnedScopeWitnesses: Array<[string, ScopedScenario]> = [
   ],
 ]
 
-describe(`includes alpha-renaming across sibling scopes`, () => {
+describe(`includes alpha-renaming across lexical scopes`, () => {
   fcTest(
     `an include that reuses a joined subquery alias keeps the reported rows`,
     // Issue #1975: only part 1 has a ref for client 1; parts 1 and 2 are
@@ -5911,7 +5950,7 @@ describe(`includes alpha-renaming across sibling scopes`, () => {
     }
   }
 
-  fcTest(`legality rejects shadowing and same-scope reuse`, () => {
+  fcTest(`legality admits shadowing and rejects same-scope reuse`, () => {
     const shape: ScopedShape = {
       topology: `fromSubquery`,
       subquery: { ...plainSubquery, joins: `refsThenNotes` },
@@ -5950,17 +5989,23 @@ describe(`includes alpha-renaming across sibling scopes`, () => {
     expect(
       classifyScopedNaming(nestedShape, {
         ...legal,
-        include: `c`,
-        includeOuter: `c`,
-      }),
-    ).toBe(`legal`)
-    expect(
-      classifyScopedNaming(nestedShape, {
-        ...legal,
         include: `a`,
         includeOuter: `c`,
       }),
     ).toBe(`shadowing`)
+    expect(
+      classifyScopedNaming(nestedShape, {
+        ...legal,
+        include: `c`,
+        includeOuter: `c`,
+      }),
+    ).toBe(`shadowing`)
+    expect(
+      classifyScopedNaming(
+        { topology: `unionParent`, includeSource: `refs` },
+        { activeBranch: `a`, inactiveBranch: `a`, anchor: `b`, include: `c` },
+      ),
+    ).toBe(`sameScope`)
   })
 
   for (const { label, options } of generatedCampaigns(
@@ -5969,7 +6014,7 @@ describe(`includes alpha-renaming across sibling scopes`, () => {
     1715,
   )) {
     fcTest.prop([scopedScenarioArbitrary], options)(
-      `is unchanged when sibling scopes reuse alias names [${label}]`,
+      `is unchanged when lexical scopes reuse alias names [${label}]`,
       (scenario) => expectScopedAlphaRenamingHolds(scenario),
       // Each run builds four live queries; scale with the run budget.
       Math.max(5_000, oracleRuns(80) * 50),

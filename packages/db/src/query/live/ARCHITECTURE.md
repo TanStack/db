@@ -138,10 +138,13 @@ publication to the builder while the graph keeps its private contributions.
 ## Identity
 
 Aliases are lexical query-language names rather than source runtime identities.
-The query builder requires collection aliases to be unique within each lexical
-scope and rejects nested queries that shadow an ancestor alias. Sibling include
-scopes may reuse an alias because neither alias is visible to the other.
-Compilation then assigns opaque IDs to the accepted plan:
+The query builder requires source aliases to be unique within each lexical
+scope. A nested query may shadow an ancestor alias: a reference captured from
+an earlier callback retains that source's lexical binding, while a callback in
+the nested scope reads its local source. Sibling scopes may also reuse aliases.
+The builder gives each source reference a binding ID when it is created and
+preserves that ID when it places or rewrites the query. Compilation assigns
+separate opaque IDs to the accepted plan:
 
 ```ts
 type SourceId = Brand<string, 'SourceId'>
@@ -149,11 +152,15 @@ type RelationNodeId = Brand<string, 'RelationNodeId'>
 type MaterializationEdgeId = Brand<string, 'MaterializationEdgeId'>
 ```
 
-An explicit projection can alpha-normalize aliases because its field names
-define the public shape. Without a projection, joined and grouped queries return
-a namespaced row whose keys are the lexical aliases. Those observable keys are
-part of query identity. Alias text may otherwise remain as debug metadata
-without becoming source identity.
+An explicit structured projection can alpha-normalize aliases because its field
+names define the public shape. Its query identity resolves captured references
+by binding role, including when the captured alias is shadowed. A functional
+callback may inspect its input keys; alias equivalence applies to it only when
+the callback is alias-equivariant. Without a projection, joined and grouped
+queries return a namespaced row whose keys are the lexical aliases. Those
+observable keys are part of query identity. A functional callback still
+receives the user's lexical keys. Alias text may otherwise remain as debug
+metadata without becoming source identity.
 
 A plan rewrite must preserve each Collection reference's `SourceId`. The
 optimizer reuses the reference when it copies, wraps, or collapses a source,
@@ -1339,11 +1346,14 @@ create recursive Collection machinery.
 
 ## Normative laws
 
-1. **Alpha-renaming:** changing any accepted alias to another unused name cannot
-   change an explicitly projected result. An implicit namespaced result keeps
-   its aliases as public field names. Aliases must be unique within one lexical
-   scope and cannot shadow an ancestor alias. Sibling scopes may reuse aliases,
-   except that the branches of one `unionAll()` share one alias namespace.
+1. **Alpha-renaming:** changing an accepted alias to another unused name in a
+   structured plan cannot change an explicitly projected result when references
+   are renamed with their binding. The same equivalence applies to a functional
+   callback only when it is alias-equivariant. A captured reference retains its
+   source even when a nested query shadows its alias. An implicit namespaced
+   result and a functional callback keep the user's aliases as public field
+   names. Aliases must be unique within one lexical scope. The branches of one
+   `unionAll()` share one alias namespace.
 2. **Contribution conservation:** a public row exists exactly when its reduced
    supporting weight and collision policy produce one.
 3. **Batch partition:** equivalent valid split and atomic deliveries converge.
@@ -1429,7 +1439,8 @@ keep the meanings defined there.
 | --------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------- |
 | State equivalence, route lifecycle, transition history, and batch partition             | `packages/db/tests/query/includes-oracle.property.test.ts`                                                                      |
 | Joined multiplicity, alias identity, and null-key normalization                         | `packages/db/tests/query/includes-query-shape-oracle.test.ts`                                                                   |
-| Alias reuse across sibling scopes and `SourceId` preservation                           | `packages/db/tests/query/includes-oracle.property.test.ts` (sibling scopes), `packages/db/tests/query/validate-aliases.test.ts` |
+| Alias reuse, captured bindings, public keys, and `SourceId` preservation                | (`packages/db/tests/query/includes-oracle.property.test.ts`, `packages/db/tests/query/includes-alias-shadowing-oracle.test.ts`) |
+| Same-scope and union alias rejection                                                    | `packages/db/tests/query/validate-aliases.test.ts`                                                                              |
 | Demand, cancellation, and progressive timing                                            | `packages/db/tests/query/includes-temporal-oracle.test.ts`                                                                      |
 | Optimistic confirmation, rollback, and later reactivity                                 | `packages/db/tests/query/includes-optimistic-oracle.property.test.ts`                                                           |
 | Coherent layered publication                                                            | `packages/db/tests/query/includes-publication-oracle.test.ts`                                                                   |

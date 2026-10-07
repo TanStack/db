@@ -358,7 +358,10 @@ export class BaseQueryBuilder<TContext extends Context = Context> {
     // Create a temporary context for the callback
     const currentAliases = this._getCurrentAliases()
     const newAliases = [...currentAliases, alias]
-    const refProxy = createRefProxy(newAliases) as RefsForContext<
+    const refProxy = createRefProxy(
+      newAliases,
+      new Map([...this._getCurrentBindings(), [alias, from.bindingId]]),
+    ) as RefsForContext<
       MergeContextForJoinCallback<TContext, SchemaFromSource<TSource>>
     >
 
@@ -510,7 +513,10 @@ export class BaseQueryBuilder<TContext extends Context = Context> {
    */
   where(callback: WhereCallback<TContext>): QueryBuilder<TContext> {
     const aliases = this._getCurrentAliases()
-    const refProxy = createRefProxy(aliases) as RefsForContext<TContext>
+    const refProxy = createRefProxy(
+      aliases,
+      this._getCurrentBindings(),
+    ) as RefsForContext<TContext>
     const rawExpression = callback(refProxy)
 
     // Allow bare boolean column references like `.where(({ u }) => u.active)`
@@ -568,8 +574,8 @@ export class BaseQueryBuilder<TContext extends Context = Context> {
     // Add $selected namespace if SELECT clause exists (either regular or functional)
     const refProxy = (
       this.query.select || this.query.fnSelect
-        ? createRefProxyWithSelected(aliases)
-        : createRefProxy(aliases)
+        ? createRefProxyWithSelected(aliases, this._getCurrentBindings())
+        : createRefProxy(aliases, this._getCurrentBindings())
     ) as RefsForContext<TContext>
     const rawExpression = callback(refProxy)
 
@@ -643,7 +649,10 @@ export class BaseQueryBuilder<TContext extends Context = Context> {
     ) => SelectObject | ScalarSelectValue,
   ) {
     const aliases = this._getCurrentAliases()
-    const refProxy = createRefProxy(aliases) as RefsForContext<TContext>
+    const refProxy = createRefProxy(
+      aliases,
+      this._getCurrentBindings(),
+    ) as RefsForContext<TContext>
     let selectObject = callback(refProxy)
 
     // Returning a top-level alias directly is equivalent to spreading it.
@@ -696,8 +705,8 @@ export class BaseQueryBuilder<TContext extends Context = Context> {
     // Add $selected namespace if SELECT clause exists (either regular or functional)
     const refProxy = (
       this.query.select || this.query.fnSelect
-        ? createRefProxyWithSelected(aliases)
-        : createRefProxy(aliases)
+        ? createRefProxyWithSelected(aliases, this._getCurrentBindings())
+        : createRefProxy(aliases, this._getCurrentBindings())
     ) as RefsForContext<TContext>
     const result = callback(refProxy)
 
@@ -775,7 +784,10 @@ export class BaseQueryBuilder<TContext extends Context = Context> {
    */
   groupBy(callback: GroupByCallback<TContext>): QueryBuilder<TContext> {
     const aliases = this._getCurrentAliases()
-    const refProxy = createRefProxy(aliases) as RefsForContext<TContext>
+    const refProxy = createRefProxy(
+      aliases,
+      this._getCurrentBindings(),
+    ) as RefsForContext<TContext>
     const result = callback(refProxy)
 
     const newExpressions = Array.isArray(result)
@@ -903,6 +915,22 @@ export class BaseQueryBuilder<TContext extends Context = Context> {
     }
 
     return aliases
+  }
+
+  private _getCurrentBindings(): Map<string, string> {
+    const bindings = new Map<string, string>()
+    const from = this.query.from
+    if (from?.type === `unionFrom`) {
+      for (const source of from.sources) {
+        bindings.set(source.alias, source.bindingId)
+      }
+    } else if (from && from.type !== `unionAll`) {
+      bindings.set(from.alias, from.bindingId)
+    }
+    for (const join of this.query.join ?? []) {
+      bindings.set(join.from.alias, join.from.bindingId)
+    }
+    return bindings
   }
 
   /**
@@ -1216,6 +1244,7 @@ function collectRefsFromSelectValue(value: unknown): Array<PropRef> {
 
 function collectExternalRefsFromQuery(query: QueryIR): Array<PropRef> {
   const localAliases = new Set(collectQueryAliases(query))
+  const localBindings = collectDeclaredBindings(query)
   const refs: Array<PropRef> = []
   const addExpression = (expression: BasicExpression | Aggregate) => {
     refs.push(...collectRefsFromExpression(expression))
@@ -1257,11 +1286,13 @@ function collectExternalRefsFromQuery(query: QueryIR): Array<PropRef> {
   const seen = new Set<string>()
   return refs.filter((ref) => {
     const alias = ref.path.length > 1 ? ref.path[0] : undefined
-    const path = JSON.stringify(ref.path)
+    const path = JSON.stringify([ref.bindingId, ref.path])
     if (
       alias == null ||
       alias === `$selected` ||
-      localAliases.has(alias) ||
+      (ref.bindingId !== undefined
+        ? localBindings.has(ref.bindingId)
+        : localAliases.has(alias)) ||
       seen.has(path)
     ) {
       return false
@@ -1275,6 +1306,7 @@ function collectParentRefsFromQuery(
   query: QueryIR,
   parentAliases: Array<string>,
 ): Array<PropRef> {
+  const localBindings = collectDeclaredBindings(query)
   const refs: Array<PropRef> = []
   const addExpression = (expression: BasicExpression | Aggregate) => {
     refs.push(...collectRefsFromExpression(expression))
@@ -1317,10 +1349,11 @@ function collectParentRefsFromQuery(
 
   const seen = new Set<string>()
   return refs.filter((ref) => {
-    const path = JSON.stringify(ref.path)
+    const path = JSON.stringify([ref.bindingId, ref.path])
     if (
       ref.path[0] == null ||
       !parentAliases.includes(ref.path[0]) ||
+      (ref.bindingId !== undefined && localBindings.has(ref.bindingId)) ||
       seen.has(path)
     ) {
       return false
@@ -1343,13 +1376,20 @@ function collectExternalParentAliases(query: QueryIR): Array<string> {
 /**
  * Checks whether a WHERE clause references any parent alias.
  */
-function referencesParent(where: Where, parentAliases: Array<string>): boolean {
+function referencesParent(
+  where: Where,
+  parentAliases: Array<string>,
+  localBindings: ReadonlySet<string>,
+): boolean {
   const expr =
     typeof where === `object` && `expression` in where
       ? where.expression
       : where
   return collectRefsFromExpression(expr).some(
-    (ref) => ref.path[0] != null && parentAliases.includes(ref.path[0]),
+    (ref) =>
+      ref.path[0] != null &&
+      parentAliases.includes(ref.path[0]) &&
+      (ref.bindingId === undefined || !localBindings.has(ref.bindingId)),
   )
 }
 
@@ -1368,6 +1408,7 @@ function buildIncludesSubquery(
 
   // Collect child's own aliases
   const childAliases = collectQueryAliases(childQuery)
+  const childBindings = collectDeclaredBindings(childQuery)
   const visibleParentAliases = [
     ...new Set([...parentAliases, ...collectExternalParentAliases(childQuery)]),
   ]
@@ -1398,6 +1439,7 @@ function buildIncludesSubquery(
           expr.args[1]!,
           visibleParentAliases,
           childAliases,
+          childBindings,
         )
         if (result) {
           parentRef = result.parentRef
@@ -1425,6 +1467,7 @@ function buildIncludesSubquery(
               arg.args[1]!,
               visibleParentAliases,
               childAliases,
+              childBindings,
             )
             if (result) {
               parentRef = result.parentRef
@@ -1484,7 +1527,7 @@ function buildIncludesSubquery(
   const pureChildWhere: Array<Where> = []
   const parentFilters: Array<Where> = []
   for (const w of modifiedWhere) {
-    if (referencesParent(w, visibleParentAliases)) {
+    if (referencesParent(w, visibleParentAliases, childBindings)) {
       parentFilters.push(w)
     } else {
       pureChildWhere.push(w)
@@ -1557,6 +1600,37 @@ function collectQueryAliases(query: QueryIR): Array<string> {
   return [...aliases]
 }
 
+function collectDeclaredBindings(query: QueryIR): Set<string> {
+  const bindings = new Set<string>()
+  const visitSelect = (value: unknown): void => {
+    if (value instanceof IncludesSubquery) {
+      visit(value.query)
+    } else if (value instanceof ConditionalSelect) {
+      value.branches.forEach((branch) => visitSelect(branch.value))
+      if (value.defaultValue !== undefined) visitSelect(value.defaultValue)
+    } else if (isNestedSelectRecord(value)) {
+      Object.values(value).forEach(visitSelect)
+    }
+  }
+  const visit = (nested: QueryIR): void => {
+    const addSource = (source: CollectionRef | QueryRef) => {
+      bindings.add(source.bindingId)
+      if (source.type === `queryRef`) visit(source.query)
+    }
+    if (nested.from.type === `unionAll`) {
+      nested.from.queries.forEach(visit)
+    } else if (nested.from.type === `unionFrom`) {
+      nested.from.sources.forEach(addSource)
+    } else {
+      addSource(nested.from)
+    }
+    nested.join?.forEach(({ from }) => addSource(from))
+    if (nested.select) visitSelect(nested.select)
+  }
+  visit(query)
+  return bindings
+}
+
 function collectFromAliases(from: QueryIR[`from`]): Array<string> {
   if (from.type === `unionFrom`) {
     return from.sources.map((source) => source.alias)
@@ -1578,8 +1652,17 @@ function extractCorrelation(
   argB: BasicExpression,
   parentAliases: Array<string>,
   childAliases: Array<string>,
+  childBindings: ReadonlySet<string>,
 ): { parentRef: PropRef; childRef: PropRef } | undefined {
   if (argA.type === `ref` && argB.type === `ref`) {
+    if (argA.bindingId !== undefined && argB.bindingId !== undefined) {
+      const aIsChild = childBindings.has(argA.bindingId)
+      const bIsChild = childBindings.has(argB.bindingId)
+      if (aIsChild === bIsChild) return undefined
+      return aIsChild
+        ? { parentRef: argB, childRef: argA }
+        : { parentRef: argA, childRef: argB }
+    }
     const aAlias = argA.path[0]
     const bAlias = argB.path[0]
 

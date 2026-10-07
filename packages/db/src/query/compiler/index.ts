@@ -16,12 +16,12 @@ import {
   createParentContext,
   createValueIdentity,
   getParentContextIdentity,
+  getParentContextProjectedBindings,
   getParentContextValue,
 } from '../equality-value-identity.js'
 import {
   CollectionInputNotFoundError,
   DistinctRequiresSelectError,
-  DuplicateAliasInSubqueryError,
   FnSelectWithGroupByError,
   HavingRequiresGroupByError,
   LimitOffsetRequireOrderByError,
@@ -165,6 +165,7 @@ type ProjectedSourceIncludePath = {
 type CompiledParentProjection = {
   alias: string
   field: Array<string>
+  bindingKey?: string
   compiled: (row: NamespacedRow) => unknown
 }
 
@@ -177,15 +178,22 @@ function projectParentContext(
   const inheritedValue = getParentContextValue(inherited)
   const parentContext: Record<string, any> =
     inheritedValue === undefined ? {} : { ...inheritedValue }
+  const projectedBindings = {
+    ...getParentContextProjectedBindings(inherited),
+  }
   const projectedIdentity: Array<unknown> = []
 
   for (const projection of projections) {
     const projectedValue = projection.compiled(nsRow)
     projectedIdentity.push([
       projection.alias,
+      projection.bindingKey,
       projection.field,
       valueIdentity.equality(projectedValue),
     ])
+    if (projection.bindingKey !== undefined) {
+      projectedBindings[projection.bindingKey] = projectedValue
+    }
     if (projection.field.length === 0) {
       const projectedAlias = projectedValue
       parentContext[projection.alias] =
@@ -216,10 +224,11 @@ function projectParentContext(
     target[projection.field[projection.field.length - 1]!] = projectedValue
   }
 
-  return createParentContext(parentContext, [
-    getParentContextIdentity(inherited),
-    projectedIdentity,
-  ])
+  return createParentContext(
+    parentContext,
+    [getParentContextIdentity(inherited), projectedIdentity],
+    projectedBindings,
+  )
 }
 
 function parameterizeByParentRoutes(
@@ -233,15 +242,13 @@ function parameterizeByParentRoutes(
     parentKeyStream,
     (rowKey, row, correlationKey, parentContext) => {
       const namespaced = {
+        ...getParentContextValue(parentContext),
         ...(row as Record<string, unknown>),
       } as Record<string, any>
       namespaced[mainSource] = {
         ...namespaced[mainSource],
         [INCLUDES_PUBLIC_KEY]:
           namespaced[mainSource]?.[INCLUDES_PUBLIC_KEY] ?? rowKey,
-      }
-      if (parentContext != null) {
-        Object.assign(namespaced, getParentContextValue(parentContext))
       }
       attachRouteMetadata(namespaced, correlationKey, parentContext)
       return [
@@ -708,6 +715,9 @@ export function compileQuery(
         subquery.parentProjection?.map((ref) => ({
           alias: ref.path[0]!,
           field: ref.path.slice(1),
+          bindingKey: ref.bindingId
+            ? JSON.stringify([ref.bindingId, ref.path.slice(1)])
+            : undefined,
           compiled: compileExpression(ref),
         })) ?? []
       // One routing function serves both the parent-key branch and the
@@ -1306,43 +1316,8 @@ function canonicalizeSelectedRows(
   ) as NamespacedAndKeyedStream
 }
 
-/**
- * Collects aliases used for DIRECT collection references (not subqueries).
- * Used to validate that subqueries don't reuse parent query collection aliases.
- * Only direct CollectionRef aliases matter - QueryRef aliases don't cause conflicts.
- */
-function collectDirectCollectionAliases(query: QueryIR): Set<string> {
-  const aliases = new Set<string>()
-
-  // Collect FROM alias only if it's a direct collection reference
-  for (const source of getFromSources(query.from)) {
-    if (source.type === `collectionRef`) {
-      aliases.add(source.alias)
-    }
-  }
-
-  // Collect JOIN aliases only for direct collection references
-  if (query.join) {
-    for (const joinClause of query.join) {
-      if (joinClause.from.type === `collectionRef`) {
-        aliases.add(joinClause.from.alias)
-      }
-    }
-  }
-
-  return aliases
-}
-
-/**
- * Validates the structure of a query and its subqueries.
- * Checks that subqueries don't reuse collection aliases from parent queries.
- * This must be called on the RAW query before optimization.
- */
-function validateQueryStructure(
-  query: QueryIR,
-  parentCollectionAliases: Set<string> = new Set(),
-  visibleAliases: Set<string> = new Set(),
-): void {
+/** Validate each lexical scope before optimization changes the plan. */
+function validateQueryStructure(query: QueryIR): void {
   // One scope cannot name two sources alike.
   const levelAliases = getAllSources(query).map((source) => source.alias)
   for (const [index, alias] of levelAliases.entries()) {
@@ -1353,41 +1328,15 @@ function validateQueryStructure(
     }
   }
 
-  // A scope cannot shadow an alias that its ancestors can see.
-  for (const alias of collectScopeAliases(query)) {
-    if (visibleAliases.has(alias)) {
-      throw new DuplicateAliasInSubqueryError(alias, [...visibleAliases])
-    }
-  }
-
-  // Collect direct collection aliases from this query level
-  const currentLevelAliases = collectDirectCollectionAliases(query)
-
-  // Check if any current alias conflicts with parent aliases
-  for (const alias of currentLevelAliases) {
-    if (parentCollectionAliases.has(alias)) {
-      throw new DuplicateAliasInSubqueryError(
-        alias,
-        Array.from(parentCollectionAliases),
-      )
-    }
-  }
-
-  // Combine parent and current aliases for checking nested subqueries
-  const combinedAliases = new Set([
-    ...parentCollectionAliases,
-    ...currentLevelAliases,
-  ])
-
   // Recursively validate FROM subqueries
   if (query.from.type === `unionAll`) {
     for (const branch of query.from.queries) {
-      validateQueryStructure(branch, combinedAliases, visibleAliases)
+      validateQueryStructure(branch)
     }
   } else {
     for (const source of getFromSources(query.from)) {
       if (source.type === `queryRef`) {
-        validateQueryStructure(source.query, combinedAliases, visibleAliases)
+        validateQueryStructure(source.query)
       }
     }
   }
@@ -1396,37 +1345,16 @@ function validateQueryStructure(
   if (query.join) {
     for (const joinClause of query.join) {
       if (joinClause.from.type === `queryRef`) {
-        validateQueryStructure(
-          joinClause.from.query,
-          combinedAliases,
-          visibleAliases,
-        )
+        validateQueryStructure(joinClause.from.query)
       }
     }
   }
 
-  // An include sees every alias of its ancestors, including subquery
-  // aliases, so it cannot shadow any of them.
   if (query.select) {
-    // A parent row exposes its from and join aliases, not the aliases inside
-    // its unionAll() branches.
-    const scopeAliases = new Set([...visibleAliases, ...levelAliases])
     for (const { subquery } of extractIncludesFromSelect(query.select)) {
-      validateQueryStructure(subquery.query, combinedAliases, scopeAliases)
+      validateQueryStructure(subquery.query)
     }
   }
-}
-
-// unionAll() branches belong to the scope of the query that unions them.
-function collectScopeAliases(query: QueryIR): Array<string> {
-  const branchAliases =
-    query.from.type === `unionAll`
-      ? query.from.queries.flatMap(collectScopeAliases)
-      : []
-  return [
-    ...branchAliases,
-    ...getAllSources(query).map((source) => source.alias),
-  ]
 }
 
 /**
@@ -1714,18 +1642,13 @@ function wrapInputWithAlias(
       if (scalar) {
         const nsRow = attachRouteMetadata(
           {
+            ...getParentContextValue(scalar.parentContext),
             [alias]: scalar.value,
             [INCLUDES_PUBLIC_KEY]: scalar.publicKey,
           },
           scalar.correlationKey,
           scalar.parentContext,
         ) as unknown as NamespacedRow
-        if (
-          scalar.parentContext != null &&
-          typeof scalar.parentContext === `object`
-        ) {
-          Object.assign(nsRow, getParentContextValue(scalar.parentContext))
-        }
         return [key, nsRow] as [unknown, NamespacedRow]
       }
 
@@ -1739,9 +1662,9 @@ function wrapInputWithAlias(
       const cleanRow = route
         ? stripRouteMetadata(inputRow as Record<PropertyKey, unknown>)
         : inputRow
-      const nsRow: Record<string, any> = { [alias]: cleanRow }
-      if (route?.parentContext != null) {
-        Object.assign(nsRow, getParentContextValue(route.parentContext))
+      const nsRow: Record<string, any> = {
+        ...getParentContextValue(route?.parentContext),
+        [alias]: cleanRow,
       }
       if (route) {
         attachRouteMetadata(nsRow, route.correlationKey, route.parentContext)

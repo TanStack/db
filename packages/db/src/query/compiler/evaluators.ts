@@ -11,6 +11,11 @@ import {
   normalizeValue,
 } from '../../utils/comparison.js'
 import { getPropRefPropertyPath, getPropRefSourceAlias } from '../ir.js'
+import {
+  PARENT_PROJECTION_NOT_FOUND,
+  getParentContextProjectedValue,
+} from '../equality-value-identity.js'
+import { getNamespacedRouteMetadata } from './route-metadata.js'
 import type { BasicExpression, Func, PropRef } from '../ir.js'
 import type { NamespacedRow } from '../../types.js'
 
@@ -152,10 +157,20 @@ function compileRef(ref: PropRef): CompiledExpression {
     explicitAlias === undefined
       ? legacyPropertyPath
       : getPropRefPropertyPath(ref)
-
   if (!namespace) {
     throw new EmptyReferencePathError()
   }
+
+  const projectedBindingKey = ref.bindingId
+    ? JSON.stringify([ref.bindingId, propertyPath])
+    : undefined
+  const projectedParentValue = projectedBindingKey
+    ? (row: NamespacedRow) =>
+        getParentContextProjectedValue(
+          getNamespacedRouteMetadata(row, namespace)?.parentContext,
+          projectedBindingKey,
+        )
+    : undefined
 
   // Handle $selected namespace - references SELECT result fields
   if (namespace === `$selected`) {
@@ -196,17 +211,28 @@ function compileRef(ref: PropRef): CompiledExpression {
   // Pre-compile the property path navigation
   if (propertyPath.length === 0) {
     // Simple table reference
-    return (namespacedRow) => namespacedRow[tableAlias]
+    return (namespacedRow) => {
+      const projected = projectedParentValue?.(namespacedRow)
+      return projectedParentValue && projected !== PARENT_PROJECTION_NOT_FOUND
+        ? projected
+        : namespacedRow[tableAlias]
+    }
   } else if (propertyPath.length === 1) {
     // Single property access - most common case
     const prop = propertyPath[0]!
     return (namespacedRow) => {
+      const projected = projectedParentValue?.(namespacedRow)
+      if (projectedParentValue && projected !== PARENT_PROJECTION_NOT_FOUND)
+        return projected
       const tableData = namespacedRow[tableAlias]
       return tableData?.[prop]
     }
   } else {
     // Multiple property navigation
     return (namespacedRow) => {
+      const projected = projectedParentValue?.(namespacedRow)
+      if (projectedParentValue && projected !== PARENT_PROJECTION_NOT_FOUND)
+        return projected
       const tableData = namespacedRow[tableAlias]
       if (tableData === undefined) {
         return undefined

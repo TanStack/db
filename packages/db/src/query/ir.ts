@@ -69,6 +69,7 @@ export type Limit = number
 export type Offset = number
 
 let nextCollectionSourceId = 0
+let nextLexicalBindingId = 0
 
 /* Expressions */
 
@@ -82,26 +83,40 @@ export class CollectionRef extends BaseExpression {
   public type = `collectionRef` as const
   // Not an own property, so structural identity and hashing ignore it.
   readonly #sourceId = `source-${++nextCollectionSourceId}`
+  readonly #bindingId: string
   constructor(
     public collection: CollectionImpl,
     public alias: string,
+    bindingId?: string,
   ) {
     super()
+    this.#bindingId = bindingId ?? `binding-${++nextLexicalBindingId}`
   }
 
   /** Opaque runtime identity; aliases are lexical names only. */
   get sourceId(): string {
     return this.#sourceId
   }
+
+  get bindingId(): string {
+    return this.#bindingId
+  }
 }
 
 export class QueryRef extends BaseExpression {
   public type = `queryRef` as const
+  readonly #bindingId: string
   constructor(
     public query: QueryIR,
     public alias: string,
+    bindingId?: string,
   ) {
     super()
+    this.#bindingId = bindingId ?? `binding-${++nextLexicalBindingId}`
+  }
+
+  get bindingId(): string {
+    return this.#bindingId
   }
 }
 
@@ -136,14 +151,23 @@ export class UnionAll extends BaseExpression {
 export class PropRef<T = any> extends BaseExpression<T> {
   public type = `ref` as const
   declare public readonly sourceAlias?: string
+  declare public readonly bindingId?: string
   constructor(
     public path: Array<string>, // path to the property in the collection, with the alias as the first element
     sourceAlias?: string,
+    bindingId?: string,
   ) {
     super()
     // Present only when given, so unqualified refs keep their shape.
     if (sourceAlias !== undefined) {
       ;(this as { sourceAlias?: string }).sourceAlias = sourceAlias
+    }
+    if (bindingId !== undefined) {
+      // Preserve structural IR equality and optional record compatibility.
+      Object.defineProperty(this, `bindingId`, {
+        value: bindingId,
+        enumerable: false,
+      })
     }
   }
 }

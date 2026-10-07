@@ -15,6 +15,8 @@ export interface RefProxy<T = any> {
   /** @internal */
   readonly __sourceAlias?: string
   /** @internal */
+  readonly __bindingId?: string
+  /** @internal */
   readonly __type: T
 }
 
@@ -135,6 +137,7 @@ export function createSingleRowRefProxy<
  */
 export function createRefProxy<T extends Record<string, any>>(
   aliases: Array<string>,
+  bindings?: ReadonlyMap<string, string>,
 ): RefProxy<T> & T {
   // Each path has one proxy, cached by its parent under the property name.
   const aliasProxies = new Map<string, any>()
@@ -147,6 +150,7 @@ export function createRefProxy<T extends Record<string, any>>(
         if (prop === `__refProxy`) return true
         if (prop === `__path`) return path
         if (prop === `__sourceAlias`) return path[0]
+        if (prop === `__bindingId`) return bindings?.get(path[0] ?? ``)
         if (prop === `__type`) return undefined // Type is only for TypeScript inference
         // Answers with the path so toExpression reads it in one trap.
         if (prop === REF_PROXY_BRAND) return path
@@ -206,6 +210,7 @@ export function createRefProxy<T extends Record<string, any>>(
       if (prop === `__refProxy`) return true
       if (prop === `__path`) return []
       if (prop === `__sourceAlias`) return undefined
+      if (prop === `__bindingId`) return undefined
       if (prop === `__type`) return undefined // Type is only for TypeScript inference
       if (prop === REF_PROXY_BRAND) return true
       if (typeof prop === `symbol`) return Reflect.get(target, prop, receiver)
@@ -269,9 +274,10 @@ export function createRefProxy<T extends Record<string, any>>(
  */
 export function createRefProxyWithSelected<T extends Record<string, any>>(
   aliases: Array<string>,
+  bindings?: ReadonlyMap<string, string>,
 ): RefProxy<T> &
   T & { $selected: SingleRowRefProxy<any, string | number, true> } {
-  const baseProxy = createRefProxy(aliases)
+  const baseProxy = createRefProxy(aliases, bindings)
 
   // Create a proxy for $selected that prefixes all paths with '$selected'
   const cache = new Map<string, any>()
@@ -383,8 +389,8 @@ export function toExpression(value: any): BasicExpression<any> {
   if (brand !== undefined) {
     // An alias-qualified ref proxy answers the brand with its path.
     return Array.isArray(brand)
-      ? new PropRef(brand, brand[0])
-      : new PropRef(value.__path, value.__sourceAlias)
+      ? new PropRef(brand, brand[0], value.__bindingId)
+      : new PropRef(value.__path, value.__sourceAlias, value.__bindingId)
   }
   // toArray(), concat(toArray()), and materialize() must be used as direct
   // select fields, not inside expressions

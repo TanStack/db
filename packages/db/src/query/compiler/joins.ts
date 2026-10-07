@@ -109,18 +109,13 @@ function wrapJoinedInputRow(alias: string, row: any): NamespacedRow {
   if (scalar) {
     const namespaced = attachRouteMetadata(
       {
+        ...getParentContextValue(scalar.parentContext),
         [alias]: scalar.value,
         [INCLUDES_PUBLIC_KEY]: scalar.publicKey,
       },
       scalar.correlationKey,
       scalar.parentContext,
     ) as unknown as NamespacedRow
-    if (
-      scalar.parentContext != null &&
-      typeof scalar.parentContext === `object`
-    ) {
-      Object.assign(namespaced, getParentContextValue(scalar.parentContext))
-    }
     return namespaced
   }
 
@@ -130,9 +125,9 @@ function wrapJoinedInputRow(alias: string, row: any): NamespacedRow {
 
   const route = getRouteMetadata(row)
   const cleanRow = route ? stripRouteMetadata(row) : row
-  const namespaced: NamespacedRow = { [alias]: cleanRow }
-  if (route?.parentContext != null) {
-    Object.assign(namespaced, getParentContextValue(route.parentContext))
+  const namespaced: NamespacedRow = {
+    ...getParentContextValue(route?.parentContext),
+    [alias]: cleanRow,
   }
   if (route) {
     attachRouteMetadata(namespaced, route.correlationKey, route.parentContext)
