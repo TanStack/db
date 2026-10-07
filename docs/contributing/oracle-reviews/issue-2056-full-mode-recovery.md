@@ -206,3 +206,43 @@ bounded tag histories, full-mode fallback, and named public/durable observations
 It does not close arbitrary provider schedules, live service behavior, native
 storage, or cross-tab recovery. No reachable in-scope counterexample is known
 within the executed histories; the coverage map retains the other cells.
+
+## Prep-PR review: coordinator authority during scoped recovery
+
+Review continuation — 2026-10-07. Reviewed implementation head: `6f3149bf6`.
+The prep-PR review found a P1 counterexample to the scoped-source contract:
+after an applied Electric subset snapshot, a coordinator notification could
+reload an active paginated subset from empty SQLite cache and remove the public
+source row. The old oracle omitted this coordinator cut. The review also found
+one valid simplification: compute the on-demand changes-only decision once and
+use it for both stream mode and the default offset. Two other simplification
+ideas lacked a lifecycle witness and were not applied. The complete source-order
+ledger is retained in the task's prep-PR review evidence.
+
+The persistence oracle now crosses targeted, paginated, full-reload,
+sequence-gap, and durable-reset notifications after applying a source row. It
+fences coordinator processing and compares the public row with the source
+model. The controlled installed-SDK receiver adds the paginated coordinator
+cut after its scoped A snapshot. On the reviewed implementation, the targeted
+and paginated cases failed at the post-invalidation public-row assertion. With
+the repair, all five persistence cases and the installed-SDK receiver pass.
+Removing each of the three recovery guards separately made a corresponding
+controlled history fail; removing them together made all three scoped restart
+cases fail at the SDK receiver's coordinator checkpoint. These are finite
+mutant kills at named observations, not a claim about all coordinator schedules.
+
+The repair keeps coordinator durable-cache notifications from hydrating,
+truncating, or replacing public source rows while scoped recovery is active.
+Electric source changes and demanded snapshots retain public authority in that
+interval. Outside scoped recovery, coordinator invalidation follows its
+existing path. Unknown and missing key-set evidence were also checked with a
+held Node SQLite metadata read: startup avoids a full baseline read, leaves
+cached rows unpublished, and applies only a demanded source snapshot.
+
+Validation before merging the newer main branch: 647 Electric package tests
+passed; the persistence oracle passed 645 tests with one existing TODO; the
+persistence TypeScript check and changed-file ESLint passed with existing
+warnings. The changed files passed formatting after the final oracle edit.
+The coverage map names remaining native SQLite, real cross-tab transport,
+live-service, and wider scheduling witnesses. This review closes the observed
+controlled coordinator counterexample, not the whole scoped-recovery class.

@@ -1778,10 +1778,10 @@ function createElectricSync<T extends Row<unknown>>(
         syncMode === `on-demand` &&
         requiresFreshSourceEvidence &&
         persistence?.startScopedRecovery !== undefined
-      const usesFullLog =
+      const usesChangesOnlyLog =
         syncMode === `on-demand` &&
-        requiresFreshSourceEvidence &&
-        !scopedRecovery
+        (!requiresFreshSourceEvidence || scopedRecovery)
+      const usesFullLog = syncMode === `on-demand` && !usesChangesOnlyLog
       let resolveFullSnapshot: (receipt: SyncAppliedReceipt) => void = () => {}
       let rejectFullSnapshot: (error: unknown) => void = () => {}
       let fullSnapshotReady = Promise.resolve()
@@ -1876,19 +1876,14 @@ function createElectricSync<T extends Row<unknown>>(
         ...shapeOptions,
         // Uncertified on-demand cache rows are quarantined and loaded only
         // through fresh subset snapshots.
-        log:
-          syncMode === `on-demand` &&
-          (!requiresFreshSourceEvidence || scopedRecovery)
-            ? `changes_only`
-            : undefined,
+        log: usesChangesOnlyLog ? `changes_only` : undefined,
         // In on-demand mode, we only need the changes from the point of time the collection was created
         // so we default to `now` when there is no saved offset.
         offset:
           shapeOptions.offset ??
           (canUsePersistedResume
             ? (persistedResumeState.offset as Offset)
-            : syncMode === `on-demand` &&
-                (!requiresFreshSourceEvidence || scopedRecovery)
+            : usesChangesOnlyLog
               ? `now`
               : undefined),
         handle:

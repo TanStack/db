@@ -7,7 +7,10 @@ import {
   eq,
 } from '@tanstack/db'
 import { ShapeStream } from '@electric-sql/client'
-import { persistedCollectionOptions } from '../../db-sqlite-persistence-core/src'
+import {
+  SingleProcessCoordinator,
+  persistedCollectionOptions,
+} from '../../db-sqlite-persistence-core/src'
 import { electricCollectionOptions } from '../src/electric'
 import {
   oraclePropertyOptions,
@@ -21,6 +24,11 @@ import {
 } from './electric-oracle-lifecycle'
 import type { TestRow } from './electric-persistence-fixture'
 import type { ElectricCollectionUtils } from '../src/electric'
+import type { SyncPersistenceCapabilityV1 } from '@tanstack/db'
+import type {
+  ProtocolEnvelope,
+  TxCommitted,
+} from '../../db-sqlite-persistence-core/src'
 import type { Message } from '@electric-sql/client'
 
 /**
@@ -49,6 +57,10 @@ import type { Message } from '@electric-sql/client'
  * full-shape network read. Concurrent demands share one SDK cursor, so their
  * snapshot requests must run in order. Named two-launch and concurrent cases
  * check those laws at HTTP, local-read, public-row, and settlement boundaries.
+ * A coordinator notification after the scoped A snapshot changes an unrelated
+ * durable row. The source Map still predicts A for its active predicate. The
+ * post-notification public comparison must retain A; the persistence capability
+ * scan fences coordinator processing first.
  *
  * These finite HTTP fixtures do not prove that a live Electric service emits
  * the authored snapshot or move frames, nor do they cover multiple row keys,
@@ -229,6 +241,34 @@ function controlledHttp() {
     },
     activeCount: () => active.size,
   }
+}
+
+// Deliver a coordinator notification through the same persistence wrapper
+// used by the installed-SDK receiver. The test still controls the provider
+// response independently of this durable-cache notification.
+function controlledCoordinator(collectionId: string) {
+  let subscriber: ((message: ProtocolEnvelope<unknown>) => void) | undefined
+  return Object.assign(new SingleProcessCoordinator(), {
+    subscribe: (
+      _collectionId: string,
+      onMessage: (message: ProtocolEnvelope<unknown>) => void,
+    ) => {
+      subscriber = onMessage
+      return () => {
+        subscriber = undefined
+      }
+    },
+    emit: (payload: TxCommitted) => {
+      subscriber?.({
+        v: 1,
+        dbName: `sdk-receiver`,
+        collectionId,
+        senderId: `other-tab`,
+        ts: Date.now(),
+        payload,
+      })
+    },
+  })
 }
 
 const headers = (offset: number) => ({
@@ -1132,6 +1172,9 @@ fixedCase.each([
     const baselineReads = vi.spyOn(adapter, `loadResumeSnapshot`)
     const http = controlledHttp()
     const collectionId = `sdk-scoped-restart-${++sequence}`
+    const coordinator = controlledCoordinator(collectionId)
+    let currentCapability: SyncPersistenceCapabilityV1<string | number> | null =
+      null
     const source = new Map<number, TestRow>([
       [1, { id: 1, name: `old-a`, stable: `a` }],
       [2, { id: 2, name: `old-b`, stable: `b` }],
@@ -1139,28 +1182,37 @@ fixedCase.each([
     const demand = (id: number) => ({
       where: new IR.Func(`eq`, [new IR.PropRef([`id`]), new IR.Value(id)]),
     })
-    const create = (table = `rows`) =>
-      createCollection(
+    const create = (table = `rows`) => {
+      const electricOptions = electricCollectionOptions<TestRow>({
+        id: collectionId,
+        shapeOptions: {
+          url: `http://test-url/${collectionId}`,
+          params: { table },
+          fetchClient: http.fetchClient,
+        },
+        syncMode: `on-demand`,
+        startSync: true,
+        getKey: (row) => row.id,
+      })
+      return createCollection(
         persistedCollectionOptions<
           TestRow,
           string | number,
           never,
           ElectricCollectionUtils<TestRow>
         >({
-          ...electricCollectionOptions<TestRow>({
-            id: collectionId,
-            shapeOptions: {
-              url: `http://test-url/${collectionId}`,
-              params: { table },
-              fetchClient: http.fetchClient,
+          ...electricOptions,
+          sync: {
+            ...electricOptions.sync,
+            sync: (params) => {
+              currentCapability = params.metadata?.persistence ?? null
+              return electricOptions.sync.sync(params)
             },
-            syncMode: `on-demand`,
-            startSync: true,
-            getKey: (row) => row.id,
-          }),
-          persistence: { adapter },
+          },
+          persistence: { adapter, coordinator },
         }),
       )
+    }
     const respond = (
       request: Request,
       result: Array<TestRow>,
@@ -1260,7 +1312,9 @@ fixedCase.each([
         expect(publicRows(current), `after first empty subset`).toEqual([])
       }
 
-      const loadingA = Promise.resolve(current._sync.loadSubset(demand(1)))
+      const loadingA = Promise.resolve(
+        current._sync.loadSubset({ ...demand(1), limit: 10 }),
+      )
       const requestA = await atCheckpoint(http.take(true), `scoped A snapshot`)
       expect(requestA.url.searchParams.get(`subset__where`)).toContain(`id`)
       expect(localReads).not.toHaveBeenCalled()
@@ -1272,6 +1326,36 @@ fixedCase.each([
         name: `old-b`,
         stable: `b`,
       })
+
+      // A second tab updates durable cache outside the active A demand. The
+      // provider has not sent another source change, so the public A row still
+      // follows its applied source snapshot. The capability scan fences the
+      // coordinator's async handling before this public observation.
+      const durablePosition = await adapter.loadResumeSnapshot(collectionId, {
+        includeRows: false,
+      })
+      const otherTabRow: TestRow = {
+        id: 3,
+        name: `other-tab-cache`,
+        stable: `c`,
+      }
+      source.set(3, otherTabRow)
+      rows.set(3, { value: otherTabRow })
+      coordinator.emit({
+        type: `tx:committed`,
+        term: durablePosition.latestTerm,
+        seq: durablePosition.latestSeq + 1,
+        txId: `other-tab-cache-update`,
+        latestRowVersion: durablePosition.latestRowVersion + 1,
+        requiresFullReload: false,
+        changedRows: [{ key: 3, value: otherTabRow }],
+        deletedKeys: [],
+      })
+      expect(currentCapability?.scanPersistedRows).toBeTypeOf(`function`)
+      await currentCapability!.scanPersistedRows()
+      expect(publicRows(current), `after coordinator invalidation`).toEqual([
+        source.get(1),
+      ])
 
       if (tagged) {
         const loadingB = Promise.resolve(current._sync.loadSubset(demand(2)))

@@ -375,6 +375,13 @@ remains until a complete baseline can justify a global resume cursor. A wrapper
 without scoped recovery support continues to use full-shape recovery. An
 interrupted recovery keeps the reset marker for the next start.
 
+During scoped recovery, coordinator notifications about SQLite changes do not
+hydrate, truncate, or replace public source rows. The Electric change stream
+and demanded source snapshots own those rows until the sync run ends. A change
+made in another tab may therefore become public when Electric delivers it,
+rather than when its durable-cache notification arrives. Outside scoped
+recovery, coordinator invalidation retains its normal behavior.
+
 An eager or progressive resume cannot apply a partial update to an unknown row.
 The adapter rejects that batch, enters an error state, and records a reset so the
 next sync starts from a full snapshot. This does not silently retry the failed

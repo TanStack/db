@@ -1354,6 +1354,7 @@ class PersistedCollectionRuntime<
   private nextRequestId = 0
   private startupSettled = false
   private sourceTruncateGeneration = 0
+  /** Durable rows cannot replace source rows during scoped recovery. */
   private scopedRecovery = false
 
   private latestTerm = 0
@@ -3576,6 +3577,7 @@ class PersistedCollectionRuntime<
     lifecycleGeneration = this.lifecycleGeneration,
   ): Promise<void> {
     if (lifecycleGeneration !== this.lifecycleGeneration) return
+    if (this.scopedRecovery) return
     // A subscriber may reacquire reentrantly from the truncate commit.
     this.hydratedDemands.clear()
     this.resetSequence++
@@ -3596,6 +3598,7 @@ class PersistedCollectionRuntime<
     txCommitted: TxCommitted,
     adapter: HydrationPersistenceAdapter,
   ): Promise<void> {
+    if (this.scopedRecovery) return
     const reloadActiveSubsets = () =>
       this.runInHydrationScope(
         (scopedAdapter) => this.reloadActiveSubsetsUnsafe(scopedAdapter),
@@ -3688,6 +3691,7 @@ class PersistedCollectionRuntime<
   private async reloadActiveSubsetsUnsafe(
     adapter: HydrationPersistenceAdapter,
   ): Promise<void> {
+    if (this.scopedRecovery) return
     const lifecycleGeneration = this.lifecycleGeneration
     const truncateGeneration = this.sourceTruncateGeneration
     const activeSubsetOptions =

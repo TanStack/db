@@ -1700,6 +1700,16 @@ first. A third launch with no demand starts no full-shape transport or
 unrestricted local subset read. Another receiving witness rejects concurrent
 SDK snapshot invocation on the shared cursor. Compatible untagged resumes and
 the true full-mode fallback remain separate controls.
+The two-launch receiver also delivers a coordinator invalidation after a
+paginated scoped snapshot. The persistence owner crosses targeted, paginated,
+full-reload, and reset notifications after an active source row. Its
+post-invalidation public-row checks distinguish source authority from durable
+cache; the non-scoped paginated reload remains a neighboring control.
+`electric-resume-snapshot-races.test.ts` also holds a real SQLite metadata
+read across row loss or a committed replacement. Unknown and missing key-set
+evidence start changes-only without publishing the cached rows; a row-1 demand
+then applies only its source snapshot. This is a fixed Node SQLite receiving
+witness, not a generated-history claim or a native Expo result.
 
 Applied-settlement owner: `packages/electric-db-collection/tests/electric-oracle.property.test.ts`.
 Held optimistic application distinguishes readiness from subset completion for
@@ -1711,11 +1721,15 @@ unavailable; the scoped path uses SDK snapshots and applied receipts.
 
 Remaining witnesses before broader closure:
 
-- Electric tag/history owners: unknown or missing key-set evidence plus scoped
-  demand, multiple resets overlapping held application, independently aborted
-  sibling demands, and partial updates arriving before a scoped baseline.
-- Persistence/coordinator owners: native SQLite reads, cross-tab invalidation
-  during cache quarantine, and source versus local-only truncate durability.
+- Electric tag/history owners: unknown or missing key-set evidence combined
+  with tagged scoped demand, multiple resets overlapping held application,
+  independently aborted sibling demands, and partial updates arriving before
+  a scoped baseline. The untagged SQLite metadata-read race is covered above.
+- Persistence/coordinator owners: native SQLite reads, browser/electron
+  cross-tab transport delivering an invalidation during cache quarantine, and
+  source versus local-only truncate durability. Controlled coordinator
+  delivery and installed-SDK receipt cover the wrapper response, not the
+  multiprocess transport premise.
 - Installed-SDK delivery and Electric service E2E owners: actual subquery/tag
   emission, overlapping provider responses, and the scoped restart schedule
   against a live service.

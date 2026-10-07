@@ -17930,6 +17930,121 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
     })
   })
 
+  // A scoped source snapshot establishes row 1. Until the source sends another
+  // change or snapshot, coordinator notifications can change durable cache but
+  // cannot replace that public row. The five legal histories cross targeted,
+  // paginated, full-reload, sequence-gap, and reset notifications. The recording adapter is
+  // durable state, not the expected source result. The apply-mutex fence below
+  // places the public-row comparison after coordinator processing. This owner
+  // isolates the wrapper boundary; installed Electric delivery has a receiver.
+  it.each([
+    `targeted change`,
+    `paginated change`,
+    `full reload`,
+    `sequence gap`,
+    `durable reset`,
+  ] as const)(`keeps an active scoped source row after %s`, async (event) => {
+    const adapter = createRecordingAdapter()
+    const coordinator = createLocalCoordinatorHarness()
+    let source!: TodoSyncParams
+    const collection = createCollection(
+      persistedCollectionOptions<Todo, string>({
+        id: `sync-present`,
+        syncMode: `on-demand`,
+        getKey: (row) => row.id,
+        sync: {
+          sync: (params) => {
+            source = params
+            params.markReady()
+          },
+        },
+        persistence: { adapter, coordinator },
+      }),
+    )
+
+    collection.startSyncImmediate()
+    await flushAsyncWork()
+    const capability = source.metadata?.persistence
+    expect(capability?.startScopedRecovery).toBeTypeOf(`function`)
+    await capability!.startScopedRecovery!()
+
+    const sourceRow: Todo = { id: `1`, title: `Source row` }
+    source.begin()
+    source.write({ type: `insert`, value: sourceRow })
+    await whenSyncAccepted(source.commit())
+    await collection._sync.loadSubset(
+      event === `targeted change` ? {} : { limit: 10 },
+    )
+    expect(stripVirtualProps(collection.get(`1`))).toEqual(sourceRow)
+
+    const latest = adapter.applyCommittedTxCalls.at(-1)!.tx
+    if (event === `durable reset`) {
+      adapter.rows.clear()
+      coordinator.emit({
+        type: `collection:reset`,
+        schemaVersion: 1,
+        resetEpoch: 1,
+      })
+    } else if (event === `sequence gap`) {
+      Object.assign(coordinator, {
+        pullSince: (): Promise<PullSinceResponse> =>
+          Promise.resolve({
+            type: `rpc:pullSince:res`,
+            rpcId: `scoped-gap`,
+            ok: true,
+            latestTerm: latest.term,
+            latestSeq: latest.seq + 2,
+            latestRowVersion: latest.rowVersion + 2,
+            requiresFullReload: true,
+          }),
+      })
+      coordinator.emit({
+        type: `tx:committed`,
+        term: latest.term,
+        seq: latest.seq + 2,
+        txId: `scoped-sequence-gap`,
+        latestRowVersion: latest.rowVersion + 2,
+        requiresFullReload: true,
+      })
+    } else if (event === `full reload`) {
+      // A transaction above the coordinator's targeted-invalidation limit can
+      // change many unrelated durable rows without changing source row 1.
+      for (let id = 2; id <= 130; id++) {
+        adapter.rows.set(String(id), { id: String(id), title: `Other ${id}` })
+      }
+      coordinator.emit({
+        type: `tx:committed`,
+        term: latest.term,
+        seq: latest.seq + 1,
+        txId: `large-scoped-change`,
+        latestRowVersion: latest.rowVersion + 1,
+        requiresFullReload: true,
+      })
+    } else {
+      const durableRow: Todo =
+        event === `targeted change`
+          ? { id: `1`, title: `Uncertified durable update` }
+          : { id: `2`, title: `Unrelated durable row` }
+      adapter.rows.set(durableRow.id, durableRow)
+      coordinator.emit({
+        type: `tx:committed`,
+        term: latest.term,
+        seq: latest.seq + 1,
+        txId: `scoped-change`,
+        latestRowVersion: latest.rowVersion + 1,
+        requiresFullReload: false,
+        changedRows: [{ key: durableRow.id, value: durableRow }],
+        deletedKeys: [],
+      })
+    }
+
+    // scanPersistedRows enters the same apply mutex after event admission, so
+    // this observes the settled coordinator invalidation rather than a race.
+    await capability!.scanPersistedRows()
+    expect(stripVirtualProps(collection.get(`1`))).toEqual(sourceRow)
+    expect(adapter.loadSubsetCalls).toEqual([])
+  })
+
   it(`fail-stops queued and later work when reset reload fails after truncation`, async () => {
     const seed = { id: `seed`, title: `durable baseline` }
     const adapter = createRecordingAdapter([seed])
