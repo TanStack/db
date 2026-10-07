@@ -63,33 +63,66 @@ describe(`group representative work`, () => {
  * Authority: incremental view maintenance. A count changes by the delta's
  * multiplicity, so re-reading every member is not needed for the result.
  *
- * Observation: the number of Map and Set iterator steps taken during one
- * synchronous commit. A reduction that re-reads a group walks the group's
- * value map, so its steps grow with the group. The counter observes all
- * iteration in the commit, so any other per-member walk also fails the law.
+ * Scope: the law holds when the group's members contribute exactly identical
+ * aggregate inputs, as a count over primitive group values does. A sum, avg,
+ * min, or max over distinct values keeps one contribution per distinct exact
+ * input, so its reduction still visits each of them.
+ *
+ * Observation: the number of Map, Set, and array iterator steps, plus array
+ * callback calls (`map`, `filter`, `forEach`, `reduce`, `some`, `every`),
+ * taken during one synchronous commit. A reduction that re-reads a group
+ * walks the group's values, so its steps grow with the group. The counter
+ * observes all such iteration in the commit, so any other per-member walk
+ * also fails the law.
  * The checkpoint is the commit's return, where the published count must also
  * equal the model's count.
  */
-const mapIteratorPrototype = Object.getPrototypeOf(new Map().values())
-const setIteratorPrototype = Object.getPrototypeOf(new Set().values())
+const iteratorPrototypes = [
+  Object.getPrototypeOf(new Map().values()),
+  Object.getPrototypeOf(new Set().values()),
+  Object.getPrototypeOf([][Symbol.iterator]()),
+] as Array<{ next: (this: Iterator<unknown>) => IteratorResult<unknown> }>
+const arrayCallbackMethods = [
+  `map`,
+  `filter`,
+  `forEach`,
+  `reduce`,
+  `some`,
+  `every`,
+] as const
 
 function countIteratorSteps(run: () => void): number {
-  const mapNext = mapIteratorPrototype.next
-  const setNext = setIteratorPrototype.next
   let steps = 0
-  mapIteratorPrototype.next = function (this: Iterator<unknown>) {
-    steps++
-    return mapNext.call(this)
-  }
-  setIteratorPrototype.next = function (this: Iterator<unknown>) {
-    steps++
-    return setNext.call(this)
-  }
+  const nexts = iteratorPrototypes.map((prototype) => prototype.next)
+  const arrayMethods = arrayCallbackMethods.map(
+    (name) => Array.prototype[name] as (...args: Array<unknown>) => unknown,
+  )
+  iteratorPrototypes.forEach((prototype, index) => {
+    const next = nexts[index]!
+    prototype.next = function (this: Iterator<unknown>) {
+      steps++
+      return next.call(this)
+    }
+  })
+  arrayCallbackMethods.forEach((name, index) => {
+    const method = arrayMethods[index]!
+    ;(Array.prototype as any)[name] = function (
+      this: Array<unknown>,
+      ...args: Array<unknown>
+    ) {
+      steps += this.length
+      return method.apply(this, args)
+    }
+  })
   try {
     run()
   } finally {
-    mapIteratorPrototype.next = mapNext
-    setIteratorPrototype.next = setNext
+    iteratorPrototypes.forEach((prototype, index) => {
+      prototype.next = nexts[index]!
+    })
+    arrayCallbackMethods.forEach((name, index) => {
+      ;(Array.prototype as any)[name] = arrayMethods[index]
+    })
   }
   return steps
 }
@@ -211,6 +244,48 @@ describe(`grouped aggregate work per change`, () => {
       }
     }
     for (const sizeSteps of steps) expect(sizeSteps).toEqual(steps[0])
+  })
+
+  // The group's representative must not serialize a large binary group
+  // value's bytes. The group key still encodes them once; that cost predates
+  // this law and is tracked in the review record.
+  it(`encodes a large binary group value's bytes at most once`, async () => {
+    const bytes = new Uint8Array(1024 * 1024)
+    const source = createCollection(
+      mockSyncCollectionOptions<{ id: number; value: Uint8Array }>({
+        id: `group-binary-work-${Math.random()}`,
+        getKey: (row) => row.id,
+        initialData: [{ id: 1, value: bytes }],
+      }),
+    )
+    const grouped = createLiveQueryCollection((q) =>
+      q
+        .from({ row: source })
+        .groupBy(({ row }) => row.value)
+        .select(({ row }) => ({ value: row.value, count: count(row.id) })),
+    )
+    try {
+      await grouped.preload()
+      const stringify = JSON.stringify
+      let fullEncodings = 0
+      JSON.stringify = function (...args: Parameters<typeof stringify>) {
+        const result = stringify.apply(JSON, args)
+        if (result.length >= bytes.length) fullEncodings++
+        return result
+      } as typeof stringify
+      try {
+        source.utils.begin()
+        source.utils.write({ type: `insert`, value: { id: 2, value: bytes } })
+        source.utils.commit()
+      } finally {
+        JSON.stringify = stringify
+      }
+      expect(grouped.toArray[0]?.count).toBe(2)
+      expect(fullEncodings).toBeLessThanOrEqual(1)
+    } finally {
+      await grouped.cleanup()
+      await source.cleanup()
+    }
   })
 
   // The route representative no longer distinguishes members, so every

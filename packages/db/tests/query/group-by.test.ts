@@ -229,6 +229,7 @@ const equalityEquivalentGroupValues: Array<
   [`a Date and its timestamp`, () => [new Date(0), 0]],
   [`an invalid Date and NaN`, () => [new Date(Number.NaN), Number.NaN]],
   [`signed zero`, () => [-0, 0]],
+  [`two Date instances with the same time`, () => [new Date(0), new Date(0)]],
   [
     `binary values with the same bytes`,
     () => [Buffer.from([1, 2, 3]), new Uint8Array([1, 2, 3])],
@@ -268,6 +269,10 @@ const equalityEquivalentGroupValues: Array<
  * `Date` before `Uint8Array`). Objects of one type with the same content are
  * the same exact value, so either instance may be projected. The choice does
  * not depend on row keys or on the order in which rows arrived.
+ *
+ * Law: the projected value is an instance that a currently positive member
+ * holds. After a member is deleted, its instance is never projected, even
+ * when a remaining member holds an equal instance.
  *
  * Before this law, the member with the smallest row key supplied the value.
  * That choice made every member's contribution distinct, so each change
@@ -426,15 +431,21 @@ function createGroupByTests(autoIndex: `off` | `eager`): void {
         const expectSingleGroup = (
           expectedCount: number,
           representative: unknown,
+          members: ReadonlyArray<unknown>,
         ) => {
           expect(summary.toArray).toHaveLength(1)
           expect(summary.toArray[0]?.count).toBe(expectedCount)
-          expect(representativeSignature(summary.toArray[0]?.value)).toBe(
+          const projected = summary.toArray[0]?.value
+          expect(representativeSignature(projected)).toBe(
             representativeSignature(representative),
+          )
+          // The projected instance belongs to a positive member.
+          expect(members.some((member) => Object.is(member, projected))).toBe(
+            true,
           )
         }
 
-        expectSingleGroup(2, smallestExact([left, right]))
+        expectSingleGroup(2, smallestExact([left, right]), [left, right])
 
         valuesCollection.utils.begin()
         valuesCollection.utils.write({
@@ -442,7 +453,7 @@ function createGroupByTests(autoIndex: `off` | `eager`): void {
           value: { id: 1, value: left },
         })
         valuesCollection.utils.commit()
-        expectSingleGroup(1, right)
+        expectSingleGroup(1, right, [right])
 
         valuesCollection.utils.begin()
         valuesCollection.utils.write({
@@ -450,9 +461,51 @@ function createGroupByTests(autoIndex: `off` | `eager`): void {
           value: { id: 1, value: left },
         })
         valuesCollection.utils.commit()
-        expectSingleGroup(2, smallestExact([left, right]))
+        expectSingleGroup(2, smallestExact([left, right]), [left, right])
       }
     }
+
+    test.each([
+      [`signed zero`, () => [0, -0] as const],
+      [`Date instances with the same time`, () => [new Date(0), new Date(0)]],
+    ])(
+      `min and max return a value a remaining member holds for %s`,
+      (_name, createValues) => {
+        const [left, right] = createValues()
+        const valuesCollection = createCollection(
+          mockSyncCollectionOptions<{ id: number; group: number; value: any }>({
+            id: `minmax-exact-${autoIndex}-${_name}`,
+            getKey: (row) => row.id,
+            initialData: [
+              { id: 1, group: 1, value: left },
+              { id: 2, group: 1, value: right },
+            ],
+            autoIndex,
+          }),
+        )
+        const summary = createLiveQueryCollection({
+          startSync: true,
+          query: (q) =>
+            q
+              .from({ row: valuesCollection })
+              .groupBy(({ row }) => row.group)
+              .select(({ row }) => ({
+                group: row.group,
+                low: min(row.value),
+                high: max(row.value),
+              })),
+        })
+        valuesCollection.utils.begin()
+        valuesCollection.utils.write({
+          type: `delete`,
+          value: { id: 1, group: 1, value: left },
+        })
+        valuesCollection.utils.commit()
+        // Only `right` remains, so both aggregates must return it exactly.
+        expect(Object.is(summary.toArray[0]?.low, right)).toBe(true)
+        expect(Object.is(summary.toArray[0]?.high, right)).toBe(true)
+      },
+    )
 
     test.each([
       `__group_value_0`,
