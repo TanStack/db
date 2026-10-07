@@ -1,17 +1,26 @@
 import fc from 'fast-check'
 import { expect, it, vi } from 'vitest'
-import { IR, createCollection } from '@tanstack/db'
+import {
+  IR,
+  createCollection,
+  createLiveQueryCollection,
+  eq,
+} from '@tanstack/db'
 import { ShapeStream } from '@electric-sql/client'
+import { persistedCollectionOptions } from '../../db-sqlite-persistence-core/src'
 import { electricCollectionOptions } from '../src/electric'
 import {
   oraclePropertyOptions,
   readOracleRunConfig,
 } from '../../db/tests/oracle-config'
+import { tagPersistence } from './electric-persistence-fixture'
 import {
   atCheckpoint,
   withElectricCleanup,
   withElectricSetup,
 } from './electric-oracle-lifecycle'
+import type { TestRow } from './electric-persistence-fixture'
+import type { ElectricCollectionUtils } from '../src/electric'
 import type { Message } from '@electric-sql/client'
 
 /**
@@ -34,6 +43,12 @@ import type { Message } from '@electric-sql/client'
  * through controlled HTTP.
  * The refinement checks compare exact public Collection rows after each SDK
  * delivery; they do not assert public order or intermediate callback cuts.
+ * For an uncertified persisted on-demand restart, the Electric guide promises
+ * scoped source snapshots: old durable rows remain cache-only, an empty
+ * snapshot cannot readmit them, and no demand causes no unrestricted local or
+ * full-shape network read. Concurrent demands share one SDK cursor, so their
+ * snapshot requests must run in order. Named two-launch and concurrent cases
+ * check those laws at HTTP, local-read, public-row, and settlement boundaries.
  *
  * These finite HTTP fixtures do not prove that a live Electric service emits
  * the authored snapshot or move frames, nor do they cover multiple row keys,
@@ -618,6 +633,91 @@ fixedCase(`lets requestSnapshot own the warm transport`, async () => {
   ])
 })
 
+/**
+ * Two active demands share one ShapeStream cursor. The source model gives each
+ * predicate one row and increasing offsets. The second provider snapshot may
+ * start only after the first settles; otherwise an older HTTP response can
+ * overwrite a later row and regress that cursor. The SDK method invocation is
+ * the checkpoint, while public rows verify both acquisitions still apply.
+ */
+fixedCase(
+  `serializes concurrent subset snapshots on one SDK stream`,
+  async () => {
+    const http = controlledHttp()
+    const requestSnapshot = vi.spyOn(ShapeStream.prototype, `requestSnapshot`)
+    const collection = createCollection(
+      electricCollectionOptions<Item>({
+        id: `sdk-ordered-snapshots-${++sequence}`,
+        shapeOptions: {
+          url: `http://test-url/ordered-snapshots-${sequence}`,
+          params: { table: `rows` },
+          fetchClient: http.fetchClient,
+        },
+        syncMode: `on-demand`,
+        startSync: true,
+        getKey: (row) => row.id,
+      }),
+    )
+    const demand = (id: number) => ({
+      where: new IR.Func(`eq`, [new IR.PropRef([`id`]), new IR.Value(id)]),
+    })
+    const respond = (request: Request, id: number) =>
+      request.respond(
+        new Response(
+          JSON.stringify({
+            metadata: {
+              xmin: `10`,
+              xmax: `20`,
+              xip_list: [],
+              database_lsn: `10`,
+              snapshot_mark: id,
+            },
+            data: [
+              {
+                key: String(id),
+                value: { id: String(id), name: `row-${id}` },
+                headers: { operation: `insert` },
+              },
+            ],
+          }),
+          { headers: headers(id + 1) },
+        ),
+      )
+    await withElectricCleanup(async () => {
+      await atCheckpoint(http.take(), `initial ordered-snapshot transport`)
+      const first = Promise.resolve(collection._sync.loadSubset(demand(1)))
+      const second = Promise.resolve(collection._sync.loadSubset(demand(2)))
+      const firstRequest = await atCheckpoint(
+        http.take(true),
+        `first ordered snapshot`,
+      )
+      await new Promise<void>((resolve) => setTimeout(resolve, 0))
+      expect(
+        requestSnapshot,
+        `second snapshot waits for first`,
+      ).toHaveBeenCalledTimes(1)
+      respond(firstRequest, 1)
+      await atCheckpoint(first, `first ordered snapshot applied`)
+      const secondRequest = await atCheckpoint(
+        http.take(true),
+        `second ordered snapshot`,
+      )
+      expect(requestSnapshot).toHaveBeenCalledTimes(2)
+      respond(secondRequest, 2)
+      await atCheckpoint(second, `second ordered snapshot applied`)
+      expect(collection.toArray.map(({ id, name }) => ({ id, name }))).toEqual([
+        { id: 1, name: `row-1` },
+        { id: 2, name: `row-2` },
+      ])
+    }, [
+      () => collection.cleanup(),
+      () => http.close(),
+      () => requestSnapshot.mockRestore(),
+      () => expect(http.activeCount()).toBe(0),
+    ])
+  },
+)
+
 async function checkMembership(
   leftWidth: number,
   rightWidth: number,
@@ -814,3 +914,408 @@ fixedCase(`detects dropped move-in at its visibility checkpoint`, async () => {
     message: expect.stringContaining(`after silent move-in`),
   })
 })
+
+/**
+ * Restart demand must remain legal when recovery changes provider capability.
+ * Electric's SDK permits requestSnapshot only in changes_only mode. The
+ * LoadSubsetFn contract requires success to follow application of the rows
+ * that establish the requested subset. This receiving witness uses the real
+ * SDK with the same durable-storage seam as the tag-history owner.
+ *
+ * The independent model is a complete replacement row after the second
+ * launch. Tagged and untagged launches differ only in provider acquisition:
+ * the tagged launch cannot resume its prior cursor, but its on-demand stream
+ * can start changes-only and request the active subset. The untagged neighbor
+ * resumes its cursor. Both must satisfy the same subset demand.
+ * A new descriptor and Collection discard all prior in-memory tag state.
+ * This checks SDK behavior over controlled HTTP, not server tag generation,
+ * native SQLite, or a separate operating-system process.
+ */
+fixedCase.each(
+  [false, true].flatMap((tagged) =>
+    ([`direct`, `live-query`] as const).map((consumer) => ({
+      tagged,
+      consumer,
+    })),
+  ),
+)(
+  `satisfies subset demand after a fresh persisted launch, tagged=$tagged consumer=$consumer`,
+  async ({ tagged, consumer }) => {
+    const { adapter, rows, metadata } = tagPersistence()
+    const collectionId = `sdk-persisted-restart-${++sequence}`
+    const http = controlledHttp()
+    const firstRow: TestRow = { id: 1, name: `first`, stable: `retained` }
+    const replacement: TestRow = { ...firstRow, name: `replacement` }
+    const create = () =>
+      createCollection(
+        persistedCollectionOptions<
+          TestRow,
+          string | number,
+          never,
+          ElectricCollectionUtils<TestRow>
+        >({
+          ...electricCollectionOptions<TestRow>({
+            id: collectionId,
+            shapeOptions: {
+              url: `http://test-url/${collectionId}`,
+              params: { table: `rows` },
+              fetchClient: http.fetchClient,
+            },
+            syncMode: `on-demand`,
+            startSync: true,
+            getKey: (row) => row.id,
+          }),
+          persistence: { adapter },
+        }),
+      )
+    const message = (row: TestRow) => ({
+      key: String(row.id),
+      value: { ...row, id: String(row.id) },
+      headers: {
+        operation: `insert`,
+        ...(tagged ? { tags: [`selected`] } : {}),
+      },
+    })
+    const responseHeaders = (offset: number) => ({
+      ...headers(offset),
+      'electric-schema': JSON.stringify({
+        id: { type: `int4` },
+        name: { type: `text` },
+        stable: { type: `text` },
+      }),
+    })
+    const snapshotResponse = (row: TestRow, offset: number) =>
+      new Response(
+        JSON.stringify({
+          metadata: {
+            xmin: `10`,
+            xmax: `20`,
+            xip_list: [],
+            database_lsn: `10`,
+            snapshot_mark: offset,
+          },
+          data: [message(row)],
+        }),
+        { headers: responseHeaders(offset) },
+      )
+    const demand = {
+      where: new IR.Func(`eq`, [new IR.PropRef([`id`]), new IR.Value(1)]),
+    }
+    const first = create()
+    let current = first
+    let cleanupQuery = () => Promise.resolve()
+    await withElectricCleanup(async () => {
+      const initial = await atCheckpoint(
+        http.take(),
+        `first launch stream started`,
+      )
+      expect(initial.url.searchParams.get(`log`)).toBe(`changes_only`)
+      const firstLoad = Promise.resolve(first._sync.loadSubset(demand))
+      void firstLoad.catch(() => undefined)
+      const request = await atCheckpoint(
+        http.take(true),
+        `first launch snapshot`,
+      )
+      request.respond(snapshotResponse(firstRow, 2))
+      await atCheckpoint(firstLoad, `first launch subset applied`)
+      await vi.waitFor(
+        () =>
+          expect(metadata.get(`electric:resume`)).toMatchObject({
+            kind: `resume`,
+            requiresTagState: tagged,
+          }),
+        { interval: 1 },
+      )
+      expect(rows.get(1)?.value).toEqual(firstRow)
+      await first.cleanup()
+
+      current = create()
+      const resumed = await atCheckpoint(
+        http.take(),
+        `second launch stream started`,
+      )
+      expect(resumed.url.searchParams.get(`log`)).toBe(`changes_only`)
+      expect(resumed.url.searchParams.get(`offset`)).toBe(
+        tagged ? `now` : `2_0`,
+      )
+      const query =
+        consumer === `live-query`
+          ? createLiveQueryCollection({
+              startSync: false,
+              query: (q) =>
+                q
+                  .from({ row: current })
+                  .where(({ row }) => eq(row.id, 1))
+                  .select(({ row }) => ({
+                    id: row.id,
+                    name: row.name,
+                    stable: row.stable,
+                  })),
+            })
+          : undefined
+      if (query) cleanupQuery = () => query.cleanup()
+      const loading = Promise.resolve(
+        query ? query.preload() : current._sync.loadSubset(demand),
+      ).then(
+        () => ({ kind: `fulfilled` as const }),
+        (error: unknown) => ({
+          kind: `rejected` as const,
+          error: String(error),
+        }),
+      )
+      const resumedSnapshot = await atCheckpoint(
+        http.take(true),
+        `resumed subset snapshot`,
+      )
+      resumedSnapshot.respond(snapshotResponse(replacement, 3))
+      const outcome = await atCheckpoint(
+        loading,
+        `second launch subset settled`,
+      )
+      await vi.waitFor(() => expect(current.status).toBe(`ready`), {
+        interval: 1,
+      })
+      await vi.waitFor(() => expect(rows.get(1)?.value).toEqual(replacement), {
+        interval: 1,
+      })
+      // Observe settlement as well as rows. A ready Collection with correct
+      // rows cannot excuse a rejected subset acquisition.
+      expect({
+        outcome,
+        status: current.status,
+        row: current.get(1),
+      }).toMatchObject({
+        outcome: { kind: `fulfilled` },
+        status: `ready`,
+        row: replacement,
+      })
+      if (query) {
+        expect(query.status).toBe(`ready`)
+        // This law observes selected payload values, not virtual metadata.
+        expect(
+          query.toArray.map(({ id, name, stable }) => ({ id, name, stable })),
+        ).toEqual([replacement])
+      }
+    }, [
+      () => cleanupQuery(),
+      () => current.cleanup(),
+      () => first.cleanup(),
+      () => http.close(),
+      () => expect(http.activeCount()).toBe(0),
+    ])
+  },
+)
+
+/**
+ * A persisted source row is only a cache after tag state is lost. The source
+ * model starts with A and B, then changes A and removes B while the Collection
+ * is closed. Only A is active at the second launch. Its scoped snapshot may
+ * establish A, but neither the old B row nor a later empty B snapshot may
+ * re-admit B from SQLite. This driver observes HTTP scope, durable rows, local
+ * reads, public rows, and acquisition settlement at each cut. The controlled
+ * provider supplies authoritative responses for the requested predicates;
+ * live-server framing and native storage remain separate receiving boundaries.
+ */
+fixedCase.each([
+  { cause: `lost tags`, tagged: true, nextTable: `rows` },
+  { cause: `changed shape`, tagged: false, nextTable: `other_rows` },
+  {
+    cause: `malformed resume state`,
+    tagged: false,
+    nextTable: `rows`,
+    malformed: true,
+  },
+])(
+  `quarantines uncertified cache rows across later scoped demands after $cause`,
+  async ({ tagged, nextTable, malformed }) => {
+    const { adapter, rows, metadata } = tagPersistence()
+    const baselineReads = vi.spyOn(adapter, `loadResumeSnapshot`)
+    const http = controlledHttp()
+    const collectionId = `sdk-scoped-restart-${++sequence}`
+    const source = new Map<number, TestRow>([
+      [1, { id: 1, name: `old-a`, stable: `a` }],
+      [2, { id: 2, name: `old-b`, stable: `b` }],
+    ])
+    const demand = (id: number) => ({
+      where: new IR.Func(`eq`, [new IR.PropRef([`id`]), new IR.Value(id)]),
+    })
+    const create = (table = `rows`) =>
+      createCollection(
+        persistedCollectionOptions<
+          TestRow,
+          string | number,
+          never,
+          ElectricCollectionUtils<TestRow>
+        >({
+          ...electricCollectionOptions<TestRow>({
+            id: collectionId,
+            shapeOptions: {
+              url: `http://test-url/${collectionId}`,
+              params: { table },
+              fetchClient: http.fetchClient,
+            },
+            syncMode: `on-demand`,
+            startSync: true,
+            getKey: (row) => row.id,
+          }),
+          persistence: { adapter },
+        }),
+      )
+    const respond = (
+      request: Request,
+      result: Array<TestRow>,
+      offset: number,
+    ) =>
+      request.respond(
+        new Response(
+          JSON.stringify({
+            metadata: {
+              xmin: `10`,
+              xmax: `20`,
+              xip_list: [],
+              database_lsn: `10`,
+              snapshot_mark: offset,
+            },
+            data: result.map((row) => ({
+              key: String(row.id),
+              value: { ...row, id: String(row.id) },
+              headers: {
+                operation: `insert`,
+                ...(tagged ? { tags: [`selected`] } : {}),
+              },
+            })),
+          }),
+          {
+            headers: {
+              ...headers(offset),
+              'electric-schema': JSON.stringify({
+                id: { type: `int4` },
+                name: { type: `text` },
+                stable: { type: `text` },
+              }),
+            },
+          },
+        ),
+      )
+    const publicRows = (collection: ReturnType<typeof create>) =>
+      collection.toArray
+        .map(({ id, name, stable }) => ({ id, name, stable }))
+        .sort((a, b) => a.id - b.id)
+    const first = create()
+    let current = first
+    let localReads: { mockRestore: () => void } | undefined
+    await withElectricCleanup(async () => {
+      await atCheckpoint(http.take(), `initial changes-only transport`)
+      for (const [id, row] of source) {
+        const loading = Promise.resolve(first._sync.loadSubset(demand(id)))
+        const request = await atCheckpoint(
+          http.take(true),
+          `initial subset ${id}`,
+        )
+        respond(request, [row], id + 1)
+        await atCheckpoint(loading, `initial subset ${id} applied`)
+      }
+      expect(publicRows(first)).toEqual([...source.values()])
+      expect(rows.size).toBe(2)
+      expect(metadata.get(`electric:resume`)).toMatchObject({
+        kind: `resume`,
+        requiresTagState: tagged,
+      })
+      await first.cleanup()
+      baselineReads.mockClear()
+      if (malformed) {
+        metadata.set(`electric:resume`, { kind: `resume`, offset: 10 })
+      }
+
+      source.set(1, { id: 1, name: `new-a`, stable: `a` })
+      source.delete(2)
+      localReads = vi.spyOn(adapter, `loadSubset`)
+      current = create(nextTable)
+      const resumed = await atCheckpoint(
+        http.take(),
+        `scoped restart transport`,
+      )
+      expect(resumed.url.searchParams.get(`log`)).toBe(`changes_only`)
+      expect(resumed.url.searchParams.get(`offset`)).toBe(`now`)
+      expect(publicRows(current), `before active demand`).toEqual([])
+      expect(baselineReads, `startup metadata read`).toHaveBeenCalled()
+      expect(
+        baselineReads.mock.calls.every(
+          ([, context]) => context?.includeRows !== true,
+        ),
+        `no full baseline row read`,
+      ).toBe(true)
+
+      if (!tagged) {
+        // An empty first source snapshot must still establish its own demand
+        // without promoting the stale durable B row into the Collection.
+        const emptyFirst = Promise.resolve(current._sync.loadSubset(demand(2)))
+        const emptyRequest = await atCheckpoint(
+          http.take(true),
+          `first empty scoped snapshot`,
+        )
+        expect(localReads).not.toHaveBeenCalled()
+        respond(emptyRequest, [], 4)
+        await atCheckpoint(emptyFirst, `first empty subset applied`)
+        expect(publicRows(current), `after first empty subset`).toEqual([])
+      }
+
+      const loadingA = Promise.resolve(current._sync.loadSubset(demand(1)))
+      const requestA = await atCheckpoint(http.take(true), `scoped A snapshot`)
+      expect(requestA.url.searchParams.get(`subset__where`)).toContain(`id`)
+      expect(localReads).not.toHaveBeenCalled()
+      respond(requestA, [source.get(1)!], tagged ? 4 : 5)
+      await atCheckpoint(loadingA, `scoped A applied`)
+      expect(publicRows(current), `after A applied`).toEqual([source.get(1)])
+      expect(rows.get(2)?.value, `durable B retained`).toEqual({
+        id: 2,
+        name: `old-b`,
+        stable: `b`,
+      })
+
+      if (tagged) {
+        const loadingB = Promise.resolve(current._sync.loadSubset(demand(2)))
+        const requestB = await atCheckpoint(http.take(true), `empty B snapshot`)
+        expect(publicRows(current), `while B is pending`).toEqual([
+          source.get(1),
+        ])
+        expect(localReads).not.toHaveBeenCalled()
+        respond(requestB, [], 5)
+        await atCheckpoint(loadingB, `empty B applied`)
+        expect(publicRows(current), `after empty B applied`).toEqual([
+          source.get(1),
+        ])
+      }
+      expect(metadata.get(`electric:resume`)).toMatchObject({ kind: `reset` })
+
+      await current.cleanup()
+      localReads.mockRestore()
+      localReads = vi.spyOn(adapter, `loadSubset`)
+      current = create(nextTable)
+      const idle = await atCheckpoint(http.take(), `idle scoped restart`)
+      expect(idle.url.searchParams.get(`log`)).toBe(`changes_only`)
+      expect(idle.url.searchParams.get(`offset`)).toBe(`now`)
+      expect(publicRows(current), `no active demand`).toEqual([])
+      expect(localReads, `no unrestricted local read`).not.toHaveBeenCalled()
+      expect(
+        baselineReads.mock.calls.every(
+          ([, context]) => context?.includeRows !== true,
+        ),
+        `no full baseline row read without demand`,
+      ).toBe(true)
+      expect(rows.get(2)?.value, `cache retained without demand`).toMatchObject(
+        {
+          id: 2,
+          name: `old-b`,
+        },
+      )
+    }, [
+      () => current.cleanup(),
+      () => first.cleanup(),
+      () => http.close(),
+      () => localReads?.mockRestore(),
+      () => baselineReads.mockRestore(),
+      () => expect(http.activeCount()).toBe(0),
+    ])
+  },
+)

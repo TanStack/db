@@ -356,13 +356,24 @@ snapshot's commit boundary. Rows omitted from that snapshot do not survive in
 the collection or its persisted cache, even when the fresh snapshot is empty.
 
 Tag membership is kept in memory, not restored from cached row headers. A cold
-restart therefore fetches a full snapshot when the saved state needs tags, or
-comes from an older version that did not record whether tags were used. Untagged
-shapes can still resume from their saved offset. Cached rows remain visible until
-the replacement snapshot completes; a partial batch or subset completion cannot
-publish that replacement early. Interrupting recovery leaves a durable reset
-marker so the next start still refetches. This recovery also requests a full shape
-snapshot in on-demand mode, at the cost of fetching more than the active subsets.
+restart cannot use a saved cursor that needs tags or comes from an older version
+that did not record whether tags were used. A changed shape, malformed saved
+state, or incomplete key-set evidence also invalidates the saved cursor.
+Untagged shapes with complete resume evidence can still resume from their saved
+offset.
+
+Eager and progressive recovery fetch a full snapshot. Cached rows remain visible
+until that replacement completes; a partial batch or subset completion cannot
+publish it early. An on-demand collection with the current SQLite persistence
+wrapper instead retains cached rows on disk but clears the source Collection's
+uncertified rows. It starts a changes-only stream at the current position and
+requests snapshots for active subset demands. Each demand completes after its
+snapshot rows apply, including an empty snapshot. Later demands cannot rehydrate
+old cache rows without a fresh source snapshot. With no active demand, recovery
+does not read all cached rows or download the full shape. The durable reset marker
+remains until a complete baseline can justify a global resume cursor. A wrapper
+without scoped recovery support continues to use full-shape recovery. An
+interrupted recovery keeps the reset marker for the next start.
 
 An eager or progressive resume cannot apply a partial update to an unknown row.
 The adapter rejects that batch, enters an error state, and records a reset so the
@@ -370,9 +381,10 @@ next sync starts from a full snapshot. This does not silently retry the failed
 stream. Complete updates from an explicit `replica: 'full'` stream remain valid.
 On-demand streams can observe updates outside their loaded subsets; unknown
 partial rows are ignored, while transaction acknowledgement evidence is retained.
-Complete rows published by persistence reloads or another tab are valid baselines
-for subsequent partial updates. Pending deletions and resets still take precedence
-over an older row that remains publicly visible.
+Outside scoped recovery, complete rows published by persistence reloads or
+another tab are valid baselines for subsequent partial updates. Uncertified
+cached rows in scoped recovery are not. Pending deletions and resets still take
+precedence over an older row that remains publicly visible.
 
 Reusing Electric collection options, including a spread of those options, does
 not share transaction waiters or tag visibility between collections. Tag state

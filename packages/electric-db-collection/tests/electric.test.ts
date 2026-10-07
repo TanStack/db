@@ -3026,7 +3026,7 @@ describe(`Electric Integration`, () => {
       }
     })
 
-    it(`waits for both physical requests of one cursor demand`, async () => {
+    it(`serializes and waits for both physical requests of one cursor demand`, async () => {
       const whereCurrent = createDeferred<void>()
       const whereFrom = createDeferred<void>()
       mockRequestSnapshot
@@ -3059,10 +3059,13 @@ describe(`Electric Integration`, () => {
           }),
         )
         await vi.waitFor(() =>
-          expect(mockRequestSnapshot).toHaveBeenCalledTimes(2),
+          expect(mockRequestSnapshot).toHaveBeenCalledOnce(),
         )
 
         whereCurrent.resolve()
+        await vi.waitFor(() =>
+          expect(mockRequestSnapshot).toHaveBeenCalledTimes(2),
+        )
         const nextTurn = new Promise<`next-turn`>((resolve) =>
           setTimeout(() => resolve(`next-turn`), 0),
         )
@@ -4187,7 +4190,7 @@ describe(`Electric Integration`, () => {
       )
     })
 
-    it(`should honor persisted reset resume metadata through the persisted wrapper`, async () => {
+    it(`uses scoped recovery for persisted reset metadata through the wrapper`, async () => {
       vi.clearAllMocks()
 
       const { ShapeStream } = await import(`@electric-sql/client`)
@@ -4226,8 +4229,8 @@ describe(`Electric Integration`, () => {
 
       expect(ShapeStream).toHaveBeenCalledWith(
         expect.objectContaining({
-          offset: undefined,
-          log: undefined,
+          offset: `now`,
+          log: `changes_only`,
           handle: undefined,
         }),
       )
@@ -4438,7 +4441,7 @@ describe(`Electric Integration`, () => {
       )
     })
 
-    it(`should ignore malformed persisted resume metadata`, async () => {
+    it(`uses a full fallback for malformed resume metadata without scoped persistence`, async () => {
       vi.clearAllMocks()
 
       const { ShapeStream } = await import(`@electric-sql/client`)
@@ -4483,13 +4486,17 @@ describe(`Electric Integration`, () => {
 
       expect(ShapeStream).toHaveBeenCalledWith(
         expect.objectContaining({
-          offset: `now`,
+          offset: undefined,
+          log: undefined,
           handle: undefined,
         }),
       )
+      expect(metadataHarness.collectionMetadata.get(`electric:resume`)).toEqual(
+        expect.objectContaining({ kind: `reset` }),
+      )
     })
 
-    it(`should reset and fall back when persisted resume identity is incompatible`, async () => {
+    it(`uses a full fallback for incompatible identity without scoped persistence`, async () => {
       vi.clearAllMocks()
 
       const { ShapeStream } = await import(`@electric-sql/client`)
@@ -4536,7 +4543,8 @@ describe(`Electric Integration`, () => {
 
       expect(ShapeStream).toHaveBeenCalledWith(
         expect.objectContaining({
-          offset: `now`,
+          offset: undefined,
+          log: undefined,
           handle: undefined,
         }),
       )

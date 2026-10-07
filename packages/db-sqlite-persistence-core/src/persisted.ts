@@ -1354,6 +1354,7 @@ class PersistedCollectionRuntime<
   private nextRequestId = 0
   private startupSettled = false
   private sourceTruncateGeneration = 0
+  private scopedRecovery = false
 
   private latestTerm = 0
   private latestSeq = 0
@@ -1721,6 +1722,19 @@ class PersistedCollectionRuntime<
 
   getKeySetEvidence(): PersistedKeySetEvidence | undefined {
     return this.persistedKeySetEvidence
+  }
+
+  async startScopedRecovery(): Promise<void> {
+    this.scopedRecovery = true
+    this.hydratedDemands.clear()
+    this.resetSequence++
+    if (!this.syncControls.begin || !this.syncControls.commit) return
+    const applied = this.withInternalApply(() => {
+      this.syncControls.begin?.()
+      this.syncControls.truncate?.()
+      return this.syncControls.commit?.() ?? true
+    })
+    if (applied !== true) await applied
   }
 
   getResumeGenerationOwner(): symbol {
@@ -2281,6 +2295,7 @@ class PersistedCollectionRuntime<
 
   private advanceLifecycle(): void {
     this.lifecycleGeneration++
+    this.scopedRecovery = false
     this.persistedReadiness?.set({ status: `loading` })
     this.startupSettled = false
     this.hydratedDemands.clear()
@@ -2317,6 +2332,7 @@ class PersistedCollectionRuntime<
     options: LoadSubsetOptions,
     adapter: HydrationPersistenceAdapter,
   ): Promise<Array<{ key: TKey; value: T; metadata?: unknown }>> {
+    if (this.scopedRecovery) return Promise.resolve([])
     return adapter.loadSubset(this.collectionId, options, {
       requiredIndexSignatures: this.getRequiredIndexSignatures(),
     }) as Promise<Array<{ key: TKey; value: T; metadata?: unknown }>>
@@ -4168,6 +4184,7 @@ function createWrappedSyncConfig<
             throw runtime.reportSyncError(error)
           }
         },
+        startScopedRecovery: () => runtime.startScopedRecovery(),
         scanPersistedRows: (options) =>
           startupState.cleanedUp
             ? Promise.resolve([])

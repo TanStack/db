@@ -1666,3 +1666,65 @@ records the approved contracts and assertion-killed wrong implementations.
 Atomic cross-Collection read-modify-write remains a separate API proposal.
 Native durability remains the current receipt. These are accepted design limits,
 not deferred implementations of the approved follow-up.
+
+
+## Electric recovery demand and scoped persisted restore
+
+[Issue #2056 evaluation](oracle-reviews/issue-2056-full-mode-recovery.md) records
+the original RED and candidate comparisons on head
+`f43a16522c990134ae993235a312d2d5e433dc8a`. The later scoped design
+revises the Electric guide's on-demand cold-recovery contract. The earlier
+“Complete” literacy status is not a claim that every recovery law or provider
+assumption is enforced.
+
+Primary owner: `packages/electric-db-collection/tests/electric-descriptor-isolation-oracle.test.ts`.
+Its existing restart grammar reached subset demand, but its ShapeStream mock
+accepted full-mode snapshot requests forbidden by the SDK. The driver now
+separates durable cache from public source rows and successful subset settlement.
+Tagged cold, legacy, explicit reset, warm resume, interruption, partial
+replacement, and late demand have named cuts. On-demand uncertified recovery
+clears public source rows and publishes scoped snapshot rows only after a
+request; eager and progressive recovery keep full replacement. The fixed/random
+tag campaigns share budget and grammar; a direct seed/path replay runs only the
+selected property. This owner's unconstrained subset demand can fetch all rows
+because the caller requested all rows; it does not prove bounded network work.
+
+Receiver: `packages/electric-db-collection/tests/electric-sdk-delivery-oracle.property.test.ts`.
+A real installed SDK receives two launches through the Electric adapter and
+persistence wrapper with controlled HTTP and durable storage. Direct demand and
+public live-query preload reproduce the original rejection on main and now
+settle through changes-only scoped snapshots. Lost tags, changed shape, and
+malformed resume state each keep stale B on disk without exposing it after an A
+snapshot or an empty B snapshot. The changed-shape case makes B's empty snapshot
+first. A third launch with no demand starts no full-shape transport or
+unrestricted local subset read. Another receiving witness rejects concurrent
+SDK snapshot invocation on the shared cursor. Compatible untagged resumes and
+the true full-mode fallback remain separate controls.
+
+Applied-settlement owner: `packages/electric-db-collection/tests/electric-oracle.property.test.ts`.
+Held optimistic application distinguishes readiness from subset completion for
+demand both before and after readiness. A later same-run reset distinguishes a
+current replacement obligation from a permanently fulfilled startup gate.
+Concurrent initial-error and cleanup cuts observe settlement and lifecycle
+authority. These full-mode obligations still apply when scoped recovery is
+unavailable; the scoped path uses SDK snapshots and applied receipts.
+
+Remaining witnesses before broader closure:
+
+- Electric tag/history owners: unknown or missing key-set evidence plus scoped
+  demand, multiple resets overlapping held application, independently aborted
+  sibling demands, and partial updates arriving before a scoped baseline.
+- Persistence/coordinator owners: native SQLite reads, cross-tab invalidation
+  during cache quarantine, and source versus local-only truncate durability.
+- Installed-SDK delivery and Electric service E2E owners: actual subquery/tag
+  emission, overlapping provider responses, and the scoped restart schedule
+  against a live service.
+- Expo `expo-persisted-collection.e2e.test.ts` and emulator owners: the offered
+  node:sqlite fixture, native storage, and actual process relaunch.
+- Descriptor/tag and SDK DNF owners, if durable tags are selected: complete
+  selected membership and silent active-condition changes persisted atomically
+  with rows and the resume certificate, including migration/reset admission.
+
+No individual maintainer assignment or approved deferral is implied by these
+executable ownership destinations. The bounded controlled-HTTP and Map-backed
+persistence witnesses do not establish class closure across those hosts.

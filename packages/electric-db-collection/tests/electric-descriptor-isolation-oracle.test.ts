@@ -5,7 +5,14 @@ import { createCollection } from '@tanstack/db'
 import { ShapeStream } from '@electric-sql/client'
 import { persistedCollectionOptions } from '../../db-sqlite-persistence-core/src'
 import { electricCollectionOptions } from '../src/electric'
-import { oraclePropertyOptions, oracleRuns } from '../../db/tests/oracle-config'
+import {
+  oraclePropertyOptions,
+  oracleRuns,
+  readOracleRunConfig,
+} from '../../db/tests/oracle-config'
+import { atCheckpoint } from './electric-oracle-lifecycle'
+import { tagPersistence } from './electric-persistence-fixture'
+import type { TestRow } from './electric-persistence-fixture'
 import type { Message } from '@electric-sql/client'
 import type { PersistenceAdapter } from '../../db-sqlite-persistence-core/src'
 import type { ElectricCollectionUtils } from '../src/electric'
@@ -14,8 +21,8 @@ import type { ElectricCollectionUtils } from '../src/electric'
  * # Can reused Electric descriptors keep independent owners and tag state?
  *
  * One descriptor may create several Collections, but each Collection must own
- * its sync run, acknowledgement waiters, persisted tag membership, and cleanup.
- * A compatible resume restores selected tags; a fresh snapshot replaces them.
+ * its sync run, acknowledgement waiters, tag membership, and cleanup.
+ * A compatible warm resume retains selected tags; a fresh snapshot rebuilds them.
  * A `move-out` removes a row only after its modeled tag membership is empty.
  *
  * Plain Maps and tag sets form the independent model. Generated histories vary
@@ -23,14 +30,24 @@ import type { ElectricCollectionUtils } from '../src/electric'
  * edits, and tag removals. The driver uses the real Collection, Electric
  * adapter, persisted wrapper, and a controlled ShapeStream SDK boundary.
  * Checkpoints compare coherent public snapshots, durable rows, recovery traces,
- * acknowledgement ownership, and unsubscribe calls.
+ * acknowledgement ownership, and unsubscribe calls. Restart demand must use
+ * the current stream's capability and wait for its source rows to apply.
+ * The Electric guide now authorizes scoped on-demand recovery: an uncertified
+ * cache remains durable but is excluded from the source Collection until a
+ * fresh subset snapshot establishes its rows. This owner's unconstrained
+ * demand checks replacement and tags; the installed-SDK owner checks bounded
+ * requests, retained cache rows, and empty later snapshots.
+ * The installed-SDK delivery oracle receives the mock's full-mode restriction.
  *
  * Fixed and random campaigns retain replay inputs through the shared oracle
  * configuration. The controlled stream does not establish live Electric HTTP
  * framing or service behavior; those have separate owners.
  */
 
-type TestRow = { id: number; name: string; stable: string }
+const { replayPath, replayProperty } = readOracleRunConfig()
+const fixedCase = replayPath === undefined ? it : it.skip
+const fixedDescribe = replayPath === undefined ? describe : describe.skip
+
 type TagExposure = { cut: string; rows: Array<TestRow> }
 
 function expectMoveOutCheckpoint(observation: {
@@ -64,6 +81,9 @@ function expectWholeTagRecovery(
 type StreamHarness = {
   send: (messages: Array<Message<TestRow>>) => void
   unsubscribe: ReturnType<typeof vi.fn>
+  holdSnapshots: boolean
+  snapshotRequested: () => Promise<void>
+  completeSnapshot: () => void
 }
 
 const streams: Array<StreamHarness> = []
@@ -72,14 +92,57 @@ vi.mock(`@electric-sql/client`, async () => {
   const actual = await vi.importActual(`@electric-sql/client`)
   return {
     ...actual,
-    ShapeStream: vi.fn(() => {
-      const unsubscribe = vi.fn()
+    ShapeStream: vi.fn((options: { log?: string }) => {
+      const pendingSnapshots: Array<{
+        resolve: () => void
+        reject: (error: Error) => void
+      }> = []
+      const requestObservers: Array<() => void> = []
+      let snapshotRequests = 0
+      const unsubscribe = vi.fn(() => {
+        for (const pending of pendingSnapshots.splice(0)) {
+          pending.reject(new Error(`snapshot aborted`))
+        }
+      })
+      let harness: StreamHarness | undefined
       return {
         subscribe: (send: StreamHarness[`send`]) => {
-          streams.push({ send, unsubscribe })
+          harness = {
+            send,
+            unsubscribe,
+            holdSnapshots: false,
+            snapshotRequested: () =>
+              snapshotRequests > 0
+                ? Promise.resolve()
+                : new Promise<void>((resolve) =>
+                    requestObservers.push(resolve),
+                  ),
+            completeSnapshot: () => {
+              const pending = pendingSnapshots.shift()
+              if (!pending) throw new Error(`no pending snapshot request`)
+              pending.resolve()
+            },
+          }
+          streams.push(harness)
           return unsubscribe
         },
-        requestSnapshot: vi.fn().mockResolvedValue(undefined),
+        // ShapeStream.requestSnapshot is legal only in changes_only mode.
+        // The installed-SDK delivery oracle is the receiving witness.
+        requestSnapshot: vi.fn(() => {
+          if (options.log !== `changes_only`) {
+            return Promise.reject(
+              new Error(`Snapshot requests are not supported in full mode`),
+            )
+          }
+          snapshotRequests++
+          for (const observe of requestObservers.splice(0)) observe()
+          if (harness?.holdSnapshots) {
+            return new Promise<void>((resolve, reject) => {
+              pendingSnapshots.push({ resolve, reject })
+            })
+          }
+          return Promise.resolve()
+        }),
         fetchSnapshot: vi.fn().mockResolvedValue({ metadata: {}, data: [] }),
         isUpToDate: false,
         shapeHandle: `shape-current`,
@@ -123,87 +186,6 @@ function descriptor(
   return form === `once-spread` ? { ...options } : options
 }
 
-function tagPersistence() {
-  const rows = new Map<
-    string | number,
-    { value: TestRow; metadata?: unknown }
-  >()
-  const metadata = new Map<string, unknown>()
-  let latestTerm = 0
-  let latestSeq = 0
-  let latestRowVersion = 0
-  let resetEpoch = 0
-  const adapter: PersistenceAdapter = {
-    loadSubset: () =>
-      Promise.resolve(
-        Array.from(rows, ([key, row]) => ({ key, ...structuredClone(row) })),
-      ),
-    loadResumeSnapshot: (_id, ctx) =>
-      Promise.resolve({
-        rows:
-          ctx?.includeRows === false
-            ? []
-            : Array.from(rows, ([key, row]) => ({
-                key,
-                ...structuredClone(row),
-              })),
-        keySet: { status: `consistent` },
-        collectionMetadata: Array.from(metadata, ([key, value]) => ({
-          key,
-          value: structuredClone(value),
-        })),
-        latestTerm,
-        latestSeq,
-        latestRowVersion,
-        resetEpoch,
-      }),
-    loadCollectionMetadata: () =>
-      Promise.resolve(
-        Array.from(metadata, ([key, value]) => ({
-          key,
-          value: structuredClone(value),
-        })),
-      ),
-    applyCommittedTx: (_id, transaction) => {
-      if (transaction.truncate) {
-        rows.clear()
-        resetEpoch++
-      }
-      for (const mutation of transaction.mutations) {
-        if (mutation.type === `delete`) rows.delete(mutation.key)
-        else
-          rows.set(mutation.key, {
-            value: {
-              ...rows.get(mutation.key)?.value,
-              ...structuredClone(mutation.value),
-            } as TestRow,
-            metadata: structuredClone(
-              mutation.metadata ?? rows.get(mutation.key)?.metadata,
-            ),
-          })
-      }
-      for (const mutation of transaction.rowMetadataMutations ?? []) {
-        const row = rows.get(mutation.key)
-        if (row)
-          row.metadata =
-            mutation.type === `delete`
-              ? undefined
-              : structuredClone(mutation.value)
-      }
-      for (const mutation of transaction.collectionMetadataMutations ?? []) {
-        if (mutation.type === `delete`) metadata.delete(mutation.key)
-        else metadata.set(mutation.key, structuredClone(mutation.value))
-      }
-      latestTerm = transaction.term
-      latestSeq = transaction.seq
-      latestRowVersion = transaction.rowVersion
-      return Promise.resolve()
-    },
-    ensureIndex: () => Promise.resolve(),
-  }
-  return { rows, metadata, adapter }
-}
-
 const tagHistory = fc.record({
   syncMode: fc.constantFrom(
     `eager` as const,
@@ -227,16 +209,24 @@ const tagHistory = fc.record({
   }),
 })
 
-async function runTagHistory(history: {
-  syncMode: `eager` | `on-demand` | `progressive`
-  tagged: boolean
-  legacyResume: boolean
-  interruptRecovery: boolean
-  edits: Array<{ id: number; renameOnly: boolean; tag: string }>
-  removals: Array<string>
-}) {
+async function runTagHistory(
+  history: {
+    syncMode: `eager` | `on-demand` | `progressive`
+    tagged: boolean
+    legacyResume: boolean
+    interruptRecovery: boolean
+    edits: Array<{ id: number; renameOnly: boolean; tag: string }>
+    removals: Array<string>
+  },
+  selectedRestart?: { cold: boolean; fresh: boolean },
+) {
   for (const cold of [false, true]) {
     for (const fresh of [true, false]) {
+      if (
+        selectedRestart &&
+        (cold !== selectedRestart.cold || fresh !== selectedRestart.fresh)
+      )
+        continue
       const start = streams.length
       const { rows, metadata, adapter } = tagPersistence()
       const model = new Map(
@@ -274,6 +264,10 @@ async function runTagHistory(history: {
           stable,
         }))
       const durableRows = () => [...rows.values()].map((entry) => entry.value)
+      // The model's row map is the authoritative provider state. After scoped
+      // recovery, the durable map is only a cache and may retain removed rows;
+      // public refinement remains exact while the SDK receiver checks retention.
+      let scopedRecoveryOccurred = false
       const check = async () => {
         await vi.waitFor(
           () =>
@@ -282,9 +276,14 @@ async function runTagHistory(history: {
             ),
           { interval: 1 },
         )
-        await vi.waitFor(() => expect(durableRows()).toEqual(expectedRows()), {
-          interval: 1,
-        })
+        if (!scopedRecoveryOccurred) {
+          await vi.waitFor(
+            () => expect(durableRows()).toEqual(expectedRows()),
+            {
+              interval: 1,
+            },
+          )
+        }
       }
       const snapshot = (): Array<Message<TestRow>> =>
         [...model.values()].map(({ row, tags }) => ({
@@ -351,20 +350,55 @@ async function runTagHistory(history: {
         await vi.waitFor(() => expect(streams).toHaveLength(start + 2), {
           interval: 1,
         })
-        // Lazy persistence hydrates cached rows only when a consumer acquires
-        // a subset. The stream alone does not materialize that cache.
-        if (history.syncMode !== `eager`) await current._sync.loadSubset({})
-        await vi.waitFor(() => expect(publicRows()).toEqual(expectedRows()), {
-          interval: 1,
-        })
         const rebuild =
           fresh || (cold && (history.tagged || history.legacyResume))
+        const waitsForReplacement = history.syncMode === `on-demand` && rebuild
+        scopedRecoveryOccurred = waitsForReplacement
+        if (waitsForReplacement) streams[start + 1]!.holdSnapshots = true
+        const acquire = () => {
+          let outcome: `pending` | `fulfilled` | `rejected` = `pending`
+          const completion = Promise.resolve(current._sync.loadSubset({})).then(
+            () => {
+              outcome = `fulfilled`
+              return { kind: `fulfilled` }
+            },
+            (error: unknown) => {
+              outcome = `rejected`
+              return { kind: `rejected`, error: String(error) }
+            },
+          )
+          return { completion, outcome: () => outcome }
+        }
+        // The controlled provider holds scoped recovery snapshots so demand
+        // cannot settle from an uncertified persisted row before source delivery.
+        let acquisition = history.syncMode === `eager` ? undefined : acquire()
+        if (acquisition && !waitsForReplacement) {
+          expect(
+            await atCheckpoint(acquisition.completion, `resumed subset`),
+          ).toEqual({ kind: `fulfilled` })
+        }
+        if (waitsForReplacement) expect(publicRows()).toEqual([])
+        else
+          await vi.waitFor(() => expect(publicRows()).toEqual(expectedRows()), {
+            interval: 1,
+          })
+        if (waitsForReplacement)
+          expect(acquisition?.outcome(), `before recovery snapshot`).toBe(
+            `pending`,
+          )
         let resumedStream = streams[start + 1]!
         expect(vi.mocked(ShapeStream).mock.calls[start + 1]?.[0]).toMatchObject(
-          { offset: rebuild ? undefined : `20_0` },
+          {
+            offset: rebuild
+              ? waitsForReplacement
+                ? `now`
+                : undefined
+              : `20_0`,
+          },
         )
         if (rebuild) {
           const cachedRows = structuredClone(expectedRows())
+          const visibleBefore = waitsForReplacement ? [] : cachedRows
           const exposures: Array<TagExposure> = []
           const record = (cut: string) => {
             exposures.push({ cut, rows: structuredClone(publicRows()) })
@@ -392,32 +426,63 @@ async function runTagHistory(history: {
           // expose a torn snapshot or erase the still-visible cached rows.
           model.delete(2)
           for (const entry of model.values()) entry.tags = new Set([`fresh`])
+          if (waitsForReplacement)
+            await atCheckpoint(
+              resumedStream.snapshotRequested(),
+              `scoped snapshot request`,
+            )
           resumedStream.send(snapshot())
           record(`after partial replacement`)
-          expect(publicRows()).toEqual(cachedRows)
+          expect(publicRows()).toEqual(visibleBefore)
           // A concurrent subset request finishing is not completion of the
           // full replacement snapshot used to recover cold membership.
-          if (!fresh && cold && (history.tagged || history.legacyResume)) {
+          if (
+            !waitsForReplacement &&
+            !fresh &&
+            cold &&
+            (history.tagged || history.legacyResume)
+          ) {
             resumedStream.send([{ headers: { control: `subset-end` } }])
             record(`after subset completion`)
             expect(publicRows()).toEqual(cachedRows)
           }
-          expectWholeTagRecovery(exposures, [cachedRows])
+          expectWholeTagRecovery(exposures, [visibleBefore])
+          if (waitsForReplacement)
+            expect(acquisition?.outcome(), `partial replacement`).toBe(
+              `pending`,
+            )
           if (history.interruptRecovery) {
             const abandoned = resumedStream
             stopRecoveryObservation()
             await current.cleanup()
+            if (acquisition)
+              await atCheckpoint(
+                acquisition.completion,
+                `abandoned acquisition settles`,
+              )
             current.startSyncImmediate()
             await vi.waitFor(() => expect(streams).toHaveLength(start + 3), {
               interval: 1,
             })
-            if (history.syncMode !== `eager`) await current._sync.loadSubset({})
-            await vi.waitFor(() => expect(publicRows()).toEqual(cachedRows), {
-              interval: 1,
-            })
+            if (waitsForReplacement) streams[start + 2]!.holdSnapshots = true
+            acquisition = history.syncMode === `eager` ? undefined : acquire()
+            if (acquisition && history.syncMode !== `on-demand`) {
+              expect(
+                await atCheckpoint(
+                  acquisition.completion,
+                  `progressive recovery subset`,
+                ),
+              ).toEqual({ kind: `fulfilled` })
+            }
+            await vi.waitFor(
+              () => expect(publicRows()).toEqual(visibleBefore),
+              { interval: 1 },
+            )
             expect(
               vi.mocked(ShapeStream).mock.calls[start + 2]?.[0],
-            ).toMatchObject({ offset: undefined })
+            ).toMatchObject({
+              offset: waitsForReplacement ? `now` : undefined,
+            })
             observe()
             record(`replacement lifecycle hydrated`)
             const metadataBefore = structuredClone(
@@ -434,18 +499,37 @@ async function runTagHistory(history: {
             expect(current.config.sync.exportSyncMeta?.()).toEqual(
               metadataBefore,
             )
-            expectWholeTagRecovery(exposures, [cachedRows])
+            expectWholeTagRecovery(exposures, [visibleBefore])
             resumedStream = streams[start + 2]!
+            if (waitsForReplacement)
+              await atCheckpoint(
+                resumedStream.snapshotRequested(),
+                `restarted scoped snapshot request`,
+              )
             resumedStream.send(snapshot())
             record(`after restarted partial replacement`)
-            expectWholeTagRecovery(exposures, [cachedRows])
+            expectWholeTagRecovery(exposures, [visibleBefore])
           }
-          resumedStream.send([upToDate])
+          if (waitsForReplacement) {
+            resumedStream.send([{ headers: { control: `subset-end` } }])
+            resumedStream.completeSnapshot()
+          } else resumedStream.send([upToDate])
           record(`after replacement commit`)
           await check()
+          if (acquisition) {
+            expect(
+              await atCheckpoint(
+                acquisition.completion,
+                `recovery subset applied`,
+              ),
+            ).toEqual({ kind: `fulfilled` })
+            // A later acquisition still uses the current stream capability.
+            resumedStream.holdSnapshots = false
+            await current._sync.loadSubset({ limit: 1 })
+          }
           record(`replacement settled`)
           expectWholeTagRecovery(exposures, [
-            cachedRows,
+            visibleBefore,
             structuredClone(expectedRows()),
           ])
           stopRecoveryObservation()
@@ -470,24 +554,62 @@ async function runTagHistory(history: {
   }
 }
 
-fcTest.prop([tagHistory], { seed: 42712, numRuns: oracleRuns(6) })(
-  `persisted tag histories preserve membership across warm and cold restart (fixed)`,
-  runTagHistory,
+// Bounded neighbors isolate membership loss from reset debt. The ordinary
+// untagged resume is the distinguishing control for changes_only capability.
+fixedCase.each([
+  { tagged: true, legacyResume: false, cold: true, fresh: false },
+  { tagged: false, legacyResume: false, cold: true, fresh: false },
+  { tagged: false, legacyResume: true, cold: true, fresh: false },
+  { tagged: false, legacyResume: false, cold: false, fresh: true },
+])(
+  `settles restart demand with tagged=$tagged legacy=$legacyResume cold=$cold reset=$fresh`,
+  async ({ cold, fresh, ...history }) => {
+    await runTagHistory(
+      {
+        ...history,
+        syncMode: `on-demand`,
+        interruptRecovery: false,
+        edits: [],
+        removals: [`left`, `right`, `other`],
+      },
+      { cold, fresh },
+    )
+  },
 )
-fcTest.prop(
-  [tagHistory],
-  oraclePropertyOptions(10, `electric.persisted-tag-history`),
-)(
-  `persisted tag histories preserve membership across warm and cold restart (random)`,
-  runTagHistory,
-)
+
+// The two campaigns use the same grammar, checker, and budget. An explicit
+// replay registers only its selected property. Reproduce a saved failure with:
+// TANSTACK_DB_ORACLE_PROPERTY=electric.persisted-tag-history
+// TANSTACK_DB_ORACLE_SEED=<seed> TANSTACK_DB_ORACLE_PATH=<path>
+// pnpm exec vitest run tests/electric-descriptor-isolation-oracle.test.ts
+if (replayPath === undefined) {
+  fcTest.prop([tagHistory], { seed: 42712, numRuns: oracleRuns(10) })(
+    `persisted tag histories preserve membership across warm and cold restart (fixed)`,
+    (history) => runTagHistory(history),
+  )
+  fcTest.prop(
+    [tagHistory],
+    oraclePropertyOptions(10, `electric.persisted-tag-history`),
+  )(
+    `persisted tag histories preserve membership across warm and cold restart (random)`,
+    (history) => runTagHistory(history),
+  )
+} else if (replayProperty === `electric.persisted-tag-history`) {
+  fcTest.prop(
+    [tagHistory],
+    oraclePropertyOptions(10, `electric.persisted-tag-history`),
+  )(
+    `persisted tag histories preserve membership across warm and cold restart (replay)`,
+    (history) => runTagHistory(history),
+  )
+}
 
 beforeEach(() => {
   streams.length = 0
   vi.clearAllMocks()
 })
 
-it.each([`eager`, `on-demand`, `progressive`] as const)(
+fixedCase.each([`eager`, `on-demand`, `progressive`] as const)(
   `delivers abandoned tag-recovery callbacks after replacement starts in %s mode`,
   async (syncMode) => {
     await runTagHistory({
@@ -504,28 +626,31 @@ it.each([`eager`, `on-demand`, `progressive`] as const)(
   },
 )
 
-it(`rejects torn or reverted tag-recovery histories even when their last snapshot is correct`, () => {
-  const cached = [{ id: 1, name: `cached`, stable: `stable-1` }]
-  const replacement = [{ id: 2, name: `replacement`, stable: `stable-2` }]
-  const record = (rows: Array<Array<TestRow>>) =>
-    rows.map((snapshot, index) => ({
-      cut: `cut-${index}`,
-      rows: structuredClone(snapshot),
-    }))
-  expectWholeTagRecovery(record([cached, cached, replacement, replacement]), [
-    cached,
-    replacement,
-  ])
-  for (const rows of [
-    [cached, [], replacement],
-    [cached, [...cached, ...replacement], replacement],
-    [cached, replacement, cached, replacement],
-  ]) {
-    expect(() =>
-      expectWholeTagRecovery(record(rows), [cached, replacement]),
-    ).toThrow()
-  }
-})
+fixedCase(
+  `rejects torn or reverted tag-recovery histories even when their last snapshot is correct`,
+  () => {
+    const cached = [{ id: 1, name: `cached`, stable: `stable-1` }]
+    const replacement = [{ id: 2, name: `replacement`, stable: `stable-2` }]
+    const record = (rows: Array<Array<TestRow>>) =>
+      rows.map((snapshot, index) => ({
+        cut: `cut-${index}`,
+        rows: structuredClone(snapshot),
+      }))
+    expectWholeTagRecovery(record([cached, cached, replacement, replacement]), [
+      cached,
+      replacement,
+    ])
+    for (const rows of [
+      [cached, [], replacement],
+      [cached, [...cached, ...replacement], replacement],
+      [cached, replacement, cached, replacement],
+    ]) {
+      expect(() =>
+        expectWholeTagRecovery(record(rows), [cached, replacement]),
+      ).toThrow()
+    }
+  },
+)
 
 const ownerHistory = fc.record({
   startSync: fc.boolean(),
@@ -606,93 +731,116 @@ async function runOwnerHistory(history: {
   }
 }
 
-fcTest.prop([ownerHistory], { seed: 42711, numRuns: oracleRuns(12) })(
-  `config derivation preserves independent owner histories (fixed)`,
-  runOwnerHistory,
-)
-fcTest.prop(
-  [ownerHistory],
-  oraclePropertyOptions(20, `electric.bound-descriptor-history`),
-)(
-  `config derivation preserves independent owner histories (random)`,
-  runOwnerHistory,
-)
+if (replayPath === undefined) {
+  fcTest.prop([ownerHistory], { seed: 42711, numRuns: oracleRuns(12) })(
+    `config derivation preserves independent owner histories (fixed)`,
+    runOwnerHistory,
+  )
+  fcTest.prop(
+    [ownerHistory],
+    oraclePropertyOptions(20, `electric.bound-descriptor-history`),
+  )(
+    `config derivation preserves independent owner histories (random)`,
+    runOwnerHistory,
+  )
+} else if (replayProperty === `electric.bound-descriptor-history`) {
+  fcTest.prop(
+    [ownerHistory],
+    oraclePropertyOptions(20, `electric.bound-descriptor-history`),
+  )(
+    `config derivation preserves independent owner histories (replay)`,
+    runOwnerHistory,
+  )
+}
 
-it(`keeps insert acknowledgements on the owner of a reused persisted descriptor`, async () => {
-  const adapter: PersistenceAdapter = {
-    loadSubset: () => Promise.resolve([]),
-    loadResumeSnapshot: () =>
-      Promise.resolve({
-        rows: [],
-        keySet: { status: `consistent` },
-        collectionMetadata: [],
-        latestTerm: 0,
-        latestSeq: 0,
-        latestRowVersion: 0,
-        resetEpoch: 0,
+fixedCase(
+  `keeps insert acknowledgements on the owner of a reused persisted descriptor`,
+  async () => {
+    const adapter: PersistenceAdapter = {
+      loadSubset: () => Promise.resolve([]),
+      loadResumeSnapshot: () =>
+        Promise.resolve({
+          rows: [],
+          keySet: { status: `consistent` },
+          collectionMetadata: [],
+          latestTerm: 0,
+          latestSeq: 0,
+          latestRowVersion: 0,
+          resetEpoch: 0,
+        }),
+      loadCollectionMetadata: () => Promise.resolve([]),
+      applyCommittedTx: () => Promise.resolve(),
+      ensureIndex: () => Promise.resolve(),
+    }
+    const options = persistedCollectionOptions<
+      TestRow,
+      string | number,
+      never,
+      ElectricCollectionUtils<TestRow>
+    >({
+      ...electricCollectionOptions<TestRow>({
+        id: `shared-persisted-options`,
+        shapeOptions: {
+          url: `http://test-url`,
+          params: { table: `test_table` },
+        },
+        getKey: (row) => row.id,
+        startSync: false,
+        onInsert: () => Promise.resolve({ txid: 200, timeout: 100 }),
       }),
-    loadCollectionMetadata: () => Promise.resolve([]),
-    applyCommittedTx: () => Promise.resolve(),
-    ensureIndex: () => Promise.resolve(),
-  }
-  const options = persistedCollectionOptions<
-    TestRow,
-    string | number,
-    never,
-    ElectricCollectionUtils<TestRow>
-  >({
-    ...electricCollectionOptions<TestRow>({
-      id: `shared-persisted-options`,
-      shapeOptions: { url: `http://test-url`, params: { table: `test_table` } },
-      getKey: (row) => row.id,
-      startSync: false,
-      onInsert: () => Promise.resolve({ txid: 200, timeout: 100 }),
-    }),
-    persistence: { adapter },
-  })
-  const first = createCollection(options)
-  const second = createCollection(options)
-  try {
-    first.startSyncImmediate()
-    await vi.waitFor(() => expect(streams).toHaveLength(1))
-    streams[0]!.send([upToDate])
-    await vi.waitFor(() => expect(first.status).toBe(`ready`))
-    second.startSyncImmediate()
-    await vi.waitFor(() => expect(streams).toHaveLength(2))
-    streams[1]!.send([upToDate])
-    await vi.waitFor(() => expect(second.status).toBe(`ready`))
+      persistence: { adapter },
+    })
+    const first = createCollection(options)
+    const second = createCollection(options)
+    try {
+      first.startSyncImmediate()
+      await vi.waitFor(() => expect(streams).toHaveLength(1))
+      streams[0]!.send([upToDate])
+      await vi.waitFor(() => expect(first.status).toBe(`ready`))
+      second.startSyncImmediate()
+      await vi.waitFor(() => expect(streams).toHaveLength(2))
+      streams[1]!.send([upToDate])
+      await vi.waitFor(() => expect(second.status).toBe(`ready`))
 
-    const transaction = first.insert({ id: 1, name: `own`, stable: `stable-1` })
-    void transaction.isPersisted.promise.catch(() => undefined)
-    streams[0]!.send([
-      insert(1, `own`),
-      { headers: { control: `up-to-date`, txids: [200] } },
-    ])
-    await expect(transaction.isPersisted.promise).resolves.toBeDefined()
-    expect(first.get(1)?.name).toBe(`own`)
-    expect(second.has(1)).toBe(false)
-  } finally {
-    await first.cleanup()
-    await second.cleanup()
-  }
-})
+      const transaction = first.insert({
+        id: 1,
+        name: `own`,
+        stable: `stable-1`,
+      })
+      void transaction.isPersisted.promise.catch(() => undefined)
+      streams[0]!.send([
+        insert(1, `own`),
+        { headers: { control: `up-to-date`, txids: [200] } },
+      ])
+      await expect(transaction.isPersisted.promise).resolves.toBeDefined()
+      expect(first.get(1)?.name).toBe(`own`)
+      expect(second.has(1)).toBe(false)
+    } finally {
+      await first.cleanup()
+      await second.cleanup()
+    }
+  },
+)
 
-it(`rejects a descriptor move-out checkpoint that deletes rows by fail-stopping`, () => {
-  expectMoveOutCheckpoint({
-    status: `ready`,
-    publicRowPresent: false,
-    durableRowPresent: false,
-  })
-  expect(() =>
+fixedCase(
+  `rejects a descriptor move-out checkpoint that deletes rows by fail-stopping`,
+  () => {
     expectMoveOutCheckpoint({
-      status: `error`,
+      status: `ready`,
       publicRowPresent: false,
       durableRowPresent: false,
-    }),
-  ).toThrow()
-})
+    })
+    expect(() =>
+      expectMoveOutCheckpoint({
+        status: `error`,
+        publicRowPresent: false,
+        durableRowPresent: false,
+      }),
+    ).toThrow()
+  },
+)
 
-it.each([`resume`, `fresh`] as const)(
+fixedCase.each([`resume`, `fresh`] as const)(
   `restores compatible tags and discards obsolete tags on persisted $0 restart`,
   async (restart) => {
     const { rows, metadata, adapter } = tagPersistence()
@@ -750,7 +898,7 @@ it.each([`resume`, `fresh`] as const)(
   },
 )
 
-describe.each([`original`, `once-spread`] as const)(
+fixedDescribe.each([`original`, `once-spread`] as const)(
   `%s Electric descriptor`,
   (form) => {
     it.each([false, true])(

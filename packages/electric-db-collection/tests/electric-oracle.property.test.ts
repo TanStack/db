@@ -114,8 +114,8 @@ function electricHistoryProperty<T>(
  *
  * Electric delivers change messages, reset controls, offsets, handles, and
  * snapshot availability through an SDK stream. The adapter must publish atomic
- * callback cuts, wait for applied receipts before readiness, persist valid
- * resume evidence for a valid source prefix, reject unseen partial updates,
+ * callback cuts, wait for acceptance before Collection readiness and for
+ * application before subset success, persist valid resume evidence for a valid source prefix, reject unseen partial updates,
  * and keep stale callbacks and metadata scoped to the sync run that created
  * them.
  *
@@ -5084,6 +5084,170 @@ describeUnlessQueuedPresenceReplay(`Electric adapter laws`, () => {
     )
     await trace.collection.cleanup()
   })
+
+  /**
+   * Full-mode recovery can accept its complete source snapshot while an
+   * optimistic transaction still withholds application. Collection readiness
+   * is allowed at acceptance; LoadSubsetFn success must await the applied
+   * receipt. The independent obligation is simply pending until the held
+   * transaction releases, then exact source-row visibility at settlement.
+   *
+   * Demand before and after readiness distinguishes an initial-ready gate
+   * from the stronger applied-settlement law, including receipts created
+   * before the acquisition's own commit cursor. The transaction promise
+   * controls application; yielding a turn only drains already queued work.
+   */
+  it.each([`before-ready`, `after-ready`] as const)(
+    `full recovery subset waits for application when acquired %s`,
+    async (acquireAt) => {
+      const trace = createOracleCollection(
+        `full-recovery-applied-${acquireAt}`,
+        `on-demand`,
+        createMetadata(
+          new Map([[`electric:resume`, { kind: `reset`, updatedAt: 1 }]]),
+        ).api,
+      )
+      const persistence = createDeferred<void>()
+      const transaction = createTransaction({
+        mutationFn: () => persistence.promise,
+      })
+      transaction.mutate(() =>
+        trace.collection.insert({
+          id: 99,
+          name: `optimistic`,
+          stable: `stable-99`,
+        }),
+      )
+      let outcome: `pending` | `fulfilled` | `rejected` = `pending`
+      const acquire = () =>
+        Promise.resolve(trace.collection._sync.loadSubset({ limit: 1 })).then(
+          () => {
+            outcome = `fulfilled`
+          },
+          (error: unknown) => {
+            outcome = `rejected`
+            throw error
+          },
+        )
+      let loading: Promise<void> | undefined
+      await withElectricCleanup(async () => {
+        if (acquireAt === `before-ready`) loading = acquire()
+        trace.subscriber([change(`insert`, 1, `replacement`), upToDate])
+        expect(trace.collection.status).toBe(`ready`)
+        if (acquireAt === `after-ready`) loading = acquire()
+        void loading!.catch(() => undefined)
+        await new Promise<void>((resolve) => setTimeout(resolve, 0))
+        expect(trace.collection.has(1), `application is still held`).toBe(false)
+        expect(outcome, `ready does not establish subset application`).toBe(
+          `pending`,
+        )
+        persistence.resolve()
+        await transaction.isPersisted.promise
+        await atCheckpoint(loading!, `full recovery applied settlement`)
+        expect(outcome).toBe(`fulfilled`)
+        expect(trace.collection.get(1)).toMatchObject({
+          id: 1,
+          name: `replacement`,
+          stable: `stable-1`,
+        })
+      }, [() => persistence.resolve(), () => trace.collection.cleanup()])
+    },
+  )
+
+  // A full stream keeps its capability across a same-run must-refetch. Its
+  // previous applied snapshot cannot establish newly requested replacement
+  // coverage. This continuation rejects a permanently fulfilled startup gate.
+  it(`full recovery demand waits again after a same-run reset`, async () => {
+    const trace = createOracleCollection(
+      `full-recovery-reset`,
+      `on-demand`,
+      createMetadata(
+        new Map([[`electric:resume`, { kind: `reset`, updatedAt: 1 }]]),
+      ).api,
+    )
+    await withElectricCleanup(async () => {
+      trace.subscriber([change(`insert`, 1, `first`), upToDate])
+      await trace.collection._sync.loadSubset({ limit: 1 })
+      trace.subscriber([mustRefetch])
+      let outcome = `pending`
+      const loading = Promise.resolve(
+        trace.collection._sync.loadSubset({ limit: 2 }),
+      ).then(
+        () => {
+          outcome = `fulfilled`
+        },
+        (error: unknown) => {
+          outcome = `rejected`
+          throw error
+        },
+      )
+      void loading.catch(() => undefined)
+      await new Promise<void>((resolve) => setTimeout(resolve, 0))
+      expect(outcome, `prior readiness is not replacement coverage`).toBe(
+        `pending`,
+      )
+      trace.subscriber([change(`insert`, 2, `second`), upToDate])
+      await atCheckpoint(loading, `same-run replacement applied`)
+      expect(outcome).toBe(`fulfilled`)
+      expect(rowsFromCollection(trace.collection)).toEqual([
+        [2, `second`, `stable-2`],
+      ])
+    }, [() => trace.collection.cleanup()])
+  })
+
+  // Initial failure rejects all current waiters with the original error.
+  // Cleanup settles them and invalidates subsequent callbacks. A provider
+  // error alone does not make its future callbacks obsolete; retry semantics
+  // remain outside this initial-settlement check.
+  it.each([`failure`, `cleanup`] as const)(
+    `full recovery retires concurrent demand on %s`,
+    async (terminal) => {
+      const loggedError = vi
+        .spyOn(console, `error`)
+        .mockImplementation(() => {})
+      const trace = createOracleCollection(
+        `full-recovery-${terminal}`,
+        `on-demand`,
+        createMetadata(
+          new Map([[`electric:resume`, { kind: `reset`, updatedAt: 1 }]]),
+        ).api,
+      )
+      const sentinel = new Error(`initial full sync failed`)
+      const outcomes = [1, 2].map((limit) =>
+        Promise.resolve(trace.collection._sync.loadSubset({ limit })).then(
+          () => ({ kind: `fulfilled` as const }),
+          (error: unknown) => ({ kind: `rejected` as const, error }),
+        ),
+      )
+      await withElectricCleanup(async () => {
+        if (terminal === `failure`) {
+          const options = vi.mocked(ShapeStream).mock.calls.at(-1)?.[0] as
+            | {
+                onError?: (error: unknown) => void
+              }
+            | undefined
+          expect(options?.onError).toBeTypeOf(`function`)
+          options?.onError?.(sentinel)
+        } else await trace.collection.cleanup()
+        const results = await atCheckpoint(
+          Promise.all(outcomes),
+          `terminal full recovery settlement`,
+        )
+        if (terminal === `failure`) {
+          expect(results).toEqual([
+            { kind: `rejected`, error: sentinel },
+            { kind: `rejected`, error: sentinel },
+          ])
+          expect(trace.collection.status).toBe(`error`)
+        } else {
+          expect(results).toHaveLength(2)
+          expect(trace.collection.status).toBe(`cleaned-up`)
+          trace.subscriber([change(`insert`, 1, `abandoned`), upToDate])
+          expect(trace.collection.has(1)).toBe(false)
+        }
+      }, [() => trace.collection.cleanup(), () => loggedError.mockRestore()])
+    },
+  )
 
   it(`drops a held receipt's rows when cleanup abandons it`, async () => {
     const metadata = createMetadata(new Map())

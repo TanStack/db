@@ -648,6 +648,7 @@ function createLoadSubsetDedupe<T extends Row<unknown>>({
   stream,
   syncMode,
   isBufferingInitialSync,
+  waitForFullSnapshot,
   begin,
   write,
   commit,
@@ -657,10 +658,12 @@ function createLoadSubsetDedupe<T extends Row<unknown>>({
   collectionId,
   encodeColumnName,
   signal,
+  beforeSnapshot,
 }: {
   stream: ShapeStream<T>
   syncMode: ElectricSyncMode
   isBufferingInitialSync: () => boolean
+  waitForFullSnapshot?: () => Promise<void>
   begin: () => void
   write: (mutation: {
     type: `insert` | `update` | `delete`
@@ -682,6 +685,7 @@ function createLoadSubsetDedupe<T extends Row<unknown>>({
    * When aborted, errors from requestSnapshot are silently ignored.
    */
   signal: AbortSignal
+  beforeSnapshot?: () => Promise<void>
 }): DeduplicatedLoadSubset | null {
   if (syncMode === `eager`) {
     return null
@@ -689,6 +693,9 @@ function createLoadSubsetDedupe<T extends Row<unknown>>({
 
   const compileOptions = encodeColumnName ? { encodeColumnName } : undefined
   const logPrefix = collectionId ? `[${collectionId}] ` : ``
+  // ShapeStream advances one stream cursor for every snapshot response.
+  // Overlapping requests must not apply a later offset before an older one.
+  let snapshotTail: Promise<void> | undefined
 
   const abortReason = (abortedSignal: AbortSignal): unknown =>
     abortedSignal.reason ?? new LoadSubsetOperationAbortedError()
@@ -712,7 +719,31 @@ function createLoadSubsetDedupe<T extends Row<unknown>>({
       if (signal.aborted) throw abortReason(signal)
       if (opts.signal?.aborted) throw abortReason(opts.signal)
     }
+    const requestSnapshotInOrder = (
+      params: Parameters<typeof stream.requestSnapshot>[0],
+    ) => {
+      const invoke = () => {
+        throwIfAborted()
+        return stream.requestSnapshot(params)
+      }
+      const request = snapshotTail ? snapshotTail.then(invoke) : invoke()
+      snapshotTail = request.then(
+        () => undefined,
+        () => undefined,
+      )
+      return request
+    }
     throwIfAborted()
+    if (beforeSnapshot) {
+      await beforeSnapshot()
+      throwIfAborted()
+    }
+
+    if (waitForFullSnapshot) {
+      await waitForFullSnapshot()
+      throwIfAborted()
+      return
+    }
 
     if (isBufferingInitialSync()) {
       const snapshotParams = compileSQL<T>(opts, compileOptions)
@@ -790,13 +821,11 @@ function createLoadSubsetDedupe<T extends Row<unknown>>({
           `${logPrefix}Requesting cursor.whereFrom snapshot (with limit ${limit})`,
         )
 
-        await Promise.all([
-          stream.requestSnapshot(whereCurrentParams),
-          stream.requestSnapshot(whereFromParams),
-        ])
+        await requestSnapshotInOrder(whereCurrentParams)
+        await requestSnapshotInOrder(whereFromParams)
       } else {
         const snapshotParams = compileSQL<T>(opts, compileOptions)
-        await stream.requestSnapshot(snapshotParams)
+        await requestSnapshotInOrder(snapshotParams)
       }
     } catch (error) {
       if (opts.signal?.aborted) return
@@ -1702,11 +1731,6 @@ function createElectricSync<T extends Row<unknown>>(
           ),
         )
       }
-      const readPersistedResumeState = (): ElectricResumeState | undefined => {
-        const persistedResumeState = metadata?.collection.get(`electric:resume`)
-        return parseElectricResumeState(persistedResumeState)
-      }
-
       const persistence =
         metadata === undefined
           ? null
@@ -1718,8 +1742,12 @@ function createElectricSync<T extends Row<unknown>>(
       const expectCurrentCommit = resumeSnapshot?.expectCurrentCommit
       const persistedKeySetEvidence = getKeySetEvidence?.()
 
+      const storedResumeRecord = metadata?.collection.get(`electric:resume`)
+      const storedResumeState = parseElectricResumeState(storedResumeRecord)
+      const malformedPersistedResume =
+        storedResumeRecord !== undefined && storedResumeState === undefined
       const persistedResumeState = getNewestElectricResumeState(
-        readPersistedResumeState(),
+        storedResumeState,
         lifecycle.resumeState,
       )
       const shapeIdentity = getStableShapeIdentity({
@@ -1735,13 +1763,38 @@ function createElectricSync<T extends Row<unknown>>(
         persistedResumeState?.kind === `resume` &&
         getKeySetEvidence !== undefined &&
         persistedKeySetEvidence?.status !== `consistent`
-      const needsFullSnapshot =
+      const requiresFreshSourceEvidence =
         shapeOptions.offset === undefined &&
         shapeOptions.handle === undefined &&
-        persistedResumeState !== undefined &&
-        (persistedResumeState.kind === `reset` ||
+        (persistedResumeState !== undefined || malformedPersistedResume) &&
+        (malformedPersistedResume ||
+          hasIncompatiblePersistedResume ||
+          persistedResumeState?.kind === `reset` ||
           lacksCompletePersistedKeySet ||
-          (!retainsTagState && persistedResumeState.requiresTagState !== false))
+          (!retainsTagState &&
+            persistedResumeState?.kind === `resume` &&
+            persistedResumeState.requiresTagState !== false))
+      const scopedRecovery =
+        syncMode === `on-demand` &&
+        requiresFreshSourceEvidence &&
+        persistence?.startScopedRecovery !== undefined
+      const usesFullLog =
+        syncMode === `on-demand` &&
+        requiresFreshSourceEvidence &&
+        !scopedRecovery
+      let resolveFullSnapshot: (receipt: SyncAppliedReceipt) => void = () => {}
+      let rejectFullSnapshot: (error: unknown) => void = () => {}
+      let fullSnapshotReady = Promise.resolve()
+      const resetFullSnapshot = () => {
+        if (!usesFullLog) return
+        fullSnapshotReady = new Promise<void>((resolve, reject) => {
+          resolveFullSnapshot = (receipt) =>
+            resolve(receipt === true ? undefined : receipt)
+          rejectFullSnapshot = reject
+        })
+        void fullSnapshotReady.catch(() => undefined)
+      }
+      resetFullSnapshot()
       const canUsePersistedResume =
         shapeOptions.offset === undefined &&
         shapeOptions.handle === undefined &&
@@ -1749,7 +1802,7 @@ function createElectricSync<T extends Row<unknown>>(
         !hasIncompatiblePersistedResume &&
         // Cached rows do not contain authoritative tag/active-condition state.
         // Only a complete adapter ledger can justify a persisted cursor.
-        !needsFullSnapshot
+        !requiresFreshSourceEvidence
       const hasExplicitResumeOffset =
         shapeOptions.offset !== undefined && shapeOptions.offset !== `-1`
       if (!canUsePersistedResume && !hasExplicitResumeOffset) {
@@ -1767,7 +1820,8 @@ function createElectricSync<T extends Row<unknown>>(
       // A fresh snapshot replaces its hydrated cache; omitting the old offset
       // alone would merge rows that no longer exist on the server.
       let freshSnapshotPending =
-        (syncMode === `eager` || needsFullSnapshot) &&
+        (syncMode === `eager` ||
+          (requiresFreshSourceEvidence && !scopedRecovery)) &&
         !canUsePersistedResume &&
         !hasExplicitResumeOffset &&
         hydrateBaseline !== undefined
@@ -1814,15 +1868,17 @@ function createElectricSync<T extends Row<unknown>>(
       }
 
       abortController.signal.addEventListener(`abort`, () => {
+        rejectFullSnapshot(new StreamAbortedError(collectionId))
         lifecycle.retire(lifecycleEpoch)
       })
 
       const stream = new ShapeStream({
         ...shapeOptions,
-        // Recovery needs a complete snapshot even for on-demand shapes.
-        // Normal on-demand startup still subscribes to changes only.
+        // Uncertified on-demand cache rows are quarantined and loaded only
+        // through fresh subset snapshots.
         log:
-          syncMode === `on-demand` && !needsFullSnapshot
+          syncMode === `on-demand` &&
+          (!requiresFreshSourceEvidence || scopedRecovery)
             ? `changes_only`
             : undefined,
         // In on-demand mode, we only need the changes from the point of time the collection was created
@@ -1831,7 +1887,8 @@ function createElectricSync<T extends Row<unknown>>(
           shapeOptions.offset ??
           (canUsePersistedResume
             ? (persistedResumeState.offset as Offset)
-            : syncMode === `on-demand` && !needsFullSnapshot
+            : syncMode === `on-demand` &&
+                (!requiresFreshSourceEvidence || scopedRecovery)
               ? `now`
               : undefined),
         handle:
@@ -1839,6 +1896,7 @@ function createElectricSync<T extends Row<unknown>>(
           (canUsePersistedResume ? persistedResumeState.handle : undefined),
         signal: abortController.signal,
         onError: (errorParams) => {
+          rejectFullSnapshot(errorParams)
           streamErrorVersion++
           // Note that Electric sends a 409 error on a `must-refetch` message, but the
           // ShapeStream handled this and it will not reach this handler, therefor
@@ -1943,7 +2001,7 @@ function createElectricSync<T extends Row<unknown>>(
       let resumeInvalid = false
 
       const stageResumeMetadata = () => {
-        if (!isActiveLifecycle() || resumeInvalid) {
+        if (!isActiveLifecycle() || resumeInvalid || scopedRecovery) {
           return
         }
         const shapeHandle = stream.shapeHandle
@@ -1984,14 +2042,18 @@ function createElectricSync<T extends Row<unknown>>(
       }
 
       if (
+        malformedPersistedResume ||
         hasIncompatiblePersistedResume ||
-        (needsFullSnapshot && persistedResumeState.kind === `resume`)
+        (requiresFreshSourceEvidence && persistedResumeState?.kind === `resume`)
       ) {
         // This reset is part of the current runtime's startup decision. The
         // persisted wrapper may commit it before loading the atomic baseline,
         // so carry ownership of exactly this generation into certification.
-        commitResetResumeMetadataImmediately(true)
+        commitResetResumeMetadataImmediately(!scopedRecovery)
       }
+      const scopedRecoveryPromise = scopedRecovery
+        ? persistence.startScopedRecovery()
+        : undefined
 
       /**
        * Process a change message: handle tags and write the mutation
@@ -2055,6 +2117,7 @@ function createElectricSync<T extends Row<unknown>>(
         stream,
         syncMode,
         isBufferingInitialSync,
+        waitForFullSnapshot: usesFullLog ? () => fullSnapshotReady : undefined,
         begin,
         write,
         commit,
@@ -2070,10 +2133,14 @@ function createElectricSync<T extends Row<unknown>>(
         encodeColumnName: shapeOptions.columnMapper?.encode,
         // Pass abort signal so requestSnapshot errors can be ignored during cleanup
         signal: abortController.signal,
+        beforeSnapshot: scopedRecoveryPromise
+          ? () => scopedRecoveryPromise
+          : undefined,
       })
 
       const resumeKeysPromise =
-        requiresCompleteResume || freshSnapshotPending
+        scopedRecoveryPromise ??
+        (requiresCompleteResume || freshSnapshotPending
           ? hydrateBaseline
             ? (async () => {
                 await hydrateBaseline()
@@ -2098,7 +2165,7 @@ function createElectricSync<T extends Row<unknown>>(
                   )
                 }
               })()
-            : undefined
+            : undefined)
       let areResumeKeysReady = !resumeKeysPromise
       const pendingResumeBatches: Array<Array<Message<T>>> = []
       let unsubscribeStream: () => void = () => {}
@@ -2287,6 +2354,7 @@ function createElectricSync<T extends Row<unknown>>(
               processMoveInEvent(message.headers.patterns)
             }
           } else if (isMustRefetchMessage(message)) {
+            if (hasReceivedUpToDate) resetFullSnapshot()
             debug(
               `${collectionId ? `[${collectionId}] ` : ``}Received must-refetch message, starting transaction with truncate`,
             )
@@ -2324,7 +2392,7 @@ function createElectricSync<T extends Row<unknown>>(
 
         // A subset completion cannot publish a partial cold-recovery snapshot.
         if (
-          needsFullSnapshot &&
+          requiresFreshSourceEvidence &&
           isResettingSnapshot &&
           commitPoint === `subset-end`
         )
@@ -2424,6 +2492,7 @@ function createElectricSync<T extends Row<unknown>>(
           const readyErrorVersion = streamErrorVersion
           // Readiness counts accepted rows.
           const accepted = whenSyncAccepted(applied)
+          if (commitPoint === `up-to-date`) resolveFullSnapshot(applied)
           if (accepted === true) {
             wrappedMarkReady(wasBufferingInitialSync, readyErrorVersion)
           } else {
@@ -2511,6 +2580,7 @@ function createElectricSync<T extends Row<unknown>>(
 
             pendingResumeBatches.length = 0
             resumeInvalid = true
+            rejectFullSnapshot(error)
             commitResetResumeMetadataImmediately()
             streamErrorVersion++
             unsubscribeStream()

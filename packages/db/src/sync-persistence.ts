@@ -55,6 +55,9 @@ export function validateSyncPersistenceCapability<
     )
   }
   requireFunction(value, `hydrateBaseline`)
+  if (value.startScopedRecovery !== undefined) {
+    requireFunction(value, `startScopedRecovery`)
+  }
   requireFunction(value, `reserveCommitTurn`)
   requireFunction(value, `scanPersistedRows`)
 

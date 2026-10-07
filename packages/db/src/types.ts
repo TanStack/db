@@ -539,6 +539,8 @@ export type SyncPersistenceCapabilityV1<
   readonly protocol: `@tanstack/db/sync-persistence`
   readonly version: 1
   readonly hydrateBaseline: () => Promise<void>
+  /** Keep durable rows as a cache while excluding them from source hydration. */
+  readonly startScopedRecovery?: () => Promise<void>
   /**
    * Reserve the open sync transaction's FIFO turn, so a subset hydration
    * that starts before it commits waits for that commit.
