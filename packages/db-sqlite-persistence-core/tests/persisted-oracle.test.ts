@@ -10238,8 +10238,9 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
   })
 
   // The core optimistic-history law drops a refused insert at settlement;
-  // the source edit log remains authoritative. The independent source model
-  // starts empty, and each accepted source turn changes only its named key.
+  // accepted source transactions remain authoritative. The independent
+  // single-row source reference state starts empty. Each accepted source turn
+  // changes only its named key.
   // Cross first-turn insert/delete with commitment before/after refusal, then
   // apply the opposite turn. Compare at mutation settlement and each receipt,
   // before a later source turn can hide a ghost.
