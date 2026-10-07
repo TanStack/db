@@ -84,6 +84,9 @@ export class OrderedSourceLoader {
       }
     | undefined
   private drainingNoInputContinuations = false
+  // An eager source holds every row, so an index on a single order term can
+  // answer a prefix with only the first rows of the window.
+  private readonly readsBoundedPrefix: boolean
 
   constructor(
     private readonly info: OrderByOptimizationInfo,
@@ -99,6 +102,13 @@ export class OrderedSourceLoader {
     private readonly hasPendingJoinedWork: () => boolean = () => false,
   ) {
     this.info.isRequesting = () => this.requesting
+    // A joined filter drops rows after the source's limit, so a full window
+    // after a bounded read would not prove it holds the first eligible rows.
+    this.readsBoundedPrefix =
+      info.sourceHoldsAllRows &&
+      info.index !== undefined &&
+      info.orderBy.length === 1 &&
+      info.joinedFilterSourceId === undefined
   }
 
   /** Derive invalidation from actual contributions, not a second cursor. */
@@ -304,6 +314,7 @@ export class OrderedSourceLoader {
           refetch: true,
           orderBy: normalizeOrderByPaths(this.info.orderBy, this.alias),
           limit: this.info.offset + this.info.limit,
+          boundedPrefix: this.readsBoundedPrefix,
           trackLoadSubsetPromise: false,
           onLoadSubsetResult,
         })
@@ -335,6 +346,7 @@ export class OrderedSourceLoader {
           ...(continuesOrderedPrefixRepair ? { refetch: true } : {}),
           orderBy: normalizeOrderByPaths(this.info.orderBy, this.alias),
           limit: count,
+          boundedPrefix: this.readsBoundedPrefix,
           trackLoadSubsetPromise: false,
           onLoadSubsetResult,
         })
@@ -593,7 +605,10 @@ export class OrderedSourceLoader {
     const canSettleSynchronously =
       !settlesAsync &&
       windowOperationGeneration === undefined &&
-      !isAuthoritativeRepair &&
+      // A bounded prefix repair reads only installed rows, so its whole chain
+      // can finish inside the graph run that publishes the window. A
+      // full-source request keeps its asynchronous settlement.
+      (!isAuthoritativeRepair || (this.readsBoundedPrefix && !isFullSource)) &&
       requestGraphInputRevision !== undefined
     let synchronousCompletionFailure: { error: unknown } | undefined
     const continuation = (
