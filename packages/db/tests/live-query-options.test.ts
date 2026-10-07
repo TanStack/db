@@ -1,13 +1,33 @@
 import { describe, expect, it } from 'vitest'
 import { createCollection } from '../src/collection/index.js'
+import { collectionOptions } from '../src/client.js'
 import {
   getLiveQueryHash,
   getPreparedLiveQueryIdentity,
   prepareLiveQueryValue,
+  resolveLiveQueryValue,
 } from '../src/live-query-options.js'
 import { BaseQueryBuilder } from '../src/query/builder/index.js'
 
 describe(`live query preparation`, () => {
+  it(`requires a client when a standalone descriptor query is consumed`, () => {
+    const descriptor = collectionOptions(`unbound-descriptor`, () => ({
+      id: `unbound-descriptor`,
+      getKey: (row: { id: string }) => row.id,
+      sync: { sync: ({ markReady }) => markReady() },
+    }))
+    const query = new BaseQueryBuilder().from({ item: descriptor })
+
+    expect(() =>
+      resolveLiveQueryValue(
+        prepareLiveQueryValue(query, undefined, new Set()),
+        { pool: false },
+      ),
+    ).toThrow(
+      /descriptor "item" requires a DbClient when the query is consumed/,
+    )
+  })
+
   it.each([undefined, null])(
     `promotes a nullish config query result to a disabled query`,
     (disabled) => {

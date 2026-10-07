@@ -1,3 +1,4 @@
+import { hasCollectionOptionsBrand } from '../collection-options.js'
 import { isRefProxy } from './builder/ref-proxy-identity.js'
 
 /*
@@ -6,6 +7,7 @@ This is the intermediate representation of the query.
 
 import type { CompareOptions } from './builder/types'
 import type { Collection, CollectionImpl } from '../collection/index.js'
+import type { CollectionOptionsIdentity } from '../collection-options.js'
 import type { NamespacedRow } from '../types'
 
 export interface QueryIR {
@@ -82,11 +84,26 @@ export class CollectionRef extends BaseExpression {
   public type = `collectionRef` as const
   // Not an own property, so structural identity and hashing ignore it.
   readonly #sourceId = `source-${++nextCollectionSourceId}`
+  // A descriptor stays in the query plan until a receiving DbClient binds it.
   constructor(
-    public collection: CollectionImpl,
+    public readonly source:
+      | CollectionImpl
+      | CollectionOptionsIdentity<any, string | number, any, any, any>,
     public alias: string,
   ) {
     super()
+  }
+
+  get descriptor():
+    CollectionOptionsIdentity<any, string | number, any, any, any> | undefined {
+    return hasCollectionOptionsBrand(this.source) ? this.source : undefined
+  }
+
+  get collection(): CollectionImpl {
+    if (!hasCollectionOptionsBrand(this.source)) return this.source
+    throw new Error(
+      `Collection descriptor "${this.alias}" requires a DbClient when the query is consumed. In React, wrap the consumer in <DbProvider> or pass a client.`,
+    )
   }
 
   /** Opaque runtime identity; aliases are lexical names only. */

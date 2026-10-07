@@ -12,6 +12,7 @@ import {
   QueryRef,
   UnionAll,
   UnionFrom,
+  collectCollectionSources,
   isExpressionLike,
 } from '../ir.js'
 import {
@@ -37,9 +38,9 @@ import {
   MaterializeWrapper,
   ToArrayWrapper,
 } from './functions.js'
+import type { CollectionResolver } from './clone-query.js'
 import type { SourceClauseContext } from '../../errors.js'
 import type { NamespacedRow, SingleResult } from '../../types.js'
-import type { CollectionOptionsIdentity } from '../../collection-options.js'
 import type {
   Aggregate,
   BasicExpression,
@@ -78,10 +79,6 @@ import type {
 } from './types.js'
 
 const UNION_ALL_SOURCE_CONTEXT = `unionAll clause` satisfies SourceClauseContext
-
-type CollectionResolver = (
-  options: CollectionOptionsIdentity<any, string | number, any, any, any>,
-) => CollectionImpl<any, string | number, any, any, any>
 
 type FnSelectQueryConstructionValue =
   | QueryBuilder<any>
@@ -216,12 +213,12 @@ export class BaseQueryBuilder<TContext extends Context = Context> {
       if (sourceValue instanceof CollectionImpl) {
         ref = new CollectionRef(sourceValue, alias)
       } else if (hasCollectionOptionsBrand(sourceValue)) {
-        if (!this.resolveCollection) {
-          throw new Error(
-            `Cannot use collection descriptor "${alias}" as a query source without a DbClient resolver. In React, wrap your tree in <DbProvider>.`,
-          )
-        }
-        ref = new CollectionRef(this.resolveCollection(sourceValue), alias)
+        ref = new CollectionRef(
+          this.resolveCollection
+            ? this.resolveCollection(sourceValue)
+            : sourceValue,
+          alias,
+        )
       } else if (sourceValue instanceof BaseQueryBuilder) {
         const subQuery = cloneQueryForPlacement(sourceValue._getQuery())
         if (!(subQuery as Partial<QueryIR>).from) {
@@ -1020,6 +1017,24 @@ export class BaseQueryBuilder<TContext extends Context = Context> {
       throw new QueryMustHaveFromClauseError()
     }
     return this.query as QueryIR
+  }
+
+  /** Bind descriptor sources to the DbClient that consumes this query. */
+  _bindCollectionSources(
+    resolveCollection: CollectionResolver | undefined,
+  ): BaseQueryBuilder<TContext> {
+    const query = this._getQuery()
+    if (
+      !resolveCollection ||
+      !collectCollectionSources(query).some((source) => source.descriptor)
+    ) {
+      return this
+    }
+    return new BaseQueryBuilder<TContext>(
+      cloneQueryForPlacement(query, resolveCollection),
+      resolveCollection,
+      true,
+    )
   }
 }
 

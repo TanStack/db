@@ -424,7 +424,7 @@ function canonicalizeSource(
     return {
       type: `collectionRef`,
       collectionId: canonicalizeRuntimeValue(
-        source.collection.id,
+        source.descriptor?.id ?? source.collection.id,
         `${path}.collection.id`,
         seen,
       ),

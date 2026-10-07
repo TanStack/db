@@ -47,24 +47,24 @@ function createInitialQueryBuilder(
 ): InitialQueryBuilder {
   return new BaseQueryBuilder(
     {},
-    dbClient
-      ? (
-          options: CollectionOptionsIdentity<
-            any,
-            string | number,
-            any,
-            any,
-            any
-          >,
-        ) => {
-          const collection = dbClient._materializeCollectionForRender(
-            options as CollectionOptions<any, string | number, any, any>,
-          ) as CollectionImpl<any, string | number, any, any, any>
-          if (collection._deferSyncStart()) deferredCollections.add(collection)
-          return collection
-        }
-      : undefined,
+    createCollectionResolver(dbClient, deferredCollections),
   ) as InitialQueryBuilder
+}
+
+function createCollectionResolver(
+  dbClient: DbClient | undefined,
+  deferredCollections: DeferredLiveQueryCollections,
+) {
+  if (!dbClient) return undefined
+  return (
+    options: CollectionOptionsIdentity<any, string | number, any, any, any>,
+  ): CollectionImpl<any, string | number, any, any, any> => {
+    const collection = dbClient._materializeCollectionForRender(
+      options as CollectionOptions<any, string | number, any, any>,
+    ) as CollectionImpl<any, string | number, any, any, any>
+    if (collection._deferSyncStart()) deferredCollections.add(collection)
+    return collection
+  }
 }
 
 export function prepareLiveQueryValue(
@@ -77,6 +77,12 @@ export function prepareLiveQueryValue(
       value(createInitialQueryBuilder(dbClient, deferredCollections)),
       dbClient,
       deferredCollections,
+    )
+  }
+
+  if (value instanceof BaseQueryBuilder) {
+    return value._bindCollectionSources(
+      createCollectionResolver(dbClient, deferredCollections),
     )
   }
 
@@ -94,10 +100,16 @@ export function prepareLiveQueryValue(
       ...config
     } = value as PreparedLiveQueryConfigInput
 
-    const preparedQuery =
+    const queryValue =
       typeof query === `function`
         ? query(createInitialQueryBuilder(dbClient, deferredCollections))
         : query
+
+    const preparedQuery = prepareLiveQueryValue(
+      queryValue,
+      dbClient,
+      deferredCollections,
+    )
 
     if (preparedQuery === undefined || preparedQuery === null) {
       return preparedQuery

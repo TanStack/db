@@ -84,6 +84,7 @@ replacement.
 import {
   DbClient,
   DbProvider,
+  Query,
   collectionOptions,
   eq,
   useDbClient,
@@ -138,6 +139,26 @@ root.render(
   </DbProvider>
 )
 ```
+
+A descriptor query can also be defined outside React, without a `DbClient` at
+definition time:
+
+```tsx
+const openTodosQuery = new Query()
+  .from({ todo: todoCollection })
+  .where(({ todo }) => eq(todo.status, 'open'))
+
+function OpenTodos() {
+  const { data } = useLiveQuery({ query: openTodosQuery })
+  return <span>{data.length} open todos</span>
+}
+```
+
+The consuming hook binds this query to its `DbProvider` client. The same query
+can be used with `dbClient.preloadLiveQuery({ query: openTodosQuery })` on the
+server, or under another provider with a different client. For that reuse, the
+descriptor must have a reusable factory. Executing a descriptor query without
+a client throws when the source Collection is needed.
 
 The factory matters when config contains mutable adapter state or closures.
 Every `DbClient` gets a fresh config and collection instance. First-party
