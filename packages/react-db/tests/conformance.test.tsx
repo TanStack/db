@@ -251,6 +251,42 @@ it(`publishes a synchronous ordered limit in the first layout commit`, async () 
   }
 })
 
+it(`publishes a synchronous full-source ordered limit in the first layout commit`, async () => {
+  // A function filter makes the plan load its whole source; that initial load
+  // shares the synchronous readiness cut with an ordinary ordered request.
+  const source = makeSource([
+    { id: `1`, rank: 1 },
+    { id: `2`, rank: 2 },
+    { id: `3`, rank: 3 },
+  ])
+  const commits: Array<{ ids: Array<string>; status: string }> = []
+  const hook = renderHook(() => {
+    const result = useLiveQuery((q) =>
+      q
+        .from({ row: source.collection })
+        .fn.where(({ row }) => row.rank > 0)
+        .orderBy(({ row }) => row.rank)
+        .limit(2),
+    )
+    useLayoutEffect(() => {
+      commits.push({
+        ids: result.data.map(({ id }) => id),
+        status: result.status,
+      })
+    })
+    return result
+  })
+
+  try {
+    expect(commits[0]).toEqual({ ids: [`1`, `2`], status: `ready` })
+  } finally {
+    const liveQueryCollection = hook.result.current.collection
+    hook.unmount()
+    await liveQueryCollection.cleanup()
+    await source.collection.cleanup()
+  }
+})
+
 it(`preserves raw result types through the actual driver reader`, () => {
   const raw: Record<string, unknown> = {
     data: [{ id: `a`, value: undefined }],
