@@ -1,6 +1,8 @@
 import { createTransaction } from './transactions'
+import { normalizeError } from './utils/error'
 import {
   DebounceCallDroppedError,
+  PacedTransactionManualCommitError,
   QueueCapacityExceededError,
   QueueDisposedError,
   ThrottleCallDroppedError,
@@ -46,7 +48,10 @@ export interface PacedMutationsConfig<
  *
  * The returned function accepts variables of type TVariables and returns a
  * Transaction object that can be awaited to know when persistence completes
- * or to handle errors.
+ * or to handle errors. The strategy owns `commit()`; calling it on the returned
+ * transaction throws before persistence starts. `rollback()` remains available.
+ * If a synchronous `onMutate` calls this manager again and then throws, every
+ * call merged into that pending transaction rejects together.
  *
  * @param config - Configuration including onMutate, mutationFn and strategy
  * @returns A function that accepts variables and returns a Transaction
@@ -99,6 +104,12 @@ export function createPacedMutations<
   const { onMutate, mutationFn, strategy, ...transactionConfig } = config
 
   let activeTransaction: Transaction<T> | null = null
+  const strategyCommits = new WeakMap<
+    Transaction<T>,
+    () => Promise<Transaction<T>>
+  >()
+  let optimisticFrame:
+    { transaction: Transaction<T>; admittedNestedCall: boolean } | undefined
 
   function getTransaction(isolated = false): Transaction<T> {
     if (!isolated && activeTransaction?.state === `pending`)
@@ -108,6 +119,10 @@ export function createPacedMutations<
       mutationFn,
       autoCommit: false,
     })
+    strategyCommits.set(transaction, transaction.commit.bind(transaction))
+    transaction.commit = () => {
+      throw new PacedTransactionManualCommitError()
+    }
     if (!isolated) activeTransaction = transaction
     return transaction
   }
@@ -125,12 +140,43 @@ export function createPacedMutations<
         `Strategy callback called but transaction is in state "${transaction.state}". Expected "pending".`,
       )
     }
-    const completion = transaction.commit()
+    const strategyCommit = strategyCommits.get(transaction)
+    if (!strategyCommit)
+      throw new Error(`Paced transaction has no strategy-owned commit`)
+    const completion = strategyCommit()
     onStarted?.(completion)
     completion.catch(() => {
       // Persistence failures are reported by transaction.isPersisted.promise.
     })
     return transaction
+  }
+
+  function applyOptimistic(
+    transaction: Transaction<T>,
+    variables: TVariables,
+    newlyCreated: boolean,
+  ): void {
+    const parent = optimisticFrame
+    if (parent?.transaction === transaction) parent.admittedNestedCall = true
+    const frame = { transaction, admittedNestedCall: false }
+    optimisticFrame = frame
+    try {
+      transaction.mutate(() => onMutate(variables))
+    } catch (error) {
+      if (newlyCreated || frame.admittedNestedCall) {
+        // Calls merged into this pending transaction share a failure. A newly
+        // created transaction also needs release when no receipt was returned.
+        void transaction.isPersisted.promise.catch(() => {})
+        transaction.rollback({
+          error: normalizeError(error),
+          isSecondaryRollback: !frame.admittedNestedCall,
+        })
+        if (activeTransaction === transaction) activeTransaction = null
+      }
+      throw error
+    } finally {
+      optimisticFrame = parent
+    }
   }
 
   function mutate(variables: TVariables): Transaction<T> {
@@ -139,8 +185,9 @@ export function createPacedMutations<
       let completion: Promise<Transaction<T>> | undefined
       const onAdmit = (): Transaction<T> => {
         if (transaction) return transaction
+        const previous = activeTransaction
         transaction = getTransaction()
-        transaction.mutate(() => onMutate(variables))
+        applyOptimistic(transaction, variables, transaction !== previous)
         return transaction
       }
       const admitted = strategy.execute(
@@ -157,7 +204,7 @@ export function createPacedMutations<
 
       // Rejected calls must never join an already-admitted pending transaction.
       const dropped = getTransaction(true)
-      dropped.mutate(() => onMutate(variables))
+      applyOptimistic(dropped, variables, true)
       dropped.rollback({
         error:
           strategy._type === `debounce`
@@ -168,8 +215,9 @@ export function createPacedMutations<
       return dropped
     }
 
+    const previous = activeTransaction
     const transaction = getTransaction(strategy._type === `queue`)
-    transaction.mutate(() => onMutate(variables))
+    applyOptimistic(transaction, variables, transaction !== previous)
     try {
       let completion: Promise<Transaction<T>> | undefined
       const admitted = strategy.execute(

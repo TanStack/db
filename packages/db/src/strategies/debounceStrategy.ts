@@ -34,46 +34,83 @@ export function debounceStrategy(
   const serial = createSerialPacer(0)
   let canLead = true
   let leadingPending = false
+  let leadingOwner: object | undefined
   let timeout: ReturnType<typeof setTimeout> | undefined
+  const trailingRuns = new Map<
+    object,
+    { run: () => Promise<unknown>; isCanceled: () => boolean }
+  >()
 
   return {
     _type: `debounce`,
     options,
     execute: <T extends object = Record<string, unknown>>(
       fn: () => Transaction<T>,
-      onAdmit?: () => void,
+      onAdmit?: () => Transaction<T> | void,
       onCommit?: () => Promise<unknown> | undefined,
     ) => {
       const run = () => runWithCommitCompletion(fn, onCommit)
       const leadingCall = leading && canLead
       const admitted = leadingCall || trailing
-      const joinsPendingLeading = leadingPending && !leadingCall
       // Reserve the edge before optimistic mutation can reenter execute.
       const wasLeadAvailable = canLead
       canLead = false
+      let owner: object = fn
+      let transaction: Transaction<T> | undefined
       try {
-        if (admitted) onAdmit?.()
+        if (admitted) {
+          const admittedOwner = onAdmit?.()
+          if (admittedOwner) {
+            transaction = admittedOwner
+            owner = admittedOwner
+          }
+        }
       } catch (error) {
         // A nested admitted call may have installed its own quiet timer.
         if (timeout === undefined) canLead = wasLeadAvailable
         throw error
       }
+      // A replacement transaction after rollback cannot inherit a canceled
+      // leading callback's eligibility. It needs its own quiet-edge schedule.
+      const joinsPendingLeading =
+        leadingPending && !leadingCall && owner === leadingOwner
       if (timeout !== undefined) clearTimeout(timeout)
       // A new call renews the quiet period, including after an earlier timer
       // became eligible while persistence was held.
-      if (trailing && !leadingPending) serial.cancel()
+      if (trailing)
+        for (const pendingOwner of trailingRuns.keys())
+          serial.cancel(pendingOwner)
+      if (trailing && admitted && !leadingCall && !joinsPendingLeading) {
+        trailingRuns.set(owner, {
+          run,
+          isCanceled: () => transaction?.state === `failed`,
+        })
+      }
       timeout = setTimeout(() => {
         timeout = undefined
         canLead = true
-        if (trailing && !leadingCall && !joinsPendingLeading)
-          serial.schedule(run)
+        for (const [pendingOwner, pending] of trailingRuns) {
+          if (pending.isCanceled()) {
+            trailingRuns.delete(pendingOwner)
+            continue
+          }
+          serial.schedule(() => {
+            trailingRuns.delete(pendingOwner)
+            return pending.run()
+          }, pendingOwner)
+        }
       }, options.wait)
       if (leadingCall) {
+        // A same-manager reentrant trailing call joins this leading transaction.
+        // A different manager's trailing transaction keeps the shared edge.
+        trailingRuns.delete(owner)
         leadingPending = true
+        leadingOwner = owner
         serial.schedule(() => {
           leadingPending = false
+          leadingOwner = undefined
           return run()
-        })
+        }, owner)
       }
       if (!admitted) return false
       return

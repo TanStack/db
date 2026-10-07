@@ -1422,6 +1422,23 @@ import, clear and restore. Core global mutation identity now encodes Collection
 id, key type and key value as a tuple. This does not establish interoperability
 between distinct Collections that intentionally reuse the same id and key.
 
+**Failed mutation callback context:** the optimistic transaction payload owner
+checks that restoration publishes after the failed callback's ambient frame
+ends. A subscriber's new write is visible but does not enter the failed
+transaction payload. Nested success and failure witnesses retain the enclosing
+callback's context for subsequent writes. The reviewed implementation fails the
+subscriber payload cut; the frame-specific repair passes it and the adjacent
+nested histories. These finite histories do not establish arbitrary subscriber
+reentry or cross-scope restoration behavior.
+
+**Failed-callback snapshot work:** the same owner places 16 prior mutations in
+one transaction and counts array-entry visits across five no-write `mutate`
+callbacks. The eager snapshot on the reviewed code visits 80 entries; capturing
+only before the first real `applyMutations` visits none. The neighboring
+failed-write histories still check restoration of prior intent. This bound
+does not remove the existing linear merge traversal for each real write or
+establish elapsed-time performance.
+
 ## Compound joins
 
 [The replacement evidence record](oracle-reviews/2026-10-05-compound-joins.md)
@@ -1690,9 +1707,35 @@ strategies, including queue, and observe handler overlap after the public
 receipt has rejected. The wrong implementation fails at that intermediate cut;
 the repaired implementation waits for the handler itself to return.
 
-The owner does not yet cover provider echo, cleanup during a held handler,
-longer arbitrary bursts, held default/omitted-trailing combinations, or
-multiple managers. It owns those future source-level witnesses. Leading-only
+The owner also drives a leading debounce successor canceled while the first
+handler is held. A third admission after either direct rollback or same-key
+cascade must start after its own quiet edge and the held handler's release;
+the old callback cannot consume the third call's persistence obligation. The
+reviewed implementation fails at that handler-start cut, while the ownership
+repair passes both histories. A failed optimistic callback must not retain a
+newly created empty pending transaction: admitted debounce, dropped debounce,
+and queue paths now have scope-retention witnesses that fail on the reviewed
+implementation and pass after cleanup. The owner checks the chosen group-rejection law for a nested admitted call
+both with and without an earlier pending call. All receipts sharing the failed
+pending transaction reject with the callback error, no member reaches the
+backend, and a later independent call persists. The earlier-pending regime
+failed at the transaction-state cut before the group rollback repair; both
+factories now pass at the throw and scheduled edges. A separate held-handler
+matrix crosses debounce, throttle, and queue: manual `commit()` throws before
+changing a pending receipt, and the strategy still starts that write only
+after its timer edge and the prior handler's release.
+
+The owner also checks one strategy shared by two managers. Reentrant
+leading/trailing and ordinary trailing histories retain both separate
+transactions at one timing boundary. A renewed-quiet history moves another
+manager's eligible callback to the new quiet edge while the first handler is
+held. A held-handler rollback keeps the second manager's write behind the first
+handler. The reviewed code fails the second
+backend-start assertion for both debounce and throttle; the keyed pending-run
+repair passes. The owner does not yet cover provider echo, cleanup during a
+held handler, longer arbitrary bursts, held default/omitted-trailing
+combinations, or more than two managers. It owns those future source-level
+witnesses. Leading-only
 throttle admission-window timing while a write is held remains a separate
 policy question; the existing serialization and minimum actual-start spacing
 do not depend on its resolution. Real server ordering, framework unmount

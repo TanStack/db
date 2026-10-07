@@ -56,17 +56,27 @@ export function throttleStrategy(
   const serial = createSerialPacer(options.wait)
   let nextAllowedAt = Number.NEGATIVE_INFINITY
   let trailingTimeout: ReturnType<typeof setTimeout> | undefined
-  let pendingCallback: (() => Promise<unknown>) | undefined
+  const trailingRuns = new Map<
+    object,
+    { run: () => Promise<unknown>; isCanceled: () => boolean }
+  >()
 
   // onAdmit can reenter execute and install a trailing timer.
   function hasTrailingTimer(): boolean {
     return trailingTimeout !== undefined
   }
 
-  function discardNestedTrailing(): void {
-    if (trailingTimeout !== undefined) clearTimeout(trailingTimeout)
-    trailingTimeout = undefined
-    pendingCallback = undefined
+  function clearTrailingIfEmpty(): void {
+    if (trailingRuns.size === 0) {
+      if (trailingTimeout !== undefined) clearTimeout(trailingTimeout)
+      trailingTimeout = undefined
+    }
+  }
+
+  function discardCanceledTrailing(): void {
+    for (const [owner, pending] of trailingRuns)
+      if (pending.isCanceled()) trailingRuns.delete(owner)
+    clearTrailingIfEmpty()
   }
 
   return {
@@ -74,7 +84,7 @@ export function throttleStrategy(
     options,
     execute: <T extends object = Record<string, unknown>>(
       fn: () => Transaction<T>,
-      onAdmit?: () => void,
+      onAdmit?: () => Transaction<T> | void,
       onCommit?: () => Promise<unknown> | undefined,
     ) => {
       const run = () => runWithCommitCompletion(fn, onCommit)
@@ -83,34 +93,42 @@ export function throttleStrategy(
         // Reserve the edge before optimistic mutation can reenter execute.
         const previousAllowedAt = nextAllowedAt
         nextAllowedAt = now + options.wait
+        let owner: object = fn
         try {
-          onAdmit?.()
+          owner = onAdmit?.() ?? fn
         } catch (error) {
           // Keep a nested admitted trailing call's window if it installed one.
+          discardCanceledTrailing()
           if (!hasTrailingTimer()) nextAllowedAt = previousAllowedAt
           throw error
         }
-        discardNestedTrailing()
-        serial.schedule(run)
+        trailingRuns.delete(owner)
+        clearTrailingIfEmpty()
+        serial.schedule(run, owner)
         return
       }
       if (!trailing) return false
-      onAdmit?.()
+      const transaction = onAdmit?.()
+      const owner = transaction ?? fn
       // Once the pending transaction is eligible, later admitted calls merge
       // into it. Another timer would outlive that transaction after it drains.
-      if (serial.hasPending()) {
-        serial.schedule(run)
+      if (serial.hasPending(owner)) {
+        serial.schedule(run, owner)
         return
       }
-      pendingCallback = run
+      trailingRuns.set(owner, {
+        run,
+        isCanceled: () => transaction?.state === `failed`,
+      })
       if (trailingTimeout === undefined) {
         const delay = leading ? Math.max(0, nextAllowedAt - now) : options.wait
         trailingTimeout = setTimeout(() => {
           trailingTimeout = undefined
           nextAllowedAt = Date.now() + options.wait
-          const callback = pendingCallback
-          pendingCallback = undefined
-          if (callback) serial.schedule(callback)
+          for (const [pendingOwner, pending] of trailingRuns)
+            if (!pending.isCanceled())
+              serial.schedule(pending.run, pendingOwner)
+          trailingRuns.clear()
         }, delay)
       }
       return

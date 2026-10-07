@@ -8,6 +8,7 @@ import {
   queueStrategy,
   throttleStrategy,
 } from '../src/strategies'
+import { TransactionScope } from '../src/transactions'
 import { mockSyncCollectionOptionsNoInitialState } from './utils'
 import type { Strategy } from '../src/strategies/types'
 import type { Transaction } from '../src/transactions'
@@ -2265,6 +2266,279 @@ describe(`paced admission reentry`, () => {
 })
 
 /**
+ * One strategy object supplies one timing boundary to two managers. Their
+ * transactions cannot merge, so a shared tick must retain both callbacks.
+ * Reentry is the shortest history that exposes a leading call replacing a
+ * second manager's trailing callback before either receipt settles.
+ */
+describe(`shared strategy timing across managers`, () => {
+  it(`one queue strategy serializes separate managers without merging receipts`, async () => {
+    const collection = await createReadyCollection()
+    const strategy = queueStrategy({ wait: 10 })
+    const starts: Array<number> = []
+    let releaseFirst: (() => void) | undefined
+    const manager = (hold: boolean) =>
+      createPacedMutations<number, { id: number }>({
+        strategy,
+        onMutate: (id) => collection.insert({ id }),
+        mutationFn: ({ transaction }) => {
+          starts.push(transaction.mutations[0].modified.id)
+          return hold
+            ? new Promise<void>((resolve) => {
+                releaseFirst = resolve
+              })
+            : Promise.resolve()
+        },
+      })
+    const mutateFirst = manager(true)
+    const mutateSecond = manager(false)
+    await withCleanup(
+      strategy,
+      collection,
+      async () => {
+        const first = mutateFirst(1)
+        const second = mutateSecond(2)
+        const receipts = [observeReceipt(first), observeReceipt(second)]
+        expect(second, `separate manager transactions`).not.toBe(first)
+        await vi.advanceTimersByTimeAsync(11)
+        expect(starts, `queue waits for the held handler`).toEqual([1])
+        releaseFirst!()
+        await vi.advanceTimersByTimeAsync(20)
+        expect(starts, `both managers drain in queue order`).toEqual([1, 2])
+        expect(receipts.map((receipt) => receipt.outcome)).toEqual([
+          `fulfilled`,
+          `fulfilled`,
+        ])
+      },
+      async () => {
+        releaseFirst?.()
+        await vi.advanceTimersByTimeAsync(30)
+      },
+    )
+  })
+
+  for (const factory of [debounceStrategy, throttleStrategy])
+    it(`${factory.name} persists both managers after a reentrant shared tick`, async () => {
+      const collection = await createReadyCollection()
+      const strategy = factory({ wait: 10, leading: true, trailing: true })
+      const starts: Array<number> = []
+      let second: Transaction<{ id: number }> | undefined
+      const mutateSecond = createPacedMutations<number, { id: number }>({
+        strategy,
+        onMutate: (id) => collection.insert({ id }),
+        mutationFn: ({ transaction }) => {
+          starts.push(transaction.mutations[0].modified.id)
+          return Promise.resolve()
+        },
+      })
+      const mutateFirst = createPacedMutations<number, { id: number }>({
+        strategy,
+        onMutate: (id) => {
+          collection.insert({ id })
+          second = mutateSecond(2)
+        },
+        mutationFn: ({ transaction }) => {
+          starts.push(transaction.mutations[0].modified.id)
+          return Promise.resolve()
+        },
+      })
+      await withCleanup(strategy, collection, async () => {
+        const first = mutateFirst(1)
+        const firstReceipt = observeReceipt(first)
+        expect(second, `reentrant manager admitted`).toBeDefined()
+        const secondReceipt = observeReceipt(second!)
+        expect(second, `manager transactions remain separate`).not.toBe(first)
+        expect([...collection.keys()].sort(), `both optimistic rows`).toEqual([
+          1, 2,
+        ])
+        expect(starts, `leading write starts once`).toEqual([1])
+        await vi.advanceTimersByTimeAsync(9)
+        expect(starts, `trailing write waits for shared edge`).toEqual([1])
+        await vi.advanceTimersByTimeAsync(1)
+        expect(starts, `both admitted writes start`).toEqual([1, 2])
+        expect([firstReceipt.outcome, secondReceipt.outcome]).toEqual([
+          `fulfilled`,
+          `fulfilled`,
+        ])
+        await vi.advanceTimersByTimeAsync(20)
+        expect(starts, `no stale callback`).toEqual([1, 2])
+      })
+    })
+
+  for (const kind of [`debounce`, `throttle`] as const)
+    it(`${kind} retains separate manager writes at one shared trailing edge`, async () => {
+      const collection = await createReadyCollection()
+      const strategy =
+        kind === `debounce`
+          ? debounceStrategy({ wait: 10, leading: false, trailing: true })
+          : throttleStrategy({ wait: 10, leading: false, trailing: true })
+      const starts: Array<Start> = []
+      const manager = () =>
+        createPacedMutations<number, { id: number }>({
+          strategy,
+          onMutate: (id) => collection.insert({ id }),
+          mutationFn: ({ transaction }) => {
+            starts.push({
+              at: Date.now() - origin,
+              ids: transaction.mutations.map(
+                (mutation) => mutation.modified.id,
+              ),
+            })
+            return Promise.resolve()
+          },
+        })
+      const mutateFirst = manager()
+      const mutateSecond = manager()
+      await withCleanup(strategy, collection, async () => {
+        const first = mutateFirst(1)
+        const firstReceipt = observeReceipt(first)
+        await vi.advanceTimersByTimeAsync(1)
+        const second = mutateSecond(2)
+        const secondReceipt = observeReceipt(second)
+        expect(second, `separate manager receipts`).not.toBe(first)
+        await vi.advanceTimersByTimeAsync(8)
+        expect(starts, `before shared edge`).toEqual([])
+        await vi.advanceTimersByTimeAsync(12)
+        expect(starts, `both writes keep their timing`).toEqual(
+          kind === `debounce`
+            ? [
+                { at: 11, ids: [1] },
+                { at: 11, ids: [2] },
+              ]
+            : [
+                { at: 10, ids: [1] },
+                { at: 20, ids: [2] },
+              ],
+        )
+        expect([firstReceipt.outcome, secondReceipt.outcome]).toEqual([
+          `fulfilled`,
+          `fulfilled`,
+        ])
+      })
+    })
+
+  for (const factory of [debounceStrategy, throttleStrategy])
+    it(`${factory.name} waits for a shared manager's rolled-back handler before starting another`, async () => {
+      const collection = await createReadyCollection()
+      const strategy = factory({ wait: 10, leading: true, trailing: true })
+      const starts: Array<number> = []
+      let releaseFirst: (() => void) | undefined
+      const mutateFirst = createPacedMutations<number, { id: number }>({
+        strategy,
+        onMutate: (id) => collection.insert({ id }),
+        mutationFn: ({ transaction }) => {
+          starts.push(transaction.mutations[0].modified.id)
+          return new Promise<void>((resolve) => {
+            releaseFirst = resolve
+          })
+        },
+      })
+      const mutateSecond = createPacedMutations<number, { id: number }>({
+        strategy,
+        onMutate: (id) => collection.insert({ id }),
+        mutationFn: ({ transaction }) => {
+          starts.push(transaction.mutations[0].modified.id)
+          return Promise.resolve()
+        },
+      })
+      await withCleanup(
+        strategy,
+        collection,
+        async () => {
+          const first = mutateFirst(1)
+          const firstReceipt = observeReceipt(first)
+          const second = mutateSecond(2)
+          const secondReceipt = observeReceipt(second)
+          first.rollback({ isSecondaryRollback: true })
+          await vi.advanceTimersByTimeAsync(11)
+          expect(starts, `timer cannot bypass held handler`).toEqual([1])
+          expect(secondReceipt.outcome, `other manager still admitted`).toBe(
+            `pending`,
+          )
+          releaseFirst!()
+          await vi.advanceTimersByTimeAsync(0)
+          expect(starts, `second manager starts after handler release`).toEqual(
+            [1, 2],
+          )
+          expect(firstReceipt.outcome).toBe(`rejected`)
+          expect(secondReceipt.outcome).toBe(`fulfilled`)
+        },
+        async () => {
+          releaseFirst?.()
+          await vi.advanceTimersByTimeAsync(30)
+        },
+      )
+    })
+
+  it(`shared debounce renews the quiet edge for another manager's eligible write`, async () => {
+    const collection = await createReadyCollection()
+    const strategy = debounceStrategy({
+      wait: 10,
+      leading: false,
+      trailing: true,
+    })
+    const starts: Array<Start> = []
+    let releaseFirst: (() => void) | undefined
+    const manager = () =>
+      createPacedMutations<number, { id: number }>({
+        strategy,
+        onMutate: (id) => collection.insert({ id }),
+        mutationFn: ({ transaction }) => {
+          const ids = transaction.mutations.map(
+            (mutation) => mutation.modified.id,
+          )
+          starts.push({ at: Date.now() - origin, ids })
+          return ids[0] === 1
+            ? new Promise<void>((resolve) => {
+                releaseFirst = resolve
+              })
+            : Promise.resolve()
+        },
+      })
+    const mutateFirst = manager()
+    const mutateSecond = manager()
+    await withCleanup(
+      strategy,
+      collection,
+      async () => {
+        const first = mutateFirst(1)
+        const firstReceipt = observeReceipt(first)
+        await vi.advanceTimersByTimeAsync(11)
+        const second = mutateSecond(2)
+        const secondReceipt = observeReceipt(second)
+        await vi.advanceTimersByTimeAsync(11)
+        expect(starts, `second edge waits behind first handler`).toEqual([
+          { at: 10, ids: [1] },
+        ])
+        const third = mutateFirst(3)
+        const thirdReceipt = observeReceipt(third)
+        await vi.advanceTimersByTimeAsync(2)
+        releaseFirst!()
+        await vi.advanceTimersByTimeAsync(0)
+        expect(starts, `new call renews shared quiet edge`).toEqual([
+          { at: 10, ids: [1] },
+        ])
+        await vi.advanceTimersByTimeAsync(8)
+        expect(starts, `both managers start after renewed edge`).toEqual([
+          { at: 10, ids: [1] },
+          { at: 32, ids: [2] },
+          { at: 32, ids: [3] },
+        ])
+        expect(
+          [firstReceipt, secondReceipt, thirdReceipt].map(
+            (receipt) => receipt.outcome,
+          ),
+        ).toEqual([`fulfilled`, `fulfilled`, `fulfilled`])
+      },
+      async () => {
+        releaseFirst?.()
+        await vi.advanceTimersByTimeAsync(30)
+      },
+    )
+  })
+})
+
+/**
  * A failed onMutate that changed no row admits no work and consumes no leading
  * edge. This two-action model starts the next valid call at the same clock
  * instant. The production driver catches the user's original error, then
@@ -2435,6 +2709,331 @@ for (const releaseAt of [12, 24])
         await vi.advanceTimersByTimeAsync(30)
       },
     )
+  })
+
+/**
+ * A paced manager owns the commit edge. A caller's manual commit attempt on
+ * its pending receipt must throw before any backend handler starts or state
+ * changes. The scheduled callback still runs once its timer edge and the held
+ * predecessor's release both occur. This two-write grammar crosses all three
+ * serial strategies and checks starts, state, and receipts at each cut.
+ */
+for (const kind of [`debounce`, `throttle`, `queue`] as const)
+  it(`${kind} rejects manual commit without bypassing paced persistence`, async () => {
+    const collection = await createReadyCollection()
+    const strategy =
+      kind === `debounce`
+        ? debounceStrategy({ wait: 10, leading: true, trailing: true })
+        : kind === `throttle`
+          ? throttleStrategy({ wait: 10, leading: true, trailing: true })
+          : queueStrategy({ wait: 0 })
+    const firstWrite = createDeferred<void>()
+    const starts: Array<number> = []
+    const mutate = createPacedMutations<number, { id: number }>({
+      strategy,
+      onMutate: (id) => collection.insert({ id }),
+      mutationFn: ({ transaction }) => {
+        const id = transaction.mutations[0].modified.id
+        starts.push(id)
+        return id === 1 ? firstWrite.promise : Promise.resolve()
+      },
+    })
+    let second: Transaction<{ id: number }> | undefined
+    await withCleanup(
+      strategy,
+      collection,
+      async () => {
+        const first = mutate(1)
+        const firstReceipt = observeReceipt(first)
+        await vi.advanceTimersByTimeAsync(0)
+        expect(starts).toEqual([1])
+        second = mutate(2)
+        const secondReceipt = observeReceipt(second)
+        expect(second.state).toBe(`pending`)
+        expect(() => second!.commit()).toThrow(
+          `Paced mutations are committed by their strategy`,
+        )
+        expect(second.state, `manual attempt cannot start persistence`).toBe(
+          `pending`,
+        )
+        expect(starts).toEqual([1])
+        await vi.advanceTimersByTimeAsync(10)
+        expect(starts, `the held handler still owns the flight`).toEqual([1])
+        firstWrite.resolve()
+        await vi.advanceTimersByTimeAsync(0)
+        expect(starts, `the scheduled write starts after release`).toEqual([
+          1, 2,
+        ])
+        expect([firstReceipt.outcome, secondReceipt.outcome]).toEqual([
+          `fulfilled`,
+          `fulfilled`,
+        ])
+      },
+      async () => {
+        firstWrite.resolve()
+        if (second?.state === `pending`)
+          second.rollback({ isSecondaryRollback: true })
+        await vi.advanceTimersByTimeAsync(20)
+      },
+    )
+  })
+
+/**
+ * An admitted call after a pending transaction rolls back owns a new
+ * persistence obligation. The canceled leading callback may still occupy the
+ * serial slot, but it cannot consume the later call's quiet edge. This legal
+ * history holds the first handler, cancels its pending successor directly or
+ * by same-key cascade, admits a new transaction, then crosses the quiet and
+ * handler-release cuts. The independent expectation is backend starts 1 and 3:
+ * the first already started, the canceled second never starts, and the third
+ * retains its own persistence obligation.
+ */
+for (const cancellation of [`direct`, `same-key cascade`] as const)
+  it(`debounce persists a new call after ${cancellation} cancels its pending leading predecessor`, async () => {
+    const collection = await createReadyCollection<{
+      id: number
+      value: number
+    }>([{ id: 1, value: 0 }])
+    const strategy = debounceStrategy({
+      wait: 10,
+      leading: true,
+      trailing: true,
+    })
+    const firstWrite = createDeferred<void>()
+    const starts: Array<number> = []
+    const canceled = new Error(`pending leading canceled`)
+    const mutate = createPacedMutations<number, { id: number; value: number }>({
+      strategy,
+      onMutate: (value) =>
+        collection.update(1, (draft) => {
+          draft.value = value
+        }),
+      mutationFn: ({ transaction }) => {
+        const value = transaction.mutations[0].modified.value
+        starts.push(value)
+        return value === 1 ? firstWrite.promise : Promise.resolve()
+      },
+    })
+    let third: Transaction<{ id: number; value: number }> | undefined
+    await withCleanup(
+      strategy,
+      collection,
+      async () => {
+        const first = mutate(1)
+        const firstReceipt = observeReceipt(first)
+        await vi.advanceTimersByTimeAsync(11)
+        const second = mutate(2)
+        const secondReceipt = observeReceipt(second)
+        if (cancellation === `direct`)
+          second.rollback({ error: canceled, isSecondaryRollback: true })
+        else first.rollback({ error: canceled })
+        await vi.advanceTimersByTimeAsync(0)
+        expect(secondReceipt.outcome, `pending successor was canceled`).toBe(
+          `rejected`,
+        )
+        third = mutate(3)
+        const thirdReceipt = observeReceipt(third)
+        expect(third, `a canceled predecessor cannot own later work`).not.toBe(
+          second,
+        )
+        expect(collection.get(1)?.value, `new optimism is retained`).toBe(3)
+        await vi.advanceTimersByTimeAsync(10)
+        expect(starts, `the first handler still holds persistence`).toEqual([1])
+        firstWrite.resolve()
+        await vi.advanceTimersByTimeAsync(0)
+        expect(
+          starts,
+          `new transaction starts after both prerequisites`,
+        ).toEqual([1, 3])
+        expect([
+          firstReceipt.outcome,
+          secondReceipt.outcome,
+          thirdReceipt.outcome,
+        ]).toEqual([
+          cancellation === `direct` ? `fulfilled` : `rejected`,
+          `rejected`,
+          `fulfilled`,
+        ])
+      },
+      async () => {
+        firstWrite.resolve()
+        if (third?.state === `pending`)
+          third.rollback({ isSecondaryRollback: true })
+        await vi.advanceTimersByTimeAsync(30)
+      },
+    )
+  })
+
+/**
+ * A callback that throws before admission returns has no caller-visible
+ * transaction receipt. Its newly created empty transaction must leave the
+ * scope rather than remain pending forever. The resource witness inspects the
+ * owning scope after the throw for both admitted and dropped calls; the public
+ * Collection state alone cannot reveal this retained empty object.
+ */
+for (const admission of [`admitted`, `dropped`, `queued`] as const)
+  it(`releases a newly created ${admission} transaction after onMutate throws`, () => {
+    const create = vi.spyOn(TransactionScope.prototype, `createTransaction`)
+    const failure = new Error(`optimistic callback failed`)
+    const strategy =
+      admission === `queued`
+        ? queueStrategy({ wait: 0 })
+        : debounceStrategy({
+            wait: 10,
+            leading: false,
+            trailing: admission === `admitted`,
+          })
+    const mutate = createPacedMutations<number, { id: number }>({
+      strategy,
+      onMutate: () => {
+        throw failure
+      },
+      mutationFn: () => Promise.resolve(),
+    })
+    try {
+      expect(() => mutate(1)).toThrow(failure)
+      const scope = create.mock.instances.at(-1) as unknown as TransactionScope
+      const transaction = create.mock.results.at(-1)?.value as Transaction<{
+        id: number
+      }>
+      const retained = (
+        scope as unknown as { transactions: Array<Transaction<{ id: number }>> }
+      ).transactions
+      expect(transaction.state, `failed callback owns no pending work`).toBe(
+        `failed`,
+      )
+      expect(retained, `the scope releases failed admission`).not.toContain(
+        transaction,
+      )
+    } finally {
+      const transaction = create.mock.results.at(-1)?.value as
+        Transaction<{ id: number }> | undefined
+      if (transaction?.state === `pending`) {
+        void transaction.isPersisted.promise.catch(() => {})
+        transaction.rollback({ isSecondaryRollback: true })
+      }
+      create.mockRestore()
+      strategy.cleanup()
+    }
+  })
+
+/**
+ * Calls merged into one pending paced transaction settle together. When an
+ * outer onMutate throws after admitting a nested call, the failed group has no
+ * backend attempt and every receipt in that group rejects with the callback
+ * error. A later independent call must still persist. The driver observes the
+ * rollback immediately, then checks backend starts and receipts after the
+ * scheduled edge. This group-failure rule is a product decision for paced
+ * reentry; ordinary manual mutate callbacks retain earlier successful calls.
+ */
+for (const factory of [debounceStrategy, throttleStrategy])
+  it(`${factory.name} does not fulfill erased nested intent after an outer callback throws`, async () => {
+    const collection = await createReadyCollection()
+    const strategy = factory({ wait: 10, leading: true, trailing: true })
+    const starts: Array<Array<number>> = []
+    const failure = new Error(`outer callback failed`)
+    let nested: Transaction<{ id: number }> | undefined
+    const mutate = createPacedMutations<number, { id: number }>({
+      strategy,
+      onMutate: (id) => {
+        collection.insert({ id })
+        if (id === 1) {
+          nested = mutate(2)
+          throw failure
+        }
+      },
+      mutationFn: ({ transaction }) => {
+        starts.push(
+          transaction.mutations.map((mutation) => mutation.modified.id),
+        )
+        return Promise.resolve()
+      },
+    })
+    await withCleanup(
+      strategy,
+      collection,
+      async () => {
+        expect(() => mutate(1)).toThrow(failure)
+        expect(nested, `nested admission returned a receipt`).toBeDefined()
+        const receipt = observeReceipt(nested!)
+        expect(nested!.state, `the merged group rolls back`).toBe(`failed`)
+        expect(
+          [...collection.keys()],
+          `the failed group has no visible row`,
+        ).toEqual([])
+        const later = mutate(3)
+        const laterReceipt = observeReceipt(later)
+        await vi.advanceTimersByTimeAsync(11)
+        expect(
+          starts,
+          `only the later independent call reaches the backend`,
+        ).toEqual([[3]])
+        expect(receipt).toMatchObject({ outcome: `rejected`, error: failure })
+        expect(laterReceipt.outcome).toBe(`fulfilled`)
+      },
+      async () => {
+        if (nested?.state === `pending`)
+          nested.rollback({ isSecondaryRollback: true })
+        await vi.advanceTimersByTimeAsync(20)
+      },
+    )
+  })
+
+/**
+ * An earlier call in the same pending transaction shares the failure. The
+ * group has one optimistic lifetime and one backend attempt, so rejecting only
+ * the nested call would leave an earlier receipt claiming a partial group.
+ * The model rejects both receipts at the throw cut, and a later transaction
+ * proves that the strategy did not retain a stale callback.
+ */
+for (const factory of [debounceStrategy, throttleStrategy])
+  it(`${factory.name} does not fulfill erased nested intent in an existing pending transaction`, async () => {
+    const collection = await createReadyCollection()
+    const strategy = factory({ wait: 10, leading: false, trailing: true })
+    const starts: Array<Array<number>> = []
+    const failure = new Error(`outer callback failed`)
+    let nested: Transaction<{ id: number }> | undefined
+    const mutate = createPacedMutations<number, { id: number }>({
+      strategy,
+      onMutate: (id) => {
+        collection.insert({ id })
+        if (id === 1) {
+          nested = mutate(2)
+          throw failure
+        }
+      },
+      mutationFn: ({ transaction }) => {
+        starts.push(
+          transaction.mutations.map((mutation) => mutation.modified.id),
+        )
+        return Promise.resolve()
+      },
+    })
+    await withCleanup(strategy, collection, async () => {
+      const prior = mutate(0)
+      const priorReceipt = observeReceipt(prior)
+      expect(() => mutate(1)).toThrow(failure)
+      expect(nested, `nested admission returned a receipt`).toBeDefined()
+      const nestedReceipt = observeReceipt(nested!)
+      expect(prior.state, `the merged group rolls back`).toBe(`failed`)
+      expect(
+        [...collection.keys()],
+        `the failed group has no visible row`,
+      ).toEqual([])
+      const later = mutate(3)
+      const laterReceipt = observeReceipt(later)
+      await vi.advanceTimersByTimeAsync(11)
+      expect(starts, `only the later transaction persists`).toEqual([[3]])
+      expect(priorReceipt).toMatchObject({
+        outcome: `rejected`,
+        error: failure,
+      })
+      expect(nestedReceipt).toMatchObject({
+        outcome: `rejected`,
+        error: failure,
+      })
+      expect(laterReceipt.outcome).toBe(`fulfilled`)
+    })
   })
 
 /**

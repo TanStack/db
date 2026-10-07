@@ -63,6 +63,52 @@ type Scenario = {
  * events emitted during the failed callback.
  */
 describe(`failed manual mutation callback`, () => {
+  it(`does not copy prior mutations for a callback with no writes`, async () => {
+    const collection = createCollection<Row>({
+      getKey: (row) => row.id,
+      sync: {
+        sync: (actions) => {
+          actions.begin()
+          actions.commit()
+          actions.markReady()
+        },
+      },
+    })
+    const tx = createTransaction<Row>({
+      autoCommit: false,
+      mutationFn: () => Promise.resolve(),
+    })
+    await withHistoryCleanup(
+      async () => {
+        await collection.preload()
+        for (let id = 1; id <= 16; id++)
+          tx.mutate(() => collection.insert({ id, value: id, note: `prior` }))
+        const mutations = tx.mutations
+        let visits = 0
+        tx.mutations = new Proxy(mutations, {
+          get(target, property, receiver) {
+            if (property === Symbol.iterator)
+              return function* () {
+                for (const mutation of target) {
+                  visits++
+                  yield mutation
+                }
+              }
+            return Reflect.get(target, property, receiver)
+          },
+        })
+        for (let index = 0; index < 5; index++) tx.mutate(() => {})
+        expect(visits, `no snapshot traversal without a write`).toBe(0)
+        expect(tx.mutations).toHaveLength(16)
+        tx.mutations = mutations
+      },
+      () => [
+        () => tx.rollback({ isSecondaryRollback: true }),
+        () => collection.cleanup(),
+      ],
+    )
+  })
+
   for (const failure of [
     `same-key update`,
     `distinct insert`,
@@ -262,6 +308,135 @@ describe(`failed manual mutation callback`, () => {
       ],
     )
   })
+
+  /**
+   * The transaction context belongs to the synchronous mutate callback. A
+   * subscriber responding to restoration runs after that callback has thrown,
+   * so its new write is independent. The reference classifies intent by the
+   * authoring action: the failed callback contributes none, while the later
+   * subscriber contributes its own row. At the throw and commit cuts, the
+   * failed transaction must not contain or persist the subscriber's row.
+   */
+  it(`keeps a restoration subscriber write out of the failed callback transaction`, async () => {
+    const collection = createCollection<Row>({
+      getKey: (row) => row.id,
+      onInsert: () => Promise.resolve(),
+      sync: {
+        sync: (actions) => {
+          actions.begin()
+          actions.write({
+            type: `insert`,
+            value: { id: 1, value: 0, note: `base` },
+          })
+          actions.commit()
+          actions.markReady()
+        },
+      },
+    })
+    const payloads: Array<Array<number>> = []
+    const tx = createTransaction<Row>({
+      autoCommit: false,
+      mutationFn: ({ transaction }) => {
+        payloads.push(transaction.mutations.map(({ modified }) => modified.id))
+        return Promise.resolve()
+      },
+    })
+    let subscription: ReturnType<typeof collection.subscribeChanges> | undefined
+    await withHistoryCleanup(
+      async () => {
+        await collection.preload()
+        let restored = false
+        subscription = collection.subscribeChanges(
+          (batch) => {
+            if (
+              !restored &&
+              batch.some(
+                (change) => change.value.id === 1 && change.value.value === 0,
+              )
+            ) {
+              restored = true
+              collection.insert({ id: 3, value: 3, note: `subscriber` })
+            }
+          },
+          { includeInitialState: false },
+        )
+        const failure = new Error(`callback failed`)
+        expect(() =>
+          tx.mutate(() => {
+            collection.update(1, (draft) => {
+              draft.value = 2
+            })
+            throw failure
+          }),
+        ).toThrow(failure)
+        expect(restored, `restoration reached the subscriber`).toBe(true)
+        expect(collection.get(1)?.value).toBe(0)
+        expect(collection.get(3)?.value).toBe(3)
+        expect(
+          tx.mutations.map(({ modified }) => modified.id),
+          `subscriber intent has a separate owner`,
+        ).toEqual([])
+        await tx.commit()
+        expect(
+          payloads,
+          `failed transaction persisted no subscriber write`,
+        ).toEqual([])
+      },
+      () => [() => subscription?.unsubscribe(), () => collection.cleanup()],
+    )
+  })
+
+  /**
+   * Nested mutate calls use one transaction context per callback frame. After
+   * the inner frame returns or throws, the outer frame still owns later
+   * Collection writes. The reference retains the inner row only on success
+   * and always retains the outer row authored after the inner cut.
+   */
+  for (const nestedFails of [false, true])
+    it(`keeps the outer transaction active after a nested ${nestedFails ? `failure` : `success`}`, async () => {
+      const collection = createCollection<Row>({
+        getKey: (row) => row.id,
+        sync: {
+          sync: (actions) => {
+            actions.begin()
+            actions.commit()
+            actions.markReady()
+          },
+        },
+      })
+      const payloads: Array<Array<number>> = []
+      const tx = createTransaction<Row>({
+        autoCommit: false,
+        mutationFn: ({ transaction }) => {
+          payloads.push(
+            transaction.mutations.map(({ modified }) => modified.id),
+          )
+          return Promise.resolve()
+        },
+      })
+      await withHistoryCleanup(
+        async () => {
+          await collection.preload()
+          tx.mutate(() => {
+            const inner = () =>
+              tx.mutate(() => {
+                collection.insert({ id: 2, value: 2, note: `inner` })
+                if (nestedFails) throw new Error(`inner failed`)
+              })
+            if (nestedFails) expect(inner).toThrow(`inner failed`)
+            else inner()
+            collection.insert({ id: 3, value: 3, note: `outer` })
+          })
+          const expected = nestedFails ? [3] : [2, 3]
+          expect(tx.mutations.map(({ modified }) => modified.id)).toEqual(
+            expected,
+          )
+          await tx.commit()
+          expect(payloads).toEqual([expected])
+        },
+        () => [() => collection.cleanup()],
+      )
+    })
 })
 type ObservationFault =
   | `missing-delete`

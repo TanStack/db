@@ -19,7 +19,7 @@ export interface BaseStrategy<TName extends string = string> {
    */
   execute: <T extends object = Record<string, unknown>>(
     fn: () => Transaction<T>,
-    onAdmit?: () => void,
+    onAdmit?: () => Transaction<T> | void,
     onCommit?: () => Promise<unknown> | undefined,
   ) => void | boolean | Promise<void>
 
@@ -75,7 +75,7 @@ export interface QueueStrategy extends BaseStrategy<`queue`> {
   /** Explicit false rejects the transaction; void preserves custom strategies. */
   execute: <T extends object = Record<string, unknown>>(
     fn: () => Transaction<T>,
-    onAdmit?: () => void,
+    onAdmit?: () => Transaction<T> | void,
     onCommit?: () => Promise<unknown> | undefined,
   ) => boolean | void | Promise<void>
 }
