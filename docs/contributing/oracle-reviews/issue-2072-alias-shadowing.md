@@ -43,8 +43,10 @@ identity use the binding. Source input lookup continues to use `SourceId`.
 Public aliases remain the user's strings.
 
 The role-based model in the exact-output oracle reads only maps of locks and
-votes. For each current lock, it computes matching votes by `vote.lockId ===
-lock.id`. The production driver uses `Query` and `createLiveQueryCollection`.
+votes. Direct and implicit-join forms match `vote.lockId` to `lock.id`. The
+`QueryRef` and union left branch also match `vote.lockName` to `lock.name`;
+the union right branch selects vote 11 by ID and joins it by `lockId`. The
+production driver uses `Query` and `createLiveQueryCollection`.
 It compares all enumerable key names and user values, including the presence
 of virtual keys, plus multiplicity after preload
 and after child insertion, parent insertion, a child insertion for that new
@@ -71,8 +73,29 @@ rejection stays there.
 | Repaired implementation | The scope campaigns, exact-output cases, original issue form, and affected query suites pass. |
 | Lost-binding mutant | Ignoring projected binding lookup survives the direct child: its equality was extracted before evaluation. It fails the nested `QueryRef` case at the **initial public-row comparison** with empty children. This distinguishes path reach from a vacuous green test. |
 | False-correlation mutant | Treating an equality between two local child refs as a parent-child correlation fails the local-equality witness at the **initial public-row comparison** with empty children. |
-| Alias boundary | The shadowed and renamed explicit projections agree with the role model. Their implicit joined children have the distinct declared keys `lock` and `vote`, as the public shape requires. A functional callback sees exactly the declared `lock` key. |
+| Alias boundary | The shadowed and renamed explicit projections agree with the role model. Their implicit joined children have the distinct declared keys `lock` and `vote`, as the public shape requires. A functional callback sees the declared `lock` key and a child vote's ID, lock ID, and lock name. |
 | Identity boundary | An explicit child projection has the same query identity after consistent `lock`→`vote` renaming. `child.id = child.id` and `child.id = capturedParent.id` have different identities despite identical selected field names. |
+| Dropped `QueryRef` inner predicate | Removing only its captured `lockName = parent.name` condition leaves the required outer `lockId = parent.id` correlation legal. Vote 11 then appears incorrectly under lock 1. The check fails at the **initial public-row assertion**. |
+| Dropped union left predicate | Removing only its captured name condition leaves the outer `lockId` join and parent filter legal. The nonempty right branch still supplies vote 11; the left now supplies an extra copy. The check fails at the **initial public-row assertion**. |
+| Parent-shaped functional input | Replacing the callback's child value with a parent-shaped lock leaves the `lock` key present but makes the child-specific predicate false. The check fails at the **initial public-row assertion** with empty children. |
+
+### Independent review correction
+
+The first exact-output oracle had three enforcement gaps. The `QueryRef`
+inner and outer predicates both constrained `lockId`, so deleting the inner
+predicate left the same public rows. The union's outer join and parent filter
+implied its left predicate, while its right branch was empty. The functional
+callback checked only its input key, so a parent row under `lock` looked valid.
+These were false-green oracle designs; the review found no new production bug.
+
+The revised finite grammar keeps the outer `lockId` correlation required for
+include admission and gives each recursive inner plan an independent captured
+`lockName` predicate. Vote 11 matches lock 1 by ID but not by name. The union
+right branch contributes vote 11 at initial publication, and a later move
+makes both branches contribute it under lock 2. The functional callback reads
+child fields, filters vote 11, and records its input values. The three
+temporary wrong-query controls above reached the intended public comparison
+and failed by assertion, rather than by setup error or timeout.
 
 ## Bug-class boundary and remaining work
 
@@ -107,15 +130,19 @@ here at the live Collection boundary rather than in a mounted React hook.
   two alias, two operand-order, and two source-mode axes. Renamed controls
   ablate shadowing; reversing equality distinguishes direction-dependent
   mistakes; the original guard distinguishes admission from execution. IDs
-  are 1–3 for parents and 10–15 for children, with one orphan; later writes
-  cover new, moved, and deleted rows. Same-scope and union-branch repeats are
-  nearby invalid cases. The primary generated grammar retains its documented
+  are 1–3 for parents and 10–15 for children, with one orphan. Initial votes
+  include a matching ID with a mismatching name; a later move creates union
+  branch overlap. Writes cover new, moved, and deleted rows. Same-scope and
+  union-branch repeats are nearby invalid cases. The primary generated grammar
+  retains its documented
   three-name pool, bounded rows/writes, fixed and random runs, and replay.
 - **ORC-005:** Real live Collections are read at initial and named write
   checkpoints. The recorder retains every enumerable key and duplicate child.
+  The callback recorder sees vote 11 before its predicate excludes that row.
 - **ORC-006:** Both temporary production mutants above fail at the intended
   public-row assertion. The direct-case survival of the lost-binding mutant
-  is recorded, rather than counted as a kill.
+  is recorded, rather than counted as a kill. Three later wrong-query controls
+  each fail at initial public-row comparison after the independent review.
 - **ORC-007:** The important generated property is the existing scope owner;
   it runs the same grammar and check at fixed seed `1715` and without a seed.
   `TANSTACK_DB_ORACLE_PROPERTY=includes.scoped-alpha-renaming` plus
@@ -139,8 +166,9 @@ here at the live Collection boundary rather than in a mounted React hook.
   the bounded closure claim.
 - **ORC-013:** A captured parent and a local child with the same alias are a
   legal witness; the renamed control preserves explicit results, while the
-  implicit joined output distinguishes names that are public. Same-scope and
-  union duplicates distinguish the adjacent rejection boundary.
+  implicit joined output distinguishes names that are public. Vote 11
+  distinguishes the recursive inner predicate from the outer key correlation.
+  Same-scope and union duplicates distinguish the adjacent rejection boundary.
 - **ORC-014:** The on-demand fixture supplies the `loadSubset` premise. The
   claim is limited to that controlled provider; real adapter scheduling is an
   open receiving boundary in the coverage map.

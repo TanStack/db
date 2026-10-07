@@ -22,14 +22,17 @@ import { createScopedSource } from './includes-scope-identity-oracle.js'
  * that alias as a key. Same-scope and union-branch duplicates remain illegal.
  *
  * This finite oracle covers eager and on-demand children, direct and recursive
- * child plans, an implicit join, and writes after initial publication. It does
- * not claim arbitrary expression trees, callback equivalence under renaming,
- * or every asynchronous acquisition schedule. The primary scope oracle owns
- * broader alias and source-history generation.
+ * child plans, an implicit join, and writes after initial publication. The
+ * QueryRef and union paths use an inner captured name predicate beside a
+ * required outer key correlation. Neither predicate implies the other. The
+ * union has a nonempty right branch. It does not claim arbitrary expression
+ * trees, callback equivalence under renaming, or every asynchronous acquisition
+ * schedule. The primary scope oracle owns broader alias and source-history
+ * generation.
  */
 
 type Lock = { id: number; name: string }
-type Vote = { id: number; lockId: number }
+type Vote = { id: number; lockId: number; lockName: string }
 type Form = `direct` | `queryRef` | `union` | `joinedImplicit`
 type OperandOrder = `childFirst` | `parentFirst`
 type ChildAlias = `lock` | `vote`
@@ -40,10 +43,10 @@ const initialLocks: Array<Lock> = [
   { id: 2, name: `B` },
 ]
 const initialVotes: Array<Vote> = [
-  { id: 10, lockId: 1 },
-  { id: 11, lockId: 1 },
-  { id: 12, lockId: 2 },
-  { id: 15, lockId: 99 },
+  { id: 10, lockId: 1, lockName: `A` },
+  { id: 11, lockId: 1, lockName: `B` },
+  { id: 12, lockId: 2, lockName: `B` },
+  { id: 15, lockId: 99, lockName: `A` },
 ]
 // Collection rows expose these documented virtual fields in addition to the
 // selected user fields. Their values are not part of this alias-scope law.
@@ -60,9 +63,12 @@ const voteAt = (context: Context, alias: ChildAlias): Vote =>
 
 /**
  * Model: source roles, not aliases, decide the relation. Each current lock
- * receives precisely the votes whose lockId equals its id. A joined implicit
- * child also contains the matching lock row. Map replacement and deletion are
- * the entire legal write grammar; no production planner rule enters this model.
+ * receives votes whose lockId equals its id. Recursive forms also require
+ * vote.lockName to equal lock.name in their left or only branch. The union's
+ * right branch supplies vote 11 when its lockId matches, preserving
+ * multiplicity if both branches select it. A joined implicit child also
+ * contains the matching lock row. Map replacement and deletion are the entire
+ * legal write grammar; no production planner rule enters this model.
  */
 function modelRows(
   locks: ReadonlyMap<number, Lock>,
@@ -71,26 +77,41 @@ function modelRows(
   alias: ChildAlias,
 ) {
   return [...locks.values()]
-    .map((lock) => ({
-      keys: [...rootVirtualKeys, `children`, `id`],
-      id: lock.id,
-      children: [...votes.values()]
-        .filter((vote) => vote.lockId === lock.id)
-        .map((vote) =>
-          form === `joinedImplicit`
-            ? {
-                keys: [alias, `other`].sort(),
-                sourceKeys: [...rootVirtualKeys, `id`, `lockId`],
-                id: vote.id,
-                lockId: vote.lockId,
-                otherKeys: [...rootVirtualKeys, `id`, `name`],
-                otherId: lock.id,
-                otherName: lock.name,
-              }
-            : { keys: [`id`, `lockId`], id: vote.id, lockId: vote.lockId },
-        )
-        .sort((a, b) => a.id - b.id),
-    }))
+    .map((lock) => {
+      const childVotes = [
+        ...[...votes.values()].filter(
+          (vote) =>
+            vote.lockId === lock.id &&
+            ((form !== `queryRef` && form !== `union`) ||
+              vote.lockName === lock.name),
+        ),
+        ...(form === `union`
+          ? [...votes.values()].filter(
+              (vote) => vote.id === 11 && vote.lockId === lock.id,
+            )
+          : []),
+      ]
+      return {
+        keys: [...rootVirtualKeys, `children`, `id`],
+        id: lock.id,
+        children: childVotes
+          .map((vote) =>
+            form === `joinedImplicit`
+              ? {
+                  keys: [alias, `other`].sort(),
+                  sourceKeys: [...rootVirtualKeys, `id`, `lockId`, `lockName`],
+                  id: vote.id,
+                  lockId: vote.lockId,
+                  lockName: vote.lockName,
+                  otherKeys: [...rootVirtualKeys, `id`, `name`],
+                  otherId: lock.id,
+                  otherName: lock.name,
+                }
+              : { keys: [`id`, `lockId`], id: vote.id, lockId: vote.lockId },
+          )
+          .sort((a, b) => a.id - b.id),
+      }
+    })
     .sort((a, b) => a.id - b.id)
 }
 
@@ -124,6 +145,7 @@ function observedRows(
             sourceKeys: Object.keys(source).sort(),
             id: source.id,
             lockId: source.lockId,
+            lockName: source.lockName,
             otherKeys: Object.keys(other).sort(),
             otherId: other.id,
             otherName: other.name,
@@ -149,6 +171,10 @@ function buildQuery(
         order === `childFirst`
           ? eq(child.lockId, parent.id)
           : eq(parent.id, child.lockId)
+      const capturedName = (child: Vote) =>
+        order === `childFirst`
+          ? eq(child.lockName, parent.name)
+          : eq(parent.name, child.lockName)
       const base = () =>
         new Query()
           .from({ [alias]: votes.collection })
@@ -163,10 +189,13 @@ function buildQuery(
             })),
           )
         if (form === `queryRef`) {
-          const inner = base().select((context: Context) => ({
-            id: voteAt(context, alias).id,
-            lockId: voteAt(context, alias).lockId,
-          }))
+          const inner = new Query()
+            .from({ [alias]: votes.collection })
+            .where((context: Context) => capturedName(voteAt(context, alias)))
+            .select((context: Context) => ({
+              id: voteAt(context, alias).id,
+              lockId: voteAt(context, alias).lockId,
+            }))
           return toArray(
             new Query()
               .from({ nested: inner })
@@ -178,13 +207,16 @@ function buildQuery(
           )
         }
         if (form === `union`) {
-          const left = base().select((context: Context) => ({
-            id: voteAt(context, alias).id,
-            lockId: voteAt(context, alias).lockId,
-          }))
+          const left = new Query()
+            .from({ [alias]: votes.collection })
+            .where((context: Context) => capturedName(voteAt(context, alias)))
+            .select((context: Context) => ({
+              id: voteAt(context, alias).id,
+              lockId: voteAt(context, alias).lockId,
+            }))
           const right = new Query()
             .from({ otherVote: votes.collection })
-            .where(({ otherVote }) => eq(otherVote.id, 999))
+            .where(({ otherVote }) => eq(otherVote.id, 11))
             .select(({ otherVote }) => ({
               id: otherVote.id,
               lockId: otherVote.lockId,
@@ -211,10 +243,12 @@ function buildQuery(
 
 /**
  * The bounded grammar crosses the reported shadowed spelling with a renamed
- * control, both equality orders, and two source modes. The recursive forms
- * keep the same finite rows and one controlled write sequence so that each
- * boundary can be compared at every checkpoint. A union with duplicate branch
- * aliases is outside the legal grammar and has its own rejection witness.
+ * control, both equality orders, and two source modes. The QueryRef's outer
+ * lockId filter cannot imply its inner lockName filter. The union's outer join
+ * and filter also use lockId; its right branch contributes vote 11 without
+ * the inner name predicate. The forms keep the same finite writes at every
+ * checkpoint. A union with duplicate branch aliases is outside the legal
+ * grammar and has its own rejection witness.
  */
 describe(`captured alias scope oracle`, () => {
   for (const form of [
@@ -247,7 +281,7 @@ describe(`captured alias scope oracle`, () => {
                   )
                 check(`initial publication`)
 
-                const addedVote = { id: 13, lockId: 2 }
+                const addedVote = { id: 13, lockId: 2, lockName: `A` }
                 votes.put(addedVote)
                 modelVotes.set(addedVote.id, addedVote)
                 check(`child insert`)
@@ -257,12 +291,12 @@ describe(`captured alias scope oracle`, () => {
                 modelLocks.set(addedLock.id, addedLock)
                 check(`parent insert`)
 
-                const newChild = { id: 14, lockId: 3 }
+                const newChild = { id: 14, lockId: 3, lockName: `C` }
                 votes.put(newChild)
                 modelVotes.set(newChild.id, newChild)
                 check(`child insert after parent insert`)
 
-                const movedVote = { id: 11, lockId: 2 }
+                const movedVote = { id: 11, lockId: 2, lockName: `B` }
                 votes.put(movedVote)
                 modelVotes.set(movedVote.id, movedVote)
                 check(`child moves between parents`)
@@ -449,7 +483,7 @@ describe(`captured alias scope oracle`, () => {
       async () => {
         await live.preload()
         check()
-        const added = { id: 13, lockId: 2 }
+        const added = { id: 13, lockId: 2, lockName: `A` }
         votes.put(added)
         currentVotes.set(added.id, added)
         check()
@@ -462,10 +496,15 @@ describe(`captured alias scope oracle`, () => {
     )
   })
 
-  test(`a functional callback sees the child's public alias`, async () => {
+  test(`a functional callback reads child values under its public alias`, async () => {
     const locks = createScopedSource(`functional-locks`, initialLocks, `eager`)
     const votes = createScopedSource(`functional-votes`, initialVotes, `eager`)
-    const seen: Array<Array<string>> = []
+    const seen: Array<{
+      keys: Array<string>
+      id: number | undefined
+      lockId: number | undefined
+      lockName: string | undefined
+    }> = []
     const live = createLiveQueryCollection({
       query: new Query()
         .from({ lock: locks.collection })
@@ -476,8 +515,14 @@ describe(`captured alias scope oracle`, () => {
               .from({ lock: votes.collection })
               .where(({ lock: child }) => eq(child.lockId, parent.id))
               .fn.where((row) => {
-                seen.push(Object.keys(row).sort())
-                return Object.keys(row).includes(`lock`)
+                const child = row.lock as Vote | undefined
+                seen.push({
+                  keys: Object.keys(row).sort(),
+                  id: child?.id,
+                  lockId: child?.lockId,
+                  lockName: child?.lockName,
+                })
+                return child?.lockId !== undefined && child.id !== 11
               })
               .select(({ lock: child }) => ({ id: child.id })),
           ),
@@ -486,8 +531,8 @@ describe(`captured alias scope oracle`, () => {
     await withHistoryCleanup(
       async () => {
         await live.preload()
-        expect(seen.length).toBeGreaterThan(0)
-        expect(seen.every((keys) => keys.join() === `lock`)).toBe(true)
+        // The callback drops vote 11. A parent row substituted for the child
+        // lacks lockId and drops every child at this public checkpoint.
         expect(
           live.toArray
             .map((row) => ({
@@ -498,9 +543,23 @@ describe(`captured alias scope oracle`, () => {
             }))
             .sort((a, b) => a.id - b.id),
         ).toEqual([
-          { id: 1, children: [10, 11] },
+          { id: 1, children: [10] },
           { id: 2, children: [12] },
         ])
+        expect(seen.length).toBeGreaterThan(0)
+        expect(seen.some(({ id }) => id === 11)).toBe(true)
+        expect(
+          seen.every(
+            ({ keys, id, lockId, lockName }) =>
+              keys.join() === `lock` &&
+              initialVotes.some(
+                (vote) =>
+                  vote.id === id &&
+                  vote.lockId === lockId &&
+                  vote.lockName === lockName,
+              ),
+          ),
+        ).toBe(true)
       },
       () => [
         () => live.cleanup(),
