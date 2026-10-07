@@ -341,6 +341,19 @@ a later write, the same refetch may reuse the in-flight request. A separate
 checkpoint keeps the detached fetch-start position until that request settles
 and retires it afterward. These controlled histories do not establish every
 persisted adapter or Query cache-removal schedule.
+The [PR #2065 review at 74e399150](oracle-reviews/pr-2065-74e399-review.md)
+adds ordinary-unload and unobserved-fetch histories to that request-order law.
+The ownership oracle also checks derived-select reacquisition and eager restart,
+explicit subset refetch, a derived result held behind `deferDataRefresh`, a
+provisional cache row awaiting persisted application, aliased physical Queries,
+and the boundary between an in-flight pending Query and an idle empty cache
+entry. The cursor-pagination integration oracle supplies the idle-entry control.
+The ordinary-unload, provisional-row, and alias tests reject their respective
+hostile classifiers at public-row or cache checkpoints. These finite histories
+do not establish every persistence schedule, every Query hash collision, or a
+full offline replay; those remain owned by the Query DB ownership and offline
+receiving oracles. Query Core 5.90.20 is the tested cancellation boundary;
+older supported versions are excluded by the package peer minimum.
 
 The [React source ID reuse oracle](https://github.com/TanStack/db/blob/main/packages/react-db/tests/source-id-reuse-oracle.test.tsx) ([review](oracle-reviews/issue-1991-react-source-id.md))
 checks that a mounted derived-identity hook rejects a different same-ID
