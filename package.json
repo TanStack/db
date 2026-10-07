@@ -24,7 +24,7 @@
     "test": "pnpm --filter \"./packages/**\" test && pnpm --filter @tanstack/indexeddb-db-collection test:package",
     "test:oracles": "pnpm --filter @tanstack/db test:oracles && pnpm --filter @tanstack/query-db-collection test:oracles && pnpm --filter @tanstack/indexeddb-db-collection test:oracles",
     "test:minified-db": "node scripts/test-minified-db.mjs",
-    "test:production-errors": "node scripts/test-production-errors.mjs",
+    "test:production-errors": "node scripts/generate-error-docs.mjs --check && node scripts/test-production-errors.mjs",
     "check:mangle": "node scripts/mangle-private-members.mjs",
     "typecheck:tests": "pnpm --filter @tanstack/db-ivm --filter @tanstack/offline-transactions typecheck",
     "test:docs": "node scripts/verify-links.ts",

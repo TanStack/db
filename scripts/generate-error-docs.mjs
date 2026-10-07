@@ -1,7 +1,8 @@
 // Writes docs/errors.md, the page production error messages link to. Each
 // coded error class gets an `error-<code>` anchor and its development message
 // for the sample inputs in packages/db/tests/error-sample-arguments.ts.
-// packages/db/tests/production-error-messages.test.ts checks the page.
+// With `--check`, it fails instead of writing when the page is out of date.
+// packages/db/tests/production-error-messages.test.ts checks the headings.
 import { readFile, writeFile } from 'node:fs/promises'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -26,9 +27,8 @@ ${messages[name][0]}
 `,
 )
 
-await writeFile(
-  path.join(root, 'docs/errors.md'),
-  `---
+const pagePath = path.join(root, 'docs/errors.md')
+const page = `---
 title: Error Codes
 id: errors
 ---
@@ -46,5 +46,16 @@ Development builds keep the full messages below. The error classes, their
 \`name\` values, and their fields are the same in both builds. See
 [Error Handling](./guides/error-handling.md) for how to catch them.
 
-${sections.join('\n')}`,
-)
+${sections.join('\n')}`
+
+if (process.argv.includes('--check')) {
+  const current = await readFile(pagePath, 'utf8').catch(() => '')
+  if (current !== page) {
+    console.error(
+      'docs/errors.md is out of date; run node scripts/generate-error-docs.mjs',
+    )
+    process.exit(1)
+  }
+} else {
+  await writeFile(pagePath, page)
+}
