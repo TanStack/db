@@ -663,8 +663,18 @@ export class CollectionImpl<
    */
   public preload(): Promise<void> {
     // Preload asks for this Collection's data, so provider work may start.
-    this._markPreload()
-    return this._sync.preload()
+    return this.afterPreloadMark(() => this._sync.preload())
+  }
+
+  // Records a request for data, then continues. A source whose start throws
+  // on resumption rejects the returned promise instead of throwing.
+  private afterPreloadMark<T>(next: () => Promise<T>): Promise<T> {
+    try {
+      this._markPreload()
+    } catch (error) {
+      return Promise.reject(error)
+    }
+    return next()
   }
 
   /**
@@ -1057,8 +1067,7 @@ export class CollectionImpl<
     // If we already have data or collection is ready, resolve immediately.
     // This read still asks for data, so it counts as a preload.
     if (this.size > 0 || this.isReady()) {
-      this._markPreload()
-      return Promise.resolve(this.state)
+      return this.afterPreloadMark(() => Promise.resolve(this.state))
     }
 
     // Use preload to ensure the collection starts loading, then return the state
@@ -1084,8 +1093,7 @@ export class CollectionImpl<
     // If we already have data or collection is ready, resolve immediately.
     // This read still asks for data, so it counts as a preload.
     if (this.size > 0 || this.isReady()) {
-      this._markPreload()
-      return Promise.resolve(this.toArray)
+      return this.afterPreloadMark(() => Promise.resolve(this.toArray))
     }
 
     // Use preload to ensure the collection starts loading, then return the array

@@ -84,9 +84,8 @@ describe(`Query while syncing`, () => {
         // subscriber or a preload. This subscriber starts its sources.
         liveQuery.subscribeChanges(() => {})
 
-        // startSync: true starts the live query's own sync run, which reads
-        // local memory. It starts no provider work: the idle source has not
-        // started. The subscriber below starts it.
+        // startSync: true alone starts only the live query's own sync run,
+        // which reads local memory; the subscriber above started the source.
         // Wait a moment for the subscription to set up
         await vi.advanceTimersByTimeAsync(10)
 

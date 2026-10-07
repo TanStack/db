@@ -390,7 +390,16 @@ export class CollectionChangesManager<
   public markSubscriberOrPreload(): void {
     if (this.subscriberOrPreload) return
     this.subscriberOrPreload = true
-    for (const listener of [...this.subscriberOrPreloadListeners]) listener()
+    // One source's failed start must not keep the others deferred.
+    const errors: Array<unknown> = []
+    for (const listener of [...this.subscriberOrPreloadListeners]) {
+      try {
+        listener()
+      } catch (error) {
+        errors.push(error)
+      }
+    }
+    if (errors.length) throw errors[0]
   }
 
   /** A deferring subscription resumed: it may now start this sync run. */

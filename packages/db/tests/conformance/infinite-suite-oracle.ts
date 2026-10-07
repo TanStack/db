@@ -97,13 +97,17 @@ function expectReadyObservationsMatchSource(
  * subscriber or a preload. A framework that publishes a value before its hook
  * subscribes (a React render, Svelte construction) therefore shows a value
  * with no rows first; one whose first value follows the subscription (Vue
- * setup) shows the ready first page. Both are legal. A first value that is
- * ready with other rows, or not ready but holding rows, is not.
+ * setup) shows the ready first page. Both are legal. Any other first value,
+ * such as an error, an idle value, or one holding rows before it is ready, is
+ * not.
  */
 function expectFirstOnDemandValue(
   handle: InfiniteQueryHandle,
   firstPage: Array<string>,
   where: string,
+  // `loading` when the hook started the collection before subscribing;
+  // `idle` for a supplied window the hook adjusts before starting it.
+  notReady: `loading` | `idle` = `loading`,
 ): void {
   const first = handle.observations()[0]
   if (first?.status === `ready`) {
@@ -114,7 +118,12 @@ function expectFirstOnDemandValue(
       hasNextPage: true,
     })
   } else {
-    expect(first?.ids, `${where}: a first value before the request`).toEqual([])
+    expect(first, `${where}: a first value before the request`).toEqual({
+      status: notReady,
+      ids: [],
+      pages: [[]],
+      hasNextPage: false,
+    })
   }
 }
 
@@ -727,7 +736,12 @@ export function runInfiniteQuerySuite(rawDriver: InfiniteQueryDriver): void {
           ).toHaveLength(1)
           expectPageRows(handle.current(), rows(8).slice(0, 3), 3)
           expectReadyObservationsMatchSource(handle, rows(8), 3)
-          expectFirstOnDemandValue(handle, [`1`, `2`, `3`], where)
+          expectFirstOnDemandValue(
+            handle,
+            [`1`, `2`, `3`],
+            where,
+            declared === 4 ? `loading` : `idle`,
+          )
           handle.unmount()
         }
       },

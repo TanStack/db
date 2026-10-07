@@ -124,6 +124,8 @@ export class CollectionConfigBuilder<
    * starting provider work.
    */
   hasSubscriberOrPreload(): boolean {
+    // A builder driven without its Collection, as its own tests do, has no
+    // subscriber state to defer on.
     return this.liveQueryCollection?._hasSubscriberOrPreload() ?? true
   }
 

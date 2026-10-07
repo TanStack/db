@@ -35,3 +35,21 @@ fails the assertion `the preload settles` in React, Vue, and Svelte.
 
 The mutants above were designed after reading the tests, so they are a
 self-review of this author's coverage, not an independent mutant gap hunt.
+
+## Second review, at `c2fe18d21`
+
+A medium code review raised ten findings. Each claim was probed on that
+revision before any change.
+
+| Finding | Kind | Evidence | Outcome |
+| --- | --- | --- | --- |
+| A deferring subscription raises the source's subscriber count, so a Query Collection refetches | Defect, open | With the reviewer's precondition (the last direct subscriber left first), a live query with `startSync: true` and no subscriber raised the count from 0 to 1 and the Query Collection fetched again. The first review's probe had no prior subscriber | Needs a decision on what `subscriberCount` and `subscribers:change` report |
+| A resume that throws strands the other sources and makes `preload()` throw | Defect | Pinned block: `preload()` threw synchronously instead of returning a rejected promise | Listeners all run before the first error is rethrown; the preload entry points reject. Each half fails the block alone |
+| A failed resume clears the subscription's deferring flag | Defect by source inspection | Observable only when the failing source is itself a live query that is later cleaned up; no runtime witness | The source starts before the flag clears |
+| A truncate with retained stale rows stalls publication | Refuted at the precondition | Retained stale rows come only from source cleanup, which puts the dependent live query in terminal error first | No change |
+| A cleaned-up Suspense collection gets no in-render preload | Pre-existing defect | The rerender showed no rows on this PR and on `main` | The in-render preload covers `cleaned-up`; the new React witness fails without it |
+| The first-value helper accepts any not-ready value | Weak assertion | Source inspection | The not-ready value is now exact: `loading` when the hook started the collection, `idle` for a supplied window it adjusts first |
+| `hasSubscriberOrPreload()` falls back to `true` | Refuted: reachable | A non-null assertion failed 8 scheduler tests that drive the builder without its Collection | Fallback kept, with a comment naming where it is reached |
+| Pooled `preload()` leaves the partition deferring | Refuted at the precondition | The partition unsubscribes when its source's cleanup starts, so no survivor is miscounted | No change |
+| The change manager special-cases live-query Collections | Design | Source inspection | No change; a config-level capability would add surface for one caller |
+| A test comment is out of order | Maintainability | Source inspection | Fixed |

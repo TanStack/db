@@ -956,7 +956,11 @@ class LiveQueryObserverImpl<
       if (query?.status === `pending` || query?.status === `success`) {
         // The client stream answers this preload, but it is still a request
         // for this Collection's data, so its deferred acquisition may resume.
-        this.collection?._markPreload()
+        try {
+          this.collection?._markPreload()
+        } catch (error) {
+          return Promise.reject(error)
+        }
         return query.status === `pending` ? query.promise : Promise.resolve()
       }
     }

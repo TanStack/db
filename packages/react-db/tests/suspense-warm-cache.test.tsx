@@ -9,7 +9,7 @@
  * restart path, one microtask later, and suspend once.
  */
 import { expect, it } from 'vitest'
-import { render } from '@testing-library/react'
+import { act, render } from '@testing-library/react'
 import { BTreeIndex, createCollection } from '@tanstack/db'
 import { Suspense } from 'react'
 import { useLiveSuspenseQuery } from '../src/useLiveSuspenseQuery'
@@ -65,3 +65,58 @@ for (const syncMode of [`eager`, `on-demand`] as const) {
     })
   }
 }
+
+it(`renders warm rows again after the held Suspense collection is cleaned up`, async () => {
+  // The rerender keeps the cleaned-up collection. It asks for its data again,
+  // so the in-render preload restarts it and the warm source serves it.
+  const source = createCollection<Row>({
+    id: `warm-after-cleanup`,
+    getKey: (row) => row.id,
+    syncMode: `on-demand`,
+    startSync: true,
+    autoIndex: `eager`,
+    defaultIndexType: BTreeIndex,
+    sync: {
+      sync: ({ begin, write, commit, markReady }) => {
+        begin()
+        for (const row of ROWS) write({ type: `insert`, value: row })
+        commit()
+        markReady()
+        return { loadSubset: () => true }
+      },
+    },
+  })
+  const renders: Array<string> = []
+  let held: { cleanup: () => Promise<void> } | undefined
+  function View({ pass }: { pass: number }) {
+    const result = useLiveSuspenseQuery((q) =>
+      q.from({ row: source }).orderBy(({ row }) => row.rank),
+    )
+    held = result.collection
+    renders.push(`${pass}:${result.data.map((row) => row.id).join(``)}`)
+    return null
+  }
+  function Fallback() {
+    renders.push(`fallback`)
+    return null
+  }
+  const view = render(
+    <Suspense fallback={<Fallback />}>
+      <View pass={1} />
+    </Suspense>,
+  )
+  await act(async () => {})
+  await act(async () => {
+    await held!.cleanup()
+  })
+  renders.length = 0
+  await act(async () => {
+    view.rerender(
+      <Suspense fallback={<Fallback />}>
+        <View pass={2} />
+      </Suspense>,
+    )
+  })
+  expect(renders[0]).toBe(`2:abc`)
+  expect(renders).not.toContain(`fallback`)
+})

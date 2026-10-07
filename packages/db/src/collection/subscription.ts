@@ -296,8 +296,10 @@ export class CollectionSubscription
    */
   public resumeDeferredAcquisition(): void {
     if (!this.defersAcquisition || this.unsubscribed) return
-    this.defersAcquisition = false
+    // Start the source first: if its start throws, this subscription still
+    // defers rather than claiming acquisition it never began.
     this.options.onResumeAcquisition?.()
+    this.defersAcquisition = false
     if (this.collection.status !== `idle`) {
       this.restartDetachedDemands(this.collection._sync.getSyncRunGeneration())
     }

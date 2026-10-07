@@ -1006,7 +1006,12 @@ function useLiveQueryImpl(
   // source that already holds the rows makes it ready before the snapshot is
   // read instead of suspending once. useLiveSuspenseQuery surfaces failures.
   // A DbClient defers source starts past render and owns its streamed query.
-  if (forSuspense && !dbClient && instance.collection?.status === `idle`) {
+  if (
+    forSuspense &&
+    !dbClient &&
+    (instance.collection?.status === `idle` ||
+      instance.collection?.status === `cleaned-up`)
+  ) {
     observer.preloadForInitialRender().catch(() => {})
   }
 

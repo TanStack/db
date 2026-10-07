@@ -45,7 +45,7 @@
  * `DbClient` stream preloads, a subscriber that outlives cleanup, and reads
  * that wait for readiness.
  */
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import {
   BTreeIndex,
   DbClient,
@@ -720,4 +720,57 @@ describe(`reads that wait for readiness`, () => {
       }
     })
   }
+})
+
+/**
+ * ## A source whose start throws on resumption
+ *
+ * The first subscriber or preload resumes every deferred source subscription.
+ * One source's start can throw synchronously. That failure is reported, as a
+ * rejected preload, but it does not keep the other sources deferred: each is
+ * resumed before the first error surfaces. `preload()` keeps its promise
+ * contract and never throws.
+ */
+describe(`a source whose start throws on resumption`, () => {
+  it(`rejects the preload and still resumes the other source`, async () => {
+    const failing = createCollection<Row>({
+      id: `deferred-acquisition-throwing-${sequence++}`,
+      getKey: (row) => row.id,
+      syncMode: `on-demand`,
+      autoIndex: `eager`,
+      defaultIndexType: BTreeIndex,
+      gcTime: 0,
+      sync: {
+        sync: () => {
+          throw new Error(`source start failed`)
+        },
+      },
+    })
+    const { collection: healthy, counts } = makeSource(`on-demand-idle`)
+    const live = createLiveQueryCollection({
+      query: (q) =>
+        q
+          .from({ a: failing })
+          .join({ b: healthy }, ({ a, b }) => eq(a.id, b.id)),
+      gcTime: 0,
+    })
+    const consoleError = vi.spyOn(console, `error`).mockImplementation(() => {})
+    try {
+      live.startSyncImmediate()
+      let pending: Promise<void> | undefined
+      expect(() => {
+        pending = live.preload()
+      }, `preload returns a promise`).not.toThrow()
+      await expect(pending, `the preload rejects`).rejects.toThrow(
+        `source start failed`,
+      )
+      await settle()
+      expect(counts.starts, `the other source was resumed`).toBe(1)
+    } finally {
+      consoleError.mockRestore()
+      await live.cleanup()
+      await healthy.cleanup()
+      await failing.cleanup()
+    }
+  })
 })
