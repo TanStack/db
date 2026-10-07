@@ -1405,7 +1405,6 @@ describe(`warm ordered readiness oracle`, () => {
             .orderBy(({ row }) => row.tie, `asc`)
             .offset(1)
             .limit(2),
-        startSync: true,
       })
     const owner = query()
     try {
@@ -1413,6 +1412,11 @@ describe(`warm ordered readiness oracle`, () => {
       cold = false
       const sibling = query()
       try {
+        // Construction starts no provider work. The sibling's first preload
+        // starts its sync run, and both warm acquisitions return true, so it
+        // is ready before preload returns: the synchronous observation cut.
+        expect(warmRequests).toEqual([])
+        void sibling.preload()
         expect(sibling.status).toBe(`ready`)
         expect(sibling.toArray.map(({ id }) => id)).toEqual([2, 3])
         expect(warmRequests).toEqual([

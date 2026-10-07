@@ -43,7 +43,7 @@ describe(`Query while syncing`, () => {
   })
 
   describe.each([`off`, `eager`] as const)(`with autoIndex %s`, (autoIndex) => {
-    describe(`Basic queries with startSync: true`, () => {
+    describe(`Basic queries with a subscriber`, () => {
       test(`should update live query results while source collection is syncing`, async () => {
         let syncBegin: (() => void) | undefined
         let syncWrite: ((op: any) => void) | undefined
@@ -79,9 +79,13 @@ describe(`Query while syncing`, () => {
                 name: user.name,
               })),
         })
+        expect(syncBegin).toBeUndefined()
+        // A live-query Collection starts no provider work until it has a
+        // subscriber or a preload. This subscriber starts its sources.
+        liveQuery.subscribeChanges(() => {})
 
-        // The live query starts with startSync: true, which immediately subscribes to the source
-        // This triggers the source collection to start syncing too (even though it has startSync: false)
+        // startSync: true alone starts only the live query's own sync run,
+        // which reads local memory; the subscriber above started the source.
         // Wait a moment for the subscription to set up
         await vi.advanceTimersByTimeAsync(10)
 
@@ -167,6 +171,9 @@ describe(`Query while syncing`, () => {
                 age: user.age,
               })),
         })
+        // A live-query Collection starts no provider work until it has a
+        // subscriber or a preload. This subscriber starts its sources.
+        liveQuery.subscribeChanges(() => {})
 
         // The live query will trigger the source collection to start syncing
         await vi.advanceTimersByTimeAsync(10)
@@ -236,6 +243,9 @@ describe(`Query while syncing`, () => {
               // Only select id and name, not age or active
             })),
         })
+        // A live-query Collection starts no provider work until it has a
+        // subscriber or a preload. This subscriber starts its sources.
+        liveQuery.subscribeChanges(() => {})
 
         // The live query will trigger the source collection to start syncing
         await vi.advanceTimersByTimeAsync(10)
@@ -317,6 +327,9 @@ describe(`Query while syncing`, () => {
                 department_name: dept.name,
               })),
         })
+        // A live-query Collection starts no provider work until it has a
+        // subscriber or a preload. This subscriber starts its sources.
+        liveQuery.subscribeChanges(() => {})
 
         // The live query will trigger both source collections to start syncing
         await vi.advanceTimersByTimeAsync(10)
@@ -439,6 +452,9 @@ describe(`Query while syncing`, () => {
                 department_name: dept.name,
               })),
         })
+        // A live-query Collection starts no provider work until it has a
+        // subscriber or a preload. This subscriber starts its sources.
+        liveQuery.subscribeChanges(() => {})
 
         // The live query will trigger both source collections to start syncing
         await vi.advanceTimersByTimeAsync(10)
@@ -575,6 +591,9 @@ describe(`Query while syncing`, () => {
                 name: c1.name,
               })),
         })
+        // A live-query Collection starts no provider work until it has a
+        // subscriber or a preload. This subscriber starts its sources.
+        liveQuery.subscribeChanges(() => {})
 
         // The live query will trigger all source collections to start syncing
         await vi.advanceTimersByTimeAsync(10)
@@ -644,6 +663,9 @@ describe(`Query while syncing`, () => {
               name: user.name,
             })),
         })
+        // A live-query Collection starts no provider work until it has a
+        // subscriber or a preload. This subscriber starts its sources.
+        liveQuery.subscribeChanges(() => {})
 
         // The live query will trigger the source collection to start syncing
         await vi.advanceTimersByTimeAsync(10)

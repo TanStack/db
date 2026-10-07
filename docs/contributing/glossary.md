@@ -96,6 +96,7 @@ earlier node alone.
 | acquisition lease | The release obligation created when an adapter accepts a physical acquisition. | The acquisition attempt itself. |
 | window lease | One window-controller caller's contribution to the requested window. | Acquisition lease. |
 | observer lease | One Query DB owner's claim that retains a query observer or its rows. | Subscription or acquisition lease. |
+| deferred acquisition | The state of a live-query Collection's subscription to a source Collection before the live-query Collection has a subscriber or a preload in its current sync run. Its demand is active and reads rows the source already holds, but it starts no idle source sync run and no acquisition attempt. | Paused sync, render deferral, or demand retirement. |
 | demand retirement | Removing one logical owner's claim on demand. | Acquisition release or row deletion. |
 | acquisition release | Fulfilling one acquisition lease by aborting its signal and giving the owning adapter one unload opportunity. | Demand retirement, guaranteed transport cancellation, or row deletion. |
 | adapter unload | The adapter callback invoked during acquisition release. | Demand retirement or proof that transport stopped. |

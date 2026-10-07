@@ -384,11 +384,11 @@ export function useLiveInfiniteQuery<TContext extends Context>(
     } else {
       assertLiveQueryWindowManyResult(collection)
     }
-    // Like useLiveQuery, start sync during render once the input is valid, so
-    // a synchronously loaded source is published on the first commit instead
-    // of an empty idle commit. GC reclaims a render that never commits. A
-    // supplied window that the controller must still adjust waits for the
-    // subscription.
+    // Like useLiveQuery, start sync during render once the input is valid. A
+    // render reads only rows the sources already hold, such as a preloaded
+    // collection's, and sends no request until the subscription commits. GC
+    // reclaims a render that never commits. A supplied window that the
+    // controller must still adjust waits for the subscription.
     if (suppliedCollection) {
       startInRender = liveQueryWindowMatches(collection, requiredLimit)
     }
