@@ -14,6 +14,12 @@ The payoff is broader bug detection and a stable check during refactoring. The c
 
 Start with [one small oracle](#build-one-small-oracle). Follow the later sections when your contract needs [richer state](#keep-only-state-that-can-matter), [controlled timing](#generate-histories-that-reach-the-problem), or [more observations](#observe-what-the-contract-promises). The [review card](#a-review-card) is a short way to apply the guide to an existing test. Historical cases and research are collected in the [companion notes](oracle-test-notes.md). Use the [project glossary](glossary.md) for terms shared with production code.
 
+For help discovering or challenging the law itself, use the repository's
+[oracle-authoring](../../.agents/skills/oracle-authoring/SKILL.md) or
+[oracle-review](../../.agents/skills/oracle-review/SKILL.md) skill and its
+[design instruments](instruments/index.md). These aids support inquiry; the
+numbered requirements below continue to define guide conformance.
+
 ## How to interpret this guide
 
 The numbered requirements in this section are the complete checklist for an
@@ -135,8 +141,9 @@ presence of a preferred heading, class, comment template, or helper.
 - **Not required:** Modifying production, checking in a mutant, or running a
   production mutation campaign for every oracle.
 - **Conditional obligation:** When a mutant is run, the evidence MUST classify
-  its outcome as assertion failure, timeout, setup failure, an unreached path,
-  survival, or equivalence within the tested domain.
+  its outcome as assertion failure, timeout, setup failure, runtime failure
+  after setup outside the intended comparison, an unreached path, survival, or
+  equivalence within the tested domain.
 
 ### ORC-007: Fixed and random campaigns with direct replay
 
@@ -869,6 +876,7 @@ Mutation testing changes production code deliberately to challenge tests. Record
 - A value assertion rejected the intended wrong answer.
 - A timeout exposed a missing progress obligation.
 - Setup failed before reaching the comparison.
+- Execution failed outside the intended comparison after setup, such as a crash.
 - The changed code never ran.
 - The mutant survived, or the change was equivalent within the tested domain.
 
