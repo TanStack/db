@@ -5,9 +5,12 @@ Evidence by revision, on `fix-failed-transaction-retention`, based on
 
 - First campaign: oracle commit `fb9a682e9`, fix `89de5ea0a`. It removed a
   transaction in both `isPersisted` handlers.
-- Review follow-up: the commit that adds this revision of the record. It moves
-  removal into the recompute pass, removes `scheduleTransactionCleanup`, and
-  makes `touchCollection()` recompute every Collection before it rethrows. The
+- Review follow-up: `f777321fd` (tests) and `64f1c1045` (fix), plus
+  `8274b81f3`, which keeps an owned transaction's unobserved rejection
+  handled. They move removal into the recompute pass, remove
+  `scheduleTransactionCleanup`, and make `touchCollection()` recompute every
+  Collection before it rethrows. The mutant results and CI counts below ran on
+  `8274b81f3`. The
   RED results for findings 1, 2 and 5 below were run on `89de5ea0a`, and
   finding 5 also on `2ab7f3e55`.
 
@@ -53,6 +56,12 @@ are gone.
 
 The sweep deletes by map entry, so a same-id successor that replaced its
 predecessor's entry stays tracked.
+
+The removed `isPersisted` handlers also kept a rejected `isPersisted` promise
+from reaching `unhandledrejection`, as `main` does. A Collection now marks the
+promise handled once, when it first owns the transaction. Without that, the db
+and offline-transactions suites reported 48 and 154 unhandled rejections while
+every test passed.
 
 `touchCollection()` now recomputes every Collection of a settled transaction
 before it rethrows the first error. Before, a throwing subscriber in one
