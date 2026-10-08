@@ -23,9 +23,11 @@ import type { BucketRow } from '../../src/query/live/materialized-pipeline.js'
  *    commit throws during a flush, or the root commit fails after `prepare()`,
  *    every facade returns to its rows, order and key mapping from before the
  *    flush, the facades the flush created leave the adapter, and no facade
- *    publishes an event or a layout revision. Pending graph output that a
- *    thrown flush did not consume is still pending, so the next successful
- *    flush applies it.
+ *    publishes an event or a layout revision. Every change pending at a failed
+ *    flush, whether the facade write threw or the root commit failed, stays
+ *    pending, so the next successful flush publishes it exactly once. The
+ *    live-query builder keeps its pending root changes after a failed root
+ *    commit; the facade rows those root rows refer to must survive with them.
  * 2. **Bounded rollback work.** A flush reads the stored rows only of the
  *    facades it writes, through any read path of the stored map. The rows it
  *    reads do not depend on the number or the size of facades that the flush
@@ -45,10 +47,10 @@ import type { BucketRow } from '../../src/query/live/materialized-pipeline.js'
  * order by an order string. It also keeps the operations sent to the graph
  * since the last successful flush. A successful flush applies those
  * operations. A thrown flush leaves the published rows unchanged and keeps the
- * operations pending. A rollback after `prepare()` also leaves the published
- * rows unchanged, but the adapter consumed the operations before `prepare()`,
- * so the model drops them and the history continues from the restored rows.
- * The next flush must then compute order changes against the restored state.
+ * operations pending. A rollback after `prepare()` models a failed root commit:
+ * it also leaves the published rows unchanged and keeps the operations
+ * pending. The next flush must then compute order changes against the
+ * restored state and publish the kept operations once.
  *
  * The history grammar has one edge with ordered rows and buckets `b0`..`b3`.
  * Each step sends a batch of operations to the graph, then flushes. The
@@ -395,22 +397,6 @@ class Driver {
     }
   }
 
-  /** Forget operations that a rolled-back flush consumed. */
-  resetSent(model: Model): void {
-    this.sent.clear()
-    for (const [bucket, rows] of model) {
-      this.sent.set(
-        bucket,
-        new Map(
-          [...rows].map(([id, row]) => [
-            id,
-            { publicKey: id, value: row.value, order: row.order },
-          ]),
-        ),
-      )
-    }
-  }
-
   eventCounts(): Map<object, number> {
     return new Map(this.events)
   }
@@ -605,13 +591,6 @@ async function runHistory(
             `${label}: layout revision after ${outcome}`,
           ).toBe(layoutsBefore.get(facade))
         }
-        if (outcome === `rollback`) {
-          // The adapter consumed the pending rows before `prepare()`, so the
-          // rolled-back operations are gone. The next flush must compute order
-          // changes against the restored facades, not the rolled-back ones.
-          pending = []
-          driver.resetSent(published)
-        }
       }
     },
     () => driver.cleanup(),
@@ -737,6 +716,32 @@ describe(`bucket facade rollback`, () => {
       },
       {
         choices: [{ kind: 0, bucket: 0, id: 0, v: 1, rank: 5 }],
+        outcome: `publish`,
+        throwPick: 0,
+      },
+    ])
+  })
+
+  // Pinned: a failed root commit, then a retry that carries only changes to
+  // other buckets, as a parent-only write would. The retry must still publish
+  // the facade change that was pending when the root commit failed.
+  it(`publishes a pending facade change after a failed root commit`, async () => {
+    await runHistory([
+      {
+        choices: [
+          { kind: 0, bucket: 0, id: 0, v: 0, rank: 0 },
+          { kind: 0, bucket: 0, id: 0, v: 1, rank: 1 },
+        ],
+        outcome: `publish`,
+        throwPick: 0,
+      },
+      {
+        choices: [{ kind: 0, bucket: 0, id: 0, v: 2, rank: 1 }],
+        outcome: `rollback`,
+        throwPick: 0,
+      },
+      {
+        choices: [{ kind: 0, bucket: 1, id: 0, v: 0, rank: 0 }],
         outcome: `publish`,
         throwPick: 0,
       },
