@@ -612,15 +612,8 @@ export class CollectionStateManager<
         pendingSyncKeys.add(operation.key as TKey)
       }
     }
-    // A settled transaction is needed only until this pass records its held
-    // rows, so it leaves `transactions` after the pass, by its own entry.
-    // Every way into the map, including offline restoration, settles through
-    // a recompute.
-    const settled: Array<string> = []
-    for (const [id, transaction] of this.transactions) {
-      if (transaction.state === `failed`) settled.push(id)
+    for (const transaction of this.transactions.values()) {
       if (transaction.state !== `completed`) continue
-      settled.push(id)
       for (const mutation of transaction.mutations) {
         if (
           !this.isThisCollection(mutation.collection) ||
@@ -639,7 +632,6 @@ export class CollectionStateManager<
         })
       }
     }
-    for (const id of settled) this.transactions.delete(id)
 
     // Clear current optimistic state
     this.optimisticUpserts.clear()
@@ -680,11 +672,18 @@ export class CollectionStateManager<
   /**
    * Overlay still-active optimistic mutations on the current layers and
    * record their keys as pending local changes for $origin tracking.
+   *
+   * A settled transaction leaves `transactions` here, by its own entry. A
+   * recompute calls this after it records held rows, and a sync commit calls
+   * it after it skips those recomputes.
    */
   private overlayActiveTransactions(): void {
-    for (const transaction of this.transactions.values()) {
-      if (transaction.state === `completed` || transaction.state === `failed`)
+    const settled: Array<string> = []
+    for (const [id, transaction] of this.transactions) {
+      if (transaction.state === `completed` || transaction.state === `failed`) {
+        settled.push(id)
         continue
+      }
       for (const mutation of transaction.mutations) {
         if (!this.isThisCollection(mutation.collection)) continue
         this.pendingLocalChanges.add(mutation.key)
@@ -698,6 +697,7 @@ export class CollectionStateManager<
         }
       }
     }
+    for (const id of settled) this.transactions.delete(id)
   }
 
   /**

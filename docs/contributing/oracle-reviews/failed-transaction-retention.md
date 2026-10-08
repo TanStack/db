@@ -13,6 +13,10 @@ Evidence by revision, on `fix-failed-transaction-retention`, based on
   `8274b81f3`. The
   RED results for findings 1, 2 and 5 below were run on `89de5ea0a`, and
   finding 5 also on `2ab7f3e55`.
+- Medium-review follow-up (PR head `609e97162`, findings M1–M10 below): the
+  owning-Collection set, removal in the overlay pass, settlement that survives
+  a throwing conflicting rollback, and the transaction-ownership oracle. RED
+  runs used `609e97162` and `origin/main` `07ffcfe47`.
 
 ## Contract and evidence
 
@@ -125,22 +129,66 @@ All mutants ran on the follow-up revision.
 | ORC-001 | Applicable. The law and authority are above. The claim covers a Collection's tracked transactions; it does not bound transaction-scope state in `transactions.ts`. |
 | ORC-002 | Applicable. The expected count comes from the model's transaction states, not from production. |
 | ORC-003 | Applicable. The opening prose of the history oracle states the law beside the model, and the driver states the observation. |
-| ORC-004 | Applicable, with gaps. The grammar generates failed settles, cascading rollbacks, held sync transactions and truncates. It uses one Collection and one mutation per transaction, so it never generates a transaction across two Collections, a same-id successor, offline restoration, or two settlements before one recompute. Focused witnesses pin those histories. |
+| ORC-004 | Applicable, with gaps. The history grammar generates failed settles, cascading rollbacks, held sync transactions and truncates over one Collection. The ownership grammar adds two Collections, merged-away pairs, truncate-listener rollbacks and throwing subscribers. Same-id instances, offline restoration and two settlements before one recompute have focused witnesses. |
 | ORC-005 | Applicable. The driver reads `_state.transactions`, the semi-public observation used by `collection.test.ts` and the local-only direct-write oracle. The work witness checks the public cost law without that field. |
 | ORC-006 | Applicable. See the mutant table. |
-| ORC-007 | Applicable. The generated campaigns are unchanged and keep their fixed and random seeds. |
-| ORC-008 | Inapplicable. The model gains no state. |
+| ORC-007 | Applicable. The history campaigns keep their fixed and random seeds. The ownership oracle runs a fixed seed (2080) and a random or replayed seed through `oraclePropertyOptions`, with the same property and budget. |
+| ORC-008 | Applicable. The ownership model keeps each transaction's owning Collections separately from its writes, because a merged-away pair leaves an owner with no write; the pinned history distinguishes them. |
 | ORC-009 | Applicable. "Unsettled" maps to the glossary's persisting state; the model has no separate pending state. |
-| ORC-010 | Inapplicable. No cleanup step was added. |
+| ORC-010 | Applicable, with a gap. The ownership driver cleans up in `finally`, so a cleanup error after an assertion failure replaces it. No run showed a cleanup failure. |
 | ORC-011 | Applicable. The reviewer named a shared fault: an id-keyed removal. The same-id witness is the independent check. |
 | ORC-013 | Inapplicable. No threshold law. |
 | ORC-014 | Inapplicable. No controlled provider. |
 
+## Medium-review follow-up
+
+The review of `609e97162` found that removal reached only the Collections that
+the transaction's current mutations touch, while the removed `isPersisted`
+cleanup had reached every Collection that ever tracked it.
+
+| ID | Finding | RED | Fix |
+| --- | --- | --- | --- |
+| M1 | A conflicting transaction's rollback throws, so the primary never settles | `tx1Settled:false, bValue:1, bTracksTx1:true` on `609e97162` and `main` | `rollback()` runs every step and reports their errors together |
+| M2 | Mutations that merge away leave the Collection tracking the transaction | Tracked after commit on `609e97162`; released on `main` | The transaction records each Collection that tracked it; settlement, including an empty commit, recomputes all of them |
+| M3 | Two Collection instances with one id | The first instance keeps the transaction on `609e97162`; both keep it on `main` | `touchCollection()` reaches instances, not ids |
+| M4 | A rollback in a `truncate` listener during a sync commit | Tracked on `609e97162` and `main` | Removal moved into `overlayActiveTransactions`, which the sync commit calls after it skips recomputes |
+| M5 | Only the first settlement error survives | — | One error rethrows as is; several throw an `AggregateError`, like `mutate()` |
+| M6 | The history oracle compared a count | A wrong-identity removal could keep the count | It compares transaction ids |
+| M7 | The offline witness yielded a microtask before asserting | — | The yield is gone; the row and the entry leave in one recompute |
+| M8 | The work witness patched `Map` and `Set` globally and asserted equality | — | It counts walks of the Collection's own `transactions`, warms up first, and asserts a bound |
+| M9 | `as any` in the work witness | — | `Reflect.get` and `Reflect.set` |
+| M10 | Each removal splices `sortedKeys` | — | Kept. A recompute normally removes one entry. A local measurement deleted k entries from a `SortedMap` of n: at n = 1,000 and k = 1, splicing took 1.3 ms against 64 ms for a deferred rebuild over the same 2,000 runs; splicing stays cheaper until k nears n / 10. |
+
+The transaction-ownership oracle
+(`packages/db/tests/transaction-ownership-oracle.property.test.ts`, registered
+as `transaction-ownership.settlement-release`) owns the law across two
+Collections. It runs a fixed campaign (seed 2080) and a random or replayed
+campaign, 200 runs each, plus a pinned history. Its grammar covers writes, a
+pair that merges away, commits, successful and failed settlements, rollbacks,
+truncate-listener rollbacks, and a throwing subscriber during a settling step.
+After each synchronous settling step it compares the tracked ids in the same
+call stack, then compares tracked ids, rows and `isPersisted` settlement after
+promises flush. The model's first draft treated an update that keeps the
+visible value as a write; production creates no mutation for it, which the
+contract permits, so the model now skips it.
+
+| Mutant | Outcome |
+| --- | --- |
+| A persisting transaction counts as settled | Assertion failure, 15 tests |
+| Only the current mutations' Collections recompute | Assertion failure: all three ownership campaigns and the same-id witness |
+| `touchCollection()` deduplicates by Collection id | Assertion failure: the same-id witness only |
+| No removal during a sync commit | Assertion failure: all three ownership campaigns |
+| A conflicting rollback's throw skips the primary's settlement | Assertion failure: the pinned ownership history only |
+| Removal one microtask late | Assertion failure: the same-call checks and two focused witnesses |
+| Never remove (`main`) | Assertion failure, 28 tests |
+
 ## Unresolved
 
-- The generated grammar does not reach multi-Collection transactions, same-id
-  successors, offline restoration, or two settlements before one recompute.
-  Owner: the optimistic-history oracle. Needed witness: a two-Collection model
-  dimension.
+- The generated ownership grammar reaches a conflicting rollback that throws
+  only rarely; the pinned history is its reliable witness.
+- Two Collection instances with one id are covered only by a focused witness.
+- The ownership oracle does not combine queued sync transactions that hold a
+  completed row with a second Collection. The optimistic-history oracle owns
+  held rows for one Collection.
 - The per-mutation pass is still O(unsettled transactions). A key-scoped
   recompute would remove that term, but it touches every settlement law.

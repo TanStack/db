@@ -106,10 +106,12 @@ export class TransactionScope {
     }
   }
 
+  /** Rolls back every conflicting candidate and returns their errors. */
   rollbackConflictingTransactions(
     transaction: Transaction<any>,
     mutationIds: Set<string>,
-  ): void {
+  ): Array<unknown> {
+    const errors: Array<unknown> = []
     for (const candidate of [...this.transactions]) {
       if (
         candidate !== transaction &&
@@ -118,9 +120,14 @@ export class TransactionScope {
           mutationIds.has(mutation.globalKey),
         )
       ) {
-        candidate.rollback({ isSecondaryRollback: true })
+        try {
+          candidate.rollback({ isSecondaryRollback: true })
+        } catch (error) {
+          errors.push(error)
+        }
       }
     }
+    return errors
   }
 
   clear(): void {
@@ -146,6 +153,15 @@ function getTransactionScope(transaction: object): TransactionScope {
     throw new Error(`Transaction is not associated with a TransactionScope.`)
   }
   return scope
+}
+
+/** Rethrows one settlement error as is, or several as an `AggregateError`. */
+function throwSettlementErrors(errors: Array<unknown>): void {
+  if (errors.length === 1) throw errors[0]
+  if (errors.length > 1)
+    throw new AggregateError(errors, `Transaction settlement failed`, {
+      cause: errors[0],
+    })
 }
 
 function getTransactionAmbientScope(transaction: object): TransactionScope {
@@ -345,6 +361,11 @@ class Transaction<T extends object = Record<string, unknown>> {
   public state: TransactionState
   public mutationFn: MutationFn<T>
   public mutations: Array<PendingMutation<T>>
+  /**
+   * Every Collection that has tracked this transaction. Settlement recomputes
+   * each of them, including one whose mutations merged away.
+   */
+  public readonly collections = new Set<PendingMutation<T>[`collection`]>()
   private captureMutations?: () => void
   /**
    * Deferred that settles when this transaction settles.
@@ -643,21 +664,31 @@ class Transaction<T extends object = Record<string, unknown>> {
 
     this.setState(`failed`)
 
+    // A failing subscriber cannot leave this transaction unsettled, so each
+    // step runs and their errors are reported together.
+    const errors: Array<unknown> = []
     // See if there's any other transactions w/ mutations on the same ids
     // and roll them back as well.
     if (!isSecondaryRollback) {
       const mutationIds = new Set(
         this.mutations.map((mutation) => mutation.globalKey),
       )
-      getTransactionScope(this).rollbackConflictingTransactions(
-        this,
-        mutationIds,
+      errors.push(
+        ...getTransactionScope(this).rollbackConflictingTransactions(
+          this,
+          mutationIds,
+        ),
       )
     }
 
     // Reject the promise
     this.isPersisted.reject(this.error?.error)
-    this.touchCollection()
+    try {
+      this.touchCollection()
+    } catch (error) {
+      errors.push(error)
+    }
+    throwSettlementErrors(errors)
 
     return this
   }
@@ -666,25 +697,23 @@ class Transaction<T extends object = Record<string, unknown>> {
   touchCollection(): void {
     // A failure in one Collection must not leave the others showing this
     // transaction's settled optimistic state, so every Collection recomputes
-    // before the first error is rethrown.
-    const hasCalled = new Set()
-    let failure: { error: unknown } | undefined
-    for (const mutation of this.mutations) {
-      if (!hasCalled.has(mutation.collection.id)) {
-        hasCalled.add(mutation.collection.id)
-        try {
-          mutation.collection._state.onTransactionStateChange()
+    // before the errors are rethrown.
+    const collections = new Set(this.collections)
+    for (const mutation of this.mutations) collections.add(mutation.collection)
+    const errors: Array<unknown> = []
+    for (const collection of collections) {
+      try {
+        collection._state.onTransactionStateChange()
 
-          // Only call commitPendingTransactions if there are pending sync transactions
-          if (mutation.collection._state.pendingSyncedTransactions.length > 0) {
-            mutation.collection._state.commitPendingTransactions()
-          }
-        } catch (error) {
-          failure ??= { error }
+        // Only call commitPendingTransactions if there are pending sync transactions
+        if (collection._state.pendingSyncedTransactions.length > 0) {
+          collection._state.commitPendingTransactions()
         }
+      } catch (error) {
+        errors.push(error)
       }
     }
-    if (failure) throw failure.error
+    throwSettlementErrors(errors)
   }
 
   /**
@@ -735,7 +764,12 @@ class Transaction<T extends object = Record<string, unknown>> {
 
     if (this.mutations.length === 0) {
       this.setState(`completed`)
-      this.isPersisted.resolve(this)
+      // A Collection whose mutations merged away still tracks this transaction.
+      try {
+        this.touchCollection()
+      } finally {
+        this.isPersisted.resolve(this)
+      }
 
       return this
     }

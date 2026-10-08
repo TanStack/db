@@ -237,6 +237,7 @@ export class CollectionMutationsManager<
     // the caller reads it from `isPersisted` or `when('settled')`.
     if (this.state.transactions.get(transaction.id) !== transaction) {
       this.state.transactions.set(transaction.id, transaction)
+      transaction.collections.add(this.collection)
       transaction.isPersisted.promise.catch(() => undefined)
     }
     this.state.recomputeOptimisticState(true)
