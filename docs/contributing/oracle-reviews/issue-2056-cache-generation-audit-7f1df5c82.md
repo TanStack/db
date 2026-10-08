@@ -106,14 +106,26 @@ use the claimed physical storage ID. An in-process receiving witness exercises
 claim, read, index operations, renew, rotate, read again, and release against
 real SQLite; both v1 and v2 requests are rejected before adapter work, and
 their responses are rejected before result parsing. The shared Electron
-contract and package suite pass (163 tests,
-no Vitest type errors), and the package build and changed-file lint pass.
+contract and package suite pass (163 tests, no Vitest type errors), and the
+package build and changed-file lint pass.
 The Browser fixtures now observe the claimed storage ID at the adapter or
 coordinator boundary. The full real-Chromium OPFS suite passes (29 tests),
 including the on-demand hydration and two-tab routes that failed before the
 fixture correction. The installed local Electron package lacks its executable,
 so actual separate main/renderer process receiving remains unproved; the
 in-process IPC path and real SQLite adapter are the present evidence.
+
+The next CI run reached the live Electric/OPFS hydration-straddle witness and
+found one more stale fixture observation. Its public row was present, but it
+read `durableRows=[]` from the old logical ID before the controlled hold began;
+the same ID also made its hold target and leader check unreachable. A focused
+local run reproduced that RED first checkpoint in 59.7 seconds. The fixture now
+observes the claimed storage ID and claim at coordinator registration, reads
+durability under that claim, and targets the same ID for hold and leadership.
+PostgreSQL remains the independent source of the expected row. The focused
+history is GREEN, and the full live Electric/PostgreSQL/Chromium OPFS suite
+passes all 15 tests, including handoff and reopen. This restores the host
+witness; it does not change production behavior.
 
 The coverage map keeps the specific in-scope cells open: claim expiry after
 public source publication but before SQLite accepts the write is fail-stop;

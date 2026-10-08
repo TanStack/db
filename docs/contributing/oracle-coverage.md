@@ -608,7 +608,9 @@ an OPFS subset hydration is held after its local read; a PostgreSQL update
 begins an Electric source transaction during that hold; and the row-bearing
 commit is released only after the hydration scope exits. It checks the old row
 before release and the exact new public and durable row afterward, then after
-follower takeover and reopen. A late-buffer mutant leaves the old row in both
+follower takeover and reopen. The fixture observes the on-demand run's claimed
+storage ID and claim at coordinator registration; PostgreSQL supplies the
+expected row independently. A late-buffer mutant leaves the old row in both
 observations. The [core persistence tests](https://github.com/TanStack/db/blob/main/packages/db-sqlite-persistence-core/tests/persisted-oracle.test.ts)
 own the adjacent during/straddling/after settlement, FIFO, abort, and failure
 histories. The live oracle does not prove eager-startup overlap, other mutation
