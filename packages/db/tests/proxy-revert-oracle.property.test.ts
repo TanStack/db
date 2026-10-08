@@ -464,16 +464,26 @@ const nestedRoundTripArb: fc.Arbitrary<History> = fc
     a: primArb,
     sym: fc.option(primArb, { nil: undefined }),
     g: specArb,
-    mode: fc.constantFrom(`delete` as const, `restore` as const),
+    mode: fc.constantFrom(
+      `delete` as const,
+      `restore` as const,
+      `replace` as const,
+    ),
     value: primArb,
     between: fc.array(opArb, { maxLength: 2 }),
   })
   .map(({ a, sym, g, mode, value, between }): History => {
     const f: Spec = sym === undefined ? { k: `obj`, a } : { k: `obj`, a, sym }
+    // `replace` assigns a new object without `a`; the nested write that
+    // restores `a` makes the field equal its original again.
+    const replacement: Spec =
+      sym === undefined ? { k: `obj` } : { k: `obj`, sym }
     const first: GeneratedOp =
       mode === `delete`
         ? { op: `nested`, field: `f`, key: `b`, value }
-        : { op: `nested`, field: `f`, key: `a`, value }
+        : mode === `replace`
+          ? { op: `set`, field: `f`, value: replacement }
+          : { op: `nested`, field: `f`, key: `a`, value }
     const last: GeneratedOp =
       mode === `delete`
         ? { op: `nestedDelete`, field: `f`, key: `b` }
@@ -950,6 +960,37 @@ describe(`draft revert oracle`, () => {
           { op: `nested`, field: `f`, key: `a`, value: 3 },
           { op: `nested`, field: `f`, key: `a`, value: 2 },
         ],
+      },
+    ],
+    [
+      `a replaced object restored to its original by a nested write is not a change`,
+      {
+        original: { f: { k: `obj`, a: 0 } },
+        ops: [
+          { op: `set`, field: `f`, value: { k: `obj` } },
+          { op: `nested`, field: `f`, key: `a`, value: 0 },
+        ],
+      },
+    ],
+    [
+      `a replaced object restored with its symbol key kept is not a change`,
+      {
+        original: {
+          f: { k: `obj`, a: 0, sym: 1 },
+          g: { k: `map`, entries: [] },
+        },
+        ops: [
+          { op: `nested`, field: `f`, key: `a`, value: 0 },
+          { op: `set`, field: `f`, value: { k: `obj`, sym: 1 } },
+          { op: `nested`, field: `f`, key: `a`, value: 0 },
+        ],
+      },
+    ],
+    [
+      `an array replaced by an empty Set is a change`,
+      {
+        original: { g: { k: `array`, items: [] } },
+        ops: [{ op: `set`, field: `g`, value: { k: `set`, values: [] } }],
       },
     ],
     [
