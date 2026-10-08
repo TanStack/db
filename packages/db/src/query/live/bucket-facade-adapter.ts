@@ -6,6 +6,7 @@ import {
   INCLUDES_ROUTING,
   transformPublicContainers,
 } from '../compiler/route-metadata.js'
+import { codedMessage, devBuild } from '../../error-message.js'
 import { BUCKET_FACADE_REF } from './materialized-pipeline.js'
 import type { Collection } from '../../collection/index.js'
 import type { SyncConfig } from '../../types.js'
@@ -351,7 +352,11 @@ export class BucketFacadeAdapter {
       getKey: (row) => {
         const key = keys.get(row) ?? row?.$key
         if (typeof key !== `string` && typeof key !== `number`) {
-          throw new Error(`Bucket facade row has no public key`)
+          throw new Error(
+            devBuild() && process.env.NODE_ENV !== `production`
+              ? `Bucket facade row has no public key`
+              : codedMessage(146),
+          )
         }
         return key
       },

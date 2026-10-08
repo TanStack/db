@@ -1,3 +1,5 @@
+import { devBuild } from '../error-message'
+
 /**
  * Index Dev Mode - Helps developers identify when indexes would improve performance
  *
@@ -64,7 +66,9 @@ export function getIndexDevModeConfig(): IndexDevModeConfig {
  * Check if dev mode is enabled
  */
 export function isDevModeEnabled(): boolean {
-  return devModeConfig.enabled && process.env.NODE_ENV !== `production`
+  return (
+    devModeConfig.enabled && devBuild() && process.env.NODE_ENV !== `production`
+  )
 }
 
 /**

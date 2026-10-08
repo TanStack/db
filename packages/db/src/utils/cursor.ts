@@ -10,6 +10,7 @@ import {
   or,
 } from '../query/builder/functions.js'
 import { Value } from '../query/ir.js'
+import { codedMessage, devBuild } from '../error-message.js'
 import type { BasicExpression, OrderBy, OrderByClause } from '../query/ir.js'
 
 function isNullish(
@@ -46,7 +47,11 @@ export function buildCursor(
 ): BasicExpression<boolean> | undefined {
   if (values.length === 0) return undefined
   if (orderBy.length === 0 || values.length !== 1) {
-    throw new Error(`Only leading-column cursors are supported`)
+    throw new Error(
+      devBuild() && process.env.NODE_ENV !== `production`
+        ? `Only leading-column cursors are supported`
+        : codedMessage(169),
+    )
   }
   return followsBoundary(orderBy[0]!, values[0])
 }
