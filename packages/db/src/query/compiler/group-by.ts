@@ -132,20 +132,34 @@ function createRepresentative<T>(
 
 /**
  * Members equal under query equality supply the value with the smallest exact
- * value: another number before -0, and every primitive before an object.
+ * value: another primitive before -0, and every primitive before an object.
  * Objects are ordered by an explicit type tag, so the order survives
- * minification. Members of one tag are equal in content; the instance
- * identity that follows keeps each instance a separate contribution.
+ * minification. Members of one tag are equal in content, so the smallest row
+ * key decides among them: the choice does not depend on arrival order, and
+ * the instance comes from a current member. Equal primitives share a key and
+ * consolidate.
+ *
+ * The key is compared as a serialized string. Its first two parts have a
+ * fixed format (a one-digit rank and a quoted tag), so the string order
+ * matches the order above; the last part only breaks ties.
  */
-function exactValueOrder(value: unknown): unknown {
-  if (Object.is(value, -0)) return 1
-  if (value === null || typeof value !== `object`) return 0
-  if (value instanceof Date) return [2, `Date`]
-  if (isTemporal(value)) return [2, (value as any)[Symbol.toStringTag]]
-  if (typeof Buffer !== `undefined` && value instanceof Buffer) {
-    return [2, `Buffer`]
+function exactValueKey(
+  value: unknown,
+  rowKey: string,
+  valueIdentity: ValueIdentity,
+): unknown {
+  if (Object.is(value, -0)) return [1, ``, ``]
+  if (value === null || typeof value !== `object`) {
+    return [0, ``, valueIdentity.exact(value)]
   }
-  return [2, value instanceof Uint8Array ? `Uint8Array` : `Object`]
+  return [2, exactObjectTag(value), rowKey]
+}
+
+function exactObjectTag(value: object): string {
+  if (value instanceof Date) return `Date`
+  if (isTemporal(value)) return (value as any)[Symbol.toStringTag]
+  if (typeof Buffer !== `undefined` && value instanceof Buffer) return `Buffer`
+  return value instanceof Uint8Array ? `Uint8Array` : `Object`
 }
 
 function getRepresentative<T>(
@@ -404,12 +418,12 @@ export function processGroupBy(
   for (let i = 0; i < compiledGroupByExpressions.length; i++) {
     const compiledExpr = compiledGroupByExpressions[i]!
     aggregates[fields.groupValues[i]!] = {
-      preMap: ([, row]: [string, NamespacedRow]) => {
+      preMap: ([rowKey, row]: [string, NamespacedRow]) => {
         const value = compiledExpr(row)
-        return createRepresentative(value, [
-          exactValueOrder(value),
-          valueIdentity.exact(value),
-        ])
+        return createRepresentative(
+          value,
+          exactValueKey(value, rowKey, valueIdentity),
+        )
       },
       reduce: getRepresentative,
       postMap: unwrapRepresentative,
@@ -417,14 +431,18 @@ export function processGroupBy(
   }
 
   // D2 consolidates contributions whose hashes match, and the hash treats -0
-  // as 0 and equal Dates as one value. A sum, avg, min, or max must still see
-  // each exactly different input, so contributions carry those inputs'
-  // exact identities. A count's input is only 0 or 1.
-  const exactInputs: Array<(row: NamespacedRow) => unknown> = []
+  // as 0 and equal Dates as one value. A min or max returns one of its
+  // inputs, so contributions carry the exact identity of the value it
+  // compares. A sum, avg, or count only adds its coerced numbers, so merging
+  // equal inputs cannot change its result. The identity is taken from the
+  // aggregate's own input, so a retraction that rebuilds its argument still
+  // cancels the insert.
+  const exactInputs: Array<(entry: [string, NamespacedRow]) => unknown> = []
   const addAggregate = (alias: string, aggExpr: Aggregate) => {
     aggregates[alias] = getAggregateFunction(aggExpr)
-    if (aggExpr.name.toLowerCase() !== `count`) {
-      exactInputs.push(compileExpression(aggExpr.args[0]!))
+    const name = aggExpr.name.toLowerCase()
+    if (name === `min` || name === `max`) {
+      exactInputs.push(minMaxInput(compileExpression(aggExpr.args[0]!)))
     }
   }
 
@@ -457,8 +475,8 @@ export function processGroupBy(
 
   if (exactInputs.length > 0) {
     aggregates[fields.exactInputs] = {
-      preMap: ([, row]: [string, NamespacedRow]) =>
-        exactInputs.map((input) => valueIdentity.exact(input(row))),
+      preMap: (entry: [string, NamespacedRow]) =>
+        exactInputs.map((input) => valueIdentity.exact(input(entry))),
       reduce: () => undefined,
     }
   }
@@ -641,6 +659,25 @@ function expressionsEqual(expr1: any, expr2: any): boolean {
   }
 }
 
+/** The value a min or max compares: strings, numbers, Dates, and bigints keep
+ * their type, and anything else becomes a number. */
+function minMaxInput(
+  compiledExpr: (row: NamespacedRow) => unknown,
+): (entry: [string, NamespacedRow]) => string | number | bigint | Date {
+  return ([, namespacedRow]) => {
+    const value = compiledExpr(namespacedRow)
+    if (
+      typeof value === `number` ||
+      typeof value === `string` ||
+      typeof value === `bigint` ||
+      value instanceof Date
+    ) {
+      return value
+    }
+    return value != null ? Number(value) : 0
+  }
+}
+
 /**
  * Helper function to get an aggregate function based on the Agg expression
  */
@@ -658,23 +695,7 @@ function getAggregateFunction(aggExpr: Aggregate) {
     return value != null ? Number(value) : 0
   }
 
-  // Create a value extractor function for min/max that preserves comparable types
-  const valueExtractorForMinMax = ([, namespacedRow]: [
-    string,
-    NamespacedRow,
-  ]) => {
-    const value = compiledExpr(namespacedRow)
-    // Preserve strings, numbers, Dates, and bigints for comparison
-    if (
-      typeof value === `number` ||
-      typeof value === `string` ||
-      typeof value === `bigint` ||
-      value instanceof Date
-    ) {
-      return value
-    }
-    return value != null ? Number(value) : 0
-  }
+  const valueExtractorForMinMax = minMaxInput(compiledExpr)
 
   // Create a raw value extractor function for the expression to aggregate
   const rawValueExtractor = ([, namespacedRow]: [string, NamespacedRow]) => {
