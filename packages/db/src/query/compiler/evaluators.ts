@@ -11,6 +11,7 @@ import {
   normalizeValue,
 } from '../../utils/comparison.js'
 import { getPropRefPropertyPath, getPropRefSourceAlias } from '../ir.js'
+import { codedMessage, devBuild } from '../../error-message.js'
 import {
   PARENT_PROJECTION_NOT_FOUND,
   getParentContextProjectedValue,
@@ -567,7 +568,11 @@ function compileFunction(func: Func, isSingleRow: boolean): (data: any) => any {
       const pairCount = Math.floor(compiledArgs.length / 2)
 
       if (compiledArgs.length < 2) {
-        throw new Error(`caseWhen() requires at least two arguments`)
+        throw new Error(
+          devBuild() && process.env.NODE_ENV !== `production`
+            ? `caseWhen() requires at least two arguments`
+            : codedMessage(127),
+        )
       }
 
       return (data) => {

@@ -1,4 +1,5 @@
 import { isPlainObject } from '../utils/type-guards.js'
+import { UnhashableQueryIRError } from '../errors.js'
 import { normalizeValue } from '../utils/comparison.js'
 import { isRefProxy, toExpression } from './builder/ref-proxy.js'
 import { getQueryIR } from './builder/query-ir.js'
@@ -54,15 +55,7 @@ export type DemandKey = string & {
   readonly [demandKeyBrand]: true
 }
 
-export class UnhashableQueryIRError extends Error {
-  constructor(
-    public readonly path: string,
-    public readonly reason: string,
-  ) {
-    super(`Query IR is not stably hashable at ${path}: ${reason}`)
-    this.name = `UnhashableQueryIRError`
-  }
-}
+export { UnhashableQueryIRError }
 
 export function getStableQueryIRHash(query: QueryIR): string {
   return getQueryIdentity(query)

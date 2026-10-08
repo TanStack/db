@@ -1,4 +1,5 @@
 import { PropRef, Value, isBasicOrAggregateExpression } from '../ir.js'
+import { codedMessage, devBuild } from '../../error-message.js'
 import { REF_PROXY_BRAND, readRefProxyBrand } from './ref-proxy-identity.js'
 import { getWrapperExpressionName } from './wrapper-identity.js'
 import type { BasicExpression } from '../ir.js'
@@ -397,8 +398,10 @@ export function toExpression(value: any): BasicExpression<any> {
   const name = getWrapperExpressionName(value)
   if (name) {
     throw new Error(
-      `${name} cannot be used inside expressions (e.g., coalesce(), eq(), not()). ` +
-        `Use ${name} directly as a select field value instead.`,
+      devBuild() && process.env.NODE_ENV !== `production`
+        ? `${name} cannot be used inside expressions (e.g., coalesce(), eq(), not()). ` +
+            `Use ${name} directly as a select field value instead.`
+        : codedMessage(126, { name }),
     )
   }
   // Only constructed expressions are IR; user values may have the same fields.
