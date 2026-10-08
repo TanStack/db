@@ -364,14 +364,12 @@ describe(`retraction of a rebuilt aggregate argument`, () => {
     const grouped = createLiveQueryCollection((q) =>
       q
         .from({
-          s: q
-            .from({ row: source })
-            .select(({ row }) => ({
-              id: row.id,
-              g: row.g,
-              x: row.x,
-              box: { x: row.x },
-            })),
+          s: q.from({ row: source }).select(({ row }) => ({
+            id: row.id,
+            g: row.g,
+            x: row.x,
+            box: { x: row.x },
+          })),
         })
         .groupBy(({ s }) => s.g)
         .select(({ s }) => ({
