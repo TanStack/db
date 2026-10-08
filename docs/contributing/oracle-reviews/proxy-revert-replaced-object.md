@@ -70,9 +70,70 @@ restores `a` through a nested write.
 | ORC-006 | Applicable. The mutant table above classifies each mutant. |
 | ORC-007 | Applicable. The revert oracle runs a fixed seed and a random campaign with direct replay through `TANSTACK_DB_PROXY_REVERT_SEED` and `_PATH`. |
 | ORC-008 | Inapplicable. The model is a spec state with no new state. |
-| ORC-009 | Applicable. "Native mutator" means a method call that the draft forwards to the value (`createModifyingMethodHandler`, Map and Set `set`, `add`, `delete`, and a read-only object). |
+| ORC-009 | Applicable. "Native mutator" means a method call that the draft forwards to the value (`createModifyingMethodHandler`, Map and Set `set`, `add`, `delete`). A read under a frozen key is not one: it records the key as assigned, so the value check decides. |
 | ORC-010 | Applicable. The drafts hold no resources, and failures report the history and the observation. |
 | ORC-011 | Applicable. The native-operation owner is a second formulation for the native-mutator exception, and it caught the first fix. |
 | ORC-012 | This record. |
 | ORC-013 | Inapplicable. No threshold law. |
 | ORC-014 | Inapplicable. No controlled provider. |
+
+## Follow-up review: native writes mixed with assignments
+
+A review of the fix found two cases where the native-mutator record outlived
+the value it described. Both also fail on `main`.
+
+1. A native write that an assignment replaces could leave its mark on an
+   ancestor. After `draft.f.arr.pop()`, `draft.f.g = {}`, `draft.f.arr = [0]`,
+   and `draft.f.g.a = 0` on `{ f: { arr: [0], g: { a: 0 } } }`, the root
+   still held a native mark for `f` and reported it. The assignment cleared
+   the mark on `f`, but not the root's mark that stood for it.
+2. A mutator called through a handle that the callback had replaced marked
+   the parent's edge native, although the edge no longer held that array.
+
+The fix keeps the design. A native mark propagates only along edges that
+still hold the child, and clearing the last mark under an edge clears the
+ancestor marks above it. A read under a frozen key now records the key as
+assigned without a native mark, so a read that writes nothing reports no
+change, and a write through the raw copy is still found by the value check.
+
+Why the oracles missed these: the revert grammar wrote only by assignment
+and delete, so it never reached a key a native mutator had changed, and the
+native-methods oracle calls one method on a fresh row, never mixed with
+assignments, nested replacement, or retained handles. The law was right; its
+grammar did not reach the histories. The revert oracle's last block now
+generates array mutators mixed with assignments, a nested object, and a
+retained handle, and pins three histories one and two levels deep. A
+focused case nests the native site three levels deep. The frozen-key table
+gains an object read.
+
+| Check | `main` | `e3178d2a6` | Fixed code |
+| --- | --- | --- | --- |
+| Native histories, fixed seed `2026101` and random | Fail | Fail | Pass |
+| Pinned: native write restored by an assignment | Fails | Fails | Passes |
+| Pinned: mutator through a detached handle | Fails | Fails | Passes |
+| Pinned: restoring the last native write clears every ancestor | Fails | Fails | Passes |
+| Native write three levels deep restored | Fails | Fails | Passes |
+| Object read under a frozen key | Fails | Fails | Passes |
+
+| Mutant | Outcome |
+| --- | --- |
+| Clear only the nearest ancestor's mark | Assertion failure: the three-level case |
+| Never clear ancestor marks | Assertion failure: both native campaigns and the ancestor pinned case |
+| Propagate a native mark past a replaced edge | Assertion failure: both native campaigns and the detached-handle case |
+| Mark an edge that no longer holds the child | Assertion failure: the fixed native campaign, the detached-handle case, and a detachment test |
+| Mark a frozen-key read native | Assertion failure: the frozen object read |
+| Record nothing on a frozen-key read | Assertion failure: freeze or fix a key, then a nested write |
+| Keep the native mark when `checkParentStatus` removes a reverted edge | Survives, so the fix does not add that clearing. The path runs only after the child has reverted, which already cleared the child's marks, so a stale ancestor mark can only report an equal value under a native write the model still treats as live. The native Limits permit that report. |
+| Convert Sets to arrays on the alias comparison | Equivalent: an unassigned key holds a copy of its original, so both sides are Sets and draft equality already compares them in order. The fix removes the conversion. |
+
+Open, recorded rather than decided:
+
+- An assignment of a value draft-equal to the current one is a no-op, so a
+  handle taken before it stays attached and a later mutator through it changes
+  the row. Native JavaScript would detach the handle. The revert oracle's
+  native model follows the set trap and declares this in its Limits.
+- Draft equality treats `-0` as `0`, as `deepEquals` and the query `eq` model
+  do. The native mark is what reports reversing a typed `[-0, 0]`. Replacing
+  the mark with a sign-aware value check would also stop `push` then `pop`
+  from reporting an equal array, and would make `draft.x = -0` over `0` a
+  change. That is a law change, not part of this fix.

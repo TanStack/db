@@ -436,19 +436,20 @@ export function createChangeProxy<
 
     // Propagate the change up the parent chain
     if (state.parent) {
-      if (
+      // Only mark an edge that still points to this child. A retained handle
+      // must not reinstall itself after the callback replaces or deletes it,
+      // and its native mutation does not reach the value its parent holds.
+      const current =
         !state.parent.retainIdentity &&
         state.parent.tracker.copy_[state.parent.prop] === state.copy_
-      ) {
-        // Only mark an edge that still points to this child. A retained handle
-        // must not reinstall itself after the callback replaces or deletes it.
+      if (current) {
         state.parent.tracker.assigned_[state.parent.prop] = true
         if (native)
           state.parent.tracker.native_[String(state.parent.prop)] = true
       }
 
       // Mark parent as changed
-      markChanged(state.parent.tracker, native)
+      markChanged(state.parent.tracker, native && current)
     }
   }
 
@@ -515,6 +516,22 @@ export function createChangeProxy<
     }
   }
 
+  // An ancestor's native mark stands for a native write below it, so it goes
+  // once no native write remains under the edge.
+  function clearNative(state: ChangeTracker<object>, key: string) {
+    if (!state.native_[key]) return
+    delete state.native_[key]
+    const edge = state.parent
+    if (
+      edge &&
+      Object.keys(state.native_).length === 0 &&
+      !edge.retainIdentity &&
+      edge.tracker.copy_[edge.prop] === state.copy_
+    ) {
+      clearNative(edge.tracker, String(edge.prop))
+    }
+  }
+
   // Create a proxy for the target object.
   // Use the unfrozen copy_ as the proxy target to avoid Proxy invariant violations
   // when the original target is frozen (e.g., from Immer)
@@ -531,7 +548,7 @@ export function createChangeProxy<
   // it so they report the same change.
   function recordWrite(prop: string | symbol, reverted: boolean) {
     // The write replaces the value a native mutator may have changed.
-    delete changeTracker.native_[prop.toString()]
+    clearNative(changeTracker, prop.toString())
     if (reverted) {
       delete changeTracker.assigned_[prop.toString()]
       // Some properties may still be changed; checkParentStatus clears
@@ -560,8 +577,7 @@ export function createChangeProxy<
       if (desc?.configurable === false && !desc.writable) {
         if (isProxiableObject(value)) {
           changeTracker.assigned_[String(prop)] = true
-          changeTracker.native_[String(prop)] = true
-          markChanged(changeTracker, true)
+          markChanged(changeTracker, false)
         }
         return value
       }
@@ -820,17 +836,13 @@ export function createChangeProxy<
         // A replaced object can return to the original through nested
         // writes, so an assigned key still compares by value. A key added with
         // the value undefined differs from an absent key.
+        const assigned = changeTracker.assigned_[key] === true
         if (
-          changeTracker.assigned_[key] === true
-            ? changeTracker.native_[key] === true ||
-              !Object.hasOwn(changeTracker.originalObject, key) ||
-              !draftValuesEqual(value, original, pairedRoots)
-            : mayHaveChangedAliases &&
-              !draftValuesEqual(
-                value instanceof Set ? Array.from(value) : value,
-                original instanceof Set ? Array.from(original) : original,
-                pairedRoots,
-              )
+          (assigned &&
+            (changeTracker.native_[key] === true ||
+              !Object.hasOwn(changeTracker.originalObject, key))) ||
+          ((assigned || mayHaveChangedAliases) &&
+            !draftValuesEqual(value, original, pairedRoots))
         ) {
           defineDataProperty(result, key, changeTracker.copy_[key])
         }
