@@ -1296,13 +1296,8 @@ export class CollectionSubscription
         (!this.sentKeys.has(change.key) && !knownRows.has(change.key)),
     )
 
-    // Add keys to sentKeys BEFORE calling callback to prevent race condition.
-    // If a change event arrives while the callback is executing, it will see
-    // the keys already in sentKeys and filter out duplicates correctly.
-    for (const change of filteredSnapshot) {
-      this.sentKeys.add(change.key)
-    }
-
+    // The callback wrapper records these keys before user code runs, so a
+    // change that arrives during the callback is filtered against them.
     this.snapshotSent = true
     this.publishSnapshot(
       this.isBufferingForTruncate
@@ -1550,13 +1545,6 @@ export class CollectionSubscription
     // Track row count for offset-based pagination (before sending to callback)
     // Use the current count as the offset for this load
     const currentOffset = this.limitedSnapshotRowCount
-
-    // Add keys to sentKeys BEFORE calling callback to prevent race condition.
-    // If a change event arrives while the callback is executing, it will see
-    // the keys already in sentKeys and filter out duplicates correctly.
-    for (const change of changes) {
-      this.sentKeys.add(change.key)
-    }
 
     this.publishSnapshot(changes)
     // A subscriber callback can synchronously tear down this subscription.
