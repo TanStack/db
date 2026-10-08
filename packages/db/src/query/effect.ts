@@ -4,6 +4,7 @@ import { createDeferred } from '../deferred.js'
 import { runAllCallbacks } from '../utils/callbacks.js'
 import { normalizeError } from '../utils/error.js'
 import { deepEquals } from '../utils.js'
+import { codedMessage, devBuild } from '../error-message.js'
 import { compileQuery } from './compiler/index.js'
 import { normalizeExpressionPaths } from './compiler/expressions.js'
 import { getCollectionBuilder } from './live/collection-registry.js'
@@ -658,7 +659,9 @@ class EffectPipelineRunner<TRow extends object, TKey extends string | number> {
         if (this.disposed) return
         this.onSourceError(
           new Error(
-            `Source collection '${collectionId}' was cleaned up while effect depends on it`,
+            devBuild() && process.env.NODE_ENV !== `production`
+              ? `Source collection '${collectionId}' was cleaned up while effect depends on it`
+              : codedMessage(134, { collectionId }),
           ),
         )
       }
@@ -673,7 +676,9 @@ class EffectPipelineRunner<TRow extends object, TKey extends string | number> {
         if (status === `error`) {
           this.onSourceError(
             new Error(
-              `Source collection '${collectionId}' entered error state`,
+              devBuild() && process.env.NODE_ENV !== `production`
+                ? `Source collection '${collectionId}' entered error state`
+                : codedMessage(135, { collectionId }),
             ),
           )
           return

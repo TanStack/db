@@ -42,6 +42,8 @@ jobs:
         run: pnpm --filter @tanstack/db-ivm --filter @tanstack/db build
       - name: Check minified public API
         run: pnpm run test:minified-db
+      - name: Check production error text
+        run: pnpm run test:production-errors
       - name: Check DB tests against built dist
         run: pnpm --filter @tanstack/db test:dist
   test-db:

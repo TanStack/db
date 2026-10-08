@@ -11,6 +11,7 @@ import {
 } from './errors'
 import { transactionScopedScheduler } from './scheduler.js'
 import { takeTransactionCommitWork } from './transaction-commit-work.js'
+import { codedMessage, devBuild } from './error-message.js'
 import type { Deferred } from './deferred'
 import type {
   MutationFn,
@@ -64,7 +65,9 @@ export class TransactionScope {
     }
     if (owner !== this) {
       throw new Error(
-        `A transaction created with createTransaction() cannot mutate collections from multiple DbClient instances. Use dbClient.createTransaction() for explicit client scope.`,
+        devBuild() && process.env.NODE_ENV !== `production`
+          ? `A transaction created with createTransaction() cannot mutate collections from multiple DbClient instances. Use dbClient.createTransaction() for explicit client scope.`
+          : codedMessage(162),
       )
     }
 
@@ -144,7 +147,11 @@ const transactionAmbientScopes = new WeakMap<object, TransactionScope>()
 function getTransactionScope(transaction: object): TransactionScope {
   const scope = transactionScopes.get(transaction)
   if (!scope) {
-    throw new Error(`Transaction is not associated with a TransactionScope.`)
+    throw new Error(
+      devBuild() && process.env.NODE_ENV !== `production`
+        ? `Transaction is not associated with a TransactionScope.`
+        : codedMessage(163),
+    )
   }
   return scope
 }
@@ -152,7 +159,11 @@ function getTransactionScope(transaction: object): TransactionScope {
 function getTransactionAmbientScope(transaction: object): TransactionScope {
   const scope = transactionAmbientScopes.get(transaction)
   if (!scope) {
-    throw new Error(`Transaction is not associated with an ambient scope.`)
+    throw new Error(
+      devBuild() && process.env.NODE_ENV !== `production`
+        ? `Transaction is not associated with an ambient scope.`
+        : codedMessage(164),
+    )
   }
   return scope
 }
@@ -263,7 +274,11 @@ function mergePendingMutations<T extends object>(
     default: {
       // Exhaustiveness check
       const _exhaustive: never = `${existing.type}-${incoming.type}` as never
-      throw new Error(`Unhandled mutation combination: ${_exhaustive}`)
+      throw new Error(
+        devBuild() && process.env.NODE_ENV !== `production`
+          ? `Unhandled mutation combination: ${_exhaustive}`
+          : codedMessage(165, { combination: _exhaustive }),
+      )
     }
   }
 }
@@ -515,7 +530,9 @@ class Transaction<T extends object = Record<string, unknown>> {
       if (restorationErrors.length)
         throw new AggregateError(
           [error, ...restorationErrors],
-          `Mutation callback and restoration failed`,
+          devBuild() && process.env.NODE_ENV !== `production`
+            ? `Mutation callback and restoration failed`
+            : codedMessage(174),
           { cause: error },
         )
       throw error

@@ -4,6 +4,7 @@ import {
   compareKeysReversed,
   findInsertPositionInArray,
 } from '../utils/array-utils.js'
+import { codedMessage, devBuild } from '../error-message.js'
 import { BaseIndex, builtInIndexResolverNames } from './base-index.js'
 import type { CompareOptions } from '../query/builder/types.js'
 import type { IndexOperation } from './base-index.js'
@@ -243,7 +244,11 @@ export class BasicIndex<
         result = this.inArrayLookup(value)
         break
       default:
-        throw new Error(`Operation ${operation} not supported by BasicIndex`)
+        throw new Error(
+          devBuild() && process.env.NODE_ENV !== `production`
+            ? `Operation ${operation} not supported by BasicIndex`
+            : codedMessage(100, { operation }),
+        )
     }
     return result
   }
