@@ -15,6 +15,7 @@ import {
   getByKey,
   openDatabase,
 } from './indexed-db-wrapper'
+import { codedMessage, devBuild } from './error-message.js'
 import type {
   BaseCollectionConfig,
   ChangeMessageOrDeleteKeyMessage,
@@ -32,8 +33,10 @@ import type { StandardSchemaV1 } from '@standard-schema/spec'
 export class DatabaseRequiredError extends Error {
   constructor() {
     super(
-      `IndexedDB collection requires a "db" configuration option. ` +
-        `Create a database instance using createIndexedDB() and pass it to the collection.`,
+      devBuild() && process.env.NODE_ENV !== `production`
+        ? `IndexedDB collection requires a "db" configuration option. ` +
+            `Create a database instance using createIndexedDB() and pass it to the collection.`
+        : codedMessage(175),
     )
     this.name = `DatabaseRequiredError`
   }
@@ -49,9 +52,11 @@ export class ObjectStoreNotFoundError extends Error {
     availableStores: ReadonlyArray<string>,
   ) {
     super(
-      `Object store "${storeName}" not found in database "${databaseName}". ` +
-        `Available stores: [${availableStores.join(', ')}]. ` +
-        `Add "${storeName}" to the stores array when calling createIndexedDB().`,
+      devBuild() && process.env.NODE_ENV !== `production`
+        ? `Object store "${storeName}" not found in database "${databaseName}". ` +
+            `Available stores: [${availableStores.join(', ')}]. ` +
+            `Add "${storeName}" to the stores array when calling createIndexedDB().`
+        : codedMessage(176, { storeName, databaseName, availableStores }),
     )
     this.name = 'ObjectStoreNotFoundError'
   }
@@ -63,8 +68,10 @@ export class ObjectStoreNotFoundError extends Error {
 export class NameRequiredError extends Error {
   constructor() {
     super(
-      `IndexedDB collection requires a "name" configuration option. ` +
-        `This is the name of the object store within the database.`,
+      devBuild() && process.env.NODE_ENV !== `production`
+        ? `IndexedDB collection requires a "name" configuration option. ` +
+            `This is the name of the object store within the database.`
+        : codedMessage(177),
     )
     this.name = `NameRequiredError`
   }
@@ -76,8 +83,10 @@ export class NameRequiredError extends Error {
 export class GetKeyRequiredError extends Error {
   constructor() {
     super(
-      `IndexedDB collection requires a "getKey" configuration option. ` +
-        `This function extracts the unique key from each item.`,
+      devBuild() && process.env.NODE_ENV !== `production`
+        ? `IndexedDB collection requires a "getKey" configuration option. ` +
+            `This function extracts the unique key from each item.`
+        : codedMessage(178),
     )
     this.name = `GetKeyRequiredError`
   }
@@ -287,27 +296,35 @@ export async function createIndexedDB(
   // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- runtime safety for JS consumers
   if (!stores || stores.length === 0) {
     throw new Error(
-      'createIndexedDB requires at least one store in the stores array.',
+      devBuild() && process.env.NODE_ENV !== `production`
+        ? 'createIndexedDB requires at least one store in the stores array.'
+        : codedMessage(193),
     )
   }
 
   const storeSet = new Set(stores)
   if (storeSet.size !== stores.length) {
     throw new Error(
-      'createIndexedDB stores array contains duplicate store names.',
+      devBuild() && process.env.NODE_ENV !== `production`
+        ? 'createIndexedDB stores array contains duplicate store names.'
+        : codedMessage(194),
     )
   }
 
   for (const storeName of stores) {
     if (storeName === VERSIONS_STORE_NAME) {
       throw new Error(
-        'The "_versions" store is reserved for IndexedDB Collection metadata.',
+        devBuild() && process.env.NODE_ENV !== `production`
+          ? 'The "_versions" store is reserved for IndexedDB Collection metadata.'
+          : codedMessage(195),
       )
     }
     if (!storeName || typeof storeName !== 'string') {
       throw new Error(
-        'createIndexedDB stores array contains invalid store names. ' +
-          'Each store name must be a non-empty string.',
+        devBuild() && process.env.NODE_ENV !== `production`
+          ? 'createIndexedDB stores array contains invalid store names. ' +
+              'Each store name must be a non-empty string.'
+          : codedMessage(196),
       )
     }
   }
@@ -340,7 +357,9 @@ export async function createIndexedDB(
     db.close()
     if (connection.error) return
     connection.error = new Error(
-      `IndexedDB connection "${name}" closed. Recreate its Collections with a new database instance.`,
+      devBuild() && process.env.NODE_ENV !== `production`
+        ? `IndexedDB connection "${name}" closed. Recreate its Collections with a new database instance.`
+        : codedMessage(197, { name }),
     )
     // Record closure before reentrant listeners can request more work. Core
     // reports user event-listener failures asynchronously and notifies siblings.
@@ -460,7 +479,9 @@ export function indexedDBCollectionOptions(
   }
   if (name === VERSIONS_STORE_NAME) {
     throw new Error(
-      'The "_versions" store is reserved for IndexedDB Collection metadata.',
+      devBuild() && process.env.NODE_ENV !== `production`
+        ? 'The "_versions" store is reserved for IndexedDB Collection metadata.'
+        : codedMessage(198),
     )
   }
 
@@ -853,7 +874,12 @@ export function indexedDBCollectionOptions(
         item = result.value as Item
       }
       const key = getKey(item)
-      if (keys.has(key)) throw new Error(`Duplicate imported key: ${key}`)
+      if (keys.has(key))
+        throw new Error(
+          devBuild() && process.env.NODE_ENV !== `production`
+            ? `Duplicate imported key: ${key}`
+            : codedMessage(199, { key }),
+        )
       keys.add(key)
       return { type: 'insert' as const, key, modified: structuredClone(item) }
     })

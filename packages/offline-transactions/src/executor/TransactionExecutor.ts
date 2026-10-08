@@ -8,7 +8,6 @@ import type { OutboxManager } from '../outbox/OutboxManager'
 import type {
   OfflineConfig,
   OfflineTransaction,
-  RetryPolicy,
   TransactionSignaler,
 } from '../types'
 
@@ -18,7 +17,7 @@ export class TransactionExecutor {
   private scheduler: KeyScheduler
   private outbox: OutboxManager
   private config: OfflineConfig
-  private retryPolicy: RetryPolicy
+  private retryPolicy: DefaultRetryPolicy
   private isExecuting = false
   private executionPromise: Promise<void> | null = null
   private offlineExecutor: TransactionSignaler
@@ -34,9 +33,10 @@ export class TransactionExecutor {
     this.scheduler = scheduler
     this.outbox = outbox
     this.config = config
-    this.retryPolicy =
-      config.retryPolicy ??
-      new DefaultRetryPolicy(Number.POSITIVE_INFINITY, config.jitter ?? true)
+    this.retryPolicy = new DefaultRetryPolicy(
+      Number.POSITIVE_INFINITY,
+      config.jitter ?? true,
+    )
     this.offlineExecutor = offlineExecutor
   }
 
@@ -202,10 +202,14 @@ export class TransactionExecutor {
         'error.message': error.message,
       },
       async (span) => {
-        const retryDelay = this.retryDelayFor(transaction, error)
-        span.setAttribute(`shouldRetry`, retryDelay !== null)
+        const shouldRetry = this.retryPolicy.shouldRetry(
+          error,
+          transaction.retryCount,
+        )
 
-        if (retryDelay === null) {
+        span.setAttribute(`shouldRetry`, shouldRetry)
+
+        if (!shouldRetry) {
           const rejectionPending: OfflineTransaction = {
             ...transaction,
             outboxPhase: `rejection-pending`,
@@ -233,10 +237,14 @@ export class TransactionExecutor {
           return
         }
 
+        const delay = Math.max(
+          0,
+          this.retryPolicy.calculateDelay(transaction.retryCount),
+        )
         const updatedTransaction: OfflineTransaction = {
           ...transaction,
           retryCount: transaction.retryCount + 1,
-          nextAttemptAt: Date.now() + retryDelay,
+          nextAttemptAt: Date.now() + delay,
           lastError: {
             name: error.name,
             message: error.message,
@@ -244,7 +252,7 @@ export class TransactionExecutor {
           },
         }
 
-        span.setAttribute(`retryDelay`, retryDelay)
+        span.setAttribute(`retryDelay`, delay)
         span.setAttribute(`nextRetryCount`, updatedTransaction.retryCount)
 
         this.scheduler.updateTransaction(updatedTransaction)
@@ -261,37 +269,6 @@ export class TransactionExecutor {
         }
       },
     )
-  }
-
-  private retryDelayFor(
-    transaction: OfflineTransaction,
-    error: Error,
-  ): number | null {
-    try {
-      const shouldRetry = this.retryPolicy.shouldRetry(
-        error,
-        transaction.retryCount,
-      )
-      if (typeof shouldRetry !== `boolean`)
-        throw new TypeError(`RetryPolicy.shouldRetry must return a boolean`)
-      if (!shouldRetry) return null
-
-      const delay = this.retryPolicy.calculateDelay(transaction.retryCount)
-      if (!Number.isFinite(delay))
-        throw new TypeError(
-          `RetryPolicy.calculateDelay must return a finite number`,
-        )
-      return Math.max(0, delay)
-    } catch (policyError) {
-      const failure =
-        policyError instanceof Error
-          ? policyError
-          : new Error(String(policyError))
-      this.fatalError = failure
-      this.scheduler.markFailed(transaction)
-      this.clearRetryTimer()
-      throw failure
-    }
   }
 
   private async removeSettledTransaction(

@@ -101,20 +101,6 @@ export interface OfflineConfig {
   storage?: StorageAdapter
   maxConcurrency?: number
   jitter?: boolean
-  /**
-   * Replaces the default decision and delay for mutation function failures.
-   *
-   * `shouldRetry` receives the original error and current retry count. A retry
-   * retains the durable FIFO head and leaves its caller pending; a terminal
-   * decision rejects with that error after outbox removal. The delay must be
-   * finite milliseconds; negative values are treated as zero.
-   *
-   * When omitted, {@link DefaultRetryPolicy} keeps its existing classification
-   * and exponential backoff. `jitter` only configures that default. A custom
-   * policy also replaces its handling of `NonRetriableError` and `AbortError`;
-   * delegate to `DefaultRetryPolicy` to retain those decisions.
-   */
-  retryPolicy?: RetryPolicy
   beforeRetry?: (
     transactions: Array<OfflineTransaction>,
   ) => Array<OfflineTransaction>
@@ -139,9 +125,7 @@ export interface StorageAdapter {
 }
 
 export interface RetryPolicy {
-  /** Finite milliseconds until the next attempt; negative values become zero. */
   calculateDelay: (retryCount: number) => number
-  /** Decide whether to retry the original mutation function error. */
   shouldRetry: (error: Error, retryCount: number) => boolean
 }
 

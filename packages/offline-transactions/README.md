@@ -133,34 +133,12 @@ interface OfflineConfig {
   storage?: StorageAdapter
   maxConcurrency?: number
   jitter?: boolean
-  retryPolicy?: RetryPolicy
   beforeRetry?: (transactions: OfflineTransaction[]) => OfflineTransaction[]
   onUnknownMutationFn?: (name: string, tx: OfflineTransaction) => void
   onLeadershipChange?: (isLeader: boolean) => void
   onlineDetector?: OnlineDetector
 }
 ```
-
-### Retry policy
-
-The default policy retries ordinary mutation function errors with exponential
-backoff and optional `jitter`. It treats `NonRetriableError`, `AbortError`, and
-messages containing `400`, `401`, `403`, or `422` as terminal. Supply
-`retryPolicy` when a provider needs a different decision or delay.
-
-`shouldRetry(error, retryCount)` receives the original error and the current
-retry count. Returning `true` keeps the transaction in the outbox and its caller
-pending. The policy's `calculateDelay(retryCount)` must return finite
-milliseconds; negative values become zero. Returning `false` removes the
-transaction from the outbox before rejecting its caller with the provider error.
-A custom policy replaces the default policy completely, including its handling
-of `NonRetriableError` and `AbortError`; delegate to `DefaultRetryPolicy` when
-those decisions should stay in effect. The `jitter` option applies only when
-`retryPolicy` is omitted.
-
-Retries retain the first transaction's FIFO position. A policy that retries a
-permanent authentication failure forever also holds later transactions. Bound
-that decision to the period in which authentication can recover.
 
 ### OfflineExecutor
 

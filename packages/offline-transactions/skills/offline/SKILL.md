@@ -165,7 +165,6 @@ interface OfflineConfig {
   storage?: StorageAdapter // Custom storage (default: auto-detect)
   maxConcurrency?: number // Parallel execution limit
   jitter?: boolean // Add jitter to retry delays
-  retryPolicy?: RetryPolicy // Replace default retry classification and delay
   beforeRetry?: (txs) => txs // Transform/filter before retry
   onUnknownMutationFn?: (name, tx) => void // Handle orphaned transactions
   onLeadershipChange?: (isLeader) => void // Leadership state callback
@@ -174,13 +173,6 @@ interface OfflineConfig {
   onlineDetector?: OnlineDetector // Custom connectivity detection
 }
 ```
-
-A custom `retryPolicy` receives each mutation function error and its current
-retry count. Its `shouldRetry` decision controls whether the durable FIFO head
-stays pending or terminates; `calculateDelay` must return finite milliseconds.
-It replaces the default policy, including its `NonRetriableError` handling.
-`jitter` applies only to the default policy. Bound retries for failures that
-may be permanent, because the FIFO head blocks later transactions.
 
 ### Custom storage adapter
 
