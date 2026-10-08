@@ -461,7 +461,9 @@ export function findErrorSites(
               (ts.isReturnStatement(statement.thenStatement) ||
                 (ts.isBlock(statement.thenStatement) &&
                   statement.thenStatement.statements.length === 1 &&
-                  ts.isReturnStatement(statement.thenStatement.statements[0]!))),
+                  ts.isReturnStatement(
+                    statement.thenStatement.statements[0]!,
+                  ))),
           )
       })
     const isDevelopmentOnly = (node: ts.Node) => !!developmentRegion(node)

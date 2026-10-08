@@ -382,7 +382,11 @@ describe(`production error messages`, () => {
         { file: `cases.ts`, literals: [`Braced return hint text`] },
       ])
       expect(
-        cases.coded.map(({ code, template, stored }) => [code, template, stored]),
+        cases.coded.map(({ code, template, stored }) => [
+          code,
+          template,
+          stored,
+        ]),
       ).toEqual([
         [1, `Failed for \${id}`, false],
         [2, `Stored failure text`, true],
