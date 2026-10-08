@@ -130,3 +130,48 @@ uses, so the law observes it.
 | Copy the rows after the first write | Assertion failures, 3 of 6 tests |
 | Skip the copy for new buckets; retire copies after its deletes | Still equivalent, as above |
 | Harness mutant: rethrow the cleanup error | The ORC-010 calibration fails |
+
+## Follow-up: medium code review
+
+Reviewed source: the commit that adds this section, on top of `3b9b74ba2`.
+The review raised 10 findings. The evaluation ledger is outside the
+repository; its verdicts are below.
+
+**Laws.** The oracle now states three laws. Atomicity also requires that a
+failed flush removes the facades it created. Bounded work now covers every
+read path of the stored rows. The layout law is now derived from the rows a
+reader sees, not from production's classifier: a revision is required when
+the rows shown before and after appear in a different relative order,
+forbidden when the shown key sequence is identical, and allowed otherwise.
+
+| Finding | Verdict | Change |
+| --- | --- | --- |
+| 1. Work counter did not see `forEach` | Confirmed | The counter also wraps `forEach`, `get` and `has`. |
+| 2. Layout model copied the production classifier | Confirmed | Three-part layout law above. |
+| 3. Nested-facade rollback was claimed covered but was not | Confirmed | Pinned case: the child edge commits, the parent edge throws. The child facade is restored, the parent keeps its reference to it, and the child facade created by the flush is removed. |
+| 4. Missing failure cuts | Confirmed | The grammar adds a throw from a facade's first write (open sync transaction) and a throw from the commit of a facade the flush creates. The nested case covers a second edge after the first commits. A retire on a non-empty facade cannot occur in legal histories (see mutants). |
+| 5. `check()` skipped buckets the model lacks | Confirmed | `check()` compares the adapter's facade set with the model's buckets. |
+| 6. A rollback after `prepare()` ended the history | Confirmed | The history continues after a rollback; a pinned case sends a rolled-back reorder again. |
+| 7. `?? []` could restore a facade to empty | Confirmed | `restore()` iterates the copied rows, so a missing copy cannot occur. |
+| 8. `deferredEntries` duplicated the copied rows' keys | Confirmed | Removed. |
+| 9. Copy-before-write was a convention | Confirmed | One `write()` helper copies, defers, begins and commits for both write paths. |
+| 10. `snapshot()` still copies the edge and bucket maps | Confirmed, scoped | Not changed. A lazy copy would need a copy-on-write hook across the window from `flush()` to `publish()`/`rollback()`, including `resolve()` calls after `flush()` returns. The changeset now says the bucket bookkeeping still grows with the number of buckets. |
+
+**Mutants** (ORC-006), run against this oracle and against the previous one:
+
+| Mutant | This oracle | Previous oracle |
+| --- | --- | --- |
+| Eager copy through `forEach` | Assertion failure | Survived |
+| Layout revision without a key change | Assertion failure | Assertion failure |
+| No layout revision when membership also changes | Assertion failure | Assertion failure |
+| Layout from common-row relative order only | Survives: the contract allows it | Assertion failure: the old model over-specified |
+| Entries map not restored | Assertion failure | Assertion failure |
+| Stale order state after a rollback | Assertion failure | Survived |
+| Rows copied after the first write | Assertion failure | Assertion failure |
+| Retired facade copied after its deletes | Equivalent: a retired bucket's rows retract in the same flush, so retire finds an empty facade | Equivalent |
+
+**Production delta:** `bucket-facade-adapter.ts` is now +41/−54 against
+`main`, net −13.
+
+**Unresolved:** the random campaign rarely sends a rolled-back reorder again;
+the pinned case covers it. The edge and bucket map copy is not measured.

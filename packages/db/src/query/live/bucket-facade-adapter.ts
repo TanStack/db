@@ -101,15 +101,18 @@ export class BucketFacadeAdapter {
 
   flush(): FacadePublication {
     const snapshot = this.snapshot()
-    const deferredEntries = new Set<FacadeEntry>()
     const publications: Array<PublicationDeferral> = []
-    // Every write path defers an entry before its first write, so copy the
-    // entry's rows there: a rollback reads only the entries the flush wrote.
-    const deferPublication = (entry: FacadeEntry) => {
-      if (deferredEntries.has(entry)) return
-      deferredEntries.add(entry)
-      snapshot.rows.set(entry, this.copyRows(entry))
-      publications.push(entry.collection._deferPublication())
+    // The only way to write a facade. It copies the facade's rows and defers
+    // its events before the first write, so a rollback reads only the
+    // facades the flush wrote.
+    const write = (entry: FacadeEntry, sync: FacadeSync, body: () => void) => {
+      if (!snapshot.rows.has(entry)) {
+        snapshot.rows.set(entry, this.copyRows(entry))
+        publications.push(entry.collection._deferPublication())
+      }
+      sync.begin()
+      body()
+      sync.commit()
     }
     const newBaselines: Array<FacadeEntry> = []
 
@@ -137,21 +140,20 @@ export class BucketFacadeAdapter {
           for (const change of changes.values()) {
             this.prepareChange(entry, change)
           }
-          deferPublication(entry)
-          sync.begin()
-          for (const change of changes.values()) {
-            this.applyChange(entry, sync, change, compilation.hasOrderBy)
-          }
-          sync.commit()
+          write(entry, sync, () => {
+            for (const change of changes.values()) {
+              this.applyChange(entry, sync, change, compilation.hasOrderBy)
+            }
+          })
         }
         for (const [bucketKey, multiplicity] of activity ?? []) {
           if (multiplicity >= 0) continue
           active.delete(bucketKey)
-          this.retireEntry(compilation.edgeId, bucketKey, deferPublication)
+          this.retireEntry(compilation.edgeId, bucketKey, write)
         }
       }
     } catch (error) {
-      this.restore(snapshot, deferredEntries)
+      this.restore(snapshot)
       this.retiredEntries.clear()
       for (const publication of publications) publication.discard()
       throw error
@@ -180,7 +182,7 @@ export class BucketFacadeAdapter {
       rollback: () => {
         if (closed) return
         closed = true
-        this.restore(snapshot, deferredEntries)
+        this.restore(snapshot)
         this.retiredEntries.clear()
         for (const publication of publications) publication.discard()
       },
@@ -254,10 +256,7 @@ export class BucketFacadeAdapter {
     }
   }
 
-  private restore(
-    snapshot: FacadeSnapshot,
-    changedEntries: Set<FacadeEntry>,
-  ): void {
+  private restore(snapshot: FacadeSnapshot): void {
     const previousEntries = new Set(
       [...snapshot.entries.values()].flatMap((byBucket) => [
         ...byBucket.values(),
@@ -267,11 +266,10 @@ export class BucketFacadeAdapter {
       [...this.entries.values()].flatMap((byBucket) => [...byBucket.values()]),
     )
 
-    for (const entry of changedEntries) {
+    for (const [entry, rows] of snapshot.rows) {
       if (!previousEntries.has(entry)) continue
       const sync = entry.sync
       if (!sync) continue
-      const rows = snapshot.rows.get(entry) ?? []
       const restoredKeys = new Set(rows.map((row) => row.key))
       sync.begin()
       for (const key of entry.collection.keys()) {
@@ -321,7 +319,7 @@ export class BucketFacadeAdapter {
   private retireEntry(
     edgeId: string,
     bucketKey: string,
-    deferPublication: (entry: FacadeEntry) => void,
+    write: (entry: FacadeEntry, sync: FacadeSync, body: () => void) => void,
   ): void {
     const byBucket = this.entries.get(edgeId)
     const entry = byBucket?.get(bucketKey)
@@ -330,10 +328,9 @@ export class BucketFacadeAdapter {
     const sync = entry.sync
     const keys = [...entry.collection.keys()]
     if (sync && keys.length > 0) {
-      deferPublication(entry)
-      sync.begin()
-      for (const key of keys) sync.write({ type: `delete`, key })
-      sync.commit()
+      write(entry, sync, () => {
+        for (const key of keys) sync.write({ type: `delete`, key })
+      })
     }
     byBucket!.delete(bucketKey)
     if (byBucket!.size === 0) this.entries.delete(edgeId)
