@@ -329,3 +329,96 @@ leader-close schedules passed. The full Electric OPFS suite passed 16 tests.
 TypeScript checks passed for `@tanstack/db`, SQLite persistence core, and
 Browser persistence after the final fixture type correction. The earlier
 Vitest Expo tsconfig warnings did not fail these suites.
+
+## Follow-up: CodeRabbit evaluation and Electron receiving path
+
+This addendum evaluates CodeRabbit review `5463528038` at reviewed commit
+`613dbc9e001f6a2b93076375e1fcb05932078eda`. Its four inline comments,
+subclaims, and optional CLI suggestion yield ten source-order items. The exact
+executable follow-up commit is
+`a1a3dd8c1cecc6761e93f2c7feaf946bc0830b45`; this addendum changes no
+executable code. The earlier verification paragraphs remain historical records
+for their named commits.
+
+| ID | Original claim or proposal | Verdict, PR action, and durable value |
+| --- | --- | --- |
+| CR-1 | Fence reconciliation on `state.leaderId !== this.nodeId`, like ordinary apply. | The inconsistency was real, but the proposed fence fails after a legal no-write Web Lock takeover: the former owner's same-term heartbeat can overwrite the successor's route. `fixed-now`: a local Web Lock leader ignores peer heartbeats. The Browser oracle retains both the queued exact-ID check and a later source write. |
+| CR-2a | Alphabetize the `IndeterminateCommitError` import. | `already-fixed` at `6a64f4c67`; affected lint passes. |
+| CR-2b | Alphabetize the `ReconciledCommittedTx` import. | `already-fixed` at `6a64f4c67`; affected lint passes. |
+| CR-2c | Order `PersistedTx` before `PersistenceAdapter`. | `already-fixed` at `6a64f4c67`; affected lint passes. |
+| CR-2d | Keep both defensive anchor guards and correct the nullable SQL type rather than suppressing lint broadly. | `already-fixed` at `6a64f4c67`: RPC and SQLite each validate before work, and `reset_epoch` is nullable at the SQL boundary. |
+| CR-3a | Make the first cursor lookup `string | undefined` before `?? null`. | `already-fixed` at `6a64f4c67`; the nullable fallback remains typed. |
+| CR-3b | Apply the same type correction at the second cursor lookup. | `already-fixed` at `6a64f4c67`; this distinct site is retained. |
+| CR-4a | Wait for orphan metadata cleanup rather than relying on one async flush. | `fixed-now`: the wrapper oracle holds the reload, checks pending metadata and event state, then waits for cleanup and checks settled public rows and events. |
+| CR-4b | Wait for the durable array shape at the second reload site. | `fixed-now`: sparse-slot and enumerable-array-property histories check authored shape during the hold and durable public shape after release. |
+| CR-5 | Consider `coderabbit review --agent` after changes. | `refuted` as a required action: this is an optional process suggestion, not a defect claim. Raw comments, independent oracle attacks, mutants, lint, types, and affected suites supplied direct review evidence. The optional idea remains recorded here. |
+
+The review had high signal: its lint and timing findings were accurate, and
+CR-1 exposed a real route inconsistency. Its suggested ownership fence was
+wrong for a legal same-term history. Fix quality was mixed; the reviewer earns
+a positive recommendation with that caveat. The final loss audit is ten raw
+items = three `fixed-now` + six `already-fixed` + one `refuted` as a required
+process action. No CodeRabbit item is deferred or omitted.
+
+### Law, history, path, and checkpoint audit
+
+For CR-1, exclusive per-Collection Web Lock ownership is the route authority.
+The Browser oracle captures a real former-owner heartbeat before a no-write
+release, elects the successor at the same term, queues exact-ID reconciliation
+behind the writer lock, then delivers the captured heartbeat. It observes the
+successor's route at the queued cut, an applied-once exact-ID result after
+release, and the next sequence on a later source write; the former adapter
+applies nothing. The original handler let reconciliation succeed but made that
+later write fail. CodeRabbit's fence made reconciliation fail. Both RED runs
+reached their intended comparisons; the repaired handler passes. The existing
+queued-transfer history separately checks genuine ownership loss. These are
+bounded controlled Browser histories, not arbitrary browser scheduling.
+
+For CR-4a/b, the established reconciliation-reload law removes orphan row
+metadata without duplicate row events and publishes durable value shape even
+when ordinary change-event equality equates sparse and dense arrays. The
+wrapper oracle controls `loadSubset` entry and release. At the held cut,
+metadata and authored array shapes remain public. At the settled cut, orphan
+metadata is absent, source and live-query rows have the durable shape, and
+unchanged rows emitted no duplicate events. The old single-flush assertions
+failed before reload completion. A skip-publication mutant reached the
+positive settled comparisons and failed all three cases. The OPFS passive-tab
+history remains the separate real-browser publication receiver.
+
+CI uncovered a separate Electron receiving gap: the renderer/main IPC bridge
+did not expose `reconcileCommittedTx`, so the shared SQLite adapter contract
+failed at its explicit operation assertion. The bridge now transports the
+immutable transaction and durable anchor, returns the complete result, and
+requires protocol v3. The registered SQLite contract exercises exact-ID
+reconciliation through both in-process handlers and a real Electron main
+process. A resolved-adapter witness checks distinct Collection modes and
+schema versions in the reconciliation envelopes; dropping resolution fails at
+that assertion. An adapter without the optional operation returns `unknown`
+without a durable write; a temporary blind-apply-then-unknown mutant changed
+the durable row and version and failed at the no-write assertion. Tests also
+reject v1 and v2 peers in both directions and preserve durability error code
+and path over IPC. The Electron correctness review found the missing error
+path; its fix passed a test that was RED at the path assertion. The simplifier's
+only remaining proposal was a shorter forwarding method with no behavior or
+clarity gain, so the explicit method remains.
+
+The full Electron package passed 163 tests with no type errors. The exact-ID
+contract passed through a real Electron main process in isolation. The full
+Browser coordinator suite passed 263 tests, the persisted wrapper suite
+passed 876 tests with two existing todos, and all five real Chromium/OPFS
+leader-close schedules passed on the named executable commit. The final
+affected-file ESLint check had no errors and 37 existing `require-await`
+warnings in the large Browser and wrapper oracle files. Electron TypeScript,
+formatting, and `git diff --check` passed. An optional broader real-process
+Electron run had
+five other failures: two multi-Collection leadership checks and three
+function-bearing collation cases, so that broader run is not claimed green.
+
+The real-process witness executes the renderer adapter in Vitest and sends its
+envelope through IPC to Electron main. It does not execute that adapter inside
+an Electron renderer or cover concurrent requests from multiple renderers in
+one live main process. A delayed reconciliation IPC reply after main applies
+is an untested transport history, recorded with the Electron receiving owner
+in the coverage map. Passing prompt-reply histories do not establish general
+Electron same-run recovery. The Browser and Electron coverage boundaries stay
+separate from the original source-backed Collection law.
