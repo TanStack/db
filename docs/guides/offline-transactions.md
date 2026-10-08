@@ -78,23 +78,26 @@ void transaction.when('settled').catch((error) => console.error(error))
 
 When `isOfflineEnabled` is true, the executor calls the named `mutationFn` after it records the transaction. A temporary error leaves the entry available for retry. `NonRetriableError` marks a permanent failure and rolls back optimistic state.
 
-Set `shouldRetry(error, retryCount)` on the executor config to change a
-mutation error's retry decision. Return `true` to retry, `false` to stop, or
-`undefined` to keep the default decision. For example, a recoverable 401 can
-return `true` while other errors use the default. The hook receives the
-original error and a retry count of `0` on the first failure.
+Set `shouldRetry(error, retryCount)` on the executor config to change the
+retry decision after a named mutation function rejects. Return `true` to retry,
+`false` to stop, or `undefined` to keep the default decision. For example, the
+hook can return `true` for a recoverable 401 and `undefined` for other errors.
+The hook receives the original error and a retry count of `0` on the first
+failure.
 `NonRetriableError` always stops without calling the hook. Retry delays and
-configured jitter remain unchanged; a retried entry keeps its FIFO position.
-If the hook throws or returns another value, the affected caller rejects and
-the executor stops before recording a retry.
+configured jitter remain unchanged. A retried offline transaction keeps its
+FIFO position. If the hook throws or returns another value, the affected
+transaction's `when('settled')` promise rejects. The executor stops before
+recording a retry.
 
 If an outbox phase write or deletion fails after `mutationFn` returns, the
-affected transaction rejects with the storage error and the executor stops
-processing queued work. If `mutationFn` failed permanently, its caller keeps
-that provider error while the executor batch reports the storage error. Restart
-with a fresh executor after storage recovers. A durable phase marker prevents
-another provider call; if the marker write failed, the provider may be called
-again.
+executor stops processing queued work, and its batch promise rejects with the
+storage error. The affected transaction's `when('settled')` promise also rejects
+with that error unless `mutationFn` failed permanently. In that case, the
+promise rejects with the mutation function error. After storage recovers,
+restart the offline executor over the retained outbox. A durable phase marker
+prevents another named mutation function call. If the marker write failed,
+that function may be called again.
 
 The executor sends a stable `idempotencyKey` with each attempt. A server can receive an attempt more than once, especially after a restart or leadership change. Make the server treat repeated keys as one logical mutation.
 

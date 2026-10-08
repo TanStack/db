@@ -102,9 +102,9 @@ export interface OfflineConfig {
   maxConcurrency?: number
   jitter?: boolean
   /**
-   * Override retry decisions for mutation function errors. Return undefined
-   * to use the default decision. NonRetriableError always stops retry; the
-   * default policy still supplies the delay and configured jitter.
+   * Override retry decisions for errors from a named mutation function. Return
+   * undefined to use the default decision. NonRetriableError always stops retry.
+   * The default policy still supplies the delay and configured jitter.
    */
   shouldRetry?: (error: Error, retryCount: number) => boolean | undefined
   beforeRetry?: (

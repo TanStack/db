@@ -33,14 +33,15 @@ import type {
  * submits their Collection sync writes before returning. Row assertions depend
  * on that controlled premise; the executor does not supply it for every provider.
  * The model is a prefix of completed transaction outcomes and an independently
- * folded map of provider-applied rows. Its pending local rows represent the
- * optimistic overlay, not durable outbox entries. Generated histories use 2–5
- * transactions, 1–3 rows each, shared or disjoint keys, and success or permanent
- * failure at each position. Pinned examples reconstruct all-success, middle
- * failure, all-failure, and alternating outcomes. Shared keys distinguish
- * sibling rollback from disjoint-key survival; width distinguishes whole-row
- * snapshots from partial multirow application; outcome order distinguishes
- * per-ID settlement from a global failure. Two transactions and one row are
+ * folded map of provider-applied rows. Its `localRows` field represents public
+ * Collection rows from optimistic state, not durable outbox entries.
+ * Generated histories use 2–5 transactions, 1–3 rows each, shared or disjoint
+ * keys, and success or permanent failure at each position. Pinned examples
+ * reconstruct all-success, middle-failure, all-failure, and alternating
+ * outcomes. Shared keys distinguish sibling rollback from disjoint-key
+ * survival. Width distinguishes complete optimistic state for several rows
+ * from partial multirow application. Outcome order distinguishes per-ID
+ * settlement from a global failure. Two transactions and one row are
  * the marginal peer and width cases. Fresh production IDs exclude duplicate-ID
  * histories; an outcome-less provider call is not a completed history here.
  *
@@ -53,45 +54,52 @@ import type {
  * comparison rejects early fulfillment. The simple expected Maps do not copy
  * executor or scheduler internals.
  *
- * Held and failed deletion witnesses split provider application from durable
- * outbox removal. At the held-delete cut the caller and isPersisted remain
- * pending; a phase-write or deletion failure rejects that caller with the
- * storage error, stops the executor, and holds queued peers. A fresh executor
- * removes a durably marked row without repeating its provider call. An
- * unmarked admitted row still replays through the provider. These two rows
- * distinguish the crash windows around the phase write. The controlled provider and fake
+ * Held and failed deletion witnesses split named mutation function fulfillment
+ * from durable outbox removal. At the held-delete checkpoint, the public caller
+ * and `isPersisted` promises remain pending. A phase-write or deletion failure
+ * rejects the caller promise with the storage error, stops the executor, and
+ * holds queued peers. An offline executor restart removes a marked outbox entry
+ * without another named mutation function call.
+ * An admitted outbox entry without a terminal marker can invoke the named
+ * mutation function during outbox replay. These two entries distinguish the
+ * crash windows around the phase write. The controlled provider and fake
  * storage establish this executor boundary, not real server acknowledgement
  * timing, native storage completion, or multiple-owner leadership. A normal
  * run pairs fixed and seedless campaigns.
- * A permanent provider failure uses a separate rejection-pending marker. The
- * original caller rejects with that failure; a storage failure also throws
- * from the executor batch and stops further work. An offline executor restart
- * removes a marked row without another provider call or optimistic restore.
+ * A permanent named mutation function failure uses a separate rejection-pending
+ * marker. The original caller promise rejects with that failure. A storage
+ * failure also rejects the executor batch promise and stops further work. An
+ * offline executor restart removes a marked outbox entry without another named
+ * mutation function call or restoration of optimistic state.
  * Direct executor checks pin the storage error, FIFO peer hold, and refusal of
- * further attempts. An unmarked row after a failed marker write can still replay
- * after a crash.
- * The `shouldRetry` option changes only the decision on a mutationFn
- * failure. Its original Error and current retry count reach the hook once.
+ * further attempts. Outbox replay can invoke the named mutation function after
+ * a crash if the marker write failed.
+ * The `shouldRetry` option changes only the decision after a named mutation
+ * function rejects. The hook receives the original Error and current retry
+ * count once.
  * `true` retries, `false` terminates, and `undefined` delegates to the existing
  * default decision. An absent hook also uses that default. `NonRetriableError`
  * remains permanent without consulting the hook. The existing default policy
  * still supplies retry delay with the configured jitter setting. This oracle
  * checks the default delay path with jitter disabled, not jitter math. The
  * exported default currently treats a 401 message as terminal and an ordinary
- * transient error as retryable;
- * these are preservation controls, while the hook rule is the chosen new law.
- * At the durable decision checkpoint, a retry retains the FIFO head, its
- * optimistic row, and both caller promises; terminal removal rejects those
- * promises with the provider Error and admits the peer. The controlled provider
- * and storage do not establish real timer accuracy or server idempotency.
+ * transient error as retryable. These are preservation controls, while the hook
+ * rule is the chosen new law.
+ * At the durable decision checkpoint, a retry retains the offline transaction
+ * at the FIFO head, the public Collection's optimistic state, and both caller
+ * promises. The outer optimistic transaction remains pending during retry.
+ * A terminal decision removes the outbox entry, rejects those promises with
+ * the named mutation function Error, and lets the queued peer run. The controlled
+ * provider and storage do not establish real timer accuracy or server idempotency.
  * A throwing hook or a result outside `true`, `false`, and `undefined` is a
- * configuration failure. The affected public caller rejects with that failure
- * and no retry record is published. The executor stops and releases its active
- * slot. This witness does not promise what a fresh
- * executor does with the still-admitted row after such a failure.
- * Public manual removal may acknowledge deletion while a provider call is
- * held. Once that call fulfills, both success conditions have occurred, so
- * the caller and local persistence promise must settle without another row.
+ * configuration failure. The affected public `commit()` promise rejects with
+ * that failure, and no retry record is published. The executor stops and
+ * releases its active slot. This witness does not judge outbox replay after an
+ * offline executor restart over that admitted offline transaction.
+ * Public manual removal may acknowledge deletion while a named mutation
+ * function call is held. Once that call fulfills, both success conditions have
+ * occurred. The caller promise and local persistence promise must settle
+ * without another outbox entry.
  * Here, an offline executor restart constructs a fresh executor over the retained
  * outbox. Outbox replay resumes unfinished durable work, including terminal-phase
  * deletion; neither operation is a Collection sync restart or truncate replay.
@@ -264,8 +272,8 @@ it.each(oracleSeeds(20260913, settlementOracle))(
               }
             }
             expect(env.serverState).toEqual(expectedServer)
-            // Queued provider work is already independently submitted. Its
-            // active whole-row snapshots survive a sibling's failed insert.
+            // Queued offline transactions already contributed optimistic state.
+            // A sibling's failed insert does not remove it.
             const expectedLocal = new Map(expectedServer)
             for (const rows of expectedRows.slice(completed))
               for (const row of rows) expectedLocal.set(row.id, row)
@@ -763,7 +771,7 @@ it.each(oracleSeeds(20261008, retryDecisionOracle))(
               )
             await turn()
             // These public observations distinguish retaining the head from
-            // removing it, including per-ID settlement and optimistic rows.
+            // removing it, including per-ID settlement and optimistic state.
             expect(calls).toEqual(expected.calls)
             expect(
               (await env.executor.peekOutbox()).map(({ id, retryCount }) => ({

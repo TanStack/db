@@ -211,14 +211,14 @@ Throwing `NonRetriableError` stops retry and removes the transaction from the ou
 
 ### Retry decisions
 
-Set `shouldRetry` to override the default decision for a mutation function
+Set `shouldRetry` to override the default decision for a named mutation function
 error. The hook receives the original error and retry count (`0` on the first
 failure). Return `true` to retry, `false` to stop, or `undefined` to use the
 default decision. For example, return `true` for a recoverable 401 and
 `undefined` otherwise. `NonRetriableError` always stops without calling the
 hook. The default backoff and configured jitter still determine retry timing.
-If the hook throws or returns another value, the caller rejects and the
-executor stops before recording a retry.
+If the hook throws or returns another value, the affected waiting promises
+rejects and the executor stops before recording a retry.
 
 ### Idempotency keys
 

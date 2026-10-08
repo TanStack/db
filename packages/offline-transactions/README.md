@@ -31,7 +31,7 @@ The React Native entry point uses `@react-native-community/netinfo` for connecti
 
 This package provides platform-specific implementations for web and React Native environments:
 
-- **Web**: Uses browser APIs (`window.online` and `document.visibilitychange` events). Visible tabs allow sync attempts even when `navigator.onLine` is false; hidden tabs follow that hint. Request failures still use the retry decision and backoff. Visibility is local to each tab and does not transfer leadership from a hidden tab.
+- **Web**: Uses browser APIs (`window.online` and `document.visibilitychange` events). Visible tabs let the executor process the outbox even when `navigator.onLine` is false; hidden tabs follow that hint. Errors from named mutation functions still use the retry decision and backoff. Visibility is local to each tab and does not transfer leadership from a hidden tab.
 - **React Native**: Uses React Native primitives (`@react-native-community/netinfo` for network status, `AppState` for foreground/background detection)
 
 ## Quick Start
@@ -143,11 +143,12 @@ interface OfflineConfig {
 
 ### Retry decisions
 
-`shouldRetry` receives the original mutation function error and the current
-retry count, which is `0` on the first failure. Return `true` to retry, `false`
-to remove the transaction and reject its caller with that error, or `undefined`
-to use the default decision. For example, this allows a 401 retry while keeping
-the default decision for other errors:
+`shouldRetry` receives the original error from the named mutation function and
+the current retry count, which is `0` on the first failure. Return `true` to
+retry, `false` to remove the offline transaction from the outbox and reject its
+waiting promises with that error, or `undefined` to use the default
+decision. For example, this allows a 401 retry while keeping the default
+decision for other errors:
 
 ```typescript
 shouldRetry: (error) =>
@@ -159,8 +160,8 @@ authentication problem can recover.
 
 `NonRetriableError` always stops retry without calling the hook. The default
 policy still determines backoff and the `jitter` option. A hook that throws or
-returns another value rejects the affected caller and stops the executor before
-writing a retry record.
+returns another value rejects the affected waiting promises and stops the
+executor before writing a retry record.
 
 ### OfflineExecutor
 
