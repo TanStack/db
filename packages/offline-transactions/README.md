@@ -148,20 +148,50 @@ the current retry count, which is `0` on the first failure. Return `true` to
 retry, `false` to remove the offline transaction from the outbox and reject its
 waiting promises with that error, or `undefined` to use the default
 decision. For example, this allows a 401 retry while keeping the default
-decision for other errors:
+decision for other errors. The named mutation function must throw an error
+that retains the HTTP response status:
 
 ```typescript
-shouldRetry: (error) =>
-  error.message.includes('401') ? true : undefined,
+class HttpError extends Error {
+  constructor(readonly status: number) {
+    super(`HTTP ${status}`)
+    this.name = 'HttpError'
+  }
+}
+
+const offline = startOfflineExecutor({
+  collections: { todos: todoCollection },
+  mutationFns: {
+    syncTodos: async ({ transaction, idempotencyKey }) => {
+      const response = await fetch('/api/todos', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Idempotency-Key': idempotencyKey,
+        },
+        body: JSON.stringify(transaction.mutations),
+      })
+      if (!response.ok) throw new HttpError(response.status)
+    },
+  },
+  shouldRetry: (error) =>
+    error instanceof HttpError && error.status === 401 ? true : undefined,
+})
 ```
 
 A retried transaction retains its FIFO position, so use this when the
-authentication problem can recover.
+authentication problem can recover. The app must refresh credentials separately
+before another attempt.
 
 `NonRetriableError` always stops retry without calling the hook. The default
 policy still determines backoff and the `jitter` option. A hook that throws or
-returns another value rejects the affected waiting promises and stops the
-executor before writing a retry record.
+returns another value records a terminal rejection, removes the outbox row,
+rejects the affected waiting promises with the hook failure, and stops the
+executor. A fresh executor does not replay the failed row.
+If terminal marker storage or deletion fails, the caller still rejects with
+the hook failure and the executor batch rejects with the storage error. A
+marked row skips the named mutation function after restart; an unmarked row
+may replay.
 
 ### OfflineExecutor
 

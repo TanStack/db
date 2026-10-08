@@ -29,6 +29,13 @@ import {
 
 type Todo = { id: string; title: string; completed: boolean }
 
+class HttpError extends Error {
+  constructor(readonly status: number) {
+    super(`HTTP ${status}`)
+    this.name = 'HttpError'
+  }
+}
+
 const executor = startOfflineExecutor({
   collections: { todos },
   mutationFns: {
@@ -48,7 +55,7 @@ const executor = startOfflineExecutor({
       if (response.status === 422) {
         throw new NonRetriableError('The server rejected this todo')
       }
-      if (!response.ok) throw new Error('Could not save the todo')
+      if (!response.ok) throw new HttpError(response.status)
 
       // Wait for a server read or sync observation here if your app needs it.
     },
@@ -81,20 +88,35 @@ When `isOfflineEnabled` is true, the executor calls the named `mutationFn` after
 Set `shouldRetry(error, retryCount)` on the executor config to change the
 retry decision after a named mutation function rejects. Return `true` to retry,
 `false` to stop, or `undefined` to keep the default decision. For example, the
-hook can return `true` for a recoverable 401 and `undefined` for other errors.
+hook can return `true` for a recoverable 401 and `undefined` for other errors:
+
+```ts
+shouldRetry: (error) =>
+  error instanceof HttpError && error.status === 401 ? true : undefined,
+```
+
+`fetch` does not reject on an HTTP error response. The named mutation function
+above throws an `HttpError` that carries the numeric status. Retry a 401 only
+when the app can refresh its credentials between attempts.
 The hook receives the original error and a retry count of `0` on the first
 failure.
 `NonRetriableError` always stops without calling the hook. Retry delays and
 configured jitter remain unchanged. A retried offline transaction keeps its
-FIFO position. If the hook throws or returns another value, the affected
-transaction's `when('settled')` promise rejects. The executor stops before
-recording a retry.
+FIFO position. If the hook throws or returns another value, the executor
+records a terminal rejection, removes the outbox row, and rejects the affected
+transaction's `when('settled')` promise with the hook failure. The executor
+then stops. A fresh executor can process newly admitted work without replaying
+the failed row. If writing the terminal marker or deleting the row fails, the
+caller still rejects with the hook failure while the executor stops with the
+storage error. A saved marker prevents a provider call on restart; an unmarked
+row can replay.
 
-If an outbox phase write or deletion fails after `mutationFn` returns, the
+If an outbox phase write or deletion fails after `mutationFn` settles, the
 executor stops processing queued work, and its batch promise rejects with the
 storage error. The affected transaction's `when('settled')` promise also rejects
-with that error unless `mutationFn` failed permanently. In that case, the
-promise rejects with the mutation function error. After storage recovers,
+with the storage error after a successful mutation function, with the named
+mutation function error after a terminal provider failure, or with the hook
+error after a retry decision failure. After storage recovers,
 restart the offline executor over the retained outbox. A durable phase marker
 prevents another named mutation function call. If the marker write failed,
 that function may be called again.

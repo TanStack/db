@@ -203,6 +203,7 @@ export class TransactionExecutor {
       },
       async (span) => {
         let shouldRetry: boolean
+        let hookFailure: Error | undefined
         if (error instanceof NonRetriableError) {
           shouldRetry = false
         } else {
@@ -214,18 +215,14 @@ export class TransactionExecutor {
                 `OfflineConfig.shouldRetry must return true, false, or undefined`,
               )
           } catch (hookError) {
-            const failure =
+            hookFailure =
               hookError instanceof Error
                 ? hookError
                 : new Error(String(hookError))
-            this.fatalError = failure
-            this.scheduler.markFailed(transaction)
-            this.clearRetryTimer()
-            this.offlineExecutor.rejectTransaction(transaction.id, failure)
-            throw failure
           }
-          shouldRetry =
-            decision === undefined
+          shouldRetry = hookFailure
+            ? false
+            : decision === undefined
               ? this.retryPolicy.shouldRetry(error, transaction.retryCount)
               : decision
         }
@@ -233,30 +230,39 @@ export class TransactionExecutor {
         span.setAttribute(`shouldRetry`, shouldRetry)
 
         if (!shouldRetry) {
+          const terminalError = hookFailure ?? error
           const rejectionPending: OfflineTransaction = {
             ...transaction,
             outboxPhase: `rejection-pending`,
             lastError: {
-              name: error.name,
-              message: error.message,
-              stack: error.stack,
+              name: terminalError.name,
+              message: terminalError.message,
+              stack: terminalError.stack,
             },
           }
           console.warn(
             `Transaction ${transaction.id} failed permanently:`,
-            error,
+            terminalError,
           )
           try {
             await this.removeSettledTransaction(rejectionPending, true)
           } catch (storageError) {
             span.recordException(storageError as Error)
             span.setAttribute(`result`, `outbox_failure`)
-            this.offlineExecutor.rejectTransaction(transaction.id, error)
+            this.offlineExecutor.rejectTransaction(
+              transaction.id,
+              terminalError,
+            )
             throw storageError
           }
 
           span.setAttribute(`result`, `permanent_failure`)
-          this.offlineExecutor.rejectTransaction(transaction.id, error)
+          if (hookFailure) {
+            this.fatalError = hookFailure
+            this.clearRetryTimer()
+          }
+          this.offlineExecutor.rejectTransaction(transaction.id, terminalError)
+          if (hookFailure) throw hookFailure
           return
         }
 

@@ -92,10 +92,15 @@ import type {
  * the named mutation function Error, and lets the queued peer run. The controlled
  * provider and storage do not establish real timer accuracy or server idempotency.
  * A throwing hook or a result outside `true`, `false`, and `undefined` is a
- * configuration failure. The affected public `commit()` promise rejects with
- * that failure, and no retry record is published. The executor stops and
- * releases its active slot. This witness does not judge outbox replay after an
- * offline executor restart over that admitted offline transaction.
+ * configuration failure. The executor records a terminal rejection and removes
+ * the outbox row before rejecting public `commit()` with that failure and
+ * dropping its optimistic state. The executor then stops and releases its
+ * active slot. A fresh executor has no failed row to
+ * restore or replay, but can process newly admitted work. This law assumes the
+ * storage adapter acknowledges the terminal marker and deletion. If deletion
+ * fails after the marker write, restart removes the marked row without another
+ * named mutation function call or optimistic restoration. A queued FIFO peer
+ * remains durable but unrun when the current executor stops.
  * Public manual removal may acknowledge deletion while a named mutation
  * function call is held. Once that call fulfills, both success conditions have
  * occurred. The caller promise and local persistence promise must settle
@@ -1087,8 +1092,8 @@ it.each([`terminal`, `defer`] as const)(
 
 // A configuration failure is observed through public commit(), not only the
 // executor's internal batch promise. The provider error is a 401, so ignoring
-// the hook would instead take the established terminal path. The retained
-// outbox row distinguishes failure before a retry decision from a terminal one.
+// the hook would reject with the provider error. A fresh executor over the same
+// storage must skip the failed row and process only newly admitted work.
 it.each([`throw`, `invalid`] as const)(
   `rejects public commit when shouldRetry fails (%s)`,
   async (failureKind) => {
@@ -1108,7 +1113,9 @@ it.each([`throw`, `invalid`] as const)(
         return null as unknown as boolean | undefined
       },
     }
+    const storage = new FakeStorageAdapter()
     const env = createTestOfflineEnvironment({
+      storage,
       config,
       mutationFn: async () => {
         providerEntered.resolve()
@@ -1117,6 +1124,7 @@ it.each([`throw`, `invalid`] as const)(
       },
     })
     const warning = vi.spyOn(console, `warn`).mockImplementation(() => {})
+    let restarted: ReturnType<typeof createTestOfflineEnvironment> | undefined
     let transactionId = ``
     let commitStatus: unknown = `pending`
     let hasPrimaryFailure = false
@@ -1159,17 +1167,42 @@ it.each([`throw`, `invalid`] as const)(
       }
       expect(hookCalls).toBe(1)
       const remaining = await env.executor.peekOutbox()
-      expect(remaining).toHaveLength(1)
-      expect(remaining[0]).toMatchObject({
-        id: transactionId,
-        retryCount: 0,
-        nextAttemptAt: admitted!.nextAttemptAt,
-      })
-      expect(remaining[0]?.lastError).toBeUndefined()
-      expect(remaining[0]?.outboxPhase).toBeUndefined()
       await turn()
       expect(env.executor.getRunningCount()).toBe(0)
       expect(env.mutationCalls).toHaveLength(1)
+      expect(env.collection.toArray).toEqual([])
+
+      env.executor.dispose()
+      restarted = createTestOfflineEnvironment({
+        storage,
+        mutationFn: (params) => {
+          restarted!.applyMutations(params.transaction.mutations)
+        },
+      })
+      await restarted.waitForLeader()
+      const fresh = restarted.executor.createOfflineTransaction({
+        mutationFnName: restarted.mutationFnName,
+        autoCommit: false,
+      })
+      fresh.mutate(() =>
+        restarted!.collection.insert({
+          id: `after-hook-failure`,
+          value: `fresh`,
+          completed: false,
+          updatedAt: new Date(1),
+        }),
+      )
+      await atOracleCheckpoint(fresh.commit(), `fresh work after hook failure`)
+      // The new transaction proves that restart has passed the FIFO head.
+      // A retained failed row would have called the provider before this one.
+      expect(
+        restarted.mutationCalls.map(({ transaction: { id } }) => id),
+      ).toEqual([fresh.id])
+      expect(remaining).toEqual([])
+      expect(await restarted.executor.peekOutbox()).toEqual([])
+      expect(restarted.collection.toArray.map(({ id }) => id)).toEqual([
+        `after-hook-failure`,
+      ])
     } catch (error) {
       hasPrimaryFailure = true
       throw error
@@ -1183,7 +1216,9 @@ it.each([`throw`, `invalid`] as const)(
       await cleanupOfflineOracle(
         [
           () => env.executor.dispose(),
+          () => restarted?.executor.dispose(),
           () => env.collection.cleanup(),
+          () => restarted?.collection.cleanup(),
           () => warning.mockRestore(),
         ],
         hasPrimaryFailure,
@@ -1191,6 +1226,79 @@ it.each([`throw`, `invalid`] as const)(
     }
   },
 )
+
+// A hook failure removes only the head. The queued peer stays durable, but the
+// faulty executor refuses another batch instead of silently continuing.
+it(`stops queued work after shouldRetry throws`, async () => {
+  const providerError = new Error(`HTTP 401 Unauthorized`)
+  const hookError = new Error(`retry decision failed`)
+  const outbox = new OutboxManager(new FakeStorageAdapter(), {})
+  const scheduler = new KeyScheduler()
+  const rejections: Array<Error> = []
+  let peerCalls = 0
+  const signaler: TransactionSignaler = {
+    isOfflineEnabled: true,
+    isOnline: () => true,
+    resolveTransaction: () => {
+      throw new Error(`failed head cannot resolve`)
+    },
+    rejectTransaction: (_id, error) => rejections.push(error),
+    registerRestorationTransaction: () => {},
+  }
+  const executor = new TransactionExecutor(
+    scheduler,
+    outbox,
+    {
+      collections: {},
+      mutationFns: {
+        head: () => Promise.reject(providerError),
+        peer: () => {
+          peerCalls++
+          return Promise.resolve()
+        },
+      },
+      shouldRetry: () => {
+        throw hookError
+      },
+    },
+    signaler,
+  )
+  const head: OfflineTransaction = {
+    id: `hook-failure-head`,
+    mutationFnName: `head`,
+    mutations: [],
+    keys: [],
+    idempotencyKey: `hook-failure-head`,
+    createdAt: new Date(0),
+    retryCount: 0,
+    nextAttemptAt: 0,
+    version: 1,
+  }
+  const peer: OfflineTransaction = {
+    ...head,
+    id: `hook-failure-peer`,
+    mutationFnName: `peer`,
+    idempotencyKey: `hook-failure-peer`,
+    createdAt: new Date(1),
+  }
+  const warning = vi.spyOn(console, `warn`).mockImplementation(() => {})
+  try {
+    await outbox.add(head)
+    await outbox.add(peer)
+    scheduler.schedule(peer)
+    await expect(executor.execute(head)).rejects.toBe(hookError)
+    expect(rejections).toEqual([hookError])
+    expect(await outbox.get(head.id)).toBeNull()
+    expect(await outbox.get(peer.id)).toMatchObject({ id: peer.id })
+    expect(scheduler.getPendingCount()).toBe(1)
+    expect(peerCalls).toBe(0)
+    await expect(executor.executeAll()).rejects.toBe(hookError)
+    expect(peerCalls).toBe(0)
+  } finally {
+    executor.pause()
+    warning.mockRestore()
+  }
+})
 
 // A first-provider retry-record write fails after 2–5 transactions have been
 // admitted. Two is the marginal held-head/peer history; five checks that every
@@ -2202,11 +2310,22 @@ it(`replays an admitted row with no fulfilled-provider checkpoint`, async () => 
   }
 })
 
-it(`preserves permanent provider failure when rejection cleanup also fails`, async () => {
+// Deletion failure leaves a durable terminal marker. The two causes must both
+// retain their own error and skip the provider when a fresh executor removes it.
+async function checkTerminalFailureWithFailedDeletion(
+  failureKind: `provider` | `hook`,
+) {
   const deletionAttempted = gate()
   const restartedDeletionAttempted = gate()
   const releaseRestartedDeletion = gate()
-  const primaryError = new NonRetriableError(`provider rejected permanently`)
+  const primaryError =
+    failureKind === `provider`
+      ? new NonRetriableError(`provider rejected permanently`)
+      : new Error(`retry decision failed`)
+  const providerError =
+    failureKind === `provider`
+      ? primaryError
+      : new Error(`HTTP 401 Unauthorized`)
   const storageError = new Error(`rejection cleanup failed`)
   class Storage extends FakeStorageAdapter {
     failDeletes = true
@@ -2226,9 +2345,17 @@ it(`preserves permanent provider failure when rejection cleanup also fails`, asy
   let providerCalls = 0
   const env = createTestOfflineEnvironment({
     storage,
+    config:
+      failureKind === `hook`
+        ? {
+            shouldRetry: () => {
+              throw primaryError
+            },
+          }
+        : {},
     mutationFn: () => {
       providerCalls++
-      return Promise.reject(primaryError)
+      return Promise.reject(providerError)
     },
   })
   const warning = vi.spyOn(console, `warn`).mockImplementation(() => {})
@@ -2273,6 +2400,10 @@ it(`preserves permanent provider failure when rejection cleanup also fails`, asy
     expect((await env.executor.peekOutbox()).map(({ id }) => id)).toEqual([
       transaction.id,
     ])
+    expect((await env.executor.peekOutbox())[0]).toMatchObject({
+      outboxPhase: `rejection-pending`,
+      lastError: { message: primaryError.message },
+    })
     expect(providerCalls).toBe(1)
 
     env.executor.dispose()
@@ -2303,7 +2434,7 @@ it(`preserves permanent provider failure when rejection cleanup also fails`, asy
     releaseRestartedDeletion.resolve()
     await atOracleCheckpoint(observedReplay, `terminal replay settled`)
     expect(replayStatus).toMatchObject({
-      name: `NonRetriableError`,
+      name: primaryError.name,
       message: primaryError.message,
     })
     expect(await restarted.executor.peekOutbox()).toEqual([])
@@ -2329,7 +2460,12 @@ it(`preserves permanent provider failure when rejection cleanup also fails`, asy
       hasPrimaryFailure,
     )
   }
-})
+}
+
+it.each([`provider`, `hook`] as const)(
+  `preserves terminal %s failure when rejection cleanup also fails`,
+  checkTerminalFailureWithFailedDeletion,
+)
 
 it(`stops the executor batch when terminal deletion fails`, async () => {
   const providerError = new NonRetriableError(`provider rejected`)

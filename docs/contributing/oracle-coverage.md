@@ -1130,16 +1130,20 @@ for this oracle repair. Keep these scenarios and decisions with that owner:
   still needs a browser-host composition with leadership loss across a write.
   These paths are outside this bounded repair. The [review record](oracle-reviews/issue-1939-offline-admission.md)
   preserves the RED/GREEN and checker-calibration evidence.
-- **A10 R5/R9:** manual removal/clear outside the active-provider witnesses,
-  restored optimistic lifetimes, and outbox replay after a retry-hook fault
-  remain open. The settlement owner checks the optional retry decision across
-  401, ordinary, and permanent errors; explicit, delegated, and absent answers;
+- **A10 R5/R9:** manual removal/clear outside the active-provider witnesses and
+  broader restored optimistic lifetimes remain open. The settlement owner checks
+  the optional retry decision across 401, ordinary, and permanent errors;
+  explicit, delegated, and absent answers;
   FIFO peers; a later failure; and rejection of the public `commit()` promise for
-  throwing or invalid hooks before a retry record is written. A hook fault halts
-  the executor and releases its active slot. Outbox replay after an offline
-  executor restart over that admitted offline transaction needs a separate
-  witness. The settlement owner also checks terminal named mutation function
-  rejection with failed deletion, a halted executor with queued peers held,
+  throwing or invalid hooks. A hook fault records a terminal rejection, removes
+  the failed outbox row, halts the executor with a queued FIFO peer held, and
+  releases its active slot. An offline executor restart over the same storage
+  processes newly admitted work
+  without replaying that row. If deletion fails after the terminal marker is
+  written, restart removes the marked row without calling the named mutation
+  function again or restoring its optimistic state. The settlement owner also
+  checks terminal named mutation function rejection with failed deletion, a
+  halted executor with queued peers held,
   and offline executor restart without a second named mutation function call
   or optimistic restore. The executor does not automatically retry a failed
   phase write or deletion. A failed terminal marker write followed by a crash
