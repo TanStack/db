@@ -1,0 +1,763 @@
+{
+  "88": {
+    "file": "client.ts",
+    "template": "collectionOptions requires a non-empty explicit id so the descriptor is stable across DbClient instances and SSR boundaries.",
+    "literals": [
+      "collectionOptions requires a non-empty explicit id so the descriptor is stable across DbClient instances and SSR boundaries."
+    ]
+  },
+  "89": {
+    "file": "client.ts",
+    "template": "collectionOptions(\"${id}\") requires a factory as its second argument.",
+    "literals": [
+      "collectionOptions(\"",
+      "\") requires a factory as its second argument."
+    ]
+  },
+  "90": {
+    "file": "client.ts",
+    "template": "Collection descriptor \"${id}\" was created from a concrete config that cannot be safely reused across DbClient instances. Use collectionOptions(\"${id}\", (client) => adapterCollectionOptions(...)) or an adapter options creator that supports DbClient materialization.",
+    "literals": [
+      "Collection descriptor \"",
+      "\" was created from a concrete config that cannot be safely reused across DbClient instances. ",
+      "Use collectionOptions(\"",
+      "\", (client) => adapterCollectionOptions(...)) or an adapter options creator that supports DbClient materialization."
+    ]
+  },
+  "91": {
+    "file": "client.ts",
+    "template": "Collection descriptor \"${id}\" materialized a config with id \"${materialized.id}\". Descriptor and collection ids must match.",
+    "literals": [
+      "Collection descriptor \"",
+      "\" materialized a config with id \"",
+      "\". Descriptor and collection ids must match."
+    ]
+  },
+  "92": {
+    "file": "client.ts",
+    "template": "DbClient is missing the required \"${key}\" dependency. Pass it explicitly when constructing the client: new DbClient({ ${key} }).",
+    "literals": [
+      "DbClient is missing the required \"",
+      "\" dependency. Pass it explicitly when constructing the client: new DbClient({ "
+    ]
+  },
+  "93": {
+    "file": "client.ts",
+    "template": "Dehydrated live query \"${dehydratedQuery.queryHash}\" has neither a snapshot nor a promise.",
+    "literals": [
+      "Dehydrated live query \"",
+      "\" has neither a snapshot nor a promise."
+    ]
+  },
+  "94": {
+    "file": "collection/change-events.ts",
+    "template": "limit cannot be used without orderBy",
+    "literals": ["limit cannot be used without orderBy"]
+  },
+  "95": {
+    "file": "collection/changes.ts",
+    "template": "Cannot specify both 'where' and 'whereExpression' options. Use one or the other.",
+    "literals": [
+      "Cannot specify both 'where' and 'whereExpression' options. Use one or the other."
+    ]
+  },
+  "96": {
+    "file": "collection/subscription.ts",
+    "template": "limit is required",
+    "literals": ["limit is required"]
+  },
+  "97": {
+    "file": "collection/subscription.ts",
+    "template": "Ordered snapshot was requested but no index was found. You have to call setOrderByIndex before requesting an ordered snapshot.",
+    "literals": [
+      "Ordered snapshot was requested but no index was found. You have to call setOrderByIndex before requesting an ordered snapshot."
+    ]
+  },
+  "98": {
+    "file": "event-emitter.ts",
+    "template": "Timeout waiting for event ${String(event)}",
+    "literals": ["Timeout waiting for event "]
+  },
+  "99": {
+    "file": "indexes/base-index.ts",
+    "template": "Failed to evaluate index expression for key ${key}: ${error}",
+    "literals": ["Failed to evaluate index expression for key "]
+  },
+  "100": {
+    "file": "indexes/basic-index.ts",
+    "template": "Operation ${operation} not supported by BasicIndex",
+    "literals": ["Operation ", " not supported by BasicIndex"]
+  },
+  "101": {
+    "file": "indexes/btree-index.ts",
+    "template": "Operation ${operation} not supported by BTreeIndex",
+    "literals": ["Operation ", " not supported by BTreeIndex"]
+  },
+  "102": {
+    "file": "live-query-options.ts",
+    "template": "A live query must be a QueryBuilder, LiveQueryCollectionConfig, Collection, undefined, or null. Got: ${typeof value}",
+    "literals": [
+      "A live query must be a QueryBuilder, LiveQueryCollectionConfig, Collection, undefined, or null. Got: "
+    ]
+  },
+  "103": {
+    "file": "live-query-window-controller.ts",
+    "template": "useLiveInfiniteQuery: First argument must be either a pre-created live query collection or a query function. Received: ${typeof input}",
+    "literals": [
+      "useLiveInfiniteQuery: First argument must be either a pre-created live query collection or a query function. ",
+      "Received: "
+    ]
+  },
+  "104": {
+    "file": "live-query-window-controller.ts",
+    "template": "useLiveInfiniteQuery: Query function must return a query builder. Disabled null or undefined queries are not supported.",
+    "literals": [
+      "useLiveInfiniteQuery: Query function must return a query builder. ",
+      "Disabled null or undefined queries are not supported."
+    ]
+  },
+  "105": {
+    "file": "live-query-window-controller.ts",
+    "template": "useLiveInfiniteQuery: Infinite queries do not support single-result queries. Remove .findOne().",
+    "literals": [
+      "useLiveInfiniteQuery: Infinite queries do not support single-result queries. Remove .findOne()."
+    ]
+  },
+  "106": {
+    "file": "live-query-window-controller.ts",
+    "template": "useLiveInfiniteQuery: Pre-created live query collection must have an ORDER BY (orderBy) clause for infinite pagination to work. Please add .orderBy() to your createLiveQueryCollection query.",
+    "literals": [
+      "useLiveInfiniteQuery: Pre-created live query collection must have an ORDER BY (orderBy) clause for infinite pagination to work. ",
+      "Please add .orderBy() to your createLiveQueryCollection query."
+    ]
+  },
+  "107": {
+    "file": "paced-mutations.ts",
+    "template": "Strategy callback called but transaction is in state \"${transaction.state}\". Expected \"pending\".",
+    "literals": [
+      "Strategy callback called but transaction is in state \"",
+      "\". Expected \"pending\"."
+    ]
+  },
+  "108": {
+    "file": "paced-mutations.ts",
+    "template": "Paced transaction has no strategy-owned commit",
+    "literals": ["Paced transaction has no strategy-owned commit"]
+  },
+  "109": {
+    "file": "proxy.ts",
+    "template": "forEach callback must be a function",
+    "literals": ["forEach callback must be a function"]
+  },
+  "110": {
+    "file": "query/builder/functions.ts",
+    "template": "concat(toArray(...)) currently supports only a single toArray(...) argument",
+    "literals": [
+      "concat(toArray(...)) currently supports only a single toArray(...) argument"
+    ]
+  },
+  "111": {
+    "file": "query/builder/functions.ts",
+    "template": "caseWhen() requires at least two arguments",
+    "literals": ["caseWhen() requires at least two arguments"]
+  },
+  "112": {
+    "file": "query/builder/functions.ts",
+    "template": "caseWhen() conditions must be expression-like values",
+    "literals": ["caseWhen() conditions must be expression-like values"]
+  },
+  "113": {
+    "file": "query/builder/index.ts",
+    "template": "Cannot use collection descriptor \"${alias}\" as a query source without a DbClient resolver. In React, wrap your tree in <DbProvider>.",
+    "literals": [
+      "Cannot use collection descriptor \"",
+      "\" as a query source without a DbClient resolver. In React, wrap your tree in <DbProvider>."
+    ]
+  },
+  "114": {
+    "file": "query/builder/index.ts",
+    "template": "Conditional include branch is missing a field name",
+    "literals": ["Conditional include branch is missing a field name"]
+  },
+  "115": {
+    "file": "query/builder/index.ts",
+    "template": "toArray() must wrap a subquery builder",
+    "literals": ["toArray() must wrap a subquery builder"]
+  },
+  "116": {
+    "file": "query/builder/index.ts",
+    "template": "Conditional toArray() branch is missing a field name",
+    "literals": ["Conditional toArray() branch is missing a field name"]
+  },
+  "117": {
+    "file": "query/builder/index.ts",
+    "template": "concat(toArray(...)) must wrap a subquery builder",
+    "literals": ["concat(toArray(...)) must wrap a subquery builder"]
+  },
+  "118": {
+    "file": "query/builder/index.ts",
+    "template": "Conditional concat(toArray(...)) branch is missing a field name",
+    "literals": [
+      "Conditional concat(toArray(...)) branch is missing a field name"
+    ]
+  },
+  "119": {
+    "file": "query/builder/index.ts",
+    "template": "toArray() must wrap a subquery builder",
+    "literals": ["toArray() must wrap a subquery builder"]
+  },
+  "120": {
+    "file": "query/builder/index.ts",
+    "template": "concat(toArray(...)) must wrap a subquery builder",
+    "literals": ["concat(toArray(...)) must wrap a subquery builder"]
+  },
+  "121": {
+    "file": "query/builder/index.ts",
+    "template": "materialize() must wrap a subquery builder",
+    "literals": ["materialize() must wrap a subquery builder"]
+  },
+  "122": {
+    "file": "query/builder/index.ts",
+    "template": "caseWhen() requires at least two arguments",
+    "literals": ["caseWhen() requires at least two arguments"]
+  },
+  "123": {
+    "file": "query/builder/index.ts",
+    "template": "Includes subquery for \"${fieldName}\" must have a WHERE clause with an eq() condition that correlates a parent field with a child field. Example: .where(({child}) => eq(child.parentId, parent.id))",
+    "literals": [
+      "Includes subquery for \"",
+      "\" must have a WHERE clause with an eq() condition ",
+      "that correlates a parent field with a child field. ",
+      "Example: .where(({child}) => eq(child.parentId, parent.id))"
+    ]
+  },
+  "124": {
+    "file": "query/builder/index.ts",
+    "template": "concat(toArray(...)) for \"${fieldName}\" requires the subquery to select a scalar value",
+    "literals": [
+      "concat(toArray(...)) for \"",
+      "\" requires the subquery to select a scalar value"
+    ]
+  },
+  "125": {
+    "file": "query/builder/index.ts",
+    "template": "Includes subquery for \"${fieldName}\" must select an object when materializing as a Collection",
+    "literals": [
+      "Includes subquery for \"",
+      "\" must select an object when materializing as a Collection"
+    ]
+  },
+  "126": {
+    "file": "query/builder/ref-proxy.ts",
+    "template": "${name} cannot be used inside expressions (e.g., coalesce(), eq(), not()). Use ${name} directly as a select field value instead.",
+    "literals": [
+      " cannot be used inside expressions (e.g., coalesce(), eq(), not()). ",
+      "Use ",
+      " directly as a select field value instead."
+    ]
+  },
+  "127": {
+    "file": "query/compiler/evaluators.ts",
+    "template": "caseWhen() requires at least two arguments",
+    "literals": ["caseWhen() requires at least two arguments"]
+  },
+  "128": {
+    "file": "query/compiler/index.ts",
+    "template": "fn.select() cannot consume Collection-valued includes. Use toArray() or materialize() in the upstream select(), or use an expression select() to keep live Collections.",
+    "literals": [
+      "fn.select() cannot consume Collection-valued includes. Use toArray() or materialize() in the upstream select(), or use an expression select() to keep live Collections."
+    ]
+  },
+  "129": {
+    "file": "query/compiler/index.ts",
+    "template": "Query row has negative multiplicity",
+    "literals": ["Query row has negative multiplicity"]
+  },
+  "130": {
+    "file": "query/compiler/index.ts",
+    "template": "Query row has no positive contributor",
+    "literals": ["Query row has no positive contributor"]
+  },
+  "131": {
+    "file": "query/compiler/index.ts",
+    "template": "Query contributors with the same row key are not congruent",
+    "literals": ["Query contributors with the same row key are not congruent"]
+  },
+  "132": {
+    "file": "query/compiler/index.ts",
+    "template": "Duplicate source alias \"${source.alias}\" in unionAll query branches. Use distinct aliases in each branch before passing them to unionAll().",
+    "literals": [
+      "Duplicate source alias \"",
+      "\" in unionAll query branches. ",
+      "Use distinct aliases in each branch before passing them to unionAll()."
+    ]
+  },
+  "133": {
+    "file": "query/compiler/index.ts",
+    "template": "Includes subqueries must be at the top level of select(). Found nested includes at \"${parentPath}.${key}\".",
+    "literals": [
+      "Includes subqueries must be at the top level of select(). ",
+      "Found nested includes at \""
+    ]
+  },
+  "134": {
+    "file": "query/effect.ts",
+    "template": "Source collection '${collectionId}' was cleaned up while effect depends on it",
+    "literals": [
+      "Source collection '",
+      "' was cleaned up while effect depends on it"
+    ]
+  },
+  "135": {
+    "file": "query/effect.ts",
+    "template": "Source collection '${collectionId}' entered error state",
+    "literals": ["Source collection '", "' entered error state"]
+  },
+  "136": {
+    "file": "query/expression-helpers.ts",
+    "template": "No handler provided for operator: ${name}. Available handlers: ${Object.keys(handlers).join(`, `)}",
+    "literals": ["No handler provided for operator: ", ". Available handlers: "]
+  },
+  "137": {
+    "file": "query/expression-helpers.ts",
+    "template": "ORDER BY expression must be a field reference, got: ${clause.expression.type}",
+    "literals": ["ORDER BY expression must be a field reference, got: "]
+  },
+  "138": {
+    "file": "query/expression-helpers.ts",
+    "template": "extractSimpleComparisons requires a comparison or null check inside 'not' operator.",
+    "literals": [
+      "extractSimpleComparisons requires a comparison or null check inside 'not' operator."
+    ]
+  },
+  "139": {
+    "file": "query/expression-helpers.ts",
+    "template": "extractSimpleComparisons requires a field reference for '${arg.name}' operator.",
+    "literals": [
+      "extractSimpleComparisons requires a field reference for '",
+      "' operator."
+    ]
+  },
+  "140": {
+    "file": "query/expression-helpers.ts",
+    "template": "extractSimpleComparisons requires simple field-value comparisons. Found complex expression for 'not(${arg.name})' operator.",
+    "literals": [
+      "extractSimpleComparisons requires simple field-value comparisons. Found complex expression for 'not(",
+      ")' operator."
+    ]
+  },
+  "141": {
+    "file": "query/expression-helpers.ts",
+    "template": "extractSimpleComparisons does not support 'not(${arg.name})'. NOT can only wrap comparison operators (eq, gt, gte, lt, lte, in) or null checks (isNull, isUndefined).",
+    "literals": [
+      "extractSimpleComparisons does not support 'not(",
+      ")'. NOT can only wrap comparison operators (eq, gt, gte, lt, lte, in) or null checks (isNull, isUndefined)."
+    ]
+  },
+  "142": {
+    "file": "query/expression-helpers.ts",
+    "template": "extractSimpleComparisons does not support '${e.name}' operator. Use parseWhereExpression with custom handlers for complex expressions.",
+    "literals": [
+      "extractSimpleComparisons does not support '",
+      "' operator. Use parseWhereExpression with custom handlers for complex expressions."
+    ]
+  },
+  "143": {
+    "file": "query/expression-helpers.ts",
+    "template": "extractSimpleComparisons requires a field reference for '${e.name}' operator.",
+    "literals": [
+      "extractSimpleComparisons requires a field reference for '",
+      "' operator."
+    ]
+  },
+  "144": {
+    "file": "query/expression-helpers.ts",
+    "template": "extractSimpleComparisons requires simple field-value comparisons. Found complex expression for '${e.name}' operator.",
+    "literals": [
+      "extractSimpleComparisons requires simple field-value comparisons. Found complex expression for '",
+      "' operator."
+    ]
+  },
+  "145": {
+    "file": "query/expression-helpers.ts",
+    "template": "extractSimpleComparisons encountered unknown operator: '${e.name}'",
+    "literals": ["extractSimpleComparisons encountered unknown operator: '"]
+  },
+  "146": {
+    "file": "query/live/bucket-facade-adapter.ts",
+    "template": "Bucket facade row has no public key",
+    "literals": ["Bucket facade row has no public key"]
+  },
+  "147": {
+    "file": "query/live/collection-config-builder.ts",
+    "template": "Source recovery failed",
+    "literals": ["Source recovery failed"]
+  },
+  "148": {
+    "file": "query/live/collection-config-builder.ts",
+    "template": "maybeRunGraph called without active sync run. This should not happen.",
+    "literals": [
+      "maybeRunGraph called without active sync run. This should not happen."
+    ]
+  },
+  "149": {
+    "file": "query/live/collection-config-builder.ts",
+    "template": "scheduleGraphRun called without active sync run. This should not happen.",
+    "literals": [
+      "scheduleGraphRun called without active sync run. This should not happen."
+    ]
+  },
+  "150": {
+    "file": "query/live/collection-config-builder.ts",
+    "template": "Live query result key ${String(key)} changed by ${inserts - deletes} rows in one flush; a key has at most one result row.",
+    "literals": [
+      "Live query result key ",
+      " changed by ",
+      " rows in one flush; a key has at most one result row."
+    ]
+  },
+  "151": {
+    "file": "query/live/collection-config-builder.ts",
+    "template": "Could not apply changes: ${JSON.stringify(changes)}. This should never happen.",
+    "literals": ["Could not apply changes: ", ". This should never happen."]
+  },
+  "152": {
+    "file": "query/live/collection-config-builder.ts",
+    "template": "Source collection '${collectionId}' was manually cleaned up while live query '${this.id}' depends on it. Live queries prevent automatic GC, so this was likely a manual cleanup() call.",
+    "literals": [
+      "Source collection '",
+      "' was manually cleaned up while live query '",
+      "' depends on it. ",
+      "Live queries prevent automatic GC, so this was likely a manual cleanup() call."
+    ]
+  },
+  "153": {
+    "file": "query/live/collection-config-builder.ts",
+    "template": "Query '${this.id}' has no collection sources. This should not happen; please report.",
+    "literals": [
+      "Query '",
+      "' has no collection sources. This should not happen; please report."
+    ]
+  },
+  "154": {
+    "file": "query/live/materialized-pipeline.ts",
+    "template": "Canonical query row has negative multiplicity",
+    "literals": ["Canonical query row has negative multiplicity"]
+  },
+  "155": {
+    "file": "query/live/materialized-pipeline.ts",
+    "template": "Canonical query row has no positive contributor",
+    "literals": ["Canonical query row has no positive contributor"]
+  },
+  "156": {
+    "file": "query/live/materialized-pipeline.ts",
+    "template": "Query contributors for public key ${serializeValue(left.publicKey)} are not congruent",
+    "literals": ["Query contributors for public key ", " are not congruent"]
+  },
+  "157": {
+    "file": "query/live/materialized-pipeline.ts",
+    "template": "Materialization bucket row has negative multiplicity",
+    "literals": ["Materialization bucket row has negative multiplicity"]
+  },
+  "158": {
+    "file": "query/live/materialized-pipeline.ts",
+    "template": "Collection includes require a bucket facade",
+    "literals": ["Collection includes require a bucket facade"]
+  },
+  "159": {
+    "file": "query/live/subset-demand-controller.ts",
+    "template": "Subset demand snapshot did not start",
+    "literals": ["Subset demand snapshot did not start"]
+  },
+  "160": {
+    "file": "query/live/utils.ts",
+    "template": "Failed to extract collection. Invalid FROM clause: ${JSON.stringify(query)}",
+    "literals": ["Failed to extract collection. Invalid FROM clause: "]
+  },
+  "161": {
+    "file": "scheduler.ts",
+    "template": "Scheduler detected unresolved dependencies for context ${String(contextId)}.",
+    "literals": ["Scheduler detected unresolved dependencies for context "]
+  },
+  "162": {
+    "file": "transactions.ts",
+    "template": "A transaction created with createTransaction() cannot mutate collections from multiple DbClient instances. Use dbClient.createTransaction() for explicit client scope.",
+    "literals": [
+      "A transaction created with createTransaction() cannot mutate collections from multiple DbClient instances. Use dbClient.createTransaction() for explicit client scope."
+    ]
+  },
+  "163": {
+    "file": "transactions.ts",
+    "template": "Transaction is not associated with a TransactionScope.",
+    "literals": ["Transaction is not associated with a TransactionScope."]
+  },
+  "164": {
+    "file": "transactions.ts",
+    "template": "Transaction is not associated with an ambient scope.",
+    "literals": ["Transaction is not associated with an ambient scope."]
+  },
+  "165": {
+    "file": "transactions.ts",
+    "template": "Unhandled mutation combination: ${_exhaustive}",
+    "literals": ["Unhandled mutation combination: "]
+  },
+  "166": {
+    "file": "utils/comparison.ts",
+    "template": "Index comparator must return a number, but returned ${String(result)}",
+    "literals": ["Index comparator must return a number, but returned "]
+  },
+  "167": {
+    "file": "utils/comparison.ts",
+    "template": "Cannot order Temporal values of different types: ${aTag} vs ${bTag}",
+    "literals": ["Cannot order Temporal values of different types: ", " vs "]
+  },
+  "168": {
+    "file": "utils/comparison.ts",
+    "template": "${aTag} has no defined ordering",
+    "literals": [" has no defined ordering"]
+  },
+  "169": {
+    "file": "utils/cursor.ts",
+    "template": "Only leading-column cursors are supported",
+    "literals": ["Only leading-column cursors are supported"]
+  },
+  "170": {
+    "file": "utils/error.ts",
+    "template": "Unknown error",
+    "literals": ["Unknown error"]
+  },
+  "171": {
+    "file": "utils/uuid.ts",
+    "template": "No secure random number generator available: neither crypto.randomUUID nor crypto.getRandomValues is defined in this environment.",
+    "literals": [
+      "No secure random number generator available: neither crypto.randomUUID nor crypto.getRandomValues is defined in this environment."
+    ]
+  },
+  "172": {
+    "file": "query/live/collection-config-builder.ts",
+    "template": "Source collection '${collectionId}' entered error state",
+    "literals": ["Source collection '", "' entered error state"]
+  },
+  "173": {
+    "file": "collection/lifecycle.ts",
+    "template": "${syncFailure ? Adapter cleanup and local teardown both failed : Multiple local teardown steps failed}",
+    "literals": [
+      "Adapter cleanup and local teardown both failed",
+      "Multiple local teardown steps failed"
+    ]
+  },
+  "174": {
+    "file": "transactions.ts",
+    "template": "Mutation callback and restoration failed",
+    "literals": ["Mutation callback and restoration failed"]
+  },
+  "179": {
+    "file": "indexed-db-wrapper.ts",
+    "template": "IndexedDB is not available in this environment. Ensure you are running in a browser or provide a custom IDBFactory for testing.",
+    "literals": [
+      "IndexedDB is not available in this environment. ",
+      "Ensure you are running in a browser or provide a custom IDBFactory for testing."
+    ]
+  },
+  "182": {
+    "file": "indexed-db-wrapper.ts",
+    "template": "Failed to open IndexedDB database \"${name}\": ${error instanceof Error ? error.message : String(error)}",
+    "literals": ["Failed to open IndexedDB database \""]
+  },
+  "183": {
+    "file": "indexed-db-wrapper.ts",
+    "template": "Database upgrade failed for \"${name}\": ${error instanceof Error ? error.message : String(error)}",
+    "literals": ["Database upgrade failed for \""]
+  },
+  "184": {
+    "file": "indexed-db-wrapper.ts",
+    "template": "Failed to open IndexedDB database \"${name}\": ${errorMessage}",
+    "literals": ["Failed to open IndexedDB database \""]
+  },
+  "185": {
+    "file": "indexed-db-wrapper.ts",
+    "template": "Cannot create object store \"${storeName}\": This operation is only allowed during a database upgrade. Ensure you are calling createObjectStore within the onUpgrade callback of openDatabase.",
+    "literals": [
+      "Cannot create object store \"",
+      "\": This operation is only allowed during a database upgrade. ",
+      "Ensure you are calling createObjectStore within the onUpgrade callback of openDatabase."
+    ]
+  },
+  "186": {
+    "file": "indexed-db-wrapper.ts",
+    "template": "Object store \"${storeName}\" already exists in the database. Check the database version and only create stores when needed.",
+    "literals": [
+      "Object store \"",
+      "\" already exists in the database. ",
+      "Check the database version and only create stores when needed."
+    ]
+  },
+  "187": {
+    "file": "indexed-db-wrapper.ts",
+    "template": "Failed to create object store \"${storeName}\": ${error instanceof Error ? error.message : String(error)}",
+    "literals": ["Failed to create object store \""]
+  },
+  "188": {
+    "file": "indexed-db-wrapper.ts",
+    "template": "Failed to create transaction for stores [${storeNamesArray.join(', ')}]: ${error instanceof Error ? error.message : String(error)}",
+    "literals": ["Failed to create transaction for stores ["]
+  },
+  "189": {
+    "file": "indexed-db-wrapper.ts",
+    "template": "Object store \"${storeName}\" not found in the database. Ensure the store was created during the database upgrade.",
+    "literals": [
+      "Object store \"",
+      "\" not found in the database. ",
+      "Ensure the store was created during the database upgrade."
+    ]
+  },
+  "190": {
+    "file": "indexed-db-wrapper.ts",
+    "template": "Transaction was aborted",
+    "literals": ["Transaction was aborted"]
+  },
+  "191": {
+    "file": "indexed-db-wrapper.ts",
+    "template": "Failed to delete IndexedDB database \"${name}\": ${error instanceof Error ? error.message : String(error)}",
+    "literals": ["Failed to delete IndexedDB database \""]
+  },
+  "192": {
+    "file": "indexed-db-wrapper.ts",
+    "template": "Failed to delete IndexedDB database \"${name}\": ${errorMessage}",
+    "literals": ["Failed to delete IndexedDB database \""]
+  },
+  "193": {
+    "file": "indexed-db.ts",
+    "template": "createIndexedDB requires at least one store in the stores array.",
+    "literals": [
+      "createIndexedDB requires at least one store in the stores array."
+    ]
+  },
+  "194": {
+    "file": "indexed-db.ts",
+    "template": "createIndexedDB stores array contains duplicate store names.",
+    "literals": ["createIndexedDB stores array contains duplicate store names."]
+  },
+  "195": {
+    "file": "indexed-db.ts",
+    "template": "The \"_versions\" store is reserved for IndexedDB Collection metadata.",
+    "literals": [
+      "The \"_versions\" store is reserved for IndexedDB Collection metadata."
+    ]
+  },
+  "196": {
+    "file": "indexed-db.ts",
+    "template": "createIndexedDB stores array contains invalid store names. Each store name must be a non-empty string.",
+    "literals": [
+      "createIndexedDB stores array contains invalid store names. ",
+      "Each store name must be a non-empty string."
+    ]
+  },
+  "197": {
+    "file": "indexed-db.ts",
+    "template": "IndexedDB connection \"${name}\" closed. Recreate its Collections with a new database instance.",
+    "literals": [
+      "IndexedDB connection \"",
+      "\" closed. Recreate its Collections with a new database instance."
+    ]
+  },
+  "198": {
+    "file": "indexed-db.ts",
+    "template": "The \"_versions\" store is reserved for IndexedDB Collection metadata.",
+    "literals": [
+      "The \"_versions\" store is reserved for IndexedDB Collection metadata."
+    ]
+  },
+  "199": {
+    "file": "indexed-db.ts",
+    "template": "Duplicate imported key: ${key}",
+    "literals": ["Duplicate imported key: "]
+  },
+  "200": {
+    "file": "indexed-db-wrapper.ts",
+    "template": "Failed to get all keys from object store \"${objectStore.name}\": ${cause}",
+    "literals": ["Failed to get all keys from object store \""]
+  },
+  "201": {
+    "file": "indexed-db-wrapper.ts",
+    "template": "Failed to write item to object store \"${objectStore.name}\": ${cause}",
+    "literals": ["Failed to write item to object store \""]
+  },
+  "202": {
+    "file": "indexed-db-wrapper.ts",
+    "template": "Failed to delete item with key \"${String(key)}\" from object store \"${objectStore.name}\": ${cause}",
+    "literals": ["Failed to delete item with key \"", "\" from object store \""]
+  },
+  "203": {
+    "file": "indexed-db-wrapper.ts",
+    "template": "Failed to clear object store \"${objectStore.name}\": ${cause}",
+    "literals": ["Failed to clear object store \""]
+  },
+  "204": {
+    "file": "indexed-db-wrapper.ts",
+    "template": "Failed to get all items from object store \"${objectStore.name}\": ${cause}",
+    "literals": ["Failed to get all items from object store \""]
+  },
+  "205": {
+    "file": "indexed-db-wrapper.ts",
+    "template": "Failed to get item with key \"${String(key)}\" from object store \"${objectStore.name}\": ${cause}",
+    "literals": ["Failed to get item with key \"", "\" from object store \""]
+  },
+  "206": {
+    "file": "collection/index.ts",
+    "template": "autoIndex: 'eager' requires defaultIndexType to be set. Import an index type and set it:\n  import { BasicIndex } from '@tanstack/db'\n  createCollection({ defaultIndexType: BasicIndex, autoIndex: 'eager', ... })",
+    "literals": [
+      "autoIndex: 'eager' requires defaultIndexType to be set. ",
+      "Import an index type and set it:\n",
+      "  import { BasicIndex } from '@tanstack/db'\n",
+      "  createCollection({ defaultIndexType: BasicIndex, autoIndex: 'eager', ... })"
+    ]
+  },
+  "207": {
+    "file": "collection/indexes.ts",
+    "template": "No index type specified and no defaultIndexType set on collection. Either pass indexType in config, or set defaultIndexType on the collection:\n  import { BasicIndex } from '@tanstack/db'\n  createCollection({ defaultIndexType: BasicIndex, ... })",
+    "literals": [
+      "No index type specified and no defaultIndexType set on collection. ",
+      "Either pass indexType in config, or set defaultIndexType on the collection:\n",
+      "  import { BasicIndex } from '@tanstack/db'\n",
+      "  createCollection({ defaultIndexType: BasicIndex, ... })"
+    ]
+  },
+  "208": {
+    "file": "collection/lifecycle.ts",
+    "template": "You can't directly call \"setStatus('ready'). You must use markReady instead.",
+    "literals": [
+      "You can't directly call \"setStatus('ready'). You must use markReady instead."
+    ]
+  },
+  "209": {
+    "file": "collection/lifecycle.ts",
+    "template": "Cannot start collection \"${this.id}\" during cleanup. Restart after cleanup() completes.",
+    "literals": [
+      "Cannot start collection \"",
+      "\" during cleanup. Restart after cleanup() completes."
+    ]
+  },
+  "210": {
+    "file": "collection/sync.ts",
+    "template": "Collection \"${this.id}\" is configured with syncMode \"on-demand\" but the sync function did not return a loadSubset handler. Either provide a loadSubset handler or use syncMode \"eager\".",
+    "literals": [
+      "Collection \"",
+      "\" is configured with syncMode \"on-demand\" but the sync function did not return a loadSubset handler. ",
+      "Either provide a loadSubset handler or use syncMode \"eager\"."
+    ]
+  },
+  "211": {
+    "file": "query/compiler/index.ts",
+    "template": "Query uses alias \"${alias}\" more than once. Give each source in one query a distinct alias.",
+    "literals": [
+      "Query uses alias \"",
+      "\" more than once. Give each source in one query a distinct alias."
+    ]
+  },
+  "212": {
+    "file": "query/live/collection-config-builder.ts",
+    "template": "Live query graph failed",
+    "literals": ["Live query graph failed"]
+  }
+}
