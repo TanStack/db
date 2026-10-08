@@ -1169,19 +1169,13 @@ export class CollectionStateManager<
       }
       const rowUpdateMode = this.config.sync.rowUpdateMode || `partial`
       for (const transaction of committedSyncedTransactions) {
-        const truncatePendingLocalChanges = transaction.truncate
-          ? new Set(this.pendingLocalChanges)
-          : undefined
-        const truncatePendingLocalOrigins = transaction.truncate
-          ? new Set(this.pendingLocalOrigins)
-          : undefined
         // Handle truncate operations first
         if (transaction.truncate) {
           // TRUNCATE PHASE
           // Clear the authoritative synced base. Subsequent server ops in this
           //    same commit will rebuild the base atomically.
-          // Preserve pending local tracking just long enough for operations in this
-          // truncate batch to retain correct local origin semantics.
+          // Keep active local mutations for later source transactions on keys
+          // this truncate does not write. Completed attribution is one-use.
           this.syncedData.clear()
           this.syncedMetadata.clear()
           this.hydrationSeedKeys.clear()
@@ -1193,7 +1187,9 @@ export class CollectionStateManager<
             this.hasAppliedAdapterTruncate = true
             this.appliedAdapterDeletedKeys.clear()
           }
-          this.clearOriginTrackingState()
+          this.virtualPropsCache.clear()
+          this.rowOrigins.clear()
+          this.pendingLocalOrigins.clear()
 
           // Clear currentVisibleState for truncated keys to ensure subsequent operations
           //    are compared against the post-truncate state (undefined) rather than pre-truncate state
@@ -1216,15 +1212,11 @@ export class CollectionStateManager<
           const key = operation.key as TKey
 
           // Attribute this source write from active or held same-key mutations.
-          const retainedLocalOrigin =
-            truncatePendingLocalChanges?.has(key) === true ||
-            truncatePendingLocalOrigins?.has(key) === true
           const origin: VirtualOrigin =
             this.isLocalOnly ||
             this.pendingLocalChanges.has(key) ||
             this.pendingLocalOrigins.has(key) ||
-            localKeys.has(key) ||
-            retainedLocalOrigin
+            localKeys.has(key)
               ? 'local'
               : 'remote'
           if (origin === `local`) localKeys.add(key)

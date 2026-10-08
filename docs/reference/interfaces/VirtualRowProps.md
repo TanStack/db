@@ -3,7 +3,7 @@ id: VirtualRowProps
 title: VirtualRowProps
 ---
 
-Defined in: [packages/db/src/virtual-props.ts:74](https://github.com/TanStack/db/blob/main/packages/db/src/virtual-props.ts#L74)
+Defined in: [packages/db/src/virtual-props.ts:76](https://github.com/TanStack/db/blob/main/packages/db/src/virtual-props.ts#L76)
 
 Virtual properties recognized on TanStack DB rows. The new
 `$hasPendingWrites` field is optional here so legacy four-field rows accepted
@@ -54,7 +54,7 @@ The type of the row's key (string or number)
 readonly $collectionId: string;
 ```
 
-Defined in: [packages/db/src/virtual-props.ts:149](https://github.com/TanStack/db/blob/main/packages/db/src/virtual-props.ts#L149)
+Defined in: [packages/db/src/virtual-props.ts:133](https://github.com/TanStack/db/blob/main/packages/db/src/virtual-props.ts#L133)
 
 The ID of the source collection this row originated from.
 
@@ -69,7 +69,7 @@ For live query collections, this is the ID of the upstream collection.
 readonly optional $hasPendingWrites: boolean;
 ```
 
-Defined in: [packages/db/src/virtual-props.ts:85](https://github.com/TanStack/db/blob/main/packages/db/src/virtual-props.ts#L85)
+Defined in: [packages/db/src/virtual-props.ts:87](https://github.com/TanStack/db/blob/main/packages/db/src/virtual-props.ts#L87)
 
 Whether this row currently has pending local optimistic writes.
 
@@ -86,7 +86,7 @@ rows always provide it.
 readonly $key: TKey;
 ```
 
-Defined in: [packages/db/src/virtual-props.ts:141](https://github.com/TanStack/db/blob/main/packages/db/src/virtual-props.ts#L141)
+Defined in: [packages/db/src/virtual-props.ts:125](https://github.com/TanStack/db/blob/main/packages/db/src/virtual-props.ts#L125)
 
 The row's key (primary identifier).
 
@@ -101,30 +101,12 @@ Useful when you need the key in projections or computations.
 readonly $origin: VirtualOrigin;
 ```
 
-Defined in: [packages/db/src/virtual-props.ts:133](https://github.com/TanStack/db/blob/main/packages/db/src/virtual-props.ts#L133)
+Defined in: [packages/db/src/virtual-props.ts:117](https://github.com/TanStack/db/blob/main/packages/db/src/virtual-props.ts#L117)
 
-Collection attribution for this row's current value.
-
-- `'local'`: An optimistic row or a source write attributed through a
-  same-key local mutation
-- `'remote'`: A source write without that local attribution
-
-Synced Collections infer attribution from key and timing, not a source
-client ID. With one persisting local mutation and no truncate, the first queued
-same-key source transaction published at successful mutation settlement
-consumes local attribution. Its surviving row is `'local'`; later source
-transactions are `'remote'`. A failed mutation gives those queued
-writes no local attribution. A truncate can publish while a mutation remains
-active, leaving its same-key row `'local'` even if the mutation later fails.
-A source write on a still-pending manual mutation's key applies immediately
-and can keep `'local'` attribution if that mutation rolls back.
-When two same-key mutations both persist before a source transaction is
-queued, with no truncate, a successful one retains one local attribution
-for the key even if its sibling fails; two failures retain none. A later
-same-key transaction in a truncate drain is
-`'remote'` after the truncate transaction consumes that attribution.
-A peer write can be labeled `'local'`, and a later local confirmation can be
-labeled `'remote'`.
+Collection attribution for this row's current value. `'local'` covers
+optimistic rows and attributed source writes; `'remote'` covers source
+writes without local attribution. See [VirtualOrigin](../type-aliases/VirtualOrigin.md) for the
+key-and-timing rules, including truncate and overlapping mutations.
 
 For local-only collections, this is always `'local'`.
 For live query collections, this is passed through from the source collection.
@@ -137,7 +119,7 @@ For live query collections, this is passed through from the source collection.
 readonly $synced: boolean;
 ```
 
-Defined in: [packages/db/src/virtual-props.ts:104](https://github.com/TanStack/db/blob/main/packages/db/src/virtual-props.ts#L104)
+Defined in: [packages/db/src/virtual-props.ts:106](https://github.com/TanStack/db/blob/main/packages/db/src/virtual-props.ts#L106)
 
 Whether this row currently has no pending local optimistic writes.
 

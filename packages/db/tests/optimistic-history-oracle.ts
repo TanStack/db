@@ -39,7 +39,11 @@ import type { CollectionConfig, SyncConfig } from '../src/types.js'
  * A truncate applies at once, with every queued sync transaction before it.
  * Its same-key source row can receive local attribution while a mutation still
  * persists, even if that mutation later fails. Still-persisting transactions
- * overlay the replacement.
+ * overlay the replacement. The truncate consumes active attribution for keys
+ * it writes, but an active mutation on an untouched key still attributes its
+ * first later source transaction, even when both transactions share a drain.
+ * Completed one-use attribution ends at the truncate. A later transaction on
+ * a key written by the truncate is remote without another local owner.
  *
  * The reference model has three small parts: the applied synced rows, an
  * ordered list of optimistic transactions with one mutation each, and a queue
@@ -66,6 +70,9 @@ import type { CollectionConfig, SyncConfig } from '../src/types.js'
  * reason. A later edit cannot determine the earlier manual request's outcome.
  * The model keeps pending distinct from persisting because the same source
  * commit publishes immediately in the former state and waits in the latter.
+ * A failed same-key edit that cascades also rolls back a pending manual peer.
+ * A persisting or different-key peer keeps its own settlement. Handler rejection
+ * cascades; an explicit rollback can request a secondary rollback without it.
  * Ordinary source batches write rows before deletes. The ordered-operations
  * lane also permits a delete and reinsert of one key in the same transaction.
  * Its `row` action combines source insert and update; the production driver
@@ -278,17 +285,30 @@ class HistoryModel {
     return this.transactions.length - 1
   }
 
-  settle(index: number, success: boolean) {
+  settle(index: number, success: boolean, cascade: boolean): Array<number> {
     const transaction = this.transactions[index]!
     transaction.state = success ? `completed` : `failed`
     transaction.held = success && this.queuedKeys().has(transaction.key)
     // A successful mutation grants one queued same-key source transaction
     // local attribution when that transaction is held at this boundary.
     transaction.originPending = transaction.held
-    // This grammar submits direct operations immediately. Rollback cascades
-    // affect pending (not already persisting) peer transactions, so none of
-    // these independently submitted requests is canceled by a sibling failure.
+    // This one-Collection model uses key equality for the public same-key
+    // conflict rule. Only pending peers can be canceled by a failed request.
+    const canceled: Array<number> = []
+    if (!success && cascade) {
+      for (const [peerIndex, peer] of this.transactions.entries()) {
+        if (
+          peerIndex !== index &&
+          peer.state === `pending` &&
+          peer.key === transaction.key
+        ) {
+          peer.state = `failed`
+          canceled.push(peerIndex)
+        }
+      }
+    }
     if (!this.persisting()) this.drain()
+    return canceled
   }
 
   sync(step: SourceBatch) {
@@ -303,8 +323,8 @@ class HistoryModel {
   }
 
   private drain() {
-    // A truncate can drain before a mutation settles. Its same-key source row
-    // uses the active mutation's attribution, regardless of later settlement.
+    // A truncate can drain before a mutation settles. Active keys survive it
+    // until a source operation touches them, regardless of later settlement.
     const activeKeys = new Set(
       this.transactions
         .filter(
@@ -351,7 +371,8 @@ class HistoryModel {
         attributed.delete(row.id)
         activeKeys.delete(row.id)
       }
-      // Truncate keeps attribution only for rows in its own replacement.
+      // Truncate ends completed one-use attribution. Active keys omitted by
+      // its operations remain eligible for a later transaction in this drain.
       if (batch.truncate) attributed.clear()
     }
     for (const transaction of this.transactions) {
@@ -1040,7 +1061,13 @@ export async function runOptimisticHistory(
           if (!active.length) continue
           const index = active[step.slot % active.length]!
           const op = operations[index]!
-          model.settle(index, step.success)
+          const canceled = model.settle(
+            index,
+            step.success,
+            step.failure === `reject` || step.cascade,
+          )
+          for (const peerIndex of canceled)
+            operations[peerIndex]!.expected = { status: `rejected` }
           // The drop and the queued sync transactions publish together.
           cuts = [sorted(model.visible().values())]
           if (step.success) {

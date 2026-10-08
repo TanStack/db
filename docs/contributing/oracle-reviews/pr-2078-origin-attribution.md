@@ -252,3 +252,120 @@ Final CodeRabbit accounting: **3 raw findings = 3 fixed-now**. There are no
 deferred or design-decision items. The original user's eight-item audit remains
 **8 raw = 8 fixed-now**; the unknown private #2071 bridge sequence remains an
 evidence limit, not a CodeRabbit item.
+
+## Subsequent nine-finding review of `e659d413e`
+
+The external medium-effort review examined `e659d413e0f52fa0f9d800fb1d5a41ca784199c3`
+by reading code; it reported no executed checks. Evaluation began on
+`ee21b1797eb7cfc9dfa18a05637477a10de67828`, which had already repaired
+the manual-transaction defects in M04 and M05. The nine numbered findings are
+all the review's claims; its closing remarks add context, not a tenth item.
+
+| ID | Review claim and proposed repair | Technical verdict and evidence | PR disposition and durable value |
+| --- | --- | --- | --- |
+| M01 | A truncate on key 1 clears active attribution for untouched key 2; a later key 2 source transaction in the same drain becomes remote. | **Correct, high severity.** A real subscriber committed a truncate suffix and later key 2 write while an edit on key 2 remained active. The public row was remote where the independent model required local. Both publication and settlement variants failed on the reviewed production logic. | **fixed-now.** Preserve active keys across truncate; the primary optimistic-history oracle owns the origin law. |
+| M02 | Clearing `pendingLocalChanges` on truncate caused M01; keep it and remove the temporary origin snapshots. | **Correct.** The snapshot copies covered only the truncate transaction. Removing the clear and snapshots preserves untouched active keys while existing same-key controls still consume attribution. | **fixed-now.** The production change removes the per-transaction snapshots and clears only row origins, completed attribution, and the virtual-props cache at truncate. |
+| M03 | The reentrant grammar never wrote a later different key with an active edit. | **Correct coverage gap.** The former fixed histories wrote key 1 only. The new key 2 history failed on the original production logic at the promised public cuts. | **fixed-now.** Two optimistic-visibility variants join the primary publication owner; the coverage map names the bounded shape. |
+| M04 | A pending manual transaction's shared handler could take a later edit's deferred result. | **Correct at the reviewed head; already fixed** in `ee21b1797`. The prior review record documents a later-edit RED settlement assertion and a hostile shared-handler variant; the current driver binds its own deferred. | **already-fixed.** Preserve the later-edit witness and settlement law in the optimistic-history owner. |
+| M05 | Rejection of a pending manual request never commits it, so the model fails it while production stays pending. | **Correct at the reviewed head; already fixed** in `ee21b1797`. The prior RED assertion and current guarded rejection, commit, and cleanup are recorded above. | **already-fixed.** Preserve success, direct rollback, and rejection cases; no second patch to the handler was needed. |
+| M06 | The no-cascade model comment is false for a failed same-key edit and pending manual peer. | **Correct.** Explicit cascading rollback and handler rejection made production reject the peer while the old model kept its overlay. The mismatch reached settlement, not a timeout. | **fixed-now.** The model cancels pending same-key peers; six cases distinguish same/different keys, cascading/secondary rollback, and handler rejection. |
+| M07 | The real SQLite test rejects an outbound promise that no handler observes if setup fails before insert. | **Correct.** A temporary pre-insert failure produced both the intended error and a Vitest unhandled rejection. The same injection after the guard preserved only the primary failure. | **fixed-now.** Reject outbound only once a transaction exists; this protects test failure fidelity. |
+| M08 | The model keeps active keys through truncate while production clears them, without explaining the difference. | **Correct explanatory and implementation gap.** The model's active-key rule was the independent expected behavior that exposed M01; its comment did not distinguish active from completed attribution. | **fixed-now.** Opening and local model prose now explain why untouched active keys survive and completed one-use attribution ends. |
+| M09 | The origin contract is repeated across source, glossary, guide, and generated reference pages and had drifted. | **Correct.** The same detailed paragraph appeared six times. The generated reference copy also stated the broken drain rule. | **fixed-now.** `VirtualOrigin` source prose is the detailed contract; the interface, glossary, and guide summarize and link to its generated reference entry. Five affected reference pages carry the regenerated text and corrected source anchors. |
+
+No original severity labels were supplied. M01 is the release-relevant product
+regression; M03, M04, M05, M06, and M08 concern oracle reach or judgment; M07
+concerns test failure fidelity; M09 concerns contract drift. The reviewer was
+technically accurate on all nine items at the reviewed commit and found the
+interaction between the prior fix and active-key ownership. The proposed M02
+repair was both correct and smaller than the snapshot approach. The review
+did not report execution, so its failure claims needed the probes above.
+**Hire recommendation: yes** for further review work, with executable
+calibration required before accepting behavior claims.
+
+### Laws, reachable histories, and enforcement
+
+**L6: Truncate preserves active attribution for untouched keys (M01–M03,
+M08–M09).** The public `VirtualOrigin` contract and the existing key-and-timing
+model require a source write on an active local mutation's key to be local
+until a source operation consumes that key. A truncate ends completed one-use
+attribution, but an active mutation on a key the truncate omits is still active.
+The old production clear contradicted this law. The old oracle lacked the
+different-key suffix, so it never distinguished the clear from the model.
+The independent model retains active keys until a source operation touches
+them and clears completed grants at truncate. The legal fixed history has one
+active edit on key 2, a subscriber-triggering truncate, a second truncate
+writing key 1, then a non-truncate key 2 source transaction in the same drain.
+Both optimistic and nonoptimistic edit visibility are tested. The existing
+later same-key suffix controls the opposite boundary: a key written by the
+truncate loses attribution for a later transaction. The real Collection sync
+driver compares public rows and origin, both subscriber replicas, downstream
+rows, outcomes, and complete publication cuts after each step. On the old
+implementation, the nonoptimistic case failed at source publication and the
+optimistic case failed when the failed edit's `isPersisted` settled: actual
+`remote`, expected `local`. Those are assertion failures at the intended
+cuts. The repaired code passes both and the same-key controls. This closes the
+two-key, one-active-edit, two-suffix-batch core boundary tested here; it does
+not establish every longer reentrant drain or provider bridge sequence.
+
+**L7: A cascading failure cancels a pending same-key peer (M06).** Public
+transaction settlement and the established same-key conflict rule require a
+pending manual peer to reject when a failing edit cascades rollback to it.
+A different-key peer, an already persisting peer, or a secondary rollback
+does not acquire that outcome from this failure. The old model comment and
+transition wrongly omitted the pending-peer cancellation, allowing false
+failures against correct production behavior. The model now uses its own
+one-Collection key equality and pending state to derive the canceled peers;
+it does not import the production conflict helper. The six fixed histories
+cross same/different keys with direct cascading rollback, secondary rollback,
+and handler rejection. They run real `createTransaction({ autoCommit: false })`,
+`mutate`, `commit` or `rollback`, and `isPersisted`. Each step compares
+visible rows, origin, event replicas, downstream rows, request outcomes, and
+publication cuts. The old no-cascade model failed at settlement in the
+same-key cases; the corrected model passes all six, while the different-key
+and secondary controls distinguish overbroad cancellation. This closes the
+two-request pending-peer boundary tested here, not arbitrary conflict graphs.
+
+**L8: A pending manual request settles by its own handler (M04–M05).** The
+contract, grammar, core path, settlement observations, original RED results,
+shared-handler hostile control, and remaining longer-history limit are
+documented under CR3 above. This review rechecked that the current driver
+still uses that path and that its focused suite remains green. M04 and M05
+were true of `e659d413e` but required no new repair after `ee21b1797`.
+
+M07 needed a controlled failure injection, not a product model: the test
+cleanup must not create an unhandled rejection that masks its primary setup
+failure. M09 needed direct source comparison, TypeDoc output, and working
+relative links, not a state oracle. The five generated reference pages contain
+one detailed contract in `VirtualOrigin` and summaries elsewhere; their
+source anchors match the current declarations.
+
+### Oracle-guide audit and verification
+
+| Requirement | Outcome for this review |
+| --- | --- |
+| ORC-001/003 | L6–L8 state authority, finite limits, model rules, grammar, production path, and comparison cuts beside the executable owner. The canonical origin prose and coverage map were updated with the executable law. |
+| ORC-002/008/009 | The model retains active keys independently of production tracking and distinguishes pending from persisting. Cancellation uses model key/state, not the production helper. The model-only row action and public terms remain mapped in the opening. |
+| ORC-004/013 | The new key 2 suffix reconstructs the reported trace; same-key later-write and both visibility modes distinguish wrong boundaries. The six peer histories ablate key equality and cascade mode. The existing grammar rejects a reentrant suffix without truncate. Domains and longer-history limits are explicit above and in the coverage map. |
+| ORC-005/006 | Original truncate logic and old no-cascade model failed assertions at named public cuts. The earlier manual-handler omissions and shared-handler mutant failed at settlement. No timeout, setup error, or mere path reach is counted as a kill. |
+| ORC-007 | The additions are bounded fixed histories, not a new important generated property. Existing generated campaigns were not changed. |
+| ORC-010 | The real SQLite pre-insert injection separated its primary error from the unhandled rejection; the guard removed the latter. Existing cleanup aggregation still preserves primary history failures. |
+| ORC-011 | No new shared semantic fault between production and the independent model was identified, so a second formulation is not triggered. Same-key and different-key controls test the boundary; no new real-provider equivalence is claimed. |
+| ORC-012/014 | This record binds the reviewed head and RED/GREEN evidence. The core reentrant claim stays at the core Collection boundary; the private bridge still needs its callback/write sequence and a persisted receiver. |
+
+After the repair, 241 core tests passed across optimistic publication,
+outcomes, state retention, and truncate readiness, with no test type errors.
+The SQLite real-adapter and persisted oracle run passed 869 tests with two
+existing todo tests and no test type errors. The doc generator emitted the five
+relevant reference pages, but also produced unrelated changes because several
+package dependencies were unavailable; those unrelated changes were not part
+of this repair. The focused source and link checks found no stale repeated
+origin paragraph or invalid `VirtualOrigin` relative link.
+
+Final loss audit for this review: **9 raw items = 7 fixed-now + 2
+already-fixed**. There are no refutations, accepted-design items, design
+decisions, or agreed deferrals. The reviewed claims are accounted for and
+the authorized bounded repairs are complete. No universal claim is made for
+longer reentrant suffixes, larger rollback conflict graphs, other SQLite
+hosts, or the unavailable private #2071 bridge sequence; their executable
+owners and needed witnesses remain in the coverage map.

@@ -461,7 +461,7 @@ it.each([
       hasPrimaryFailure = true
       throw error
     } finally {
-      rejectOutbound(refused)
+      if (transaction) rejectOutbound(refused)
       await cleanupTestActions(
         [
           () => transaction?.isPersisted.promise.catch(() => undefined),

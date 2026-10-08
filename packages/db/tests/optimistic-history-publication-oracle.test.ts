@@ -349,6 +349,53 @@ it.each([false, true])(
   },
 )
 
+// A truncate consumes attribution for keys it writes, while an active edit on
+// another key still owns its first later source transaction in the same drain.
+// The nonoptimistic lane exposes source origin at the drain cut; the optimistic
+// lane exposes it when the failed edit drops its overlay.
+it.each([false, true])(
+  `retains active attribution for another key after truncate, optimistic=%s`,
+  async (optimistic) => {
+    const counts = await runOptimisticHistory(
+      [],
+      [
+        { type: `edit`, key: 2, fields: { a: 1 }, optimistic },
+        {
+          type: `reentrant`,
+          trigger: {
+            type: `sync`,
+            rows: [{ id: 1, a: 1, b: 0, c: 0 }],
+            truncate: true,
+            copies: 1,
+          },
+          batches: [
+            {
+              type: `sync`,
+              rows: [{ id: 1, a: 2, b: 0, c: 0 }],
+              truncate: true,
+              copies: 1,
+            },
+            {
+              type: `sync`,
+              rows: [{ id: 2, a: 3, b: 0, c: 0 }],
+              truncate: false,
+              copies: 1,
+            },
+          ],
+        },
+        { type: `settle`, slot: 0, success: false, cascade: false },
+      ],
+    )
+    expect(counts).toMatchObject({
+      edits: 1,
+      settlements: 1,
+      failures: 1,
+      replacements: 2,
+      sourceInserts: 3,
+    })
+  },
+)
+
 // Two active same-key mutations share one source key but settle independently.
 // A failure cannot consume another mutation's held attribution; a second
 // source transaction still needs to lose attribution after the first.

@@ -7,7 +7,7 @@ title: VirtualOrigin
 type VirtualOrigin = "local" | "remote";
 ```
 
-Defined in: [packages/db/src/virtual-props.ts:36](https://github.com/TanStack/db/blob/main/packages/db/src/virtual-props.ts#L36)
+Defined in: [packages/db/src/virtual-props.ts:38](https://github.com/TanStack/db/blob/main/packages/db/src/virtual-props.ts#L38)
 
 Collection attribution for a row's current value.
 
@@ -22,13 +22,15 @@ consumes local attribution. Its surviving row is `'local'`; later source
 transactions are `'remote'`. A failed mutation gives those queued
 writes no local attribution. A truncate can publish while a mutation remains
 active, leaving its same-key row `'local'` even if the mutation later fails.
+An unconsumed active mutation on a key omitted by the truncate retains
+attribution for its first later same-key source transaction, even in that
+drain. A truncate's own write consumes attribution for its key, so a later
+transaction on that key is `'remote'` without another local owner.
 A source write on a still-pending manual mutation's key applies immediately
 and can keep `'local'` attribution if that mutation rolls back.
 When two same-key mutations both persist before a source transaction is
 queued, with no truncate, a successful one retains one local attribution
-for the key even if its sibling fails; two failures retain none. A later
-same-key transaction in a truncate drain is
-`'remote'` after the truncate transaction consumes that attribution.
+for the key even if its sibling fails; two failures retain none.
 An independent peer write can be labeled `'local'`, and a later confirmation
 from this client can be labeled `'remote'`. Local-only Collections always use
 `'local'`.

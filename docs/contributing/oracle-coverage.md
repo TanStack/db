@@ -795,7 +795,9 @@ The post-merge review added three missing domains to existing owners:
   writes; a same-key source row can retain local attribution after rollback.
   A subscriber can commit a truncate and a later same-key transaction during
   another drain. The truncate batch keeps its attribution, while the later
-  transaction in that drain is remote. Bounded histories also cross two
+  transaction on its written key is remote. An active mutation on a key the
+  truncate does not write still attributes that key's first later transaction
+  in the same drain. Bounded histories also cross two
   persisting same-key mutations, one or two source batches, both settlement
   orders, and success/failure combinations. The first source batch is local
   when at least one mutation succeeds; two failures leave it remote. A hostile
@@ -806,9 +808,11 @@ The post-merge review added three missing domains to existing owners:
   A later disjoint edit cannot supply the earlier manual request's handler
   outcome. The original harness left rejected manual requests pending; the
   new settlement check rejects that harness and a shared-handler variant.
-  Longer manual interleavings and same-key cascade combinations remain outside
-  these fixed histories. The original truncate implementation failed the
-  reentrant history at failed-mutation settlement. The earlier
+  Six pending-peer histories distinguish same-key rollback cascades from
+  secondary rollback and different-key controls, through public settlement
+  and publication. Longer manual interleavings and larger same-key cascades
+  remain outside these fixed histories. The original truncate implementation
+  failed the reentrant history at failed-mutation settlement. The earlier
   accepted-snapshot retention law
   and its truncate-capture ownership refinement were retired with this
   contract. The
@@ -841,8 +845,9 @@ Issue #2071 adds two focused checks to this acceptance map:
   an absent-key delete before a source insert, a delete and reinsert in one
   atomic source transaction, a truncate published before
   a mutation fails, pending manual mutations, two overlapping same-key
-  mutations, and a truncate followed by another same-key transaction in one
-  reentrant drain. The persisted wrapper receives the one/two transaction
+  mutations, a truncate followed by another same-key transaction, and a
+  truncate followed by a different-key transaction with an active mutation in
+  one reentrant drain. The persisted wrapper receives the one/two transaction
   pair. The source grammar can now preserve mixed write order inside one
   transaction; its atomic delete/reinsert witness is distinguished from a
   later same-key transaction. These histories establish bounded key-and-timing
