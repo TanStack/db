@@ -37,6 +37,12 @@
  *   its sub-expressions, is passed to the code line. Plain objects, such as
  *   rows, never reach it (maintainer decision, 2026-10-07). `AggregateError` messages count too. A message built only
  *   from a caller's value, such as `new Error(String(error))`, is not a site.
+ * - **Console messages:** a `console` call that reports a runtime failure is a
+ *   site too and is coded the same way. A developer hint is development-only:
+ *   it sits inside the erasable guard's branch, or after an early `return` on
+ *   its negation, and its text is frozen in
+ *   `fixtures/development-only-messages.json`. The bundle check proves that
+ *   production drops every frozen hint (maintainer decision, 2026-10-08).
  *
  * The model is the frozen fixtures and the format above; nothing here reads
  * codes from `src/errors.ts`. The production path is every error class that the
@@ -57,6 +63,7 @@ import { dirname, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import * as Errors from '../src/index'
+import { codedWarning } from '../src/error-message'
 import { errorSampleArguments } from './error-sample-arguments'
 import { findErrorSites } from './error-sites-oracle'
 
@@ -66,6 +73,10 @@ const devMessages: Record<string, Array<string>> = JSON.parse(
 )
 const codesPath = resolve(testsDirectory, `fixtures/error-codes.json`)
 const sitesPath = resolve(testsDirectory, `fixtures/error-site-messages.json`)
+const developmentOnlyPath = resolve(
+  testsDirectory,
+  `fixtures/development-only-messages.json`,
+)
 const docsPath = resolve(testsDirectory, `../../../docs/errors.md`)
 const docsUrl = `https://tanstack.com/db/latest/docs/errors`
 
@@ -111,6 +122,9 @@ const hostileInputs: Array<unknown> = [
   `a\nb, c=d)`,
   `a\u2028b\u2029c`,
   [{ secret: `row` }],
+  // JSON calls toJSON before any replacer, so these must never reach it.
+  [{ toJSON: () => `secret-row` }],
+  Object.assign([1], { toJSON: () => `secret-array` }),
   [1n],
   [undefined],
 ]
@@ -268,7 +282,12 @@ describe(`production error messages`, () => {
     )
     const frozen: Record<
       string,
-      { file: string; template: string; literals: Array<string> }
+      {
+        file: string
+        template: string
+        literals: Array<string>
+        kind?: `warning`
+      }
     > = JSON.parse(readFileSync(sitesPath, `utf8`))
 
     // Only validateCollectionConfig reaches these diagnostics, and
@@ -284,12 +303,13 @@ describe(`production error messages`, () => {
 
     it(`keeps each site's development message and code`, () => {
       const current = Object.fromEntries(
-        sites.coded.map(({ code, file, template, literals }) => [
+        sites.coded.map(({ code, file, template, literals, kind }) => [
           code,
           {
             file,
             template,
             literals: literals.filter((text) => /[A-Za-z]/.test(text)),
+            ...(kind === `warning` ? { kind } : {}),
           },
         ]),
       )
@@ -333,6 +353,66 @@ describe(`production error messages`, () => {
         expect(guard.code, `${guard.file} ${guard.name}`).toBe(
           codes[guard.name],
         )
+    })
+
+    // Developer hints are development-only (maintainer decision,
+    // 2026-10-08). Their text is frozen here, and the bundle check proves a
+    // production bundle drops every frozen literal.
+    it(`freezes every development-only literal`, () => {
+      const frozenRegions: Array<{ file: string; literals: Array<string> }> =
+        JSON.parse(readFileSync(developmentOnlyPath, `utf8`))
+      expect(sites.developmentOnly).toEqual(frozenRegions)
+    })
+
+    // The census is the classifier these laws rest on, so its rules are
+    // pinned on hand-written cases: one per rule, in fixtures/census.
+    it(`classifies guarded, unguarded, and coded census cases`, () => {
+      const cases = findErrorSites(
+        resolve(testsDirectory, `fixtures/census/src`),
+      )
+      expect(cases.plain.map(({ template }) => template)).toEqual([
+        `console alias: console.warn`,
+        `Or-guarded hint text`,
+        `\${devBuild() && process.env.NODE_ENV !== \`production\` ? Failed to save the row: : }`,
+        `console alias: {warn}=console`,
+        `Helper hint text`,
+      ])
+      expect(cases.developmentOnly).toEqual([
+        { file: `cases.ts`, literals: [`Guarded hint text`] },
+        { file: `cases.ts`, literals: [`Braced return hint text`] },
+      ])
+      expect(
+        cases.coded.map(({ code, template, stored }) => [
+          code,
+          template,
+          stored,
+        ]),
+      ).toEqual([
+        [1, `Failed for \${id}`, false],
+        [2, `Stored failure text`, true],
+      ])
+    })
+
+    // The warning and sink laws read where a message is used, so a coded
+    // message is used where it is written, not stored first.
+    it(`uses every coded message where it is written`, () => {
+      expect(
+        sites.coded
+          .filter(({ stored }) => stored)
+          .map(({ file, code }) => `${file} ${code}`),
+      ).toEqual([])
+    })
+
+    // A warning says so (maintainer decision, 2026-10-08): a console.warn
+    // message uses codedWarning, and nothing else does.
+    it(`codes a console.warn message as a warning`, () => {
+      const mismatched = sites.coded
+        .filter(({ kind, inWarn }) => (kind === `warning`) !== inWarn)
+        .map(({ file, code, kind }) => `${file} ${kind} ${code}`)
+      expect(mismatched).toEqual([])
+      expect(codedWarning(7, { key: 1 })).toBe(
+        `TanStack DB warning 7 (key=1): ${docsUrl}#warning-7`,
+      )
     })
 
     it(`never reuses a class code`, () => {
@@ -385,12 +465,15 @@ describe(`production error messages`, () => {
       const heading = new RegExp(`^## Error ${code}\\b.*${name}`, `m`)
       expect(docs, `${name} (${code})`).toMatch(heading)
     }
-    const sites: Record<string, { file: string }> = JSON.parse(
+    const sites: Record<string, { file: string; kind?: string }> = JSON.parse(
       readFileSync(sitesPath, `utf8`),
     )
-    for (const [code, { file }] of Object.entries(sites)) {
-      const heading = new RegExp(`^## Error ${code}\\b.*${file}`, `m`)
-      expect(docs, `error ${code} (${file})`).toMatch(heading)
+    for (const [code, { file, kind }] of Object.entries(sites)) {
+      const title = kind === `warning` ? `Warning` : `Error`
+      const anchor = `<a id="${kind ?? `error`}-${code}"></a>`
+      const heading = new RegExp(`^## ${title} ${code}\\b.*${file}`, `m`)
+      expect(docs, `${title} ${code} (${file})`).toMatch(heading)
+      expect(docs, `${title} ${code} anchor`).toContain(anchor)
     }
   })
 })

@@ -2,7 +2,6 @@ import { safeRandomUUID } from './utils/uuid'
 import { withCollectionConfigFactory } from './client.js'
 import { collectionOptionsClaim } from './collection-options.js'
 import { registerTransactionCommitWork } from './transaction-commit-work.js'
-import { codedMessage, devBuild } from './error-message.js'
 import {
   InvalidStorageDataFormatError,
   InvalidStorageObjectFormatError,
@@ -10,6 +9,7 @@ import {
   SerializationError,
   StorageKeyRequiredError,
 } from './errors'
+import { codedMessage, codedWarning, devBuild } from './error-message.js'
 import type {
   BaseCollectionConfig,
   CollectionConfig,
@@ -469,7 +469,9 @@ export function localStorageCollectionOptions(
       return serialized
     } catch (error) {
       console.error(
-        `[LocalStorageCollection] Error saving data to storage key "${config.storageKey}":`,
+        devBuild() && process.env.NODE_ENV !== `production`
+          ? `[LocalStorageCollection] Error saving data to storage key "${config.storageKey}":`
+          : codedMessage(218, { storageKey: config.storageKey }),
         error,
       )
       throw error
@@ -753,7 +755,7 @@ export function localStorageCollectionOptions(
         new LocalStorageCollectionError(
           devBuild() && process.env.NODE_ENV !== `production`
             ? `LocalStorage manual acceptance belongs to a different Collection.`
-            : codedMessage(214),
+            : codedMessage(231),
         ),
       )
       registerTransactionCommitWork(transaction, work)
@@ -792,7 +794,7 @@ export function localStorageCollectionOptions(
         throw new LocalStorageCollectionError(
           devBuild() && process.env.NODE_ENV !== `production`
             ? `LocalStorage options can create only one Collection. Create fresh options for each Collection.`
-            : codedMessage(213),
+            : codedMessage(230),
         )
       claimed = true
     },
@@ -945,7 +947,9 @@ function createLocalStorageSync<T extends object>(
         knownSnapshot ?? readFromStorage<T>(storageKey, storage, parser, getKey)
     } catch (error) {
       console.warn(
-        `[LocalStorageCollection] Error loading data from storage key "${storageKey}":`,
+        devBuild() && process.env.NODE_ENV !== `production`
+          ? `[LocalStorageCollection] Error loading data from storage key "${storageKey}":`
+          : codedWarning(219, { storageKey }),
         error,
       )
       return

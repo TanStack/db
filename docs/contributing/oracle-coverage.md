@@ -68,7 +68,7 @@ that test identifiers must copy production's private data structures.
 | Pooled live queries | Complete for bounded eq-filter grammar | The contract, independent `eq` model, live-query Collection second formulation, sync/optimistic/mount/cleanup-restart grammar, observer driver, and per-step refinement check are literate. On-demand and persisted sources, `DbClient`, Suspense, and every clause beyond `eq` conjuncts keep the live-query Collection. |
 | Live-query deferred acquisition | Complete for bounded synchronous grammar | The law, independent model, history grammar over source states, shapes, and depth, real-Collection driver, and per-step refinement check are literate. Pooled views and DbClient stream preloads have their own blocks. The grammar also adds a peer consumer starting the source and a source truncate before the first subscriber; pinned blocks cover a subscriber that outlives cleanup and reads that wait for readiness. Asynchronous sources, several live-query consumers, and failure stay open. |
 | Flat-row change tracking | Complete for bounded flat-row grammar | Flat and proxy trackers and an independent change model run the same generated callbacks. Nested values fall back to the proxy, which its own oracles own. |
-| Production error messages | `packages/db/tests/production-error-messages-oracle.test.ts` | Every public error class keeps its development message for frozen sample inputs, and its coded production line shows the JSON of each shown input, even for hostile inputs. Every plain `Error`, `TypeError`, `RangeError`, or `AggregateError` site in `packages/db/src` keeps its frozen development template, has a code, and passes each showable interpolated expression or one of its sub-expressions; the TypeScript checker keeps plain objects, such as rows, out of production lines. A projection of an object, such as `Object.keys(handlers)`, is not required. `scripts/test-production-errors.mjs` checks that a production bundle drops the full text. Text sent only to `console` and errors built from a caller's value stay outside this owner. |
+| Production error messages | `packages/db/tests/production-error-messages-oracle.test.ts` | Every public error class keeps its development message for frozen sample inputs, and its coded production line shows the JSON of each shown input, even for hostile inputs. Every plain `Error`, `TypeError`, `RangeError`, or `AggregateError` site in `packages/db/src` keeps its frozen development template, has a code, and passes each showable interpolated expression or one of its sub-expressions; the TypeScript checker keeps plain objects, such as rows, out of production lines. A projection of an object, such as `Object.keys(handlers)`, is not required. Every `console` call whose argument holds library text is coded, development-only with its text frozen per guarded region, or a development-only decoration of a value. Text that reaches the console through a parameter, such as `setErrorState(message)`, is coded where it is written; the census cannot follow it. `scripts/test-production-errors.mjs` checks that a production bundle drops the full text and every development-only hint, in ESM and CommonJS. Errors built from a caller's value stay outside this owner. |
 | Lazy target path identity                | Focused compiler boundary                                      | A same-source union/coalesce witness keeps dotted and nested demand paths distinct during target deduplication.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
 | Correlated include path identity         | Focused public route-context witnesses                         | One-level and nested includes keep dotted and nested parent paths, including ancestor aliases, distinct. Conditional result paths receive separate routes. Fixed fixtures cover initial reads and selected source updates; other recursive source forms and arbitrary path segments remain outside this witness.                                                                                                                                                                                                                                                                                                                                   |
 | Alias scope identity                     | Generated cross-scope alpha-renaming with an independent model | Optimizer copies, wraps, and collapses keep `SourceId`; compilation binds inputs by `SourceId` only; includes cannot shadow a parent subquery alias. Unreached forms and channels are listed in the owner row.                                                                                                                                                                                                                                                                                                                                                                                                                                     |
@@ -813,15 +813,87 @@ The post-merge review added three missing domains to existing owners:
   Sync transactions committed while it persisted are held and publish with
   that drop; `isPersisted` settles after that publication. Handler sync writes
   are generated at every cut, with and without awaiting their acceptance.
-  Receipts stay pending until visible. A confirmation committed while the
-  transaction persists is `$origin: 'local'`; one committed after settlement
-  is `'remote'`. The earlier accepted-snapshot retention law and its
-  truncate-capture ownership refinement were retired with this contract; the
+  Receipts stay pending until visible. With one persisting local mutation and no
+  truncate, the first queued same-key source transaction consumes local
+  attribution at settlement if that mutation succeeds. An absent-key delete
+  consumes it without leaving a row. Repeated same-key writes in that first
+  atomic source transaction keep its attribution. Later source transactions
+  are `'remote'` without another local owner. A truncate can publish while the
+  mutation remains active and label its same-key row `'local'` even if that
+  mutation later fails. Attribution uses key and timing; `SyncConfig.write`
+  has no causal client identity. A pending manual mutation does not hold source
+  writes; a same-key source row can retain local attribution after rollback.
+  A subscriber can commit a truncate and a later same-key transaction during
+  another drain. The suffix truncate can use the still-active mutation's
+  attribution. The later same-key transaction in that suffix drain is remote.
+  An active mutation on a key the
+  truncate does not write still attributes that key's first later transaction
+  in the same drain. Bounded histories also cross two
+  persisting same-key mutations, one or two source batches, both settlement
+  orders, and success/failure combinations. The first source batch is local
+  when at least one mutation succeeds; two failures leave it remote. A hostile
+  failed-sibling mutant fails the one-success cases at settlement. The pending
+  lane rejects a mutant that ignores pending mutations at its source or
+  settlement publication. Bounded manual histories now cross success, direct
+  rollback, and handler rejection with both optimistic visibility settings.
+  A later disjoint edit cannot supply the earlier manual request's handler
+  outcome. The original harness left rejected manual requests pending; the
+  new settlement check rejects that harness and a shared-handler variant.
+  Six pending-peer histories distinguish same-key rollback cascades from
+  secondary rollback and different-key controls, through public settlement
+  and publication. Longer manual interleavings and larger same-key cascades
+  remain outside these fixed histories. The original truncate implementation
+  failed the reentrant history at failed-mutation settlement. The earlier
+  accepted-snapshot retention law
+  and its truncate-capture ownership refinement were retired with this
+  contract. The
   [PR #1907 review record](oracle-reviews/pr-1907-accepted-delete-ownership.md)
-  is historical; the [settlement-drop review record](oracle-reviews/2026-10-03-settlement-drop.md)
+  is historical. The [settlement-drop review record](oracle-reviews/2026-10-03-settlement-drop.md)
   holds the RED/GREEN and mutant evidence. A handler that awaits a visibility receipt held by its own
   transaction, such as an on-demand load of its own Collection, waits for
   itself; that history is outside the generated grammar.
+
+Issue #2071 adds two focused checks to this acceptance map:
+
+- The [issue #2071 review](oracle-reviews/issue-2071-refused-insert.md)
+  checks a rejecting `onInsert` through the persisted wrapper. Four controlled
+  histories cross source insert/delete with acceptance before/after rejection.
+  They compare live rows, exposed base, durable rows, origin, and a held source
+  receipt at mutation settlement and after source application. The
+  [real SQLite receiver](https://github.com/TanStack/db/blob/main/packages/db-sqlite-persistence-core/tests/persisted-real-adapter-lifecycle.test.ts)
+  checks two same-key continuations, including a real source `update` after
+  reinsert. Each reopens the same file with a new
+  Collection, adapter, and SQLite driver. Both the reported release and this
+  review tree pass these bounded histories. The reporter's private bridge
+  sequence is unavailable; these witnesses do not establish its behavior,
+  other mutation kinds, on-demand sync, other SQLite hosts, or an OS process
+  restart. The persisted wrapper owner needs the bridge callback and write
+  sequence to reach that path.
+
+- The [optimistic publication owner](https://github.com/TanStack/db/blob/main/packages/db/tests/optimistic-history-publication-oracle.test.ts)
+  distinguishes one and two queued same-key source transactions during a
+  successful local mutation, two same-key writes inside one atomic transaction,
+  an absent-key delete before a source insert, a delete and reinsert in one
+  atomic source transaction, a truncate published before
+  a mutation fails, pending manual mutations, two overlapping same-key
+  mutations, a truncate followed by another same-key transaction, and a
+  truncate followed by a different-key transaction with an active mutation in
+  one reentrant drain. The persisted wrapper receives the one/two transaction
+  pair. The source grammar can now preserve mixed write order inside one
+  transaction; its atomic delete/reinsert witness is distinguished from a
+  later same-key transaction. These histories establish bounded key-and-timing
+  attribution; they do not establish every mixed operation sequence, causal
+  authorship, or every overlapping mutation schedule. A
+  causal `$origin` guarantee would require an explicit source signal and a new
+  core-owner model and provider receiving witness. The
+  [PR #2078 review](oracle-reviews/pr-2078-origin-attribution.md) records the
+  original same-drain RED, the repair, and hostile controls. The optimistic
+  history owner still needs controlled pending-plus-persisting same-key
+  histories, truncate with two active owners, and longer reentrant or mixed
+  source suffixes if those broader schedules are claimed. Such a witness must
+  compare origin and complete publication cuts, not only the final row. The
+  persisted wrapper owner still needs the private bridge callback and write
+  sequence before claiming that reported path.
 
 | Issue obligation           | Implemented evidence                                                                                                                                                        | Limit                                                                                        |
 | -------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------- |

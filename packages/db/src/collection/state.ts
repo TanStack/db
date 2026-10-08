@@ -146,23 +146,19 @@ export class CollectionStateManager<
   >()
 
   /**
-   * Tracks the origin of confirmed changes for each row.
-   * 'local' = change originated from this client
-   * 'remote' = change was received via sync
-   *
-   * This is used for the $origin virtual property.
-   * Note: This only tracks *confirmed* changes, not optimistic ones.
-   * Optimistic changes are always considered 'local' for $origin.
+   * Tracks Collection attribution for applied source rows. A same-key local
+   * mutation can make an independent source write appear 'local'; this map
+   * does not identify the source client. Optimistic rows are separately 'local'.
+   * Used for the $origin virtual property.
    */
   public rowOrigins = new Map<TKey, VirtualOrigin>()
 
   /**
-   * Tracks keys that have pending local changes.
-   * Used to determine whether sync-confirmed data should have 'local' or 'remote' origin.
-   * When sync confirms data for a key with pending local changes, it keeps 'local' origin.
+   * Tracks keys of pending or persisting local mutations for source-write attribution.
+   * A same-key source write can receive 'local' even when a peer supplied it.
    */
   public pendingLocalChanges = new Set<TKey>()
-  // A completed mutation attributes only the sync writes committed before its
+  // A successful mutation attributes only the sync writes committed before its
   // optimistic state dropped: those held at its completion boundary. Active or
   // failed mutations must not add to, or erase a sibling's entry in, this set.
   public pendingLocalOrigins = new Set<TKey>()
@@ -251,8 +247,8 @@ export class CollectionStateManager<
   }
 
   /**
-   * Gets the origin of the last confirmed change to a row.
-   * Returns 'local' if the row has optimistic mutations (optimistic changes are local).
+   * Gets Collection attribution for a row. An optimistic row is 'local';
+   * otherwise the applied source row retains its timing-based attribution.
    * Used to compute the $origin virtual property.
    */
   public getRowOrigin(key: TKey): VirtualOrigin {
@@ -1116,9 +1112,6 @@ export class CollectionStateManager<
       // Set flag to prevent redundant optimistic state recalculations
       this.isCommittingSyncTransactions = true
 
-      let truncatePendingLocalChanges: Set<TKey> | undefined
-      let truncatePendingLocalOrigins: Set<TKey> | undefined
-
       // First collect all keys that will be affected by sync operations
       const changedKeys = new Set<TKey>()
       const syncedInsertedOrUpdatedKeys = new Set<TKey>()
@@ -1181,10 +1174,8 @@ export class CollectionStateManager<
           // TRUNCATE PHASE
           // Clear the authoritative synced base. Subsequent server ops in this
           //    same commit will rebuild the base atomically.
-          // Preserve pending local tracking just long enough for operations in this
-          // truncate batch to retain correct local origin semantics.
-          truncatePendingLocalChanges = new Set(this.pendingLocalChanges)
-          truncatePendingLocalOrigins = new Set(this.pendingLocalOrigins)
+          // Keep active local mutations for later source transactions on keys
+          // this truncate does not write. Completed attribution is one-use.
           this.syncedData.clear()
           this.syncedMetadata.clear()
           this.hydrationSeedKeys.clear()
@@ -1196,7 +1187,9 @@ export class CollectionStateManager<
             this.hasAppliedAdapterTruncate = true
             this.appliedAdapterDeletedKeys.clear()
           }
-          this.clearOriginTrackingState()
+          this.virtualPropsCache.clear()
+          this.rowOrigins.clear()
+          this.pendingLocalOrigins.clear()
 
           // Clear currentVisibleState for truncated keys to ensure subsequent operations
           //    are compared against the post-truncate state (undefined) rather than pre-truncate state
@@ -1218,16 +1211,12 @@ export class CollectionStateManager<
         for (const operation of transaction.operations) {
           const key = operation.key as TKey
 
-          // Determine origin: 'local' for local-only collections or pending local changes
-          const retainedLocalOrigin =
-            truncatePendingLocalChanges?.has(key) === true ||
-            truncatePendingLocalOrigins?.has(key) === true
+          // Attribute this source write from active or held same-key mutations.
           const origin: VirtualOrigin =
             this.isLocalOnly ||
             this.pendingLocalChanges.has(key) ||
             this.pendingLocalOrigins.has(key) ||
-            localKeys.has(key) ||
-            retainedLocalOrigin
+            localKeys.has(key)
               ? 'local'
               : 'remote'
           if (origin === `local`) localKeys.add(key)
