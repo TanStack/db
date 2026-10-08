@@ -56,6 +56,14 @@ production queues, caches, or semantic helpers merely to share their names.
 `source session`. Use `sync run` for the local Collection sync invocation
 and a provider-qualified `provider session` for a remote lifecycle.
 
+## Persistence coordination terms
+
+| Term | Meaning |
+| --- | --- |
+| durable anchor | The row version and reset epoch observed before one source sync transaction is sent to a coordinator. If both still match and the exact transaction ID is absent, the replacement leader may apply that transaction once. |
+| exact-ID reconciliation | The replacement leader checks one immutable source transaction ID under the SQLite writer lock after its RPC result becomes indeterminate. A present ID acknowledges the original commit; an absent ID needs an unchanged durable anchor. |
+| reconciliation reload | A peer notification after exact-ID reconciliation that reloads persisted rows even when the receiver has already observed the same stream position. Equal public rows do not publish a second change batch. |
+
 ## Offline outbox terms
 
 | Term | Meaning |
@@ -146,6 +154,7 @@ crossing subsystem boundaries; these comparisons are not interchangeable.
 | D2 value identity | The value domain compared by `hash` and `equalHashValues`, including their documented reference leaves. A matching hash digest alone does not establish identity. The [identity oracle](https://github.com/TanStack/db/blob/main/packages/db-ivm/tests/hash-identity-oracle.property.test.ts) defines its bounded value rules. Map/Set insertion-order sensitivity is pinned current behavior, not a universal D2 operator contract. |
 | change-event equality | The `deepEquals` comparison used for Collection change-event suppression. Its supported domain ignores Map/Set insertion order, RegExp `lastIndex`, and array holes versus `undefined`. The [change-event equality oracle](https://github.com/TanStack/db/blob/main/packages/db/tests/utils-oracle.property.test.ts) defines its value-class rules. |
 | draft equality | The comparison that recognizes a reverted draft value. Its [revert oracle](https://github.com/TanStack/db/blob/main/packages/db/tests/proxy-revert-oracle.property.test.ts) preserves Map/Set insertion order, RegExp `lastIndex`, and array holes, with explicit snapshot rules for class instances. Native mutator methods have separate change-tracking laws. |
+| persisted-snapshot equality | The strict value-shape comparison used before skipping a reconciliation reload. It preserves array holes and enumerable array properties, so a public row that differs from its durable row still reloads. |
 
 ## Oracle and model terms
 

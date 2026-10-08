@@ -16,7 +16,9 @@ import {
 } from '../src'
 import { harnessScope } from './contracts/harness-scope'
 import type {
+  CommittedTxAnchor,
   PersistenceAdapter,
+  PersistedTx,
   SQLiteDriver,
   SQLitePullSinceResult,
 } from '../src'
@@ -691,6 +693,188 @@ export function runSQLiteCoreAdapterContractSuite(
 
   describe(suiteName, () => {
     afterEach(scope.cleanup)
+    /**
+     * An unanswered source transaction may be acknowledged by its exact
+     * durable ID, or applied when no durable write followed its pre-send
+     * anchor. A different write, reset, or pruned ID cannot authorize late
+     * application: opaque source cursors and same-key values may be newer.
+     *
+     * The reference below comes from the authored durable history, not the
+     * adapter's SQL. Each scenario uses a real SQLite collection. The check
+     * observes the result, complete rows, cursor, row version, and exact log
+     * IDs after reconciliation; a successful duplicate write would fail the
+     * ledger and version comparison even if its final row matched. Each txId
+     * identifies one immutable source payload; reusing an ID for different
+     * content is outside this source-transaction grammar.
+     */
+    it(`reconciles only a certified source transaction against SQLite`, async () => {
+      const { adapter, driver } = registerContractHarness()
+      if (!adapter.reconcileCommittedTx) {
+        throw new Error(`SQLite adapter has no reconciliation operation`)
+      }
+      const reconcile = adapter.reconcileCommittedTx.bind(adapter)
+      const anchor: CommittedTxAnchor = {
+        latestRowVersion: 0,
+        resetEpoch: 0,
+      }
+      const tx = (
+        txId: string,
+        term: number,
+        seq: number,
+        rowVersion: number,
+        title: string,
+      ): PersistedTx => ({
+        txId,
+        term,
+        seq,
+        rowVersion,
+        mutations: [
+          {
+            type: `insert`,
+            key: `same-key`,
+            value: {
+              id: `same-key`,
+              title,
+              createdAt: `2026-01-01T00:00:00.000Z`,
+              score: 1,
+            },
+          },
+        ],
+        collectionMetadataMutations: [
+          { type: `set`, key: `probe:cursor`, value: title },
+        ],
+      })
+      const observe = async (collectionId: string) => {
+        const snapshot = await adapter.loadResumeSnapshot(collectionId)
+        const log = await driver.query<{ tx_id: string }>(
+          `SELECT tx_id FROM applied_tx WHERE collection_id = ? ORDER BY row_version`,
+          [collectionId],
+        )
+        return {
+          title: (snapshot.rows[0]?.value as Todo | undefined)?.title ?? null,
+          cursor:
+            (snapshot.collectionMetadata.find(
+              ({ key }) => key === `probe:cursor`,
+            )?.value as string | undefined) ?? null,
+          rowVersion: snapshot.latestRowVersion,
+          txIds: log.map(({ tx_id }) => tx_id),
+        }
+      }
+
+      const appliedId = `source-id-present`
+      const crossing = tx(`crossing`, 1, 1, 1, `crossing`)
+      await adapter.applyCommittedTx(appliedId, crossing)
+      await adapter.applyCommittedTx(appliedId, tx(`peer`, 1, 2, 2, `newer`))
+      expect(
+        await reconcile(appliedId, tx(`crossing`, 2, 1, 2, `crossing`), anchor),
+      ).toEqual({
+        kind: `already-applied`,
+        committed: { term: 1, seq: 1, rowVersion: 1 },
+        latestRowVersion: 2,
+      })
+      expect(await observe(appliedId)).toEqual({
+        title: `newer`,
+        cursor: `newer`,
+        rowVersion: 2,
+        txIds: [`crossing`, `peer`],
+      })
+
+      const absentId = `source-id-absent`
+      expect(
+        await reconcile(absentId, tx(`crossing`, 2, 1, 1, `crossing`), anchor),
+      ).toEqual({
+        kind: `applied-now`,
+        committed: { term: 2, seq: 1, rowVersion: 1 },
+        latestRowVersion: 1,
+      })
+      expect(await observe(absentId)).toEqual({
+        title: `crossing`,
+        cursor: `crossing`,
+        rowVersion: 1,
+        txIds: [`crossing`],
+      })
+
+      const intervenedId = `source-intervened`
+      await adapter.applyCommittedTx(intervenedId, tx(`peer`, 2, 1, 1, `newer`))
+      expect(
+        await reconcile(intervenedId, tx(`crossing`, 2, 2, 2, `stale`), anchor),
+      ).toEqual({ kind: `unknown` })
+      expect(await observe(intervenedId)).toEqual({
+        title: `newer`,
+        cursor: `newer`,
+        rowVersion: 1,
+        txIds: [`peer`],
+      })
+
+      const prunedId = `source-pruned`
+      await adapter.applyCommittedTx(prunedId, crossing)
+      await driver.run(`DELETE FROM applied_tx WHERE collection_id = ?`, [
+        prunedId,
+      ])
+      expect(
+        await reconcile(prunedId, tx(`crossing`, 2, 1, 2, `stale`), anchor),
+      ).toEqual({ kind: `unknown` })
+      expect(await observe(prunedId)).toEqual({
+        title: `crossing`,
+        cursor: `crossing`,
+        rowVersion: 1,
+        txIds: [],
+      })
+
+      const resetId = `source-reset`
+      await adapter.applyCommittedTx(resetId, crossing)
+      const resetAdapter = new SQLiteCorePersistenceAdapter({
+        driver,
+        schemaVersion: 2,
+        schemaMismatchPolicy: `sync-present-reset`,
+      })
+      await resetAdapter.loadSubset(resetId, {})
+      expect(
+        await resetAdapter.reconcileCommittedTx(
+          resetId,
+          tx(`crossing`, 2, 1, 1, `stale`),
+          anchor,
+        ),
+      ).toEqual({ kind: `unknown` })
+      const resetSnapshot = await resetAdapter.loadResumeSnapshot(resetId)
+      expect({
+        ids: resetSnapshot.rows.map(({ key }) => key),
+        resetEpoch: resetSnapshot.resetEpoch,
+        rowVersion: resetSnapshot.latestRowVersion,
+      }).toEqual({ ids: [], resetEpoch: 1, rowVersion: 0 })
+
+      const staleId = `source-old-id`
+      await adapter.applyCommittedTx(staleId, crossing)
+      await adapter.applyCommittedTx(staleId, tx(`peer`, 1, 2, 2, `newer`))
+      expect(
+        await reconcile(staleId, tx(`crossing`, 2, 1, 3, `crossing`), {
+          latestRowVersion: 1,
+          resetEpoch: 0,
+        }),
+      ).toEqual({ kind: `unknown` })
+      expect(await observe(staleId)).toEqual({
+        title: `newer`,
+        cursor: `newer`,
+        rowVersion: 2,
+        txIds: [`crossing`, `peer`],
+      })
+
+      const malformedId = `source-missing-anchor`
+      await expect(async () =>
+        reconcile(
+          malformedId,
+          tx(`crossing`, 2, 1, 1, `unsafe`),
+          undefined as unknown as CommittedTxAnchor,
+        ),
+      ).rejects.toThrow(/valid durable anchor/)
+      expect(await observe(malformedId)).toEqual({
+        title: null,
+        cursor: null,
+        rowVersion: 0,
+        txIds: [],
+      })
+    })
+
     it(`applies transactions idempotently with row versions and tombstones`, async () => {
       const { adapter, driver } = registerContractHarness()
       const collectionId = `todos`

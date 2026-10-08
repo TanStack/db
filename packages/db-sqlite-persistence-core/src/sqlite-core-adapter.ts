@@ -26,6 +26,7 @@ import {
 } from './sqlite-value'
 import type { LoadSubsetOptions } from '@tanstack/db'
 import type {
+  CommittedTxAnchor,
   HydrationPersistenceAdapter,
   PersistedIndexSpec,
   PersistedKeySetEvidence,
@@ -34,6 +35,7 @@ import type {
   PersistedTx,
   PersistenceAdapter,
   ReplayableTxDelta,
+  ReconciledCommittedTx,
   SQLiteDriver,
 } from './persisted'
 
@@ -1713,6 +1715,8 @@ export class SQLiteCorePersistenceAdapter implements PersistenceAdapter {
         this.loadResumeSnapshotUnscheduled(collectionId, context),
       applyCommittedTx: (collectionId, tx) =>
         this.applyCommittedTxUnscheduled(collectionId, tx),
+      reconcileCommittedTx: (collectionId, tx, anchor) =>
+        this.reconcileCommittedTxUnscheduled(collectionId, tx, anchor),
       loadCollectionMetadata: (collectionId) =>
         this.loadCollectionMetadataUnscheduled(collectionId),
       scanRows: (collectionId, scanOptions) =>
@@ -2006,24 +2010,64 @@ export class SQLiteCorePersistenceAdapter implements PersistenceAdapter {
     )
   }
 
+  reconcileCommittedTx(
+    collectionId: string,
+    tx: PersistedTx,
+    anchor: CommittedTxAnchor,
+  ): Promise<ReconciledCommittedTx> {
+    return this.runRegular(() =>
+      this.reconcileCommittedTxUnscheduled(collectionId, tx, anchor),
+    )
+  }
+
   private async applyCommittedTxUnscheduled(
     collectionId: string,
     tx: PersistedTx,
   ): Promise<void> {
+    await this.applyCommittedTxInternal(collectionId, tx)
+  }
+
+  private reconcileCommittedTxUnscheduled(
+    collectionId: string,
+    tx: PersistedTx,
+    anchor: CommittedTxAnchor,
+  ): Promise<ReconciledCommittedTx> {
+    if (
+      !anchor ||
+      !Number.isSafeInteger(anchor.latestRowVersion) ||
+      anchor.latestRowVersion < 0 ||
+      !Number.isSafeInteger(anchor.resetEpoch) ||
+      anchor.resetEpoch < 0
+    ) {
+      throw new Error(
+        `Cannot reconcile a committed transaction without a valid durable anchor`,
+      )
+    }
+    return this.applyCommittedTxInternal(collectionId, tx, anchor)
+  }
+
+  private async applyCommittedTxInternal(
+    collectionId: string,
+    tx: PersistedTx,
+    anchor?: CommittedTxAnchor,
+  ): Promise<ReconciledCommittedTx> {
     const tableMapping = await this.ensureCollectionReady(collectionId)
     const collectionTableSql = quoteIdentifier(tableMapping.tableName)
     const tombstoneTableSql = quoteIdentifier(tableMapping.tombstoneTableName)
 
-    await this.runInTransaction(async (transactionDriver) => {
+    return this.runInTransaction(async (transactionDriver) => {
       const versionRows = await transactionDriver.query<{
         latest_row_version: number
         key_set_evidence_available: number
         schema_version: number
         already_applied: number
+        reset_epoch: number
       }>(
         `SELECT
            latest_row_version,
            key_set_evidence_available,
+           (SELECT reset_epoch FROM collection_reset_epoch
+            WHERE collection_id = ? LIMIT 1) AS reset_epoch,
            (
              SELECT schema_version
              FROM collection_registry
@@ -2038,7 +2082,14 @@ export class SQLiteCorePersistenceAdapter implements PersistenceAdapter {
          FROM collection_version
          WHERE collection_id = ?
          LIMIT 1`,
-        [collectionId, collectionId, tx.term, tx.seq, collectionId],
+        [
+          collectionId,
+          collectionId,
+          collectionId,
+          tx.term,
+          tx.seq,
+          collectionId,
+        ],
       )
       const version = versionRows[0]
 
@@ -2055,8 +2106,47 @@ export class SQLiteCorePersistenceAdapter implements PersistenceAdapter {
         )
       }
 
+      if (anchor) {
+        const sameResetEpoch = (version.reset_epoch ?? 0) === anchor.resetEpoch
+        const matching = await transactionDriver.query<{
+          term: number
+          seq: number
+          row_version: number
+        }>(
+          `SELECT term, seq, row_version FROM applied_tx
+           WHERE collection_id = ? AND tx_id = ? LIMIT 2`,
+          [collectionId, tx.txId],
+        )
+        if (matching.length > 1) return { kind: `unknown` }
+        if (matching[0]) {
+          if (
+            matching[0].row_version <= anchor.latestRowVersion ||
+            !sameResetEpoch
+          ) {
+            return { kind: `unknown` }
+          }
+          return {
+            kind: `already-applied`,
+            committed: {
+              term: matching[0].term,
+              seq: matching[0].seq,
+              rowVersion: matching[0].row_version,
+            },
+            latestRowVersion: version.latest_row_version,
+          }
+        }
+        // A different durable write may have superseded this source row or
+        // its opaque cursor. Absence alone cannot authorize late application.
+        if (
+          version.latest_row_version !== anchor.latestRowVersion ||
+          !sameResetEpoch
+        ) {
+          return { kind: `unknown` }
+        }
+      }
+
       if (version.already_applied === 1) {
-        return
+        return { kind: `unknown` }
       }
 
       const currentRowVersion = version.latest_row_version
@@ -2366,6 +2456,15 @@ export class SQLiteCorePersistenceAdapter implements PersistenceAdapter {
       )
 
       await this.pruneAppliedTxRows(collectionId, transactionDriver)
+      return {
+        kind: `applied-now`,
+        committed: {
+          term: tx.term,
+          seq: tx.seq,
+          rowVersion: nextRowVersion,
+        },
+        latestRowVersion: nextRowVersion,
+      }
     })
   }
 

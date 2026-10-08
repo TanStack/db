@@ -605,6 +605,53 @@ ownership topology. Their
 [review record](oracle-reviews/issue-1589-live-electric-opfs.md) preserves the
 RED and GREEN host observations.
 
+The [issue #2085 review record](oracle-reviews/issue-2085-leader-close-red.md)
+preserves the baseline RED result and the subsequent repair audit. The source
+Collection law keeps an applied receipt pending after an indeterminate RPC. The
+replacement leader checks its exact transaction ID under the writer lock; an
+existing ID acknowledges the commit, while an absent ID permits application
+only against an unchanged durable anchor. The Collection and a dependent live
+query stay in one sync run. Direct mutating RPCs retain the #1845
+`IndeterminateCommitError` contract. An absent ID after an intervening write,
+reset, or pruning remains indeterminate because applying it could regress a
+newer row or opaque source cursor.
+
+The persisted wrapper owner in
+`packages/db-sqlite-persistence-core/tests/persisted-oracle.test.ts` checks
+before/after durability, pending receipts, mounted live-query rows, queued
+hydration, later work, known durability failures, and an unchanged
+reconciliation reload. Its orphan row-metadata case fails on a shortcut that
+skips needed cleanup. Sparse-array and extra-array-property histories require
+a changed durable value to reload even when ordinary deep equality would skip
+it. The SQLite adapter owner checks exact IDs, row versions,
+reset epochs, pruning, unchanged anchors, same-key peer writes, and cursor
+metadata against real SQLite transactions. The Browser coordinator owner
+checks writer-lock stream advancement, changed routes, and invalid wire
+anchors. The Chromium/OPFS host owner runs idle, before-durable,
+after-durable, peer-before-reconciliation, and notification-before-lost-answer
+histories across real tabs, Web Locks, BroadcastChannel, workers, and SQLite.
+It observes durable rows, cursor, and exact applied transaction IDs, public
+source/live-query rows, receipt settlement, one sync run, and passive-tab event
+counts. The peer history holds
+reconciliation before the writer lock until the peer write is durable. Removing
+the reconciliation reload marker leaves the passive source and live query
+without the original row at that public checkpoint. The real Electric receiver
+in `packages/browser-db-sqlite-persistence/e2e/electric-leader-close.opfs.spec.ts`
+streams a PostgreSQL row through the installed SDK, closes the first writer
+after SQLite applies that source transaction, and checks the surviving
+Collection, mounted live query, durable rows, exact applied ID, resume marker,
+and later PostgreSQL row. It supplies the SDK handoff for this one
+after-durable history.
+
+This bounded owner assumes tabs run the same protocol version and one `txId`
+identifies one immutable payload. The Electric receiver does not cover
+before-durable loss, queued hydration, seven concurrent Collections, or a
+closing leader's active SQLite call; those need receiving schedules owned by
+the Browser Electric, hydration, and OPFS page-lifecycle suites. Arbitrary
+concurrent writes, physical crash durability, other browsers, and
+cross-version tabs are outside the established host evidence. These limits do
+not authorize a late apply after an intervening durable write.
+
 The [live Electric hydration-straddle oracle](https://github.com/TanStack/db/blob/main/packages/browser-db-sqlite-persistence/e2e/electric-hydration-straddle.opfs.spec.ts)
 owns one #1754 host history: an on-demand Collection has an initial durable row;
 an OPFS subset hydration is held after its local read; a PostgreSQL update

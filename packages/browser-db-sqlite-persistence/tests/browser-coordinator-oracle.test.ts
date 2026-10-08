@@ -11,7 +11,7 @@ import {
   persistedCollectionOptions,
 } from '../src'
 import { createWASQLiteTestDatabase } from './helpers/wa-sqlite-test-db'
-import type { LoadSubsetOptions, Subscription } from '@tanstack/db'
+import type { LoadSubsetOptions, Subscription, SyncConfig } from '@tanstack/db'
 import type {
   ApplyCommittedTxRequest,
   ApplyCommittedTxResponse,
@@ -3204,6 +3204,370 @@ describe(`BrowserCollectionCoordinator`, () => {
         retiredLeader.dispose()
         requester.dispose()
         vi.useRealTimers()
+      }
+    })
+
+    /**
+     * A source commit whose response is lost across leadership retains its
+     * applied receipt while the replacement leader certifies the exact txId.
+     * The receipt fulfills in the same Collection sync run, which admits a
+     * later source commit. A direct coordinator RPC remains indeterminate.
+     *
+     * Mock transport and Web Locks order durable leader application, response
+     * loss, disposal, election, and the next source commit. The independent
+     * check compares the receipt, sync-run count, public status, and next
+     * receipt after the RPC deadline. The shared applied-tx ledger here only
+     * certifies an exact ID; SQLite and OPFS own durable rows and cursor.
+     */
+    it(`keeps a surviving source Collection usable after a leader closes during a committed RPC`, async () => {
+      type Row = { id: string; title: string }
+      type SourceParams = Parameters<SyncConfig<Row, string>['sync']>[0]
+      const leaderAdapter = createStubAdapter()
+      const followerAdapter = createStubAdapter()
+      followerAdapter.reconcileCommittedTx = async (
+        _collectionId,
+        tx,
+        anchor,
+      ) => {
+        expect(anchor).toEqual({ latestRowVersion: 0, resetEpoch: 0 })
+        const applied = leaderAdapter.appliedTxs.find(
+          ({ tx: durable }) => durable.txId === tx.txId,
+        )?.tx
+        if (!applied) return { kind: `unknown` }
+        return {
+          kind: `already-applied`,
+          committed: {
+            term: applied.term,
+            seq: applied.seq,
+            rowVersion: applied.rowVersion,
+          },
+          latestRowVersion: applied.rowVersion,
+        }
+      }
+      const leader = createCoordinator(leaderAdapter)
+      const follower = createCoordinator(followerAdapter)
+      const releaseLeader = leader.subscribe(`source-close`, () => {})
+      let source!: SourceParams
+      let syncRuns = 0
+      const collection = createCollection(
+        persistedCollectionOptions<Row, string>({
+          id: `source-close`,
+          getKey: (row) => row.id,
+          sync: {
+            sync: (params) => {
+              syncRuns++
+              source = params
+              params.markReady()
+            },
+          },
+          persistence: { adapter: followerAdapter, coordinator: follower },
+        }),
+      )
+      let firstReceipt: Promise<unknown> | undefined
+      let primaryFailure: unknown
+      let hasPrimaryFailure = false
+
+      try {
+        await collection.preload()
+        await flush(50)
+        expect(leader.isLeader(`source-close`)).toBe(true)
+        expect(follower.isLeader(`source-close`)).toBe(false)
+
+        vi.useFakeTimers()
+        let droppedSuccess = false
+        dropNextBroadcastMessage = (data) => {
+          const payload = (
+            data as { payload?: { type?: string; ok?: boolean } }
+          ).payload
+          if (payload?.type !== `rpc:applyCommittedTx:res`) return false
+          droppedSuccess = payload.ok === true
+          return true
+        }
+
+        source.begin()
+        source.write({
+          type: `insert`,
+          value: { id: `first`, title: `before close` },
+        })
+        firstReceipt = Promise.resolve(source.commit()).then(
+          () => ({ status: `fulfilled` as const }),
+          (error: unknown) => ({
+            status: `rejected` as const,
+            errorName: error instanceof Error ? error.name : String(error),
+          }),
+        )
+        await vi.advanceTimersByTimeAsync(0)
+        expect(droppedSuccess).toBe(true)
+        expect(leaderAdapter.appliedTxs).toHaveLength(1)
+
+        leader.dispose()
+        await vi.advanceTimersByTimeAsync(0)
+        expect(follower.isLeader(`source-close`)).toBe(true)
+        await vi.advanceTimersByTimeAsync(10_200)
+        const firstOutcome = await firstReceipt
+
+        let secondOutcome: {
+          status: `fulfilled` | `rejected`
+          errorName?: string
+        }
+        try {
+          source.begin()
+          source.write({
+            type: `insert`,
+            value: { id: `second`, title: `after close` },
+          })
+          await source.commit()
+          secondOutcome = { status: `fulfilled` }
+        } catch (error) {
+          secondOutcome = {
+            status: `rejected`,
+            errorName: error instanceof Error ? error.name : String(error),
+          }
+        }
+
+        // Reach witnesses above distinguish an RPC crossover from ordinary
+        // leadership transfer. The exact-ID answer must settle the wrapper's
+        // first receipt without cleanup or a second sync run.
+        const actual = {
+          firstOutcome,
+          collectionStatus: collection.status,
+          syncRuns,
+          secondOutcome,
+        }
+        expect(
+          actual,
+          `Source-close observation: ${JSON.stringify(actual)}`,
+        ).toMatchObject({
+          firstOutcome: { status: `fulfilled` },
+          collectionStatus: `ready`,
+          syncRuns: 1,
+          secondOutcome: { status: `fulfilled` },
+        })
+      } catch (error) {
+        hasPrimaryFailure = true
+        primaryFailure = error
+      }
+
+      dropNextBroadcastMessage = undefined
+      const cleanupFailures: Array<Error> = []
+      for (const cleanup of [
+        () => leader.dispose(),
+        () => releaseLeader(),
+        () => collection.cleanup(),
+        () => follower.dispose(),
+        () => firstReceipt?.catch(() => undefined),
+      ]) {
+        try {
+          await cleanup()
+        } catch (error) {
+          cleanupFailures.push(
+            error instanceof Error ? error : new Error(String(error)),
+          )
+        }
+      }
+      vi.useRealTimers()
+      if (hasPrimaryFailure && cleanupFailures.length > 0) {
+        throw new AggregateError(
+          cleanupFailures,
+          `Source-close oracle and cleanup both failed`,
+          { cause: primaryFailure },
+        )
+      }
+      if (hasPrimaryFailure) throw primaryFailure
+      expect(cleanupFailures).toEqual([])
+    })
+
+    /**
+     * Reconciliation and a later source commit share the writer lock. The
+     * replacement must advance its stream position before releasing that lock;
+     * otherwise the next commit can reuse the reconciled (term, seq) and be
+     * falsely acknowledged. The adapter log is the independent sequence
+     * reference, and both RPC receipts are checked after the queued write.
+     */
+    it(`reserves the reconciled stream position before a queued source write`, async () => {
+      const adapter = createStubAdapter()
+      const entered = createDeferred()
+      const release = createDeferred()
+      adapter.reconcileCommittedTx = async (collectionId, tx) => {
+        entered.resolve()
+        await release.promise
+        adapter.appliedTxs.push({ collectionId, tx })
+        return {
+          kind: `applied-now`,
+          committed: {
+            term: tx.term,
+            seq: tx.seq,
+            rowVersion: tx.rowVersion,
+          },
+          latestRowVersion: tx.rowVersion,
+        }
+      }
+      const coordinator = createCoordinator(adapter)
+      const unsubscribe = coordinator.subscribe(`source-sequence`, () => {})
+      const transaction = (txId: string): PersistedTx => ({
+        txId,
+        term: 0,
+        seq: 0,
+        rowVersion: 0,
+        mutations: [],
+      })
+      try {
+        await flush(50)
+        expect(coordinator.isLeader(`source-sequence`)).toBe(true)
+        const first = coordinator.reconcileCommittedTx(
+          `source-sequence`,
+          transaction(`crossing`),
+          { latestRowVersion: 0, resetEpoch: 0 },
+        )
+        await entered.promise
+        const second = coordinator.requestApplyCommittedTx(
+          `source-sequence`,
+          transaction(`later`),
+        )
+        release.resolve()
+        expect(await first).toMatchObject({ ok: true, alreadyApplied: false })
+        expect(await second).toMatchObject({
+          ok: true,
+          seq: 2,
+          latestRowVersion: 2,
+        })
+        expect(
+          adapter.appliedTxs.map(({ tx }) => ({
+            id: tx.txId,
+            term: tx.term,
+            seq: tx.seq,
+            rowVersion: tx.rowVersion,
+          })),
+        ).toEqual([
+          { id: `crossing`, term: 1, seq: 1, rowVersion: 1 },
+          { id: `later`, term: 1, seq: 2, rowVersion: 2 },
+        ])
+      } finally {
+        release.resolve()
+        unsubscribe()
+        coordinator.dispose()
+      }
+    })
+
+    /** A malformed wire request cannot turn missing proof into an ordinary write. */
+    it(`rejects a reconciliation RPC without its durable anchor`, async () => {
+      const adapter = createStubAdapter()
+      adapter.reconcileCommittedTx = vi.fn(async () => ({
+        kind: `unknown` as const,
+      }))
+      const coordinator = createCoordinator(adapter)
+      const unsubscribe = coordinator.subscribe(`source-anchor`, () => {})
+      let response: unknown
+      try {
+        await flush(50)
+        expect(coordinator.isLeader(`source-anchor`)).toBe(true)
+        observeBroadcastMessage = (message) => {
+          const payload = (message as { payload?: { type?: string } }).payload
+          if (payload?.type === `rpc:reconcileCommittedTx:res`) {
+            response = payload
+          }
+        }
+        injectBroadcastMessage(`tsdb:coord:test-db`, {
+          v: 1,
+          dbName: `test-db`,
+          collectionId: `source-anchor`,
+          senderId: `malformed-peer`,
+          ts: Date.now(),
+          payload: {
+            type: `rpc:reconcileCommittedTx:req`,
+            rpcId: `missing-anchor`,
+            tx: { txId: `unsafe`, mutations: [] },
+          },
+        })
+        await flush(50)
+        expect(response).toMatchObject({
+          rpcId: `missing-anchor`,
+          ok: false,
+          code: `UNDETERMINED`,
+        })
+        expect(adapter.reconcileCommittedTx).not.toHaveBeenCalled()
+        expect(adapter.appliedTxs).toEqual([])
+      } finally {
+        observeBroadcastMessage = undefined
+        unsubscribe()
+        coordinator.dispose()
+      }
+    })
+
+    /** A NOT_LEADER response can race election before the durable check starts. */
+    it(`retries an unanswered source proof after a stale owner rejects its route`, async () => {
+      const oldOwner = createCoordinator(createStubAdapter())
+      const replacementAdapter = createStubAdapter()
+      replacementAdapter.reconcileCommittedTx = vi.fn(
+        async (collectionId, tx) => {
+          replacementAdapter.appliedTxs.push({ collectionId, tx })
+          return {
+            kind: `applied-now` as const,
+            committed: {
+              term: tx.term,
+              seq: tx.seq,
+              rowVersion: tx.rowVersion,
+            },
+            latestRowVersion: tx.rowVersion,
+          }
+        },
+      )
+      const requester = createCoordinator(replacementAdapter)
+      const releaseOld = oldOwner.subscribe(`source-route`, () => {})
+      const releaseRequester = requester.subscribe(`source-route`, () => {})
+      let rejectedRoute = false
+      try {
+        await flush(50)
+        expect(oldOwner.isLeader(`source-route`)).toBe(true)
+        dropNextBroadcastMessage = (message) => {
+          const payload = (
+            message as {
+              payload?: { type?: string; rpcId?: string }
+            }
+          ).payload
+          if (payload?.type !== `rpc:reconcileCommittedTx:req`) return false
+          rejectedRoute = true
+          queueMicrotask(() => {
+            injectBroadcastMessage(`tsdb:coord:test-db`, {
+              v: 1,
+              dbName: `test-db`,
+              collectionId: `source-route`,
+              senderId: oldOwner.getNodeId(),
+              ts: Date.now(),
+              payload: {
+                type: `rpc:reconcileCommittedTx:res`,
+                rpcId: payload.rpcId,
+                ok: false,
+                code: `NOT_LEADER`,
+                error: `the old owner released its route`,
+              },
+            })
+            oldOwner.dispose()
+          })
+          return true
+        }
+        const response = await requester.reconcileCommittedTx(
+          `source-route`,
+          { txId: `crossing`, term: 0, seq: 0, rowVersion: 0, mutations: [] },
+          { latestRowVersion: 0, resetEpoch: 0 },
+        )
+        expect(rejectedRoute).toBe(true)
+        expect(requester.isLeader(`source-route`)).toBe(true)
+        expect(response).toMatchObject({ ok: true, alreadyApplied: false })
+        expect(
+          replacementAdapter.appliedTxs.map(({ tx }) => ({
+            txId: tx.txId,
+            term: tx.term,
+            seq: tx.seq,
+            rowVersion: tx.rowVersion,
+          })),
+        ).toEqual([{ txId: `crossing`, term: 1, seq: 1, rowVersion: 1 }])
+      } finally {
+        dropNextBroadcastMessage = undefined
+        releaseOld()
+        releaseRequester()
+        oldOwner.dispose()
+        requester.dispose()
       }
     })
 

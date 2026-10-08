@@ -18,6 +18,7 @@ import type { RemoteSubsetOwner } from './remote-subset-owner'
 import type {
   ApplyCommittedTxResponse,
   ApplyLocalMutationsResponse,
+  CommittedTxAnchor,
   EnsureRemoteSubsetRequest,
   EnsureRemoteSubsetResponse,
   HydrationPersistenceAdapter,
@@ -29,6 +30,7 @@ import type {
   PersistenceAdapter,
   ProtocolEnvelope,
   PullSinceResponse,
+  ReconcileCommittedTxResponse,
   ReleaseRemoteSubsetRequest,
   ReleaseRemoteSubsetResponse,
   TxCommitted,
@@ -74,6 +76,12 @@ type RPCRequest =
       tx: PersistedTx
     }
   | {
+      type: `rpc:reconcileCommittedTx:req`
+      rpcId: string
+      tx: PersistedTx
+      anchor: CommittedTxAnchor
+    }
+  | {
       type: `rpc:pullSince:req`
       rpcId: string
       fromRowVersion: number
@@ -90,6 +98,7 @@ type RPCResponse =
     }
   | ApplyLocalMutationsResponse
   | ApplyCommittedTxResponse
+  | ReconcileCommittedTxResponse
   | PullSinceResponse
 
 type PendingRPC = {
@@ -115,7 +124,11 @@ type CollectionState = {
 // belong to the persisted sync wrapper, not the elected writer transport.
 type CoordinatorAdapter = Pick<
   PersistenceAdapter,
-  `loadSubset` | `applyCommittedTx` | `ensureIndex` | `runInRegularScope`
+  | `loadSubset`
+  | `applyCommittedTx`
+  | `reconcileCommittedTx`
+  | `ensureIndex`
+  | `runInRegularScope`
 > & {
   pullSince?: (
     collectionId: string,
@@ -675,6 +688,43 @@ export class BroadcastCollectionCoordinator implements PersistedCollectionCoordi
     }
 
     return this.sendRPC<ApplyCommittedTxResponse>(collectionId, request)
+  }
+
+  async reconcileCommittedTx(
+    collectionId: string,
+    tx: PersistedTx,
+    anchor: CommittedTxAnchor,
+    scopedAdapter?: HydrationPersistenceAdapter,
+  ): Promise<ReconcileCommittedTxResponse> {
+    const initialRoute = this.waitForInitialRoute(collectionId)
+    if (initialRoute) await initialRoute
+    // Each attempt checks the exact txId under the elected writer lock, so a
+    // stale NOT_LEADER reply can follow the replacement route safely.
+    let response: ReconcileCommittedTxResponse | undefined
+    for (let attempt = 0; attempt <= RPC_RETRY_ATTEMPTS; attempt++) {
+      if (attempt > 0) await sleep(RPC_RETRY_DELAY_MS * attempt)
+      const request: Extract<
+        RPCRequest,
+        { type: `rpc:reconcileCommittedTx:req` }
+      > = {
+        type: `rpc:reconcileCommittedTx:req`,
+        rpcId: safeRandomUUID(),
+        tx,
+        anchor,
+      }
+      response = this.isLeader(collectionId)
+        ? await this.handleReconcileCommittedTx(
+            collectionId,
+            request,
+            scopedAdapter,
+          )
+        : await this.sendRPC<ReconcileCommittedTxResponse>(
+            collectionId,
+            request,
+          )
+      if (response.ok || response.code !== `NOT_LEADER`) return response
+    }
+    return response!
   }
 
   async pullSince(
@@ -1415,6 +1465,8 @@ export class BroadcastCollectionCoordinator implements PersistedCollectionCoordi
         return this.handleApplyLocalMutations(collectionId, request)
       case `rpc:applyCommittedTx:req`:
         return this.handleApplyCommittedTx(collectionId, request)
+      case `rpc:reconcileCommittedTx:req`:
+        return this.handleReconcileCommittedTx(collectionId, request)
       case `rpc:pullSince:req`:
         return this.handlePullSince(collectionId, request)
     }
@@ -2056,6 +2108,17 @@ export class BroadcastCollectionCoordinator implements PersistedCollectionCoordi
     )
     this.pruneAppliedEnvelopes()
 
+    this.publishCommittedTx(collectionId, state, tx)
+
+    return response
+  }
+
+  private publishCommittedTx(
+    collectionId: string,
+    state: CollectionState,
+    tx: PersistedTx,
+    forceReload = false,
+  ): void {
     const committedBase = {
       type: `tx:committed` as const,
       term: tx.term,
@@ -2063,26 +2126,28 @@ export class BroadcastCollectionCoordinator implements PersistedCollectionCoordi
       txId: tx.txId,
       latestRowVersion: tx.rowVersion,
     }
-    const committedPayload: TxCommitted = tx.truncate
-      ? {
-          ...committedBase,
-          requiresFullReload: true,
-        }
-      : {
-          ...committedBase,
-          requiresFullReload: false,
-          changedRows: tx.mutations
-            .filter((mutation) => mutation.type !== `delete`)
-            .map((mutation) => ({
-              key: mutation.key,
-              value: mutation.value,
-            })),
-          deletedKeys: tx.mutations
-            .filter((mutation) => mutation.type === `delete`)
-            .map((mutation) => mutation.key),
-          rowMetadataMutations: tx.rowMetadataMutations,
-          collectionMetadataMutations: tx.collectionMetadataMutations,
-        }
+    const committedPayload: TxCommitted =
+      tx.truncate || forceReload
+        ? {
+            ...committedBase,
+            requiresFullReload: true,
+            ...(forceReload ? { reconciliationReload: true as const } : {}),
+          }
+        : {
+            ...committedBase,
+            requiresFullReload: false,
+            changedRows: tx.mutations
+              .filter((mutation) => mutation.type !== `delete`)
+              .map((mutation) => ({
+                key: mutation.key,
+                value: mutation.value,
+              })),
+            deletedKeys: tx.mutations
+              .filter((mutation) => mutation.type === `delete`)
+              .map((mutation) => mutation.key),
+            rowMetadataMutations: tx.rowMetadataMutations,
+            collectionMetadataMutations: tx.collectionMetadataMutations,
+          }
     const committed: ProtocolEnvelope<TxCommitted> = {
       v: 1,
       dbName: this.dbName,
@@ -2095,7 +2160,114 @@ export class BroadcastCollectionCoordinator implements PersistedCollectionCoordi
     for (const subscriber of state.subscribers) {
       subscriber(committed)
     }
+  }
 
+  private async handleReconcileCommittedTx(
+    collectionId: string,
+    request: Extract<RPCRequest, { type: `rpc:reconcileCommittedTx:req` }>,
+    scopedAdapter?: HydrationPersistenceAdapter,
+  ): Promise<ReconcileCommittedTxResponse> {
+    const state = this.collections.get(collectionId)
+    const notLeader = (): ReconcileCommittedTxResponse => ({
+      type: `rpc:reconcileCommittedTx:res`,
+      rpcId: request.rpcId,
+      ok: false,
+      code: `NOT_LEADER`,
+      error: `not the leader for ${collectionId}`,
+    })
+    if (!state?.isLeader) return notLeader()
+    if (
+      !request.anchor ||
+      !Number.isSafeInteger(request.anchor.latestRowVersion) ||
+      request.anchor.latestRowVersion < 0 ||
+      !Number.isSafeInteger(request.anchor.resetEpoch) ||
+      request.anchor.resetEpoch < 0 ||
+      typeof request.tx?.txId !== `string` ||
+      !Array.isArray(request.tx.mutations)
+    ) {
+      return {
+        type: `rpc:reconcileCommittedTx:res`,
+        rpcId: request.rpcId,
+        ok: false,
+        code: `UNDETERMINED`,
+        error: `the source transaction has no valid durable proof`,
+      }
+    }
+
+    const expectedTerm = state.latestTerm
+    const result = await this.withScheduledWriterLock(
+      collectionId,
+      async (adapter) => {
+        if (
+          this.isDisposed() ||
+          this.collections.get(collectionId) !== state ||
+          !state.isLeader ||
+          state.latestTerm !== expectedTerm
+        ) {
+          return null
+        }
+        if (!adapter.reconcileCommittedTx) return { kind: `unknown` as const }
+        const candidate: PersistedTx = {
+          ...request.tx,
+          term: state.latestTerm,
+          seq: state.latestSeq + 1,
+          rowVersion: state.latestRowVersion + 1,
+        }
+        try {
+          const reconciled = await adapter.reconcileCommittedTx(
+            collectionId,
+            candidate,
+            request.anchor,
+          )
+          if (reconciled.kind !== `unknown`) {
+            state.latestRowVersion = Math.max(
+              state.latestRowVersion,
+              reconciled.latestRowVersion,
+            )
+            if (reconciled.kind === `applied-now`) {
+              state.latestSeq = reconciled.committed.seq
+            }
+          }
+          return reconciled
+        } catch (error) {
+          throw toPersistedCollectionDurabilityError(collectionId, error)
+        }
+      },
+      scopedAdapter,
+    )
+    if (result === null) return notLeader()
+    if (result.kind === `unknown`) {
+      return {
+        type: `rpc:reconcileCommittedTx:res`,
+        rpcId: request.rpcId,
+        ok: false,
+        code: `UNDETERMINED`,
+        error: `the durable outcome cannot be certified`,
+      }
+    }
+
+    const current = {
+      term: state.latestTerm,
+      seq: state.latestSeq,
+      rowVersion: state.latestRowVersion,
+    }
+    const response: ReconcileCommittedTxResponse = {
+      type: `rpc:reconcileCommittedTx:res`,
+      rpcId: request.rpcId,
+      ok: true,
+      alreadyApplied: result.kind === `already-applied`,
+      committed: result.committed,
+    }
+    if (!this.isDisposed() && this.collections.get(collectionId) === state) {
+      this.publishCommittedTx(
+        collectionId,
+        state,
+        result.kind === `already-applied`
+          ? { ...request.tx, ...current }
+          : { ...request.tx, ...result.committed },
+        result.kind === `already-applied`,
+      )
+    }
     return response
   }
 
@@ -2315,6 +2487,7 @@ function isRPCRequest(payload: unknown): payload is RPCRequest {
     case `rpc:ensurePersistedIndex:req`:
     case `rpc:applyLocalMutations:req`:
     case `rpc:applyCommittedTx:req`:
+    case `rpc:reconcileCommittedTx:req`:
     case `rpc:pullSince:req`:
       return true
     default:
@@ -2410,6 +2583,20 @@ function createRPCErrorResponse(
         ok: false,
         code: `CONFLICT`,
         error,
+      }
+    case `rpc:reconcileCommittedTx:req`:
+      return {
+        type: `rpc:reconcileCommittedTx:res`,
+        rpcId: request.rpcId,
+        ok: false,
+        code:
+          cause instanceof PersistedCollectionDurabilityError
+            ? `PERSISTENCE_ERROR`
+            : `UNDETERMINED`,
+        error,
+        ...(cause instanceof PersistedCollectionDurabilityError
+          ? toSafeDurabilityDetails(cause)
+          : {}),
       }
     case `rpc:pullSince:req`:
       return {

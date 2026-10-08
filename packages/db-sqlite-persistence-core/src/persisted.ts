@@ -6,6 +6,7 @@ import {
   SYNC_PERSISTENCE_VERSION,
   SyncTransactionAbortedError,
   compileSingleRowExpression,
+  deepEqualsStrict,
   getLoadSubsetDemandKey,
   safeRandomUUID,
   toBooleanPredicate,
@@ -21,6 +22,7 @@ import {
   InvalidPersistedStorageKeyError,
   InvalidPersistenceAdapterError,
   InvalidSyncConfigError,
+  IndeterminateCommitError,
   PersistedCollectionDurabilityError,
   toPersistedCollectionDurabilityError,
 } from './errors'
@@ -115,6 +117,7 @@ export type TxCommitted = {
 } & (
   | {
       requiresFullReload: true
+      reconciliationReload?: true
     }
   | {
       requiresFullReload: false
@@ -237,6 +240,38 @@ export type ApplyCommittedTxResponse =
       sourceCode?: string | number
       path?: string | ReadonlyArray<string | number>
     }
+
+/** The durable version read before a source transaction enters coordination. */
+export type CommittedTxAnchor = {
+  latestRowVersion: number
+  resetEpoch: number
+}
+
+export type ReconcileCommittedTxResponse =
+  | {
+      type: `rpc:reconcileCommittedTx:res`
+      rpcId: string
+      ok: true
+      alreadyApplied: boolean
+      committed: { term: number; seq: number; rowVersion: number }
+    }
+  | {
+      type: `rpc:reconcileCommittedTx:res`
+      rpcId: string
+      ok: false
+      code: `NOT_LEADER` | `UNDETERMINED` | `PERSISTENCE_ERROR`
+      error: string
+      sourceCode?: string | number
+      path?: string | ReadonlyArray<string | number>
+    }
+
+export type ReconciledCommittedTx =
+  | {
+      kind: `already-applied` | `applied-now`
+      committed: { term: number; seq: number; rowVersion: number }
+      latestRowVersion: number
+    }
+  | { kind: `unknown` }
 
 export type PullSinceRequest = {
   type: `rpc:pullSince:req`
@@ -418,6 +453,12 @@ export interface PersistenceAdapter {
     resetEpoch: number
   }>
   applyCommittedTx: (collectionId: string, tx: PersistedTx) => Promise<void>
+  /** Atomically certify or apply one source transaction after a lost response. */
+  reconcileCommittedTx?: (
+    collectionId: string,
+    tx: PersistedTx,
+    anchor: CommittedTxAnchor,
+  ) => Promise<ReconciledCommittedTx>
   loadCollectionMetadata?: (
     collectionId: string,
   ) => Promise<Array<{ key: string; value: unknown }>>
@@ -555,6 +596,13 @@ export interface PersistedCollectionCoordinator {
     tx: PersistedTx,
     scopedAdapter?: HydrationPersistenceAdapter,
   ) => Promise<ApplyCommittedTxResponse>
+  /** Available only when the elected adapter can certify the durable outcome. */
+  reconcileCommittedTx?: (
+    collectionId: string,
+    tx: PersistedTx,
+    anchor: CommittedTxAnchor,
+    scopedAdapter?: HydrationPersistenceAdapter,
+  ) => Promise<ReconcileCommittedTxResponse>
   /** The scoped adapter is leader-local and is never serialized to a follower. */
   pullSince?: (
     collectionId: string,
@@ -1252,7 +1300,10 @@ function isTxCommittedPayload(payload: unknown): payload is TxCommitted {
   }
 
   if (payload.requiresFullReload) {
-    return true
+    return (
+      payload.reconciliationReload === undefined ||
+      payload.reconciliationReload === true
+    )
   }
 
   return (
@@ -2706,6 +2757,34 @@ class PersistedCollectionRuntime<
     })
   }
 
+  private matchesCollectionSnapshot(
+    rows: Map<TKey, { value: T; metadata?: unknown }>,
+    collectionMetadata: Array<{ key: string; value: unknown }>,
+  ): boolean {
+    if (!this.collection || !this.syncControls.metadata) return false
+    const base = this.collection.base
+    if (base.size !== rows.size) return false
+    for (const [key, row] of rows) {
+      if (
+        !base.has(key) ||
+        !deepEqualsStrict(base.get(key), row.value) ||
+        !deepEqualsStrict(this.syncControls.metadata.row.get(key), row.metadata)
+      ) {
+        return false
+      }
+    }
+    const currentMetadata = this.syncControls.metadata.collection.list()
+    if (currentMetadata.length !== collectionMetadata.length) return false
+    const expectedMetadata = new Map(
+      collectionMetadata.map(({ key, value }) => [key, value]),
+    )
+    return currentMetadata.every(
+      ({ key, value }) =>
+        expectedMetadata.has(key) &&
+        deepEqualsStrict(expectedMetadata.get(key), value),
+    )
+  }
+
   private async flushQueuedHydrationTransactionsUnsafe(
     adapter: HydrationPersistenceAdapter,
   ): Promise<{ reason: unknown } | undefined> {
@@ -2834,16 +2913,76 @@ class PersistedCollectionRuntime<
       return
     }
 
+    const anchor = this.persistedResumeGeneration && {
+      latestRowVersion: this.latestRowVersion,
+      resetEpoch: this.persistedResumeGeneration.resetEpoch,
+    }
     const streamPosition = this.nextLocalStreamPosition()
     const tx = this.createPersistedTxFromOperations(transaction, streamPosition)
-    const response = await this.persistence.coordinator.requestApplyCommittedTx(
-      this.collectionId,
-      tx,
-      // A hydration-scoped adapter is already inside the shared scheduler.
-      // Ordinary source commits pass no scoped adapter so the coordinator
-      // enters that scheduler before taking the database-wide writer lock.
-      scopedAdapter,
-    )
+    let response: ApplyCommittedTxResponse
+    try {
+      response = await this.persistence.coordinator.requestApplyCommittedTx(
+        this.collectionId,
+        tx,
+        // A hydration-scoped adapter is already inside the shared scheduler.
+        // Ordinary source commits enter it before taking the writer lock.
+        scopedAdapter,
+      )
+    } catch (error) {
+      if (
+        !(error instanceof IndeterminateCommitError) ||
+        !anchor ||
+        !this.persistence.coordinator.reconcileCommittedTx
+      ) {
+        throw error
+      }
+      let reconciled: ReconcileCommittedTxResponse
+      try {
+        reconciled = await this.persistence.coordinator.reconcileCommittedTx(
+          this.collectionId,
+          tx,
+          anchor,
+          scopedAdapter,
+        )
+      } catch (reconcileError) {
+        if (reconcileError instanceof PersistedCollectionDurabilityError) {
+          throw reconcileError
+        }
+        throw error
+      }
+      if (!reconciled.ok) {
+        if (reconciled.code === `PERSISTENCE_ERROR`) {
+          throw new PersistedCollectionDurabilityError(
+            `Failed to reconcile collection "${this.collectionId}": ${reconciled.error}`,
+            {
+              cause: reconciled,
+              code: reconciled.sourceCode ?? reconciled.code,
+              path: reconciled.path,
+            },
+          )
+        }
+        throw error
+      }
+      if (transaction.lifecycleGeneration !== this.lifecycleGeneration) return
+      this.observeStreamPosition(
+        reconciled.committed.term,
+        reconciled.committed.seq,
+        reconciled.committed.rowVersion,
+      )
+      if (
+        transaction.expectedResumeGenerationOwner ===
+          this.resumeGenerationOwner &&
+        this.persistedResumeGeneration !== undefined
+      ) {
+        this.persistedResumeGeneration = {
+          ...this.persistedResumeGeneration,
+          latestTerm: reconciled.committed.term,
+          latestSeq: reconciled.committed.seq,
+          latestRowVersion: reconciled.committed.rowVersion,
+        }
+      }
+      return
+    }
     if (!response.ok) {
       if (response.code === `PERSISTENCE_ERROR`) {
         const error = new PersistedCollectionDurabilityError(
@@ -3433,6 +3572,24 @@ class PersistedCollectionRuntime<
     lifecycleGeneration = this.lifecycleGeneration,
   ): Promise<void> {
     if (lifecycleGeneration !== this.lifecycleGeneration) return
+    // An exact-ID reconciliation can discover a commit whose original
+    // notification was lost. A peer may already be at this stream position
+    // without having loaded that commit's rows.
+    if (txCommitted.requiresFullReload && txCommitted.reconciliationReload) {
+      await this.invalidateFromCommittedTxUnsafe(
+        txCommitted,
+        this.persistence.adapter,
+      )
+      if (lifecycleGeneration === this.lifecycleGeneration) {
+        this.observeStreamPosition(
+          txCommitted.term,
+          txCommitted.seq,
+          txCommitted.latestRowVersion,
+        )
+        await this.flushQueuedTxCommittedUnsafe()
+      }
+      return
+    }
     if (txCommitted.term < this.latestTerm) {
       return
     }
@@ -3580,14 +3737,15 @@ class PersistedCollectionRuntime<
     txCommitted: TxCommitted,
     adapter: HydrationPersistenceAdapter,
   ): Promise<void> {
-    const reloadActiveSubsets = () =>
+    const reloadActiveSubsets = (skipUnchangedReplace = false) =>
       this.runInHydrationScope(
-        (scopedAdapter) => this.reloadActiveSubsetsUnsafe(scopedAdapter),
+        (scopedAdapter) =>
+          this.reloadActiveSubsetsUnsafe(scopedAdapter, skipUnchangedReplace),
         adapter,
       )
 
     if (txCommitted.requiresFullReload) {
-      await reloadActiveSubsets()
+      await reloadActiveSubsets(txCommitted.reconciliationReload === true)
       return
     }
 
@@ -3671,6 +3829,7 @@ class PersistedCollectionRuntime<
 
   private async reloadActiveSubsetsUnsafe(
     adapter: HydrationPersistenceAdapter,
+    skipUnchangedReplace = false,
   ): Promise<void> {
     const lifecycleGeneration = this.lifecycleGeneration
     const truncateGeneration = this.sourceTruncateGeneration
@@ -3704,15 +3863,35 @@ class PersistedCollectionRuntime<
         hydrationContext.suppliedRowKeys.add(key)
       }
 
-      const applied = this.replaceCollectionSnapshot(
-        Array.from(mergedRows.entries()).map(([key, row]) => ({
-          key,
-          value: row.value,
-          metadata: row.metadata,
-        })),
-        collectionMetadata,
-      )
-      await whenSyncAccepted(applied)
+      if (
+        skipUnchangedReplace &&
+        this.matchesCollectionSnapshot(mergedRows, collectionMetadata)
+      ) {
+        // A full replacement would also clear metadata for missing rows.
+        // Clear only those entries so equal public rows do not republish.
+        const orphanKeys =
+          this.collection?._syncedRowMetadataKeysOutsideBase() ?? []
+        if (orphanKeys.length > 0) {
+          const applied = this.withInternalApply(() => {
+            this.syncControls.begin?.()
+            for (const key of orphanKeys) {
+              this.syncControls.metadata?.row.delete(key)
+            }
+            return this.syncControls.commit?.() ?? true
+          })
+          await whenSyncAccepted(applied)
+        }
+      } else {
+        const applied = this.replaceCollectionSnapshot(
+          Array.from(mergedRows.entries()).map(([key, row]) => ({
+            key,
+            value: row.value,
+            metadata: row.metadata,
+          })),
+          collectionMetadata,
+        )
+        await whenSyncAccepted(applied)
+      }
     } finally {
       if (
         this.activeHydrationContext === hydrationContext &&

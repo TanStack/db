@@ -69,6 +69,12 @@ import type {
  * route through the configured collection owner. Publication precedes
  * durability, but a rejected durability boundary must reject its wrapped sync
  * receipt and fail-stop that sync run without admitting a suffix.
+ * An indeterminate coordinator response can be reconciled only by a replacement
+ * leader that certifies the exact source transaction under its writer lock.
+ * The source receipt remains pending through that check, then fulfills if the
+ * transaction was already durable or was proved absent and durably applied.
+ * The Collection and its dependent live queries keep the same sync run. An
+ * uncertified outcome and other durability failures remain terminal.
  * Accepted sync transactions from the sync adapter take precedence over older
  * persisted rows. Reading those rows for a subset demand or a coordinator
  * notification may delay publication, but cannot revoke acceptance. Truncate
@@ -119,6 +125,7 @@ type Todo = {
   id: string
   title: string
   detail?: string
+  values?: Array<string | null>
 }
 
 type TodoSyncParams = Parameters<SyncConfig<Todo, string>[`sync`]>[0]
@@ -393,7 +400,11 @@ function createNoopAdapter(): PersistenceAdapter {
 }
 
 type CoordinatorHarness = PersistedCollectionCoordinator & {
-  emit: (payload: TxCommitted | CollectionReset, senderId?: string) => void
+  emit: (
+    payload: TxCommitted | CollectionReset,
+    senderId?: string,
+    collectionId?: string,
+  ) => void
   pullSinceCalls: number
   setPullSinceResponse: (response: PullSinceResponse) => void
 }
@@ -443,11 +454,15 @@ function createCoordinatorHarness(): CoordinatorHarness {
       harness.pullSinceCalls++
       return Promise.resolve(pullSinceResponse)
     },
-    emit: (payload, senderId = `remote-node`) => {
+    emit: (
+      payload,
+      senderId = `remote-node`,
+      collectionId = `sync-present`,
+    ) => {
       subscriber?.({
         v: 1,
         dbName: `test-db`,
-        collectionId: `sync-present`,
+        collectionId,
         senderId,
         ts: Date.now(),
         payload,
@@ -719,6 +734,689 @@ function foldDurabilityLedger(events: ReadonlyArray<DurabilityLedgerEvent>): {
 
   return { committedRows, commitOrder }
 }
+
+// The immutable authored order is crossing→later. The model has no coordinator
+// route or runtime lifecycle: a durable exact-ID hit contributes crossing once;
+// otherwise a certified empty interval lets the replacement apply it once.
+function modelSourceReconciliation(committedBeforeClose: boolean) {
+  const before = committedBeforeClose ? [`crossing`] : []
+  return {
+    atUncertain: {
+      publicIds: [`crossing`],
+      durableIds: before,
+      cursor: committedBeforeClose ? `crossing` : null,
+    },
+    afterReconciliation: {
+      publicIds: [`crossing`],
+      liveIds: [`crossing`],
+      liveStatus: `ready`,
+      durableIds: [`crossing`],
+      cursor: `crossing`,
+      syncRuns: 1,
+      durableTxCount: 1,
+    },
+    afterSuffix: {
+      publicIds: [`crossing`, `later`],
+      liveIds: [`crossing`, `later`],
+      liveStatus: `ready`,
+      durableIds: [`crossing`, `later`],
+      cursor: `later`,
+      syncRuns: 1,
+      durableTxCount: 2,
+    },
+  }
+}
+
+// The controlled coordinator loses one source RPC answer after either storing
+// its transaction or storing nothing. It holds the exact-ID reconciliation so
+// the driver can compare the pending receipt and public/durable state at the
+// uncertainty cut. Browser/SQLite owns the atomic absence proof and actual
+// election; this driver checks the wrapped receipt and dependent query path.
+it.each([false, true])(
+  `reconciles a source receipt without ending its dependent live query when applied=%s`,
+  async (committedBeforeClose) => {
+    const expected = modelSourceReconciliation(committedBeforeClose)
+    const adapter = createRecordingAdapter()
+    const coordinator = createCoordinatorHarness()
+    const error = new IndeterminateCommitError({
+      collectionId: `source-restart`,
+      requestType: `rpc:applyCommittedTx:req`,
+      previousLeaderId: `retired`,
+      previousTerm: 1,
+      currentLeaderId: `replacement`,
+      currentTerm: 2,
+      cause: new Error(`lost response`),
+    })
+    let first = true
+    const reconciliationEntered = createDeferred()
+    const releaseReconciliation = createDeferred()
+    let durableFirstTx: PersistedTx | undefined
+    coordinator.requestApplyCommittedTx = async (collectionId, tx) => {
+      if (first) {
+        first = false
+        if (committedBeforeClose) {
+          await adapter.applyCommittedTx(collectionId, tx)
+          durableFirstTx = tx
+        }
+        throw error
+      }
+      await adapter.applyCommittedTx(collectionId, tx)
+      return {
+        type: `rpc:applyCommittedTx:res`,
+        rpcId: tx.txId,
+        ok: true,
+        term: tx.term,
+        seq: tx.seq,
+        latestRowVersion: tx.rowVersion,
+      }
+    }
+    coordinator.reconcileCommittedTx = async (collectionId, tx, anchor) => {
+      expect(anchor.latestRowVersion).toBe(0)
+      reconciliationEntered.resolve()
+      await releaseReconciliation.promise
+      const alreadyApplied = durableFirstTx !== undefined
+      const committed = alreadyApplied
+        ? durableFirstTx!
+        : { ...tx, term: 2, seq: 1, rowVersion: 1 }
+      if (!alreadyApplied)
+        await adapter.applyCommittedTx(collectionId, committed)
+      return {
+        type: `rpc:reconcileCommittedTx:res`,
+        rpcId: `controlled-reconciliation`,
+        ok: true,
+        alreadyApplied,
+        committed: {
+          term: committed.term,
+          seq: committed.seq,
+          rowVersion: committed.rowVersion,
+        },
+      }
+    }
+
+    let source!: TodoSyncParams
+    let syncRuns = 0
+    const collection = createCollection(
+      persistedCollectionOptions<Todo, string>({
+        id: `source-restart`,
+        getKey: (row) => row.id,
+        sync: {
+          sync: (params) => {
+            source = params
+            syncRuns++
+            params.markReady()
+          },
+        },
+        persistence: { adapter, coordinator },
+      }),
+    )
+    const live = createLiveQueryCollection((q) => q.from({ row: collection }))
+    const livePublishedKeys: Array<string> = []
+    const liveSubscription = live.subscribeChanges((changes) => {
+      livePublishedKeys.push(...changes.map(({ key }) => String(key)))
+    })
+    let hasPrimaryFailure = false
+    const observe = () => ({
+      publicIds: [...collection.keys()].sort(),
+      liveIds: [...live.keys()].sort(),
+      liveStatus: live.status,
+      durableIds: [...adapter.rows.keys()].sort(),
+      cursor:
+        (adapter.collectionMetadata.get(`probe:cursor`) as string) ?? null,
+    })
+
+    try {
+      await atPersistedOracleCheckpoint(collection.preload(), `initial ready`)
+      await atPersistedOracleCheckpoint(
+        live.preload(),
+        `dependent live query ready`,
+      )
+      source.begin()
+      source.write({
+        type: `insert`,
+        value: { id: `crossing`, title: `source` },
+      })
+      source.metadata?.collection.set(`probe:cursor`, `crossing`)
+      const firstReceipt = Promise.resolve(source.commit()).then(
+        () => undefined,
+      )
+      const firstSettlement = observeSettlement(firstReceipt)
+      await atPersistedOracleCheckpoint(
+        reconciliationEntered.promise,
+        `exact-ID reconciliation entered`,
+      )
+      expect(firstSettlement.read()).toEqual({ status: `pending` })
+      expect({
+        publicIds: [...collection.keys()].sort(),
+        durableIds: [...adapter.rows.keys()].sort(),
+        cursor:
+          (adapter.collectionMetadata.get(`probe:cursor`) as string) ?? null,
+      }).toEqual(expected.atUncertain)
+      expect(live.status).toBe(`ready`)
+      releaseReconciliation.resolve()
+      await atPersistedOracleCheckpoint(
+        firstReceipt,
+        `reconciled source receipt`,
+      )
+
+      expect(firstSettlement.read()).toEqual({ status: `fulfilled` })
+      expect({ status: collection.status, syncRuns }).toEqual({
+        status: `ready`,
+        syncRuns: 1,
+      })
+      expect({
+        ...observe(),
+        syncRuns,
+        durableTxCount: adapter.applyCommittedTxCalls.length,
+      }).toEqual(expected.afterReconciliation)
+      expect(livePublishedKeys).toContain(`crossing`)
+
+      source.begin()
+      source.write({
+        type: `insert`,
+        value: { id: `later`, title: `source suffix` },
+      })
+      source.metadata?.collection.set(`probe:cursor`, `later`)
+      await atPersistedOracleCheckpoint(
+        Promise.resolve(source.commit()),
+        `later source receipt`,
+      )
+      expect({
+        ...observe(),
+        syncRuns,
+        durableTxCount: adapter.applyCommittedTxCalls.length,
+      }).toEqual(expected.afterSuffix)
+      expect(livePublishedKeys).toContain(`later`)
+    } catch (failure) {
+      hasPrimaryFailure = true
+      throw failure
+    } finally {
+      releaseReconciliation.resolve()
+      liveSubscription.unsubscribe()
+      await cleanupPersistedOracle(
+        [() => live.cleanup(), () => collection.cleanup()],
+        hasPrimaryFailure,
+      )
+    }
+  },
+)
+
+// Reconciliation after a lost answer can arrive even when a peer already
+// published the original tx:committed. A duplicate proof must not turn an
+// unchanged durable snapshot into a second public change batch. This owner
+// checks the persisted wrapper and mounted dependent graph, not SQLite or a
+// browser transport. The notification's explicit flag reaches the equal-seq
+// branch that ordinary tx deduplication would skip. An orphan row-metadata
+// entry is not part of the loaded row snapshot; an unchanged-row shortcut
+// must still remove it, as an ordinary full replacement does.
+it(`does not republish unchanged rows for a repeated reconciliation notice`, async () => {
+  const adapter = createRecordingAdapter([{ id: `crossing`, title: `settled` }])
+  const coordinator = createCoordinatorHarness()
+  const collectionId = `source-reconciliation-repeat`
+  let source!: TodoSyncParams
+  const collection = createCollection(
+    persistedCollectionOptions<Todo, string>({
+      id: collectionId,
+      getKey: (row) => row.id,
+      sync: {
+        sync: (params) => {
+          source = params
+          params.markReady()
+        },
+      },
+      persistence: { adapter, coordinator },
+    }),
+  )
+  const live = createLiveQueryCollection((q) => q.from({ row: collection }))
+  let hasPrimaryFailure = false
+  try {
+    await atPersistedOracleCheckpoint(collection.preload(), `source ready`)
+    await atPersistedOracleCheckpoint(live.preload(), `live query ready`)
+    source.begin()
+    source.metadata?.row.set(`ghost`, { stale: true })
+    await atPersistedOracleCheckpoint(
+      Promise.resolve(source.commit()),
+      `orphan row metadata applied`,
+    )
+    expect(source.metadata?.row.get(`ghost`)).toEqual({ stale: true })
+    const sourceEvents: Array<string> = []
+    const liveEvents: Array<string> = []
+    const sourceSubscription = collection.subscribeChanges((changes) => {
+      sourceEvents.push(...changes.map(({ key }) => String(key)))
+    })
+    const liveSubscription = live.subscribeChanges((changes) => {
+      liveEvents.push(...changes.map(({ key }) => String(key)))
+    })
+    try {
+      coordinator.emit(
+        {
+          type: `tx:committed`,
+          term: 1,
+          seq: 1,
+          txId: `crossing`,
+          latestRowVersion: 1,
+          requiresFullReload: true,
+          reconciliationReload: true,
+        },
+        `replacement`,
+        collectionId,
+      )
+      await flushAsyncWork()
+      expect({
+        sourceEvents,
+        liveEvents,
+        sourceIds: [...collection.keys()].sort(),
+        liveIds: [...live.keys()].sort(),
+        orphanMetadata: source.metadata?.row.get(`ghost`),
+        status: collection.status,
+        liveStatus: live.status,
+      }).toEqual({
+        sourceEvents: [],
+        liveEvents: [],
+        sourceIds: [`crossing`],
+        liveIds: [`crossing`],
+        orphanMetadata: undefined,
+        status: `ready`,
+        liveStatus: `ready`,
+      })
+    } finally {
+      liveSubscription.unsubscribe()
+      sourceSubscription.unsubscribe()
+    }
+  } catch (error) {
+    hasPrimaryFailure = true
+    throw error
+  } finally {
+    await cleanupPersistedOracle(
+      [() => live.cleanup(), () => collection.cleanup()],
+      hasPrimaryFailure,
+    )
+  }
+})
+
+// SQLite stores array holes as null and omits enumerable array properties
+// outside the indexed elements. A source Collection can still hold the
+// authored array shape before a reconciliation reload. The durable row below
+// is the independent reference; the public source and live-query rows must
+// publish it at this checkpoint, even when general change-event equality
+// considers the arrays equal.
+it.each([`sparse slot`, `extra array property`] as const)(
+  `publishes the durable array shape after a reconciliation reload: %s`,
+  async (shape) => {
+    const authoredValues: Array<string | null> =
+      shape === `sparse slot`
+        ? Array<string | null>(1)
+        : Object.assign([`kept`], { extra: `not durable` })
+    const durableValues: Array<string | null> =
+      shape === `sparse slot` ? [null] : [`kept`]
+    const adapter = createRecordingAdapter([
+      { id: `crossing`, title: `source`, values: authoredValues },
+    ])
+    const coordinator = createCoordinatorHarness()
+    const collectionId = `source-array-shape-${shape}`
+    const collection = createCollection(
+      persistedCollectionOptions<Todo, string>({
+        id: collectionId,
+        getKey: (row) => row.id,
+        sync: { sync: (params) => params.markReady() },
+        persistence: { adapter, coordinator },
+      }),
+    )
+    const live = createLiveQueryCollection((q) => q.from({ row: collection }))
+    let hasPrimaryFailure = false
+    const shapeOf = (values: Array<string | null> | undefined) => ({
+      indexedKeys: values
+        ? Object.keys(values).filter((key) => key === `0`)
+        : [],
+      firstValue: values?.[0],
+      hasExtra: values ? Object.hasOwn(values, `extra`) : false,
+    })
+    try {
+      await atPersistedOracleCheckpoint(collection.preload(), `source ready`)
+      await atPersistedOracleCheckpoint(live.preload(), `live query ready`)
+      adapter.rows.set(`crossing`, {
+        id: `crossing`,
+        title: `source`,
+        values: durableValues,
+      })
+      coordinator.emit(
+        {
+          type: `tx:committed`,
+          term: 1,
+          seq: 1,
+          txId: `crossing`,
+          latestRowVersion: 1,
+          requiresFullReload: true,
+          reconciliationReload: true,
+        },
+        `replacement`,
+        collectionId,
+      )
+      await flushAsyncWork()
+      const expectedShape = shapeOf(durableValues)
+      expect({
+        source: shapeOf(collection.get(`crossing`)?.values),
+        live: shapeOf(live.get(`crossing`)?.values),
+        durable: shapeOf(adapter.rows.get(`crossing`)?.values),
+      }).toEqual({
+        source: expectedShape,
+        live: expectedShape,
+        durable: expectedShape,
+      })
+    } catch (error) {
+      hasPrimaryFailure = true
+      throw error
+    } finally {
+      await cleanupPersistedOracle(
+        [() => live.cleanup(), () => collection.cleanup()],
+        hasPrimaryFailure,
+      )
+    }
+  },
+)
+
+// A source commit accepted while persisted restore is reading waits behind the
+// hydration baseline. Its queued applied receipt remains one obligation when
+// the coordinator answer is lost. The independent authored ledger is baseline
+// → crossing → later; no second source sync run or queue re-admission exists in
+// that model. The controlled adapter holds the baseline and then the exact-ID
+// decision so both pending checkpoints are observable.
+it(`reconciles a source receipt queued behind persisted hydration`, async () => {
+  const adapter = createRecordingAdapter([{ id: `shared`, title: `baseline` }])
+  const hydrationEntered = createEventGate()
+  const releaseHydration = createEventGate()
+  overrideBaselineRows(adapter, async () => {
+    hydrationEntered.resolve()
+    await releaseHydration.promise
+    return [
+      {
+        key: `shared`,
+        value: { id: `shared`, title: `baseline` },
+      },
+    ]
+  })
+  const coordinator = createCoordinatorHarness()
+  const reconcileEntered = createEventGate()
+  const releaseReconcile = createEventGate()
+  const uncertain = new IndeterminateCommitError({
+    collectionId: `queued-reconciliation`,
+    requestType: `rpc:applyCommittedTx:req`,
+    previousLeaderId: `retired`,
+    previousTerm: 1,
+    currentLeaderId: `replacement`,
+    currentTerm: 2,
+    cause: new Error(`lost answer`),
+  })
+  let first = true
+  coordinator.requestApplyCommittedTx = async (
+    collectionId,
+    tx,
+    scopedAdapter,
+  ) => {
+    if (first) {
+      first = false
+      expect(scopedAdapter).toBeDefined()
+      throw uncertain
+    }
+    await (scopedAdapter ?? adapter).applyCommittedTx(collectionId, tx)
+    return {
+      type: `rpc:applyCommittedTx:res`,
+      rpcId: tx.txId,
+      ok: true,
+      term: tx.term,
+      seq: tx.seq,
+      latestRowVersion: tx.rowVersion,
+    }
+  }
+  coordinator.reconcileCommittedTx = async (
+    collectionId,
+    tx,
+    anchor,
+    scopedAdapter,
+  ) => {
+    expect(anchor).toEqual({ latestRowVersion: 0, resetEpoch: 0 })
+    expect(scopedAdapter).toBeDefined()
+    reconcileEntered.resolve()
+    await releaseReconcile.promise
+    const committed = { ...tx, term: 2, seq: 1, rowVersion: 1 }
+    await (scopedAdapter ?? adapter).applyCommittedTx(collectionId, committed)
+    return {
+      type: `rpc:reconcileCommittedTx:res`,
+      rpcId: tx.txId,
+      ok: true,
+      alreadyApplied: false,
+      committed: { term: 2, seq: 1, rowVersion: 1 },
+    }
+  }
+  let source!: TodoSyncParams
+  let syncRuns = 0
+  const collection = createCollection(
+    persistedCollectionOptions<Todo, string>({
+      id: `queued-reconciliation`,
+      getKey: (row) => row.id,
+      sync: {
+        sync: (params) => {
+          source = params
+          syncRuns++
+          params.markReady()
+        },
+      },
+      persistence: { adapter, coordinator },
+    }),
+  )
+  const ready = collection.stateWhenReady()
+  let firstReceipt: Promise<void> | undefined
+  let hasPrimaryFailure = false
+  try {
+    await atPersistedOracleCheckpoint(hydrationEntered.promise, `held baseline`)
+    source.begin()
+    source.write({
+      type: `update`,
+      value: { id: `shared`, title: `crossing` },
+    })
+    source.metadata?.collection.set(`probe:cursor`, `crossing`)
+    firstReceipt = Promise.resolve(source.commit()).then(() => undefined)
+    const settlement = observeSettlement(firstReceipt)
+    expect(settlement.read()).toEqual({ status: `pending` })
+    expect(adapter.applyCommittedTxCalls).toHaveLength(0)
+    releaseHydration.resolve()
+    await atPersistedOracleCheckpoint(
+      reconcileEntered.promise,
+      `queued reconciliation entered`,
+    )
+    expect(settlement.read()).toEqual({ status: `pending` })
+    expect(adapter.rows.get(`shared`)?.title).toBe(`baseline`)
+    releaseReconcile.resolve()
+    await atPersistedOracleCheckpoint(firstReceipt, `queued source receipt`)
+    await atPersistedOracleCheckpoint(ready, `persisted restore ready`)
+    expect({
+      receipt: settlement.read(),
+      status: collection.status,
+      syncRuns,
+      publicTitle: collection.get(`shared`)?.title,
+      durableTitle: adapter.rows.get(`shared`)?.title,
+      cursor: adapter.collectionMetadata.get(`probe:cursor`),
+      durableTxCount: adapter.applyCommittedTxCalls.length,
+    }).toEqual({
+      receipt: { status: `fulfilled` },
+      status: `ready`,
+      syncRuns: 1,
+      publicTitle: `crossing`,
+      durableTitle: `crossing`,
+      cursor: `crossing`,
+      durableTxCount: 1,
+    })
+    source.begin()
+    source.write({
+      type: `update`,
+      value: { id: `shared`, title: `later` },
+    })
+    source.metadata?.collection.set(`probe:cursor`, `later`)
+    await atPersistedOracleCheckpoint(
+      Promise.resolve(source.commit()),
+      `queued source suffix`,
+    )
+    expect({
+      status: collection.status,
+      syncRuns,
+      publicTitle: collection.get(`shared`)?.title,
+      durableTitle: adapter.rows.get(`shared`)?.title,
+      cursor: adapter.collectionMetadata.get(`probe:cursor`),
+      durableTxCount: adapter.applyCommittedTxCalls.length,
+    }).toEqual({
+      status: `ready`,
+      syncRuns: 1,
+      publicTitle: `later`,
+      durableTitle: `later`,
+      cursor: `later`,
+      durableTxCount: 2,
+    })
+  } catch (error) {
+    hasPrimaryFailure = true
+    throw error
+  } finally {
+    releaseHydration.resolve()
+    releaseReconcile.resolve()
+    await cleanupPersistedOracle(
+      [
+        () => ready.catch(() => undefined),
+        () => firstReceipt?.catch(() => undefined),
+        () => collection.cleanup(),
+      ],
+      hasPrimaryFailure,
+    )
+  }
+})
+
+// A missing exact-ID proof leaves the original uncertainty visible. A known
+// SQLite failure keeps its durability class and details, whether it arrived as
+// a remote response or a direct local throw. In all three histories the source
+// has no safe suffix: a later commit cannot advance durable rows or cursor.
+it.each([`unknown`, `remote-durability`, `local-durability`] as const)(
+  `fails the source run after %s reconciliation`,
+  async (failureMode) => {
+    const adapter = createRecordingAdapter()
+    const coordinator = createCoordinatorHarness()
+    const uncertain = new IndeterminateCommitError({
+      collectionId: `failed-reconciliation`,
+      requestType: `rpc:applyCommittedTx:req`,
+      previousLeaderId: `retired`,
+      previousTerm: 1,
+      currentLeaderId: `replacement`,
+      currentTerm: 2,
+      cause: new Error(`lost answer`),
+    })
+    const localFailure = new PersistedCollectionDurabilityError(
+      `SQLite reconciliation failed`,
+      { code: `SQLITE_IOERR_FSYNC`, path: [`database`, `wal`] },
+    )
+    coordinator.requestApplyCommittedTx = async () => {
+      throw uncertain
+    }
+    coordinator.reconcileCommittedTx = async () => {
+      if (failureMode === `local-durability`) throw localFailure
+      if (failureMode === `remote-durability`) {
+        return {
+          type: `rpc:reconcileCommittedTx:res`,
+          rpcId: `known-failure`,
+          ok: false,
+          code: `PERSISTENCE_ERROR`,
+          error: `disk write failed`,
+          sourceCode: `SQLITE_IOERR_FSYNC`,
+          path: [`database`, `wal`],
+        }
+      }
+      return {
+        type: `rpc:reconcileCommittedTx:res`,
+        rpcId: `unknown`,
+        ok: false,
+        code: `UNDETERMINED`,
+        error: `newer write exists`,
+      }
+    }
+    let source!: TodoSyncParams
+    let syncRuns = 0
+    const collection = createCollection(
+      persistedCollectionOptions<Todo, string>({
+        id: `failed-reconciliation`,
+        getKey: (row) => row.id,
+        sync: {
+          sync: (params) => {
+            source = params
+            syncRuns++
+            params.markReady()
+          },
+        },
+        persistence: { adapter, coordinator },
+      }),
+    )
+    const live = createLiveQueryCollection((q) => q.from({ row: collection }))
+    const subscription = live.subscribeChanges(() => {})
+    let hasPrimaryFailure = false
+    try {
+      await atPersistedOracleCheckpoint(collection.preload(), `source ready`)
+      await atPersistedOracleCheckpoint(live.preload(), `live ready`)
+      source.begin()
+      source.write({
+        type: `insert`,
+        value: { id: `crossing`, title: `source` },
+      })
+      source.metadata?.collection.set(`probe:cursor`, `crossing`)
+      let firstFailure: unknown
+      try {
+        await atPersistedOracleCheckpoint(
+          Promise.resolve(source.commit()),
+          `failed source receipt`,
+        )
+      } catch (error) {
+        firstFailure = error
+      }
+      if (failureMode === `unknown`) {
+        expect(firstFailure).toBe(uncertain)
+      } else if (failureMode === `local-durability`) {
+        expect(firstFailure).toBe(localFailure)
+      } else {
+        expect(firstFailure).toMatchObject({
+          name: `PersistedCollectionDurabilityError`,
+          code: `SQLITE_IOERR_FSYNC`,
+          path: [`database`, `wal`],
+        })
+      }
+      let suffixFailure: unknown
+      try {
+        source.begin()
+        source.write({ type: `insert`, value: { id: `later`, title: `later` } })
+        await Promise.resolve(source.commit())
+      } catch (error) {
+        suffixFailure = error
+      }
+      expect(suffixFailure).toBe(firstFailure)
+      expect({
+        sourceStatus: collection.status,
+        liveStatus: live.status,
+        syncRuns,
+        durableIds: [...adapter.rows.keys()],
+        durableCursor: adapter.collectionMetadata.get(`probe:cursor`),
+        durableTxCount: adapter.applyCommittedTxCalls.length,
+      }).toEqual({
+        sourceStatus: `error`,
+        liveStatus: `error`,
+        syncRuns: 1,
+        durableIds: [],
+        durableCursor: undefined,
+        durableTxCount: 0,
+      })
+    } catch (error) {
+      hasPrimaryFailure = true
+      throw error
+    } finally {
+      subscription.unsubscribe()
+      await cleanupPersistedOracle(
+        [() => live.cleanup(), () => collection.cleanup()],
+        hasPrimaryFailure,
+      )
+    }
+  },
+)
 
 function observeSettlement(promise: Promise<void>): {
   read: () =>

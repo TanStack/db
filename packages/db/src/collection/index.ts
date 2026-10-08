@@ -699,6 +699,15 @@ export class CollectionImpl<
     return this._state.syncedData
   }
 
+  /** @internal Applied metadata keys without a source row. */
+  public _syncedRowMetadataKeysOutsideBase(): Array<TKey> {
+    const keys: Array<TKey> = []
+    for (const key of this._state.syncedMetadata.keys()) {
+      if (!this._state.syncedData.has(key)) keys.push(key)
+    }
+    return keys
+  }
+
   /**
    * Get the current value for a key (virtual derived state)
    */

@@ -30,6 +30,11 @@ export function deepEquals(a: any, b: any): boolean {
   return deepEqualsInternal(a, b, undefined)
 }
 
+/** @internal Compare complete value shape before skipping a persisted reload. */
+export function deepEqualsStrict(a: unknown, b: unknown): boolean {
+  return deepEqualsInternal(a, b, undefined, true)
+}
+
 function isPlainPrototype(prototype: object | null): boolean {
   return prototype === null || Object.getPrototypeOf(prototype) === null
 }
