@@ -63,6 +63,7 @@ import { dirname, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import * as Errors from '../src/index'
+import { codedWarning } from '../src/error-message'
 import { errorSampleArguments } from './error-sample-arguments'
 import { findErrorSites } from './error-sites-oracle'
 
@@ -281,7 +282,12 @@ describe(`production error messages`, () => {
     )
     const frozen: Record<
       string,
-      { file: string; template: string; literals: Array<string> }
+      {
+        file: string
+        template: string
+        literals: Array<string>
+        kind?: `warning`
+      }
     > = JSON.parse(readFileSync(sitesPath, `utf8`))
 
     // Only validateCollectionConfig reaches these diagnostics, and
@@ -297,12 +303,13 @@ describe(`production error messages`, () => {
 
     it(`keeps each site's development message and code`, () => {
       const current = Object.fromEntries(
-        sites.coded.map(({ code, file, template, literals }) => [
+        sites.coded.map(({ code, file, template, literals, kind }) => [
           code,
           {
             file,
             template,
             literals: literals.filter((text) => /[A-Za-z]/.test(text)),
+            ...(kind === `warning` ? { kind } : {}),
           },
         ]),
       )
@@ -376,6 +383,18 @@ describe(`production error messages`, () => {
       )
     })
 
+    // A warning says so (maintainer decision, 2026-10-08): a console.warn
+    // message uses codedWarning, and nothing else does.
+    it(`codes a console.warn message as a warning`, () => {
+      const mismatched = sites.coded
+        .filter(({ kind, inWarn }) => (kind === `warning`) !== inWarn)
+        .map(({ file, code, kind }) => `${file} ${kind} ${code}`)
+      expect(mismatched).toEqual([])
+      expect(codedWarning(7, { key: 1 })).toBe(
+        `TanStack DB warning 7 (key=1): ${docsUrl}#warning-7`,
+      )
+    })
+
     it(`never reuses a class code`, () => {
       const codes: Record<string, number> = JSON.parse(
         readFileSync(codesPath, `utf8`),
@@ -426,12 +445,15 @@ describe(`production error messages`, () => {
       const heading = new RegExp(`^## Error ${code}\\b.*${name}`, `m`)
       expect(docs, `${name} (${code})`).toMatch(heading)
     }
-    const sites: Record<string, { file: string }> = JSON.parse(
+    const sites: Record<string, { file: string; kind?: string }> = JSON.parse(
       readFileSync(sitesPath, `utf8`),
     )
-    for (const [code, { file }] of Object.entries(sites)) {
-      const heading = new RegExp(`^## Error ${code}\\b.*${file}`, `m`)
-      expect(docs, `error ${code} (${file})`).toMatch(heading)
+    for (const [code, { file, kind }] of Object.entries(sites)) {
+      const title = kind === `warning` ? `Warning` : `Error`
+      const anchor = `<a id="${kind ?? `error`}-${code}"></a>`
+      const heading = new RegExp(`^## ${title} ${code}\\b.*${file}`, `m`)
+      expect(docs, `${title} ${code} (${file})`).toMatch(heading)
+      expect(docs, `${title} ${code} anchor`).toContain(anchor)
     }
   })
 })

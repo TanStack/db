@@ -18,6 +18,17 @@
   {
     "file": "indexes/index-registry.ts",
     "literals": [
+      "Queries on \"",
+      "\" are slow (avg ",
+      "ms). Consider adding an index.",
+      "Collection has ",
+      " items. Queries on \"",
+      "\" may benefit from an index."
+    ]
+  },
+  {
+    "file": "indexes/index-registry.ts",
+    "literals": [
       "[TanStack DB] Index suggestion for \"",
       "  Add index: collection.createIndex((row) => row."
     ]
@@ -25,17 +36,13 @@
   {
     "file": "indexes/index-registry.ts",
     "literals": [
-      "Queries on \"",
-      "\" are slow (avg ",
-      "ms). Consider adding an index."
+      "slow-query"
     ]
   },
   {
     "file": "indexes/index-registry.ts",
     "literals": [
-      "Collection has ",
-      " items. Queries on \"",
-      "\" may benefit from an index."
+      "collection-size"
     ]
   },
   {

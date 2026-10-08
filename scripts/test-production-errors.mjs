@@ -149,7 +149,12 @@ for (const [name, literal] of checked) {
   )
   seen.set(literal, name)
 }
-const short = checked.filter(([, literal]) => literal.length < 12)
+// A development-only region may hold only a short value, such as `slow-query`;
+// it still has to be absent from production.
+const short = checked.filter(
+  ([name, literal]) =>
+    literal.length < (name.startsWith('development-only') ? 8 : 12),
+)
 assert.deepEqual(short, [], 'coded errors without a distinctive literal')
 
 // `require` consumers get the CommonJS build, so check it too.

@@ -35,6 +35,10 @@ import ts from 'typescript'
 export type CodedSite = {
   file: string
   code: number
+  /** `warning` for `codedWarning`, else `error`. */
+  kind: `error` | `warning`
+  /** True when the message is an argument of `console.warn`. */
+  inWarn: boolean
   /** The development message as a template. */
   template: string
   /** Its literal text pieces, outside interpolations. */
@@ -397,7 +401,9 @@ export function findErrorSites(
       ts.isConditionalExpression(node) &&
       compact(node.condition, sourceFile) === guard &&
       ts.isCallExpression(node.whenFalse) &&
-      node.whenFalse.expression.getText(sourceFile) === `codedMessage`
+      [`codedMessage`, `codedWarning`].includes(
+        node.whenFalse.expression.getText(sourceFile),
+      )
     // The guard alone, or the first terms of a top-level `&&` chain: then the
     // whole condition is false in production. `guard || x` is not a guard.
     const isGuard = (node: ts.Expression): boolean => {
@@ -535,9 +541,18 @@ export function findErrorSites(
         })
       } else if (isCoded(node)) {
         const call = node.whenFalse as ts.CallExpression
+        const parent = node.parent
         coded.push({
           file,
           code: Number(call.arguments[0]!.getText(sourceFile)),
+          kind:
+            call.expression.getText(sourceFile) === `codedWarning`
+              ? `warning`
+              : `error`,
+          inWarn:
+            ts.isCallExpression(parent) &&
+            isConsoleMethod(parent.expression) &&
+            /warn['"`]?\]?$/.test(parent.expression.getText(sourceFile)),
           template: messageTemplate(node.whenTrue, sourceFile),
           literals: messageLiterals(node.whenTrue),
           interpolations: interpolations(node.whenTrue, sourceFile, showable),

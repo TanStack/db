@@ -6,7 +6,7 @@ import {
   SerializationError,
   StorageKeyRequiredError,
 } from './errors'
-import { codedMessage, devBuild } from './error-message.js'
+import { codedMessage, codedWarning, devBuild } from './error-message.js'
 import type {
   BaseCollectionConfig,
   CollectionConfig,
@@ -635,7 +635,7 @@ function loadFromStorage<T extends object>(
     console.warn(
       devBuild() && process.env.NODE_ENV !== `production`
         ? `[LocalStorageCollection] Error loading data from storage key "${storageKey}":`
-        : codedMessage(219, { storageKey }),
+        : codedWarning(219, { storageKey }),
       error,
     )
     return new Map()

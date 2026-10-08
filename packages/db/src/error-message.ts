@@ -50,6 +50,7 @@ function show(value: unknown, inArray: boolean): string | undefined {
 export function codedMessage(
   code: number,
   values: Record<string, unknown> = {},
+  kind = `error`,
 ): string {
   const shown = Object.entries(values).flatMap(([name, value]) => {
     try {
@@ -66,5 +67,13 @@ export function codedMessage(
       /[\u2028\u2029]/g,
       (separator) => `\\u${separator.charCodeAt(0).toString(16)}`,
     )
-  return `TanStack DB error ${code}${pairs && ` (${pairs})`}: https://tanstack.com/db/latest/docs/errors#error-${code}`
+  return `TanStack DB ${kind} ${code}${pairs && ` (${pairs})`}: https://tanstack.com/db/latest/docs/errors#${kind}-${code}`
+}
+
+/** The production form of a `console.warn` message: a warning, not an error. */
+export function codedWarning(
+  code: number,
+  values?: Record<string, unknown>,
+): string {
+  return codedMessage(code, values, `warning`)
 }

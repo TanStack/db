@@ -2,7 +2,7 @@ import { compileSingleRowExpression } from '../query/compiler/evaluators.js'
 import { comparisonFunctions } from '../query/builder/functions.js'
 import { DEFAULT_COMPARE_OPTIONS, deepEquals } from '../utils.js'
 import { makeCheckedComparator, makeComparator } from '../utils/comparison.js'
-import { codedMessage, devBuild } from '../error-message.js'
+import { codedMessage, codedWarning, devBuild } from '../error-message.js'
 import type { CompiledSingleRowExpression } from '../query/compiler/evaluators.js'
 import type { RangeQueryOptions } from './btree-index.js'
 import type { CompareOptions } from '../query/builder/types.js'
@@ -350,7 +350,7 @@ export function warnRemovalFailure(key: unknown, error: unknown): void {
   console.warn(
     devBuild() && process.env.NODE_ENV !== `production`
       ? `Failed to evaluate index expression for key ${key} during removal:`
-      : codedMessage(216, { key }),
+      : codedWarning(216, { key }),
     error,
   )
 }

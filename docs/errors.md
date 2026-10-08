@@ -12,6 +12,7 @@ that the error can show, and a link to this page. For example:
 TanStack DB error 17 (key=1, collectionId="todos"): https://tanstack.com/db/latest/docs/errors#error-17
 ```
 
+A console warning uses the same form with `warning` in place of `error`.
 Development builds keep the full messages below. The error classes, their
 `name` values, and their fields are the same in both builds. See
 [Error Handling](./guides/error-handling.md) for how to catch them.
@@ -2169,9 +2170,9 @@ Development builds show this message, with `${...}` replaced by values:
 Live query graph failed
 ```
 
-<a id="error-213"></a>
+<a id="warning-213"></a>
 
-## Error 213: `collection/change-events.ts`
+## Warning 213: `collection/change-events.ts`
 
 Development builds show this message, with `${...}` replaced by values:
 
@@ -2189,9 +2190,9 @@ Development builds show this message, with `${...}` replaced by values:
 Error in CleanupQueue task:
 ```
 
-<a id="error-215"></a>
+<a id="warning-215"></a>
 
-## Error 215: `indexes/auto-index.ts`
+## Warning 215: `indexes/auto-index.ts`
 
 Development builds show this message, with `${...}` replaced by values:
 
@@ -2199,9 +2200,9 @@ Development builds show this message, with `${...}` replaced by values:
 ${collection.id ? `[${collection.id}] ` : ``}Failed to create auto-index for field path "${fieldPath.join(`.`)}":
 ```
 
-<a id="error-216"></a>
+<a id="warning-216"></a>
 
-## Error 216: `indexes/base-index.ts`
+## Warning 216: `indexes/base-index.ts`
 
 Development builds show this message, with `${...}` replaced by values:
 
@@ -2219,9 +2220,9 @@ Development builds show this message, with `${...}` replaced by values:
 [LocalStorageCollection] Error saving data to storage key "${config.storageKey}":
 ```
 
-<a id="error-219"></a>
+<a id="warning-219"></a>
 
-## Error 219: `local-storage.ts`
+## Warning 219: `local-storage.ts`
 
 Development builds show this message, with `${...}` replaced by values:
 
