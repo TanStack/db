@@ -167,9 +167,13 @@ function getTransactionScope(transaction: object): TransactionScope {
 function throwSettlementErrors(errors: Array<unknown>): void {
   if (errors.length === 1) throw errors[0]
   if (errors.length > 1)
-    throw new AggregateError(errors, `Transaction settlement failed`, {
-      cause: errors[0],
-    })
+    throw new AggregateError(
+      errors,
+      devBuild() && process.env.NODE_ENV !== `production`
+        ? `Transaction settlement failed`
+        : codedMessage(213),
+      { cause: errors[0] },
+    )
 }
 
 function getTransactionAmbientScope(transaction: object): TransactionScope {

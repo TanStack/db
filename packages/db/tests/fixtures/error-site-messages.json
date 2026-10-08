@@ -759,5 +759,10 @@
     "file": "query/live/collection-config-builder.ts",
     "template": "Live query graph failed",
     "literals": ["Live query graph failed"]
+  },
+  "213": {
+    "file": "transactions.ts",
+    "template": "Transaction settlement failed",
+    "literals": ["Transaction settlement failed"]
   }
 }

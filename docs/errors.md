@@ -2167,3 +2167,13 @@ Development builds show this message, with `${...}` replaced by values:
 ```text
 Live query graph failed
 ```
+
+<a id="error-213"></a>
+
+## Error 213: `transactions.ts`
+
+Development builds show this message, with `${...}` replaced by values:
+
+```text
+Transaction settlement failed
+```
