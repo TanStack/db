@@ -545,7 +545,12 @@ function createGroupByTests(autoIndex: `off` | `eager`): void {
     test.each(minMaxCases)(
       `min and max equal the remaining members' values: %s`,
       (_name, select, aValues, bValues, toValue, rebuilt) => {
-        type Row = { id: number; group: number; a: unknown; b: unknown }
+        type Row = {
+          id: number
+          group: number
+          a: number | Date
+          b: number | Date
+        }
         // A stored argument holds the final values in the source rows. A
         // rebuilt argument holds numbers, and the subquery builds the value.
         const rows: Array<Row> = aValues.map((a, i) => ({
@@ -554,7 +559,7 @@ function createGroupByTests(autoIndex: `off` | `eager`): void {
           a: rebuilt ? a : toValue(a),
           b: rebuilt ? bValues[i]! : toValue(bValues[i]!),
         }))
-        const valueOf = (raw: unknown) =>
+        const valueOf = (raw: number | Date): number | Date =>
           rebuilt ? toValue(raw as number) : raw
         const source = createCollection(
           mockSyncCollectionOptions<Row>({
@@ -595,7 +600,10 @@ function createGroupByTests(autoIndex: `off` | `eager`): void {
               ? `-0`
               : String(value)
         const check = (remaining: Array<Row>) => {
-          const actual = summary.toArray[0] as Record<string, unknown>
+          const actual = summary.toArray[0] as unknown as Record<
+            string,
+            unknown
+          >
           const expectOne = (
             alias: `low` | `high`,
             field: `a` | `b`,
