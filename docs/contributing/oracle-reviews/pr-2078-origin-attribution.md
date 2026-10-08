@@ -196,9 +196,8 @@ both reviews are accounted for separately from the user's eight findings:
 The reviewer's three findings were accurate and focused. The proposed fix for
 CR3 identified the missing commit but did not account for a later edit replacing
 the shared deferred promise. The reviews distinguished documentation defects
-from a test-integrity defect and had little noise. **Hire recommendation:** yes
-for further review work, with adjacent interleavings checked before accepting
-the proposed patch verbatim.
+from a test-integrity defect and had little noise. Adjacent interleavings
+still need checking before accepting the proposed patch verbatim.
 
 ### CR3 law, reach, and calibration
 
@@ -280,8 +279,6 @@ technically accurate on all nine items at the reviewed commit and found the
 interaction between the prior fix and active-key ownership. The proposed M02
 repair was both correct and smaller than the snapshot approach. The review
 did not report execution, so its failure claims needed the probes above.
-**Hire recommendation: yes** for further review work, with executable
-calibration required before accepting behavior claims.
 
 ### Laws, reachable histories, and enforcement
 
@@ -369,3 +366,20 @@ the authorized bounded repairs are complete. No universal claim is made for
 longer reentrant suffixes, larger rollback conflict graphs, other SQLite
 hosts, or the unavailable private #2071 bridge sequence; their executable
 owners and needed witnesses remain in the coverage map.
+
+### CodeRabbit review of `ee21b1797`
+
+[Review 5460095613](https://github.com/TanStack/db/pull/2078#pullrequestreview-5460095613)
+contained one outside-diff behavior suggestion and one inline documentation
+suggestion. Both are accounted for here; its suggested agent prompts and local
+tool invocation are review metadata, not additional findings.
+
+| ID | Claim and proposed action | Evidence and technical verdict | Disposition and durable value |
+| --- | --- | --- | --- |
+| CR4 | The model keeps `activeKeys` after an empty truncate while production clears its active-key tracking; clear `activeKeys` after taking the batch snapshot. | Production did clear active tracking on the reviewed `ee21b1797`, so the observation was accurate there. Its proposed model change contradicts the `VirtualOrigin` active-key law and would make the model accept M01's product regression. After the production repair at `a109687c1`, that change was run as a temporary model mutant. Both new key 2 cases failed at their intended public cuts: the nonoptimistic case at complete source publication and the optimistic case at `isPersisted` settlement. The mutant was removed. | **stale** as a production/model mismatch after M01's repair; **refuted** as a model repair. Keep the empty-truncate/different-key challenge under the optimistic-history owner. |
+| CR5 | Remove a hiring recommendation from the engineering review record. | Correct maintainability point: the durable record needs code and test evidence; the user-facing review can carry the requested reviewer assessment. | **fixed-now.** Removed the personnel recommendation from this record while retaining the technical quality assessment and all law evidence. |
+
+CodeRabbit accounting for this review: **2 raw items = 1 stale with a refuted
+repair + 1 fixed-now**. CR4's historical observation and useful adversarial
+history remain recorded; no product law or test coverage was weakened to
+accept the proposed model change.
