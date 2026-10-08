@@ -432,7 +432,11 @@ export function getByKey<T>(
     (cause) =>
       devBuild() && process.env.NODE_ENV !== `production`
         ? `Failed to get item with key "${String(key)}" from object store "${objectStore.name}": ${cause}`
-        : codedMessage(205, { key: String(key), name: objectStore.name, cause }),
+        : codedMessage(205, {
+            key: String(key),
+            name: objectStore.name,
+            cause,
+          }),
   )
 }
 
@@ -502,7 +506,11 @@ export function deleteByKey(
     (cause) =>
       devBuild() && process.env.NODE_ENV !== `production`
         ? `Failed to delete item with key "${String(key)}" from object store "${objectStore.name}": ${cause}`
-        : codedMessage(202, { key: String(key), name: objectStore.name, cause }),
+        : codedMessage(202, {
+            key: String(key),
+            name: objectStore.name,
+            cause,
+          }),
   )
 }
 

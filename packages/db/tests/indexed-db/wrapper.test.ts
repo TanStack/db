@@ -59,12 +59,42 @@ it('preserves native request-error text with operation context', async () => {
 // Every request helper names its operation and keeps the native error text, so
 // a helper that drops either part fails here, not only `getAll`.
 it.each([
-  ['getAll', 'readonly', (store: IDBObjectStore) => getAll(store), 'Failed to get all items from object store "items"'],
-  ['getAllKeys', 'readonly', (store: IDBObjectStore) => getAllKeys(store), 'Failed to get all keys from object store "items"'],
-  ['getByKey', 'readonly', (store: IDBObjectStore) => getByKey(store, 1), 'Failed to get item with key "1" from object store "items"'],
-  ['put', 'readwrite', (store: IDBObjectStore) => put(store, { id: 9, value: 'x' }, 9), 'Failed to write item to object store "items"'],
-  ['deleteByKey', 'readwrite', (store: IDBObjectStore) => deleteByKey(store, 1), 'Failed to delete item with key "1" from object store "items"'],
-  ['clear', 'readwrite', (store: IDBObjectStore) => clear(store), 'Failed to clear object store "items"'],
+  [
+    'getAll',
+    'readonly',
+    (store: IDBObjectStore) => getAll(store),
+    'Failed to get all items from object store "items"',
+  ],
+  [
+    'getAllKeys',
+    'readonly',
+    (store: IDBObjectStore) => getAllKeys(store),
+    'Failed to get all keys from object store "items"',
+  ],
+  [
+    'getByKey',
+    'readonly',
+    (store: IDBObjectStore) => getByKey(store, 1),
+    'Failed to get item with key "1" from object store "items"',
+  ],
+  [
+    'put',
+    'readwrite',
+    (store: IDBObjectStore) => put(store, { id: 9, value: 'x' }, 9),
+    'Failed to write item to object store "items"',
+  ],
+  [
+    'deleteByKey',
+    'readwrite',
+    (store: IDBObjectStore) => deleteByKey(store, 1),
+    'Failed to delete item with key "1" from object store "items"',
+  ],
+  [
+    'clear',
+    'readwrite',
+    (store: IDBObjectStore) => clear(store),
+    'Failed to clear object store "items"',
+  ],
 ] as const)(
   '%s keeps its operation and the native error text when its request fails',
   async (_name, mode, run, operation) => {
