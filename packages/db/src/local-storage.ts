@@ -892,9 +892,6 @@ function createLocalStorageSync<T extends object>(
         lastKnownData.set(key, storedItem)
       })
 
-      // Mark collection as ready after initial load
-      markReady()
-
       // Listen for storage events from other tabs
       const handleStorageEvent = (event: StorageEvent) => {
         // Only respond to changes to our specific key and from our storage
@@ -905,13 +902,23 @@ function createLocalStorageSync<T extends object>(
         processStorageChanges()
       }
 
-      // Add storage event listener for cross-tab sync
-      storageEventApi.addEventListener(`storage`, handleStorageEvent)
+      // Install the same-tab listener before readiness. A ready-status
+      // listener may synchronously write through another Collection.
       const unsubscribeSameTab = subscribeToSameTabWrites(
         storage,
         storageKey,
         processStorageChanges,
       )
+      try {
+        // Mark collection as ready after initial load, then listen for
+        // browser events from other tabs.
+        markReady()
+        storageEventApi.addEventListener(`storage`, handleStorageEvent)
+      } catch (error) {
+        unsubscribeSameTab()
+        if (syncParams === params) syncParams = null
+        throw error
+      }
       return {
         cleanup: () => {
           storageEventApi.removeEventListener(`storage`, handleStorageEvent)

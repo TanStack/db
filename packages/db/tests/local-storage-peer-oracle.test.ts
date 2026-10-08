@@ -292,6 +292,40 @@ it('restores same-tab publication after cleanup and restart', async () => {
   )
 })
 
+/** Readiness grants the second Collection a public sync-run snapshot. A
+ * status listener may synchronously cause an already-ready peer to write at
+ * that boundary. The authored model contains that one accepted row, so the
+ * newly ready Collection must show it at the writer's receipt even though no
+ * browser event is delivered. This distinguishes listener registration before
+ * readiness publication from registration afterward. */
+it('receives a same-tab write started by its ready listener', async () => {
+  const host = createHost()
+  const first = makeCollection(host, 'shared', 'first')
+  const second = makeCollection(host, 'shared', 'second')
+  let writeReceipt: Promise<unknown> | undefined
+  const off = second.on('status:change', ({ status }) => {
+    if (status === 'ready') {
+      writeReceipt = first.insert({ id: 'at-ready', value: 1 }).isPersisted
+        .promise
+    }
+  })
+  await withHistoryCleanup(
+    async () => {
+      await first.preload()
+      await second.preload()
+      expect(writeReceipt, 'ready listener admitted a write').toBeDefined()
+      await writeReceipt
+      expect(durableRows(host, 'shared')).toEqual([
+        { id: 'at-ready', value: 1 },
+      ])
+      expect(publicRows(second), 'newly ready peer at receipt').toEqual([
+        { id: 'at-ready', value: 1 },
+      ])
+    },
+    () => [off, () => second.cleanup(), () => first.cleanup()],
+  )
+})
+
 /** The controlled host supplies the no-event premise above. This receiving
  * witness uses jsdom's Storage object through the public default option: its
  * second Collection must see a write from the first without a synthetic event.
