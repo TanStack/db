@@ -759,5 +759,12 @@
     "file": "query/live/collection-config-builder.ts",
     "template": "Live query graph failed",
     "literals": ["Live query graph failed"]
+  },
+  "213": {
+    "file": "local-storage.ts",
+    "template": "LocalStorage options can create only one Collection. Create fresh options for each Collection.",
+    "literals": [
+      "LocalStorage options can create only one Collection. Create fresh options for each Collection."
+    ]
   }
 }

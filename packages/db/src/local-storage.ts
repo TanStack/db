@@ -2,6 +2,7 @@ import { safeRandomUUID } from './utils/uuid'
 import { withCollectionConfigFactory } from './client.js'
 import { collectionOptionsClaim } from './collection-options.js'
 import { registerTransactionCommitWork } from './transaction-commit-work.js'
+import { codedMessage, devBuild } from './error-message.js'
 import {
   InvalidStorageDataFormatError,
   InvalidStorageObjectFormatError,
@@ -659,7 +660,9 @@ export function localStorageCollectionOptions(
     value: () => {
       if (claimed)
         throw new Error(
-          `LocalStorage options can create only one Collection. Create fresh options for each Collection.`,
+          devBuild() && process.env.NODE_ENV !== `production`
+            ? `LocalStorage options can create only one Collection. Create fresh options for each Collection.`
+            : codedMessage(213),
         )
       claimed = true
     },
