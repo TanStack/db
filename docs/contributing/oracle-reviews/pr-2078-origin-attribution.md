@@ -163,3 +163,22 @@ repair from these eight findings is left open.
 
 Final accounting: **8 raw items = 8 fixed-now**. F07 and F08 include the
 technical qualifications recorded above; neither was dropped from the ledger.
+
+## Post-audit CI and review follow-ups
+
+The full `db-2` CI shard on `00fcf0f` passed 5,901 runtime tests but reported a
+test type error at `optimistic-history-oracle.ts:987`: the new manual
+`Transaction<HistoryRow>` was missing from the driver's transaction union.
+Commit `9cb0e9998ba7fc4f8bb67f2ddc6c45e58717c24b` adds that type. The
+package test TypeScript check and 42 origin-publication tests, including their
+Vitest type check, pass locally. This change does not alter the model or
+production behavior.
+
+CodeRabbit then reviewed `00fcf0f` and posted two actionable documentation
+comments. Both were correct. The earlier issue #2071 review record used present
+tense for the source-batch grammar's former delete/reinsert limit; its affected
+statements now name the historical commit and point to the ordered-batch witness
+added in this PR. The generated `VirtualRowProps` and `VirtualOrigin` reference
+pages linked to old source line numbers; all seven declaration links now match
+`virtual-props.ts`. These follow-ups do not change the eight-item accounting
+above. The new CI run is pending at the time of this note.

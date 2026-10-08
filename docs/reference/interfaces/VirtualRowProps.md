@@ -3,7 +3,7 @@ id: VirtualRowProps
 title: VirtualRowProps
 ---
 
-Defined in: [packages/db/src/virtual-props.ts:67](https://github.com/TanStack/db/blob/main/packages/db/src/virtual-props.ts#L67)
+Defined in: [packages/db/src/virtual-props.ts:74](https://github.com/TanStack/db/blob/main/packages/db/src/virtual-props.ts#L74)
 
 Virtual properties recognized on TanStack DB rows. The new
 `$hasPendingWrites` field is optional here so legacy four-field rows accepted
@@ -54,7 +54,7 @@ The type of the row's key (string or number)
 readonly $collectionId: string;
 ```
 
-Defined in: [packages/db/src/virtual-props.ts:135](https://github.com/TanStack/db/blob/main/packages/db/src/virtual-props.ts#L135)
+Defined in: [packages/db/src/virtual-props.ts:149](https://github.com/TanStack/db/blob/main/packages/db/src/virtual-props.ts#L149)
 
 The ID of the source collection this row originated from.
 
@@ -69,7 +69,7 @@ For live query collections, this is the ID of the upstream collection.
 readonly optional $hasPendingWrites: boolean;
 ```
 
-Defined in: [packages/db/src/virtual-props.ts:78](https://github.com/TanStack/db/blob/main/packages/db/src/virtual-props.ts#L78)
+Defined in: [packages/db/src/virtual-props.ts:85](https://github.com/TanStack/db/blob/main/packages/db/src/virtual-props.ts#L85)
 
 Whether this row currently has pending local optimistic writes.
 
@@ -86,7 +86,7 @@ rows always provide it.
 readonly $key: TKey;
 ```
 
-Defined in: [packages/db/src/virtual-props.ts:127](https://github.com/TanStack/db/blob/main/packages/db/src/virtual-props.ts#L127)
+Defined in: [packages/db/src/virtual-props.ts:141](https://github.com/TanStack/db/blob/main/packages/db/src/virtual-props.ts#L141)
 
 The row's key (primary identifier).
 
@@ -101,7 +101,7 @@ Useful when you need the key in projections or computations.
 readonly $origin: VirtualOrigin;
 ```
 
-Defined in: [packages/db/src/virtual-props.ts:119](https://github.com/TanStack/db/blob/main/packages/db/src/virtual-props.ts#L119)
+Defined in: [packages/db/src/virtual-props.ts:133](https://github.com/TanStack/db/blob/main/packages/db/src/virtual-props.ts#L133)
 
 Collection attribution for this row's current value.
 
@@ -137,7 +137,7 @@ For live query collections, this is passed through from the source collection.
 readonly $synced: boolean;
 ```
 
-Defined in: [packages/db/src/virtual-props.ts:97](https://github.com/TanStack/db/blob/main/packages/db/src/virtual-props.ts#L97)
+Defined in: [packages/db/src/virtual-props.ts:104](https://github.com/TanStack/db/blob/main/packages/db/src/virtual-props.ts#L104)
 
 Whether this row currently has no pending local optimistic writes.
 
