@@ -34,8 +34,9 @@ import type { Transaction } from '../src/transactions.js'
  *   surviving writes, in creation order.
  * - A rollback, or a failed commit, also rolls back every pending (not yet
  *   committed) transaction that wrote one of the same Collection keys.
- * - A settled transaction's `isPersisted` has settled, and it holds no
- *   reference to a Collection.
+ * - A settled transaction's `isPersisted` has settled, and its set of
+ *   tracking Collections is empty. Its mutations still name their
+ *   Collection; this oracle does not claim the Collection is collectable.
  * - Transaction ids are unique among unsettled transactions in a Collection.
  *   A write that would make a Collection track a second unsettled
  *   transaction with an id it already tracks throws, and changes nothing.
@@ -427,7 +428,7 @@ async function runHistory(steps: ReadonlyArray<Step>): Promise<void> {
       if (settled)
         expect(
           entry.tx.collections.size,
-          `${label}: settled tx ${index} holds no Collection`,
+          `${label}: settled tx ${index} tracks no Collection`,
         ).toBe(0)
     }
   }

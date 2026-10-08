@@ -970,12 +970,13 @@ export async function runOptimisticHistory(
               model.transactions[index]?.state === `pending` ||
               model.transactions[index]?.state === `persisting`,
           )
-          .map((operation) => operation.tx.id)
-          .sort()
+          .map((operation) => operation.tx)
+        const tracked = [...collection._state.transactions.values()]
         expect(
-          [...collection._state.transactions.keys()].sort(),
-          `${label}: tracked transactions are the unsettled ones`,
-        ).toEqual(unsettled)
+          tracked.length === unsettled.length &&
+            unsettled.every((transaction) => tracked.includes(transaction)),
+          `${label}: tracked transactions are the unsettled ones, by identity`,
+        ).toBe(true)
       }
       const initialFrame = publications.at(-1)
       check(`initial`)
