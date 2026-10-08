@@ -42,11 +42,21 @@ import type { BucketRow } from '../../src/query/live/materialized-pipeline.js'
  * buckets, as the graph guarantees. A flush either publishes, throws from the
  * commit of one facade it writes, or is rolled back after `prepare()`.
  *
+ * A facade is a Collection-valued include, so an order-only change of a row it
+ * already shows is a layout change ("Inline modes" in the architecture
+ * document). The model predicts one layout revision for a facade when a
+ * successful flush changes the order of a row the facade showed before and
+ * still shows after, and the facade's key sequence changes. It predicts no
+ * new revision otherwise, and none for a failed flush. The prediction
+ * depends only on the facade's published rows before and after the flush, so a
+ * failed flush that leaves stale order state behind is visible at the retry.
+ *
  * The driver runs the real adapter over a D2 graph. After each flush it
  * compares each active facade's ordered rows, the key that `getKeyFromItem`
- * returns for each row, and the events each facade published. The work
- * counter wraps the iterators of each facade's stored rows during the flush
- * and records which facades the flush read.
+ * returns for each row, the events each facade published, and each facade's
+ * layout revision. The work counter wraps the iterators of each
+ * facade's stored rows during the flush and records which facades the flush
+ * read.
  *
  * Limits: this owner covers one edge. Nested facades, facade indexes and the
  * root commit inside a live query are covered by `bucket-facade-adapter.test.ts`
@@ -82,6 +92,56 @@ function expectedRows(rows: Map<number, ModelRow> | undefined): Array<Row> {
   return [...(rows?.values() ?? [])]
     .sort((left, right) => (left.order < right.order ? -1 : 1))
     .map((row) => row.value)
+}
+
+/**
+ * Whether a successful flush from `before` to `after` changes the layout of a
+ * facade that exists on both sides: a row it shows on both sides changes
+ * order, and the facade's key sequence changes.
+ */
+function expectsLayoutChange(
+  before: Map<number, ModelRow>,
+  after: Map<number, ModelRow>,
+): boolean {
+  const reordered = [...before].some(([id, row]) => {
+    const next = after.get(id)
+    return next !== undefined && next.order !== row.order
+  })
+  if (!reordered) return false
+  const previousKeys = expectedRows(before).map((row) => row.id)
+  const nextKeys = expectedRows(after).map((row) => row.id)
+  return (
+    previousKeys.length !== nextKeys.length ||
+    previousKeys.some((id, index) => id !== nextKeys[index])
+  )
+}
+
+/**
+ * Run `body`, then `cleanup`. When both throw, keep the body's failure as the
+ * primary error: an AggregateError whose `cause` is that failure and whose
+ * `errors` list it before the cleanup error (ORC-010).
+ */
+async function withCleanup(
+  body: () => void | Promise<void>,
+  cleanup: () => Promise<void>,
+): Promise<void> {
+  let failure: { error: unknown } | undefined
+  try {
+    await body()
+  } catch (error) {
+    failure = { error }
+  }
+  try {
+    await cleanup()
+  } catch (cleanupError) {
+    if (!failure) throw cleanupError
+    throw new AggregateError(
+      [failure.error, cleanupError],
+      `oracle failure, then cleanup failure`,
+      { cause: failure.error },
+    )
+  }
+  if (failure) throw failure.error
 }
 
 function cloneModel(model: Model): Model {
@@ -260,6 +320,21 @@ class Driver {
     return new Map(this.events)
   }
 
+  /**
+   * Each existing facade's layout revision. The live-query observer compares
+   * it to detect a reorder of a Collection-valued include. A committed batch
+   * advances it when it marks a layout change and the visible key order
+   * changes; a discarded publication restores it.
+   */
+  layoutCounts(): Map<object, number> {
+    return new Map(
+      [...this.entries().values()].map((entry) => [
+        entry.collection,
+        entry.collection._layoutRevision,
+      ]),
+    )
+  }
+
   /** Facades read since the last call. */
   takeReads(): Map<object, number> {
     const reads = this.reads
@@ -308,89 +383,119 @@ async function runHistory(
   const driver = new Driver()
   let published: Model = new Map()
   let pending: Array<Op> = []
-  try {
-    for (const [index, step] of steps.entries()) {
-      const label = `step ${index}`
-      const ops = legalize(applyOps(published, pending), step.choices)
-      driver.send(ops)
-      pending = [...pending, ...ops]
-      driver.instrument()
-      const written = writtenBuckets(pending)
-      const before = driver.eventCounts()
-
-      // Throw from the commit of one facade the flush writes. A facade commits
-      // only when it has a pending row operation, so choose among existing
-      // facades with one. Retiring an empty facade writes nothing.
-      const rowBuckets = new Set(
-        pending
-          .filter((op) => op.type !== `activate` && op.type !== `retire`)
-          .map((op) => op.bucket),
-      )
-      const throwTargets = [...rowBuckets].filter((bucket) =>
-        driver.entry(bucket),
-      )
-      let outcome = step.outcome
-      if (outcome === `throw` && throwTargets.length === 0) outcome = `publish`
-      if (outcome === `throw`) {
-        const target = driver.entry(
-          throwTargets[step.throwPick % throwTargets.length]!,
-        )!
-        const sync = target.sync!
-        const commit = sync.commit
-        sync.commit = () => {
-          sync.commit = commit
-          commit()
-          throw new Error(`injected facade write failure`)
-        }
-      }
-
-      driver.takeReads()
-      if (outcome === `throw`) {
-        expect(() => driver.adapter.flush(), label).toThrow(
-          `injected facade write failure`,
+  await withCleanup(
+    () => {
+      for (const [index, step] of steps.entries()) {
+        const label = `step ${index}`
+        const ops = legalize(applyOps(published, pending), step.choices)
+        driver.send(ops)
+        pending = [...pending, ...ops]
+        driver.instrument()
+        const written = writtenBuckets(pending)
+        const before = driver.eventCounts()
+        const layoutsBefore = driver.layoutCounts()
+        const facadesBefore = new Map(
+          BUCKETS.map((bucket) => [bucket, driver.entry(bucket)?.collection]),
         )
-      } else {
-        const publication = driver.adapter.flush()
-        if (outcome === `rollback`) {
-          publication.prepare()
-          publication.rollback()
+
+        // Throw from the commit of one facade the flush writes. A facade commits
+        // only when it has a pending row operation, so choose among existing
+        // facades with one. Retiring an empty facade writes nothing.
+        const rowBuckets = new Set(
+          pending
+            .filter((op) => op.type !== `activate` && op.type !== `retire`)
+            .map((op) => op.bucket),
+        )
+        const throwTargets = [...rowBuckets].filter((bucket) =>
+          driver.entry(bucket),
+        )
+        let outcome = step.outcome
+        if (outcome === `throw` && throwTargets.length === 0)
+          outcome = `publish`
+        if (outcome === `throw`) {
+          const target = driver.entry(
+            throwTargets[step.throwPick % throwTargets.length]!,
+          )!
+          const sync = target.sync!
+          const commit = sync.commit
+          sync.commit = () => {
+            sync.commit = commit
+            commit()
+            throw new Error(`injected facade write failure`)
+          }
+        }
+
+        driver.takeReads()
+        if (outcome === `throw`) {
+          expect(() => driver.adapter.flush(), label).toThrow(
+            `injected facade write failure`,
+          )
         } else {
-          publication.publish()
+          const publication = driver.adapter.flush()
+          if (outcome === `rollback`) {
+            publication.prepare()
+            publication.rollback()
+          } else {
+            publication.publish()
+          }
         }
-      }
 
-      // Bounded rollback work: no facade outside the written buckets is read.
-      const reads = driver.takeReads()
-      for (const bucket of BUCKETS) {
-        if (written.has(bucket)) continue
-        const facade = driver.entry(bucket)?.collection
-        if (!facade) continue
-        expect(
-          reads.get(facade) ?? 0,
-          `${label}: reads of untouched ${bucket}`,
-        ).toBe(0)
-      }
+        // Bounded rollback work: no facade outside the written buckets is read.
+        const reads = driver.takeReads()
+        for (const bucket of BUCKETS) {
+          if (written.has(bucket)) continue
+          const facade = driver.entry(bucket)?.collection
+          if (!facade) continue
+          expect(
+            reads.get(facade) ?? 0,
+            `${label}: reads of untouched ${bucket}`,
+          ).toBe(0)
+        }
 
-      if (outcome === `publish`) {
-        published = applyOps(published, pending)
-        pending = []
-        driver.check(published, label)
-        continue
-      }
+        const layoutsAfter = driver.layoutCounts()
+        if (outcome === `publish`) {
+          const next = applyOps(published, pending)
+          // Layout: the revision advances once for each facade whose shown rows
+          // reorder, and stays put for any other facade that existed before.
+          for (const bucket of BUCKETS) {
+            const facade = facadesBefore.get(bucket)
+            if (!facade || driver.entry(bucket)?.collection !== facade) continue
+            const previous = published.get(bucket)
+            const following = next.get(bucket)
+            const expected =
+              previous && following && expectsLayoutChange(previous, following)
+                ? 1
+                : 0
+            expect(
+              (layoutsAfter.get(facade) ?? 0) -
+                (layoutsBefore.get(facade) ?? 0),
+              `${label}: layout revision of ${bucket}`,
+            ).toBe(expected)
+          }
+          published = next
+          pending = []
+          driver.check(published, label)
+          continue
+        }
 
-      // A failed flush restores the published rows and publishes nothing.
-      driver.check(published, `${label} (${outcome})`)
-      const after = driver.eventCounts()
-      for (const [facade, count] of before) {
-        expect(after.get(facade), `${label}: events after ${outcome}`).toBe(
-          count,
-        )
+        // A failed flush restores the published rows and publishes nothing,
+        // neither row events nor a layout revision.
+        driver.check(published, `${label} (${outcome})`)
+        const after = driver.eventCounts()
+        for (const [facade, count] of before) {
+          expect(after.get(facade), `${label}: events after ${outcome}`).toBe(
+            count,
+          )
+          expect(
+            layoutsAfter.get(facade),
+            `${label}: layout revision after ${outcome}`,
+          ).toBe(layoutsBefore.get(facade))
+        }
+        if (outcome === `rollback`) return
       }
-      if (outcome === `rollback`) return
-    }
-  } finally {
-    await driver.cleanup()
-  }
+    },
+    () => driver.cleanup(),
+  )
 }
 
 const choice = fc.record({
@@ -427,33 +532,87 @@ describe(`bucket facade rollback`, () => {
   // one bucket. The flush must read that bucket's rows and no others.
   it(`reads only the written facade in a wide list`, async () => {
     const driver = new Driver()
-    try {
-      const wide = Array.from({ length: 50 }, (_, index) => `w${index}`)
-      for (const bucket of wide) {
-        driver.send([
-          { type: `activate`, bucket },
-          ...[1, 2, 3].map((id): Op => ({
-            type: `insert`,
-            bucket,
-            id,
-            v: id,
-            rank: id,
-          })),
-        ])
-      }
-      driver.adapter.flush().publish()
-      driver.instrument()
-      driver.send([{ type: `insert`, bucket: `w7`, id: 4, v: 4, rank: 4 }])
-      driver.takeReads()
-      driver.adapter.flush().publish()
-      const written = driver.entry(`w7`)!.collection
-      const untouchedReads = [...driver.takeReads()]
-        .filter(([facade]) => facade !== written)
-        .map(([facade]) => (facade as Collection<Row, number>).id)
-      expect(untouchedReads).toEqual([])
-    } finally {
-      await driver.cleanup()
-    }
+    await withCleanup(
+      () => {
+        const wide = Array.from({ length: 50 }, (_, index) => `w${index}`)
+        for (const bucket of wide) {
+          driver.send([
+            { type: `activate`, bucket },
+            ...[1, 2, 3].map((id): Op => ({
+              type: `insert`,
+              bucket,
+              id,
+              v: id,
+              rank: id,
+            })),
+          ])
+        }
+        driver.adapter.flush().publish()
+        driver.instrument()
+        driver.send([{ type: `insert`, bucket: `w7`, id: 4, v: 4, rank: 4 }])
+        driver.takeReads()
+        driver.adapter.flush().publish()
+        const written = driver.entry(`w7`)!.collection
+        const untouchedReads = [...driver.takeReads()]
+          .filter(([facade]) => facade !== written)
+          .map(([facade]) => (facade as Collection<Row, number>).id)
+        expect(untouchedReads).toEqual([])
+      },
+      () => driver.cleanup(),
+    )
+  })
+
+  // Pinned: a flush that reorders a shown row throws. The retried flush must
+  // still publish the layout change, so the failed flush must not leave its
+  // new order behind as the facade's current order.
+  it(`publishes a reorder on retry after a failed reordering flush`, async () => {
+    await runHistory([
+      {
+        choices: [
+          { kind: 0, bucket: 0, id: 0, v: 0, rank: 0 },
+          { kind: 0, bucket: 0, id: 0, v: 1, rank: 1 },
+          { kind: 0, bucket: 0, id: 1, v: 2, rank: 2 },
+        ],
+        outcome: `publish`,
+        throwPick: 0,
+      },
+      {
+        choices: [{ kind: 0, bucket: 0, id: 0, v: 1, rank: 5 }],
+        outcome: `throw`,
+        throwPick: 0,
+      },
+      {
+        choices: [{ kind: 0, bucket: 1, id: 0, v: 0, rank: 0 }],
+        outcome: `publish`,
+        throwPick: 0,
+      },
+    ])
+  })
+
+  // Calibration for ORC-010: when the history fails and cleanup also throws,
+  // the report keeps the history's failure as its cause.
+  it(`keeps the oracle failure when cleanup also fails`, async () => {
+    const failure = new Error(`oracle assertion`)
+    const cleanupFailure = new Error(`cleanup failure`)
+    const result = await withCleanup(
+      () => Promise.reject(failure),
+      () => Promise.reject(cleanupFailure),
+    ).then(
+      () => undefined,
+      (error: unknown) => error,
+    )
+    expect(result).toBeInstanceOf(AggregateError)
+    const aggregate = result as AggregateError
+    expect(aggregate.cause).toBe(failure)
+    expect(aggregate.errors).toEqual([failure, cleanupFailure])
+
+    // Without a history failure, the cleanup failure is reported as is.
+    await expect(
+      withCleanup(
+        () => Promise.resolve(),
+        () => Promise.reject(cleanupFailure),
+      ),
+    ).rejects.toBe(cleanupFailure)
   })
 
   // Pinned: a failed flush that writes two existing buckets and retires a
