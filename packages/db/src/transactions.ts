@@ -732,8 +732,11 @@ class Transaction<T extends object = Record<string, unknown>> {
    * their errors. A failure in one Collection must not leave the others
    * showing this transaction's settled optimistic state. A settled
    * transaction then drops its Collections, so it holds none of them.
+   * Not `private`: `TransactionWithMutations` omits a key, which drops
+   * private members, and a Transaction with one is then not assignable.
+   * @internal
    */
-  private settleCollections(): Array<unknown> {
+  settleCollections(): Array<unknown> {
     const collections = new Set(this.collections)
     for (const mutation of this.mutations) collections.add(mutation.collection)
     if (this.state === `completed` || this.state === `failed`)

@@ -184,7 +184,7 @@ class OwnershipModel {
 
 const name = fc.constantFrom<CollectionName>(`A`, `B`)
 const txIndex = fc.integer({ min: 0, max: 3 })
-const throwOn: fc.Arbitrary<ThrowOn> = fc.oneof(
+const throwTarget: fc.Arbitrary<ThrowOn> = fc.oneof(
   { weight: 3, arbitrary: fc.constant(undefined) },
   { weight: 2, arbitrary: name },
   { weight: 1, arbitrary: fc.constant(`both` as const) },
@@ -225,7 +225,7 @@ const step: fc.Arbitrary<Step> = fc.oneof(
       type: fc.constant(`settle` as const),
       tx: txIndex,
       ok: fc.boolean(),
-      throwOn,
+      throwOn: throwTarget,
     }),
   },
   {
@@ -233,7 +233,7 @@ const step: fc.Arbitrary<Step> = fc.oneof(
     arbitrary: fc.record({
       type: fc.constant(`rollback` as const),
       tx: txIndex,
-      throwOn,
+      throwOn: throwTarget,
     }),
   },
   {

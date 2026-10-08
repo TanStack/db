@@ -1,8 +1,10 @@
 import { describe, expectTypeOf, it } from 'vitest'
+import type { Transaction } from '../src/transactions'
 import type {
   BaseCollectionConfig,
   DeleteMutationFn,
   InsertMutationFn,
+  TransactionWithMutations,
   UpdateMutationFn,
   UtilsRecord,
 } from '../src/types'
@@ -31,5 +33,14 @@ describe(`mutation handler return compatibility`, () => {
     >
 
     expectTypeOf<LegacyConfig>().toBeObject()
+  })
+
+  // Adapters pass a handler's transaction to code that takes a Transaction.
+  // `TransactionWithMutations` omits a key, which drops private members, so
+  // a private member on Transaction would break this.
+  it(`passes a handler's transaction where a Transaction is expected`, () => {
+    expectTypeOf<
+      TransactionWithMutations<Row, `insert`>
+    >().toExtend<Transaction<any>>()
   })
 })
