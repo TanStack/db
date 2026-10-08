@@ -78,6 +78,12 @@ replacement.
 | Stream render-time results | none | `routerWithDbClient(router, dbClient)` |
 | React query identity | dependency array | derived IR, or `queryKey` when needed |
 
+Building or extending a Query keeps descriptors in its plan without starting
+their source Collections. The client-aware hook or `dbClient.preloadLiveQuery()`
+binds the finished plan when it consumes it. Reuse the original unbound Query
+across clients; a prepared Query contains Collections from the client that
+prepared it.
+
 ### Minimal React Pattern
 
 ```tsx

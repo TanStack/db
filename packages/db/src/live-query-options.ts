@@ -42,14 +42,9 @@ type PreparedLiveQueryConfigInput = Omit<
   client?: DbClient
 }
 
-function createInitialQueryBuilder(
-  dbClient: DbClient | undefined,
-  deferredCollections?: DeferredLiveQueryCollections,
-): InitialQueryBuilder {
-  return new BaseQueryBuilder(
-    {},
-    createCollectionResolver(dbClient, deferredCollections),
-  ) as InitialQueryBuilder
+function createInitialQueryBuilder(): InitialQueryBuilder {
+  // Query construction does not materialize descriptor Collections.
+  return new BaseQueryBuilder() as InitialQueryBuilder
 }
 
 function createCollectionResolver(
@@ -80,7 +75,7 @@ export function prepareLiveQueryValue(
 ): unknown {
   if (typeof value === `function`) {
     return prepareLiveQueryValue(
-      value(createInitialQueryBuilder(dbClient, deferredCollections)),
+      value(createInitialQueryBuilder()),
       dbClient,
       deferredCollections,
     )

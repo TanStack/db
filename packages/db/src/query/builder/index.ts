@@ -139,7 +139,6 @@ export class BaseQueryBuilder<TContext extends Context = Context> {
 
   constructor(
     query: Partial<QueryIR> = {},
-    private readonly resolveCollection?: CollectionResolver,
     /** @internal Whether the builder may keep `query` without copying it. */
     owned = false,
   ) {
@@ -150,11 +149,7 @@ export class BaseQueryBuilder<TContext extends Context = Context> {
     query: Partial<QueryIR>,
   ): BaseQueryBuilder<TNextContext> {
     // Every clone receives a freshly spread query, so it needs no copy.
-    return new BaseQueryBuilder<TNextContext>(
-      query,
-      this.resolveCollection,
-      true,
-    )
+    return new BaseQueryBuilder<TNextContext>(query, true)
   }
 
   /**
@@ -216,14 +211,9 @@ export class BaseQueryBuilder<TContext extends Context = Context> {
       if (sourceValue instanceof CollectionImpl) {
         ref = new CollectionRef(sourceValue, alias)
       } else if (hasCollectionOptionsBrand(sourceValue)) {
-        ref = this.resolveCollection
-          ? new CollectionRef(this.resolveCollection(sourceValue), alias)
-          : new DescriptorRef(sourceValue, alias)
+        ref = new DescriptorRef(sourceValue, alias)
       } else if (sourceValue instanceof BaseQueryBuilder) {
-        const subQuery = cloneQueryForPlacement(
-          sourceValue._getQuery(),
-          this.resolveCollection,
-        )
+        const subQuery = cloneQueryForPlacement(sourceValue._getQuery())
         if (!(subQuery as Partial<QueryIR>).from) {
           throw new SubQueryMustHaveFromClauseError(context)
         }
@@ -297,7 +287,6 @@ export class BaseQueryBuilder<TContext extends Context = Context> {
           [sourceOrBranch, ...branches].map((branch) =>
             cloneQueryForPlacement(
               (branch as unknown as BaseQueryBuilder)._getQuery(),
-              this.resolveCollection,
             ),
           ),
         ),
@@ -656,12 +645,7 @@ export class BaseQueryBuilder<TContext extends Context = Context> {
       selectObject = { [sentinelKey]: true }
     }
 
-    const select = buildNestedSelect(
-      selectObject,
-      aliases,
-      undefined,
-      this.resolveCollection,
-    )
+    const select = buildNestedSelect(selectObject, aliases)
 
     return this._clone({
       ...this.query,
@@ -1030,7 +1014,7 @@ export class BaseQueryBuilder<TContext extends Context = Context> {
     return this.query as QueryIR
   }
 
-  /** Bind descriptor sources to the DbClient that consumes this query. */
+  /** Bind this query for one consumer. Later descriptor clauses wait for another consumer. */
   _bindCollectionSources(
     resolveCollection: CollectionResolver | undefined,
   ): BaseQueryBuilder<TContext> {
@@ -1045,7 +1029,6 @@ export class BaseQueryBuilder<TContext extends Context = Context> {
     }
     return new BaseQueryBuilder<TContext>(
       cloneQueryForPlacement(query, resolveCollection),
-      resolveCollection,
       true,
     )
   }
@@ -1077,7 +1060,6 @@ function buildNestedSelect(
   obj: any,
   parentAliases: Array<string> = [],
   fieldName?: string,
-  resolveCollection?: CollectionResolver,
 ): any {
   if (Array.isArray(obj)) {
     return obj.some((value) => isRefProxy(value) || isExpressionLike(value))
@@ -1095,13 +1077,7 @@ function buildNestedSelect(
           : codedMessage(114),
       )
     }
-    return buildIncludesSubquery(
-      obj,
-      fieldName,
-      parentAliases,
-      `collection`,
-      resolveCollection,
-    )
+    return buildIncludesSubquery(obj, fieldName, parentAliases, `collection`)
   }
   if (obj instanceof ToArrayWrapper) {
     if (!(obj.query instanceof BaseQueryBuilder)) {
@@ -1118,13 +1094,7 @@ function buildNestedSelect(
           : codedMessage(116),
       )
     }
-    return buildIncludesSubquery(
-      obj.query,
-      fieldName,
-      parentAliases,
-      `array`,
-      resolveCollection,
-    )
+    return buildIncludesSubquery(obj.query, fieldName, parentAliases, `array`)
   }
   if (obj instanceof ConcatToArrayWrapper) {
     if (!(obj.query instanceof BaseQueryBuilder)) {
@@ -1141,21 +1111,10 @@ function buildNestedSelect(
           : codedMessage(118),
       )
     }
-    return buildIncludesSubquery(
-      obj.query,
-      fieldName,
-      parentAliases,
-      `concat`,
-      resolveCollection,
-    )
+    return buildIncludesSubquery(obj.query, fieldName, parentAliases, `concat`)
   }
   if (obj instanceof CaseWhenWrapper) {
-    return buildConditionalSelect(
-      obj,
-      parentAliases,
-      fieldName,
-      resolveCollection,
-    )
+    return buildConditionalSelect(obj, parentAliases, fieldName)
   }
   if (!isNestedSelectRecord(obj)) return toExpr(obj)
   const out: Record<string, any> = {}
@@ -1166,13 +1125,7 @@ function buildNestedSelect(
       continue
     }
     if (v instanceof BaseQueryBuilder) {
-      out[k] = buildIncludesSubquery(
-        v,
-        k,
-        parentAliases,
-        `collection`,
-        resolveCollection,
-      )
+      out[k] = buildIncludesSubquery(v, k, parentAliases, `collection`)
       continue
     }
     if (v instanceof ToArrayWrapper) {
@@ -1183,13 +1136,7 @@ function buildNestedSelect(
             : codedMessage(119),
         )
       }
-      out[k] = buildIncludesSubquery(
-        v.query,
-        k,
-        parentAliases,
-        `array`,
-        resolveCollection,
-      )
+      out[k] = buildIncludesSubquery(v.query, k, parentAliases, `array`)
       continue
     }
     if (v instanceof ConcatToArrayWrapper) {
@@ -1200,13 +1147,7 @@ function buildNestedSelect(
             : codedMessage(120),
         )
       }
-      out[k] = buildIncludesSubquery(
-        v.query,
-        k,
-        parentAliases,
-        `concat`,
-        resolveCollection,
-      )
+      out[k] = buildIncludesSubquery(v.query, k, parentAliases, `concat`)
       continue
     }
     if (v instanceof MaterializeWrapper) {
@@ -1221,20 +1162,14 @@ function buildNestedSelect(
       const materialization: IncludesMaterialization = childQuery.singleResult
         ? `singleton`
         : `array`
-      out[k] = buildIncludesSubquery(
-        v.query,
-        k,
-        parentAliases,
-        materialization,
-        resolveCollection,
-      )
+      out[k] = buildIncludesSubquery(v.query, k, parentAliases, materialization)
       continue
     }
     if (v instanceof CaseWhenWrapper) {
-      out[k] = buildConditionalSelect(v, parentAliases, k, resolveCollection)
+      out[k] = buildConditionalSelect(v, parentAliases, k)
       continue
     }
-    out[k] = buildNestedSelect(v, parentAliases, k, resolveCollection)
+    out[k] = buildNestedSelect(v, parentAliases, k)
   }
   return out
 }
@@ -1243,7 +1178,6 @@ function buildConditionalSelect(
   wrapper: CaseWhenWrapper,
   parentAliases: Array<string>,
   fieldName?: string,
-  resolveCollection?: CollectionResolver,
 ): ConditionalSelect {
   const args = wrapper.args
   if (args.length < 2) {
@@ -1261,22 +1195,12 @@ function buildConditionalSelect(
   for (let i = 0; i < pairCount; i++) {
     branches.push({
       condition: toExpression(args[i * 2]),
-      value: buildNestedSelect(
-        args[i * 2 + 1],
-        parentAliases,
-        fieldName,
-        resolveCollection,
-      ),
+      value: buildNestedSelect(args[i * 2 + 1], parentAliases, fieldName),
     })
   }
 
   const defaultValue = hasDefaultValue
-    ? buildNestedSelect(
-        args[args.length - 1],
-        parentAliases,
-        fieldName,
-        resolveCollection,
-      )
+    ? buildNestedSelect(args[args.length - 1], parentAliases, fieldName)
     : undefined
 
   return new ConditionalSelect(branches, defaultValue)
@@ -1484,12 +1408,8 @@ function buildIncludesSubquery(
   fieldName: string,
   parentAliases: Array<string>,
   materialization: IncludesMaterialization,
-  resolveCollection?: CollectionResolver,
 ): IncludesSubquery {
-  const childQuery = cloneQueryForPlacement(
-    childBuilder._getQuery(),
-    resolveCollection,
-  )
+  const childQuery = cloneQueryForPlacement(childBuilder._getQuery())
 
   // Collect child's own aliases
   const childAliases = collectQueryAliases(childQuery)

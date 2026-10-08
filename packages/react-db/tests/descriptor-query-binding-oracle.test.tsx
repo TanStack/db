@@ -28,20 +28,34 @@
  * descriptor query with the same semantic hash. It must reject the unbound
  * source before reusing the old live-query Collection. The React error names
  * DbProvider as the remedy; the core error remains framework neutral.
+ *
+ * A prepared query is a bound snapshot, not a lasting render resolver. Adding
+ * a descriptor source later changes the plan without starting a sync run. The
+ * next client-aware consumer binds that source. The independent start model is
+ * zero for an unconsumed continuation or a render that never commits, and one
+ * for the source after a committed hook consumes it. A fixed history prepares
+ * a base query, releases its render deferral, then extends and mounts it. A
+ * neighboring Suspense history extends a query during a render that is never
+ * committed. The sync callback count and public rows are checked at those
+ * cuts. These two histories do not cover arbitrary concurrent render schedules.
  */
-import { act, renderHook, waitFor } from '@testing-library/react'
+import { act, render, renderHook, waitFor } from '@testing-library/react'
 import {
   DbClient,
   Query,
   collectionOptions,
   createCollection,
+  eq,
   getStableQueryBuilderHash,
+  prepareLiveQueryValue,
 } from '@tanstack/db'
 import { describe, expect, it } from 'vitest'
+import { Suspense } from 'react'
 import { DbProvider } from '../src/DbProvider'
 import { useLiveQuery } from '../src/useLiveQuery'
 import { useLiveQueryEffect } from '../src/useLiveQueryEffect'
 import { mockSyncCollectionOptions } from '../../db/tests/utils'
+import type { DeferredLiveQueryCollections } from '@tanstack/db'
 import type { ReactNode } from 'react'
 
 type Row = { id: string; value: string }
@@ -82,6 +96,113 @@ function expectedRows(rows: ReadonlyMap<string, Row>): Array<Row> {
 }
 
 describe(`standalone descriptor query binding`, () => {
+  it(`binds a continued query for the next committed client-aware hook`, async () => {
+    const client = new DbClient()
+    const baseDescriptor = collectionOptions(`continued-react-base`, () => ({
+      id: `continued-react-base`,
+      getKey: (row: Row) => row.id,
+      startSync: true,
+      sync: {
+        sync: ({ begin, write, commit, markReady }) => {
+          begin()
+          write({ type: `insert`, value: { id: `one`, value: `base` } })
+          commit()
+          markReady()
+        },
+      },
+    }))
+    let lateStarts = 0
+    const lateDescriptor = collectionOptions(`continued-react-late`, () => ({
+      id: `continued-react-late`,
+      getKey: (row: Row) => row.id,
+      startSync: true,
+      sync: {
+        sync: ({ begin, write, commit, markReady }) => {
+          lateStarts++
+          begin()
+          write({ type: `insert`, value: { id: `one`, value: `late` } })
+          commit()
+          markReady()
+        },
+      },
+    }))
+    const original = new Query().from({ base: baseDescriptor })
+    const firstRenderDeferrals: DeferredLiveQueryCollections = new Set()
+    const prepared = prepareLiveQueryValue(
+      original,
+      client,
+      firstRenderDeferrals,
+    ) as typeof original
+    for (const source of firstRenderDeferrals) source._resumeSyncStart()
+    firstRenderDeferrals.clear()
+
+    const continued = prepared
+      .join({ late: lateDescriptor }, ({ base, late }) => eq(base.id, late.id))
+      .select(({ base, late }) => ({ id: base.id, value: late.value }))
+    expect(lateStarts).toBe(0)
+
+    const mounted = renderHook(() => useLiveQuery({ client, query: continued }))
+    await waitFor(() => {
+      expect(
+        mounted.result.current.data.map(({ id, value }) => ({ id, value })),
+      ).toEqual([{ id: `one`, value: `late` }])
+    })
+    expect(lateStarts).toBe(1)
+    mounted.unmount()
+  })
+
+  it(`does not start a continued descriptor in a render that never commits`, async () => {
+    const client = new DbClient()
+    const baseDescriptor = collectionOptions(`abandoned-react-base`, () => ({
+      id: `abandoned-react-base`,
+      getKey: (row: Row) => row.id,
+      startSync: true,
+      sync: { sync: ({ markReady }) => markReady() },
+    }))
+    let lateMaterializations = 0
+    let lateStarts = 0
+    const lateDescriptor = collectionOptions(`abandoned-react-late`, () => {
+      lateMaterializations++
+      return {
+        id: `abandoned-react-late`,
+        getKey: (row: Row) => row.id,
+        startSync: true,
+        sync: {
+          sync: ({ markReady }) => {
+            lateStarts++
+            markReady()
+          },
+        },
+      }
+    })
+    const original = new Query().from({ base: baseDescriptor })
+    const never = new Promise<void>(() => {})
+
+    function Abandoned(): ReactNode {
+      const deferrals: DeferredLiveQueryCollections = new Set()
+      const prepared = prepareLiveQueryValue(
+        original,
+        client,
+        deferrals,
+      ) as typeof original
+      prepared.join({ late: lateDescriptor }, ({ base, late }) =>
+        eq(base.id, late.id),
+      )
+      throw never
+    }
+
+    const mounted = render(
+      <Suspense fallback={<div>Waiting</div>}>
+        <Abandoned />
+      </Suspense>,
+    )
+    expect(mounted.getByText(`Waiting`)).toBeDefined()
+    await act(async () => {})
+    expect(lateMaterializations).toBe(0)
+    expect(lateStarts).toBe(0)
+    mounted.unmount()
+  })
+
   it(`rejects an unbound descriptor after a same-hash concrete query`, async () => {
     const id = `standalone-descriptor-unbound-transition`
     const concrete = createCollection(

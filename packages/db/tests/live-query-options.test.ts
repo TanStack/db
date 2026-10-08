@@ -15,6 +15,7 @@ import {
   toArray,
 } from '../src/query/builder/functions.js'
 import { collectSourceRefs } from '../src/query/ir.js'
+import type { DeferredLiveQueryCollections } from '../src/live-query-options.js'
 
 describe(`live query preparation`, () => {
   it(`requires a client when a standalone descriptor query is consumed`, () => {
@@ -43,7 +44,139 @@ describe(`live query preparation`, () => {
     expect(prepareLiveQueryValue(query, undefined, new Set())).toBe(query)
   })
 
-  it(`binds a nested descriptor when a client-aware builder places it`, () => {
+  it(`binds a later descriptor only when the continued query is consumed`, async () => {
+    let starts = 0
+    let materializations = 0
+    const sourceDescriptor = collectionOptions(`continuation-source`, () => ({
+      id: `continuation-source`,
+      getKey: (row: { id: string }) => row.id,
+      sync: { sync: ({ markReady }) => markReady() },
+    }))
+    const laterDescriptor = collectionOptions(`continuation-later`, () => {
+      materializations++
+      return {
+        id: `continuation-later`,
+        getKey: (row: { id: string }) => row.id,
+        startSync: true,
+        sync: {
+          sync: ({ markReady }) => {
+            starts++
+            markReady()
+          },
+        },
+      }
+    })
+    const client = new DbClient()
+    const renderDeferrals: DeferredLiveQueryCollections = new Set()
+    const original = new BaseQueryBuilder().from({ source: sourceDescriptor })
+    const prepared = prepareLiveQueryValue(
+      original,
+      client,
+      renderDeferrals,
+    ) as typeof original
+    for (const collection of renderDeferrals) collection._resumeSyncStart()
+    renderDeferrals.clear()
+
+    const continued = prepared.join(
+      { later: laterDescriptor },
+      ({ source, later }) => eq(source.id, later.id),
+    )
+    expect(
+      collectSourceRefs(getQueryIR(continued)).map((ref) => ref.type),
+    ).toEqual([`collectionRef`, `descriptorRef`])
+    expect(materializations).toBe(0)
+    expect(starts).toBe(0)
+    expect(() => resolveLiveQueryValue(continued, { pool: false })).toThrow(
+      /requires a DbClient/,
+    )
+
+    await client.preloadLiveQuery({ query: continued })
+    expect(materializations).toBe(1)
+    expect(starts).toBe(1)
+  })
+
+  it(`defers a continued descriptor until its render preparation is released`, () => {
+    let starts = 0
+    const sourceDescriptor = collectionOptions(`before-release-source`, () => ({
+      id: `before-release-source`,
+      getKey: (row: { id: string }) => row.id,
+      sync: { sync: ({ markReady }) => markReady() },
+    }))
+    const laterDescriptor = collectionOptions(`before-release-later`, () => ({
+      id: `before-release-later`,
+      getKey: (row: { id: string }) => row.id,
+      startSync: true,
+      sync: {
+        sync: ({ markReady }) => {
+          starts++
+          markReady()
+        },
+      },
+    }))
+    const client = new DbClient()
+    const deferrals: DeferredLiveQueryCollections = new Set()
+    const base = new BaseQueryBuilder().from({ source: sourceDescriptor })
+    const prepared = prepareLiveQueryValue(
+      base,
+      client,
+      deferrals,
+    ) as typeof base
+    const continued = prepared.join(
+      { later: laterDescriptor },
+      ({ source, later }) => eq(source.id, later.id),
+    )
+
+    expect(starts).toBe(0)
+    const consumed = prepareLiveQueryValue(
+      continued,
+      client,
+      deferrals,
+    ) as typeof continued
+    expect(
+      collectSourceRefs(getQueryIR(consumed)).map((ref) => ref.type),
+    ).toEqual([`collectionRef`, `collectionRef`])
+    expect(starts).toBe(0)
+    for (const collection of deferrals) collection._resumeSyncStart()
+    expect(starts).toBe(1)
+  })
+
+  it(`does not retain a render resolver on a builder captured in the query callback`, () => {
+    const sourceDescriptor = collectionOptions(
+      `captured-builder-source`,
+      () => ({
+        id: `captured-builder-source`,
+        getKey: (row: { id: string }) => row.id,
+        sync: { sync: ({ markReady }) => markReady() },
+      }),
+    )
+    const laterDescriptor = collectionOptions(`captured-builder-later`, () => ({
+      id: `captured-builder-later`,
+      getKey: (row: { id: string }) => row.id,
+      sync: { sync: ({ markReady }) => markReady() },
+    }))
+    const example = new BaseQueryBuilder().from({ source: sourceDescriptor })
+    expect(getQueryIR(example).from.type).toBe(`descriptorRef`)
+    let captured: typeof example | undefined
+    const client = new DbClient()
+    prepareLiveQueryValue(
+      (builder: BaseQueryBuilder) => {
+        captured = builder.from({ source: sourceDescriptor })
+        return captured
+      },
+      client,
+      new Set(),
+    )
+
+    const continued = captured!.join(
+      { later: laterDescriptor },
+      ({ source, later }) => eq(source.id, later.id),
+    )
+    expect(
+      collectSourceRefs(getQueryIR(continued)).map((ref) => ref.type),
+    ).toEqual([`descriptorRef`, `descriptorRef`])
+  })
+
+  it(`binds a nested descriptor after query construction`, () => {
     const descriptor = collectionOptions(`nested-placement-descriptor`, () => ({
       id: `nested-placement-descriptor`,
       getKey: (row: { id: string }) => row.id,
@@ -53,7 +186,7 @@ describe(`live query preparation`, () => {
     const client = new DbClient()
     let nestedSourceType: string | undefined
 
-    prepareLiveQueryValue(
+    const prepared = prepareLiveQueryValue(
       {
         query: (builder: BaseQueryBuilder) => {
           const outer = builder.from({ nested: standalone })
@@ -66,12 +199,15 @@ describe(`live query preparation`, () => {
       },
       client,
       new Set(),
-    )
+    ) as { query: BaseQueryBuilder }
 
-    expect(nestedSourceType).toBe(`collectionRef`)
+    expect(nestedSourceType).toBe(`descriptorRef`)
+    expect(collectSourceRefs(getQueryIR(prepared.query))[0]?.type).toBe(
+      `collectionRef`,
+    )
   })
 
-  it(`binds descriptor branches when a client-aware builder places a union`, () => {
+  it(`binds descriptor union branches after query construction`, () => {
     const descriptor = collectionOptions(`union-placement-descriptor`, () => ({
       id: `union-placement-descriptor`,
       getKey: (row: { id: string }) => row.id,
@@ -86,16 +222,18 @@ describe(`live query preparation`, () => {
     const client = new DbClient()
     let sourceTypes: Array<string> = []
 
-    prepareLiveQueryValue((builder: BaseQueryBuilder) => {
+    const prepared = prepareLiveQueryValue((builder: BaseQueryBuilder) => {
       const union = builder.unionAll(firstBranch, secondBranch)
       sourceTypes = collectSourceRefs(getQueryIR(union)).map(
         (source) => source.type,
       )
       return union
-    }, client)
+    }, client) as BaseQueryBuilder
 
-    // Placement, before final preparation, must leave no descriptor source.
-    expect(sourceTypes).toEqual([`collectionRef`, `collectionRef`])
+    expect(sourceTypes).toEqual([`descriptorRef`, `descriptorRef`])
+    expect(
+      collectSourceRefs(getQueryIR(prepared)).map((ref) => ref.type),
+    ).toEqual([`collectionRef`, `collectionRef`])
     expect(collectSourceRefs(getQueryIR(firstBranch))[0]?.type).toBe(
       `descriptorRef`,
     )
@@ -104,7 +242,7 @@ describe(`live query preparation`, () => {
     )
   })
 
-  it(`binds an includes child when a client-aware builder places it`, () => {
+  it(`binds includes children after query construction`, () => {
     const parentDescriptor = collectionOptions(
       `include-placement-parent`,
       () => ({
@@ -124,7 +262,7 @@ describe(`live query preparation`, () => {
     const client = new DbClient()
     let sourceTypes: Array<string> = []
 
-    prepareLiveQueryValue((builder: BaseQueryBuilder) => {
+    const prepared = prepareLiveQueryValue((builder: BaseQueryBuilder) => {
       const query = builder
         .from({ parent: parentDescriptor })
         .select(({ parent }) => {
@@ -147,9 +285,12 @@ describe(`live query preparation`, () => {
         (source) => source.type,
       )
       return query
-    }, client)
+    }, client) as BaseQueryBuilder
 
-    expect(sourceTypes).toEqual(Array(6).fill(`collectionRef`))
+    expect(sourceTypes).toEqual(Array(6).fill(`descriptorRef`))
+    expect(
+      collectSourceRefs(getQueryIR(prepared)).map((ref) => ref.type),
+    ).toEqual(Array(6).fill(`collectionRef`))
   })
 
   it.each([undefined, null])(
