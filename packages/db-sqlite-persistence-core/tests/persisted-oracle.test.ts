@@ -18920,6 +18920,10 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
       const replacementReceipt = replacement.commit()
       if (replacementReceipt !== true) await replacementReceipt
 
+      // A retained capability from the cleaned-up run must not truncate the
+      // new Collection, even when invoked after the replacement row applies.
+      await retired.metadata!.persistence!.startScopedRecovery!()
+
       expect({
         retiredPublic: collection.get(`retired`),
         retiredDurable: adapter.rows.get(`retired`),

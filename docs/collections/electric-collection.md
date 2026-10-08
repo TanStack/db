@@ -375,6 +375,11 @@ does not read all cached rows or download the full shape. The durable reset mark
 remains until a complete baseline can justify a global resume cursor. A wrapper
 without scoped recovery support continues to use full-shape recovery. An
 interrupted recovery keeps the reset marker for the next start.
+Until a complete baseline is certified, each later cold start repeats scoped
+recovery. Cached rows from earlier starts are not shown offline, and rows no
+longer present on the server can remain in the durable cache. A durable-cache
+eviction or subset-certification policy is still needed for bounded storage
+and offline reuse.
 
 During scoped recovery, coordinator notifications about SQLite changes do not
 hydrate, truncate, or replace public source rows. The Electric change stream

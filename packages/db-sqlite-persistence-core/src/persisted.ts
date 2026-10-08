@@ -4189,7 +4189,10 @@ function createWrappedSyncConfig<
             throw runtime.reportSyncError(error)
           }
         },
-        startScopedRecovery: () => runtime.startScopedRecovery(),
+        startScopedRecovery: () =>
+          startupState.cleanedUp
+            ? Promise.resolve()
+            : runtime.startScopedRecovery(),
         scanPersistedRows: (options) =>
           startupState.cleanedUp
             ? Promise.resolve([])

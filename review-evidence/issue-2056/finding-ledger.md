@@ -26,3 +26,22 @@ Production head remains f43a16522c990134ae993235a312d2d5e433dc8a. All temporary 
 Final dispositions: R1 confirmed-open (P1 acquisition failure; permanent loading not established); R2 duplicate of R1 (resume/tag mechanism confirmed); R3 confirmed-open (SDK capability bug; no-start claim refuted on tested current-main path); R4 design-decision (recommend reset-aware applied gate); R5 design-decision (complete persisted tag certificate); R6 confirmed-open (offered Expo/0.5.4 fixture not supplied or verified); R7 already-fixed (earlier progressive path).
 
 Evidence: existing primary 30/30 baseline; strict mock 3 red; final main 11 red/227 green; readiness-only 2 red/6 green; reset-aware applied prototype 238 green; direct saved replay 1 red/30 skipped. Tests and documentation only remain. No implementation closure or deferral is claimed.
+
+## Later implementation status
+
+The final evaluation above describes only the reviewed main commit
+`f43a16522c990134ae993235a312d2d5e433dc8a`. It is not the status of
+PR #2069. After the user chose scoped, on-demand recovery, the production
+implementation and its oracle witnesses landed on this branch at
+`7c2e6a4f640bbbef64c1045362b22346a8c46e21`. The implementation and
+subsequent review evidence are recorded in
+`docs/contributing/oracle-reviews/issue-2056-full-mode-recovery.md` under
+“Continuation: scoped on-demand recovery” and later sections. At PR head
+`c21196d94`, Electric and the SQLite persistence wrapper contain that repair;
+the old “production repair awaits user selection” conclusion no longer applies
+to the PR.
+
+The three `candidate-*.patch` files are head-pinned comparison artifacts from
+the original evaluation. They are not pending changes or patches to apply to
+the current `electric.ts`. Keep them only as historical evidence of the
+rejected readiness-only and one-time gates and the selected reset-aware gate.

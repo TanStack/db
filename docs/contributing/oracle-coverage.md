@@ -1771,6 +1771,21 @@ subset-end to apply its row before demand success without waiting for a full
 up-to-date. The neighboring full-mode reset retains that stronger wait. The
 Electric durable fixture has an adversarial insert check that rejects retained
 old columns or tag metadata; it is driver validation, not a new model owner.
+The Electric adapter owner now holds an asynchronous user retry decision and
+checks that a new full-recovery demand remains pending until source replacement,
+while the pre-error demand rejects. It also checks caller abort before subset
+transport settlement, while a request is queued behind the SDK cursor, and
+while an applied receipt is held. Each original behavior failed at the caller
+settlement cut; the fixed driver requires prompt `AbortError` without certifying
+that demand. The explicit-resume neighbor keeps malformed durable metadata
+untouched until source evidence arrives. The persistence owner now invokes a
+retired scoped-recovery capability after cleanup and restart; the original
+cleared the replacement Collection, and the lifecycle guard preserves its row.
+These fixed schedules do not prove arbitrary overlapping retry decisions or
+all failure paths through `startScopedRecovery`. A valid scoped-clear commit
+failure with an exact public sync-error observation still needs a witness;
+an attempted subscriber-throw fixture did not reach that callback during the
+local clear and supplies no evidence for the review's error-report claim.
 
 Remaining witnesses before broader closure:
 
@@ -1784,7 +1799,11 @@ Remaining witnesses before broader closure:
   cross-tab transport delivering an invalidation during cache quarantine, and
   source versus local-only truncate durability. Controlled coordinator
   delivery and installed-SDK receipt cover the wrapper response, not the
-  multiprocess transport premise.
+  multiprocess transport premise. Scoped recovery also needs an explicit
+  durable-cache eviction or certification policy: the current reset marker
+  makes later uncertified starts repeat quarantine, and deleted durable rows
+  can remain on disk. Neither a safe offline subset certificate nor bounded
+  storage growth is proved here.
 - Installed-SDK delivery and Electric service E2E owners: actual subquery/tag
   emission, overlapping provider responses, and the scoped restart schedule
   against a live service.

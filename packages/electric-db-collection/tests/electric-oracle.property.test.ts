@@ -153,12 +153,15 @@ const mockStream = {
 function createDeferred<T>(): {
   promise: Promise<T>
   resolve: (value: T | PromiseLike<T>) => void
+  reject: (reason?: unknown) => void
 } {
   let resolve!: (value: T | PromiseLike<T>) => void
-  const promise = new Promise<T>((resolvePromise) => {
+  let reject!: (reason?: unknown) => void
+  const promise = new Promise<T>((resolvePromise, rejectPromise) => {
     resolve = resolvePromise
+    reject = rejectPromise
   })
-  return { promise, resolve }
+  return { promise, resolve, reject }
 }
 
 vi.mock(`@electric-sql/client`, async () => {
@@ -567,6 +570,7 @@ function createOracleCollection(
     offset?: Offset
     handle?: string
     signal?: AbortSignal
+    onError?: () => Promise<Record<string, never> | undefined>
   } = {},
 ) {
   let subscriber!: (messages: Array<Message<OracleRow>>) => void
@@ -5288,6 +5292,58 @@ describeUnlessQueuedPresenceReplay(`Electric adapter laws`, () => {
     },
   )
 
+  // The user may decide to retry asynchronously. The failed acquisition owes
+  // the original error, but a new acquisition during that decision cannot
+  // inherit it: a retry is still a legal continuation of this source run.
+  // This controlled callback holds the decision, observes both settlements,
+  // and then supplies an applied replacement through the real Collection.
+  it(`keeps a new full recovery demand pending during an async retry decision`, async () => {
+    const retryDecision = createDeferred<Record<string, never> | undefined>()
+    const metadata = createMetadata(
+      new Map([[`electric:resume`, { kind: `reset`, updatedAt: 1 }]]),
+    )
+    const trace = createOracleCollection(
+      `full-recovery-async-retry`,
+      `on-demand`,
+      metadata.api,
+      { onError: () => retryDecision.promise },
+    )
+    const error = new Error(`transient provider error`)
+
+    await withElectricCleanup(async () => {
+      const first = Promise.resolve(
+        trace.collection._sync.loadSubset({ limit: 1 }),
+      )
+      const streamOptions = vi.mocked(ShapeStream).mock.calls.at(-1)?.[0] as
+        { onError?: (error: unknown) => unknown } | undefined
+      const decision = Promise.resolve(streamOptions!.onError!(error))
+      await expect(first).rejects.toBe(error)
+
+      let secondOutcome: `pending` | `fulfilled` | `rejected` = `pending`
+      const second = Promise.resolve(
+        trace.collection._sync.loadSubset({ limit: 2 }),
+      ).then(
+        () => {
+          secondOutcome = `fulfilled`
+        },
+        () => {
+          secondOutcome = `rejected`
+        },
+      )
+      await new Promise<void>((resolve) => setTimeout(resolve, 0))
+      expect(secondOutcome).toBe(`pending`)
+      retryDecision.resolve({})
+      await decision
+      trace.subscriber([change(`insert`, 1, `recovered`), upToDate])
+      await atCheckpoint(second, `async retry replacement`)
+      expect(secondOutcome).toBe(`fulfilled`)
+      expect(trace.collection.get(1)?.name).toBe(`recovered`)
+    }, [
+      () => retryDecision.resolve(undefined),
+      () => trace.collection.cleanup(),
+    ])
+  })
+
   /**
    * A scoped source snapshot owes applied settlement at subset-end, even
    * when must-refetch opened a truncate replay. The independent model knows
@@ -5592,6 +5648,156 @@ describeUnlessQueuedPresenceReplay(`Electric adapter laws`, () => {
       () => persistence.resolve(),
       () => trace.collection.cleanup(),
     ])
+  })
+
+  // Application can outlive the SDK request. A caller that releases its
+  // demand during that interval must reject promptly, while the source
+  // receipt remains held and a later acquisition can still wait for it.
+  it(`cancels a subset demand while its source receipt is held`, async () => {
+    const trace = createOracleCollection(
+      `subset-held-demand-abort`,
+      `on-demand`,
+      createMetadata(new Map()).api,
+    )
+    const persistence = createDeferred<void>()
+    const transaction = createTransaction({
+      mutationFn: () => persistence.promise,
+    })
+    transaction.mutate(() =>
+      trace.collection.insert({
+        id: 99,
+        name: `optimistic`,
+        stable: `stable-99`,
+      }),
+    )
+    const snapshot = createDeferred<void>()
+    mockStream.requestSnapshot.mockReturnValueOnce(snapshot.promise)
+    const controller = new AbortController()
+    const first = Promise.resolve(
+      trace.collection._sync.loadSubset({
+        limit: 1,
+        signal: controller.signal,
+      }),
+    )
+    let firstOutcome: `pending` | `fulfilled` | `rejected` = `pending`
+    let firstError: unknown
+    const observedFirst = first.then(
+      () => {
+        firstOutcome = `fulfilled`
+      },
+      (error: unknown) => {
+        firstOutcome = `rejected`
+        firstError = error
+      },
+    )
+
+    await withElectricCleanup(async () => {
+      await vi.waitFor(() =>
+        expect(mockStream.requestSnapshot).toHaveBeenCalledOnce(),
+      )
+      trace.subscriber([change(`insert`, 1, `source row`), subsetEnd])
+      snapshot.resolve()
+      await new Promise<void>((resolve) => setTimeout(resolve, 0))
+      expect(trace.collection.has(1)).toBe(false)
+      controller.abort()
+      await new Promise<void>((resolve) => setTimeout(resolve, 0))
+      expect(firstOutcome).toBe(`rejected`)
+      expect(firstError).toMatchObject({ name: `AbortError` })
+      persistence.resolve()
+      await transaction.isPersisted.promise
+      await observedFirst
+      expect(trace.collection.has(1)).toBe(true)
+    }, [
+      () => snapshot.resolve(),
+      () => persistence.resolve(),
+      () => trace.collection.cleanup(),
+    ])
+  })
+
+  // A demand canceled before its subset transport settles has no successful
+  // acquisition, whether that transport later resolves or rejects. The source
+  // may still apply a late SDK response, but this caller observes AbortError and
+  // an identical later demand remains eligible for a new acquisition.
+  it.each([`resolve`, `reject`] as const)(
+    `rejects a canceled subset demand when its transport later %ss`,
+    async (transportOutcome) => {
+      const trace = createOracleCollection(
+        `subset-demand-abort-${transportOutcome}`,
+        `on-demand`,
+        createMetadata(new Map()).api,
+      )
+      const controller = new AbortController()
+      const snapshot = createDeferred<void>()
+      mockStream.requestSnapshot.mockReturnValueOnce(snapshot.promise)
+      const first = Promise.resolve(
+        trace.collection._sync.loadSubset({
+          limit: 1,
+          signal: controller.signal,
+        }),
+      )
+      void first.catch(() => undefined)
+
+      await withElectricCleanup(async () => {
+        await vi.waitFor(() =>
+          expect(mockStream.requestSnapshot).toHaveBeenCalledOnce(),
+        )
+        controller.abort()
+        if (transportOutcome === `resolve`) snapshot.resolve()
+        else snapshot.reject(new Error(`late provider failure`))
+        await expect(
+          atCheckpoint(first, `canceled subset ${transportOutcome}`),
+        ).rejects.toMatchObject({ name: `AbortError` })
+        const second = trace.collection._sync.loadSubset({ limit: 1 })
+        expect(second).not.toBe(true)
+      }, [() => snapshot.resolve(), () => trace.collection.cleanup()])
+    },
+  )
+
+  // Snapshot responses share one SDK cursor, but a queued demand owns its
+  // cancellation independently of the request ahead of it. At the next task
+  // boundary after abort, this caller must have rejected without invoking a
+  // second SDK request; the first demand remains pending until its response.
+  it(`cancels a queued subset demand while an earlier snapshot is held`, async () => {
+    const trace = createOracleCollection(
+      `queued-subset-abort`,
+      `on-demand`,
+      createMetadata(new Map()).api,
+    )
+    const held = createDeferred<void>()
+    mockStream.requestSnapshot.mockReturnValueOnce(held.promise)
+    const first = Promise.resolve(
+      trace.collection._sync.loadSubset({ limit: 1 }),
+    )
+    const controller = new AbortController()
+    let secondOutcome: `pending` | `fulfilled` | `rejected` = `pending`
+    let secondError: unknown
+    const second = Promise.resolve(
+      trace.collection._sync.loadSubset({
+        limit: 2,
+        signal: controller.signal,
+      }),
+    ).then(
+      () => {
+        secondOutcome = `fulfilled`
+      },
+      (error: unknown) => {
+        secondOutcome = `rejected`
+        secondError = error
+      },
+    )
+
+    await withElectricCleanup(async () => {
+      await vi.waitFor(() =>
+        expect(mockStream.requestSnapshot).toHaveBeenCalledOnce(),
+      )
+      controller.abort()
+      await new Promise<void>((resolve) => setTimeout(resolve, 0))
+      expect(secondOutcome).toBe(`rejected`)
+      expect(secondError).toMatchObject({ name: `AbortError` })
+      expect(mockStream.requestSnapshot).toHaveBeenCalledOnce()
+      held.resolve()
+      await atCheckpoint(Promise.all([first, second]), `queued abort drain`)
+    }, [() => held.resolve(), () => trace.collection.cleanup()])
   })
 
   it(`drops a held receipt's rows when cleanup abandons it`, async () => {
@@ -6269,6 +6475,33 @@ describeUnlessQueuedPresenceReplay(`Electric adapter laws`, () => {
     expect(trace.collection.status).toBe(`ready`)
     await trace.collection.cleanup()
   })
+
+  // An explicit source cursor owns this run's resume decision. A malformed
+  // durable record is still invalid for a later implicit run, but it cannot
+  // authorize this run to write a reset before any source evidence arrives.
+  // The metadata Map observes that side effect at startup, before up-to-date
+  // can legitimately stage a fresh resume record.
+  it.each([
+    { name: `offset`, options: { offset: `10_0` as Offset } },
+    { name: `handle`, options: { handle: `explicit-handle` } },
+  ])(
+    `leaves malformed durable resume untouched with explicit $name`,
+    async ({ options }) => {
+      const malformed = { kind: `resume`, offset: 10, handle: `stale` }
+      const metadata = createMetadata(new Map([[`electric:resume`, malformed]]))
+      const trace = createOracleCollection(
+        `explicit-malformed-${options}`,
+        `on-demand`,
+        metadata.api,
+        options,
+      )
+      try {
+        expect(metadata.state.get(`electric:resume`)).toBe(malformed)
+      } finally {
+        await trace.collection.cleanup()
+      }
+    },
+  )
 
   it(`lets an equal-timestamp reset dominate a stale hydrated resume`, async () => {
     let subscriber!: (messages: Array<Message<OracleRow>>) => void

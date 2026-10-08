@@ -702,6 +702,22 @@ function createLoadSubsetDedupe<T extends Row<unknown>>({
   const abortReason = (abortedSignal: AbortSignal): unknown =>
     abortedSignal.reason ?? new LoadSubsetOperationAbortedError()
 
+  const waitForDemandOrAbort = <TResult>(
+    work: Promise<TResult>,
+    demandSignal?: AbortSignal,
+  ): Promise<TResult> => {
+    if (!demandSignal) return work
+    let removeAbortListener = () => {}
+    const aborted = new Promise<never>((_, reject) => {
+      const onAbort = () => reject(abortReason(demandSignal))
+      demandSignal.addEventListener(`abort`, onAbort, { once: true })
+      removeAbortListener = () =>
+        demandSignal.removeEventListener(`abort`, onAbort)
+      if (demandSignal.aborted) onAbort()
+    })
+    return Promise.race([work, aborted]).finally(removeAbortListener)
+  }
+
   /**
    * Handles errors from snapshot operations. Returns true if the error was
    * handled (signal aborted during cleanup), false if it should be re-thrown.
@@ -738,7 +754,9 @@ function createLoadSubsetDedupe<T extends Row<unknown>>({
         () => undefined,
         () => undefined,
       )
-      return request
+      // Caller cancellation does not advance the shared SDK cursor. The tail
+      // still waits for the physical request or its queued turn to finish.
+      return waitForDemandOrAbort(request, opts.signal)
     }
     throwIfAborted()
     if (beforeSnapshot) {
@@ -747,26 +765,13 @@ function createLoadSubsetDedupe<T extends Row<unknown>>({
     }
 
     if (waitForFullSnapshot) {
-      const snapshot = waitForFullSnapshot()
       const demandSignal = opts.signal
-      let removeAbortListener: (() => void) | undefined
-      const aborted = demandSignal
-        ? new Promise<never>((_, reject) => {
-            const onAbort = () => reject(abortReason(demandSignal))
-            demandSignal.addEventListener(`abort`, onAbort, { once: true })
-            removeAbortListener = () =>
-              demandSignal.removeEventListener(`abort`, onAbort)
-            if (demandSignal.aborted) onAbort()
-          })
-        : undefined
       try {
-        await (aborted ? Promise.race([snapshot, aborted]) : snapshot)
+        await waitForDemandOrAbort(waitForFullSnapshot(), demandSignal)
       } catch (error) {
         if (signal.aborted && isCleanupAbort()) return
         if (demandSignal?.aborted) throw abortReason(demandSignal)
         throw error
-      } finally {
-        removeAbortListener?.()
       }
       if (signal.aborted && isCleanupAbort()) return
       if (demandSignal?.aborted) throw abortReason(demandSignal)
@@ -856,14 +861,16 @@ function createLoadSubsetDedupe<T extends Row<unknown>>({
         await requestSnapshotInOrder(snapshotParams)
       }
     } catch (error) {
-      if (opts.signal?.aborted) return
+      if (opts.signal?.aborted) throw abortReason(opts.signal)
       if (handleSnapshotError(error, `requestSnapshot`)) {
         return
       }
       throw error
     }
+    if (opts.signal?.aborted) throw abortReason(opts.signal)
     if (stopAfterStreamAbort()) return
-    await waitForCommitsAfter(commitCursor)
+    await waitForDemandOrAbort(waitForCommitsAfter(commitCursor), opts.signal)
+    if (opts.signal?.aborted) throw abortReason(opts.signal)
     if (stopAfterStreamAbort()) return
   }
 
@@ -1933,18 +1940,26 @@ function createElectricSync<T extends Row<unknown>>(
           }
 
           if (shapeOptions.onError) {
-            const retry = await shapeOptions.onError(errorParams)
-            if (
-              retry &&
-              typeof retry === `object` &&
+            const mayRetryFullSnapshot =
               usesFullLog &&
               !hasReceivedUpToDate &&
               isActiveLifecycle() &&
               !abortController.signal.aborted
-            ) {
-              // Current waiters keep the original error. A new demand may
-              // wait for the provider retry before its first batch arrives.
+            if (mayRetryFullSnapshot) {
+              // Retire old acquisitions but admit new ones while the user's
+              // asynchronous retry decision is pending.
               resetFullSnapshot()
+            }
+            const rejectPendingRetry = rejectFullSnapshot
+            let retry: Awaited<ReturnType<typeof shapeOptions.onError>>
+            try {
+              retry = await shapeOptions.onError(errorParams)
+            } catch (error) {
+              if (mayRetryFullSnapshot) rejectPendingRetry(error)
+              throw error
+            }
+            if (mayRetryFullSnapshot && (!retry || typeof retry !== `object`)) {
+              rejectPendingRetry(errorParams)
             }
             return retry
           } else {
@@ -2081,9 +2096,10 @@ function createElectricSync<T extends Row<unknown>>(
       }
 
       if (
-        malformedPersistedResume ||
-        hasIncompatiblePersistedResume ||
-        (requiresFreshSourceEvidence && persistedResumeState?.kind === `resume`)
+        requiresFreshSourceEvidence &&
+        (malformedPersistedResume ||
+          hasIncompatiblePersistedResume ||
+          persistedResumeState?.kind === `resume`)
       ) {
         // This reset is part of the current runtime's startup decision. The
         // persisted wrapper may commit it before loading the atomic baseline,
