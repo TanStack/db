@@ -81,13 +81,23 @@ assert.equal(
   sharedWithWarnings.size,
   'stale sharedWithWarnings entry',
 )
+// collection/config-errors.ts is development-only: ESM production bundles
+// erase validateCollectionConfig and every diagnostic it throws. A CommonJS
+// bundle cannot drop the module, so it keeps that text, as main does.
+const developmentOnly = [
+  'collection/config-errors.ts',
+  'Collection requires a "getKey" function in the config.',
+]
 const short = checked.filter(([, literal]) => literal.length < 12)
 assert.deepEqual(short, [], 'coded errors without a distinctive literal')
 
-async function bundle(nodeEnv) {
+// `require` consumers get the CommonJS build, so check it too.
+const cjsEntry = path.join(path.dirname(builtEntry), '../cjs/index.cjs')
+
+async function bundle(nodeEnv, entry = builtEntry) {
   const result = await build({
     stdin: {
-      contents: `export * from ${JSON.stringify(builtEntry)}`,
+      contents: `export * from ${JSON.stringify(entry)}`,
       resolveDir: root,
     },
     bundle: true,
@@ -102,12 +112,23 @@ async function bundle(nodeEnv) {
   return result.outputFiles[0].text
 }
 
-const production = await bundle('production')
-const development = await bundle('development')
-const kept = checked.filter(([, literal]) => production.includes(literal))
-const missing = checked.filter(([, literal]) => !development.includes(literal))
-assert.deepEqual(kept, [], 'production build kept full error text')
-assert.deepEqual(missing, [], 'development build lost full error text')
+for (const [format, entry, expected] of [
+  ['ESM', builtEntry, [...checked, developmentOnly]],
+  ['CommonJS', cjsEntry, checked],
+]) {
+  const production = await bundle('production', entry)
+  const development = await bundle('development', entry)
+  const kept = expected.filter(([, literal]) => production.includes(literal))
+  const missing = expected.filter(
+    ([, literal]) => !development.includes(literal),
+  )
+  assert.deepEqual(kept, [], `${format} production build kept full error text`)
+  assert.deepEqual(
+    missing,
+    [],
+    `${format} development build lost full error text`,
+  )
+}
 console.log(
-  `production error text: ${checked.length} literals erased in production and kept in development`,
+  `production error text: ${checked.length} literals erased in production and kept in development, in ESM and CommonJS builds`,
 )

@@ -62,7 +62,7 @@ Development builds keep the full messages below. The error classes, their
 ${sections.join('\n')}
 ## Other errors
 
-These errors are plain \`Error\`, \`TypeError\`, or \`RangeError\` values. Each
+These errors are plain \`Error\`, \`TypeError\`, \`RangeError\`, or \`AggregateError\` values. Each
 heading names the source file under \`packages/db/src\` that throws it.
 
 ${siteSections.join('\n')}`

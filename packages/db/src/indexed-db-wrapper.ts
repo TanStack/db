@@ -39,7 +39,8 @@ function getIDBFactory(idbFactory?: IDBFactory): IDBFactory {
 
 function executeRequest<T>(
   createRequest: () => IDBRequest<T>,
-  describeFailure: () => string,
+  /** The whole message, given the native failure's text. */
+  describeFailure: (cause: string) => string,
 ): Promise<T> {
   return new Promise((resolve, reject) => {
     let request: IDBRequest<T>
@@ -48,7 +49,9 @@ function executeRequest<T>(
     } catch (error) {
       reject(
         new Error(
-          `${describeFailure()}: ${error instanceof Error ? error.message : String(error)}`,
+          describeFailure(
+            error instanceof Error ? error.message : String(error),
+          ),
           { cause: error },
         ),
       )
@@ -58,7 +61,7 @@ function executeRequest<T>(
     request.onerror = () => {
       const errorMessage = request.error?.message || 'Unknown error'
       reject(
-        new Error(`${describeFailure()}: ${errorMessage}`, {
+        new Error(describeFailure(errorMessage), {
           cause: request.error,
         }),
       )
@@ -367,7 +370,10 @@ export function executeTransaction<T>(
 export function getAll<T>(objectStore: IDBObjectStore): Promise<Array<T>> {
   return executeRequest<Array<T>>(
     () => objectStore.getAll(),
-    () => `Failed to get all items from object store "${objectStore.name}"`,
+    (cause) =>
+      devBuild() && process.env.NODE_ENV !== `production`
+        ? `Failed to get all items from object store "${objectStore.name}": ${cause}`
+        : codedMessage(204, { name: objectStore.name, cause }),
   )
 }
 
@@ -392,10 +398,10 @@ export function getAllKeys(
 ): Promise<Array<IDBValidKey>> {
   return executeRequest(
     () => objectStore.getAllKeys(),
-    () =>
+    (cause) =>
       devBuild() && process.env.NODE_ENV !== `production`
-        ? `Failed to get all keys from object store "${objectStore.name}"`
-        : codedMessage(200, { name: objectStore.name }),
+        ? `Failed to get all keys from object store "${objectStore.name}": ${cause}`
+        : codedMessage(200, { name: objectStore.name, cause }),
   )
 }
 
@@ -423,8 +429,10 @@ export function getByKey<T>(
 ): Promise<T | undefined> {
   return executeRequest<T | undefined>(
     () => objectStore.get(key),
-    () =>
-      `Failed to get item with key "${String(key)}" from object store "${objectStore.name}"`,
+    (cause) =>
+      devBuild() && process.env.NODE_ENV !== `production`
+        ? `Failed to get item with key "${String(key)}" from object store "${objectStore.name}": ${cause}`
+        : codedMessage(205, { key: String(key), name: objectStore.name, cause }),
   )
 }
 
@@ -463,10 +471,10 @@ export function put<T>(
   return executeRequest(
     () =>
       key !== undefined ? objectStore.put(value, key) : objectStore.put(value),
-    () =>
+    (cause) =>
       devBuild() && process.env.NODE_ENV !== `production`
-        ? `Failed to write item to object store "${objectStore.name}"`
-        : codedMessage(201, { name: objectStore.name }),
+        ? `Failed to write item to object store "${objectStore.name}": ${cause}`
+        : codedMessage(201, { name: objectStore.name, cause }),
   )
 }
 
@@ -491,10 +499,10 @@ export function deleteByKey(
 ): Promise<void> {
   return executeRequest(
     () => objectStore.delete(key),
-    () =>
+    (cause) =>
       devBuild() && process.env.NODE_ENV !== `production`
-        ? `Failed to delete item with key "${String(key)}" from object store "${objectStore.name}"`
-        : codedMessage(202, { key: String(key), name: objectStore.name }),
+        ? `Failed to delete item with key "${String(key)}" from object store "${objectStore.name}": ${cause}`
+        : codedMessage(202, { key: String(key), name: objectStore.name, cause }),
   )
 }
 
@@ -515,10 +523,10 @@ export function deleteByKey(
 export function clear(objectStore: IDBObjectStore): Promise<void> {
   return executeRequest(
     () => objectStore.clear(),
-    () =>
+    (cause) =>
       devBuild() && process.env.NODE_ENV !== `production`
-        ? `Failed to clear object store "${objectStore.name}"`
-        : codedMessage(203, { name: objectStore.name }),
+        ? `Failed to clear object store "${objectStore.name}": ${cause}`
+        : codedMessage(203, { name: objectStore.name, cause }),
   )
 }
 

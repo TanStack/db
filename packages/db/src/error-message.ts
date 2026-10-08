@@ -36,7 +36,15 @@ export function codedMessage(
               : value === null ||
                   typeof value !== `object` ||
                   Array.isArray(value)
-                ? JSON.stringify(value)
+                ? // A plain object inside an array shows only as a placeholder.
+                  JSON.stringify(value, (key, item) =>
+                    key &&
+                    item !== null &&
+                    typeof item === `object` &&
+                    !Array.isArray(item)
+                      ? `[object]`
+                      : item,
+                  )
                 : undefined
       return text === undefined ? [] : [`${name}=${text}`]
     } catch {

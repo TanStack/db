@@ -971,7 +971,7 @@ IndexedDB collection requires a "getKey" configuration option. This function ext
 
 ## Other errors
 
-These errors are plain `Error`, `TypeError`, or `RangeError` values. Each
+These errors are plain `Error`, `TypeError`, `RangeError`, or `AggregateError` values. Each
 heading names the source file under `packages/db/src` that throws it.
 
 <a id="error-88"></a>
@@ -2041,7 +2041,7 @@ Duplicate imported key: ${key}
 Development builds show this message, with `${...}` replaced by values:
 
 ```text
-Failed to get all keys from object store "${objectStore.name}"
+Failed to get all keys from object store "${objectStore.name}": ${cause}
 ```
 
 <a id="error-201"></a>
@@ -2051,7 +2051,7 @@ Failed to get all keys from object store "${objectStore.name}"
 Development builds show this message, with `${...}` replaced by values:
 
 ```text
-Failed to write item to object store "${objectStore.name}"
+Failed to write item to object store "${objectStore.name}": ${cause}
 ```
 
 <a id="error-202"></a>
@@ -2061,7 +2061,7 @@ Failed to write item to object store "${objectStore.name}"
 Development builds show this message, with `${...}` replaced by values:
 
 ```text
-Failed to delete item with key "${String(key)}" from object store "${objectStore.name}"
+Failed to delete item with key "${String(key)}" from object store "${objectStore.name}": ${cause}
 ```
 
 <a id="error-203"></a>
@@ -2071,5 +2071,25 @@ Failed to delete item with key "${String(key)}" from object store "${objectStore
 Development builds show this message, with `${...}` replaced by values:
 
 ```text
-Failed to clear object store "${objectStore.name}"
+Failed to clear object store "${objectStore.name}": ${cause}
+```
+
+<a id="error-204"></a>
+
+## Error 204: `indexed-db-wrapper.ts`
+
+Development builds show this message, with `${...}` replaced by values:
+
+```text
+Failed to get all items from object store "${objectStore.name}": ${cause}
+```
+
+<a id="error-205"></a>
+
+## Error 205: `indexed-db-wrapper.ts`
+
+Development builds show this message, with `${...}` replaced by values:
+
+```text
+Failed to get item with key "${String(key)}" from object store "${objectStore.name}": ${cause}
 ```

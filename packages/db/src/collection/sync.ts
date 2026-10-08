@@ -255,7 +255,11 @@ export class CollectionSyncManager<
               messageType = disposition
             }
 
-            if (`value` in messageWithOptionalKey && devBuild()) {
+            if (
+              `value` in messageWithOptionalKey &&
+              devBuild() &&
+              process.env.NODE_ENV !== `production`
+            ) {
               this.checkReusedRow(key, messageType, messageWithOptionalKey)
             }
 

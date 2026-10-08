@@ -33,9 +33,9 @@ export { collectCollectionSources as extractCollectionSources }
  * Helper function to extract the collection that is referenced in the query's FROM clause.
  * The FROM clause may refer directly to a collection or indirectly to a subquery.
  */
-export function extractCollectionFromSource(
-  query: any,
-): Collection<any, any, any> {
+export function extractCollectionFromSource(query: {
+  readonly from: any
+}): Collection<any, any, any> {
   const from = query.from
 
   if (from.type === `collectionRef`) {
@@ -52,7 +52,7 @@ export function extractCollectionFromSource(
   throw new Error(
     devBuild() && process.env.NODE_ENV !== `production`
       ? `Failed to extract collection. Invalid FROM clause: ${JSON.stringify(query)}`
-      : codedMessage(160, { query }),
+      : codedMessage(160),
   )
 }
 

@@ -7,13 +7,14 @@
  *   codedMessage(code, values)` expression, wherever the message goes, except
  *   an error class's `super(...)` message.
  * - A **plain site** is an `Error`, `TypeError`, or `RangeError` message, or an
- *   `AggregateError` message, that contains a string or template literal with
+ *   `AggregateError` message, with or without `new`, or a `super(...)` message
+ *   in an error class outside `errors.ts`, that contains a string or template literal with
  *   a letter and is not coded. A message built only from a caller's value, such as
  *   `new Error(String(error))`, is the caller's text and is not a site.
  *
  * Values are typed with the TypeScript checker. A value is **showable** when
- * `codedMessage` can print it: a primitive, `null`, `undefined`, an array, an
- * `Error`, or a type the checker cannot narrow (`any`, `unknown`). Plain
+ * `codedMessage` can print it: a primitive, `null`, `undefined`, an array of
+ * showable values, an `Error`, or a type the checker cannot narrow (`any`, `unknown`). Plain
  * objects are not shown in production, by maintainer decision (2026-10-07).
  *
  * Messages are compared as templates: literal text with each interpolated
@@ -52,6 +53,9 @@ export type CodedSite = {
   /** Value expressions passed to `codedMessage`, in canonical form. */
   values: Array<{ expression: string; showable: boolean }>
 }
+
+/** A coded `super(...)` message in an error class outside `errors.ts`. */
+export type ClassGuard = { file: string; name: string; code: number }
 
 export type PlainSite = {
   file: string
@@ -181,11 +185,9 @@ function isShowable(type: ts.Type, checker: ts.TypeChecker, error: ts.Type) {
         ts.TypeFlags.Never)
     )
       return true
-    return (
-      checker.isArrayType(current) ||
-      checker.isTupleType(current) ||
-      checker.isTypeAssignableTo(current, error)
-    )
+    if (checker.isArrayType(current) || checker.isTupleType(current))
+      return checker.getTypeArguments(current as ts.TypeReference).every(visit)
+    return checker.isTypeAssignableTo(current, error)
   }
   return visit(type)
 }
@@ -295,9 +297,11 @@ function codedValues(
 export function findErrorSites(sourceRoot: string): {
   coded: Array<CodedSite>
   plain: Array<PlainSite>
+  classGuards: Array<ClassGuard>
 } {
   const coded: Array<CodedSite> = []
   const plain: Array<PlainSite> = []
+  const classGuards: Array<ClassGuard> = []
   const configPath = join(dirname(sourceRoot), `tsconfig.json`)
   const config = ts.parseJsonConfigFileContent(
     ts.readConfigFile(configPath, (path) => readFileSync(path, `utf8`)).config,
@@ -327,7 +331,18 @@ export function findErrorSites(sourceRoot: string): {
       ts.isCallExpression(node.whenFalse) &&
       node.whenFalse.expression.getText(sourceFile) === `codedMessage`
     const visit = (node: ts.Node) => {
-      if (isCoded(node) && !isClassMessage(node)) {
+      if (isCoded(node) && isClassMessage(node)) {
+        const owner = ts.findAncestor(node, ts.isClassLike)
+        classGuards.push({
+          file,
+          name: owner?.name?.text ?? `(anonymous)`,
+          code: Number(
+            (node.whenFalse as ts.CallExpression).arguments[0]!.getText(
+              sourceFile,
+            ),
+          ),
+        })
+      } else if (isCoded(node)) {
         const call = node.whenFalse as ts.CallExpression
         coded.push({
           file,
@@ -338,7 +353,7 @@ export function findErrorSites(sourceRoot: string): {
           values: codedValues(call.arguments[1], sourceFile, showable),
         })
       } else if (
-        ts.isNewExpression(node) &&
+        (ts.isNewExpression(node) || ts.isCallExpression(node)) &&
         ts.isIdentifier(node.expression) &&
         messagePosition.has(node.expression.text)
       ) {
@@ -354,9 +369,31 @@ export function findErrorSites(sourceRoot: string): {
             literals: messageLiterals(message),
           })
       }
+      // An error class outside errors.ts that passes library text to super.
+      if (
+        ts.isCallExpression(node) &&
+        node.expression.kind === ts.SyntaxKind.SuperKeyword &&
+        node.arguments[0] &&
+        !isCoded(node.arguments[0]) &&
+        hasLibraryText(node.arguments[0]) &&
+        ts
+          .findAncestor(node, ts.isClassLike)
+          ?.heritageClauses?.some((clause) =>
+            clause.types.some((type) =>
+              /Error$/.test(type.expression.getText(sourceFile)),
+            ),
+          )
+      )
+        plain.push({
+          file,
+          line:
+            sourceFile.getLineAndCharacterOfPosition(node.getStart()).line + 1,
+          template: messageTemplate(node.arguments[0], sourceFile),
+          literals: messageLiterals(node.arguments[0]),
+        })
       ts.forEachChild(node, visit)
     }
     visit(sourceFile)
   }
-  return { coded, plain }
+  return { coded, plain, classGuards }
 }

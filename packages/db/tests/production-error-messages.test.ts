@@ -110,6 +110,7 @@ const hostileInputs: Array<unknown> = [
   undefined,
   `a\nb, c=d)`,
   `a\u2028b\u2029c`,
+  [{ secret: `row` }],
 ]
 
 const exportedErrorClasses = Object.entries(Errors).filter(
@@ -251,6 +252,8 @@ describe(`production error messages`, () => {
             const match = productionLine.exec(message)
             expect(match, `${name}: ${message}`).not.toBeNull()
             expect(Number(match![1]), name).toBe(codes[name])
+            // A plain object never reaches the line, not even inside an array.
+            expect(message, name).not.toContain(`secret`)
           }
         })
     }
@@ -263,8 +266,15 @@ describe(`production error messages`, () => {
       { file: string; template: string; literals: Array<string> }
     > = JSON.parse(readFileSync(sitesPath, `utf8`))
 
+    // Only validateCollectionConfig reaches these diagnostics, and
+    // createCollection calls it behind the erasable guard, so production
+    // bundles drop the whole module. The bundle check proves that erasure.
+    const developmentOnlyFiles = new Set([`collection/config-errors.ts`])
+
     it(`codes every site that throws library text`, () => {
-      expect(sites.plain).toEqual([])
+      expect(
+        sites.plain.filter(({ file }) => !developmentOnlyFiles.has(file)),
+      ).toEqual([])
     })
 
     it(`keeps each site's development message and code`, () => {
@@ -303,6 +313,16 @@ describe(`production error messages`, () => {
           .map(({ expression }) => `${file} error ${code}: ${expression}`),
       )
       expect(hidden).toEqual([])
+    })
+
+    it(`registers the code of every error class outside errors.ts`, () => {
+      const codes: Record<string, number> = JSON.parse(
+        readFileSync(codesPath, `utf8`),
+      )
+      for (const guard of sites.classGuards)
+        expect(guard.code, `${guard.file} ${guard.name}`).toBe(
+          codes[guard.name],
+        )
     })
 
     it(`never reuses a class code`, () => {
