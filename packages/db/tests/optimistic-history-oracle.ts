@@ -571,6 +571,7 @@ export async function runOptimisticHistory(
     tx:
       | ReturnType<typeof collection.update>
       | ReturnType<typeof collection.insert>
+      | ReturnType<typeof createTransaction<HistoryRow>>
     done: ReturnType<typeof createDeferred<void>>
     outcome: ReturnType<typeof observeHistoryPromise<unknown>>
     // Rows visible when `isPersisted` fulfilled or rejected.
