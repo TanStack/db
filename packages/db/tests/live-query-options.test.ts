@@ -18,14 +18,22 @@ describe(`live query preparation`, () => {
     }))
     const query = new BaseQueryBuilder().from({ item: descriptor })
 
-    expect(() =>
+    const consume = () =>
       resolveLiveQueryValue(
         prepareLiveQueryValue(query, undefined, new Set()),
         { pool: false },
-      ),
-    ).toThrow(
+      )
+
+    expect(consume).toThrow(
       /descriptor "item" requires a DbClient when the query is consumed/,
     )
+    expect(consume).not.toThrow(/DbProvider/)
+  })
+
+  it(`leaves an unfinished builder unchanged when no client can bind it`, () => {
+    const query = new BaseQueryBuilder()
+
+    expect(prepareLiveQueryValue(query, undefined, new Set())).toBe(query)
   })
 
   it.each([undefined, null])(

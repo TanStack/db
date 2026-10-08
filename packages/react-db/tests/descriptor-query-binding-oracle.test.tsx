@@ -7,14 +7,17 @@
  * are intentionally outside the two-client law.
  *
  * Model: each client owns a plain map of rows. A write to one map changes
- * only that client's expected result. The model never calls the query builder,
- * materializer, or live-query engine to calculate expected rows.
+ * only that client's expected result. An Effect reports that client's row on
+ * entry, including after a mounted provider switch. The model never calls the
+ * query builder, materializer, or live-query engine to calculate expected rows.
  *
  * Legal histories: one has disjoint row keys across clients; the other has the
  * same key with different values in both clients. Build once, mount under two
  * clients, write independently to each, then switch one mounted hook to the
  * other client and back. The public observation at each settled cut is the
- * complete projected row bag and row key from each useLiveQuery hook. The
+ * complete projected row bag and row key from each useLiveQuery hook. A separate
+ * Effect history checks enter events from two clients with the same row key,
+ * then switches one mounted Effect to the other client. The
  * colliding-key history rejects a row-ID-only cross-client cache that the
  * disjoint history could miss. This bounded driver does not prove every query
  * clause, on-demand load, or framework adapter.
@@ -29,6 +32,7 @@ import {
 import { describe, expect, it } from 'vitest'
 import { DbProvider } from '../src/DbProvider'
 import { useLiveQuery } from '../src/useLiveQuery'
+import { useLiveQueryEffect } from '../src/useLiveQueryEffect'
 import { mockSyncCollectionOptions } from '../../db/tests/utils'
 import type { ReactNode } from 'react'
 
@@ -70,6 +74,56 @@ function expectedRows(rows: ReadonlyMap<string, Row>): Array<Row> {
 }
 
 describe(`standalone descriptor query binding`, () => {
+  it(`binds an Effect's prebuilt query to its receiving provider`, async () => {
+    const descriptor = collectionOptions(
+      `standalone-descriptor-effect-rows`,
+      (client) =>
+        mockSyncCollectionOptions<Row>({
+          id: `standalone-descriptor-effect-rows`,
+          getKey: (row) => row.id,
+          initialData: client.requireDependency<Array<Row>>(`rows`),
+        }),
+    )
+    const query = new Query()
+      .from({ item: descriptor })
+      .select(({ item }) => ({ id: item.id, value: item.value }))
+    const expected = [
+      { id: `shared`, value: `first` },
+      { id: `shared`, value: `second` },
+    ]
+    const observed: Array<Array<Row>> = [[], []]
+    const clients = expected.map((row) => new DbClient({ rows: [{ ...row }] }))
+    const mounted = expected.map((_, index) => {
+      return renderHook(
+        () =>
+          useLiveQueryEffect<Row, string>({
+            query,
+            onEnter: ({ value }) => {
+              observed[index]!.push({ id: value.id, value: value.value })
+            },
+          }),
+        {
+          wrapper: ({ children }: { children: ReactNode }) => (
+            <DbProvider client={clients[index]!}>{children}</DbProvider>
+          ),
+        },
+      )
+    })
+
+    // At initial publication, each Effect must report its own client's row.
+    await waitFor(() => {
+      expect(observed).toEqual(expected.map((row) => [row]))
+    })
+
+    clients[0] = clients[1]!
+    mounted[0]!.rerender()
+    await waitFor(() => {
+      expect(observed[0]).toEqual([expected[0], expected[1]])
+    })
+
+    mounted.forEach((hook) => hook.unmount())
+  })
+
   it.each(histories)(
     `binds one prebuilt Query to each receiving DbClient with $name`,
     async ({ name, initial, writes }) => {

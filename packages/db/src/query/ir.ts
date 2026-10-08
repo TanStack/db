@@ -102,7 +102,7 @@ export class CollectionRef extends BaseExpression {
   get collection(): CollectionImpl {
     if (!hasCollectionOptionsBrandValue(this.source)) return this.source
     throw new Error(
-      `Collection descriptor "${this.alias}" requires a DbClient when the query is consumed. In React, wrap the consumer in <DbProvider> or pass a client.`,
+      `Collection descriptor "${this.alias}" requires a DbClient when the query is consumed. Bind the query through a client-aware API or use a concrete Collection.`,
     )
   }
 

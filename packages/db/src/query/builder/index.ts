@@ -1023,11 +1023,9 @@ export class BaseQueryBuilder<TContext extends Context = Context> {
   _bindCollectionSources(
     resolveCollection: CollectionResolver | undefined,
   ): BaseQueryBuilder<TContext> {
+    if (!resolveCollection || !this.query.from) return this
     const query = this._getQuery()
-    if (
-      !resolveCollection ||
-      !collectCollectionSources(query).some((source) => source.descriptor)
-    ) {
+    if (!collectCollectionSources(query).some((source) => source.descriptor)) {
       return this
     }
     return new BaseQueryBuilder<TContext>(

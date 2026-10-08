@@ -246,6 +246,9 @@ are compared against plain per-client maps after initial publication, each
 write, and a mounted A→B→A provider switch. It checks the public `$key` against
 each projected row ID, exact public key sets, and identity equality with direct
 Collection formulations.
+The same owner also checks a prebuilt Query consumed by `useLiveQueryEffect`:
+two clients with the same row key report their own initial enter events, and
+one mounted Effect reports the new client's row after a provider switch.
 `packages/db/tests/db-client.test.ts` supplies a
 focused nested-query preload witness across two clients, including equal query
 hashes and distinct dehydrated rows. Concrete-config descriptors, on-demand
