@@ -26,7 +26,8 @@
  * observes dehydration after the committed Effect has reported its first row.
  * A no-client history changes one mounted hook from a concrete query to a
  * descriptor query with the same semantic hash. It must reject the unbound
- * source before reusing the old live-query Collection.
+ * source before reusing the old live-query Collection. The React error names
+ * DbProvider as the remedy; the core error remains framework neutral.
  */
 import { act, renderHook, waitFor } from '@testing-library/react'
 import {
@@ -116,7 +117,7 @@ describe(`standalone descriptor query binding`, () => {
     // The public error is the observation at the attempted consumption cut.
     // Returning the previous row would conceal the missing DbClient.
     query = unboundQuery
-    expect(() => mounted.rerender()).toThrow(/requires a DbClient/)
+    expect(() => mounted.rerender()).toThrow(/requires a DbClient.*DbProvider/)
     mounted.unmount()
   })
 

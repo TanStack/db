@@ -1,6 +1,7 @@
 import { useEffect, useRef } from 'react'
 import { createEffect, prepareLiveQueryValue } from '@tanstack/db'
 import { useOptionalDbClient } from './DbProvider'
+import { getPreparedSources } from './source-id-bindings'
 import type { EffectConfig } from '@tanstack/db'
 
 /**
@@ -38,6 +39,7 @@ export function useLiveQueryEffect<
 
   useEffect(() => {
     const query = prepareLiveQueryValue(config.query, client)
+    getPreparedSources(query, client, `useLiveQueryEffect`)
     const effect = createEffect<TRow, TKey>({
       id: config.id,
       query: query as EffectConfig<TRow, TKey>[`query`],
@@ -55,8 +57,10 @@ export function useLiveQueryEffect<
     })
 
     return () => {
-      // Fire-and-forget disposal; AbortSignal cancels in-flight work
-      void effect.dispose()
+      // React cannot await cleanup. Report a failed source release.
+      void effect.dispose().catch((error) => {
+        console.error(`[useLiveQueryEffect] failed to dispose effect:`, error)
+      })
     }
   }, [...deps, client])
 }

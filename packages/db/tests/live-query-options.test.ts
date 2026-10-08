@@ -8,6 +8,13 @@ import {
   resolveLiveQueryValue,
 } from '../src/live-query-options.js'
 import { BaseQueryBuilder, getQueryIR } from '../src/query/builder/index.js'
+import {
+  caseWhen,
+  eq,
+  materialize,
+  toArray,
+} from '../src/query/builder/functions.js'
+import { collectSourceRefs } from '../src/query/ir.js'
 
 describe(`live query preparation`, () => {
   it(`requires a client when a standalone descriptor query is consumed`, () => {
@@ -62,6 +69,87 @@ describe(`live query preparation`, () => {
     )
 
     expect(nestedSourceType).toBe(`collectionRef`)
+  })
+
+  it(`binds descriptor branches when a client-aware builder places a union`, () => {
+    const descriptor = collectionOptions(`union-placement-descriptor`, () => ({
+      id: `union-placement-descriptor`,
+      getKey: (row: { id: string }) => row.id,
+      sync: { sync: ({ markReady }) => markReady() },
+    }))
+    const firstBranch = new BaseQueryBuilder()
+      .from({ first: descriptor })
+      .select(({ first }) => ({ id: first.id }))
+    const secondBranch = new BaseQueryBuilder()
+      .from({ second: descriptor })
+      .select(({ second }) => ({ id: second.id }))
+    const client = new DbClient()
+    let sourceTypes: Array<string> = []
+
+    prepareLiveQueryValue((builder: BaseQueryBuilder) => {
+      const union = builder.unionAll(firstBranch, secondBranch)
+      sourceTypes = collectSourceRefs(getQueryIR(union)).map(
+        (source) => source.type,
+      )
+      return union
+    }, client)
+
+    // Placement, before final preparation, must leave no descriptor source.
+    expect(sourceTypes).toEqual([`collectionRef`, `collectionRef`])
+    expect(collectSourceRefs(getQueryIR(firstBranch))[0]?.type).toBe(
+      `descriptorRef`,
+    )
+    expect(collectSourceRefs(getQueryIR(secondBranch))[0]?.type).toBe(
+      `descriptorRef`,
+    )
+  })
+
+  it(`binds an includes child when a client-aware builder places it`, () => {
+    const parentDescriptor = collectionOptions(
+      `include-placement-parent`,
+      () => ({
+        id: `include-placement-parent`,
+        getKey: (row: { id: string }) => row.id,
+        sync: { sync: ({ markReady }) => markReady() },
+      }),
+    )
+    const childDescriptor = collectionOptions(
+      `include-placement-child`,
+      () => ({
+        id: `include-placement-child`,
+        getKey: (row: { id: string; parentId: string }) => row.id,
+        sync: { sync: ({ markReady }) => markReady() },
+      }),
+    )
+    const client = new DbClient()
+    let sourceTypes: Array<string> = []
+
+    prepareLiveQueryValue((builder: BaseQueryBuilder) => {
+      const query = builder
+        .from({ parent: parentDescriptor })
+        .select(({ parent }) => {
+          const childQuery = new BaseQueryBuilder()
+            .from({ child: childDescriptor })
+            .where(({ child }) => eq(child.parentId, parent.id))
+          return {
+            id: parent.id,
+            children: childQuery,
+            nested: { inlineChildren: toArray(childQuery) },
+            materializedChildren: materialize(childQuery),
+            conditionalChildren: caseWhen(
+              eq(parent.id, `parent`),
+              childQuery,
+              childQuery,
+            ),
+          }
+        })
+      sourceTypes = collectSourceRefs(getQueryIR(query)).map(
+        (source) => source.type,
+      )
+      return query
+    }, client)
+
+    expect(sourceTypes).toEqual(Array(6).fill(`collectionRef`))
   })
 
   it.each([undefined, null])(

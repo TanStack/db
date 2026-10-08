@@ -15,6 +15,8 @@ export function getSourceObjectToken(source: object): number {
 
 export function getPreparedSources(
   preparedValue: unknown,
+  client?: DbClient,
+  hookName?: string,
 ): Array<{ id: string }> {
   if (isCollection(preparedValue)) return [preparedValue]
   const query =
@@ -26,11 +28,18 @@ export function getPreparedSources(
           preparedValue.query instanceof BaseQueryBuilder
         ? preparedValue.query
         : undefined
-  return query
-    ? IR.collectCollectionSources(query._getQuery()).map(
-        ({ collection }) => collection,
-      )
-    : []
+  if (!query) return []
+  return IR.collectSourceRefs(query._getQuery()).map((source) => {
+    if (source.type === `descriptorRef`) {
+      if (!client && hookName) {
+        throw new Error(
+          `[${hookName}] Collection descriptor "${source.alias}" requires a DbClient when the query is consumed. Wrap this component in <DbProvider client={client}> or use a concrete Collection.`,
+        )
+      }
+      return IR.requireCollectionSource(source)
+    }
+    return source.collection
+  })
 }
 
 /** The source object each Collection ID named while one hook is mounted. */
@@ -59,7 +68,7 @@ export function claimSourceIds(
 ): void {
   const prior = client ? bindings.byClient.get(client) : bindings.unscoped
   const seen = new Map<string, number>()
-  for (const source of getPreparedSources(preparedValue)) {
+  for (const source of getPreparedSources(preparedValue, client, hookName)) {
     const token = getSourceObjectToken(source)
     const previous = seen.get(source.id) ?? prior?.get(source.id)
     if (previous !== undefined && previous !== token) {

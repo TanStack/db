@@ -26,8 +26,7 @@ export function extractCollectionsFromQuery(
 ): Record<string, Collection<any, any, any>> {
   const collections: Record<string, Collection<any, any, any>> = {}
   for (const source of collectCollectionSources(query)) {
-    const collection = source.collection
-    collections[collection.id] = collection
+    collections[source.collection.id] = source.collection
   }
   return collections
 }

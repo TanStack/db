@@ -262,8 +262,15 @@ this binding law; a receiving oracle needs the relevant public observation for
 each. Vue, Solid, and Angular have no DbClient descriptor-binding contract in
 this work. Their query callers use concrete Collections.
 `packages/db/tests/live-query-options.test.ts` checks that a client-aware
-builder binds a nested descriptor when placing the subquery, before final
-preparation; it does not compare public nested-query rows.
+builder binds nested, union-branch, and include-child descriptors when placing
+them, before final preparation. The include checks cover direct, nested,
+materialized, and conditional positions. They do not compare public rows for
+these query forms. A prepared builder can still retain its render-scoped
+resolver: adding a descriptor source after that render's deferral set is drained
+leaves the source idle, while using a plain resolver before commit can start
+provider work in an abandonable render. The descriptor-binding owner needs a
+controlled public source-start witness on both sides of that boundary before
+late chaining is declared supported.
 `packages/db/tests/query/collection-ref-compatibility.test.ts` pins the
 exported `IR.CollectionRef` shape for concrete Collections: `collection` is an
 enumerable, writable own field that a spread copies. It also checks that an

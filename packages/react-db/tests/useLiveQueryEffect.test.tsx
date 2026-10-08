@@ -1,6 +1,6 @@
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { act, renderHook } from '@testing-library/react'
-import { createCollection, eq } from '@tanstack/db'
+import { Query, collectionOptions, createCollection, eq } from '@tanstack/db'
 import { useLiveQueryEffect } from '../src/useLiveQueryEffect'
 import { mockSyncCollectionOptions } from '../../db/tests/utils'
 import type { DeltaEvent, EffectConfig } from '@tanstack/db'
@@ -29,6 +29,66 @@ function createUsersCollection(initialData = initialUsers) {
 }
 
 describe(`useLiveQueryEffect`, () => {
+  it(`explains the provider needed by an unbound descriptor query`, () => {
+    const descriptor = collectionOptions(`effect-provider-hint`, () => ({
+      id: `effect-provider-hint`,
+      getKey: (row: { id: number }) => row.id,
+      sync: { sync: ({ markReady }) => markReady() },
+    }))
+    const query = new Query().from({ item: descriptor })
+
+    expect(() =>
+      renderHook(() => useLiveQueryEffect({ query, onBatch: () => {} })),
+    ).toThrow(/requires a DbClient.*DbProvider/)
+  })
+
+  it(`reports a source release failure when unmount disposes the Effect`, async () => {
+    const failure = new Error(`source release failed`)
+    let unloadCalls = 0
+    const source = createCollection<{ id: number }>({
+      id: `effect-unmount-release-failure`,
+      getKey: (row) => row.id,
+      syncMode: `on-demand`,
+      sync: {
+        sync: ({ markReady }) => {
+          markReady()
+          return {
+            loadSubset: () => true,
+            unloadSubset: () => {
+              unloadCalls++
+              throw failure
+            },
+          }
+        },
+      },
+    })
+    const reported = vi.spyOn(console, `error`).mockImplementation(() => {})
+    try {
+      const mounted = renderHook(() =>
+        useLiveQueryEffect({
+          query: (q) => q.from({ source }),
+          onBatch: () => {},
+        }),
+      )
+      expect(source.subscriberCount).toBe(1)
+
+      mounted.unmount()
+      await act(async () => {
+        await flushPromises()
+      })
+
+      expect(unloadCalls).toBe(1)
+      expect(source.subscriberCount).toBe(0)
+      expect(reported).toHaveBeenCalledWith(
+        expect.stringContaining(`failed to dispose`),
+        failure,
+      )
+    } finally {
+      reported.mockRestore()
+      await source.cleanup()
+    }
+  })
+
   it(`reports an invalid query function result`, () => {
     const query = (() => undefined) as unknown as EffectConfig<
       User,
