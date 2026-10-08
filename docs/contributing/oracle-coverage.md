@@ -843,7 +843,15 @@ Issue #2071 adds two focused checks to this acceptance map:
   attribution; they do not establish every mixed operation sequence, causal
   authorship, or every overlapping mutation schedule. A
   causal `$origin` guarantee would require an explicit source signal and a new
-  core-owner model and provider receiving witness.
+  core-owner model and provider receiving witness. The
+  [PR #2078 review](oracle-reviews/pr-2078-origin-attribution.md) records the
+  original same-drain RED, the repair, and hostile controls. The optimistic
+  history owner still needs controlled pending-plus-persisting same-key
+  histories, truncate with two active owners, and longer reentrant or mixed
+  source suffixes if those broader schedules are claimed. Such a witness must
+  compare origin and complete publication cuts, not only the final row. The
+  persisted wrapper owner still needs the private bridge callback and write
+  sequence before claiming that reported path.
 
 | Issue obligation           | Implemented evidence                                                                                                                                                        | Limit                                                                                        |
 | -------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------- |
