@@ -8,6 +8,7 @@ import {
   InvalidPersistedCollectionConfigError,
   InvalidPersistedStorageKeyEncodingError,
 } from './errors'
+import { isValidCommittedTxAnchor } from './committed-tx-anchor'
 import {
   SQLITE_DRIVER_SHARED_LOGICAL_SCHEDULING_KEY,
   createPersistedTableName,
@@ -34,8 +35,8 @@ import type {
   PersistedScannedRow,
   PersistedTx,
   PersistenceAdapter,
-  ReplayableTxDelta,
   ReconciledCommittedTx,
+  ReplayableTxDelta,
   SQLiteDriver,
 } from './persisted'
 
@@ -2032,13 +2033,7 @@ export class SQLiteCorePersistenceAdapter implements PersistenceAdapter {
     tx: PersistedTx,
     anchor: CommittedTxAnchor,
   ): Promise<ReconciledCommittedTx> {
-    if (
-      !anchor ||
-      !Number.isSafeInteger(anchor.latestRowVersion) ||
-      anchor.latestRowVersion < 0 ||
-      !Number.isSafeInteger(anchor.resetEpoch) ||
-      anchor.resetEpoch < 0
-    ) {
+    if (!isValidCommittedTxAnchor(anchor)) {
       throw new Error(
         `Cannot reconcile a committed transaction without a valid durable anchor`,
       )
@@ -2061,7 +2056,7 @@ export class SQLiteCorePersistenceAdapter implements PersistenceAdapter {
         key_set_evidence_available: number
         schema_version: number
         already_applied: number
-        reset_epoch: number
+        reset_epoch: number | null
       }>(
         `SELECT
            latest_row_version,

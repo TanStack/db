@@ -860,8 +860,7 @@ it.each([false, true])(
       liveIds: [...live.keys()].sort(),
       liveStatus: live.status,
       durableIds: [...adapter.rows.keys()].sort(),
-      cursor:
-        (adapter.collectionMetadata.get(`probe:cursor`) as string) ?? null,
+      cursor: adapter.collectionMetadata.get(`probe:cursor`) ?? null,
     })
 
     try {
@@ -888,8 +887,7 @@ it.each([false, true])(
       expect({
         publicIds: [...collection.keys()].sort(),
         durableIds: [...adapter.rows.keys()].sort(),
-        cursor:
-          (adapter.collectionMetadata.get(`probe:cursor`) as string) ?? null,
+        cursor: adapter.collectionMetadata.get(`probe:cursor`) ?? null,
       }).toEqual(expected.atUncertain)
       expect(live.status).toBe(`ready`)
       releaseReconciliation.resolve()

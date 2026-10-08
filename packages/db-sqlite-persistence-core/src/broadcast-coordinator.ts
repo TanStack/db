@@ -1,4 +1,5 @@
 import { safeRandomUUID } from '@tanstack/db'
+import { isValidCommittedTxAnchor } from './committed-tx-anchor'
 import {
   DuplicateRemoteSubsetOwnerError,
   IndeterminateCommitError,
@@ -2177,13 +2178,8 @@ export class BroadcastCollectionCoordinator implements PersistedCollectionCoordi
     })
     if (!state?.isLeader) return notLeader()
     if (
-      !request.anchor ||
-      !Number.isSafeInteger(request.anchor.latestRowVersion) ||
-      request.anchor.latestRowVersion < 0 ||
-      !Number.isSafeInteger(request.anchor.resetEpoch) ||
-      request.anchor.resetEpoch < 0 ||
-      typeof request.tx?.txId !== `string` ||
-      !Array.isArray(request.tx.mutations)
+      !isValidCommittedTxAnchor(request.anchor) ||
+      !hasReconciliationTxPayload(request.tx)
     ) {
       return {
         type: `rpc:reconcileCommittedTx:res`,
@@ -2493,6 +2489,12 @@ function isRPCRequest(payload: unknown): payload is RPCRequest {
     default:
       return false
   }
+}
+
+function hasReconciliationTxPayload(value: unknown): boolean {
+  if (!value || typeof value !== `object`) return false
+  const tx = value as Record<string, unknown>
+  return typeof tx.txId === `string` && Array.isArray(tx.mutations)
 }
 
 function sleep(ms: number): Promise<void> {

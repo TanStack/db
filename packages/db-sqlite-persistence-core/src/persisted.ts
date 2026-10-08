@@ -16,13 +16,13 @@ import {
 } from '@tanstack/db'
 import {
   DuplicateRemoteSubsetOwnerError,
+  IndeterminateCommitError,
   InvalidPersistedCollectionConfigError,
   InvalidPersistedCollectionCoordinatorError,
   InvalidPersistedStorageKeyEncodingError,
   InvalidPersistedStorageKeyError,
   InvalidPersistenceAdapterError,
   InvalidSyncConfigError,
-  IndeterminateCommitError,
   PersistedCollectionDurabilityError,
   toPersistedCollectionDurabilityError,
 } from './errors'

@@ -17,8 +17,8 @@ import {
 import { harnessScope } from './contracts/harness-scope'
 import type {
   CommittedTxAnchor,
-  PersistenceAdapter,
   PersistedTx,
+  PersistenceAdapter,
   SQLiteDriver,
   SQLitePullSinceResult,
 } from '../src'
