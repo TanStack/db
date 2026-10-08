@@ -101,6 +101,12 @@ export interface OfflineConfig {
   storage?: StorageAdapter
   maxConcurrency?: number
   jitter?: boolean
+  /**
+   * Override retry decisions for mutation function errors. Return undefined
+   * to use the default decision. NonRetriableError always stops retry; the
+   * default policy still supplies the delay and configured jitter.
+   */
+  shouldRetry?: (error: Error, retryCount: number) => boolean | undefined
   beforeRetry?: (
     transactions: Array<OfflineTransaction>,
   ) => Array<OfflineTransaction>

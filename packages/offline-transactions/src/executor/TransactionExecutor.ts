@@ -202,10 +202,33 @@ export class TransactionExecutor {
         'error.message': error.message,
       },
       async (span) => {
-        const shouldRetry = this.retryPolicy.shouldRetry(
-          error,
-          transaction.retryCount,
-        )
+        let shouldRetry: boolean
+        if (error instanceof NonRetriableError) {
+          shouldRetry = false
+        } else {
+          let decision: boolean | undefined
+          try {
+            decision = this.config.shouldRetry?.(error, transaction.retryCount)
+            if (decision !== undefined && typeof decision !== `boolean`)
+              throw new TypeError(
+                `OfflineConfig.shouldRetry must return true, false, or undefined`,
+              )
+          } catch (hookError) {
+            const failure =
+              hookError instanceof Error
+                ? hookError
+                : new Error(String(hookError))
+            this.fatalError = failure
+            this.scheduler.markFailed(transaction)
+            this.clearRetryTimer()
+            this.offlineExecutor.rejectTransaction(transaction.id, failure)
+            throw failure
+          }
+          shouldRetry =
+            decision === undefined
+              ? this.retryPolicy.shouldRetry(error, transaction.retryCount)
+              : decision
+        }
 
         span.setAttribute(`shouldRetry`, shouldRetry)
 

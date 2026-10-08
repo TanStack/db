@@ -165,6 +165,7 @@ interface OfflineConfig {
   storage?: StorageAdapter // Custom storage (default: auto-detect)
   maxConcurrency?: number // Parallel execution limit
   jitter?: boolean // Add jitter to retry delays
+  shouldRetry?: (error: Error, retryCount: number) => boolean | undefined // Override retry decision
   beforeRetry?: (txs) => txs // Transform/filter before retry
   onUnknownMutationFn?: (name, tx) => void // Handle orphaned transactions
   onLeadershipChange?: (isLeader) => void // Leadership state callback
@@ -207,6 +208,17 @@ const executor = startOfflineExecutor({
 ```
 
 Throwing `NonRetriableError` stops retry and removes the transaction from the outbox. Use for permanent failures (validation errors, conflicts, 4xx responses).
+
+### Retry decisions
+
+Set `shouldRetry` to override the default decision for a mutation function
+error. The hook receives the original error and retry count (`0` on the first
+failure). Return `true` to retry, `false` to stop, or `undefined` to use the
+default decision. For example, return `true` for a recoverable 401 and
+`undefined` otherwise. `NonRetriableError` always stops without calling the
+hook. The default backoff and configured jitter still determine retry timing.
+If the hook throws or returns another value, the caller rejects and the
+executor stops before recording a retry.
 
 ### Idempotency keys
 

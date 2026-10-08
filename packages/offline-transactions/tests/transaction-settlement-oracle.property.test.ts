@@ -10,7 +10,11 @@ import { FakeStorageAdapter, createTestOfflineEnvironment } from './harness'
 import { atOracleCheckpoint, cleanupOfflineOracle } from './oracle-lifecycle'
 import { readOfflineOracleConfig } from './oracle-config'
 import type { TestItem } from './harness'
-import type { OfflineTransaction, TransactionSignaler } from '../src/types'
+import type {
+  OfflineConfig,
+  OfflineTransaction,
+  TransactionSignaler,
+} from '../src/types'
 
 /**
  * # Does each offline transaction settle only from its own durable history?
@@ -66,6 +70,25 @@ import type { OfflineTransaction, TransactionSignaler } from '../src/types'
  * Direct executor checks pin the storage error, FIFO peer hold, and refusal of
  * further attempts. An unmarked row after a failed marker write can still replay
  * after a crash.
+ * The proposed `shouldRetry` option changes only the decision on a mutationFn
+ * failure. Its original Error and current retry count reach the hook once.
+ * `true` retries, `false` terminates, and `undefined` delegates to the existing
+ * default decision. An absent hook also uses that default. `NonRetriableError`
+ * remains permanent without consulting the hook. The existing default policy
+ * still supplies retry delay with the configured jitter setting. This oracle
+ * checks the default delay path with jitter disabled, not jitter math. The
+ * exported default currently treats a 401 message as terminal and an ordinary
+ * transient error as retryable;
+ * these are preservation controls, while the hook rule is the chosen new law.
+ * At the durable decision checkpoint, a retry retains the FIFO head, its
+ * optimistic row, and both caller promises; terminal removal rejects those
+ * promises with the provider Error and admits the peer. The controlled provider
+ * and storage do not establish real timer accuracy or server idempotency.
+ * A throwing hook or a result outside `true`, `false`, and `undefined` is a
+ * configuration failure. The affected public caller rejects with that failure
+ * and no retry record is published. The executor stops and releases its active
+ * slot. This witness does not promise what a fresh
+ * executor does with the still-admitted row after such a failure.
  * Public manual removal may acknowledge deletion while a provider call is
  * held. Once that call fulfills, both success conditions have occurred, so
  * the caller and local persistence promise must settle without another row.
@@ -87,6 +110,10 @@ const retryRecordOracle = readOfflineOracleConfig({
 const admissionOracle = readOfflineOracleConfig({
   prefix: `OFFLINE_ORACLE`,
   defaultRuns: 10,
+})
+const retryDecisionOracle = readOfflineOracleConfig({
+  prefix: `OFFLINE_ORACLE`,
+  defaultRuns: 12,
 })
 
 type OracleConfig = ReturnType<typeof readOfflineOracleConfig>
@@ -499,6 +526,657 @@ it.each([
           () => Promise.all(waits),
           () => env.executor.dispose(),
           () => env.collection.cleanup(),
+        ],
+        hasPrimaryFailure,
+      )
+    }
+  },
+)
+
+const retryDecisionCases = [
+  { errorKind: `auth`, hook: `retry` },
+  { errorKind: `auth`, hook: `defer` },
+  { errorKind: `auth`, hook: `absent` },
+  { errorKind: `ordinary`, hook: `terminal` },
+  { errorKind: `ordinary`, hook: `defer` },
+  { errorKind: `ordinary`, hook: `absent` },
+  { errorKind: `permanent`, hook: `retry` },
+] as const
+
+type RetryDecisionCase = (typeof retryDecisionCases)[number]
+const retryDecisionExamples: Array<[RetryDecisionCase, number]> = [
+  ...retryDecisionCases.map((scenario): [RetryDecisionCase, number] => [
+    scenario,
+    1,
+  ]),
+  [retryDecisionCases[0]!, 3],
+]
+
+// This table is the contract model, not a copy of the executor. The permanent
+// error has no configurable decision. Otherwise an explicit hook answer wins;
+// delegation uses the two established default controls in this grammar. A
+// retained FIFO head permits no peer call, while removal permits the first one.
+function expectedRetryDecision(
+  scenario: RetryDecisionCase,
+  headId: string,
+  peerIds: Array<string>,
+  providerError: Error,
+) {
+  const retry =
+    scenario.errorKind !== `permanent` &&
+    (scenario.hook === `retry` ||
+      (scenario.hook !== `terminal` && scenario.errorKind === `ordinary`))
+  const peerRows = peerIds.map((_id, index) => `peer-${index}`)
+  return {
+    retry,
+    calls: retry ? [headId] : [headId, peerIds[0]!],
+    outbox: retry
+      ? [
+          { id: headId, retryCount: 1 },
+          ...peerIds.map((id) => ({ id, retryCount: 0 })),
+        ]
+      : peerIds.map((id) => ({ id, retryCount: 0 })),
+    headStatus: retry ? `pending` : providerError,
+    localRows: retry ? [`head`, ...peerRows] : peerRows,
+  }
+}
+
+// Legal histories have one failed FIFO head and 1–3 admitted peers. The seven
+// pinned cases cross override, delegation, omission, and permanent failure;
+// peer count varies independently. Removing auth retry loses the motivating
+// override; removing ordinary terminal loses the opposite decision; removing
+// defer or absent conflates two ways to retain default behavior for both error
+// classes; removing the permanent case permits an explicit permanent failure
+// to retry. One peer is the marginal FIFO witness, while three detect loss of
+// a later admitted peer.
+// A second failure and hook contract breach have separate witnesses below.
+// Duplicate IDs and storage failures belong to other settlement grammars here.
+it.each(oracleSeeds(20261008, retryDecisionOracle))(
+  `refines an optional retry decision at the durable FIFO checkpoint (seed %s)`,
+  async (seed) => {
+    await fc.assert(
+      fc.asyncProperty(
+        fc.constantFrom(...retryDecisionCases),
+        fc.integer({ min: 1, max: 3 }),
+        async (scenario, peerCount) => {
+          const providerError =
+            scenario.errorKind === `permanent`
+              ? new NonRetriableError(`validation rejected`)
+              : new Error(
+                  scenario.errorKind === `auth`
+                    ? `HTTP 401 Unauthorized`
+                    : `temporary connection failure`,
+                )
+          const firstEntered = gate()
+          const releaseFirst = gate()
+          const firstPeerEntered = gate()
+          const releaseFirstPeer = gate()
+          const peersAdmitted = gate()
+          const decisionStored = gate()
+          let headId = ``
+          const peerIds: Array<string> = []
+          const admittedPeers = new Set<string>()
+          const calls: Array<string> = []
+          const hookCalls: Array<{ error: Error; retryCount: number }> = []
+          let headAttempts = 0
+          class DecisionStorage extends FakeStorageAdapter {
+            override async set(key: string, value: string): Promise<void> {
+              await super.set(key, value)
+              if (peerIds.some((id) => key === `tx:${id}`)) {
+                admittedPeers.add(key)
+                if (admittedPeers.size === peerCount) peersAdmitted.resolve()
+              }
+              if (
+                key === `tx:${headId}` &&
+                (JSON.parse(value) as { retryCount: number }).retryCount === 1
+              )
+                decisionStored.resolve()
+            }
+
+            override async delete(key: string): Promise<void> {
+              await super.delete(key)
+              if (key === `tx:${headId}`) decisionStored.resolve()
+            }
+          }
+          const shouldRetry: NonNullable<OfflineConfig['shouldRetry']> = (
+            error: Error,
+            retryCount: number,
+          ): boolean | undefined => {
+            hookCalls.push({ error, retryCount })
+            if (scenario.hook === `defer`) return undefined
+            return scenario.hook === `retry`
+          }
+          const config =
+            scenario.hook === `absent`
+              ? { jitter: false }
+              : { jitter: false, shouldRetry }
+          const env = createTestOfflineEnvironment({
+            storage: new DecisionStorage(),
+            config,
+            mutationFn: async (params) => {
+              const id = params.transaction.id
+              calls.push(id)
+              if (id === headId && headAttempts++ === 0) {
+                firstEntered.resolve()
+                await releaseFirst.promise
+                throw providerError
+              }
+              if (id === peerIds[0]) {
+                firstPeerEntered.resolve()
+                await releaseFirstPeer.promise
+              }
+              env.applyMutations(params.transaction.mutations)
+            },
+          })
+          const warning = vi.spyOn(console, `warn`).mockImplementation(() => {})
+          let headCommitStatus: unknown = `pending`
+          let headWaitStatus: unknown = `pending`
+          const peerStatuses: Array<unknown> = []
+          const observed: Array<Promise<void>> = []
+          let hasPrimaryFailure = false
+          try {
+            await env.waitForLeader()
+            const head = env.executor.createOfflineTransaction({
+              mutationFnName: env.mutationFnName,
+              autoCommit: false,
+            })
+            headId = head.id
+            observed.push(
+              env.executor.waitForTransactionCompletion(headId).then(
+                () => {
+                  headWaitStatus = `fulfilled`
+                },
+                (error: unknown) => {
+                  headWaitStatus = error
+                },
+              ),
+            )
+            head.mutate(() =>
+              env.collection.insert({
+                id: `head`,
+                value: `head`,
+                completed: false,
+                updatedAt: new Date(0),
+              }),
+            )
+            observed.push(
+              head.commit().then(
+                () => {
+                  headCommitStatus = `fulfilled`
+                },
+                (error: unknown) => {
+                  headCommitStatus = error
+                },
+              ),
+            )
+            await atOracleCheckpoint(
+              firstEntered.promise,
+              `head provider entered`,
+            )
+
+            for (let index = 0; index < peerCount; index++) {
+              const peer = env.executor.createOfflineTransaction({
+                mutationFnName: env.mutationFnName,
+                autoCommit: false,
+              })
+              peerIds.push(peer.id)
+              peer.mutate(() =>
+                env.collection.insert({
+                  id: `peer-${index}`,
+                  value: `peer-${index}`,
+                  completed: false,
+                  updatedAt: new Date(index + 1),
+                }),
+              )
+              peerStatuses[index] = `pending`
+              observed.push(
+                peer.commit().then(
+                  () => {
+                    peerStatuses[index] = `fulfilled`
+                  },
+                  (error: unknown) => {
+                    peerStatuses[index] = error
+                  },
+                ),
+              )
+            }
+            await atOracleCheckpoint(peersAdmitted.promise, `peers admitted`)
+
+            // The provider failure occurs with later work already durable.
+            // Observe only after the head's retry record or deletion settles.
+            const releasedAt = Date.now()
+            releaseFirst.resolve()
+            await atOracleCheckpoint(
+              decisionStored.promise,
+              `head decision stored`,
+            )
+            const expected = expectedRetryDecision(
+              scenario,
+              headId,
+              peerIds,
+              providerError,
+            )
+            if (!expected.retry)
+              await atOracleCheckpoint(
+                firstPeerEntered.promise,
+                `terminal decision admitted peer`,
+              )
+            await turn()
+            // These public observations distinguish retaining the head from
+            // removing it, including per-ID settlement and optimistic rows.
+            expect(calls).toEqual(expected.calls)
+            expect(
+              (await env.executor.peekOutbox()).map(({ id, retryCount }) => ({
+                id,
+                retryCount,
+              })),
+            ).toEqual(expected.outbox)
+            expect(headCommitStatus).toBe(expected.headStatus)
+            expect(headWaitStatus).toBe(expected.headStatus)
+            expect(peerStatuses).toEqual(peerIds.map(() => `pending`))
+            expect(env.collection.toArray.map(({ id }) => id).sort()).toEqual(
+              expected.localRows,
+            )
+            expect(env.serverState.size).toBe(0)
+            expect(hookCalls).toEqual(
+              scenario.hook === `absent` || scenario.errorKind === `permanent`
+                ? []
+                : [{ error: providerError, retryCount: 0 }],
+            )
+            if (hookCalls.length > 0)
+              expect(hookCalls[0]!.error).toBe(providerError)
+            if (expected.retry) {
+              const [record] = await env.executor.peekOutbox()
+              expect(record?.lastError?.message).toBe(providerError.message)
+              expect(record!.nextAttemptAt).toBeGreaterThan(releasedAt)
+            }
+
+            releaseFirstPeer.resolve()
+            if (expected.retry) env.executor.getOnlineDetector().notifyOnline()
+            await atOracleCheckpoint(
+              Promise.all(observed),
+              `retry decision history settled`,
+            )
+            expect(headCommitStatus).toBe(
+              expected.retry ? `fulfilled` : providerError,
+            )
+            expect(headWaitStatus).toBe(headCommitStatus)
+            expect(peerStatuses).toEqual(peerIds.map(() => `fulfilled`))
+            expect(calls).toEqual(
+              expected.retry
+                ? [headId, headId, ...peerIds]
+                : [headId, ...peerIds],
+            )
+            expect(await env.executor.peekOutbox()).toEqual([])
+            expect([...env.serverState.keys()].sort()).toEqual(
+              expected.localRows,
+            )
+          } catch (error) {
+            hasPrimaryFailure = true
+            throw error
+          } finally {
+            releaseFirst.resolve()
+            releaseFirstPeer.resolve()
+            const cleanupError = new Error(`retry decision oracle cleanup`)
+            if (
+              headId &&
+              (headCommitStatus === `pending` || headWaitStatus === `pending`)
+            )
+              env.executor.rejectTransaction(headId, cleanupError)
+            for (const [index, id] of peerIds.entries())
+              if (peerStatuses[index] === `pending`)
+                env.executor.rejectTransaction(id, cleanupError)
+            await cleanupOfflineOracle(
+              [
+                () => Promise.all(observed),
+                () => env.executor.dispose(),
+                () => env.collection.cleanup(),
+                () => warning.mockRestore(),
+              ],
+              hasPrimaryFailure,
+            )
+          }
+        },
+      ),
+      {
+        ...oracleOptions(retryDecisionOracle, seed),
+        examples: retryDecisionExamples,
+      },
+    )
+  },
+)
+
+// The no-hook run is the reference for existing retry timing. With the same
+// retry count, ordinary Error, disabled jitter, and clock, adding a true hook
+// may change the decision path but not the durable deadline. Comparing outbox
+// records leaves the choice of delay implementation to production.
+it(`preserves the default retry deadline when the hook agrees`, async () => {
+  const fixedNow = 1_000_000
+  const providerError = new Error(`temporary connection failure`)
+  const hookCalls: Array<{ error: Error; retryCount: number }> = []
+  const clock = vi.spyOn(Date, `now`).mockReturnValue(fixedNow)
+  const signaler: TransactionSignaler = {
+    isOfflineEnabled: true,
+    isOnline: () => true,
+    resolveTransaction: () => {
+      throw new Error(`failed provider cannot resolve`)
+    },
+    rejectTransaction: () => {
+      throw new Error(`ordinary failure should retry`)
+    },
+    registerRestorationTransaction: () => {},
+  }
+  const observeDeadline = async (withHook: boolean): Promise<number> => {
+    const outbox = new OutboxManager(new FakeStorageAdapter(), {})
+    const executor = new TransactionExecutor(
+      new KeyScheduler(),
+      outbox,
+      {
+        collections: {},
+        mutationFns: {
+          syncData: () => Promise.reject(providerError),
+        },
+        jitter: false,
+        ...(withHook
+          ? {
+              shouldRetry: (error: Error, retryCount: number) => {
+                hookCalls.push({ error, retryCount })
+                return true
+              },
+            }
+          : {}),
+      },
+      signaler,
+    )
+    const transaction: OfflineTransaction = {
+      id: withHook ? `hooked-deadline` : `default-deadline`,
+      mutationFnName: `syncData`,
+      mutations: [],
+      keys: [],
+      idempotencyKey: withHook ? `hooked-deadline` : `default-deadline`,
+      createdAt: new Date(0),
+      retryCount: 0,
+      nextAttemptAt: 0,
+      version: 1,
+    }
+    await outbox.add(transaction)
+    try {
+      await atOracleCheckpoint(
+        executor.execute(transaction),
+        `retry deadline ${withHook ? `with` : `without`} hook`,
+      )
+      const stored = await outbox.get(transaction.id)
+      expect(stored).toMatchObject({ retryCount: 1 })
+      return stored!.nextAttemptAt
+    } finally {
+      executor.pause()
+    }
+  }
+
+  try {
+    const defaultDeadline = await observeDeadline(false)
+    const hookedDeadline = await observeDeadline(true)
+    expect(defaultDeadline).toBeGreaterThan(fixedNow)
+    expect(hookedDeadline).toBe(defaultDeadline)
+    expect(hookCalls).toEqual([{ error: providerError, retryCount: 0 }])
+    expect(hookCalls[0]?.error).toBe(providerError)
+  } finally {
+    clock.mockRestore()
+  }
+})
+
+// Two ordinary provider failures are a legal history. The first explicit
+// answer keeps the head. On the second failure, false removes it while
+// undefined delegates to the default and keeps it for a third attempt. The
+// distinct Errors expose a stale-error decision at the second durable cut.
+it.each([`terminal`, `defer`] as const)(
+  `passes the second error and retry count to the decision hook (%s)`,
+  async (secondDecision) => {
+    const firstError = new Error(`temporary first failure`)
+    const secondError = new Error(`temporary second failure`)
+    const firstRetryStored = gate()
+    const secondDecisionStored = gate()
+    const hookCalls: Array<{ error: Error; retryCount: number }> = []
+    let transactionId = ``
+    class DecisionStorage extends FakeStorageAdapter {
+      override async set(key: string, value: string): Promise<void> {
+        await super.set(key, value)
+        if (key !== `tx:${transactionId}`) return
+        const record = JSON.parse(value) as { retryCount: number }
+        if (record.retryCount === 1) firstRetryStored.resolve()
+        if (record.retryCount === 2) secondDecisionStored.resolve()
+      }
+
+      override async delete(key: string): Promise<void> {
+        await super.delete(key)
+        if (key === `tx:${transactionId}`) secondDecisionStored.resolve()
+      }
+    }
+    const config = {
+      jitter: false,
+      shouldRetry: (error: Error, retryCount: number): boolean | undefined => {
+        hookCalls.push({ error, retryCount })
+        if (retryCount === 0) return true
+        return secondDecision === `terminal` ? false : undefined
+      },
+    }
+    const env = createTestOfflineEnvironment({
+      storage: new DecisionStorage(),
+      config,
+      mutationFn: (params) => {
+        const attempt = env.mutationCalls.length
+        if (attempt === 1) throw firstError
+        if (attempt === 2) throw secondError
+        env.applyMutations(params.transaction.mutations)
+      },
+    })
+    const warning = vi.spyOn(console, `warn`).mockImplementation(() => {})
+    let commitStatus: unknown = `pending`
+    let waitStatus: unknown = `pending`
+    const observed: Array<Promise<void>> = []
+    let hasPrimaryFailure = false
+    try {
+      await env.waitForLeader()
+      const tx = env.executor.createOfflineTransaction({
+        mutationFnName: env.mutationFnName,
+        autoCommit: false,
+      })
+      transactionId = tx.id
+      const observedWait = env.executor
+        .waitForTransactionCompletion(tx.id)
+        .then(
+          () => {
+            waitStatus = `fulfilled`
+          },
+          (error: unknown) => {
+            waitStatus = error
+          },
+        )
+      tx.mutate(() =>
+        env.collection.insert({
+          id: `retry-count`,
+          value: `pending`,
+          completed: false,
+          updatedAt: new Date(0),
+        }),
+      )
+      const observedCommit = tx.commit().then(
+        () => {
+          commitStatus = `fulfilled`
+        },
+        (error: unknown) => {
+          commitStatus = error
+        },
+      )
+      observed.push(observedCommit, observedWait)
+      await atOracleCheckpoint(firstRetryStored.promise, `first retry stored`)
+      expect((await env.executor.peekOutbox())[0]?.retryCount).toBe(1)
+      expect(commitStatus).toBe(`pending`)
+      expect(waitStatus).toBe(`pending`)
+
+      await turn()
+      env.executor.getOnlineDetector().notifyOnline()
+      await atOracleCheckpoint(
+        secondDecisionStored.promise,
+        `second decision stored`,
+      )
+      await turn()
+      expect(hookCalls).toEqual([
+        { error: firstError, retryCount: 0 },
+        { error: secondError, retryCount: 1 },
+      ])
+      expect(hookCalls[0]?.error).toBe(firstError)
+      expect(hookCalls[1]?.error).toBe(secondError)
+      expect(env.mutationCalls).toHaveLength(2)
+      if (secondDecision === `defer`) {
+        expect(await env.executor.peekOutbox()).toMatchObject([
+          { id: tx.id, retryCount: 2 },
+        ])
+        expect(commitStatus).toBe(`pending`)
+        expect(waitStatus).toBe(`pending`)
+        env.executor.getOnlineDetector().notifyOnline()
+        await atOracleCheckpoint(
+          Promise.all([observedCommit, observedWait]),
+          `delegated second retry settled caller`,
+        )
+        expect(env.mutationCalls).toHaveLength(3)
+        expect(commitStatus).toBe(`fulfilled`)
+        expect(waitStatus).toBe(`fulfilled`)
+        expect(await env.executor.peekOutbox()).toEqual([])
+      } else {
+        expect(await env.executor.peekOutbox()).toEqual([])
+        await atOracleCheckpoint(
+          Promise.all([observedCommit, observedWait]),
+          `second failure settled caller`,
+        )
+        expect(commitStatus).toBe(secondError)
+        expect(waitStatus).toBe(secondError)
+      }
+    } catch (error) {
+      hasPrimaryFailure = true
+      throw error
+    } finally {
+      if (
+        transactionId &&
+        (commitStatus === `pending` || waitStatus === `pending`)
+      )
+        env.executor.rejectTransaction(
+          transactionId,
+          new Error(`retry count oracle cleanup`),
+        )
+      await cleanupOfflineOracle(
+        [
+          () => Promise.all(observed),
+          () => env.executor.dispose(),
+          () => env.collection.cleanup(),
+          () => warning.mockRestore(),
+        ],
+        hasPrimaryFailure,
+      )
+    }
+  },
+)
+
+// A configuration failure is observed through public commit(), not only the
+// executor's internal batch promise. The provider error is a 401, so ignoring
+// the hook would instead take the established terminal path. The retained
+// outbox row distinguishes failure before a retry decision from a terminal one.
+it.each([`throw`, `invalid`] as const)(
+  `rejects public commit when shouldRetry fails (%s)`,
+  async (failureKind) => {
+    const providerError = new Error(`HTTP 401 Unauthorized`)
+    const hookError = new Error(`retry decision unavailable`)
+    const providerEntered = gate()
+    const releaseProvider = gate()
+    let hookCalls = 0
+    const config = {
+      jitter: false,
+      shouldRetry: (
+        _error: Error,
+        _retryCount: number,
+      ): boolean | undefined => {
+        hookCalls++
+        if (failureKind === `throw`) throw hookError
+        return null as unknown as boolean | undefined
+      },
+    }
+    const env = createTestOfflineEnvironment({
+      config,
+      mutationFn: async () => {
+        providerEntered.resolve()
+        await releaseProvider.promise
+        throw providerError
+      },
+    })
+    const warning = vi.spyOn(console, `warn`).mockImplementation(() => {})
+    let transactionId = ``
+    let commitStatus: unknown = `pending`
+    let hasPrimaryFailure = false
+    try {
+      await env.waitForLeader()
+      const tx = env.executor.createOfflineTransaction({
+        mutationFnName: env.mutationFnName,
+        autoCommit: false,
+      })
+      transactionId = tx.id
+      tx.mutate(() =>
+        env.collection.insert({
+          id: `invalid-decision`,
+          value: `pending`,
+          completed: false,
+          updatedAt: new Date(0),
+        }),
+      )
+      const observedCommit = tx.commit().then(
+        () => {
+          commitStatus = `fulfilled`
+        },
+        (error: unknown) => {
+          commitStatus = error
+        },
+      )
+      await atOracleCheckpoint(providerEntered.promise, `provider entered`)
+      const [admitted] = await env.executor.peekOutbox()
+      expect(admitted?.retryCount).toBe(0)
+      releaseProvider.resolve()
+      await atOracleCheckpoint(
+        observedCommit,
+        `invalid decision settled caller`,
+      )
+
+      if (failureKind === `throw`) expect(commitStatus).toBe(hookError)
+      else {
+        expect(commitStatus).toBeInstanceOf(Error)
+        expect(commitStatus).not.toBe(providerError)
+      }
+      expect(hookCalls).toBe(1)
+      const remaining = await env.executor.peekOutbox()
+      expect(remaining).toHaveLength(1)
+      expect(remaining[0]).toMatchObject({
+        id: transactionId,
+        retryCount: 0,
+        nextAttemptAt: admitted!.nextAttemptAt,
+      })
+      expect(remaining[0]?.lastError).toBeUndefined()
+      expect(remaining[0]?.outboxPhase).toBeUndefined()
+      await turn()
+      expect(env.executor.getRunningCount()).toBe(0)
+      expect(env.mutationCalls).toHaveLength(1)
+    } catch (error) {
+      hasPrimaryFailure = true
+      throw error
+    } finally {
+      releaseProvider.resolve()
+      if (transactionId && commitStatus === `pending`)
+        env.executor.rejectTransaction(
+          transactionId,
+          new Error(`invalid decision oracle cleanup`),
+        )
+      await cleanupOfflineOracle(
+        [
+          () => env.executor.dispose(),
+          () => env.collection.cleanup(),
+          () => warning.mockRestore(),
         ],
         hasPrimaryFailure,
       )

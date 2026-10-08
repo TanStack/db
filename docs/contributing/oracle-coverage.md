@@ -1131,8 +1131,14 @@ for this oracle repair. Keep these scenarios and decisions with that owner:
   These paths are outside this bounded repair. The [review record](oracle-reviews/issue-1939-offline-admission.md)
   preserves the RED/GREEN and checker-calibration evidence.
 - **A10 R5/R9:** manual removal/clear outside the active-provider witnesses,
-  restored optimistic lifetimes, and retry-hook failures remain open. The
-  settlement owner checks terminal provider rejection with failed deletion, a
+  restored optimistic lifetimes, and replay after a retry-hook fault remain
+  open. The settlement owner checks the optional retry decision across 401,
+  ordinary, and permanent errors; explicit, delegated, and absent answers;
+  FIFO peers; a later failure; and public caller rejection for throwing or
+  invalid hooks before a retry record is written. A hook fault halts the
+  executor and releases its active slot. A fresh executor over its still-admitted
+  row needs a separate replay witness. The settlement owner also checks terminal
+  provider rejection with failed deletion, a
   halted executor with queued peers held, and restart without a second provider
   call or optimistic restore. The executor does not automatically retry a failed
   phase write or deletion. A failed terminal marker write followed by a crash
