@@ -455,10 +455,12 @@ export class CollectionImpl<
 
     if (this.config.autoIndex === `eager` && !config.defaultIndexType) {
       throw new CollectionConfigurationError(
-        devBuild() && process.env.NODE_ENV !== `production` ? `autoIndex: 'eager' requires defaultIndexType to be set. ` +
-          `Import an index type and set it:\n` +
-          `  import { BasicIndex } from '@tanstack/db'\n` +
-          `  createCollection({ defaultIndexType: BasicIndex, autoIndex: 'eager', ... })` : codedMessage(206),
+        devBuild() && process.env.NODE_ENV !== `production`
+          ? `autoIndex: 'eager' requires defaultIndexType to be set. ` +
+              `Import an index type and set it:\n` +
+              `  import { BasicIndex } from '@tanstack/db'\n` +
+              `  createCollection({ defaultIndexType: BasicIndex, autoIndex: 'eager', ... })`
+          : codedMessage(206),
       )
     }
 

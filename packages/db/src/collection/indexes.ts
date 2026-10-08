@@ -296,10 +296,12 @@ export class CollectionIndexesManager<
     const IndexType = config.indexType ?? this.defaultIndexType
     if (!IndexType) {
       throw new CollectionConfigurationError(
-        devBuild() && process.env.NODE_ENV !== `production` ? `No index type specified and no defaultIndexType set on collection. ` +
-          `Either pass indexType in config, or set defaultIndexType on the collection:\n` +
-          `  import { BasicIndex } from '@tanstack/db'\n` +
-          `  createCollection({ defaultIndexType: BasicIndex, ... })` : codedMessage(207),
+        devBuild() && process.env.NODE_ENV !== `production`
+          ? `No index type specified and no defaultIndexType set on collection. ` +
+              `Either pass indexType in config, or set defaultIndexType on the collection:\n` +
+              `  import { BasicIndex } from '@tanstack/db'\n` +
+              `  createCollection({ defaultIndexType: BasicIndex, ... })`
+          : codedMessage(207),
       )
     }
 
