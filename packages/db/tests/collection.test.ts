@@ -373,6 +373,41 @@ describe(`Collection`, () => {
     expect(collection.get(1)).toMatchObject({ id: 1, value: 2 })
   })
 
+  it(`releases a transaction whose Collection was cleaned up before it settled`, async () => {
+    // The ownership oracle keeps Collections alive for a whole history, so a
+    // cleanup in the middle of one is covered here.
+    const options = mockSyncCollectionOptionsNoInitialState<{
+      id: number
+      value: number
+    }>({
+      id: `cleanup-before-settlement`,
+      getKey: (item) => item.id,
+      startSync: true,
+    })
+    const collection = createCollection(options)
+    options.utils.begin()
+    options.utils.write({ type: `insert`, value: { id: 1, value: 0 } })
+    options.utils.commit()
+    options.utils.markReady()
+    await collection.stateWhenReady()
+
+    const transaction = createTransaction({
+      autoCommit: false,
+      mutationFn: () => Promise.resolve(),
+    })
+    transaction.mutate(() =>
+      collection.update(1, (draft) => {
+        draft.value = 1
+      }),
+    )
+    await collection.cleanup()
+    expect(() => transaction.rollback()).not.toThrow()
+    await transaction.isPersisted.promise.catch(() => undefined)
+
+    expect(transaction.collections.size).toBe(0)
+    expect(collection._state.transactions.size).toBe(0)
+  })
+
   it(`recomputes every Collection of a rollback when one recompute throws`, async () => {
     const make = (id: string) => {
       const options = mockSyncCollectionOptionsNoInitialState<{

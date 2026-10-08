@@ -966,7 +966,9 @@ export async function runOptimisticHistory(
         // cannot keep the count right.
         const unsettled = operations
           .filter(
-            (_, index) => model.transactions[index]?.state === `persisting`,
+            (_, index) =>
+              model.transactions[index]?.state === `pending` ||
+              model.transactions[index]?.state === `persisting`,
           )
           .map((operation) => operation.tx.id)
           .sort()

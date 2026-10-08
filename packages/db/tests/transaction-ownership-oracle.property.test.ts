@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import * as fc from 'fast-check'
 import { createCollection } from '../src/collection/index.js'
 import { createTransaction } from '../src/transactions.js'
+import { DuplicateTransactionIdError } from '../src/errors.js'
 import { oraclePropertyOptions, oracleRuns } from './oracle-config.js'
 import { mockSyncCollectionOptionsNoInitialState } from './utils.js'
 import type { Transaction } from '../src/transactions.js'
@@ -33,14 +34,29 @@ import type { Transaction } from '../src/transactions.js'
  *   surviving writes, in creation order.
  * - A rollback, or a failed commit, also rolls back every pending (not yet
  *   committed) transaction that wrote one of the same Collection keys.
- * - A settled transaction's `isPersisted` has settled.
+ * - A settled transaction's `isPersisted` has settled, and it holds no
+ *   reference to a Collection.
+ * - Transaction ids are unique among unsettled transactions in a Collection.
+ *   A write that would make a Collection track a second unsettled
+ *   transaction with an id it already tracks throws, and changes nothing.
+ *   Ownership and conflicts follow transaction identity, so a later
+ *   transaction that reuses a settled transaction's id is a separate
+ *   transaction.
+ * - A failed `mutate()` callback undoes its writes, but the Collection that
+ *   took one still tracked the transaction.
+ * - Error shape: a settling call that ran no throwing subscriber reports no
+ *   subscriber error. One subscriber error is rethrown as is; several become
+ *   one flat `AggregateError` of those errors. A commit whose mutation function
+ *   rejected rejects with that error, or, when subscribers also threw, with a
+ *   flat `AggregateError` whose first member and `cause` are that error.
  *
  * The grammar opens up to four manual transactions over Collections A and B
- * (keys 1 and 2). A step's `tx` number chooses among the transactions whose
+ * (keys 1 and 2); an `open` may reuse an earlier transaction's id. A step's `tx` number chooses among the transactions whose
  * state allows that step, so generated steps rarely skip. Steps write a value, write and remove key 9 in one call
  * (a pair that merges away), commit, settle a commit as success or failure,
- * roll back, and roll back from a `truncate` listener during a sync commit.
- * A settling step may install a throwing subscriber on one Collection. It stays
+ * roll back, roll back from a `truncate` listener during a sync commit, and
+ * run a `mutate()` callback that writes and then throws. A settling step may
+ * install a throwing subscriber on one Collection or on both. It stays
  * installed until promises flush, because a commit settles in a later
  * microtask, and it must have run whenever the model predicts that the step
  * changes that Collection's rows.
@@ -50,22 +66,27 @@ import type { Transaction } from '../src/transactions.js'
  * step it then flushes promises and compares, for each
  * Collection, the tracked transaction ids with the model's set, the rows of
  * keys 1, 2 and 9 with the model's overlay, and each transaction's
- * `isPersisted` settlement with the model's state. The tracked ids come from
- * `_state.transactions`, because no public API exposes them; the rows and
- * settlement are public.
+ * `isPersisted` settlement with the model's state. It compares tracked
+ * transactions by identity. Each settling call's thrown error, or its
+ * commit's rejection, is compared with the error-shape law, counting the
+ * subscriber errors the step raised. A settled transaction's `collections`
+ * must be empty. The tracked transactions come from `_state.transactions`,
+ * because no public API exposes them; the rows and settlement are public.
  *
  * Out of scope: queued sync transactions that hold a completed row (owned by
  * the optimistic-history oracle), offline restoration (owned by the
- * offline-transactions witnesses), and two Collection instances that share an
- * id (a focused witness in `collection.test.ts`).
+ * offline-transactions witnesses), two Collection instances that share an
+ * id (a focused witness in `collection.test.ts`), and Collection cleanup in
+ * the middle of a history (a focused witness in `collection.test.ts`).
  */
 
 const PROPERTY = `transaction-ownership.settlement-release`
 
 type CollectionName = `A` | `B`
+type ThrowOn = CollectionName | `both` | undefined
 type Key = 1 | 2
 type Step =
-  | { type: `open` }
+  | { type: `open`; reuse: number | undefined }
   | { type: `edit`; tx: number; on: CollectionName; key: Key; value: number }
   | { type: `cancel`; tx: number; on: CollectionName }
   | { type: `commit`; tx: number }
@@ -73,13 +94,22 @@ type Step =
       type: `settle`
       tx: number
       ok: boolean
-      throwOn: CollectionName | undefined
+      throwOn: ThrowOn
     }
-  | { type: `rollback`; tx: number; throwOn: CollectionName | undefined }
+  | { type: `rollback`; tx: number; throwOn: ThrowOn }
   | { type: `truncateRollback`; tx: number; on: CollectionName }
+  | {
+      type: `mutateThrows`
+      tx: number
+      on: CollectionName
+      key: Key
+      value: number
+    }
 
 type ModelState = `pending` | `persisting` | `completed` | `failed`
 type ModelTx = {
+  /** The index of the transaction whose id this one uses. */
+  id: number
   state: ModelState
   owners: Set<CollectionName>
   writes: Map<`${CollectionName}:${Key}`, number>
@@ -88,8 +118,9 @@ type ModelTx = {
 class OwnershipModel {
   transactions: Array<ModelTx> = []
 
-  open(): void {
+  open(reuse: number | undefined): void {
     this.transactions.push({
+      id: reuse ?? this.transactions.length,
       state: `pending`,
       owners: new Set(),
       writes: new Map(),
@@ -103,6 +134,19 @@ class OwnershipModel {
   tracked(on: CollectionName): Array<number> {
     return this.transactions.flatMap((tx, index) =>
       this.unsettled(tx) && tx.owners.has(on) ? [index] : [],
+    )
+  }
+
+  /** Whether `on` already tracks a different unsettled transaction with `index`'s id. */
+  duplicate(index: number, on: CollectionName): boolean {
+    const tx = this.transactions[index]!
+    return this.transactions.some(
+      (other, otherIndex) =>
+        otherIndex !== index &&
+        other.id === tx.id &&
+        this.unsettled(other) &&
+        other.owners.has(on) &&
+        !tx.owners.has(on),
     )
   }
 
@@ -140,9 +184,19 @@ class OwnershipModel {
 
 const name = fc.constantFrom<CollectionName>(`A`, `B`)
 const txIndex = fc.integer({ min: 0, max: 3 })
-const throwOn = fc.option(name, { nil: undefined, freq: 3 })
+const throwOn: fc.Arbitrary<ThrowOn> = fc.oneof(
+  { weight: 3, arbitrary: fc.constant(undefined) },
+  { weight: 2, arbitrary: name },
+  { weight: 1, arbitrary: fc.constant(`both` as const) },
+)
 const step: fc.Arbitrary<Step> = fc.oneof(
-  { weight: 2, arbitrary: fc.constant({ type: `open` as const }) },
+  {
+    weight: 2,
+    arbitrary: fc.record({
+      type: fc.constant(`open` as const),
+      reuse: fc.option(txIndex, { nil: undefined, freq: 2 }),
+    }),
+  },
   {
     weight: 4,
     arbitrary: fc.record({
@@ -190,6 +244,16 @@ const step: fc.Arbitrary<Step> = fc.oneof(
       on: name,
     }),
   },
+  {
+    weight: 1,
+    arbitrary: fc.record({
+      type: fc.constant(`mutateThrows` as const),
+      tx: txIndex,
+      on: name,
+      key: fc.constantFrom<Key>(1, 2),
+      value: fc.integer({ min: 1, max: 9 }),
+    }),
+  },
 )
 
 const flush = async () => {
@@ -201,6 +265,49 @@ type Driven = {
   tx: Transaction<{ id: number; v: number }>
   outcome: { resolve: () => void; reject: (error: Error) => void }
   settled: boolean
+  /** How `commit()` settled, once it has. */
+  commitResult?: { ok: true } | { ok: false; error: unknown }
+}
+
+/**
+ * The error-shape law. `raised` are the subscriber errors a settling call ran
+ * into; `mutationError` is the mutation function's rejection, if any.
+ */
+function expectErrorShape(
+  label: string,
+  result: { ok: true } | { ok: false; error: unknown },
+  raised: ReadonlyArray<Error>,
+  mutationError?: Error,
+): void {
+  const expected = mutationError ? [mutationError, ...raised] : [...raised]
+  if (expected.length === 0) {
+    expect(result.ok, `${label}: no settlement error`).toBe(true)
+    return
+  }
+  expect(result.ok, `${label}: settlement error reported`).toBe(false)
+  if (result.ok) return
+  if (expected.length === 1) {
+    expect(result.error, `${label}: one error rethrown as is`).toBe(expected[0])
+    return
+  }
+  expect(result.error, `${label}: several errors aggregate`).toBeInstanceOf(
+    AggregateError,
+  )
+  const members = (result.error as AggregateError).errors
+  expect(
+    members.some((member) => member instanceof AggregateError),
+    `${label}: flat aggregate`,
+  ).toBe(false)
+  expect(new Set(members), `${label}: aggregate members`).toEqual(
+    new Set(expected),
+  )
+  if (mutationError) {
+    expect(members[0], `${label}: mutation error first`).toBe(mutationError)
+    expect(
+      (result.error as AggregateError).cause,
+      `${label}: mutation error is the cause`,
+    ).toBe(mutationError)
+  }
 }
 
 async function makeCollection(id: string) {
@@ -237,54 +344,69 @@ async function runHistory(steps: ReadonlyArray<Step>): Promise<void> {
     )
   }
   const rows = (on: CollectionName) => [model.row(on, 1), model.row(on, 2)]
-  // Runs a settling step with a throwing subscriber on `on`. A commit settles
-  // in a later microtask, so the subscriber stays installed until promises
-  // flush. When the model predicts that the step changes `on`'s rows, the
-  // subscriber must have run, so the throw really reached the settlement.
-  const withThrowingSubscriber = async (
+  // Runs a settling step with throwing subscribers on `throwOn`. A commit
+  // settles in a later microtask, so the subscribers stay installed until
+  // promises flush. When the model predicts that the step changes a
+  // Collection's rows, its subscriber must have run, so the throw really
+  // reached the settlement. Returns the synchronous result and every
+  // subscriber error raised.
+  const withThrowingSubscribers = async (
     label: string,
-    on: CollectionName | undefined,
+    throwOn: ThrowOn,
     run: () => void,
     applyModel: () => void,
   ) => {
-    const before = on ? rows(on) : []
-    let calls = 0
-    const subscription = on
-      ? collections[on].collection.subscribeChanges(() => {
-          calls++
-          throw new Error(`subscriber failed`)
-        })
-      : undefined
+    const targets: Array<CollectionName> =
+      throwOn === `both` ? [`A`, `B`] : throwOn ? [throwOn] : []
+    const before = targets.map((on) => JSON.stringify(rows(on)))
+    const raised: Array<Error> = []
+    const calls = new Map<CollectionName, number>()
+    const subscriptions = targets.map((on) =>
+      collections[on].collection.subscribeChanges(() => {
+        calls.set(on, (calls.get(on) ?? 0) + 1)
+        const error = new Error(`subscriber on ${on} failed`)
+        raised.push(error)
+        throw error
+      }),
+    )
+    let result: { ok: true } | { ok: false; error: unknown } = { ok: true }
     try {
       run()
-    } catch {
-      // A throwing subscriber surfaces here for a synchronous settlement. The
-      // law is that settlement still completes, which the checks observe.
+    } catch (error) {
+      result = { ok: false, error }
     }
     applyModel()
     try {
       await flush()
     } finally {
-      subscription?.unsubscribe()
+      for (const subscription of subscriptions) subscription.unsubscribe()
     }
-    if (on && JSON.stringify(rows(on)) !== JSON.stringify(before))
-      expect(calls, `${label}: the throwing subscriber ran`).toBeGreaterThan(0)
+    targets.forEach((on, position) => {
+      if (JSON.stringify(rows(on)) !== before[position])
+        expect(
+          calls.get(on) ?? 0,
+          `${label}: the throwing subscriber on ${on} ran`,
+        ).toBeGreaterThan(0)
+    })
+    return { result, raised }
   }
 
   // A synchronous settlement releases the transaction in the recompute that
-  // publishes it, so this runs before any promise turn as well as after.
+  // publishes it, so this runs before any promise turn as well as after. It
+  // compares transactions by identity, because ids can repeat.
   const checkTracked = (label: string) => {
     for (const on of [`A`, `B`] as const) {
-      const tracked = [
-        ...collections[on].collection._state.transactions.keys(),
-      ].sort()
-      const expected = model
-        .tracked(on)
-        .map((index) => driven[index]!.tx.id)
-        .sort()
-      expect(tracked, `${label}: ${on} tracks the unsettled owners`).toEqual(
-        expected,
+      const tracked = new Set(
+        collections[on].collection._state.transactions.values(),
       )
+      const expected = new Set(
+        model.tracked(on).map((index) => driven[index]!.tx),
+      )
+      expect(
+        tracked.size === expected.size &&
+          [...tracked].every((tx) => expected.has(tx as never)),
+        `${label}: ${on} tracks exactly the unsettled owners`,
+      ).toBe(true)
     }
   }
 
@@ -300,9 +422,13 @@ async function runHistory(steps: ReadonlyArray<Step>): Promise<void> {
       expect(collection.has(9), `${label}: ${on} merged-away row`).toBe(false)
     }
     for (const [index, entry] of driven.entries()) {
-      expect(entry.settled, `${label}: tx ${index} settlement`).toBe(
-        !model.unsettled(model.transactions[index]!),
-      )
+      const settled = !model.unsettled(model.transactions[index]!)
+      expect(entry.settled, `${label}: tx ${index} settlement`).toBe(settled)
+      if (settled)
+        expect(
+          entry.tx.collections.size,
+          `${label}: settled tx ${index} holds no Collection`,
+        ).toBe(0)
     }
   }
 
@@ -311,8 +437,13 @@ async function runHistory(steps: ReadonlyArray<Step>): Promise<void> {
       const label = `step ${position} ${JSON.stringify(current)}`
       if (current.type === `open`) {
         if (driven.length === 4) continue
+        const reuse =
+          current.reuse !== undefined && driven.length > 0
+            ? current.reuse % driven.length
+            : undefined
         let outcome!: Driven[`outcome`]
         const tx = createTransaction<{ id: number; v: number }>({
+          ...(reuse === undefined ? {} : { id: driven[reuse]!.tx.id }),
           autoCommit: false,
           mutationFn: () =>
             new Promise<void>((resolve, reject) => {
@@ -328,11 +459,14 @@ async function runHistory(steps: ReadonlyArray<Step>): Promise<void> {
         }
         settle(entry)
         driven.push(entry)
-        model.open()
+        model.open(
+          reuse === undefined ? undefined : model.transactions[reuse]!.id,
+        )
       } else {
         const states: ReadonlyArray<ModelState> =
           current.type === `edit` ||
           current.type === `cancel` ||
+          current.type === `mutateThrows` ||
           current.type === `commit`
             ? [`pending`]
             : current.type === `settle`
@@ -342,47 +476,86 @@ async function runHistory(steps: ReadonlyArray<Step>): Promise<void> {
         if (index === undefined) continue
         const modelTx = model.transactions[index]!
         const entry = driven[index]!
-        if (current.type === `edit`) {
+        if (
+          current.type === `edit` ||
+          current.type === `cancel` ||
+          current.type === `mutateThrows`
+        ) {
           if (modelTx.state !== `pending`) continue
           // An update that leaves the visible row unchanged creates no
           // mutation, so the Collection does not take the transaction.
-          if (model.row(current.on, current.key) === current.value) continue
-          entry.tx.mutate(() =>
-            collections[current.on].collection.update(current.key, (draft) => {
-              draft.v = current.value
-            }),
+          if (
+            current.type !== `cancel` &&
+            model.row(current.on, current.key) === current.value
           )
+            continue
+          const target = collections[current.on].collection
+          const callbackError = new Error(`callback failed`)
+          let thrown: unknown
+          try {
+            entry.tx.mutate(() => {
+              if (current.type === `cancel`) {
+                target.insert({ id: 9, v: 1 })
+                target.delete(9)
+                return
+              }
+              target.update(current.key, (draft) => {
+                draft.v = current.value
+              })
+              if (current.type === `mutateThrows`) throw callbackError
+            })
+          } catch (error) {
+            thrown = error
+          }
+          if (model.duplicate(index, current.on)) {
+            // A second unsettled transaction with a tracked id changes nothing.
+            expect(thrown, `${label}: duplicate id rejected`).toBeInstanceOf(
+              DuplicateTransactionIdError,
+            )
+            continue
+          }
+          if (current.type === `mutateThrows`) {
+            expect(thrown, `${label}: callback error rethrown`).toBe(
+              callbackError,
+            )
+          } else {
+            expect(thrown, `${label}: mutate succeeds`).toBeUndefined()
+          }
           modelTx.owners.add(current.on)
-          modelTx.writes.set(`${current.on}:${current.key}`, current.value)
-        } else if (current.type === `cancel`) {
-          if (modelTx.state !== `pending`) continue
-          entry.tx.mutate(() => {
-            collections[current.on].collection.insert({ id: 9, v: 1 })
-            collections[current.on].collection.delete(9)
-          })
-          modelTx.owners.add(current.on)
+          if (current.type === `edit`)
+            modelTx.writes.set(`${current.on}:${current.key}`, current.value)
         } else if (current.type === `commit`) {
           if (modelTx.state !== `pending`) continue
-          entry.tx.commit().catch(() => undefined)
+          entry.tx.commit().then(
+            () => (entry.commitResult = { ok: true }),
+            (error: unknown) => (entry.commitResult = { ok: false, error }),
+          )
           modelTx.state = modelTx.writes.size === 0 ? `completed` : `persisting`
         } else if (current.type === `settle`) {
           if (modelTx.state !== `persisting`) continue
-          await withThrowingSubscriber(
+          const mutationError = current.ok ? undefined : new Error(`rejected`)
+          const { raised } = await withThrowingSubscribers(
             label,
             current.throwOn,
             () => {
-              if (current.ok) entry.outcome.resolve()
-              else entry.outcome.reject(new Error(`rejected`))
+              if (mutationError) entry.outcome.reject(mutationError)
+              else entry.outcome.resolve()
             },
             () => {
               if (current.ok) modelTx.state = `completed`
               else model.fail(index)
             },
           )
+          expectErrorShape(
+            `${label} commit`,
+            entry.commitResult ?? { ok: false, error: `commit unsettled` },
+            raised,
+            mutationError,
+          )
         } else if (current.type === `rollback`) {
           if (!model.unsettled(modelTx)) continue
           let sameCall = true
-          await withThrowingSubscriber(
+          const { result, raised } = await withThrowingSubscribers(
             label,
             current.throwOn,
             () => entry.tx.rollback(),
@@ -393,6 +566,7 @@ async function runHistory(steps: ReadonlyArray<Step>): Promise<void> {
               sameCall = false
             },
           )
+          expectErrorShape(`${label} rollback`, result, raised)
         } else {
           if (!model.unsettled(modelTx)) continue
           const target = collections[current.on]
@@ -445,12 +619,12 @@ describe(`settled transactions leave every Collection that tracked them`, () => 
 
   it(`pinned: a subscriber throws during an asynchronous success and failure settlement`, async () => {
     await runHistory([
-      { type: `open` },
+      { type: `open`, reuse: undefined },
       { type: `edit`, tx: 0, on: `A`, key: 1, value: 3 },
       { type: `edit`, tx: 0, on: `B`, key: 1, value: 3 },
       { type: `commit`, tx: 0 },
       { type: `settle`, tx: 0, ok: true, throwOn: `A` },
-      { type: `open` },
+      { type: `open`, reuse: undefined },
       { type: `edit`, tx: 0, on: `A`, key: 2, value: 4 },
       { type: `edit`, tx: 0, on: `B`, key: 2, value: 4 },
       { type: `commit`, tx: 0 },
@@ -460,19 +634,66 @@ describe(`settled transactions leave every Collection that tracked them`, () => 
 
   it(`pinned: a merged-away pair, a conflicting rollback that throws, and a truncate rollback`, async () => {
     await runHistory([
-      { type: `open` },
+      { type: `open`, reuse: undefined },
       { type: `cancel`, tx: 0, on: `A` },
       { type: `commit`, tx: 0 },
-      { type: `open` },
+      { type: `open`, reuse: undefined },
       { type: `edit`, tx: 1, on: `A`, key: 1, value: 3 },
       { type: `edit`, tx: 1, on: `B`, key: 1, value: 3 },
-      { type: `open` },
+      { type: `open`, reuse: undefined },
       // Choices index the eligible transactions: pending 1 and 2 here.
       { type: `edit`, tx: 1, on: `A`, key: 1, value: 4 },
       { type: `rollback`, tx: 0, throwOn: `A` },
-      { type: `open` },
+      { type: `open`, reuse: undefined },
       { type: `edit`, tx: 3, on: `B`, key: 2, value: 5 },
       { type: `truncateRollback`, tx: 3, on: `B` },
+    ])
+  })
+
+  it(`pinned: a rolled-back transaction does not remove a live one that shares its id`, async () => {
+    await runHistory([
+      { type: `open`, reuse: undefined },
+      { type: `edit`, tx: 0, on: `A`, key: 1, value: 5 },
+      { type: `open`, reuse: 0 },
+      // Choices index the eligible transactions: pending 0 and 1 here.
+      { type: `edit`, tx: 1, on: `B`, key: 1, value: 6 },
+      { type: `rollback`, tx: 1, throwOn: undefined },
+      { type: `open`, reuse: undefined },
+      // Pending 0 and 2: the rollback of 2 also rolls back 0, which shares A1.
+      { type: `edit`, tx: 1, on: `A`, key: 1, value: 7 },
+      { type: `rollback`, tx: 1, throwOn: undefined },
+    ])
+  })
+
+  it(`pinned: a second live transaction with a tracked id is rejected`, async () => {
+    await runHistory([
+      { type: `open`, reuse: undefined },
+      { type: `edit`, tx: 0, on: `A`, key: 1, value: 5 },
+      { type: `open`, reuse: 0 },
+      { type: `edit`, tx: 1, on: `A`, key: 2, value: 6 },
+    ])
+  })
+
+  it(`pinned: conflicting rollbacks that throw report one flat aggregate`, async () => {
+    await runHistory([
+      { type: `open`, reuse: undefined },
+      { type: `edit`, tx: 0, on: `A`, key: 1, value: 5 },
+      { type: `open`, reuse: undefined },
+      { type: `edit`, tx: 1, on: `A`, key: 1, value: 6 },
+      { type: `edit`, tx: 1, on: `A`, key: 2, value: 6 },
+      { type: `open`, reuse: undefined },
+      { type: `edit`, tx: 2, on: `A`, key: 1, value: 7 },
+      { type: `edit`, tx: 2, on: `B`, key: 2, value: 7 },
+      { type: `rollback`, tx: 0, throwOn: `both` },
+    ])
+  })
+
+  it(`pinned: a failed commit whose rollback subscriber throws keeps the mutation error`, async () => {
+    await runHistory([
+      { type: `open`, reuse: undefined },
+      { type: `edit`, tx: 0, on: `A`, key: 1, value: 5 },
+      { type: `commit`, tx: 0 },
+      { type: `settle`, tx: 0, ok: false, throwOn: `A` },
     ])
   })
 })
