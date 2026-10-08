@@ -28,7 +28,9 @@ Evidence by revision, on `perf-aggregate-representatives`:
    (`ARCHITECTURE.md`, "Value identity"). D2 consolidates contributions whose
    hashes match, its hash treats `-0` as `0` and equal Dates as one value, and
    a consolidated entry keeps the record of its latest change. Thus a
-   contribution must carry the exact identity of every value it can supply.
+   contribution must carry a key that separates every value it can supply. A
+   primitive's key is its exact value. An object's key holds its row key,
+   because a rebuilt argument is a new instance each time.
 3. **Group-value law (revised by a product decision).** When several members
    are equal under query equality but differ exactly, the projected value comes
    from the member with the smallest exact value:
@@ -98,7 +100,7 @@ in the original order. In the reversed order, the old code projected the
 | ORC-006 | Applicable. The four mutants above fail at the intended checkpoints. |
 | ORC-007 | Inapplicable. These tests are finite, not generated properties. |
 | ORC-008 | Inapplicable. No stateful reference model changes. |
-| ORC-009 | Applicable. "Iterator step" is a test observation, not a production concept. "Exact value" is the value relation that `ValueIdentity.exact` keeps, with Dates, binary arrays and Temporal values compared by type and content. |
+| ORC-009 | Applicable. "Iterator step" is a test observation, not a production concept. "Exact value" is the value relation that `ValueIdentity.exact` keeps: primitives by value, with `-0` and `NaN` kept apart, and objects, including Dates, binary arrays and Temporal values, by instance. The group-value order compares objects by type tag only; the earlier text of this row said that exact identity compares them by content, which was false. |
 | ORC-010 | Applicable, with a gap. Cleanup runs in `finally` blocks, so a cleanup error can replace an assertion error. |
 | ORC-011 | Inapplicable. No shared fault was named. |
 | ORC-013 | Applicable. The work law is a scaling law. Four sizes over two orders of magnitude separate a constant cost from a cost per member. |
@@ -111,7 +113,7 @@ extended oracle confirmed the product defects:
 
 | Finding | Verdict | Evidence on `9b021bbdc` | Disposition |
 | --- | --- | --- | --- |
-| F1 `min`/`max` returns a deleted row's value | Confirmed | Rows `0` and `-0`, delete `0`: `min` and `max` return `0`. On `main`: `-0`. Two equal Dates: the deleted row's instance. | Fixed: contributions carry the exact identity of each sum, avg, min, or max input |
+| F1 `min`/`max` returns a deleted row's value | Confirmed | Rows `0` and `-0`, delete `0`: `min` and `max` return `0`. On `main`: `-0`. Two equal Dates: the deleted row's instance. | Fixed: contributions carry the exact identity of each min or max input. This row first named sum and avg too; the medium follow-up removed them, and the targeted follow-up keys object inputs by row |
 | F2 projected value is a deleted row's instance | Confirmed | Two `Date(0)` instances, delete row 1: the deleted instance is projected | Fixed: the representative key holds the instance identity |
 | F3 oracle compares only a type label | Confirmed | The F2 defect passed the old oracle | Fixed: the oracle requires a positive member's instance |
 | F4 route identity uses parent equality | Evidence gap | An include aggregate cannot project a parent field, so no public observation was found. The mutant that restores the equality identity survives | Uses the parent context instance; recorded as unobserved |
@@ -149,7 +151,8 @@ Review mutants on `e5449edc2`:
 - The work counter observes Map, Set and array iteration and array callbacks.
   A walk through an indexed `for` loop would not count.
 - Contributions consolidate only when their representative keys and min or
-  max inputs are identical. A min or max over distinct values, and an include
+  max inputs are identical. A min or max over objects keeps one contribution
+  per member. A min or max over distinct values, and an include
   correlated on Date, binary, or Temporal key instances, keep one contribution
   per distinct input or instance.
 - The group key serializes a large binary group value's contents once per
@@ -202,3 +205,44 @@ Not changed:
 - db-ivm merges hash-equal values by design. Choosing which instance remains
   needs per-instance state, which the compiler identity supplies, so the fix
   stays in the compiler.
+
+## Targeted review follow-up (2026-10-08)
+
+Reviewed head `28a2f8c79`. Ledger: `review-targeted-ledger.md` in the task
+scratch notes.
+
+- **Rebuilt Date min/max (regression).** The medium follow-up keyed a min or
+  max contribution by the exact identity of the compared value. A rebuilt Date
+  is a new instance at each evaluation, so a retraction did not cancel its
+  insert, and the Index kept the deleted row's instance. RED on `28a2f8c79`:
+  6 cells, for example `expected [ 'Date(2000)' ] to include 'Date(5000)'`.
+  The base before this pull request passes all cells. An object input is now
+  keyed by its row key, as a group value is.
+- **Law.** `min and max equal the remaining members' values` deletes members
+  one at a time. After each delete, the published `min` and `max` must be
+  exactly one of the remaining members' values that ties for the extreme.
+  The matrix covers `max` alone, `min` and `max` of one argument, and of two
+  arguments; signed zero and Dates; stored and rebuilt arguments.
+- **Realm.** `group-by.test.ts` runs in the `node` environment. Under jsdom a
+  Node `Buffer` is not an instance of jsdom's `Uint8Array`, so the binary case
+  could not see the `Buffer` tag.
+
+| Mutant | Outcome |
+| --- | --- |
+| Production of `28a2f8c79` | Assertion failure, 6 cells (rebuilt Dates) |
+| `max` without exact inputs | Assertion failure, 8 cells (signed zero) |
+| No `Buffer` tag | Assertion failure, 2 tests (`expected 'uint8array' to be 'buffer'`) |
+| Object input keyed by instance, not row | Assertion failure, 6 cells |
+
+Not changed, and recorded as proposals:
+
+- An include whose parents are equal under query equality but differ exactly
+  shares one route, so a parent field can come from another parent. This
+  predates this pull request.
+- A single-group aggregate drops every non-aggregate select field, also in an
+  include, while the same select with `groupBy` throws
+  `NonAggregateExpressionNotInGroupByError`. This predates this pull request.
+- db-ivm `min` and `max` ignore multiplicity, and the Index keeps the latest
+  record. The compiler's exact inputs work around both.
+- The route representative is not covered by a deterministic-choice law.
+- The work counter does not count indexed loops.

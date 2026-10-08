@@ -432,11 +432,13 @@ export function processGroupBy(
 
   // D2 consolidates contributions whose hashes match, and the hash treats -0
   // as 0 and equal Dates as one value. A min or max returns one of its
-  // inputs, so contributions carry the exact identity of the value it
-  // compares. A sum, avg, or count only adds its coerced numbers, so merging
-  // equal inputs cannot change its result. The identity is taken from the
-  // aggregate's own input, so a retraction that rebuilds its argument still
-  // cancels the insert.
+  // inputs, so each contribution carries the exact key of the value it
+  // compares, as a group value does. A primitive's key is its exact value, so
+  // equal primitives still consolidate. An object's key holds its row key, so
+  // a retraction cancels its insert even when the argument builds a new
+  // instance each time, and a merged contribution never keeps a deleted
+  // row's instance. A sum, avg, or count only adds its coerced numbers, so
+  // merging equal inputs cannot change its result.
   const exactInputs: Array<(entry: [string, NamespacedRow]) => unknown> = []
   const addAggregate = (alias: string, aggExpr: Aggregate) => {
     aggregates[alias] = getAggregateFunction(aggExpr)
@@ -476,7 +478,9 @@ export function processGroupBy(
   if (exactInputs.length > 0) {
     aggregates[fields.exactInputs] = {
       preMap: (entry: [string, NamespacedRow]) =>
-        exactInputs.map((input) => valueIdentity.exact(input(entry))),
+        exactInputs.map((input) =>
+          exactValueKey(input(entry), entry[0], valueIdentity),
+        ),
       reduce: () => undefined,
     }
   }
