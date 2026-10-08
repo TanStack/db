@@ -207,7 +207,7 @@ const executor = startOfflineExecutor({
 })
 ```
 
-Throwing `NonRetriableError` stops retry and removes the transaction from the outbox. Use it for known permanent failures, such as validation errors or conflicts. A recoverable 401 can instead reach `shouldRetry`.
+Throwing `NonRetriableError` stops retry and removes the transaction from the outbox. Use it for failures known to be permanent under the server contract, such as validation errors or a 409 that means an unrecoverable duplicate. A recoverable 401 can instead reach `shouldRetry`.
 
 ### Retry decisions
 
@@ -386,6 +386,9 @@ mutationFns: {
     const res = await fetch('/api/todos', { ... })
     if (res.status === 422) {
       throw new NonRetriableError('Invalid todo')
+    }
+    if (res.status === 409) {
+      throw new NonRetriableError('Duplicate detected')
     }
     if (!res.ok) throw new HttpError(res.status)
   },
