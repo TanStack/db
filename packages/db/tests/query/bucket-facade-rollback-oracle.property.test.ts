@@ -251,6 +251,11 @@ function legalize(
  * failure leaves the facade's sync transaction open, as a validation error
  * from a real write would.
  */
+/** The child facade a parent row's `kids` field points to. */
+function kidsOf(row: unknown): unknown {
+  return (row as { kids?: unknown } | undefined)?.kids
+}
+
 function injectFailure(sync: FacadeSync, method: `commit` | `write`): void {
   if (method === `commit`) {
     const commit = sync.commit
@@ -806,7 +811,7 @@ describe(`bucket facade rollback`, () => {
         adapter.flush().publish()
         const c1 = facade(`children`, `c1`)!
         const p1 = facade(`parents`, `p1`)!
-        expect((p1.get(1) as { kids: unknown }).kids).toBe(c1)
+        expect(kidsOf(p1.get(1))).toBe(c1)
 
         let events = 0
         c1.subscribeChanges(() => events++)
@@ -835,7 +840,7 @@ describe(`bucket facade rollback`, () => {
 
         expect(() => adapter.flush()).toThrow(`injected facade write failure`)
         expect(c1.toArray.map(stripVirtualProps)).toEqual([{ id: 10, v: 1 }])
-        expect((p1.get(1) as { kids: unknown }).kids).toBe(c1)
+        expect(kidsOf(p1.get(1))).toBe(c1)
         expect([...entries.get(`children`)!.keys()]).toEqual([`c1`])
         expect(events).toBe(0)
 
@@ -844,7 +849,7 @@ describe(`bucket facade rollback`, () => {
         const c2 = facade(`children`, `c2`)!
         expect(c1.toArray.map(stripVirtualProps)).toEqual([{ id: 10, v: 2 }])
         expect(c2.toArray.map(stripVirtualProps)).toEqual([{ id: 11, v: 1 }])
-        expect((p1.get(1) as { kids: unknown }).kids).toBe(c2)
+        expect(kidsOf(p1.get(1))).toBe(c2)
       },
       async () => {
         adapter.cleanup()
