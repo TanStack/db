@@ -384,7 +384,7 @@ repair + 1 fixed-now**. CR4's historical observation and useful adversarial
 history remain recorded; no product law or test coverage was weakened to
 accept the proposed model change.
 
-### Merge-readiness self-review after green CI
+### Merge-readiness self-review after CI passed on `7dcebc75f`
 
 The public origin prose said that a later same-key transaction after a
 truncate is remote without specifying the drain boundary. The existing
@@ -400,3 +400,19 @@ same-key pair with a reentrant truncate, and two active keys with that drain.
 Both passed the core public-history comparison and test type check. The probes
 were removed. They support those two sampled schedules but do not close the
 coverage map's longer overlap or provider-path limits.
+
+### CodeRabbit review of `c7d99a43f`
+
+[Review 5460769310](https://github.com/TanStack/db/pull/2078#pullrequestreview-5460769310)
+contained one inline documentation finding. The review body also suggested
+running the local CodeRabbit CLI after a fix. Both items are accounted for
+below.
+
+| ID | Claim and proposed action | Evidence and technical verdict | Disposition and durable value |
+| --- | --- | --- | --- |
+| CR6 | The “after green CI” heading implied the current head had passed; change it to say CI was pending. | The preceding head `7dcebc75f` had passed its 26 checks, but checks for reviewed head `c7d99a43f` were still pending at review time. The unqualified heading was ambiguous. | **fixed-now.** The heading now names the head whose CI had passed, preserving the historical sequence without implying current-head success. |
+| CR7 | Consider running `coderabbit review --agent` after the fix. | This was an optional workflow prompt, not a code or contract finding. The hosted review already examined `c7d99a43f`; the local CLI would add no required evidence for this wording change. | **refuted** as an additional PR requirement. Keep the hosted review and CI status as the review evidence. |
+
+CodeRabbit accounting for this review: **2 raw items = 1 fixed-now + 1
+refuted**. This documentation finding affects no product law or oracle path;
+its evidence is the recorded commit order and CI status at review time.
