@@ -12,7 +12,7 @@ import {
   SyncTransactionAlreadyCommittedWriteError,
 } from '../errors'
 import { createDeferred } from '../deferred'
-import { devBuild } from '../error-message'
+import { codedMessage, devBuild } from '../error-message'
 import { withAcceptedReceipt } from '../sync-receipt'
 import { isPromiseLike } from '../utils/type-guards'
 import { LIVE_QUERY_INTERNAL } from '../query/live/internal.js'
@@ -373,8 +373,8 @@ export class CollectionSyncManager<
       // Validate: on-demand mode requires a loadSubset function
       if (this.syncMode === `on-demand` && !this.syncLoadSubsetFn) {
         throw new CollectionConfigurationError(
-          `Collection "${this.id}" is configured with syncMode "on-demand" but the sync function did not return a loadSubset handler. ` +
-            `Either provide a loadSubset handler or use syncMode "eager".`,
+          devBuild() && process.env.NODE_ENV !== `production` ? `Collection "${this.id}" is configured with syncMode "on-demand" but the sync function did not return a loadSubset handler. ` +
+            `Either provide a loadSubset handler or use syncMode "eager".` : codedMessage(210, { id: this.id }),
         )
       }
 

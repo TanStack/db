@@ -126,7 +126,7 @@ export class CollectionLifecycleManager<
       // Instead, use markReady to transition to ready triggering the necessary events
       // and side effects.
       throw new CollectionStateError(
-        `You can't directly call "setStatus('ready'). You must use markReady instead.`,
+        devBuild() && process.env.NODE_ENV !== `production` ? `You can't directly call "setStatus('ready'). You must use markReady instead.` : codedMessage(208),
       )
     }
     this.validateStatusTransition(this.status, newStatus)
@@ -248,7 +248,7 @@ export class CollectionLifecycleManager<
   public assertCanStartSync(): void {
     if (this.cleaningUp) {
       throw new CollectionStateError(
-        `Cannot start collection "${this.id}" during cleanup. Restart after cleanup() completes.`,
+        devBuild() && process.env.NODE_ENV !== `production` ? `Cannot start collection "${this.id}" during cleanup. Restart after cleanup() completes.` : codedMessage(209, { id: this.id }),
       )
     }
     // A synchronously finished retirement retains its public promise until

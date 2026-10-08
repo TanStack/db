@@ -625,7 +625,12 @@ export class CollectionConfigBuilder<
               syncState.graph.run()
             } catch (error) {
               if (isCurrentSyncRun()) {
-                this.transitionToError(`Live query graph failed`, error)
+                this.transitionToError(
+                  devBuild() && process.env.NODE_ENV !== `production`
+                    ? `Live query graph failed`
+                    : codedMessage(212),
+                  error,
+                )
               }
               throw error
             }

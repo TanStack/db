@@ -7,8 +7,10 @@
  *   codedMessage(code, values)` expression, wherever the message goes, except
  *   an error class's `super(...)` message.
  * - A **plain site** is an `Error`, `TypeError`, or `RangeError` message, or an
- *   `AggregateError` message, with or without `new`, or a `super(...)` message
- *   in an error class outside `errors.ts`, that contains a string or template literal with
+ *   `AggregateError` message, with or without `new`, a message passed to an
+ *   error class whose caller writes the message, such as
+ *   `CollectionStateError`, or a `super(...)` message in an error class
+ *   outside `errors.ts`, that contains a string or template literal with
  *   a letter and is not coded. A message built only from a caller's value, such as
  *   `new Error(String(error))`, is the caller's text and is not a site.
  *
@@ -50,8 +52,11 @@ export type CodedSite = {
      */
     showable: boolean
   }>
-  /** Value expressions passed to `codedMessage`, in canonical form. */
-  values: Array<{ expression: string; showable: boolean }>
+  /**
+   * Value expressions passed to `codedMessage`, in canonical form, with their
+   * sub-expressions.
+   */
+  values: Array<{ expression: string; parts: Array<string>; showable: boolean }>
 }
 
 /** A coded `super(...)` message in an error class outside `errors.ts`. */
@@ -164,6 +169,7 @@ function isShowable(type: ts.Type, checker: ts.TypeChecker, error: ts.Type) {
   const visit = (current: ts.Type): boolean => {
     // Read before the type guards below narrow `current`.
     const flags = current.flags
+    const symbol = current.getSymbol()
     if (current.isUnion()) return current.types.every(visit)
     if (current.isTypeParameter()) {
       const constraint = checker.getBaseConstraintOfType(current)
@@ -187,7 +193,13 @@ function isShowable(type: ts.Type, checker: ts.TypeChecker, error: ts.Type) {
       return true
     if (checker.isArrayType(current) || checker.isTupleType(current))
       return checker.getTypeArguments(current as ts.TypeReference).every(visit)
-    return checker.isTypeAssignableTo(current, error)
+    // `codedMessage` shows an `Error` by `instanceof`, so a type must be the
+    // global Error or a class, not an object shaped like one.
+    return (
+      checker.isTypeAssignableTo(current, error) &&
+      (current === error ||
+        (symbol?.getDeclarations() ?? []).some(ts.isClassLike))
+    )
   }
   return visit(type)
 }
@@ -220,25 +232,43 @@ export function messageLiterals(node: ts.Expression): Array<string> {
 }
 
 /** Expressions a message interpolates, with their sub-expressions. */
+/** An expression and every sub-expression, excluding property names. */
+function parts(expression: ts.Node): Array<ts.Node> {
+  const all = [expression]
+  ts.forEachChild(expression, (child) => {
+    // A property name is not a value: `materialized.id` does not pass `id`.
+    if (ts.isPropertyAccessExpression(expression) && child === expression.name)
+      return
+    if (ts.isExpression(child)) all.push(...parts(child))
+  })
+  return all
+}
+
+/**
+ * The expressions a message interpolates: template spans, the non-literal
+ * operands of `+`, and a message-level conditional's condition.
+ */
+function holes(node: ts.Expression): Array<ts.Expression> {
+  if (ts.isParenthesizedExpression(node)) return holes(node.expression)
+  if (ts.isStringLiteral(node) || ts.isNoSubstitutionTemplateLiteral(node))
+    return []
+  if (ts.isTemplateExpression(node))
+    return node.templateSpans.map((span) => span.expression)
+  if (
+    ts.isBinaryExpression(node) &&
+    node.operatorToken.kind === ts.SyntaxKind.PlusToken
+  )
+    return [...holes(node.left), ...holes(node.right)]
+  if (ts.isConditionalExpression(node))
+    return [node.condition, ...holes(node.whenTrue), ...holes(node.whenFalse)]
+  return [node]
+}
+
 function interpolations(
   node: ts.Expression,
   sourceFile: ts.SourceFile,
   showable: (node: ts.Node) => boolean,
 ) {
-  const found: CodedSite[`interpolations`] = []
-  const parts = (expression: ts.Node): Array<ts.Node> => {
-    const all = [expression]
-    ts.forEachChild(expression, (child) => {
-      // A property name is not a value: `materialized.id` does not pass `id`.
-      if (
-        ts.isPropertyAccessExpression(expression) &&
-        child === expression.name
-      )
-        return
-      if (ts.isExpression(child)) all.push(...parts(child))
-    })
-    return all
-  }
   const references = (expression: ts.Node): Array<ts.Node> => {
     const refs: Array<ts.Node> = []
     const walk = (current: ts.Node) => {
@@ -260,18 +290,11 @@ function interpolations(
     walk(expression)
     return refs
   }
-  const visit = (child: ts.Node) => {
-    if (ts.isTemplateSpan(child)) {
-      found.push({
-        expression: compact(child.expression, sourceFile),
-        parts: parts(child.expression).map((part) => compact(part, sourceFile)),
-        showable: references(child.expression).some(showable),
-      })
-    }
-    ts.forEachChild(child, visit)
-  }
-  visit(node)
-  return found
+  return holes(node).map((hole) => ({
+    expression: compact(hole, sourceFile),
+    parts: parts(hole).map((part) => compact(part, sourceFile)),
+    showable: references(hole).some(showable),
+  }))
 }
 
 function codedValues(
@@ -288,13 +311,18 @@ function codedValues(
         : property
     return {
       expression: compact(value, sourceFile),
+      parts: parts(value).map((part) => compact(part, sourceFile)),
       showable: showable(value),
     }
   })
 }
 
 /** Every coded and plain error site under `sourceRoot`. */
-export function findErrorSites(sourceRoot: string): {
+export function findErrorSites(
+  sourceRoot: string,
+  /** Error classes whose message the caller writes; their text is a site. */
+  callerMessageClasses: Iterable<string> = [],
+): {
   coded: Array<CodedSite>
   plain: Array<PlainSite>
   classGuards: Array<ClassGuard>
@@ -302,6 +330,7 @@ export function findErrorSites(sourceRoot: string): {
   const coded: Array<CodedSite> = []
   const plain: Array<PlainSite> = []
   const classGuards: Array<ClassGuard> = []
+  const callerMessage = new Set(callerMessageClasses)
   const configPath = join(dirname(sourceRoot), `tsconfig.json`)
   const config = ts.parseJsonConfigFileContent(
     ts.readConfigFile(configPath, (path) => readFileSync(path, `utf8`)).config,
@@ -355,10 +384,11 @@ export function findErrorSites(sourceRoot: string): {
       } else if (
         (ts.isNewExpression(node) || ts.isCallExpression(node)) &&
         ts.isIdentifier(node.expression) &&
-        messagePosition.has(node.expression.text)
+        (messagePosition.has(node.expression.text) ||
+          callerMessage.has(node.expression.text))
       ) {
         const message =
-          node.arguments?.[messagePosition.get(node.expression.text)!]
+          node.arguments?.[messagePosition.get(node.expression.text) ?? 0]
         if (message && !isCoded(message) && hasLibraryText(message))
           plain.push({
             file,

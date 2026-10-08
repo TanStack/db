@@ -1,6 +1,6 @@
 // Consumer-build contract for production error codes: a production build of
 // the public API carries no full error message text, and a development build
-// keeps it. Authority: packages/db/tests/production-error-messages.test.ts,
+// keeps it. Authority: packages/db/tests/production-error-messages-oracle.test.ts,
 // which owns the message format. This check owns erasure: it bundles the
 // built packages/db/dist the way a consumer's bundler would, with
 // `process.env.NODE_ENV` defined, and searches the output for one distinctive

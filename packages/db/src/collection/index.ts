@@ -5,7 +5,7 @@ import {
   CollectionRequiresConfigError,
   CollectionRequiresSyncConfigError,
 } from '../errors'
-import { devBuild } from '../error-message'
+import { codedMessage, devBuild } from '../error-message'
 import { validateCollectionConfig } from './validate-config'
 import { currentStateAsChanges } from './change-events'
 
@@ -455,10 +455,10 @@ export class CollectionImpl<
 
     if (this.config.autoIndex === `eager` && !config.defaultIndexType) {
       throw new CollectionConfigurationError(
-        `autoIndex: 'eager' requires defaultIndexType to be set. ` +
+        devBuild() && process.env.NODE_ENV !== `production` ? `autoIndex: 'eager' requires defaultIndexType to be set. ` +
           `Import an index type and set it:\n` +
           `  import { BasicIndex } from '@tanstack/db'\n` +
-          `  createCollection({ defaultIndexType: BasicIndex, autoIndex: 'eager', ... })`,
+          `  createCollection({ defaultIndexType: BasicIndex, autoIndex: 'eager', ... })` : codedMessage(206),
       )
     }
 

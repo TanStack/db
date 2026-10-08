@@ -36,14 +36,21 @@ export function codedMessage(
               : value === null ||
                   typeof value !== `object` ||
                   Array.isArray(value)
-                ? // A plain object inside an array shows only as a placeholder.
+                ? // Inside an array, a plain object shows only as a placeholder,
+                  // and values JSON cannot encode show as their strings.
                   JSON.stringify(value, (key, item) =>
-                    key &&
-                    item !== null &&
-                    typeof item === `object` &&
-                    !Array.isArray(item)
-                      ? `[object]`
-                      : item,
+                    !key
+                      ? item
+                      : item === undefined ||
+                          typeof item === `bigint` ||
+                          typeof item === `symbol` ||
+                          (typeof item === `number` && !Number.isFinite(item))
+                        ? String(item)
+                        : item !== null &&
+                            typeof item === `object` &&
+                            !Array.isArray(item)
+                          ? `[object]`
+                          : item,
                   )
                 : undefined
       return text === undefined ? [] : [`${name}=${text}`]

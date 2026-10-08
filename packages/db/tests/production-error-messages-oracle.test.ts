@@ -43,7 +43,7 @@
  * public package entry exports, wherever it is defined, constructed directly
  * under `vi.stubEnv('NODE_ENV', ...)`. Errors that production code builds
  * elsewhere reach users through the same constructors. For error sites, the
- * observation is the source itself, read by `error-sites.ts`: a site cannot be
+ * observation is the source itself, read by `error-sites-oracle.ts`: a site cannot be
  * constructed alone, and the shared `codedMessage` is checked through the
  * classes.
  *
@@ -58,7 +58,7 @@ import { fileURLToPath } from 'node:url'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import * as Errors from '../src/index'
 import { errorSampleArguments } from './error-sample-arguments'
-import { findErrorSites } from './error-sites'
+import { findErrorSites } from './error-sites-oracle'
 
 const testsDirectory = dirname(fileURLToPath(import.meta.url))
 const devMessages: Record<string, Array<string>> = JSON.parse(
@@ -111,6 +111,8 @@ const hostileInputs: Array<unknown> = [
   `a\nb, c=d)`,
   `a\u2028b\u2029c`,
   [{ secret: `row` }],
+  [1n],
+  [undefined],
 ]
 
 const exportedErrorClasses = Object.entries(Errors).filter(
@@ -260,7 +262,10 @@ describe(`production error messages`, () => {
   })
 
   describe(`error sites`, () => {
-    const sites = findErrorSites(resolve(testsDirectory, `../src`))
+    const sites = findErrorSites(
+      resolve(testsDirectory, `../src`),
+      callerMessageClasses,
+    )
     const frozen: Record<
       string,
       { file: string; template: string; literals: Array<string> }
@@ -298,8 +303,13 @@ describe(`production error messages`, () => {
           ({ showable }) => showable,
         ))
           expect(
-            site.values.some(({ expression }) =>
-              interpolation.parts.includes(expression),
+            // A value covers an interpolation that contains it, such as
+            // `key` in `String(key)`, or one it contains, such as
+            // `syncFailure` in `syncFailure !== undefined`.
+            site.values.some(
+              ({ expression, parts }) =>
+                interpolation.parts.includes(expression) ||
+                parts.includes(interpolation.expression),
             ),
             `${site.file} error ${site.code} drops \${${interpolation.expression}}`,
           ).toBe(true)
@@ -353,6 +363,7 @@ describe(`production error messages`, () => {
             [undefined, `=undefined`],
             [NaN, `=NaN`],
             [-Infinity, `=-Infinity`],
+            [[7n, undefined, NaN], `=["7","undefined","NaN"]`],
           ] as const) {
             const replaced = args.map((original, at) =>
               at === position ? value : original,

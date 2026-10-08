@@ -1362,7 +1362,7 @@ function validateQueryStructure(
   for (const [index, alias] of levelAliases.entries()) {
     if (levelAliases.indexOf(alias) !== index) {
       throw new QueryCompilationError(
-        `Query uses alias "${alias}" more than once. Give each source in one query a distinct alias.`,
+        devBuild() && process.env.NODE_ENV !== `production` ? `Query uses alias "${alias}" more than once. Give each source in one query a distinct alias.` : codedMessage(211, { alias }),
       )
     }
   }

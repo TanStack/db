@@ -2093,3 +2093,77 @@ Development builds show this message, with `${...}` replaced by values:
 ```text
 Failed to get item with key "${String(key)}" from object store "${objectStore.name}": ${cause}
 ```
+
+<a id="error-206"></a>
+
+## Error 206: `collection/index.ts`
+
+Development builds show this message, with `${...}` replaced by values:
+
+```text
+autoIndex: 'eager' requires defaultIndexType to be set. Import an index type and set it:
+  import { BasicIndex } from '@tanstack/db'
+  createCollection({ defaultIndexType: BasicIndex, autoIndex: 'eager', ... })
+```
+
+<a id="error-207"></a>
+
+## Error 207: `collection/indexes.ts`
+
+Development builds show this message, with `${...}` replaced by values:
+
+```text
+No index type specified and no defaultIndexType set on collection. Either pass indexType in config, or set defaultIndexType on the collection:
+  import { BasicIndex } from '@tanstack/db'
+  createCollection({ defaultIndexType: BasicIndex, ... })
+```
+
+<a id="error-208"></a>
+
+## Error 208: `collection/lifecycle.ts`
+
+Development builds show this message, with `${...}` replaced by values:
+
+```text
+You can't directly call "setStatus('ready'). You must use markReady instead.
+```
+
+<a id="error-209"></a>
+
+## Error 209: `collection/lifecycle.ts`
+
+Development builds show this message, with `${...}` replaced by values:
+
+```text
+Cannot start collection "${this.id}" during cleanup. Restart after cleanup() completes.
+```
+
+<a id="error-210"></a>
+
+## Error 210: `collection/sync.ts`
+
+Development builds show this message, with `${...}` replaced by values:
+
+```text
+Collection "${this.id}" is configured with syncMode "on-demand" but the sync function did not return a loadSubset handler. Either provide a loadSubset handler or use syncMode "eager".
+```
+
+<a id="error-211"></a>
+
+## Error 211: `query/compiler/index.ts`
+
+Development builds show this message, with `${...}` replaced by values:
+
+```text
+Query uses alias "${alias}" more than once. Give each source in one query a distinct alias.
+```
+
+<a id="error-212"></a>
+
+## Error 212: `query/live/collection-config-builder.ts`
+
+Development builds show this message, with `${...}` replaced by values:
+
+```text
+Live query graph failed
+```

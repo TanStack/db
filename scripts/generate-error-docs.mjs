@@ -4,7 +4,7 @@
 // coded error site, a plain Error thrown elsewhere, gets an anchor, its source
 // file, and its message template.
 // With `--check`, it fails instead of writing when the page is out of date.
-// packages/db/tests/production-error-messages.test.ts checks the headings.
+// packages/db/tests/production-error-messages-oracle.test.ts checks the headings.
 import { readFile, writeFile } from 'node:fs/promises'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
