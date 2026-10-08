@@ -21,13 +21,6 @@ jobs:
         group: [browser, desktop, cloud-mobile]
     runs-on: ubuntu-latest
     timeout-minutes: 35
-    env:
-      # Since 2026-10-01 Docker Hub rejects anonymous pulls of
-      # electricsql/electric (401 "authentication required"). The Docker
-      # services and the suites that need Electric are skipped until the
-      # image can be pulled again. Set this back to 'true' then.
-      ELECTRIC_E2E: 'false'
-
     steps:
       - name: Checkout code
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
@@ -49,7 +42,7 @@ jobs:
         run: pnpm install --frozen-lockfile
 
       - name: Start Docker services
-        if: matrix.group == 'browser' && env.ELECTRIC_E2E == 'true'
+        if: matrix.group == 'browser'
         run: |
           cd packages/db-collection-e2e/docker
           docker compose up -d
@@ -83,7 +76,7 @@ jobs:
           build
 
       - name: Run Electric E2E tests
-        if: matrix.group == 'browser' && env.ELECTRIC_E2E == 'true'
+        if: matrix.group == 'browser'
         run: |
           cd packages/electric-db-collection
           pnpm test:e2e
@@ -138,7 +131,7 @@ jobs:
           pnpm test:opfs-fairness
 
       - name: Run Browser SQLite OPFS with live Electric E2E tests
-        if: matrix.group == 'browser' && env.ELECTRIC_E2E == 'true'
+        if: matrix.group == 'browser'
         run: |
           cd packages/browser-db-sqlite-persistence
           pnpm test:opfs-electric
@@ -215,7 +208,7 @@ jobs:
           TANSTACK_DB_REQUIRE_MOBILE_RUNTIME_LANE: ${{ vars.TANSTACK_DB_REQUIRE_MOBILE_RUNTIME_LANE }}
 
       - name: Stop Docker services
-        if: always() && matrix.group == 'browser' && env.ELECTRIC_E2E == 'true'
+        if: always() && matrix.group == 'browser'
         run: |
           cd packages/db-collection-e2e/docker
           docker compose down -v
