@@ -70,7 +70,7 @@ import type {
  * Direct executor checks pin the storage error, FIFO peer hold, and refusal of
  * further attempts. An unmarked row after a failed marker write can still replay
  * after a crash.
- * The proposed `shouldRetry` option changes only the decision on a mutationFn
+ * The `shouldRetry` option changes only the decision on a mutationFn
  * failure. Its original Error and current retry count reach the hook once.
  * `true` retries, `false` terminates, and `undefined` delegates to the existing
  * default decision. An absent hook also uses that default. `NonRetriableError`

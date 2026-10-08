@@ -2,6 +2,6 @@
 '@tanstack/offline-transactions': minor
 ---
 
-Add an optional `shouldRetry` callback for mutation errors. Return `undefined`
-to use the default decision. `NonRetriableError` remains terminal, and retry
-timing still uses the default backoff and configured jitter.
+Add `OfflineConfig.shouldRetry` so apps can keep recoverable mutation errors,
+such as a 401, in the outbox for retry. Return `undefined` to use the default
+decision. `NonRetriableError` remains terminal, and retry timing stays the same.
