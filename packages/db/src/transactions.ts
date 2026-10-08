@@ -11,6 +11,7 @@ import {
 } from './errors'
 import { transactionScopedScheduler } from './scheduler.js'
 import type { Deferred } from './deferred'
+import type { Collection } from './collection/index.js'
 import type {
   MutationFn,
   PendingMutation,
@@ -365,7 +366,8 @@ class Transaction<T extends object = Record<string, unknown>> {
    * Every Collection that has tracked this transaction. Settlement recomputes
    * each of them, including one whose mutations merged away.
    */
-  public readonly collections = new Set<PendingMutation<T>[`collection`]>()
+  public readonly collections: Set<Collection<any, any, any, any, any>> =
+    new Set()
   private captureMutations?: () => void
   /**
    * Deferred that settles when this transaction settles.
