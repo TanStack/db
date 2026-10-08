@@ -18,13 +18,16 @@
  * that mutation's persistence or a later manual acceptance from the earlier
  * handler would form a cycle under the order law; the guide excludes both.
  * With no earlier write or handler, a direct mutation reaches synchronous
- * Storage before its method returns. A failed later handler releases its own
+ * Storage before its method returns, including after a held queue drains. A failed later handler releases its own
  * optimistic state promptly, even while an earlier accepted handler is held.
  * An automatic write enters this order when its mutation is submitted; a
  * manual write enters when `acceptMutations` is called. The mixed grammar
  * varies same/disjoint keys and the earlier handler's decision. Its manual
  * receipt and durable effect wait behind that handler; otherwise the older
  * automatic value could replace a later accepted value.
+ * Manual acceptance always returns a Promise, including when a synchronous
+ * Storage write fails. The caller can attach a rejection handler to that
+ * Promise before either an immediate or queued write reports failure.
  */
 import { describe, expect, it } from 'vitest'
 import { createCollection } from '../src/collection/index'
@@ -223,6 +226,15 @@ it('holds a handler-free write behind an earlier pending handler', async () => {
         { id: 'b', value: 0 },
         { id: 'new', value: 3 },
       ])
+      const afterDrain = collection.update('b', (draft) => {
+        draft.value = 4
+      })
+      expect(storedRows(storage.getItem('rows'))).toEqual([
+        { id: 'a', value: 2 },
+        { id: 'b', value: 4 },
+        { id: 'new', value: 3 },
+      ])
+      await afterDrain.isPersisted.promise
     },
     () => [() => release.resolve(), () => collection.cleanup()],
   )
@@ -319,6 +331,135 @@ for (const sameKey of [true, false]) {
     })
   }
 }
+
+// The Promise-returning manual API has one error channel. The finite grammar
+// varies whether an earlier automatic write reserves a slot. A storage fault
+// on the manual row must reject the returned Promise with the same error at
+// the direct-call or predecessor-release checkpoint, without publishing it.
+for (const queued of [false, true]) {
+  it(`returns a rejected manual acceptance Promise after a ${queued ? 'queued' : 'direct'} storage fault`, async () => {
+    const storage = makeStorage()
+    const savedSetItem = storage.setItem
+    const storageError = new Error('manual storage fault')
+    storage.setItem = (key, value) => {
+      if (value.includes('s:manual')) throw storageError
+      savedSetItem(key, value)
+    }
+    const entered = createDeferred<void>()
+    const release = createDeferred<void>()
+    const collection = createCollection(
+      localStorageCollectionOptions<Row>({
+        storageKey: 'rows',
+        storage,
+        storageEventApi: { addEventListener() {}, removeEventListener() {} },
+        getKey: (row) => row.id,
+        onInsert: async ({ transaction }) => {
+          if (transaction.mutations[0].modified.id === 'first') {
+            entered.resolve()
+            await release.promise
+          }
+        },
+      }),
+    )
+    let manual:
+      ReturnType<typeof createTransaction<Record<string, unknown>>> | undefined
+    await withHistoryCleanup(
+      async () => {
+        await collection.preload()
+        const first = queued
+          ? collection.insert({ id: 'first', value: 1 })
+          : undefined
+        if (queued) await entered.promise
+        manual = createTransaction<Record<string, unknown>>({
+          autoCommit: false,
+          mutationFn: async () => {},
+        })
+        manual.mutate(() => collection.insert({ id: 'manual', value: 2 }))
+        let receipt: Promise<void> | undefined
+        expect(() => {
+          receipt = collection.utils.acceptMutations(manual!)
+        }).not.toThrow()
+        expect(receipt).toBeInstanceOf(Promise)
+        if (queued) {
+          expect(storage.getItem('rows')).toBeNull()
+          release.resolve()
+          await first!.isPersisted.promise
+        }
+        await expect(receipt).rejects.toBe(storageError)
+        if (queued)
+          expect(storedRows(storage.getItem('rows'))).toEqual([
+            { id: 'first', value: 1 },
+          ])
+        else expect(storage.getItem('rows')).toBeNull()
+      },
+      () => [
+        () => release.resolve(),
+        () => {
+          if (manual) {
+            void manual.isPersisted.promise.catch(() => undefined)
+            manual.rollback()
+          }
+        },
+        () => collection.cleanup(),
+      ],
+    )
+  })
+}
+
+// Validation runs before a write reserves its slot. It still belongs to the
+// Promise-returning manual API: the caller observes rejection through that
+// Promise, and no durable row is published.
+it('returns a rejected manual acceptance Promise for invalid serialized data', async () => {
+  const storage = makeStorage()
+  const collection = createCollection(
+    localStorageCollectionOptions<Row>({
+      storageKey: 'rows',
+      storage,
+      storageEventApi: { addEventListener() {}, removeEventListener() {} },
+      getKey: (row) => row.id,
+      parser: {
+        parse: JSON.parse,
+        stringify: (value) => {
+          if (
+            typeof value === 'object' &&
+            value !== null &&
+            'id' in value &&
+            value.id === 'bad'
+          )
+            throw new Error('unserializable row')
+          return JSON.stringify(value)
+        },
+      },
+    }),
+  )
+  let manual:
+    ReturnType<typeof createTransaction<Record<string, unknown>>> | undefined
+  await withHistoryCleanup(
+    async () => {
+      await collection.preload()
+      manual = createTransaction<Record<string, unknown>>({
+        autoCommit: false,
+        mutationFn: async () => {},
+      })
+      manual.mutate(() => collection.insert({ id: 'bad', value: 1 }))
+      let receipt: Promise<void> | undefined
+      expect(() => {
+        receipt = collection.utils.acceptMutations(manual!)
+      }).not.toThrow()
+      await expect(receipt).rejects.toThrow('unserializable row')
+      expect(storage.getItem('rows')).toBeNull()
+    },
+    () => [
+      () => {
+        if (manual) {
+          void manual.isPersisted.promise.catch(() => undefined)
+          manual.rollback()
+        }
+      },
+      () => collection.cleanup(),
+    ],
+  )
+})
 
 // Handler rejection contributes no durable effect and releases its optimistic
 // row at its own decision checkpoint for same and disjoint keys. The earlier

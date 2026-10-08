@@ -971,7 +971,7 @@ const tx = createTransaction({
     await api.saveDraft(draftData)
 
     // After API succeeds, accept and persist local collection mutations
-    formDraft.utils.acceptMutations(transaction)
+    await formDraft.utils.acceptMutations(transaction)
   },
 })
 

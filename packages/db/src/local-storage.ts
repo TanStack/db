@@ -464,32 +464,30 @@ export function localStorageCollectionOptions(
   // Reserve automatic and manual writes in acceptance order. A rejected
   // handler releases only its storage slot after its predecessor, while its
   // own transaction receipt can reject immediately.
-  let writeTail = Promise.resolve()
-  let reservedWrites = 0
+  let writeTail: Promise<void> | undefined
   const reserveWrite = () => {
     const previous = writeTail
     let release!: () => void
-    writeTail = new Promise<void>((resolve) => {
+    const slot = new Promise<void>((resolve) => {
       release = resolve
     })
-    reservedWrites++
-    const unblocked = reservedWrites === 1
+    writeTail = slot
     const retire = () => {
-      reservedWrites--
       release()
+      if (writeTail === slot) writeTail = undefined
     }
-    return { previous, unblocked, retire }
+    return { previous, retire }
   }
 
   const persistAutomatic = (
     mutations: Array<PendingMutation<Record<string, unknown>>>,
     handler?: () => unknown | Promise<unknown>,
   ): Promise<unknown> => {
-    const { previous, unblocked, retire } = reserveWrite()
+    const { previous, retire } = reserveWrite()
 
     // Native Storage writes synchronously. With no handler or earlier write,
     // preserve that direct-mutation return boundary.
-    if (!handler && unblocked) {
+    if (!handler && previous === undefined) {
       try {
         persistMutations(mutations)
         return Promise.resolve({})
@@ -504,7 +502,7 @@ export function localStorageCollectionOptions(
     try {
       result = handler?.()
     } catch (error) {
-      void previous.then(retire)
+      void Promise.resolve(previous).then(retire)
       return Promise.reject(error)
     }
     return Promise.resolve(result).then(
@@ -520,7 +518,7 @@ export function localStorageCollectionOptions(
       (error: unknown) => {
         // Rejection belongs to this transaction immediately. Only its empty
         // storage slot must wait for the earlier accepted write to retire.
-        void previous.then(retire)
+        void Promise.resolve(previous).then(retire)
         throw error
       },
     )
@@ -529,8 +527,8 @@ export function localStorageCollectionOptions(
   const persistManual = (
     mutations: Array<PendingMutation<Record<string, unknown>>>,
   ): Promise<void> => {
-    const { previous, unblocked, retire } = reserveWrite()
-    if (unblocked) {
+    const { previous, retire } = reserveWrite()
+    if (previous === undefined) {
       try {
         persistMutations(mutations)
         return Promise.resolve()
@@ -594,7 +592,7 @@ export function localStorageCollectionOptions(
    * Accepts this Collection's manual mutations in write order and resolves
    * after their storage write. The caller must await it in mutationFn.
    */
-  const acceptMutations = (transaction: {
+  const acceptMutations = async (transaction: {
     mutations: Array<PendingMutation<Record<string, unknown>>>
   }): Promise<void> => {
     // Filter mutations that belong to this collection
@@ -623,7 +621,7 @@ export function localStorageCollectionOptions(
       }
     }
 
-    return persistManual(collectionMutations)
+    await persistManual(collectionMutations)
   }
 
   const options = {
