@@ -182,10 +182,38 @@ contract permits, so the model now skips it.
 | Removal one microtask late | Assertion failure: the same-call checks and two focused witnesses |
 | Never remove (`main`) | Assertion failure, 28 tests |
 
+## Low-review follow-up
+
+A low review of `26d34291d` found that the ownership driver removed its
+throwing subscriber in a synchronous `finally`, before a commit's settlement
+resumed in a later microtask. A subscriber therefore never threw during an
+asynchronous success or failure settlement. Measuring the reach showed a wider
+gap: steps chose a transaction index from 0 to 3 at random, so most pointed at
+a missing transaction or one in the wrong state, and in one run the `settle`
+step ran 0 times in 400 histories.
+
+The driver now keeps the subscriber installed until promises flush, and it
+asserts that the subscriber ran whenever the model predicts that the step
+changes that Collection's rows. A step's `tx` number now chooses among the
+transactions whose state allows the step, and settle and commit steps are
+weighted higher. A pinned history throws during an asynchronous success and an
+asynchronous failure settlement.
+
+| Check, on `cb9f8a47b` production code | Result |
+| --- | --- |
+| New driver | All 4 cases pass; no production defect |
+| Old subscriber ordering with the new invocation assertion | The random campaign fails: `the throwing subscriber ran: expected 0 to be greater than 0`, at an asynchronous failed settlement |
+| Mutant: success settlement skips `isPersisted` when a subscriber throws | New driver: assertion failure in the random campaign and the asynchronous pinned history. Old driver: survives |
+| Mutant: `touchCollection()` stops at the first throwing Collection | New driver: assertion failure in the asynchronous pinned history. Old driver: its random campaign can also reach it through the synchronous rollback path, so this mutant does not distinguish the drivers |
+
+The fixed seed alone does not catch the first mutant; the pinned history is the
+reliable witness for asynchronous settlement with a throwing subscriber.
+
 ## Unresolved
 
-- The generated ownership grammar reaches a conflicting rollback that throws
-  only rarely; the pinned history is its reliable witness.
+- The generated ownership grammar reaches a conflicting rollback that throws,
+  and an asynchronous settlement with a throwing subscriber, only sometimes;
+  the pinned histories are their reliable witnesses.
 - Two Collection instances with one id are covered only by a focused witness.
 - The ownership oracle does not combine queued sync transactions that hold a
   completed row with a second Collection. The optimistic-history oracle owns

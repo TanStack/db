@@ -36,11 +36,14 @@ import type { Transaction } from '../src/transactions.js'
  * - A settled transaction's `isPersisted` has settled.
  *
  * The grammar opens up to four manual transactions over Collections A and B
- * (keys 1 and 2). Steps write a value, write and remove key 9 in one call
+ * (keys 1 and 2). A step's `tx` number chooses among the transactions whose
+ * state allows that step, so generated steps rarely skip. Steps write a value, write and remove key 9 in one call
  * (a pair that merges away), commit, settle a commit as success or failure,
  * roll back, and roll back from a `truncate` listener during a sync commit.
- * A settling step may install a throwing subscriber on one Collection for
- * that step only.
+ * A settling step may install a throwing subscriber on one Collection. It stays
+ * installed until promises flush, because a commit settles in a later
+ * microtask, and it must have run whenever the model predicts that the step
+ * changes that Collection's rows.
  *
  * After a synchronous settling step (commit, rollback, truncate rollback) the
  * driver first compares the tracked ids in the same call stack. After each
@@ -112,6 +115,17 @@ class OwnershipModel {
     return value
   }
 
+  /**
+   * Chooses a transaction for a step: the step's number selects among the
+   * transactions whose state allows the step, so generated steps rarely skip.
+   */
+  pick(choice: number, states: ReadonlyArray<ModelState>): number | undefined {
+    const eligible = this.transactions.flatMap((tx, index) =>
+      states.includes(tx.state) ? [index] : [],
+    )
+    return eligible.length ? eligible[choice % eligible.length] : undefined
+  }
+
   /** Fails `index`, then every pending transaction that shares a key. */
   fail(index: number): void {
     const tx = this.transactions[index]!
@@ -148,11 +162,11 @@ const step: fc.Arbitrary<Step> = fc.oneof(
     }),
   },
   {
-    weight: 2,
+    weight: 3,
     arbitrary: fc.record({ type: fc.constant(`commit` as const), tx: txIndex }),
   },
   {
-    weight: 2,
+    weight: 4,
     arbitrary: fc.record({
       type: fc.constant(`settle` as const),
       tx: txIndex,
@@ -222,23 +236,39 @@ async function runHistory(steps: ReadonlyArray<Step>): Promise<void> {
       () => (entry.settled = true),
     )
   }
-  const withThrowingSubscriber = (
+  const rows = (on: CollectionName) => [model.row(on, 1), model.row(on, 2)]
+  // Runs a settling step with a throwing subscriber on `on`. A commit settles
+  // in a later microtask, so the subscriber stays installed until promises
+  // flush. When the model predicts that the step changes `on`'s rows, the
+  // subscriber must have run, so the throw really reached the settlement.
+  const withThrowingSubscriber = async (
+    label: string,
     on: CollectionName | undefined,
     run: () => void,
+    applyModel: () => void,
   ) => {
+    const before = on ? rows(on) : []
+    let calls = 0
     const subscription = on
       ? collections[on].collection.subscribeChanges(() => {
+          calls++
           throw new Error(`subscriber failed`)
         })
       : undefined
     try {
       run()
     } catch {
-      // A throwing subscriber surfaces here. The law is that settlement still
-      // completes, which the checks below observe.
+      // A throwing subscriber surfaces here for a synchronous settlement. The
+      // law is that settlement still completes, which the checks observe.
+    }
+    applyModel()
+    try {
+      await flush()
     } finally {
       subscription?.unsubscribe()
     }
+    if (on && JSON.stringify(rows(on)) !== JSON.stringify(before))
+      expect(calls, `${label}: the throwing subscriber ran`).toBeGreaterThan(0)
   }
 
   // A synchronous settlement releases the transaction in the recompute that
@@ -300,9 +330,18 @@ async function runHistory(steps: ReadonlyArray<Step>): Promise<void> {
         driven.push(entry)
         model.open()
       } else {
-        const modelTx = model.transactions[current.tx]
-        const entry = driven[current.tx]
-        if (!modelTx || !entry) continue
+        const states: ReadonlyArray<ModelState> =
+          current.type === `edit` ||
+          current.type === `cancel` ||
+          current.type === `commit`
+            ? [`pending`]
+            : current.type === `settle`
+              ? [`persisting`]
+              : [`pending`, `persisting`]
+        const index = model.pick(current.tx, states)
+        if (index === undefined) continue
+        const modelTx = model.transactions[index]!
+        const entry = driven[index]!
         if (current.type === `edit`) {
           if (modelTx.state !== `pending`) continue
           // An update that leaves the visible row unchanged creates no
@@ -328,16 +367,32 @@ async function runHistory(steps: ReadonlyArray<Step>): Promise<void> {
           modelTx.state = modelTx.writes.size === 0 ? `completed` : `persisting`
         } else if (current.type === `settle`) {
           if (modelTx.state !== `persisting`) continue
-          withThrowingSubscriber(current.throwOn, () => {
-            if (current.ok) entry.outcome.resolve()
-            else entry.outcome.reject(new Error(`rejected`))
-          })
-          if (current.ok) modelTx.state = `completed`
-          else model.fail(current.tx)
+          await withThrowingSubscriber(
+            label,
+            current.throwOn,
+            () => {
+              if (current.ok) entry.outcome.resolve()
+              else entry.outcome.reject(new Error(`rejected`))
+            },
+            () => {
+              if (current.ok) modelTx.state = `completed`
+              else model.fail(index)
+            },
+          )
         } else if (current.type === `rollback`) {
           if (!model.unsettled(modelTx)) continue
-          withThrowingSubscriber(current.throwOn, () => entry.tx.rollback())
-          model.fail(current.tx)
+          let sameCall = true
+          await withThrowingSubscriber(
+            label,
+            current.throwOn,
+            () => entry.tx.rollback(),
+            () => {
+              model.fail(index)
+              // A rollback settles synchronously, before any promise turn.
+              if (sameCall) checkTracked(`${label} (same call)`)
+              sameCall = false
+            },
+          )
         } else {
           if (!model.unsettled(modelTx)) continue
           const target = collections[current.on]
@@ -353,14 +408,10 @@ async function runHistory(steps: ReadonlyArray<Step>): Promise<void> {
           } finally {
             stop()
           }
-          model.fail(current.tx)
+          model.fail(index)
         }
       }
-      if (
-        current.type === `rollback` ||
-        current.type === `truncateRollback` ||
-        current.type === `commit`
-      )
+      if (current.type === `truncateRollback` || current.type === `commit`)
         checkTracked(`${label} (same call)`)
       await flush()
       check(label)
@@ -392,6 +443,21 @@ describe(`settled transactions leave every Collection that tracked them`, () => 
     )
   }, 300_000)
 
+  it(`pinned: a subscriber throws during an asynchronous success and failure settlement`, async () => {
+    await runHistory([
+      { type: `open` },
+      { type: `edit`, tx: 0, on: `A`, key: 1, value: 3 },
+      { type: `edit`, tx: 0, on: `B`, key: 1, value: 3 },
+      { type: `commit`, tx: 0 },
+      { type: `settle`, tx: 0, ok: true, throwOn: `A` },
+      { type: `open` },
+      { type: `edit`, tx: 0, on: `A`, key: 2, value: 4 },
+      { type: `edit`, tx: 0, on: `B`, key: 2, value: 4 },
+      { type: `commit`, tx: 0 },
+      { type: `settle`, tx: 0, ok: false, throwOn: `A` },
+    ])
+  })
+
   it(`pinned: a merged-away pair, a conflicting rollback that throws, and a truncate rollback`, async () => {
     await runHistory([
       { type: `open` },
@@ -401,8 +467,9 @@ describe(`settled transactions leave every Collection that tracked them`, () => 
       { type: `edit`, tx: 1, on: `A`, key: 1, value: 3 },
       { type: `edit`, tx: 1, on: `B`, key: 1, value: 3 },
       { type: `open` },
-      { type: `edit`, tx: 2, on: `A`, key: 1, value: 4 },
-      { type: `rollback`, tx: 1, throwOn: `A` },
+      // Choices index the eligible transactions: pending 1 and 2 here.
+      { type: `edit`, tx: 1, on: `A`, key: 1, value: 4 },
+      { type: `rollback`, tx: 0, throwOn: `A` },
       { type: `open` },
       { type: `edit`, tx: 3, on: `B`, key: 2, value: 5 },
       { type: `truncateRollback`, tx: 3, on: `B` },
