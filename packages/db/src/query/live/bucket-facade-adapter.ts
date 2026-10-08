@@ -159,6 +159,11 @@ export class BucketFacadeAdapter {
       for (const publication of publications) publication.discard()
       throw error
     }
+    // A failed root commit keeps the builder's pending root rows, so keep the
+    // facade rows they refer to: a rollback puts them back for the next flush.
+    // No graph output arrives between this flush and its rollback.
+    const pending = new Map(this.pending)
+    const pendingActivity = new Map(this.pendingActivity)
     this.pending.clear()
     this.pendingActivity.clear()
 
@@ -186,6 +191,10 @@ export class BucketFacadeAdapter {
         this.restore(snapshot)
         this.retiredEntries.clear()
         for (const publication of publications) publication.discard()
+        for (const [edgeId, rows] of pending) this.pending.set(edgeId, rows)
+        for (const [edgeId, activity] of pendingActivity) {
+          this.pendingActivity.set(edgeId, activity)
+        }
       },
     }
   }

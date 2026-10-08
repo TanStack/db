@@ -175,3 +175,42 @@ forbidden when the shown key sequence is identical, and allowed otherwise.
 
 **Unresolved:** the random campaign rarely sends a rolled-back reorder again;
 the pinned case covers it. The edge and bucket map copy is not measured.
+
+## Follow-up: child rows lost after a failed root commit
+
+Found while evaluating the medium review, and confirmed on `main`
+(`f6d65eace`) and on this branch before the fix.
+
+**Law.** After a failed root commit, the next successful flush publishes every
+change that was pending at the failed flush, child rows included, exactly once.
+The live-query builder keeps its pending root changes when the root commit
+fails. Before this fix, the facade adapter had already cleared its pending
+child rows and activations, so `rollback()` restored the facades but lost
+their pending changes.
+
+**Witness.** A live query with a Collection-valued include. One write updates
+the parent and the child, and the root commit throws. A retry writes only a
+further parent change. On `main` and on the unfixed branch, the parent shows
+the retry while the child keeps `value: 1` and publishes no event, although the
+source holds `value: 2`. With the fix, the child shows `value: 2` and publishes
+one event.
+
+**Oracle.** The rollback outcome now keeps the model's operations pending, as
+a thrown flush does. RED before the fix: both campaigns failed with "facades
+held by the adapter: expected [] to deeply equal [ 'b0' ]" (a lost
+activation), and a pinned case failed with "rows of b0: expected [ { id: 1, v:
+1 } ] to deeply equal [ { id: 1, v: 2 } ]". The includes owner gained the
+public witness above.
+
+**Fix.** `flush()` keeps the pending rows and activations it consumed;
+`rollback()` puts them back. No graph output arrives between a flush and its
+rollback, so the maps are empty when it does.
+
+**Mutant.** Dropping the pending rows on rollback fails both campaigns, the
+pinned case, and the includes witness (assertion failures).
+
+**Not covered by the law.** When no further write reaches the live query after
+a failed root commit, no flush runs, so the root and the child both keep their
+rows from before the failure until the next write. Whether a failed commit
+should schedule its own retry is a design question; this change does not add
+one.
