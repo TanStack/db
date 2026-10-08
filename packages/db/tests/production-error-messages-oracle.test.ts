@@ -111,6 +111,9 @@ const hostileInputs: Array<unknown> = [
   `a\nb, c=d)`,
   `a\u2028b\u2029c`,
   [{ secret: `row` }],
+  // JSON calls toJSON before any replacer, so these must never reach it.
+  [{ toJSON: () => `secret-row` }],
+  Object.assign([1], { toJSON: () => `secret-array` }),
   [1n],
   [undefined],
 ]

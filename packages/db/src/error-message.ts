@@ -14,6 +14,34 @@ export function devBuild(): boolean {
 }
 
 /**
+ * One value as it appears in a production message, or `undefined` when it is
+ * not shown. Only primitives reach `JSON.stringify`, so no `toJSON()` runs: a
+ * plain object, at any depth, never contributes its contents.
+ */
+function show(value: unknown, inArray: boolean): string | undefined {
+  if (Array.isArray(value))
+    return `[${value.map((item) => show(item, true) ?? `"[object]"`).join(`,`)}]`
+  if (value instanceof Error)
+    return inArray ? undefined : JSON.stringify(value.message)
+  if (
+    typeof value === `symbol` ||
+    typeof value === `bigint` ||
+    (inArray &&
+      (value === undefined ||
+        (typeof value === `number` && !Number.isFinite(value))))
+  )
+    return JSON.stringify(String(value))
+  if (
+    value === undefined ||
+    (typeof value === `number` && !Number.isFinite(value))
+  )
+    return String(value)
+  return value === null || typeof value !== `object`
+    ? JSON.stringify(value)
+    : undefined
+}
+
+/**
  * A production message: the code, the inputs it can show as JSON, and its docs
  * anchor. Symbols and bigints show as strings; `undefined`, `NaN`, and the
  * infinities show as themselves. Objects other than arrays and errors are not
@@ -25,34 +53,7 @@ export function codedMessage(
 ): string {
   const shown = Object.entries(values).flatMap(([name, value]) => {
     try {
-      const text =
-        value instanceof Error
-          ? JSON.stringify(value.message)
-          : typeof value === `symbol` || typeof value === `bigint`
-            ? JSON.stringify(String(value))
-            : value === undefined ||
-                (typeof value === `number` && !Number.isFinite(value))
-              ? String(value)
-              : value === null ||
-                  typeof value !== `object` ||
-                  Array.isArray(value)
-                ? // Inside an array, a plain object shows only as a placeholder,
-                  // and values JSON cannot encode show as their strings.
-                  JSON.stringify(value, (key, item) =>
-                    !key
-                      ? item
-                      : item === undefined ||
-                          typeof item === `bigint` ||
-                          typeof item === `symbol` ||
-                          (typeof item === `number` && !Number.isFinite(item))
-                        ? String(item)
-                        : item !== null &&
-                            typeof item === `object` &&
-                            !Array.isArray(item)
-                          ? `[object]`
-                          : item,
-                  )
-                : undefined
+      const text = show(value, false)
       return text === undefined ? [] : [`${name}=${text}`]
     } catch {
       return []
