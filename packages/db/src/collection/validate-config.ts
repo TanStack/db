@@ -80,17 +80,18 @@ export function validateCollectionConfig(config: unknown): void {
   const configObj = config as Record<string, unknown>
 
   // Adapter metadata is valid. Warn only when an extra key is likely a typo.
-  for (const key of Object.keys(configObj)) {
-    if (!KNOWN_CONFIG_KEYS.has(key) && !key.startsWith(`_`)) {
+  // The guard keeps the typo search and its text out of a CommonJS production
+  // bundle, which cannot drop this module.
+  if (devBuild() && process.env.NODE_ENV !== `production`)
+    for (const key of Object.keys(configObj)) {
+      if (KNOWN_CONFIG_KEYS.has(key) || key.startsWith(`_`)) continue
       const suggestion = findLikelyTypo(key, configObj)
-      // A developer hint; this module only runs in development builds.
-      if (devBuild() && process.env.NODE_ENV !== `production` && suggestion) {
+      if (suggestion) {
         console.warn(
           `Possible misspelling in collection config: "${key}". Did you mean "${suggestion}"?`,
         )
       }
     }
-  }
 
   // Validate getKey
   if (!(`getKey` in configObj) || configObj.getKey === undefined) {

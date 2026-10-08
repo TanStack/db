@@ -50,7 +50,7 @@ function show(value: unknown, inArray: boolean): string | undefined {
 export function codedMessage(
   code: number,
   values: Record<string, unknown> = {},
-  kind = `error`,
+  kind: `error` | `warning` = `error`,
 ): string {
   const shown = Object.entries(values).flatMap(([name, value]) => {
     try {

@@ -374,13 +374,29 @@ describe(`production error messages`, () => {
         `console alias: console.warn`,
         `Or-guarded hint text`,
         `\${devBuild() && process.env.NODE_ENV !== \`production\` ? Failed to save the row: : }`,
+        `console alias: {warn}=console`,
+        `Helper hint text`,
       ])
       expect(cases.developmentOnly).toEqual([
         { file: `cases.ts`, literals: [`Guarded hint text`] },
+        { file: `cases.ts`, literals: [`Braced return hint text`] },
       ])
-      expect(cases.coded.map(({ code, template }) => [code, template])).toEqual(
-        [[1, `Failed for \${id}`]],
-      )
+      expect(
+        cases.coded.map(({ code, template, stored }) => [code, template, stored]),
+      ).toEqual([
+        [1, `Failed for \${id}`, false],
+        [2, `Stored failure text`, true],
+      ])
+    })
+
+    // The warning and sink laws read where a message is used, so a coded
+    // message is used where it is written, not stored first.
+    it(`uses every coded message where it is written`, () => {
+      expect(
+        sites.coded
+          .filter(({ stored }) => stored)
+          .map(({ file, code }) => `${file} ${code}`),
+      ).toEqual([])
     })
 
     // A warning says so (maintainer decision, 2026-10-08): a console.warn

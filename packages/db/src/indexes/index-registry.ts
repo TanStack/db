@@ -88,12 +88,17 @@ export function emitIndexSuggestion(
     return
 
   const field = details.fieldPath.join(`.`)
+  const { type, collectionId, fieldPath, ...stats } = details
+  // The keys keep the order callers saw before the text moved here.
   const suggestion: IndexSuggestion = {
-    ...details,
+    type,
+    collectionId,
+    fieldPath,
     message:
-      details.type === `slow-query`
-        ? `Queries on "${field}" are slow (avg ${details.queryTimeMs!.toFixed(1)}ms). Consider adding an index.`
-        : `Collection has ${details.collectionSize} items. Queries on "${field}" may benefit from an index.`,
+      type === `slow-query`
+        ? `Queries on "${field}" are slow (avg ${(stats.queryTimeMs ?? 0).toFixed(1)}ms). Consider adding an index.`
+        : `Collection has ${stats.collectionSize} items. Queries on "${field}" may benefit from an index.`,
+    ...stats,
   }
   if (devModeConfig.onSuggestion) {
     try {

@@ -55,3 +55,33 @@ export function coded(id: string): void {
       : codedMessage(1, { id }),
   )
 }
+
+// A plain site: destructuring hands on console methods that could log anything.
+export function destructured(): void {
+  const { warn } = console
+  warn(`Destructured hint text`)
+}
+
+declare function warnOnce(key: string, message: string): void
+
+// A plain site: warnOnce logs its second argument.
+export function viaWarnOnce(): void {
+  warnOnce(`key`, `Helper hint text`)
+}
+
+// Development-only: a braced early return counts like a bare one.
+export function bracedReturn(): void {
+  if (!(devBuild() && process.env.NODE_ENV !== `production`)) {
+    return
+  }
+  console.warn(`Braced return hint text`)
+}
+
+// A stored coded message: the oracle requires it to be used where written.
+export function stored(): void {
+  const message =
+    devBuild() && process.env.NODE_ENV !== `production`
+      ? `Stored failure text`
+      : codedMessage(2)
+  console.error(message)
+}

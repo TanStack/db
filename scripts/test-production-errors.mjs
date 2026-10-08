@@ -115,6 +115,11 @@ const hints = await Promise.all(
  * one message thrown at several sites, keeps its first choice and is shared.
  */
 const shared = new Set()
+// A development-only region may hold only a short value, such as `slow-query`;
+// it still has to be absent from production.
+function minimumLength(name) {
+  return name.startsWith('development-only') ? 8 : 12
+}
 function chooseLiterals(list) {
   const first = list.map(([, text, source]) => distinctiveLiteral(text, source))
   const chosen = [...first]
@@ -133,7 +138,7 @@ function chooseLiterals(list) {
           .map((other) => list[other][1])
           .join('\n')
         const own = distinctiveLiteral(text, source, avoid)
-        if (own.length >= 12) chosen[index] = own
+        if (own.length >= minimumLength(list[index][0])) chosen[index] = own
         else shared.add(list[index][0])
       }
   }
@@ -149,11 +154,8 @@ for (const [name, literal] of checked) {
   )
   seen.set(literal, name)
 }
-// A development-only region may hold only a short value, such as `slow-query`;
-// it still has to be absent from production.
 const short = checked.filter(
-  ([name, literal]) =>
-    literal.length < (name.startsWith('development-only') ? 8 : 12),
+  ([name, literal]) => literal.length < minimumLength(name),
 )
 assert.deepEqual(short, [], 'coded errors without a distinctive literal')
 

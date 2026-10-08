@@ -37,8 +37,13 @@ export type CodedSite = {
   code: number
   /** `warning` for `codedWarning`, else `error`. */
   kind: `error` | `warning`
-  /** True when the message is an argument of `console.warn`. */
+  /** True when the message is an argument of `console.warn` or `warnOnce`. */
   inWarn: boolean
+  /**
+   * True when the message is stored in a variable rather than used where it is
+   * written; the census then cannot tell where it goes.
+   */
+  stored: boolean
   /** The development message as a template. */
   template: string
   /** Its literal text pieces, outside interpolations. */
@@ -88,7 +93,11 @@ export type PlainSite = {
  * Methods that log their first argument as a message. Text passed to them is a
  * site, as if it were written at their `console` call.
  */
-const messageSinks = new Set([`transitionToError`, `setErrorState`])
+const messageSinks = new Map([
+  [`transitionToError`, 0],
+  [`setErrorState`, 0],
+  [`warnOnce`, 1],
+])
 
 /** Constructor name to the position of its message argument. */
 const messagePosition = new Map([
@@ -449,7 +458,10 @@ export function findErrorSites(
                 ts.SyntaxKind.ExclamationToken &&
               ts.isParenthesizedExpression(statement.expression.operand) &&
               isGuard(statement.expression.operand.expression) &&
-              ts.isReturnStatement(statement.thenStatement),
+              (ts.isReturnStatement(statement.thenStatement) ||
+                (ts.isBlock(statement.thenStatement) &&
+                  statement.thenStatement.statements.length === 1 &&
+                  ts.isReturnStatement(statement.thenStatement.statements[0]!))),
           )
       })
     const isDevelopmentOnly = (node: ts.Node) => !!developmentRegion(node)
@@ -488,6 +500,27 @@ export function findErrorSites(
         ])
         return
       }
+      // `console` itself handed on, as in `const { warn } = console`.
+      if (
+        ts.isIdentifier(node) &&
+        node.text === `console` &&
+        !(
+          (ts.isPropertyAccessExpression(node.parent) ||
+            ts.isElementAccessExpression(node.parent)) &&
+          node.parent.expression === node
+        ) &&
+        !ts.isPropertyAccessExpression(node.parent) &&
+        // `typeof console.warn` names a type, not a value.
+        !ts.isQualifiedName(node.parent) &&
+        !isDevelopmentOnly(node)
+      )
+        plain.push({
+          file,
+          line:
+            sourceFile.getLineAndCharacterOfPosition(node.getStart()).line + 1,
+          template: `console alias: ${compact(node.parent, sourceFile)}`,
+          literals: [],
+        })
       // A console method that is not called directly could carry any text.
       if (
         isConsoleMethod(node) &&
@@ -505,16 +538,24 @@ export function findErrorSites(
         })
       // A console call, or a call to a method that logs its message, with
       // library text is a site unless it is development-only.
+      const sinkName =
+        ts.isCallExpression(node) &&
+        (ts.isPropertyAccessExpression(node.expression)
+          ? node.expression.name.text
+          : ts.isIdentifier(node.expression)
+            ? node.expression.text
+            : undefined)
+      const sinkPosition =
+        sinkName === false || sinkName === undefined
+          ? undefined
+          : messageSinks.get(sinkName)
       const sink =
         ts.isCallExpression(node) &&
-        (isConsoleMethod(node.expression) ||
-          (ts.isPropertyAccessExpression(node.expression) &&
-            messageSinks.has(node.expression.name.text)))
+        (isConsoleMethod(node.expression) || sinkPosition !== undefined)
       if (sink && !isDevelopmentOnly(node))
-        for (const argument of node.arguments.slice(
-          0,
-          isConsoleMethod(node.expression) ? undefined : 1,
-        ))
+        for (const argument of isConsoleMethod(node.expression)
+          ? node.arguments
+          : node.arguments.slice(sinkPosition, sinkPosition! + 1))
           if (
             !isCoded(argument) &&
             !isDecoration(argument) &&
@@ -551,8 +592,13 @@ export function findErrorSites(
               : `error`,
           inWarn:
             ts.isCallExpression(parent) &&
-            isConsoleMethod(parent.expression) &&
-            /warn['"`]?\]?$/.test(parent.expression.getText(sourceFile)),
+            ((isConsoleMethod(parent.expression) &&
+              /warn['"`]?\]?$/.test(parent.expression.getText(sourceFile))) ||
+              /(^|\.)warnOnce$/.test(parent.expression.getText(sourceFile))),
+          stored:
+            ts.isVariableDeclaration(parent) ||
+            (ts.isBinaryExpression(parent) &&
+              parent.operatorToken.kind === ts.SyntaxKind.EqualsToken),
           template: messageTemplate(node.whenTrue, sourceFile),
           literals: messageLiterals(node.whenTrue),
           interpolations: interpolations(node.whenTrue, sourceFile, showable),
