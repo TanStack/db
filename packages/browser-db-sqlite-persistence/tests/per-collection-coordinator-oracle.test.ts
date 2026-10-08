@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { setImmediate as nextTurn } from 'node:timers/promises'
 import { fc } from '@fast-check/vitest'
-import { IR, createCollection } from '@tanstack/db'
+import { IR, createCollection, whenSyncAccepted } from '@tanstack/db'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { BrowserCollectionCoordinator } from '../src/browser-coordinator'
 import {
@@ -18,7 +18,12 @@ import type {
   PersistenceAdapter,
   TransportedLoadSubsetOptions,
 } from '@tanstack/db-sqlite-persistence-core'
-import type { LoadSubsetOptions, Subscription, SyncConfig } from '@tanstack/db'
+import type {
+  Collection,
+  LoadSubsetOptions,
+  Subscription,
+  SyncConfig,
+} from '@tanstack/db'
 import type { BrowserWASQLiteDatabase } from '../src'
 
 const FIXED_SEED = 165902
@@ -624,6 +629,51 @@ function createRecordingAdapter(options: {
       return Promise.resolve(structuredClone(result))
     },
   }
+}
+
+// The storage oracle exercises the SQLite generation catalog. This small
+// adapter supplies only its public claim/rotation result so the Browser owner
+// oracle can judge the separate coordinator boundary with two live sync runs.
+function createGenerationRecordingAdapter(
+  id: string,
+  claimExpired: () => boolean = () => false,
+): RecordingAdapter & { currentStorageId: () => string } {
+  const adapter = createRecordingAdapter({ id })
+  let currentStorageId = `cache-generation-0`
+  let nextGeneration = 1
+  let nextClaim = 0
+  const claims = new Map<string, string>()
+  adapter.claimCacheGeneration = () => {
+    const claimId = `${id}-claim-${++nextClaim}`
+    claims.set(claimId, currentStorageId)
+    return Promise.resolve({ storageCollectionId: currentStorageId, claimId })
+  }
+  adapter.rotateCacheGeneration = (_collectionId, claimId) => {
+    if (claims.get(claimId) !== currentStorageId && !claimExpired()) {
+      return Promise.reject(new Error(`recovery lost its cache claim`))
+    }
+    const storageCollectionId = `cache-generation-${nextGeneration++}`
+    if (!claimExpired()) currentStorageId = storageCollectionId
+    claims.set(claimId, storageCollectionId)
+    return Promise.resolve({ storageCollectionId, claimId })
+  }
+  adapter.renewCacheGenerationClaim = (storageCollectionId, claimId) =>
+    Promise.resolve(
+      !claimExpired() && claims.get(claimId) === storageCollectionId
+        ? Date.now() + 10_000
+        : undefined,
+    )
+  adapter.releaseCacheGenerationClaim = (claimId) => {
+    claims.delete(claimId)
+    return Promise.resolve()
+  }
+  adapter.assertCacheGenerationClaim = (storageId, claimId) => {
+    if (claimExpired() || claims.get(claimId) !== storageId) {
+      return Promise.reject(new Error(`cache claim expired`))
+    }
+    return Promise.resolve()
+  }
+  return Object.assign(adapter, { currentStorageId: () => currentStorageId })
 }
 
 type SemanticValue =
@@ -1719,6 +1769,482 @@ function remoteLeaseHistoryViolations(
   return violations
 }
 
+describe(`persisted cache generation routing oracle`, () => {
+  // A cache generation is a routing boundary, while the public Collection ID
+  // remains the same. The independent model has two run-local source owners:
+  // after the second run loses its resume authority, its demand belongs to
+  // its new generation; the warm run retains its old source row and owner.
+  // The legal history is warm start, source commit, second start, scoped
+  // recovery, then one retained demand and one new demand. Real persisted
+  // wrappers and Browser coordinators drive that history. At each demand
+  // settlement, compare source-call counts, old acquisition release, and the
+  // warm public row. The controlled browser seam
+  // does not establish native multi-tab or OPFS behavior; the SQLite owner
+  // separately proves durable generation separation.
+  it(`routes a recovering run's demand to its own source while a warm run keeps its row`, async () => {
+    type Row = { id: string; title: string }
+    const collectionId = `shared-public-collection`
+    const adapter = createGenerationRecordingAdapter(`shared-cache`)
+    const warmCoordinator = createCoordinator(`generation-routing`, adapter)
+    const recoveringCoordinator = createCoordinator(
+      `generation-routing`,
+      adapter,
+    )
+    let warmSource!: Parameters<SyncConfig<Row, string>[`sync`]>[0]
+    let recoveringSource!: Parameters<SyncConfig<Row, string>[`sync`]>[0]
+    let warmStarted = false
+    let recoveringStarted = false
+    let warmLoads = 0
+    let warmUnloads = 0
+    let recoveringLoads = 0
+    let recoveringRefetches = 0
+    let releaseWarmLoad!: () => void
+    const warmLoadGate = new Promise<void>((resolve) => {
+      releaseWarmLoad = resolve
+    })
+    let warmCollection: Collection<Row, string> | undefined
+    let recoveringCollection: Collection<Row, string> | undefined
+    const cleanupCollection = async (
+      collection: Collection<Row, string> | undefined,
+      checkpoint: string,
+    ) => {
+      if (!collection) return
+      let settled = false
+      const cleanup = collection.cleanup().finally(() => {
+        settled = true
+      })
+      await waitFor(() => settled, checkpoint)
+      await cleanup
+    }
+
+    await withFailurePreservingCleanup(async () => {
+      warmCollection = createCollection(
+        persistedCollectionOptions<Row, string>({
+          id: collectionId,
+          syncMode: `on-demand`,
+          getKey: (row) => row.id,
+          sync: {
+            sync: (params) => {
+              warmSource = params
+              warmStarted = true
+              params.markReady()
+              return {
+                loadSubset: () => {
+                  warmLoads++
+                  return warmLoadGate
+                },
+                unloadSubset: () => {
+                  warmUnloads++
+                  releaseWarmLoad()
+                },
+              }
+            },
+          },
+          persistence: { adapter, coordinator: warmCoordinator },
+        }),
+      )
+      warmCollection.startSyncImmediate()
+      await waitFor(() => warmStarted, `warm source start`)
+      const warmRow = { id: `warm`, title: `Source-backed row` }
+      warmSource.begin()
+      warmSource.write({ type: `insert`, value: warmRow })
+      let warmCommitted = false
+      const warmCommit = Promise.resolve(
+        whenSyncAccepted(warmSource.commit()),
+      ).then(() => {
+        warmCommitted = true
+      })
+      await waitFor(() => warmCommitted, `warm source commit`)
+      await warmCommit
+
+      recoveringCollection = createCollection(
+        persistedCollectionOptions<Row, string>({
+          id: collectionId,
+          syncMode: `on-demand`,
+          getKey: (row) => row.id,
+          sync: {
+            sync: (params) => {
+              recoveringSource = params
+              recoveringStarted = true
+              params.markReady()
+              return {
+                // This controlled source has no delayed provider callback.
+                restartAfterScopedRecovery: () => {},
+                loadSubset: (options) => {
+                  recoveringLoads++
+                  if (options.refetch) recoveringRefetches++
+                  return Promise.resolve()
+                },
+              }
+            },
+          },
+          persistence: { adapter, coordinator: recoveringCoordinator },
+        }),
+      )
+      recoveringCollection.startSyncImmediate()
+      await waitFor(() => recoveringStarted, `recovering source`)
+      const retainedDemand = { limit: 1 }
+      let firstSettled = false
+      const firstLoad = Promise.resolve(
+        recoveringCollection._sync.loadSubset(retainedDemand),
+      ).then(() => {
+        firstSettled = true
+      })
+      await waitFor(() => warmLoads === 1, `held pre-recovery demand`)
+      expect(firstSettled).toBe(false)
+      expect({ warmLoads, recoveringLoads }).toEqual({
+        warmLoads: 1,
+        recoveringLoads: 0,
+      })
+
+      let recoverySettled = false
+      const oldStorageId = adapter.currentStorageId()
+      const recovery = recoveringSource.metadata!.persistence!
+        .startScopedRecovery!().then(() => {
+        recoverySettled = true
+      })
+      // Hold the old leader's release acknowledgement while delivering every
+      // other message. The new cache has its own route, so its source demand
+      // must start before that old leader resumes.
+      const isOldRelease = (data: unknown) =>
+        payloadType(data) === `rpc:releaseRemoteSubset:req` &&
+        envelopeCollection(data) === oldStorageId
+      let heldOldRelease = false
+      for (let pass = 0; pass < 100; pass++) {
+        heldOldRelease ||= ControlledBroadcastChannel.delayed.some((delivery) =>
+          isOldRelease(delivery.data),
+        )
+        while (
+          ControlledBroadcastChannel.deliverWhere((data) => !isOldRelease(data))
+        ) {
+          await Promise.resolve()
+        }
+        if (heldOldRelease && recoveringLoads > 0) break
+        await nextTurn()
+      }
+      const loadsBeforeOldRelease = recoveringLoads
+      ControlledBroadcastChannel.deliverWhere(isOldRelease)
+      await pumpNetwork()
+      expect(heldOldRelease).toBe(true)
+      expect(loadsBeforeOldRelease).toBe(1)
+      await waitFor(() => recoverySettled, `scoped recovery with active demand`)
+      await recovery
+      await firstLoad
+      await waitFor(
+        () => recoveringLoads === 1,
+        `retained demand reacquisition`,
+      )
+      expect(recoveringRefetches).toBe(1)
+      expect(warmUnloads).toBe(1)
+
+      // The checkpoint is the settled physical acquisition. A wrong design
+      // using the public ID for both runs sends this request to the warm
+      // leader; a generation-qualified route sends it to the new owner.
+      let settled = false
+      const load = Promise.resolve(
+        recoveringCollection._sync.loadSubset({ limit: 2 }),
+      ).then(() => {
+        settled = true
+      })
+      await waitFor(() => settled, `recovering demand settlement`)
+      await load
+      expect({ warmLoads, recoveringLoads }).toEqual({
+        warmLoads: 1,
+        recoveringLoads: 2,
+      })
+      expect(warmCollection.get(`warm`)).toMatchObject(warmRow)
+
+      // A later committed-cache notification in the new generation cannot
+      // reload from its uncertified SQLite rows. The active demand gets a
+      // fresh source snapshot over the real Browser coordinator wire.
+      const storageId = adapter.currentStorageId()
+      warmCoordinator.publish(storageId, {
+        v: 1,
+        dbName: `generation-routing`,
+        collectionId: storageId,
+        senderId: warmCoordinator.getNodeId(),
+        ts: Date.now(),
+        payload: {
+          type: `tx:committed`,
+          term: 1,
+          seq: 1,
+          txId: `peer-new-generation-change`,
+          latestRowVersion: 1,
+          requiresFullReload: true,
+        },
+      })
+      await waitFor(() => recoveringLoads > 2, `new-generation source refresh`)
+      expect(recoveringRefetches).toBeGreaterThan(0)
+      expect(warmLoads).toBe(1)
+      expect(warmCollection.get(`warm`)).toMatchObject(warmRow)
+    }, [
+      [`held warm source`, () => Promise.resolve(releaseWarmLoad())],
+      [
+        `recovering Collection`,
+        () => cleanupCollection(recoveringCollection, `recovering cleanup`),
+      ],
+      [
+        `warm Collection`,
+        () => cleanupCollection(warmCollection, `warm cleanup`),
+      ],
+      [
+        `recovering coordinator`,
+        () => disposeCoordinator(recoveringCoordinator),
+      ],
+      [`warm coordinator`, () => disposeCoordinator(warmCoordinator)],
+    ])
+  })
+
+  // A paused follower may receive a coordinator commit before its renewal
+  // timer runs. Its expired claim cannot authorize that message to reload
+  // cached rows. The independent history expires one claim, delivers a peer
+  // notification, then keeps the demand: the old source row disappears and
+  // the demand obtains a fresh source snapshot in another cache generation.
+  it(`recovers an expired follower claim before applying a peer notification`, async () => {
+    type Row = { id: string; title: string }
+    let expired = false
+    const adapter = createGenerationRecordingAdapter(
+      `expired-receiver`,
+      () => expired,
+    )
+    const originalClaim = adapter.claimCacheGeneration!
+    const originalRotate = adapter.rotateCacheGeneration!
+    adapter.claimCacheGeneration = async (collectionId) => ({
+      ...(await originalClaim(collectionId)),
+      expiresAtMs: Date.now() + 10_000,
+    })
+    adapter.renewCacheGenerationClaim = async () =>
+      expired ? undefined : Date.now() + 10_000
+    adapter.rotateCacheGeneration = async (...args) => {
+      const claim = await originalRotate(...args)
+      expired = false
+      return { ...claim, expiresAtMs: Date.now() + 10_000 }
+    }
+    const receiver = createCoordinator(`expired-receiver`, adapter)
+    const peer = createCoordinator(`expired-receiver`, adapter)
+    let source!: Parameters<SyncConfig<Row, string>[`sync`]>[0]
+    const loads: Array<boolean | undefined> = []
+    let collection: Collection<Row, string> | undefined
+    await withFailurePreservingCleanup(async () => {
+      collection = createCollection(
+        persistedCollectionOptions<Row, string>({
+          id: `expired-public-collection`,
+          syncMode: `on-demand`,
+          getKey: (row) => row.id,
+          sync: {
+            sync: (params) => {
+              source = params
+              params.markReady()
+              return {
+                restartAfterScopedRecovery: () => {},
+                loadSubset: async (options) => {
+                  loads.push(options.refetch)
+                  if (options.refetch) {
+                    source.begin()
+                    source.write({
+                      type: `insert`,
+                      value: { id: `fresh`, title: `New source` },
+                    })
+                    await whenSyncAccepted(source.commit())
+                  }
+                },
+              }
+            },
+          },
+          persistence: { adapter, coordinator: receiver },
+        }),
+      )
+      collection.startSyncImmediate()
+      await collection.stateWhenReady()
+      source.begin()
+      source.write({
+        type: `insert`,
+        value: { id: `old`, title: `Old source` },
+      })
+      await whenSyncAccepted(source.commit())
+      await collection._sync.loadSubset({ limit: 1 })
+      expect(collection.get(`old`)).toMatchObject({ id: `old` })
+      expect(loads).toEqual([undefined])
+
+      const oldStorageId = adapter.currentStorageId()
+      expired = true
+      peer.publish(oldStorageId, {
+        v: 1,
+        dbName: `expired-receiver`,
+        collectionId: oldStorageId,
+        senderId: peer.getNodeId(),
+        ts: Date.now(),
+        payload: {
+          type: `tx:committed`,
+          term: 1,
+          seq: 2,
+          txId: `peer-change-after-pause`,
+          latestRowVersion: 2,
+          requiresFullReload: true,
+        },
+      })
+      // Deliver the queued message at the paused tab's later wall-clock cut,
+      // before JavaScript gets an opportunity to run its renewal timer.
+      const wallNow = Date.now
+      const clock = vi
+        .spyOn(Date, `now`)
+        .mockImplementation(() => wallNow() + 20_000)
+      try {
+        expect(
+          ControlledBroadcastChannel.deliverWhere(
+            (data) =>
+              envelopeCollection(data) === oldStorageId &&
+              payloadType(data) === `tx:committed` &&
+              (data as { payload?: { txId?: string } }).payload?.txId ===
+                `peer-change-after-pause`,
+          ),
+        ).toBe(true)
+      } finally {
+        clock.mockRestore()
+      }
+      await waitFor(() => loads.length > 1, `retained demand reload`)
+      expect(adapter.currentStorageId()).toBe(oldStorageId)
+      expect(loads).toEqual([undefined, true])
+      expect(collection.get(`old`)).toBeUndefined()
+      expect(collection.get(`fresh`)).toMatchObject({ id: `fresh` })
+    }, [
+      [`receiver Collection`, () => collection?.cleanup() ?? Promise.resolve()],
+      [`receiver coordinator`, () => disposeCoordinator(receiver)],
+      [`peer coordinator`, () => disposeCoordinator(peer)],
+    ])
+  })
+
+  // One host clock defines claim expiry for both SQLite and the receiving
+  // runtime. The independent history expires a live claim using the clock
+  // supplied through the public Browser factory, then delivers a targeted
+  // peer commit. Because the old generation is no longer readable, its
+  // notification cannot publish a row. The active demand instead obtains a
+  // fresh source snapshot after rotation. Real SQLite and the composed
+  // Browser coordinator carry the claim and message at this checkpoint.
+  it(`uses the configured host clock before applying a peer notification`, async () => {
+    type Row = { id: string; title: string }
+    const directory = mkdtempSync(join(tmpdir(), `db-claim-clock-`))
+    const database = createWASQLiteTestDatabase({
+      filename: join(directory, `claim.sqlite`),
+    })
+    const receiver = createCoordinator(
+      `claim-clock`,
+      createRecordingAdapter({ id: `clock-receiver-bootstrap` }),
+    )
+    const peer = createCoordinator(
+      `claim-clock`,
+      createRecordingAdapter({ id: `clock-peer` }),
+    )
+    let hostNow = Date.now() + 86_400_000
+    const persistence = createBrowserWASQLitePersistence({
+      database,
+      coordinator: receiver,
+      cacheGenerationClaimTtlMs: 10_000,
+      now: () => hostNow,
+    })
+    let source!: Parameters<SyncConfig<Row, string>[`sync`]>[0]
+    let collection: Collection<Row, string> | undefined
+    const loads: Array<boolean | undefined> = []
+
+    await withFailurePreservingCleanup(async () => {
+      collection = createCollection(
+        persistedCollectionOptions<Row, string>({
+          id: `claim-clock-collection`,
+          syncMode: `on-demand`,
+          getKey: (row) => row.id,
+          sync: {
+            sync: (params) => {
+              source = params
+              params.markReady()
+              return {
+                restartAfterScopedRecovery: () => {},
+                loadSubset: async (options) => {
+                  loads.push(options.refetch)
+                  if (options.refetch) {
+                    source.begin()
+                    source.write({
+                      type: `insert`,
+                      value: { id: `fresh`, title: `Fresh source` },
+                    })
+                    await whenSyncAccepted(source.commit())
+                  }
+                },
+              }
+            },
+          },
+          persistence,
+        }),
+      )
+      collection.startSyncImmediate()
+      await collection.stateWhenReady()
+      source.begin()
+      source.write({
+        type: `insert`,
+        value: { id: `old`, title: `Old source` },
+      })
+      await whenSyncAccepted(source.commit())
+      await collection._sync.loadSubset({})
+      expect(collection.get(`old`)).toMatchObject({ title: `Old source` })
+      expect(loads).toEqual([undefined])
+
+      const head = await database.execute<{ physical_id: string }>(
+        `SELECT physical_id FROM cache_generation
+         WHERE logical_id = ? AND retired = 0`,
+        [`claim-clock-collection`],
+      )
+      const oldStorageId = head[0]?.physical_id
+      if (!oldStorageId) throw new Error(`missing claimed cache generation`)
+      hostNow += 20_000
+      peer.publish(oldStorageId, {
+        v: 1,
+        dbName: `claim-clock`,
+        collectionId: oldStorageId,
+        senderId: peer.getNodeId(),
+        ts: Date.now(),
+        payload: {
+          type: `tx:committed`,
+          term: 2,
+          seq: 1,
+          txId: `peer-change-after-clock-expiry`,
+          latestRowVersion: 2,
+          requiresFullReload: false,
+          changedRows: [
+            {
+              key: `old`,
+              value: { id: `old`, title: `Stale peer notification` },
+            },
+          ],
+          deletedKeys: [],
+        },
+      })
+      expect(
+        ControlledBroadcastChannel.deliverWhere(
+          (data) =>
+            envelopeCollection(data) === oldStorageId &&
+            payloadType(data) === `tx:committed` &&
+            (data as { payload?: { txId?: string } }).payload?.txId ===
+              `peer-change-after-clock-expiry`,
+        ),
+      ).toBe(true)
+      await pumpNetwork()
+      for (let pass = 0; pass < 10; pass++) await nextTurn()
+      expect(collection.get(`old`)?.title).not.toBe(`Stale peer notification`)
+      await waitFor(() => loads.includes(true), `expired-claim source reload`)
+      expect(collection.get(`old`)).toBeUndefined()
+      expect(collection.get(`fresh`)).toMatchObject({ title: `Fresh source` })
+    }, [
+      [`receiver Collection`, () => collection?.cleanup() ?? Promise.resolve()],
+      [`receiver coordinator`, () => disposeCoordinator(receiver)],
+      [`peer coordinator`, () => disposeCoordinator(peer)],
+      [`real SQLite database`, () => Promise.resolve(database.close?.())],
+      [
+        `real SQLite directory`,
+        () => rmSync(directory, { recursive: true, force: true }),
+      ],
+    ])
+  })
+})
+
 describe(`remote subset ownership lease oracle`, () => {
   it(`calibrates collection-scoped acquisition identity against a global-id mutant`, () => {
     const expected: CollectionScopedLeaseSnapshot = {
@@ -2434,6 +2960,35 @@ async function readRawCollectionSnapshot(
 }
 
 describe(`per-collection adapter and SQLite-state oracle`, () => {
+  // A host factory promises the same configured claim lifetime as its core
+  // adapter. The supplied clock makes the claim's expiry exact; this catches
+  // options accepted by the public type but dropped before adapter creation.
+  it(`forwards the configured cache claim lifetime to its SQLite adapter`, async () => {
+    const directory = mkdtempSync(join(tmpdir(), `db-claim-options-`))
+    const database = createWASQLiteTestDatabase({
+      filename: join(directory, `claim.sqlite`),
+    })
+    try {
+      const persistence = createBrowserWASQLitePersistence({
+        database,
+        cacheGenerationClaimTtlMs: 1_234,
+        now: () => 5_000,
+      })
+      const resolve = persistence.resolvePersistenceForCollection
+      if (!resolve) throw new Error(`missing per-collection resolver`)
+      const adapter = resolve({
+        collectionId: `claim-options`,
+        mode: `sync-present`,
+      }).adapter
+      const claim = await adapter.claimCacheGeneration!(`claim-options`)
+      expect(claim.expiresAtMs).toBe(6_234)
+      await adapter.releaseCacheGenerationClaim!(claim.claimId)
+    } finally {
+      await Promise.resolve(database.close?.())
+      rmSync(directory, { recursive: true, force: true })
+    }
+  })
+
   it(`preserves alpha rows, schema, and reset epoch when beta registers a different adapter`, async () => {
     let directory: string | undefined
     let database: BrowserWASQLiteDatabase | undefined

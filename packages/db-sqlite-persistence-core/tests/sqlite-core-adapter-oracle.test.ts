@@ -815,15 +815,18 @@ export function runSQLiteCoreAdapterContractSuite(
         score: 10,
       }
       const expected: Todo = { ...baseline, title: `Source update` }
-      await adapter.applyCommittedTx(collectionId, {
+      const cacheClaim = await adapter.claimCacheGeneration?.(collectionId)
+      if (!cacheClaim) throw new Error(`Expected managed cache claim`)
+      expect(cacheClaim.storageCollectionId).not.toBe(collectionId)
+      await adapter.applyCommittedTx(cacheClaim.storageCollectionId, {
         txId: `seed-partial-source-baseline`,
         term: 1,
         seq: 1,
         rowVersion: 1,
+        cacheGenerationClaimId: cacheClaim.claimId,
         mutations: [{ type: `insert`, key: baseline.id, value: baseline }],
       })
 
-      const loadSubset = adapter.loadSubset.bind(adapter)
       const subsetFailure = new Error(`controlled incremental subset failure`)
       const subsetLoad = holdAndRejectFirstSubsetLoad(adapter, subsetFailure)
 
@@ -882,7 +885,11 @@ export function runSQLiteCoreAdapterContractSuite(
         subsetLoad.release()
         await expect(load).rejects.toBe(subsetFailure)
         await receipt
-        const durableBeforeRetry = await loadSubset(collectionId, {})
+        const durableBeforeRetry = await adapter.loadSubset(
+          cacheClaim.storageCollectionId,
+          {},
+          { cacheGenerationClaimId: cacheClaim.claimId },
+        )
         expect({
           receiptStatus,
           status: collection.status,
@@ -896,6 +903,7 @@ export function runSQLiteCoreAdapterContractSuite(
           publicBeforeRetry: expected,
           durableBeforeRetry: [expected],
         })
+        expect(await adapter.loadSubset(collectionId, {})).toEqual([])
 
         await collection._sync.loadSubset({ limit: 1 })
         expect({
@@ -912,6 +920,7 @@ export function runSQLiteCoreAdapterContractSuite(
         await load?.catch(() => undefined)
         await receipt?.catch(() => undefined)
         await collection.cleanup()
+        await adapter.releaseCacheGenerationClaim?.(cacheClaim.claimId)
       }
     })
 
@@ -926,17 +935,20 @@ export function runSQLiteCoreAdapterContractSuite(
           createdAt: `2026-01-02T00:00:00.000Z`,
           score: 11,
         }
+        const cacheClaim = await adapter.claimCacheGeneration?.(collectionId)
+        if (!cacheClaim) throw new Error(`Expected managed cache claim`)
+        expect(cacheClaim.storageCollectionId).not.toBe(collectionId)
         if (operation === `delete`) {
-          await adapter.applyCommittedTx(collectionId, {
+          await adapter.applyCommittedTx(cacheClaim.storageCollectionId, {
             txId: `seed-delete-baseline`,
             term: 1,
             seq: 1,
             rowVersion: 1,
+            cacheGenerationClaimId: cacheClaim.claimId,
             mutations: [{ type: `insert`, key: row.id, value: row }],
           })
         }
 
-        const loadSubset = adapter.loadSubset.bind(adapter)
         const subsetFailure = new Error(
           `controlled ${operation} subset failure`,
         )
@@ -1000,9 +1012,15 @@ export function runSQLiteCoreAdapterContractSuite(
               createdAt: value.createdAt,
               score: value.score,
             })),
-            durableRows: (await loadSubset(collectionId, {})).map(
-              ({ value }) => value,
-            ),
+            durableRows: (
+              await adapter.loadSubset(
+                cacheClaim.storageCollectionId,
+                {},
+                {
+                  cacheGenerationClaimId: cacheClaim.claimId,
+                },
+              )
+            ).map(({ value }) => value),
             status: collection.status,
             publicError: collection._lifecycle.getSyncError(),
           }).toEqual({
@@ -1012,6 +1030,7 @@ export function runSQLiteCoreAdapterContractSuite(
             status: `ready`,
             publicError: undefined,
           })
+          expect(await adapter.loadSubset(collectionId, {})).toEqual([])
 
           await collection._sync.loadSubset({ limit: 1 })
           expect({
@@ -1033,6 +1052,7 @@ export function runSQLiteCoreAdapterContractSuite(
           await load?.catch(() => undefined)
           await receipt?.catch(() => undefined)
           await collection.cleanup()
+          await adapter.releaseCacheGenerationClaim?.(cacheClaim.claimId)
         }
       },
     )

@@ -2,6 +2,7 @@ import {
   IR,
   compareTemporalValues,
   compileSingleRowExpression,
+  safeRandomUUID,
   toBooleanPredicate,
 } from '@tanstack/db'
 import {
@@ -27,6 +28,7 @@ import {
 import type { LoadSubsetOptions } from '@tanstack/db'
 import type {
   HydrationPersistenceAdapter,
+  PersistedCacheGenerationClaim,
   PersistedIndexSpec,
   PersistedKeySetEvidence,
   PersistedRowScanOptions,
@@ -75,6 +77,10 @@ export type SQLiteCoreAdapterOptions = {
   appliedTxPruneMaxRows?: number
   appliedTxPruneMaxAgeSeconds?: number
   pullSinceReloadThreshold?: number
+  /** Milliseconds without renewal before a sync run loses cache access. */
+  cacheGenerationClaimTtlMs?: number
+  /** Host clock, injectable for expiry histories. */
+  now?: () => number
 }
 
 export type SQLitePullSinceResult<TKey extends string | number> =
@@ -245,6 +251,16 @@ function observeSharedLogicalSchedulingSupport(
 }
 
 const DEFAULT_SCHEMA_VERSION = 1
+const CACHE_GENERATION_ID_PREFIX = `tanstack-db-cache:`
+const LEGACY_CACHE_GENERATION_ID_PREFIX = `\u0000tanstack-db-cache:`
+
+function hasCacheGenerationIdPrefix(collectionId: string): boolean {
+  return (
+    collectionId.startsWith(CACHE_GENERATION_ID_PREFIX) ||
+    collectionId.startsWith(LEGACY_CACHE_GENERATION_ID_PREFIX)
+  )
+}
+export const DEFAULT_CACHE_GENERATION_CLAIM_TTL_MS = 5 * 60_000
 const DEFAULT_PULL_SINCE_RELOAD_THRESHOLD = 128
 
 /**
@@ -1619,6 +1635,8 @@ export class SQLiteCorePersistenceAdapter implements PersistenceAdapter {
   private readonly appliedTxPruneMaxAgeSeconds: number | undefined
   private readonly pullSinceReloadThreshold: number
   private readonly replacementBatchSize: number
+  private readonly cacheGenerationClaimTtlMs: number
+  private readonly now: () => number
 
   private initialized = false
   private readonly collectionTableCache = new Map<
@@ -1629,6 +1647,309 @@ export class SQLiteCorePersistenceAdapter implements PersistenceAdapter {
     string,
     Promise<CollectionTableMapping>
   >()
+
+  claimCacheGeneration(
+    collectionId: string,
+  ): Promise<PersistedCacheGenerationClaim> {
+    return this.runRegular(async () => {
+      await this.ensureInitialized()
+      return this.driver.transaction(async (driver) => {
+        const expiresAtMs = this.now() + this.cacheGenerationClaimTtlMs
+        // The first generation must not reuse the legacy collection ID: an older
+        // adapter can still write that ID without a claim after an upgrade.
+        const initialPhysicalId = `${CACHE_GENERATION_ID_PREFIX}${safeRandomUUID()}`
+        await driver.run(
+          `INSERT INTO cache_generation (logical_id, generation, physical_id, retired)
+           SELECT ?, 0, ?, 0
+           WHERE NOT EXISTS (
+             SELECT 1 FROM cache_generation WHERE logical_id = ?
+           )`,
+          [collectionId, initialPhysicalId, collectionId],
+        )
+        const head = await driver.query<{ physical_id: string }>(
+          `SELECT physical_id FROM cache_generation
+           WHERE logical_id = ? AND retired = 0`,
+          [collectionId],
+        )
+        const storageCollectionId = head[0]?.physical_id
+        if (!storageCollectionId) {
+          throw new InvalidPersistedCollectionConfigError(
+            `No active persisted cache generation for collection "${collectionId}"`,
+          )
+        }
+        const claimId = safeRandomUUID()
+        await driver.run(
+          `INSERT INTO cache_generation_claim
+             (claim_id, logical_id, physical_id, expires_at_ms)
+           VALUES (?, ?, ?, ?)`,
+          [claimId, collectionId, storageCollectionId, expiresAtMs],
+        )
+        await this.collectRetiredCacheGenerations(driver)
+        return { storageCollectionId, claimId, expiresAtMs }
+      })
+    })
+  }
+
+  rotateCacheGeneration(
+    collectionId: string,
+    claimId: string,
+    resetMetadata?: { key: string; value: unknown },
+    expectedStorageCollectionId?: string,
+  ): Promise<PersistedCacheGenerationClaim> {
+    return this.runRegular(async () => {
+      await this.ensureInitialized()
+      return this.driver.transaction(async (driver) => {
+        const now = this.now()
+        const expiresAtMs = now + this.cacheGenerationClaimTtlMs
+        const claimed = await driver.query<{
+          physical_id: string
+          expires_at_ms: number
+        }>(
+          `SELECT physical_id, expires_at_ms
+           FROM cache_generation_claim
+           WHERE claim_id = ? AND logical_id = ?`,
+          [claimId, collectionId],
+        )
+        const claimedPhysicalId =
+          claimed[0] && claimed[0].expires_at_ms > now
+            ? claimed[0].physical_id
+            : undefined
+        if (
+          claimedPhysicalId &&
+          expectedStorageCollectionId &&
+          claimedPhysicalId !== expectedStorageCollectionId
+        ) {
+          throw new InvalidPersistedCollectionConfigError(
+            `Persisted cache claim changed generations before recovery`,
+          )
+        }
+        const head = await driver.query<{
+          generation: number
+          physical_id: string
+        }>(
+          `SELECT generation, physical_id FROM cache_generation
+           WHERE logical_id = ? AND retired = 0`,
+          [collectionId],
+        )
+        const active = head[0]
+        if (!active) {
+          throw new InvalidPersistedCollectionConfigError(
+            `No active persisted cache generation for collection "${collectionId}"`,
+          )
+        }
+        await driver.run(
+          `INSERT INTO cache_generation_sequence (logical_id, next_generation)
+           SELECT ?, COALESCE(MAX(generation), -1) + 1
+           FROM cache_generation WHERE logical_id = ?
+           ON CONFLICT(logical_id) DO NOTHING`,
+          [collectionId, collectionId],
+        )
+        const nextRows = await driver.query<{ next_generation: number }>(
+          `SELECT next_generation FROM cache_generation_sequence
+           WHERE logical_id = ?`,
+          [collectionId],
+        )
+        const nextGeneration = nextRows[0]!.next_generation
+        await driver.run(
+          `UPDATE cache_generation_sequence SET next_generation = ?
+           WHERE logical_id = ?`,
+          [nextGeneration + 1, collectionId],
+        )
+        // An expired claim no longer owns the head, even when it remembers
+        // the current storage ID. Its recovery is private so another run's
+        // valid current cache remains claimable.
+        const ownedHead = claimedPhysicalId === active.physical_id
+        const storageCollectionId = `${CACHE_GENERATION_ID_PREFIX}${safeRandomUUID()}`
+        if (ownedHead) {
+          await driver.run(
+            `UPDATE cache_generation SET retired = 1
+             WHERE logical_id = ? AND generation = ?`,
+            [collectionId, active.generation],
+          )
+        }
+        await driver.run(
+          `INSERT INTO cache_generation (logical_id, generation, physical_id, retired)
+           VALUES (?, ?, ?, ?)`,
+          [
+            collectionId,
+            nextGeneration,
+            storageCollectionId,
+            ownedHead ? 0 : 1,
+          ],
+        )
+        const nextClaimId = claimed[0] ? claimId : safeRandomUUID()
+        if (claimed[0]) {
+          await driver.run(
+            `UPDATE cache_generation_claim
+             SET physical_id = ?, expires_at_ms = ? WHERE claim_id = ?`,
+            [storageCollectionId, expiresAtMs, claimId],
+          )
+        } else {
+          await driver.run(
+            `INSERT INTO cache_generation_claim
+               (claim_id, logical_id, physical_id, expires_at_ms)
+             VALUES (?, ?, ?, ?)`,
+            [nextClaimId, collectionId, storageCollectionId, expiresAtMs],
+          )
+        }
+        await driver.run(
+          `INSERT INTO collection_version (
+             collection_id, latest_row_version,
+             key_set_evidence_available, key_set_evidence_incompatible
+           ) VALUES (?, 0, 1, 1)`,
+          [storageCollectionId],
+        )
+        if (resetMetadata) {
+          await driver.run(
+            `INSERT INTO collection_metadata (collection_id, key, value, updated_at)
+             VALUES (?, ?, ?, CAST(strftime('%s', 'now') AS INTEGER))`,
+            [
+              storageCollectionId,
+              resetMetadata.key,
+              serializePersistedRowValue(resetMetadata.value),
+            ],
+          )
+        }
+        await this.collectRetiredCacheGenerations(driver)
+        return { storageCollectionId, claimId: nextClaimId, expiresAtMs }
+      })
+    })
+  }
+
+  releaseCacheGenerationClaim(claimId: string): Promise<void> {
+    return this.runRegular(async () => {
+      await this.ensureInitialized()
+      await this.runInTransaction(async (driver) => {
+        await driver.run(
+          `DELETE FROM cache_generation_claim WHERE claim_id = ?`,
+          [claimId],
+        )
+        await this.collectRetiredCacheGenerations(driver)
+      })
+    })
+  }
+
+  renewCacheGenerationClaim(
+    storageCollectionId: string,
+    claimId: string,
+  ): Promise<number | undefined> {
+    return this.runRegular(() =>
+      this.renewCacheGenerationClaimUnscheduled(storageCollectionId, claimId),
+    )
+  }
+
+  private async renewCacheGenerationClaimUnscheduled(
+    storageCollectionId: string,
+    claimId: string,
+  ): Promise<number | undefined> {
+    await this.ensureInitialized()
+    return this.runInTransaction(async (driver) => {
+      const now = this.now()
+      const rows = await driver.query<{ claim_id: string }>(
+        `SELECT claim_id FROM cache_generation_claim
+           WHERE claim_id = ? AND physical_id = ? AND expires_at_ms > ?`,
+        [claimId, storageCollectionId, now],
+      )
+      if (!rows[0]) {
+        await this.collectRetiredCacheGenerations(driver)
+        return undefined
+      }
+      const expiresAtMs = now + this.cacheGenerationClaimTtlMs
+      await driver.run(
+        `UPDATE cache_generation_claim SET expires_at_ms = ?
+           WHERE claim_id = ?`,
+        [expiresAtMs, claimId],
+      )
+      return expiresAtMs
+    })
+  }
+
+  private async collectRetiredCacheGenerations(
+    driver: SQLiteDriver,
+  ): Promise<void> {
+    await driver.run(
+      `DELETE FROM cache_generation_claim WHERE expires_at_ms <= ?`,
+      [this.now()],
+    )
+    const retired = await driver.query<{
+      physical_id: string
+      table_name: string | null
+      tombstone_table_name: string | null
+    }>(
+      `SELECT generation.physical_id, registry.table_name,
+              registry.tombstone_table_name
+       FROM cache_generation AS generation
+       LEFT JOIN collection_registry AS registry
+         ON registry.collection_id = generation.physical_id
+       WHERE generation.retired = 1
+         AND NOT EXISTS (
+           SELECT 1 FROM cache_generation_claim AS claim
+           WHERE claim.physical_id = generation.physical_id
+         )`,
+    )
+    for (const generation of retired) {
+      if (generation.table_name) {
+        await driver.exec(
+          `DROP TABLE IF EXISTS ${quoteIdentifier(generation.table_name)}`,
+        )
+      }
+      if (generation.tombstone_table_name) {
+        await driver.exec(
+          `DROP TABLE IF EXISTS ${quoteIdentifier(generation.tombstone_table_name)}`,
+        )
+      }
+      for (const table of [
+        `applied_tx`,
+        `collection_expected_keys`,
+        `collection_metadata`,
+        `persisted_index_registry`,
+        `leader_term`,
+      ]) {
+        await driver.run(`DELETE FROM ${table} WHERE collection_id = ?`, [
+          generation.physical_id,
+        ])
+      }
+      await driver.run(
+        `DELETE FROM collection_version WHERE collection_id = ?`,
+        [generation.physical_id],
+      )
+      await driver.run(
+        `DELETE FROM collection_reset_epoch WHERE collection_id = ?`,
+        [generation.physical_id],
+      )
+      await driver.run(
+        `DELETE FROM collection_registry WHERE collection_id = ?`,
+        [generation.physical_id],
+      )
+      await driver.run(`DELETE FROM cache_generation WHERE physical_id = ?`, [
+        generation.physical_id,
+      ])
+      this.collectionTableCache.delete(generation.physical_id)
+    }
+  }
+
+  assertCacheGenerationClaim(
+    storageCollectionId: string,
+    claimId: string,
+  ): Promise<void> {
+    return this.runRegular(async () => {
+      await this.ensureInitialized()
+      const claim = await this.driver.query<{ claim_id: string }>(
+        `SELECT claim_id FROM cache_generation_claim
+         WHERE claim_id = ? AND physical_id = ? AND expires_at_ms > ?`,
+        [claimId, storageCollectionId, this.now()],
+      )
+      if (!claim[0]) {
+        throw new InvalidPersistedCollectionConfigError(
+          `Persisted cache claim is no longer active for collection "${storageCollectionId}"`,
+        )
+      }
+    })
+  }
+
+  getCacheGenerationNow(): number {
+    return this.now()
+  }
 
   constructor(options: SQLiteCoreAdapterOptions) {
     const maxBoundParameters = options.driver.maxBoundParameters
@@ -1644,6 +1965,18 @@ export class SQLiteCorePersistenceAdapter implements PersistenceAdapter {
       maxBoundParameters === undefined
         ? REPLACEMENT_BATCH_SIZE
         : Math.min(REPLACEMENT_BATCH_SIZE, Math.floor(maxBoundParameters / 4))
+
+    this.cacheGenerationClaimTtlMs =
+      options.cacheGenerationClaimTtlMs ?? DEFAULT_CACHE_GENERATION_CLAIM_TTL_MS
+    if (
+      !Number.isSafeInteger(this.cacheGenerationClaimTtlMs) ||
+      this.cacheGenerationClaimTtlMs <= 0
+    ) {
+      throw new InvalidPersistedCollectionConfigError(
+        `SQLite adapter cacheGenerationClaimTtlMs must be a positive safe integer`,
+      )
+    }
+    this.now = options.now ?? Date.now
 
     const schemaVersion = options.schemaVersion ?? DEFAULT_SCHEMA_VERSION
     if (!Number.isInteger(schemaVersion) || schemaVersion < 0) {
@@ -1713,18 +2046,20 @@ export class SQLiteCorePersistenceAdapter implements PersistenceAdapter {
         this.loadResumeSnapshotUnscheduled(collectionId, context),
       applyCommittedTx: (collectionId, tx) =>
         this.applyCommittedTxUnscheduled(collectionId, tx),
-      loadCollectionMetadata: (collectionId) =>
-        this.loadCollectionMetadataUnscheduled(collectionId),
-      scanRows: (collectionId, scanOptions) =>
-        this.scanRowsUnscheduled(collectionId, scanOptions),
-      ensureIndex: (collectionId, signature, spec) =>
-        this.ensureIndexUnscheduled(collectionId, signature, spec),
-      markIndexRemoved: (collectionId, signature) =>
-        this.markIndexRemovedUnscheduled(collectionId, signature),
-      getStreamPosition: (collectionId) =>
-        this.getStreamPositionUnscheduled(collectionId),
-      pullSince: (collectionId, fromRowVersion) =>
-        this.pullSinceUnscheduled(collectionId, fromRowVersion),
+      renewCacheGenerationClaim: (storageCollectionId, claimId) =>
+        this.renewCacheGenerationClaimUnscheduled(storageCollectionId, claimId),
+      loadCollectionMetadata: (collectionId, context) =>
+        this.loadCollectionMetadataUnscheduled(collectionId, context),
+      scanRows: (collectionId, scanOptions, context) =>
+        this.scanRowsUnscheduled(collectionId, scanOptions, context),
+      ensureIndex: (collectionId, signature, spec, ctx) =>
+        this.ensureIndexUnscheduled(collectionId, signature, spec, ctx),
+      markIndexRemoved: (collectionId, signature, ctx) =>
+        this.markIndexRemovedUnscheduled(collectionId, signature, ctx),
+      getStreamPosition: (collectionId, ctx) =>
+        this.getStreamPositionUnscheduled(collectionId, ctx),
+      pullSince: (collectionId, fromRowVersion, ctx) =>
+        this.pullSinceUnscheduled(collectionId, fromRowVersion, ctx),
       runInHydrationScope: async (task) => task(this.hydrationAdapter),
     }
   }
@@ -1804,10 +2139,48 @@ export class SQLiteCorePersistenceAdapter implements PersistenceAdapter {
     }
   }
 
+  private async assertCacheGenerationReadClaim(
+    driver: SQLiteDriver,
+    storageCollectionId: string,
+    claimId?: string,
+  ): Promise<void> {
+    await this.ensureInitialized()
+    if (!claimId) {
+      if (!hasCacheGenerationIdPrefix(storageCollectionId)) return
+      const generation = await driver.query<{ physical_id: string }>(
+        `SELECT physical_id FROM cache_generation WHERE physical_id = ?`,
+        [storageCollectionId],
+      )
+      if (generation[0]) {
+        throw new InvalidPersistedCollectionConfigError(
+          `Persisted cache claim is required for collection "${storageCollectionId}"`,
+        )
+      }
+      return
+    }
+    const rows = await driver.query<{ claim_id: string }>(
+      `SELECT claim.claim_id
+       FROM cache_generation_claim AS claim
+       JOIN cache_generation AS generation
+         ON generation.physical_id = claim.physical_id
+       WHERE claim.claim_id = ? AND claim.physical_id = ?
+         AND claim.expires_at_ms > ?`,
+      [claimId, storageCollectionId, this.now()],
+    )
+    if (!rows[0]) {
+      throw new InvalidPersistedCollectionConfigError(
+        `Persisted cache claim is no longer active for collection "${storageCollectionId}"`,
+      )
+    }
+  }
+
   loadSubset(
     collectionId: string,
     options: LoadSubsetOptions,
-    ctx?: { requiredIndexSignatures?: ReadonlyArray<string> },
+    ctx?: {
+      requiredIndexSignatures?: ReadonlyArray<string>
+      cacheGenerationClaimId?: string
+    },
   ): Promise<
     Array<{
       key: string | number
@@ -1823,7 +2196,10 @@ export class SQLiteCorePersistenceAdapter implements PersistenceAdapter {
   private async loadSubsetUnscheduled(
     collectionId: string,
     options: LoadSubsetOptions,
-    ctx?: { requiredIndexSignatures?: ReadonlyArray<string> },
+    ctx?: {
+      requiredIndexSignatures?: ReadonlyArray<string>
+      cacheGenerationClaimId?: string
+    },
   ): Promise<
     Array<{
       key: string | number
@@ -1831,8 +2207,21 @@ export class SQLiteCorePersistenceAdapter implements PersistenceAdapter {
       metadata?: unknown
     }>
   > {
-    const tableMapping = await this.ensureCollectionReady(collectionId)
+    await this.assertCacheGenerationReadClaim(
+      this.driver,
+      collectionId,
+      ctx?.cacheGenerationClaimId,
+    )
+    const tableMapping = await this.ensureCollectionReady(
+      collectionId,
+      ctx?.cacheGenerationClaimId,
+    )
     return this.runInTransaction(async (transactionDriver) => {
+      await this.assertCacheGenerationReadClaim(
+        transactionDriver,
+        collectionId,
+        ctx?.cacheGenerationClaimId,
+      )
       await this.assertCurrentSchemaVersion(
         collectionId,
         transactionDriver,
@@ -1910,6 +2299,7 @@ export class SQLiteCorePersistenceAdapter implements PersistenceAdapter {
     ctx?: {
       requiredIndexSignatures?: ReadonlyArray<string>
       includeRows?: boolean
+      cacheGenerationClaimId?: string
     },
   ) {
     return this.runRegular(() =>
@@ -1922,6 +2312,7 @@ export class SQLiteCorePersistenceAdapter implements PersistenceAdapter {
     ctx?: {
       requiredIndexSignatures?: ReadonlyArray<string>
       includeRows?: boolean
+      cacheGenerationClaimId?: string
     },
   ): Promise<{
     rows: Array<{
@@ -1936,10 +2327,23 @@ export class SQLiteCorePersistenceAdapter implements PersistenceAdapter {
     latestRowVersion: number
     resetEpoch: number
   }> {
-    const tableMapping = await this.ensureCollectionReady(collectionId)
+    await this.assertCacheGenerationReadClaim(
+      this.driver,
+      collectionId,
+      ctx?.cacheGenerationClaimId,
+    )
+    const tableMapping = await this.ensureCollectionReady(
+      collectionId,
+      ctx?.cacheGenerationClaimId,
+    )
     const includeRows = ctx?.includeRows !== false
 
     return this.runInTransaction(async (transactionDriver) => {
+      await this.assertCacheGenerationReadClaim(
+        transactionDriver,
+        collectionId,
+        ctx?.cacheGenerationClaimId,
+      )
       await this.assertCurrentSchemaVersion(
         collectionId,
         transactionDriver,
@@ -2010,11 +2414,25 @@ export class SQLiteCorePersistenceAdapter implements PersistenceAdapter {
     collectionId: string,
     tx: PersistedTx,
   ): Promise<void> {
-    const tableMapping = await this.ensureCollectionReady(collectionId)
+    await this.assertCacheGenerationReadClaim(
+      this.driver,
+      collectionId,
+      tx.cacheGenerationClaimId,
+    )
+    const tableMapping = await this.ensureCollectionReady(
+      collectionId,
+      tx.cacheGenerationClaimId,
+    )
     const collectionTableSql = quoteIdentifier(tableMapping.tableName)
     const tombstoneTableSql = quoteIdentifier(tableMapping.tombstoneTableName)
 
     await this.runInTransaction(async (transactionDriver) => {
+      await this.assertCacheGenerationReadClaim(
+        transactionDriver,
+        collectionId,
+        tx.cacheGenerationClaimId,
+      )
+
       const versionRows = await transactionDriver.query<{
         latest_row_version: number
         key_set_evidence_available: number
@@ -2371,17 +2789,29 @@ export class SQLiteCorePersistenceAdapter implements PersistenceAdapter {
 
   loadCollectionMetadata(
     collectionId: string,
+    ctx?: { cacheGenerationClaimId?: string },
   ): Promise<Array<{ key: string; value: unknown }>> {
     return this.runRegular(() =>
-      this.loadCollectionMetadataUnscheduled(collectionId),
+      this.loadCollectionMetadataUnscheduled(collectionId, ctx),
     )
   }
 
   private async loadCollectionMetadataUnscheduled(
     collectionId: string,
+    ctx?: { cacheGenerationClaimId?: string },
   ): Promise<Array<{ key: string; value: unknown }>> {
-    await this.ensureCollectionReady(collectionId)
+    await this.assertCacheGenerationReadClaim(
+      this.driver,
+      collectionId,
+      ctx?.cacheGenerationClaimId,
+    )
+    await this.ensureCollectionReady(collectionId, ctx?.cacheGenerationClaimId)
     return this.runInTransaction(async (transactionDriver) => {
+      await this.assertCacheGenerationReadClaim(
+        transactionDriver,
+        collectionId,
+        ctx?.cacheGenerationClaimId,
+      )
       await this.assertCurrentSchemaVersion(
         collectionId,
         transactionDriver,
@@ -2407,19 +2837,34 @@ export class SQLiteCorePersistenceAdapter implements PersistenceAdapter {
   scanRows(
     collectionId: string,
     options?: PersistedRowScanOptions,
+    ctx?: { cacheGenerationClaimId?: string },
   ): Promise<Array<PersistedScannedRow>> {
     return this.runRegular(() =>
-      this.scanRowsUnscheduled(collectionId, options),
+      this.scanRowsUnscheduled(collectionId, options, ctx),
     )
   }
 
   private async scanRowsUnscheduled(
     collectionId: string,
     options?: PersistedRowScanOptions,
+    ctx?: { cacheGenerationClaimId?: string },
   ): Promise<Array<PersistedScannedRow>> {
-    const tableMapping = await this.ensureCollectionReady(collectionId)
+    await this.assertCacheGenerationReadClaim(
+      this.driver,
+      collectionId,
+      ctx?.cacheGenerationClaimId,
+    )
+    const tableMapping = await this.ensureCollectionReady(
+      collectionId,
+      ctx?.cacheGenerationClaimId,
+    )
     const collectionTableSql = quoteIdentifier(tableMapping.tableName)
     return this.runInTransaction(async (transactionDriver) => {
+      await this.assertCacheGenerationReadClaim(
+        transactionDriver,
+        collectionId,
+        ctx?.cacheGenerationClaimId,
+      )
       await this.assertCurrentSchemaVersion(
         collectionId,
         transactionDriver,
@@ -2446,9 +2891,10 @@ export class SQLiteCorePersistenceAdapter implements PersistenceAdapter {
     collectionId: string,
     signature: string,
     spec: PersistedIndexSpec,
+    ctx?: { cacheGenerationClaimId?: string },
   ): Promise<void> {
     return this.runRegular(() =>
-      this.ensureIndexUnscheduled(collectionId, signature, spec),
+      this.ensureIndexUnscheduled(collectionId, signature, spec, ctx),
     )
   }
 
@@ -2456,8 +2902,17 @@ export class SQLiteCorePersistenceAdapter implements PersistenceAdapter {
     collectionId: string,
     signature: string,
     spec: PersistedIndexSpec,
+    ctx?: { cacheGenerationClaimId?: string },
   ): Promise<void> {
-    const tableMapping = await this.ensureCollectionReady(collectionId)
+    await this.assertCacheGenerationReadClaim(
+      this.driver,
+      collectionId,
+      ctx?.cacheGenerationClaimId,
+    )
+    const tableMapping = await this.ensureCollectionReady(
+      collectionId,
+      ctx?.cacheGenerationClaimId,
+    )
     const collectionTableSql = quoteIdentifier(tableMapping.tableName)
     const indexName = buildIndexName(collectionId, signature)
     const indexNameSql = quoteIdentifier(indexName)
@@ -2472,6 +2927,11 @@ export class SQLiteCorePersistenceAdapter implements PersistenceAdapter {
     const persistedWhereSql = whereSql ?? null
 
     await this.runInTransaction(async (transactionDriver) => {
+      await this.assertCacheGenerationReadClaim(
+        transactionDriver,
+        collectionId,
+        ctx?.cacheGenerationClaimId,
+      )
       await this.assertCurrentSchemaVersion(
         collectionId,
         transactionDriver,
@@ -2545,18 +3005,33 @@ export class SQLiteCorePersistenceAdapter implements PersistenceAdapter {
     })
   }
 
-  markIndexRemoved(collectionId: string, signature: string): Promise<void> {
+  markIndexRemoved(
+    collectionId: string,
+    signature: string,
+    ctx?: { cacheGenerationClaimId?: string },
+  ): Promise<void> {
     return this.runRegular(() =>
-      this.markIndexRemovedUnscheduled(collectionId, signature),
+      this.markIndexRemovedUnscheduled(collectionId, signature, ctx),
     )
   }
 
   private async markIndexRemovedUnscheduled(
     collectionId: string,
     signature: string,
+    ctx?: { cacheGenerationClaimId?: string },
   ): Promise<void> {
-    await this.ensureCollectionReady(collectionId)
+    await this.assertCacheGenerationReadClaim(
+      this.driver,
+      collectionId,
+      ctx?.cacheGenerationClaimId,
+    )
+    await this.ensureCollectionReady(collectionId, ctx?.cacheGenerationClaimId)
     await this.runInTransaction(async (transactionDriver) => {
+      await this.assertCacheGenerationReadClaim(
+        transactionDriver,
+        collectionId,
+        ctx?.cacheGenerationClaimId,
+      )
       await this.assertCurrentSchemaVersion(
         collectionId,
         transactionDriver,
@@ -2588,23 +3063,39 @@ export class SQLiteCorePersistenceAdapter implements PersistenceAdapter {
     })
   }
 
-  getStreamPosition(collectionId: string): Promise<{
+  getStreamPosition(
+    collectionId: string,
+    ctx?: { cacheGenerationClaimId?: string },
+  ): Promise<{
     latestTerm: number
     latestSeq: number
     latestRowVersion: number
   }> {
     // Election must not queue behind a hydrate awaiting its first writer route.
     // The stream-position snapshot still uses the driver's transaction admission.
-    return this.getStreamPositionUnscheduled(collectionId)
+    return this.getStreamPositionUnscheduled(collectionId, ctx)
   }
 
-  private async getStreamPositionUnscheduled(collectionId: string): Promise<{
+  private async getStreamPositionUnscheduled(
+    collectionId: string,
+    ctx?: { cacheGenerationClaimId?: string },
+  ): Promise<{
     latestTerm: number
     latestSeq: number
     latestRowVersion: number
   }> {
-    await this.ensureCollectionReady(collectionId)
+    await this.assertCacheGenerationReadClaim(
+      this.driver,
+      collectionId,
+      ctx?.cacheGenerationClaimId,
+    )
+    await this.ensureCollectionReady(collectionId, ctx?.cacheGenerationClaimId)
     return this.runInTransaction(async (transactionDriver) => {
+      await this.assertCacheGenerationReadClaim(
+        transactionDriver,
+        collectionId,
+        ctx?.cacheGenerationClaimId,
+      )
       await this.assertCurrentSchemaVersion(
         collectionId,
         transactionDriver,
@@ -2703,21 +3194,36 @@ export class SQLiteCorePersistenceAdapter implements PersistenceAdapter {
   pullSince(
     collectionId: string,
     fromRowVersion: number,
+    ctx?: { cacheGenerationClaimId?: string },
   ): Promise<SQLitePullSinceResult<string | number>> {
     return this.runRegular(() =>
-      this.pullSinceUnscheduled(collectionId, fromRowVersion),
+      this.pullSinceUnscheduled(collectionId, fromRowVersion, ctx),
     )
   }
 
   private async pullSinceUnscheduled(
     collectionId: string,
     fromRowVersion: number,
+    ctx?: { cacheGenerationClaimId?: string },
   ): Promise<SQLitePullSinceResult<string | number>> {
-    const tableMapping = await this.ensureCollectionReady(collectionId)
+    await this.assertCacheGenerationReadClaim(
+      this.driver,
+      collectionId,
+      ctx?.cacheGenerationClaimId,
+    )
+    const tableMapping = await this.ensureCollectionReady(
+      collectionId,
+      ctx?.cacheGenerationClaimId,
+    )
     const collectionTableSql = quoteIdentifier(tableMapping.tableName)
     const tombstoneTableSql = quoteIdentifier(tableMapping.tombstoneTableName)
 
     return this.runInTransaction(async (transactionDriver) => {
+      await this.assertCacheGenerationReadClaim(
+        transactionDriver,
+        collectionId,
+        ctx?.cacheGenerationClaimId,
+      )
       await this.assertCurrentSchemaVersion(
         collectionId,
         transactionDriver,
@@ -3042,6 +3548,7 @@ export class SQLiteCorePersistenceAdapter implements PersistenceAdapter {
 
   private async ensureCollectionReady(
     collectionId: string,
+    cacheGenerationClaimId?: string,
   ): Promise<CollectionTableMapping> {
     await this.ensureInitialized()
 
@@ -3055,7 +3562,10 @@ export class SQLiteCorePersistenceAdapter implements PersistenceAdapter {
       return inFlight
     }
 
-    const loadPromise = this.ensureCollectionReadyInternal(collectionId)
+    const loadPromise = this.ensureCollectionReadyInternal(
+      collectionId,
+      cacheGenerationClaimId,
+    )
     this.collectionTableLoads.set(collectionId, loadPromise)
 
     try {
@@ -3090,7 +3600,19 @@ export class SQLiteCorePersistenceAdapter implements PersistenceAdapter {
 
   private async ensureCollectionReadyInternal(
     collectionId: string,
+    cacheGenerationClaimId?: string,
   ): Promise<CollectionTableMapping> {
+    // Record whether registration began for a managed physical ID. Collection
+    // may remove that catalog row while this operation waits on external DDL.
+    const managedAtAdmission =
+      cacheGenerationClaimId !== undefined ||
+      (hasCacheGenerationIdPrefix(collectionId) &&
+        (
+          await this.driver.query<{ physical_id: string }>(
+            `SELECT physical_id FROM cache_generation WHERE physical_id = ?`,
+            [collectionId],
+          )
+        )[0] !== undefined)
     let registration = await this.loadCollectionRegistration(collectionId)
 
     if (!registration) {
@@ -3174,6 +3696,38 @@ export class SQLiteCorePersistenceAdapter implements PersistenceAdapter {
       [collectionId],
     )
     await this.ensureCollectionKeyEvidenceTriggers(collectionId, tableName)
+    if (managedAtAdmission) {
+      // Registration is outside the read/write transaction. If collection
+      // retired this generation while the DDL was in flight, remove any
+      // empty table recreated after collection instead of caching it.
+      const generation = await this.driver.query<{ physical_id: string }>(
+        `SELECT physical_id FROM cache_generation WHERE physical_id = ?`,
+        [collectionId],
+      )
+      if (!generation[0]) {
+        await this.driver.exec(
+          `DROP TABLE IF EXISTS ${quoteIdentifier(tableName)}`,
+        )
+        await this.driver.exec(
+          `DROP TABLE IF EXISTS ${quoteIdentifier(tombstoneTableName)}`,
+        )
+        await this.driver.run(
+          `DELETE FROM collection_registry WHERE collection_id = ?`,
+          [collectionId],
+        )
+        await this.driver.run(
+          `DELETE FROM collection_version WHERE collection_id = ?`,
+          [collectionId],
+        )
+        await this.driver.run(
+          `DELETE FROM collection_reset_epoch WHERE collection_id = ?`,
+          [collectionId],
+        )
+        throw new InvalidPersistedCollectionConfigError(
+          `Persisted cache generation was collected before registration finished`,
+        )
+      }
+    }
     const mapping = {
       tableName,
       tombstoneTableName,
@@ -3359,6 +3913,49 @@ export class SQLiteCorePersistenceAdapter implements PersistenceAdapter {
   private async ensureInitialized(): Promise<void> {
     if (this.initialized) {
       return
+    }
+
+    await this.driver.exec(
+      `CREATE TABLE IF NOT EXISTS cache_generation (
+         logical_id TEXT NOT NULL,
+         generation INTEGER NOT NULL,
+         physical_id TEXT NOT NULL UNIQUE,
+         retired INTEGER NOT NULL DEFAULT 0,
+         PRIMARY KEY (logical_id, generation)
+       )`,
+    )
+    await this.driver.exec(
+      `CREATE UNIQUE INDEX IF NOT EXISTS cache_generation_head
+       ON cache_generation (logical_id) WHERE retired = 0`,
+    )
+    await this.driver.exec(
+      `CREATE TABLE IF NOT EXISTS cache_generation_sequence (
+         logical_id TEXT PRIMARY KEY,
+         next_generation INTEGER NOT NULL
+       )`,
+    )
+    await this.driver.exec(
+      `CREATE TABLE IF NOT EXISTS cache_generation_claim (
+         claim_id TEXT PRIMARY KEY,
+         logical_id TEXT NOT NULL,
+         physical_id TEXT NOT NULL,
+         expires_at_ms INTEGER NOT NULL
+       )`,
+    )
+    const claimColumns = await this.driver.query<{ name: string }>(
+      `PRAGMA table_info(cache_generation_claim)`,
+    )
+    if (!claimColumns.some(({ name }) => name === `logical_id`)) {
+      await this.driver.exec(
+        `ALTER TABLE cache_generation_claim
+         ADD COLUMN logical_id TEXT NOT NULL DEFAULT ''`,
+      )
+    }
+    if (!claimColumns.some(({ name }) => name === `expires_at_ms`)) {
+      await this.driver.exec(
+        `ALTER TABLE cache_generation_claim
+         ADD COLUMN expires_at_ms INTEGER NOT NULL DEFAULT 0`,
+      )
     }
 
     await this.driver.exec(

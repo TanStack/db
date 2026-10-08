@@ -1,3 +1,4 @@
+import { DatabaseSync } from 'node:sqlite'
 import fc from 'fast-check'
 import { expect, it, vi } from 'vitest'
 import {
@@ -8,6 +9,7 @@ import {
 } from '@tanstack/db'
 import { ShapeStream } from '@electric-sql/client'
 import {
+  SQLiteCorePersistenceAdapter,
   SingleProcessCoordinator,
   persistedCollectionOptions,
 } from '../../db-sqlite-persistence-core/src'
@@ -26,7 +28,9 @@ import type { TestRow } from './electric-persistence-fixture'
 import type { ElectricCollectionUtils } from '../src/electric'
 import type { SyncMetadataApi, SyncPersistenceCapabilityV1 } from '@tanstack/db'
 import type {
+  PersistenceAdapter,
   ProtocolEnvelope,
+  SQLiteDriver,
   TxCommitted,
 } from '../../db-sqlite-persistence-core/src'
 import type { Message } from '@electric-sql/client'
@@ -61,6 +65,9 @@ import type { Message } from '@electric-sql/client'
  * durable row. The source Map still predicts A for its active predicate. The
  * post-notification public comparison must retain A; the persistence capability
  * scan fences coordinator processing first.
+ * A real node:sqlite cold-launch witness starts with an incompatible partial
+ * cache and no reset marker. It must exclude that row before and after the
+ * installed SDK returns an empty source snapshot for the demanded predicate.
  *
  * These finite HTTP fixtures do not prove that a live Electric service emits
  * the authored snapshot or move frames, nor do they cover multiple row keys,
@@ -149,6 +156,51 @@ function sameViolation() {
 }
 
 type Item = { id: number; name: string }
+
+function toSqliteBinding(value: unknown): string | number | bigint | null {
+  if (value === null || value === undefined) return null
+  if (typeof value === `boolean`) return value ? 1 : 0
+  if (
+    typeof value === `string` ||
+    typeof value === `number` ||
+    typeof value === `bigint`
+  ) {
+    return value
+  }
+  return String(value)
+}
+
+function nodeSqliteDriver(database: DatabaseSync): SQLiteDriver {
+  const driver: SQLiteDriver = {
+    exec: (sql) => {
+      database.exec(sql)
+      return Promise.resolve()
+    },
+    query: (sql, params = []) =>
+      Promise.resolve(
+        database
+          .prepare(sql)
+          .all(...params.map(toSqliteBinding))
+          .map((row) => ({ ...row })) as Array<never>,
+      ),
+    run: (sql, params = []) => {
+      database.prepare(sql).run(...params.map(toSqliteBinding))
+      return Promise.resolve()
+    },
+    transaction: async (transaction) => {
+      database.exec(`BEGIN IMMEDIATE`)
+      try {
+        const result = await transaction(driver)
+        database.exec(`COMMIT`)
+        return result
+      } catch (error) {
+        database.exec(`ROLLBACK`)
+        throw error
+      }
+    },
+  }
+  return driver
+}
 
 function deferred<T>() {
   let resolve!: (value: T) => void
@@ -759,6 +811,327 @@ fixedCase(`does not certify an aborted SDK subset snapshot`, async () => {
     })
   }, [() => collection.cleanup(), () => http.close()])
 })
+
+/**
+ * A managed cache claim can expire while an installed SDK snapshot request is
+ * still in flight. The source model has no row for the old predicate and one
+ * row for the new predicate. The old provider session loses authority before
+ * cache rotation; its late HTTP response cannot publish or persist a row in
+ * the new generation. The replacement session must settle both demands from
+ * its own snapshots. This receives the controlled provider-restart law through
+ * the installed ShapeStream and HTTP path. A Map-backed adapter supplies the
+ * generation boundary; real SQLite and native hosts have separate owners.
+ */
+fixedCase(
+  `discards an old SDK snapshot after managed cache rotation`,
+  async () => {
+    const http = controlledHttp()
+    const rows = new Map<string, Map<number, Item>>([
+      [`old-generation`, new Map()],
+    ])
+    const metadata = new Map<string, Map<string, unknown>>([
+      [`old-generation`, new Map()],
+    ])
+    let storageId = `old-generation`
+    let claimExpired = false
+    let rotations = 0
+    const claimId = `managed-sdk-claim`
+    const adapter: PersistenceAdapter = {
+      claimCacheGeneration: () =>
+        Promise.resolve({
+          storageCollectionId: storageId,
+          claimId,
+          expiresAtMs: Date.now() + 10_000,
+        }),
+      renewCacheGenerationClaim: () =>
+        Promise.resolve(claimExpired ? undefined : Date.now() + 10_000),
+      rotateCacheGeneration: (
+        _collectionId,
+        _claimId,
+        resetMetadata,
+        expectedStorageId,
+      ) => {
+        expect(expectedStorageId).toBe(storageId)
+        rotations++
+        storageId = `new-generation`
+        rows.set(storageId, new Map())
+        metadata.set(
+          storageId,
+          new Map(
+            resetMetadata ? [[resetMetadata.key, resetMetadata.value]] : [],
+          ),
+        )
+        claimExpired = false
+        return Promise.resolve({
+          storageCollectionId: storageId,
+          claimId,
+          expiresAtMs: Date.now() + 10_000,
+        })
+      },
+      releaseCacheGenerationClaim: async () => {},
+      loadSubset: (id) =>
+        Promise.resolve(
+          Array.from(rows.get(id) ?? [], ([key, value]) => ({ key, value })),
+        ),
+      loadResumeSnapshot: (id) =>
+        Promise.resolve({
+          rows: Array.from(rows.get(id) ?? [], ([key, value]) => ({
+            key,
+            value,
+          })),
+          keySet: {
+            status: id === `old-generation` ? `consistent` : `incompatible`,
+          },
+          collectionMetadata: Array.from(
+            metadata.get(id) ?? [],
+            ([key, value]) => ({ key, value }),
+          ),
+          latestTerm: 0,
+          latestSeq: 0,
+          latestRowVersion: 0,
+          resetEpoch: 0,
+        }),
+      applyCommittedTx: (id, tx) => {
+        expect(tx.cacheGenerationClaimId).toBe(claimId)
+        const generationRows = rows.get(id)!
+        if (tx.truncate) generationRows.clear()
+        for (const mutation of tx.mutations) {
+          if (mutation.type === `delete`) {
+            generationRows.delete(Number(mutation.key))
+          } else {
+            generationRows.set(Number(mutation.key), mutation.value as Item)
+          }
+        }
+        const generationMetadata = metadata.get(id)!
+        for (const mutation of tx.collectionMetadataMutations ?? []) {
+          if (mutation.type === `delete`)
+            generationMetadata.delete(mutation.key)
+          else generationMetadata.set(mutation.key, mutation.value)
+        }
+        return Promise.resolve()
+      },
+      ensureIndex: async () => {},
+    }
+    const electric = electricCollectionOptions<Item>({
+      id: `sdk-managed-restart-${++sequence}`,
+      shapeOptions: {
+        url: `http://test-url/managed-restart-${sequence}`,
+        params: { table: `rows` },
+        // A provider can finish an HTTP request after stream retirement.
+        fetchClient: (input, init) =>
+          http.fetchClient(input, { ...init, signal: undefined }),
+      },
+      syncMode: `on-demand`,
+      startSync: true,
+      getKey: (row) => row.id,
+    })
+    const collection = createCollection(
+      persistedCollectionOptions<
+        Item,
+        string | number,
+        never,
+        ElectricCollectionUtils<Item>
+      >({
+        ...electric,
+        persistence: { adapter },
+      }),
+    )
+    const demand = (id: number) => ({
+      where: new IR.Func(`eq`, [new IR.PropRef([`id`]), new IR.Value(id)]),
+    })
+    const respond = (request: Request, row: Item | undefined, offset: number) =>
+      request.respond(
+        new Response(
+          JSON.stringify({
+            metadata: {
+              xmin: `10`,
+              xmax: `20`,
+              xip_list: [],
+              database_lsn: `10`,
+              snapshot_mark: offset,
+            },
+            data: row
+              ? [
+                  {
+                    key: String(row.id),
+                    value: { ...row, id: String(row.id) },
+                    headers: { operation: `insert` },
+                  },
+                ]
+              : [],
+          }),
+          { headers: headers(offset) },
+        ),
+      )
+
+    await withElectricCleanup(async () => {
+      await atCheckpoint(http.take(), `old managed stream`)
+      const oldDemand = Promise.resolve(collection._sync.loadSubset(demand(1)))
+      void oldDemand.catch(() => undefined)
+      const oldSnapshot = await atCheckpoint(
+        http.take(true),
+        `old managed subset snapshot`,
+      )
+
+      claimExpired = true
+      const newDemand = Promise.resolve(collection._sync.loadSubset(demand(2)))
+      void newDemand.catch(() => undefined)
+      await vi.waitFor(() => expect(rotations).toBe(1))
+      expect(storageId).toBe(`new-generation`)
+
+      // The replacement SDK first reacquires the old demand, then the new one.
+      // Empty source snapshots for id 1 distinguish source authority from the
+      // old request's late row; the id 2 snapshot establishes the new row.
+      respond(
+        await atCheckpoint(http.take(true), `first replacement snapshot`),
+        undefined,
+        2,
+      )
+      respond(
+        await atCheckpoint(http.take(true), `replayed old demand`),
+        undefined,
+        3,
+      )
+      respond(
+        await atCheckpoint(http.take(true), `new demand snapshot`),
+        { id: 2, name: `fresh` },
+        4,
+      )
+      await atCheckpoint(
+        Promise.all([oldDemand, newDemand]),
+        `replacement demand settlement`,
+      )
+      expect(collection.get(2)?.name).toBe(`fresh`)
+
+      respond(oldSnapshot, { id: 1, name: `late-old` }, 1)
+      await new Promise<void>((resolve) => setTimeout(resolve, 0))
+      expect(collection.get(1)).toBeUndefined()
+      expect(collection.get(2)?.name).toBe(`fresh`)
+      expect([...rows.get(`new-generation`)!.keys()]).toEqual([2])
+    }, [() => collection.cleanup(), () => http.close()])
+  },
+)
+
+/**
+ * An expired run can rotate without Electric reset metadata, then persist one
+ * demanded source row in its private generation. That row is a partial cache,
+ * not an offline source snapshot. After a cold restart, the provider model has
+ * no matching row. Real SQLite supplies incompatible key-set evidence and no
+ * resume record; the installed SDK holds an empty subset HTTP response. Before
+ * and after that response, the public Collection must not expose the stale
+ * cached row. The generation must rotate before it can serve the new demand,
+ * even when the caller supplies an explicit source offset or handle. Those
+ * source cursor options do not certify the persisted cache's key set.
+ */
+fixedCase.each([
+  { cursor: `none`, shapeCursor: {} },
+  { cursor: `explicit offset`, shapeCursor: { offset: `now` as const } },
+  { cursor: `explicit handle`, shapeCursor: { handle: `explicit-shape` } },
+])(
+  `keeps a partial cache without a reset marker private after cold restart with $cursor`,
+  async ({ shapeCursor }) => {
+    const database = new DatabaseSync(`:memory:`)
+    const adapter = new SQLiteCorePersistenceAdapter({
+      driver: nodeSqliteDriver(database),
+    })
+    const collectionId = `sdk-cold-expired-cache-${++sequence}`
+    const first = await adapter.claimCacheGeneration(collectionId)
+    const partial = await adapter.rotateCacheGeneration(
+      collectionId,
+      first.claimId,
+    )
+    await adapter.applyCommittedTx(partial.storageCollectionId, {
+      txId: `partial-subset-row`,
+      term: 1,
+      seq: 1,
+      rowVersion: 1,
+      cacheGenerationClaimId: partial.claimId,
+      mutations: [
+        {
+          type: `insert`,
+          key: 1,
+          value: { id: 1, name: `stale-partial` },
+        },
+      ],
+    })
+    const seeded = await adapter.loadResumeSnapshot(
+      partial.storageCollectionId,
+      { cacheGenerationClaimId: partial.claimId },
+    )
+    expect(seeded.keySet).toEqual({ status: `incompatible` })
+    expect(seeded.collectionMetadata).toEqual([])
+    await adapter.releaseCacheGenerationClaim(partial.claimId)
+
+    const http = controlledHttp()
+    const electric = electricCollectionOptions<Item>({
+      id: collectionId,
+      shapeOptions: {
+        url: `http://test-url/${collectionId}`,
+        params: { table: `rows` },
+        fetchClient: http.fetchClient,
+        ...shapeCursor,
+      },
+      syncMode: `on-demand`,
+      startSync: true,
+      getKey: (row) => row.id,
+    })
+    const collection = createCollection(
+      persistedCollectionOptions<
+        Item,
+        string | number,
+        never,
+        ElectricCollectionUtils<Item>
+      >({ ...electric, persistence: { adapter } }),
+    )
+
+    try {
+      await withElectricCleanup(async () => {
+        const stream = await atCheckpoint(http.take(), `cold restart stream`)
+        expect(stream.url.searchParams.get(`log`)).toBe(`changes_only`)
+        const load = Promise.resolve(
+          collection._sync.loadSubset({
+            where: new IR.Func(`eq`, [new IR.PropRef([`id`]), new IR.Value(1)]),
+          }),
+        )
+        void load.catch(() => undefined)
+        const request = await atCheckpoint(
+          http.take(true),
+          `cold restart source snapshot`,
+        )
+        expect(collection.get(1), `before source evidence`).toBeUndefined()
+        const current = await adapter.claimCacheGeneration(collectionId)
+        try {
+          expect(current.storageCollectionId).not.toBe(
+            partial.storageCollectionId,
+          )
+        } finally {
+          await adapter.releaseCacheGenerationClaim(current.claimId)
+        }
+
+        request.respond(
+          new Response(
+            JSON.stringify({
+              metadata: {
+                xmin: `10`,
+                xmax: `20`,
+                xip_list: [],
+                database_lsn: `10`,
+                snapshot_mark: 2,
+              },
+              data: [],
+            }),
+            { headers: headers(2) },
+          ),
+        )
+        await atCheckpoint(load, `empty source snapshot applied`)
+        expect(collection.status).toBe(`ready`)
+        expect(collection.get(1), `after empty source evidence`).toBeUndefined()
+      }, [() => collection.cleanup(), () => http.close()])
+    } finally {
+      database.close()
+    }
+  },
+)
 
 /**
  * Two active demands share one ShapeStream cursor. The source model gives each
@@ -1599,13 +1972,23 @@ fixedCase.each([
       ])
 
       if (tagged) {
+        // The coordinator may refresh the still-active A demand after its
+        // notification. Service that source request before B: ShapeStream
+        // serializes both snapshots on one cursor.
+        const refreshA = await atCheckpoint(
+          http.take(true),
+          `active A refresh after coordinator notification`,
+        )
+        expect(refreshA.url.searchParams.get(`subset__params`)).toContain(`"1"`)
+        respond(refreshA, [source.get(1)!], 5)
         const loadingB = Promise.resolve(current._sync.loadSubset(demand(2)))
         const requestB = await atCheckpoint(http.take(true), `empty B snapshot`)
+        expect(requestB.url.searchParams.get(`subset__params`)).toContain(`"2"`)
         expect(publicRows(current), `while B is pending`).toEqual([
           source.get(1),
         ])
         expect(localReads).not.toHaveBeenCalled()
-        respond(requestB, [], 5)
+        respond(requestB, [], 6)
         await atCheckpoint(loadingB, `empty B applied`)
         expect(publicRows(current), `after empty B applied`).toEqual([
           source.get(1),

@@ -347,6 +347,14 @@ pending waits with `StreamAbortedError`; callbacks from the retired stream canno
 settle waits in a restarted collection. Observe these promises even when the
 component or collection may be disposed before they settle.
 
+An on-demand Collection with managed SQLite persistence can also replace its
+Electric provider session within the same Collection sync run when its cached
+resume evidence becomes invalid or its cache claim expires. This replacement
+rejects pending `awaitTxId` and `awaitMatch` waits with `StreamAbortedError`.
+A mutation handler waiting on one of them rejects; a later handler can wait for
+evidence from the replacement session. The replacement reloads demanded
+subsets and does not treat acknowledgements from the retired session as current.
+
 Persisted resumes wait for the cached row baseline to finish hydrating. If the
 persistence wrapper cannot verify hydration completion, Electric starts a fresh
 snapshot instead of using the saved offset and handle. It warns once per options
@@ -365,21 +373,29 @@ offset.
 Eager and progressive recovery fetch a full snapshot. Cached rows remain visible
 until that replacement completes; a partial batch or subset completion cannot
 publish it early. An on-demand collection with the current SQLite persistence
-wrapper instead retains cached rows on disk but clears the source Collection's
-uncertified rows. That local clear does not mark the Collection ready. Electric
-source evidence supplies readiness. It starts a changes-only stream at the current position and
+wrapper instead retires the persisted cache generation and clears the source
+Collection's uncertified rows. A run with a valid claim can continue using the
+retired generation; new runs claim an empty generation. That local clear does
+not mark the Collection ready. Electric source evidence supplies readiness. It
+starts a changes-only stream at the current position and
 requests snapshots for active subset demands. Each demand completes after its
 snapshot rows apply, including an empty snapshot. Later demands cannot rehydrate
 old cache rows without a fresh source snapshot. With no active demand, recovery
 does not read all cached rows or download the full shape. The durable reset marker
-remains until a complete baseline can justify a global resume cursor. A wrapper
+remains until a complete baseline can justify a global resume cursor. A cache
+generation created after claim expiry can lack that marker; its incompatible
+key-set evidence also requires scoped recovery on the next cold start, even
+when the caller supplies an explicit Electric offset or handle. Those source
+cursor options do not certify cached rows. A wrapper
 without scoped recovery support continues to use full-shape recovery. An
 interrupted recovery keeps the reset marker for the next start.
 Until a complete baseline is certified, each later cold start repeats scoped
-recovery. Cached rows from earlier starts are not shown offline, and rows no
-longer present on the server can remain in the durable cache. A durable-cache
-eviction or subset-certification policy is still needed for bounded storage
-and offline reuse.
+recovery. Uncertified cached rows from earlier starts are not shown offline.
+Retired new-format storage is reclaimed after its claims release or expire; a
+paused run whose claim expires must reload its demanded subsets from the source
+when it resumes. Pre-upgrade on-demand storage is isolated but needs a separate
+cross-version cleanup policy while older tabs may still use it. Scoped recovery
+does not certify the new generation for offline reuse.
 
 During scoped recovery, coordinator notifications about SQLite changes do not
 hydrate, truncate, or replace public source rows. The Electric change stream

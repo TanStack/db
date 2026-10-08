@@ -1686,6 +1686,107 @@ not deferred implementations of the approved follow-up.
 
 ## Electric recovery demand and scoped persisted restore
 
+[The cache-eviction design](oracle-reviews/issue-2056-cache-eviction-design.md)
+records the generation and expiry laws and their unresolved cuts. The
+real-SQLite owner checks generation rotation, legacy-writer isolation,
+warm-run claims, rejection of moved or expired claims, uncertified key-set
+evidence after partial writes, and physical collection of a retired row table.
+A held registration test rejects a read after collection and removes its late
+DDL and metadata. The persisted owner checks demand-triggered and timer-triggered
+expiry recovery, queued old source commits, and an optimistic mutation held
+through the accepted truncate. It also holds hydration, row-scan, and replay
+results across claim expiry and checks publication or returned rows after
+recovery. A startup history holds private rotation during index bootstrap and
+checks that the source cannot enter until new storage is bound. The real-SQLite
+owner rejects an expired startup resume record and checks that a public index
+event from an expired Collection cannot remove a warm peer's persisted index.
+The persisted owner also holds cleanup across cache rotation and requires the
+late private claim to release. It holds a peer full-reload read across claim
+expiry, checking both returned old rows and SQLite-style rejection at its
+second claim check; a live-claim I/O failure remains terminal. The real-SQLite
+owner accepts a valid eager Collection ID with the internal cache prefix and
+rejects late managed registration that tries to recreate collected storage
+after the first claim check.
+The persisted owner holds resume certification across claim expiry: an old
+answer or a second claim-check rejection starts private recovery, while a
+live-claim I/O failure remains terminal. It also holds initial scoped rotation
+while aborting one demand and checks prompt rejection with a sibling still
+pending. The CLI owner writes a claimed physical ID through sqlite3, and its
+subset-failure cases seed the claimed storage while preserving their public
+and durable assertions.
+The Browser owner checks two concurrent runs:
+the recovering demand reaches its own source owner while the warm run keeps
+its source-backed row. Another controlled receiving test delivers a peer
+notification to an expired claimant before its renewal timer runs and checks
+subset reload. Both coordinator owners offer unload before a held source load
+settles.
+
+The Electric descriptor owner now holds an old SDK snapshot across claim
+expiry. The replacement provider session settles both demands from fresh
+snapshots, rejects a pending old txid wait, and excludes a late old row from
+public and durable state. A second delivery lands during rotation, before the
+replacement stream starts; it rejects old callback admission into the new
+cache. Initial scoped recovery also forgets imported old txid evidence, and
+retiring an incomplete old stream transaction releases its commit turn so a
+new demand can start. These histories killed the one-phase restart, retained
+acknowledgement, and open-transaction designs at their named checkpoints. The
+Electric descriptor owner also holds rotation while aborting one old demand:
+that demand rejects promptly and a sibling later applies fresh source rows.
+The unabortable restart wait failed at this settlement checkpoint before the
+repair. The SQLite owner rejects coordinator stream-position, replay, and
+index work from a specific expired claim even while a peer claim is live. An
+expired run recovers privately while the healthy current cache remains
+claimable. The older Electric resume-race owner explicitly exercises adapters
+without managed generations; it retains that certification contract.
+The installed-SDK delivery owner now holds an old HTTP subset response across
+managed rotation and observes fresh demand settlement, public rows, and the
+new cache's durable rows after that old response arrives. Its adapter is a
+controlled Map; real SQLite and native multi-tab delivery are separate cuts.
+The same owner uses real SQLite and the installed SDK for a cold restart after
+expiry rotation left a partial row and no reset marker. It observes the row
+absent before and after an empty source subset snapshot, including with an
+explicit Electric offset or handle. The explicit-cursor cases were RED at the
+pre-response public-row checkpoint before the cache-trust predicate changed.
+This rules out both early cache hydration and relying on source completion to
+delete that row.
+The descriptor owner also checks that cleanup during a held rotation fulfills
+after rotation settles. It does not establish a prompt cleanup bound while the
+adapter rotation remains held.
+The persisted Electric interleaving owner holds an uncancelable local cache
+read after demand abort. It requires the returned load to remain pending until
+the cached row is public, then reject with `AbortError`; both fixed and random
+campaigns were RED at the early-settlement checkpoint before the wrapper
+separated pre-hydration abort from in-flight baseline settlement. A separate
+composed Electric probe confirms prompt abort while a later source snapshot is
+held after local hydration. These cuts do not establish cancellation of an SDK
+request that has already delivered its rows through the shared stream.
+
+The persisted owner refuses a managed custom adapter that lacks rotation,
+renewal, or release, and refuses recovery from a managed source without a
+provider-session restart capability. The Browser owner holds the old leader's
+release message while the new generation starts its own source demand. Its
+host factory owner checks that configured claim lifetime and clock reach the
+SQLite adapter. A composed receiving history advances that clock past expiry
+and rejects a peer update before reloading the demanded subset. Cross-package
+Browser runs require freshly built core package
+artifacts because package exports otherwise resolve stale `dist` files.
+
+Reachable limits remain. A source that declares a restart capability must
+itself retire callbacks synchronously when recovery calls it. Claim expiry
+after core publication but before SQLite accepts the write rejects the receipt
+and leaves the Collection in terminal error; a real-SQLite hostile probe
+confirmed the row can remain public without becoming durable. The ordinary
+durability-failure law permits that fail-stop, while automatic expiry reload
+covers admission before publication. The first new-format
+claim isolates but does not reclaim legacy storage. The present tests do not
+establish native multi-tab or OPFS receiving, release retry after a timed-out
+old-leader RPC, full retired-metadata collection, or claimless direct-adapter
+access to a physical ID after its catalog row is collected. The Browser owner
+also needs one combined receiving history in which two runs share a generation,
+only one claim expires before its renewal timer, and the warm peer retains its
+exact row and source lease while the expired run reloads. Those cuts
+need receiving witnesses before the whole cache-eviction class can be closed.
+
 [Issue #2056 evaluation](oracle-reviews/issue-2056-full-mode-recovery.md) records
 the original RED and candidate comparisons on head
 `f43a16522c990134ae993235a312d2d5e433dc8a`. The later scoped design

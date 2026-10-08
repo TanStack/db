@@ -415,6 +415,13 @@ export type SyncConfigRes = {
   cleanup?: CleanupFn
   loadSubset?: LoadSubsetFn
   unloadSubset?: UnloadSubsetFn
+  /**
+   * Retire old provider callbacks synchronously. Start the replacement only
+   * after `cacheRotated` fulfills; it rejects if scoped recovery fails.
+   */
+  restartAfterScopedRecovery?: (
+    cacheRotated: Promise<void>,
+  ) => void | Promise<void>
 }
 export interface SyncConfig<
   T extends object = Record<string, unknown>,
@@ -538,9 +545,14 @@ export type SyncPersistenceCapabilityV1<
 > = {
   readonly protocol: `@tanstack/db/sync-persistence`
   readonly version: 1
+  /** This run owns a claimed on-demand cache generation. */
+  readonly managedCacheGeneration?: boolean
   readonly hydrateBaseline: () => Promise<void>
-  /** Keep durable rows as a cache while excluding them from source hydration. */
-  readonly startScopedRecovery?: () => Promise<void>
+  /** Retire untrusted on-demand rows and retain the provider's reset metadata. */
+  readonly startScopedRecovery?: (resetMetadata?: {
+    key: string
+    value: unknown
+  }) => Promise<void>
   /**
    * Reserve the open sync transaction's FIFO turn, so a subset hydration
    * that starts before it commits waits for that commit.

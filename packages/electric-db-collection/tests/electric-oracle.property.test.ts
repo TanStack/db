@@ -929,6 +929,18 @@ async function runQueuedPresenceHistory(
   }, [() => releaseFirstPersistence.resolve(), () => collection.cleanup()])
 }
 
+/**
+ * Persisted Electric histories may overlap a source commit with a subset
+ * hydration, or let a later subset supersede an earlier absence. Source rows
+ * must converge in public and durable state at the final checkpoint. In the
+ * hydration history the caller explicitly aborts its demand after hydration
+ * starts. The uncancelable local read keeps that load pending while its gate is
+ * held. After the gate releases, the cached row applies before the load rejects
+ * with AbortError. The independent expected rows below combine that authored
+ * cache row with the source changes in order; caller abort does not undo them.
+ * These histories exercise the persisted Collection wrapper and mocked
+ * Electric callback boundary, not native-host scheduling.
+ */
 type PersistenceInterleavingKind =
   `open-transaction-hydration` | `subset-supersedes-absence`
 
@@ -941,6 +953,10 @@ type PersistenceInterleavingObservation =
   | {
       kind: `open-transaction-hydration`
       hydrationStartedBeforeCommit: boolean
+      hydrationOutcomeBeforeRelease: string
+      cachedRowBeforeRelease: boolean
+      hydrationOutcome: string
+      publicRowsAtHydrationSettlement: Array<[string | number, string, string]>
       deliveryErrors: Array<string>
       publicRows: Array<[string | number, string, string]>
       durableRows: Array<[string | number, string, string]>
@@ -1006,7 +1022,12 @@ function reconstructPersistenceInterleavingCampaign(
 }
 
 function errorName(error: unknown): string {
-  return error instanceof Error ? error.name : typeof error
+  return typeof error === `object` &&
+    error !== null &&
+    `name` in error &&
+    typeof error.name === `string`
+    ? error.name
+    : typeof error
 }
 
 function publicErrorName(
@@ -1029,6 +1050,8 @@ async function observeOpenTransactionHydration(
   })
   const persistedRows = new Map<string | number, OracleRow>()
   const persistedMetadata = new Map<string, unknown>()
+  const cachedRow: OracleRow = { id: 2, name: `cached`, stable: `stable-2` }
+  persistedRows.set(cachedRow.id, cachedRow)
   const adapter = createPersistedAdapter(persistedMetadata, persistedRows)
   const hydrationEntered = createDeferred<void>()
   const releaseHydration = createDeferred<void>()
@@ -1037,7 +1060,7 @@ async function observeOpenTransactionHydration(
     hydrationStarted = true
     hydrationEntered.resolve()
     await releaseHydration.promise
-    return []
+    return [{ key: cachedRow.id, value: cachedRow }]
   }
   const collection = createCollection(
     persistedCollectionOptions<
@@ -1060,7 +1083,11 @@ async function observeOpenTransactionHydration(
     }),
   )
   const abortHydration = new AbortController()
-  let hydration: Promise<void> | undefined
+  let hydrationOutcome: Promise<string> | undefined
+  let hydrationSettlement = `pending`
+  let publicRowsAtHydrationSettlement: Array<
+    [string | number, string, string]
+  > = []
   const deliveryErrors: Array<string> = []
 
   try {
@@ -1076,12 +1103,26 @@ async function observeOpenTransactionHydration(
     })
 
     subscriber([change(`insert`, 1, names[0])])
-    hydration = Promise.resolve(
+    const hydration = Promise.resolve(
       collection._sync.loadSubset({
         limit: 1,
         signal: abortHydration.signal,
       }),
-    ).then(() => undefined)
+    )
+    // Observe settlement immediately so an expected abort never becomes an
+    // unhandled rejection. Record the public snapshot at that exact cut.
+    hydrationOutcome = hydration.then(
+      () => {
+        hydrationSettlement = `fulfilled`
+        publicRowsAtHydrationSettlement = rowsFromCollection(collection)
+        return hydrationSettlement
+      },
+      (error: unknown) => {
+        hydrationSettlement = errorName(error)
+        publicRowsAtHydrationSettlement = rowsFromCollection(collection)
+        return hydrationSettlement
+      },
+    )
     await Promise.resolve()
     await Promise.resolve()
     const hydrationStartedBeforeCommit = hydrationStarted
@@ -1102,14 +1143,20 @@ async function observeOpenTransactionHydration(
       `open-transaction hydration entered after commit`,
     )
     abortHydration.abort()
+    // Cancellation is cooperative. A held local hydration read cannot finish
+    // or install its baseline yet, so its acquisition promise stays pending.
+    await new Promise<void>((resolve) => setTimeout(resolve, 0))
+    const hydrationOutcomeBeforeRelease = hydrationSettlement
+    const cachedRowBeforeRelease = collection.has(cachedRow.id)
     releaseHydration.resolve()
-    await hydration
+    const settledHydration = await hydrationOutcome
 
     if (deliveryErrors.length === 0) {
       await vi.waitFor(
         () =>
           expect(rowsFromMap(persistedRows)).toEqual([
             [1, names[1], `stable-1`],
+            [2, `cached`, `stable-2`],
           ]),
         { interval: 1, timeout: 250 },
       )
@@ -1118,6 +1165,10 @@ async function observeOpenTransactionHydration(
     return {
       kind: `open-transaction-hydration`,
       hydrationStartedBeforeCommit,
+      hydrationOutcomeBeforeRelease,
+      cachedRowBeforeRelease,
+      hydrationOutcome: settledHydration,
+      publicRowsAtHydrationSettlement,
       deliveryErrors,
       publicRows: rowsFromCollection(collection),
       durableRows: rowsFromMap(persistedRows),
@@ -1127,7 +1178,7 @@ async function observeOpenTransactionHydration(
   } finally {
     abortHydration.abort()
     releaseHydration.resolve()
-    await Promise.allSettled([hydration, collection.cleanup()])
+    await Promise.allSettled([hydrationOutcome, collection.cleanup()])
   }
 }
 
@@ -1209,12 +1260,17 @@ function expectPersistenceInterleavingObservation(
     [1, names[1], `stable-1`],
   ]
   if (observation.kind === `open-transaction-hydration`) {
+    const rowsWithCache = [...rows, [2, `cached`, `stable-2`] as const]
     expect(observation, JSON.stringify(observation)).toEqual({
       kind: `open-transaction-hydration`,
       hydrationStartedBeforeCommit: false,
+      hydrationOutcomeBeforeRelease: `pending`,
+      cachedRowBeforeRelease: false,
+      hydrationOutcome: `AbortError`,
+      publicRowsAtHydrationSettlement: rowsWithCache,
       deliveryErrors: [],
-      publicRows: rows,
-      durableRows: rows,
+      publicRows: rowsWithCache,
+      durableRows: rowsWithCache,
       status: `ready`,
       publicError: undefined,
     })
@@ -7000,6 +7056,10 @@ describeUnlessQueuedPresenceReplay(`Electric adapter laws`, () => {
         {
           kind: `open-transaction-hydration`,
           hydrationStartedBeforeCommit: true,
+          hydrationOutcomeBeforeRelease: `AbortError`,
+          cachedRowBeforeRelease: true,
+          hydrationOutcome: `fulfilled`,
+          publicRowsAtHydrationSettlement: [],
           deliveryErrors: [`InvalidPersistedCollectionConfigError`],
           publicRows: [],
           durableRows: [],

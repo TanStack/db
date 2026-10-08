@@ -54,6 +54,14 @@ export function validateSyncPersistenceCapability<
       `version must be ${SYNC_PERSISTENCE_VERSION}`,
     )
   }
+  if (
+    value.managedCacheGeneration !== undefined &&
+    typeof value.managedCacheGeneration !== `boolean`
+  ) {
+    throw new InvalidSyncPersistenceCapabilityError(
+      `managedCacheGeneration must be a boolean`,
+    )
+  }
   requireFunction(value, `hydrateBaseline`)
   if (value.startScopedRecovery !== undefined) {
     requireFunction(value, `startScopedRecovery`)

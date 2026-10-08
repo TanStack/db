@@ -1,10 +1,11 @@
 import { isDeepStrictEqual } from 'node:util'
 import { fc, test as fcTest } from '@fast-check/vitest'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { createCollection } from '@tanstack/db'
+import { createCollection, createTransaction } from '@tanstack/db'
 import { ShapeStream } from '@electric-sql/client'
 import { persistedCollectionOptions } from '../../db-sqlite-persistence-core/src'
 import { electricCollectionOptions } from '../src/electric'
+import { StreamAbortedError } from '../src/errors'
 import {
   oraclePropertyOptions,
   oracleRuns,
@@ -121,11 +122,14 @@ type StreamHarness = {
   send: (messages: Array<Message<TestRow>>) => void
   unsubscribe: ReturnType<typeof vi.fn>
   holdSnapshots: boolean
+  ignoreUnsubscribe: boolean
+  pendingSnapshotCount: () => number
   snapshotRequested: () => Promise<void>
-  completeSnapshot: () => void
+  completeSnapshot: (messages?: Array<Message<TestRow>>) => void
 }
 
 const streams: Array<StreamHarness> = []
+let holdNewSnapshots = false
 
 vi.mock(`@electric-sql/client`, async () => {
   const actual = await vi.importActual(`@electric-sql/client`)
@@ -139,6 +143,7 @@ vi.mock(`@electric-sql/client`, async () => {
       const requestObservers: Array<() => void> = []
       let snapshotRequests = 0
       const unsubscribe = vi.fn(() => {
+        if (harness?.ignoreUnsubscribe) return
         for (const pending of pendingSnapshots.splice(0)) {
           pending.reject(new Error(`snapshot aborted`))
         }
@@ -149,16 +154,19 @@ vi.mock(`@electric-sql/client`, async () => {
           harness = {
             send,
             unsubscribe,
-            holdSnapshots: false,
+            holdSnapshots: holdNewSnapshots,
+            ignoreUnsubscribe: false,
+            pendingSnapshotCount: () => pendingSnapshots.length,
             snapshotRequested: () =>
               snapshotRequests > 0
                 ? Promise.resolve()
                 : new Promise<void>((resolve) =>
                     requestObservers.push(resolve),
                   ),
-            completeSnapshot: () => {
+            completeSnapshot: (messages) => {
               const pending = pendingSnapshots.shift()
               if (!pending) throw new Error(`no pending snapshot request`)
+              if (messages) send(messages)
               pending.resolve()
             },
           }
@@ -645,8 +653,654 @@ if (replayPath === undefined) {
 
 beforeEach(() => {
   streams.length = 0
+  holdNewSnapshots = false
   vi.clearAllMocks()
 })
+
+// A released acquisition does not cancel the installed SDK's physical
+// request. The model rotates the durable cache while that request is held,
+// then delivers its old row after a fresh subset has completed. Public and
+// durable rows must contain only fresh source evidence. The same demand must
+// finish through the replacement provider session without waiting for the old
+// request. Pending match waits and both kinds of txid evidence belong to the
+// retired provider session, not the replacement. A mutation handler waiting
+// on old evidence must reject so an accepted cache clear can advance. This
+// driver crosses Electric, the persisted wrapper, and the controlled SDK
+// callback boundary.
+fixedCase(
+  `restarts a provider session before an old subset can publish into a new cache`,
+  async () => {
+    const durable = new Map<string, Map<number, TestRow>>([
+      [`cache-old`, new Map()],
+    ])
+    let currentStorageId = `cache-old`
+    let claimedStorageId = `cache-old`
+    let expired = false
+    const claimId = `one-run-claim`
+    let oldToDeliver: StreamHarness | undefined
+    let deliverDuringRecovery = false
+    const adapter: PersistenceAdapter = {
+      runInHydrationScope: async (task) => {
+        if (deliverDuringRecovery) {
+          deliverDuringRecovery = false
+          oldToDeliver?.completeSnapshot([
+            insert(3, `late-during-rotation`),
+            { headers: { control: `subset-end` } },
+          ])
+        }
+        return task(adapter)
+      },
+      claimCacheGeneration: () =>
+        Promise.resolve({
+          storageCollectionId: currentStorageId,
+          claimId,
+          expiresAtMs: Date.now() + 10_000,
+        }),
+      renewCacheGenerationClaim: () =>
+        Promise.resolve(expired ? undefined : Date.now() + 10_000),
+      rotateCacheGeneration: () => {
+        currentStorageId = `cache-new`
+        claimedStorageId = currentStorageId
+        durable.set(currentStorageId, new Map())
+        deliverDuringRecovery = true
+        expired = false
+        return Promise.resolve({
+          storageCollectionId: currentStorageId,
+          claimId,
+          expiresAtMs: Date.now() + 10_000,
+        })
+      },
+      releaseCacheGenerationClaim: () => Promise.resolve(),
+      loadSubset: (id) =>
+        Promise.resolve(
+          Array.from(durable.get(id) ?? [], ([key, value]) => ({ key, value })),
+        ),
+      loadResumeSnapshot: (id) =>
+        Promise.resolve({
+          rows: Array.from(durable.get(id) ?? [], ([key, value]) => ({
+            key,
+            value,
+          })),
+          keySet: {
+            status: id === `cache-old` ? `consistent` : `incompatible`,
+          },
+          collectionMetadata: [],
+          latestTerm: 0,
+          latestSeq: 0,
+          latestRowVersion: 0,
+          resetEpoch: 0,
+        }),
+      applyCommittedTx: (id, tx) => {
+        expect(id).toBe(claimedStorageId)
+        const rows = durable.get(id)!
+        if (tx.truncate) rows.clear()
+        for (const mutation of tx.mutations) {
+          if (mutation.type === `delete`) rows.delete(Number(mutation.key))
+          else
+            rows.set(
+              Number(mutation.key),
+              structuredClone(mutation.value) as TestRow,
+            )
+        }
+        return Promise.resolve()
+      },
+      ensureIndex: () => Promise.resolve(),
+    }
+    const collection = createCollection(
+      persistedCollectionOptions<
+        TestRow,
+        string | number,
+        never,
+        ElectricCollectionUtils<TestRow>
+      >({
+        ...descriptor(`original`, false, `on-demand`),
+        id: `late-provider-row`,
+        persistence: { adapter },
+      }),
+    )
+    try {
+      collection.startSyncImmediate()
+      await vi.waitFor(() => expect(streams).toHaveLength(1))
+      const old = streams[0]!
+      oldToDeliver = old
+      old.send([
+        insert(1, `old`),
+        // 779 is visible only through the old snapshot. Explicit txid 778 is
+        // listed as active so the two evidence paths remain distinguishable.
+        {
+          headers: {
+            control: `snapshot-end`,
+            xmin: `778`,
+            xmax: `800`,
+            xip_list: [`778`],
+          },
+        },
+        { headers: { control: `up-to-date`, txids: [778] } },
+      ])
+      await collection.stateWhenReady()
+      await vi.waitFor(() => expect(collection.get(1)?.name).toBe(`old`))
+      await expect(collection.utils.awaitTxId(778)).resolves.toBe(true)
+      await expect(collection.utils.awaitTxId(779)).resolves.toBe(true)
+      old.holdSnapshots = true
+      old.ignoreUnsubscribe = true
+      const oldWait = collection.utils.awaitTxId(801, 10_000).then(
+        () => undefined,
+        (error: unknown) => error,
+      )
+      const oldMatch = collection.utils
+        .awaitMatch(
+          (message) => `value` in message && message.value.id === 9,
+          10_000,
+        )
+        .then(
+          () => undefined,
+          (error: unknown) => error,
+        )
+      const firstDemand = Promise.resolve(
+        collection._sync.loadSubset({ limit: 1 }),
+      )
+      await atCheckpoint(old.snapshotRequested(), `old request`)
+      let handlerEntered!: () => void
+      const handlerStart = new Promise<void>((resolve) => {
+        handlerEntered = resolve
+      })
+      const mutation = createTransaction({
+        mutationFn: async () => {
+          handlerEntered()
+          await collection.utils.awaitTxId(802, 10_000)
+        },
+      })
+      mutation.mutate(() =>
+        collection.insert({ id: 10, name: `optimistic`, stable: `stable-10` }),
+      )
+      const handlerOutcome = mutation.isPersisted.promise.then(
+        () => undefined,
+        (error: unknown) => error,
+      )
+      await atCheckpoint(handlerStart, `old mutation handler wait`)
+
+      holdNewSnapshots = true
+      expired = true
+      const secondDemand = Promise.resolve(
+        collection._sync.loadSubset({ limit: 2 }),
+      )
+      await vi.waitFor(() => expect(streams).toHaveLength(2))
+      expect(await oldWait).toBeInstanceOf(StreamAbortedError)
+      expect(await oldMatch).toBeInstanceOf(StreamAbortedError)
+      expect(await handlerOutcome).toBeInstanceOf(StreamAbortedError)
+      const fresh = streams[1]!
+      await vi.waitFor(() => expect(fresh.pendingSnapshotCount()).toBe(1))
+      fresh.send([insert(2, `fresh`), { headers: { control: `subset-end` } }])
+      fresh.completeSnapshot()
+      await vi.waitFor(() => expect(fresh.pendingSnapshotCount()).toBe(1))
+      fresh.send([{ headers: { control: `subset-end` } }])
+      fresh.completeSnapshot()
+      await vi.waitFor(() => expect(fresh.pendingSnapshotCount()).toBe(1))
+      fresh.send([{ headers: { control: `subset-end` } }])
+      fresh.completeSnapshot()
+      await atCheckpoint(
+        Promise.all([firstDemand, secondDemand]),
+        `replayed demands`,
+      )
+      expect(collection.get(1)).toBeUndefined()
+      expect(collection.get(2)?.name).toBe(`fresh`)
+      expect(collection.get(10)).toBeUndefined()
+
+      // The old txid and snapshot once acknowledged mutations, but their
+      // source rows were cleared during cache rotation. The replacement
+      // session must observe both kinds of evidence anew.
+      let replacementWaitSettled = false
+      const replacementWait = collection.utils
+        .awaitTxId(778, 1_000)
+        .then(() => {
+          replacementWaitSettled = true
+        })
+      await Promise.resolve()
+      const txidSettledBeforeFreshEvidence = replacementWaitSettled
+      let replacementSnapshotWaitSettled = false
+      const replacementSnapshotWait = collection.utils
+        .awaitTxId(779, 1_000)
+        .then(() => {
+          replacementSnapshotWaitSettled = true
+        })
+      await Promise.resolve()
+      const snapshotSettledBeforeFreshEvidence = replacementSnapshotWaitSettled
+      fresh.send([
+        {
+          headers: {
+            control: `snapshot-end`,
+            xmin: `778`,
+            xmax: `800`,
+            xip_list: [`778`],
+          },
+        },
+        { headers: { control: `up-to-date`, txids: [778] } },
+      ])
+      await atCheckpoint(replacementWait, `replacement txid evidence`)
+      await atCheckpoint(
+        replacementSnapshotWait,
+        `replacement snapshot evidence`,
+      )
+      expect(txidSettledBeforeFreshEvidence).toBe(false)
+      expect(snapshotSettledBeforeFreshEvidence).toBe(false)
+
+      old.send([
+        insert(4, `late-after-restart`),
+        { headers: { control: `subset-end` } },
+      ])
+      await Promise.resolve()
+      expect(collection.get(3)).toBeUndefined()
+      expect(collection.get(4)).toBeUndefined()
+      expect([...durable.get(`cache-new`)!.keys()]).toEqual([2])
+    } finally {
+      await atCheckpoint(collection.cleanup(), `provider restart cleanup`)
+    }
+  },
+)
+
+// An acquisition's abort is independent of provider-session replacement. The
+// model retires an old stream, holds cache rotation, and releases one demand
+// while a second demand still needs the fresh source snapshot. At the held
+// rotation checkpoint the released demand owes AbortError, while its sibling
+// remains pending; after rotation, that sibling owes an applied fresh row.
+fixedCase(`aborts one demand while its provider session restarts`, async () => {
+  let storageCollectionId = `cache-old`
+  let expired = false
+  let releaseRotation!: () => void
+  let rotationEntered!: () => void
+  const rotationGate = new Promise<void>((resolve) => {
+    releaseRotation = resolve
+  })
+  const entered = new Promise<void>((resolve) => {
+    rotationEntered = resolve
+  })
+  const adapter: PersistenceAdapter = {
+    claimCacheGeneration: () =>
+      Promise.resolve({
+        storageCollectionId,
+        claimId: `abort-claim`,
+        expiresAtMs: Date.now() + 10_000,
+      }),
+    renewCacheGenerationClaim: () =>
+      Promise.resolve(expired ? undefined : Date.now() + 10_000),
+    rotateCacheGeneration: async () => {
+      rotationEntered()
+      await rotationGate
+      storageCollectionId = `cache-new`
+      expired = false
+      return {
+        storageCollectionId,
+        claimId: `abort-claim`,
+        expiresAtMs: Date.now() + 10_000,
+      }
+    },
+    releaseCacheGenerationClaim: () => Promise.resolve(),
+    loadSubset: () => Promise.resolve([]),
+    loadResumeSnapshot: () =>
+      Promise.resolve({
+        rows: [],
+        keySet: { status: `consistent` },
+        collectionMetadata: [],
+        latestTerm: 0,
+        latestSeq: 0,
+        latestRowVersion: 0,
+        resetEpoch: 0,
+      }),
+    applyCommittedTx: () => Promise.resolve(),
+    ensureIndex: () => Promise.resolve(),
+  }
+  const collection = createCollection(
+    persistedCollectionOptions<
+      TestRow,
+      string | number,
+      never,
+      ElectricCollectionUtils<TestRow>
+    >({
+      ...descriptor(`original`, false, `on-demand`),
+      id: `abort-during-provider-restart`,
+      persistence: { adapter },
+    }),
+  )
+  const aborter = new AbortController()
+  let releasedOutcome = `pending`
+  let siblingOutcome = `pending`
+  let sibling: Promise<void> | undefined
+  try {
+    collection.startSyncImmediate()
+    await vi.waitFor(() => expect(streams).toHaveLength(1))
+    const old = streams[0]!
+    old.send([upToDate])
+    await collection.stateWhenReady()
+    old.holdSnapshots = true
+    old.ignoreUnsubscribe = true
+    const released = Promise.resolve(
+      collection._sync.loadSubset({ limit: 1, signal: aborter.signal }),
+    ).then(
+      () => {
+        releasedOutcome = `fulfilled`
+      },
+      (error: unknown) => {
+        releasedOutcome =
+          typeof error === `object` && error !== null && `name` in error
+            ? String(error.name)
+            : `rejected`
+      },
+    )
+    await atCheckpoint(old.snapshotRequested(), `old held request`)
+
+    holdNewSnapshots = true
+    expired = true
+    sibling = Promise.resolve(collection._sync.loadSubset({ limit: 2 })).then(
+      () => {
+        siblingOutcome = `fulfilled`
+      },
+    )
+    void sibling.catch(() => undefined)
+    await atCheckpoint(entered, `cache rotation entered`)
+    aborter.abort()
+    await new Promise<void>((resolve) => setTimeout(resolve, 0))
+    const outcomeAtHeldRotation = releasedOutcome
+    expect(siblingOutcome).toBe(`pending`)
+
+    releaseRotation()
+    await vi.waitFor(() => expect(streams).toHaveLength(2))
+    const fresh = streams[1]!
+    await vi.waitFor(() => expect(fresh.pendingSnapshotCount()).toBe(1))
+    fresh.send([insert(2, `fresh`), { headers: { control: `subset-end` } }])
+    fresh.completeSnapshot()
+    await atCheckpoint(Promise.all([released, sibling]), `demand outcomes`)
+    expect(outcomeAtHeldRotation).toBe(`AbortError`)
+    expect(releasedOutcome).toBe(`AbortError`)
+    expect(siblingOutcome).toBe(`fulfilled`)
+    expect(collection.get(2)?.name).toBe(`fresh`)
+  } finally {
+    releaseRotation()
+    await sibling?.catch(() => undefined)
+    await atCheckpoint(collection.cleanup(), `restart abort cleanup`)
+  }
+})
+
+// Cleanup can arrive after the old provider session has retired but before
+// SQLite finishes rotating its cache. The Collection owns that cleanup, so
+// rotation's lifecycle cancellation must not turn successful resource teardown
+// into a cleanup error. No replacement stream may start after cleanup begins.
+fixedCase(`cleans up during a held provider-session restart`, async () => {
+  let storageCollectionId = `cache-old`
+  let expired = false
+  let releaseRotation!: () => void
+  let rotationEntered!: () => void
+  const rotationGate = new Promise<void>((resolve) => {
+    releaseRotation = resolve
+  })
+  const entered = new Promise<void>((resolve) => {
+    rotationEntered = resolve
+  })
+  const adapter: PersistenceAdapter = {
+    claimCacheGeneration: () =>
+      Promise.resolve({
+        storageCollectionId,
+        claimId: `cleanup-claim`,
+        expiresAtMs: Date.now() + 10_000,
+      }),
+    renewCacheGenerationClaim: () =>
+      Promise.resolve(expired ? undefined : Date.now() + 10_000),
+    rotateCacheGeneration: async () => {
+      rotationEntered()
+      await rotationGate
+      storageCollectionId = `cache-new`
+      return {
+        storageCollectionId,
+        claimId: `cleanup-claim`,
+        expiresAtMs: Date.now() + 10_000,
+      }
+    },
+    releaseCacheGenerationClaim: () => Promise.resolve(),
+    loadSubset: () => Promise.resolve([]),
+    loadResumeSnapshot: () =>
+      Promise.resolve({
+        rows: [],
+        keySet: { status: `consistent` },
+        collectionMetadata: [],
+        latestTerm: 0,
+        latestSeq: 0,
+        latestRowVersion: 0,
+        resetEpoch: 0,
+      }),
+    applyCommittedTx: () => Promise.resolve(),
+    ensureIndex: () => Promise.resolve(),
+  }
+  const collection = createCollection(
+    persistedCollectionOptions<
+      TestRow,
+      string | number,
+      never,
+      ElectricCollectionUtils<TestRow>
+    >({
+      ...descriptor(`original`, false, `on-demand`),
+      id: `cleanup-during-provider-restart`,
+      persistence: { adapter },
+    }),
+  )
+  try {
+    collection.startSyncImmediate()
+    await vi.waitFor(() => expect(streams).toHaveLength(1))
+    streams[0]!.send([upToDate])
+    await collection.stateWhenReady()
+
+    expired = true
+    const demand = Promise.resolve(collection._sync.loadSubset({ limit: 1 }))
+    void demand.catch(() => undefined)
+    await atCheckpoint(entered, `held cache rotation`)
+    const cleanup = collection.cleanup()
+    releaseRotation()
+    await atCheckpoint(cleanup, `cleanup after held rotation`)
+    await demand.catch(() => undefined)
+    expect(streams).toHaveLength(1)
+    expect(collection.status).toBe(`cleaned-up`)
+  } finally {
+    releaseRotation()
+  }
+})
+
+// Imported acknowledgement evidence belongs to the old persisted cache.
+// Initial scoped recovery clears that cache before any new source message,
+// so a txid wait must remain pending until the new provider session supplies
+// its own evidence. The independent checkpoint observes settlement timing.
+fixedCase(
+  `forgets imported txid evidence during initial scoped recovery`,
+  async () => {
+    let storageCollectionId = `cache-old`
+    const claimId = `initial-claim`
+    const adapter: PersistenceAdapter = {
+      claimCacheGeneration: () =>
+        Promise.resolve({
+          storageCollectionId,
+          claimId,
+          expiresAtMs: Date.now() + 10_000,
+        }),
+      renewCacheGenerationClaim: () => Promise.resolve(Date.now() + 10_000),
+      rotateCacheGeneration: () => {
+        storageCollectionId = `cache-new`
+        return Promise.resolve({
+          storageCollectionId,
+          claimId,
+          expiresAtMs: Date.now() + 10_000,
+        })
+      },
+      releaseCacheGenerationClaim: () => Promise.resolve(),
+      loadSubset: () => Promise.resolve([]),
+      loadResumeSnapshot: () =>
+        Promise.resolve({
+          rows: [],
+          keySet: { status: `consistent` },
+          collectionMetadata: [],
+          latestTerm: 0,
+          latestSeq: 0,
+          latestRowVersion: 0,
+          resetEpoch: 0,
+        }),
+      applyCommittedTx: () => Promise.resolve(),
+      ensureIndex: () => Promise.resolve(),
+    }
+    const options = descriptor(`original`, false, `on-demand`)
+    options.sync.importSyncMeta?.({
+      version: 1,
+      resume: {
+        kind: `resume`,
+        offset: `10_0`,
+        handle: `old`,
+        shapeId: `incompatible`,
+        updatedAt: 1,
+        requiresTagState: false,
+      },
+      seenTxids: [778],
+    })
+    const collection = createCollection(
+      persistedCollectionOptions<
+        TestRow,
+        string | number,
+        never,
+        ElectricCollectionUtils<TestRow>
+      >({
+        ...options,
+        id: `initial-evidence`,
+        persistence: { adapter },
+      }),
+    )
+    try {
+      collection.startSyncImmediate()
+      await vi.waitFor(() => expect(storageCollectionId).toBe(`cache-new`))
+      await vi.waitFor(() => expect(streams).toHaveLength(1))
+      let settled = false
+      const wait = collection.utils.awaitTxId(778, 1_000).then(() => {
+        settled = true
+      })
+      await Promise.resolve()
+      expect(settled).toBe(false)
+      streams[0]!.send([{ headers: { control: `up-to-date`, txids: [778] } }])
+      await atCheckpoint(wait, `new txid evidence`)
+    } finally {
+      await atCheckpoint(collection.cleanup(), `initial evidence cleanup`)
+    }
+  },
+)
+
+// A provider session can end with a source transaction open between batches.
+// That transaction has no source commit point, so it supplies no public row or
+// acquisition readiness. Retiring the session must abandon its commit turn;
+// otherwise a demand in the replacement session waits on impossible work.
+fixedCase(
+  `starts a new subset after retiring an incomplete old stream transaction`,
+  async () => {
+    const durable = new Map<string, Map<number, TestRow>>([
+      [`cache-old`, new Map()],
+    ])
+    let storageCollectionId = `cache-old`
+    let expired = false
+    const claimId = `open-tx-claim`
+    const adapter: PersistenceAdapter = {
+      claimCacheGeneration: () =>
+        Promise.resolve({
+          storageCollectionId,
+          claimId,
+          expiresAtMs: Date.now() + 300,
+        }),
+      renewCacheGenerationClaim: () =>
+        Promise.resolve(expired ? undefined : Date.now() + 300),
+      rotateCacheGeneration: () => {
+        storageCollectionId = `cache-new`
+        durable.set(storageCollectionId, new Map())
+        expired = false
+        return Promise.resolve({
+          storageCollectionId,
+          claimId,
+          expiresAtMs: Date.now() + 10_000,
+        })
+      },
+      releaseCacheGenerationClaim: () => Promise.resolve(),
+      loadSubset: (id) =>
+        Promise.resolve(
+          Array.from(durable.get(id) ?? [], ([key, value]) => ({
+            key,
+            value,
+          })),
+        ),
+      loadResumeSnapshot: (id) =>
+        Promise.resolve({
+          rows: Array.from(durable.get(id) ?? [], ([key, value]) => ({
+            key,
+            value,
+          })),
+          keySet: {
+            status: id === `cache-old` ? `consistent` : `incompatible`,
+          },
+          collectionMetadata: [],
+          latestTerm: 0,
+          latestSeq: 0,
+          latestRowVersion: 0,
+          resetEpoch: 0,
+        }),
+      applyCommittedTx: (id, tx) => {
+        const rows = durable.get(id)!
+        if (tx.truncate) rows.clear()
+        for (const mutation of tx.mutations) {
+          if (mutation.type === `delete`) rows.delete(Number(mutation.key))
+          else
+            rows.set(
+              Number(mutation.key),
+              structuredClone(mutation.value) as TestRow,
+            )
+        }
+        return Promise.resolve()
+      },
+      ensureIndex: () => Promise.resolve(),
+    }
+    const collection = createCollection(
+      persistedCollectionOptions<
+        TestRow,
+        string | number,
+        never,
+        ElectricCollectionUtils<TestRow>
+      >({
+        ...descriptor(`original`, false, `on-demand`),
+        id: `open-old-transaction`,
+        persistence: { adapter },
+      }),
+    )
+    let demand: Promise<void> | undefined
+    try {
+      collection.startSyncImmediate()
+      await vi.waitFor(() => expect(streams).toHaveLength(1))
+      const old = streams[0]!
+      old.send([insert(1, `old`), { headers: { control: `up-to-date` } }])
+      await collection.stateWhenReady()
+      old.send([insert(2, `incomplete`)])
+      expect(collection.get(2)).toBeUndefined()
+      holdNewSnapshots = true
+      expired = true
+      await vi.waitFor(() => expect(streams).toHaveLength(2), {
+        timeout: 2_000,
+      })
+      const fresh = streams[1]!
+      demand = Promise.resolve(collection._sync.loadSubset({ limit: 1 })).then(
+        () => undefined,
+      )
+      await vi.waitFor(() => expect(fresh.pendingSnapshotCount()).toBe(1), {
+        timeout: 600,
+      })
+      fresh.send([{ headers: { control: `subset-end` } }])
+      fresh.completeSnapshot()
+      await atCheckpoint(
+        demand,
+        `fresh subset after incomplete old transaction`,
+      )
+      expect(collection.get(2)).toBeUndefined()
+    } finally {
+      await atCheckpoint(collection.cleanup(), `open transaction cleanup`)
+      await demand?.catch(() => undefined)
+    }
+  },
+)
 
 fixedCase.each([`eager`, `on-demand`, `progressive`] as const)(
   `delivers abandoned tag-recovery callbacks after replacement starts in %s mode`,

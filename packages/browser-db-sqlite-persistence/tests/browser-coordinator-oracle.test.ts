@@ -3840,7 +3840,10 @@ describe(`BrowserCollectionCoordinator`, () => {
       }
     })
 
-    it(`compacts a terminal same-stack Browser release after the real owner load finishes`, async () => {
+    // The owner can hold a load until unload cancels it. A terminal release
+    // must therefore reach unload before source settlement, even when release
+    // reenters from the owner's load callback on the same stack.
+    it(`compacts a terminal same-stack Browser release before the owner load finishes`, async () => {
       const coordinator = createCoordinator()
       coordinator.subscribe(`todos`, () => {})
       await flush(50)
@@ -3880,10 +3883,10 @@ describe(`BrowserCollectionCoordinator`, () => {
         const terminalRelease = release!.then(() => {
           releaseSettled = true
         })
-        await flush(0)
+        await vi.waitFor(() => expect(releaseSettled).toBe(true))
         expect({ events: [...events], releaseSettled }).toEqual({
-          events: [`load`],
-          releaseSettled: false,
+          events: [`load`, `unload`],
+          releaseSettled: true,
         })
 
         releaseLoad()

@@ -222,6 +222,18 @@ async function runRace(
     ): TAdapter => {
       const gatedAdapter = new Proxy(adapter, {
         get(target, property) {
+          // This owner exercises resume certification on adapters without
+          // managed cache generations. Rotation has separate receiving tests.
+          if (
+            syncMode === `on-demand` &&
+            (property === `claimCacheGeneration` ||
+              property === `rotateCacheGeneration` ||
+              property === `renewCacheGenerationClaim` ||
+              property === `releaseCacheGenerationClaim` ||
+              property === `assertCacheGenerationClaim`)
+          ) {
+            return undefined
+          }
           if (property === `runInHydrationScope`) {
             // Exercise both an adapter without optional hydration scopes and
             // an adapter that forwards its scoped snapshot reads.
@@ -684,6 +696,17 @@ async function runScopedRace(
     const gateAdapter = (adapter: PersistenceAdapter): PersistenceAdapter =>
       new Proxy(adapter, {
         get(target, property) {
+          // Keep this race on the legacy adapter boundary; the managed cache
+          // generation law is checked by the storage and provider-session owners.
+          if (
+            property === `claimCacheGeneration` ||
+            property === `rotateCacheGeneration` ||
+            property === `renewCacheGenerationClaim` ||
+            property === `releaseCacheGenerationClaim` ||
+            property === `assertCacheGenerationClaim`
+          ) {
+            return undefined
+          }
           if (
             property === `runInHydrationScope` &&
             target.runInHydrationScope
