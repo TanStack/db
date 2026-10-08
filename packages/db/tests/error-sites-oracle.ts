@@ -485,7 +485,8 @@ export function findErrorSites(
       // A console method that is not called directly could carry any text.
       if (
         isConsoleMethod(node) &&
-        !(ts.isCallExpression(node.parent) && node.parent.expression === node)
+        !(ts.isCallExpression(node.parent) && node.parent.expression === node) &&
+        !isDevelopmentOnly(node)
       )
         plain.push({
           file,
