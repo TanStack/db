@@ -794,8 +794,9 @@ The post-merge review added three missing domains to existing owners:
   has no causal client identity. A pending manual mutation does not hold source
   writes; a same-key source row can retain local attribution after rollback.
   A subscriber can commit a truncate and a later same-key transaction during
-  another drain. The truncate batch keeps its attribution, while the later
-  transaction on its written key is remote. An active mutation on a key the
+  another drain. The suffix truncate can use the still-active mutation's
+  attribution. The later same-key transaction in that suffix drain is remote.
+  An active mutation on a key the
   truncate does not write still attributes that key's first later transaction
   in the same drain. Bounded histories also cross two
   persisting same-key mutations, one or two source batches, both settlement

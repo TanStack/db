@@ -383,3 +383,20 @@ CodeRabbit accounting for this review: **2 raw items = 1 stale with a refuted
 repair + 1 fixed-now**. CR4's historical observation and useful adversarial
 history remain recorded; no product law or test coverage was weakened to
 accept the proposed model change.
+
+### Merge-readiness self-review after green CI
+
+The public origin prose said that a later same-key transaction after a
+truncate is remote without specifying the drain boundary. The existing
+reentrant witness has a trigger and suffix truncate in separate drains. The
+still-active mutation can attribute the suffix truncate again. A later
+same-key transaction within the suffix drain is remote. The source comment,
+generated reference, oracle opening, publication comment, and coverage map
+now state that narrower rule. This is a contract wording correction, not a
+production change.
+
+Two temporary legal-history probes also crossed a pending and persisting
+same-key pair with a reentrant truncate, and two active keys with that drain.
+Both passed the core public-history comparison and test type check. The probes
+were removed. They support those two sampled schedules but do not close the
+coverage map's longer overlap or provider-path limits.

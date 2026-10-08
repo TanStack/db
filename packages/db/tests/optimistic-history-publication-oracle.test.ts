@@ -301,9 +301,9 @@ it.each([false, true])(
   },
 )
 
-// A source callback can commit a truncate and its successor while core is
-// draining an earlier publication. Only the truncate's own same-key write
-// inherits its retained attribution; the next transaction is remote.
+// A source callback commits a truncate and successor during an earlier drain.
+// The suffix truncate gets active attribution again. The later same-key
+// transaction in the suffix drain is remote after the truncate consumes it.
 it.each([false, true])(
   `consumes truncate attribution before a later same-key transaction in one drain, later=%s`,
   async (later) => {

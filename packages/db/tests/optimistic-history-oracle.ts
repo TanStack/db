@@ -43,7 +43,7 @@ import type { CollectionConfig, SyncConfig } from '../src/types.js'
  * it writes, but an active mutation on an untouched key still attributes its
  * first later source transaction, even when both transactions share a drain.
  * Completed one-use attribution ends at the truncate. A later transaction on
- * a key written by the truncate is remote without another local owner.
+ * that key in the same drain is remote without another local owner.
  *
  * The reference model has three small parts: the applied synced rows, an
  * ordered list of optimistic transactions with one mutation each, and a queue

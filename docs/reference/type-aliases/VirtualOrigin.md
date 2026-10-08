@@ -24,8 +24,8 @@ writes no local attribution. A truncate can publish while a mutation remains
 active, leaving its same-key row `'local'` even if the mutation later fails.
 An unconsumed active mutation on a key omitted by the truncate retains
 attribution for its first later same-key source transaction, even in that
-drain. A truncate's own write consumes attribution for its key, so a later
-transaction on that key is `'remote'` without another local owner.
+drain. A truncate's write consumes attribution for its key, so a later
+same-key transaction in that drain is `'remote'` without a new local owner.
 A source write on a still-pending manual mutation's key applies immediately
 and can keep `'local'` attribution if that mutation rolls back.
 When two same-key mutations both persist before a source transaction is
