@@ -214,3 +214,28 @@ a failed root commit, no flush runs, so the root and the child both keep their
 rows from before the failure until the next write. Whether a failed commit
 should schedule its own retry is a design question; this change does not add
 one.
+
+## Recorded limits (maintainer decision, 2026-10-08)
+
+**Bucket bookkeeping copy (finding 10).** `snapshot()` still copies each edge's
+`entries` map and `activeBuckets` set on every flush. The maintainer accepted
+this as a documented limit. Measured per comment write, with a scratch variant
+that skips the copy (an upper bound, because that variant cannot roll back):
+
+| Unlimited include | Entries copied | Copy share of a write |
+| --- | ---: | ---: |
+| 10 parents | 20 | about 2% |
+| 100 parents | 200 | about 6% |
+| 1,000 parents | 2,000 | about 31% |
+| 10,000 parents | 20,000 | about 83% |
+
+A limited query ("list + 3 recent comments", limit 50) copies no entries,
+because only the parents in its window hold facades. A lazy copy for each edge
+does not help, because one edge holds all the buckets. The follow-up, if large
+unlimited include queries matter, is a per-bucket undo log (about +20/−15
+lines plus oracle cases for activate, retire and restore of a new entry). Raw
+data: `~/.cw-perf/bucket-f10/RESULTS.md` (local).
+
+**Retry after a failed root commit.** The maintainer recorded this as a design
+question for later. A retry needs a public contract, a backoff and a stop
+condition before it can earn its code weight.
