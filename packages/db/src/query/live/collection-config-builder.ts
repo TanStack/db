@@ -450,7 +450,9 @@ export class CollectionConfigBuilder<
     const normalized = this.recordSubsetError(error)
     demand.participant?.reject(normalized)
     this.transitionToError(
-      `Subset demand '${planId}' failed: ${normalized.message}`,
+      devBuild() && process.env.NODE_ENV !== `production`
+        ? `Subset demand '${planId}' failed: ${normalized.message}`
+        : codedMessage(228, { planId, cause: normalized.message }),
       normalized,
     )
   }
@@ -467,7 +469,9 @@ export class CollectionConfigBuilder<
     }
     if (fatalBeforeReady) {
       this.transitionToError(
-        `Initial subset load failed: ${normalized.message}`,
+        devBuild() && process.env.NODE_ENV !== `production`
+          ? `Initial subset load failed: ${normalized.message}`
+          : codedMessage(229, { cause: normalized.message }),
         normalized,
       )
     }
@@ -1198,7 +1202,11 @@ export class CollectionConfigBuilder<
     this.isInErrorState = true
 
     // Log error to console for debugging
-    console.error(`[Live Query Error] ${message}`)
+    console.error(
+      devBuild() && process.env.NODE_ENV !== `production`
+        ? `[Live Query Error] ${message}`
+        : message,
+    )
 
     // Transition live query collection to error state
     this.liveQueryCollection?._lifecycle.markError(error ?? new Error(message))
