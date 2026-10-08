@@ -39,8 +39,8 @@ describe(`mutation handler return compatibility`, () => {
   // `TransactionWithMutations` omits a key, which drops private members, so
   // a private member on Transaction would break this.
   it(`passes a handler's transaction where a Transaction is expected`, () => {
-    expectTypeOf<
-      TransactionWithMutations<Row, `insert`>
-    >().toExtend<Transaction<any>>()
+    expectTypeOf<TransactionWithMutations<Row, `insert`>>().toExtend<
+      Transaction<any>
+    >()
   })
 })
