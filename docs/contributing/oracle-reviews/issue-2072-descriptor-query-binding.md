@@ -63,3 +63,11 @@ The new witness failed on the prior code head 8361d12ad during Effect setup with
 | ORC-014 controlled-premise handoff | No real-provider claim is made. The controlled sync fixture supplies each client's initial row. |
 
 Two focused core tests also failed before the fix and pass on a037c6052: preparation of an unfinished builder without a client now returns the builder unchanged, and the core unbound-descriptor error no longer recommends React's `DbProvider` to callers in other frameworks. The focused core and React runs passed 16 tests across three files, with no type errors. React package build, ESLint, Prettier, and `git diff --check` passed.
+
+## Public IR compatibility follow-up
+
+Reviewed semantic head: 368bcbca1f8b94cd3d7e4e08537198c7c890a5ac (2026-10-08). The prior `IR.CollectionRef` exposed `collection` as an enumerable, writable own field for a concrete Collection. The descriptor implementation at c99228736 instead exposed an enumerable `source` field and a prototype `collection` getter. A spread lost `collection`, and assignment failed.
+
+The focused public-API test `packages/db/tests/query/collection-ref-compatibility.test.ts` failed on c99228736 at the own-key comparison. It passes on 368bcbca1. A concrete ref again exposes and permits assignment to its own `collection` field. Its `source` getter follows an assigned Collection. An unbound descriptor ref still keeps its descriptor until a receiving client binds a cloned plan, and reading its `collection` fails with the intended missing-client error. This fixed shape check is sufficient for the finite own-field contract; it makes no general oracle claim about arbitrary IR walkers over unbound plans.
+
+The focused DB and React runs passed 116 tests with no type errors. DB package build, the private-member minification check, changed-file ESLint and Prettier, and `git diff --check` passed. Generic traversal of unbound descriptor refs remains outside this compatibility claim; callers can distinguish those refs through `descriptor` before reading `collection`.
