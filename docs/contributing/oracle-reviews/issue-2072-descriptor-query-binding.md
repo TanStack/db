@@ -36,3 +36,30 @@ The first-client bound-query mutant returned A's row where the disjoint history 
 This evidence covers reusable factory descriptors, one prebuilt basic projection Query, two controlled React clients, independent insert or same-key update, and a mounted A→B→A switch at settled public-row checkpoints. No reachable counterexample was found in that bounded domain. The broader descriptor-binding law remains open for the cells listed in the coverage map; each needs a receiving oracle with its own public observation before a broader closure claim.
 
 The React oracle and existing useLiveQuery suite passed 62 tests in two files. ESLint, Prettier, and git diff --check passed. The SSR guide's two bare preloadLiveQuery calls were corrected to the documented config-object form in the reviewed semantic head.
+
+## Follow-up audit: React Effects and preparation
+
+Reviewed semantic head: a037c605221fa458e06796dd85ef81774b41c314 (2026-10-08). This entry supplements the earlier e4a002a0 audit; it does not revise that earlier verdict.
+
+The added Effect history uses the same prebuilt factory-descriptor Query under two DbClients with the same row key and different values. At initial publication, each `useLiveQueryEffect` must report its own client's public row. Switching one mounted Effect to the second provider must report the second row. The model is the pair of plain input rows, copied before seeding production; it does not use the query compiler to predict values. The public observation is the ordered `onEnter` row sequence at the settled test cut. The Effect witness covers initial enters and one A→B switch. It does not establish later source writes, on-demand loading, joins, unions, or non-React Effects.
+
+The new witness failed on the prior code head 8361d12ad during Effect setup with the unbound descriptor error. On a037c6052 it passed. A temporary hostile fixture made both clients supply the first client's row while retaining the second client's expected row; the oracle failed at its initial public-event comparison (`first` observed where `second` was expected). That was an assertion failure at the intended checkpoint. The fixture was restored. This checks that a wrong cross-client row result cannot pass merely because the two rows share a key.
+
+| Requirement | Follow-up outcome |
+| --- | --- |
+| ORC-001 authority and limits | Pass. The standalone descriptor contract and the existing two-client law also govern a client-aware React Effect; the new fixed history and open cells are stated above and in the coverage map. |
+| ORC-002 independent judgment | Pass. Plain expected rows are copied before entering production and compared with callback values. |
+| ORC-003 visible responsibilities | Pass. The oracle opening prose now names the Effect law, model, fixed history, callback observation, settled cut, and limits beside the executable witness. |
+| ORC-004 generated grammar | Not applicable; this follow-up adds a fixed history. |
+| ORC-005 production path and observation | Pass. The driver mounts the public hook under `DbProvider` and compares complete projected `onEnter` values after initial publication and a provider switch. |
+| ORC-006 checker calibration | Pass. The hostile first-client-row fixture failed by assertion at the public-event checkpoint; the previous production code failed earlier during Effect setup. |
+| ORC-007 fixed and random campaigns | Not applicable; no generated property was added. |
+| ORC-008 stateful-model minimality | Not triggered; the two independent client inputs remain distinct because a provider switch changes the required event value. |
+| ORC-009 vocabulary mapping | Pass. A model row is one client's expected projected public row; an `onEnter` event is the Effect's public observation, not a source change message. |
+| ORC-010 failure fidelity and cleanup | Not triggered by shrinking. The fixed test unmounts both hooks after its comparisons. |
+| ORC-011 independent second formulation | No additional shared-fault hypothesis is claimed for the fixed Effect history; the existing `useLiveQuery` two-client result is a separate consumer path. |
+| ORC-012 review evidence | Pass for the bounded follow-up claim. This entry names the reviewed semantic head, all guide outcomes, the negative controls, and open cells. |
+| ORC-013 distinguishing boundary witness | Pass. Same-key, different-value clients and the hostile first-client-row fixture distinguish the required client binding from a wrong cross-client row. |
+| ORC-014 controlled-premise handoff | No real-provider claim is made. The controlled sync fixture supplies each client's initial row. |
+
+Two focused core tests also failed before the fix and pass on a037c6052: preparation of an unfinished builder without a client now returns the builder unchanged, and the core unbound-descriptor error no longer recommends React's `DbProvider` to callers in other frameworks. The focused core and React runs passed 16 tests across three files, with no type errors. React package build, ESLint, Prettier, and `git diff --check` passed.
