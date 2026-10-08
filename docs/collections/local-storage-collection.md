@@ -122,7 +122,10 @@ are not an atomic transaction; localStorage has no compare-and-swap operation.
 Startup requires a valid stored snapshot. Malformed JSON or a row missing its
 version information puts the Collection in an error state and leaves the stored
 bytes intact. Each stored row needs an object value, a string version token,
-and an encoded storage key that matches `getKey` for its data. Repair or remove
+and a storage key that decodes to the same identity as `getKey` for its data.
+New writes encode string and number keys with a type prefix; restore also
+accepts legacy unprefixed string keys. Two entries that decode to one identity
+are malformed. Repair or remove
 the invalid value, then restart the Collection. A Collection restoring rows can
 receive a same-tab peer write from a subscriber during that restore; the peer's
 accepted row remains visible when the Collection becomes ready.

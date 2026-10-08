@@ -713,6 +713,95 @@ for (const queued of [false, true]) {
   }
 }
 
+// A mutationFn may accept local work and then fail for another reason. The
+// accepted write remains authorized, but the transaction cannot report its
+// failure before that registered work settles. The independent fold contains
+// both accepted rows after the held predecessor is released. The held cut
+// checks commit and persistence receipts; the final cut checks durable data.
+it('waits for queued acceptance before reporting a later mutationFn failure', async () => {
+  const storage = makeStorage()
+  const entered = createDeferred<void>()
+  const release = createDeferred<void>()
+  const accepted = createDeferred<void>()
+  const failure = new Error('API failed after accepting local write')
+  const collection = createCollection(
+    localStorageCollectionOptions<Row>({
+      storageKey: 'rows',
+      storage,
+      storageEventApi: { addEventListener() {}, removeEventListener() {} },
+      getKey: (row) => row.id,
+      onInsert: async ({ transaction }) => {
+        if (transaction.mutations[0].modified.id === 'first') {
+          entered.resolve()
+          await release.promise
+        }
+      },
+    }),
+  )
+  let reopened: typeof collection | undefined
+  await withHistoryCleanup(
+    async () => {
+      await collection.preload()
+      const first = collection.insert({ id: 'first', value: 1 })
+      await entered.promise
+      const manual = createTransaction<Record<string, unknown>>({
+        autoCommit: false,
+        mutationFn: ({ transaction }) => {
+          void collection.utils.acceptMutations(transaction).catch(() => {})
+          accepted.resolve()
+          throw failure
+        },
+      })
+      manual.mutate(() => collection.insert({ id: 'manual', value: 2 }))
+      const commit = observeHistoryPromise(manual.commit())
+      const receipt = observeHistoryPromise(manual.isPersisted.promise)
+      await accepted.promise
+      await new Promise((resolve) => setTimeout(resolve, 0))
+      expect(commit.read().status, 'held commit').toBe('pending')
+      expect(receipt.read().status, 'held persistence receipt').toBe('pending')
+      release.resolve()
+      await first.isPersisted.promise
+      await Promise.all([commit.settled, receipt.settled])
+      expect(commit.read()).toMatchObject({
+        status: 'rejected',
+        reason: failure,
+      })
+      expect(receipt.read()).toMatchObject({
+        status: 'rejected',
+        reason: failure,
+      })
+      const expected = [
+        { id: 'first', value: 1 },
+        { id: 'manual', value: 2 },
+      ]
+      expect(
+        storedRows(storage.getItem('rows')),
+        'durable at rejected receipt',
+      ).toEqual(expected)
+      expect(
+        sortedRows(collection.values()),
+        'public at rejected receipt',
+      ).toEqual(expected)
+      reopened = createCollection(
+        localStorageCollectionOptions<Row>({
+          id: 'reopened',
+          storageKey: 'rows',
+          storage,
+          storageEventApi: { addEventListener() {}, removeEventListener() {} },
+          getKey: (row) => row.id,
+        }),
+      )
+      await reopened.preload()
+      expect(sortedRows(reopened.values()), 'fresh restore').toEqual(expected)
+    },
+    () => [
+      () => release.resolve(),
+      () => reopened?.cleanup(),
+      () => collection.cleanup(),
+    ],
+  )
+})
+
 // One manual transaction can accept rows from more than one Collection. Its
 // receipt represents every accepted storage write, not merely the first work
 // registered. The model allows the independent direct write now, but keeps

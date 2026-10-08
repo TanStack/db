@@ -374,21 +374,13 @@ it('preserves a nested same-tab write during peer publication', async () => {
   const peer = makeCollection(host, 'shared', 'peer')
   const nestedWriter = makeCollection(host, 'shared', 'nested-writer')
   let nested: Promise<unknown> | undefined
-  let nestedCommit: Promise<unknown> | undefined
   let admitted = false
   const subscription = peer.subscribeChanges(
     (changes) => {
       if (!admitted && changes.some((change) => change.key === 'first')) {
         admitted = true
-        const transaction = createTransaction({
-          autoCommit: false,
-          mutationFn: async () => {},
-        })
-        transaction.mutate(() => {
-          nestedWriter.insert({ id: 'nested', value: 2 })
-        })
-        nested = nestedWriter.utils.acceptMutations(transaction)
-        nestedCommit = transaction.commit()
+        nested = nestedWriter.insert({ id: 'nested', value: 2 }).isPersisted
+          .promise
       }
     },
     { includeInitialState: false },
@@ -402,7 +394,7 @@ it('preserves a nested same-tab write during peer publication', async () => {
       ])
       await writer.insert({ id: 'first', value: 1 }).isPersisted.promise
       expect(nested, 'peer admitted nested write').toBeDefined()
-      await Promise.all([nested, nestedCommit])
+      await nested
       const expected = expectedRows([
         { id: 'first', value: 1 },
         { id: 'nested', value: 2 },
@@ -481,7 +473,12 @@ it('avoids reparsing the writer snapshot during same-tab publication', async () 
       defaultParse.mockClear()
       peerParses.fill(0)
       await writer.insert({ id: 'new', value: 1 }).isPersisted.promise
-      expect(defaultParse, 'one writer full parse').toHaveBeenCalledTimes(1)
+      expect(
+        defaultParse.mock.calls.filter(
+          ([raw]) => typeof raw === 'string' && raw.includes('s:prior'),
+        ),
+        'one writer full parse',
+      ).toHaveLength(1)
       expect(peerParses, 'one full parse per peer').toEqual([1, 1, 1])
       const expected = expectedRows([
         { id: 'prior', value: 0 },
@@ -554,70 +551,74 @@ it('keeps an authored Date in the writer while peers read JSON bytes', async () 
  * staged Map is then not authoritative for untouched rows, even when Storage
  * still contains the exact string it just saved. The receiving model reads
  * the actual normalized durable row, so custom parsers must read back. */
-it('reads back a custom parser snapshot before publishing the writer', async () => {
-  const host = createHost()
-  host.storage.setItem(
-    'shared',
-    JSON.stringify({
-      's:prior': {
-        versionKey: 'prior-version',
-        data: { id: 'prior', value: 0 },
-      },
-    }),
-  )
-  let parses = 0
-  const writer = createCollection(
-    localStorageCollectionOptions<Row>({
-      id: 'writer',
-      storageKey: 'shared',
-      storage: host.storage,
-      storageEventApi: host.events,
-      getKey: (row) => row.id,
-      parser: {
-        parse: (raw) => {
-          parses++
-          return JSON.parse(raw)
+for (const changesVersion of [false, true]) {
+  it(`publishes an untouched parser-normalized row ${changesVersion ? 'with' : 'without'} a new version token`, async () => {
+    const host = createHost()
+    host.storage.setItem(
+      'shared',
+      JSON.stringify({
+        's:prior': {
+          versionKey: 'prior-version',
+          data: { id: 'prior', value: 0 },
         },
-        stringify: (value) => {
-          if (
-            typeof value === 'object' &&
-            value !== null &&
-            's:prior' in value &&
-            's:new' in value
-          ) {
-            return JSON.stringify({
-              ...value,
-              's:prior': {
-                versionKey: 'normalized-version',
-                data: { id: 'prior', value: 9 },
-              },
-            })
-          }
-          return JSON.stringify(value)
+      }),
+    )
+    let parses = 0
+    const writer = createCollection(
+      localStorageCollectionOptions<Row>({
+        id: 'writer',
+        storageKey: 'shared',
+        storage: host.storage,
+        storageEventApi: host.events,
+        getKey: (row) => row.id,
+        parser: {
+          parse: (raw) => {
+            parses++
+            return JSON.parse(raw)
+          },
+          stringify: (value) => {
+            if (
+              typeof value === 'object' &&
+              value !== null &&
+              's:prior' in value &&
+              's:new' in value
+            ) {
+              return JSON.stringify({
+                ...value,
+                's:prior': {
+                  versionKey: changesVersion
+                    ? 'normalized-version'
+                    : 'prior-version',
+                  data: { id: 'prior', value: 9 },
+                },
+              })
+            }
+            return JSON.stringify(value)
+          },
         },
+      }),
+    )
+    const peer = makeCollection(host, 'shared', 'peer')
+    await withHistoryCleanup(
+      async () => {
+        await Promise.all([writer.preload(), peer.preload()])
+        parses = 0
+        await writer.insert({ id: 'new', value: 1 }).isPersisted.promise
+        const expected = expectedRows([
+          { id: 'prior', value: 9 },
+          { id: 'new', value: 1 },
+        ])
+        expect(parses, 'custom writer read and readback').toBe(2)
+        expect(durableRows(host, 'shared')).toEqual(expected)
+        expect(publicRows(writer), 'writer normalized public row').toEqual(
+          expected,
+        )
+        expect(publicRows(peer), 'peer normalized public row').toEqual(expected)
       },
-    }),
-  )
-  const peer = makeCollection(host, 'shared', 'peer')
-  await withHistoryCleanup(
-    async () => {
-      await Promise.all([writer.preload(), peer.preload()])
-      parses = 0
-      await writer.insert({ id: 'new', value: 1 }).isPersisted.promise
-      const expected = expectedRows([
-        { id: 'prior', value: 9 },
-        { id: 'new', value: 1 },
-      ])
-      expect(parses, 'custom writer read and readback').toBe(2)
-      expect(durableRows(host, 'shared')).toEqual(expected)
-      expect(publicRows(writer), 'writer normalized public row').toEqual(
-        expected,
-      )
-      expect(publicRows(peer), 'peer normalized public row').toEqual(expected)
-    },
-    () => [() => peer.cleanup(), () => writer.cleanup()],
-  )
-})
+      () => [() => peer.cleanup(), () => writer.cleanup()],
+    )
+  })
+}
 
 /** A parser can normalize the row being authored while keeping its generated
  * version token. The authored model predicts the parser's durable value, not
@@ -1187,6 +1188,13 @@ for (const [name, raw] of [
       's:a': { versionKey: 'valid-token', data: { id: 'b', value: 1 } },
     }),
   ],
+  [
+    'two encoded keys with one decoded identity',
+    JSON.stringify({
+      'n:1': { versionKey: 'first', data: { id: 1, value: 1 } },
+      'n:01': { versionKey: 'second', data: { id: 1, value: 2 } },
+    }),
+  ],
 ] as const) {
   it(`fails persisted restore without replacing ${name}`, async () => {
     const host = createHost()
@@ -1204,6 +1212,104 @@ for (const [name, raw] of [
         expect(publicRows(reopened)).toEqual([])
       },
       () => [() => reopened?.cleanup(), () => collection.cleanup()],
+    )
+  })
+}
+
+/** A single unprefixed string key is a supported legacy spelling. Unlike the
+ * duplicate decoded-key history, it names one public identity. The driver
+ * restores it, authors a later update, then checks a fresh restore after the
+ * writer encodes the key in its new whole snapshot. */
+it('keeps one legacy unprefixed string key writable and restorable', async () => {
+  const host = createHost()
+  host.storage.setItem(
+    'shared',
+    JSON.stringify({
+      legacy: { versionKey: 'old', data: { id: 'legacy', value: 1 } },
+    }),
+  )
+  const writer = makeCollection(host, 'shared', 'writer')
+  let reopened: ReturnType<typeof makeCollection> | undefined
+  await withHistoryCleanup(
+    async () => {
+      await writer.preload()
+      expect(publicRows(writer)).toEqual([{ id: 'legacy', value: 1 }])
+      await writer.update('legacy', (draft) => {
+        draft.value = 2
+      }).isPersisted.promise
+      expect(durableRows(host, 'shared')).toEqual([{ id: 'legacy', value: 2 }])
+      reopened = makeCollection(host, 'shared', 'reopened')
+      await reopened.preload()
+      expect(publicRows(reopened)).toEqual([{ id: 'legacy', value: 2 }])
+    },
+    () => [() => reopened?.cleanup(), () => writer.cleanup()],
+  )
+})
+
+/** Map key identity uses SameValueZero: numeric NaN is the same key after
+ * encoding and decoding, while numeric 1 and string "1" remain distinct.
+ * The NaN key is derived from a serializable string, so the row itself can
+ * round-trip. The independent model holds those three typed identities. */
+it('restores a serializable NaN key alongside distinct number and string keys', async () => {
+  const host = createHost()
+  type KeyedRow = { id: string; key: number | string; value: number }
+  const make = (id: string) =>
+    createCollection(
+      localStorageCollectionOptions<KeyedRow>({
+        id,
+        storageKey: 'typed',
+        storage: host.storage,
+        storageEventApi: host.events,
+        getKey: (row) => (row.id === 'nan' ? Number(row.key) : row.key),
+      }),
+    )
+  const writer = make('writer')
+  let reopened: typeof writer | undefined
+  await withHistoryCleanup(
+    async () => {
+      await writer.preload()
+      const authored: Array<KeyedRow> = [
+        { id: 'nan', key: 'NaN', value: 1 },
+        { id: 'number', key: 1, value: 2 },
+        { id: 'string', key: '1', value: 3 },
+      ]
+      for (const row of authored) await writer.insert(row).isPersisted.promise
+      expect(
+        [...writer.values()].map(({ id, key, value }) => ({ id, key, value })),
+      ).toEqual(expect.arrayContaining(authored))
+      reopened = make('reopened')
+      await reopened.preload()
+      expect(
+        [...reopened.values()].map(({ id, key, value }) => ({
+          id,
+          key,
+          value,
+        })),
+      ).toEqual(expect.arrayContaining(authored))
+      expect([...reopened.values()]).toHaveLength(authored.length)
+    },
+    () => [() => reopened?.cleanup(), () => writer.cleanup()],
+  )
+})
+
+/** A fulfilled receipt promises a restorable row. Default JSON cannot
+ * round-trip a nonfinite numeric ID in row data, even though its storage key
+ * has a stable text encoding. The model rejects that write before changing
+ * the durable empty snapshot; finite numeric and string controls remain legal. */
+for (const invalid of [NaN, Infinity, -Infinity]) {
+  it(`rejects a default-JSON row with nonfinite key data ${String(invalid)}`, async () => {
+    const host = createHost()
+    const writer = makeCollection(host, 'shared', 'writer')
+    await withHistoryCleanup(
+      async () => {
+        await writer.preload()
+        await expect(
+          writer.insert({ id: invalid, value: 1 }).isPersisted.promise,
+        ).rejects.toThrow()
+        expect(host.storage.getItem('shared')).toBeNull()
+        expect(publicRows(writer)).toEqual([])
+      },
+      () => [() => writer.cleanup()],
     )
   })
 }
@@ -1541,3 +1647,52 @@ for (const failureKind of ['storage', 'parser'] as const) {
     )
   })
 }
+
+/** Once setItem accepts a valid snapshot, a later transient Storage read
+ * cannot turn that durable write into a rejected receipt. The driver faults
+ * only the postwrite readback of a custom-parser writer; the independent fold
+ * has the accepted row at the receipt in durable bytes, writer, peer, and a
+ * fresh restore. A prewrite fault is covered by the neighboring history. */
+it('settles an accepted custom-parser write through a postwrite read fault', async () => {
+  const host = createHost()
+  const getItem = host.storage.getItem
+  let reads = 0
+  let faultOnRead = 0
+  const readError = new Error('postwrite read fault')
+  host.storage.getItem = (key) => {
+    reads++
+    if (reads === faultOnRead) throw readError
+    return getItem(key)
+  }
+  const writer = createCollection(
+    localStorageCollectionOptions<Row>({
+      id: 'writer',
+      storageKey: 'shared',
+      storage: host.storage,
+      storageEventApi: host.events,
+      getKey: (row) => row.id,
+      parser: { parse: JSON.parse, stringify: JSON.stringify },
+    }),
+  )
+  const peer = makeCollection(host, 'shared', 'peer')
+  let reopened: ReturnType<typeof makeCollection> | undefined
+  await withHistoryCleanup(
+    async () => {
+      await Promise.all([writer.preload(), peer.preload()])
+      faultOnRead = reads + 2
+      await writer.insert({ id: 'saved', value: 1 }).isPersisted.promise
+      const expected = [{ id: 'saved', value: 1 }]
+      expect(durableRows(host, 'shared'), 'durable receipt').toEqual(expected)
+      expect(publicRows(writer), 'writer receipt').toEqual(expected)
+      expect(publicRows(peer), 'peer receipt').toEqual(expected)
+      reopened = makeCollection(host, 'shared', 'reopened')
+      await reopened.preload()
+      expect(publicRows(reopened), 'fresh restore').toEqual(expected)
+    },
+    () => [
+      () => reopened?.cleanup(),
+      () => peer.cleanup(),
+      () => writer.cleanup(),
+    ],
+  )
+})

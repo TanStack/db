@@ -857,5 +857,13 @@
     "literals": [
       "LocalStorage manual acceptance belongs to a different Collection."
     ]
+  },
+  "232": {
+    "file": "local-storage.ts",
+    "template": "[LocalStorageCollection] Error refreshing a same-tab peer for storage key \"${key}\":",
+    "literals": [
+      "[LocalStorageCollection] Error refreshing a same-tab peer for storage key \""
+    ],
+    "kind": "warning"
   }
 }

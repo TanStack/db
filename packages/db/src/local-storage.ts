@@ -1,4 +1,5 @@
 import { safeRandomUUID } from './utils/uuid'
+import { deepEquals } from './utils'
 import { withCollectionConfigFactory } from './client.js'
 import { collectionOptionsClaim } from './collection-options.js'
 import { registerTransactionCommitWork } from './transaction-commit-work.js'
@@ -82,7 +83,9 @@ function publishSameTabWrite(
       // A peer's parser or sync listener cannot revoke the writer's durable
       // write or prevent another peer from observing it.
       console.warn(
-        `[LocalStorageCollection] Error refreshing a same-tab peer for storage key "${key}":`,
+        devBuild() && process.env.NODE_ENV !== `production`
+          ? `[LocalStorageCollection] Error refreshing a same-tab peer for storage key "${key}":`
+          : codedWarning(232, { storageKey: key }),
         error,
       )
     }
@@ -243,6 +246,13 @@ function decodeStorageKey(encodedKey: string): string | number {
   }
   // Fallback for legacy data without encoding
   return encodedKey
+}
+
+function sameStorageKey(
+  left: string | number,
+  right: string | number,
+): boolean {
+  return left === right || (Number.isNaN(left) && Number.isNaN(right))
 }
 
 /**
@@ -457,7 +467,11 @@ export function localStorageCollectionOptions(
    */
   const saveToStorage = (
     dataMap: Map<string | number, StoredItem<any>>,
-  ): string => {
+    mutations: Array<PendingMutation<Record<string, unknown>>>,
+  ): {
+    serialized: string
+    persisted: Map<string | number, StoredItem<any>>
+  } => {
     try {
       // Convert Map to object format for storage
       const objectData: Record<string, StoredItem<any>> = {}
@@ -465,8 +479,29 @@ export function localStorageCollectionOptions(
         objectData[encodeStorageKey(key)] = storedItem
       })
       const serialized = parser.stringify(objectData)
+      // A custom parser may normalize rows while serializing. Validate and
+      // retain the exact snapshot before setItem makes the write durable.
+      const persisted =
+        parser === JSON
+          ? dataMap
+          : readFromStorage(
+              config.storageKey,
+              storage,
+              parser,
+              config.getKey,
+              serialized,
+            )
+      for (const mutation of mutations) {
+        const storedItem = persisted.get(mutation.key)
+        if (mutation.type === `delete` ? storedItem : !storedItem) {
+          throw new InvalidStorageDataFormatError(
+            config.storageKey,
+            encodeStorageKey(mutation.key),
+          )
+        }
+      }
       storage.setItem(config.storageKey, serialized)
-      return serialized
+      return { serialized, persisted }
     } catch (error) {
       console.error(
         devBuild() && process.env.NODE_ENV !== `production`
@@ -509,35 +544,26 @@ export function localStorageCollectionOptions(
     )
     for (const mutation of mutations) {
       if (mutation.type === `delete`) staged.delete(mutation.key)
-      else
+      else {
+        if (parser === JSON) {
+          const restored = JSON.parse(JSON.stringify(mutation.modified))
+          if (!sameStorageKey(config.getKey(restored), mutation.key)) {
+            throw new InvalidStorageDataFormatError(
+              config.storageKey,
+              encodeStorageKey(mutation.key),
+            )
+          }
+        }
         staged.set(mutation.key, {
           versionKey: generateUuid(),
           data: mutation.modified,
         })
-    }
-    const savedRaw = saveToStorage(staged)
-    let persisted: Map<string | number, StoredItem<any>> | undefined
-    try {
-      if (parser === JSON) {
-        // Native values authored through the default JSON parser remain in
-        // this Collection until restore; peers see their stored JSON form.
-        persisted = staged
-      } else {
-        persisted = readFromStorage(
-          config.storageKey,
-          storage,
-          parser,
-          config.getKey,
-        )
       }
+    }
+    const { serialized: savedRaw, persisted } = saveToStorage(staged, mutations)
+    try {
       for (const mutation of mutations) {
         const storedItem = persisted.get(mutation.key)
-        if (mutation.type === `delete` ? storedItem : !storedItem) {
-          throw new InvalidStorageDataFormatError(
-            config.storageKey,
-            encodeStorageKey(mutation.key),
-          )
-        }
         if (storedItem) lastKnownData.set(mutation.key, storedItem)
         else lastKnownData.delete(mutation.key)
       }
@@ -554,7 +580,7 @@ export function localStorageCollectionOptions(
               listener: writerRefresh,
               refresh: () =>
                 writerRefresh(
-                  persisted && storage.getItem(config.storageKey) === savedRaw
+                  storage.getItem(config.storageKey) === savedRaw
                     ? persisted
                     : undefined,
                 ),
@@ -822,8 +848,9 @@ function readFromStorage<T extends object>(
   storage: StorageApi,
   parser: Parser,
   getKey: (item: T) => string | number,
+  knownRaw?: string,
 ): Map<string | number, StoredItem<T>> {
-  const rawData = storage.getItem(storageKey)
+  const rawData = knownRaw ?? storage.getItem(storageKey)
   if (rawData === null) {
     return new Map()
   }
@@ -846,7 +873,10 @@ function readFromStorage<T extends object>(
       ) {
         const storedItem = value as StoredItem<T>
         const decodedKey = decodeStorageKey(encodedKey)
-        if (getKey(storedItem.data) !== decodedKey) {
+        if (
+          !sameStorageKey(getKey(storedItem.data), decodedKey) ||
+          dataMap.has(decodedKey)
+        ) {
           throw new InvalidStorageDataFormatError(storageKey, encodedKey)
         }
         dataMap.set(decodedKey, storedItem)
@@ -898,6 +928,7 @@ function createLocalStorageSync<T extends object>(
   const findChanges = (
     oldData: Map<string | number, StoredItem<T>>,
     newData: Map<string | number, StoredItem<T>>,
+    compareContent: boolean,
   ): Array<{
     type: `insert` | `update` | `delete`
     key: string | number
@@ -914,7 +945,10 @@ function createLocalStorageSync<T extends object>(
       const newStoredItem = newData.get(key)
       if (!newStoredItem) {
         changes.push({ type: `delete`, key, value: oldStoredItem.data })
-      } else if (oldStoredItem.versionKey !== newStoredItem.versionKey) {
+      } else if (
+        oldStoredItem.versionKey !== newStoredItem.versionKey ||
+        (compareContent && !deepEquals(oldStoredItem.data, newStoredItem.data))
+      ) {
         changes.push({ type: `update`, key, value: newStoredItem.data })
       }
     })
@@ -956,7 +990,13 @@ function createLocalStorageSync<T extends object>(
     }
 
     // Find the specific changes
-    const changes = findChanges(lastKnownData, newData)
+    // The default-JSON writer deliberately retains native authored values.
+    // Peers and storage events must compare content even under the same token.
+    const changes = findChanges(
+      lastKnownData,
+      newData,
+      knownSnapshot === undefined || parser !== JSON,
+    )
 
     if (changes.length > 0) {
       // Reject an invalid snapshot before opening a sync transaction. This

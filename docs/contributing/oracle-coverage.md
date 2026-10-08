@@ -310,6 +310,18 @@ subscriber histories or cross-tab atomicity. Default JSON intentionally keeps
 the writer's authored rich value until restore; a Date witness records the
 public/durable representation difference.
 
+The [second LocalStorage review](oracle-reviews/2026-10-08-localstorage-round-two.md)
+extends the peer owner across unchanged versus changed version tokens for an
+untouched parser-normalized row. At a fulfilled receipt it compares writer,
+peer, durable bytes, and fresh restore. It also checks duplicate decoded keys,
+serializable NaN-derived keys, nonfinite default-JSON row IDs, and prewrite
+versus postwrite read faults. The order owner holds an earlier handler while
+manual acceptance is followed by a `mutationFn` failure, then compares both
+receipt cuts and the eventual public, durable, and restored rows. A direct
+nested peer write replaces the unsupported manual-acceptance fixture. These
+finite histories do not establish arbitrary parser side effects, concurrent
+cross-tab writes, or every possible row serialization shape.
+
 The [React source ID reuse oracle](https://github.com/TanStack/db/blob/main/packages/react-db/tests/source-id-reuse-oracle.test.tsx) ([review](oracle-reviews/issue-1991-react-source-id.md))
 checks that a mounted derived-identity hook rejects a different same-ID
 source Collection directly, after an intervening ID and predicate, within one

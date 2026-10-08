@@ -929,7 +929,7 @@ describe(`localStorage collection`, () => {
             id: `1`,
             title: `Same`,
             completed: false,
-            createdAt: new Date(),
+            createdAt: initialData['s:1'].data.createdAt,
           },
         },
       }
@@ -948,7 +948,7 @@ describe(`localStorage collection`, () => {
 
       mockStorageEventApi.triggerStorageEvent(storageEvent)
 
-      // Should not trigger any changes since version key is the same
+      // Neither the version token nor the row content changed.
       expect(changesSpy).not.toHaveBeenCalled()
     })
   })

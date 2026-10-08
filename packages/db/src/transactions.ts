@@ -768,6 +768,14 @@ class Transaction<T extends object = Record<string, unknown>> {
       // Preserve the original error for rethrowing
       const originalError = normalizeError(error)
 
+      // A mutationFn can accept local work and then fail. That work remains
+      // accepted, so its storage effect must settle before this receipt does.
+      try {
+        await takeTransactionCommitWork(this)
+      } catch {
+        // The mutationFn error remains the transaction's reported cause.
+      }
+
       // Update transaction with error information
       this.error = {
         message: originalError.message,
