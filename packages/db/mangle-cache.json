@@ -351,7 +351,6 @@
   "transactionScope": "fR",
   "isBufferingForTruncate": "fS",
   "requesting": "fT",
-  "resolveCollection": "fU",
   "attached": "fV",
   "contexts": "fW",
   "cleanupConfig": "fX",
