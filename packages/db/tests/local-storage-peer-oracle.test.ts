@@ -4,8 +4,11 @@
  * Collections with fresh options that share one Storage object and key must
  * agree with the durable snapshot when a local write's persistence receipt
  * fulfills, apart from their own pending optimistic overlays and valid-read
- * failures. A delayed event must not erase a later accepted write. A failed
- * write must not publish an unaccepted row.
+ * failures. With default JSON, a writer retains an authored rich value such
+ * as Date; peers and fresh restore see its JSON form. JSON-native rows and
+ * custom-parser normalized rows follow the durable agreement law. A delayed
+ * event must not erase a later accepted write. A failed write must not publish
+ * an unaccepted row.
  *
  * The independent model is an array of authored rows, keyed by typed ID. It
  * folds disjoint accepted writes; it does not read production storage or mirror
@@ -23,7 +26,9 @@
  * The startup and clear histories use a second simple law: only a valid whole
  * stored snapshot can establish readiness; clear removes that snapshot and
  * publishes empty synced rows. Their model classifies absent, valid, and
- * malformed bytes without using the adapter's parser or mirror. The driver
+ * malformed bytes without using the adapter's parser or mirror. A stored row
+ * needs an object value, a string version token, and an encoded key that
+ * agrees with the row's public key. The driver
  * checks startup status, unchanged malformed bytes, local clear publication,
  * peer publication, later write settlement, and fresh restore. Direct same-tab
  * edits through the raw Storage API are outside the adapter's event contract.
@@ -495,6 +500,56 @@ it('avoids reparsing the writer snapshot during same-tab publication', async () 
   )
 })
 
+/** The established direct-write contract keeps native Date fields in the
+ * writing Collection. JSON bytes and Collections that read those bytes hold
+ * ISO strings instead. This is a deliberate value-domain limit on the peer
+ * agreement law above, not permission to leave ordinary JSON-native rows
+ * stale. The test compares all three observations at the receipt and restore. */
+it('keeps an authored Date in the writer while peers read JSON bytes', async () => {
+  type DatedRow = { id: string; at: Date | string }
+  const host = createHost()
+  const make = (id: string) =>
+    createCollection(
+      localStorageCollectionOptions<DatedRow>({
+        id,
+        storageKey: 'dated',
+        storage: host.storage,
+        storageEventApi: host.events,
+        getKey: (row) => row.id,
+      }),
+    )
+  const writer = make('writer')
+  const peer = make('peer')
+  let reopened: typeof writer | undefined
+  await withHistoryCleanup(
+    async () => {
+      await Promise.all([writer.preload(), peer.preload()])
+      const at = new Date('2020-01-02T03:04:05.000Z')
+      await writer.insert({ id: 'row', at }).isPersisted.promise
+      const expected = [{ id: 'row', at: at.toISOString() }]
+      const durable = JSON.parse(host.storage.getItem('dated')!) as Record<
+        string,
+        { data: DatedRow }
+      >
+      expect(Object.values(durable).map(({ data }) => data)).toEqual(expected)
+      expect([...writer.values()], 'native Date writer receipt').toMatchObject([
+        { id: 'row', at },
+      ])
+      expect([...peer.values()], 'JSON peer receipt').toMatchObject(expected)
+      reopened = make('reopened')
+      await reopened.preload()
+      expect([...reopened.values()], 'JSON fresh restore').toMatchObject(
+        expected,
+      )
+    },
+    () => [
+      () => reopened?.cleanup(),
+      () => peer.cleanup(),
+      () => writer.cleanup(),
+    ],
+  )
+})
+
 /** A custom parser may normalize the bytes it writes. The writer's in-memory
  * staged Map is then not authoritative for untouched rows, even when Storage
  * still contains the exact string it just saved. The receiving model reads
@@ -564,6 +619,74 @@ it('reads back a custom parser snapshot before publishing the writer', async () 
   )
 })
 
+/** A parser can normalize the row being authored while keeping its generated
+ * version token. The authored model predicts the parser's durable value, not
+ * the pre-serialization draft. At each persistence receipt the writer, peer,
+ * durable bytes, and fresh restore must agree. This history distinguishes
+ * data comparison from a version-only detector; the untouched-row history
+ * above changes its version and cannot detect that mistake. */
+it('publishes a parser-normalized authored row with an unchanged version token', async () => {
+  const host = createHost()
+  const writer = createCollection(
+    localStorageCollectionOptions<Row>({
+      id: 'writer',
+      storageKey: 'shared',
+      storage: host.storage,
+      storageEventApi: host.events,
+      getKey: (row) => row.id,
+      parser: {
+        parse: JSON.parse,
+        stringify: (value) => {
+          if (typeof value === 'object' && value !== null && 's:row' in value) {
+            const snapshot = value as Record<
+              string,
+              { versionKey: string; data: Row }
+            >
+            return JSON.stringify({
+              ...snapshot,
+              's:row': {
+                ...snapshot['s:row'],
+                data: { id: 'row', value: 9 },
+              },
+            })
+          }
+          return JSON.stringify(value)
+        },
+      },
+    }),
+  )
+  const peer = makeCollection(host, 'shared', 'peer')
+  let reopened: ReturnType<typeof makeCollection> | undefined
+  await withHistoryCleanup(
+    async () => {
+      await Promise.all([writer.preload(), peer.preload()])
+      await writer.insert({ id: 'row', value: 1 }).isPersisted.promise
+      const expected = [{ id: 'row', value: 9 }]
+      expect(durableRows(host, 'shared'), 'normalized insert durable').toEqual(
+        expected,
+      )
+      expect(publicRows(writer), 'normalized insert writer').toEqual(expected)
+      expect(publicRows(peer), 'normalized insert peer').toEqual(expected)
+      await writer.update('row', (draft) => {
+        draft.value = 2
+      }).isPersisted.promise
+      expect(durableRows(host, 'shared'), 'normalized update durable').toEqual(
+        expected,
+      )
+      expect(publicRows(writer), 'normalized update writer').toEqual(expected)
+      expect(publicRows(peer), 'normalized update peer').toEqual(expected)
+      reopened = makeCollection(host, 'shared', 'reopened')
+      await reopened.preload()
+      expect(publicRows(reopened), 'normalized fresh restore').toEqual(expected)
+    },
+    () => [
+      () => reopened?.cleanup(),
+      () => peer.cleanup(),
+      () => writer.cleanup(),
+    ],
+  )
+})
+
 /** Cleanup ends the first Collection's receiving sync run. The peer's next
  * accepted write must not republish into that ended run. Restart establishes
  * a new persisted restore and then receives a later same-tab write. The
@@ -592,6 +715,66 @@ it('restores same-tab publication after cleanup and restart', async () => {
       expect(publicRows(first), 'restarted same-tab peer receipt').toEqual(
         expected,
       )
+    },
+    () => [() => second.cleanup(), () => first.cleanup()],
+  )
+})
+
+/** A restarted Collection can publish restored rows to an existing
+ * subscriber before it reports readiness. That callback may synchronously
+ * author a write through an already-ready peer. The independent authored
+ * fold contains both seed and nested rows; no browser event is delivered.
+ * The receiver must hold that fold at its ready and writer-receipt cuts, and
+ * a later update must not reveal a stale mirror from the restore boundary. */
+it('receives a peer write authored during persisted restore publication', async () => {
+  const host = createHost()
+  const first = makeCollection(host, 'shared', 'first')
+  const second = makeCollection(host, 'shared', 'second')
+  let nestedReceipt: Promise<unknown> | undefined
+  let admitted = false
+  await withHistoryCleanup(
+    async () => {
+      await Promise.all([first.preload(), second.preload()])
+      const subscription = second.subscribeChanges(
+        (changes) => {
+          if (!admitted && changes.some((change) => change.key === 'seed')) {
+            admitted = true
+            nestedReceipt = first.insert({ id: 'nested', value: 2 }).isPersisted
+              .promise
+          }
+        },
+        { includeInitialState: false },
+      )
+      try {
+        await second.cleanup()
+        await first.insert({ id: 'seed', value: 1 }).isPersisted.promise
+        second.startSyncImmediate()
+        expect(admitted, 'restore callback admitted peer write').toBe(true)
+        await nestedReceipt
+        const expected = expectedRows([
+          { id: 'seed', value: 1 },
+          { id: 'nested', value: 2 },
+        ])
+        expect(second.status, 'receiver ready after restore').toBe('ready')
+        expect(durableRows(host, 'shared'), 'nested durable receipt').toEqual(
+          expected,
+        )
+        expect(publicRows(first), 'nested writer receipt').toEqual(expected)
+        expect(publicRows(second), 'restored peer receipt').toEqual(expected)
+        await first.update('nested', (draft) => {
+          draft.value = 3
+        }).isPersisted.promise
+        const later = expectedRows([
+          { id: 'seed', value: 1 },
+          { id: 'nested', value: 3 },
+        ])
+        expect(durableRows(host, 'shared'), 'later durable receipt').toEqual(
+          later,
+        )
+        expect(publicRows(second), 'later restored peer receipt').toEqual(later)
+      } finally {
+        subscription.unsubscribe()
+      }
     },
     () => [() => second.cleanup(), () => first.cleanup()],
   )
@@ -967,7 +1150,9 @@ it('distinguishes a missing storage key from malformed empty content', async () 
  * snapshot; it never substitutes an empty one. Startup must report Collection
  * error before readiness, leave the bytes intact, and allow a new Collection
  * to restore after an explicit clear. This grammar includes malformed JSON,
- * an old array shape, and one bad row beside a valid row. */
+ * an old array shape, missing or invalid row fields, and an encoded key that
+ * disagrees with `getKey(data)`. The last case is necessary for a delete by
+ * public key to remain deleted after fresh restore. */
 for (const [name, raw] of [
   ['empty string', ''],
   ['legacy array', '[{"id":"old","value":1}]'],
@@ -979,6 +1164,27 @@ for (const [name, raw] of [
         data: { id: 'valid', value: 1 },
       },
       's:invalid': { data: { id: 'invalid', value: 2 } },
+    }),
+  ],
+  [
+    'null version token',
+    JSON.stringify({
+      's:invalid': {
+        versionKey: null,
+        data: { id: 'invalid', value: 1 },
+      },
+    }),
+  ],
+  [
+    'null row data',
+    JSON.stringify({
+      's:invalid': { versionKey: 'valid-token', data: null },
+    }),
+  ],
+  [
+    'encoded key and row identity disagreement',
+    JSON.stringify({
+      's:a': { versionKey: 'valid-token', data: { id: 'b', value: 1 } },
     }),
   ],
 ] as const) {
@@ -1001,6 +1207,48 @@ for (const [name, raw] of [
     )
   })
 }
+
+/** An invalid event cannot advance the receiver's remembered durable version.
+ * The independent model retains the last valid public row until a later valid
+ * whole snapshot is delivered. Here the invalid `null` row and its repair use
+ * the same version token. If the bad event advances the mirror despite
+ * publishing nothing, the repaired row is invisible at the second event cut. */
+it('retains the last valid peer snapshot through a null row and its repair', async () => {
+  const host = createHost()
+  const collection = makeCollection(host, 'shared', 'receiver')
+  await withHistoryCleanup(
+    async () => {
+      await collection.preload()
+      await collection.insert({ id: 'row', value: 1 }).isPersisted.promise
+      const old = [{ id: 'row', value: 1 }]
+      host.storage.setItem(
+        'shared',
+        JSON.stringify({
+          's:row': { versionKey: 'repaired-version', data: null },
+        }),
+      )
+      host.deliver('shared')
+      expect(
+        publicRows(collection),
+        'invalid event retains public row',
+      ).toEqual(old)
+      host.storage.setItem(
+        'shared',
+        JSON.stringify({
+          's:row': {
+            versionKey: 'repaired-version',
+            data: { id: 'row', value: 2 },
+          },
+        }),
+      )
+      host.deliver('shared')
+      expect(publicRows(collection), 'valid repair event').toEqual([
+        { id: 'row', value: 2 },
+      ])
+    },
+    () => [() => collection.cleanup()],
+  )
+})
 
 /** A rejected persisted restore must not retain a sync transaction or callbacks
  * from its failed sync run. The model predicts no accepted snapshot until a
@@ -1067,6 +1315,45 @@ it('does not retain a failed startup validation run', async () => {
       expect(publicRows(collection), 'valid restart restore').toEqual([
         { id: 'good', value: 2 },
       ])
+    },
+    () => [() => collection.cleanup()],
+  )
+})
+
+/** The row-shape check must run before an adapter `begin()`, not merely fail
+ * later when core extracts the row key. A `null` row is present in the stored
+ * envelope but cannot represent a Collection row. The begin counter is the
+ * adapter-boundary observation; error status and intact bytes are public. */
+it('rejects null stored row data before opening a sync transaction', async () => {
+  const host = createHost()
+  const raw = JSON.stringify({
+    's:row': { versionKey: 'token', data: null },
+  })
+  host.storage.setItem('shared', raw)
+  const options = localStorageCollectionOptions<Row>({
+    id: 'reader',
+    storageKey: 'shared',
+    storage: host.storage,
+    storageEventApi: host.events,
+    getKey: (row) => row.id,
+  })
+  const originalSync = options.sync.sync
+  let begins = 0
+  options.sync.sync = (params) =>
+    originalSync({
+      ...params,
+      begin: () => {
+        begins++
+        return params.begin()
+      },
+    })
+  const collection = createCollection(options)
+  await withHistoryCleanup(
+    async () => {
+      await expect(collection.preload()).rejects.toThrow()
+      expect(collection.status).toBe('error')
+      expect(host.storage.getItem('shared')).toBe(raw)
+      expect(begins, 'malformed restore opens no transaction').toBe(0)
     },
     () => [() => collection.cleanup()],
   )

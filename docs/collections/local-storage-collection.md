@@ -96,6 +96,12 @@ remain visible until their own mutations settle. The same-tab mechanism does
 not connect distinct custom Storage wrapper objects, even if those wrappers
 access the same underlying bytes.
 
+The default JSON parser keeps a value authored by the writer in its original
+JavaScript form until that Collection restores. For example, a writer can still
+hold a `Date`, while a peer and a freshly restored Collection see its JSON
+string. With a custom parser, an authored row is read back after a successful
+write so the writer also sees any value that parser normalized.
+
 Automatic mutations in one Collection persist in mutation order, even if their
 optional handlers finish in another order. A handler that rejects does not write
 its mutation. Other tabs see accepted changes when their storage events arrive.
@@ -115,7 +121,11 @@ are not an atomic transaction; localStorage has no compare-and-swap operation.
 
 Startup requires a valid stored snapshot. Malformed JSON or a row missing its
 version information puts the Collection in an error state and leaves the stored
-bytes intact. Repair or remove that value, then restart the Collection.
+bytes intact. Each stored row needs an object value, a string version token,
+and an encoded storage key that matches `getKey` for its data. Repair or remove
+the invalid value, then restart the Collection. A Collection restoring rows can
+receive a same-tab peer write from a subscriber during that restore; the peer's
+accepted row remains visible when the Collection becomes ready.
 `utils.clearStorage()` removes the stored snapshot and immediately publishes
 removal of accepted rows to active same-tab Collections. A pending optimistic
 mutation can remain visible and later persist. Edit the Collection through its

@@ -187,6 +187,7 @@ it('orders module-level manual acceptance with a DbClient Collection', async () 
   const client = new DbClient()
   const collection = client.collection(collectionOptions(settings))
   let cleanupReopened: (() => Promise<void>) | undefined
+  const manualEntered = createDeferred<void>()
   await withHistoryCleanup(
     async () => {
       await collection.preload()
@@ -196,16 +197,23 @@ it('orders module-level manual acceptance with a DbClient Collection', async () 
       await entered.promise
       const manual = createTransaction({
         autoCommit: false,
-        mutationFn: async () => {},
+        mutationFn: ({ transaction: pending }) => {
+          void settings.utils.acceptMutations(pending)
+          manualEntered.resolve()
+          return Promise.resolve()
+        },
       })
       manual.mutate(() => {
         collection.update('a', (draft) => {
           draft.value = 2
         })
       })
-      const acceptance = settings.utils.acceptMutations(manual)
       const receipt = observeHistoryPromise(manual.isPersisted.promise)
       const commit = observeHistoryPromise(manual.commit())
+      await manualEntered.promise
+      // The receipt check must occur after mutationFn registers its write.
+      // Otherwise an unrelated pending commit can make this check false green.
+      await new Promise((resolve) => setTimeout(resolve, 0))
       expect(storedRows(storage.getItem('rows')), 'held durable order').toEqual(
         initial,
       )
@@ -213,7 +221,6 @@ it('orders module-level manual acceptance with a DbClient Collection', async () 
       release.resolve()
       await Promise.all([
         automatic.isPersisted.promise,
-        acceptance,
         receipt.settled,
         commit.settled,
       ])
@@ -274,12 +281,13 @@ it('routes module-level manual acceptance before explicit preload', async () => 
     async () => {
       transaction = createTransaction<Record<string, unknown>>({
         autoCommit: false,
-        mutationFn: async () => {},
+        mutationFn: async ({ transaction: pending }) => {
+          await settings.utils.acceptMutations(pending)
+        },
       })
       transaction.mutate(() => {
         collection.insert({ id: 'early', value: 1 })
       })
-      await settings.utils.acceptMutations(transaction)
       await transaction.commit()
       expect(
         storedRows(storage.getItem('rows')),
@@ -301,6 +309,78 @@ it('routes module-level manual acceptance before explicit preload', async () => 
     ],
   )
 })
+
+/** The module-level utility belongs to both its direct Collection and every
+ * fresh Collection made by its DbClient descriptor. A direct Collection's
+ * sync-run state cannot change which materialized Collection owns a manual
+ * mutation. The independent model accepts the one authored row in the
+ * materialized Collection for each direct-owner state. A fulfilled receipt
+ * must match durable bytes, both active public snapshots, and fresh restore.
+ * The cleaned-up direct owner has no public-snapshot obligation until restart. */
+for (const directState of ['idle', 'ready', 'cleaned-up'] as const) {
+  it(`routes manual acceptance to a DbClient owner with a ${directState} direct owner`, async () => {
+    const storage = makeStorage()
+    const settings = localStorageCollectionOptions<Row>({
+      id: 'shared-options',
+      storageKey: 'rows',
+      storage,
+      storageEventApi: { addEventListener() {}, removeEventListener() {} },
+      getKey: (row) => row.id,
+    })
+    const direct = createCollection(settings)
+    const client = new DbClient()
+    const materialized = client.collection(collectionOptions(settings))
+    let reopened: typeof materialized | undefined
+    await withHistoryCleanup(
+      async () => {
+        if (directState !== 'idle') await direct.preload()
+        if (directState === 'cleaned-up') await direct.cleanup()
+        await materialized.preload()
+        const manual = createTransaction({
+          autoCommit: false,
+          mutationFn: async ({ transaction: pending }) => {
+            await settings.utils.acceptMutations(pending)
+          },
+        })
+        manual.mutate(() => materialized.insert({ id: 'owned', value: 1 }))
+        await manual.commit()
+        await manual.isPersisted.promise
+        const expected = [{ id: 'owned', value: 1 }]
+        expect(
+          storedRows(storage.getItem('rows')),
+          'manual durable receipt',
+        ).toEqual(expected)
+        expect(
+          sortedRows(materialized.values()),
+          'materialized public receipt',
+        ).toEqual(expected)
+        if (directState === 'ready')
+          expect(sortedRows(direct.values()), 'direct peer receipt').toEqual(
+            expected,
+          )
+        reopened = createCollection(
+          localStorageCollectionOptions<Row>({
+            id: 'reopened',
+            storageKey: 'rows',
+            storage,
+            storageEventApi: {
+              addEventListener() {},
+              removeEventListener() {},
+            },
+            getKey: (row) => row.id,
+          }),
+        )
+        await reopened.preload()
+        expect(sortedRows(reopened.values()), 'fresh restore').toEqual(expected)
+      },
+      () => [
+        () => reopened?.cleanup(),
+        () => client.cleanup(),
+        () => direct.cleanup(),
+      ],
+    )
+  })
+}
 
 // Storage is synchronous. The model applies each handler-free mutation before
 // the corresponding direct Collection call returns. These return checkpoints
@@ -333,6 +413,62 @@ it('persists handler-free direct mutations before their calls return', async () 
       const deletion = collection.delete('a')
       expect(storedRows(storage.getItem('rows'))).toEqual([])
       await deletion.isPersisted.promise
+    },
+    () => [() => collection.cleanup()],
+  )
+})
+
+// A synchronous handler rejection has already decided that its mutation will
+// not write. The independent authored fold therefore excludes that update and
+// includes the next handler-free insert at the insert method's return cut.
+// Waiting for the rejected receipt is a neighboring control: both cuts must
+// have the same durable rows, without an empty failed slot delaying the first.
+it('persists a direct write at return after a synchronous handler failure', async () => {
+  const storage = makeSeededStorage()
+  const failure = new Error('update rejected before writing')
+  const collection = createCollection(
+    localStorageCollectionOptions<Row>({
+      storageKey: 'rows',
+      storage,
+      storageEventApi: { addEventListener() {}, removeEventListener() {} },
+      getKey: (row) => row.id,
+      onUpdate: () => {
+        throw failure
+      },
+    }),
+  )
+  await withHistoryCleanup(
+    async () => {
+      await collection.preload()
+      const rejected = collection.update('a', (draft) => {
+        draft.value = 1
+      })
+      void rejected.isPersisted.promise.catch(() => undefined)
+      const next = collection.insert({ id: 'next', value: 2 })
+      const expected = expectedRows([{ id: 'next', value: 2 }], [true])
+      expect(
+        storedRows(storage.getItem('rows')),
+        'direct return after decided failure',
+      ).toEqual(expected)
+      await expect(rejected.isPersisted.promise).rejects.toBe(failure)
+      await next.isPersisted.promise
+      expect(storedRows(storage.getItem('rows')), 'settled durable').toEqual(
+        expected,
+      )
+      const after = collection.insert({ id: 'after', value: 3 })
+      expect(
+        storedRows(storage.getItem('rows')),
+        'direct return after rejected receipt',
+      ).toEqual(
+        expectedRows(
+          [
+            { id: 'next', value: 2 },
+            { id: 'after', value: 3 },
+          ],
+          [true, true],
+        ),
+      )
+      await after.isPersisted.promise
     },
     () => [() => collection.cleanup()],
   )
@@ -525,12 +661,13 @@ for (const queued of [false, true]) {
           if (queued) await entered.promise
           manual = createTransaction<Record<string, unknown>>({
             autoCommit: false,
-            mutationFn: async ({ transaction }) => {
+            mutationFn: ({ transaction }) => {
               // The application deliberately omits await and return. A
               // rejection observer prevents the test runner from replacing
               // the receipt assertion with an unhandled-rejection failure.
               void collection.utils.acceptMutations(transaction).catch(() => {})
               accepted.resolve()
+              return Promise.resolve()
             },
           })
           manual.mutate(() => collection.insert({ id: 'manual', value: 2 }))

@@ -295,6 +295,21 @@ remain current. Custom parsers still read back. These finite witnesses do not
 establish recovery of an invalid writer key extractor or manual acceptance
 without a mutation Collection owner.
 
+The [follow-up oracle review](oracle-reviews/2026-10-08-localstorage-final-review.md)
+adds direct-owner idle, ready, and cleaned-up histories for module-level
+acceptance into a DbClient materialization. It checks the manual receipt,
+durable snapshot, active public snapshots, and fresh restore. A hostile subject
+that drops transaction commit work fails the held-receipt checkpoint. The peer
+owner checks a peer write admitted by a restore subscriber, custom-parser
+normalization of an authored insert and update without a version-token change,
+invalid events followed by same-token repair, and malformed stored row shape
+or key identity before startup opens a sync transaction. The order owner checks
+a handler-free direct write at method return immediately after a synchronous
+handler failure. These finite witnesses do not prove arbitrary reentrant
+subscriber histories or cross-tab atomicity. Default JSON intentionally keeps
+the writer's authored rich value until restore; a Date witness records the
+public/durable representation difference.
+
 The [React source ID reuse oracle](https://github.com/TanStack/db/blob/main/packages/react-db/tests/source-id-reuse-oracle.test.tsx) ([review](oracle-reviews/issue-1991-react-source-id.md))
 checks that a mounted derived-identity hook rejects a different same-ID
 source Collection directly, after an intervening ID and predicate, within one
