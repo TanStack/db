@@ -844,7 +844,29 @@
     "template": "Initial subset load failed: ${normalized.message}",
     "literals": ["Initial subset load failed: "]
   },
+  "230": {
+    "file": "local-storage.ts",
+    "template": "LocalStorage options can create only one Collection. Create fresh options for each Collection.",
+    "literals": [
+      "LocalStorage options can create only one Collection. Create fresh options for each Collection."
+    ]
+  },
+  "231": {
+    "file": "local-storage.ts",
+    "template": "LocalStorage manual acceptance belongs to a different Collection.",
+    "literals": [
+      "LocalStorage manual acceptance belongs to a different Collection."
+    ]
+  },
   "232": {
+    "file": "local-storage.ts",
+    "template": "[LocalStorageCollection] Error refreshing a same-tab peer for storage key \"${key}\":",
+    "literals": [
+      "[LocalStorageCollection] Error refreshing a same-tab peer for storage key \""
+    ],
+    "kind": "warning"
+  },
+  "234": {
     "file": "transactions.ts",
     "template": "Transaction settlement failed",
     "literals": ["Transaction settlement failed"]
