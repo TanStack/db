@@ -947,7 +947,14 @@ function createLocalStorageSync<T extends object>(
         changes.push({ type: `delete`, key, value: oldStoredItem.data })
       } else if (
         oldStoredItem.versionKey !== newStoredItem.versionKey ||
-        (compareContent && !deepEquals(oldStoredItem.data, newStoredItem.data))
+        (compareContent &&
+          !deepEquals(oldStoredItem.data, newStoredItem.data) &&
+          // A default-JSON writer may retain a native Date while the stored
+          // row contains its ISO string. A peer's unrelated write must not
+          // publish that representation change as an update.
+          (parser !== JSON ||
+            JSON.stringify(oldStoredItem.data) !==
+              JSON.stringify(newStoredItem.data)))
       ) {
         changes.push({ type: `update`, key, value: newStoredItem.data })
       }

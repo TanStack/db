@@ -97,10 +97,11 @@ not connect distinct custom Storage wrapper objects, even if those wrappers
 access the same underlying bytes.
 
 The default JSON parser keeps a value authored by the writer in its original
-JavaScript form until that Collection restores. For example, a writer can still
-hold a `Date`, while a peer and a freshly restored Collection see its JSON
-string. With a custom parser, an authored row is read back after a successful
-write so the writer also sees any value that parser normalized.
+JavaScript form until that Collection restores or another write replaces that
+row. A disjoint peer write does not change the authored value. For example, a
+writer can still hold a `Date`, while a peer and a freshly restored Collection
+see its JSON string. With a custom parser, an authored row is read back after a
+successful write so the writer also sees any value that parser normalized.
 
 Automatic mutations in one Collection persist in mutation order, even if their
 optional handlers finish in another order. A handler that rejects does not write

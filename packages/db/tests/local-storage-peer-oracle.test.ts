@@ -265,6 +265,52 @@ it('does not publish a rejected same-tab write', async () => {
   )
 })
 
+/** A consumer callback may fail while the writer publishes an accepted row.
+ * The authored fold still contains that durable row: application observation
+ * cannot revoke a completed Storage write or change the persistence receipt.
+ * The driver observes the writer, peer, durable bytes and fresh restore after
+ * the receipt, with the throwing callback installed only after preload. */
+it('keeps a durable receipt when a writer subscriber throws', async () => {
+  const host = createHost()
+  const writer = makeCollection(host, 'shared', 'writer')
+  const peer = makeCollection(host, 'shared', 'peer')
+  let reopened: ReturnType<typeof makeCollection> | undefined
+  let subscription: ReturnType<typeof writer.subscribeChanges> | undefined
+  let postStorageCallbacks = 0
+  await withHistoryCleanup(
+    async () => {
+      await Promise.all([writer.preload(), peer.preload()])
+      subscription = writer.subscribeChanges(
+        () => {
+          if (host.storage.getItem('shared') !== null) {
+            postStorageCallbacks++
+            throw new Error('consumer callback failed after storage acceptance')
+          }
+        },
+        { includeInitialState: false },
+      )
+      await writer.insert({ id: 'saved', value: 1 }).isPersisted.promise
+      expect(
+        postStorageCallbacks,
+        'post-Storage callback reached',
+      ).toBeGreaterThan(0)
+      const expected = [{ id: 'saved', value: 1 }]
+      expect(durableRows(host, 'shared')).toEqual(expected)
+      expect(publicRows(writer)).toEqual(expected)
+      expect(publicRows(peer)).toEqual(expected)
+      reopened = makeCollection(host, 'shared', 'reopened')
+      await reopened.preload()
+      expect(publicRows(reopened)).toEqual(expected)
+    },
+    () => [
+      () => subscription?.unsubscribe(),
+      () => reopened?.cleanup(),
+      () => peer.cleanup(),
+      () => writer.cleanup(),
+    ],
+  )
+})
+
 /** A durable write is accepted before peer refresh. One peer's invalid read
  * cannot revoke that receipt or prevent a later compatible peer from seeing
  * the authored row. The controlled parser fails only when validating the row
@@ -543,6 +589,91 @@ it('keeps an authored Date in the writer while peers read JSON bytes', async () 
       () => reopened?.cleanup(),
       () => peer.cleanup(),
       () => writer.cleanup(),
+    ],
+  )
+})
+
+/** A disjoint peer write is not a restore of this Collection. The default-JSON
+ * writer keeps the Date it authored until its own persisted restore, while it
+ * still receives the peer's newly accepted row. The independent model tracks
+ * authored native values per Collection and the JSON form in durable bytes;
+ * the driver compares both active snapshots at the peer receipt and a fresh
+ * restore. This crosses native-value retention with same-tab publication. */
+it('keeps a native authored Date through a disjoint peer write', async () => {
+  type DatedRow = { id: string; at: Date | string }
+  const host = createHost()
+  const make = (id: string) =>
+    createCollection(
+      localStorageCollectionOptions<DatedRow>({
+        id,
+        storageKey: 'dated',
+        storage: host.storage,
+        storageEventApi: host.events,
+        getKey: (row) => row.id,
+      }),
+    )
+  const first = make('first')
+  const second = make('second')
+  let reopened: typeof first | undefined
+  await withHistoryCleanup(
+    async () => {
+      await Promise.all([first.preload(), second.preload()])
+      const at = new Date('2020-01-02T03:04:05.000Z')
+      await first.insert({ id: 'first-row', at }).isPersisted.promise
+      await second.insert({ id: 'second-row', at: 'later' }).isPersisted.promise
+      const durable = JSON.parse(host.storage.getItem('dated')!) as Record<
+        string,
+        { data: DatedRow }
+      >
+      expect(Object.values(durable).map(({ data }) => data)).toEqual(
+        expect.arrayContaining([
+          { id: 'first-row', at: at.toISOString() },
+          { id: 'second-row', at: 'later' },
+        ]),
+      )
+      expect(
+        [...first.values()].map(({ id, at: value }) => ({ id, at: value })),
+      ).toEqual(
+        expect.arrayContaining([
+          { id: 'first-row', at },
+          { id: 'second-row', at: 'later' },
+        ]),
+      )
+      expect(
+        [...second.values()].map(({ id, at: value }) => ({ id, at: value })),
+      ).toEqual(
+        expect.arrayContaining([
+          { id: 'first-row', at: at.toISOString() },
+          { id: 'second-row', at: 'later' },
+        ]),
+      )
+      reopened = make('reopened')
+      await reopened.preload()
+      expect(
+        [...reopened.values()].map(({ id, at: value }) => ({ id, at: value })),
+      ).toEqual(
+        expect.arrayContaining([
+          { id: 'first-row', at: at.toISOString() },
+          { id: 'second-row', at: 'later' },
+        ]),
+      )
+
+      // A peer's actual same-key edit has a new version and must replace the
+      // retained native value in the first Collection.
+      await second.update('first-row', (draft) => {
+        draft.at = 'changed'
+      }).isPersisted.promise
+      expect(
+        [...first.values()].find(({ id }) => id === 'first-row'),
+      ).toMatchObject({ at: 'changed' })
+      expect(
+        [...reopened.values()].find(({ id }) => id === 'first-row'),
+      ).toMatchObject({ at: 'changed' })
+    },
+    () => [
+      () => reopened?.cleanup(),
+      () => second.cleanup(),
+      () => first.cleanup(),
     ],
   )
 })

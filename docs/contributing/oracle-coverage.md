@@ -322,6 +322,16 @@ nested peer write replaces the unsupported manual-acceptance fixture. These
 finite histories do not establish arbitrary parser side effects, concurrent
 cross-tab writes, or every possible row serialization shape.
 
+The [boundary audit](oracle-reviews/2026-10-08-localstorage-boundary-audit.md)
+crosses default-JSON native-value retention with a disjoint same-tab peer write:
+the writer keeps its authored Date while receiving the peer's row, and a later
+same-key peer edit replaces that Date. Writer, peer, durable bytes, and fresh
+restore are observed at the peer receipt. A throwing writer subscriber after
+Storage acceptance does not revoke the receipt or prevent peer publication.
+The controlled host does not establish arbitrary native values or `toJSON`
+side effects, many-operation histories, or native browser scheduling. Those
+need a widened peer-owner value/history grammar and a receiving browser witness.
+
 The [React source ID reuse oracle](https://github.com/TanStack/db/blob/main/packages/react-db/tests/source-id-reuse-oracle.test.tsx) ([review](oracle-reviews/issue-1991-react-source-id.md))
 checks that a mounted derived-identity hook rejects a different same-ID
 source Collection directly, after an intervening ID and predicate, within one
