@@ -2201,17 +2201,7 @@ ${collection.id ? `[${collection.id}] ` : ``}Failed to create auto-index for fie
 
 <a id="error-216"></a>
 
-## Error 216: `indexes/basic-index.ts`
-
-Development builds show this message, with `${...}` replaced by values:
-
-```text
-Failed to evaluate index expression for key ${key} during removal:
-```
-
-<a id="error-217"></a>
-
-## Error 217: `indexes/btree-index.ts`
+## Error 216: `indexes/base-index.ts`
 
 Development builds show this message, with `${...}` replaced by values:
 

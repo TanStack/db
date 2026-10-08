@@ -80,6 +80,12 @@ export type PlainSite = {
   literals: Array<string>
 }
 
+/**
+ * Methods that log their first argument as a message. Text passed to them is a
+ * site, as if it were written at their `console` call.
+ */
+const messageSinks = new Set([`transitionToError`, `setErrorState`])
+
 /** Constructor name to the position of its message argument. */
 const messagePosition = new Map([
   [`Error`, 0],
@@ -443,10 +449,23 @@ export function findErrorSites(
     const isDevelopmentOnly = (node: ts.Node) => !!developmentRegion(node)
     // A guarded message whose production form holds no library text, such as
     // `guard ? \`[Live Query Error] ${message}\` : message`.
-    const isDecoration = (node: ts.Node) =>
-      ts.isConditionalExpression(node) &&
-      isGuard(node.condition) &&
-      !hasLibraryText(node.whenFalse)
+    const isDecoration = (node: ts.Node) => {
+      if (!ts.isConditionalExpression(node) || !isGuard(node.condition))
+        return false
+      const value = compact(node.whenFalse, sourceFile)
+      const decorated = holes(node.whenTrue)
+      return (
+        !hasLibraryText(node.whenFalse) &&
+        decorated.length > 0 &&
+        decorated.every((hole) => compact(hole, sourceFile) === value)
+      )
+    }
+    // A console method read other than as a direct call: an alias.
+    const consoleReceivers = new Set([`console`, `globalThis.console`])
+    const isConsoleMethod = (node: ts.Node) =>
+      (ts.isPropertyAccessExpression(node) ||
+        ts.isElementAccessExpression(node)) &&
+      consoleReceivers.has(node.expression.getText(sourceFile))
     const regions = new Map<ts.Node, Array<string>>()
     const visit = (node: ts.Node) => {
       if (
@@ -463,15 +482,30 @@ export function findErrorSites(
         ])
         return
       }
-      // A console call with library text is a site unless it is
-      // development-only.
+      // A console method that is not called directly could carry any text.
       if (
-        ts.isCallExpression(node) &&
-        ts.isPropertyAccessExpression(node.expression) &&
-        node.expression.expression.getText(sourceFile) === `console` &&
-        !isDevelopmentOnly(node)
+        isConsoleMethod(node) &&
+        !(ts.isCallExpression(node.parent) && node.parent.expression === node)
       )
-        for (const argument of node.arguments)
+        plain.push({
+          file,
+          line:
+            sourceFile.getLineAndCharacterOfPosition(node.getStart()).line + 1,
+          template: `console alias: ${compact(node, sourceFile)}`,
+          literals: [],
+        })
+      // A console call, or a call to a method that logs its message, with
+      // library text is a site unless it is development-only.
+      const sink =
+        ts.isCallExpression(node) &&
+        (isConsoleMethod(node.expression) ||
+          (ts.isPropertyAccessExpression(node.expression) &&
+            messageSinks.has(node.expression.name.text)))
+      if (sink && !isDevelopmentOnly(node))
+        for (const argument of node.arguments.slice(
+          0,
+          isConsoleMethod(node.expression) ? undefined : 1,
+        ))
           if (
             !isCoded(argument) &&
             !isDecoration(argument) &&
@@ -551,7 +585,11 @@ export function findErrorSites(
     visit(sourceFile)
     // One entry per guarded region, holding its prose: words and a space.
     for (const texts of regions.values()) {
-      const literals = texts.filter((text) => /[A-Za-z]+ [A-Za-z]/.test(text))
+      const prose = texts.filter((text) => /[A-Za-z]+ [A-Za-z]/.test(text))
+      // A region without prose still freezes its text, so it stays checked.
+      const literals = prose.length
+        ? prose
+        : texts.filter((text) => /[A-Za-z]/.test(text))
       if (literals.length) developmentOnly.push({ file, literals })
     }
   }

@@ -344,3 +344,13 @@ export type IndexConstructor<TKey extends string | number = string | number> =
     name?: string,
     options?: any,
   ) => BaseIndex<TKey>
+
+/** A row being removed whose expression throws: warn, and skip the row. */
+export function warnRemovalFailure(key: unknown, error: unknown): void {
+  console.warn(
+    devBuild() && process.env.NODE_ENV !== `production`
+      ? `Failed to evaluate index expression for key ${key} during removal:`
+      : codedMessage(216, { key }),
+    error,
+  )
+}

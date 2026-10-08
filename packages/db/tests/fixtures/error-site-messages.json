@@ -920,15 +920,7 @@
     ]
   },
   "216": {
-    "file": "indexes/basic-index.ts",
-    "template": "Failed to evaluate index expression for key ${key} during removal:",
-    "literals": [
-      "Failed to evaluate index expression for key ",
-      " during removal:"
-    ]
-  },
-  "217": {
-    "file": "indexes/btree-index.ts",
+    "file": "indexes/base-index.ts",
     "template": "Failed to evaluate index expression for key ${key} during removal:",
     "literals": [
       "Failed to evaluate index expression for key ",

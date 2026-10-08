@@ -5,7 +5,11 @@ import {
   findInsertPositionInArray,
 } from '../utils/array-utils.js'
 import { codedMessage, devBuild } from '../error-message.js'
-import { BaseIndex, builtInIndexResolverNames } from './base-index.js'
+import {
+  BaseIndex,
+  builtInIndexResolverNames,
+  warnRemovalFailure,
+} from './base-index.js'
 import type { CompareOptions } from '../query/builder/types.js'
 import type { IndexOperation } from './base-index.js'
 
@@ -97,12 +101,7 @@ export class BasicIndex<
     try {
       indexedValue = this.evaluateIndexExpression(item)
     } catch (error) {
-      console.warn(
-        devBuild() && process.env.NODE_ENV !== `production`
-          ? `Failed to evaluate index expression for key ${key} during removal:`
-          : codedMessage(216, { key }),
-        error,
-      )
+      warnRemovalFailure(key, error)
       this.indexedKeys.delete(key)
       return
     }
