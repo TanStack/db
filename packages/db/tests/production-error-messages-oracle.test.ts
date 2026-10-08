@@ -360,7 +360,9 @@ describe(`production error messages`, () => {
     // The census is the classifier these laws rest on, so its rules are
     // pinned on hand-written cases: one per rule, in fixtures/census.
     it(`classifies guarded, unguarded, and coded census cases`, () => {
-      const cases = findErrorSites(resolve(testsDirectory, `fixtures/census/src`))
+      const cases = findErrorSites(
+        resolve(testsDirectory, `fixtures/census/src`),
+      )
       expect(cases.plain.map(({ template }) => template)).toEqual([
         `console alias: console.warn`,
         `Or-guarded hint text`,
