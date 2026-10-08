@@ -6,6 +6,7 @@ import { codedMessage, devBuild } from './error-message.js'
 import {
   InvalidStorageDataFormatError,
   InvalidStorageObjectFormatError,
+  LocalStorageCollectionError,
   SerializationError,
   StorageKeyRequiredError,
 } from './errors'
@@ -68,9 +69,23 @@ function subscribeToSameTabWrites(
   }
 }
 
-function publishSameTabWrite(storage: StorageApi, key: string): void {
+function publishSameTabWrite(
+  storage: StorageApi,
+  key: string,
+  writer?: { listener: () => void; refresh: () => void },
+): void {
   for (const refresh of [...(sameTabListeners.get(storage)?.get(key) ?? [])]) {
-    refresh()
+    try {
+      if (refresh === writer?.listener) writer.refresh()
+      else refresh()
+    } catch (error) {
+      // A peer's parser or sync listener cannot revoke the writer's durable
+      // write or prevent another peer from observing it.
+      console.warn(
+        `[LocalStorageCollection] Error refreshing a same-tab peer for storage key "${key}":`,
+        error,
+      )
+    }
   }
 }
 
@@ -442,7 +457,7 @@ export function localStorageCollectionOptions(
    */
   const saveToStorage = (
     dataMap: Map<string | number, StoredItem<any>>,
-  ): void => {
+  ): string => {
     try {
       // Convert Map to object format for storage
       const objectData: Record<string, StoredItem<any>> = {}
@@ -451,6 +466,7 @@ export function localStorageCollectionOptions(
       })
       const serialized = parser.stringify(objectData)
       storage.setItem(config.storageKey, serialized)
+      return serialized
     } catch (error) {
       console.error(
         `[LocalStorageCollection] Error saving data to storage key "${config.storageKey}":`,
@@ -466,7 +482,6 @@ export function localStorageCollectionOptions(
    */
   const clearStorage: ClearStorageFn = (): void => {
     storage.removeItem(config.storageKey)
-    sync.manualTrigger?.()
     publishSameTabWrite(storage, config.storageKey)
   }
 
@@ -493,7 +508,7 @@ export function localStorageCollectionOptions(
           data: mutation.modified,
         })
     }
-    saveToStorage(staged)
+    const savedRaw = saveToStorage(staged)
     // Promote our writes before confirming them. The same-tab notification
     // then refreshes both this Collection's untouched peer rows and its peers.
     for (const mutation of mutations) {
@@ -501,8 +516,29 @@ export function localStorageCollectionOptions(
       if (storedItem) lastKnownData.set(mutation.key, storedItem)
       else lastKnownData.delete(mutation.key)
     }
-    sync.confirmOperationsSync(mutations)
-    publishSameTabWrite(storage, config.storageKey)
+    try {
+      sync.confirmOperationsSync(mutations)
+    } finally {
+      // Storage has already accepted this snapshot. A local confirmation
+      // error must not suppress publication to other active Collections.
+      const writerRefresh = sync.manualTrigger
+      publishSameTabWrite(
+        storage,
+        config.storageKey,
+        writerRefresh
+          ? {
+              listener: writerRefresh,
+              refresh: () =>
+                writerRefresh(
+                  parser === JSON &&
+                    storage.getItem(config.storageKey) === savedRaw
+                    ? staged
+                    : undefined,
+                ),
+            }
+          : undefined,
+      )
+    }
   }
 
   // Reserve automatic and manual writes in acceptance order. A rejected
@@ -669,9 +705,43 @@ export function localStorageCollectionOptions(
     await persistManual(collectionMutations)
   }
 
+  const materializedAcceptors = new WeakSet<
+    LocalStorageCollectionUtils[`acceptMutations`]
+  >()
   const acceptMutations = (transaction: {
     mutations: Array<PendingMutation<Record<string, unknown>>>
   }): Promise<void> => {
+    // A DbClient materializes module-level options into a fresh Collection.
+    // Route acceptance to that Collection's utility so its automatic and
+    // manual writes reserve slots in the same queue.
+    if (!sync.collection) {
+      const owners = new Set(
+        transaction.mutations
+          .filter((mutation) => mutation.collection.id === collectionId)
+          .map((mutation) => mutation.collection),
+      )
+      if (owners.size > 0) {
+        const owner = [...owners][0]!
+        const ownerAccept = (owner.utils as LocalStorageCollectionUtils)
+          .acceptMutations
+        if (
+          owners.size !== 1 ||
+          (ownerAccept !== acceptMutations &&
+            !materializedAcceptors.has(ownerAccept))
+        ) {
+          const work = Promise.reject(
+            new LocalStorageCollectionError(
+              devBuild() && process.env.NODE_ENV !== `production`
+                ? `LocalStorage manual acceptance belongs to a different Collection.`
+                : codedMessage(214),
+            ),
+          )
+          registerTransactionCommitWork(transaction, work)
+          return work
+        }
+        if (ownerAccept !== acceptMutations) return ownerAccept(transaction)
+      }
+    }
     const work = persistAcceptedMutations(transaction)
     registerTransactionCommitWork(transaction, work)
     return work
@@ -696,7 +766,7 @@ export function localStorageCollectionOptions(
     enumerable: true,
     value: () => {
       if (claimed)
-        throw new Error(
+        throw new LocalStorageCollectionError(
           devBuild() && process.env.NODE_ENV !== `production`
             ? `LocalStorage options can create only one Collection. Create fresh options for each Collection.`
             : codedMessage(213),
@@ -705,14 +775,14 @@ export function localStorageCollectionOptions(
     },
   })
 
-  return withCollectionConfigFactory(
-    options,
-    () =>
-      localStorageCollectionOptions({
-        ...config,
-        id: collectionId,
-      }) as unknown as typeof options,
-  )
+  return withCollectionConfigFactory(options, () => {
+    const materialized = localStorageCollectionOptions({
+      ...config,
+      id: collectionId,
+    }) as unknown as typeof options
+    materializedAcceptors.add(materialized.utils.acceptMutations)
+    return materialized
+  })
 }
 
 /**
@@ -777,7 +847,7 @@ function createLocalStorageSync<T extends object>(
   _getKey: (item: T) => string | number,
   lastKnownData: Map<string | number, StoredItem<T>>,
 ): SyncConfig<T> & {
-  manualTrigger?: () => void
+  manualTrigger?: (knownSnapshot?: Map<string | number, StoredItem<T>>) => void
   collection: any
   confirmOperationsSync: (mutations: Array<any>) => void
 } {
@@ -828,7 +898,9 @@ function createLocalStorageSync<T extends object>(
    * Process storage changes and update collection
    * Loads new data from storage, compares with last known state, and applies changes
    */
-  const processStorageChanges = () => {
+  const processStorageChanges = (
+    knownSnapshot?: Map<string | number, StoredItem<T>>,
+  ) => {
     if (!syncParams) return
 
     const { begin, write, commit } = syncParams
@@ -836,7 +908,7 @@ function createLocalStorageSync<T extends object>(
     // Load the new data
     let newData: Map<string | number, StoredItem<T>>
     try {
-      newData = readFromStorage<T>(storageKey, storage, parser)
+      newData = knownSnapshot ?? readFromStorage<T>(storageKey, storage, parser)
     } catch (error) {
       console.warn(
         `[LocalStorageCollection] Error loading data from storage key "${storageKey}":`,
@@ -849,24 +921,32 @@ function createLocalStorageSync<T extends object>(
     const changes = findChanges(lastKnownData, newData)
 
     if (changes.length > 0) {
+      // Reject an invalid snapshot before opening a sync transaction. This
+      // leaves the previous mirror available for a later valid refresh.
+      changes.forEach(({ type, value }) => {
+        if (value) validateJsonSerializable(parser, value, type)
+      })
       begin()
       changes.forEach(({ type, value }) => {
         if (value) {
-          validateJsonSerializable(parser, value, type)
           write({ type, value })
         }
       })
-      commit()
-
-      // Update lastKnownData
+      // A commit can synchronously publish to a subscriber that writes again.
+      // The nested refresh must compare against this snapshot, not its parent.
       lastKnownData.clear()
       newData.forEach((storedItem, key) => {
         lastKnownData.set(key, storedItem)
       })
+      commit()
     }
   }
 
-  const syncConfig: SyncConfig<T> & { manualTrigger?: () => void } = {
+  const syncConfig: SyncConfig<T> & {
+    manualTrigger?: (
+      knownSnapshot?: Map<string | number, StoredItem<T>>,
+    ) => void
+  } = {
     rowUpdateMode: `full`,
     sync: (params: Parameters<SyncConfig<T>[`sync`]>[0]) => {
       const { begin, write, commit, markReady } = params
@@ -875,12 +955,14 @@ function createLocalStorageSync<T extends object>(
       // Read before retaining this sync run's callbacks so startup failure
       // leaves no stale adapter state.
       const initialData = readFromStorage<T>(storageKey, storage, parser)
+      initialData.forEach((storedItem) => {
+        validateJsonSerializable(parser, storedItem.data, `load`)
+      })
       syncParams = params
       collection = params.collection
       if (initialData.size > 0) {
         begin()
         initialData.forEach((storedItem) => {
-          validateJsonSerializable(parser, storedItem.data, `load`)
           write({ type: `insert`, value: storedItem.data })
         })
         commit()
@@ -916,14 +998,18 @@ function createLocalStorageSync<T extends object>(
         storageEventApi.addEventListener(`storage`, handleStorageEvent)
       } catch (error) {
         unsubscribeSameTab()
-        if (syncParams === params) syncParams = null
+        if (syncParams === params) {
+          syncParams = null
+        }
         throw error
       }
       return {
         cleanup: () => {
           storageEventApi.removeEventListener(`storage`, handleStorageEvent)
           unsubscribeSameTab()
-          if (syncParams === params) syncParams = null
+          if (syncParams === params) {
+            syncParams = null
+          }
         },
       }
     },

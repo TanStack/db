@@ -35,6 +35,7 @@
  */
 import { describe, expect, it } from 'vitest'
 import { createCollection } from '../src/collection/index'
+import { DbClient, collectionOptions } from '../src/client'
 import { createDeferred } from '../src/deferred'
 import { localStorageCollectionOptions } from '../src/local-storage'
 import { createTransaction } from '../src/transactions'
@@ -161,6 +162,145 @@ function makeSeededStorage() {
   )
   return storage
 }
+
+/** A DbClient descriptor materializes a fresh Collection from module-level
+ * LocalStorage options. The authored order is automatic update 1, then manual
+ * update 2. Calling the module-level acceptance utility must enter the actual
+ * Collection's storage order: while the first handler is held, durable state
+ * stays at 0; after both receipts it is 2. The materialized Collection and a
+ * fresh restore are the public observations. */
+it('orders module-level manual acceptance with a DbClient Collection', async () => {
+  const storage = makeSeededStorage()
+  const entered = createDeferred<void>()
+  const release = createDeferred<void>()
+  const settings = localStorageCollectionOptions<Row>({
+    id: 'client-rows',
+    storageKey: 'rows',
+    storage,
+    storageEventApi: { addEventListener() {}, removeEventListener() {} },
+    getKey: (row) => row.id,
+    onUpdate: async () => {
+      entered.resolve()
+      await release.promise
+    },
+  })
+  const client = new DbClient()
+  const collection = client.collection(collectionOptions(settings))
+  let cleanupReopened: (() => Promise<void>) | undefined
+  await withHistoryCleanup(
+    async () => {
+      await collection.preload()
+      const automatic = collection.update('a', (draft) => {
+        draft.value = 1
+      })
+      await entered.promise
+      const manual = createTransaction({
+        autoCommit: false,
+        mutationFn: async () => {},
+      })
+      manual.mutate(() => {
+        collection.update('a', (draft) => {
+          draft.value = 2
+        })
+      })
+      const acceptance = settings.utils.acceptMutations(manual)
+      const receipt = observeHistoryPromise(manual.isPersisted.promise)
+      const commit = observeHistoryPromise(manual.commit())
+      expect(storedRows(storage.getItem('rows')), 'held durable order').toEqual(
+        initial,
+      )
+      expect(receipt.read().status, 'held manual receipt').toBe('pending')
+      release.resolve()
+      await Promise.all([
+        automatic.isPersisted.promise,
+        acceptance,
+        receipt.settled,
+        commit.settled,
+      ])
+      const expected = expectedRows(
+        [
+          { id: 'a', value: 1 },
+          { id: 'a', value: 2 },
+        ],
+        [true, true],
+      )
+      expect(
+        storedRows(storage.getItem('rows')),
+        'settled durable order',
+      ).toEqual(expected)
+      expect(
+        sortedRows(collection.values()),
+        'materialized public rows',
+      ).toEqual(expected)
+      const reopened = createCollection(
+        localStorageCollectionOptions<Row>({
+          id: 'reopened-client-rows',
+          storageKey: 'rows',
+          storage,
+          storageEventApi: { addEventListener() {}, removeEventListener() {} },
+          getKey: (row) => row.id,
+        }),
+      )
+      cleanupReopened = () => reopened.cleanup()
+      await reopened.preload()
+      expect(sortedRows(reopened.values()), 'fresh restore').toEqual(expected)
+    },
+    () => [
+      () => release.resolve(),
+      () => cleanupReopened?.(),
+      () => client.cleanup(),
+    ],
+  )
+})
+
+/** The same descriptor utility can be called for a materialized Collection
+ * before an explicit preload. The mutation itself establishes its Collection
+ * owner. Manual acceptance must use that owner's Storage path, and a later
+ * persisted restore must see exactly the authored row. */
+it('routes module-level manual acceptance before explicit preload', async () => {
+  const storage = makeStorage()
+  const settings = localStorageCollectionOptions<Row>({
+    id: 'client-rows',
+    storageKey: 'rows',
+    storage,
+    storageEventApi: { addEventListener() {}, removeEventListener() {} },
+    getKey: (row) => row.id,
+  })
+  const client = new DbClient()
+  const collection = client.collection(collectionOptions(settings))
+  let transaction:
+    ReturnType<typeof createTransaction<Record<string, unknown>>> | undefined
+  await withHistoryCleanup(
+    async () => {
+      transaction = createTransaction<Record<string, unknown>>({
+        autoCommit: false,
+        mutationFn: async () => {},
+      })
+      transaction.mutate(() => {
+        collection.insert({ id: 'early', value: 1 })
+      })
+      await settings.utils.acceptMutations(transaction)
+      await transaction.commit()
+      expect(
+        storedRows(storage.getItem('rows')),
+        'manual durable receipt',
+      ).toEqual([{ id: 'early', value: 1 }])
+      await collection.preload()
+      expect(sortedRows(collection.values()), 'later public restore').toEqual([
+        { id: 'early', value: 1 },
+      ])
+    },
+    () => [
+      () => {
+        if (transaction) {
+          void transaction.isPersisted.promise.catch(() => undefined)
+          if (transaction.state === 'pending') transaction.rollback()
+        }
+      },
+      () => client.cleanup(),
+    ],
+  )
+})
 
 // Storage is synchronous. The model applies each handler-free mutation before
 // the corresponding direct Collection call returns. These return checkpoints

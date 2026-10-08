@@ -77,8 +77,8 @@ failed-read contract, not a successful-convergence claim.
 Reviewed source and oracle head: `69ef5690a7db8f10b692462c70fc1ad2d43159b2`.
 The preceding audit's receipt histories began after both Collections preloaded.
 A newly ready Collection can invoke application status listeners before its
-sync function returns. One such listener started a write through an already
-ready peer. On prior head `d28d748da`, the write reached durable Storage and
+sync function returns. One such listener started a write through a peer that
+was already ready. On prior head `d28d748da`, the write reached durable Storage and
 fulfilled its receipt while the newly ready Collection stayed empty: same-tab
 registration followed `markReady()`. The new oracle's `newly ready peer at
 receipt` comparison failed with `[]` instead of the authored row.

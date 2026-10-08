@@ -2177,3 +2177,13 @@ Development builds show this message, with `${...}` replaced by values:
 ```text
 LocalStorage options can create only one Collection. Create fresh options for each Collection.
 ```
+
+<a id="error-214"></a>
+
+## Error 214: `local-storage.ts`
+
+Development builds show this message, with `${...}` replaced by values:
+
+```text
+LocalStorage manual acceptance belongs to a different Collection.
+```

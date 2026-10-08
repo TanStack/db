@@ -766,5 +766,12 @@
     "literals": [
       "LocalStorage options can create only one Collection. Create fresh options for each Collection."
     ]
+  },
+  "214": {
+    "file": "local-storage.ts",
+    "template": "LocalStorage manual acceptance belongs to a different Collection.",
+    "literals": [
+      "LocalStorage manual acceptance belongs to a different Collection."
+    ]
   }
 }

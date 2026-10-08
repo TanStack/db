@@ -32,9 +32,10 @@
  * checks this admission before and after the first preload, then checks that
  * the first Collection can still write.
  */
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { createCollection } from '../src/collection/index'
 import { createDeferred } from '../src/deferred'
+import { LocalStorageCollectionError } from '../src/errors'
 import { localStorageCollectionOptions } from '../src/local-storage'
 import { createTransaction } from '../src/transactions'
 import { withHistoryCleanup } from './optimistic-history-oracle'
@@ -259,6 +260,310 @@ it('does not publish a rejected same-tab write', async () => {
   )
 })
 
+/** A durable write is accepted before peer refresh. One peer's invalid read
+ * cannot revoke that receipt or prevent a later compatible peer from seeing
+ * the authored row. The controlled parser fails only when validating the row
+ * received through publication; all three Collections restored empty first. */
+it('isolates a failing same-tab receiver after a durable write', async () => {
+  const host = createHost()
+  const writer = makeCollection(host, 'shared', 'writer')
+  const failed = createCollection(
+    localStorageCollectionOptions<Row>({
+      id: 'failed',
+      storageKey: 'shared',
+      storage: host.storage,
+      storageEventApi: host.events,
+      getKey: (row) => row.id,
+      parser: {
+        parse: JSON.parse,
+        stringify: (value) => {
+          if (typeof value === 'object' && value !== null && 'id' in value) {
+            throw new Error('receiver cannot validate row')
+          }
+          return JSON.stringify(value)
+        },
+      },
+    }),
+  )
+  const later = makeCollection(host, 'shared', 'later')
+  const warning = vi.spyOn(console, 'warn').mockImplementation(() => {})
+  await withHistoryCleanup(
+    async () => {
+      await Promise.all([writer.preload(), failed.preload(), later.preload()])
+      await writer.insert({ id: 'accepted', value: 1 }).isPersisted.promise
+      const expected = [{ id: 'accepted', value: 1 }]
+      expect(durableRows(host, 'shared'), 'durable receipt').toEqual(expected)
+      expect(publicRows(writer), 'writer receipt').toEqual(expected)
+      expect(publicRows(later), 'later peer receipt').toEqual(expected)
+      expect(
+        publicRows(failed),
+        'failed peer remains on prior snapshot',
+      ).toEqual([])
+      expect(warning).toHaveBeenCalled()
+    },
+    () => [
+      () => warning.mockRestore(),
+      () => later.cleanup(),
+      () => failed.cleanup(),
+      () => writer.cleanup(),
+    ],
+  )
+})
+
+/** A writer's key extractor can fail while confirming a row that Storage has
+ * already accepted. The receipt reports that local error, but the durable
+ * authored row still belongs to the shared snapshot. A compatible peer must
+ * see it without relying on a browser storage event; this history does not
+ * promise recovery for the writer's invalid key extractor. */
+it('publishes a durable row even when local confirmation fails', async () => {
+  const host = createHost()
+  const confirmationError = new Error('local confirmation key failed')
+  let failNextKey = false
+  const setItem = host.storage.setItem
+  host.storage.setItem = (key, value) => {
+    setItem(key, value)
+    failNextKey = true
+  }
+  const writer = createCollection(
+    localStorageCollectionOptions<Row>({
+      id: 'writer',
+      storageKey: 'shared',
+      storage: host.storage,
+      storageEventApi: host.events,
+      getKey: (row) => {
+        if (failNextKey) {
+          failNextKey = false
+          throw confirmationError
+        }
+        return row.id
+      },
+    }),
+  )
+  const peer = makeCollection(host, 'shared', 'peer')
+  await withHistoryCleanup(
+    async () => {
+      await Promise.all([writer.preload(), peer.preload()])
+      await expect(
+        writer.insert({ id: 'durable', value: 1 }).isPersisted.promise,
+      ).rejects.toBe(confirmationError)
+      const expected = [{ id: 'durable', value: 1 }]
+      expect(
+        durableRows(host, 'shared'),
+        'durable despite rejected receipt',
+      ).toEqual(expected)
+      expect(publicRows(peer), 'peer after failed local confirmation').toEqual(
+        expected,
+      )
+    },
+    () => [() => peer.cleanup(), () => writer.cleanup()],
+  )
+})
+
+/** A receiver can synchronously author a second write while publishing the
+ * first. The third authored update changes that nested row again. A stale
+ * outer mirror would classify it as a new insert, although the public peer
+ * already has the row, and can fail with a duplicate-key error. */
+it('preserves a nested same-tab write during peer publication', async () => {
+  const host = createHost()
+  const writer = makeCollection(host, 'shared', 'writer')
+  const peer = makeCollection(host, 'shared', 'peer')
+  const nestedWriter = makeCollection(host, 'shared', 'nested-writer')
+  let nested: Promise<unknown> | undefined
+  let nestedCommit: Promise<unknown> | undefined
+  let admitted = false
+  const subscription = peer.subscribeChanges(
+    (changes) => {
+      if (!admitted && changes.some((change) => change.key === 'first')) {
+        admitted = true
+        const transaction = createTransaction({
+          autoCommit: false,
+          mutationFn: async () => {},
+        })
+        transaction.mutate(() => {
+          nestedWriter.insert({ id: 'nested', value: 2 })
+        })
+        nested = nestedWriter.utils.acceptMutations(transaction)
+        nestedCommit = transaction.commit()
+      }
+    },
+    { includeInitialState: false },
+  )
+  await withHistoryCleanup(
+    async () => {
+      await Promise.all([
+        peer.preload(),
+        writer.preload(),
+        nestedWriter.preload(),
+      ])
+      await writer.insert({ id: 'first', value: 1 }).isPersisted.promise
+      expect(nested, 'peer admitted nested write').toBeDefined()
+      await Promise.all([nested, nestedCommit])
+      const expected = expectedRows([
+        { id: 'first', value: 1 },
+        { id: 'nested', value: 2 },
+      ])
+      expect(durableRows(host, 'shared'), 'nested durable receipt').toEqual(
+        expected,
+      )
+      expect(publicRows(writer), 'nested writer receipt').toEqual(expected)
+      expect(publicRows(peer), 'nested peer receipt').toEqual(expected)
+      expect(publicRows(nestedWriter), 'nested writer public receipt').toEqual(
+        expected,
+      )
+      await nestedWriter.update('nested', (draft) => {
+        draft.value = 3
+      }).isPersisted.promise
+      const final = expectedRows([
+        { id: 'first', value: 1 },
+        { id: 'nested', value: 3 },
+      ])
+      expect(durableRows(host, 'shared'), 'later durable receipt').toEqual(
+        final,
+      )
+      expect(publicRows(peer), 'later peer receipt').toEqual(final)
+    },
+    () => [
+      () => subscription.unsubscribe(),
+      () => nestedWriter.cleanup(),
+      () => peer.cleanup(),
+      () => writer.cleanup(),
+    ],
+  )
+})
+
+/** A whole-snapshot write must read the current durable base once, and each
+ * distinct peer parser must read the new bytes once. With the default JSON
+ * parser, the writer already owns the exact saved snapshot, so a second full
+ * parse adds no information at this non-reentrant receipt. Custom parsers
+ * remain independent. The public model expects both rows in all Collections. */
+it('avoids reparsing the writer snapshot during same-tab publication', async () => {
+  const host = createHost()
+  host.storage.setItem(
+    'shared',
+    JSON.stringify({
+      's:prior': {
+        versionKey: 'prior-version',
+        data: { id: 'prior', value: 0 },
+      },
+    }),
+  )
+  const parseJson = JSON.parse
+  const writer = makeCollection(host, 'shared', 'writer')
+  const peerParses = [0, 0, 0]
+  const peers = peerParses.map((_, index) =>
+    createCollection(
+      localStorageCollectionOptions<Row>({
+        id: `peer-${index}`,
+        storageKey: 'shared',
+        storage: host.storage,
+        storageEventApi: host.events,
+        getKey: (row) => row.id,
+        parser: {
+          parse: (raw) => {
+            peerParses[index]!++
+            return parseJson(raw)
+          },
+          stringify: JSON.stringify,
+        },
+      }),
+    ),
+  )
+  const collections = [writer, ...peers]
+  const defaultParse = vi.spyOn(JSON, 'parse')
+  await withHistoryCleanup(
+    async () => {
+      await Promise.all(collections.map((collection) => collection.preload()))
+      defaultParse.mockClear()
+      peerParses.fill(0)
+      await writer.insert({ id: 'new', value: 1 }).isPersisted.promise
+      expect(defaultParse, 'one writer full parse').toHaveBeenCalledTimes(1)
+      expect(peerParses, 'one full parse per peer').toEqual([1, 1, 1])
+      const expected = expectedRows([
+        { id: 'prior', value: 0 },
+        { id: 'new', value: 1 },
+      ])
+      for (const collection of collections) {
+        expect(publicRows(collection), 'public rows at receipt').toEqual(
+          expected,
+        )
+      }
+    },
+    () => [
+      () => defaultParse.mockRestore(),
+      ...collections.map((collection) => () => collection.cleanup()),
+    ],
+  )
+})
+
+/** A custom parser may normalize the bytes it writes. The writer's in-memory
+ * staged Map is then not authoritative for untouched rows, even when Storage
+ * still contains the exact string it just saved. The receiving model reads
+ * the actual normalized durable row, so custom parsers must read back. */
+it('reads back a custom parser snapshot before publishing the writer', async () => {
+  const host = createHost()
+  host.storage.setItem(
+    'shared',
+    JSON.stringify({
+      's:prior': {
+        versionKey: 'prior-version',
+        data: { id: 'prior', value: 0 },
+      },
+    }),
+  )
+  let parses = 0
+  const writer = createCollection(
+    localStorageCollectionOptions<Row>({
+      id: 'writer',
+      storageKey: 'shared',
+      storage: host.storage,
+      storageEventApi: host.events,
+      getKey: (row) => row.id,
+      parser: {
+        parse: (raw) => {
+          parses++
+          return JSON.parse(raw)
+        },
+        stringify: (value) => {
+          if (
+            typeof value === 'object' &&
+            value !== null &&
+            's:prior' in value &&
+            's:new' in value
+          ) {
+            return JSON.stringify({
+              ...value,
+              's:prior': {
+                versionKey: 'normalized-version',
+                data: { id: 'prior', value: 9 },
+              },
+            })
+          }
+          return JSON.stringify(value)
+        },
+      },
+    }),
+  )
+  const peer = makeCollection(host, 'shared', 'peer')
+  await withHistoryCleanup(
+    async () => {
+      await Promise.all([writer.preload(), peer.preload()])
+      parses = 0
+      await writer.insert({ id: 'new', value: 1 }).isPersisted.promise
+      const expected = expectedRows([
+        { id: 'prior', value: 9 },
+        { id: 'new', value: 1 },
+      ])
+      expect(parses, 'custom writer read and readback').toBe(2)
+      expect(durableRows(host, 'shared')).toEqual(expected)
+      expect(publicRows(writer), 'writer normalized public row').toEqual(
+        expected,
+      )
+      expect(publicRows(peer), 'peer normalized public row').toEqual(expected)
+    },
+    () => [() => peer.cleanup(), () => writer.cleanup()],
+  )
+})
+
 /** Cleanup ends the first Collection's receiving sync run. The peer's next
  * accepted write must not republish into that ended run. Restart establishes
  * a new persisted restore and then receives a later same-tab write. The
@@ -395,6 +700,53 @@ it('manual acceptance keeps equal-ID Collections in their own stores', async () 
   )
 })
 
+/** A module-level options utility is not a license to persist a different
+ * Collection that happens to have the same ID. The independent ownership
+ * model assigns the mutation only to the Collection built from its own
+ * options. A mismatched utility must fail at acceptance without writing
+ * either store, rather than silently reporting a successful wrong write. */
+for (const unrelatedKey of ['first-store', 'second-store']) {
+  it(`rejects module-level acceptance for an unrelated equal-ID Collection on ${unrelatedKey}`, async () => {
+    const host = createHost()
+    const settings = localStorageCollectionOptions<Row>({
+      id: 'same-id',
+      storageKey: 'first-store',
+      storage: host.storage,
+      storageEventApi: host.events,
+      getKey: (row) => row.id,
+    })
+    const unrelated = makeCollection(host, unrelatedKey, 'same-id')
+    let transaction:
+      ReturnType<typeof createTransaction<Record<string, unknown>>> | undefined
+    await withHistoryCleanup(
+      async () => {
+        await unrelated.preload()
+        transaction = createTransaction<Record<string, unknown>>({
+          autoCommit: false,
+          mutationFn: async () => {},
+        })
+        transaction.mutate(() => {
+          unrelated.insert({ id: 'other', value: 1 })
+        })
+        await expect(
+          settings.utils.acceptMutations(transaction),
+        ).rejects.toThrow(LocalStorageCollectionError)
+        expect(host.storage.getItem('first-store')).toBeNull()
+        expect(host.storage.getItem('second-store')).toBeNull()
+      },
+      () => [
+        () => {
+          if (transaction) {
+            void transaction.isPersisted.promise.catch(() => undefined)
+            transaction.rollback()
+          }
+        },
+        () => unrelated.cleanup(),
+      ],
+    )
+  })
+}
+
 /** One adapter options object owns one Collection. Its mutable sync and
  * utility state cannot represent two owners at once. The finite history
  * varies whether the first Collection has started its sync run and whether
@@ -419,6 +771,9 @@ for (const firstPreloaded of [false, true]) {
           if (firstPreloaded) await first.preload()
           expect(() => createCollection(forCreate())).toThrow(
             'LocalStorage options can create only one Collection',
+          )
+          expect(() => createCollection(forCreate())).toThrow(
+            LocalStorageCollectionError,
           )
           if (!firstPreloaded) await first.preload()
           const transaction = createTransaction({
@@ -555,6 +910,33 @@ it('keeps a pending mutation through clear until it settles', async () => {
   )
 })
 
+/** Clear publishes one empty snapshot to each active Collection. The work
+ * model counts one Storage read per receiver at the clear-return checkpoint;
+ * reading the writer twice gives no additional observation. Public rows in
+ * both receivers must be empty before another browser event is delivered. */
+it('refreshes each active Collection once when clearing storage', async () => {
+  const host = createHost()
+  const writer = makeCollection(host, 'shared', 'writer')
+  const peer = makeCollection(host, 'shared', 'peer')
+  await withHistoryCleanup(
+    async () => {
+      await Promise.all([writer.preload(), peer.preload()])
+      await writer.insert({ id: 'row', value: 1 }).isPersisted.promise
+      const getItem = host.storage.getItem
+      let reads = 0
+      host.storage.getItem = (key) => {
+        reads++
+        return getItem(key)
+      }
+      writer.utils.clearStorage()
+      expect(reads, 'one read per active receiver').toBe(2)
+      expect(publicRows(writer), 'writer at clear return').toEqual([])
+      expect(publicRows(peer), 'peer at clear return').toEqual([])
+    },
+    () => [() => peer.cleanup(), () => writer.cleanup()],
+  )
+})
+
 /** The Storage API uses null for a missing key. An existing empty string is
  * malformed stored content, so the model permits a first insert from null
  * but forbids silently replacing the empty string after startup. The failed
@@ -619,6 +1001,76 @@ for (const [name, raw] of [
     )
   })
 }
+
+/** A rejected persisted restore must not retain a sync transaction or callbacks
+ * from its failed sync run. The model predicts no accepted snapshot until a
+ * later run restores valid bytes. The adapter seam counts `begin` before the
+ * public error checkpoint and after an obsolete manual trigger; public status,
+ * unchanged bytes, and restart rows check the observable consequences. */
+it('does not retain a failed startup validation run', async () => {
+  const host = createHost()
+  const bad = JSON.stringify({
+    's:bad': { versionKey: 'bad-version', data: { id: 'bad', value: 1 } },
+  })
+  const good = JSON.stringify({
+    's:good': { versionKey: 'good-version', data: { id: 'good', value: 2 } },
+  })
+  host.storage.setItem('shared', bad)
+  const options = localStorageCollectionOptions<Row>({
+    id: 'reader',
+    storageKey: 'shared',
+    storage: host.storage,
+    storageEventApi: host.events,
+    getKey: (row) => row.id,
+    parser: {
+      parse: JSON.parse,
+      stringify: (value) => {
+        if (
+          typeof value === 'object' &&
+          value !== null &&
+          'id' in value &&
+          value.id === 'bad'
+        ) {
+          throw new Error('bad row cannot be serialized')
+        }
+        return JSON.stringify(value)
+      },
+    },
+  })
+  const originalSync = options.sync.sync
+  let begins = 0
+  options.sync.sync = (params) =>
+    originalSync({
+      ...params,
+      begin: () => {
+        begins++
+        return params.begin()
+      },
+    })
+  const collection = createCollection(options)
+  await withHistoryCleanup(
+    async () => {
+      await expect(collection.preload()).rejects.toThrow(
+        'bad row cannot be serialized',
+      )
+      expect(collection.status).toBe('error')
+      expect(host.storage.getItem('shared')).toBe(bad)
+      expect(begins, 'failed restore opens no transaction').toBe(0)
+      host.storage.setItem('shared', good)
+      const failedRunTrigger = (
+        options.sync as typeof options.sync & { manualTrigger?: () => void }
+      ).manualTrigger
+      failedRunTrigger?.()
+      expect(begins, 'obsolete failed callback remains inert').toBe(0)
+      await collection.cleanup()
+      collection.startSyncImmediate()
+      expect(publicRows(collection), 'valid restart restore').toEqual([
+        { id: 'good', value: 2 },
+      ])
+    },
+    () => [() => collection.cleanup()],
+  )
+})
 
 // A transient read failure is also insufficient evidence for an empty
 // persisted restore. Unlike malformed bytes, the existing valid snapshot can
