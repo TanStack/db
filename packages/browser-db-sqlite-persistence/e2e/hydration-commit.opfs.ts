@@ -40,6 +40,7 @@ export type HydrationCommitObservation = {
   baseline: boolean
   rich: boolean
   browserCoordinator: boolean
+  sourceStorageId: string
   rowReads: number
   cycleCalls: number
   held: {
@@ -182,6 +183,23 @@ async function run(): Promise<void> {
       schemaVersion: 11,
     })
     const adapter = resolved.adapter
+    // On-demand A writes its claimed physical cache ID. Keep that ID from the
+    // adapter's claim result so the scheduling and durable checks observe the
+    // same Collection without guessing a storage-name format.
+    let sourceStorageId = `a`
+    let sourceClaimId: string | undefined
+    if (phase === `subscription`) {
+      const claim = adapter.claimCacheGeneration?.bind(adapter)
+      if (!claim) throw new Error(`On-demand A requires a managed cache claim`)
+      adapter.claimCacheGeneration = async (id) => {
+        const result = await claim(id)
+        if (id === `a`) {
+          sourceStorageId = result.storageCollectionId
+          sourceClaimId = result.claimId
+        }
+        return result
+      }
+    }
     const bAdapter = persistence.resolvePersistenceForCollection!({
       collectionId: `b`,
       mode: `sync-present`,
@@ -200,7 +218,26 @@ async function run(): Promise<void> {
         rowVersion: 1,
         mutations: [{ type: `insert`, key: row.id, value: row }],
       })
-    if (baseline) await seed(`a`, { id: `baseline`, value: 0 }, adapter)
+    if (baseline && phase === `subscription`) {
+      const claim = await adapter.claimCacheGeneration!(`a`)
+      await adapter.applyCommittedTx(claim.storageCollectionId, {
+        txId: `seed-a`,
+        term: 1,
+        seq: 1,
+        rowVersion: 1,
+        cacheGenerationClaimId: claim.claimId,
+        mutations: [
+          {
+            type: `insert`,
+            key: `baseline`,
+            value: { id: `baseline`, value: 0 },
+          },
+        ],
+      })
+      await adapter.releaseCacheGenerationClaim!(claim.claimId)
+    } else if (baseline) {
+      await seed(`a`, { id: `baseline`, value: 0 }, adapter)
+    }
     await seed(`b`, { id: `peer-baseline`, value: 22 }, bAdapter)
     const runScope = adapter.runInHydrationScope!.bind(adapter)
     const pendingHydrations = new Set<Promise<unknown>>()
@@ -278,11 +315,11 @@ async function run(): Promise<void> {
     )
     resolved.coordinator!.requestApplyCommittedTx = async (id, tx, scoped) => {
       const nestedHere =
-        id === `a` &&
+        id === sourceStorageId &&
         scoped !== undefined &&
         [...liveScopes.values()].includes(scoped)
       if (nestedHere) nested.add(tx.txId)
-      if (id === `a` && tailStarted) tailTransactions.add(tx.txId)
+      if (id === sourceStorageId && tailStarted) tailTransactions.add(tx.txId)
       try {
         return await request(id, tx, scoped)
       } finally {
@@ -292,9 +329,13 @@ async function run(): Promise<void> {
     const apply = adapter.applyCommittedTx.bind(adapter)
     adapter.applyCommittedTx = (id, tx) => {
       const result = apply(id, tx)
-      if (id === `a` && tailStarted && tailTransactions.has(tx.txId))
+      if (
+        id === sourceStorageId &&
+        tailStarted &&
+        tailTransactions.has(tx.txId)
+      )
         tailScheduling.push(`public-apply`)
-      if (id === `a` && nested.has(tx.txId)) {
+      if (id === sourceStorageId && nested.has(tx.txId)) {
         cycleCalls++
         cycle.resolve()
       }
@@ -478,14 +519,24 @@ async function run(): Promise<void> {
       )
       await receiptPromises.at(-1)
       tailStarted = false
-      const durable = await adapter.loadSubset(`a`, {})
+      const sourceClaimContext = sourceClaimId
+        ? { cacheGenerationClaimId: sourceClaimId }
+        : undefined
+      const durable = await adapter.loadSubset(
+        sourceStorageId,
+        {},
+        sourceClaimContext,
+      )
       durableRows = durable
         .map(({ value }) => value as Row)
         .sort((x, y) => x.id.localeCompare(y.id))
       durableRowMetadata = durable
         .filter(({ metadata }) => metadata !== undefined)
         .map(({ key, metadata }) => ({ key, metadata }))
-      durableMetadata = await adapter.loadCollectionMetadata!(`a`)
+      durableMetadata = await adapter.loadCollectionMetadata!(
+        sourceStorageId,
+        sourceClaimContext,
+      )
       peerRows = (await bAdapter.loadSubset(`b`, {})).map(
         ({ value }) => value as Row,
       )
@@ -506,6 +557,7 @@ async function run(): Promise<void> {
       baseline,
       rich,
       browserCoordinator,
+      sourceStorageId,
       rowReads,
       cycleCalls,
       held,
@@ -530,18 +582,40 @@ async function run(): Promise<void> {
     window.__hydrationCommitResult = captured
     if (cycleCalls === 0) {
       await a.cleanup()
-      const reopened = createCollection(
-        persistedCollectionOptions<Row, string>({
-          id: `a`,
-          schemaVersion: 11,
-          persistence,
-          getKey: (row) => row.id,
-          syncMode: `eager`,
-        }),
-      )
-      cleanup.unshift(() => reopened.cleanup())
-      await reopened.preload()
-      captured.reopenedRows = publicRows(reopened)
+      if (phase === `subscription`) {
+        // A partial on-demand cache does not certify offline Collection
+        // restore. A fresh claim still proves the current physical rows were
+        // durably stored after the first sync run releases its claim.
+        const freshClaim = await adapter.claimCacheGeneration!(`a`)
+        try {
+          captured.reopenedRows = (
+            await adapter.loadSubset(
+              freshClaim.storageCollectionId,
+              {},
+              {
+                cacheGenerationClaimId: freshClaim.claimId,
+              },
+            )
+          )
+            .map(({ value }) => value as Row)
+            .sort((x, y) => x.id.localeCompare(y.id))
+        } finally {
+          await adapter.releaseCacheGenerationClaim!(freshClaim.claimId)
+        }
+      } else {
+        const reopened = createCollection(
+          persistedCollectionOptions<Row, string>({
+            id: `a`,
+            schemaVersion: 11,
+            persistence,
+            getKey: (row) => row.id,
+            syncMode: `eager`,
+          }),
+        )
+        cleanup.unshift(() => reopened.cleanup())
+        await reopened.preload()
+        captured.reopenedRows = publicRows(reopened)
+      }
       window.__hydrationCommitResult = structuredClone(captured)
     }
   } catch (error) {

@@ -1,5 +1,6 @@
 import type { LoadSubsetOptions } from '@tanstack/db'
 import type {
+  PersistedCacheGenerationClaim,
   PersistedCollectionMode,
   PersistedIndexSpec,
   PersistedKeySetEvidence,
@@ -7,7 +8,7 @@ import type {
   SQLitePullSinceResult,
 } from '@tanstack/db-sqlite-persistence-core'
 
-export const ELECTRON_PERSISTENCE_PROTOCOL_VERSION = 2 as const
+export const ELECTRON_PERSISTENCE_PROTOCOL_VERSION = 3 as const
 export const DEFAULT_ELECTRON_PERSISTENCE_CHANNEL = `tanstack-db:sqlite-persistence`
 
 export type ElectronPersistedRow = Record<string, unknown>
@@ -16,6 +17,7 @@ export type ElectronPersistedKey = string | number
 export type ElectronPersistenceResolution = {
   mode: PersistedCollectionMode
   schemaVersion?: number
+  logicalCollectionId?: string
 }
 
 export type ElectronPersistenceMethod =
@@ -28,23 +30,32 @@ export type ElectronPersistenceMethod =
   | `markIndexRemoved`
   | `pullSince`
   | `getStreamPosition`
+  | `claimCacheGeneration`
+  | `rotateCacheGeneration`
+  | `renewCacheGenerationClaim`
+  | `releaseCacheGenerationClaim`
 
 export type ElectronPersistencePayloadMap = {
   loadSubset: {
     options: LoadSubsetOptions
-    ctx?: { requiredIndexSignatures?: ReadonlyArray<string> }
+    ctx?: {
+      requiredIndexSignatures?: ReadonlyArray<string>
+      cacheGenerationClaimId?: string
+    }
   }
   loadResumeSnapshot: {
     ctx?: {
       requiredIndexSignatures?: ReadonlyArray<string>
       includeRows?: boolean
+      cacheGenerationClaimId?: string
     }
   }
-  loadCollectionMetadata: {}
+  loadCollectionMetadata: { ctx?: { cacheGenerationClaimId?: string } }
   scanRows: {
     options?: {
       metadataOnly?: boolean
     }
+    ctx?: { cacheGenerationClaimId?: string }
   }
   applyCommittedTx: {
     tx: PersistedTx<ElectronPersistedRow, ElectronPersistedKey>
@@ -52,14 +63,28 @@ export type ElectronPersistencePayloadMap = {
   ensureIndex: {
     signature: string
     spec: PersistedIndexSpec
+    ctx?: { cacheGenerationClaimId?: string }
   }
   markIndexRemoved: {
     signature: string
+    ctx?: { cacheGenerationClaimId?: string }
   }
   pullSince: {
     fromRowVersion: number
+    ctx?: { cacheGenerationClaimId?: string }
   }
-  getStreamPosition: {}
+  getStreamPosition: { ctx?: { cacheGenerationClaimId?: string } }
+  claimCacheGeneration: {}
+  rotateCacheGeneration: {
+    claimId: string
+    resetMetadata?: { key: string; value: unknown }
+    expectedStorageCollectionId?: string
+  }
+  renewCacheGenerationClaim: {
+    storageCollectionId: string
+    claimId: string
+  }
+  releaseCacheGenerationClaim: { claimId: string }
 }
 
 export type ElectronPersistenceResultMap = {
@@ -92,6 +117,10 @@ export type ElectronPersistenceResultMap = {
     latestSeq: number
     latestRowVersion: number
   }
+  claimCacheGeneration: PersistedCacheGenerationClaim
+  rotateCacheGeneration: PersistedCacheGenerationClaim
+  renewCacheGenerationClaim: number | undefined
+  releaseCacheGenerationClaim: null
 }
 
 export type ElectronSerializedError = {

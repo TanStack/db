@@ -136,6 +136,11 @@ idempotent.
 ## Notes
 
 - The renderer API mirrors other runtimes: one shared `create...Persistence`.
+- IPC protocol v3 forwards managed on-demand cache claims, rotation, renewal,
+  release, and claim checks on SQLite reads. Upgrade main and renderer together.
+  If a custom main-process adapter does not implement these operations, pass
+  `managedCacheGenerations: false` to `createElectronSQLitePersistence` to keep
+  the full-shape recovery fallback.
 - Collection mode (`sync-present` vs `sync-absent`) and `schemaVersion` are
   resolved per collection and forwarded across IPC automatically.
 - Without an `ElectronCollectionCoordinator`, single-renderer mode uses

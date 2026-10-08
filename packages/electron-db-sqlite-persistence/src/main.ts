@@ -19,10 +19,12 @@ import type {
 type ElectronMainPersistenceAdapter = PersistenceAdapter & {
   loadCollectionMetadata?: (
     collectionId: string,
+    ctx?: { cacheGenerationClaimId?: string },
   ) => Promise<Array<{ key: string; value: unknown }>>
   scanRows?: (
     collectionId: string,
     options?: { metadataOnly?: boolean },
+    ctx?: { cacheGenerationClaimId?: string },
   ) => Promise<
     Array<{
       key: ElectronPersistedKey
@@ -33,8 +35,12 @@ type ElectronMainPersistenceAdapter = PersistenceAdapter & {
   pullSince?: (
     collectionId: string,
     fromRowVersion: number,
+    ctx?: { cacheGenerationClaimId?: string },
   ) => Promise<SQLitePullSinceResult<ElectronPersistedKey>>
-  getStreamPosition?: (collectionId: string) => Promise<{
+  getStreamPosition?: (
+    collectionId: string,
+    ctx?: { cacheGenerationClaimId?: string },
+  ) => Promise<{
     latestTerm: number
     latestSeq: number
     latestRowVersion: number
@@ -140,7 +146,10 @@ async function executeRequestAgainstAdapter(
           `loadCollectionMetadata is not supported by the configured electron persistence adapter`,
         )
       }
-      const result = await adapter.loadCollectionMetadata(request.collectionId)
+      const result = await adapter.loadCollectionMetadata(
+        request.collectionId,
+        request.payload.ctx,
+      )
       return {
         v: ELECTRON_PERSISTENCE_PROTOCOL_VERSION,
         requestId: request.requestId,
@@ -159,6 +168,7 @@ async function executeRequestAgainstAdapter(
       const result = await adapter.scanRows(
         request.collectionId,
         request.payload.options,
+        request.payload.ctx,
       )
       return {
         v: ELECTRON_PERSISTENCE_PROTOCOL_VERSION,
@@ -185,6 +195,7 @@ async function executeRequestAgainstAdapter(
         request.collectionId,
         request.payload.signature,
         request.payload.spec,
+        request.payload.ctx,
       )
       return {
         v: ELECTRON_PERSISTENCE_PROTOCOL_VERSION,
@@ -204,6 +215,7 @@ async function executeRequestAgainstAdapter(
       await adapter.markIndexRemoved(
         request.collectionId,
         request.payload.signature,
+        request.payload.ctx,
       )
       return {
         v: ELECTRON_PERSISTENCE_PROTOCOL_VERSION,
@@ -223,6 +235,7 @@ async function executeRequestAgainstAdapter(
       const result = await adapter.pullSince(
         request.collectionId,
         request.payload.fromRowVersion,
+        request.payload.ctx,
       )
       return {
         v: ELECTRON_PERSISTENCE_PROTOCOL_VERSION,
@@ -239,13 +252,88 @@ async function executeRequestAgainstAdapter(
           `getStreamPosition is not supported by the configured electron persistence adapter`,
         )
       }
-      const position = await adapter.getStreamPosition(request.collectionId)
+      const position = await adapter.getStreamPosition(
+        request.collectionId,
+        request.payload.ctx,
+      )
       return {
         v: ELECTRON_PERSISTENCE_PROTOCOL_VERSION,
         requestId: request.requestId,
         method: request.method,
         ok: true,
         result: position,
+      }
+    }
+
+    case `claimCacheGeneration`: {
+      if (!adapter.claimCacheGeneration) {
+        throw new InvalidPersistedCollectionConfigError(
+          `claimCacheGeneration is not supported by the configured electron persistence adapter`,
+        )
+      }
+      const result = await adapter.claimCacheGeneration(request.collectionId)
+      return {
+        v: ELECTRON_PERSISTENCE_PROTOCOL_VERSION,
+        requestId: request.requestId,
+        method: request.method,
+        ok: true,
+        result,
+      }
+    }
+
+    case `rotateCacheGeneration`: {
+      if (!adapter.rotateCacheGeneration) {
+        throw new InvalidPersistedCollectionConfigError(
+          `rotateCacheGeneration is not supported by the configured electron persistence adapter`,
+        )
+      }
+      const result = await adapter.rotateCacheGeneration(
+        request.collectionId,
+        request.payload.claimId,
+        request.payload.resetMetadata,
+        request.payload.expectedStorageCollectionId,
+      )
+      return {
+        v: ELECTRON_PERSISTENCE_PROTOCOL_VERSION,
+        requestId: request.requestId,
+        method: request.method,
+        ok: true,
+        result,
+      }
+    }
+
+    case `renewCacheGenerationClaim`: {
+      if (!adapter.renewCacheGenerationClaim) {
+        throw new InvalidPersistedCollectionConfigError(
+          `renewCacheGenerationClaim is not supported by the configured electron persistence adapter`,
+        )
+      }
+      const result = await adapter.renewCacheGenerationClaim(
+        request.payload.storageCollectionId,
+        request.payload.claimId,
+      )
+      return {
+        v: ELECTRON_PERSISTENCE_PROTOCOL_VERSION,
+        requestId: request.requestId,
+        method: request.method,
+        ok: true,
+        result,
+      }
+    }
+
+    case `releaseCacheGenerationClaim`: {
+      if (!adapter.releaseCacheGenerationClaim) {
+        throw new InvalidPersistedCollectionConfigError(
+          `releaseCacheGenerationClaim is not supported by the configured electron persistence adapter`,
+        )
+      }
+      await adapter.releaseCacheGenerationClaim(request.payload.claimId)
+      return {
+        v: ELECTRON_PERSISTENCE_PROTOCOL_VERSION,
+        requestId: request.requestId,
+        method: request.method,
+        ok: true,
+        result: null,
       }
     }
   }
@@ -259,7 +347,8 @@ function resolveModeAwarePersistence(
   const schemaVersion = request.resolution?.schemaVersion
   const collectionAwarePersistence =
     persistence.resolvePersistenceForCollection?.({
-      collectionId: request.collectionId,
+      collectionId:
+        request.resolution?.logicalCollectionId ?? request.collectionId,
       mode,
       schemaVersion,
     })

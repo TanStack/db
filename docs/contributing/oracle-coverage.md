@@ -1722,6 +1722,15 @@ its source-backed row. Another controlled receiving test delivers a peer
 notification to an expired claimant before its renewal timer runs and checks
 subset reload. Both coordinator owners offer unload before a held source load
 settles.
+The Electron IPC receiving owner forwards claim, renewal, rotation, release,
+and cache-claim read contexts through protocol v3. Its in-process main adapter
+witness keeps the logical Collection ID for adapter selection while reads
+address the claimed physical storage ID. The shared SQLite adapter contract
+runs its claimed-cache cases over that bridge. A custom main-process adapter
+can explicitly disable managed cache generations and retain the full-shape
+fallback. The local Electron binary is unavailable, so an actual
+main/renderer process receiving cut remains with the Electron runtime-bridge
+owner.
 
 The Electric descriptor owner now holds an old SDK snapshot across claim
 expiry. The replacement provider session settles both demands from fresh

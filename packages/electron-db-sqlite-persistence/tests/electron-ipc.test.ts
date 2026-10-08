@@ -26,6 +26,7 @@ import {
 import type {
   ApplyCommittedTxRequest,
   ApplyLocalMutationsRequest,
+  HydrationPersistenceAdapter,
   IndeterminateCommitError,
   PersistedCollectionDurabilityError,
   PersistedCollectionPersistence,
@@ -54,12 +55,19 @@ import type {
  * acquisition has its own lease and release obligation. The Collection-level
  * mapping is documented in the Browser
  * `per-collection-coordinator-oracle.test.ts` companion.
+ * The approved persisted-cache law requires a claimed physical storage ID for
+ * on-demand rows. The logical Collection ID still selects the main-process
+ * adapter. The receiving history claims, reads, renews, rotates, reads again,
+ * and releases; its reference is the authored logical ID and claim returned
+ * at each step, independent of the IPC routing code. A custom adapter that
+ * opts out advertises no managed-cache operations and retains the fallback.
  *
  * Expected transactions, adapter call logs, SQLite rows, metadata, owner
  * callbacks, and coordinator snapshots form the reference observations.
  * Histories vary response loss, leadership change, owner replacement,
- * duplicate delivery, acquisition release, durability failure, cleanup, and
- * reopen. The driver crosses the real Electron coordinator, its shared
+ * duplicate delivery, acquisition release, durability failure, cleanup,
+ * cache-claim changes, and reopen. The driver crosses the real Electron
+ * coordinator, its shared
  * broadcast coordination engine, and the IPC persistence adapter; the durable
  * witness reopens a real SQLite database.
  *
@@ -566,6 +574,126 @@ describe(`electron sqlite persistence bridge`, () => {
       }
     },
   )
+
+  // A cache generation has a physical storage ID, while mode-aware adapter
+  // selection belongs to the logical Collection. IPC must keep both identities.
+  it(`routes cache-generation operations through the logical Collection adapter`, async () => {
+    const driver = new BetterSqlite3SQLiteDriver({
+      filename: createTempDbPath(),
+    })
+    registerCleanup(() => driver.close())
+    const mainPersistence = createNodeSQLitePersistence({
+      database: driver.getDatabase(),
+    })
+    const resolutions: Array<{
+      collectionId: string
+      mode: string
+      schemaVersion?: number
+    }> = []
+    let handler:
+      | ((
+          event: unknown,
+          request: ElectronPersistenceRequestEnvelope,
+        ) => Promise<ElectronPersistenceResponseEnvelope>)
+      | undefined
+    const dispose = exposeElectronSQLitePersistence({
+      ipcMain: {
+        handle: (_channel, listener) => {
+          handler = listener
+        },
+      },
+      persistence: {
+        ...mainPersistence,
+        resolvePersistenceForCollection: (selection) => {
+          const { collectionId } = selection
+          resolutions.push(selection)
+          if (collectionId !== `todos`) {
+            throw new Error(`Wrong logical Collection: ${collectionId}`)
+          }
+          return mainPersistence.resolvePersistenceForCollection!(selection)
+        },
+      },
+    })
+    registerCleanup(dispose)
+    const rendererPersistence = createElectronSQLitePersistence({
+      invoke: async (_channel, request) => handler!(undefined, request),
+    })
+    const bound = rendererPersistence.resolvePersistenceForCollection!({
+      collectionId: `todos`,
+      mode: `sync-present`,
+      schemaVersion: 11,
+    })
+    const adapter = bound.adapter as HydrationPersistenceAdapter
+    for (const method of [
+      adapter.loadCollectionMetadata,
+      adapter.scanRows,
+      adapter.pullSince,
+      adapter.getStreamPosition,
+      adapter.markIndexRemoved,
+    ]) {
+      expect(method).toBeTypeOf(`function`)
+    }
+    const claim = await adapter.claimCacheGeneration!(`todos`)
+    expect(claim.storageCollectionId).not.toBe(`todos`)
+    const claimContext = { cacheGenerationClaimId: claim.claimId }
+    await adapter.loadResumeSnapshot(claim.storageCollectionId, claimContext)
+    await adapter.loadSubset(claim.storageCollectionId, {}, claimContext)
+    await adapter.loadCollectionMetadata?.(
+      claim.storageCollectionId,
+      claimContext,
+    )
+    await adapter.scanRows?.(claim.storageCollectionId, {}, claimContext)
+    await adapter.pullSince?.(claim.storageCollectionId, 0, claimContext)
+    await adapter.getStreamPosition?.(claim.storageCollectionId, claimContext)
+    await adapter.ensureIndex(
+      claim.storageCollectionId,
+      `title-index`,
+      { expressionSql: [`json_extract(value, '$.title')`] },
+      claimContext,
+    )
+    await adapter.markIndexRemoved?.(
+      claim.storageCollectionId,
+      `title-index`,
+      claimContext,
+    )
+    await expect(
+      adapter.renewCacheGenerationClaim!(
+        claim.storageCollectionId,
+        claim.claimId,
+      ),
+    ).resolves.toEqual(expect.any(Number))
+    const rotated = await adapter.rotateCacheGeneration!(`todos`, claim.claimId)
+    await adapter.loadResumeSnapshot(rotated.storageCollectionId, {
+      cacheGenerationClaimId: rotated.claimId,
+    })
+    await adapter.releaseCacheGenerationClaim!(rotated.claimId)
+    expect(resolutions).toEqual(
+      Array(13).fill({
+        collectionId: `todos`,
+        mode: `sync-present`,
+        schemaVersion: 11,
+      }),
+    )
+    await expect(
+      driver.query<{ schema_version: number }>(
+        `SELECT schema_version FROM collection_registry WHERE collection_id = ?`,
+        [rotated.storageCollectionId],
+      ),
+    ).resolves.toEqual([{ schema_version: 11 }])
+  })
+
+  it(`keeps the unsupported-cache fallback available for a custom main adapter`, () => {
+    const persistence = createElectronSQLitePersistence({
+      invoke: vi.fn(),
+      managedCacheGenerations: false,
+    })
+    expect([
+      persistence.adapter.claimCacheGeneration,
+      persistence.adapter.rotateCacheGeneration,
+      persistence.adapter.renewCacheGenerationClaim,
+      persistence.adapter.releaseCacheGenerationClaim,
+    ]).toEqual([undefined, undefined, undefined, undefined])
+  })
 
   it(`persists data across main process restarts`, async () => {
     const dbPath = createTempDbPath()
@@ -1470,12 +1598,20 @@ describe(`electron sqlite persistence bridge`, () => {
     ).toEqual([
       {
         collectionId: `alpha`,
-        resolution: { mode: `sync-present`, schemaVersion: 1 },
+        resolution: {
+          mode: `sync-present`,
+          schemaVersion: 1,
+          logicalCollectionId: `alpha`,
+        },
         txId: `alpha-tx`,
       },
       {
         collectionId: `beta`,
-        resolution: { mode: `sync-present`, schemaVersion: 2 },
+        resolution: {
+          mode: `sync-present`,
+          schemaVersion: 2,
+          logicalCollectionId: `beta`,
+        },
         txId: `beta-tx`,
       },
     ])
@@ -2158,7 +2294,9 @@ describe(`electron sqlite persistence bridge`, () => {
     }
   })
 
-  it(`compacts a terminal same-stack Electron release after the real owner load finishes`, async () => {
+  // A held owner load may need unload to settle. Terminal release must reach
+  // unload before that load completes, including reentry on the same stack.
+  it(`compacts a terminal same-stack Electron release before the owner load finishes`, async () => {
     const coordinator = new ElectronCollectionCoordinator({
       dbName: `electron-subset-terminal-release`,
       adapter: createElectronCoordinatorTestAdapter(),
@@ -2201,10 +2339,10 @@ describe(`electron sqlite persistence bridge`, () => {
       const terminalRelease = release!.then(() => {
         releaseSettled = true
       })
-      await Promise.resolve()
+      await vi.waitFor(() => expect(releaseSettled).toBe(true))
       expect({ events: [...events], releaseSettled }).toEqual({
-        events: [`load`],
-        releaseSettled: false,
+        events: [`load`, `unload`],
+        releaseSettled: true,
       })
 
       releaseLoad()
@@ -3945,24 +4083,27 @@ describe(`electron sqlite persistence bridge`, () => {
     ).rejects.toBeInstanceOf(InvalidPersistedCollectionConfigError)
   })
 
-  it(`rejects a version-1 main response before reading its result`, async () => {
-    const rendererPersistence = createElectronSQLitePersistence({
-      invoke: (_channel, request) =>
-        Promise.resolve({
-          v: 1,
-          requestId: request.requestId,
-          method: request.method,
-          ok: true,
-          result: null,
-        } as unknown as ElectronPersistenceResponseEnvelope),
-    })
+  it.each([1, 2])(
+    `rejects a version-%i main response before reading its result`,
+    async (version) => {
+      const rendererPersistence = createElectronSQLitePersistence({
+        invoke: (_channel, request) =>
+          Promise.resolve({
+            v: version,
+            requestId: request.requestId,
+            method: request.method,
+            ok: true,
+            result: null,
+          } as unknown as ElectronPersistenceResponseEnvelope),
+      })
 
-    await expect(
-      rendererPersistence.adapter.loadResumeSnapshot(`todos`),
-    ).rejects.toThrow(
-      `Unexpected electron persistence protocol version "1" in response`,
-    )
-  })
+      await expect(
+        rendererPersistence.adapter.loadResumeSnapshot(`todos`),
+      ).rejects.toThrow(
+        `Unexpected electron persistence protocol version "${version}" in response`,
+      )
+    },
+  )
 
   it(`returns remote errors for unknown collections`, async () => {
     const dbPath = createTempDbPath()
@@ -4011,6 +4152,10 @@ describe(`electron sqlite persistence bridge`, () => {
     const persistence = createNodeSQLitePersistence({
       database: driver.getDatabase(),
     })
+    const loadResumeSnapshot = vi.spyOn(
+      persistence.adapter,
+      `loadResumeSnapshot`,
+    )
 
     const dispose = exposeElectronSQLitePersistence({
       ipcMain: fakeIpcMain,
@@ -4058,22 +4203,25 @@ describe(`electron sqlite persistence bridge`, () => {
       },
     })
 
-    const legacyVersionResponse = await registeredHandler?.(undefined, {
-      v: 1,
-      requestId: `req-v1`,
-      collectionId: `todos`,
-      method: `loadResumeSnapshot`,
-      payload: {},
-    })
-    expect(legacyVersionResponse).toMatchObject({
-      v: ELECTRON_PERSISTENCE_PROTOCOL_VERSION,
-      requestId: `req-v1`,
-      method: `loadResumeSnapshot`,
-      ok: false,
-      error: {
-        message: `Unsupported electron persistence protocol version "1"`,
-      },
-    })
+    for (const version of [1, 2]) {
+      const legacyVersionResponse = await registeredHandler?.(undefined, {
+        v: version,
+        requestId: `req-v${version}`,
+        collectionId: `todos`,
+        method: `loadResumeSnapshot`,
+        payload: {},
+      })
+      expect(legacyVersionResponse).toMatchObject({
+        v: ELECTRON_PERSISTENCE_PROTOCOL_VERSION,
+        requestId: `req-v${version}`,
+        method: `loadResumeSnapshot`,
+        ok: false,
+        error: {
+          message: `Unsupported electron persistence protocol version "${version}"`,
+        },
+      })
+    }
+    expect(loadResumeSnapshot).toHaveBeenCalledTimes(1)
 
     dispose()
     expect(removedChannels).toEqual([DEFAULT_ELECTRON_PERSISTENCE_CHANNEL])

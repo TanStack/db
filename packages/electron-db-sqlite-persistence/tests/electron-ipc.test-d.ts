@@ -7,7 +7,7 @@ test(`renderer persistence requires invoke transport`, () => {
     switch (request.method) {
       case `loadSubset`:
         return Promise.resolve({
-          v: 2,
+          v: 3,
           requestId: request.requestId,
           method: request.method,
           ok: true,
@@ -15,7 +15,7 @@ test(`renderer persistence requires invoke transport`, () => {
         })
       case `loadResumeSnapshot`:
         return Promise.resolve({
-          v: 2,
+          v: 3,
           requestId: request.requestId,
           method: request.method,
           ok: true,
@@ -31,7 +31,7 @@ test(`renderer persistence requires invoke transport`, () => {
         })
       case `pullSince`:
         return Promise.resolve({
-          v: 2,
+          v: 3,
           requestId: request.requestId,
           method: request.method,
           ok: true,
@@ -42,7 +42,7 @@ test(`renderer persistence requires invoke transport`, () => {
         })
       case `getStreamPosition`:
         return Promise.resolve({
-          v: 2,
+          v: 3,
           requestId: request.requestId,
           method: request.method,
           ok: true,
@@ -54,7 +54,7 @@ test(`renderer persistence requires invoke transport`, () => {
         })
       case `loadCollectionMetadata`:
         return Promise.resolve({
-          v: 2,
+          v: 3,
           requestId: request.requestId,
           method: request.method,
           ok: true,
@@ -62,15 +62,32 @@ test(`renderer persistence requires invoke transport`, () => {
         })
       case `scanRows`:
         return Promise.resolve({
-          v: 2,
+          v: 3,
           requestId: request.requestId,
           method: request.method,
           ok: true,
           result: [],
         })
+      case `claimCacheGeneration`:
+      case `rotateCacheGeneration`:
+        return Promise.resolve({
+          v: 3,
+          requestId: request.requestId,
+          method: request.method,
+          ok: true,
+          result: { storageCollectionId: `cache`, claimId: `claim` },
+        })
+      case `renewCacheGenerationClaim`:
+        return Promise.resolve({
+          v: 3,
+          requestId: request.requestId,
+          method: request.method,
+          ok: true,
+          result: undefined,
+        })
       default:
         return Promise.resolve({
-          v: 2,
+          v: 3,
           requestId: request.requestId,
           method: request.method,
           ok: true,

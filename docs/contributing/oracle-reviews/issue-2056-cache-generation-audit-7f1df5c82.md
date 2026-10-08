@@ -96,6 +96,25 @@ old predicate and fails the new one; the focused tests and typecheck pass.
 This extends the caller-settlement and provider-invocation comparisons without
 changing the production law or the reviewed implementation commit above.
 
+The next CI run found a receiving gap in Electron IPC and stale logical-ID
+assumptions in two Browser OPFS fixtures. Electron's renderer did not advertise
+or forward managed-cache claim operations, so the shared SQLite adapter
+contract could not exercise cache rotation through IPC. Protocol v3 now
+forwards claim, rotate, renew, release, and claim contexts. The renderer sends
+the logical Collection ID for main-process adapter selection while cache reads
+use the claimed physical storage ID. An in-process receiving witness exercises
+claim, read, index operations, renew, rotate, read again, and release against
+real SQLite; both v1 and v2 requests are rejected before adapter work, and
+their responses are rejected before result parsing. The shared Electron
+contract and package suite pass (163 tests,
+no Vitest type errors), and the package build and changed-file lint pass.
+The Browser fixtures now observe the claimed storage ID at the adapter or
+coordinator boundary. The full real-Chromium OPFS suite passes (29 tests),
+including the on-demand hydration and two-tab routes that failed before the
+fixture correction. The installed local Electron package lacks its executable,
+so actual separate main/renderer process receiving remains unproved; the
+in-process IPC path and real SQLite adapter are the present evidence.
+
 The coverage map keeps the specific in-scope cells open: claim expiry after
 public source publication but before SQLite accepts the write is fail-stop;
 legacy pre-upgrade on-demand tables remain isolated but uncollected while old

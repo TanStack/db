@@ -30,9 +30,11 @@ export type RemoteSubsetObservation = {
   phase: `starting` | `ready` | `failed`
   failure?: string
   isLeader: boolean
+  storageCollectionId?: string
   rows: Array<Item>
   upstreamLoads: number
   ensureRequests: Array<{
+    collectionId: string
     hasWhere: boolean
     hasSignal: boolean
     hasSubscriptionCallback: boolean
@@ -67,11 +69,13 @@ let phase: RemoteSubsetObservation[`phase`] = `starting`
 let failure: string | undefined
 let upstreamLoads = 0
 let remoteSubsetPosts = 0
+let storageCollectionId: string | undefined
 const remoteSubsetPostFailures: Array<string> = []
 const ensureRequests: RemoteSubsetObservation[`ensureRequests`] = []
 const cleanupTasks: Array<() => Promise<void> | void> = []
 let readRuntime = () => ({
   isLeader: false,
+  storageCollectionId,
   rows: [] as Array<Item>,
 })
 let cleaned = false
@@ -137,9 +141,16 @@ try {
 
   const coordinator = new BrowserCollectionCoordinator({ dbName: databaseId })
   cleanupTasks.unshift(() => coordinator.dispose())
+  const originalSetAdapter =
+    coordinator.setAdapterForCollection.bind(coordinator)
+  coordinator.setAdapterForCollection = (collectionId, adapter, claimId) => {
+    if (claimId) storageCollectionId = collectionId
+    originalSetAdapter(collectionId, adapter, claimId)
+  }
   const originalEnsure = coordinator.requestEnsureRemoteSubset.bind(coordinator)
   coordinator.requestEnsureRemoteSubset = (collectionId, options) => {
     ensureRequests.push({
+      collectionId,
       hasWhere: options.where !== undefined,
       hasSignal: options.signal !== undefined,
       hasSubscriptionCallback: typeof options.subscription?.on === `function`,
@@ -147,9 +158,10 @@ try {
     return originalEnsure(collectionId, options)
   }
   tryInvalidWire = async () => {
+    if (!storageCollectionId) throw new Error(`No claimed storage Collection`)
     const postsBefore = remoteSubsetPosts
     try {
-      await coordinator.requestEnsureRemoteSubset(`repro-items`, {
+      await coordinator.requestEnsureRemoteSubset(storageCollectionId, {
         where: new IR.Value({ nested: () => {} }),
       } as unknown as LoadSubsetOptions)
       return { name: `none`, postsBefore, postsAfter: remoteSubsetPosts }
@@ -208,7 +220,10 @@ try {
   )
   cleanupTasks.unshift(() => live.cleanup())
   readRuntime = () => ({
-    isLeader: coordinator.isLeader(`repro-items`),
+    isLeader: storageCollectionId
+      ? coordinator.isLeader(storageCollectionId)
+      : false,
+    storageCollectionId,
     rows: [...live.values()],
   })
 
