@@ -65,6 +65,7 @@ export class BucketFacadeAdapter {
   private readonly entries = new Map<string, Map<string, FacadeEntry>>()
   private readonly retiredEntries = new Map<string, Map<string, FacadeEntry>>()
   private resolvedValues = new WeakMap<object, unknown>()
+  private cleanedUp = false
 
   constructor(
     private readonly parentId: string,
@@ -126,12 +127,7 @@ export class BucketFacadeAdapter {
           for (const change of changes.values()) {
             this.prepareChange(entry, change)
           }
-          // The only place a flush applies graph deltas to a facade. Copy the
-          // facade's rows and defer its events first, so a rollback reads only
-          // the facades the flush wrote. A bucket appears once per edge.
-          snapshot.rows.set(entry, this.copyRows(entry))
-          publications.push(entry.collection._deferPublication())
-          sync.begin()
+          this.beginWrite(entry, sync, snapshot, publications)
           for (const change of changes.values()) {
             this.applyChange(entry, sync, change, compilation.hasOrderBy)
           }
@@ -140,7 +136,7 @@ export class BucketFacadeAdapter {
         for (const [bucketKey, multiplicity] of activity ?? []) {
           if (multiplicity >= 0) continue
           active.delete(bucketKey)
-          this.retireEntry(compilation.edgeId, bucketKey)
+          this.retireEntry(compilation.edgeId, bucketKey, snapshot, publications)
         }
       }
     } catch (error) {
@@ -175,10 +171,14 @@ export class BucketFacadeAdapter {
         this.retiredEntries.clear()
       },
       rollback: () => {
-        if (closed) return
+        if (closed || this.cleanedUp) return
         closed = true
+        this.restore(snapshot)
+        this.retiredEntries.clear()
+        for (const publication of publications) publication.discard()
         // The flush runs inside the graph run, so no graph output can reach
-        // the adapter before its rollback. New deltas here would be lost.
+        // the adapter before its rollback. Restoring the consumed deltas over
+        // new ones would lose them, so keep the new ones and fail instead.
         if (this.hasPendingChanges()) {
           throw new Error(
             devBuild() && process.env.NODE_ENV !== `production`
@@ -186,9 +186,6 @@ export class BucketFacadeAdapter {
               : codedMessage(230),
           )
         }
-        this.restore(snapshot)
-        this.retiredEntries.clear()
-        for (const publication of publications) publication.discard()
         this.pending = pending
         this.pendingActivity = pendingActivity
       },
@@ -200,6 +197,7 @@ export class BucketFacadeAdapter {
   }
 
   cleanup(): void {
+    this.cleanedUp = true
     for (const byBucket of this.entries.values()) {
       for (const entry of byBucket.values()) {
         void entry.collection.cleanup()
@@ -322,19 +320,44 @@ export class BucketFacadeAdapter {
     return getOrCreate(this.activeBuckets, edgeId, () => new Set())
   }
 
-  private retireEntry(edgeId: string, bucketKey: string): void {
+  /**
+   * Begin a facade write. Copy the facade's rows and defer its events before
+   * its first write in the flush, so a rollback reads only the facades the
+   * flush wrote. A bucket written and then retired in one flush copies once.
+   */
+  private beginWrite(
+    entry: FacadeEntry,
+    sync: FacadeSync,
+    snapshot: FacadeSnapshot,
+    publications: Array<PublicationDeferral>,
+  ): void {
+    if (!snapshot.rows.has(entry)) {
+      snapshot.rows.set(entry, this.copyRows(entry))
+      publications.push(entry.collection._deferPublication())
+    }
+    sync.begin()
+  }
+
+  private retireEntry(
+    edgeId: string,
+    bucketKey: string,
+    snapshot: FacadeSnapshot,
+    publications: Array<PublicationDeferral>,
+  ): void {
     const byBucket = this.entries.get(edgeId)
     const entry = byBucket?.get(bucketKey)
     if (!entry) return
 
-    // The graph retracts a bucket's rows in the run that retires it, and the
-    // flush writes those retractions first, so a retired facade is empty.
-    if (entry.collection.size > 0) {
-      throw new Error(
-        devBuild() && process.env.NODE_ENV !== `production`
-          ? `Bucket facade ${bucketKey} was retired while it still had rows`
-          : codedMessage(231, { bucketKey }),
-      )
+    // The graph retracts a bucket's rows when it retires it, but the facade
+    // can still show rows it never sent: an optimistic row from a pending
+    // transaction, or a sync commit held behind a persisting one. Retract
+    // whatever it still holds.
+    const sync = entry.sync
+    const keys = [...entry.collection.keys()]
+    if (sync && keys.length > 0) {
+      this.beginWrite(entry, sync, snapshot, publications)
+      for (const key of keys) sync.write({ type: `delete`, key })
+      sync.commit()
     }
     byBucket!.delete(bucketKey)
     if (byBucket!.size === 0) this.entries.delete(edgeId)

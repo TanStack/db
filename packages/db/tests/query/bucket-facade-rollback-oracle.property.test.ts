@@ -2,11 +2,13 @@ import { D2, MultiSet } from '@tanstack/db-ivm'
 import { describe, expect, it } from 'vitest'
 import { fc } from '@fast-check/vitest'
 import { BucketFacadeAdapter } from '../../src/query/live/bucket-facade-adapter.js'
+import { createTransaction } from '../../src/transactions.js'
 import { stripVirtualProps } from '../utils.js'
 import { oraclePropertyOptions, oracleRuns } from '../oracle-config.js'
 import { BUCKET_FACADE_REF } from '../../src/query/live/materialized-pipeline.js'
 import type { Collection } from '../../src/collection/index.js'
 import type { ChangeMessage, SyncConfig } from '../../src/types.js'
+import type { Transaction } from '../../src/transactions.js'
 import type { BucketRow } from '../../src/query/live/materialized-pipeline.js'
 
 /**
@@ -296,6 +298,11 @@ class Driver {
   private readonly wrapped = new WeakSet<object>()
   private reads = new Map<object, number>()
   private readonly sent = new Map<BucketKey, Map<number, BucketRow>>()
+  // Rows a user transaction inserted into a facade. They are optimistic, so
+  // the graph never sent them and the model's synced rows do not hold them.
+  private readonly localIds = new Map<object, Set<number>>()
+  private readonly localTransactions: Array<Transaction> = []
+  private nextLocalId = 100
 
   constructor() {
     this.adapter = new BucketFacadeAdapter(
@@ -366,6 +373,28 @@ class Driver {
     this.graph.run()
   }
 
+  /**
+   * Insert a row into a shown facade inside a user transaction that stays
+   * pending, as an application may with a Collection-valued include. The
+   * facade then shows an optimistic row the graph never sent.
+   */
+  addLocal(bucket: BucketKey): void {
+    const facade = this.entry(bucket)?.collection
+    if (!facade) return
+    const id = this.nextLocalId++
+    const transaction = createTransaction({
+      autoCommit: false,
+      mutationFn: () => new Promise<void>(() => {}),
+    })
+    transaction.mutate(() => {
+      facade.insert({ id, v: 0, $key: id } as unknown as Row)
+    })
+    this.localTransactions.push(transaction)
+    const ids = this.localIds.get(facade) ?? new Set()
+    ids.add(id)
+    this.localIds.set(facade, ids)
+  }
+
   /** Count events and stored-row reads for every facade that exists now. */
   instrument(): void {
     for (const entry of this.entries().values()) {
@@ -431,6 +460,32 @@ class Driver {
     }
   }
 
+  /**
+   * Record every facade the next flush creates. A failed flush must dispose
+   * of them, which a holder sees as the facade's public `cleaned-up` status.
+   */
+  recordCreated(): Array<Collection<Row, number>> {
+    const created: Array<Collection<Row, number>> = []
+    const adapter = this.adapter as unknown as {
+      getEntry: (edgeId: string, bucketKey: string) => FacadeEntry
+    }
+    const getEntry = adapter.getEntry
+    const recording = (edgeId: string, bucketKey: string) => {
+      const existed = this.entries().has(bucketKey)
+      const entry = getEntry.call(this.adapter, edgeId, bucketKey)
+      if (!existed) created.push(entry.collection)
+      return entry
+    }
+    adapter.getEntry = recording
+    this.restoreGetEntry = () => {
+      // A one-shot failure wrapper underneath may already have removed both.
+      if (adapter.getEntry === recording) adapter.getEntry = getEntry
+    }
+    return created
+  }
+
+  restoreGetEntry: () => void = () => {}
+
   eventCounts(): Map<object, number> {
     return new Map(this.events)
   }
@@ -476,10 +531,18 @@ class Driver {
       const facade = this.entry(bucket)?.collection
       if (!rows) continue
       expect(facade, `${label}: facade ${bucket}`).toBeDefined()
+      const local = this.localIds.get(facade!) ?? new Set<number>()
       expect(
-        facade!.toArray.map(stripVirtualProps),
+        facade!.toArray
+          .map(stripVirtualProps)
+          .filter((row) => !local.has(row.id)),
         `${label}: rows of ${bucket}`,
       ).toEqual(expectedRows(rows))
+      for (const id of local) {
+        expect(facade!.has(id), `${label}: local row ${bucket}/${id}`).toBe(
+          true,
+        )
+      }
       for (const id of rows.keys()) {
         const stored = facade!.get(id)
         expect(stored, `${label}: row ${bucket}/${id}`).toBeDefined()
@@ -489,6 +552,7 @@ class Driver {
   }
 
   async cleanup(): Promise<void> {
+    for (const transaction of this.localTransactions) transaction.rollback()
     this.adapter.cleanup()
     await Promise.resolve()
   }
@@ -579,6 +643,7 @@ async function runHistory(
     }>
     outcome: Outcome
     throwPick: number
+    local?: number
   }>,
 ): Promise<void> {
   const driver = new Driver()
@@ -588,6 +653,12 @@ async function runHistory(
     () => {
       for (const [index, step] of steps.entries()) {
         const label = `step ${index}`
+        // A user transaction may first add an optimistic row to a shown facade.
+        const localBucket =
+          step.local === undefined ? undefined : BUCKETS[step.local]
+        if (localBucket && published.has(localBucket)) {
+          driver.addLocal(localBucket)
+        }
         const ops = legalize(applyOps(published, pending), step.choices)
         driver.send(ops)
         pending = [...pending, ...ops]
@@ -636,6 +707,7 @@ async function runHistory(
 
         driver.takeReads()
         driver.takeChanges()
+        const created = driver.recordCreated()
         if (outcome !== `publish` && outcome !== `rollback`) {
           expect(() => driver.adapter.flush(), label).toThrow(
             `injected facade write failure`,
@@ -649,6 +721,7 @@ async function runHistory(
             publication.publish()
           }
         }
+        driver.restoreGetEntry()
 
         // Bounded rollback work: no facade outside the written buckets is read.
         const reads = driver.takeReads()
@@ -695,7 +768,13 @@ async function runHistory(
         }
 
         // A failed flush restores the published rows and publishes nothing,
-        // neither row events nor a layout revision.
+        // neither row events nor a layout revision, and disposes of the
+        // facades it created.
+        for (const facade of created) {
+          expect(facade.status, `${label}: created facade disposed`).toBe(
+            `cleaned-up`,
+          )
+        }
         driver.check(published, `${label} (${outcome})`)
         const after = driver.eventCounts()
         for (const [facade, count] of before) {
@@ -731,6 +810,10 @@ const step = fc.record({
     `rollback`,
   ),
   throwPick: fc.nat(3),
+  // About two steps in five add an optimistic row to a facade first.
+  local: fc.integer({ min: -3, max: BUCKETS.length - 1 }).map((bucket) =>
+    bucket < 0 ? undefined : bucket,
+  ),
 })
 const history = fc.array(step, { minLength: 1, maxLength: 8 })
 
@@ -1015,15 +1098,29 @@ describe(`bucket facade rollback`, () => {
         expect(() => publication.rollback()).toThrow(
           `Bucket facade received graph output between a flush and its rollback`,
         )
+        // The rollback restored the facade and closed its deferral before it
+        // threw, so the new delta still publishes on the next flush.
+        const facade = driver.entry(`b0`)!.collection
+        expect(facade.toArray.map(stripVirtualProps)).toEqual([{ id: 1, v: 1 }])
+        let events = 0
+        facade.subscribeChanges(() => {
+          events++
+        })
+        driver.adapter.flush().publish()
+        expect(facade.toArray.map(stripVirtualProps)).toEqual([
+          { id: 1, v: 1 },
+          { id: 2, v: 3 },
+        ])
+        expect(events).toBe(1)
       },
       () => driver.cleanup(),
     )
   })
 
-  // Invariant witness: the graph retracts a bucket's rows in the run that
-  // retires it, so a retired facade is empty. A retirement that leaves rows is
-  // a contradictory graph signal, and the flush throws.
-  it(`throws when a bucket is retired while its facade still has rows`, async () => {
+  // A live query can be disposed between a flush and its rollback, for
+  // example by a listener that runs during the root commit. The rollback then
+  // has nothing to restore and must not bring the disposed facades back.
+  it(`does nothing on rollback after cleanup`, async () => {
     const driver = new Driver()
     await withCleanup(
       () => {
@@ -1032,10 +1129,109 @@ describe(`bucket facade rollback`, () => {
           { type: `insert`, bucket: `b0`, id: 1, v: 1, rank: 1 },
         ])
         driver.adapter.flush().publish()
+        driver.send([{ type: `update`, bucket: `b0`, id: 1, v: 2, rank: 1 }])
+        const publication = driver.adapter.flush()
+        driver.adapter.cleanup()
+        publication.rollback()
+        expect(driver.entry(`b0`)).toBeUndefined()
+        expect(driver.adapter.hasPendingChanges()).toBe(false)
+      },
+      () => driver.cleanup(),
+    )
+  })
+
+  // A retired facade can still show rows the graph never sent: an optimistic
+  // row from a pending user transaction, or a held sync commit behind a
+  // persisting one. Retiring the bucket must not fail the flush.
+  it(`retires a bucket whose facade shows an optimistic row`, async () => {
+    await runHistory([
+      {
+        choices: [
+          { kind: 0, bucket: 0, id: 0, v: 1, rank: 1 },
+          { kind: 0, bucket: 0, id: 0, v: 1, rank: 1 },
+        ],
+        outcome: `publish`,
+        throwPick: 0,
+      },
+      {
+        choices: [{ kind: 4, bucket: 0, id: 0, v: 0, rank: 0 }],
+        outcome: `publish`,
+        throwPick: 0,
+        local: 0,
+      },
+    ])
+  })
+
+  it(`retires a bucket while a facade transaction persists`, async () => {
+    const driver = new Driver()
+    let settle!: () => void
+    await withCleanup(
+      async () => {
+        driver.send([
+          { type: `activate`, bucket: `b0` },
+          { type: `insert`, bucket: `b0`, id: 1, v: 1, rank: 1 },
+        ])
+        driver.adapter.flush().publish()
+        const facade = driver.entry(`b0`)!.collection
+        const transaction = createTransaction({
+          autoCommit: false,
+          mutationFn: () =>
+            new Promise<void>((resolve) => {
+              settle = resolve
+            }),
+        })
+        transaction.mutate(() => {
+          facade.insert({ id: 50, v: 0, $key: 50 } as unknown as Row)
+        })
+        const committed = transaction.commit()
+        driver.send([{ type: `retire`, bucket: `b0` }])
+        expect(() => driver.adapter.flush().publish()).not.toThrow()
+        expect(driver.entry(`b0`)).toBeUndefined()
+        settle()
+        await committed
+      },
+      () => driver.cleanup(),
+    )
+  })
+
+  // A retirement without its retractions is a contradictory graph signal, but
+  // the adapter has always retracted whatever the facade still holds, so the
+  // facade empties instead of failing the flush.
+  it(`retracts a retired facade's remaining synced rows`, async () => {
+    const driver = new Driver()
+    await withCleanup(
+      () => {
+        driver.send([
+          { type: `activate`, bucket: `b0` },
+          { type: `insert`, bucket: `b0`, id: 1, v: 1, rank: 1 },
+        ])
+        driver.adapter.flush().publish()
+        const facade = driver.entry(`b0`)!.collection
         driver.retireWithoutRetractions(`b0`)
-        expect(() => driver.adapter.flush()).toThrow(
-          `Bucket facade b0 was retired while it still had rows`,
-        )
+        driver.adapter.flush().publish()
+        expect(facade.toArray).toEqual([])
+      },
+      () => driver.cleanup(),
+    )
+  })
+
+  // The retraction is an ordinary facade write, so a rollback restores it.
+  it(`restores a retired facade's rows when the root commit fails`, async () => {
+    const driver = new Driver()
+    await withCleanup(
+      () => {
+        driver.send([
+          { type: `activate`, bucket: `b0` },
+          { type: `insert`, bucket: `b0`, id: 1, v: 1, rank: 1 },
+        ])
+        driver.adapter.flush().publish()
+        const facade = driver.entry(`b0`)!.collection
+        driver.retireWithoutRetractions(`b0`)
+        const publication = driver.adapter.flush()
+        publication.prepare()
+        publication.rollback()
+        expect(driver.entry(`b0`)?.collection).toBe(facade)
+        expect(facade.toArray.map(stripVirtualProps)).toEqual([{ id: 1, v: 1 }])
       },
       () => driver.cleanup(),
     )

@@ -850,10 +850,5 @@
     "literals": [
       "Bucket facade received graph output between a flush and its rollback"
     ]
-  },
-  "231": {
-    "file": "query/live/bucket-facade-adapter.ts",
-    "template": "Bucket facade ${bucketKey} was retired while it still had rows",
-    "literals": ["Bucket facade ", " was retired while it still had rows"]
   }
 }
