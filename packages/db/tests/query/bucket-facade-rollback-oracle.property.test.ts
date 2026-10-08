@@ -4,6 +4,7 @@ import { fc } from '@fast-check/vitest'
 import { BucketFacadeAdapter } from '../../src/query/live/bucket-facade-adapter.js'
 import { stripVirtualProps } from '../utils.js'
 import { oraclePropertyOptions, oracleRuns } from '../oracle-config.js'
+import { BUCKET_FACADE_REF } from '../../src/query/live/materialized-pipeline.js'
 import type { Collection } from '../../src/collection/index.js'
 import type { SyncConfig } from '../../src/types.js'
 import type { BucketRow } from '../../src/query/live/materialized-pipeline.js'
@@ -15,52 +16,68 @@ import type { BucketRow } from '../../src/query/live/materialized-pipeline.js'
  * into stable child-facade Collections. A flush writes every pending bucket
  * through ordinary Collection transactions while it defers their events.
  *
- * Two laws hold at the adapter boundary:
+ * Three laws hold at the adapter boundary:
  *
  * 1. **Flush atomicity** ("Coherent publication" in
- *    `packages/db/src/query/live/ARCHITECTURE.md`). If a facade write throws
- *    during a flush, or the root commit fails after `prepare()`, every facade
- *    returns to its rows, order and key mapping from before the flush, and no
- *    facade publishes an event. Pending graph output that the failed flush did
- *    not consume is still pending, so the next successful flush applies it.
+ *    `packages/db/src/query/live/ARCHITECTURE.md`). If a facade write or
+ *    commit throws during a flush, or the root commit fails after `prepare()`,
+ *    every facade returns to its rows, order and key mapping from before the
+ *    flush, the facades the flush created leave the adapter, and no facade
+ *    publishes an event or a layout revision. Pending graph output that a
+ *    thrown flush did not consume is still pending, so the next successful
+ *    flush applies it.
  * 2. **Bounded rollback work.** A flush reads the stored rows only of the
- *    facades it writes. The rows it reads do not depend on the number or the
- *    size of facades that the flush does not touch.
+ *    facades it writes, through any read path of the stored map. The rows it
+ *    reads do not depend on the number or the size of facades that the flush
+ *    does not touch.
+ * 3. **Layout.** A facade is a Collection-valued include, and "an order-only
+ *    change is a ... Collection layout" change ("Inline modes" in the
+ *    architecture document). For a facade that exists before and after a
+ *    successful flush, the model derives the owed layout revision from the
+ *    rows a reader sees on each side. When the rows shown on both sides
+ *    appear in a different relative order, exactly one revision is required.
+ *    When the shown key sequence is identical, no revision is allowed.
+ *    Otherwise membership changed while the common rows kept their relative
+ *    order. Insert and delete events already convey that, so the contract
+ *    allows zero or one revision. A failed flush publishes no revision.
  *
  * The model is a map from bucket key to the rows its facade shows, kept in
  * order by an order string. It also keeps the operations sent to the graph
  * since the last successful flush. A successful flush applies those
- * operations. A failed flush leaves the published rows unchanged and keeps
- * the operations pending. A rollback after `prepare()` is the last step of a
- * history, because the adapter has consumed its pending rows by then and the
- * builder above it owns the retry.
+ * operations. A thrown flush leaves the published rows unchanged and keeps the
+ * operations pending. A rollback after `prepare()` also leaves the published
+ * rows unchanged, but the adapter consumed the operations before `prepare()`,
+ * so the model drops them and the history continues from the restored rows.
+ * The next flush must then compute order changes against the restored state.
  *
  * The history grammar has one edge with ordered rows and buckets `b0`..`b3`.
  * Each step sends a batch of operations to the graph, then flushes. The
  * operations are: activate a bucket, insert a row, update a row's value or
  * order, delete a row, and retire a bucket. Operations apply only to active
  * buckets, as the graph guarantees. A flush either publishes, throws from the
- * commit of one facade it writes, or is rolled back after `prepare()`.
- *
- * A facade is a Collection-valued include, so an order-only change of a row it
- * already shows is a layout change ("Inline modes" in the architecture
- * document). The model predicts one layout revision for a facade when a
- * successful flush changes the order of a row the facade showed before and
- * still shows after, and the facade's key sequence changes. It predicts no
- * new revision otherwise, and none for a failed flush. The prediction
- * depends only on the facade's published rows before and after the flush, so a
- * failed flush that leaves stale order state behind is visible at the retry.
+ * commit of an existing facade it writes, throws from the first write of such
+ * a facade (leaving its sync transaction open), throws from the commit of a
+ * facade it creates, or is rolled back after `prepare()`.
  *
  * The driver runs the real adapter over a D2 graph. After each flush it
- * compares each active facade's ordered rows, the key that `getKeyFromItem`
- * returns for each row, the events each facade published, and each facade's
- * layout revision. The work counter wraps the iterators of each
- * facade's stored rows during the flush and records which facades the flush
- * read.
+ * compares the set of facades the adapter holds with the model's buckets,
+ * each facade's ordered rows, the key that `getKeyFromItem` returns for each
+ * row, the events each facade published, and each facade's layout revision.
+ * The work counter wraps the iteration, `forEach`, `get` and `has` methods of
+ * each facade's stored rows during the flush and records which facades the
+ * flush read. A pinned case covers nested facades across two edges: the child
+ * edge commits, then the parent edge throws.
  *
- * Limits: this owner covers one edge. Nested facades, facade indexes and the
- * root commit inside a live query are covered by `bucket-facade-adapter.test.ts`
- * and `includes-collection-oracle.property.test.ts`.
+ * Limits:
+ * - Facade indexes and the root commit inside a live query are covered by
+ *   `bucket-facade-adapter.test.ts` and
+ *   `includes-collection-oracle.property.test.ts`.
+ * - In legal histories, retiring a bucket retracts its rows in the same flush,
+ *   so the retire path always finds an empty facade. A mutant that copies a
+ *   retired facade after its deletes is equivalent within this grammar.
+ * - The flush still copies the adapter's edge and bucket maps, which grows
+ *   with the number of buckets. That is bookkeeping, not row work, and this
+ *   owner does not measure it.
  */
 
 const PROPERTY = `bucket-facade.rollback-history`
@@ -79,7 +96,7 @@ type Op =
   | { type: `delete`; bucket: BucketKey; id: number }
   | { type: `retire`; bucket: BucketKey }
 
-type Outcome = `publish` | `throw` | `rollback`
+type Outcome = `publish` | `throw` | `throwWrite` | `throwNew` | `rollback`
 
 type FacadeSync = Parameters<SyncConfig<Record<string, unknown>>[`sync`]>[0]
 type FacadeEntry = {
@@ -94,26 +111,36 @@ function expectedRows(rows: Map<number, ModelRow> | undefined): Array<Row> {
     .map((row) => row.value)
 }
 
+type LayoutExpectation = `required` | `forbidden` | `permitted`
+
 /**
- * Whether a successful flush from `before` to `after` changes the layout of a
- * facade that exists on both sides: a row it shows on both sides changes
- * order, and the facade's key sequence changes.
+ * The layout notification a successful flush owes a facade that exists on
+ * both sides. "An order-only change is a ... Collection layout" change, so
+ * when the rows the facade shows on both sides appear in a different
+ * relative order, a revision is required. When the shown key sequence is
+ * identical, a revision is forbidden. Otherwise membership changed while the
+ * common rows kept their relative order: insert and delete events already
+ * convey that, and the contract neither requires nor forbids a revision.
  */
-function expectsLayoutChange(
+function layoutExpectation(
   before: Map<number, ModelRow>,
   after: Map<number, ModelRow>,
-): boolean {
-  const reordered = [...before].some(([id, row]) => {
-    const next = after.get(id)
-    return next !== undefined && next.order !== row.order
-  })
-  if (!reordered) return false
+): LayoutExpectation {
   const previousKeys = expectedRows(before).map((row) => row.id)
   const nextKeys = expectedRows(after).map((row) => row.id)
-  return (
-    previousKeys.length !== nextKeys.length ||
-    previousKeys.some((id, index) => id !== nextKeys[index])
-  )
+  if (
+    previousKeys.length === nextKeys.length &&
+    previousKeys.every((id, index) => id === nextKeys[index])
+  ) {
+    return `forbidden`
+  }
+  const common = (keys: Array<number>, other: Array<number>) =>
+    keys.filter((id) => other.includes(id))
+  const previousCommon = common(previousKeys, nextKeys)
+  const nextCommon = common(nextKeys, previousKeys)
+  return previousCommon.some((id, index) => id !== nextCommon[index])
+    ? `required`
+    : `permitted`
 }
 
 /**
@@ -217,6 +244,28 @@ function legalize(
   return ops
 }
 
+/**
+ * Make the next `commit` or `write` of a facade's sync throw once. A `write`
+ * failure leaves the facade's sync transaction open, as a validation error
+ * from a real write would.
+ */
+function injectFailure(sync: FacadeSync, method: `commit` | `write`): void {
+  if (method === `commit`) {
+    const commit = sync.commit
+    sync.commit = () => {
+      sync.commit = commit
+      commit()
+      throw new Error(`injected facade write failure`)
+    }
+    return
+  }
+  const write = sync.write
+  sync.write = () => {
+    sync.write = write
+    throw new Error(`injected facade write failure`)
+  }
+}
+
 class Driver {
   private readonly graph = new D2()
   private readonly rows = this.graph.newInput<[string, BucketRow]>()
@@ -306,13 +355,59 @@ class Driver {
       >
       if (this.wrapped.has(stored)) continue
       this.wrapped.add(stored)
-      for (const method of [Symbol.iterator, `entries`, `keys`, `values`]) {
+      // Every read path of the stored rows: iteration, forEach, and lookups.
+      for (const method of [
+        Symbol.iterator,
+        `entries`,
+        `keys`,
+        `values`,
+        `forEach`,
+        `get`,
+        `has`,
+      ]) {
         const original = stored[method]!.bind(stored)
         stored[method] = (...args: Array<unknown>) => {
           this.reads.set(facade, (this.reads.get(facade) ?? 0) + 1)
           return original(...args)
         }
       }
+    }
+  }
+
+  /**
+   * Make the facade the flush creates for `bucket` throw from its first
+   * commit. The facade does not exist before the flush, so wrap the adapter's
+   * entry factory for this one flush.
+   */
+  failNewFacade(bucket: BucketKey): void {
+    const adapter = this.adapter as unknown as {
+      getEntry: (edgeId: string, bucketKey: string) => FacadeEntry
+    }
+    const getEntry = adapter.getEntry
+    adapter.getEntry = (edgeId, bucketKey) => {
+      const existed = this.entries().has(bucketKey)
+      const entry = getEntry.call(this.adapter, edgeId, bucketKey)
+      if (!existed && bucketKey === bucket) {
+        adapter.getEntry = getEntry
+        injectFailure(entry.sync!, `commit`)
+      }
+      return entry
+    }
+  }
+
+  /** Forget operations that a rolled-back flush consumed. */
+  resetSent(model: Model): void {
+    this.sent.clear()
+    for (const [bucket, rows] of model) {
+      this.sent.set(
+        bucket,
+        new Map(
+          [...rows].map(([id, row]) => [
+            id,
+            { publicKey: id, value: row.value, order: row.order },
+          ]),
+        ),
+      )
     }
   }
 
@@ -343,6 +438,12 @@ class Driver {
   }
 
   check(model: Model, label: string): void {
+    // The adapter holds exactly the facades the model shows: a failed flush
+    // removes the facades it created, and a retired bucket has no facade.
+    expect(
+      [...this.entries().keys()].sort(),
+      `${label}: facades held by the adapter`,
+    ).toEqual([...model.keys()].sort())
     for (const bucket of BUCKETS) {
       const rows = model.get(bucket)
       const facade = this.entry(bucket)?.collection
@@ -409,24 +510,32 @@ async function runHistory(
         const throwTargets = [...rowBuckets].filter((bucket) =>
           driver.entry(bucket),
         )
+        // A facade created in this flush: no facade before the flush, and the
+        // pending operations leave its bucket active with rows to commit.
+        const afterPending = applyOps(published, pending)
+        const newTargets = BUCKETS.filter(
+          (bucket) =>
+            !driver.entry(bucket) && (afterPending.get(bucket)?.size ?? 0) > 0,
+        )
         let outcome = step.outcome
-        if (outcome === `throw` && throwTargets.length === 0)
+        if (
+          (outcome === `throw` || outcome === `throwWrite`) &&
+          throwTargets.length === 0
+        )
           outcome = `publish`
-        if (outcome === `throw`) {
+        if (outcome === `throwNew` && newTargets.length === 0)
+          outcome = `publish`
+        if (outcome === `throw` || outcome === `throwWrite`) {
           const target = driver.entry(
             throwTargets[step.throwPick % throwTargets.length]!,
           )!
-          const sync = target.sync!
-          const commit = sync.commit
-          sync.commit = () => {
-            sync.commit = commit
-            commit()
-            throw new Error(`injected facade write failure`)
-          }
+          injectFailure(target.sync!, outcome === `throw` ? `commit` : `write`)
+        } else if (outcome === `throwNew`) {
+          driver.failNewFacade(newTargets[step.throwPick % newTargets.length]!)
         }
 
         driver.takeReads()
-        if (outcome === `throw`) {
+        if (outcome !== `publish` && outcome !== `rollback`) {
           expect(() => driver.adapter.flush(), label).toThrow(
             `injected facade write failure`,
           )
@@ -462,15 +571,20 @@ async function runHistory(
             if (!facade || driver.entry(bucket)?.collection !== facade) continue
             const previous = published.get(bucket)
             const following = next.get(bucket)
-            const expected =
-              previous && following && expectsLayoutChange(previous, following)
-                ? 1
-                : 0
-            expect(
-              (layoutsAfter.get(facade) ?? 0) -
-                (layoutsBefore.get(facade) ?? 0),
-              `${label}: layout revision of ${bucket}`,
-            ).toBe(expected)
+            if (!previous || !following) continue
+            const advanced =
+              (layoutsAfter.get(facade) ?? 0) - (layoutsBefore.get(facade) ?? 0)
+            const expectation = layoutExpectation(previous, following)
+            if (expectation === `permitted`) {
+              expect(
+                advanced,
+                `${label}: layout revision of ${bucket}`,
+              ).toBeLessThanOrEqual(1)
+            } else {
+              expect(advanced, `${label}: layout revision of ${bucket}`).toBe(
+                expectation === `required` ? 1 : 0,
+              )
+            }
           }
           published = next
           pending = []
@@ -491,7 +605,13 @@ async function runHistory(
             `${label}: layout revision after ${outcome}`,
           ).toBe(layoutsBefore.get(facade))
         }
-        if (outcome === `rollback`) return
+        if (outcome === `rollback`) {
+          // The adapter consumed the pending rows before `prepare()`, so the
+          // rolled-back operations are gone. The next flush must compute order
+          // changes against the restored facades, not the rolled-back ones.
+          pending = []
+          driver.resetSent(published)
+        }
       }
     },
     () => driver.cleanup(),
@@ -507,7 +627,14 @@ const choice = fc.record({
 })
 const step = fc.record({
   choices: fc.array(choice, { minLength: 1, maxLength: 6 }),
-  outcome: fc.constantFrom<Outcome>(`publish`, `publish`, `throw`, `rollback`),
+  outcome: fc.constantFrom<Outcome>(
+    `publish`,
+    `publish`,
+    `throw`,
+    `throwWrite`,
+    `throwNew`,
+    `rollback`,
+  ),
   throwPick: fc.nat(3),
 })
 const history = fc.array(step, { minLength: 1, maxLength: 8 })
@@ -587,6 +714,138 @@ describe(`bucket facade rollback`, () => {
         throwPick: 0,
       },
     ])
+  })
+
+  // Pinned: a reorder rolled back after `prepare()`, then sent again. The
+  // rollback must restore the facade's current order, or the second flush
+  // sees no order change and owes a layout revision it does not publish.
+  it(`publishes a reorder sent again after a rolled-back reorder`, async () => {
+    await runHistory([
+      {
+        choices: [
+          { kind: 0, bucket: 0, id: 0, v: 0, rank: 0 },
+          { kind: 0, bucket: 0, id: 0, v: 1, rank: 1 },
+          { kind: 0, bucket: 0, id: 1, v: 2, rank: 2 },
+        ],
+        outcome: `publish`,
+        throwPick: 0,
+      },
+      {
+        choices: [{ kind: 0, bucket: 0, id: 0, v: 1, rank: 5 }],
+        outcome: `rollback`,
+        throwPick: 0,
+      },
+      {
+        choices: [{ kind: 0, bucket: 0, id: 0, v: 1, rank: 5 }],
+        outcome: `publish`,
+        throwPick: 0,
+      },
+    ])
+  })
+
+  // Pinned: nested facades. A parent facade's row refers to a child facade.
+  // The child edge commits first, then the parent edge's commit throws. The
+  // failed flush must restore the child's rows, keep the parent's reference
+  // to the old child facade, and drop the child facade it created. The retry
+  // then applies every change.
+  it(`restores a child facade when its parent edge fails`, async () => {
+    const graph = new D2()
+    const childRows = graph.newInput<[string, BucketRow]>()
+    const childActive = graph.newInput<[string, true]>()
+    const parentRows = graph.newInput<[string, BucketRow]>()
+    const parentActive = graph.newInput<[string, true]>()
+    const adapter = new BucketFacadeAdapter(
+      `rollback-oracle-nested-${Math.random()}`,
+      [
+        {
+          edgeId: `children`,
+          rows: childRows,
+          activeBuckets: childActive,
+          hasOrderBy: false,
+        },
+        {
+          edgeId: `parents`,
+          rows: parentRows,
+          activeBuckets: parentActive,
+          hasOrderBy: false,
+        },
+      ],
+      () => {},
+    )
+    graph.finalize()
+    const entries = (
+      adapter as unknown as {
+        entries: Map<string, Map<string, FacadeEntry>>
+      }
+    ).entries
+    const facade = (edgeId: string, bucket: string) =>
+      entries.get(edgeId)?.get(bucket)?.collection
+    const ref = (bucketKey: string) => ({
+      [BUCKET_FACADE_REF]: { edgeId: `children`, bucketKey },
+    })
+    const row = (publicKey: number, value: object): BucketRow => ({
+      publicKey,
+      value,
+      order: undefined,
+    })
+    const child10 = row(10, { id: 10, v: 1 })
+    const parent1 = row(1, { id: 1, kids: ref(`c1`) })
+
+    await withCleanup(
+      () => {
+        childActive.sendData(new MultiSet([[[`c1`, true], 1]]))
+        childRows.sendData(new MultiSet([[[`c1`, child10], 1]]))
+        parentActive.sendData(new MultiSet([[[`p1`, true], 1]]))
+        parentRows.sendData(new MultiSet([[[`p1`, parent1], 1]]))
+        graph.run()
+        adapter.flush().publish()
+        const c1 = facade(`children`, `c1`)!
+        const p1 = facade(`parents`, `p1`)!
+        expect((p1.get(1) as { kids: unknown }).kids).toBe(c1)
+
+        let events = 0
+        c1.subscribeChanges(() => events++)
+        p1.subscribeChanges(() => events++)
+
+        // The flush updates c1, creates c2, and moves parent 1 to c2.
+        const child10v2 = row(10, { id: 10, v: 2 })
+        const child11 = row(11, { id: 11, v: 1 })
+        const parent1moved = row(1, { id: 1, kids: ref(`c2`) })
+        childRows.sendData(
+          new MultiSet([
+            [[`c1`, child10], -1],
+            [[`c1`, child10v2], 1],
+          ]),
+        )
+        childActive.sendData(new MultiSet([[[`c2`, true], 1]]))
+        childRows.sendData(new MultiSet([[[`c2`, child11], 1]]))
+        parentRows.sendData(
+          new MultiSet([
+            [[`p1`, parent1], -1],
+            [[`p1`, parent1moved], 1],
+          ]),
+        )
+        graph.run()
+        injectFailure(entries.get(`parents`)!.get(`p1`)!.sync!, `commit`)
+
+        expect(() => adapter.flush()).toThrow(`injected facade write failure`)
+        expect(c1.toArray.map(stripVirtualProps)).toEqual([{ id: 10, v: 1 }])
+        expect((p1.get(1) as { kids: unknown }).kids).toBe(c1)
+        expect([...entries.get(`children`)!.keys()]).toEqual([`c1`])
+        expect(events).toBe(0)
+
+        // The retry applies the pending changes the failed flush kept.
+        adapter.flush().publish()
+        const c2 = facade(`children`, `c2`)!
+        expect(c1.toArray.map(stripVirtualProps)).toEqual([{ id: 10, v: 2 }])
+        expect(c2.toArray.map(stripVirtualProps)).toEqual([{ id: 11, v: 1 }])
+        expect((p1.get(1) as { kids: unknown }).kids).toBe(c2)
+      },
+      async () => {
+        adapter.cleanup()
+        await Promise.resolve()
+      },
+    )
   })
 
   // Calibration for ORC-010: when the history fails and cleanup also throws,
