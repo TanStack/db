@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest'
 import { createCollection } from '../../src/collection/index.js'
 import { createLiveQueryCollection, eq } from '../../src/query/index.js'
-import { count } from '../../src/query/builder/functions.js'
+import { count, max, sum } from '../../src/query/builder/functions.js'
 import { mockSyncCollectionOptions } from '../utils.js'
 
 describe(`group representative work`, () => {
@@ -63,10 +63,11 @@ describe(`group representative work`, () => {
  * Authority: incremental view maintenance. A count changes by the delta's
  * multiplicity, so re-reading every member is not needed for the result.
  *
- * Scope: the law holds when the group's members contribute exactly identical
- * aggregate inputs, as a count over primitive group values does. A sum, avg,
- * min, or max over distinct values keeps one contribution per distinct exact
- * input, so its reduction still visits each of them.
+ * Scope: the law holds when the group's members contribute identical
+ * representative keys and min or max inputs, as a count, sum, or avg over
+ * primitive group values does. A min or max over distinct values keeps one
+ * contribution per distinct exact input, so its reduction still visits each
+ * of them.
  *
  * Observation: the number of Map, Set, and array iterator steps, plus array
  * callback calls (`map`, `filter`, `forEach`, `reduce`, `some`, `every`),
@@ -223,20 +224,26 @@ describe(`grouped aggregate work per change`, () => {
   })
 
   it(`keeps an include count's work independent of group size`, async () => {
-    const steps: Array<number> = []
+    const steps: Array<Array<number>> = []
     for (const size of groupSizes) {
       const fixture = createCommentCount(size)
       try {
         await fixture.counts.preload()
+        const changes = [
+          [`insert`, { id: size, issueId: 1 }, size + 1],
+          [`update`, { id: 0, issueId: 2 }, size],
+          [`update`, { id: 0, issueId: 1 }, size + 1],
+          [`delete`, { id: size, issueId: 1 }, size],
+        ] as const
         steps.push(
-          countIteratorSteps(() =>
-            fixture.write(fixture.comments, `insert`, {
-              id: size,
-              issueId: 1,
-            }),
-          ),
+          changes.map(([type, value, expected]) => {
+            const count = countIteratorSteps(() =>
+              fixture.write(fixture.comments, type, value),
+            )
+            expect(fixture.commentCount(1)).toBe(expected)
+            return count
+          }),
         )
-        expect(fixture.commentCount(1)).toBe(size + 1)
       } finally {
         await fixture.counts.cleanup()
         await fixture.issues.cleanup()
@@ -324,6 +331,75 @@ describe(`grouped aggregate work per change`, () => {
       await fixture.counts.cleanup()
       await issues.cleanup()
       await comments.cleanup()
+    }
+  })
+})
+
+/**
+ * # Does a retraction cancel its insert when the argument is rebuilt?
+ *
+ * Law: an insert followed by the matching delete leaves a grouped aggregate
+ * with the work it had before, however many such cycles ran. A query that
+ * reads its source through an inline subquery rebuilds the projected objects
+ * each time the subquery runs, so the retraction carries a new object for the
+ * same row. A contribution keyed by that object's instance would never cancel,
+ * and every later change would visit the leftover contributions.
+ *
+ * Observation: the iterator steps of one insert-and-delete cycle, measured
+ * after 10 cycles and after 300 cycles, with the published `max` and `sum`
+ * equal to the model's values at each checkpoint.
+ */
+describe(`retraction of a rebuilt aggregate argument`, () => {
+  it(`keeps cycle work constant for max and sum over a rebuilt value`, async () => {
+    const source = createCollection(
+      mockSyncCollectionOptions<{ id: number; g: number; x: number }>({
+        id: `rebuilt-argument-${Math.random()}`,
+        getKey: (row) => row.id,
+        initialData: [
+          { id: 1, g: 1, x: 1 },
+          { id: 2, g: 1, x: 5 },
+        ],
+      }),
+    )
+    const grouped = createLiveQueryCollection((q) =>
+      q
+        .from({
+          s: q
+            .from({ row: source })
+            .select(({ row }) => ({
+              id: row.id,
+              g: row.g,
+              x: row.x,
+              box: { x: row.x },
+            })),
+        })
+        .groupBy(({ s }) => s.g)
+        .select(({ s }) => ({
+          g: s.g,
+          hi: max(s.x),
+          total: sum(s.x),
+          boxed: max(s.box as never),
+        })),
+    )
+    const cycle = () =>
+      countIteratorSteps(() => {
+        for (const type of [`insert`, `delete`] as const) {
+          source.utils.begin()
+          source.utils.write({ type, value: { id: 99, g: 1, x: 7 } })
+          source.utils.commit()
+        }
+      })
+    try {
+      await grouped.preload()
+      for (let i = 0; i < 9; i++) cycle()
+      const early = cycle()
+      for (let i = 0; i < 289; i++) cycle()
+      const late = cycle()
+      expect(grouped.toArray).toMatchObject([{ g: 1, hi: 5, total: 6 }])
+      expect(late).toBe(early)
+    } finally {
+      await grouped.cleanup()
+      await source.cleanup()
     }
   })
 })

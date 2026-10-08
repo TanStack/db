@@ -262,13 +262,12 @@ const equalityEquivalentGroupValues: Array<
  * Which member supplies a group's projected value when several members are
  * equal under query equality but differ exactly?
  *
- * Law: the member with the smallest exact value. Exact values are ordered by
- * kind first: a number before an object (a Date, a binary array, or a
- * Temporal value). Among numbers, an ordinary number comes before -0, and
- * -0 before NaN. Among objects, the type name decides (`Buffer` before
- * `Date` before `Uint8Array`). Objects of one type with the same content are
- * the same exact value, so either instance may be projected. The choice does
- * not depend on row keys or on the order in which rows arrived.
+ * Law: the member with the smallest exact value. Any primitive other than -0
+ * comes first, then -0, then objects (a Date, a binary array, or a Temporal
+ * value). Among objects, the type tag decides (`Buffer` before `Date` before
+ * `Uint8Array`). Among objects of one type with the same content, the member
+ * with the smallest row key supplies the instance. The choice does not depend
+ * on the order in which rows arrived.
  *
  * Law: the projected value is an instance that a currently positive member
  * holds. After a member is deleted, its instance is never projected, even
@@ -278,17 +277,13 @@ const equalityEquivalentGroupValues: Array<
  * That choice made every member's contribution distinct, so each change
  * re-read the whole group.
  */
-function exactRank(value: unknown): [number, number | string] {
-  if (typeof value === `number`) {
-    if (Object.is(value, -0)) return [0, 1]
-    if (Number.isNaN(value)) return [0, 2]
-    return [0, 0]
-  }
-  const typeName =
-    value !== null && typeof value === `object`
-      ? value.constructor.name
-      : typeof value
-  return [1, typeName]
+function exactRank(value: unknown): [number, string] {
+  // Any primitive other than -0 comes first, then -0, then objects ordered by
+  // type tag. Object.prototype.toString reads the tag without production code.
+  if (Object.is(value, -0)) return [1, ``]
+  if (value === null || typeof value !== `object`) return [0, ``]
+  if (Buffer.isBuffer(value)) return [2, `Buffer`]
+  return [2, Object.prototype.toString.call(value).slice(8, -1)]
 }
 
 function smallestExact(values: ReadonlyArray<unknown>): unknown {
@@ -2562,4 +2557,54 @@ function createGroupByTests(autoIndex: `off` | `eager`): void {
 describe(`Query GROUP BY Execution`, () => {
   createGroupByTests(`off`)
   createGroupByTests(`eager`)
+})
+
+/**
+ * Law: among members whose group values are equal in content, the projected
+ * instance does not depend on the order in which rows arrived. The member
+ * with the smallest row key supplies it, so it is also always a current
+ * member's instance.
+ */
+describe(`group value among equal instances`, () => {
+  for (const order of [
+    [1, 2],
+    [2, 1],
+  ] as const) {
+    test(`projects the smallest row key's instance when rows arrive as ${order.join(`, `)}`, async () => {
+      const instances = new Map([
+        [1, new Date(0)],
+        [2, new Date(0)],
+      ])
+      const source = createCollection(
+        mockSyncCollectionOptions<{ id: number; v: Date }>({
+          id: `equal-instances-${order.join(``)}-${Math.random()}`,
+          getKey: (row) => row.id,
+          initialData: [],
+        }),
+      )
+      const grouped = createLiveQueryCollection((q) =>
+        q
+          .from({ row: source })
+          .groupBy(({ row }) => row.v)
+          .select(({ row }) => ({ v: row.v })),
+      )
+      const write = (type: `insert` | `delete`, id: number) => {
+        source.utils.begin()
+        source.utils.write({ type, value: { id, v: instances.get(id)! } })
+        source.utils.commit()
+      }
+      try {
+        await grouped.preload()
+        for (const id of order) write(`insert`, id)
+        expect((grouped.toArray[0] as { v: Date }).v).toBe(instances.get(1))
+        write(`delete`, 1)
+        expect((grouped.toArray[0] as { v: Date }).v).toBe(instances.get(2))
+        write(`insert`, 1)
+        expect((grouped.toArray[0] as { v: Date }).v).toBe(instances.get(1))
+      } finally {
+        await grouped.cleanup()
+        await source.cleanup()
+      }
+    })
+  }
 })
