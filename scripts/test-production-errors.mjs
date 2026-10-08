@@ -70,8 +70,6 @@ const literals = [
 // These errors share all of their text with text that every build keeps, so no
 // literal distinguishes them. The oracle still checks their guard.
 const sharedWithWarnings = new Set([
-  // console.warn in basic-index.ts and btree-index.ts
-  'error 99 (indexes/base-index.ts)',
   // the IndexedDB request-failure fallback in indexed-db-wrapper.ts
   'error 170 (utils/error.ts)',
 ])
@@ -88,6 +86,21 @@ const developmentOnly = [
   'collection/config-errors.ts',
   'Collection requires a "getKey" function in the config.',
 ]
+
+// Developer hints in guarded branches: production bundles drop all of them,
+// in both formats, because the guard folds inside each function.
+const hints = await Promise.all(
+  JSON.parse(
+    await readFile(
+      path.join(tests, 'fixtures/development-only-messages.json'),
+      'utf8',
+    ),
+  ).map(async ({ file, literals }) => [
+    `development-only text (${file})`,
+    distinctiveLiteral(literals.join('\n'), await readSource(file)),
+  ]),
+)
+checked.push(...hints)
 const short = checked.filter(([, literal]) => literal.length < 12)
 assert.deepEqual(short, [], 'coded errors without a distinctive literal')
 

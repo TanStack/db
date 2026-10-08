@@ -1198,7 +1198,7 @@ export class CollectionConfigBuilder<
     this.isInErrorState = true
 
     // Log error to console for debugging
-    console.error(`[Live Query Error] ${message}`)
+    console.error(devBuild() && process.env.NODE_ENV !== `production` ? `[Live Query Error] ${message}` : codedMessage(227, { message }))
 
     // Transition live query collection to error state
     this.liveQueryCollection?._lifecycle.markError(error ?? new Error(message))

@@ -60,10 +60,11 @@ Development builds keep the full messages below. The error classes, their
 [Error Handling](./guides/error-handling.md) for how to catch them.
 
 ${sections.join('\n')}
-## Other errors
+## Other errors and log messages
 
-These errors are plain \`Error\`, \`TypeError\`, \`RangeError\`, or \`AggregateError\` values. Each
-heading names the source file under \`packages/db/src\` that throws it.
+These are plain \`Error\`, \`TypeError\`, \`RangeError\`, or
+\`AggregateError\` values, and \`console\` messages about runtime failures.
+Each heading names the source file under \`packages/db/src\` that writes it.
 
 ${siteSections.join('\n')}`
 

@@ -1,5 +1,6 @@
 import { DEFAULT_COMPARE_OPTIONS } from '../utils'
 import { hasVirtualPropPath } from '../virtual-props'
+import { codedMessage, devBuild } from '../error-message.js'
 import { checkCollectionSizeForIndex, isDevModeEnabled } from './index-registry'
 import type { CompareOptions } from '../query/builder/types'
 import type { BasicExpression } from '../query/ir'
@@ -73,7 +74,7 @@ export function ensureIndexForField<
     )
   } catch (error) {
     console.warn(
-      `${collection.id ? `[${collection.id}] ` : ``}Failed to create auto-index for field path "${fieldPath.join(`.`)}":`,
+      devBuild() && process.env.NODE_ENV !== `production` ? `${collection.id ? `[${collection.id}] ` : ``}Failed to create auto-index for field path "${fieldPath.join(`.`)}":` : codedMessage(215, { id: collection.id, value: fieldPath.join(`.`) }),
       error,
     )
   }

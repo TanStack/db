@@ -75,7 +75,7 @@ export function isDevModeEnabled(): boolean {
  * Emit an index suggestion (dev mode only)
  */
 export function emitIndexSuggestion(suggestion: IndexSuggestion): void {
-  if (!isDevModeEnabled()) return
+  if (!(devBuild() && process.env.NODE_ENV !== `production` && devModeConfig.enabled)) return
 
   if (devModeConfig.onSuggestion) {
     try {
@@ -102,7 +102,7 @@ export function trackQuery(
   fieldPath: Array<string>,
   executionTimeMs: number,
 ): void {
-  if (!isDevModeEnabled()) return
+  if (!(devBuild() && process.env.NODE_ENV !== `production` && devModeConfig.enabled)) return
 
   const key = `${collectionId}:${fieldPath.join(`.`)}`
   const existing = queryPatterns.get(key)
@@ -142,7 +142,7 @@ export function checkCollectionSizeForIndex(
   collectionSize: number,
   fieldPath: Array<string>,
 ): void {
-  if (!isDevModeEnabled()) return
+  if (!(devBuild() && process.env.NODE_ENV !== `production` && devModeConfig.enabled)) return
 
   if (collectionSize > devModeConfig.collectionSizeThreshold) {
     emitIndexSuggestion({

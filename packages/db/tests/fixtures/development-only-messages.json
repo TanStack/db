@@ -1,0 +1,58 @@
+[
+  {
+    "file": "collection/sync.ts",
+    "literals": [
+      "Calling .preload() on a collection with syncMode \"on-demand\" is a no-op. ",
+      "In on-demand mode, data is only loaded when queries request it. ",
+      "Instead, create a live query and call .preload() on that to load the specific data you need. ",
+      "See https://tanstack.com/blog/tanstack-db-0.5-query-driven-sync for more details."
+    ]
+  },
+  {
+    "file": "indexes/index-registry.ts",
+    "literals": [
+      "[TanStack DB] Index suggestion for \"",
+      "  Field: ",
+      "  Add index: collection.createIndex((row) => row.",
+      "slow-query",
+      "Queries on \"",
+      "\" are slow (avg ",
+      "ms). Consider adding an index.",
+      "collection-size",
+      "Collection has ",
+      " items. Queries on \"",
+      "\" may benefit from an index."
+    ]
+  },
+  {
+    "file": "live-query-window-controller.ts",
+    "literals": [
+      "useLiveInfiniteQuery: Pre-created collection has window {offset: ",
+      ", limit: ",
+      "but the hook expects {offset: 0, limit: ",
+      "}. Adjusting window now."
+    ]
+  },
+  {
+    "file": "query/compiler/order-by.ts",
+    "literals": [
+      "[TanStack DB]",
+      " orderBy with limit requires an index on \"",
+      "\" for efficient lazy loading. ",
+      "Falling back to loading all data. ",
+      "Consider creating an index on the collection with collection.createIndex((row) => row.",
+      "or enable auto-indexing with autoIndex: 'eager' and a defaultIndexType."
+    ]
+  },
+  {
+    "file": "query/live/subset-demand-controller.ts",
+    "literals": [
+      "[TanStack DB]",
+      " Join requires an index on \"",
+      "\" for efficient loading. ",
+      "Falling back to scanning local data. ",
+      "Consider creating an index on the collection with collection.createIndex((row) => row.",
+      "or enable auto-indexing with autoIndex: 'eager' and a defaultIndexType."
+    ]
+  }
+]

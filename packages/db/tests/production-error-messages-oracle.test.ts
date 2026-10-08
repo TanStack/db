@@ -37,6 +37,12 @@
  *   its sub-expressions, is passed to the code line. Plain objects, such as
  *   rows, never reach it (maintainer decision, 2026-10-07). `AggregateError` messages count too. A message built only
  *   from a caller's value, such as `new Error(String(error))`, is not a site.
+ * - **Console messages:** a `console` call that reports a runtime failure is a
+ *   site too and is coded the same way. A developer hint is development-only:
+ *   it sits inside the erasable guard's branch, or after an early `return` on
+ *   its negation, and its text is frozen in
+ *   `fixtures/development-only-messages.json`. The bundle check proves that
+ *   production drops every frozen hint (maintainer decision, 2026-10-08).
  *
  * The model is the frozen fixtures and the format above; nothing here reads
  * codes from `src/errors.ts`. The production path is every error class that the
@@ -66,6 +72,10 @@ const devMessages: Record<string, Array<string>> = JSON.parse(
 )
 const codesPath = resolve(testsDirectory, `fixtures/error-codes.json`)
 const sitesPath = resolve(testsDirectory, `fixtures/error-site-messages.json`)
+const developmentOnlyPath = resolve(
+  testsDirectory,
+  `fixtures/development-only-messages.json`,
+)
 const docsPath = resolve(testsDirectory, `../../../docs/errors.md`)
 const docsUrl = `https://tanstack.com/db/latest/docs/errors`
 
@@ -274,7 +284,10 @@ describe(`production error messages`, () => {
     // Only validateCollectionConfig reaches these diagnostics, and
     // createCollection calls it behind the erasable guard, so production
     // bundles drop the whole module. The bundle check proves that erasure.
-    const developmentOnlyFiles = new Set([`collection/config-errors.ts`])
+    const developmentOnlyFiles = new Set([
+      `collection/config-errors.ts`,
+      `collection/validate-config.ts`,
+    ])
 
     it(`codes every site that throws library text`, () => {
       expect(
@@ -333,6 +346,15 @@ describe(`production error messages`, () => {
         expect(guard.code, `${guard.file} ${guard.name}`).toBe(
           codes[guard.name],
         )
+    })
+
+    // Developer hints are development-only (maintainer decision,
+    // 2026-10-08). Their text is frozen here, and the bundle check proves a
+    // production bundle drops every frozen literal.
+    it(`freezes every development-only literal`, () => {
+      const frozen: Array<{ file: string; literals: Array<string> }> =
+        JSON.parse(readFileSync(developmentOnlyPath, `utf8`))
+      expect(sites.developmentOnly).toEqual(frozen)
     })
 
     it(`never reuses a class code`, () => {

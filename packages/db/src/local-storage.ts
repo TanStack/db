@@ -6,6 +6,7 @@ import {
   SerializationError,
   StorageKeyRequiredError,
 } from './errors'
+import { codedMessage, devBuild } from './error-message.js'
 import type {
   BaseCollectionConfig,
   CollectionConfig,
@@ -410,7 +411,7 @@ export function localStorageCollectionOptions(
       storage.setItem(config.storageKey, serialized)
     } catch (error) {
       console.error(
-        `[LocalStorageCollection] Error saving data to storage key "${config.storageKey}":`,
+        devBuild() && process.env.NODE_ENV !== `production` ? `[LocalStorageCollection] Error saving data to storage key "${config.storageKey}":` : codedMessage(218, { storageKey: config.storageKey }),
         error,
       )
       throw error
@@ -630,7 +631,7 @@ function loadFromStorage<T extends object>(
     return dataMap
   } catch (error) {
     console.warn(
-      `[LocalStorageCollection] Error loading data from storage key "${storageKey}":`,
+      devBuild() && process.env.NODE_ENV !== `production` ? `[LocalStorageCollection] Error loading data from storage key "${storageKey}":` : codedMessage(219, { storageKey }),
       error,
     )
     return new Map()

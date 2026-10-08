@@ -12,6 +12,7 @@ import {
 } from '../ir.js'
 import { ensureIndexForField } from '../../indexes/auto-index.js'
 import { findIndexForField } from '../../utils/index-optimization.js'
+import { devBuild } from '../../error-message.js'
 import { compileExpression } from './evaluators.js'
 import { getSourceAliasesFromExpression } from './expressions.js'
 import { replaceAggregatesByRefs } from './group-by.js'
@@ -207,7 +208,7 @@ export function processOrderBy(
         index = undefined
       }
 
-      if (!index) {
+      if (devBuild() && process.env.NODE_ENV !== `production` && !index) {
         const collectionId = followRefCollection.id
         const fieldPath = followRefResult.path.join(`.`)
         console.warn(

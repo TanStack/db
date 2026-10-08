@@ -3,6 +3,10 @@
  * error classes in `src/errors.ts`. The production error message oracle uses
  * it to check that each such message is coded.
  *
+ * - A `console` call whose argument contains library text is a plain site too,
+ *   unless it is development-only: inside the erasable guard's branch, or after
+ *   an early `return` on its negation. The census lists every development-only
+ *   literal so the bundle check can prove production drops it.
  * - A **coded site** is any `devBuild() && NODE_ENV !== 'production' ? dev :
  *   codedMessage(code, values)` expression, wherever the message goes, except
  *   an error class's `super(...)` message.
@@ -58,6 +62,12 @@ export type CodedSite = {
    */
   values: Array<{ expression: string; parts: Array<string>; showable: boolean }>
 }
+
+/**
+ * Library text that only development builds contain: everything inside the
+ * erasable guard's branch, or after an early `return` on its negation.
+ */
+export type DevelopmentOnlyText = { file: string; literals: Array<string> }
 
 /** A coded `super(...)` message in an error class outside `errors.ts`. */
 export type ClassGuard = { file: string; name: string; code: number }
@@ -326,10 +336,12 @@ export function findErrorSites(
   coded: Array<CodedSite>
   plain: Array<PlainSite>
   classGuards: Array<ClassGuard>
+  developmentOnly: Array<DevelopmentOnlyText>
 } {
   const coded: Array<CodedSite> = []
   const plain: Array<PlainSite> = []
   const classGuards: Array<ClassGuard> = []
+  const developmentOnly: Array<DevelopmentOnlyText> = []
   const callerMessage = new Set(callerMessageClasses)
   const configPath = join(dirname(sourceRoot), `tsconfig.json`)
   const config = ts.parseJsonConfigFileContent(
@@ -359,7 +371,63 @@ export function findErrorSites(
       compact(node.condition, sourceFile) === guard &&
       ts.isCallExpression(node.whenFalse) &&
       node.whenFalse.expression.getText(sourceFile) === `codedMessage`
+    const isGuard = (node: ts.Expression) =>
+      compact(node, sourceFile).startsWith(guard)
+    // `if (guard) { ... }`, or `if (!(guard ...)) return` earlier in a block.
+    const isDevelopmentOnly = (node: ts.Node): boolean =>
+      !!ts.findAncestor(node, (ancestor) => {
+        if (ts.isSourceFile(ancestor)) return `quit`
+        if (
+          ts.isIfStatement(ancestor.parent) &&
+          ancestor === ancestor.parent.thenStatement &&
+          isGuard(ancestor.parent.expression)
+        )
+          return true
+        if (!ts.isBlock(ancestor.parent)) return false
+        const statements = ancestor.parent.statements
+        return statements
+          .slice(0, statements.indexOf(ancestor as ts.Statement))
+          .some(
+            (statement) =>
+              ts.isIfStatement(statement) &&
+              ts.isPrefixUnaryExpression(statement.expression) &&
+              statement.expression.operator ===
+                ts.SyntaxKind.ExclamationToken &&
+              ts.isParenthesizedExpression(statement.expression.operand) &&
+              isGuard(statement.expression.operand.expression) &&
+              ts.isReturnStatement(statement.thenStatement),
+          )
+      })
+    const developmentLiterals: Array<string> = []
     const visit = (node: ts.Node) => {
+      if (
+        (ts.isStringLiteral(node) ||
+          ts.isNoSubstitutionTemplateLiteral(node) ||
+          ts.isTemplateExpression(node)) &&
+        hasLibraryText(node) &&
+        isDevelopmentOnly(node)
+      ) {
+        developmentLiterals.push(...messageLiterals(node))
+        return
+      }
+      // A console call with library text is a site unless it is
+      // development-only.
+      if (
+        ts.isCallExpression(node) &&
+        ts.isPropertyAccessExpression(node.expression) &&
+        node.expression.expression.getText(sourceFile) === `console` &&
+        !isDevelopmentOnly(node)
+      )
+        for (const argument of node.arguments)
+          if (!isCoded(argument) && hasLibraryText(argument))
+            plain.push({
+              file,
+              line:
+                sourceFile.getLineAndCharacterOfPosition(argument.getStart())
+                  .line + 1,
+              template: messageTemplate(argument, sourceFile),
+              literals: messageLiterals(argument),
+            })
       if (isCoded(node) && isClassMessage(node)) {
         const owner = ts.findAncestor(node, ts.isClassLike)
         classGuards.push({
@@ -424,6 +492,8 @@ export function findErrorSites(
       ts.forEachChild(node, visit)
     }
     visit(sourceFile)
+    const literals = developmentLiterals.filter((text) => /[A-Za-z]/.test(text))
+    if (literals.length) developmentOnly.push({ file, literals })
   }
-  return { coded, plain, classGuards }
+  return { coded, plain, classGuards, developmentOnly }
 }

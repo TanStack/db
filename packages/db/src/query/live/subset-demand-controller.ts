@@ -179,6 +179,7 @@ export class SubsetDemandController {
   }
 
   private warnUnoptimized(plan: LazyDemandPlan): void {
+    if (!(devBuild() && process.env.NODE_ENV !== `production`)) return
     if (this.warnedPlans.has(plan.id)) return
     this.warnedPlans.add(plan.id)
     const path = plan.path.join(`.`)

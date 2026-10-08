@@ -969,10 +969,11 @@ Development builds show the full message. For example:
 IndexedDB collection requires a "getKey" configuration option. This function extracts the unique key from each item.
 ```
 
-## Other errors
+## Other errors and log messages
 
-These errors are plain `Error`, `TypeError`, `RangeError`, or `AggregateError` values. Each
-heading names the source file under `packages/db/src` that throws it.
+These are plain `Error`, `TypeError`, `RangeError`, or
+`AggregateError` values, and `console` messages about runtime failures.
+Each heading names the source file under `packages/db/src` that writes it.
 
 <a id="error-88"></a>
 
@@ -2166,4 +2167,154 @@ Development builds show this message, with `${...}` replaced by values:
 
 ```text
 Live query graph failed
+```
+
+<a id="error-213"></a>
+
+## Error 213: `collection/change-events.ts`
+
+Development builds show this message, with `${...}` replaced by values:
+
+```text
+${collection.id ? `[${collection.id}]` : ``}Error processing where clause, falling back to full scan:
+```
+
+<a id="error-214"></a>
+
+## Error 214: `collection/cleanup-queue.ts`
+
+Development builds show this message, with `${...}` replaced by values:
+
+```text
+Error in CleanupQueue task:
+```
+
+<a id="error-215"></a>
+
+## Error 215: `indexes/auto-index.ts`
+
+Development builds show this message, with `${...}` replaced by values:
+
+```text
+${collection.id ? `[${collection.id}]` : ``}Failed to create auto-index for field path "${fieldPath.join(`.`)}":
+```
+
+<a id="error-216"></a>
+
+## Error 216: `indexes/basic-index.ts`
+
+Development builds show this message, with `${...}` replaced by values:
+
+```text
+Failed to evaluate index expression for key ${key} during removal:
+```
+
+<a id="error-217"></a>
+
+## Error 217: `indexes/btree-index.ts`
+
+Development builds show this message, with `${...}` replaced by values:
+
+```text
+Failed to evaluate index expression for key ${key} during removal:
+```
+
+<a id="error-218"></a>
+
+## Error 218: `local-storage.ts`
+
+Development builds show this message, with `${...}` replaced by values:
+
+```text
+[LocalStorageCollection] Error saving data to storage key "${config.storageKey}":
+```
+
+<a id="error-219"></a>
+
+## Error 219: `local-storage.ts`
+
+Development builds show this message, with `${...}` replaced by values:
+
+```text
+[LocalStorageCollection] Error loading data from storage key "${storageKey}":
+```
+
+<a id="error-220"></a>
+
+## Error 220: `query/effect.ts`
+
+Development builds show this message, with `${...}` replaced by values:
+
+```text
+[Effect '${id}'] onSourceError callback threw:
+```
+
+<a id="error-221"></a>
+
+## Error 221: `query/effect.ts`
+
+Development builds show this message, with `${...}` replaced by values:
+
+```text
+[Effect '${id}'] ${error.message}. Disposing effect.
+```
+
+<a id="error-222"></a>
+
+## Error 222: `query/effect.ts`
+
+Development builds show this message, with `${...}` replaced by values:
+
+```text
+[Effect '${id}'] failed to dispose after a source error:
+```
+
+<a id="error-223"></a>
+
+## Error 223: `query/effect.ts`
+
+Development builds show this message, with `${...}` replaced by values:
+
+```text
+[Effect '${id}'] failed to dispose after a startup error:
+```
+
+<a id="error-224"></a>
+
+## Error 224: `query/effect.ts`
+
+Development builds show this message, with `${...}` replaced by values:
+
+```text
+[Effect] Error in onError handler:
+```
+
+<a id="error-225"></a>
+
+## Error 225: `query/effect.ts`
+
+Development builds show this message, with `${...}` replaced by values:
+
+```text
+[Effect] Original error:
+```
+
+<a id="error-226"></a>
+
+## Error 226: `query/effect.ts`
+
+Development builds show this message, with `${...}` replaced by values:
+
+```text
+[Effect] Unhandled error in handler:
+```
+
+<a id="error-227"></a>
+
+## Error 227: `query/live/collection-config-builder.ts`
+
+Development builds show this message, with `${...}` replaced by values:
+
+```text
+[Live Query Error] ${message}
 ```
