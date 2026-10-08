@@ -1643,34 +1643,16 @@ function collectQueryAliases(query: QueryIR): Array<string> {
   return [...aliases]
 }
 
+/** Source declarations visible in this query's lexical scope. */
 function collectDeclaredBindings(query: QueryIR): Set<string> {
   const bindings = new Set<string>()
-  const visitSelect = (value: unknown): void => {
-    if (value instanceof IncludesSubquery) {
-      visit(value.query)
-    } else if (value instanceof ConditionalSelect) {
-      value.branches.forEach((branch) => visitSelect(branch.value))
-      if (value.defaultValue !== undefined) visitSelect(value.defaultValue)
-    } else if (isNestedSelectRecord(value)) {
-      Object.values(value).forEach(visitSelect)
-    }
+  const from = query.from
+  if (from.type === `unionFrom`) {
+    for (const source of from.sources) bindings.add(source.bindingId)
+  } else if (from.type !== `unionAll`) {
+    bindings.add(from.bindingId)
   }
-  const visit = (nested: QueryIR): void => {
-    const addSource = (source: CollectionRef | QueryRef) => {
-      bindings.add(source.bindingId)
-      if (source.type === `queryRef`) visit(source.query)
-    }
-    if (nested.from.type === `unionAll`) {
-      nested.from.queries.forEach(visit)
-    } else if (nested.from.type === `unionFrom`) {
-      nested.from.sources.forEach(addSource)
-    } else {
-      addSource(nested.from)
-    }
-    nested.join?.forEach(({ from }) => addSource(from))
-    if (nested.select) visitSelect(nested.select)
-  }
-  visit(query)
+  for (const join of query.join ?? []) bindings.add(join.from.bindingId)
   return bindings
 }
 

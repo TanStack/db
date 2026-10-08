@@ -50,6 +50,42 @@ describe(`Subquery Caching`, () => {
     expect(queriesMatchForCaching(filtered, original)).toBe(false)
   })
 
+  it(`does not equate identical paths bound to different lexical sources`, () => {
+    const collection = createMockCollection(`users`)
+    const source = new CollectionRef(collection, `u`)
+    const queryFor = (bindingId: string): QueryIR => ({
+      from: source,
+      where: [
+        new Func(`eq`, [
+          new PropRef([`u`, `id`], `u`, bindingId),
+          new Value(1),
+        ]),
+      ],
+    })
+
+    // The path text is identical. One ref belongs to the query's source and
+    // the other names an enclosing source; a cache substitution changes which
+    // row the predicate reads. The older structural comparison missed this
+    // distinction because PropRef.bindingId is deliberately non-enumerable.
+    expect(
+      queriesMatchForCaching(
+        queryFor(source.bindingId),
+        queryFor(`enclosing-source`),
+      ),
+    ).toBe(false)
+  })
+
+  it(`does not hash function-form queries during cache comparison`, () => {
+    const collection = createMockCollection(`users`)
+    const predicate = () => true
+    const query: QueryIR = {
+      from: new CollectionRef(collection, `u`),
+      fnWhere: [predicate],
+    }
+
+    expect(queriesMatchForCaching(query, { ...query })).toBe(false)
+  })
+
   it(`should cache compiled subqueries and avoid duplicate compilation`, () => {
     // Create a mock collection
     const usersCollection = createMockCollection(`users`)

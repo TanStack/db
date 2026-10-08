@@ -374,6 +374,66 @@ describe(`captured alias scope oracle`, () => {
     )
   })
 
+  /**
+   * The inner QueryRef owns a different lexical scope from the include that
+   * contains it. Its declarations cannot classify the captured parent ref as
+   * child-local, even when an immutable base builder is reused to form both.
+   * The plain model groups each current row by parentId after preload and a
+   * source update; it never consults the builder's binding IDs.
+   */
+  test(`inner QueryRef declarations do not impersonate a captured parent`, async () => {
+    const rows = [
+      { id: 1, parentId: 1 },
+      { id: 2, parentId: 1 },
+    ]
+    const source = createScopedSource(`nested-reuse`, rows, `eager`)
+    const base = new Query().from({ n: source.collection })
+    const live = createLiveQueryCollection({
+      query: base.select(({ n: parent }) => ({
+        id: parent.id,
+        children: toArray(
+          new Query()
+            .from({
+              inner: base.select(({ n }) => ({
+                id: n.id,
+                parentId: n.parentId,
+              })),
+            })
+            .where(({ inner }) => eq(inner.parentId, parent.id))
+            .select(({ inner }) => ({ id: inner.id })),
+        ),
+      })),
+    })
+    const check = () =>
+      expect(
+        live.toArray
+          .map(({ id, children }) => ({
+            id,
+            children: children.map((child) => child.id).sort(),
+          }))
+          .sort((a, b) => a.id - b.id),
+      ).toEqual(
+        rows.map((parent) => ({
+          id: parent.id,
+          children: rows
+            .filter((child) => child.parentId === parent.id)
+            .map((child) => child.id)
+            .sort(),
+        })),
+      )
+    await withHistoryCleanup(
+      async () => {
+        await live.preload()
+        check()
+        const moved = { id: 2, parentId: 2 }
+        source.put(moved)
+        rows[1] = moved
+        check()
+      },
+      () => [() => live.cleanup(), () => source.collection.cleanup()],
+    )
+  })
+
   test(`a local child equality cannot impersonate a shadowed correlation`, async () => {
     const locks = createScopedSource(
       `local-equality-locks`,
@@ -654,4 +714,104 @@ describe(`captured alias scope oracle`, () => {
       ],
     )
   })
+
+  /**
+   * Spread model: the parent and child have deliberately different labels and
+   * profile tags. A captured parent spread contributes the parent's value at
+   * both the initial and update checkpoints, whether the child shadows its
+   * alias or has a distinct name. The child id remains local to the child.
+   * This tests whole-row and nested-path spread lowering separately from
+   * ordinary scalar PropRefs in the generated matrix above.
+   */
+  for (const alias of [`parent`, `child`] as const) {
+    for (const mode of [`eager`, `onDemand`] as const) {
+      for (const spread of [`row`, `profile`] as const) {
+        test(`captured ${spread} spread keeps parent binding with ${alias} child, ${mode}`, async () => {
+          const parents = createScopedSource(
+            `spread-parent`,
+            [{ id: 1, label: `parent`, profile: { tag: `parent-tag` } }],
+            `eager`,
+          )
+          const children = createScopedSource(
+            `spread-child`,
+            [
+              {
+                id: 10,
+                parentId: 1,
+                label: `child`,
+                profile: { tag: `child-tag` },
+              },
+            ],
+            mode,
+          )
+          const live = createLiveQueryCollection({
+            query: new Query()
+              .from({ parent: parents.collection })
+              .select(({ parent }) => ({
+                id: parent.id,
+                children: toArray(
+                  new Query()
+                    .from({ [alias]: children.collection })
+                    .where((context: Context) =>
+                      eq(
+                        (context[alias] as { parentId: number }).parentId,
+                        parent.id,
+                      ),
+                    )
+                    .select((context: Context) =>
+                      spread === `row`
+                        ? {
+                            ...parent,
+                            childId: (context[alias] as { id: number }).id,
+                          }
+                        : {
+                            ...parent.profile,
+                            childId: (context[alias] as { id: number }).id,
+                          },
+                    ),
+                ),
+              })),
+          })
+          const check = (label: string, tag: string) => {
+            const projected = (
+              live.toArray[0]?.children as Array<Record<string, unknown>>
+            ).map((row) =>
+              spread === `row`
+                ? { id: row.id, label: row.label, childId: row.childId }
+                : { tag: row.tag, childId: row.childId },
+            )
+            expect(projected).toEqual([
+              spread === `row`
+                ? { id: 1, label, childId: 10 }
+                : { tag, childId: 10 },
+            ])
+          }
+          await withHistoryCleanup(
+            async () => {
+              await live.preload()
+              check(`parent`, `parent-tag`)
+              parents.put({
+                id: 1,
+                label: `updated-parent`,
+                profile: { tag: `updated-parent-tag` },
+              })
+              check(`updated-parent`, `updated-parent-tag`)
+              children.put({
+                id: 10,
+                parentId: 1,
+                label: `updated-child`,
+                profile: { tag: `updated-child-tag` },
+              })
+              check(`updated-parent`, `updated-parent-tag`)
+            },
+            () => [
+              () => live.cleanup(),
+              () => parents.collection.cleanup(),
+              () => children.collection.cleanup(),
+            ],
+          )
+        })
+      }
+    }
+  }
 })

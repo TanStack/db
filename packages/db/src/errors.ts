@@ -780,9 +780,10 @@ export class CollectionInputNotFoundError extends QueryCompilationError {
 }
 
 /**
- * Error thrown when a subquery uses the same alias as its parent query.
- * This causes issues because parent and subquery would share the same input streams,
- * leading to empty results or incorrect data (aggregation cross-leaking).
+ * Retained for callers that imported this formerly thrown error.
+ *
+ * @deprecated Nested queries may now shadow ancestor aliases. Duplicate aliases
+ * are rejected only within one lexical scope or union branch namespace.
  */
 export class DuplicateAliasInSubqueryError extends QueryCompilationError {
   constructor(alias: string, parentAliases: Array<string>) {

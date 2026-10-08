@@ -1,4 +1,8 @@
 import { deepEquals } from '../../utils.js'
+import {
+  UnhashableQueryIRError,
+  getQueryIdentity,
+} from '../ir-stable-identity.js'
 import type { From, QueryIR } from '../ir.js'
 
 /**
@@ -6,7 +10,15 @@ import type { From, QueryIR } from '../ir.js'
  * or explicitly set to undefined by an optimizer copy.
  */
 export function queriesMatchForCaching(a: QueryIR, b: QueryIR): boolean {
-  return deepEquals(normalizeQuery(a), normalizeQuery(b))
+  if (!deepEquals(normalizeQuery(a), normalizeQuery(b))) return false
+  try {
+    return getQueryIdentity(a) === getQueryIdentity(b)
+  } catch (error) {
+    // Function-form queries may compile but have no stable identity. Recompile
+    // conservatively rather than mistaking matching paths for matching scopes.
+    if (error instanceof UnhashableQueryIRError) return false
+    throw error
+  }
 }
 
 function normalizeQuery(query: QueryIR): Record<string, unknown> {

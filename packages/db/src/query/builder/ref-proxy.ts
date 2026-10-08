@@ -89,6 +89,7 @@ export function createSingleRowRefProxy<
         if (prop === `__refProxy`) return true
         if (prop === `__path`) return path
         if (prop === `__sourceAlias`) return undefined
+        if (prop === `__bindingId`) return undefined
         if (prop === `__type`) return undefined // Type is only for TypeScript inference
         if (prop === REF_PROXY_BRAND) return true
         if (typeof prop === `symbol`) return Reflect.get(target, prop, receiver)
@@ -102,6 +103,7 @@ export function createSingleRowRefProxy<
           prop === `__refProxy` ||
           prop === `__path` ||
           prop === `__sourceAlias` ||
+          prop === `__bindingId` ||
           prop === `__type`
         )
           return true
@@ -117,6 +119,7 @@ export function createSingleRowRefProxy<
           prop === `__refProxy` ||
           prop === `__path` ||
           prop === `__sourceAlias` ||
+          prop === `__bindingId` ||
           prop === `__type`
         ) {
           return { enumerable: false, configurable: true }
@@ -156,6 +159,9 @@ export function createRefProxy<T extends Record<string, any>>(
         // Answers with the path so toExpression reads it in one trap.
         if (prop === REF_PROXY_BRAND) return path
         if (typeof prop === `symbol`) return Reflect.get(target, prop, receiver)
+        if (Object.prototype.hasOwnProperty.call(target, prop)) {
+          return Reflect.get(target, prop, receiver)
+        }
 
         children ??= new Map()
         let child = children.get(prop)
@@ -171,6 +177,7 @@ export function createRefProxy<T extends Record<string, any>>(
           prop === `__refProxy` ||
           prop === `__path` ||
           prop === `__sourceAlias` ||
+          prop === `__bindingId` ||
           prop === `__type`
         )
           return true
@@ -184,7 +191,7 @@ export function createRefProxy<T extends Record<string, any>>(
           Object.defineProperty(target, sentinelKey, {
             enumerable: true,
             configurable: true,
-            value: true,
+            value: new PropRef(path, path[0], bindings?.get(path[0] ?? ``)),
           })
         }
         return Reflect.ownKeys(target)
@@ -195,6 +202,7 @@ export function createRefProxy<T extends Record<string, any>>(
           prop === `__refProxy` ||
           prop === `__path` ||
           prop === `__sourceAlias` ||
+          prop === `__bindingId` ||
           prop === `__type`
         ) {
           return { enumerable: false, configurable: true }
@@ -234,6 +242,7 @@ export function createRefProxy<T extends Record<string, any>>(
         prop === `__refProxy` ||
         prop === `__path` ||
         prop === `__sourceAlias` ||
+        prop === `__bindingId` ||
         prop === `__type`
       )
         return true
@@ -242,7 +251,14 @@ export function createRefProxy<T extends Record<string, any>>(
     },
 
     ownKeys(_target) {
-      return [...aliases, `__refProxy`, `__path`, `__sourceAlias`, `__type`]
+      return [
+        ...aliases,
+        `__refProxy`,
+        `__path`,
+        `__sourceAlias`,
+        `__bindingId`,
+        `__type`,
+      ]
     },
 
     getOwnPropertyDescriptor(target, prop) {
@@ -250,6 +266,7 @@ export function createRefProxy<T extends Record<string, any>>(
         prop === `__refProxy` ||
         prop === `__path` ||
         prop === `__sourceAlias` ||
+        prop === `__bindingId` ||
         prop === `__type`
       ) {
         return { enumerable: false, configurable: true }
@@ -294,6 +311,7 @@ export function createRefProxyWithSelected<T extends Record<string, any>>(
         if (prop === `__refProxy`) return true
         if (prop === `__path`) return [`$selected`, ...path]
         if (prop === `__sourceAlias`) return `$selected`
+        if (prop === `__bindingId`) return undefined
         if (prop === `__type`) return undefined
         if (prop === REF_PROXY_BRAND) return true
         if (typeof prop === `symbol`) return Reflect.get(target, prop, receiver)
@@ -307,6 +325,7 @@ export function createRefProxyWithSelected<T extends Record<string, any>>(
           prop === `__refProxy` ||
           prop === `__path` ||
           prop === `__sourceAlias` ||
+          prop === `__bindingId` ||
           prop === `__type`
         )
           return true
@@ -322,6 +341,7 @@ export function createRefProxyWithSelected<T extends Record<string, any>>(
           prop === `__refProxy` ||
           prop === `__path` ||
           prop === `__sourceAlias` ||
+          prop === `__bindingId` ||
           prop === `__type`
         ) {
           return { enumerable: false, configurable: true }
