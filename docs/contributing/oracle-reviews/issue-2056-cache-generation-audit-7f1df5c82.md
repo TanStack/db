@@ -87,6 +87,15 @@ were not run.
 
 ## Open cells
 
+A later test-only follow-up, `e5095c0d6`, strengthened the Electric canceled
+subset reacquisition witness after CodeRabbit observed that `second !== true`
+also accepts a cached rejected promise. The oracle now awaits the identical
+later demand and requires a second SDK snapshot invocation in both late
+resolve and late reject histories. A rejected-promise wrong result passes the
+old predicate and fails the new one; the focused tests and typecheck pass.
+This extends the caller-settlement and provider-invocation comparisons without
+changing the production law or the reviewed implementation commit above.
+
 The coverage map keeps the specific in-scope cells open: claim expiry after
 public source publication but before SQLite accepts the write is fail-stop;
 legacy pre-upgrade on-demand tables remain isolated but uncollected while old
