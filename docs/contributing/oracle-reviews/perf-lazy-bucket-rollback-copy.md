@@ -248,10 +248,10 @@ Reviewed head `bf6caffb1`. The review had nine findings. The evidence for each o
 | --- | --- | --- |
 | 1. Successful flushes do not check events | Confirmed | Law 1 now checks events on each successful flush. The subscriber starts from the facade's current rows (`includeInitialState`). Its events name only rows that a pending operation touched, at most once each. A replay of the events on the previous rows gives the shown rows. |
 | 2. `ARCHITECTURE.md` says the adapter buffers no deltas | Confirmed | The adapter paragraph and "Coherent publication" state the retention law and the rollback invariant. |
-| 3. `rollback()` can overwrite new pending deltas | Confirmed as an unchecked invariant | `rollback()` throws (code 230) when graph output arrived after the flush. The flush runs inside the graph run, so this cannot occur in a legal history. A pinned witness covers it. |
+| 3. `rollback()` can overwrite new pending deltas | Confirmed as an unchecked invariant | `rollback()` throws (code 233) when graph output arrived after the flush. The flush runs inside the graph run, so this cannot occur in a legal history. A pinned witness covers it. |
 | 4. Per-flush bookkeeping copy | Accepted design | The maintainer decision is recorded below. |
 | 5. Per-flush `write` closure | Confirmed | Removed. The copy, the deferral and the write are at the one write site. |
-| 6. The retire write branch is unreachable | Confirmed | The branch is removed. A retire that finds rows throws (code 231). A probe that threw on that branch ran the full `@tanstack/db` suite (11,267 tests) and reached it zero times. A pinned witness covers the throw. |
+| 6. The retire write branch is unreachable | Confirmed, then refuted in the third review | The branch was removed, and a retire that found rows threw (code 231). A probe that threw on that branch ran the full `@tanstack/db` suite (11,267 tests) and reached it zero times. The third review showed that the probe measured a blind spot shared by every suite, not the contract. The branch is restored. |
 | 7. Pending maps are copied, then cleared | Confirmed | The flush swaps the map references, and the rollback swaps them back. |
 | 8. The oracle reads adapter internals | Confirmed, documented | The Limits section gives the reason: `resolve` creates facades, so the facade set and the new-facade failure need the private map and factory. Rows, events and layout revisions are public Collection state. |
 | 9. The "only way to write a facade" comment is wrong | Confirmed | The comment now says this is the only place where a flush applies graph deltas. |
@@ -270,3 +270,54 @@ Mutants, against the extended oracle (with the includes oracle and the adapter t
 | Apply each change twice | Equivalent: the repeated identical update publishes no event | Equivalent |
 
 Production: `bucket-facade-adapter.ts` is +54/−64 against `main` (net −10).
+
+## Follow-up: third, targeted code review (2026-10-08)
+
+Reviewed head `00ef3ea07`. The review had ten findings.
+
+**Regression.** Round 2 made retirement throw (code 231) when a facade still
+had rows. It assumed that a retired facade is empty in legal histories. That
+holds for synced rows only. A facade is a public Collection, so a user
+transaction can show an optimistic row in it, and a persisting transaction can
+hold its sync commits. `main` retracted every visible key. The oracle's grammar
+had no step that writes a facade outside the graph, so no generated history
+could refute the assumption. The reach probe counted only what the existing
+suites generate.
+
+**Law.** Retirement deletes through sync every key the facade still shows. It
+is a facade write of the flush, so a failed flush restores it. The
+architecture text says so and explains why a non-empty retirement is legal.
+
+| Finding | Verdict | Change |
+| --- | --- | --- |
+| 1. Retire throws on a facade with optimistic or held rows | Confirmed regression | The grammar gained a step that inserts an optimistic row into a held facade, and the oracle checks that the row stays visible. RED: both campaigns, plus pinned optimistic-row and held-commit cases, threw code 231. GREEN after retirement went back to retracting through the shared copy and deferral path. Code 231 is removed. |
+| 2. Created-facade disposal is not observed | Confirmed | After a failed flush, every facade it created must report `status === 'cleaned-up'`. |
+| 3. The rollback invariant wedges event delivery | Confirmed | The rollback restores the facades and discards the deferred events before it throws. The witness checks the rows and one event on the next flush. |
+| 4. Rollback after cleanup restores disposed facades | Confirmed | Rollback after `cleanup()` does nothing. Pinned witness. |
+| 5. The architecture text does not match the retire throw | Confirmed | Updated, as above. Coherent publication also states the rollback ordering and the cleanup no-op. |
+| 6. The layout law over-specifies | Open law question | Proposed to the maintainer. |
+| 7. No liveness after a deterministic root-commit failure | Recorded limit | See the recorded limits above. |
+| 8. `currentOrder.clear()` in restore is redundant | Refuted | Removing it fails the adapter unit test. Only a private-state assertion catches it, so its public consequence is an open witness. |
+| 9. `retiredEntries.clear()` on rollback is redundant | Equivalent | Removing it passes all 4,033 query tests. Restore puts each retired entry back, so the reference retains nothing. Kept, because it states that a rolled-back flush retires nothing. |
+| 10. Misplaced comments | Confirmed | Moved. |
+
+On merge, `main` (#2074) had taken codes 230–232, so the rollback invariant is
+now code 233.
+
+Mutants, against the rollback oracle, the includes oracle and the adapter
+tests:
+
+| Mutant | Result |
+| --- | --- |
+| Retire throws when rows remain | Assertion failures (6 tests, both campaigns) |
+| Created facades are not disposed | Assertion failures (both campaigns) |
+| Rollback after cleanup restores | Assertion failure (witness) |
+| The invariant check runs before restore and discard | Assertion failure (witness) |
+| Copy again on each write | Assertion failures (both campaigns) |
+| Retire skips the rollback copy | Assertion failure (pinned witness only) |
+| Rollback drops the consumed pending changes | Assertion failures (4 tests, includes oracle too) |
+
+**Limits.** Held commits and synced rows left at retirement have pinned
+witnesses only. The second is a contradictory graph signal. Disposal between a
+flush and its rollback is pinned, not generated.
+

@@ -65,7 +65,11 @@ import type { BucketRow } from '../../src/query/live/materialized-pipeline.js'
  * buckets, as the graph guarantees. A flush either publishes, throws from the
  * commit of an existing facade it writes, throws from the first write of such
  * a facade (leaving its sync transaction open), throws from the commit of a
- * facade it creates, or is rolled back after `prepare()`.
+ * facade it creates, or is rolled back after `prepare()`. Before a step's
+ * operations, the step may insert an optimistic row into a held facade
+ * through a user transaction that stays pending until cleanup. The model
+ * keeps only synced rows, so the comparison sets those optimistic rows aside
+ * and checks that each stays visible while its facade is held.
  *
  * The driver runs the real adapter over a D2 graph. After each flush it
  * compares the set of facades the adapter holds with the model's buckets,
@@ -73,7 +77,8 @@ import type { BucketRow } from '../../src/query/live/materialized-pipeline.js'
  * row, the change events each facade published, and each facade's layout
  * revision. For a facade that existed before a successful flush, it replays
  * the flush's events on the facade's previous rows and checks which rows the
- * events name.
+ * events name. After a failed flush it checks that every facade the flush
+ * created reports `status === 'cleaned-up'`.
  * The work counter wraps the iteration, `forEach`, `get` and `has` methods of
  * each facade's stored rows during the flush and records which facades the
  * flush read. A pinned case covers nested facades across two edges: the child
@@ -83,9 +88,18 @@ import type { BucketRow } from '../../src/query/live/materialized-pipeline.js'
  * - Facade indexes and the root commit inside a live query are covered by
  *   `bucket-facade-adapter.test.ts` and
  *   `includes-collection-oracle.property.test.ts`.
- * - In legal histories, retiring a bucket retracts its rows in the same flush,
- *   so a retired facade is empty. The adapter throws if it is not. A pinned
- *   case retires a bucket without its retractions to witness that check.
+ * - The graph retracts a bucket's synced rows before it retires the bucket,
+ *   but a retired facade can still show rows the graph never sent: an
+ *   optimistic row from a user transaction on the facade, or a sync commit
+ *   held behind a persisting transaction. The grammar adds optimistic rows
+ *   (the `local` step field) and the oracle requires the flush to keep them
+ *   visible while the facade is held. Retirement retracts every key the facade
+ *   still shows through an ordinary facade write, so a failed flush restores
+ *   it. Held commits and synced rows left at retirement have pinned witnesses
+ *   only.
+ * - After a failed flush, each facade the flush created must report
+ *   `status === 'cleaned-up'`. The model does not otherwise follow facades
+ *   after the adapter drops them.
  * - The adapter is internal. Its public surface is `flush`, `resolve` and
  *   `cleanup`, and `resolve` creates a facade for a bucket it does not hold.
  *   So the driver reads the adapter's private facade map to see which facades
@@ -261,16 +275,16 @@ function legalize(
   return ops
 }
 
-/**
- * Make the next `commit` or `write` of a facade's sync throw once. A `write`
- * failure leaves the facade's sync transaction open, as a validation error
- * from a real write would.
- */
 /** The child facade a parent row's `kids` field points to. */
 function kidsOf(row: unknown): unknown {
   return (row as { kids?: unknown } | undefined)?.kids
 }
 
+/**
+ * Make the next `commit` or `write` of a facade's sync throw once. A `write`
+ * failure leaves the facade's sync transaction open, as a validation error
+ * from a real write would.
+ */
 function injectFailure(sync: FacadeSync, method: `commit` | `write`): void {
   if (method === `commit`) {
     const commit = sync.commit
@@ -811,9 +825,9 @@ const step = fc.record({
   ),
   throwPick: fc.nat(3),
   // About two steps in five add an optimistic row to a facade first.
-  local: fc.integer({ min: -3, max: BUCKETS.length - 1 }).map((bucket) =>
-    bucket < 0 ? undefined : bucket,
-  ),
+  local: fc
+    .integer({ min: -3, max: BUCKETS.length - 1 })
+    .map((bucket) => (bucket < 0 ? undefined : bucket)),
 })
 const history = fc.array(step, { minLength: 1, maxLength: 8 })
 
@@ -1078,8 +1092,6 @@ describe(`bucket facade rollback`, () => {
     ).rejects.toBe(cleanupFailure)
   })
 
-  // Pinned: a failed flush that writes two existing buckets and retires a
-  // third restores all three, then the retried flush applies everything.
   // Invariant witness: the flush runs inside the graph run, so graph output
   // cannot reach the adapter before its rollback. If it did, restoring the
   // consumed deltas would overwrite it, so the rollback throws instead.
@@ -1194,9 +1206,11 @@ describe(`bucket facade rollback`, () => {
     )
   })
 
-  // A retirement without its retractions is a contradictory graph signal, but
-  // the adapter has always retracted whatever the facade still holds, so the
-  // facade empties instead of failing the flush.
+  // The graph retracts a bucket's rows before it retires the bucket, so synced
+  // rows left at retirement are a contradictory graph signal. The adapter
+  // retracts every key the facade still shows, as it does for optimistic and
+  // held rows, so the facade's synced state empties instead of failing the
+  // flush.
   it(`retracts a retired facade's remaining synced rows`, async () => {
     const driver = new Driver()
     await withCleanup(
@@ -1237,6 +1251,8 @@ describe(`bucket facade rollback`, () => {
     )
   })
 
+  // Pinned: a failed flush that writes two existing buckets and retires a
+  // third restores all three, then the retried flush applies everything.
   it(`restores two written buckets and a retired bucket, then retries`, async () => {
     await runHistory([
       {

@@ -574,8 +574,13 @@ snapshot when the bucket becomes active; the facade adapter does not buffer
 discarded deltas. It keeps only the deltas a flush consumed until that flush
 publishes: if the root commit fails, the adapter restores them, so the next
 successful flush publishes each pending child change exactly once. The adapter retains a facade only while at least one parent
-route uses its bucket. When the last route leaves, it retracts the facade's rows
-and drops its strong reference. An external holder may keep that empty
+route uses its bucket. When the last route leaves, it deletes through sync every
+key the facade still shows and drops its strong reference. The graph has
+already retracted the bucket's rows, but a facade is a Collection: a user
+transaction can show an optimistic row in it, and a sync commit can be held
+behind a persisting transaction. Retirement is therefore a legal write to a
+non-empty facade, not an invariant violation. It is a facade write of the
+flush, so a failed flush restores it. An external holder may keep the retired
 Collection alive, but a later active interval gets a new facade. Inline modes
 do not create child Collections.
 
@@ -1308,7 +1313,9 @@ event or a layout revision. The child deltas that flush consumed stay pending
 with the builder's pending root rows, so the next successful flush publishes
 each of them exactly once. No graph output reaches the adapter between a flush
 and its rollback, because the flush runs inside the graph run; a rollback that
-finds new pending deltas is an invariant violation and throws.
+finds new pending deltas is an invariant violation. It restores the facades and
+discards the deferred events first, so the facades keep delivering events, and
+then throws. A rollback after the adapter is cleaned up does nothing.
 
 ## External boundaries
 
