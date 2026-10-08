@@ -212,14 +212,18 @@ Throwing `NonRetriableError` stops retry and removes the transaction from the ou
 ### Retry decisions
 
 Set `shouldRetry` to override the default decision for a named mutation function
-error. The hook receives the original error and retry count (`0` on the first
-failure). Return `true` to retry, `false` to stop, or `undefined` to use the
+error. The hook receives the named mutation function's `Error` and retry count
+(`0` on the first failure). The same `Error` instance is passed through; a
+non-`Error` rejection is converted to an `Error` and may lose custom fields.
+Return `true` to retry, `false` to stop, or `undefined` to use the
 default decision. For example, return `true` for a recoverable 401 and
 `undefined` otherwise. `NonRetriableError` always stops without calling the
 hook. The default backoff and configured jitter still determine retry timing.
 If the hook throws or returns another value, the affected waiting promises
-reject with the hook failure. The executor records a terminal rejection,
-removes the outbox row, and stops. A fresh executor does not replay that row.
+reject with the hook failure. The executor stops new admission immediately,
+records a terminal rejection, and removes the outbox row. Already durable
+queued work remains pending and retained for restart. A fresh executor does
+not replay the failed row.
 If marker storage or deletion fails, the caller still receives the hook error
 while the executor stops with the storage error. A saved terminal marker skips
 the named mutation function after restart; an unmarked row can replay.

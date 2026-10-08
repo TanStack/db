@@ -98,14 +98,17 @@ shouldRetry: (error) =>
 `fetch` does not reject on an HTTP error response. The named mutation function
 above throws an `HttpError` that carries the numeric status. Retry a 401 only
 when the app can refresh its credentials between attempts.
-The hook receives the original error and a retry count of `0` on the first
-failure.
+The hook receives the named mutation function's `Error` and a retry count of
+`0` on the first failure. The same `Error` instance is passed through; a
+rejection with a non-`Error` value is converted to an `Error` and may lose
+custom fields.
 `NonRetriableError` always stops without calling the hook. Retry delays and
 configured jitter remain unchanged. A retried offline transaction keeps its
 FIFO position. If the hook throws or returns another value, the executor
-records a terminal rejection, removes the outbox row, and rejects the affected
-transaction's `when('settled')` promise with the hook failure. The executor
-then stops. A fresh executor can process newly admitted work without replaying
+stops new admission immediately, records a terminal rejection, removes the
+outbox row, and rejects the affected transaction's `when('settled')` promise
+with the hook failure. Already durable queued work remains pending and retained
+for restart. A fresh executor can process newly admitted work without replaying
 the failed row. If writing the terminal marker or deleting the row fails, the
 caller still rejects with the hook failure while the executor stops with the
 storage error. A saved marker prevents a provider call on restart; an unmarked

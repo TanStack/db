@@ -1209,11 +1209,16 @@ for this oracle repair. Keep these scenarios and decisions with that owner:
   FIFO peers; a later failure; and rejection of the public `commit()` promise for
   throwing or invalid hooks. A hook fault records a terminal rejection, removes
   the failed outbox row, halts the executor with a queued FIFO peer held, and
-  releases its active slot. An offline executor restart over the same storage
-  processes newly admitted work
-  without replaying that row. If deletion fails after the terminal marker is
-  written, restart removes the marked row without calling the named mutation
-  function again or restoring its optimistic state. The settlement owner also
+  releases its active slot. The public admission witness holds the terminal
+  marker read, marker write, or deletion after a thrown or invalid hook. At each
+  cut, a new `commit()` rejects without a durable row, while a peer durable
+  before the fault remains pending with no terminal phase. An outbox write begun
+  before the hook fault and settled afterward remains outside this admission
+  witness. The retained peer's eventual replay also needs a fresh-executor
+  witness. An offline executor restart over the same storage processes newly
+  admitted work without replaying that row. If deletion fails after the terminal
+  marker is written, restart removes the marked row without calling the named
+  mutation function again or restoring its optimistic state. The settlement owner also
   checks terminal named mutation function rejection with failed deletion, a
   halted executor with queued peers held,
   and offline executor restart without a second named mutation function call

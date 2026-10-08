@@ -101,6 +101,11 @@ import type {
  * fails after the marker write, restart removes the marked row without another
  * named mutation function call or optimistic restoration. A queued FIFO peer
  * remains durable but unrun when the current executor stops.
+ * A hook fault closes new admission before terminal outbox cleanup. Work
+ * already durable before the fault remains pending and retained for restart.
+ * A commit begun after the fault rejects without adding an outbox row,
+ * even while the terminal marker read, write, or deletion is held. This law
+ * does not decide an outbox write begun before the fault that settles afterward.
  * Public manual removal may acknowledge deletion while a named mutation
  * function call is held. Once that call fulfills, both success conditions have
  * occurred. The caller promise and local persistence promise must settle
@@ -1220,6 +1225,233 @@ it.each([`throw`, `invalid`] as const)(
           () => env.collection.cleanup(),
           () => restarted?.collection.cleanup(),
           () => warning.mockRestore(),
+        ],
+        hasPrimaryFailure,
+      )
+    }
+  },
+)
+
+// This admission model uses only the action's relation to the hook fault. A
+// pre-fault durable peer remains replayable; a post-fault call cannot become
+// durable. It does not copy the executor's cleanup or scheduling machinery.
+function expectedHookFaultAdmission(alreadyDurable: boolean): {
+  durable: boolean
+  outcome: `pending` | `rejected`
+} {
+  return alreadyDurable
+    ? { durable: true, outcome: `pending` }
+    : { durable: false, outcome: `rejected` }
+}
+
+function observedFaultAdmissionOutcome(value: unknown) {
+  if (value instanceof Error) return `rejected`
+  return value
+}
+
+// Legal history: the FIFO head enters its named mutation function, one peer
+// becomes durable, then the hook throws or returns an invalid result. Storage
+// holds the terminal marker read, write, or deletion while a second public commit
+// attempts admission. The held cut compares settlement, exact outbox contents,
+// provider calls, and optimistic rows.
+// No storage write fails. An in-flight pre-fault admission crossing the fault
+// needs a separate policy; this history waits for its pre-fault write first.
+it.each([
+  [`throw`, `marker`],
+  [`throw`, `read`],
+  [`throw`, `deletion`],
+  [`invalid`, `marker`],
+  [`invalid`, `read`],
+  [`invalid`, `deletion`],
+] as const)(
+  `rejects post-fault admission during %s hook failure and %s cleanup`,
+  async (failureKind, heldStep) => {
+    const providerError = new Error(`HTTP 401 Unauthorized`)
+    const hookError = new Error(`retry decision failed`)
+    const providerEntered = gate()
+    const releaseProvider = gate()
+    const hookEntered = gate()
+    const preFaultStored = gate()
+    const terminalCleanupEntered = gate()
+    const releaseTerminalCleanup = gate()
+    const postFaultStored = gate()
+    let headId = ``
+    let preFaultId = ``
+    let postFaultId = ``
+    let holdTerminalRead = false
+    const providerCalls: Array<string> = []
+
+    class HeldTerminalDeleteStorage extends FakeStorageAdapter {
+      override async get(key: string): Promise<string | null> {
+        if (heldStep === `read` && key === `tx:${headId}` && holdTerminalRead) {
+          holdTerminalRead = false
+          terminalCleanupEntered.resolve()
+          await releaseTerminalCleanup.promise
+        }
+        return super.get(key)
+      }
+
+      override async set(key: string, value: string): Promise<void> {
+        if (
+          heldStep === `marker` &&
+          key === `tx:${headId}` &&
+          (JSON.parse(value) as { outboxPhase?: string }).outboxPhase ===
+            `rejection-pending`
+        ) {
+          terminalCleanupEntered.resolve()
+          await releaseTerminalCleanup.promise
+        }
+        await super.set(key, value)
+        if (key === `tx:${preFaultId}`) preFaultStored.resolve()
+        if (key === `tx:${postFaultId}`) postFaultStored.resolve()
+      }
+
+      override async delete(key: string): Promise<void> {
+        if (heldStep === `deletion` && key === `tx:${headId}`) {
+          terminalCleanupEntered.resolve()
+          await releaseTerminalCleanup.promise
+        }
+        await super.delete(key)
+      }
+    }
+
+    const env = createTestOfflineEnvironment({
+      storage: new HeldTerminalDeleteStorage(),
+      config: {
+        shouldRetry: (): boolean | undefined => {
+          hookEntered.resolve()
+          holdTerminalRead = true
+          if (failureKind === `throw`) throw hookError
+          return null as unknown as boolean | undefined
+        },
+      },
+      mutationFn: async ({ transaction }) => {
+        providerCalls.push(transaction.id)
+        if (transaction.id !== headId)
+          throw new Error(`peer ran after retry decision failure`)
+        providerEntered.resolve()
+        await releaseProvider.promise
+        throw providerError
+      },
+    })
+    const warning = vi.spyOn(console, `warn`).mockImplementation(() => {})
+    const errorLog = vi.spyOn(console, `error`).mockImplementation(() => {})
+    const observed: Array<Promise<void>> = []
+    const outcomes = new Map<string, unknown>()
+    let hasPrimaryFailure = false
+
+    // The production driver uses public transactions and their commit promises.
+    // Each outcome starts pending so the held checkpoint can reject early success.
+    function createObservedTransaction(rowId: string, updatedAt: number) {
+      const tx = env.executor.createOfflineTransaction({
+        mutationFnName: env.mutationFnName,
+        autoCommit: false,
+      })
+      tx.mutate(() =>
+        env.collection.insert({
+          id: rowId,
+          value: rowId,
+          completed: false,
+          updatedAt: new Date(updatedAt),
+        }),
+      )
+      outcomes.set(tx.id, `pending`)
+      const commit = tx.commit().then(
+        () => {
+          outcomes.set(tx.id, `fulfilled`)
+        },
+        (error: unknown) => {
+          outcomes.set(tx.id, error)
+        },
+      )
+      observed.push(commit)
+      return { id: tx.id, commit }
+    }
+
+    try {
+      await env.waitForLeader()
+      const head = createObservedTransaction(`head`, 0)
+      headId = head.id
+      await atOracleCheckpoint(providerEntered.promise, `head provider entered`)
+
+      const preFault = createObservedTransaction(`before-fault`, 1)
+      preFaultId = preFault.id
+      await atOracleCheckpoint(preFaultStored.promise, `pre-fault peer durable`)
+      releaseProvider.resolve()
+      await atOracleCheckpoint(hookEntered.promise, `retry hook failed`)
+      await atOracleCheckpoint(
+        terminalCleanupEntered.promise,
+        `terminal ${heldStep} held`,
+      )
+
+      const postFault = createObservedTransaction(`after-fault`, 2)
+      postFaultId = postFault.id
+      const firstObservation = await atOracleCheckpoint(
+        Promise.race([
+          postFault.commit.then(() => `settled` as const),
+          postFaultStored.promise.then(() => `durable` as const),
+        ]),
+        `post-fault admission or rejection`,
+      )
+
+      const before = expectedHookFaultAdmission(true)
+      const after = expectedHookFaultAdmission(false)
+      const outboxAtHeldCleanup = await env.executor.peekOutbox()
+      const durableIds = new Set(outboxAtHeldCleanup.map(({ id }) => id))
+      // The race rejects an unexpected durable admission at this exact cut;
+      // waiting for final cleanup alone would hide the transient violation.
+      expect(firstObservation).toBe(`settled`)
+      expect(durableIds.has(preFault.id)).toBe(before.durable)
+      expect(durableIds.has(postFault.id)).toBe(after.durable)
+      expect([...durableIds].sort()).toEqual([head.id, preFault.id].sort())
+      expect(observedFaultAdmissionOutcome(outcomes.get(preFault.id))).toBe(
+        before.outcome,
+      )
+      expect(observedFaultAdmissionOutcome(outcomes.get(postFault.id))).toBe(
+        after.outcome,
+      )
+      expect(outcomes.get(head.id)).toBe(`pending`)
+      expect(
+        outboxAtHeldCleanup.find(({ id }) => id === head.id)?.outboxPhase,
+      ).toBe(heldStep === `deletion` ? `rejection-pending` : undefined)
+      expect(
+        outboxAtHeldCleanup.find(({ id }) => id === preFault.id)?.outboxPhase,
+      ).toBeUndefined()
+      expect(providerCalls).toEqual([head.id])
+      expect(env.collection.toArray.map(({ id }) => id).sort()).toEqual([
+        `before-fault`,
+        `head`,
+      ])
+
+      releaseTerminalCleanup.resolve()
+      await atOracleCheckpoint(head.commit, `failed head settled`)
+      if (failureKind === `throw`) expect(outcomes.get(head.id)).toBe(hookError)
+      else expect(outcomes.get(head.id)).toBeInstanceOf(TypeError)
+      expect(outcomes.get(preFault.id)).toBe(`pending`)
+      expect(observedFaultAdmissionOutcome(outcomes.get(postFault.id))).toBe(
+        `rejected`,
+      )
+      const outboxAfterCleanup = await env.executor.peekOutbox()
+      expect(outboxAfterCleanup.map(({ id }) => id)).toEqual([preFault.id])
+      expect(outboxAfterCleanup[0]?.outboxPhase).toBeUndefined()
+      expect(providerCalls).toEqual([head.id])
+    } catch (error) {
+      hasPrimaryFailure = true
+      throw error
+    } finally {
+      releaseProvider.resolve()
+      releaseTerminalCleanup.resolve()
+      const cleanupError = new Error(`hook-fault admission oracle cleanup`)
+      for (const [id, outcome] of outcomes)
+        if (outcome === `pending`)
+          env.executor.rejectTransaction(id, cleanupError)
+      await cleanupOfflineOracle(
+        [
+          () => Promise.all(observed),
+          () => env.executor.dispose(),
+          () => env.collection.cleanup(),
+          () => warning.mockRestore(),
+          () => errorLog.mockRestore(),
         ],
         hasPrimaryFailure,
       )
