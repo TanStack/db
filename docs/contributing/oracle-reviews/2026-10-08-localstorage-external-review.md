@@ -81,3 +81,43 @@ arbitrary long histories and a handler that never settles are not claimed.
 The five-file LocalStorage run passed 119 runtime tests and 14 type tests with
 no type errors after the working repair. The package build and changed-file
 ESLint passed. These results do not settle the three open design decisions.
+
+## Follow-up on approved laws
+
+The preceding dispositions describe the review of `8abbf5b14`. The user then
+approved two laws on pushed head `ad707b841a438253159a8baa3771b0a901964839`:
+an un-awaited LocalStorage `acceptMutations()` must still hold the manual
+transaction's persistence receipt until its write settles, and reuse of one
+options object's mutable adapter state must fail at Collection construction.
+The working repair is a normal follow-up to that pushed head. R8 remains an
+open product decision; the other findings retain their earlier dispositions.
+
+| Source item | New evidence and current disposition |
+| --- | --- |
+| R1 | **Fixed in working repair.** The order oracle crosses direct or queued un-awaited acceptance with successful or failed Storage writes. It compares `commit()`, `isPersisted`, exact errors, durable rows, and public rows at settlement. The reviewed implementation failed three of four single-write histories at receipt or error checkpoints; direct success passed as a control. A transaction with two un-awaited acceptances checks that its receipt waits for both. LocalStorage now registers each accepted write as transaction commit work, and `Transaction.commit()` waits for all registered work. The old un-awaited call pattern remains valid, so the changeset stays patch. |
+| R7 | **Fixed in working repair.** The peer oracle varies direct or shallow-copy reuse and whether the first Collection has preloaded. All four histories reject the second construction before it can replace the first Collection's owner; the first still persists its authored row. Direct reuse failed on the reviewed implementation. Both shallow-copy histories failed the first working guard at their admission assertion, so the guard now survives a shallow copy. Fresh options and per-client descriptor materialization remain supported. |
+| R8 | **Open product decision.** The same-tab no-event public-snapshot gap still needs either a synchronization law or an explicit one-Collection-per-key contract. The user asked about implementation difficulty; a registry keyed by Storage object and key is moderate adapter work, with optimistic state, failed writes, cleanup, and restart as the critical histories. Cross-tab read-modify-write atomicity remains a separate limit. |
+
+CodeRabbit review `5458818828` on `ad707b841` supplied one actionable inline
+comment, `4220736088`, labeled major. **CR1** duplicates R1: an un-awaited
+manual acceptance could let a transaction report persistence before a queued
+write and leave a later failure unhandled. It proposed transaction-level
+tracking or an incompatible release. The controlled R1 probe confirmed the
+claim; the approved law selects transaction-level tracking. Its static analysis
+did not run the test suite. There was one raw inline finding and no additional
+footnote or suggestion. The task-local lossless ledger retains its full claim.
+
+The new receipt and admission histories extend the order and peer owners,
+respectively. Their expected outcomes come from the approved receipt and
+ownership laws, not from the adapter queue or claim hook. The admission
+history first exposed a false-green shallow-copy path in the working repair.
+The affected five-file run passes 149 tests with no type errors after that
+repair. A full-package attempt passed 11,577 tests but failed to transform one
+changed oracle because its callback used `await` without `async`; the focused
+run passed after the syntax correction. This is not a green full-package run.
+The coverage map retains the distinct R8 limit and the cross-tab atomicity
+limit. No item was silently deferred.
+
+Final recheck after the syntax correction and shallow-copy repair: all 269
+`@tanstack/db` test files passed, with 11,616 tests and no type errors. The
+package build, changed-file ESLint, Prettier, and whitespace checks passed.

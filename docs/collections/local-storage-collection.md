@@ -214,7 +214,7 @@ const preferencesCollection = createCollection(
 
 ## Manual Transactions
 
-When using LocalStorage collections with manual transactions (created via `createTransaction`), await `utils.acceptMutations()` in `mutationFn`. Manual acceptance joins the same write order, and awaiting it keeps the transaction's persistence receipt behind the storage write:
+When using LocalStorage collections with manual transactions (created via `createTransaction`), call `utils.acceptMutations()` in `mutationFn`. Manual acceptance joins the same write order, and the transaction's persistence receipt waits for the storage write even if the returned Promise is not awaited. Await it when later work in `mutationFn` depends on the storage write:
 
 ```typescript
 import { createTransaction } from '@tanstack/react-db'
@@ -260,6 +260,11 @@ tx.mutate(() => {
 
 await tx.commit()
 ```
+
+Create fresh `localStorageCollectionOptions()` for each direct
+`createCollection()` call. One options object contains state owned by one
+Collection and throws if used to create a second. The same `DbClient`
+collection descriptor can still materialize fresh options for separate clients.
 
 ## Complete Example
 

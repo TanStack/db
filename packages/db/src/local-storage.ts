@@ -1,5 +1,7 @@
 import { safeRandomUUID } from './utils/uuid'
 import { withCollectionConfigFactory } from './client.js'
+import { collectionOptionsClaim } from './collection-options.js'
+import { registerTransactionCommitWork } from './transaction-commit-work.js'
 import {
   InvalidStorageDataFormatError,
   InvalidStorageObjectFormatError,
@@ -104,8 +106,10 @@ export interface LocalStorageCollectionUtils extends UtilsRecord {
   getStorageSize: GetStorageSizeFn
   /**
    * Accepts this Collection's manual mutations in write order and persists
-   * them to localStorage. Await this in the transaction's mutationFn so its
-   * persistence receipt cannot settle before the storage write.
+   * them to localStorage. Call it inside the transaction's mutationFn. The
+   * transaction's persistence receipt waits for this work even if the caller
+   * does not await the returned Promise. Await it when later mutationFn work
+   * depends on the storage write.
    *
    * @param transaction - The transaction containing mutations to accept
    * @example
@@ -235,6 +239,8 @@ function createNoOpStorageEventApi(): StorageEventApi {
  *
  * This function creates a collection that persists data to localStorage/sessionStorage
  * and synchronizes changes across browser tabs using storage events.
+ * Create fresh options for each direct `createCollection()` call. One options
+ * object contains state owned by one Collection and cannot be reused.
  *
  * **Fallback Behavior:**
  *
@@ -246,9 +252,9 @@ function createNoOpStorageEventApi(): StorageEventApi {
  *
  * **Using with Manual Transactions:**
  *
- * For manual transactions, you must await `utils.acceptMutations()` in your transaction's `mutationFn`
- * to persist changes made during `tx.mutate()`. This is necessary because local-storage collections
- * don't participate in the standard mutation handler flow for manual transactions.
+ * For manual transactions, call `utils.acceptMutations()` in your transaction's `mutationFn`
+ * to persist changes made during `tx.mutate()`. The transaction receipt waits for this work even
+ * when the call is not awaited. Await it when later mutationFn work depends on the storage write.
  *
  * @template TExplicit - The explicit type of items in the collection (highest priority)
  * @template TSchema - The schema type for validation and type inference (second priority)
@@ -590,9 +596,10 @@ export function localStorageCollectionOptions(
 
   /**
    * Accepts this Collection's manual mutations in write order and resolves
-   * after their storage write. The caller must await it in mutationFn.
+   * after their storage write. A mutationFn receipt tracks this work even
+   * when the caller does not await the returned Promise.
    */
-  const acceptMutations = async (transaction: {
+  const persistAcceptedMutations = async (transaction: {
     mutations: Array<PendingMutation<Record<string, unknown>>>
   }): Promise<void> => {
     // Filter mutations that belong to this collection
@@ -624,6 +631,14 @@ export function localStorageCollectionOptions(
     await persistManual(collectionMutations)
   }
 
+  const acceptMutations = (transaction: {
+    mutations: Array<PendingMutation<Record<string, unknown>>>
+  }): Promise<void> => {
+    const work = persistAcceptedMutations(transaction)
+    registerTransactionCommitWork(transaction, work)
+    return work
+  }
+
   const options = {
     ...restConfig,
     id: collectionId,
@@ -637,6 +652,18 @@ export function localStorageCollectionOptions(
       acceptMutations,
     },
   }
+
+  let claimed = false
+  Object.defineProperty(options, collectionOptionsClaim, {
+    enumerable: true,
+    value: () => {
+      if (claimed)
+        throw new Error(
+          `LocalStorage options can create only one Collection. Create fresh options for each Collection.`,
+        )
+      claimed = true
+    },
+  })
 
   return withCollectionConfigFactory(
     options,

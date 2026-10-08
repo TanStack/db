@@ -1,5 +1,6 @@
 import { registerOpaqueHash } from '@tanstack/db-ivm'
 import { safeRandomUUID } from '../utils/uuid'
+import { collectionOptionsClaim } from '../collection-options.js'
 import {
   CollectionConfigurationError,
   CollectionRequiresConfigError,
@@ -361,6 +362,11 @@ export function createCollection(
   ) {
     validateCollectionConfig(options)
   }
+
+  const claimOptions = (
+    options as typeof options & { [collectionOptionsClaim]?: () => void }
+  )[collectionOptionsClaim]
+  claimOptions?.()
 
   const collection = new CollectionImpl<any, string | number, any, any, any>(
     options,

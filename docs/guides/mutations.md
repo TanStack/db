@@ -1065,7 +1065,7 @@ Choose based on whether your local data should be independent of or coupled to r
 
 #### Best Practices
 
-- Always call `utils.acceptMutations()` for local collections in manual transactions; await it for LocalStorage collections so transaction settlement follows the storage write
+- Always call `utils.acceptMutations()` for local collections in manual transactions. LocalStorage transaction settlement waits for its storage write even if the returned Promise is not awaited; await it when later work depends on the write
 - Call `acceptMutations` **after** API success if you want transactional consistency
 - Call `acceptMutations` **before** API calls if local state should persist regardless
 - Filter mutations by collection if you need to process them separately

@@ -28,7 +28,8 @@ acceptMutations: (transaction) => Promise<void>;
 Defined in: [packages/db/src/local-storage.ts:122](https://github.com/TanStack/db/blob/main/packages/db/src/local-storage.ts#L122)
 
 Accepts mutations from a transaction that belong to this collection and persists them to localStorage.
-Await this in your transaction's mutationFn so its persistence receipt follows the storage write.
+Call this in your transaction's mutationFn. Its persistence receipt follows the storage write even
+if the returned Promise is not awaited. Await it when later mutationFn work depends on the write.
 
 #### Parameters
 

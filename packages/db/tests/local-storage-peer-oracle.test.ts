@@ -21,6 +21,10 @@
  * checks startup status, unchanged malformed bytes, local clear publication,
  * peer delivery, later write settlement, and fresh restore. Direct same-tab
  * edits through the raw Storage API are outside the adapter's event contract.
+ * An options object contains mutable adapter state and may construct only one
+ * Collection, including when shallow copies retain that state. The driver
+ * checks this admission before and after the first preload, then checks that
+ * the first Collection can still write.
  */
 import { describe, expect, it } from 'vitest'
 import { createCollection } from '../src/collection/index'
@@ -179,6 +183,51 @@ it('manual acceptance keeps equal-ID Collections in their own stores', async () 
     () => [() => second.cleanup(), () => first.cleanup()],
   )
 })
+
+/** One adapter options object owns one Collection. Its mutable sync and
+ * utility state cannot represent two owners at once. The finite history
+ * varies whether the first Collection has started its sync run and whether
+ * callers shallow-copy the options. The model rejects a second construction
+ * at admission; the first still persists its authored row. Fresh options
+ * objects remain the supported path for two Collections. */
+for (const firstPreloaded of [false, true]) {
+  for (const shallowCopy of [false, true]) {
+    it(`rejects ${shallowCopy ? 'shallow-copy' : 'direct'} reuse of LocalStorage options ${firstPreloaded ? 'after' : 'before'} the first preload`, async () => {
+      const host = createHost()
+      const options = localStorageCollectionOptions<Row>({
+        id: 'shared-options',
+        storageKey: 'shared',
+        storage: host.storage,
+        storageEventApi: host.events,
+        getKey: (row) => row.id,
+      })
+      const forCreate = () => (shallowCopy ? { ...options } : options)
+      const first = createCollection(forCreate())
+      await withHistoryCleanup(
+        async () => {
+          if (firstPreloaded) await first.preload()
+          expect(() => createCollection(forCreate())).toThrow(
+            'LocalStorage options can create only one Collection',
+          )
+          if (!firstPreloaded) await first.preload()
+          const transaction = createTransaction({
+            autoCommit: false,
+            mutationFn: async ({ transaction: pending }) => {
+              await first.utils.acceptMutations(pending)
+            },
+          })
+          transaction.mutate(() => first.insert({ id: 'first', value: 1 }))
+          await transaction.commit()
+          expect(durableRows(host, 'shared')).toEqual([
+            { id: 'first', value: 1 },
+          ])
+          expect(publicRows(first)).toEqual([{ id: 'first', value: 1 }])
+        },
+        () => [() => first.cleanup()],
+      )
+    })
+  }
+}
 
 /** Cleanup ends a sync run, including its browser-event lease. A restart
  * starts one new listener. Counting the controlled host's listeners is the

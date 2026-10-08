@@ -27,14 +27,21 @@
  * automatic value could replace a later accepted value.
  * Manual acceptance always returns a Promise, including when a synchronous
  * Storage write fails. The caller can attach a rejection handler to that
- * Promise before either an immediate or queued write reports failure.
+ * Promise before either an immediate or queued write reports failure. A manual
+ * transaction's persistence receipt also waits for every acceptance called
+ * in mutationFn, even if mutationFn does not await those Promises. This law
+ * covers direct and queued success and Storage failure; it does not make
+ * several distinct storage keys one atomic transaction.
  */
 import { describe, expect, it } from 'vitest'
 import { createCollection } from '../src/collection/index'
 import { createDeferred } from '../src/deferred'
 import { localStorageCollectionOptions } from '../src/local-storage'
 import { createTransaction } from '../src/transactions'
-import { withHistoryCleanup } from './optimistic-history-oracle'
+import {
+  observeHistoryPromise,
+  withHistoryCleanup,
+} from './optimistic-history-oracle'
 
 type Row = { id: string; value: number }
 const initial: Array<Row> = [
@@ -331,6 +338,185 @@ for (const sameKey of [true, false]) {
     })
   }
 }
+
+// A manual transaction's persistence receipt represents its Storage write,
+// even when mutationFn does not await the utility's Promise. The authored
+// model includes the manual row only after its successful storage acceptance.
+// This finite grammar varies an earlier held automatic write and a manual
+// Storage fault. The driver enters through createTransaction and the public
+// utility. At the held cut neither receipt may settle; at the final cut both
+// receipts, durable rows, and the public snapshot must match the decision.
+for (const queued of [false, true]) {
+  for (const storageFails of [false, true]) {
+    it(`settles un-awaited manual acceptance after its ${queued ? 'queued' : 'direct'} ${storageFails ? 'failed' : 'successful'} storage write`, async () => {
+      const storage = makeStorage()
+      const storageError = new Error('manual storage fault')
+      const setItem = storage.setItem
+      storage.setItem = (key, value) => {
+        if (storageFails && value.includes('s:manual')) throw storageError
+        setItem(key, value)
+      }
+      const entered = createDeferred<void>()
+      const release = createDeferred<void>()
+      const accepted = createDeferred<void>()
+      const collection = createCollection(
+        localStorageCollectionOptions<Row>({
+          storageKey: 'rows',
+          storage,
+          storageEventApi: { addEventListener() {}, removeEventListener() {} },
+          getKey: (row) => row.id,
+          onInsert: async ({ transaction }) => {
+            if (transaction.mutations[0].modified.id === 'first') {
+              entered.resolve()
+              await release.promise
+            }
+          },
+        }),
+      )
+      let manual:
+        | ReturnType<typeof createTransaction<Record<string, unknown>>>
+        | undefined
+      await withHistoryCleanup(
+        async () => {
+          await collection.preload()
+          const first = queued
+            ? collection.insert({ id: 'first', value: 1 })
+            : undefined
+          if (queued) await entered.promise
+          manual = createTransaction<Record<string, unknown>>({
+            autoCommit: false,
+            mutationFn: async ({ transaction }) => {
+              // The application deliberately omits await and return. A
+              // rejection observer prevents the test runner from replacing
+              // the receipt assertion with an unhandled-rejection failure.
+              void collection.utils.acceptMutations(transaction).catch(() => {})
+              accepted.resolve()
+            },
+          })
+          manual.mutate(() => collection.insert({ id: 'manual', value: 2 }))
+          const commit = observeHistoryPromise(manual.commit())
+          const receipt = observeHistoryPromise(manual.isPersisted.promise)
+          await accepted.promise
+          if (queued) {
+            await new Promise((resolve) => setTimeout(resolve, 0))
+            expect(commit.read().status, 'held commit').toBe('pending')
+            expect(receipt.read().status, 'held persistence receipt').toBe(
+              'pending',
+            )
+            expect(storage.getItem('rows')).toBeNull()
+            release.resolve()
+            await first!.isPersisted.promise
+          }
+          await Promise.all([commit.settled, receipt.settled])
+          if (storageFails) {
+            expect(commit.read()).toMatchObject({
+              status: 'rejected',
+              reason: storageError,
+            })
+            expect(receipt.read()).toMatchObject({
+              status: 'rejected',
+              reason: storageError,
+            })
+          } else {
+            expect(commit.read().status).toBe('fulfilled')
+            expect(receipt.read().status).toBe('fulfilled')
+          }
+          const expected = [
+            ...(queued ? [{ id: 'first', value: 1 }] : []),
+            ...(!storageFails ? [{ id: 'manual', value: 2 }] : []),
+          ]
+          if (expected.length)
+            expect(storedRows(storage.getItem('rows'))).toEqual(expected)
+          else expect(storage.getItem('rows')).toBeNull()
+          expect(sortedRows(collection.values())).toEqual(expected)
+        },
+        () => [() => release.resolve(), () => collection.cleanup()],
+      )
+    })
+  }
+}
+
+// One manual transaction can accept rows from more than one Collection. Its
+// receipt represents every accepted storage write, not merely the first work
+// registered. The model allows the independent direct write now, but keeps
+// transaction settlement behind the other Collection's held predecessor.
+it('waits for every un-awaited manual acceptance in one transaction', async () => {
+  const slowStorage = makeStorage()
+  const fastStorage = makeStorage()
+  const entered = createDeferred<void>()
+  const release = createDeferred<void>()
+  const slow = createCollection(
+    localStorageCollectionOptions<Row>({
+      id: 'slow',
+      storageKey: 'slow-rows',
+      storage: slowStorage,
+      storageEventApi: { addEventListener() {}, removeEventListener() {} },
+      getKey: (row) => row.id,
+      onInsert: async ({ transaction }) => {
+        if (transaction.mutations[0].modified.id === 'first') {
+          entered.resolve()
+          await release.promise
+        }
+      },
+    }),
+  )
+  const fast = createCollection(
+    localStorageCollectionOptions<Row>({
+      id: 'fast',
+      storageKey: 'fast-rows',
+      storage: fastStorage,
+      storageEventApi: { addEventListener() {}, removeEventListener() {} },
+      getKey: (row) => row.id,
+    }),
+  )
+  await withHistoryCleanup(
+    async () => {
+      await Promise.all([slow.preload(), fast.preload()])
+      const first = slow.insert({ id: 'first', value: 1 })
+      await entered.promise
+      const manual = createTransaction({
+        autoCommit: false,
+        mutationFn: ({ transaction }) => {
+          void slow.utils.acceptMutations(transaction).catch(() => {})
+          void fast.utils.acceptMutations(transaction).catch(() => {})
+          return Promise.resolve()
+        },
+      })
+      manual.mutate(() => {
+        slow.insert({ id: 'slow-manual', value: 2 })
+        fast.insert({ id: 'fast-manual', value: 3 })
+      })
+      const receipt = observeHistoryPromise(manual.isPersisted.promise)
+      const commit = observeHistoryPromise(manual.commit())
+      await new Promise((resolve) => setTimeout(resolve, 0))
+      expect(storedRows(fastStorage.getItem('fast-rows'))).toEqual([
+        { id: 'fast-manual', value: 3 },
+      ])
+      expect(slowStorage.getItem('slow-rows')).toBeNull()
+      expect(receipt.read().status).toBe('pending')
+      expect(commit.read().status).toBe('pending')
+      release.resolve()
+      await Promise.all([
+        first.isPersisted.promise,
+        receipt.settled,
+        commit.settled,
+      ])
+      expect(receipt.read().status).toBe('fulfilled')
+      expect(commit.read().status).toBe('fulfilled')
+      expect(storedRows(slowStorage.getItem('slow-rows'))).toEqual([
+        { id: 'first', value: 1 },
+        { id: 'slow-manual', value: 2 },
+      ])
+      expect(sortedRows(slow.values())).toEqual(
+        storedRows(slowStorage.getItem('slow-rows')),
+      )
+      expect(sortedRows(fast.values())).toEqual(
+        storedRows(fastStorage.getItem('fast-rows')),
+      )
+    },
+    () => [() => release.resolve(), () => fast.cleanup(), () => slow.cleanup()],
+  )
+})
 
 // The Promise-returning manual API has one error channel. The finite grammar
 // varies whether an earlier automatic write reserves a slot. A storage fault
