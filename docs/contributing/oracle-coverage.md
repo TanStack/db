@@ -1688,6 +1688,8 @@ not deferred implementations of the approved follow-up.
 
 [The cache-eviction design](oracle-reviews/issue-2056-cache-eviction-design.md)
 records the generation and expiry laws and their unresolved cuts. The
+[review of code head `7f1df5c82`](oracle-reviews/issue-2056-cache-generation-audit-7f1df5c82.md)
+records the ORC-012 outcomes, RED/GREEN witnesses, and evidence gaps. The
 real-SQLite owner checks generation rotation, legacy-writer isolation,
 warm-run claims, rejection of moved or expired claims, uncertified key-set
 evidence after partial writes, and physical collection of a retired row table.
