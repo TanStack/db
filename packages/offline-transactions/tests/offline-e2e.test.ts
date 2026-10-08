@@ -642,9 +642,8 @@ describe(`offline executor end-to-end`, () => {
     // After permanent failure, the optimistic state should be rolled back
     // The item should no longer exist in the collection
     expect(secondEnv.collection.get(`ghost-item`)).toBeUndefined()
-    // The rolled-back restoration transaction is no longer tracked, so later
-    // mutations do not walk it and its rows can be released.
-    await Promise.resolve()
+    // The recompute that rolled the row back also stopped tracking the
+    // restoration transaction, so later mutations do not walk it.
     expect(secondEnv.collection._state.transactions.size).toBe(0)
 
     // And it should not exist on the server either

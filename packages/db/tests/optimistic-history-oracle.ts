@@ -869,13 +869,18 @@ export async function runOptimisticHistory(
         // Every per-mutation pass walks the tracked transactions, so the
         // Collection tracks exactly its unsettled transactions. A held row
         // outlives its completed transaction in the held-row layer, not here.
-        const unsettled = model.transactions.filter(
-          (entry) => entry.state === `persisting`,
-        ).length
+        // Compare identities, so a pass that removes the wrong transaction
+        // cannot keep the count right.
+        const unsettled = operations
+          .filter(
+            (_, index) => model.transactions[index]?.state === `persisting`,
+          )
+          .map((operation) => operation.tx.id)
+          .sort()
         expect(
-          collection._state.transactions.size,
+          [...collection._state.transactions.keys()].sort(),
           `${label}: tracked transactions are the unsettled ones`,
-        ).toBe(unsettled)
+        ).toEqual(unsettled)
       }
       const initialFrame = publications.at(-1)
       check(`initial`)

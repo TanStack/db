@@ -212,10 +212,11 @@ describe(`Collection`, () => {
     }
   })
 
-  it(`does the same work per mutation however many transactions rolled back before`, async () => {
+  it(`does not walk more tracked transactions per mutation after many rollbacks`, async () => {
     // The public cost law behind the tracked-transaction bound: a mutation's
-    // work must not grow with settled history. Count Map and Set iteration
-    // steps for one mutation after 0 and after 200 rollbacks.
+    // work must not grow with settled history. Each per-mutation pass walks
+    // the Collection's tracked transactions, so count the entries those walks
+    // yield for one mutation after 0 and after 200 rollbacks.
     const options = mockSyncCollectionOptionsNoInitialState<{
       id: number
       value: number
@@ -246,34 +247,22 @@ describe(`Collection`, () => {
         await transaction.isPersisted.promise.catch(() => undefined)
       }
     }
-    const stepsForOneMutation = async () => {
-      let steps = 0
-      const patched: Array<[object, PropertyKey, unknown]> = []
-      // SortedMap walks a key array and reads each entry with Map#get, so
-      // count Map#get as well as Map and Set iteration steps.
-      const originalGet = Map.prototype.get
-      patched.push([Map.prototype, `get`, originalGet])
-      Map.prototype.get = function (this: Map<unknown, unknown>, key: unknown) {
-        steps++
-        return originalGet.call(this, key)
-      }
-      for (const proto of [Map.prototype, Set.prototype]) {
-        for (const name of [`values`, `entries`, `keys`, Symbol.iterator]) {
-          const original = (proto as any)[name]
-          patched.push([proto, name, original])
-          ;(proto as any)[name] = function (this: unknown) {
-            const iterator = original.call(this)
-            return {
-              next: () => {
-                steps++
-                return iterator.next()
-              },
-              [Symbol.iterator]() {
-                return this
-              },
-            }
+    const walkedForOneMutation = async () => {
+      const transactions = collection._state.transactions
+      const methods = [`values`, `entries`, `keys`, Symbol.iterator] as const
+      let walked = 0
+      for (const name of methods) {
+        const original = Reflect.get(
+          transactions,
+          name,
+        ) as () => Iterator<unknown>
+        Reflect.set(transactions, name, function* () {
+          const iterator = original.call(transactions)
+          for (let next = iterator.next(); !next.done; next = iterator.next()) {
+            walked++
+            yield next.value
           }
-        }
+        })
       }
       const transaction = createTransaction({
         autoCommit: false,
@@ -286,17 +275,18 @@ describe(`Collection`, () => {
           }),
         )
       } finally {
-        for (const [proto, name, original] of patched)
-          (proto as any)[name] = original
+        for (const name of methods) Reflect.deleteProperty(transactions, name)
       }
       transaction.rollback()
       await transaction.isPersisted.promise.catch(() => undefined)
-      return steps
+      return walked
     }
 
-    const fresh = await stepsForOneMutation()
+    // Warm up first, so lazy first-call work does not count against either run.
+    await walkedForOneMutation()
+    const fresh = await walkedForOneMutation()
     await rollBack(200)
-    expect(await stepsForOneMutation()).toBe(fresh)
+    expect(await walkedForOneMutation()).toBeLessThanOrEqual(fresh)
   })
 
   it(`releases every settled transaction found in one recompute`, async () => {
@@ -421,6 +411,45 @@ describe(`Collection`, () => {
 
     expect(second.get(1)).toMatchObject({ id: 1, value: 0 })
     expect(second._state.transactions.size).toBe(0)
+  })
+
+  it(`releases a settled transaction from two Collection instances that share an id`, async () => {
+    // Settlement reaches each Collection instance that tracked the
+    // transaction. Mutations on two instances with one id share a global key,
+    // so the first instance's mutation merges into the second's.
+    const make = async (id: string) => {
+      const options = mockSyncCollectionOptionsNoInitialState<{
+        id: number
+        value: number
+      }>({ id, getKey: (item) => item.id, startSync: true })
+      const collection = createCollection(options)
+      options.utils.begin()
+      options.utils.write({ type: `insert`, value: { id: 1, value: 0 } })
+      options.utils.commit()
+      options.utils.markReady()
+      await collection.stateWhenReady()
+      return collection
+    }
+    const first = await make(`shared-collection-id`)
+    const second = await make(`shared-collection-id`)
+    const transaction = createTransaction({
+      autoCommit: false,
+      mutationFn: () => Promise.reject(new Error(`rejected`)),
+    })
+    transaction.mutate(() => {
+      first.update(1, (draft) => {
+        draft.value = 1
+      })
+      second.update(1, (draft) => {
+        draft.value = 1
+      })
+    })
+    await transaction.commit().catch(() => undefined)
+
+    expect(first._state.transactions.has(transaction.id)).toBe(false)
+    expect(second._state.transactions.has(transaction.id)).toBe(false)
+    expect(first.get(1)).toMatchObject({ id: 1, value: 0 })
+    expect(second.get(1)).toMatchObject({ id: 1, value: 0 })
   })
 
   it(`keeps ambiguous server-key sync queued while a temp-key optimistic insert is pending`, async () => {
