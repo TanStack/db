@@ -15,7 +15,7 @@ import {
 } from '../query/equality-conjunct.js'
 import { makeComparator } from '../utils/comparison.js'
 import { buildCompareOptions } from '../query/compiler/order-by'
-import { codedMessage, devBuild } from '../error-message.js'
+import { codedMessage, codedWarning, devBuild } from '../error-message.js'
 import type {
   ChangeMessage,
   CollectionLike,
@@ -214,7 +214,9 @@ export function currentStateAsChanges<
   } catch (error) {
     // If anything goes wrong with the where clause, fall back to full scan
     console.warn(
-      `${collection.id ? `[${collection.id}] ` : ``}Error processing where clause, falling back to full scan:`,
+      devBuild() && process.env.NODE_ENV !== `production`
+        ? `${collection.id ? `[${collection.id}] ` : ``}Error processing where clause, falling back to full scan:`
+        : codedWarning(213, { id: collection.id }),
       error,
     )
 
