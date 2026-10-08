@@ -102,9 +102,7 @@ export class TransactionScope {
   }
 
   removeTransaction(transaction: Transaction<any>): void {
-    const index = this.transactions.findIndex(
-      (candidate) => candidate.id === transaction.id,
-    )
+    const index = this.transactions.indexOf(transaction)
     if (index !== -1) {
       this.transactions.splice(index, 1)
     }
@@ -125,7 +123,7 @@ export class TransactionScope {
         )
       ) {
         try {
-          candidate.rollback({ isSecondaryRollback: true })
+          errors.push(...candidate.rollbackSettlingErrors(true))
         } catch (error) {
           errors.push(error)
         }
@@ -163,17 +161,21 @@ function getTransactionScope(transaction: object): TransactionScope {
   return scope
 }
 
+/** One flat `AggregateError` of settlement errors, caused by the first. */
+function settlementFailure(errors: Array<unknown>): AggregateError {
+  return new AggregateError(
+    errors,
+    devBuild() && process.env.NODE_ENV !== `production`
+      ? `Transaction settlement failed`
+      : codedMessage(232),
+    { cause: errors[0] },
+  )
+}
+
 /** Rethrows one settlement error as is, or several as an `AggregateError`. */
 function throwSettlementErrors(errors: Array<unknown>): void {
   if (errors.length === 1) throw errors[0]
-  if (errors.length > 1)
-    throw new AggregateError(
-      errors,
-      devBuild() && process.env.NODE_ENV !== `production`
-        ? `Transaction settlement failed`
-        : codedMessage(230),
-      { cause: errors[0] },
-    )
+  if (errors.length > 1) throw settlementFailure(errors)
 }
 
 function getTransactionAmbientScope(transaction: object): TransactionScope {
@@ -675,15 +677,25 @@ class Transaction<T extends object = Record<string, unknown>> {
     isSecondaryRollback?: boolean
     error?: Error
   }): Transaction<T> {
-    const isSecondaryRollback = config?.isSecondaryRollback ?? false
-    if (this.state === `completed`) {
-      throw new TransactionAlreadyCompletedRollbackError()
-    }
-    if (this.state === `failed`) return this
-
     if (config?.error) {
       this.error = { message: config.error.message, error: config.error }
     }
+    throwSettlementErrors(
+      this.rollbackSettlingErrors(config?.isSecondaryRollback ?? false),
+    )
+    return this
+  }
+
+  /**
+   * Rolls back and returns the settlement errors, flat, instead of throwing
+   * them, so a caller that settles several transactions reports one flat list.
+   * @internal
+   */
+  rollbackSettlingErrors(isSecondaryRollback: boolean): Array<unknown> {
+    if (this.state === `completed`) {
+      throw new TransactionAlreadyCompletedRollbackError()
+    }
+    if (this.state === `failed`) return []
 
     this.setState(`failed`)
 
@@ -706,23 +718,26 @@ class Transaction<T extends object = Record<string, unknown>> {
 
     // Reject the promise
     this.isPersisted.reject(this.error?.error)
-    try {
-      this.touchCollection()
-    } catch (error) {
-      errors.push(error)
-    }
-    throwSettlementErrors(errors)
-
-    return this
+    errors.push(...this.settleCollections())
+    return errors
   }
 
   // Tell collection that something has changed with the transaction
   touchCollection(): void {
-    // A failure in one Collection must not leave the others showing this
-    // transaction's settled optimistic state, so every Collection recomputes
-    // before the errors are rethrown.
+    throwSettlementErrors(this.settleCollections())
+  }
+
+  /**
+   * Recomputes every Collection that tracked this transaction and returns
+   * their errors. A failure in one Collection must not leave the others
+   * showing this transaction's settled optimistic state. A settled
+   * transaction then drops its Collections, so it holds none of them.
+   */
+  private settleCollections(): Array<unknown> {
     const collections = new Set(this.collections)
     for (const mutation of this.mutations) collections.add(mutation.collection)
+    if (this.state === `completed` || this.state === `failed`)
+      this.collections.clear()
     const errors: Array<unknown> = []
     for (const collection of collections) {
       try {
@@ -736,7 +751,7 @@ class Transaction<T extends object = Record<string, unknown>> {
         errors.push(error)
       }
     }
-    throwSettlementErrors(errors)
+    return errors
   }
 
   /**
@@ -817,8 +832,11 @@ class Transaction<T extends object = Record<string, unknown>> {
         error: originalError,
       }
 
-      // rollback the transaction
-      this.rollback()
+      // Roll back. The mutation error stays first: settlement errors join it
+      // in one flat aggregate rather than replacing it.
+      const settlementErrors = this.rollbackSettlingErrors(false)
+      if (settlementErrors.length)
+        throw settlementFailure([originalError, ...settlementErrors])
 
       // Re-throw the original error to preserve identity and stack
       throw originalError

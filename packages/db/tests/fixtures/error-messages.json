@@ -95,6 +95,9 @@
   "TransactionAlreadyCompletedRollbackError": [
     "You can no longer call .rollback() as the transaction is already completed"
   ],
+  "DuplicateTransactionIdError": [
+    "A Collection already tracks an unsettled transaction with id \"tx-1\". Give each transaction a unique id."
+  ],
   "TransactionNotPendingCommitError": [
     "You can no longer call .commit() as the transaction is no longer pending"
   ],

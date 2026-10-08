@@ -547,26 +547,10 @@ export class OfflineExecutor {
       return
     }
 
-    // Mark as completed so recomputeOptimisticState removes it from consideration.
-    // The actual data will come from the sync.
+    // Mark as completed: every Collection that tracked it recomputes and
+    // releases it. The actual data will come from the sync.
     restorationTx.setState(`completed`)
-
-    // Remove from each collection's transaction map and recompute
-    const touchedCollections = new Set<string>()
-    for (const mutation of restorationTx.mutations) {
-      // Defensive check for corrupted deserialized data
-      // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
-      if (!mutation.collection) {
-        continue
-      }
-      const collectionId = mutation.collection.id
-      if (touchedCollections.has(collectionId)) {
-        continue
-      }
-      touchedCollections.add(collectionId)
-      mutation.collection._state.transactions.delete(restorationTx.id)
-      mutation.collection._state.recomputeOptimisticState(false)
-    }
+    restorationTx.touchCollection()
   }
 
   async removeFromOutbox(id: string): Promise<void> {

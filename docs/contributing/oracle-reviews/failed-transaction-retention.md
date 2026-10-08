@@ -209,12 +209,62 @@ asynchronous failure settlement.
 The fixed seed alone does not catch the first mutant; the pinned history is the
 reliable witness for asynchronous settlement with a throwing subscriber.
 
+## Medium review round 2 (reviewed head `7fd5de08b`)
+
+Probes on `7fd5de08b` and on `main` `fe284ccbd`, from a scratch probe file:
+
+| Finding | `7fd5de08b` | `main` | Disposition |
+| --- | --- | --- | --- |
+| A second live transaction with the same id evicts the first | First evicted; its row shows `0`, not `5` | Same | Fixed: `trackTransaction` throws `DuplicateTransactionIdError` (code 233) before applying. Ids are documented as unique (`TransactionConfig.id`) |
+| `TransactionScope` removes by id | Settling `t2` removed live `t1`; a later conflicting rollback left `t1` pending | Same | Fixed: removal by identity |
+| `commit()` loses the mutation error when a rollback subscriber throws | Rejects with the subscriber error | Same | Fixed: one flat `AggregateError`, mutation error first and as `cause` |
+| Nested `AggregateError` from conflicting rollbacks | Pinned history: `flat aggregate: expected true to be false` | Only the first error escapes | Fixed: internal settlement steps return flat error lists |
+| A settled transaction keeps its Collections | `collections.size` is 1 after settlement | No such field | Fixed: settlement clears the set |
+| Offline restoration bypasses ownership and removes by id | By source | Same | Fixed: restoration uses `trackTransaction`, and its cleanup settles through `touchCollection()` |
+| Release depends on a recompute | Could not make the capture step throw during settlement; by source, the next recompute or sync-commit end sweeps a skipped release | Main never releases | Refuted as a permanent skip; a transient residue until the next recompute is accepted |
+
+The ownership oracle gained:
+
+- an error-shape law, checked for each settling call and each commit rejection
+  against the subscriber errors the step raised, with throwing subscribers on
+  one or both Collections;
+- an `open` that reuses an earlier id, with the duplicate-id rule in the model;
+- a `mutate()` callback that writes and then throws;
+- a retention observation: a settled transaction holds no Collection;
+- identity comparison of tracked transactions;
+- four pinned histories (scope identity, duplicate id, flat aggregate,
+  commit error).
+
+A focused witness covers a Collection cleaned up before its transaction
+settles.
+
+All before the fix, on the oracle above: 8 of 8 cases failed on `7fd5de08b`.
+After the fix: 8 of 8 pass.
+
+| Mutant | Result |
+| --- | --- |
+| Swallow settlement errors | Assertion failure, 5 tests |
+| Always wrap errors | Assertion failure, 4 tests |
+| Throw only the first error | Assertion failure, 2 tests |
+| Scope removes by id | Assertion failure, 1 test (the pinned scope-identity history) |
+| Overwrite a live same-id transaction | Assertion failure, 3 tests |
+| Keep `collections` after settlement | Assertion failure, 7 tests |
+| `commit()` rethrows settlement errors instead of keeping the mutation error | Assertion failure, 2 tests |
+
+The optimistic-history oracle's tracked-transaction check counted only
+persisting transactions as unsettled. `main`'s pending manual edits (#2078)
+showed that the model was wrong, not production: a pending transaction is
+tracked. The check now counts pending and persisting transactions.
+
 ## Unresolved
 
 - The generated ownership grammar reaches a conflicting rollback that throws,
   and an asynchronous settlement with a throwing subscriber, only sometimes;
   the pinned histories are their reliable witnesses.
-- Two Collection instances with one id are covered only by a focused witness.
+- Two Collection instances with one id, and a Collection cleaned up before
+  its transaction settles, are covered only by focused witnesses.
+- Offline restoration's tracking path is covered by offline-transactions'
+  witnesses, not by the ownership oracle.
 - The ownership oracle does not combine queued sync transactions that hold a
   completed row with a second Collection. The optimistic-history oracle owns
   held rows for one Collection.

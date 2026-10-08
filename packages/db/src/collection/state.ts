@@ -2,6 +2,7 @@ import { deepEquals } from '../utils'
 import { SortedMap } from '../SortedMap'
 import { enrichRowWithVirtualProps } from '../virtual-props.js'
 import {
+  DuplicateTransactionIdError,
   SyncQueueInvariantError,
   SyncTransactionAbortedError,
 } from '../errors.js'
@@ -663,6 +664,21 @@ export class CollectionStateManager<
       : events.filter((event) => !this.recentlySyncedKeys.has(event.key))
     if (filteredEvents.length > 0) this.indexes.updateIndexes(filteredEvents)
     this.changes.emitEvents(filteredEvents, triggeredByUserAction)
+  }
+
+  /**
+   * Tracks `transaction`. Returns `false` when this Collection already tracks
+   * it. A different unsettled transaction with the same id is a contract
+   * violation: ids are unique.
+   */
+  public trackTransaction(transaction: Transaction<any>): boolean {
+    const tracked = this.transactions.get(transaction.id)
+    if (tracked === transaction) return false
+    if (tracked && tracked.state !== `completed` && tracked.state !== `failed`)
+      throw new DuplicateTransactionIdError(transaction.id)
+    this.transactions.set(transaction.id, transaction)
+    transaction.collections.add(this.collection)
+    return true
   }
 
   /**

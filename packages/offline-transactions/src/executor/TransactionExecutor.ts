@@ -422,10 +422,7 @@ export class TransactionExecutor {
           }
           touchedCollections.add(collectionId)
 
-          mutation.collection._state.transactions.set(
-            restorationTx.id,
-            restorationTx,
-          )
+          mutation.collection._state.trackTransaction(restorationTx)
           mutation.collection._state.recomputeOptimisticState(true)
         }
 

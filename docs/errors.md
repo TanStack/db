@@ -970,6 +970,16 @@ Development builds show the full message. For example:
 IndexedDB collection requires a "getKey" configuration option. This function extracts the unique key from each item.
 ```
 
+<a id="error-233"></a>
+
+## Error 233: `DuplicateTransactionIdError`
+
+Development builds show the full message. For example:
+
+```text
+A Collection already tracks an unsettled transaction with id "tx-1". Give each transaction a unique id.
+```
+
 ## Other errors and log messages
 
 These are plain `Error`, `TypeError`, `RangeError`, or
@@ -2320,9 +2330,9 @@ Development builds show this message, with `${...}` replaced by values:
 Initial subset load failed: ${normalized.message}
 ```
 
-<a id="error-230"></a>
+<a id="error-232"></a>
 
-## Error 230: `transactions.ts`
+## Error 232: `transactions.ts`
 
 Development builds show this message, with `${...}` replaced by values:
 
