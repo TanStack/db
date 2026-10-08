@@ -87,16 +87,16 @@ const developmentOnly = [
   'Collection requires a "getKey" function in the config.',
 ]
 
-// Developer hints in guarded branches: production bundles drop all of them,
-// in both formats, because the guard folds inside each function.
+// Developer hints, one literal per guarded region: production bundles drop
+// every region, in both formats, because the guard folds inside each function.
 const hints = await Promise.all(
   JSON.parse(
     await readFile(
       path.join(tests, 'fixtures/development-only-messages.json'),
       'utf8',
     ),
-  ).map(async ({ file, literals }) => [
-    `development-only text (${file})`,
+  ).map(async ({ file, literals }, region) => [
+    `development-only region ${region} (${file})`,
     distinctiveLiteral(literals.join('\n'), await readSource(file)),
   ]),
 )

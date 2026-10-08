@@ -2,6 +2,7 @@ import {
   CollectionRequiresConfigError,
   CollectionRequiresSyncConfigError,
 } from '../errors'
+import { devBuild } from '../error-message'
 import {
   CollectionRequiresGetKeyError,
   InvalidCallbackOptionError,
@@ -82,7 +83,8 @@ export function validateCollectionConfig(config: unknown): void {
   for (const key of Object.keys(configObj)) {
     if (!KNOWN_CONFIG_KEYS.has(key) && !key.startsWith(`_`)) {
       const suggestion = findLikelyTypo(key, configObj)
-      if (suggestion) {
+      // A developer hint; this module only runs in development builds.
+      if (devBuild() && process.env.NODE_ENV !== `production` && suggestion) {
         console.warn(
           `Possible misspelling in collection config: "${key}". Did you mean "${suggestion}"?`,
         )

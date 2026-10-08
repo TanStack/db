@@ -67,7 +67,7 @@ export function getIndexDevModeConfig(): IndexDevModeConfig {
  */
 export function isDevModeEnabled(): boolean {
   return (
-    devModeConfig.enabled && devBuild() && process.env.NODE_ENV !== `production`
+    devBuild() && process.env.NODE_ENV !== `production` && devModeConfig.enabled
   )
 }
 

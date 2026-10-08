@@ -1002,11 +1002,19 @@
       "[Effect] Unhandled error in handler:"
     ]
   },
-  "227": {
+  "228": {
     "file": "query/live/collection-config-builder.ts",
-    "template": "[Live Query Error] ${message}",
+    "template": "Subset demand '${planId}' failed: ${normalized.message}",
     "literals": [
-      "[Live Query Error] "
+      "Subset demand '",
+      "' failed: "
+    ]
+  },
+  "229": {
+    "file": "query/live/collection-config-builder.ts",
+    "template": "Initial subset load failed: ${normalized.message}",
+    "literals": [
+      "Initial subset load failed: "
     ]
   }
 }

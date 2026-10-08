@@ -2309,12 +2309,22 @@ Development builds show this message, with `${...}` replaced by values:
 [Effect] Unhandled error in handler:
 ```
 
-<a id="error-227"></a>
+<a id="error-228"></a>
 
-## Error 227: `query/live/collection-config-builder.ts`
+## Error 228: `query/live/collection-config-builder.ts`
 
 Development builds show this message, with `${...}` replaced by values:
 
 ```text
-[Live Query Error] ${message}
+Subset demand '${planId}' failed: ${normalized.message}
+```
+
+<a id="error-229"></a>
+
+## Error 229: `query/live/collection-config-builder.ts`
+
+Development builds show this message, with `${...}` replaced by values:
+
+```text
+Initial subset load failed: ${normalized.message}
 ```

@@ -9,16 +9,30 @@
     ]
   },
   {
+    "file": "collection/validate-config.ts",
+    "literals": [
+      "Possible misspelling in collection config: \"",
+      "\". Did you mean \""
+    ]
+  },
+  {
     "file": "indexes/index-registry.ts",
     "literals": [
       "[TanStack DB] Index suggestion for \"",
-      "  Field: ",
-      "  Add index: collection.createIndex((row) => row.",
-      "slow-query",
+      "  Add index: collection.createIndex((row) => row."
+    ]
+  },
+  {
+    "file": "indexes/index-registry.ts",
+    "literals": [
       "Queries on \"",
       "\" are slow (avg ",
-      "ms). Consider adding an index.",
-      "collection-size",
+      "ms). Consider adding an index."
+    ]
+  },
+  {
+    "file": "indexes/index-registry.ts",
+    "literals": [
       "Collection has ",
       " items. Queries on \"",
       "\" may benefit from an index."
@@ -28,7 +42,6 @@
     "file": "live-query-window-controller.ts",
     "literals": [
       "useLiveInfiniteQuery: Pre-created collection has window {offset: ",
-      ", limit: ",
       "but the hook expects {offset: 0, limit: ",
       "}. Adjusting window now."
     ]

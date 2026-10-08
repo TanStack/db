@@ -287,10 +287,7 @@ describe(`production error messages`, () => {
     // Only validateCollectionConfig reaches these diagnostics, and
     // createCollection calls it behind the erasable guard, so production
     // bundles drop the whole module. The bundle check proves that erasure.
-    const developmentOnlyFiles = new Set([
-      `collection/config-errors.ts`,
-      `collection/validate-config.ts`,
-    ])
+    const developmentOnlyFiles = new Set([`collection/config-errors.ts`])
 
     it(`codes every site that throws library text`, () => {
       expect(

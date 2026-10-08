@@ -64,8 +64,9 @@ export type CodedSite = {
 }
 
 /**
- * Library text that only development builds contain: everything inside the
- * erasable guard's branch, or after an early `return` on its negation.
+ * Prose that only development builds contain, one entry per guarded region:
+ * the erasable guard's branch, or the block after an early `return` on its
+ * negation.
  */
 export type DevelopmentOnlyText = { file: string; literals: Array<string> }
 
@@ -371,11 +372,32 @@ export function findErrorSites(
       compact(node.condition, sourceFile) === guard &&
       ts.isCallExpression(node.whenFalse) &&
       node.whenFalse.expression.getText(sourceFile) === `codedMessage`
-    const isGuard = (node: ts.Expression) =>
-      compact(node, sourceFile).startsWith(guard)
-    // `if (guard) { ... }`, or `if (!(guard ...)) return` earlier in a block.
-    const isDevelopmentOnly = (node: ts.Node): boolean =>
-      !!ts.findAncestor(node, (ancestor) => {
+    // The guard alone, or the first terms of a top-level `&&` chain: then the
+    // whole condition is false in production. `guard || x` is not a guard.
+    const isGuard = (node: ts.Expression): boolean => {
+      const terms: Array<ts.Expression> = []
+      const flatten = (term: ts.Expression) => {
+        if (ts.isParenthesizedExpression(term)) return flatten(term.expression)
+        if (
+          ts.isBinaryExpression(term) &&
+          term.operatorToken.kind === ts.SyntaxKind.AmpersandAmpersandToken
+        ) {
+          flatten(term.left)
+          flatten(term.right)
+        } else terms.push(term)
+      }
+      flatten(node)
+      return (
+        terms.length >= 2 &&
+        compact(terms[0]!, sourceFile) === `devBuild()` &&
+        compact(terms[1]!, sourceFile) ===
+          `process.env.NODE_ENV !== \`production\``
+      )
+    }
+    // The region that makes a node development-only: the branch of
+    // `if (guard) { ... }`, or the block after `if (!(guard ...)) return`.
+    const developmentRegion = (node: ts.Node): ts.Node | undefined =>
+      ts.findAncestor(node, (ancestor) => {
         if (ts.isSourceFile(ancestor)) return `quit`
         if (
           ts.isIfStatement(ancestor.parent) &&
@@ -398,7 +420,14 @@ export function findErrorSites(
               ts.isReturnStatement(statement.thenStatement),
           )
       })
-    const developmentLiterals: Array<string> = []
+    const isDevelopmentOnly = (node: ts.Node) => !!developmentRegion(node)
+    // A guarded message whose production form holds no library text, such as
+    // `guard ? \`[Live Query Error] ${message}\` : message`.
+    const isDecoration = (node: ts.Node) =>
+      ts.isConditionalExpression(node) &&
+      isGuard(node.condition) &&
+      !hasLibraryText(node.whenFalse)
+    const regions = new Map<ts.Node, Array<string>>()
     const visit = (node: ts.Node) => {
       if (
         (ts.isStringLiteral(node) ||
@@ -407,7 +436,11 @@ export function findErrorSites(
         hasLibraryText(node) &&
         isDevelopmentOnly(node)
       ) {
-        developmentLiterals.push(...messageLiterals(node))
+        const region = developmentRegion(node)!
+        regions.set(region, [
+          ...(regions.get(region) ?? []),
+          ...messageLiterals(node),
+        ])
         return
       }
       // A console call with library text is a site unless it is
@@ -419,7 +452,11 @@ export function findErrorSites(
         !isDevelopmentOnly(node)
       )
         for (const argument of node.arguments)
-          if (!isCoded(argument) && hasLibraryText(argument))
+          if (
+            !isCoded(argument) &&
+            !isDecoration(argument) &&
+            hasLibraryText(argument)
+          )
             plain.push({
               file,
               line:
@@ -492,8 +529,11 @@ export function findErrorSites(
       ts.forEachChild(node, visit)
     }
     visit(sourceFile)
-    const literals = developmentLiterals.filter((text) => /[A-Za-z]/.test(text))
-    if (literals.length) developmentOnly.push({ file, literals })
+    // One entry per guarded region, holding its prose: words and a space.
+    for (const texts of regions.values()) {
+      const literals = texts.filter((text) => /[A-Za-z]+ [A-Za-z]/.test(text))
+      if (literals.length) developmentOnly.push({ file, literals })
+    }
   }
   return { coded, plain, classGuards, developmentOnly }
 }
