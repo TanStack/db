@@ -84,26 +84,42 @@ export class CollectionRef extends BaseExpression {
   public type = `collectionRef` as const
   // Not an own property, so structural identity and hashing ignore it.
   readonly #sourceId = `source-${++nextCollectionSourceId}`
-  // A descriptor stays in the query plan until a receiving DbClient binds it.
+  #descriptor?: CollectionOptionsIdentity<any, string | number, any, any, any>
+  declare public collection: CollectionImpl
+  public alias: string
+
   constructor(
-    public readonly source:
+    source:
       | CollectionImpl
       | CollectionOptionsIdentity<any, string | number, any, any, any>,
-    public alias: string,
+    alias: string,
   ) {
     super()
+    if (hasCollectionOptionsBrandValue(source)) {
+      this.#descriptor = source
+      Object.defineProperty(this, `collection`, {
+        get: () => {
+          throw new Error(
+            `Collection descriptor "${this.alias}" requires a DbClient when the query is consumed. Bind the query through a client-aware API or use a concrete Collection.`,
+          )
+        },
+      })
+    } else {
+      // Concrete refs keep the writable own field exposed by the original IR.
+      this.collection = source
+    }
+    this.alias = alias
+  }
+
+  get source():
+    | CollectionImpl
+    | CollectionOptionsIdentity<any, string | number, any, any, any> {
+    return this.#descriptor ?? this.collection
   }
 
   get descriptor():
     CollectionOptionsIdentity<any, string | number, any, any, any> | undefined {
-    return hasCollectionOptionsBrandValue(this.source) ? this.source : undefined
-  }
-
-  get collection(): CollectionImpl {
-    if (!hasCollectionOptionsBrandValue(this.source)) return this.source
-    throw new Error(
-      `Collection descriptor "${this.alias}" requires a DbClient when the query is consumed. Bind the query through a client-aware API or use a concrete Collection.`,
-    )
+    return this.#descriptor
   }
 
   /** Opaque runtime identity; aliases are lexical names only. */
