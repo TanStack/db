@@ -2176,7 +2176,7 @@ Live query graph failed
 Development builds show this message, with `${...}` replaced by values:
 
 ```text
-${collection.id ? `[${collection.id}]` : ``}Error processing where clause, falling back to full scan:
+${collection.id ? `[${collection.id}] ` : ``}Error processing where clause, falling back to full scan:
 ```
 
 <a id="error-214"></a>
@@ -2196,7 +2196,7 @@ Error in CleanupQueue task:
 Development builds show this message, with `${...}` replaced by values:
 
 ```text
-${collection.id ? `[${collection.id}]` : ``}Failed to create auto-index for field path "${fieldPath.join(`.`)}":
+${collection.id ? `[${collection.id}] ` : ``}Failed to create auto-index for field path "${fieldPath.join(`.`)}":
 ```
 
 <a id="error-216"></a>

@@ -106,18 +106,38 @@ function compact(node: ts.Node, sourceFile: ts.SourceFile): string {
     node.getText(sourceFile),
   )
   const tokens: Array<string> = []
-  while (scanner.scan() !== ts.SyntaxKind.EndOfFileToken)
+  // Open braces inside each `${...}` of the templates being scanned, so the
+  // `}` that ends a substitution rescans the template's next literal part
+  // with its exact text.
+  const depths: Array<number> = []
+  for (
+    let kind = scanner.scan();
+    kind !== ts.SyntaxKind.EndOfFileToken;
+    kind = scanner.scan()
+  ) {
+    if (kind === ts.SyntaxKind.TemplateHead) depths.push(0)
+    else if (kind === ts.SyntaxKind.OpenBraceToken && depths.length)
+      depths[depths.length - 1]!++
+    else if (kind === ts.SyntaxKind.CloseBraceToken && depths.length) {
+      if (depths.at(-1) === 0) {
+        kind = scanner.reScanTemplateToken(false)
+        if (kind === ts.SyntaxKind.TemplateTail) depths.pop()
+      } else depths[depths.length - 1]!--
+    }
     tokens.push(scanner.getTokenText())
+  }
   let text = ``
   tokens.forEach((token, index) => {
     if (token === `,` && closing.has(tokens[index + 1] ?? ``)) return
     const previous = text.at(-1) ?? ``
-    if (spaced.has(token) || spaced.has(tokens[index - 1] ?? ``))
-      text += text ? ` ` : ``
-    else if (wordLike.test(token) && /[\w$]/.test(previous)) text += ` `
+    const space =
+      spaced.has(token) || spaced.has(tokens[index - 1] ?? ``)
+        ? text !== ``
+        : wordLike.test(token) && /[\w$]/.test(previous)
+    if (space && previous !== ` `) text += ` `
     text += token
   })
-  return text.replace(/ +/g, ` `)
+  return text
 }
 
 function sourceFiles(directory: string): Array<string> {
