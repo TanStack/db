@@ -411,7 +411,9 @@ export function localStorageCollectionOptions(
       storage.setItem(config.storageKey, serialized)
     } catch (error) {
       console.error(
-        devBuild() && process.env.NODE_ENV !== `production` ? `[LocalStorageCollection] Error saving data to storage key "${config.storageKey}":` : codedMessage(218, { storageKey: config.storageKey }),
+        devBuild() && process.env.NODE_ENV !== `production`
+          ? `[LocalStorageCollection] Error saving data to storage key "${config.storageKey}":`
+          : codedMessage(218, { storageKey: config.storageKey }),
         error,
       )
       throw error
@@ -631,7 +633,9 @@ function loadFromStorage<T extends object>(
     return dataMap
   } catch (error) {
     console.warn(
-      devBuild() && process.env.NODE_ENV !== `production` ? `[LocalStorageCollection] Error loading data from storage key "${storageKey}":` : codedMessage(219, { storageKey }),
+      devBuild() && process.env.NODE_ENV !== `production`
+        ? `[LocalStorageCollection] Error loading data from storage key "${storageKey}":`
+        : codedMessage(219, { storageKey }),
       error,
     )
     return new Map()

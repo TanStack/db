@@ -74,7 +74,9 @@ export function ensureIndexForField<
     )
   } catch (error) {
     console.warn(
-      devBuild() && process.env.NODE_ENV !== `production` ? `${collection.id ? `[${collection.id}] ` : ``}Failed to create auto-index for field path "${fieldPath.join(`.`)}":` : codedMessage(215, { id: collection.id, value: fieldPath.join(`.`) }),
+      devBuild() && process.env.NODE_ENV !== `production`
+        ? `${collection.id ? `[${collection.id}] ` : ``}Failed to create auto-index for field path "${fieldPath.join(`.`)}":`
+        : codedMessage(215, { id: collection.id, value: fieldPath.join(`.`) }),
       error,
     )
   }

@@ -98,7 +98,9 @@ export class BasicIndex<
       indexedValue = this.evaluateIndexExpression(item)
     } catch (error) {
       console.warn(
-        devBuild() && process.env.NODE_ENV !== `production` ? `Failed to evaluate index expression for key ${key} during removal:` : codedMessage(216, { key }),
+        devBuild() && process.env.NODE_ENV !== `production`
+          ? `Failed to evaluate index expression for key ${key} during removal:`
+          : codedMessage(216, { key }),
         error,
       )
       this.indexedKeys.delete(key)

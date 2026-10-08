@@ -98,7 +98,12 @@ export class CleanupQueue {
         try {
           task.callback()
         } catch (error) {
-          console.error(devBuild() && process.env.NODE_ENV !== `production` ? 'Error in CleanupQueue task:' : codedMessage(214), error)
+          console.error(
+            devBuild() && process.env.NODE_ENV !== `production`
+              ? 'Error in CleanupQueue task:'
+              : codedMessage(214),
+            error,
+          )
         }
       }
     }

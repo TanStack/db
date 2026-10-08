@@ -121,7 +121,9 @@ export class BTreeIndex<
       indexedValue = this.evaluateIndexExpression(item)
     } catch (error) {
       console.warn(
-        devBuild() && process.env.NODE_ENV !== `production` ? `Failed to evaluate index expression for key ${key} during removal:` : codedMessage(217, { key }),
+        devBuild() && process.env.NODE_ENV !== `production`
+          ? `Failed to evaluate index expression for key ${key} during removal:`
+          : codedMessage(217, { key }),
         error,
       )
       return

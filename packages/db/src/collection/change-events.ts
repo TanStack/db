@@ -214,7 +214,9 @@ export function currentStateAsChanges<
   } catch (error) {
     // If anything goes wrong with the where clause, fall back to full scan
     console.warn(
-      devBuild() && process.env.NODE_ENV !== `production` ? `${collection.id ? `[${collection.id}] ` : ``}Error processing where clause, falling back to full scan:` : codedMessage(213, { id: collection.id }),
+      devBuild() && process.env.NODE_ENV !== `production`
+        ? `${collection.id ? `[${collection.id}] ` : ``}Error processing where clause, falling back to full scan:`
+        : codedMessage(213, { id: collection.id }),
       error,
     )
 

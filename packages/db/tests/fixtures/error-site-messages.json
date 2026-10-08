@@ -52,9 +52,7 @@
   "94": {
     "file": "collection/change-events.ts",
     "template": "limit cannot be used without orderBy",
-    "literals": [
-      "limit cannot be used without orderBy"
-    ]
+    "literals": ["limit cannot be used without orderBy"]
   },
   "95": {
     "file": "collection/changes.ts",
@@ -66,9 +64,7 @@
   "96": {
     "file": "collection/subscription.ts",
     "template": "limit is required",
-    "literals": [
-      "limit is required"
-    ]
+    "literals": ["limit is required"]
   },
   "97": {
     "file": "collection/subscription.ts",
@@ -80,32 +76,22 @@
   "98": {
     "file": "event-emitter.ts",
     "template": "Timeout waiting for event ${String(event)}",
-    "literals": [
-      "Timeout waiting for event "
-    ]
+    "literals": ["Timeout waiting for event "]
   },
   "99": {
     "file": "indexes/base-index.ts",
     "template": "Failed to evaluate index expression for key ${key}: ${error}",
-    "literals": [
-      "Failed to evaluate index expression for key "
-    ]
+    "literals": ["Failed to evaluate index expression for key "]
   },
   "100": {
     "file": "indexes/basic-index.ts",
     "template": "Operation ${operation} not supported by BasicIndex",
-    "literals": [
-      "Operation ",
-      " not supported by BasicIndex"
-    ]
+    "literals": ["Operation ", " not supported by BasicIndex"]
   },
   "101": {
     "file": "indexes/btree-index.ts",
     "template": "Operation ${operation} not supported by BTreeIndex",
-    "literals": [
-      "Operation ",
-      " not supported by BTreeIndex"
-    ]
+    "literals": ["Operation ", " not supported by BTreeIndex"]
   },
   "102": {
     "file": "live-query-options.ts",
@@ -156,16 +142,12 @@
   "108": {
     "file": "paced-mutations.ts",
     "template": "Paced transaction has no strategy-owned commit",
-    "literals": [
-      "Paced transaction has no strategy-owned commit"
-    ]
+    "literals": ["Paced transaction has no strategy-owned commit"]
   },
   "109": {
     "file": "proxy.ts",
     "template": "forEach callback must be a function",
-    "literals": [
-      "forEach callback must be a function"
-    ]
+    "literals": ["forEach callback must be a function"]
   },
   "110": {
     "file": "query/builder/functions.ts",
@@ -177,16 +159,12 @@
   "111": {
     "file": "query/builder/functions.ts",
     "template": "caseWhen() requires at least two arguments",
-    "literals": [
-      "caseWhen() requires at least two arguments"
-    ]
+    "literals": ["caseWhen() requires at least two arguments"]
   },
   "112": {
     "file": "query/builder/functions.ts",
     "template": "caseWhen() conditions must be expression-like values",
-    "literals": [
-      "caseWhen() conditions must be expression-like values"
-    ]
+    "literals": ["caseWhen() conditions must be expression-like values"]
   },
   "113": {
     "file": "query/builder/index.ts",
@@ -199,30 +177,22 @@
   "114": {
     "file": "query/builder/index.ts",
     "template": "Conditional include branch is missing a field name",
-    "literals": [
-      "Conditional include branch is missing a field name"
-    ]
+    "literals": ["Conditional include branch is missing a field name"]
   },
   "115": {
     "file": "query/builder/index.ts",
     "template": "toArray() must wrap a subquery builder",
-    "literals": [
-      "toArray() must wrap a subquery builder"
-    ]
+    "literals": ["toArray() must wrap a subquery builder"]
   },
   "116": {
     "file": "query/builder/index.ts",
     "template": "Conditional toArray() branch is missing a field name",
-    "literals": [
-      "Conditional toArray() branch is missing a field name"
-    ]
+    "literals": ["Conditional toArray() branch is missing a field name"]
   },
   "117": {
     "file": "query/builder/index.ts",
     "template": "concat(toArray(...)) must wrap a subquery builder",
-    "literals": [
-      "concat(toArray(...)) must wrap a subquery builder"
-    ]
+    "literals": ["concat(toArray(...)) must wrap a subquery builder"]
   },
   "118": {
     "file": "query/builder/index.ts",
@@ -234,30 +204,22 @@
   "119": {
     "file": "query/builder/index.ts",
     "template": "toArray() must wrap a subquery builder",
-    "literals": [
-      "toArray() must wrap a subquery builder"
-    ]
+    "literals": ["toArray() must wrap a subquery builder"]
   },
   "120": {
     "file": "query/builder/index.ts",
     "template": "concat(toArray(...)) must wrap a subquery builder",
-    "literals": [
-      "concat(toArray(...)) must wrap a subquery builder"
-    ]
+    "literals": ["concat(toArray(...)) must wrap a subquery builder"]
   },
   "121": {
     "file": "query/builder/index.ts",
     "template": "materialize() must wrap a subquery builder",
-    "literals": [
-      "materialize() must wrap a subquery builder"
-    ]
+    "literals": ["materialize() must wrap a subquery builder"]
   },
   "122": {
     "file": "query/builder/index.ts",
     "template": "caseWhen() requires at least two arguments",
-    "literals": [
-      "caseWhen() requires at least two arguments"
-    ]
+    "literals": ["caseWhen() requires at least two arguments"]
   },
   "123": {
     "file": "query/builder/index.ts",
@@ -297,9 +259,7 @@
   "127": {
     "file": "query/compiler/evaluators.ts",
     "template": "caseWhen() requires at least two arguments",
-    "literals": [
-      "caseWhen() requires at least two arguments"
-    ]
+    "literals": ["caseWhen() requires at least two arguments"]
   },
   "128": {
     "file": "query/compiler/index.ts",
@@ -311,23 +271,17 @@
   "129": {
     "file": "query/compiler/index.ts",
     "template": "Query row has negative multiplicity",
-    "literals": [
-      "Query row has negative multiplicity"
-    ]
+    "literals": ["Query row has negative multiplicity"]
   },
   "130": {
     "file": "query/compiler/index.ts",
     "template": "Query row has no positive contributor",
-    "literals": [
-      "Query row has no positive contributor"
-    ]
+    "literals": ["Query row has no positive contributor"]
   },
   "131": {
     "file": "query/compiler/index.ts",
     "template": "Query contributors with the same row key are not congruent",
-    "literals": [
-      "Query contributors with the same row key are not congruent"
-    ]
+    "literals": ["Query contributors with the same row key are not congruent"]
   },
   "132": {
     "file": "query/compiler/index.ts",
@@ -357,25 +311,17 @@
   "135": {
     "file": "query/effect.ts",
     "template": "Source collection '${collectionId}' entered error state",
-    "literals": [
-      "Source collection '",
-      "' entered error state"
-    ]
+    "literals": ["Source collection '", "' entered error state"]
   },
   "136": {
     "file": "query/expression-helpers.ts",
     "template": "No handler provided for operator: ${name}. Available handlers: ${Object.keys(handlers).join(`, `)}",
-    "literals": [
-      "No handler provided for operator: ",
-      ". Available handlers: "
-    ]
+    "literals": ["No handler provided for operator: ", ". Available handlers: "]
   },
   "137": {
     "file": "query/expression-helpers.ts",
     "template": "ORDER BY expression must be a field reference, got: ${clause.expression.type}",
-    "literals": [
-      "ORDER BY expression must be a field reference, got: "
-    ]
+    "literals": ["ORDER BY expression must be a field reference, got: "]
   },
   "138": {
     "file": "query/expression-helpers.ts",
@@ -435,23 +381,17 @@
   "145": {
     "file": "query/expression-helpers.ts",
     "template": "extractSimpleComparisons encountered unknown operator: '${e.name}'",
-    "literals": [
-      "extractSimpleComparisons encountered unknown operator: '"
-    ]
+    "literals": ["extractSimpleComparisons encountered unknown operator: '"]
   },
   "146": {
     "file": "query/live/bucket-facade-adapter.ts",
     "template": "Bucket facade row has no public key",
-    "literals": [
-      "Bucket facade row has no public key"
-    ]
+    "literals": ["Bucket facade row has no public key"]
   },
   "147": {
     "file": "query/live/collection-config-builder.ts",
     "template": "Source recovery failed",
-    "literals": [
-      "Source recovery failed"
-    ]
+    "literals": ["Source recovery failed"]
   },
   "148": {
     "file": "query/live/collection-config-builder.ts",
@@ -479,10 +419,7 @@
   "151": {
     "file": "query/live/collection-config-builder.ts",
     "template": "Could not apply changes: ${JSON.stringify(changes)}. This should never happen.",
-    "literals": [
-      "Could not apply changes: ",
-      ". This should never happen."
-    ]
+    "literals": ["Could not apply changes: ", ". This should never happen."]
   },
   "152": {
     "file": "query/live/collection-config-builder.ts",
@@ -505,59 +442,42 @@
   "154": {
     "file": "query/live/materialized-pipeline.ts",
     "template": "Canonical query row has negative multiplicity",
-    "literals": [
-      "Canonical query row has negative multiplicity"
-    ]
+    "literals": ["Canonical query row has negative multiplicity"]
   },
   "155": {
     "file": "query/live/materialized-pipeline.ts",
     "template": "Canonical query row has no positive contributor",
-    "literals": [
-      "Canonical query row has no positive contributor"
-    ]
+    "literals": ["Canonical query row has no positive contributor"]
   },
   "156": {
     "file": "query/live/materialized-pipeline.ts",
     "template": "Query contributors for public key ${serializeValue(left.publicKey)} are not congruent",
-    "literals": [
-      "Query contributors for public key ",
-      " are not congruent"
-    ]
+    "literals": ["Query contributors for public key ", " are not congruent"]
   },
   "157": {
     "file": "query/live/materialized-pipeline.ts",
     "template": "Materialization bucket row has negative multiplicity",
-    "literals": [
-      "Materialization bucket row has negative multiplicity"
-    ]
+    "literals": ["Materialization bucket row has negative multiplicity"]
   },
   "158": {
     "file": "query/live/materialized-pipeline.ts",
     "template": "Collection includes require a bucket facade",
-    "literals": [
-      "Collection includes require a bucket facade"
-    ]
+    "literals": ["Collection includes require a bucket facade"]
   },
   "159": {
     "file": "query/live/subset-demand-controller.ts",
     "template": "Subset demand snapshot did not start",
-    "literals": [
-      "Subset demand snapshot did not start"
-    ]
+    "literals": ["Subset demand snapshot did not start"]
   },
   "160": {
     "file": "query/live/utils.ts",
     "template": "Failed to extract collection. Invalid FROM clause: ${JSON.stringify(query)}",
-    "literals": [
-      "Failed to extract collection. Invalid FROM clause: "
-    ]
+    "literals": ["Failed to extract collection. Invalid FROM clause: "]
   },
   "161": {
     "file": "scheduler.ts",
     "template": "Scheduler detected unresolved dependencies for context ${String(contextId)}.",
-    "literals": [
-      "Scheduler detected unresolved dependencies for context "
-    ]
+    "literals": ["Scheduler detected unresolved dependencies for context "]
   },
   "162": {
     "file": "transactions.ts",
@@ -569,59 +489,42 @@
   "163": {
     "file": "transactions.ts",
     "template": "Transaction is not associated with a TransactionScope.",
-    "literals": [
-      "Transaction is not associated with a TransactionScope."
-    ]
+    "literals": ["Transaction is not associated with a TransactionScope."]
   },
   "164": {
     "file": "transactions.ts",
     "template": "Transaction is not associated with an ambient scope.",
-    "literals": [
-      "Transaction is not associated with an ambient scope."
-    ]
+    "literals": ["Transaction is not associated with an ambient scope."]
   },
   "165": {
     "file": "transactions.ts",
     "template": "Unhandled mutation combination: ${_exhaustive}",
-    "literals": [
-      "Unhandled mutation combination: "
-    ]
+    "literals": ["Unhandled mutation combination: "]
   },
   "166": {
     "file": "utils/comparison.ts",
     "template": "Index comparator must return a number, but returned ${String(result)}",
-    "literals": [
-      "Index comparator must return a number, but returned "
-    ]
+    "literals": ["Index comparator must return a number, but returned "]
   },
   "167": {
     "file": "utils/comparison.ts",
     "template": "Cannot order Temporal values of different types: ${aTag} vs ${bTag}",
-    "literals": [
-      "Cannot order Temporal values of different types: ",
-      " vs "
-    ]
+    "literals": ["Cannot order Temporal values of different types: ", " vs "]
   },
   "168": {
     "file": "utils/comparison.ts",
     "template": "${aTag} has no defined ordering",
-    "literals": [
-      " has no defined ordering"
-    ]
+    "literals": [" has no defined ordering"]
   },
   "169": {
     "file": "utils/cursor.ts",
     "template": "Only leading-column cursors are supported",
-    "literals": [
-      "Only leading-column cursors are supported"
-    ]
+    "literals": ["Only leading-column cursors are supported"]
   },
   "170": {
     "file": "utils/error.ts",
     "template": "Unknown error",
-    "literals": [
-      "Unknown error"
-    ]
+    "literals": ["Unknown error"]
   },
   "171": {
     "file": "utils/uuid.ts",
@@ -633,10 +536,7 @@
   "172": {
     "file": "query/live/collection-config-builder.ts",
     "template": "Source collection '${collectionId}' entered error state",
-    "literals": [
-      "Source collection '",
-      "' entered error state"
-    ]
+    "literals": ["Source collection '", "' entered error state"]
   },
   "173": {
     "file": "collection/lifecycle.ts",
@@ -649,9 +549,7 @@
   "174": {
     "file": "transactions.ts",
     "template": "Mutation callback and restoration failed",
-    "literals": [
-      "Mutation callback and restoration failed"
-    ]
+    "literals": ["Mutation callback and restoration failed"]
   },
   "179": {
     "file": "indexed-db-wrapper.ts",
@@ -664,23 +562,17 @@
   "182": {
     "file": "indexed-db-wrapper.ts",
     "template": "Failed to open IndexedDB database \"${name}\": ${error instanceof Error ? error.message : String(error)}",
-    "literals": [
-      "Failed to open IndexedDB database \""
-    ]
+    "literals": ["Failed to open IndexedDB database \""]
   },
   "183": {
     "file": "indexed-db-wrapper.ts",
     "template": "Database upgrade failed for \"${name}\": ${error instanceof Error ? error.message : String(error)}",
-    "literals": [
-      "Database upgrade failed for \""
-    ]
+    "literals": ["Database upgrade failed for \""]
   },
   "184": {
     "file": "indexed-db-wrapper.ts",
     "template": "Failed to open IndexedDB database \"${name}\": ${errorMessage}",
-    "literals": [
-      "Failed to open IndexedDB database \""
-    ]
+    "literals": ["Failed to open IndexedDB database \""]
   },
   "185": {
     "file": "indexed-db-wrapper.ts",
@@ -703,16 +595,12 @@
   "187": {
     "file": "indexed-db-wrapper.ts",
     "template": "Failed to create object store \"${storeName}\": ${error instanceof Error ? error.message : String(error)}",
-    "literals": [
-      "Failed to create object store \""
-    ]
+    "literals": ["Failed to create object store \""]
   },
   "188": {
     "file": "indexed-db-wrapper.ts",
     "template": "Failed to create transaction for stores [${storeNamesArray.join(', ')}]: ${error instanceof Error ? error.message : String(error)}",
-    "literals": [
-      "Failed to create transaction for stores ["
-    ]
+    "literals": ["Failed to create transaction for stores ["]
   },
   "189": {
     "file": "indexed-db-wrapper.ts",
@@ -726,23 +614,17 @@
   "190": {
     "file": "indexed-db-wrapper.ts",
     "template": "Transaction was aborted",
-    "literals": [
-      "Transaction was aborted"
-    ]
+    "literals": ["Transaction was aborted"]
   },
   "191": {
     "file": "indexed-db-wrapper.ts",
     "template": "Failed to delete IndexedDB database \"${name}\": ${error instanceof Error ? error.message : String(error)}",
-    "literals": [
-      "Failed to delete IndexedDB database \""
-    ]
+    "literals": ["Failed to delete IndexedDB database \""]
   },
   "192": {
     "file": "indexed-db-wrapper.ts",
     "template": "Failed to delete IndexedDB database \"${name}\": ${errorMessage}",
-    "literals": [
-      "Failed to delete IndexedDB database \""
-    ]
+    "literals": ["Failed to delete IndexedDB database \""]
   },
   "193": {
     "file": "indexed-db.ts",
@@ -754,9 +636,7 @@
   "194": {
     "file": "indexed-db.ts",
     "template": "createIndexedDB stores array contains duplicate store names.",
-    "literals": [
-      "createIndexedDB stores array contains duplicate store names."
-    ]
+    "literals": ["createIndexedDB stores array contains duplicate store names."]
   },
   "195": {
     "file": "indexed-db.ts",
@@ -791,53 +671,37 @@
   "199": {
     "file": "indexed-db.ts",
     "template": "Duplicate imported key: ${key}",
-    "literals": [
-      "Duplicate imported key: "
-    ]
+    "literals": ["Duplicate imported key: "]
   },
   "200": {
     "file": "indexed-db-wrapper.ts",
     "template": "Failed to get all keys from object store \"${objectStore.name}\": ${cause}",
-    "literals": [
-      "Failed to get all keys from object store \""
-    ]
+    "literals": ["Failed to get all keys from object store \""]
   },
   "201": {
     "file": "indexed-db-wrapper.ts",
     "template": "Failed to write item to object store \"${objectStore.name}\": ${cause}",
-    "literals": [
-      "Failed to write item to object store \""
-    ]
+    "literals": ["Failed to write item to object store \""]
   },
   "202": {
     "file": "indexed-db-wrapper.ts",
     "template": "Failed to delete item with key \"${String(key)}\" from object store \"${objectStore.name}\": ${cause}",
-    "literals": [
-      "Failed to delete item with key \"",
-      "\" from object store \""
-    ]
+    "literals": ["Failed to delete item with key \"", "\" from object store \""]
   },
   "203": {
     "file": "indexed-db-wrapper.ts",
     "template": "Failed to clear object store \"${objectStore.name}\": ${cause}",
-    "literals": [
-      "Failed to clear object store \""
-    ]
+    "literals": ["Failed to clear object store \""]
   },
   "204": {
     "file": "indexed-db-wrapper.ts",
     "template": "Failed to get all items from object store \"${objectStore.name}\": ${cause}",
-    "literals": [
-      "Failed to get all items from object store \""
-    ]
+    "literals": ["Failed to get all items from object store \""]
   },
   "205": {
     "file": "indexed-db-wrapper.ts",
     "template": "Failed to get item with key \"${String(key)}\" from object store \"${objectStore.name}\": ${cause}",
-    "literals": [
-      "Failed to get item with key \"",
-      "\" from object store \""
-    ]
+    "literals": ["Failed to get item with key \"", "\" from object store \""]
   },
   "206": {
     "file": "collection/index.ts",
@@ -894,30 +758,22 @@
   "212": {
     "file": "query/live/collection-config-builder.ts",
     "template": "Live query graph failed",
-    "literals": [
-      "Live query graph failed"
-    ]
+    "literals": ["Live query graph failed"]
   },
   "213": {
     "file": "collection/change-events.ts",
     "template": "${collection.id ? `[${collection.id}]` : ``}Error processing where clause, falling back to full scan:",
-    "literals": [
-      "Error processing where clause, falling back to full scan:"
-    ]
+    "literals": ["Error processing where clause, falling back to full scan:"]
   },
   "214": {
     "file": "collection/cleanup-queue.ts",
     "template": "Error in CleanupQueue task:",
-    "literals": [
-      "Error in CleanupQueue task:"
-    ]
+    "literals": ["Error in CleanupQueue task:"]
   },
   "215": {
     "file": "indexes/auto-index.ts",
     "template": "${collection.id ? `[${collection.id}]` : ``}Failed to create auto-index for field path \"${fieldPath.join(`.`)}\":",
-    "literals": [
-      "Failed to create auto-index for field path \""
-    ]
+    "literals": ["Failed to create auto-index for field path \""]
   },
   "216": {
     "file": "indexes/basic-index.ts",
@@ -938,9 +794,7 @@
   "218": {
     "file": "local-storage.ts",
     "template": "[LocalStorageCollection] Error saving data to storage key \"${config.storageKey}\":",
-    "literals": [
-      "[LocalStorageCollection] Error saving data to storage key \""
-    ]
+    "literals": ["[LocalStorageCollection] Error saving data to storage key \""]
   },
   "219": {
     "file": "local-storage.ts",
@@ -952,69 +806,46 @@
   "220": {
     "file": "query/effect.ts",
     "template": "[Effect '${id}'] onSourceError callback threw:",
-    "literals": [
-      "[Effect '",
-      "'] onSourceError callback threw:"
-    ]
+    "literals": ["[Effect '", "'] onSourceError callback threw:"]
   },
   "221": {
     "file": "query/effect.ts",
     "template": "[Effect '${id}'] ${error.message}. Disposing effect.",
-    "literals": [
-      "[Effect '",
-      ". Disposing effect."
-    ]
+    "literals": ["[Effect '", ". Disposing effect."]
   },
   "222": {
     "file": "query/effect.ts",
     "template": "[Effect '${id}'] failed to dispose after a source error:",
-    "literals": [
-      "[Effect '",
-      "'] failed to dispose after a source error:"
-    ]
+    "literals": ["[Effect '", "'] failed to dispose after a source error:"]
   },
   "223": {
     "file": "query/effect.ts",
     "template": "[Effect '${id}'] failed to dispose after a startup error:",
-    "literals": [
-      "[Effect '",
-      "'] failed to dispose after a startup error:"
-    ]
+    "literals": ["[Effect '", "'] failed to dispose after a startup error:"]
   },
   "224": {
     "file": "query/effect.ts",
     "template": "[Effect] Error in onError handler:",
-    "literals": [
-      "[Effect] Error in onError handler:"
-    ]
+    "literals": ["[Effect] Error in onError handler:"]
   },
   "225": {
     "file": "query/effect.ts",
     "template": "[Effect] Original error:",
-    "literals": [
-      "[Effect] Original error:"
-    ]
+    "literals": ["[Effect] Original error:"]
   },
   "226": {
     "file": "query/effect.ts",
     "template": "[Effect] Unhandled error in handler:",
-    "literals": [
-      "[Effect] Unhandled error in handler:"
-    ]
+    "literals": ["[Effect] Unhandled error in handler:"]
   },
   "228": {
     "file": "query/live/collection-config-builder.ts",
     "template": "Subset demand '${planId}' failed: ${normalized.message}",
-    "literals": [
-      "Subset demand '",
-      "' failed: "
-    ]
+    "literals": ["Subset demand '", "' failed: "]
   },
   "229": {
     "file": "query/live/collection-config-builder.ts",
     "template": "Initial subset load failed: ${normalized.message}",
-    "literals": [
-      "Initial subset load failed: "
-    ]
+    "literals": ["Initial subset load failed: "]
   }
 }
