@@ -1,13 +1,13 @@
 import { describe, expect, it } from 'vitest'
 import { createCollection } from '../src/collection/index.js'
-import { collectionOptions } from '../src/client.js'
+import { DbClient, collectionOptions } from '../src/client.js'
 import {
   getLiveQueryHash,
   getPreparedLiveQueryIdentity,
   prepareLiveQueryValue,
   resolveLiveQueryValue,
 } from '../src/live-query-options.js'
-import { BaseQueryBuilder } from '../src/query/builder/index.js'
+import { BaseQueryBuilder, getQueryIR } from '../src/query/builder/index.js'
 
 describe(`live query preparation`, () => {
   it(`requires a client when a standalone descriptor query is consumed`, () => {
@@ -34,6 +34,34 @@ describe(`live query preparation`, () => {
     const query = new BaseQueryBuilder()
 
     expect(prepareLiveQueryValue(query, undefined, new Set())).toBe(query)
+  })
+
+  it(`binds a nested descriptor when a client-aware builder places it`, () => {
+    const descriptor = collectionOptions(`nested-placement-descriptor`, () => ({
+      id: `nested-placement-descriptor`,
+      getKey: (row: { id: string }) => row.id,
+      sync: { sync: ({ markReady }) => markReady() },
+    }))
+    const standalone = new BaseQueryBuilder().from({ item: descriptor })
+    const client = new DbClient()
+    let nestedSourceType: string | undefined
+
+    prepareLiveQueryValue(
+      {
+        query: (builder: BaseQueryBuilder) => {
+          const outer = builder.from({ nested: standalone })
+          const source = getQueryIR(outer).from
+          if (source.type === `queryRef`) {
+            nestedSourceType = source.query.from.type
+          }
+          return outer
+        },
+      },
+      client,
+      new Set(),
+    )
+
+    expect(nestedSourceType).toBe(`collectionRef`)
   })
 
   it.each([undefined, null])(

@@ -219,7 +219,10 @@ export class BaseQueryBuilder<TContext extends Context = Context> {
           ? new CollectionRef(this.resolveCollection(sourceValue), alias)
           : new DescriptorRef(sourceValue, alias)
       } else if (sourceValue instanceof BaseQueryBuilder) {
-        const subQuery = cloneQueryForPlacement(sourceValue._getQuery())
+        const subQuery = cloneQueryForPlacement(
+          sourceValue._getQuery(),
+          this.resolveCollection,
+        )
         if (!(subQuery as Partial<QueryIR>).from) {
           throw new SubQueryMustHaveFromClauseError(context)
         }

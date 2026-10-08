@@ -3,7 +3,7 @@ import { act, renderHook } from '@testing-library/react'
 import { createCollection, eq } from '@tanstack/db'
 import { useLiveQueryEffect } from '../src/useLiveQueryEffect'
 import { mockSyncCollectionOptions } from '../../db/tests/utils'
-import type { DeltaEvent } from '@tanstack/db'
+import type { DeltaEvent, EffectConfig } from '@tanstack/db'
 
 type User = {
   id: number
@@ -29,6 +29,17 @@ function createUsersCollection(initialData = initialUsers) {
 }
 
 describe(`useLiveQueryEffect`, () => {
+  it(`reports an invalid query function result`, () => {
+    const query = (() => undefined) as unknown as EffectConfig<
+      User,
+      number
+    >[`query`]
+
+    expect(() => renderHook(() => useLiveQueryEffect({ query }))).toThrow(
+      /query must resolve to a QueryBuilder/i,
+    )
+  })
+
   it(`should create effect on mount and dispose on unmount`, async () => {
     const users = createUsersCollection()
     const events: Array<DeltaEvent<User, number>> = []

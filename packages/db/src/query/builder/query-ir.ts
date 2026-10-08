@@ -9,5 +9,11 @@ import type { QueryIR } from '../ir.js'
 export function getQueryIR(
   builder: BaseQueryBuilder | QueryBuilder<any> | InitialQueryBuilder,
 ): QueryIR {
+  const value: unknown = builder
+  if (value === undefined || value === null) {
+    throw new Error(
+      `Query must resolve to a QueryBuilder; received ${value === null ? `null` : `undefined`}.`,
+    )
+  }
   return (builder as unknown as BaseQueryBuilder)._getQuery()
 }

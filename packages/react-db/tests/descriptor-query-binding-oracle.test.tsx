@@ -4,7 +4,9 @@
  * construction outside DbProvider succeeds and two providers can consume the
  * same plan without sharing rows. This follows the standalone Query contract
  * and the SSR guide's factory-descriptor promise. Concrete-config descriptors
- * are intentionally outside the two-client law.
+ * are intentionally outside the two-client law. A committed Effect that first
+ * acquires a descriptor Collection also makes that source eligible for the
+ * DbClient's public dehydration snapshot.
  *
  * Model: each client owns a plain map of rows. A write to one map changes
  * only that client's expected result. An Effect reports that client's row on
@@ -20,13 +22,18 @@
  * then switches one mounted Effect to the other client. The
  * colliding-key history rejects a row-ID-only cross-client cache that the
  * disjoint history could miss. This bounded driver does not prove every query
- * clause, on-demand load, or framework adapter.
+ * clause, on-demand load, or framework adapter. A separate Effect history
+ * observes dehydration after the committed Effect has reported its first row.
+ * A no-client history changes one mounted hook from a concrete query to a
+ * descriptor query with the same semantic hash. It must reject the unbound
+ * source before reusing the old live-query Collection.
  */
 import { act, renderHook, waitFor } from '@testing-library/react'
 import {
   DbClient,
   Query,
   collectionOptions,
+  createCollection,
   getStableQueryBuilderHash,
 } from '@tanstack/db'
 import { describe, expect, it } from 'vitest'
@@ -74,6 +81,88 @@ function expectedRows(rows: ReadonlyMap<string, Row>): Array<Row> {
 }
 
 describe(`standalone descriptor query binding`, () => {
+  it(`rejects an unbound descriptor after a same-hash concrete query`, async () => {
+    const id = `standalone-descriptor-unbound-transition`
+    const concrete = createCollection(
+      mockSyncCollectionOptions<Row>({
+        id,
+        getKey: (row) => row.id,
+        initialData: [{ id: `one`, value: `concrete` }],
+      }),
+    )
+    const descriptor = collectionOptions(id, () =>
+      mockSyncCollectionOptions<Row>({
+        id,
+        getKey: (row) => row.id,
+        initialData: [{ id: `one`, value: `descriptor` }],
+      }),
+    )
+    const concreteQuery = new Query()
+      .from({ item: concrete })
+      .select(({ item }) => ({ id: item.id, value: item.value }))
+    const unboundQuery = new Query()
+      .from({ item: descriptor })
+      .select(({ item }) => ({ id: item.id, value: item.value }))
+    expect(getStableQueryBuilderHash(unboundQuery)).toBe(
+      getStableQueryBuilderHash(concreteQuery),
+    )
+
+    let query = concreteQuery
+    const mounted = renderHook(() => useLiveQuery({ query }))
+    await waitFor(() => {
+      expect(mounted.result.current.data[0]?.value).toBe(`concrete`)
+    })
+
+    // The public error is the observation at the attempted consumption cut.
+    // Returning the previous row would conceal the missing DbClient.
+    query = unboundQuery
+    expect(() => mounted.rerender()).toThrow(/requires a DbClient/)
+    mounted.unmount()
+  })
+
+  it(`dehydrates a descriptor source first consumed by a committed Effect`, async () => {
+    const id = `standalone-descriptor-effect-dehydration`
+    const expected = { id: `one`, value: `first` }
+    const descriptor = collectionOptions(id, (client) =>
+      mockSyncCollectionOptions<Row>({
+        id,
+        getKey: (row) => row.id,
+        initialData: client.requireDependency<Array<Row>>(`rows`),
+      }),
+    )
+    const query = new Query()
+      .from({ item: descriptor })
+      .select(({ item }) => ({ id: item.id, value: item.value }))
+    const client = new DbClient({ rows: [{ ...expected }] })
+    const observed: Array<Row> = []
+
+    const mounted = renderHook(
+      () =>
+        useLiveQueryEffect<Row, string>({
+          query,
+          onEnter: ({ value }) => {
+            observed.push({ id: value.id, value: value.value })
+          },
+        }),
+      {
+        wrapper: ({ children }: { children: ReactNode }) => (
+          <DbProvider client={client}>{children}</DbProvider>
+        ),
+      },
+    )
+
+    // The plain expected row is independent of the Effect and dehydration code.
+    // Compare at the settled enter cut, then at the public dehydrate() call.
+    await waitFor(() => expect(observed).toEqual([expected]))
+    const chunk = client
+      .dehydrate()
+      .collections.find((collection) => collection.collectionId === id)
+    expect(chunk?.rows.map(({ key, value }) => ({ key, value }))).toEqual([
+      { key: expected.id, value: expected },
+    ])
+    mounted.unmount()
+  })
+
   it(`binds an Effect's prebuilt query to its receiving provider`, async () => {
     const descriptor = collectionOptions(
       `standalone-descriptor-effect-rows`,

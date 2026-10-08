@@ -249,11 +249,18 @@ Collection formulations.
 The same owner also checks a prebuilt Query consumed by `useLiveQueryEffect`:
 two clients with the same row key report their own initial enter events, and
 one mounted Effect reports the new client's row after a provider switch.
+It checks that a descriptor Collection first acquired by a committed Effect
+appears in `DbClient.dehydrate()` after the first enter event. A separate
+same-hash transition from a concrete query to an unbound descriptor query
+checks that the hook reports the missing client before reusing prior rows.
 `packages/db/tests/db-client.test.ts` supplies a
 focused nested-query preload witness across two clients, including equal query
 hashes and distinct dehydrated rows. Concrete-config descriptors, on-demand
 acquisition, joins, union sources, and non-React adapters remain open for this
 binding law; a receiving oracle needs the relevant public observation for each.
+`packages/db/tests/live-query-options.test.ts` checks that a client-aware
+builder binds a nested descriptor when placing the subquery, before final
+preparation; it does not compare public nested-query rows.
 `packages/db/tests/query/collection-ref-compatibility.test.ts` pins the
 exported `IR.CollectionRef` shape for concrete Collections: `collection` is an
 enumerable, writable own field that a spread copies. It also checks that an

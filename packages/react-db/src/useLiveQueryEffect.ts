@@ -1,12 +1,7 @@
 import { useEffect, useRef } from 'react'
 import { createEffect, prepareLiveQueryValue } from '@tanstack/db'
 import { useOptionalDbClient } from './DbProvider'
-import { resumeSyncStarts } from './source-id-bindings'
-import type {
-  DeferredLiveQueryCollections,
-  Effect,
-  EffectConfig,
-} from '@tanstack/db'
+import type { EffectConfig } from '@tanstack/db'
 
 /**
  * React hook for creating a reactive effect that fires handlers when rows
@@ -42,38 +37,22 @@ export function useLiveQueryEffect<
   configRef.current = config
 
   useEffect(() => {
-    const deferredCollections: DeferredLiveQueryCollections = new Set()
-    let effect: Effect | undefined
-    try {
-      const query = prepareLiveQueryValue(
-        config.query,
-        client,
-        deferredCollections,
-      ) as EffectConfig<TRow, TKey>[`query`]
-      effect = createEffect<TRow, TKey>({
-        id: config.id,
-        query,
-        skipInitial: config.skipInitial,
-        onEnter: (event, ctx) => configRef.current.onEnter?.(event, ctx),
-        onUpdate: (event, ctx) => configRef.current.onUpdate?.(event, ctx),
-        onExit: (event, ctx) => configRef.current.onExit?.(event, ctx),
-        onBatch: (events, ctx) => configRef.current.onBatch?.(events, ctx),
-        onError: config.onError
-          ? (error, event) => configRef.current.onError?.(error, event)
-          : undefined,
-        onSourceError: config.onSourceError
-          ? (error) => configRef.current.onSourceError?.(error)
-          : undefined,
-      })
-      resumeSyncStarts(deferredCollections)
-    } catch (error) {
-      try {
-        resumeSyncStarts(deferredCollections)
-      } finally {
-        void effect?.dispose()
-      }
-      throw error
-    }
+    const query = prepareLiveQueryValue(config.query, client)
+    const effect = createEffect<TRow, TKey>({
+      id: config.id,
+      query: query as EffectConfig<TRow, TKey>[`query`],
+      skipInitial: config.skipInitial,
+      onEnter: (event, ctx) => configRef.current.onEnter?.(event, ctx),
+      onUpdate: (event, ctx) => configRef.current.onUpdate?.(event, ctx),
+      onExit: (event, ctx) => configRef.current.onExit?.(event, ctx),
+      onBatch: (events, ctx) => configRef.current.onBatch?.(events, ctx),
+      onError: config.onError
+        ? (error, event) => configRef.current.onError?.(error, event)
+        : undefined,
+      onSourceError: config.onSourceError
+        ? (error) => configRef.current.onSourceError?.(error)
+        : undefined,
+    })
 
     return () => {
       // Fire-and-forget disposal; AbortSignal cancels in-flight work

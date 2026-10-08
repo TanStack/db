@@ -43,7 +43,7 @@ type PreparedLiveQueryConfigInput = Omit<
 
 function createInitialQueryBuilder(
   dbClient: DbClient | undefined,
-  deferredCollections: DeferredLiveQueryCollections,
+  deferredCollections?: DeferredLiveQueryCollections,
 ): InitialQueryBuilder {
   return new BaseQueryBuilder(
     {},
@@ -53,12 +53,17 @@ function createInitialQueryBuilder(
 
 function createCollectionResolver(
   dbClient: DbClient | undefined,
-  deferredCollections: DeferredLiveQueryCollections,
+  deferredCollections?: DeferredLiveQueryCollections,
 ) {
   if (!dbClient) return undefined
   return (
     options: CollectionOptionsIdentity<any, string | number, any, any, any>,
   ): CollectionImpl<any, string | number, any, any, any> => {
+    if (!deferredCollections) {
+      return dbClient.collection(
+        options as CollectionOptions<any, string | number, any, any>,
+      ) as CollectionImpl<any, string | number, any, any, any>
+    }
     const collection = dbClient._materializeCollectionForRender(
       options as CollectionOptions<any, string | number, any, any>,
     ) as CollectionImpl<any, string | number, any, any, any>
@@ -70,7 +75,7 @@ function createCollectionResolver(
 export function prepareLiveQueryValue(
   value: unknown,
   dbClient: DbClient | undefined,
-  deferredCollections: DeferredLiveQueryCollections,
+  deferredCollections?: DeferredLiveQueryCollections,
 ): unknown {
   if (typeof value === `function`) {
     return prepareLiveQueryValue(
@@ -100,13 +105,8 @@ export function prepareLiveQueryValue(
       ...config
     } = value as PreparedLiveQueryConfigInput
 
-    const queryValue =
-      typeof query === `function`
-        ? query(createInitialQueryBuilder(dbClient, deferredCollections))
-        : query
-
     const preparedQuery = prepareLiveQueryValue(
-      queryValue,
+      query,
       dbClient,
       deferredCollections,
     )
