@@ -168,13 +168,12 @@ for (const firstId of [1, '1'] as const) {
   })
 }
 
-/** The authored-row model starts with one accepted insert and replaces that
- * typed key with one manually accepted whole row. The manual transaction's
- * receipt is the checkpoint: both active public snapshots and durable storage
- * must contain the replacement without a host event. A later event is only a
- * duplicate notification. This reaches the manual persistence path as well as
- * the automatic path above. */
-it('publishes a manually accepted same-key update to a same-tab peer', async () => {
+/** The authored-row model inserts, replaces, replaces again, then removes one
+ * typed key. Each receipt predicts the same whole row (or absence) in both
+ * active public snapshots and durable storage without a host event. The
+ * second replacement reaches manual acceptance; the third and removal reach
+ * automatic update and delete. A later event is only a duplicate notice. */
+it('publishes manual and automatic same-key edits to a same-tab peer', async () => {
   const host = createHost()
   const first = makeCollection(host, 'shared', 'first')
   const second = makeCollection(host, 'shared', 'second')
@@ -204,8 +203,22 @@ it('publishes a manually accepted same-key update to a same-tab peer', async () 
         expected,
       )
       expect(publicRows(second), 'manual writer receipt').toEqual(expected)
+      await first.update('row', (draft) => {
+        draft.value = 3
+      }).isPersisted.promise
+      const updated = expectedRows([{ id: 'row', value: 3 }])
+      expect(durableRows(host, 'shared'), 'automatic update durable').toEqual(
+        updated,
+      )
+      expect(publicRows(second), 'automatic update peer').toEqual(updated)
+      await second.delete('row').isPersisted.promise
+      expect(durableRows(host, 'shared'), 'automatic delete durable').toEqual(
+        [],
+      )
+      expect(publicRows(first), 'automatic delete peer').toEqual([])
+      expect(publicRows(second), 'automatic delete writer').toEqual([])
       host.deliver('shared')
-      expect(publicRows(first), 'late duplicate delivery').toEqual(expected)
+      expect(publicRows(first), 'late duplicate delivery').toEqual([])
     },
     () => [() => second.cleanup(), () => first.cleanup()],
   )
