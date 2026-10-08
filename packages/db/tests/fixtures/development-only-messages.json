@@ -35,15 +35,11 @@
   },
   {
     "file": "indexes/index-registry.ts",
-    "literals": [
-      "slow-query"
-    ]
+    "literals": ["slow-query"]
   },
   {
     "file": "indexes/index-registry.ts",
-    "literals": [
-      "collection-size"
-    ]
+    "literals": ["collection-size"]
   },
   {
     "file": "live-query-window-controller.ts",
