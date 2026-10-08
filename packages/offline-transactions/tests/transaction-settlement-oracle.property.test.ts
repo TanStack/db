@@ -557,7 +557,7 @@ const retryDecisionExamples: Array<[RetryDecisionCase, number]> = [
     scenario,
     1,
   ]),
-  [retryDecisionCases[0]!, 3],
+  [retryDecisionCases[0], 3],
 ]
 
 // This table is the contract model, not a copy of the executor. The permanent
