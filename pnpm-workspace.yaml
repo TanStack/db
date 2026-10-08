@@ -4,7 +4,7 @@ preferWorkspacePackages: true
 blockExoticSubdeps: true
 trustPolicy: 'no-downgrade'
 trustPolicyExclude:
-  # Expo 53 still pulls this 2023 release without provenance.
+  # Babel, ESLint React, and Istanbul still require semver 6, whose last release lacks provenance.
   - 'semver@6.3.1'
 
 packages:
