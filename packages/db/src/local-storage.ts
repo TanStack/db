@@ -41,6 +41,39 @@ export type StorageEventApi = {
   ) => void
 }
 
+// Browser storage events do not reach other Collections in the writing tab.
+// A sync run owns one listener for writes through the same Storage object/key.
+const sameTabListeners = new WeakMap<StorageApi, Map<string, Set<() => void>>>()
+
+function subscribeToSameTabWrites(
+  storage: StorageApi,
+  key: string,
+  refresh: () => void,
+): () => void {
+  let byKey = sameTabListeners.get(storage)
+  if (!byKey) {
+    byKey = new Map()
+    sameTabListeners.set(storage, byKey)
+  }
+  let listeners = byKey.get(key)
+  if (!listeners) {
+    listeners = new Set()
+    byKey.set(key, listeners)
+  }
+  listeners.add(refresh)
+  return () => {
+    listeners.delete(refresh)
+    if (listeners.size === 0) byKey.delete(key)
+    if (byKey.size === 0) sameTabListeners.delete(storage)
+  }
+}
+
+function publishSameTabWrite(storage: StorageApi, key: string): void {
+  for (const refresh of [...(sameTabListeners.get(storage)?.get(key) ?? [])]) {
+    refresh()
+  }
+}
+
 /**
  * Internal storage format that includes version tracking
  */
@@ -239,7 +272,9 @@ function createNoOpStorageEventApi(): StorageEventApi {
  * Creates localStorage collection options for use with a standard Collection
  *
  * This function creates a collection that persists data to localStorage/sessionStorage
- * and synchronizes changes across browser tabs using storage events.
+ * and synchronizes changes across browser tabs using storage events. Active
+ * Collections sharing this Storage object and storage key also synchronize
+ * writes in the same tab, without waiting for a browser event.
  * Create fresh options for each direct `createCollection()` call. One options
  * object contains state owned by one Collection and cannot be reused.
  *
@@ -432,6 +467,7 @@ export function localStorageCollectionOptions(
   const clearStorage: ClearStorageFn = (): void => {
     storage.removeItem(config.storageKey)
     sync.manualTrigger?.()
+    publishSameTabWrite(storage, config.storageKey)
   }
 
   /**
@@ -458,14 +494,15 @@ export function localStorageCollectionOptions(
         })
     }
     saveToStorage(staged)
-    // Promote only our own writes after success. Peer rows remain unknown
-    // until their storage event publishes them to this Collection.
+    // Promote our writes before confirming them. The same-tab notification
+    // then refreshes both this Collection's untouched peer rows and its peers.
     for (const mutation of mutations) {
       const storedItem = staged.get(mutation.key)
       if (storedItem) lastKnownData.set(mutation.key, storedItem)
       else lastKnownData.delete(mutation.key)
     }
     sync.confirmOperationsSync(mutations)
+    publishSameTabWrite(storage, config.storageKey)
   }
 
   // Reserve automatic and manual writes in acceptance order. A rejected
@@ -870,9 +907,15 @@ function createLocalStorageSync<T extends object>(
 
       // Add storage event listener for cross-tab sync
       storageEventApi.addEventListener(`storage`, handleStorageEvent)
+      const unsubscribeSameTab = subscribeToSameTabWrites(
+        storage,
+        storageKey,
+        processStorageChanges,
+      )
       return {
         cleanup: () => {
           storageEventApi.removeEventListener(`storage`, handleStorageEvent)
+          unsubscribeSameTab()
           if (syncParams === params) syncParams = null
         },
       }

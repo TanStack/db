@@ -1,25 +1,31 @@
 /**
  * A LocalStorage Collection stores whole snapshots under one key and receives
- * peer changes through storage events. For serialized disjoint writes, a peer
- * notification may arrive after a later write. Neither accepted write may be
- * erased by that delayed delivery. Once the event is delivered, both public
- * snapshots and a fresh restore must equal the authored rows.
+ * peer changes through storage events and same-tab publication. Active
+ * Collections with fresh options that share one Storage object and key must
+ * agree with the durable snapshot when a local write's persistence receipt
+ * fulfills, apart from their own pending optimistic overlays and valid-read
+ * failures. A delayed event must not erase a later accepted write. A failed
+ * write must not publish an unaccepted row.
  *
  * The independent model is an array of authored rows, keyed by typed ID. It
  * folds disjoint accepted writes; it does not read production storage or mirror
  * the adapter's version cache. The legal finite histories vary writer order and
  * number/string-equal keys. They exclude truly simultaneous cross-tab
  * read-modify-write races because localStorage offers no compare-and-swap.
- * The production driver controls event delivery after both `isPersisted`
- * promises fulfill. The durable checkpoint precedes delivery; public and
- * fresh-restore checkpoints follow it.
+ * The production driver withholds events through each persistence receipt.
+ * Durable and public snapshots are compared at that cut, then again after a
+ * delayed event and fresh restore. The proposed same-tab law distinguishes
+ * the old event-only prediction (a peer stays stale until delivery) from the
+ * approved prediction (the peer observes each successful local receipt).
+ * Different Storage wrapper objects and simultaneous cross-tab writes remain
+ * outside this identity-scoped law.
  *
  * The startup and clear histories use a second simple law: only a valid whole
  * stored snapshot can establish readiness; clear removes that snapshot and
  * publishes empty synced rows. Their model classifies absent, valid, and
  * malformed bytes without using the adapter's parser or mirror. The driver
  * checks startup status, unchanged malformed bytes, local clear publication,
- * peer delivery, later write settlement, and fresh restore. Direct same-tab
+ * peer publication, later write settlement, and fresh restore. Direct same-tab
  * edits through the raw Storage API are outside the adapter's event contract.
  * An options object contains mutable adapter state and may construct only one
  * Collection, including when shallow copies retain that state. The driver
@@ -123,12 +129,24 @@ for (const firstId of [1, '1'] as const) {
             { id: firstId === 1 ? '1' : 1, value: 2 },
           ]
           await first.insert({ ...authored[0]! }).isPersisted.promise
+          expect(durableRows(host, 'shared'), 'first durable receipt').toEqual(
+            expectedRows(authored.slice(0, 1)),
+          )
+          expect(publicRows(second), 'first same-tab peer receipt').toEqual(
+            expectedRows(authored.slice(0, 1)),
+          )
           await second.insert({ ...authored[1]! }).isPersisted.promise
           const expected = expectedRows(authored)
           expect(
             durableRows(host, 'shared'),
             'durable before delivery',
           ).toEqual(expected)
+          expect(publicRows(first), 'first public before delivery').toEqual(
+            expected,
+          )
+          expect(publicRows(second), 'second public before delivery').toEqual(
+            expected,
+          )
           host.deliver('shared')
           expect(publicRows(first), 'first public after delivery').toEqual(
             expected,
@@ -149,6 +167,152 @@ for (const firstId of [1, '1'] as const) {
     })
   })
 }
+
+/** The authored-row model starts with one accepted insert and replaces that
+ * typed key with one manually accepted whole row. The manual transaction's
+ * receipt is the checkpoint: both active public snapshots and durable storage
+ * must contain the replacement without a host event. A later event is only a
+ * duplicate notification. This reaches the manual persistence path as well as
+ * the automatic path above. */
+it('publishes a manually accepted same-key update to a same-tab peer', async () => {
+  const host = createHost()
+  const first = makeCollection(host, 'shared', 'first')
+  const second = makeCollection(host, 'shared', 'second')
+  await withHistoryCleanup(
+    async () => {
+      await Promise.all([first.preload(), second.preload()])
+      await first.insert({ id: 'row', value: 1 }).isPersisted.promise
+      expect(publicRows(second)).toEqual([{ id: 'row', value: 1 }])
+
+      const transaction = createTransaction({
+        autoCommit: false,
+        mutationFn: async ({ transaction: pending }) => {
+          await second.utils.acceptMutations(pending)
+        },
+      })
+      transaction.mutate(() => {
+        second.update('row', (draft) => {
+          draft.value = 2
+        })
+      })
+      await transaction.commit()
+      const expected = expectedRows([{ id: 'row', value: 2 }])
+      expect(durableRows(host, 'shared'), 'manual durable receipt').toEqual(
+        expected,
+      )
+      expect(publicRows(first), 'manual same-tab peer receipt').toEqual(
+        expected,
+      )
+      expect(publicRows(second), 'manual writer receipt').toEqual(expected)
+      host.deliver('shared')
+      expect(publicRows(first), 'late duplicate delivery').toEqual(expected)
+    },
+    () => [() => second.cleanup(), () => first.cleanup()],
+  )
+})
+
+/** A failed Storage write never becomes an authored row. The model therefore
+ * keeps the first accepted row at the rejected receipt, in storage and in
+ * both public snapshots. This distinguishes notification after a successful
+ * setItem from notification at write admission. */
+it('does not publish a rejected same-tab write', async () => {
+  const host = createHost()
+  const first = makeCollection(host, 'shared', 'first')
+  const second = makeCollection(host, 'shared', 'second')
+  await withHistoryCleanup(
+    async () => {
+      await Promise.all([first.preload(), second.preload()])
+      await first.insert({ id: 'kept', value: 1 }).isPersisted.promise
+      const writeError = new Error('storage write failed')
+      const setItem = host.storage.setItem
+      host.storage.setItem = () => {
+        throw writeError
+      }
+      try {
+        await expect(
+          second.insert({ id: 'rejected', value: 2 }).isPersisted.promise,
+        ).rejects.toBe(writeError)
+      } finally {
+        host.storage.setItem = setItem
+      }
+      const expected = expectedRows([{ id: 'kept', value: 1 }])
+      expect(durableRows(host, 'shared'), 'rejected durable receipt').toEqual(
+        expected,
+      )
+      expect(publicRows(first), 'peer after rejected receipt').toEqual(expected)
+      expect(publicRows(second), 'writer after rollback').toEqual(expected)
+    },
+    () => [() => second.cleanup(), () => first.cleanup()],
+  )
+})
+
+/** Cleanup ends the first Collection's receiving sync run. The peer's next
+ * accepted write must not republish into that ended run. Restart establishes
+ * a new persisted restore and then receives a later same-tab write. The
+ * authored model contains the two accepted rows and no event is delivered. */
+it('restores same-tab publication after cleanup and restart', async () => {
+  const host = createHost()
+  const first = makeCollection(host, 'shared', 'first')
+  const second = makeCollection(host, 'shared', 'second')
+  await withHistoryCleanup(
+    async () => {
+      await Promise.all([first.preload(), second.preload()])
+      await first.cleanup()
+      await second.insert({ id: 'during-cleanup', value: 1 }).isPersisted
+        .promise
+      expect(first.status).toBe('cleaned-up')
+      first.startSyncImmediate()
+      expect(publicRows(first), 'restart restore').toEqual([
+        { id: 'during-cleanup', value: 1 },
+      ])
+      await second.insert({ id: 'after-restart', value: 2 }).isPersisted.promise
+      const expected = expectedRows([
+        { id: 'during-cleanup', value: 1 },
+        { id: 'after-restart', value: 2 },
+      ])
+      expect(durableRows(host, 'shared')).toEqual(expected)
+      expect(publicRows(first), 'restarted same-tab peer receipt').toEqual(
+        expected,
+      )
+    },
+    () => [() => second.cleanup(), () => first.cleanup()],
+  )
+})
+
+/** The controlled host supplies the no-event premise above. This receiving
+ * witness uses jsdom's Storage object through the public default option: its
+ * second Collection must see a write from the first without a synthetic event.
+ * It does not claim native multi-window timing or cross-tab atomicity. */
+it('publishes through the default same-tab Storage object', async () => {
+  const storageKey = 'same-tab-local-storage-oracle'
+  window.localStorage.removeItem(storageKey)
+  const first = createCollection(
+    localStorageCollectionOptions<Row>({
+      id: 'first-default-storage',
+      storageKey,
+      getKey: (row) => row.id,
+    }),
+  )
+  const second = createCollection(
+    localStorageCollectionOptions<Row>({
+      id: 'second-default-storage',
+      storageKey,
+      getKey: (row) => row.id,
+    }),
+  )
+  await withHistoryCleanup(
+    async () => {
+      await Promise.all([first.preload(), second.preload()])
+      await first.insert({ id: 'row', value: 1 }).isPersisted.promise
+      expect(publicRows(second)).toEqual([{ id: 'row', value: 1 }])
+    },
+    () => [
+      () => second.cleanup(),
+      () => first.cleanup(),
+      () => window.localStorage.removeItem(storageKey),
+    ],
+  )
+})
 
 /** Manual acceptance belongs to the Collection object, even when two distinct
  * Collections happen to share an ID. The model's two stores each contain only
@@ -263,8 +427,8 @@ it('cleanup releases its storage listener and restart installs one listener', as
 /** The supported clear utility removes and publishes the empty snapshot. The
  * independent model starts with one row, clears it, then inserts a new row;
  * the authored final snapshot contains only the new row. The production
- * driver delivers peer events after each durable change. Local publication
- * is checked at clear return; both peers and fresh restore at settlement. */
+ * driver withholds peer events until after each same-tab checkpoint. Local and
+ * peer publication are checked at clear return, settlement and late delivery. */
 it('does not retain cleared rows after the next local write settles', async () => {
   const host = createHost()
   const collection = makeCollection(host, 'shared', 'writer')
@@ -282,12 +446,14 @@ it('does not retain cleared rows after the next local write settles', async () =
         publicRows(collection),
         'clear publishes the empty snapshot',
       ).toEqual([])
+      expect(publicRows(peer), 'peer clear without event').toEqual([])
       host.deliver('shared')
       expect(publicRows(peer)).toEqual([])
       await collection.insert({ id: 'new', value: 2 }).isPersisted.promise
       const expected = [{ id: 'new', value: 2 }]
       expect(durableRows(host, 'shared')).toEqual(expected)
       expect(publicRows(collection)).toEqual(expected)
+      expect(publicRows(peer), 'peer write without event').toEqual(expected)
       host.deliver('shared')
       expect(publicRows(peer)).toEqual(expected)
       reopened = makeCollection(host, 'shared', 'reopened')
@@ -498,13 +664,19 @@ it('a peer insert during a pending local insert confirms the final local row', a
       await entered.promise
       await peer.insert({ id: 'same', value: 2 }).isPersisted.promise
       expect(durableRows(host, 'shared')).toEqual([{ id: 'same', value: 2 }])
+      expect(publicRows(local), 'pending local intent overlays peer').toEqual([
+        { id: 'same', value: 1 },
+      ])
       host.deliver('shared')
       expect(publicRows(local)).toEqual([{ id: 'same', value: 1 }])
       gate.resolve()
       await outcome
-      host.deliver('shared')
       expect(durableRows(host, 'shared')).toEqual([{ id: 'same', value: 1 }])
       expect(publicRows(local)).toEqual([{ id: 'same', value: 1 }])
+      expect(publicRows(peer), 'peer same-key receipt without event').toEqual([
+        { id: 'same', value: 1 },
+      ])
+      host.deliver('shared')
       expect(publicRows(peer)).toEqual([{ id: 'same', value: 1 }])
     },
     () => [() => gate.resolve(), () => peer.cleanup(), () => local.cleanup()],

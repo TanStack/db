@@ -2,13 +2,16 @@
 title: LocalStorage Collection
 ---
 
-LocalStorage collections store small amounts of local-only state that persists across browser sessions and syncs across browser tabs in real-time.
+LocalStorage collections store small amounts of local-only state that persists
+across browser sessions and syncs between Collections in one tab and across
+browser tabs.
 
 ## Overview
 
 The `localStorageCollectionOptions` allows you to create collections that:
 - Persist data to localStorage (or sessionStorage)
 - Automatically sync across browser tabs using storage events
+- Synchronize active same-tab Collections sharing one storage object and key
 - Support optimistic updates with automatic rollback on errors
 - Store all data under a single localStorage key
 - Work with any storage API that matches the localStorage interface
@@ -68,9 +71,9 @@ The `localStorageCollectionOptions` function accepts the following options:
 - `onUpdate`: Optional handler function called when items are updated
 - `onDelete`: Optional handler function called when items are deleted
 
-## Cross-Tab Synchronization
+## Synchronization
 
-LocalStorage collections automatically sync across browser tabs in real-time:
+LocalStorage collections sync across browser tabs through storage events:
 
 ```typescript
 const settingsCollection = createCollection(
@@ -84,6 +87,14 @@ const settingsCollection = createCollection(
 // Changes in one tab are automatically reflected in all other tabs
 // This works automatically via storage events
 ```
+
+Two active Collections created with fresh options also sync in the same tab
+when they use the same `storage` object and `storageKey`. A successful automatic
+write, manual acceptance, or `clearStorage()` updates both public snapshots
+without waiting for a browser event. A Collection's pending optimistic rows
+remain visible until their own mutations settle. The same-tab mechanism does
+not connect distinct custom Storage wrapper objects, even if those wrappers
+access the same underlying bytes.
 
 Automatic mutations in one Collection persist in mutation order, even if their
 optional handlers finish in another order. A handler that rejects does not write
@@ -106,8 +117,9 @@ Startup requires a valid stored snapshot. Malformed JSON or a row missing its
 version information puts the Collection in an error state and leaves the stored
 bytes intact. Repair or remove that value, then restart the Collection.
 `utils.clearStorage()` removes the stored snapshot and immediately publishes
-removal of its accepted rows. A pending optimistic mutation can remain visible
-and later persist. Edit the Collection through its mutation methods;
+removal of accepted rows to active same-tab Collections. A pending optimistic
+mutation can remain visible and later persist. Edit the Collection through its
+mutation methods;
 direct same-tab edits to its storage key do not produce browser storage events.
 Use an IndexedDB Collection when several tabs need stronger write coordination.
 
