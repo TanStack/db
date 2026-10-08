@@ -408,22 +408,23 @@ export class TransactionExecutor {
 
         restorationTx.applyMutations(offlineTx.mutations)
 
-        // Register with each affected collection's state manager
-        const touchedCollections = new Set<string>()
-        for (const mutation of offlineTx.mutations) {
-          // Defensive check for corrupted deserialized data
-          // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
-          if (!mutation.collection) {
-            continue
+        // Register with each affected Collection. If one cannot track it, roll
+        // it back, so no Collection keeps a restoration nothing will settle.
+        try {
+          for (const mutation of offlineTx.mutations) {
+            // Defensive check for corrupted deserialized data
+            // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
+            if (!mutation.collection) {
+              continue
+            }
+            if (mutation.collection._state.trackTransaction(restorationTx))
+              mutation.collection._state.recomputeOptimisticState(true)
           }
-          const collectionId = mutation.collection.id
-          if (touchedCollections.has(collectionId)) {
-            continue
-          }
-          touchedCollections.add(collectionId)
-
-          mutation.collection._state.trackTransaction(restorationTx)
-          mutation.collection._state.recomputeOptimisticState(true)
+        } catch (error) {
+          // A secondary rollback settles only this restoration; it must not
+          // roll back the user's live transactions on the same keys.
+          restorationTx.rollback({ isSecondaryRollback: true })
+          throw error
         }
 
         this.offlineExecutor.registerRestorationTransaction(

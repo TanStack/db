@@ -677,11 +677,11 @@ class Transaction<T extends object = Record<string, unknown>> {
     isSecondaryRollback?: boolean
     error?: Error
   }): Transaction<T> {
-    if (config?.error) {
-      this.error = { message: config.error.message, error: config.error }
-    }
     throwSettlementErrors(
-      this.rollbackSettlingErrors(config?.isSecondaryRollback ?? false),
+      this.rollbackSettlingErrors(
+        config?.isSecondaryRollback ?? false,
+        config?.error,
+      ),
     )
     return this
   }
@@ -691,11 +691,18 @@ class Transaction<T extends object = Record<string, unknown>> {
    * them, so a caller that settles several transactions reports one flat list.
    * @internal
    */
-  rollbackSettlingErrors(isSecondaryRollback: boolean): Array<unknown> {
+  rollbackSettlingErrors(
+    isSecondaryRollback: boolean,
+    error?: Error,
+  ): Array<unknown> {
     if (this.state === `completed`) {
       throw new TransactionAlreadyCompletedRollbackError()
     }
     if (this.state === `failed`) return []
+    // A settled transaction keeps the error it settled with.
+    if (error) {
+      this.error = { message: error.message, error }
+    }
 
     this.setState(`failed`)
 
@@ -731,7 +738,8 @@ class Transaction<T extends object = Record<string, unknown>> {
    * Recomputes every Collection that tracked this transaction and returns
    * their errors. A failure in one Collection must not leave the others
    * showing this transaction's settled optimistic state. A settled
-   * transaction then drops its Collections, so it holds none of them.
+   * transaction then empties its set of tracking Collections. Its mutations
+   * still name their Collection.
    * Not `private`: `TransactionWithMutations` omits a key, which drops
    * private members, and a Transaction with one is then not assignable.
    * @internal

@@ -550,6 +550,7 @@ export class OfflineExecutor {
     // Mark as completed: every Collection that tracked it recomputes and
     // releases it. The actual data will come from the sync.
     restorationTx.setState(`completed`)
+    restorationTx.isPersisted.resolve(restorationTx)
     restorationTx.touchCollection()
   }
 

@@ -230,7 +230,8 @@ The ownership oracle gained:
   one or both Collections;
 - an `open` that reuses an earlier id, with the duplicate-id rule in the model;
 - a `mutate()` callback that writes and then throws;
-- a retention observation: a settled transaction holds no Collection;
+- a retention observation: a settled transaction's set of tracking
+  Collections is empty (its mutations still name their Collection);
 - identity comparison of tracked transactions;
 - four pinned histories (scope identity, duplicate id, flat aggregate,
   commit error).
@@ -264,6 +265,34 @@ made that assignment. The method is now `@internal`, and
 `mutation-handler-compatibility.test-d.ts` asserts the assignability. The test
 fails with the private method and passes without it.
 
+## Targeted review (head `9e7ebb0a8`)
+
+Probes on `9e7ebb0a8` and on `main` `2c98b4992`:
+
+| Finding | `9e7ebb0a8` | `main` | Disposition |
+| --- | --- | --- | --- |
+| A direct write (`commitDirect`) whose subscriber throws leaves a pending transaction tracked | Handler never runs; the row stays pending | Same | Open: the settlement law for a direct write that throws is undecided (rollback or commit) |
+| `OfflineTransactionAPI.mutate()` creates a new transaction with the same id on each call | Second call throws `DuplicateTransactionIdError` | The second transaction replaced the first and hid its rows | Fixed: repeated calls add to one transaction |
+| A completed restoration never settles `isPersisted` | Pending | Same | Fixed |
+| A restoration that one Collection cannot track stays tracked by the others | The first Collection keeps the restored row | Not reachable: no duplicate-id error | Fixed: a secondary rollback, which leaves live transactions on the same keys alone |
+| `rollback({ error })` on a settled transaction replaces its error | Replaced | Kept | Fixed: the error is recorded after the state checks |
+| "A settled transaction holds no reference to its Collections" | Its mutations still name their Collection | — | Claim corrected: its set of tracking Collections is empty |
+| The optimistic-history oracle compares tracked transactions by id | Equivalent within its grammar, where ids are unique | — | Now compares identity |
+| `commit()` and `isPersisted` report settlement errors in different shapes | By source | — | Open: needs a decision |
+| A recompute that throws delays release until the next recompute | Same as round 2 | — | Accepted residue, as in round 2 |
+
+The focused witnesses in
+`packages/offline-transactions/tests/restoration-ownership.test.ts` and
+`packages/db/tests/transactions.test.ts` failed on `9e7ebb0a8` and pass now.
+
+| Mutant | Result |
+| --- | --- |
+| `mutate()` replaces the offline transaction | Assertion failure, 1 test |
+| A completed restoration skips `isPersisted` | Assertion failure, 1 test |
+| No rollback after a restoration fails to track | Assertion failure, 1 test |
+| A plain rollback, which cascades to the live same-key transaction | Assertion failure, 1 test |
+| `rollback()` records the error before checking the state | Assertion failure, 1 test |
+
 ## Unresolved
 
 - The generated ownership grammar reaches a conflicting rollback that throws,
@@ -272,7 +301,9 @@ fails with the private method and passes without it.
 - Two Collection instances with one id, and a Collection cleaned up before
   its transaction settles, are covered only by focused witnesses.
 - Offline restoration's tracking path is covered by offline-transactions'
-  witnesses, not by the ownership oracle.
+  witnesses, not by the ownership oracle or any generated history.
+- A direct write whose subscriber throws leaves its transaction pending, on
+  `main` and here. No oracle grammar authors a direct write.
 - The ownership oracle does not combine queued sync transactions that hold a
   completed row with a second Collection. The optimistic-history oracle owns
   held rows for one Collection.

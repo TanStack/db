@@ -33,7 +33,9 @@ export class OfflineTransaction {
   }
 
   mutate(callback: () => void): Transaction {
-    this.transaction = createTransaction({
+    // Repeated calls add to the same transaction: one offline transaction is
+    // one transaction, and its id is unique among live transactions.
+    this.transaction ??= createTransaction({
       id: this.offlineId,
       autoCommit: false,
       mutationFn: async () => {
