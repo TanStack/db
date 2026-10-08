@@ -238,6 +238,10 @@ without changing the product law. Both would receive a positive reviewer
 recommendation: the findings were technically accurate, specific, and
 prioritized by false-green risk.
 
+Electric review loss audit: 10 raw items = 8 `fixed-now` + 2 `duplicate`.
+No Electric review item remains open inside the declared one-provider
+after-durable history.
+
 ### Prep review ledger
 
 The correctness review and simplifier review were read-only. Their raw items
@@ -311,3 +315,17 @@ application mutation handler; the later installed Electric row proves source
 continuation. These are named coverage cells, not evidence of a reachable
 in-scope counterexample to the certified source receipt law. An absent ID
 after an intervening durable write still fails closed by design.
+
+### Final integrated verification
+
+The exact reviewed executable head is
+`013aa2cb788f562e87ffa0bbc10c1a1073dead43`. It includes the
+`362be03006baa210461ce31ba2cf134f3243596b` merge of `origin/main`.
+The later review-record and changeset commit changes no executable code.
+At this head, the real SQLite adapter oracle passed 43 tests. The persisted
+wrapper oracle passed 655 tests with one existing todo. The Browser
+coordinator oracle passed 158 tests. All five manual-source Chromium/OPFS
+leader-close schedules passed. The full Electric OPFS suite passed 16 tests.
+TypeScript checks passed for `@tanstack/db`, SQLite persistence core, and
+Browser persistence after the final fixture type correction. The earlier
+Vitest Expo tsconfig warnings did not fail these suites.

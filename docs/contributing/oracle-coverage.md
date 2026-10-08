@@ -691,13 +691,16 @@ in `packages/browser-db-sqlite-persistence/e2e/electric-leader-close.opfs.spec.t
 streams a PostgreSQL row through the installed SDK, closes the first writer
 after SQLite applies that source transaction, and checks the surviving
 Collection, mounted live query, durable rows, exact applied ID, resume marker,
-and later PostgreSQL row. It supplies the SDK handoff for this one
+and later PostgreSQL row. The original Electric applied receipt fulfills in
+one sync run. The crossing row's transaction and first durable snapshot agree
+on resume offset, handle, and shape ID. It supplies the SDK handoff for this one
 after-durable history.
 
 This bounded owner assumes tabs run the same protocol version and one `txId`
 identifies one immutable payload. The Electric receiver does not cover
-before-durable loss, queued hydration, seven concurrent Collections, or a
-closing leader's active SQLite call; those need receiving schedules owned by
+before-durable loss, queued hydration, two Electric providers contending in
+both tabs, seven concurrent Collections, or a closing leader's active SQLite
+call; those need receiving schedules owned by
 the Browser Electric, hydration, and OPFS page-lifecycle suites. Arbitrary
 concurrent writes, physical crash durability, other browsers, and
 cross-version tabs are outside the established host evidence. These limits do
