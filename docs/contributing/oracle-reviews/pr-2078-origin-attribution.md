@@ -181,4 +181,74 @@ statements now name the historical commit and point to the ordered-batch witness
 added in this PR. The generated `VirtualRowProps` and `VirtualOrigin` reference
 pages linked to old source line numbers; all seven declaration links now match
 `virtual-props.ts`. These follow-ups do not change the eight-item accounting
-above. The new CI run is pending at the time of this note.
+above. All reported CI checks passed on `e659d413e0f52fa0f9d800fb1d5a41ca784199c3`.
+
+CodeRabbit's next review, [5459093045](https://github.com/TanStack/db/pull/2078#pullrequestreview-5459093045),
+checked that head and found an oracle harness defect. Its three findings across
+both reviews are accounted for separately from the user's eight findings:
+
+| ID | Claim | Verdict and evidence | PR action and durable value |
+| --- | --- | --- | --- |
+| CR1 | The earlier #2071 review record still claimed that delete then reinsert was outside the source-batch grammar. | Correct on `00fcf0f`; the ordered grammar and coverage-map witness existed by that commit. | **fixed-now** in `e659d413e`; historical wording now identifies the earlier limit and later witness. |
+| CR2 | Six `VirtualRowProps` anchors and one `VirtualOrigin` anchor pointed into source comments. | Correct on `00fcf0f`; all seven current anchors match the declarations at lines 74, 85, 104, 133, 141, 149, and 36. | **fixed-now** in `e659d413e`; generated reference links were corrected. |
+| CR3 | A rejected pending manual transaction never starts its handler, so its `isPersisted` promise and oracle cleanup can remain pending. Commit the transaction after rejecting its handler promise. | Correct on `e659d413e`. Two source-row histories and one later-edit history failed at the settlement row assertion after the test first made cleanup safe. The proposed single-line fix alone leaves a later-edit history pending because the shared `starting` variable points to the later request. | **fixed-now** in this follow-up: commit the rejected manual request, bind each manual handler to its own deferred result, and release any still-active transaction during cleanup. The primary oracle and coverage map retain the law and limits. |
+
+The reviewer's three findings were accurate and focused. The proposed fix for
+CR3 identified the missing commit but did not account for a later edit replacing
+the shared deferred promise. The reviews distinguished documentation defects
+from a test-integrity defect and had little noise. **Hire recommendation:** yes
+for further review work, with adjacent interleavings checked before accepting
+the proposed patch verbatim.
+
+### CR3 law, reach, and calibration
+
+A pending manual optimistic transaction starts its mutation function only when
+committed. Handler rejection must roll it back, reject `isPersisted` with the
+same reason, and expose the applied source row after dropping any optimistic
+overlay. This follows from the optimistic transaction and settlement entries in
+the glossary and from `Transaction.commit()`/`rollback()`. The production path
+is `createTransaction({ autoCommit: false })` → `mutate()` → `commit()` → the
+controlled handler promise → `isPersisted`. The model already represented
+pending, persisting, and failed transactions. Its grammar could select a
+rejection but the pending fixed witnesses selected only success or direct
+rollback. The driver did not commit on rejection, and cleanup tried rollback
+only when the expected result was still pending.
+
+The expanded fixed matrix crosses optimistic visibility with success, direct
+rollback, and handler rejection after a same-key source insert. A second pair
+starts a later disjoint edit before the manual request succeeds or rejects.
+After each step, the driver checks public rows, origin and pending-write
+metadata, subscriber replicas, downstream rows, request outcome and reason,
+and publication cuts. At settlement it also checks the rows captured when
+`isPersisted` settles. The source-row and later-edit rejection cases failed at
+that settlement assertion on the reviewed harness. They were assertion
+failures, not Vitest timeouts; cleanup preserved the primary mismatch and
+released the pending transaction. With the commit fix in place, temporarily
+restoring the shared handler made both later-edit cases fail at the same
+assertion. Binding the manual handler to its own deferred result makes all
+eight targeted cases pass. This calibrates both the original omission and the
+plausible one-line repair that misses an adjacent legal history.
+
+This establishes the bounded law for the named manual histories through the
+core Collection path and public settlement, row, and publication checkpoints.
+It does not prove longer manual interleavings, same-key cascades, or a persisted
+adapter path. The coverage map keeps those limits under the optimistic history
+owner. CR3 changes the oracle driver and its fixed histories, not the product
+implementation or model state.
+
+| Guide requirement | CR3 evidence |
+| --- | --- |
+| ORC-001/003 | The oracle's opening states the manual settlement law and limits; the model, grammar, driver, and per-step comparison remain distinct. |
+| ORC-002 | The reference transition remains independent of transaction implementation; no expected state was copied from the new driver. |
+| ORC-004/007 | The new cases are bounded fixed histories; generated grammar and fixed/random campaigns did not change. |
+| ORC-005/006 | Real core transactions reach `isPersisted` and public rows. Original and shared-handler variants fail at the intended settlement assertion; the repaired driver passes. |
+| ORC-008/009 | Model state did not change. `pending`, `persisting`, `failed`, and settlement retain glossary meanings. |
+| ORC-010 | Cleanup rolls back a still-active transaction regardless of expected outcome; the original assertion remains the aggregate cause, with secondary diagnostics retained. The deferred rejection has a handler before a manual commit starts. |
+| ORC-011 | No plausible shared semantic fault between production and model was identified; this review concerned the production driver's ability to reach the modeled outcome. |
+| ORC-012/013 | This record binds the reviewed head, RED/GREEN cuts, hostile variant, neighboring success/rollback cases, and remaining limits. |
+| ORC-014 | The claim is limited to the core Collection path and makes no real-provider handoff claim. |
+
+Final CodeRabbit accounting: **3 raw findings = 3 fixed-now**. There are no
+deferred or design-decision items. The original user's eight-item audit remains
+**8 raw = 8 fixed-now**; the unknown private #2071 bridge sequence remains an
+evidence limit, not a CodeRabbit item.

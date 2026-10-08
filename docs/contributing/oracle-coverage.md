@@ -801,7 +801,13 @@ The post-merge review added three missing domains to existing owners:
   when at least one mutation succeeds; two failures leave it remote. A hostile
   failed-sibling mutant fails the one-success cases at settlement. The pending
   lane rejects a mutant that ignores pending mutations at its source or
-  settlement publication. The original truncate implementation failed the
+  settlement publication. Bounded manual histories now cross success, direct
+  rollback, and handler rejection with both optimistic visibility settings.
+  A later disjoint edit cannot supply the earlier manual request's handler
+  outcome. The original harness left rejected manual requests pending; the
+  new settlement check rejects that harness and a shared-handler variant.
+  Longer manual interleavings and same-key cascade combinations remain outside
+  these fixed histories. The original truncate implementation failed the
   reentrant history at failed-mutation settlement. The earlier
   accepted-snapshot retention law
   and its truncate-capture ownership refinement were retired with this

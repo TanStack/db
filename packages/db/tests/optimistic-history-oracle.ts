@@ -60,9 +60,12 @@ import type { CollectionConfig, SyncConfig } from '../src/types.js'
  * moment (`whenSyncAccepted`) reject.
  * A manual local transaction can remain pending before its mutation function
  * starts. Source writes on its key apply at once and receive local attribution;
- * rolling it back exposes that source row with the same origin. The model keeps
- * pending distinct from persisting because the same source commit publishes
- * immediately in the former state and waits in the latter.
+ * rolling it back exposes that source row with the same origin. A pending
+ * manual transaction starts its mutation function at commit. If that function
+ * rejects, the transaction rolls back and `isPersisted` rejects with its
+ * reason. A later edit cannot determine the earlier manual request's outcome.
+ * The model keeps pending distinct from persisting because the same source
+ * commit publishes immediately in the former state and waits in the latter.
  * Ordinary source batches write rows before deletes. The ordered-operations
  * lane also permits a delete and reinsert of one key in the same transaction.
  * Its `row` action combines source insert and update; the production driver
@@ -954,6 +957,9 @@ export async function runOptimisticHistory(
             if (batch.awaitReceipt) counts.awaitedReceipts++
           }
           const done = createDeferred<void>()
+          // Rejection can precede a manual commit. Keep that controlled
+          // failure from becoming an unhandled promise during diagnosis.
+          void done.promise.catch(() => undefined)
           starting = done
           const performEdit = () =>
             step.type === `delete`
@@ -980,7 +986,8 @@ export async function runOptimisticHistory(
           const tx = manual
             ? createTransaction<HistoryRow>({
                 autoCommit: false,
-                mutationFn: handler,
+                // A manual commit can run after later edits replace `starting`.
+                mutationFn: () => done.promise,
               })
             : performEdit()
           if (manual) tx.mutate(() => void performEdit())
@@ -1043,6 +1050,7 @@ export async function runOptimisticHistory(
           } else if (step.failure === `reject`) {
             const error = new Error(`Mutation rejected at step ${position}`)
             op.expected = { status: `rejected`, reason: error }
+            if (op.manual) void op.tx.commit().catch(() => undefined)
             op.done.reject(error)
           } else {
             // Manual rollback promises rejection, not a particular reason value.
@@ -1143,6 +1151,11 @@ export async function runOptimisticHistory(
         () => {
           if (op.expected.status === `pending`) {
             op.expected = { status: `rejected` }
+          }
+          // A failed assertion can leave a manual transaction uncommitted.
+          // Release it before waiting for its receipt, without hiding the
+          // original assertion failure.
+          if (op.tx.state === `pending` || op.tx.state === `persisting`) {
             op.tx.rollback({ isSecondaryRollback: true })
           }
         },

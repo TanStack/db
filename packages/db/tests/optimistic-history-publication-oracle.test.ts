@@ -229,14 +229,17 @@ it(`retains active-mutation attribution from a truncate after failure`, async ()
 // A manual local transaction is active before its mutation function starts.
 // Source writes do not wait for it, so settlement exposes the already applied
 // source row and its key-and-timing attribution. Optimistic visibility and
-// fulfillment are separate dimensions of that attribution.
+// fulfillment and handler rejection are separate dimensions of that attribution.
 it.each(
   [false, true].flatMap((optimistic) =>
-    [false, true].map((success) => ({ optimistic, success })),
+    ([`rollback`, `reject`, `success`] as const).map((outcome) => ({
+      optimistic,
+      outcome,
+    })),
   ),
 )(
-  `keeps source attribution through pending settlement, optimistic=$optimistic success=$success`,
-  async ({ optimistic, success }) => {
+  `keeps source attribution through pending settlement, optimistic=$optimistic outcome=$outcome`,
+  async ({ optimistic, outcome }) => {
     const counts = await runOptimisticHistory(
       [],
       [
@@ -247,13 +250,53 @@ it.each(
           truncate: false,
           copies: 1,
         },
-        { type: `settle`, slot: 0, success, cascade: false },
+        {
+          type: `settle`,
+          slot: 0,
+          success: outcome === `success`,
+          cascade: false,
+          ...(outcome === `success` ? {} : { failure: outcome }),
+        },
       ],
     )
     expect(counts).toMatchObject({
       edits: 1,
-      failures: success ? 0 : 1,
+      failures: outcome === `success` ? 0 : 1,
       sourceInserts: 1,
+    })
+  },
+)
+
+// The first manual transaction starts its mutation function only at commit.
+// A later automatic edit must not replace the handler promise for that request.
+it.each([false, true])(
+  `settles an earlier pending manual request after a later edit starts, success=%s`,
+  async (success) => {
+    const counts = await runOptimisticHistory(
+      [],
+      [
+        {
+          type: `edit`,
+          key: 1,
+          fields: { a: 1 },
+          optimistic: true,
+          pending: true,
+        },
+        { type: `edit`, key: 2, fields: { a: 2 }, optimistic: true },
+        {
+          type: `settle`,
+          slot: 0,
+          success,
+          cascade: false,
+          ...(success ? {} : { failure: `reject` as const }),
+        },
+        { type: `settle`, slot: 0, success: true, cascade: false },
+      ],
+    )
+    expect(counts).toMatchObject({
+      edits: 2,
+      settlements: 2,
+      failures: success ? 0 : 1,
     })
   },
 )
