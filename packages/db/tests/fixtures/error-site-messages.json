@@ -761,6 +761,90 @@
     "literals": ["Live query graph failed"]
   },
   "213": {
+    "file": "collection/change-events.ts",
+    "template": "${collection.id ? `[${collection.id}] ` : ``}Error processing where clause, falling back to full scan:",
+    "literals": ["Error processing where clause, falling back to full scan:"],
+    "kind": "warning"
+  },
+  "214": {
+    "file": "collection/cleanup-queue.ts",
+    "template": "Error in CleanupQueue task:",
+    "literals": ["Error in CleanupQueue task:"]
+  },
+  "215": {
+    "file": "indexes/auto-index.ts",
+    "template": "${collection.id ? `[${collection.id}] ` : ``}Failed to create auto-index for field path \"${fieldPath.join(`.`)}\":",
+    "literals": ["Failed to create auto-index for field path \""],
+    "kind": "warning"
+  },
+  "216": {
+    "file": "indexes/base-index.ts",
+    "template": "Failed to evaluate index expression for key ${key} during removal:",
+    "literals": [
+      "Failed to evaluate index expression for key ",
+      " during removal:"
+    ],
+    "kind": "warning"
+  },
+  "218": {
+    "file": "local-storage.ts",
+    "template": "[LocalStorageCollection] Error saving data to storage key \"${config.storageKey}\":",
+    "literals": ["[LocalStorageCollection] Error saving data to storage key \""]
+  },
+  "219": {
+    "file": "local-storage.ts",
+    "template": "[LocalStorageCollection] Error loading data from storage key \"${storageKey}\":",
+    "literals": [
+      "[LocalStorageCollection] Error loading data from storage key \""
+    ],
+    "kind": "warning"
+  },
+  "220": {
+    "file": "query/effect.ts",
+    "template": "[Effect '${id}'] onSourceError callback threw:",
+    "literals": ["[Effect '", "'] onSourceError callback threw:"]
+  },
+  "221": {
+    "file": "query/effect.ts",
+    "template": "[Effect '${id}'] ${error.message}. Disposing effect.",
+    "literals": ["[Effect '", ". Disposing effect."]
+  },
+  "222": {
+    "file": "query/effect.ts",
+    "template": "[Effect '${id}'] failed to dispose after a source error:",
+    "literals": ["[Effect '", "'] failed to dispose after a source error:"]
+  },
+  "223": {
+    "file": "query/effect.ts",
+    "template": "[Effect '${id}'] failed to dispose after a startup error:",
+    "literals": ["[Effect '", "'] failed to dispose after a startup error:"]
+  },
+  "224": {
+    "file": "query/effect.ts",
+    "template": "[Effect] Error in onError handler:",
+    "literals": ["[Effect] Error in onError handler:"]
+  },
+  "225": {
+    "file": "query/effect.ts",
+    "template": "[Effect] Original error:",
+    "literals": ["[Effect] Original error:"]
+  },
+  "226": {
+    "file": "query/effect.ts",
+    "template": "[Effect] Unhandled error in handler:",
+    "literals": ["[Effect] Unhandled error in handler:"]
+  },
+  "228": {
+    "file": "query/live/collection-config-builder.ts",
+    "template": "Subset demand '${planId}' failed: ${normalized.message}",
+    "literals": ["Subset demand '", "' failed: "]
+  },
+  "229": {
+    "file": "query/live/collection-config-builder.ts",
+    "template": "Initial subset load failed: ${normalized.message}",
+    "literals": ["Initial subset load failed: "]
+  },
+  "230": {
     "file": "query/builder/query-ir.ts",
     "template": "Query must resolve to a QueryBuilder; received ${received}.",
     "literals": ["Query must resolve to a QueryBuilder; received "]

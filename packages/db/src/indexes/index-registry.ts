@@ -67,16 +67,37 @@ export function getIndexDevModeConfig(): IndexDevModeConfig {
  */
 export function isDevModeEnabled(): boolean {
   return (
-    devModeConfig.enabled && devBuild() && process.env.NODE_ENV !== `production`
+    devBuild() && process.env.NODE_ENV !== `production` && devModeConfig.enabled
   )
 }
 
 /**
- * Emit an index suggestion (dev mode only)
+ * Emit an index suggestion (dev mode only). Every suggestion's text is written
+ * here, behind the erasable guard, so production bundles drop all of it.
  */
-export function emitIndexSuggestion(suggestion: IndexSuggestion): void {
-  if (!isDevModeEnabled()) return
+export function emitIndexSuggestion(
+  details: Omit<IndexSuggestion, `message`>,
+): void {
+  if (!(
+    devBuild() &&
+    process.env.NODE_ENV !== `production` &&
+    devModeConfig.enabled
+  ))
+    return
 
+  const field = details.fieldPath.join(`.`)
+  const { type, collectionId, fieldPath, ...stats } = details
+  // The keys keep the order callers saw before the text moved here.
+  const suggestion: IndexSuggestion = {
+    type,
+    collectionId,
+    fieldPath,
+    message:
+      type === `slow-query`
+        ? `Queries on "${field}" are slow (avg ${(stats.queryTimeMs ?? 0).toFixed(1)}ms). Consider adding an index.`
+        : `Collection has ${stats.collectionSize} items. Queries on "${field}" may benefit from an index.`,
+    ...stats,
+  }
   if (devModeConfig.onSuggestion) {
     try {
       devModeConfig.onSuggestion(suggestion)
@@ -102,7 +123,13 @@ export function trackQuery(
   fieldPath: Array<string>,
   executionTimeMs: number,
 ): void {
-  if (!isDevModeEnabled()) return
+  // Inline, not isDevModeEnabled(): production bundles then drop this body.
+  if (!(
+    devBuild() &&
+    process.env.NODE_ENV !== `production` &&
+    devModeConfig.enabled
+  ))
+    return
 
   const key = `${collectionId}:${fieldPath.join(`.`)}`
   const existing = queryPatterns.get(key)
@@ -127,7 +154,6 @@ export function trackQuery(
       type: `slow-query`,
       collectionId,
       fieldPath,
-      message: `Queries on "${fieldPath.join(`.`)}" are slow (avg ${pattern.avgTimeMs.toFixed(1)}ms). Consider adding an index.`,
       queryTimeMs: pattern.avgTimeMs,
       queryCount: pattern.queryCount,
     })
@@ -142,14 +168,19 @@ export function checkCollectionSizeForIndex(
   collectionSize: number,
   fieldPath: Array<string>,
 ): void {
-  if (!isDevModeEnabled()) return
+  // Inline, not isDevModeEnabled(): production bundles then drop this body.
+  if (!(
+    devBuild() &&
+    process.env.NODE_ENV !== `production` &&
+    devModeConfig.enabled
+  ))
+    return
 
   if (collectionSize > devModeConfig.collectionSizeThreshold) {
     emitIndexSuggestion({
       type: `collection-size`,
       collectionId,
       fieldPath,
-      message: `Collection has ${collectionSize} items. Queries on "${fieldPath.join(`.`)}" may benefit from an index.`,
       collectionSize,
     })
   }
