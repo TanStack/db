@@ -1,3 +1,4 @@
+import { codedMessage, devBuild } from '../error-message.js'
 import { isRefProxy } from './builder/ref-proxy-identity.js'
 
 /*
@@ -129,7 +130,9 @@ export function requireCollectionSource(
 ): CollectionImpl {
   if (source.type === `descriptorRef`) {
     throw new Error(
-      `Collection descriptor "${source.alias}" requires a DbClient when the query is consumed. Bind the query through a client-aware API or use a concrete Collection.`,
+      devBuild() && process.env.NODE_ENV !== `production`
+        ? `Collection descriptor "${source.alias}" requires a DbClient when the query is consumed. Bind the query through a client-aware API or use a concrete Collection.`
+        : codedMessage(113, { alias: source.alias }),
     )
   }
   return source.collection

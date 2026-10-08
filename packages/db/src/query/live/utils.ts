@@ -8,6 +8,7 @@ import {
   requireCollectionSource,
 } from '../ir.js'
 import { isRefProxy } from '../builder/ref-proxy-identity.js'
+import { codedMessage, devBuild } from '../../error-message.js'
 import type { MultiSetArray, RootStreamBuilder } from '@tanstack/db-ivm'
 import type { Collection } from '../../collection/index.js'
 import type { ChangeMessage, StringCollationConfig } from '../../types.js'
@@ -37,9 +38,9 @@ export { collectCollectionSources as extractCollectionSources }
  * Helper function to extract the collection that is referenced in the query's FROM clause.
  * The FROM clause may refer directly to a collection or indirectly to a subquery.
  */
-export function extractCollectionFromSource(
-  query: any,
-): Collection<any, any, any> {
+export function extractCollectionFromSource(query: {
+  readonly from: any
+}): Collection<any, any, any> {
   const from = query.from
 
   if (from.type === `collectionRef`) {
@@ -56,7 +57,9 @@ export function extractCollectionFromSource(
   }
 
   throw new Error(
-    `Failed to extract collection. Invalid FROM clause: ${JSON.stringify(query)}`,
+    devBuild() && process.env.NODE_ENV !== `production`
+      ? `Failed to extract collection. Invalid FROM clause: ${JSON.stringify(query)}`
+      : codedMessage(160),
   )
 }
 
