@@ -6,7 +6,12 @@ import {
   denormalizeUndefined,
   normalizeForBTree,
 } from '../utils/comparison.js'
-import { BaseIndex, builtInIndexResolverNames } from './base-index.js'
+import { codedMessage, devBuild } from '../error-message.js'
+import {
+  BaseIndex,
+  builtInIndexResolverNames,
+  warnRemovalFailure,
+} from './base-index.js'
 import type { CompareOptions } from '../query/builder/types.js'
 import type { IndexOperation } from './base-index.js'
 
@@ -119,10 +124,7 @@ export class BTreeIndex<
     try {
       indexedValue = this.evaluateIndexExpression(item)
     } catch (error) {
-      console.warn(
-        `Failed to evaluate index expression for key ${key} during removal:`,
-        error,
-      )
+      warnRemovalFailure(key, error)
       return
     }
 
@@ -244,7 +246,11 @@ export class BTreeIndex<
         result = this.inArrayLookup(value)
         break
       default:
-        throw new Error(`Operation ${operation} not supported by BTreeIndex`)
+        throw new Error(
+          devBuild() && process.env.NODE_ENV !== `production`
+            ? `Operation ${operation} not supported by BTreeIndex`
+            : codedMessage(101, { operation }),
+        )
     }
     return result
   }
