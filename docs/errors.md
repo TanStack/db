@@ -2319,3 +2319,33 @@ Development builds show this message, with `${...}` replaced by values:
 ```text
 Initial subset load failed: ${normalized.message}
 ```
+
+<a id="error-230"></a>
+
+## Error 230: `local-storage.ts`
+
+Development builds show this message, with `${...}` replaced by values:
+
+```text
+LocalStorage options can create only one Collection. Create fresh options for each Collection.
+```
+
+<a id="error-231"></a>
+
+## Error 231: `local-storage.ts`
+
+Development builds show this message, with `${...}` replaced by values:
+
+```text
+LocalStorage manual acceptance belongs to a different Collection.
+```
+
+<a id="warning-232"></a>
+
+## Warning 232: `local-storage.ts`
+
+Development builds show this message, with `${...}` replaced by values:
+
+```text
+[LocalStorageCollection] Error refreshing a same-tab peer for storage key "${key}":
+```

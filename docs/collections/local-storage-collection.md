@@ -2,13 +2,16 @@
 title: LocalStorage Collection
 ---
 
-LocalStorage collections store small amounts of local-only state that persists across browser sessions and syncs across browser tabs in real-time.
+LocalStorage collections store small amounts of local-only state that persists
+across browser sessions and syncs between Collections in one tab and across
+browser tabs.
 
 ## Overview
 
 The `localStorageCollectionOptions` allows you to create collections that:
 - Persist data to localStorage (or sessionStorage)
 - Automatically sync across browser tabs using storage events
+- Synchronize active same-tab Collections sharing one storage object and key
 - Support optimistic updates with automatic rollback on errors
 - Store all data under a single localStorage key
 - Work with any storage API that matches the localStorage interface
@@ -68,9 +71,9 @@ The `localStorageCollectionOptions` function accepts the following options:
 - `onUpdate`: Optional handler function called when items are updated
 - `onDelete`: Optional handler function called when items are deleted
 
-## Cross-Tab Synchronization
+## Synchronization
 
-LocalStorage collections automatically sync across browser tabs in real-time:
+LocalStorage collections sync across browser tabs through storage events:
 
 ```typescript
 const settingsCollection = createCollection(
@@ -84,6 +87,59 @@ const settingsCollection = createCollection(
 // Changes in one tab are automatically reflected in all other tabs
 // This works automatically via storage events
 ```
+
+Two active Collections created with fresh options also sync in the same tab
+when they use the same `storage` object and `storageKey`. A successful automatic
+write, manual acceptance, or `clearStorage()` updates both public snapshots
+without waiting for a browser event. A Collection's pending optimistic rows
+remain visible until their own mutations settle. The same-tab mechanism does
+not connect distinct custom Storage wrapper objects, even if those wrappers
+access the same underlying bytes.
+
+The default JSON parser keeps a value authored by the writer in its original
+JavaScript form until that Collection restores or another write replaces that
+row. A disjoint peer write does not change the authored value. For example, a
+writer can still hold a `Date`, while a peer and a freshly restored Collection
+see its JSON string. With a custom parser, an authored row is read back after a
+successful write so the writer also sees any value that parser normalized.
+
+Automatic mutations in one Collection persist in mutation order, even if their
+optional handlers finish in another order. A handler that rejects does not write
+its mutation. Other tabs see accepted changes when their storage events arrive.
+Without a handler or earlier pending write, a direct mutation writes to
+localStorage before the mutation method returns. A later handler failure rejects
+its transaction promptly, even if an earlier handler is still pending.
+
+A handler can start another mutation on the same Collection, then return without
+awaiting that mutation's `isPersisted` promise. Do not await that promise or a
+later `acceptMutations()` call inside the earlier handler. Those writes wait for
+the earlier handler to return, so awaiting them would leave both pending.
+
+Each write stores a complete storage snapshot under one storage key. A
+write preserves disjoint peer rows already present in storage, even when that
+peer's event has not arrived yet. Truly simultaneous writes from separate tabs
+are not an atomic transaction; localStorage has no compare-and-swap operation.
+
+Startup requires a valid stored snapshot. Malformed JSON or a row missing its
+version information puts the Collection in an error state and leaves the stored
+bytes intact. Each stored row needs an object value, a string version token,
+and a storage key that decodes to the same identity as `getKey` for its data.
+New writes encode string and number keys with a type prefix; restore also
+accepts legacy unprefixed string keys. Two entries that decode to one identity
+are malformed. Repair or remove
+the invalid value, then restart the Collection. A Collection restoring rows can
+receive a same-tab peer write from a subscriber during that restore; the peer's
+accepted row remains visible when the Collection becomes ready.
+`utils.clearStorage()` removes the stored snapshot and immediately publishes
+removal of accepted rows to active same-tab Collections. A pending optimistic
+mutation can remain visible and later persist. Edit the Collection through its
+mutation methods;
+direct same-tab edits to its storage key do not produce browser storage events.
+Use an IndexedDB Collection when several tabs need stronger write coordination.
+
+If storage cannot be read, the mutation rejects and existing stored rows remain.
+A failed storage-event read leaves current Collection rows unchanged until a
+later event can read storage successfully.
 
 ## Using SessionStorage
 
@@ -184,7 +240,7 @@ const preferencesCollection = createCollection(
 
 ## Manual Transactions
 
-When using LocalStorage collections with manual transactions (created via `createTransaction`), you must call `utils.acceptMutations()` to persist the changes:
+When using LocalStorage collections with manual transactions (created via `createTransaction`), call `utils.acceptMutations()` in `mutationFn`. Manual acceptance joins the same write order, and the transaction's persistence receipt waits for the storage write even if the returned Promise is not awaited. Await it when later work in `mutationFn` depends on the storage write:
 
 ```typescript
 import { createTransaction } from '@tanstack/react-db'
@@ -218,7 +274,7 @@ const tx = createTransaction({
     )
 
     // After server mutations succeed, persist local collection mutations
-    localData.utils.acceptMutations(transaction)
+    await localData.utils.acceptMutations(transaction)
   },
 })
 
@@ -230,6 +286,11 @@ tx.mutate(() => {
 
 await tx.commit()
 ```
+
+Create fresh `localStorageCollectionOptions()` for each direct
+`createCollection()` call. One options object contains state owned by one
+Collection and throws if used to create a second. The same `DbClient`
+collection descriptor can still materialize fresh options for separate clients.
 
 ## Complete Example
 
