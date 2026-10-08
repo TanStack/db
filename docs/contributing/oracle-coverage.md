@@ -416,8 +416,13 @@ followed by a parent or child publication at its callback boundary.
 aggregates: a change costs the same number of iterator steps at every group
 size, for a `groupBy` count and for an include count. `group-by.test.ts`
 checks which member supplies the value of a group whose members are equal
-under query equality but differ exactly, in both arrival orders
-([review](oracle-reviews/group-representative-exact-value.md)).
+under query equality but differ exactly, in both arrival orders. It also
+checks that `min` and `max` equal a remaining member's value after each delete,
+for signed zero and Dates and for stored and rebuilt arguments
+([review](oracle-reviews/group-representative-exact-value.md)). Open: no law
+observes which parent supplies an include route's parent context, because a
+single-group include aggregate drops non-aggregate select fields; parents equal
+under query equality but different exactly share one route.
 
 The [Temporal group-key oracle](https://github.com/TanStack/db/blob/main/packages/db-ivm/tests/temporal-group-key-oracle.test.ts)
 owns the db-ivm `groupBy` value boundary for the eight Temporal kinds recognized

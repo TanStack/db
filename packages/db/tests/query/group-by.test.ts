@@ -1,3 +1,11 @@
+/**
+ * @vitest-environment node
+ *
+ * The binary group-value cases compare a Buffer with a Uint8Array. Under
+ * jsdom a Node Buffer is not an instance of jsdom's Uint8Array, so it would
+ * take the generic object tag and the Buffer-before-Uint8Array law would go
+ * unchecked. Node keeps both in one realm.
+ */
 import { beforeEach, describe, expect, test } from 'vitest'
 import { Temporal } from 'temporal-polyfill'
 import { createLiveQueryCollection } from '../../src/query/index.js'
@@ -499,6 +507,121 @@ function createGroupByTests(autoIndex: `off` | `eager`): void {
         // Only `right` remains, so both aggregates must return it exactly.
         expect(Object.is(summary.toArray[0]?.low, right)).toBe(true)
         expect(Object.is(summary.toArray[0]?.high, right)).toBe(true)
+      },
+    )
+
+    // Law: after any delete, min and max equal the min and max of the
+    // remaining members' values. The model computes them from the remaining
+    // source rows, so it does not depend on how contributions are keyed. Each
+    // aggregate is checked alone and with the other, over the same or a
+    // different argument, and over a stored or rebuilt argument. A rebuilt
+    // argument is a new instance on every evaluation, as an inline subquery's
+    // `fn.select` produces, so a retraction cannot rely on instance identity.
+    const minMaxShapes = [
+      [`min alone`, { low: `a` }],
+      [`max alone`, { high: `a` }],
+      [`min and max of one argument`, { low: `a`, high: `a` }],
+      [`min and max of different arguments`, { low: `a`, high: `b` }],
+    ] as const
+    const minMaxValues = [
+      [`signed zero`, [0, -0, 0], [-0, 0, 0], (v: number) => v],
+      [`Dates`, [0, 5000, 0], [5000, 0, 2000], (v: number) => new Date(v)],
+    ] as const
+    const minMaxCases = minMaxShapes.flatMap(([shape, select]) =>
+      minMaxValues.flatMap(([kind, aValues, bValues, toValue]) =>
+        [false, true].map(
+          (rebuilt) =>
+            [
+              `${shape}, ${kind}, ${rebuilt ? `rebuilt` : `stored`} argument`,
+              select,
+              aValues,
+              bValues,
+              toValue,
+              rebuilt,
+            ] as const,
+        ),
+      ),
+    )
+    test.each(minMaxCases)(
+      `min and max equal the remaining members' values: %s`,
+      (_name, select, aValues, bValues, toValue, rebuilt) => {
+        type Row = { id: number; group: number; a: unknown; b: unknown }
+        // A stored argument holds the final values in the source rows. A
+        // rebuilt argument holds numbers, and the subquery builds the value.
+        const rows: Array<Row> = aValues.map((a, i) => ({
+          id: i + 1,
+          group: 1,
+          a: rebuilt ? a : toValue(a),
+          b: rebuilt ? bValues[i]! : toValue(bValues[i]!),
+        }))
+        const valueOf = (raw: unknown) =>
+          rebuilt ? toValue(raw as number) : raw
+        const source = createCollection(
+          mockSyncCollectionOptions<Row>({
+            id: `minmax-remaining-${autoIndex}-${_name}`,
+            getKey: (row) => row.id,
+            initialData: rows,
+            autoIndex,
+          }),
+        )
+        const summary = createLiveQueryCollection({
+          startSync: true,
+          query: (q) => {
+            const input = q.from({ r: source }).fn.select(({ r }) => ({
+              id: r.id,
+              group: r.group,
+              a: valueOf(r.a),
+              b: valueOf(r.b),
+            }))
+            return q
+              .from({ row: input })
+              .groupBy(({ row }) => row.group)
+              .select(({ row }) => ({
+                group: row.group,
+                ...(`low` in select ? { low: min(row[select.low]) } : {}),
+                ...(`high` in select ? { high: max(row[select.high]) } : {}),
+              }))
+          },
+        })
+        // Content of a value under query equality: a Date by its time, -0 as 0.
+        const content = (value: unknown) =>
+          value instanceof Date ? value.getTime() : (value as number) + 0
+        // The exact identity a remaining member supplies: content plus the
+        // sign of zero. Two rebuilt Dates with one time are the same value.
+        const exact = (value: unknown) =>
+          value instanceof Date
+            ? `Date(${value.getTime()})`
+            : Object.is(value, -0)
+              ? `-0`
+              : String(value)
+        const check = (remaining: Array<Row>) => {
+          const actual = summary.toArray[0] as Record<string, unknown>
+          const expectOne = (
+            alias: `low` | `high`,
+            field: `a` | `b`,
+            sign: 1 | -1,
+          ) => {
+            const values = remaining.map((row) => valueOf(row[field]))
+            const best = values
+              .map(content)
+              .reduce((l, r) => (sign * (r - l) < 0 ? r : l))
+            // Any remaining member tied for the extreme may supply it.
+            const allowed = values
+              .filter((value) => content(value) === best)
+              .map(exact)
+            expect(allowed).toContain(exact(actual[alias]))
+          }
+          if (`low` in select) expectOne(`low`, select.low, 1)
+          if (`high` in select) expectOne(`high`, select.high, -1)
+        }
+        check(rows)
+        // Delete each member but the last, one at a time.
+        for (let i = 0; i < rows.length - 1; i++) {
+          source.utils.begin()
+          source.utils.write({ type: `delete`, value: rows[i]! })
+          source.utils.commit()
+          check(rows.slice(i + 1))
+        }
       },
     )
 
