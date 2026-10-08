@@ -592,7 +592,11 @@ export class CollectionSyncManager<
     }
 
     // Warn when calling preload on an on-demand collection
-    if (this.syncMode === `on-demand`) {
+    if (
+      devBuild() &&
+      process.env.NODE_ENV !== `production` &&
+      this.syncMode === `on-demand`
+    ) {
       console.warn(
         `${this.id ? `[${this.id}] ` : ``}Calling .preload() on a collection with syncMode "on-demand" is a no-op. ` +
           `In on-demand mode, data is only loaded when queries request it. ` +
