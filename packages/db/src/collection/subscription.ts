@@ -1546,6 +1546,13 @@ export class CollectionSubscription
     // Use the current count as the offset for this load
     const currentOffset = this.limitedSnapshotRowCount
 
+    // During a direct truncate replay the rows go to the private buffer, so
+    // the callback wrapper does not record them; a repeated ordered snapshot
+    // must still continue after them.
+    for (const change of changes) {
+      this.sentKeys.add(change.key)
+    }
+
     this.publishSnapshot(changes)
     // A subscriber callback can synchronously tear down this subscription.
     // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition

@@ -2076,6 +2076,85 @@ describe(`CollectionSubscription replay oracle`, () => {
     },
   )
 
+  // A direct subscriber buffers ordered rows privately while a replay is
+  // pending. Each row still counts once: repeated ordered snapshots during the
+  // replay continue after the rows already chosen, so the next request's
+  // cursor names the last of them, not the first one again.
+  it(`continues after buffered rows when ordered snapshots repeat during a replay`, async () => {
+    type Row = { id: string; value: number }
+    let begin!: () => void
+    let write!: (message: { type: `insert`; value: Row }) => void
+    let commit!: () => void
+    let truncate!: () => void
+    const loadOptions: Array<LoadSubsetOptions> = []
+    const rows: Array<Row> = [
+      { id: `one`, value: 1 },
+      { id: `two`, value: 2 },
+      { id: `three`, value: 3 },
+    ]
+    const collection = createCollection<Row>({
+      id: `ordered-replay-repeated-snapshots`,
+      getKey: (row) => row.id,
+      syncMode: `on-demand`,
+      sync: {
+        sync: (params) => {
+          begin = params.begin
+          write = params.write
+          commit = params.commit
+          truncate = params.truncate
+          begin()
+          for (const value of rows) write({ type: `insert`, value })
+          commit()
+          params.markReady()
+          return {
+            // The replay's request stays pending; every other request succeeds.
+            loadSubset: (options) => {
+              loadOptions.push(options)
+              return loadOptions.length === 2
+                ? createDeferred<void>().promise
+                : true
+            },
+            unloadSubset: () => {},
+          }
+        },
+      },
+    })
+    const index = collection.createIndex((row) => row.value, {
+      indexType: BTreeIndex,
+    })
+    const orderBy: OrderBy = [
+      {
+        expression: new PropRef([`value`]),
+        compareOptions: { direction: `asc`, nulls: `first` },
+      },
+    ]
+    const subscription = collection.subscribeChanges(() => {})
+    subscription.setOrderByIndex(index)
+    try {
+      subscription.requestLimitedSnapshot({ orderBy, limit: 1 })
+      begin()
+      truncate()
+      commit()
+      await flushPromises()
+      begin()
+      for (const value of rows) write({ type: `insert`, value })
+      commit()
+      await flushPromises()
+
+      const before = loadOptions.length
+      subscription.requestLimitedSnapshot({ orderBy, limit: 1 })
+      subscription.requestLimitedSnapshot({ orderBy, limit: 1 })
+      subscription.requestLimitedSnapshot({ orderBy, limit: 1, minValues: [1] })
+      expect(loadOptions[before + 2]).toMatchObject({
+        offset: 2,
+        cursor: { lastKey: `three` },
+      })
+    } finally {
+      subscription.unsubscribe()
+      await collection.cleanup()
+    }
+  })
+
   it(`keeps private row tracking through consecutive failed replays`, async () => {
     await runReplayScenario({
       initialRows: [
