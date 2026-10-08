@@ -1,13 +1,15 @@
 import type { LoadSubsetOptions } from '@tanstack/db'
 import type {
+  CommittedTxAnchor,
   PersistedCollectionMode,
   PersistedIndexSpec,
   PersistedKeySetEvidence,
   PersistedTx,
+  ReconciledCommittedTx,
   SQLitePullSinceResult,
 } from '@tanstack/db-sqlite-persistence-core'
 
-export const ELECTRON_PERSISTENCE_PROTOCOL_VERSION = 2 as const
+export const ELECTRON_PERSISTENCE_PROTOCOL_VERSION = 3 as const
 export const DEFAULT_ELECTRON_PERSISTENCE_CHANNEL = `tanstack-db:sqlite-persistence`
 
 export type ElectronPersistedRow = Record<string, unknown>
@@ -24,6 +26,7 @@ export type ElectronPersistenceMethod =
   | `loadCollectionMetadata`
   | `scanRows`
   | `applyCommittedTx`
+  | `reconcileCommittedTx`
   | `ensureIndex`
   | `markIndexRemoved`
   | `pullSince`
@@ -48,6 +51,10 @@ export type ElectronPersistencePayloadMap = {
   }
   applyCommittedTx: {
     tx: PersistedTx<ElectronPersistedRow, ElectronPersistedKey>
+  }
+  reconcileCommittedTx: {
+    tx: PersistedTx<ElectronPersistedRow, ElectronPersistedKey>
+    anchor: CommittedTxAnchor
   }
   ensureIndex: {
     signature: string
@@ -84,6 +91,7 @@ export type ElectronPersistenceResultMap = {
     metadata?: unknown
   }>
   applyCommittedTx: null
+  reconcileCommittedTx: ReconciledCommittedTx
   ensureIndex: null
   markIndexRemoved: null
   pullSince: SQLitePullSinceResult<ElectronPersistedKey>
@@ -98,7 +106,8 @@ export type ElectronSerializedError = {
   name: string
   message: string
   stack?: string
-  code?: string
+  code?: string | number
+  path?: string | ReadonlyArray<string | number>
 }
 
 export type ElectronPersistenceRequestByMethod = {

@@ -1226,6 +1226,9 @@ export class BroadcastCollectionCoordinator implements PersistedCollectionCoordi
         typeof heartbeat.latestRowVersion === `number`
       ) {
         const state = this.getOrCreateCollectionState(envelope.collectionId)
+        // The local Web Lock still owns this route. A former owner's delayed
+        // heartbeat can reuse its term when it committed no transaction.
+        if (state.isLeader) return
         if (heartbeat.term < state.latestTerm) return
         const changedLeader = state.leaderId !== heartbeat.leaderId
         state.leaderId = heartbeat.leaderId

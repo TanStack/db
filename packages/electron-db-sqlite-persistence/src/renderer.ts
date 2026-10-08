@@ -8,11 +8,13 @@ import {
   ELECTRON_PERSISTENCE_PROTOCOL_VERSION,
 } from './protocol'
 import type {
+  CommittedTxAnchor,
   PersistedCollectionCoordinator,
   PersistedCollectionMode,
   PersistedCollectionPersistence,
   PersistedIndexSpec,
   PersistedTx,
+  ReconciledCommittedTx,
   SQLitePullSinceResult,
 } from '@tanstack/db-sqlite-persistence-core'
 import type {
@@ -139,8 +141,19 @@ function createRendererRequestExecutor(options: {
       if (typeof response.error.stack === `string`) {
         remoteError.stack = response.error.stack
       }
-      if (typeof response.error.code === `string`) {
-        ;(remoteError as Error & { code?: string }).code = response.error.code
+      if (
+        typeof response.error.code === `string` ||
+        typeof response.error.code === `number`
+      ) {
+        ;(remoteError as Error & { code?: string | number }).code =
+          response.error.code
+      }
+      if (response.error.path !== undefined) {
+        ;(
+          remoteError as Error & {
+            path?: string | ReadonlyArray<string | number>
+          }
+        ).path = response.error.path
       }
       throw remoteError
     }
@@ -224,6 +237,18 @@ function createResolvedRendererAdapter(
         {
           tx: tx as PersistedTx<ElectronPersistedRow, ElectronPersistedKey>,
         },
+        resolution,
+      )
+    },
+    reconcileCommittedTx: async (
+      collectionId: string,
+      tx: PersistedTx<Record<string, unknown>, string | number>,
+      anchor: CommittedTxAnchor,
+    ): Promise<ReconciledCommittedTx> => {
+      return executeRequest(
+        `reconcileCommittedTx`,
+        collectionId,
+        { tx, anchor },
         resolution,
       )
     },

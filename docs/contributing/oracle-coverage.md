@@ -678,7 +678,19 @@ it. The SQLite adapter owner checks exact IDs, row versions,
 reset epochs, pruning, unchanged anchors, same-key peer writes, and cursor
 metadata against real SQLite transactions. The Browser coordinator owner
 checks writer-lock stream advancement, changed routes, and invalid wire
-anchors. The Chromium/OPFS host owner runs idle, before-durable,
+anchors. It also delays a former owner's captured heartbeat past a no-write
+Web Lock takeover that reuses the same term, then checks the successor's queued
+exact-ID result and later source write. The current lock holder keeps its
+route. The Electron IPC bridge runs the SQLite adapter contract through its
+renderer and main-process handlers, including exact-ID reconciliation. Its
+resolved-adapter witness checks that reconciliation carries each Collection's
+mode and schema version, and its absent-capability witness checks that an
+unknown result leaves durable state unchanged. The real-process witness runs
+the renderer adapter in Vitest and sends its envelope to an Electron main
+process. It does not execute the adapter inside an Electron renderer or check
+concurrent requests from multiple renderers. A reconciliation IPC reply delayed
+until after main applies is an untested transport history owned by the Electron
+receiving contract. The Chromium/OPFS host owner runs idle, before-durable,
 after-durable, peer-before-reconciliation, and notification-before-lost-answer
 histories across real tabs, Web Locks, BroadcastChannel, workers, and SQLite.
 It observes durable rows, cursor, and exact applied transaction IDs, public

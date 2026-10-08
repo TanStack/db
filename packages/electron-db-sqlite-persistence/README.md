@@ -108,10 +108,12 @@ publishes nor consumes a coordinator sequence.
 
 If a mutating RPC loses its response, Electron coordination replays it only
 while the requester still knows the same non-null leader id and term. An
-unknown initial route or any leader/term change rejects with
-`IndeterminateCommitError`; the application must reconcile the outcome. The
-coordinator does not retry that mutation against an unknown or replacement
-leader.
+unknown initial route or any leader/term change rejects the direct RPC with
+`IndeterminateCommitError`. For a source-backed persisted Collection, the sync
+wrapper can certify the original transaction ID through the replacement leader
+and the main-process SQLite adapter. Application-issued mutations still need
+caller reconciliation. Main and renderer must use matching persistence protocol
+v3 peers for this IPC operation.
 
 Remote-subset requests use the same crash-only boundary. The coordinator
 projects a live `LoadSubsetOptions` input to the exported

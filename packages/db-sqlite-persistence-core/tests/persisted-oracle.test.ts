@@ -945,11 +945,15 @@ it.each([false, true])(
 // browser transport. The notification's explicit flag reaches the equal-seq
 // branch that ordinary tx deduplication would skip. An orphan row-metadata
 // entry is not part of the loaded row snapshot; an unchanged-row shortcut
-// must still remove it, as an ordinary full replacement does.
+// must still remove it, as an ordinary full replacement does. The held subset
+// read exposes the pending cut; the final comparison waits for the public
+// metadata cleanup and checks that neither Collection published a row event.
 it(`does not republish unchanged rows for a repeated reconciliation notice`, async () => {
   const adapter = createRecordingAdapter([{ id: `crossing`, title: `settled` }])
   const coordinator = createCoordinatorHarness()
   const collectionId = `source-reconciliation-repeat`
+  const reloadEntered = createDeferred()
+  const releaseReload = createDeferred()
   let source!: TodoSyncParams
   const collection = createCollection(
     persistedCollectionOptions<Todo, string>({
@@ -985,6 +989,12 @@ it(`does not republish unchanged rows for a repeated reconciliation notice`, asy
       liveEvents.push(...changes.map(({ key }) => String(key)))
     })
     try {
+      const loadSubset = adapter.loadSubset
+      adapter.loadSubset = async (...args) => {
+        reloadEntered.resolve()
+        await releaseReload.promise
+        return loadSubset(...args)
+      }
       coordinator.emit(
         {
           type: `tx:committed`,
@@ -997,6 +1007,20 @@ it(`does not republish unchanged rows for a repeated reconciliation notice`, asy
         },
         `replacement`,
         collectionId,
+      )
+      await atPersistedOracleCheckpoint(
+        reloadEntered.promise,
+        `reconciliation reload entered`,
+      )
+      await flushAsyncWork()
+      expect(source.metadata?.row.get(`ghost`)).toEqual({ stale: true })
+      expect({ sourceEvents, liveEvents }).toEqual({
+        sourceEvents: [],
+        liveEvents: [],
+      })
+      releaseReload.resolve()
+      await vi.waitFor(() =>
+        expect(source.metadata?.row.get(`ghost`)).toBeUndefined(),
       )
       await flushAsyncWork()
       expect({
@@ -1024,6 +1048,7 @@ it(`does not republish unchanged rows for a repeated reconciliation notice`, asy
     hasPrimaryFailure = true
     throw error
   } finally {
+    releaseReload.resolve()
     await cleanupPersistedOracle(
       [() => live.cleanup(), () => collection.cleanup()],
       hasPrimaryFailure,
@@ -1036,7 +1061,8 @@ it(`does not republish unchanged rows for a repeated reconciliation notice`, asy
 // authored array shape before a reconciliation reload. The durable row below
 // is the independent reference; the public source and live-query rows must
 // publish it at this checkpoint, even when general change-event equality
-// considers the arrays equal.
+// considers the arrays equal. The held subset read keeps the authored shape
+// visible at the pending cut; the settled cut compares both public shapes.
 it.each([`sparse slot`, `extra array property`] as const)(
   `publishes the durable array shape after a reconciliation reload: %s`,
   async (shape) => {
@@ -1051,6 +1077,8 @@ it.each([`sparse slot`, `extra array property`] as const)(
     ])
     const coordinator = createCoordinatorHarness()
     const collectionId = `source-array-shape-${shape}`
+    const reloadEntered = createDeferred()
+    const releaseReload = createDeferred()
     const collection = createCollection(
       persistedCollectionOptions<Todo, string>({
         id: collectionId,
@@ -1071,6 +1099,12 @@ it.each([`sparse slot`, `extra array property`] as const)(
     try {
       await atPersistedOracleCheckpoint(collection.preload(), `source ready`)
       await atPersistedOracleCheckpoint(live.preload(), `live query ready`)
+      const loadSubset = adapter.loadSubset
+      adapter.loadSubset = async (...args) => {
+        reloadEntered.resolve()
+        await releaseReload.promise
+        return loadSubset(...args)
+      }
       adapter.rows.set(`crossing`, {
         id: `crossing`,
         title: `source`,
@@ -1089,8 +1123,30 @@ it.each([`sparse slot`, `extra array property`] as const)(
         `replacement`,
         collectionId,
       )
+      await atPersistedOracleCheckpoint(
+        reloadEntered.promise,
+        `durable array reload entered`,
+      )
       await flushAsyncWork()
       const expectedShape = shapeOf(durableValues)
+      const authoredShape = shapeOf(authoredValues)
+      expect({
+        source: shapeOf(collection.get(`crossing`)?.values),
+        live: shapeOf(live.get(`crossing`)?.values),
+        durable: shapeOf(adapter.rows.get(`crossing`)?.values),
+      }).toEqual({
+        source: authoredShape,
+        live: authoredShape,
+        durable: expectedShape,
+      })
+      releaseReload.resolve()
+      await vi.waitFor(() =>
+        expect({
+          source: shapeOf(collection.get(`crossing`)?.values),
+          live: shapeOf(live.get(`crossing`)?.values),
+        }).toEqual({ source: expectedShape, live: expectedShape }),
+      )
+      await flushAsyncWork()
       expect({
         source: shapeOf(collection.get(`crossing`)?.values),
         live: shapeOf(live.get(`crossing`)?.values),
@@ -1104,6 +1160,7 @@ it.each([`sparse slot`, `extra array property`] as const)(
       hasPrimaryFailure = true
       throw error
     } finally {
+      releaseReload.resolve()
       await cleanupPersistedOracle(
         [() => live.cleanup(), () => collection.cleanup()],
         hasPrimaryFailure,

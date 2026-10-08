@@ -39,7 +39,9 @@ import type { BrowserCollectionCoordinatorOptions } from '../src/browser-coordin
  * acquisition has its own lease and release obligation. The Collection-level
  * mapping is documented in `per-collection-coordinator-oracle.test.ts`. A
  * passive heartbeat can update a route, but only a local participant may join
- * that collection's leadership. A mutation requested before the first leader
+ * that collection's leadership. The Web Lock holder keeps its own route when
+ * a former owner's delayed heartbeat carries the same term. A mutation
+ * requested before the first leader
  * is known waits for a route up to the RPC deadline. The sole participant
  * applies it locally if elected; an unsuccessful election cannot hold it forever.
  * A late follower requests the leader route without sending a mutation. A
@@ -3446,6 +3448,151 @@ describe(`BrowserCollectionCoordinator`, () => {
         release.resolve()
         unsubscribe()
         coordinator.dispose()
+      }
+    })
+
+    /**
+     * A former owner that writes nothing leaves the durable term unchanged.
+     * Its delayed heartbeat can therefore share the successor's term after
+     * Web Lock transfer. The successor owns the lock and must retain its route
+     * while a queued exact-ID check and later source write complete. The two
+     * adapters' call logs distinguish this legal stale message from a real
+     * leadership transfer, which the queued-write history above rejects.
+     */
+    it(`keeps the Web Lock owner's route after a delayed same-term heartbeat`, async () => {
+      const formerAdapter = createStubAdapter()
+      const successorAdapter = createStubAdapter()
+      successorAdapter.reconcileCommittedTx = vi.fn((collectionId, tx) => {
+        successorAdapter.appliedTxs.push({ collectionId, tx })
+        return Promise.resolve({
+          kind: `applied-now` as const,
+          committed: {
+            term: tx.term,
+            seq: tx.seq,
+            rowVersion: tx.rowVersion,
+          },
+          latestRowVersion: tx.rowVersion,
+        })
+      })
+      const former = createCoordinator(formerAdapter)
+      const successor = createCoordinator(successorAdapter)
+      const collectionId = `source-stale-heartbeat`
+      const unsubscribeFormer = former.subscribe(collectionId, () => {})
+      const unsubscribeSuccessor = successor.subscribe(collectionId, () => {})
+      const writerEntered = createDeferred()
+      const releaseWriter = createDeferred()
+      let blockingWriter: Promise<unknown> | undefined
+      let reconciliation: Promise<unknown> | undefined
+      let delayedHeartbeat: unknown
+      try {
+        await vi.waitFor(() => expect(former.isLeader(collectionId)).toBe(true))
+        expect(successor.isLeader(collectionId)).toBe(false)
+        dropNextBroadcastMessage = (message) => {
+          const envelope = message as {
+            senderId?: string
+            payload?: { type?: string }
+          }
+          if (
+            envelope.senderId !== former.getNodeId() ||
+            envelope.payload?.type !== `leader:heartbeat`
+          ) {
+            return false
+          }
+          delayedHeartbeat = structuredClone(message)
+          return true
+        }
+        injectBroadcastMessage(`tsdb:coord:test-db`, {
+          v: 1,
+          dbName: `test-db`,
+          collectionId,
+          senderId: `route-probe`,
+          ts: Date.now(),
+          payload: { type: `leader:routeRequest` },
+        })
+        await vi.waitFor(() =>
+          expect(delayedHeartbeat).toMatchObject({
+            senderId: former.getNodeId(),
+            payload: { type: `leader:heartbeat`, term: 1 },
+          }),
+        )
+        dropNextBroadcastMessage = undefined
+        former.dispose()
+        await vi.waitFor(() =>
+          expect(successor.isLeader(collectionId)).toBe(true),
+        )
+        const successorInternals = successor as unknown as {
+          collections: Map<
+            string,
+            { isLeader: boolean; leaderId: string | null; latestTerm: number }
+          >
+        }
+        expect(successorInternals.collections.get(collectionId)).toMatchObject({
+          isLeader: true,
+          leaderId: successor.getNodeId(),
+          latestTerm: 1,
+        })
+
+        blockingWriter = mockNavigatorLocks.request(
+          `tsdb:writer:test-db`,
+          async () => {
+            writerEntered.resolve()
+            await releaseWriter.promise
+          },
+        )
+        await writerEntered.promise
+        reconciliation = successor.reconcileCommittedTx(
+          collectionId,
+          { txId: `crossing`, term: 0, seq: 0, rowVersion: 0, mutations: [] },
+          { latestRowVersion: 0, resetEpoch: 0 },
+        )
+        await vi.waitFor(() =>
+          expect(lockQueues.get(`tsdb:writer:test-db`)).toHaveLength(1),
+        )
+        injectBroadcastMessage(`tsdb:coord:test-db`, delayedHeartbeat)
+        await flush(0)
+        releaseWriter.resolve()
+        await blockingWriter
+
+        expect(await reconciliation).toMatchObject({
+          ok: true,
+          alreadyApplied: false,
+          committed: { term: 1, seq: 1, rowVersion: 1 },
+        })
+        expect(successorAdapter.reconcileCommittedTx).toHaveBeenCalledTimes(1)
+        expect(
+          await successor.requestApplyCommittedTx(collectionId, {
+            txId: `later`,
+            term: 0,
+            seq: 0,
+            rowVersion: 0,
+            mutations: [],
+          }),
+        ).toMatchObject({ ok: true, term: 1, seq: 2, latestRowVersion: 2 })
+        expect(successorInternals.collections.get(collectionId)).toMatchObject({
+          isLeader: true,
+          leaderId: successor.getNodeId(),
+        })
+        expect(formerAdapter.appliedTxs).toEqual([])
+        expect(
+          successorAdapter.appliedTxs.map(({ tx }) => ({
+            id: tx.txId,
+            term: tx.term,
+            seq: tx.seq,
+            rowVersion: tx.rowVersion,
+          })),
+        ).toEqual([
+          { id: `crossing`, term: 1, seq: 1, rowVersion: 1 },
+          { id: `later`, term: 1, seq: 2, rowVersion: 2 },
+        ])
+      } finally {
+        dropNextBroadcastMessage = undefined
+        releaseWriter.resolve()
+        await blockingWriter
+        unsubscribeFormer()
+        unsubscribeSuccessor()
+        former.dispose()
+        successor.dispose()
+        await reconciliation?.catch(() => undefined)
       }
     })
 
