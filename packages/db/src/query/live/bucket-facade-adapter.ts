@@ -59,11 +59,8 @@ export type FacadePublication = {
  * graph's canonical bucket-row deltas to those facades.
  */
 export class BucketFacadeAdapter {
-  private readonly pending = new Map<
-    string,
-    Map<string, Map<string, PendingRow>>
-  >()
-  private readonly pendingActivity = new Map<string, Map<string, number>>()
+  private pending = new Map<string, Map<string, Map<string, PendingRow>>>()
+  private pendingActivity = new Map<string, Map<string, number>>()
   private readonly activeBuckets = new Map<string, Set<string>>()
   private readonly entries = new Map<string, Map<string, FacadeEntry>>()
   private readonly retiredEntries = new Map<string, Map<string, FacadeEntry>>()
@@ -103,18 +100,6 @@ export class BucketFacadeAdapter {
   flush(): FacadePublication {
     const snapshot = this.snapshot()
     const publications: Array<PublicationDeferral> = []
-    // The only way to write a facade. It copies the facade's rows and defers
-    // its events before the first write, so a rollback reads only the
-    // facades the flush wrote.
-    const write = (entry: FacadeEntry, sync: FacadeSync, body: () => void) => {
-      if (!snapshot.rows.has(entry)) {
-        snapshot.rows.set(entry, this.copyRows(entry))
-        publications.push(entry.collection._deferPublication())
-      }
-      sync.begin()
-      body()
-      sync.commit()
-    }
     const newBaselines: Array<FacadeEntry> = []
 
     // Compilations are child-first, so nested facade references resolve before
@@ -141,16 +126,21 @@ export class BucketFacadeAdapter {
           for (const change of changes.values()) {
             this.prepareChange(entry, change)
           }
-          write(entry, sync, () => {
-            for (const change of changes.values()) {
-              this.applyChange(entry, sync, change, compilation.hasOrderBy)
-            }
-          })
+          // The only place a flush applies graph deltas to a facade. Copy the
+          // facade's rows and defer its events first, so a rollback reads only
+          // the facades the flush wrote. A bucket appears once per edge.
+          snapshot.rows.set(entry, this.copyRows(entry))
+          publications.push(entry.collection._deferPublication())
+          sync.begin()
+          for (const change of changes.values()) {
+            this.applyChange(entry, sync, change, compilation.hasOrderBy)
+          }
+          sync.commit()
         }
         for (const [bucketKey, multiplicity] of activity ?? []) {
           if (multiplicity >= 0) continue
           active.delete(bucketKey)
-          this.retireEntry(compilation.edgeId, bucketKey, write)
+          this.retireEntry(compilation.edgeId, bucketKey)
         }
       }
     } catch (error) {
@@ -161,11 +151,10 @@ export class BucketFacadeAdapter {
     }
     // A failed root commit keeps the builder's pending root rows, so keep the
     // facade rows they refer to: a rollback puts them back for the next flush.
-    // No graph output arrives between this flush and its rollback.
-    const pending = new Map(this.pending)
-    const pendingActivity = new Map(this.pendingActivity)
-    this.pending.clear()
-    this.pendingActivity.clear()
+    const pending = this.pending
+    const pendingActivity = this.pendingActivity
+    this.pending = new Map()
+    this.pendingActivity = new Map()
 
     let closed = false
     let prepared = false
@@ -188,13 +177,20 @@ export class BucketFacadeAdapter {
       rollback: () => {
         if (closed) return
         closed = true
+        // The flush runs inside the graph run, so no graph output can reach
+        // the adapter before its rollback. New deltas here would be lost.
+        if (this.hasPendingChanges()) {
+          throw new Error(
+            devBuild() && process.env.NODE_ENV !== `production`
+              ? `Bucket facade received graph output between a flush and its rollback`
+              : codedMessage(230),
+          )
+        }
         this.restore(snapshot)
         this.retiredEntries.clear()
         for (const publication of publications) publication.discard()
-        for (const [edgeId, rows] of pending) this.pending.set(edgeId, rows)
-        for (const [edgeId, activity] of pendingActivity) {
-          this.pendingActivity.set(edgeId, activity)
-        }
+        this.pending = pending
+        this.pendingActivity = pendingActivity
       },
     }
   }
@@ -326,21 +322,19 @@ export class BucketFacadeAdapter {
     return getOrCreate(this.activeBuckets, edgeId, () => new Set())
   }
 
-  private retireEntry(
-    edgeId: string,
-    bucketKey: string,
-    write: (entry: FacadeEntry, sync: FacadeSync, body: () => void) => void,
-  ): void {
+  private retireEntry(edgeId: string, bucketKey: string): void {
     const byBucket = this.entries.get(edgeId)
     const entry = byBucket?.get(bucketKey)
     if (!entry) return
 
-    const sync = entry.sync
-    const keys = [...entry.collection.keys()]
-    if (sync && keys.length > 0) {
-      write(entry, sync, () => {
-        for (const key of keys) sync.write({ type: `delete`, key })
-      })
+    // The graph retracts a bucket's rows in the run that retires it, and the
+    // flush writes those retractions first, so a retired facade is empty.
+    if (entry.collection.size > 0) {
+      throw new Error(
+        devBuild() && process.env.NODE_ENV !== `production`
+          ? `Bucket facade ${bucketKey} was retired while it still had rows`
+          : codedMessage(231, { bucketKey }),
+      )
     }
     byBucket!.delete(bucketKey)
     if (byBucket!.size === 0) this.entries.delete(edgeId)

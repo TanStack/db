@@ -239,3 +239,34 @@ data: `~/.cw-perf/bucket-f10/RESULTS.md` (local).
 **Retry after a failed root commit.** The maintainer recorded this as a design
 question for later. A retry needs a public contract, a backoff and a stop
 condition before it can earn its code weight.
+
+## Follow-up: second medium code review (2026-10-08)
+
+Reviewed head `bf6caffb1`. The review had nine findings. The evidence for each one is below.
+
+| Finding | Verdict | Change |
+| --- | --- | --- |
+| 1. Successful flushes do not check events | Confirmed | Law 1 now checks events on each successful flush. The subscriber starts from the facade's current rows (`includeInitialState`). Its events name only rows that a pending operation touched, at most once each. A replay of the events on the previous rows gives the shown rows. |
+| 2. `ARCHITECTURE.md` says the adapter buffers no deltas | Confirmed | The adapter paragraph and "Coherent publication" state the retention law and the rollback invariant. |
+| 3. `rollback()` can overwrite new pending deltas | Confirmed as an unchecked invariant | `rollback()` throws (code 230) when graph output arrived after the flush. The flush runs inside the graph run, so this cannot occur in a legal history. A pinned witness covers it. |
+| 4. Per-flush bookkeeping copy | Accepted design | The maintainer decision is recorded below. |
+| 5. Per-flush `write` closure | Confirmed | Removed. The copy, the deferral and the write are at the one write site. |
+| 6. The retire write branch is unreachable | Confirmed | The branch is removed. A retire that finds rows throws (code 231). A probe that threw on that branch ran the full `@tanstack/db` suite (11,267 tests) and reached it zero times. A pinned witness covers the throw. |
+| 7. Pending maps are copied, then cleared | Confirmed | The flush swaps the map references, and the rollback swaps them back. |
+| 8. The oracle reads adapter internals | Confirmed, documented | The Limits section gives the reason: `resolve` creates facades, so the facade set and the new-facade failure need the private map and factory. Rows, events and layout revisions are public Collection state. |
+| 9. The "only way to write a facade" comment is wrong | Confirmed | The comment now says this is the only place where a flush applies graph deltas. |
+
+An earlier draft of the event law subscribed without initial state. It reported missing delete events after a thrown flush. That was a wrong observation, not a product bug. A subscriber without initial state does not receive events for rows that it was never sent, and it receives an insert for an update to such a row. The same history gives the same events on `main`.
+
+Mutants, against the extended oracle (with the includes oracle and the adapter tests) and against the oracle at `bf6caffb1`:
+
+| Mutant | Extended oracle | Previous oracle |
+| --- | --- | --- |
+| Apply the consumed deltas again after publish | Assertion failure (20 tests) | Assertion failure (4 tests), through the work law |
+| Drop the events of a delete-only facade write | Assertion failure at the successful flush (step 1) | Assertion failure only at a later rollback |
+| Rollback restores over new pending deltas | Assertion failure (witness) | Survives |
+| Retire deletes rows and does not throw | Assertion failure (witness) | Survives |
+| Copy rows after the first write | Assertion failure (12 tests) | Assertion failure (7 tests) |
+| Apply each change twice | Equivalent: the repeated identical update publishes no event | Equivalent |
+
+Production: `bucket-facade-adapter.ts` is +54/−64 against `main` (net −10).
