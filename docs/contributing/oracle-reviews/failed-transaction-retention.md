@@ -256,6 +256,14 @@ persisting transactions as unsettled. `main`'s pending manual edits (#2078)
 showed that the model was wrong, not production: a pending transaction is
 tracked. The check now counts pending and persisting transactions.
 
+The collections CI group then failed to build PowerSync. A private
+`settleCollections` made a handler's `TransactionWithMutations` unassignable
+to `Transaction<any>`, because that type omits a key from `Transaction`, and
+`Omit` drops private members. The db typecheck missed it because nothing in db
+made that assignment. The method is now `@internal`, and
+`mutation-handler-compatibility.test-d.ts` asserts the assignability. The test
+fails with the private method and passes without it.
+
 ## Unresolved
 
 - The generated ownership grammar reaches a conflicting rollback that throws,
@@ -268,5 +276,10 @@ tracked. The check now counts pending and persisting transactions.
 - The ownership oracle does not combine queued sync transactions that hold a
   completed row with a second Collection. The optimistic-history oracle owns
   held rows for one Collection.
+- One random seed of the partial-update history in
+  `collection-state-retention-oracle.property.test.ts`
+  (`TANSTACK_DB_ORACLE_SEED=-526998278`) fails identically on `main`
+  (`fe284ccbd`). A partial sync update publishes a value that the model does
+  not allow. It is unrelated to transaction retention and is not addressed here.
 - The per-mutation pass is still O(unsettled transactions). A key-scoped
   recompute would remove that term, but it touches every settlement law.
