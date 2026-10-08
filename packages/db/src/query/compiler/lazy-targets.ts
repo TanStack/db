@@ -1,7 +1,13 @@
-import { PropRef, followRef, getFromSources } from '../ir.js'
+import {
+  PropRef,
+  followRef,
+  getFromSources,
+  requireCollectionSource,
+} from '../ir.js'
 import type {
   BasicExpression,
   CollectionRef,
+  CollectionSourceRef,
   From,
   QueryIR,
   QueryRef,
@@ -170,6 +176,8 @@ function getTargetsFromPropRef(
     ]
   }
 
+  if (source.type === `descriptorRef`) return requireCollectionSource(source)
+
   if (
     source.query.limit !== undefined ||
     source.query.offset !== undefined ||
@@ -184,7 +192,7 @@ function getTargetsFromPropRef(
 function getSourceFromAlias(
   query: QueryIR,
   alias: string,
-): CollectionRef | QueryRef | undefined {
+): CollectionSourceRef | QueryRef | undefined {
   if (query.join) {
     for (const join of query.join) {
       if (join.from.alias === alias) {

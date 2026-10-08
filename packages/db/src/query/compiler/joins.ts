@@ -21,7 +21,7 @@ import {
 } from '../equality-value-identity.js'
 import { ensureIndexForField } from '../../indexes/auto-index.js'
 import { validateJoinConditions } from '../join-conditions.js'
-import { getFromSources } from '../ir.js'
+import { getFromSources, requireCollectionSource } from '../ir.js'
 import { compileExpression } from './evaluators.js'
 import { getSourceAliasesFromExpression } from './expressions.js'
 import { getLazyLoadTargets } from './lazy-targets.js'
@@ -41,7 +41,7 @@ import type { CompileQueryFn } from './index.js'
 import type { OrderByOptimizationInfo } from './order-by.js'
 import type {
   BasicExpression,
-  CollectionRef,
+  CollectionSourceRef,
   JoinClause,
   QueryIR,
   QueryRef,
@@ -606,7 +606,7 @@ function analyzeJoinExpressions(
  * Processes the join source (collection or sub-query)
  */
 function processJoinSource(
-  from: CollectionRef | QueryRef,
+  from: CollectionSourceRef | QueryRef,
   allInputs: Record<string, KeyedStream>,
   collections: Record<string, Collection>,
   subscriptions: Record<string, CollectionSubscription>,
@@ -624,6 +624,8 @@ function processJoinSource(
   parentKeyStream?: KeyedStream,
 ): { alias: string; input: KeyedStream; collectionId: string } {
   switch (from.type) {
+    case `descriptorRef`:
+      return requireCollectionSource(from)
     case `collectionRef`: {
       const input = allInputs[from.sourceId]
       if (!input) {

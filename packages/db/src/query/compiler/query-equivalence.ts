@@ -40,6 +40,12 @@ function normalizeFrom(from: From): Record<string, unknown> {
         collection: from.collection,
         alias: from.alias,
       }
+    case `descriptorRef`:
+      return {
+        type: from.type,
+        descriptor: from.descriptor,
+        alias: from.alias,
+      }
     case `queryRef`:
       return {
         type: from.type,

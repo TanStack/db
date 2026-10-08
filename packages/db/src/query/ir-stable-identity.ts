@@ -420,11 +420,13 @@ function canonicalizeSource(
   seen: WeakSet<object>,
   scope: AliasScope,
 ): StableIdentityValue {
-  if (source.type === `collectionRef`) {
+  if (source.type === `collectionRef` || source.type === `descriptorRef`) {
     return {
       type: `collectionRef`,
       collectionId: canonicalizeRuntimeValue(
-        source.descriptor?.id ?? source.collection.id,
+        source.type === `descriptorRef`
+          ? source.descriptor.id
+          : source.collection.id,
         `${path}.collection.id`,
         seen,
       ),

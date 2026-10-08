@@ -47,6 +47,7 @@ import {
   getFromSources,
   getWhereExpression,
   isExpressionLike,
+  requireCollectionSource,
 } from '../ir.js'
 import { ensureIndexForField } from '../../indexes/auto-index.js'
 import { createSourceRecord } from '../../utils/source-record.js'
@@ -82,11 +83,12 @@ import type { OrderByOptimizationInfo } from './order-by.js'
 import type {
   BasicExpression,
   CollectionRef,
+  CollectionSourceRef,
+  From,
   IncludesMaterialization,
   QueryIR,
   QueryRef,
   UnionAll,
-  UnionFrom,
 } from '../ir.js'
 import type { LazyCollectionCallbacks } from './joins.js'
 import type { Collection } from '../../collection/index.js'
@@ -392,6 +394,7 @@ export function compileQuery(
   // This must happen before optimization because the optimizer may create internal
   // subqueries (e.g., for predicate pushdown) that reuse aliases, which is fine.
   validateQueryStructure(rawQuery)
+  const rawSources = collectCollectionSources(rawQuery)
 
   // Optimize the query before compilation
   const { optimizedQuery, sourceWhereClauses } = optimizeQuery(rawQuery)
@@ -404,7 +407,6 @@ export function compileQuery(
 
   // Create a copy of the inputs map to avoid modifying the original
   const allInputs = Object.assign(createSourceRecord<KeyedStream>(), inputs)
-  const rawSources = collectCollectionSources(rawQuery)
   bindSourceInputs(rawSources, allInputs)
 
   // Track alias to collection id relationships discovered during compilation.
@@ -1309,14 +1311,14 @@ function canonicalizeSelectedRows(
 /**
  * Collects aliases used for DIRECT collection references (not subqueries).
  * Used to validate that subqueries don't reuse parent query collection aliases.
- * Only direct CollectionRef aliases matter - QueryRef aliases don't cause conflicts.
+ * Only direct Collection source aliases matter. QueryRef aliases don't cause conflicts.
  */
 function collectDirectCollectionAliases(query: QueryIR): Set<string> {
   const aliases = new Set<string>()
 
   // Collect FROM alias only if it's a direct collection reference
   for (const source of getFromSources(query.from)) {
-    if (source.type === `collectionRef`) {
+    if (source.type === `collectionRef` || source.type === `descriptorRef`) {
       aliases.add(source.alias)
     }
   }
@@ -1324,7 +1326,10 @@ function collectDirectCollectionAliases(query: QueryIR): Set<string> {
   // Collect JOIN aliases only for direct collection references
   if (query.join) {
     for (const joinClause of query.join) {
-      if (joinClause.from.type === `collectionRef`) {
+      if (
+        joinClause.from.type === `collectionRef` ||
+        joinClause.from.type === `descriptorRef`
+      ) {
         aliases.add(joinClause.from.alias)
       }
     }
@@ -1434,7 +1439,7 @@ function collectScopeAliases(query: QueryIR): Array<string> {
  * Populates `aliasToCollectionId` and `aliasRemapping` for per-alias subscription tracking.
  */
 function processFromClause(
-  from: CollectionRef | QueryRef | UnionFrom | UnionAll,
+  from: From,
   allInputs: Record<string, KeyedStream>,
   collections: Record<string, Collection>,
   subscriptions: Record<string, CollectionSubscription>,
@@ -1765,7 +1770,7 @@ function encodeKeyForUnionBranch(key: unknown): string {
 }
 
 function processFrom(
-  from: CollectionRef | QueryRef,
+  from: CollectionSourceRef | QueryRef,
   allInputs: Record<string, KeyedStream>,
   collections: Record<string, Collection>,
   subscriptions: Record<string, CollectionSubscription>,
@@ -1787,6 +1792,8 @@ function processFrom(
   isParentRouted: boolean
 } {
   switch (from.type) {
+    case `descriptorRef`:
+      return requireCollectionSource(from)
     case `collectionRef`: {
       const input = allInputs[from.sourceId]
       if (!input) {
@@ -2009,7 +2016,7 @@ function mapNestedQueries(
   }
 }
 
-function getAllSources(query: QueryIR): Array<CollectionRef | QueryRef> {
+function getAllSources(query: QueryIR): Array<CollectionSourceRef | QueryRef> {
   return [
     ...getFromSources(query.from),
     ...(query.join?.map((join) => join.from) ?? []),

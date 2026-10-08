@@ -1,6 +1,7 @@
 import {
   CollectionRef,
   ConditionalSelect,
+  DescriptorRef,
   IncludesSubquery,
   QueryRef,
   UnionAll,
@@ -10,7 +11,13 @@ import {
 import { isRefProxy } from './ref-proxy-identity.js'
 import type { CollectionImpl } from '../../collection/index.js'
 import type { CollectionOptionsIdentity } from '../../collection-options.js'
-import type { From, QueryIR, Select, SelectValueExpression } from '../ir.js'
+import type {
+  CollectionSourceRef,
+  From,
+  QueryIR,
+  Select,
+  SelectValueExpression,
+} from '../ir.js'
 
 export type CollectionResolver = (
   options: CollectionOptionsIdentity<any, string | number, any, any, any>,
@@ -26,8 +33,8 @@ type CloneContext = {
  *
  * A reused builder describes the same query meaning, but each FROM, JOIN,
  * UNION, or include placement owns an independent position in the dataflow
- * graph. Expressions are immutable and can remain shared; CollectionRefs
- * cannot because their sourceId identifies that lexical position. A supplied
+ * graph. Expressions are immutable and can remain shared; source refs cannot
+ * because their sourceId identifies that lexical position. A supplied
  * resolver also binds any retained descriptors while cloning the plan.
  */
 export function cloneQueryForPlacement(
@@ -77,17 +84,20 @@ function cloneFromForPlacement(from: From, context: CloneContext): From {
 }
 
 function cloneSourceForPlacement(
-  source: CollectionRef | QueryRef,
+  source: CollectionSourceRef | QueryRef,
   context: CloneContext,
-): CollectionRef | QueryRef {
+): CollectionSourceRef | QueryRef {
   if (source.type === `collectionRef`) {
-    const descriptor = source.descriptor
-    return new CollectionRef(
-      descriptor && context.resolveDescriptor
-        ? context.resolveDescriptor(descriptor)
-        : source.source,
-      source.alias,
-    )
+    return new CollectionRef(source.collection, source.alias)
+  }
+
+  if (source.type === `descriptorRef`) {
+    return context.resolveDescriptor
+      ? new CollectionRef(
+          context.resolveDescriptor(source.descriptor),
+          source.alias,
+        )
+      : new DescriptorRef(source.descriptor, source.alias)
   }
 
   return new QueryRef(cloneQuery(source.query, context), source.alias)

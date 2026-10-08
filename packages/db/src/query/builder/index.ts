@@ -5,6 +5,7 @@ import {
   Aggregate as AggregateExpr,
   CollectionRef,
   ConditionalSelect,
+  DescriptorRef,
   Func as FuncExpr,
   INCLUDES_SCALAR_FIELD,
   IncludesSubquery,
@@ -12,7 +13,7 @@ import {
   QueryRef,
   UnionAll,
   UnionFrom,
-  collectCollectionSources,
+  collectSourceRefs,
   isExpressionLike,
 } from '../ir.js'
 import {
@@ -44,6 +45,7 @@ import type { NamespacedRow, SingleResult } from '../../types.js'
 import type {
   Aggregate,
   BasicExpression,
+  CollectionSourceRef,
   IncludesMaterialization,
   JoinClause,
   OrderBy,
@@ -155,7 +157,7 @@ export class BaseQueryBuilder<TContext extends Context = Context> {
   }
 
   /**
-   * Creates a CollectionRef or QueryRef from a source object
+   * Creates a source reference from a source object
    * @param source - An object with a single key-value pair
    * @param context - Context string for error messages (e.g., "from clause", "join clause")
    * @returns A tuple of [alias, ref] where alias is the source key and ref is the created reference
@@ -163,7 +165,7 @@ export class BaseQueryBuilder<TContext extends Context = Context> {
   private _createRefForSource<TSource extends Source>(
     source: TSource,
     context: SourceClauseContext,
-  ): [string, CollectionRef | QueryRef] {
+  ): [string, CollectionSourceRef | QueryRef] {
     const refs = this._createRefsForSource(source, context)
     if (refs.length !== 1) {
       throw new OnlyOneSourceAllowedError(context)
@@ -174,7 +176,7 @@ export class BaseQueryBuilder<TContext extends Context = Context> {
   private _createRefsForSource<TSource extends Source>(
     source: TSource,
     context: SourceClauseContext,
-  ): Array<[string, CollectionRef | QueryRef]> {
+  ): Array<[string, CollectionSourceRef | QueryRef]> {
     if (typeof source === `string`) {
       throw new InvalidSourceTypeError(context, `string`)
     }
@@ -203,22 +205,19 @@ export class BaseQueryBuilder<TContext extends Context = Context> {
       throw new OnlyOneSourceAllowedError(context)
     }
 
-    const refs: Array<[string, CollectionRef | QueryRef]> = []
+    const refs: Array<[string, CollectionSourceRef | QueryRef]> = []
     for (const alias of keys) {
       const sourceValue = source[alias]
 
       // Validate the value is a Collection or QueryBuilder
-      let ref: CollectionRef | QueryRef
+      let ref: CollectionSourceRef | QueryRef
 
       if (sourceValue instanceof CollectionImpl) {
         ref = new CollectionRef(sourceValue, alias)
       } else if (hasCollectionOptionsBrand(sourceValue)) {
-        ref = new CollectionRef(
-          this.resolveCollection
-            ? this.resolveCollection(sourceValue)
-            : sourceValue,
-          alias,
-        )
+        ref = this.resolveCollection
+          ? new CollectionRef(this.resolveCollection(sourceValue), alias)
+          : new DescriptorRef(sourceValue, alias)
       } else if (sourceValue instanceof BaseQueryBuilder) {
         const subQuery = cloneQueryForPlacement(sourceValue._getQuery())
         if (!(subQuery as Partial<QueryIR>).from) {
@@ -1025,7 +1024,11 @@ export class BaseQueryBuilder<TContext extends Context = Context> {
   ): BaseQueryBuilder<TContext> {
     if (!resolveCollection || !this.query.from) return this
     const query = this._getQuery()
-    if (!collectCollectionSources(query).some((source) => source.descriptor)) {
+    if (
+      !collectSourceRefs(query).some(
+        (source) => source.type === `descriptorRef`,
+      )
+    ) {
       return this
     }
     return new BaseQueryBuilder<TContext>(
