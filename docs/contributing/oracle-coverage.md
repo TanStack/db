@@ -256,8 +256,10 @@ checks that the hook reports the missing client before reusing prior rows.
 `packages/db/tests/db-client.test.ts` supplies a
 focused nested-query preload witness across two clients, including equal query
 hashes and distinct dehydrated rows. Concrete-config descriptors, on-demand
-acquisition, joins, union sources, and non-React adapters remain open for this
-binding law; a receiving oracle needs the relevant public observation for each.
+acquisition, joins, union sources, and Svelte's provider path remain open for
+this binding law; a receiving oracle needs the relevant public observation for
+each. Vue, Solid, and Angular have no DbClient descriptor-binding contract in
+this work. Their query callers use concrete Collections.
 `packages/db/tests/live-query-options.test.ts` checks that a client-aware
 builder binds a nested descriptor when placing the subquery, before final
 preparation; it does not compare public nested-query rows.
