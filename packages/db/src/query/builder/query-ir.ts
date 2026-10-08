@@ -16,7 +16,7 @@ export function getQueryIR(
     throw new Error(
       devBuild() && process.env.NODE_ENV !== `production`
         ? `Query must resolve to a QueryBuilder; received ${received}.`
-        : codedMessage(230, { received }),
+        : codedMessage(233, { received }),
     )
   }
   return (builder as unknown as BaseQueryBuilder)._getQuery()

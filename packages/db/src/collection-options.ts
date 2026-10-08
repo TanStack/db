@@ -11,6 +11,11 @@ export const collectionOptionsFactory: unique symbol = Symbol.for(
   `@tanstack/db.collectionOptions.factory`,
 ) as never
 
+/** Adapter-owned admission hook for options that contain mutable per-Collection state. */
+export const collectionOptionsClaim: unique symbol = Symbol.for(
+  `@tanstack/db.collectionOptions.claim`,
+) as never
+
 export type CollectionOptionsIdentity<
   T extends object = Record<string, unknown>,
   TKey extends string | number = string | number,
