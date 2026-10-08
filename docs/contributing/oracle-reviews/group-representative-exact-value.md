@@ -148,10 +148,10 @@ Review mutants on `e5449edc2`:
 
 - The work counter observes Map, Set and array iteration and array callbacks.
   A walk through an indexed `for` loop would not count.
-- Contributions consolidate only when their inputs are exactly identical. A
-  sum, avg, min, or max over distinct values, and an include correlated on
-  Date, binary, or Temporal key instances, keep one contribution per distinct
-  input or instance.
+- Contributions consolidate only when their representative keys and min or
+  max inputs are identical. A min or max over distinct values, and an include
+  correlated on Date, binary, or Temporal key instances, keep one contribution
+  per distinct input or instance.
 - The group key serializes a large binary group value's contents once per
   member. That cost predates this change.
 - A `groupBy` over values whose exact identity is a reference, such as plain
@@ -159,3 +159,46 @@ Review mutants on `e5449edc2`:
   values is also by reference, so each such group holds one value.
 - The fixed per-change overhead from #1740 is a separate cost and is outside
   this change.
+
+## Medium review follow-up (2026-10-08)
+
+Reviewed head `14d5cd49b`. Fix commits `8db25f3b0` (laws) and `b86aaa7e2`
+(production). Ledger: `review-medium-ledger.md` in the task scratch notes.
+
+- **Rebuilt min/max argument.** An inline subquery rebuilds projected objects
+  each time it runs, so the retraction of a row carried a new argument
+  instance. The min or max contribution was keyed by that instance and did not
+  cancel its insert. RED on `14d5cd49b`: after inserting and deleting a row
+  with `x: 7`, `max` stayed `7`. The base commit before this pull request did
+  not have the fault. The identity now comes from the value the min or max
+  compares (`minMaxInput`), and the work law keeps cycle work constant over
+  300 insert and delete cycles.
+- **Sum and avg** no longer carry exact inputs. Their reduce adds coerced
+  numbers, so merging equal inputs cannot change the result.
+- **Equal instances.** Among content-equal object group values, the member with
+  the smallest row key supplies the instance. RED on `14d5cd49b`: when rows
+  arrived as 2, 1, row 2's instance was projected. The choice no longer depends
+  on arrival order.
+- **Test model.** `exactRank` now matches the documented order: another
+  primitive, then `-0`, then objects by type tag read with
+  `Object.prototype.toString`.
+- **Include work law** covers insert, an update that moves a member out and
+  back, and delete.
+
+| Mutant | Outcome |
+| --- | --- |
+| Exact input from the raw argument (`14d5cd49b`) | Assertion failure: `max` keeps the deleted value |
+| No min or max exact inputs | Assertion failure, 4 tests |
+| Instance token as the tie among equal objects (`14d5cd49b`) | Assertion failure: arrival order 2, 1 |
+| Row key in the route representative | Assertion failure: include work law |
+
+Not changed:
+
+- A parent field in an include aggregate's select is not projected into the
+  result on this commit or the base, so the route's parent context stays
+  without a public observation.
+- A min or max argument compiles twice per query, once for the aggregate and
+  once for its exact input. This is a compile-time cost only.
+- db-ivm merges hash-equal values by design. Choosing which instance remains
+  needs per-instance state, which the compiler identity supplies, so the fix
+  stays in the compiler.
