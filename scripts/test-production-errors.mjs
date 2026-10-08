@@ -46,7 +46,10 @@ function distinctiveLiteral(message, source, avoid = ``) {
     for (let start = 0; start + best.length < piece.length; start++) {
       let end = start + best.length + 1
       while (end <= piece.length && source.includes(piece.slice(start, end))) {
-        if (end - start > best.length && !avoid.includes(piece.slice(start, end)))
+        if (
+          end - start > best.length &&
+          !avoid.includes(piece.slice(start, end))
+        )
           best = piece.slice(start, end)
         if (best.length === 40) return best.trim()
         end++
