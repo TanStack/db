@@ -783,7 +783,7 @@ The post-merge review added three missing domains to existing owners:
   Sync transactions committed while it persisted are held and publish with
   that drop; `isPersisted` settles after that publication. Handler sync writes
   are generated at every cut, with and without awaiting their acceptance.
-  Receipts stay pending until visible. With one local mutation and no
+  Receipts stay pending until visible. With one persisting local mutation and no
   truncate, the first queued same-key source transaction consumes local
   attribution at settlement if that mutation succeeds. An absent-key delete
   consumes it without leaving a row. Repeated same-key writes in that first
@@ -791,7 +791,19 @@ The post-merge review added three missing domains to existing owners:
   are `'remote'` without another local owner. A truncate can publish while the
   mutation remains active and label its same-key row `'local'` even if that
   mutation later fails. Attribution uses key and timing; `SyncConfig.write`
-  has no causal client identity. The earlier accepted-snapshot retention law
+  has no causal client identity. A pending manual mutation does not hold source
+  writes; a same-key source row can retain local attribution after rollback.
+  A subscriber can commit a truncate and a later same-key transaction during
+  another drain. The truncate batch keeps its attribution, while the later
+  transaction in that drain is remote. Bounded histories also cross two
+  persisting same-key mutations, one or two source batches, both settlement
+  orders, and success/failure combinations. The first source batch is local
+  when at least one mutation succeeds; two failures leave it remote. A hostile
+  failed-sibling mutant fails the one-success cases at settlement. The pending
+  lane rejects a mutant that ignores pending mutations at its source or
+  settlement publication. The original truncate implementation failed the
+  reentrant history at failed-mutation settlement. The earlier
+  accepted-snapshot retention law
   and its truncate-capture ownership refinement were retired with this
   contract. The
   [PR #1907 review record](oracle-reviews/pr-1907-accepted-delete-ownership.md)
@@ -808,7 +820,8 @@ Issue #2071 adds two focused checks to this acceptance map:
   They compare live rows, exposed base, durable rows, origin, and a held source
   receipt at mutation settlement and after source application. The
   [real SQLite receiver](https://github.com/TanStack/db/blob/main/packages/db-sqlite-persistence-core/tests/persisted-real-adapter-lifecycle.test.ts)
-  checks two same-key continuations. Each reopens the same file with a new
+  checks two same-key continuations, including a real source `update` after
+  reinsert. Each reopens the same file with a new
   Collection, adapter, and SQLite driver. Both the reported release and this
   review tree pass these bounded histories. The reporter's private bridge
   sequence is unavailable; these witnesses do not establish its behavior,
@@ -819,11 +832,16 @@ Issue #2071 adds two focused checks to this acceptance map:
 - The [optimistic publication owner](https://github.com/TanStack/db/blob/main/packages/db/tests/optimistic-history-publication-oracle.test.ts)
   distinguishes one and two queued same-key source transactions during a
   successful local mutation, two same-key writes inside one atomic transaction,
-  an absent-key delete before a source insert, and a truncate published before
-  a mutation fails. The persisted wrapper receives the one/two transaction
-  pair. These histories establish key-and-timing attribution for one local
-  mutation; they do not establish mixed delete/reinsert order inside one source
-  transaction, causal authorship, or every overlapping mutation schedule. A
+  an absent-key delete before a source insert, a delete and reinsert in one
+  atomic source transaction, a truncate published before
+  a mutation fails, pending manual mutations, two overlapping same-key
+  mutations, and a truncate followed by another same-key transaction in one
+  reentrant drain. The persisted wrapper receives the one/two transaction
+  pair. The source grammar can now preserve mixed write order inside one
+  transaction; its atomic delete/reinsert witness is distinguished from a
+  later same-key transaction. These histories establish bounded key-and-timing
+  attribution; they do not establish every mixed operation sequence, causal
+  authorship, or every overlapping mutation schedule. A
   causal `$origin` guarantee would require an explicit source signal and a new
   core-owner model and provider receiving witness.
 

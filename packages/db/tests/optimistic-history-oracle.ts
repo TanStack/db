@@ -5,6 +5,7 @@ import { createCollection } from '../src/collection/index.js'
 import { createDeferred } from '../src/deferred.js'
 import { createLiveQueryCollection } from '../src/query/index.js'
 import { whenSyncAccepted } from '../src/sync-receipt.js'
+import { createTransaction } from '../src/transactions.js'
 import type { CollectionConfig, SyncConfig } from '../src/types.js'
 
 /**
@@ -43,8 +44,9 @@ import type { CollectionConfig, SyncConfig } from '../src/types.js'
  * The reference model has three small parts: the applied synced rows, an
  * ordered list of optimistic transactions with one mutation each, and a queue
  * of accepted sync transactions. `visible()` folds held completed
- * transactions, then persisting ones, over the applied rows. It does not reuse
- * production caches, pending-mutation mergers, or publication code. Model
+ * transactions, then pending and persisting ones, over the applied rows.
+ * It does not reuse production caches, pending-mutation mergers, or
+ * publication code. Model
  * alignment: `transactions` are optimistic transactions, `queue` holds
  * accepted sync transactions, and `base` is the applied synced rows. `held` is
  * a model-only flag for the hold described above: it is set when a
@@ -53,9 +55,20 @@ import type { CollectionConfig, SyncConfig } from '../src/types.js'
  *
  * A sync transaction still open when a transaction settles is not accepted:
  * it holds no completed row and attributes nothing. If it later commits, its
- * writes are `'remote'` unless a persisting transaction touches their key; if
- * it aborts, its writes never apply, and both its receipt and its acceptance
+ * writes are `'remote'` unless another active local transaction touches their
+ * key; if it aborts, its writes never apply, and both its receipt and its acceptance
  * moment (`whenSyncAccepted`) reject.
+ * A manual local transaction can remain pending before its mutation function
+ * starts. Source writes on its key apply at once and receive local attribution;
+ * rolling it back exposes that source row with the same origin. The model keeps
+ * pending distinct from persisting because the same source commit publishes
+ * immediately in the former state and waits in the latter.
+ * Ordinary source batches write rows before deletes. The ordered-operations
+ * lane also permits a delete and reinsert of one key in the same transaction.
+ * Its `row` action combines source insert and update; the production driver
+ * resolves that kind against source membership before invoking sync writes.
+ * A reentrant history commits a truncate and its suffix from a subscriber
+ * while an earlier truncate publishes. Core applies that suffix in one drain.
  *
  * A mutation handler can write a sync transaction before it returns, and can
  * await that write's acceptance. It is the same event as a sync transaction
@@ -91,15 +104,28 @@ import type { CollectionConfig, SyncConfig } from '../src/types.js'
 
 export type HistoryRow = { id: number; a: number; b: number; c: number }
 type Fields = Partial<Omit<HistoryRow, `id`>>
+type SourceOperation =
+  { type: `row`; row: HistoryRow } | { type: `delete`; key: number }
 type SourceBatch = {
   type: `sync`
   rows: Array<HistoryRow>
   // Keys the source deletes after writing its rows, held or not.
   deletes?: Array<number> | undefined
+  // Overrides rows/deletes when a source transaction needs mixed write order.
+  operations?: Array<SourceOperation> | undefined
   truncate: boolean
   copies: number
   // In the partial-update lane, the source's updates omit `c`.
   partial?: boolean | undefined
+}
+function sourceOperations(batch: SourceBatch): Array<SourceOperation> {
+  if (batch.operations) return batch.operations
+  const operations: Array<SourceOperation> = []
+  for (let copy = 0; copy < batch.copies; copy++)
+    for (const row of batch.rows) operations.push({ type: `row`, row })
+  for (const key of batch.deletes ?? [])
+    operations.push({ type: `delete`, key })
+  return operations
 }
 // A sync transaction the mutation handler writes before it returns. With
 // `awaitReceipt`, the handler awaits the write's acceptance before returning.
@@ -110,6 +136,7 @@ export type OptimisticStep =
       key: number
       fields: Fields
       optimistic: boolean
+      pending?: boolean
       inHandler?: HandlerBatch | undefined
     }
   | {
@@ -131,13 +158,17 @@ export type OptimisticStep =
   // sync API writes to the most recent open transaction.
   | { type: `open`; batch: SourceBatch }
   | { type: `close`; commit: boolean }
+  // The trigger publishes first; its subscriber commits all later batches
+  // while core is still draining. A truncate in the suffix releases them as
+  // one subsequent drain, preserving their source order.
+  | { type: `reentrant`; trigger: SourceBatch; batches: Array<SourceBatch> }
 
 type ModelTransaction = {
   key: number
   kind: `insert` | `update` | `delete`
   row: HistoryRow
   optimistic: boolean
-  state: `persisting` | `completed` | `failed`
+  state: `pending` | `persisting` | `completed` | `failed`
   // Settled while a queued sync transaction touched its key. The drain that
   // applies that queue ends the hold.
   held: boolean
@@ -171,8 +202,9 @@ class HistoryModel {
   private queuedKeys() {
     return new Set(
       this.queue.flatMap((batch) => [
-        ...batch.rows.map((row) => row.id),
-        ...(batch.deletes ?? []),
+        ...sourceOperations(batch).map((operation) =>
+          operation.type === `row` ? operation.row.id : operation.key,
+        ),
       ]),
     )
   }
@@ -195,7 +227,9 @@ class HistoryModel {
     )
     const overlay = [
       ...this.transactions.filter((entry) => entry.held),
-      ...this.transactions.filter((entry) => entry.state === `persisting`),
+      ...this.transactions.filter(
+        (entry) => entry.state === `pending` || entry.state === `persisting`,
+      ),
     ]
     for (const transaction of overlay) {
       if (!transaction.optimistic) continue
@@ -234,7 +268,7 @@ class HistoryModel {
         ...(step.type === `edit` ? step.fields : {}),
       },
       optimistic: step.optimistic,
-      state: `persisting`,
+      state: step.type === `edit` && step.pending ? `pending` : `persisting`,
       held: false,
       originPending: false,
     })
@@ -259,12 +293,20 @@ class HistoryModel {
     if (step.truncate || !this.persisting()) this.drain()
   }
 
+  syncTogether(batches: ReadonlyArray<SourceBatch>) {
+    this.queue.push(...batches)
+    if (batches.some((batch) => batch.truncate) || !this.persisting())
+      this.drain()
+  }
+
   private drain() {
     // A truncate can drain before a mutation settles. Its same-key source row
     // uses the active mutation's attribution, regardless of later settlement.
-    const persistingKeys = new Set(
+    const activeKeys = new Set(
       this.transactions
-        .filter((entry) => entry.state === `persisting`)
+        .filter(
+          (entry) => entry.state === `pending` || entry.state === `persisting`,
+        )
         .map((entry) => entry.key),
     )
     const attributed = new Set(
@@ -276,12 +318,22 @@ class HistoryModel {
       // One atomic source transaction has one attribution per key. Snapshot
       // ownership at its start, then consume it for later transactions only.
       // Repeated writes within this batch retain the same attribution.
-      const batchLocalKeys = new Set([...attributed, ...persistingKeys])
+      const batchLocalKeys = new Set([...attributed, ...activeKeys])
       if (batch.truncate) {
         this.base.clear()
         this.origins.clear()
       }
-      for (const row of batch.rows) {
+      for (const operation of sourceOperations(batch)) {
+        if (operation.type === `delete`) {
+          // A source delete removes the applied row and ends attribution for
+          // later transactions, but this atomic batch keeps its snapshot.
+          this.base.delete(operation.key)
+          this.origins.delete(operation.key)
+          attributed.delete(operation.key)
+          activeKeys.delete(operation.key)
+          continue
+        }
+        const { row } = operation
         const local = batchLocalKeys.has(row.id)
         const held = this.base.get(row.id)
         // The default row update mode merges a partial update into the
@@ -294,14 +346,7 @@ class HistoryModel {
         )
         this.origins.set(row.id, local ? `local` : `remote`)
         attributed.delete(row.id)
-        persistingKeys.delete(row.id)
-      }
-      // A source delete removes the applied row and ends its attribution.
-      for (const key of batch.deletes ?? []) {
-        this.base.delete(key)
-        this.origins.delete(key)
-        attributed.delete(key)
-        persistingKeys.delete(key)
+        activeKeys.delete(row.id)
       }
       // Truncate keeps attribution only for rows in its own replacement.
       if (batch.truncate) attributed.clear()
@@ -471,6 +516,7 @@ export async function runOptimisticHistory(
   let starting: ReturnType<typeof createDeferred<void>> | undefined
   // The next handler call writes this batch before it returns.
   let handlerBatch: HandlerBatch | undefined
+  let reentrantBatches: Array<SourceBatch> | undefined
   const handler = async () => {
     const batch = handlerBatch
     const done = starting!.promise
@@ -531,6 +577,7 @@ export async function runOptimisticHistory(
     settledRows?: Array<ObservedRow>
     expected: HistoryOutcome<unknown>
     changes: object
+    manual: boolean
   }> = []
   // A queued sync transaction's receipt stays pending until it is visible.
   const receipts: Array<{
@@ -565,15 +612,20 @@ export async function runOptimisticHistory(
   const sourceInserts = new WeakMap<SourceBatch, Set<number>>()
   const absentDeletes = new WeakMap<SourceBatch, Set<number>>()
   function resolveSourceBatch(step: SourceBatch): SourceBatch {
+    if (step.operations && step.copies !== 1)
+      throw new Error(`Ordered source batches have one copy`)
+    if (step.operations && (step.rows.length || step.deletes?.length))
+      throw new Error(`Ordered source batches use operations alone`)
     if (step.truncate) sourceKeys.clear()
     const inserts = new Set<number>()
-    for (const row of step.rows) {
-      if (!sourceKeys.has(row.id)) inserts.add(row.id)
-      sourceKeys.add(row.id)
-    }
     const absent = new Set<number>()
-    for (const key of step.deletes ?? []) {
-      if (!sourceKeys.delete(key)) absent.add(key)
+    for (const [index, operation] of sourceOperations(step).entries()) {
+      if (operation.type === `row`) {
+        if (!sourceKeys.has(operation.row.id)) inserts.add(index)
+        sourceKeys.add(operation.row.id)
+      } else if (!sourceKeys.delete(operation.key)) {
+        absent.add(index)
+      }
     }
     sourceInserts.set(step, inserts)
     absentDeletes.set(step, absent)
@@ -591,27 +643,27 @@ export async function runOptimisticHistory(
       sourceRows.clear()
       counts.replacements++
     }
-    for (let copy = 0; copy < step.copies; copy++) {
-      for (const row of step.rows) {
-        const type = copy === 0 && inserts.has(row.id) ? `insert` : `update`
-        if (type === `insert`) counts.sourceInserts++
-        const held = sourceRows.get(row.id)
-        if (type === `update` && partialUpdates && step.partial && held) {
-          const { c: _omitted, ...partialRow } = row
-          if (held.c !== row.c) counts.distinguishingPartialUpdates++
-          sync.write({ type, value: partialRow as HistoryRow })
-          sourceRows.set(row.id, { ...row, c: held.c })
-        } else {
-          sync.write({ type, value: { ...row } })
-          sourceRows.set(row.id, row)
-        }
+    for (const [index, operation] of sourceOperations(step).entries()) {
+      if (operation.type === `delete`) {
+        sync.write({ type: `delete`, key: operation.key })
+        sourceRows.delete(operation.key)
+        counts.sourceDeletes++
+        if (absentDeletes.get(step)!.has(index)) counts.absentSourceDeletes++
+        continue
       }
-    }
-    for (const key of step.deletes ?? []) {
-      sync.write({ type: `delete`, key })
-      sourceRows.delete(key)
-      counts.sourceDeletes++
-      if (absentDeletes.get(step)!.has(key)) counts.absentSourceDeletes++
+      const { row } = operation
+      const type = inserts.has(index) ? `insert` : `update`
+      if (type === `insert`) counts.sourceInserts++
+      const held = sourceRows.get(row.id)
+      if (type === `update` && partialUpdates && step.partial && held) {
+        const { c: _omitted, ...partialRow } = row
+        if (held.c !== row.c) counts.distinguishingPartialUpdates++
+        sync.write({ type, value: partialRow as HistoryRow })
+        sourceRows.set(row.id, { ...row, c: held.c })
+      } else {
+        sync.write({ type, value: { ...row } })
+        sourceRows.set(row.id, row)
+      }
     }
   }
   function writeSourceBatch(step: SourceBatch) {
@@ -731,6 +783,11 @@ export async function runOptimisticHistory(
               ),
             )
           } else record(captured)
+          if (reentrantBatches) {
+            const batches = reentrantBatches
+            reentrantBatches = undefined
+            for (const suffixBatch of batches) writeSourceBatch(suffixBatch)
+          }
         },
         { includeInitialState: true },
       )
@@ -823,7 +880,8 @@ export async function runOptimisticHistory(
             operation.expected.status,
             `${label}: model outcome ${index}`,
           ).toBe(
-            model.transactions[index]!.state === `persisting`
+            model.transactions[index]!.state === `persisting` ||
+              model.transactions[index]!.state === `pending`
               ? `pending`
               : model.transactions[index]!.state === `completed`
                 ? `fulfilled`
@@ -879,6 +937,8 @@ export async function runOptimisticHistory(
         const before = sorted(model.visible().values())
         const deliveredBefore = deliveries
         if (step.type === `edit` || step.type === `delete`) {
+          if (step.type === `edit` && step.pending && step.inHandler)
+            throw new Error(`A pending edit cannot write from its handler yet`)
           const index = model.author(step)
           if (index === undefined) continue
           const intent = model.transactions[index]!
@@ -894,7 +954,7 @@ export async function runOptimisticHistory(
           }
           const done = createDeferred<void>()
           starting = done
-          const tx =
+          const performEdit = () =>
             step.type === `delete`
               ? collection.delete(step.key, { optimistic: step.optimistic })
               : intent.kind === `insert`
@@ -915,6 +975,14 @@ export async function runOptimisticHistory(
                     { optimistic: step.optimistic },
                     (draft) => Object.assign(draft, step.fields),
                   )
+          const manual = step.type === `edit` && step.pending === true
+          const tx = manual
+            ? createTransaction<HistoryRow>({
+                autoCommit: false,
+                mutationFn: handler,
+              })
+            : performEdit()
+          if (manual) tx.mutate(() => void performEdit())
           const operation: (typeof operations)[number] = {
             tx,
             done,
@@ -926,6 +994,7 @@ export async function runOptimisticHistory(
               }),
             ),
             expected: { status: `pending` },
+            manual,
             changes:
               step.type === `delete`
                 ? plain(intent.row)
@@ -956,7 +1025,9 @@ export async function runOptimisticHistory(
           if (step.type === `delete`) counts.deletes++
         } else if (step.type === `settle`) {
           const active = model.transactions.flatMap((entry, index) =>
-            entry.state === `persisting` ? [index] : [],
+            entry.state === `persisting` || entry.state === `pending`
+              ? [index]
+              : [],
           )
           if (!active.length) continue
           const index = active[step.slot % active.length]!
@@ -966,6 +1037,7 @@ export async function runOptimisticHistory(
           cuts = [sorted(model.visible().values())]
           if (step.success) {
             op.expected = { status: `fulfilled`, value: op.tx }
+            if (op.manual) void op.tx.commit().catch(() => undefined)
             op.done.resolve()
           } else if (step.failure === `reject`) {
             const error = new Error(`Mutation rejected at step ${position}`)
@@ -989,6 +1061,24 @@ export async function runOptimisticHistory(
           ).toEqual(cuts[0])
           counts.settlements++
           if (!step.success) counts.failures++
+        } else if (step.type === `reentrant`) {
+          if (open) continue
+          if (!step.trigger.truncate)
+            throw new Error(`Reentrant trigger must publish a truncate`)
+          const trigger = resolveSourceBatch(step.trigger)
+          const batches = step.batches.map(resolveSourceBatch)
+          if (!batches.some((batch) => batch.truncate))
+            throw new Error(`Reentrant suffix must include a truncate`)
+          model.sync(trigger)
+          cuts = [sorted(model.visible().values())]
+          model.syncTogether(batches)
+          cuts.push(sorted(model.visible().values()))
+          reentrantBatches = batches
+          writeSourceBatch(trigger)
+          expect(
+            reentrantBatches,
+            `source callback committed suffix`,
+          ).toBeUndefined()
         } else if (step.type === `open`) {
           if (open || step.batch.truncate) continue
           const keysBefore = new Set(sourceKeys)

@@ -154,7 +154,7 @@ export class CollectionStateManager<
   public rowOrigins = new Map<TKey, VirtualOrigin>()
 
   /**
-   * Tracks keys of persisting local mutations for source-write attribution.
+   * Tracks keys of pending or persisting local mutations for source-write attribution.
    * A same-key source write can receive 'local' even when a peer supplied it.
    */
   public pendingLocalChanges = new Set<TKey>()
@@ -1112,9 +1112,6 @@ export class CollectionStateManager<
       // Set flag to prevent redundant optimistic state recalculations
       this.isCommittingSyncTransactions = true
 
-      let truncatePendingLocalChanges: Set<TKey> | undefined
-      let truncatePendingLocalOrigins: Set<TKey> | undefined
-
       // First collect all keys that will be affected by sync operations
       const changedKeys = new Set<TKey>()
       const syncedInsertedOrUpdatedKeys = new Set<TKey>()
@@ -1172,6 +1169,12 @@ export class CollectionStateManager<
       }
       const rowUpdateMode = this.config.sync.rowUpdateMode || `partial`
       for (const transaction of committedSyncedTransactions) {
+        const truncatePendingLocalChanges = transaction.truncate
+          ? new Set(this.pendingLocalChanges)
+          : undefined
+        const truncatePendingLocalOrigins = transaction.truncate
+          ? new Set(this.pendingLocalOrigins)
+          : undefined
         // Handle truncate operations first
         if (transaction.truncate) {
           // TRUNCATE PHASE
@@ -1179,8 +1182,6 @@ export class CollectionStateManager<
           //    same commit will rebuild the base atomically.
           // Preserve pending local tracking just long enough for operations in this
           // truncate batch to retain correct local origin semantics.
-          truncatePendingLocalChanges = new Set(this.pendingLocalChanges)
-          truncatePendingLocalOrigins = new Set(this.pendingLocalOrigins)
           this.syncedData.clear()
           this.syncedMetadata.clear()
           this.hydrationSeedKeys.clear()

@@ -36,6 +36,7 @@ import {
   validateRemoteSubsetOptions,
 } from '../src'
 import { Temporal } from './temporal-value-oracle'
+import { cleanupTestActions } from './test-cleanup'
 import type {
   CollectionReset,
   PersistedCollectionCoordinator,
@@ -618,28 +619,17 @@ async function cleanupPersistedOracle(
   actions: Array<() => void | Promise<unknown>>,
   hasPrimaryFailure: boolean,
 ): Promise<void> {
-  const failures: Array<unknown> = []
-  for (const [index, action] of actions.entries()) {
-    try {
-      await atPersistedOracleCheckpoint(
+  await cleanupTestActions(
+    actions,
+    hasPrimaryFailure,
+    `Persisted oracle`,
+    (action, index) =>
+      atPersistedOracleCheckpoint(
         Promise.resolve().then(action),
         `cleanup stage ${index}`,
         250,
-      )
-    } catch (error) {
-      failures.push(error)
-    }
-  }
-  if (failures.length > 0) {
-    if (hasPrimaryFailure) {
-      console.warn(
-        `Persisted oracle cleanup failed after the primary failure:`,
-        failures,
-      )
-    } else {
-      throw new AggregateError(failures, `Persisted oracle cleanup failed`)
-    }
-  }
+      ),
+  )
 }
 
 it.each([false, true])(

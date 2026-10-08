@@ -29,6 +29,7 @@ import {
   persistedCollectionOptions,
 } from '../src'
 import { SqliteCliDriver } from './sqlite-core-adapter-oracle.test'
+import { cleanupTestActions } from './test-cleanup'
 import type { SyncConfig } from '@tanstack/db'
 import type { PersistenceAdapter, SQLiteDriver } from '../src'
 
@@ -63,24 +64,6 @@ async function reachCheckpoint(
   } finally {
     if (timer !== undefined) clearTimeout(timer)
   }
-}
-
-async function cleanupRealWitness(
-  actions: Array<() => void | Promise<unknown>>,
-  hasPrimaryFailure: boolean,
-): Promise<void> {
-  const failures: Array<unknown> = []
-  for (const action of actions) {
-    try {
-      await action()
-    } catch (error) {
-      failures.push(error)
-    }
-  }
-  if (failures.length === 0) return
-  if (hasPrimaryFailure)
-    console.warn(`Real SQLite witness cleanup failed:`, failures)
-  else throw new AggregateError(failures, `Real SQLite witness cleanup failed`)
 }
 
 class QueryObservingDriver implements SQLiteDriver {
@@ -321,8 +304,8 @@ it(`preserves generated restart order across real-adapter scheduler capabilities
 // A source delete committed while the rejected insert persists may be durable
 // before it is visible. Settlement drops the optimistic row and publishes that
 // delete. Reopen before later source writes must omit the refused row. On the
-// second history, a later source insert, delete, and replacement update both
-// live and durable rows.
+// second history, a later source insert, delete, reinsert, and update change
+// both live and durable rows.
 it.each([
   `reopens before later source writes`,
   `applies later same-key source writes`,
@@ -371,6 +354,8 @@ it.each([
     let transaction: ReturnType<typeof collection.insert> | undefined
     let heldDelete: true | Promise<void> | undefined
     let reopened: typeof collection | undefined
+    let collectionCleanedUp = false
+    let reopenedCleanedUp = false
     let hasPrimaryFailure = false
 
     try {
@@ -434,9 +419,25 @@ it.each([
         expect(
           (await adapter.loadSubset(id, {})).map(({ value }) => value),
         ).toEqual([{ id: `local`, title: `later source row` }])
+
+        source.begin()
+        source.write({
+          type: `update`,
+          value: { id: `local`, title: `updated source row` },
+        })
+        await Promise.resolve(source.commit())
+        expect(adapterRowWrites()).toContainEqual(
+          expect.objectContaining({ type: `update`, key: `local` }),
+        )
+        expect(collection.get(`local`)?.title).toBe(`updated source row`)
+        expect(collection.base.get(`local`)?.title).toBe(`updated source row`)
+        expect(
+          (await adapter.loadSubset(id, {})).map(({ value }) => value),
+        ).toEqual([{ id: `local`, title: `updated source row` }])
       }
 
       await collection.cleanup()
+      collectionCleanedUp = true
       const reopenedAdapter = createAdapter()
       reopened = createCollection(
         persistedCollectionOptions<Row, string>({
@@ -451,29 +452,43 @@ it.each([
         expect(reopened.has(`local`)).toBe(false)
         expect(await reopenedAdapter.loadSubset(id, {})).toEqual([])
       } else {
-        expect(reopened.get(`local`)?.title).toBe(`later source row`)
+        expect(reopened.get(`local`)?.title).toBe(`updated source row`)
         expect(
           (await reopenedAdapter.loadSubset(id, {})).map(({ value }) => value),
-        ).toEqual([{ id: `local`, title: `later source row` }])
+        ).toEqual([{ id: `local`, title: `updated source row` }])
       }
     } catch (error) {
       hasPrimaryFailure = true
       throw error
     } finally {
       rejectOutbound(refused)
-      await cleanupRealWitness(
+      await cleanupTestActions(
         [
           () => transaction?.isPersisted.promise.catch(() => undefined),
           () =>
             heldDelete === undefined
               ? undefined
               : Promise.resolve(heldDelete).catch(() => undefined),
-          () => reopened?.cleanup(),
-          () => collection.cleanup(),
+          async () => {
+            if (reopened) {
+              await reopened.cleanup()
+              reopenedCleanedUp = true
+            }
+          },
+          async () => {
+            if (!collectionCleanedUp) {
+              await collection.cleanup()
+              collectionCleanedUp = true
+            }
+          },
           () => applyCommittedTx.mockRestore(),
-          () => rmSync(directory, { recursive: true, force: true }),
+          () => {
+            if (collectionCleanedUp && (!reopened || reopenedCleanedUp))
+              rmSync(directory, { recursive: true, force: true })
+          },
         ],
         hasPrimaryFailure,
+        `Real SQLite witness`,
       )
     }
   },

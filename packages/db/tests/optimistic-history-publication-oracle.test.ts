@@ -132,6 +132,47 @@ it(`keeps local attribution through repeated same-key writes in one source trans
   })
 })
 
+// A delete and reinsert in one accepted source transaction have one origin
+// snapshot. Moving the reinsert to a later transaction consumes that origin
+// before the later write, which distinguishes the atomic boundary.
+it.each([false, true])(
+  `attributes a delete and reinsert in one source transaction, later=%s`,
+  async (later) => {
+    const counts = await runOptimisticHistory(
+      [{ id: 1, a: 0, b: 0, c: 0 }],
+      [
+        { type: `edit`, key: 1, fields: { a: 1 }, optimistic: true },
+        {
+          type: `sync`,
+          rows: [],
+          operations: [
+            { type: `delete`, key: 1 },
+            { type: `row`, row: { id: 1, a: 2, b: 0, c: 0 } },
+          ],
+          truncate: false,
+          copies: 1,
+        },
+        ...(later
+          ? [
+              {
+                type: `sync` as const,
+                rows: [{ id: 1, a: 3, b: 0, c: 0 }],
+                truncate: false,
+                copies: 1,
+              },
+            ]
+          : []),
+        { type: `settle`, slot: 0, success: true, cascade: false },
+      ],
+    )
+    expect(counts).toMatchObject({
+      sourceInserts: 1,
+      sourceDeletes: 1,
+      queued: later ? 2 : 1,
+    })
+  },
+)
+
 // A source delete also touches the key even when that source held no row.
 // It consumes the one local attribution, so a later source insert is remote.
 it(`consumes local attribution with an absent-key source delete`, async () => {
@@ -184,6 +225,147 @@ it(`retains active-mutation attribution from a truncate after failure`, async ()
     sourceInserts: 1,
   })
 })
+
+// A manual local transaction is active before its mutation function starts.
+// Source writes do not wait for it, so settlement exposes the already applied
+// source row and its key-and-timing attribution. Optimistic visibility and
+// fulfillment are separate dimensions of that attribution.
+it.each(
+  [false, true].flatMap((optimistic) =>
+    [false, true].map((success) => ({ optimistic, success })),
+  ),
+)(
+  `keeps source attribution through pending settlement, optimistic=$optimistic success=$success`,
+  async ({ optimistic, success }) => {
+    const counts = await runOptimisticHistory(
+      [],
+      [
+        { type: `edit`, key: 1, fields: { a: 1 }, optimistic, pending: true },
+        {
+          type: `sync`,
+          rows: [{ id: 1, a: 2, b: 0, c: 0 }],
+          truncate: false,
+          copies: 1,
+        },
+        { type: `settle`, slot: 0, success, cascade: false },
+      ],
+    )
+    expect(counts).toMatchObject({
+      edits: 1,
+      failures: success ? 0 : 1,
+      sourceInserts: 1,
+    })
+  },
+)
+
+// A source callback can commit a truncate and its successor while core is
+// draining an earlier publication. Only the truncate's own same-key write
+// inherits its retained attribution; the next transaction is remote.
+it.each([false, true])(
+  `consumes truncate attribution before a later same-key transaction in one drain, later=%s`,
+  async (later) => {
+    const counts = await runOptimisticHistory(
+      [{ id: 1, a: 0, b: 0, c: 0 }],
+      [
+        { type: `edit`, key: 1, fields: { a: 1 }, optimistic: true },
+        {
+          type: `reentrant`,
+          trigger: {
+            type: `sync`,
+            rows: [{ id: 1, a: 2, b: 0, c: 0 }],
+            truncate: true,
+            copies: 1,
+          },
+          batches: [
+            {
+              type: `sync`,
+              rows: [{ id: 1, a: 3, b: 0, c: 0 }],
+              truncate: true,
+              copies: 1,
+            },
+            ...(later
+              ? [
+                  {
+                    type: `sync` as const,
+                    rows: [{ id: 1, a: 4, b: 0, c: 0 }],
+                    truncate: false,
+                    copies: 1,
+                  },
+                ]
+              : []),
+          ],
+        },
+        { type: `settle`, slot: 0, success: false, cascade: false },
+      ],
+    )
+    expect(counts).toMatchObject({
+      edits: 1,
+      failures: 1,
+      replacements: 2,
+    })
+  },
+)
+
+// Two active same-key mutations share one source key but settle independently.
+// A failure cannot consume another mutation's held attribution; a second
+// source transaction still needs to lose attribution after the first.
+const overlappingCases = [false, true].flatMap((firstSucceeds) =>
+  [false, true].flatMap((secondSucceeds) =>
+    [1, 2].flatMap((sourceTransactions) =>
+      [false, true].map((settleSecondFirst) => ({
+        firstSucceeds,
+        secondSucceeds,
+        sourceTransactions,
+        settleSecondFirst,
+      })),
+    ),
+  ),
+)
+it.each(overlappingCases)(
+  `settles overlapping same-key mutations, first=$firstSucceeds second=$secondSucceeds sources=$sourceTransactions reverse=$settleSecondFirst`,
+  async ({
+    firstSucceeds,
+    secondSucceeds,
+    sourceTransactions,
+    settleSecondFirst,
+  }) => {
+    const counts = await runOptimisticHistory(
+      [{ id: 1, a: 0, b: 0, c: 0 }],
+      [
+        { type: `edit`, key: 1, fields: { a: 1 }, optimistic: true },
+        { type: `edit`, key: 1, fields: { b: 2 }, optimistic: true },
+        {
+          type: `sync`,
+          rows: [{ id: 1, a: 3, b: 3, c: 0 }],
+          truncate: false,
+          copies: 1,
+        },
+        ...(sourceTransactions === 2
+          ? [
+              {
+                type: `sync` as const,
+                rows: [{ id: 1, a: 4, b: 4, c: 0 }],
+                truncate: false,
+                copies: 1,
+              },
+            ]
+          : []),
+        {
+          type: `settle`,
+          slot: settleSecondFirst ? 1 : 0,
+          success: firstSucceeds,
+          cascade: false,
+        },
+        { type: `settle`, slot: 0, success: secondSucceeds, cascade: false },
+      ],
+    )
+    expect(counts).toMatchObject({
+      edits: 2,
+      settlements: 2,
+      queued: sourceTransactions,
+    })
+  },
+)
 
 it.each([
   `wrong-key`,
