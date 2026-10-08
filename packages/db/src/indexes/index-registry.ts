@@ -78,13 +78,11 @@ export function isDevModeEnabled(): boolean {
 export function emitIndexSuggestion(
   details: Omit<IndexSuggestion, `message`>,
 ): void {
-  if (
-    !(
-      devBuild() &&
-      process.env.NODE_ENV !== `production` &&
-      devModeConfig.enabled
-    )
-  )
+  if (!(
+    devBuild() &&
+    process.env.NODE_ENV !== `production` &&
+    devModeConfig.enabled
+  ))
     return
 
   const field = details.fieldPath.join(`.`)
@@ -126,13 +124,11 @@ export function trackQuery(
   executionTimeMs: number,
 ): void {
   // Inline, not isDevModeEnabled(): production bundles then drop this body.
-  if (
-    !(
-      devBuild() &&
-      process.env.NODE_ENV !== `production` &&
-      devModeConfig.enabled
-    )
-  )
+  if (!(
+    devBuild() &&
+    process.env.NODE_ENV !== `production` &&
+    devModeConfig.enabled
+  ))
     return
 
   const key = `${collectionId}:${fieldPath.join(`.`)}`
@@ -173,13 +169,11 @@ export function checkCollectionSizeForIndex(
   fieldPath: Array<string>,
 ): void {
   // Inline, not isDevModeEnabled(): production bundles then drop this body.
-  if (
-    !(
-      devBuild() &&
-      process.env.NODE_ENV !== `production` &&
-      devModeConfig.enabled
-    )
-  )
+  if (!(
+    devBuild() &&
+    process.env.NODE_ENV !== `production` &&
+    devModeConfig.enabled
+  ))
     return
 
   if (collectionSize > devModeConfig.collectionSizeThreshold) {
