@@ -136,7 +136,12 @@ export class BucketFacadeAdapter {
         for (const [bucketKey, multiplicity] of activity ?? []) {
           if (multiplicity >= 0) continue
           active.delete(bucketKey)
-          this.retireEntry(compilation.edgeId, bucketKey, snapshot, publications)
+          this.retireEntry(
+            compilation.edgeId,
+            bucketKey,
+            snapshot,
+            publications,
+          )
         }
       }
     } catch (error) {
