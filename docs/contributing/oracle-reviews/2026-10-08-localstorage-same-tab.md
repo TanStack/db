@@ -72,3 +72,22 @@ failed-read contract, not a successful-convergence claim.
 | ORC-013 | No-event receipt versus delayed event distinguishes the old event-only rule. Update/delete and clear mutants demonstrate distinct consequences at their own cuts. |
 | ORC-014 | jsdom's default DOM Storage receives the controlled no-event premise. Native browser scheduling is explicitly unclaimed. |
 
+## Readiness-boundary follow-up
+
+Reviewed source and oracle head: `69ef5690a7db8f10b692462c70fc1ad2d43159b2`.
+The preceding audit's receipt histories began after both Collections preloaded.
+A newly ready Collection can invoke application status listeners before its
+sync function returns. One such listener started a write through an already
+ready peer. On prior head `d28d748da`, the write reached durable Storage and
+fulfilled its receipt while the newly ready Collection stayed empty: same-tab
+registration followed `markReady()`. The new oracle's `newly ready peer at
+receipt` comparison failed with `[]` instead of the authored row.
+
+The sync run now registers its same-tab listener before publishing readiness.
+If `markReady()` or browser-listener registration throws, it removes that
+listener before propagating the startup error. The new history passes, as do
+all 24 peer-oracle tests and the full package suite: 270 files, 11,642 tests,
+no type errors. Build, changed-file lint, formatting and whitespace checks
+pass. This extends ORC-001's active-run boundary, ORC-005's production path,
+ORC-006's old-implementation kill, ORC-010's startup cleanup, and ORC-013's
+distinguishing readiness witness. The other outcomes and limits above remain.
