@@ -153,10 +153,13 @@ try {
     if (crossing) {
       crossingTxId ??= tx.txId
       crossingTxIds.push(tx.txId)
-      crossingResumeMutation ??= tx.collectionMetadataMutations?.find(
+      const resumeMutation = tx.collectionMetadataMutations?.find(
         (mutation) =>
           mutation.type === 'set' && mutation.key === 'electric:resume',
-      )?.value
+      )
+      if (resumeMutation?.type === 'set') {
+        crossingResumeMutation ??= resumeMutation.value
+      }
     }
     const result = originalRequest(requestedId, tx, scopedAdapter)
     if (crossing) {
