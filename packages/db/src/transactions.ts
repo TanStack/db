@@ -171,7 +171,7 @@ function throwSettlementErrors(errors: Array<unknown>): void {
       errors,
       devBuild() && process.env.NODE_ENV !== `production`
         ? `Transaction settlement failed`
-        : codedMessage(213),
+        : codedMessage(230),
       { cause: errors[0] },
     )
 }

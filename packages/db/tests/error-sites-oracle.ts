@@ -3,6 +3,10 @@
  * error classes in `src/errors.ts`. The production error message oracle uses
  * it to check that each such message is coded.
  *
+ * - A `console` call whose argument contains library text is a plain site too,
+ *   unless it is development-only: inside the erasable guard's branch, or after
+ *   an early `return` on its negation. The census lists every development-only
+ *   literal so the bundle check can prove production drops it.
  * - A **coded site** is any `devBuild() && NODE_ENV !== 'production' ? dev :
  *   codedMessage(code, values)` expression, wherever the message goes, except
  *   an error class's `super(...)` message.
@@ -31,6 +35,15 @@ import ts from 'typescript'
 export type CodedSite = {
   file: string
   code: number
+  /** `warning` for `codedWarning`, else `error`. */
+  kind: `error` | `warning`
+  /** True when the message is an argument of `console.warn` or `warnOnce`. */
+  inWarn: boolean
+  /**
+   * True when the message is stored in a variable rather than used where it is
+   * written; the census then cannot tell where it goes.
+   */
+  stored: boolean
   /** The development message as a template. */
   template: string
   /** Its literal text pieces, outside interpolations. */
@@ -59,6 +72,13 @@ export type CodedSite = {
   values: Array<{ expression: string; parts: Array<string>; showable: boolean }>
 }
 
+/**
+ * Prose that only development builds contain, one entry per guarded region:
+ * the erasable guard's branch, or the block after an early `return` on its
+ * negation.
+ */
+export type DevelopmentOnlyText = { file: string; literals: Array<string> }
+
 /** A coded `super(...)` message in an error class outside `errors.ts`. */
 export type ClassGuard = { file: string; name: string; code: number }
 
@@ -68,6 +88,16 @@ export type PlainSite = {
   template: string
   literals: Array<string>
 }
+
+/**
+ * Methods that log their first argument as a message. Text passed to them is a
+ * site, as if it were written at their `console` call.
+ */
+const messageSinks = new Map([
+  [`transitionToError`, 0],
+  [`setErrorState`, 0],
+  [`warnOnce`, 1],
+])
 
 /** Constructor name to the position of its message argument. */
 const messagePosition = new Map([
@@ -95,18 +125,38 @@ function compact(node: ts.Node, sourceFile: ts.SourceFile): string {
     node.getText(sourceFile),
   )
   const tokens: Array<string> = []
-  while (scanner.scan() !== ts.SyntaxKind.EndOfFileToken)
+  // Open braces inside each `${...}` of the templates being scanned, so the
+  // `}` that ends a substitution rescans the template's next literal part
+  // with its exact text.
+  const depths: Array<number> = []
+  for (
+    let kind = scanner.scan();
+    kind !== ts.SyntaxKind.EndOfFileToken;
+    kind = scanner.scan()
+  ) {
+    if (kind === ts.SyntaxKind.TemplateHead) depths.push(0)
+    else if (kind === ts.SyntaxKind.OpenBraceToken && depths.length)
+      depths[depths.length - 1]!++
+    else if (kind === ts.SyntaxKind.CloseBraceToken && depths.length) {
+      if (depths.at(-1) === 0) {
+        kind = scanner.reScanTemplateToken(false)
+        if (kind === ts.SyntaxKind.TemplateTail) depths.pop()
+      } else depths[depths.length - 1]!--
+    }
     tokens.push(scanner.getTokenText())
+  }
   let text = ``
   tokens.forEach((token, index) => {
     if (token === `,` && closing.has(tokens[index + 1] ?? ``)) return
     const previous = text.at(-1) ?? ``
-    if (spaced.has(token) || spaced.has(tokens[index - 1] ?? ``))
-      text += text ? ` ` : ``
-    else if (wordLike.test(token) && /[\w$]/.test(previous)) text += ` `
+    const space =
+      spaced.has(token) || spaced.has(tokens[index - 1] ?? ``)
+        ? text !== ``
+        : wordLike.test(token) && /[\w$]/.test(previous)
+    if (space && previous !== ` `) text += ` `
     text += token
   })
-  return text.replace(/ +/g, ` `)
+  return text
 }
 
 function sourceFiles(directory: string): Array<string> {
@@ -326,10 +376,12 @@ export function findErrorSites(
   coded: Array<CodedSite>
   plain: Array<PlainSite>
   classGuards: Array<ClassGuard>
+  developmentOnly: Array<DevelopmentOnlyText>
 } {
   const coded: Array<CodedSite> = []
   const plain: Array<PlainSite> = []
   const classGuards: Array<ClassGuard> = []
+  const developmentOnly: Array<DevelopmentOnlyText> = []
   const callerMessage = new Set(callerMessageClasses)
   const configPath = join(dirname(sourceRoot), `tsconfig.json`)
   const config = ts.parseJsonConfigFileContent(
@@ -358,8 +410,167 @@ export function findErrorSites(
       ts.isConditionalExpression(node) &&
       compact(node.condition, sourceFile) === guard &&
       ts.isCallExpression(node.whenFalse) &&
-      node.whenFalse.expression.getText(sourceFile) === `codedMessage`
+      [`codedMessage`, `codedWarning`].includes(
+        node.whenFalse.expression.getText(sourceFile),
+      )
+    // The guard alone, or the first terms of a top-level `&&` chain: then the
+    // whole condition is false in production. `guard || x` is not a guard.
+    const isGuard = (node: ts.Expression): boolean => {
+      const terms: Array<ts.Expression> = []
+      const flatten = (term: ts.Expression) => {
+        if (ts.isParenthesizedExpression(term)) return flatten(term.expression)
+        if (
+          ts.isBinaryExpression(term) &&
+          term.operatorToken.kind === ts.SyntaxKind.AmpersandAmpersandToken
+        ) {
+          flatten(term.left)
+          flatten(term.right)
+        } else terms.push(term)
+      }
+      flatten(node)
+      return (
+        terms.length >= 2 &&
+        compact(terms[0]!, sourceFile) === `devBuild()` &&
+        compact(terms[1]!, sourceFile) ===
+          `process.env.NODE_ENV !== \`production\``
+      )
+    }
+    // The region that makes a node development-only: the branch of
+    // `if (guard) { ... }`, or the block after `if (!(guard ...)) return`.
+    const developmentRegion = (node: ts.Node): ts.Node | undefined =>
+      ts.findAncestor(node, (ancestor) => {
+        if (ts.isSourceFile(ancestor)) return `quit`
+        if (
+          ts.isIfStatement(ancestor.parent) &&
+          ancestor === ancestor.parent.thenStatement &&
+          isGuard(ancestor.parent.expression)
+        )
+          return true
+        if (!ts.isBlock(ancestor.parent)) return false
+        const statements = ancestor.parent.statements
+        return statements
+          .slice(0, statements.indexOf(ancestor as ts.Statement))
+          .some(
+            (statement) =>
+              ts.isIfStatement(statement) &&
+              ts.isPrefixUnaryExpression(statement.expression) &&
+              statement.expression.operator ===
+                ts.SyntaxKind.ExclamationToken &&
+              ts.isParenthesizedExpression(statement.expression.operand) &&
+              isGuard(statement.expression.operand.expression) &&
+              (ts.isReturnStatement(statement.thenStatement) ||
+                (ts.isBlock(statement.thenStatement) &&
+                  statement.thenStatement.statements.length === 1 &&
+                  ts.isReturnStatement(
+                    statement.thenStatement.statements[0]!,
+                  ))),
+          )
+      })
+    const isDevelopmentOnly = (node: ts.Node) => !!developmentRegion(node)
+    // A guarded message whose production form holds no library text, such as
+    // `guard ? \`[Live Query Error] ${message}\` : message`.
+    const isDecoration = (node: ts.Node) => {
+      if (!ts.isConditionalExpression(node) || !isGuard(node.condition))
+        return false
+      const value = compact(node.whenFalse, sourceFile)
+      const decorated = holes(node.whenTrue)
+      return (
+        !hasLibraryText(node.whenFalse) &&
+        decorated.length > 0 &&
+        decorated.every((hole) => compact(hole, sourceFile) === value)
+      )
+    }
+    // A console method read other than as a direct call: an alias.
+    const consoleReceivers = new Set([`console`, `globalThis.console`])
+    const isConsoleMethod = (node: ts.Node) =>
+      (ts.isPropertyAccessExpression(node) ||
+        ts.isElementAccessExpression(node)) &&
+      consoleReceivers.has(node.expression.getText(sourceFile))
+    const regions = new Map<ts.Node, Array<string>>()
     const visit = (node: ts.Node) => {
+      if (
+        (ts.isStringLiteral(node) ||
+          ts.isNoSubstitutionTemplateLiteral(node) ||
+          ts.isTemplateExpression(node)) &&
+        hasLibraryText(node) &&
+        isDevelopmentOnly(node)
+      ) {
+        const region = developmentRegion(node)!
+        regions.set(region, [
+          ...(regions.get(region) ?? []),
+          ...messageLiterals(node),
+        ])
+        return
+      }
+      // `console` itself handed on, as in `const { warn } = console`.
+      if (
+        ts.isIdentifier(node) &&
+        node.text === `console` &&
+        !(
+          (ts.isPropertyAccessExpression(node.parent) ||
+            ts.isElementAccessExpression(node.parent)) &&
+          node.parent.expression === node
+        ) &&
+        !ts.isPropertyAccessExpression(node.parent) &&
+        // `typeof console.warn` names a type, not a value.
+        !ts.isQualifiedName(node.parent) &&
+        !isDevelopmentOnly(node)
+      )
+        plain.push({
+          file,
+          line:
+            sourceFile.getLineAndCharacterOfPosition(node.getStart()).line + 1,
+          template: `console alias: ${compact(node.parent, sourceFile)}`,
+          literals: [],
+        })
+      // A console method that is not called directly could carry any text.
+      if (
+        isConsoleMethod(node) &&
+        !(
+          ts.isCallExpression(node.parent) && node.parent.expression === node
+        ) &&
+        !isDevelopmentOnly(node)
+      )
+        plain.push({
+          file,
+          line:
+            sourceFile.getLineAndCharacterOfPosition(node.getStart()).line + 1,
+          template: `console alias: ${compact(node, sourceFile)}`,
+          literals: [],
+        })
+      // A console call, or a call to a method that logs its message, with
+      // library text is a site unless it is development-only.
+      const sinkName =
+        ts.isCallExpression(node) &&
+        (ts.isPropertyAccessExpression(node.expression)
+          ? node.expression.name.text
+          : ts.isIdentifier(node.expression)
+            ? node.expression.text
+            : undefined)
+      const sinkPosition =
+        sinkName === false || sinkName === undefined
+          ? undefined
+          : messageSinks.get(sinkName)
+      const sink =
+        ts.isCallExpression(node) &&
+        (isConsoleMethod(node.expression) || sinkPosition !== undefined)
+      if (sink && !isDevelopmentOnly(node))
+        for (const argument of isConsoleMethod(node.expression)
+          ? node.arguments
+          : node.arguments.slice(sinkPosition, sinkPosition! + 1))
+          if (
+            !isCoded(argument) &&
+            !isDecoration(argument) &&
+            hasLibraryText(argument)
+          )
+            plain.push({
+              file,
+              line:
+                sourceFile.getLineAndCharacterOfPosition(argument.getStart())
+                  .line + 1,
+              template: messageTemplate(argument, sourceFile),
+              literals: messageLiterals(argument),
+            })
       if (isCoded(node) && isClassMessage(node)) {
         const owner = ts.findAncestor(node, ts.isClassLike)
         classGuards.push({
@@ -373,9 +584,23 @@ export function findErrorSites(
         })
       } else if (isCoded(node)) {
         const call = node.whenFalse as ts.CallExpression
+        const parent = node.parent
         coded.push({
           file,
           code: Number(call.arguments[0]!.getText(sourceFile)),
+          kind:
+            call.expression.getText(sourceFile) === `codedWarning`
+              ? `warning`
+              : `error`,
+          inWarn:
+            ts.isCallExpression(parent) &&
+            ((isConsoleMethod(parent.expression) &&
+              /warn['"`]?\]?$/.test(parent.expression.getText(sourceFile))) ||
+              /(^|\.)warnOnce$/.test(parent.expression.getText(sourceFile))),
+          stored:
+            ts.isVariableDeclaration(parent) ||
+            (ts.isBinaryExpression(parent) &&
+              parent.operatorToken.kind === ts.SyntaxKind.EqualsToken),
           template: messageTemplate(node.whenTrue, sourceFile),
           literals: messageLiterals(node.whenTrue),
           interpolations: interpolations(node.whenTrue, sourceFile, showable),
@@ -424,6 +649,15 @@ export function findErrorSites(
       ts.forEachChild(node, visit)
     }
     visit(sourceFile)
+    // One entry per guarded region, holding its prose: words and a space.
+    for (const texts of regions.values()) {
+      const prose = texts.filter((text) => /[A-Za-z]+ [A-Za-z]/.test(text))
+      // A region without prose still freezes its text, so it stays checked.
+      const literals = prose.length
+        ? prose
+        : texts.filter((text) => /[A-Za-z]/.test(text))
+      if (literals.length) developmentOnly.push({ file, literals })
+    }
   }
-  return { coded, plain, classGuards }
+  return { coded, plain, classGuards, developmentOnly }
 }

@@ -28,9 +28,9 @@ ${messages[name].map((message) => `\`\`\`text\n${message}\n\`\`\`\n`).join('\n')
 )
 
 const siteSections = Object.entries(sites).map(
-  ([code, { file, template }]) => `<a id="error-${code}"></a>
+  ([code, { file, template, kind = 'error' }]) => `<a id="${kind}-${code}"></a>
 
-## Error ${code}: \`${file}\`
+## ${kind === 'warning' ? 'Warning' : 'Error'} ${code}: \`${file}\`
 
 Development builds show this message, with \`\${...}\` replaced by values:
 
@@ -55,15 +55,17 @@ that the error can show, and a link to this page. For example:
 TanStack DB error 17 (key=1, collectionId="todos"): https://tanstack.com/db/latest/docs/errors#error-17
 \`\`\`
 
+A console warning uses the same form with \`warning\` in place of \`error\`.
 Development builds keep the full messages below. The error classes, their
 \`name\` values, and their fields are the same in both builds. See
 [Error Handling](./guides/error-handling.md) for how to catch them.
 
 ${sections.join('\n')}
-## Other errors
+## Other errors and log messages
 
-These errors are plain \`Error\`, \`TypeError\`, \`RangeError\`, or \`AggregateError\` values. Each
-heading names the source file under \`packages/db/src\` that throws it.
+These are plain \`Error\`, \`TypeError\`, \`RangeError\`, or
+\`AggregateError\` values, and \`console\` messages about runtime failures.
+Each heading names the source file under \`packages/db/src\` that writes it.
 
 ${siteSections.join('\n')}`
 

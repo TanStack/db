@@ -456,6 +456,8 @@ export function getLiveQueryWindowCollectionWarning(
     return undefined
   }
 
+  // A developer hint: production adapters get no warning to print.
+  if (!(devBuild() && process.env.NODE_ENV !== `production`)) return undefined
   return (
     `useLiveInfiniteQuery: Pre-created collection has window {offset: ${currentWindow.offset}, limit: ${currentWindow.limit}} ` +
     `but the hook expects {offset: 0, limit: ${expectedLimit}}. Adjusting window now.`
