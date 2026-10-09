@@ -1690,6 +1690,9 @@ not deferred implementations of the approved follow-up.
 
 [The cache-eviction design](oracle-reviews/issue-2056-cache-eviction-design.md)
 records the generation and expiry laws and their unresolved cuts. The
+[PR #2069 review at 51563046](oracle-reviews/issue-2069-review-51563046.md)
+records the Query startup handoff, index reverse-order challenge, all review
+dispositions, and the repair commit's ORC-012 audit. The
 [review of code head `7f1df5c82`](oracle-reviews/issue-2056-cache-generation-audit-7f1df5c82.md)
 records the ORC-012 outcomes, RED/GREEN witnesses, and evidence gaps. The
 real-SQLite owner checks generation rotation, legacy-writer isolation,
