@@ -307,6 +307,13 @@ row-bearing snapshot.
 - `unknown`: the adapter has no authoritative pre-migration key set and does
   not claim completeness.
 
+A no-write election can reserve a greater durable term and reset its sequence
+to zero without changing persisted rows or the source resume cursor. The
+persisted wrapper keeps an already certified resume baseline across that
+transition only when the atomic snapshot has the same row version and reset
+epoch. A committed write or schema reset requires fresh certification and
+cannot inherit the earlier baseline merely because the key set still matches.
+
 The method is required because the versioned `metadata.persistence` capability
 always carries hydration, durable row scanning, certification, evidence, and
 generation ownership as one complete bundle. Sync wrappers must forward the

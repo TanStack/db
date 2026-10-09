@@ -746,6 +746,16 @@ snapshot with the same version-zero premise that the real SQLite adapter's
 schema-reset oracle proves. A combined real-adapter wrapper reset and later
 notification remains with the persisted SQLite receiving owner.
 
+The persisted wrapper owner also holds an on-demand resume certification across
+a newer, sequence-zero term while the row version and reset epoch stay fixed.
+It rejects the old exact-generation guard at key-set evidence. The Electric
+held-snapshot owner joins the real SQLite term reservation with the persisted
+wrapper and mocked Electric stream: the source retains its cursor and reaches
+ready with the original durable rows. Neighboring committed-write and schema-
+reset histories reject inheritance of the old baseline. The real Chromium/OPFS
+reopen history still owns the host election and restart schedule; this local
+join does not prove that schedule passes in CI.
+
 A bounded TLA+ design grammar and exact TLC receipts live in
 `review-evidence/issue-2085-tla/`. It explores one X, one same-key peer Y,
 one reset, delayed/lost notices, position-only observation, and ledger pruning;

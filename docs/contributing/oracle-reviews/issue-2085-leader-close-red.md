@@ -676,3 +676,47 @@ join of missed notice, empty election, and passive public rows remains open.
 Cross-version peers, concurrent source transactions, multiple Collections,
 provider cursor semantics, physical crash durability, and Electron IPC reply
 loss remain outside this TLC claim.
+
+## CI follow-up: no-write term reservation during Electric resume (2026-10-09)
+
+The browser E2E workflow on `bfa09cc8a5b010473e4bb31065ebb1870caba057`
+failed twice in `electric-hydration-straddle.opfs.spec.ts` after reopening the
+last tab. Both runs reported `Electric persisted resume baseline could not be
+certified` at the preloading checkpoint. The host log recorded the error and
+public row, but not the generation tuple. The following controlled histories
+test a specific explanation; the new-head browser run is still required to
+confirm the host repair.
+
+**Law and authority.** The atomic-resume contract in the persistence README
+certifies rows, source cursor, stream position, key set, and reset epoch from
+one snapshot. A no-write election may reserve a greater durable term with
+sequence zero while row version and reset epoch remain fixed. That transition
+does not change rows or the source cursor, so an already certified on-demand
+baseline remains usable. A committed write or schema reset does change the
+baseline generation and cannot inherit that certification.
+
+**Competing predictions.** The old exact `(term, seq, rowVersion, resetEpoch)`
+guard marks the harmless election incompatible. The repaired guard accepts a
+greater term at sequence zero only while row version and reset epoch equal the
+owned baseline. It continues to reject a changed row version or reset epoch.
+
+**Experiments.** A focused persisted-wrapper test gives its recording adapter
+`(1, 1, 1, 0)` and then `(2, 0, 1, 0)` during on-demand certification. The
+old guard was RED at `getKeySetEvidence()`: `incompatible` instead of
+`consistent`. A second held-snapshot test composes the real SQLite adapter,
+the persisted wrapper, and a mocked Electric stream. SQLite reserves term 2
+at sequence zero, keeps row version 1 and the reset epoch, and retains
+consistent key-set evidence. With the old guard restored temporarily, this
+receiving test was RED at the post-up-to-date Collection checkpoint: `error`
+instead of `ready`. Restoring the narrow guard made both GREEN. The existing
+held-snapshot committed-write and schema-reset tests remain negative controls.
+
+**Scope and verification.** The full persisted wrapper oracle passed 666 tests
+with one existing todo; the full Electric package passed 630 tests. Both
+affected packages passed standalone TypeScript checks. ESLint reported zero
+errors after removing an unnecessary optional-method guard, with 24 existing
+fixture warnings in the large persisted oracle. The local Electric witness
+uses real in-memory SQLite and a mocked ShapeStream. It does not enact the
+Chromium/OPFS restart, Web Lock election, or live Electric delivery; the new
+head's browser E2E owns that receiving result. The coverage map records this
+join and its remaining host limit.

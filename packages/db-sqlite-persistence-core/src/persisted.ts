@@ -2696,10 +2696,14 @@ class PersistedCollectionRuntime<
     const expected = this.persistedResumeGeneration
     return (
       expected !== undefined &&
-      expected.latestTerm === generation.latestTerm &&
-      expected.latestSeq === generation.latestSeq &&
       expected.latestRowVersion === generation.latestRowVersion &&
-      expected.resetEpoch === generation.resetEpoch
+      expected.resetEpoch === generation.resetEpoch &&
+      ((expected.latestTerm === generation.latestTerm &&
+        expected.latestSeq === generation.latestSeq) ||
+        // A no-write election reserves a new term at sequence zero. It does
+        // not change the persisted rows or the source resume cursor.
+        (generation.latestTerm > expected.latestTerm &&
+          generation.latestSeq === 0))
     )
   }
 

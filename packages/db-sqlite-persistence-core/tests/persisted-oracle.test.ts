@@ -20320,6 +20320,72 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
     }
   })
 
+  // A no-write election reserves a new durable term but leaves the persisted
+  // rows, source cursor, row version, and reset epoch intact. The atomic
+  // snapshot still certifies the same baseline when on-demand Electric resumes.
+  // The recording adapter supplies only this term transition; the SQLite owner
+  // separately proves that term reservation leaves the row version unchanged.
+  it(`keeps resume evidence across a no-write durable term reservation`, async () => {
+    const adapter = createRecordingAdapter([{ id: `1`, title: `cached` }])
+    let durableGeneration = {
+      latestTerm: 1,
+      latestSeq: 1,
+      latestRowVersion: 1,
+      resetEpoch: 0,
+    }
+    const loadResumeSnapshot = adapter.loadResumeSnapshot.bind(adapter)
+    adapter.loadResumeSnapshot = async (...args) => ({
+      ...(await loadResumeSnapshot(...args)),
+      ...durableGeneration,
+    })
+    let persistenceCapability:
+      SyncMetadataApi<string>[`persistence`] | undefined
+    const collection = createCollection(
+      persistedCollectionOptions<Todo, string>({
+        id: `no-write-term-resume`,
+        syncMode: `on-demand`,
+        getKey: (item) => item.id,
+        sync: {
+          sync: ({ markReady, metadata }) => {
+            persistenceCapability = metadata?.persistence
+            markReady()
+          },
+        },
+        persistence: { adapter },
+      }),
+    )
+
+    try {
+      collection.startSyncImmediate()
+      await vi.waitFor(() =>
+        expect(persistenceCapability).toMatchObject({
+          protocol: `@tanstack/db/sync-persistence`,
+          version: 1,
+        }),
+      )
+      await vi.waitFor(() =>
+        expect(
+          persistenceCapability?.resumeSnapshot.getKeySetEvidence(),
+        ).toEqual({ status: `consistent` }),
+      )
+
+      durableGeneration = {
+        latestTerm: 2,
+        latestSeq: 0,
+        latestRowVersion: 1,
+        resetEpoch: 0,
+      }
+      await persistenceCapability?.resumeSnapshot.certify()
+      expect(persistenceCapability?.resumeSnapshot.getKeySetEvidence()).toEqual(
+        {
+          status: `consistent`,
+        },
+      )
+    } finally {
+      await collection.cleanup()
+    }
+  })
+
   it(`invalidates resume evidence when storage advances outside the owned commit generation`, async () => {
     const adapter = createRecordingAdapter()
     let durableGeneration = {
