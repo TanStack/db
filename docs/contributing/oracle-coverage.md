@@ -672,17 +672,26 @@ The persisted wrapper owner in
 before/after durability, pending receipts, mounted live-query rows, queued
 hydration, later work, known durability failures, and an unchanged
 reconciliation reload. Its orphan row-metadata case fails on a shortcut that
-skips needed cleanup. Sparse-array and extra-array-property histories require
-a changed durable value to reload even when ordinary deep equality would skip
-it. The SQLite adapter owner checks exact IDs, row versions,
-reset epochs, pruning, unchanged anchors, same-key peer writes, and cursor
-metadata against real SQLite transactions. The Browser coordinator owner
-checks writer-lock stream advancement, changed routes, and invalid wire
-anchors. It also delays a former owner's captured heartbeat past a no-write
-Web Lock takeover that reuses the same term, then checks the successor's queued
-exact-ID result and later source write. The current lock holder keeps its
-route. The Electron IPC bridge runs the SQLite adapter contract through its
-renderer and main-process handlers, including exact-ID reconciliation. Its
+skips needed cleanup. Sparse-array, extra-array-property, and nested-prototype
+histories require a changed durable value to reload even when ordinary deep
+equality would skip it. A controlled term-jump history recovers a missed row;
+a position-only certification history shows that observing a durable version
+does not publish its rows. Reset continuations rebase the publicly applied row
+version, reject a delayed pre-reset notification in both orders relative to a
+newer election, and recover a row committed between the reset reload and the
+later position-only read. The controlled wrapper compares public rows after
+each held cut; removing the old-term fence or treating the later position read
+as published rows fails those assertions. The SQLite adapter owner checks exact
+IDs, row versions, reset epochs, pruning,
+unchanged anchors, same-key peer writes, cursor metadata, durable no-write term
+reservation, and the exact-ID index plan against real SQLite transactions. The
+Browser coordinator owner checks writer-lock stream advancement, changed
+routes, and invalid wire anchors. It delays a former owner's captured heartbeat
+past a no-write Web Lock takeover and checks both the new owner and a passive
+follower retain the newer route after the delayed heartbeat. Distinct durable
+terms protect the later routed source write. The Electron IPC bridge runs the
+SQLite adapter contract through its renderer and main-process handlers,
+including exact-ID reconciliation and protocol-v4 term reservation. Its
 resolved-adapter witness checks that reconciliation carries each Collection's
 mode and schema version, and its absent-capability witness checks that an
 unknown result leaves durable state unchanged. The real-process witness runs
@@ -691,8 +700,9 @@ process. It does not execute the adapter inside an Electron renderer or check
 concurrent requests from multiple renderers. A reconciliation IPC reply delayed
 until after main applies is an untested transport history owned by the Electron
 receiving contract. The Chromium/OPFS host owner runs idle, before-durable,
-after-durable, peer-before-reconciliation, and notification-before-lost-answer
-histories across real tabs, Web Locks, BroadcastChannel, workers, and SQLite.
+after-durable, peer-before-reconciliation, notification-before-lost-answer,
+and cold-successor histories across real tabs, Web Locks, BroadcastChannel,
+workers, and SQLite.
 It observes durable rows, cursor, and exact applied transaction IDs, public
 source/live-query rows, receipt settlement, one sync run, and passive-tab event
 counts. The peer history holds
@@ -707,6 +717,17 @@ and later PostgreSQL row. The original Electric applied receipt fulfills in
 one sync run. The crossing row's transaction and first durable snapshot agree
 on resume offset, handle, and shape ID. It supplies the SDK handoff for this one
 after-durable history.
+
+The wrapper's controlled term jump and the real OPFS cold-successor election
+are separate evidence cells. A single real-host history combining a missed
+original notice, an empty reserved term, and a passive follower's later public
+rows remains with the Chromium/OPFS owner. The controlled nested-prototype
+replacement reaches source and mounted live-query cuts; real SQLite
+serialization of that nested class in the same wrapper history remains with
+the Node SQLite receiving owner. The reset continuation uses a controlled
+snapshot with the same version-zero premise that the real SQLite adapter's
+schema-reset oracle proves. A combined real-adapter wrapper reset and later
+notification remains with the persisted SQLite receiving owner.
 
 This bounded owner assumes tabs run the same protocol version and one `txId`
 identifies one immutable payload. The Electric receiver does not cover

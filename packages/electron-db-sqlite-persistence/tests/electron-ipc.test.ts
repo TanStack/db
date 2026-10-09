@@ -100,6 +100,21 @@ type ElectronMainPersistence = PersistedCollectionPersistence
 const electronRuntimeBridgeTimeoutMs = isElectronFullE2EEnabled()
   ? 45_000
   : 4_000
+const testDurableTerms = new Map<string, number>()
+
+function reserveTestLeadershipTerm(
+  collectionId: string,
+  observedTerm: number,
+): Promise<{
+  latestTerm: number
+  latestSeq: number
+  latestRowVersion: number
+}> {
+  const latestTerm =
+    Math.max(testDurableTerms.get(collectionId) ?? 0, observedTerm) + 1
+  testDurableTerms.set(collectionId, latestTerm)
+  return Promise.resolve({ latestTerm, latestSeq: 0, latestRowVersion: 0 })
+}
 
 function createFilteredPersistence(
   collectionId: string,
@@ -138,6 +153,18 @@ function createFilteredPersistence(
     ensureIndex: (requestedCollectionId, signature, spec) => {
       assertKnownCollection(requestedCollectionId)
       return baseAdapter.ensureIndex(requestedCollectionId, signature, spec)
+    },
+    reserveLeadershipTerm: (requestedCollectionId, observedTerm) => {
+      assertKnownCollection(requestedCollectionId)
+      if (!baseAdapter.reserveLeadershipTerm) {
+        throw new InvalidPersistedCollectionConfigError(
+          `reserveLeadershipTerm is not supported by the configured adapter`,
+        )
+      }
+      return baseAdapter.reserveLeadershipTerm(
+        requestedCollectionId,
+        observedTerm,
+      )
     },
     markIndexRemoved: (requestedCollectionId, signature) => {
       assertKnownCollection(requestedCollectionId)
@@ -233,6 +260,7 @@ function registerCleanup(cleanupFn: () => void): () => void {
 }
 
 afterEach(() => {
+  testDurableTerms.clear()
   while (activeCleanupFns.length > 0) {
     const cleanupFn = activeCleanupFns.pop()
     cleanupFn?.()
@@ -310,6 +338,7 @@ function electronSubsetWithNestedValue(value: unknown): LoadSubsetOptions {
 
 function createElectronCoordinatorTestAdapter(): PersistenceAdapter {
   return {
+    reserveLeadershipTerm: reserveTestLeadershipTerm,
     loadSubset: () => Promise.resolve([]),
     loadResumeSnapshot: () =>
       Promise.resolve({
@@ -978,6 +1007,7 @@ describe(`electron sqlite persistence bridge`, () => {
       const coordinator = new ElectronCollectionCoordinator({
         dbName: `electron-writer-callback-failure`,
         adapter: {
+          reserveLeadershipTerm: reserveTestLeadershipTerm,
           loadSubset: () => Promise.resolve([]),
           applyCommittedTx: () => {
             applyCalls++
@@ -1042,6 +1072,7 @@ describe(`electron sqlite persistence bridge`, () => {
     const coordinator = new ElectronCollectionCoordinator({
       dbName: `electron-requester-takeover`,
       adapter: {
+        reserveLeadershipTerm: reserveTestLeadershipTerm,
         loadSubset: () => Promise.resolve([]),
         applyCommittedTx: (_collectionId, tx) => {
           bEffects.push(tx)
@@ -1409,18 +1440,17 @@ describe(`electron sqlite persistence bridge`, () => {
       coordinator,
       invoke: (_channel, request) => {
         requests.push(structuredClone(request))
-        if (request.method === `getStreamPosition`) {
-          return Promise.resolve({
+        if (request.method === `reserveLeadershipTerm`) {
+          return reserveTestLeadershipTerm(
+            request.collectionId,
+            request.payload.observedTerm,
+          ).then((result) => ({
             v: ELECTRON_PERSISTENCE_PROTOCOL_VERSION,
             requestId: request.requestId,
             method: request.method,
             ok: true,
-            result: {
-              latestTerm: 0,
-              latestSeq: 0,
-              latestRowVersion: 0,
-            },
-          })
+            result,
+          }))
         }
         if (request.method === `applyCommittedTx`) {
           return Promise.resolve({
@@ -1556,6 +1586,7 @@ describe(`electron sqlite persistence bridge`, () => {
     const coordinator = new ElectronCollectionCoordinator({
       dbName: `electron-committed-envelope-replay`,
       adapter: {
+        reserveLeadershipTerm: reserveTestLeadershipTerm,
         loadSubset: () => Promise.resolve([]),
         applyCommittedTx: async () => {
           applyCalls++
@@ -1617,6 +1648,7 @@ describe(`electron sqlite persistence bridge`, () => {
     const coordinator = new ElectronCollectionCoordinator({
       dbName: `electron-local-envelope-replay`,
       adapter: {
+        reserveLeadershipTerm: reserveTestLeadershipTerm,
         loadSubset: () => Promise.resolve([]),
         applyCommittedTx: () => {
           applyCalls++
@@ -1686,6 +1718,7 @@ describe(`electron sqlite persistence bridge`, () => {
     const coordinator = new ElectronCollectionCoordinator({
       dbName: `electron-cross-operation-envelope`,
       adapter: {
+        reserveLeadershipTerm: reserveTestLeadershipTerm,
         loadSubset: () => Promise.resolve([]),
         applyCommittedTx: () => {
           applyCalls++
@@ -1855,6 +1888,7 @@ describe(`electron sqlite persistence bridge`, () => {
     const coordinator = new ElectronCollectionCoordinator({
       dbName: `electron-dispose-held-committed`,
       adapter: {
+        reserveLeadershipTerm: reserveTestLeadershipTerm,
         loadSubset: () => Promise.resolve([]),
         applyCommittedTx: async (_collectionId, tx) => {
           applyEntered = true
@@ -1933,6 +1967,7 @@ describe(`electron sqlite persistence bridge`, () => {
     const coordinator = new ElectronCollectionCoordinator({
       dbName: `electron-dispose-held-local`,
       adapter: {
+        reserveLeadershipTerm: reserveTestLeadershipTerm,
         loadSubset: () => Promise.resolve([]),
         applyCommittedTx: async (_collectionId, tx) => {
           applyEntered = true
@@ -2009,6 +2044,7 @@ describe(`electron sqlite persistence bridge`, () => {
     const leader = new ElectronCollectionCoordinator({
       dbName: `electron-subset-wire-leader`,
       adapter: {
+        reserveLeadershipTerm: reserveTestLeadershipTerm,
         loadSubset: () => Promise.resolve([]),
         applyCommittedTx: () => Promise.resolve(),
         ensureIndex: () => Promise.resolve(),
@@ -2738,6 +2774,7 @@ describe(`electron sqlite persistence bridge`, () => {
     const leader = new ElectronCollectionCoordinator({
       dbName,
       adapter: {
+        reserveLeadershipTerm: reserveTestLeadershipTerm,
         loadSubset: () => Promise.resolve([]),
         applyCommittedTx: () => Promise.resolve(),
         ensureIndex: () => Promise.resolve(),
@@ -3908,6 +3945,7 @@ describe(`electron sqlite persistence bridge`, () => {
     const leader = new ElectronCollectionCoordinator({
       dbName: `electron-dispose-held-inbound`,
       adapter: {
+        reserveLeadershipTerm: reserveTestLeadershipTerm,
         loadSubset: () => Promise.resolve([]),
         applyCommittedTx: async (_collectionId, tx) => {
           applyEntered = true

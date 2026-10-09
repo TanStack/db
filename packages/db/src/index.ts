@@ -50,7 +50,7 @@ export * from './errors'
 /** @internal Unstable protocol for persistence-aware collection adapters. */
 export * from './sync-persistence'
 export * from './sync-receipt'
-export { deepEquals, deepEqualsStrict } from './utils'
+export { deepEquals, equalPersistedSnapshotValues } from './utils'
 /** @internal Used by first-party collection adapters. */
 export { warnOnce, resetWarnings } from './utils'
 export * from './paced-mutations'

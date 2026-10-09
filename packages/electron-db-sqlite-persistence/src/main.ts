@@ -264,6 +264,25 @@ async function executeRequestAgainstAdapter(
       }
     }
 
+    case `reserveLeadershipTerm`: {
+      if (!adapter.reserveLeadershipTerm) {
+        throw new InvalidPersistedCollectionConfigError(
+          `reserveLeadershipTerm is not supported by the configured electron persistence adapter`,
+        )
+      }
+      const position = await adapter.reserveLeadershipTerm(
+        request.collectionId,
+        request.payload.observedTerm,
+      )
+      return {
+        v: ELECTRON_PERSISTENCE_PROTOCOL_VERSION,
+        requestId: request.requestId,
+        method: request.method,
+        ok: true,
+        result: position,
+      }
+    }
+
     case `getStreamPosition`: {
       if (!adapter.getStreamPosition) {
         throw new InvalidPersistedCollectionConfigError(

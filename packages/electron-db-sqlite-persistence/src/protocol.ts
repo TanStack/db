@@ -9,7 +9,7 @@ import type {
   SQLitePullSinceResult,
 } from '@tanstack/db-sqlite-persistence-core'
 
-export const ELECTRON_PERSISTENCE_PROTOCOL_VERSION = 3 as const
+export const ELECTRON_PERSISTENCE_PROTOCOL_VERSION = 4 as const
 export const DEFAULT_ELECTRON_PERSISTENCE_CHANNEL = `tanstack-db:sqlite-persistence`
 
 export type ElectronPersistedRow = Record<string, unknown>
@@ -31,6 +31,7 @@ export type ElectronPersistenceMethod =
   | `markIndexRemoved`
   | `pullSince`
   | `getStreamPosition`
+  | `reserveLeadershipTerm`
 
 export type ElectronPersistencePayloadMap = {
   loadSubset: {
@@ -67,6 +68,7 @@ export type ElectronPersistencePayloadMap = {
     fromRowVersion: number
   }
   getStreamPosition: {}
+  reserveLeadershipTerm: { observedTerm: number }
 }
 
 export type ElectronPersistenceResultMap = {
@@ -96,6 +98,11 @@ export type ElectronPersistenceResultMap = {
   markIndexRemoved: null
   pullSince: SQLitePullSinceResult<ElectronPersistedKey>
   getStreamPosition: {
+    latestTerm: number
+    latestSeq: number
+    latestRowVersion: number
+  }
+  reserveLeadershipTerm: {
     latestTerm: number
     latestSeq: number
     latestRowVersion: number

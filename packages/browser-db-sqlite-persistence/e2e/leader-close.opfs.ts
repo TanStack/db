@@ -42,6 +42,7 @@ type Probe = {
     ids: Array<string>
     cursor: string | null
     rowVersion: number
+    term: number
   }>
   durableTxIds: () => Promise<Array<string>>
   releaseReconciliation: () => void
@@ -152,6 +153,7 @@ window.__leaderCloseProbe = {
         (snapshot.collectionMetadata.find(({ key }) => key === `probe:cursor`)
           ?.value as string | undefined) ?? null,
       rowVersion: snapshot.latestRowVersion,
+      term: snapshot.latestTerm,
     }
   },
   durableTxIds: async () => {

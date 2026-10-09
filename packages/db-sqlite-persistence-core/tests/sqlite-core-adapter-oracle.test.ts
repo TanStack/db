@@ -101,6 +101,9 @@ export class SqliteCliDriver implements SQLiteDriver {
       const { stdout } = await execFileAsync(`sqlite3`, [
         `-json`,
         queryActiveDbPath,
+        ...(renderedSql.trimStart().startsWith(`EXPLAIN QUERY PLAN`)
+          ? [`.explain off`]
+          : []),
         renderedSql,
       ])
       const trimmedOutput = stdout.trim()
@@ -693,6 +696,79 @@ export function runSQLiteCoreAdapterContractSuite(
 
   describe(suiteName, () => {
     afterEach(scope.cleanup)
+    /**
+     * A Web Lock successor may be cold: its observed term is zero even when
+     * earlier no-write owners existed. The durable leader_term ledger, rather
+     * than the caller's memory, is the independent lower bound for each new
+     * term. Reservation itself does not advance the row version or create an
+     * applied transaction. This driver exercises the real SQLite adapter and
+     * observes both returned positions and the durable table after each cut.
+     */
+    it(`reserves distinct durable terms across empty elections`, async () => {
+      const { adapter, driver } = registerContractHarness()
+      if (!adapter.reserveLeadershipTerm) {
+        throw new Error(`SQLite adapter has no durable term reservation`)
+      }
+      const reserve = adapter.reserveLeadershipTerm.bind(adapter)
+      const collectionId = `cold-successor-terms`
+      const observeDurableTerm = async () =>
+        driver.query<{ latest_term: number }>(
+          `SELECT latest_term FROM leader_term WHERE collection_id = ?`,
+          [collectionId],
+        )
+      expect(await reserve(collectionId, 0)).toEqual({
+        latestTerm: 1,
+        latestSeq: 0,
+        latestRowVersion: 0,
+      })
+      expect(await observeDurableTerm()).toEqual([{ latest_term: 1 }])
+      expect(await reserve(collectionId, 0)).toEqual({
+        latestTerm: 2,
+        latestSeq: 0,
+        latestRowVersion: 0,
+      })
+      expect(await observeDurableTerm()).toEqual([{ latest_term: 2 }])
+      await adapter.applyCommittedTx(collectionId, {
+        txId: `term-two-write`,
+        term: 2,
+        seq: 1,
+        rowVersion: 1,
+        mutations: [],
+      })
+      expect(await reserve(collectionId, 0)).toEqual({
+        latestTerm: 3,
+        latestSeq: 0,
+        latestRowVersion: 1,
+      })
+      expect(await observeDurableTerm()).toEqual([{ latest_term: 3 }])
+      expect(await reserve(collectionId, 8)).toEqual({
+        latestTerm: 9,
+        latestSeq: 0,
+        latestRowVersion: 1,
+      })
+      expect(await observeDurableTerm()).toEqual([{ latest_term: 9 }])
+    })
+
+    /**
+     * Exact-ID reconciliation has one equality lookup under the writer lock.
+     * The query plan must seek by both collection and transaction ID; a plan
+     * that only seeks by collection grows with retained transaction count.
+     * A real SQLite plan is the work observation, independent of elapsed time.
+     */
+    it(`indexes exact transaction ID lookup within a collection`, async () => {
+      const { adapter, driver } = registerContractHarness()
+      await adapter.loadResumeSnapshot(`plan-index`)
+      const plan = await driver.query<{ detail: string }>(
+        `EXPLAIN QUERY PLAN
+         SELECT term, seq, row_version FROM applied_tx
+         WHERE collection_id = ? AND tx_id = ? LIMIT 2`,
+        [`plan-index`, `target`],
+      )
+      expect(plan.map(({ detail }) => detail).join(` | `)).toMatch(
+        /idx_applied_tx_collection_tx_id.*collection_id=\?.*tx_id=\?/,
+      )
+    })
+
     /**
      * An unanswered source transaction may be acknowledged by its exact
      * durable ID, or applied when no durable write followed its pre-send

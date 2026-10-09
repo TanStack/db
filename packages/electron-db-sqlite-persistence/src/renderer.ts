@@ -186,6 +186,14 @@ type ElectronRendererResolvedAdapter =
       latestSeq: number
       latestRowVersion: number
     }>
+    reserveLeadershipTerm: (
+      collectionId: string,
+      observedTerm: number,
+    ) => Promise<{
+      latestTerm: number
+      latestSeq: number
+      latestRowVersion: number
+    }>
   }
 
 function createResolvedRendererAdapter(
@@ -335,6 +343,13 @@ function createResolvedRendererAdapter(
     }> => {
       return executeRequest(`getStreamPosition`, collectionId, {}, resolution)
     },
+    reserveLeadershipTerm: async (collectionId, observedTerm) =>
+      executeRequest(
+        `reserveLeadershipTerm`,
+        collectionId,
+        { observedTerm },
+        resolution,
+      ),
   }
 }
 

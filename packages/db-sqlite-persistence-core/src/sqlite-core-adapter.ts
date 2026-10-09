@@ -2682,6 +2682,48 @@ export class SQLiteCorePersistenceAdapter implements PersistenceAdapter {
     })
   }
 
+  reserveLeadershipTerm(
+    collectionId: string,
+    observedTerm: number,
+  ): Promise<{
+    latestTerm: number
+    latestSeq: number
+    latestRowVersion: number
+  }> {
+    // Election may run while hydration waits for its first writer route.
+    return this.reserveLeadershipTermUnscheduled(collectionId, observedTerm)
+  }
+
+  private async reserveLeadershipTermUnscheduled(
+    collectionId: string,
+    observedTerm: number,
+  ): Promise<{
+    latestTerm: number
+    latestSeq: number
+    latestRowVersion: number
+  }> {
+    await this.ensureCollectionReady(collectionId)
+    return this.runInTransaction(async (transactionDriver) => {
+      await this.assertCurrentSchemaVersion(
+        collectionId,
+        transactionDriver,
+        `reserve a leadership term`,
+      )
+      await transactionDriver.run(
+        `INSERT INTO leader_term (collection_id, latest_term)
+         VALUES (?, ? + 1)
+         ON CONFLICT(collection_id) DO UPDATE SET
+           latest_term = MAX(leader_term.latest_term, ?) + 1`,
+        [collectionId, observedTerm, observedTerm],
+      )
+      const [position, latestRowVersion] = await Promise.all([
+        this.readStreamPosition(collectionId, transactionDriver),
+        this.readLatestRowVersion(collectionId, transactionDriver),
+      ])
+      return { ...position, latestRowVersion }
+    })
+  }
+
   getStreamPosition(collectionId: string): Promise<{
     latestTerm: number
     latestSeq: number
@@ -3490,6 +3532,10 @@ export class SQLiteCorePersistenceAdapter implements PersistenceAdapter {
          applied_at INTEGER NOT NULL,
          PRIMARY KEY (collection_id, term, seq)
        )`,
+    )
+    await this.driver.exec(
+      `CREATE INDEX IF NOT EXISTS idx_applied_tx_collection_tx_id
+       ON applied_tx (collection_id, tx_id)`,
     )
     try {
       await this.driver.exec(

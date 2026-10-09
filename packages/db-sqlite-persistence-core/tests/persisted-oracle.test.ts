@@ -125,6 +125,7 @@ type Todo = {
   id: string
   title: string
   detail?: string
+  payload?: { rank: number }
   values?: Array<string | null>
 }
 
@@ -1168,6 +1169,578 @@ it.each([`sparse slot`, `extra array property`] as const)(
     }
   },
 )
+
+// Row versions cross election terms even when an owner commits no rows.
+// The authored durable ledger has a missed term-1 row, an empty term-2
+// election, and a term-3 row. The passive Collection only receives the final
+// notification. Its public snapshot must contain both durable rows after that
+// notification settles; applying only the term-3 delta is a false green if the
+// oracle checks only the latest key. This controlled adapter supplies durable
+// writes and the coordinator supplies the lost-notice schedule.
+it(`recovers a missed commit across a no-write election`, async () => {
+  const adapter = createRecordingAdapter()
+  const coordinator = createCoordinatorHarness()
+  const collectionId = `source-empty-election-gap`
+  const collection = createCollection(
+    persistedCollectionOptions<Todo, string>({
+      id: collectionId,
+      getKey: (row) => row.id,
+      sync: { sync: (params) => params.markReady() },
+      persistence: { adapter, coordinator },
+    }),
+  )
+  let hasPrimaryFailure = false
+  try {
+    await atPersistedOracleCheckpoint(collection.preload(), `source ready`)
+    const durableWrite = async (
+      txId: string,
+      term: number,
+      rowVersion: number,
+    ) => {
+      await adapter.applyCommittedTx(collectionId, {
+        txId,
+        term,
+        seq: 1,
+        rowVersion,
+        mutations: [
+          { type: `insert`, key: txId, value: { id: txId, title: txId } },
+        ],
+      })
+    }
+    await durableWrite(`missed`, 1, 1)
+    // The controlled ledger jumps over term 2 without simulating its election.
+    // The real SQLite/OPFS owner checks durable no-write term reservation.
+    await durableWrite(`received`, 3, 2)
+    expect([...collection.keys()]).toEqual([])
+    coordinator.emit(
+      {
+        type: `tx:committed`,
+        term: 3,
+        seq: 1,
+        txId: `received`,
+        latestRowVersion: 2,
+        requiresFullReload: false,
+        changedRows: [
+          { key: `received`, value: { id: `received`, title: `received` } },
+        ],
+        deletedKeys: [],
+      },
+      `replacement`,
+      collectionId,
+    )
+    await vi.waitFor(() =>
+      expect([...collection.keys()].sort()).toEqual([`missed`, `received`]),
+    )
+    expect(coordinator.pullSinceCalls).toBe(1)
+    expect([...adapter.rows.keys()].sort()).toEqual([`missed`, `received`])
+  } catch (error) {
+    hasPrimaryFailure = true
+    throw error
+  } finally {
+    await cleanupPersistedOracle(
+      [() => collection.cleanup()],
+      hasPrimaryFailure,
+    )
+  }
+})
+
+// Metadata-only certification can observe a durable stream position without
+// loading its rows. That evidence must not make a later same-position notice
+// look publicly applied. The authored log again has two durable rows; the
+// Collection is empty at the certification cut, then receives the term-3
+// notice and must recover both rows at the settled public checkpoint.
+it(`recovers missed rows after position-only resume certification`, async () => {
+  const adapter = createRecordingAdapter()
+  const coordinator = createCoordinatorHarness()
+  const collectionId = `source-position-only-certification-gap`
+  let persistenceCapability:
+    NonNullable<SyncMetadataApi<string>[`persistence`]> | undefined
+  const collection = createCollection(
+    persistedCollectionOptions<Todo, string>({
+      id: collectionId,
+      syncMode: `on-demand`,
+      getKey: (row) => row.id,
+      sync: {
+        sync: ({ markReady, metadata }) => {
+          persistenceCapability = metadata?.persistence ?? undefined
+          markReady()
+          return { loadSubset: () => true }
+        },
+      },
+      persistence: { adapter, coordinator },
+    }),
+  )
+  let hasPrimaryFailure = false
+  try {
+    collection.startSyncImmediate()
+    await vi.waitFor(() => expect(persistenceCapability).toBeDefined())
+    await atPersistedOracleCheckpoint(
+      Promise.resolve(collection._sync.loadSubset({})).then(() => undefined),
+      `empty subset loaded before position certification`,
+    )
+    const durableWrite = async (
+      txId: string,
+      term: number,
+      rowVersion: number,
+    ) =>
+      adapter.applyCommittedTx(collectionId, {
+        txId,
+        term,
+        seq: 1,
+        rowVersion,
+        mutations: [
+          { type: `insert`, key: txId, value: { id: txId, title: txId } },
+        ],
+      })
+    await durableWrite(`missed`, 1, 1)
+    await durableWrite(`received`, 3, 2)
+    await atPersistedOracleCheckpoint(
+      persistenceCapability!.resumeSnapshot.certify(),
+      `position-only certification`,
+    )
+    expect([...collection.keys()]).toEqual([])
+    coordinator.emit(
+      {
+        type: `tx:committed`,
+        term: 3,
+        seq: 1,
+        txId: `received`,
+        latestRowVersion: 2,
+        requiresFullReload: false,
+        changedRows: [
+          { key: `received`, value: { id: `received`, title: `received` } },
+        ],
+        deletedKeys: [],
+      },
+      `replacement`,
+      collectionId,
+    )
+    await vi.waitFor(() =>
+      expect([...collection.keys()].sort()).toEqual([`missed`, `received`]),
+    )
+    expect(coordinator.pullSinceCalls).toBe(1)
+  } catch (error) {
+    hasPrimaryFailure = true
+    throw error
+  } finally {
+    await cleanupPersistedOracle(
+      [() => collection.cleanup()],
+      hasPrimaryFailure,
+    )
+  }
+})
+
+// A schema reset starts a new row-version series. The independent ledger is
+// five published rows, a durable reset to an empty table at version 0, then a
+// new leader's first version-1 row. The controlled snapshot supplies the
+// reset epoch and position while the real wrapper handles the notification.
+// At the settled cut, the public Collection must contain only the new row.
+it(`accepts a lower row version after a collection reset`, async () => {
+  const initial = Array.from({ length: 5 }, (_, index) => ({
+    id: `old-${index + 1}`,
+    title: `old`,
+  }))
+  const adapter = createRecordingAdapter(initial)
+  const coordinator = createCoordinatorHarness()
+  const collectionId = `source-reset-version-rebase`
+  let position = { term: 1, seq: 5, rowVersion: 5, resetEpoch: 0 }
+  const loadResumeSnapshot = adapter.loadResumeSnapshot.bind(adapter)
+  adapter.loadResumeSnapshot = async (...args) => ({
+    ...(await loadResumeSnapshot(...args)),
+    latestTerm: position.term,
+    latestSeq: position.seq,
+    latestRowVersion: position.rowVersion,
+    resetEpoch: position.resetEpoch,
+  })
+  const collection = createCollection(
+    persistedCollectionOptions<Todo, string>({
+      id: collectionId,
+      getKey: (row) => row.id,
+      sync: { sync: (params) => params.markReady() },
+      persistence: { adapter, coordinator },
+    }),
+  )
+  let hasPrimaryFailure = false
+  try {
+    await atPersistedOracleCheckpoint(
+      collection.preload(),
+      `reset source ready`,
+    )
+    expect([...collection.keys()].sort()).toEqual(initial.map((row) => row.id))
+
+    const resetSettled = createEventGate()
+    adapter.runInHydrationScope = async (task) => {
+      const result = await task(adapter)
+      resetSettled.resolve()
+      return result
+    }
+
+    adapter.rows.clear()
+    position = { term: 1, seq: 0, rowVersion: 0, resetEpoch: 1 }
+    coordinator.emit(
+      { type: `collection:reset`, schemaVersion: 2, resetEpoch: 1 },
+      `replacement`,
+      collectionId,
+    )
+    await atPersistedOracleCheckpoint(
+      resetSettled.promise,
+      `reset reload and position read settled`,
+    )
+    expect([...collection.keys()]).toEqual([])
+
+    const newRow = { id: `new`, title: `after reset` }
+    adapter.rows.set(newRow.id, newRow)
+    position = { term: 2, seq: 1, rowVersion: 1, resetEpoch: 1 }
+    coordinator.emit(
+      {
+        type: `tx:committed`,
+        term: 2,
+        seq: 1,
+        txId: `post-reset`,
+        latestRowVersion: 1,
+        requiresFullReload: false,
+        changedRows: [{ key: newRow.id, value: newRow }],
+        deletedKeys: [],
+      },
+      `replacement`,
+      collectionId,
+    )
+    await vi.waitFor(() => expect([...collection.keys()]).toEqual([`new`]))
+    expect(collection.get(`new`)).toMatchObject(newRow)
+  } catch (error) {
+    hasPrimaryFailure = true
+    throw error
+  } finally {
+    await cleanupPersistedOracle(
+      [() => collection.cleanup()],
+      hasPrimaryFailure,
+    )
+  }
+})
+
+// A delayed pre-reset notification can have the same row version as a new
+// post-reset transaction. Term and sequence alone cannot certify its reset
+// epoch. Reread the durable snapshot for an old term even after a newer term
+// has appeared. Both notice orders must leave only post-reset rows public.
+it.each([`stale-first`, `fresh-first`] as const)(
+  `does not republish a delayed pre-reset row after collection reset / %s`,
+  async (order) => {
+    const adapter = createRecordingAdapter()
+    const coordinator = createCoordinatorHarness()
+    const collectionId = `source-reset-stale-notice`
+    let position = { term: 0, seq: 0, rowVersion: 0, resetEpoch: 0 }
+    const loadResumeSnapshot = adapter.loadResumeSnapshot.bind(adapter)
+    adapter.loadResumeSnapshot = async (...args) => ({
+      ...(await loadResumeSnapshot(...args)),
+      latestTerm: position.term,
+      latestSeq: position.seq,
+      latestRowVersion: position.rowVersion,
+      resetEpoch: position.resetEpoch,
+    })
+    const collection = createCollection(
+      persistedCollectionOptions<Todo, string>({
+        id: collectionId,
+        getKey: (row) => row.id,
+        sync: { sync: (params) => params.markReady() },
+        persistence: { adapter, coordinator },
+      }),
+    )
+    let hasPrimaryFailure = false
+    try {
+      await atPersistedOracleCheckpoint(
+        collection.preload(),
+        `stale source ready`,
+      )
+      const resetSettled = createEventGate()
+      const staleReloadSettled = createEventGate()
+      let scopeCount = 0
+      adapter.runInHydrationScope = async (task) => {
+        const result = await task(adapter)
+        scopeCount++
+        if (scopeCount === 1) resetSettled.resolve()
+        if (scopeCount === 2) staleReloadSettled.resolve()
+        return result
+      }
+      const stale = { id: `stale`, title: `before reset` }
+      adapter.rows.set(stale.id, stale)
+      position = { term: 1, seq: 2, rowVersion: 2, resetEpoch: 0 }
+      // The original notification is lost; only the durable ledger saw it.
+      adapter.rows.clear()
+      position = { term: 1, seq: 0, rowVersion: 0, resetEpoch: 1 }
+      coordinator.emit(
+        { type: `collection:reset`, schemaVersion: 2, resetEpoch: 1 },
+        `replacement`,
+        collectionId,
+      )
+      await atPersistedOracleCheckpoint(resetSettled.promise, `reset settled`)
+      expect([...collection.keys()]).toEqual([])
+
+      const fresh = { id: `fresh`, title: `after reset` }
+      const emitStale = () =>
+        coordinator.emit(
+          {
+            type: `tx:committed`,
+            term: 1,
+            seq: 2,
+            txId: `pre-reset`,
+            latestRowVersion: 2,
+            requiresFullReload: false,
+            changedRows: [{ key: stale.id, value: stale }],
+            deletedKeys: [],
+          },
+          `replacement`,
+          collectionId,
+        )
+      const emitFresh = () =>
+        coordinator.emit(
+          {
+            type: `tx:committed`,
+            term: 2,
+            seq: 1,
+            txId: `post-reset`,
+            latestRowVersion: 1,
+            requiresFullReload: false,
+            changedRows: [{ key: fresh.id, value: fresh }],
+            deletedKeys: [],
+          },
+          `replacement`,
+          collectionId,
+        )
+      if (order === `fresh-first`) {
+        adapter.rows.set(fresh.id, fresh)
+        position = { term: 2, seq: 1, rowVersion: 1, resetEpoch: 1 }
+        emitFresh()
+        await vi.waitFor(() =>
+          expect(collection.get(`fresh`)).toMatchObject(fresh),
+        )
+        emitStale()
+      } else {
+        emitStale()
+      }
+      await atPersistedOracleCheckpoint(
+        staleReloadSettled.promise,
+        `old-term reload settled`,
+      )
+      await flushAsyncWork()
+      if (order === `stale-first`) {
+        adapter.rows.set(fresh.id, fresh)
+        position = { term: 2, seq: 1, rowVersion: 1, resetEpoch: 1 }
+        emitFresh()
+        await vi.waitFor(() =>
+          expect(collection.get(`fresh`)).toMatchObject(fresh),
+        )
+      }
+      expect([...collection.keys()]).toEqual([`fresh`])
+    } catch (error) {
+      hasPrimaryFailure = true
+      throw error
+    } finally {
+      await cleanupPersistedOracle(
+        [() => collection.cleanup()],
+        hasPrimaryFailure,
+      )
+    }
+  },
+)
+
+// A metadata-only read after a reset reload cannot certify rows that were
+// committed between the two reads. The controlled adapter holds that exact
+// boundary: the public snapshot is empty, then a new term commits row 1 before
+// the position-only read returns. When row 2 is announced, recovery must load
+// both rows rather than treating the observed position as public coverage.
+it(`recovers a row committed between reset reload and position observation`, async () => {
+  const adapter = createRecordingAdapter()
+  const coordinator = createCoordinatorHarness()
+  const collectionId = `source-reset-position-race`
+  let position = { term: 1, seq: 0, rowVersion: 0, resetEpoch: 0 }
+  let holdResetPositionRead = false
+  const positionReadEntered = createEventGate()
+  const releasePositionRead = createEventGate()
+  const resetSettled = createEventGate()
+  const loadResumeSnapshot = adapter.loadResumeSnapshot.bind(adapter)
+  adapter.loadResumeSnapshot = async (...args) => {
+    if (holdResetPositionRead && args[1]?.includeRows === false) {
+      holdResetPositionRead = false
+      positionReadEntered.resolve()
+      await releasePositionRead.promise
+    }
+    return {
+      ...(await loadResumeSnapshot(...args)),
+      latestTerm: position.term,
+      latestSeq: position.seq,
+      latestRowVersion: position.rowVersion,
+      resetEpoch: position.resetEpoch,
+    }
+  }
+  const collection = createCollection(
+    persistedCollectionOptions<Todo, string>({
+      id: collectionId,
+      getKey: (row) => row.id,
+      sync: { sync: (params) => params.markReady() },
+      persistence: { adapter, coordinator },
+    }),
+  )
+  let hasPrimaryFailure = false
+  try {
+    await atPersistedOracleCheckpoint(collection.preload(), `race source ready`)
+    adapter.runInHydrationScope = async (task) => {
+      const result = await task(adapter)
+      resetSettled.resolve()
+      return result
+    }
+    position = { term: 1, seq: 0, rowVersion: 0, resetEpoch: 1 }
+    holdResetPositionRead = true
+    coordinator.emit(
+      { type: `collection:reset`, schemaVersion: 2, resetEpoch: 1 },
+      `replacement`,
+      collectionId,
+    )
+    await atPersistedOracleCheckpoint(
+      positionReadEntered.promise,
+      `position read held after empty reload`,
+    )
+    expect([...collection.keys()]).toEqual([])
+
+    const missed = { id: `missed`, title: `committed during reset` }
+    adapter.rows.set(missed.id, missed)
+    position = { term: 2, seq: 1, rowVersion: 1, resetEpoch: 1 }
+    releasePositionRead.resolve()
+    await atPersistedOracleCheckpoint(resetSettled.promise, `reset settled`)
+    expect([...collection.keys()]).toEqual([])
+
+    const received = { id: `received`, title: `later commit` }
+    adapter.rows.set(received.id, received)
+    position = { term: 3, seq: 1, rowVersion: 2, resetEpoch: 1 }
+    coordinator.emit(
+      {
+        type: `tx:committed`,
+        term: 3,
+        seq: 1,
+        txId: `received`,
+        latestRowVersion: 2,
+        requiresFullReload: false,
+        changedRows: [{ key: received.id, value: received }],
+        deletedKeys: [],
+      },
+      `replacement`,
+      collectionId,
+    )
+    await vi.waitFor(() =>
+      expect([...collection.keys()].sort()).toEqual([`missed`, `received`]),
+    )
+    expect(coordinator.pullSinceCalls).toBe(1)
+  } catch (error) {
+    hasPrimaryFailure = true
+    throw error
+  } finally {
+    releasePositionRead.resolve()
+    await cleanupPersistedOracle(
+      [() => collection.cleanup()],
+      hasPrimaryFailure,
+    )
+  }
+})
+
+// SQLite encodes a nested class value as a plain durable record. The
+// independent reference is the durable row's prototype category: after a
+// reconciliation reload settles, the public source row must have that shape.
+// An equal keyed class is a distinguishing wrong answer because ordinary
+// change-event equality accepts it as equal to a plain record. The held read
+// exposes the authored intermediate cut; this controlled adapter does not
+// itself establish the real SQLite serialization premise.
+it(`replaces an equal nested class with its durable plain record`, async () => {
+  class DetailBox {
+    constructor(public rank: number) {}
+  }
+  const adapter = createRecordingAdapter()
+  const coordinator = createCoordinatorHarness()
+  const collectionId = `source-nested-prototype-reload`
+  const reloadEntered = createDeferred()
+  const releaseReload = createDeferred()
+  let source!: TodoSyncParams
+  const collection = createCollection(
+    persistedCollectionOptions<Todo, string>({
+      id: collectionId,
+      getKey: (row) => row.id,
+      sync: {
+        sync: (params) => {
+          source = params
+          params.markReady()
+        },
+      },
+      persistence: { adapter, coordinator },
+    }),
+  )
+  const live = createLiveQueryCollection((q) => q.from({ row: collection }))
+  let hasPrimaryFailure = false
+  try {
+    await atPersistedOracleCheckpoint(collection.preload(), `source ready`)
+    await atPersistedOracleCheckpoint(live.preload(), `live query ready`)
+    source.begin()
+    source.write({
+      type: `insert`,
+      value: { id: `crossing`, title: `source`, payload: new DetailBox(7) },
+    })
+    await atPersistedOracleCheckpoint(
+      Promise.resolve(source.commit()),
+      `authored source receipt`,
+    )
+    expect(collection.get(`crossing`)?.payload).toBeInstanceOf(DetailBox)
+    await vi.waitFor(() =>
+      expect(live.get(`crossing`)?.payload).toBeInstanceOf(DetailBox),
+    )
+    const loadSubset = adapter.loadSubset
+    adapter.loadSubset = async (...args) => {
+      reloadEntered.resolve()
+      await releaseReload.promise
+      return loadSubset(...args)
+    }
+    adapter.rows.set(`crossing`, {
+      id: `crossing`,
+      title: `source`,
+      payload: { rank: 7 },
+    })
+    coordinator.emit(
+      {
+        type: `tx:committed`,
+        term: 1,
+        seq: 1,
+        txId: `crossing`,
+        latestRowVersion: 1,
+        requiresFullReload: true,
+        reconciliationReload: true,
+      },
+      `replacement`,
+      collectionId,
+    )
+    await atPersistedOracleCheckpoint(
+      reloadEntered.promise,
+      `nested shape reload entered`,
+    )
+    expect(collection.get(`crossing`)?.payload).toBeInstanceOf(DetailBox)
+    expect(live.get(`crossing`)?.payload).toBeInstanceOf(DetailBox)
+    releaseReload.resolve()
+    await vi.waitFor(() => {
+      expect(Object.getPrototypeOf(collection.get(`crossing`)?.payload)).toBe(
+        Object.prototype,
+      )
+      expect(Object.getPrototypeOf(live.get(`crossing`)?.payload)).toBe(
+        Object.prototype,
+      )
+    })
+    expect(collection.get(`crossing`)?.payload).toEqual({ rank: 7 })
+    expect(live.get(`crossing`)?.payload).toEqual({ rank: 7 })
+  } catch (error) {
+    hasPrimaryFailure = true
+    throw error
+  } finally {
+    releaseReload.resolve()
+    await cleanupPersistedOracle(
+      [() => live.cleanup(), () => collection.cleanup()],
+      hasPrimaryFailure,
+    )
+  }
+})
 
 // A source commit accepted while persisted restore is reading waits behind the
 // hydration baseline. Its queued applied receipt remains one obligation when
@@ -3514,7 +4087,9 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
       term: 1,
       seq: 1,
       txId: `tx-metadata-only`,
-      latestRowVersion: 2,
+      // The seeded row has no stream position; this is its first contiguous
+      // notification. A jump to version 2 would correctly require recovery.
+      latestRowVersion: 1,
       requiresFullReload: false,
       changedRows: [],
       deletedKeys: [],

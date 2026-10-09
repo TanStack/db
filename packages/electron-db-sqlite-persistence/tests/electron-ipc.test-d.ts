@@ -7,7 +7,7 @@ test(`renderer persistence requires invoke transport`, () => {
     switch (request.method) {
       case `loadSubset`:
         return Promise.resolve({
-          v: 3,
+          v: 4,
           requestId: request.requestId,
           method: request.method,
           ok: true,
@@ -15,7 +15,7 @@ test(`renderer persistence requires invoke transport`, () => {
         })
       case `loadResumeSnapshot`:
         return Promise.resolve({
-          v: 3,
+          v: 4,
           requestId: request.requestId,
           method: request.method,
           ok: true,
@@ -31,7 +31,7 @@ test(`renderer persistence requires invoke transport`, () => {
         })
       case `pullSince`:
         return Promise.resolve({
-          v: 3,
+          v: 4,
           requestId: request.requestId,
           method: request.method,
           ok: true,
@@ -41,8 +41,9 @@ test(`renderer persistence requires invoke transport`, () => {
           },
         })
       case `getStreamPosition`:
+      case `reserveLeadershipTerm`:
         return Promise.resolve({
-          v: 3,
+          v: 4,
           requestId: request.requestId,
           method: request.method,
           ok: true,
@@ -54,7 +55,7 @@ test(`renderer persistence requires invoke transport`, () => {
         })
       case `loadCollectionMetadata`:
         return Promise.resolve({
-          v: 3,
+          v: 4,
           requestId: request.requestId,
           method: request.method,
           ok: true,
@@ -62,7 +63,7 @@ test(`renderer persistence requires invoke transport`, () => {
         })
       case `scanRows`:
         return Promise.resolve({
-          v: 3,
+          v: 4,
           requestId: request.requestId,
           method: request.method,
           ok: true,
@@ -70,7 +71,7 @@ test(`renderer persistence requires invoke transport`, () => {
         })
       case `reconcileCommittedTx`:
         return Promise.resolve({
-          v: 3,
+          v: 4,
           requestId: request.requestId,
           method: request.method,
           ok: true,
@@ -78,7 +79,7 @@ test(`renderer persistence requires invoke transport`, () => {
         })
       default:
         return Promise.resolve({
-          v: 3,
+          v: 4,
           requestId: request.requestId,
           method: request.method,
           ok: true,

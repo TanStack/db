@@ -3,6 +3,7 @@ import { isValidCommittedTxAnchor } from './committed-tx-anchor'
 import {
   DuplicateRemoteSubsetOwnerError,
   IndeterminateCommitError,
+  InvalidPersistenceAdapterError,
   PersistedCollectionDurabilityError,
   RetryableRemoteSubsetAcquisitionError,
   toPersistedCollectionDurabilityError,
@@ -151,6 +152,20 @@ type CoordinatorAdapter = Pick<
     latestSeq: number
     latestRowVersion: number
   }>
+  reserveLeadershipTerm?: (
+    collectionId: string,
+    observedTerm: number,
+  ) => Promise<{
+    latestTerm: number
+    latestSeq: number
+    latestRowVersion: number
+  }>
+}
+
+function requireDurableElection(adapter: CoordinatorAdapter): void {
+  if (typeof adapter.reserveLeadershipTerm !== `function`) {
+    throw new InvalidPersistenceAdapterError(`reserveLeadershipTerm`)
+  }
 }
 
 type ActiveRemoteSubsetAcquisition = {
@@ -296,6 +311,7 @@ export class BroadcastCollectionCoordinator implements PersistedCollectionCoordi
   }
 
   constructor(options: BroadcastCollectionCoordinatorOptions) {
+    if (options.adapter) requireDurableElection(options.adapter)
     this.dbName = options.dbName
     this.coordinatorName = options.coordinatorName
     this.defaultAdapter = options.adapter ?? null
@@ -314,6 +330,7 @@ export class BroadcastCollectionCoordinator implements PersistedCollectionCoordi
    * Called by a host persistence factory to wire the internally-created adapter.
    */
   setAdapter(adapter: CoordinatorAdapter): void {
+    requireDurableElection(adapter)
     this.defaultAdapter = adapter
   }
 
@@ -322,6 +339,7 @@ export class BroadcastCollectionCoordinator implements PersistedCollectionCoordi
     collectionId: string,
     adapter: CoordinatorAdapter,
   ): void {
+    requireDurableElection(adapter)
     this.collectionAdapters.set(collectionId, adapter)
   }
 
@@ -857,14 +875,20 @@ export class BroadcastCollectionCoordinator implements PersistedCollectionCoordi
           }
 
           try {
-            // Restore stream position from DB before claiming leadership
+            // Reserve an election term durably before advertising this route.
+            // Election bypasses the shared scheduler because a hydrate may be
+            // waiting for its first writer route. The writer Web Lock orders
+            // reservation after any old owner's in-flight durable write.
             const adapter = this.requireAdapter(collectionId)
-            if (adapter.getStreamPosition) {
-              const pos = await adapter.getStreamPosition(collectionId)
-              state.latestTerm = pos.latestTerm
-              state.latestSeq = pos.latestSeq
-              state.latestRowVersion = pos.latestRowVersion
-            }
+            const reserveTerm = adapter.reserveLeadershipTerm
+            if (!reserveTerm)
+              throw new InvalidPersistenceAdapterError(`reserveLeadershipTerm`)
+            const pos = await this.withWriterLock(() =>
+              reserveTerm.call(adapter, collectionId, state.latestTerm),
+            )
+            state.latestTerm = pos.latestTerm
+            state.latestSeq = pos.latestSeq
+            state.latestRowVersion = pos.latestRowVersion
 
             if (
               this.isDisposed() ||
@@ -876,7 +900,6 @@ export class BroadcastCollectionCoordinator implements PersistedCollectionCoordi
               return
             }
 
-            state.latestTerm++
             state.isLeader = true
             state.leaderId = this.nodeId
             this.notifyRouteWaiters(state)
@@ -1226,8 +1249,8 @@ export class BroadcastCollectionCoordinator implements PersistedCollectionCoordi
         typeof heartbeat.latestRowVersion === `number`
       ) {
         const state = this.getOrCreateCollectionState(envelope.collectionId)
-        // The local Web Lock still owns this route. A former owner's delayed
-        // heartbeat can reuse its term when it committed no transaction.
+        // The local Web Lock owns this route even if an older heartbeat arrives
+        // while leadership changes.
         if (state.isLeader) return
         if (heartbeat.term < state.latestTerm) return
         const changedLeader = state.leaderId !== heartbeat.leaderId
@@ -2197,21 +2220,14 @@ export class BroadcastCollectionCoordinator implements PersistedCollectionCoordi
     const result = await this.withScheduledWriterLock(
       collectionId,
       async (adapter) => {
-        if (
-          this.isDisposed() ||
-          this.collections.get(collectionId) !== state ||
-          !state.isLeader ||
-          state.latestTerm !== expectedTerm
-        ) {
-          return null
-        }
+        const candidate = this.nextPersistedTxIfLeader(
+          collectionId,
+          state,
+          expectedTerm,
+          request.tx,
+        )
+        if (candidate === null) return null
         if (!adapter.reconcileCommittedTx) return { kind: `unknown` as const }
-        const candidate: PersistedTx = {
-          ...request.tx,
-          term: state.latestTerm,
-          seq: state.latestSeq + 1,
-          rowVersion: state.latestRowVersion + 1,
-        }
         try {
           const reconciled = await adapter.reconcileCommittedTx(
             collectionId,
@@ -2270,6 +2286,29 @@ export class BroadcastCollectionCoordinator implements PersistedCollectionCoordi
     return response
   }
 
+  private nextPersistedTxIfLeader(
+    collectionId: string,
+    state: CollectionState,
+    expectedTerm: number,
+    pendingTx: Omit<PersistedTx, `term` | `seq` | `rowVersion`>,
+  ): PersistedTx | null {
+    if (
+      this.isDisposed() ||
+      this.collections.get(collectionId) !== state ||
+      !state.isLeader ||
+      state.leaderId !== this.nodeId ||
+      state.latestTerm !== expectedTerm
+    ) {
+      return null
+    }
+    return {
+      ...pendingTx,
+      term: state.latestTerm,
+      seq: state.latestSeq + 1,
+      rowVersion: state.latestRowVersion + 1,
+    }
+  }
+
   private async applyDurablyAtNextStreamPosition(
     collectionId: string,
     state: CollectionState,
@@ -2280,21 +2319,13 @@ export class BroadcastCollectionCoordinator implements PersistedCollectionCoordi
     return this.withScheduledWriterLock(
       collectionId,
       async (adapter) => {
-        if (
-          this.isDisposed() ||
-          this.collections.get(collectionId) !== state ||
-          !state.isLeader ||
-          state.leaderId !== this.nodeId ||
-          state.latestTerm !== expectedTerm
-        ) {
-          return null
-        }
-        const tx: PersistedTx = {
-          ...pendingTx,
-          term: state.latestTerm,
-          seq: state.latestSeq + 1,
-          rowVersion: state.latestRowVersion + 1,
-        }
+        const tx = this.nextPersistedTxIfLeader(
+          collectionId,
+          state,
+          expectedTerm,
+          pendingTx,
+        )
+        if (tx === null) return null
         try {
           await adapter.applyCommittedTx(collectionId, tx)
         } catch (error) {
