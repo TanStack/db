@@ -1208,12 +1208,11 @@ for this oracle repair. Keep these scenarios and decisions with that owner:
   422/404 message, and permanent errors. Each kind crosses true, false,
   undefined, and absent hook answers with 1–3 FIFO peers. The fixed examples
   each receive a campaign run before generated cases, with a reach assertion.
-  A later failure checks
-  the current retry count. Public `commit()` witnesses cover thrown, null, zero,
-  and Promise hook results; the first stored decision distinguishes terminal
-  rejection from a retry record. A hook fault
-  records a terminal rejection for only the failed row. The executor removes
-  that row, rejects its caller with the hook failure, and continues queued work
+  A later failure checks the current retry count. Public `commit()` witnesses
+  cover thrown, null, zero, and Promise hook results; the first stored decision
+  distinguishes terminal rejection from a retry record. A hook fault records
+  a terminal rejection for only the failed row. The executor removes that row,
+  rejects its caller with the hook failure, and continues queued work
   after acknowledged deletion. The public admission witness holds the terminal
   marker read, write, or deletion after a thrown or invalid hook: a new commit
   durably joins the queue at each cut but cannot run before head cleanup.
@@ -1235,7 +1234,10 @@ for this oracle repair. Keep these scenarios and decisions with that owner:
   a second named mutation function call or optimistic restore. The executor
   does not automatically retry a failed phase write or deletion. A failed
   terminal marker write followed by a crash remains an unmarked outbox replay
-  window. Broader offline retry and recovery policy remains with RFC #1659.
+  window. The [row-local review](oracle-reviews/pr-1592-row-local-retry-hook.md)
+  and [retry-decision grammar review](oracle-reviews/pr-1592-retry-decision-grammar.md)
+  record the checker controls. Broader offline retry and recovery policy
+  remains with RFC #1659.
 - **A10 R11/R12 and earlier R8:** metadata/native-value domain, old readers of
   new wire records, and unreadable/unknown-version outbox recovery. New readers
   accepting old records does not prove reverse compatibility. Do not delete
