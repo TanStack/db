@@ -247,7 +247,14 @@ row hold distinct instances when the key is an object, such as a Date or a
 binary array, so those members do not consolidate. A count, sum, or avg over
 consolidated contributions updates without re-reading the group; a min or max
 over distinct primitive values keeps one contribution per distinct exact input,
-and a min or max over objects keeps one contribution per contributor. D2 sees only
+and a min or max over objects keeps one contribution per contributor. An aggregate without `groupBy` has one group for each route. Its
+non-aggregate select fields must have one value for that group: a literal,
+or a parent field, which the route's parent context supplies. A field of the
+query's own sources throws, as it does with `groupBy`. Parents that are equal
+under query equality but differ exactly, such as `x: 0` and `x: -0`, share a
+route, so a parent field can show the other parent's exact value. That value
+is equal under query equality; this is a recorded limit, not a separate route
+per exact parent. D2 sees only
 safe exact-value identity for a representative, not the raw value itself. A separate public group key preserves primitive keys and
 serializes opaque equality identity; graph-local identity tokens never cross
 the Collection boundary. Compiler group fields use a query-local namespace

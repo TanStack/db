@@ -11,10 +11,11 @@
  * Grammar: direct, arithmetic-wrapped, conditional-branch, and
  * conditional-default global aggregates. The nested query crosses each shape
  * with an accepting and rejecting outer predicate; a grouped query is the
- * control. The model's missing `k` field represents the current global
- * aggregate projection, which omits fields that are not group keys. The
- * rejecting predicate distinguishes filtering after aggregation from dropping
- * the predicate altogether.
+ * control. A global aggregate cannot select a source field that is not
+ * aggregated (that throws), so its `k` field is `max(b.k)`, which is 2 here.
+ * A predicate on `k` pushed to source rows would filter them and change the
+ * total. The rejecting predicate distinguishes filtering after aggregation
+ * from dropping the predicate altogether.
  * An inner join has a separate boundary: the global aggregate joins when its
  * computed total matches an anchor. A materialized aggregate Collection
  * supplies a second formulation for matching and nonmatching controls.
@@ -29,6 +30,7 @@ import {
   caseWhen,
   eq,
   isUndefined,
+  max,
   or,
   sum,
 } from '../../src/query/builder/functions.js'
@@ -102,7 +104,7 @@ describe('optimizer aggregate semantics', () => {
         startSync: true,
         query: (q) => {
           const summary = q.from({ b: source }).select(({ b }) => ({
-            k: b.k,
+            k: max(b.k),
             total: sum(b.v),
           }))
           const joined = q
@@ -110,7 +112,7 @@ describe('optimizer aggregate semantics', () => {
             .innerJoin({ a: anchor }, ({ s, a }) => eq(s.total, a.target))
           if (scenario.filter === `accept`) {
             return joined
-              .where(({ s }) => isUndefined(s.k))
+              .where(({ s }) => eq(s.k, 2))
               .select(({ s }) => ({ total: s.total }))
           }
           if (scenario.filter === `reject`) {
@@ -178,7 +180,7 @@ describe('optimizer aggregate semantics', () => {
         startSync: true,
         query: (q) =>
           q.from({ b: source }).select(({ b }) => ({
-            k: b.k,
+            k: max(b.k),
             total:
               shape === `direct`
                 ? sum(b.v)
@@ -189,7 +191,9 @@ describe('optimizer aggregate semantics', () => {
                     : caseWhen(eq(1, 2), 0, sum(b.v)),
           })),
       })
-      expect(aggregate.toArray.map(stripVirtualProps)).toEqual(expected)
+      expect(aggregate.toArray.map(stripVirtualProps)).toEqual(
+        expected.map((row) => ({ k: 2, ...row })),
+      )
 
       const materialized = createLiveQueryCollection({
         startSync: true,
@@ -197,7 +201,7 @@ describe('optimizer aggregate semantics', () => {
           q
             .from({ s: aggregate })
             .leftJoin({ a: anchor }, ({ s, a }) => eq(s.total, a.target))
-            .where(({ s }) => isUndefined(s.k))
+            .where(({ s }) => eq(s.k, 2))
             .select(({ s }) => ({ total: s.total })),
       })
       expect(materialized.toArray.map(stripVirtualProps)).toEqual(expected)
@@ -207,7 +211,7 @@ describe('optimizer aggregate semantics', () => {
           startSync: true,
           query: (q) => {
             const summary = q.from({ b: source }).select(({ b }) => ({
-              k: b.k,
+              k: max(b.k),
               total:
                 shape === `direct`
                   ? sum(b.v)
@@ -221,7 +225,7 @@ describe('optimizer aggregate semantics', () => {
               .from({ s: summary })
               .leftJoin({ a: anchor }, ({ s, a }) => eq(s.total, a.target))
               .where(({ s }) =>
-                outerPredicate === `accept` ? isUndefined(s.k) : eq(s.k, 1),
+                outerPredicate === `accept` ? eq(s.k, 2) : eq(s.k, 1),
               )
               .select(({ s }) => ({ total: s.total }))
           },

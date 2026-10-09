@@ -8,7 +8,8 @@
  */
 import { beforeEach, describe, expect, test } from 'vitest'
 import { Temporal } from 'temporal-polyfill'
-import { createLiveQueryCollection } from '../../src/query/index.js'
+import { createLiveQueryCollection, toArray } from '../../src/query/index.js'
+import { NonAggregateExpressionNotInGroupByError } from '../../src/errors.js'
 import { createCollection } from '../../src/collection/index.js'
 import { mockSyncCollectionOptions, stripVirtualProps } from '../utils.js'
 import {
@@ -2738,4 +2739,92 @@ describe(`group value among equal instances`, () => {
       }
     })
   }
+})
+
+/**
+ * An aggregate without `groupBy` has one group (one per parent route inside
+ * an include). A non-aggregate select field needs one value for that group:
+ * a literal, or a parent field, which is constant within a route. A field of
+ * the query's own sources has no single value, so it throws, as it does with
+ * `groupBy`. Before, the single-group path dropped every non-aggregate field
+ * silently.
+ */
+describe(`non-aggregate fields of an aggregate without groupBy`, () => {
+  type Issue = { id: number; k: string; x: number }
+  type Comment = { id: number; k: string }
+  const setup = (name: string) => ({
+    issues: createCollection(
+      mockSyncCollectionOptions<Issue>({
+        id: `single-group-issues-${name}`,
+        getKey: (row) => row.id,
+        initialData: [
+          { id: 1, k: `a`, x: 3 },
+          { id: 2, k: `b`, x: 4 },
+        ],
+      }),
+    ),
+    comments: createCollection(
+      mockSyncCollectionOptions<Comment>({
+        id: `single-group-comments-${name}`,
+        getKey: (row) => row.id,
+        initialData: [
+          { id: 10, k: `a` },
+          { id: 11, k: `a` },
+          { id: 12, k: `b` },
+        ],
+      }),
+    ),
+  })
+
+  test(`an include publishes parent fields and literals beside its aggregate`, async () => {
+    const { issues, comments } = setup(`parent`)
+    const query = createLiveQueryCollection((q) =>
+      q.from({ issue: issues }).select(({ issue }) => ({
+        id: issue.id,
+        kids: toArray(
+          q
+            .from({ c: comments })
+            .where(({ c }) => eq(c.k, issue.k))
+            .select(({ c }) => ({
+              n: count(c.id),
+              px: issue.x,
+              label: `comments`,
+            })),
+        ),
+      })),
+    )
+    await query.preload()
+    expect(
+      query.toArray.map((row) => ({
+        id: row.id,
+        kids: row.kids.map(stripVirtualProps),
+      })),
+    ).toEqual([
+      { id: 1, kids: [{ n: 2, px: 3, label: `comments` }] },
+      { id: 2, kids: [{ n: 1, px: 4, label: `comments` }] },
+    ])
+    await query.cleanup()
+  })
+
+  test(`a field of the query's own source throws`, () => {
+    const { issues, comments } = setup(`source`)
+    expect(() =>
+      createLiveQueryCollection((q) =>
+        q.from({ c: comments }).select(({ c }) => ({ n: count(c.id), k: c.k })),
+      ),
+    ).toThrow(NonAggregateExpressionNotInGroupByError)
+    expect(() =>
+      createLiveQueryCollection((q) =>
+        q.from({ issue: issues }).select(({ issue }) => ({
+          id: issue.id,
+          kids: toArray(
+            q
+              .from({ c: comments })
+              .where(({ c }) => eq(c.k, issue.k))
+              .select(({ c }) => ({ n: count(c.id), k: c.k })),
+          ),
+        })),
+      ),
+    ).toThrow(NonAggregateExpressionNotInGroupByError)
+  })
 })

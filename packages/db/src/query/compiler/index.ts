@@ -1052,6 +1052,7 @@ export function compileQuery(
       mainCollectionId,
       groupByMainSource,
       sourceCarriesInternalRouteState || includesRoutingFns.length > 0,
+      new Set(collectScopeAliases(query)),
     )
   }
 

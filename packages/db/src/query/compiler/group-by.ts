@@ -339,6 +339,7 @@ export function processGroupBy(
   aggregateCollectionId?: string,
   mainSource?: string,
   sanitizeCallbackRows = false,
+  sourceAliases: ReadonlySet<string> = new Set(),
 ): NamespacedAndKeyedStream {
   const fields = createInternalGroupFields(groupByClause.length, selectClause)
   const virtualAggregates: Record<string, any> = {
@@ -366,10 +367,20 @@ export function processGroupBy(
   }
 
   const singleGroup = groupByClause.length === 0
-  // Single-group aggregation accepts selections without grouping validation.
   const mapping = singleGroup
     ? undefined
     : validateAndCreateMapping(groupByClause, selectClause)
+  // A single group has one value for a literal or a parent field, which is
+  // constant within a route. A field of the query's own sources has none.
+  const singleGroupValues: Record<string, (row: NamespacedRow) => unknown> = {}
+  if (singleGroup && selectClause) {
+    for (const [alias, expr] of Object.entries(selectClause)) {
+      if (expr.type === `agg` || containsAggregate(expr)) continue
+      if (refersToSource(expr, sourceAliases))
+        throw new NonAggregateExpressionNotInGroupByError(alias)
+      singleGroupValues[alias] = compileGroupedSelectValue(expr)
+    }
+  }
 
   // Pre-compile groupBy expressions
   const compiledGroupByExpressions = groupByClause.map((e) =>
@@ -502,6 +513,10 @@ export function processGroupBy(
         for (const [alias, expr] of Object.entries(selectClause)) {
           if (expr.type === `agg`) {
             finalResults[alias] = aggregatedRow[alias]
+          } else if (singleGroupValues[alias]) {
+            finalResults[alias] = singleGroupValues[alias](
+              getGroupEvaluationRow(aggregatedRow, fields),
+            )
           } else if (!singleGroup && !wrappedAggExprs[alias]) {
             // Use cached mapping to get the corresponding __key_X for non-aggregates
             const groupIndex = mapping?.get(alias)
@@ -623,6 +638,16 @@ export function processGroupBy(
   }
 
   return pipeline
+}
+
+/** Whether a select value reads a field of one of `sources`. */
+function refersToSource(value: unknown, sources: ReadonlySet<string>): boolean {
+  if (value === null || typeof value !== `object`) return false
+  const node = value as { type?: unknown; path?: Array<string> }
+  if (node.type === `ref`) return sources.has(node.path![0]!)
+  // A literal holds no refs; a nested include is compiled separately.
+  if (node.type === `val` || node.type === `includesSubquery`) return false
+  return Object.values(value).some((child) => refersToSource(child, sources))
 }
 
 /**
