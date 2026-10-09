@@ -1243,7 +1243,8 @@ for this oracle repair. Keep these scenarios and decisions with that owner:
   terminal marker write followed by a crash remains an unmarked outbox replay
   window. The [row-local review](oracle-reviews/pr-1592-row-local-retry-hook.md),
   [retry-decision grammar review](oracle-reviews/pr-1592-retry-decision-grammar.md),
-  and [rejected-Promise review](oracle-reviews/pr-1592-rejected-hook-promise.md)
+  [rejected-Promise review](oracle-reviews/pr-1592-rejected-hook-promise.md),
+  and [error-boundary review](oracle-reviews/pr-1592-error-boundary-review.md)
   record the checker controls. The Node-hosted Promise witnesses do not establish
   browser `unhandledrejection`, third-party thenables, or rejection after executor
   disposal; this settlement owner needs a receiving witness for any broader
