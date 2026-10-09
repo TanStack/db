@@ -573,6 +573,7 @@ export function compileQuery(
       optimizableOrderByCollections,
       setWindowFn,
       rawQuery,
+      query.from,
       compileQuery,
       aliasToCollectionId,
       aliasRemapping,
@@ -583,10 +584,17 @@ export function compileQuery(
     )
   }
 
-  // A recursively compiled source or a correlation owned by a joined source
-  // is already parameterized by route. Once the correlation field is visible,
-  // retain only the copy whose route key matches it.
-  if (parentKeyStream && childCorrelationField && !joinsParentDirectly) {
+  // A RIGHT or FULL join can add a row without the main source after that
+  // source was filtered by parent keys. Check the correlation again once the
+  // joined row is visible; a missing main-side correlation cannot join a route.
+  const canLoseMainSide = query.join?.some(
+    ({ type }) => type === `right` || type === `full`,
+  )
+  if (
+    parentKeyStream &&
+    childCorrelationField &&
+    (!joinsParentDirectly || canLoseMainSide)
+  ) {
     const compiledChildCorrelation = compileExpression(childCorrelationField)
     pipeline = pipeline.pipe(
       filter(([, row]) =>

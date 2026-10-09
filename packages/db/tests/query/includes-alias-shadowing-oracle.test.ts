@@ -1,9 +1,11 @@
 import { describe, expect, test } from 'vitest'
 import {
   Query,
+  add,
   count,
   createLiveQueryCollection,
   eq,
+  isUndefined,
   toArray,
 } from '../../src/query/index.js'
 import { getQueryIR } from '../../src/query/builder/query-ir.js'
@@ -2600,5 +2602,500 @@ describe(`nested source placement preserves captured outer rows`, () => {
         })
       }
     }
+  }
+})
+
+/**
+ * # An absent join side is not an ancestor with the same alias
+ *
+ * ARCHITECTURE.md §Identity promises that source bindings survive shadowing.
+ * RIGHT and FULL joins can produce a row with no main side. The child main
+ * source is then absent even if its lexical alias spells an ancestor's name.
+ * A FULL join can also have no joined side. Renaming a child alias cannot
+ * change an explicit projection. The parent correlation is attached to the
+ * side that remains present, so every expected row has a defined route.
+ *
+ * The model below pairs plain source rows by their key values, supplies the
+ * missing side as undefined, and then restricts pairs to the current parent.
+ * It does not read compiler namespaces or route metadata. The finite history
+ * crosses RIGHT/FULL, both FULL correlation sides, shadowed/renamed aliases,
+ * direct and QueryRef joined sources, eager/on-demand loading, and transitions
+ * between matched and absent sides.
+ */
+describe(`outer joins preserve absent source bindings under shadowing`, () => {
+  type Parent = { id: number; marker: string }
+  type Main = {
+    id: number
+    parentId: number
+    anchorId: number
+    label: string
+  }
+  type Anchor = { id: number; parentId: number }
+  type JoinKind = `right` | `full`
+  type CorrelationSide = `main` | `joined`
+  type Expected = {
+    parentId: number
+    mainId: number | undefined
+    anchorId: number | undefined
+    label: string | undefined
+    marker: string
+    missingMain: boolean
+    missingAnchor: boolean
+  }
+
+  const sortRows = (rows: Array<Expected>) =>
+    rows.sort(
+      (a, b) =>
+        a.parentId - b.parentId ||
+        (a.anchorId ?? Infinity) - (b.anchorId ?? Infinity) ||
+        (a.mainId ?? Infinity) - (b.mainId ?? Infinity),
+    )
+
+  /** Plain relational recomputation; alias text and source mode are absent. */
+  const model = (
+    parents: ReadonlyMap<number, Parent>,
+    mains: ReadonlyMap<number, Main>,
+    anchors: ReadonlyMap<number, Anchor>,
+    kind: JoinKind,
+    correlationSide: CorrelationSide,
+  ): Array<Expected> => {
+    const mainRows = [...mains.values()]
+    const anchorRows = [...anchors.values()]
+    const pairs: Array<[Main | undefined, Anchor | undefined]> = []
+    for (const anchor of anchorRows) {
+      const matches = mainRows.filter((main) => main.anchorId === anchor.id)
+      if (matches.length > 0) {
+        for (const main of matches) pairs.push([main, anchor])
+      } else {
+        pairs.push([undefined, anchor])
+      }
+    }
+    if (kind === `full`) {
+      for (const main of mainRows) {
+        if (!anchorRows.some((anchor) => anchor.id === main.anchorId)) {
+          pairs.push([main, undefined])
+        }
+      }
+    }
+    return sortRows(
+      [...parents.values()].flatMap((parent) =>
+        pairs
+          .filter(([main, anchor]) =>
+            correlationSide === `joined`
+              ? anchor?.parentId === parent.id
+              : main?.parentId === parent.id,
+          )
+          .map(([main, anchor]) => ({
+            parentId: parent.id,
+            mainId: main?.id,
+            anchorId: anchor?.id,
+            label: main?.label,
+            marker: parent.marker,
+            missingMain: main === undefined,
+            missingAnchor: anchor === undefined,
+          })),
+      ),
+    )
+  }
+
+  for (const [kind, correlationSide] of [
+    [`right`, `joined`],
+    [`full`, `joined`],
+    [`full`, `main`],
+  ] as const) {
+    for (const mode of [`eager`, `onDemand`] as const) {
+      test(`${kind} with ${correlationSide} correlation and ${mode} sources keeps absent sides absent`, async () => {
+        const parentRows = new Map<number, Parent>([
+          [1, { id: 1, marker: `PARENT` }],
+          [2, { id: 2, marker: `OTHER` }],
+        ])
+        const mainRows = new Map<number, Main>([
+          [10, { id: 10, parentId: 1, anchorId: 7, label: `MATCH` }],
+          [11, { id: 11, parentId: 1, anchorId: 9, label: `MAIN ONLY` }],
+          [21, { id: 21, parentId: 2, anchorId: 20, label: `OTHER MATCH` }],
+        ])
+        const anchorRows = new Map<number, Anchor>([
+          [7, { id: 7, parentId: 1 }],
+          [8, { id: 8, parentId: 1 }],
+          [20, { id: 20, parentId: 2 }],
+        ])
+        const cases = ([`queryRef`, `direct`] as const).flatMap((sourceForm) =>
+          ([`issue`, `child`] as const).map((alias) => {
+            const parents = createScopedSource(
+              `outer-parent-${kind}-${correlationSide}-${mode}-${sourceForm}-${alias}`,
+              [...parentRows.values()],
+              `eager`,
+            )
+            const mains = createScopedSource(
+              `outer-main-${kind}-${correlationSide}-${mode}-${sourceForm}-${alias}`,
+              [...mainRows.values()],
+              mode,
+            )
+            const anchors = createScopedSource(
+              `outer-anchor-${kind}-${correlationSide}-${mode}-${sourceForm}-${alias}`,
+              [...anchorRows.values()],
+              mode,
+            )
+            mains.collection.createIndex((row) => row.anchorId, {
+              indexType: BasicIndex,
+            })
+            mains.collection.createIndex((row) => row.parentId, {
+              indexType: BasicIndex,
+            })
+            anchors.collection.createIndex((row) => row.parentId, {
+              indexType: BasicIndex,
+            })
+            anchors.collection.createIndex((row) => row.id, {
+              indexType: BasicIndex,
+            })
+            const live = createLiveQueryCollection({
+              query: new Query()
+                .from({ issue: parents.collection })
+                .select(({ issue: parent }) => {
+                  const main = new Query().from({ [alias]: mains.collection })
+                  const scopedAnchors = new Query()
+                    .from({ source: anchors.collection })
+                    .where(({ source }) => eq(source.parentId, parent.id))
+                    .select(({ source }) => ({
+                      id: source.id,
+                      parentId: source.parentId,
+                    }))
+                  const on = (context: Context) =>
+                    eq(
+                      (context[alias] as Main).anchorId,
+                      (context.anchor as Anchor).id,
+                    )
+                  const anchorSource =
+                    sourceForm === `direct` ? anchors.collection : scopedAnchors
+                  const joined = main.join({ anchor: anchorSource }, on, kind)
+                  expect(getQueryIR(joined).join?.[0]?.from.type).toBe(
+                    sourceForm === `direct` ? `collectionRef` : `queryRef`,
+                  )
+                  return {
+                    id: parent.id,
+                    rows: toArray(
+                      joined
+                        .where((context: Context) =>
+                          correlationSide === `joined`
+                            ? eq((context.anchor as Anchor).parentId, parent.id)
+                            : eq((context[alias] as Main).parentId, parent.id),
+                        )
+                        .select((context: Context) => ({
+                          mainId: (context[alias] as Main).id,
+                          anchorId: (context.anchor as Anchor).id,
+                          label: (context[alias] as Main).label,
+                          marker: parent.marker,
+                          missingMain: isUndefined((context[alias] as Main).id),
+                          missingAnchor: isUndefined(
+                            (context.anchor as Anchor).id,
+                          ),
+                        })),
+                    ),
+                  }
+                }),
+            })
+            return { sourceForm, alias, parents, mains, anchors, live }
+          }),
+        )
+
+        /** Compare every public result after preload and each committed write. */
+        const observe = (live: (typeof cases)[number][`live`]) =>
+          sortRows(
+            live.toArray.flatMap(({ id, rows }) =>
+              rows.map((row) => ({
+                parentId: id,
+                mainId: row.mainId,
+                anchorId: row.anchorId,
+                label: row.label,
+                marker: row.marker,
+                missingMain: row.missingMain,
+                missingAnchor: row.missingAnchor,
+              })),
+            ),
+          )
+
+        await withHistoryCleanup(
+          async () => {
+            for (const entry of cases) await entry.live.preload()
+            const check = (cut: string) => {
+              const expected = model(
+                parentRows,
+                mainRows,
+                anchorRows,
+                kind,
+                correlationSide,
+              )
+              for (const entry of cases) {
+                expect(
+                  observe(entry.live),
+                  `${entry.sourceForm}, ${entry.alias} at ${cut}`,
+                ).toEqual(expected)
+                if (mode === `onDemand`) {
+                  expect(entry.mains.requests.length).toBeGreaterThan(0)
+                  expect(entry.anchors.requests.length).toBeGreaterThan(0)
+                }
+              }
+            }
+            check(`initial publication`)
+
+            const changedMain = {
+              id: 10,
+              parentId: 1,
+              anchorId: 7,
+              label: `UPDATED`,
+            }
+            mainRows.set(10, changedMain)
+            for (const entry of cases) entry.mains.put(changedMain)
+            await flushPromises()
+            check(`matched main update`)
+
+            mainRows.delete(10)
+            for (const entry of cases) entry.mains.remove(10)
+            await flushPromises()
+            check(`main becomes absent`)
+
+            mainRows.set(10, changedMain)
+            for (const entry of cases) entry.mains.put(changedMain)
+            await flushPromises()
+            check(`main returns`)
+
+            const secondMatch = {
+              id: 12,
+              parentId: 1,
+              anchorId: 8,
+              label: `SECOND`,
+            }
+            mainRows.set(12, secondMatch)
+            for (const entry of cases) entry.mains.put(secondMatch)
+            await flushPromises()
+            check(`second main arrives`)
+
+            anchorRows.delete(7)
+            for (const entry of cases) entry.anchors.remove(7)
+            await flushPromises()
+            check(`joined side becomes absent`)
+
+            const changedParent = { id: 1, marker: `PARENT2` }
+            parentRows.set(1, changedParent)
+            for (const entry of cases) entry.parents.put(changedParent)
+            await flushPromises()
+            check(`ancestor updates`)
+          },
+          () =>
+            cases.flatMap((entry) => [
+              () => entry.live.cleanup(),
+              () => entry.parents.collection.cleanup(),
+              () => entry.mains.collection.cleanup(),
+              () => entry.anchors.collection.cleanup(),
+            ]),
+        )
+      })
+    }
+  }
+})
+
+/**
+ * # Join operands keep their lexical source
+ *
+ * A captured ancestor reference is an available expression on the main side
+ * of a child's join, even when the joined source uses the same alias. The
+ * child-local and ancestor terms can form one join key, and an ancestor can
+ * also supply the entire main-side key. The model uses their numeric values
+ * and the joined source's ID; swapping equality operands or
+ * renaming the joined source cannot change the projected rows. The history
+ * changes each role at a public-row checkpoint, in both source modes.
+ */
+describe(`captured ancestor join operands retain their bindings`, () => {
+  type Parent = { id: number; offset: number }
+  type Child = { id: number; parentId: number; base: number }
+  type Target = { id: number }
+  type AncestorSide = `main` | `joined` | `soleMain`
+  type Expected = { parentId: number; childId: number; targetId: number }
+
+  const model = (
+    parents: ReadonlyMap<number, Parent>,
+    children: ReadonlyMap<number, Child>,
+    targets: ReadonlyMap<number, Target>,
+    ancestorSide: AncestorSide,
+  ): Array<{ id: number; rows: Array<Expected> }> =>
+    [...parents.values()]
+      .map((parent) => ({
+        id: parent.id,
+        rows: [...children.values()]
+          .filter((child) => child.parentId === parent.id)
+          .flatMap((child) =>
+            [...targets.values()]
+              .filter((target) => {
+                if (ancestorSide === `main`)
+                  return target.id === child.base + parent.offset
+                if (ancestorSide === `joined`)
+                  return child.base === target.id + parent.offset
+                return target.id === parent.offset
+              })
+              .map((target) => ({
+                parentId: parent.id,
+                childId: child.id,
+                targetId: target.id,
+              })),
+          )
+          .sort((a, b) => a.childId - b.childId),
+      }))
+      .sort((a, b) => a.id - b.id)
+
+  for (const mode of [`eager`, `onDemand`] as const) {
+    test(`${mode} sources preserve captured operands across alias and equality order`, async () => {
+      const parentRows = new Map<number, Parent>([[1, { id: 1, offset: 1 }]])
+      const childRows = new Map<number, Child>([
+        [10, { id: 10, parentId: 1, base: 6 }],
+      ])
+      const targetRows = new Map<number, Target>([
+        [1, { id: 1 }],
+        [2, { id: 2 }],
+        [3, { id: 3 }],
+        [4, { id: 4 }],
+        [5, { id: 5 }],
+        [7, { id: 7 }],
+        [8, { id: 8 }],
+      ])
+      const cases = ([`issue`, `target`] as const).flatMap((alias) =>
+        ([`childFirst`, `joinedFirst`] as const).flatMap((order) =>
+          ([`main`, `joined`, `soleMain`] as const).map((ancestorSide) => {
+            const parents = createScopedSource(
+              `operand-parent-${mode}-${alias}-${order}-${ancestorSide}`,
+              [...parentRows.values()],
+              `eager`,
+            )
+            const children = createScopedSource(
+              `operand-child-${mode}-${alias}-${order}-${ancestorSide}`,
+              [...childRows.values()],
+              mode,
+            )
+            const targets = createScopedSource(
+              `operand-target-${mode}-${alias}-${order}-${ancestorSide}`,
+              [...targetRows.values()],
+              mode,
+            )
+            children.collection.createIndex((row) => row.parentId, {
+              indexType: BasicIndex,
+            })
+            targets.collection.createIndex((row) => row.id, {
+              indexType: BasicIndex,
+            })
+            const live = createLiveQueryCollection({
+              query: new Query()
+                .from({ issue: parents.collection })
+                .select(({ issue: ancestor }) => ({
+                  id: ancestor.id,
+                  rows: toArray(
+                    new Query()
+                      .from({ child: children.collection })
+                      .innerJoin(
+                        { [alias]: targets.collection },
+                        (context: Context) => {
+                          const child = context.child as Child
+                          const target = context[alias] as Target
+                          const mainKey =
+                            ancestorSide === `main`
+                              ? add(child.base, ancestor.offset)
+                              : ancestorSide === `soleMain`
+                                ? ancestor.offset
+                                : child.base
+                          const joinedKey =
+                            ancestorSide === `joined`
+                              ? add(target.id, ancestor.offset)
+                              : target.id
+                          return order === `childFirst`
+                            ? eq(mainKey, joinedKey)
+                            : eq(joinedKey, mainKey)
+                        },
+                      )
+                      .where((context: Context) =>
+                        eq((context.child as Child).parentId, ancestor.id),
+                      )
+                      .select((context: Context) => ({
+                        parentId: ancestor.id,
+                        childId: (context.child as Child).id,
+                        targetId: (context[alias] as Target).id,
+                      })),
+                  ),
+                })),
+            })
+            return {
+              alias,
+              order,
+              ancestorSide,
+              parents,
+              children,
+              targets,
+              live,
+            }
+          }),
+        ),
+      )
+
+      const observe = (live: (typeof cases)[number][`live`]) =>
+        live.toArray
+          .map(({ id, rows }) => ({
+            id,
+            rows: rows
+              .map(({ parentId, childId, targetId }) => ({
+                parentId,
+                childId,
+                targetId,
+              }))
+              .sort((a, b) => a.childId - b.childId),
+          }))
+          .sort((a, b) => a.id - b.id)
+
+      await withHistoryCleanup(
+        async () => {
+          for (const entry of cases) await entry.live.preload()
+          const check = (cut: string) => {
+            for (const entry of cases) {
+              expect(
+                observe(entry.live),
+                `${entry.alias}, ${entry.order}, ${entry.ancestorSide} at ${cut}`,
+              ).toEqual(
+                model(parentRows, childRows, targetRows, entry.ancestorSide),
+              )
+            }
+          }
+          check(`initial publication`)
+
+          const changedParent = { id: 1, offset: 2 }
+          parentRows.set(1, changedParent)
+          for (const entry of cases) entry.parents.put(changedParent)
+          await flushPromises()
+          check(`ancestor key update`)
+
+          const changedChild = { id: 10, parentId: 1, base: 5 }
+          childRows.set(10, changedChild)
+          for (const entry of cases) entry.children.put(changedChild)
+          await flushPromises()
+          check(`child key update`)
+
+          for (const id of [2, 3, 7]) targetRows.delete(id)
+          for (const entry of cases) {
+            for (const id of [2, 3, 7]) entry.targets.remove(id)
+          }
+          await flushPromises()
+          check(`joined row removal`)
+
+          for (const id of [2, 3, 7]) targetRows.set(id, { id })
+          for (const entry of cases) {
+            for (const id of [2, 3, 7]) entry.targets.put({ id })
+          }
+          await flushPromises()
+          check(`joined row return`)
+        },
+        () =>
+          cases.flatMap((entry) => [
+            () => entry.live.cleanup(),
+            () => entry.parents.collection.cleanup(),
+            () => entry.children.collection.cleanup(),
+            () => entry.targets.collection.cleanup(),
+          ]),
+      )
+    })
   }
 })
