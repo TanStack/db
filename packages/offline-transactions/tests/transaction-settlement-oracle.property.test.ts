@@ -77,6 +77,8 @@ import type {
  * The `shouldRetry` option changes only the decision after a named mutation
  * function rejects. The hook receives the original Error and current retry
  * count once.
+ * A non-Error named mutation rejection is converted to an Error before the
+ * hook runs; its custom fields are not part of this promise.
  * `true` retries, `false` terminates, and `undefined` delegates to the existing
  * default decision. An absent hook also uses that default. `NonRetriableError`
  * remains permanent without consulting the hook. The existing default policy
@@ -95,6 +97,8 @@ import type {
  * row-local retry decision failure. The executor records a terminal rejection,
  * removes that row, rejects its public `commit()` with the hook failure, and
  * drops its optimistic state. A queued FIFO peer then runs in the same executor.
+ * A Promise returned by an async hook is invalid even if it later rejects;
+ * its rejection must not escape as an unhandled process rejection.
  * A commit begun during terminal cleanup may durably join the queue, but its
  * provider waits for the failed head's acknowledged deletion. A write begun
  * before the hook fault may also acknowledge afterward and join that queue.
@@ -1143,15 +1147,105 @@ it.each([`terminal`, `defer`] as const)(
   },
 )
 
+// The public hook always receives an Error, including when the named mutation
+// function rejects with a primitive or object. Returning false distinguishes
+// this hook decision from the default retry for these inputs. The public commit
+// rejection must be the same converted Error observed by the hook.
+it.each([
+  { label: `string`, rejection: `network disconnected` },
+  { label: `object`, rejection: { status: 401 } },
+])(
+  `passes a converted Error to shouldRetry for a $label rejection`,
+  async ({ rejection }) => {
+    const hookCalls: Array<{ error: Error; retryCount: number }> = []
+    const env = createTestOfflineEnvironment({
+      config: {
+        shouldRetry: (error, retryCount) => {
+          hookCalls.push({ error, retryCount })
+          return false
+        },
+      },
+      mutationFn: () => Promise.reject(rejection),
+    })
+    const warning = vi.spyOn(console, `warn`).mockImplementation(() => {})
+    let transactionId = ``
+    let observedCommit: Promise<void> | undefined
+    let commitStatus: unknown = `pending`
+    let hasPrimaryFailure = false
+    try {
+      await env.waitForLeader()
+      const tx = env.executor.createOfflineTransaction({
+        mutationFnName: env.mutationFnName,
+        autoCommit: false,
+      })
+      transactionId = tx.id
+      tx.mutate(() =>
+        env.collection.insert({
+          id: `converted-error`,
+          value: `pending`,
+          completed: false,
+          updatedAt: new Date(0),
+        }),
+      )
+      observedCommit = tx.commit().then(
+        () => {
+          commitStatus = `fulfilled`
+        },
+        (error: unknown) => {
+          commitStatus = error
+        },
+      )
+      await atOracleCheckpoint(
+        observedCommit,
+        `non-Error rejection settled caller`,
+      )
+      expect(hookCalls).toEqual([{ error: expect.any(Error), retryCount: 0 }])
+      expect(hookCalls[0]?.error).not.toBe(rejection)
+      expect(commitStatus).toBe(hookCalls[0]?.error)
+      expect(await env.executor.peekOutbox()).toEqual([])
+      expect(env.collection.toArray).toEqual([])
+    } catch (error) {
+      hasPrimaryFailure = true
+      throw error
+    } finally {
+      if (transactionId && commitStatus === `pending`)
+        env.executor.rejectTransaction(
+          transactionId,
+          new Error(`non-Error rejection oracle cleanup`),
+        )
+      await cleanupOfflineOracle(
+        [
+          () => observedCommit,
+          () => env.executor.dispose(),
+          () => env.collection.cleanup(),
+          () => warning.mockRestore(),
+        ],
+        hasPrimaryFailure,
+      )
+    }
+  },
+)
+
 // A configuration failure is observed through public commit(), not only the
 // executor's internal batch promise. The provider error is a 401, so ignoring
-// the hook would reject with the provider error. A fresh executor over the same
-// storage must skip the failed row and process only newly admitted work.
-it.each([`throw`, `null`, `zero`, `promise`] as const)(
+// the hook would reject with the provider error. A Promise is invalid whether
+// it fulfills or rejects; its later rejection must stay within this row-local
+// failure boundary rather than become an unhandled process rejection. A fresh
+// executor over the same storage must skip the failed row.
+it.each([
+  `throw`,
+  `null`,
+  `zero`,
+  `promise-fulfilled`,
+  `promise-rejected`,
+] as const)(
   `rejects public commit when shouldRetry fails (%s)`,
   async (failureKind) => {
     const providerError = new Error(`HTTP 401 Unauthorized`)
     const hookError = new Error(`retry decision unavailable`)
+    const asyncError = new Error(`async retry decision failed`)
+    const unhandled: Array<unknown> = []
+    const onUnhandled = (reason: unknown) => unhandled.push(reason)
     const providerEntered = gate()
     const releaseProvider = gate()
     const terminalMarkerStored = gate()
@@ -1182,9 +1276,11 @@ it.each([`throw`, `null`, `zero`, `promise`] as const)(
         if (failureKind === `null`)
           return null as unknown as boolean | undefined
         if (failureKind === `zero`) return 0 as unknown as boolean | undefined
-        // An async hook returns a Promise. The synchronous contract rejects it
-        // as a decision value rather than awaiting a possible retry answer.
-        return Promise.resolve(true) as unknown as boolean | undefined
+        // An async hook returns a Promise. Neither outcome is a synchronous
+        // retry decision, and a rejection must still be observed.
+        return (failureKind === `promise-rejected`
+          ? Promise.reject(asyncError)
+          : Promise.resolve(true)) as unknown as boolean | undefined
       },
     }
     const storage = new DecisionStorage()
@@ -1202,6 +1298,7 @@ it.each([`throw`, `null`, `zero`, `promise`] as const)(
     let commitStatus: unknown = `pending`
     let hasPrimaryFailure = false
     try {
+      process.on(`unhandledRejection`, onUnhandled)
       await env.waitForLeader()
       const tx = env.executor.createOfflineTransaction({
         mutationFnName: env.mutationFnName,
@@ -1251,6 +1348,7 @@ it.each([`throw`, `null`, `zero`, `promise`] as const)(
       expect(hookCalls).toBe(1)
       const remaining = await env.executor.peekOutbox()
       await turn()
+      expect(unhandled).toEqual([])
       expect(env.executor.getRunningCount()).toBe(0)
       expect(env.mutationCalls).toHaveLength(1)
       expect(env.collection.toArray).toEqual([])
@@ -1303,6 +1401,7 @@ it.each([`throw`, `null`, `zero`, `promise`] as const)(
           () => env.collection.cleanup(),
           () => restarted?.collection.cleanup(),
           () => warning.mockRestore(),
+          () => process.off(`unhandledRejection`, onUnhandled),
         ],
         hasPrimaryFailure,
       )
@@ -1331,7 +1430,9 @@ function observedFaultAdmissionOutcome(value: unknown) {
 // holds the terminal marker read, write, or deletion while a second public commit
 // joins the queue. The held cut compares settlement, exact outbox contents,
 // provider calls, and optimistic rows. After deletion, both peers must run in
-// FIFO order in this executor. No storage write fails in this history.
+// FIFO order in this executor. The held Promise rejects only after both peers
+// settle, so its later failure must not escape as an unhandled process
+// rejection. No storage write fails.
 it.each([
   [`throw`, `marker`],
   [`throw`, `read`],
@@ -1339,11 +1440,15 @@ it.each([
   [`invalid`, `marker`],
   [`invalid`, `read`],
   [`invalid`, `deletion`],
+  [`promise-late-rejection`, `deletion`],
 ] as const)(
   `admits queued work during %s hook failure and %s cleanup`,
   async (failureKind, heldStep) => {
     const providerError = new Error(`HTTP 401 Unauthorized`)
     const hookError = new Error(`retry decision failed`)
+    const asyncError = new Error(`async retry decision failed`)
+    const unhandled: Array<unknown> = []
+    const onUnhandled = (reason: unknown) => unhandled.push(reason)
     const providerEntered = gate()
     const releaseProvider = gate()
     const hookEntered = gate()
@@ -1355,6 +1460,9 @@ it.each([
     let preFaultId = ``
     let postFaultId = ``
     let holdTerminalRead = false
+    let asyncDecision: Promise<boolean> | undefined
+    let rejectAsyncDecision: ((error: Error) => void) | undefined
+    let lateDecisionRejected = false
     const providerCalls: Array<string> = []
 
     class HeldTerminalDeleteStorage extends FakeStorageAdapter {
@@ -1398,6 +1506,12 @@ it.each([
           hookEntered.resolve()
           holdTerminalRead = true
           if (failureKind === `throw`) throw hookError
+          if (failureKind === `promise-late-rejection`) {
+            asyncDecision = new Promise<boolean>((_resolve, reject) => {
+              rejectAsyncDecision = reject
+            })
+            return asyncDecision as unknown as boolean | undefined
+          }
           return null as unknown as boolean | undefined
         },
       },
@@ -1446,6 +1560,7 @@ it.each([
     }
 
     try {
+      process.on(`unhandledRejection`, onUnhandled)
       await env.waitForLeader()
       const head = createObservedTransaction(`head`, 0)
       headId = head.id
@@ -1517,10 +1632,22 @@ it.each([
         `after-fault`,
         `before-fault`,
       ])
+      if (failureKind === `promise-late-rejection`) {
+        expect(rejectAsyncDecision).toBeTypeOf(`function`)
+        rejectAsyncDecision?.(asyncError)
+        lateDecisionRejected = true
+      }
+      await turn()
+      expect(unhandled).toEqual([])
     } catch (error) {
       hasPrimaryFailure = true
       throw error
     } finally {
+      if (asyncDecision && !lateDecisionRejected) {
+        // Release a mutant that wrongly awaits this test-owned Promise.
+        void asyncDecision.catch(() => {})
+        rejectAsyncDecision?.(asyncError)
+      }
       releaseProvider.resolve()
       releaseTerminalCleanup.resolve()
       const cleanupError = new Error(`hook-fault admission oracle cleanup`)
@@ -1534,6 +1661,7 @@ it.each([
           () => env.collection.cleanup(),
           () => warning.mockRestore(),
           () => errorLog.mockRestore(),
+          () => process.off(`unhandledRejection`, onUnhandled),
         ],
         hasPrimaryFailure,
       )

@@ -1209,8 +1209,11 @@ for this oracle repair. Keep these scenarios and decisions with that owner:
   undefined, and absent hook answers with 1–3 FIFO peers. The fixed examples
   each receive a campaign run before generated cases, with a reach assertion.
   A later failure checks the current retry count. Public `commit()` witnesses
-  cover thrown, null, zero, and Promise hook results; the first stored decision
-  distinguishes terminal rejection from a retry record. A hook fault records
+  cover thrown, null, zero, and fulfilled or rejected Promise hook results;
+  a rejected Promise must not escape as an unhandled process rejection. Primitive
+  and status-bearing object provider rejections check Error conversion before
+  the hook. The first stored decision distinguishes terminal rejection from a
+  retry record. A hook fault records
   a terminal rejection for only the failed row. The executor removes that row,
   rejects its caller with the hook failure, and continues queued work
   after acknowledged deletion. The public admission witness holds the terminal
