@@ -347,7 +347,7 @@ for their named commits.
 | CR-2b | Alphabetize the `ReconciledCommittedTx` import. | `already-fixed` at `6a64f4c67`; affected lint passes. |
 | CR-2c | Order `PersistedTx` before `PersistenceAdapter`. | `already-fixed` at `6a64f4c67`; affected lint passes. |
 | CR-2d | Keep both defensive anchor guards and correct the nullable SQL type rather than suppressing lint broadly. | `already-fixed` at `6a64f4c67`: RPC and SQLite each validate before work, and `reset_epoch` is nullable at the SQL boundary. |
-| CR-3a | Make the first cursor lookup `string | undefined` before `?? null`. | `already-fixed` at `6a64f4c67`; the nullable fallback remains typed. |
+| CR-3a | Make the first cursor lookup `string \| undefined` before `?? null`. | `already-fixed` at `6a64f4c67`; the nullable fallback remains typed. |
 | CR-3b | Apply the same type correction at the second cursor lookup. | `already-fixed` at `6a64f4c67`; this distinct site is retained. |
 | CR-4a | Wait for orphan metadata cleanup rather than relying on one async flush. | `fixed-now`: the wrapper oracle holds the reload, checks pending metadata and event state, then waits for cleanup and checks settled public rows and events. |
 | CR-4b | Wait for the durable array shape at the second reload site. | `fixed-now`: sparse-slot and enumerable-array-property histories check authored shape during the hold and durable public shape after release. |
@@ -422,3 +422,21 @@ is an untested transport history, recorded with the Electron receiving owner
 in the coverage map. Passing prompt-reply histories do not establish general
 Electron same-run recovery. The Browser and Electron coverage boundaries stay
 separate from the original source-backed Collection law.
+
+## Follow-up: CodeRabbit review 5463932998
+
+CodeRabbit reviewed `b25d83b50cb24308b793b858bc25eb4918975c6b` and
+reported one inline documentation defect. Its review body also repeated an
+optional CLI suggestion. The checkbox, run metadata, file inventory, and
+skipped-file list contained no other findings.
+
+| ID | Claim | Evidence and disposition |
+| --- | --- | --- |
+| CR2-1 | The unescaped union pipe split the CR-3a audit cell. Escape it inside the code span. | `fixed-now`. Local GFM rendering split the original code span and omitted the verdict from the visible row. The escaped pipe renders three intact cells, including the `string \| undefined` code span and verdict. Prettier and `git diff --check` pass. This is a documentation rendering defect, so a product oracle is not applicable. |
+| CR2-2 | Consider running `coderabbit review --agent` locally. | `refuted` as a required action. The raw review, local rendering check, and formatting check supplied direct evidence. The optional process idea remains here. |
+
+The reviewer made one accurate, precise finding with a minimal correct fix.
+This is a positive recommendation for targeted documentation review. This
+review does not establish product-law review depth. The final loss audit is two
+raw items = one `fixed-now` + one `refuted` as a required process action. No
+item remains open or deferred.
