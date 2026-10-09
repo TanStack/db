@@ -1,3 +1,5 @@
+import { codedMessage, devBuild } from '../error-message'
+
 type CleanupTask = {
   executeAt: number
   callback: () => void
@@ -96,7 +98,12 @@ export class CleanupQueue {
         try {
           task.callback()
         } catch (error) {
-          console.error('Error in CleanupQueue task:', error)
+          console.error(
+            devBuild() && process.env.NODE_ENV !== `production`
+              ? 'Error in CleanupQueue task:'
+              : codedMessage(214),
+            error,
+          )
         }
       }
     }

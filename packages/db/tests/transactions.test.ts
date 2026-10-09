@@ -205,6 +205,26 @@ describe(`Transactions`, () => {
       TransactionNotPendingMutateError,
     )
   })
+  it(`keeps a settled transaction's error when rollback is called again with another error`, async () => {
+    const first = new Error(`first`)
+    const failed = createTransaction({
+      mutationFn: async () => Promise.resolve(),
+      autoCommit: false,
+    })
+    failed.rollback({ error: first })
+    await expect(failed.isPersisted.promise).rejects.toBe(first)
+    failed.rollback({ error: new Error(`second`) })
+    expect(failed.error?.error).toBe(first)
+
+    const completed = createTransaction({
+      mutationFn: async () => Promise.resolve(),
+    })
+    await completed.commit()
+    expect(() => completed.rollback({ error: new Error(`late`) })).toThrow(
+      TransactionAlreadyCompletedRollbackError,
+    )
+    expect(completed.error).toBeUndefined()
+  })
   it(`should allow manually controlling the transaction lifecycle`, () => {
     const transaction = createTransaction({
       mutationFn: async () => Promise.resolve(),

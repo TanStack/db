@@ -308,7 +308,7 @@ existing wrapper owner. The repair adds two net production lines and no state.
 The obsolete utility-deletion paragraph in ORACLE.md was also corrected to the
 already implemented administrative contract.
 
-The [donor evidence directory](../../../review-evidence/donor-survey/README.md)
+The [donor evidence directory](https://github.com/TanStack/db/blob/main/review-evidence/donor-survey/README.md)
 retains probes and RED/GREEN receipts. The provider limit for the new observer
 matrix is fake-IDB; the existing native browser suite is a separate regression
 check, not a claim that all 22 new histories were run in browsers.

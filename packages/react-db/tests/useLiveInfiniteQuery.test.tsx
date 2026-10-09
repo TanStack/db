@@ -40,6 +40,8 @@ describe(`useLiveInfiniteQuery`, () => {
         id: `abandoned-infinite-query`,
         getKey: (post) => post.id,
         initialData: createMockPosts(10),
+        // Reclaimed as soon as nothing holds it.
+        gcTime: 1,
       }),
     )
     const never = new Promise<void>(() => {})
@@ -61,11 +63,12 @@ describe(`useLiveInfiniteQuery`, () => {
       </Suspense>,
     )
 
-    // Like useLiveQuery, the hook starts sync during render so a synchronously
-    // loaded source is ready on first commit; a render that never commits is
-    // then reclaimed by GC rather than kept out of the source entirely.
-    expect(source.subscriberCount).toBeGreaterThan(0)
-    await waitFor(() => expect(source.subscriberCount).toBe(0))
+    // Like useLiveQuery, the hook starts sync during render. The render asks
+    // for no data, but its collection holds the source until GC reclaims it.
+    expect(source.subscriberCount).toBe(0)
+    await new Promise((resolve) => setTimeout(resolve, 10))
+    expect(source.status).not.toBe(`cleaned-up`)
+    await waitFor(() => expect(source.status).toBe(`cleaned-up`))
     rendered.unmount()
   })
 
@@ -83,6 +86,8 @@ describe(`useLiveInfiniteQuery`, () => {
         id: `abandoned-supplied-infinite-query`,
         getKey: (post) => post.id,
         initialData: createMockPosts(10),
+        // Reclaimed as soon as nothing holds it.
+        gcTime: 1,
       }),
     )
     const liveQuery = createLiveQueryCollection({
@@ -103,8 +108,10 @@ describe(`useLiveInfiniteQuery`, () => {
       </Suspense>,
     )
 
-    expect(source.subscriberCount).toBeGreaterThan(0)
-    await waitFor(() => expect(source.subscriberCount).toBe(0))
+    expect(source.subscriberCount).toBe(0)
+    await new Promise((resolve) => setTimeout(resolve, 10))
+    expect(source.status).not.toBe(`cleaned-up`)
+    await waitFor(() => expect(source.status).toBe(`cleaned-up`))
     rendered.unmount()
   })
 

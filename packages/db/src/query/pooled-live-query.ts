@@ -12,6 +12,7 @@ import { createLiveQueryCollection } from './live-query-collection.js'
 import type { BasicExpression, OrderBy, QueryIR } from './ir.js'
 import type { BaseQueryBuilder } from './builder/index.js'
 import type { Collection, CollectionImpl } from '../collection/index.js'
+import type { CollectionSubscription } from '../collection/subscription.js'
 import type { ChangeMessage, CollectionStatus } from '../types.js'
 import type {
   CollectionEventHandler,
@@ -64,7 +65,7 @@ class Partition {
   private readonly groups = new Map<string, PartitionGroup>()
   // Revisions for every group, so a recreated group never repeats one.
   private clock = 0
-  private subscription: { unsubscribe: () => void } | undefined
+  private subscription: CollectionSubscription | undefined
   private stopStatusEvents: (() => void) | undefined
   // One source status listener serves every view of this partition.
   readonly statusListeners = new Set<StatusListener>()
@@ -140,20 +141,23 @@ class Partition {
       this.gcTime = Math.max(this.gcTime, delay)
     }
     if (this.terminated) return
-    this.subscribe()
+    // Building a view reads the rows the source already holds; it starts no
+    // provider work until a view has a subscriber or a preload.
+    this.subscribe(true)
     // Like a Collection that synced before anything subscribed, a view built
     // during a render gets a grace period to subscribe when it commits.
     this.scheduleRelease(UNSUBSCRIBED_GC_FLOOR_MS)
   }
 
-  subscribe(): void {
+  subscribe(deferAcquisition = false): void {
+    if (!deferAcquisition) this.subscription?.resumeDeferredAcquisition()
     if (!this.terminated && !this.subscription) {
       // A released partition that subscribes again serves new mounts too.
       this.registry.add()
       this.subscription = this.source.subscribeChanges(
         (changes) =>
           this.apply(changes as Array<ChangeMessage<Row, string | number>>),
-        { includeInitialState: true },
+        { includeInitialState: true, deferAcquisition },
       )
       const stopStatus = this.source.on(`status:change`, (event) => {
         this.deliverStatus(event)

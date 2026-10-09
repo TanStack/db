@@ -2,6 +2,7 @@ import { deepEquals } from '../utils'
 import { SortedMap } from '../SortedMap'
 import { enrichRowWithVirtualProps } from '../virtual-props.js'
 import {
+  DuplicateTransactionIdError,
   SyncQueueInvariantError,
   SyncTransactionAbortedError,
 } from '../errors.js'
@@ -146,23 +147,19 @@ export class CollectionStateManager<
   >()
 
   /**
-   * Tracks the origin of confirmed changes for each row.
-   * 'local' = change originated from this client
-   * 'remote' = change was received via sync
-   *
-   * This is used for the $origin virtual property.
-   * Note: This only tracks *confirmed* changes, not optimistic ones.
-   * Optimistic changes are always considered 'local' for $origin.
+   * Tracks Collection attribution for applied source rows. A same-key local
+   * mutation can make an independent source write appear 'local'; this map
+   * does not identify the source client. Optimistic rows are separately 'local'.
+   * Used for the $origin virtual property.
    */
   public rowOrigins = new Map<TKey, VirtualOrigin>()
 
   /**
-   * Tracks keys that have pending local changes.
-   * Used to determine whether sync-confirmed data should have 'local' or 'remote' origin.
-   * When sync confirms data for a key with pending local changes, it keeps 'local' origin.
+   * Tracks keys of pending or persisting local mutations for source-write attribution.
+   * A same-key source write can receive 'local' even when a peer supplied it.
    */
   public pendingLocalChanges = new Set<TKey>()
-  // A completed mutation attributes only the sync writes committed before its
+  // A successful mutation attributes only the sync writes committed before its
   // optimistic state dropped: those held at its completion boundary. Active or
   // failed mutations must not add to, or erase a sibling's entry in, this set.
   public pendingLocalOrigins = new Set<TKey>()
@@ -251,8 +248,8 @@ export class CollectionStateManager<
   }
 
   /**
-   * Gets the origin of the last confirmed change to a row.
-   * Returns 'local' if the row has optimistic mutations (optimistic changes are local).
+   * Gets Collection attribution for a row. An optimistic row is 'local';
+   * otherwise the applied source row retains its timing-based attribution.
    * Used to compute the $origin virtual property.
    */
   public getRowOrigin(key: TKey): VirtualOrigin {
@@ -670,13 +667,35 @@ export class CollectionStateManager<
   }
 
   /**
+   * Tracks `transaction`. Returns `false` when this Collection already tracks
+   * it. A different unsettled transaction with the same id is a contract
+   * violation: ids are unique.
+   */
+  public trackTransaction(transaction: Transaction<any>): boolean {
+    const tracked = this.transactions.get(transaction.id)
+    if (tracked === transaction) return false
+    if (tracked && tracked.state !== `completed` && tracked.state !== `failed`)
+      throw new DuplicateTransactionIdError(transaction.id)
+    this.transactions.set(transaction.id, transaction)
+    transaction.collections.add(this.collection)
+    return true
+  }
+
+  /**
    * Overlay still-active optimistic mutations on the current layers and
    * record their keys as pending local changes for $origin tracking.
+   *
+   * A settled transaction leaves `transactions` here, by its own entry. A
+   * recompute calls this after it records held rows, and a sync commit calls
+   * it after it skips those recomputes.
    */
   private overlayActiveTransactions(): void {
-    for (const transaction of this.transactions.values()) {
-      if (transaction.state === `completed` || transaction.state === `failed`)
+    const settled: Array<string> = []
+    for (const [id, transaction] of this.transactions) {
+      if (transaction.state === `completed` || transaction.state === `failed`) {
+        settled.push(id)
         continue
+      }
       for (const mutation of transaction.mutations) {
         if (!this.isThisCollection(mutation.collection)) continue
         this.pendingLocalChanges.add(mutation.key)
@@ -690,6 +709,7 @@ export class CollectionStateManager<
         }
       }
     }
+    for (const id of settled) this.transactions.delete(id)
   }
 
   /**
@@ -1116,9 +1136,6 @@ export class CollectionStateManager<
       // Set flag to prevent redundant optimistic state recalculations
       this.isCommittingSyncTransactions = true
 
-      let truncatePendingLocalChanges: Set<TKey> | undefined
-      let truncatePendingLocalOrigins: Set<TKey> | undefined
-
       // First collect all keys that will be affected by sync operations
       const changedKeys = new Set<TKey>()
       const syncedInsertedOrUpdatedKeys = new Set<TKey>()
@@ -1181,10 +1198,8 @@ export class CollectionStateManager<
           // TRUNCATE PHASE
           // Clear the authoritative synced base. Subsequent server ops in this
           //    same commit will rebuild the base atomically.
-          // Preserve pending local tracking just long enough for operations in this
-          // truncate batch to retain correct local origin semantics.
-          truncatePendingLocalChanges = new Set(this.pendingLocalChanges)
-          truncatePendingLocalOrigins = new Set(this.pendingLocalOrigins)
+          // Keep active local mutations for later source transactions on keys
+          // this truncate does not write. Completed attribution is one-use.
           this.syncedData.clear()
           this.syncedMetadata.clear()
           this.hydrationSeedKeys.clear()
@@ -1196,7 +1211,9 @@ export class CollectionStateManager<
             this.hasAppliedAdapterTruncate = true
             this.appliedAdapterDeletedKeys.clear()
           }
-          this.clearOriginTrackingState()
+          this.virtualPropsCache.clear()
+          this.rowOrigins.clear()
+          this.pendingLocalOrigins.clear()
 
           // Clear currentVisibleState for truncated keys to ensure subsequent operations
           //    are compared against the post-truncate state (undefined) rather than pre-truncate state
@@ -1218,16 +1235,12 @@ export class CollectionStateManager<
         for (const operation of transaction.operations) {
           const key = operation.key as TKey
 
-          // Determine origin: 'local' for local-only collections or pending local changes
-          const retainedLocalOrigin =
-            truncatePendingLocalChanges?.has(key) === true ||
-            truncatePendingLocalOrigins?.has(key) === true
+          // Attribute this source write from active or held same-key mutations.
           const origin: VirtualOrigin =
             this.isLocalOnly ||
             this.pendingLocalChanges.has(key) ||
             this.pendingLocalOrigins.has(key) ||
-            localKeys.has(key) ||
-            retainedLocalOrigin
+            localKeys.has(key)
               ? 'local'
               : 'remote'
           if (origin === `local`) localKeys.add(key)
@@ -1491,29 +1504,6 @@ export class CollectionStateManager<
       // no longer suppressed by a sync transaction that will never publish.
       this.recomputeOptimisticState(false)
     }
-  }
-
-  /**
-   * Schedule cleanup of a transaction when it completes
-   */
-  public scheduleTransactionCleanup(transaction: Transaction<any>): void {
-    // Only schedule cleanup for transactions that aren't already completed
-    if (transaction.state === `completed`) {
-      this.transactions.delete(transaction.id)
-      return
-    }
-
-    // Schedule cleanup when the transaction completes
-    transaction.isPersisted.promise
-      .then(() => {
-        // Transaction completed successfully, remove it immediately
-        this.transactions.delete(transaction.id)
-      })
-      .catch(() => {
-        // Transaction failed, but we want to keep failed transactions for reference
-        // so don't remove it.
-        // Rollback already triggers state recomputation via touchCollection().
-      })
   }
 
   /**

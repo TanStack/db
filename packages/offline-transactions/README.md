@@ -31,7 +31,7 @@ The React Native entry point uses `@react-native-community/netinfo` for connecti
 
 This package provides platform-specific implementations for web and React Native environments:
 
-- **Web**: Uses browser APIs (`window.online` and `document.visibilitychange` events). Visible tabs allow sync attempts even when `navigator.onLine` is false; hidden tabs follow that hint. Request failures still use the configured retry policy. Visibility is local to each tab and does not transfer leadership from a hidden tab.
+- **Web**: Uses browser APIs (`window.online` and `document.visibilitychange` events). Visible tabs let the executor process the outbox even when `navigator.onLine` is false; hidden tabs follow that hint. Errors from named mutation functions still use the retry decision and backoff. Visibility is local to each tab and does not transfer leadership from a hidden tab.
 - **React Native**: Uses React Native primitives (`@react-native-community/netinfo` for network status, `AppState` for foreground/background detection)
 
 ## Quick Start
@@ -133,12 +133,85 @@ interface OfflineConfig {
   storage?: StorageAdapter
   maxConcurrency?: number
   jitter?: boolean
+  shouldRetry?: (error: Error, retryCount: number) => boolean | undefined
   beforeRetry?: (transactions: OfflineTransaction[]) => OfflineTransaction[]
   onUnknownMutationFn?: (name: string, tx: OfflineTransaction) => void
   onLeadershipChange?: (isLeader: boolean) => void
   onlineDetector?: OnlineDetector
 }
 ```
+
+### Retry decisions
+
+`shouldRetry` receives the named mutation function's `Error` and the current
+retry count, which is `0` on the first failure. The same `Error` instance is
+passed through; a rejection with a non-`Error` value is converted to an `Error`
+and may lose custom fields. Return `true` to retry, `false` to remove the
+offline transaction from the outbox and reject its
+waiting promises with that error, or `undefined` to use the default
+decision. The hook is synchronous and shared by all named mutation functions.
+An async hook returns a Promise, which fails its outbox row. Put any
+function-specific context needed by the hook on the thrown error. For example,
+this allows a 401 retry while keeping the default decision for other errors.
+The named mutation function must throw an error that retains the HTTP response
+status:
+
+```typescript
+import {
+  NonRetriableError,
+  startOfflineExecutor,
+} from '@tanstack/offline-transactions'
+
+class HttpError extends Error {
+  constructor(readonly status: number) {
+    super(`HTTP ${status}`)
+    this.name = 'HttpError'
+  }
+}
+
+const offline = startOfflineExecutor({
+  collections: { todos: todoCollection },
+  mutationFns: {
+    syncTodos: async ({ transaction, idempotencyKey }) => {
+      const response = await fetch('/api/todos', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Idempotency-Key': idempotencyKey,
+        },
+        body: JSON.stringify(transaction.mutations),
+      })
+      // This todo API treats these responses as permanent. Classify other
+      // statuses according to the server contract.
+      if ([404, 405, 409, 410, 422].includes(response.status)) {
+        throw new NonRetriableError(`Todo request rejected: ${response.status}`)
+      }
+      if (!response.ok) throw new HttpError(response.status)
+    },
+  },
+  shouldRetry: (error) =>
+    error instanceof HttpError && error.status === 401 ? true : undefined,
+})
+```
+
+A retried transaction retains its FIFO position, so use this when the
+authentication problem can recover. The app must refresh credentials separately
+before another attempt.
+
+`NonRetriableError` always stops retry without calling the hook. The default
+policy still determines backoff and the `jitter` option. A hook that throws or
+returns another value records a terminal rejection for that row, removes it
+from the outbox, and rejects its waiting promises with the hook failure. Once
+the deletion is acknowledged, queued rows continue in creation order. New
+commits may join the queue during cleanup, but cannot run ahead of the failed
+row's deletion. The named mutation function error is logged; the hook failure
+is the caller-facing and stored error. A fresh executor does not replay the
+failed row. Stored errors retain `name`, `message`, and `stack`, but a restart
+does not restore an arbitrary error subclass or its custom fields.
+If terminal marker storage or deletion fails, the caller still rejects with
+the hook failure and the executor batch rejects with the storage error. The
+executor then stops with queued work retained. A marked row skips the named
+mutation function after restart; an unmarked row may replay.
 
 ### OfflineExecutor
 
@@ -151,8 +224,14 @@ interface OfflineConfig {
 - `createOfflineTransaction(options)` - Create a manual offline transaction
 - `waitForTransactionCompletion(id)` - Wait for a specific transaction to complete
 - `removeFromOutbox(id)` - Manually remove transaction from outbox
+- `clearOutbox()` - Manually remove all outbox transactions
 - `peekOutbox()` - View all pending transactions
 - `dispose()` - Clean up resources
+
+An acknowledged `removeFromOutbox(id)` or `clearOutbox()` while a named
+mutation function is running does not cancel that call. If the call later
+fails, its waiting promises reject with the named mutation function error; the
+removed row is not retried.
 
 ### Error Handling
 

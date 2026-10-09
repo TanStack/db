@@ -2009,6 +2009,9 @@ function createJoinTests(autoIndex: `off` | `eager`): void {
             balance_amount: balance.amount,
           })),
     })
+    // A live-query Collection starts no provider work until it has a
+    // subscriber or a preload. This subscriber starts the idle clients source.
+    chainedJoinQuery.subscribeChanges(() => {})
 
     // Initial state: 3 players, no clients, so left join gives undefined for client and balance
     expect(chainedJoinQuery.toArray).toHaveLength(3)

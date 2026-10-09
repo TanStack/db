@@ -9,6 +9,7 @@ import {
   InvalidPersistedCollectionConfigError,
   InvalidPersistedStorageKeyEncodingError,
 } from './errors'
+import { isValidCommittedTxAnchor } from './committed-tx-anchor'
 import {
   SQLITE_DRIVER_SHARED_LOGICAL_SCHEDULING_KEY,
   createPersistedTableName,
@@ -27,6 +28,7 @@ import {
 } from './sqlite-value'
 import type { LoadSubsetOptions } from '@tanstack/db'
 import type {
+  CommittedTxAnchor,
   HydrationPersistenceAdapter,
   PersistedCacheGenerationClaim,
   PersistedIndexSpec,
@@ -35,6 +37,7 @@ import type {
   PersistedScannedRow,
   PersistedTx,
   PersistenceAdapter,
+  ReconciledCommittedTx,
   ReplayableTxDelta,
   SQLiteDriver,
 } from './persisted'
@@ -2029,6 +2032,8 @@ export class SQLiteCorePersistenceAdapter implements PersistenceAdapter {
         this.applyCommittedTxUnscheduled(collectionId, tx),
       renewCacheGenerationClaim: (storageCollectionId, claimId) =>
         this.renewCacheGenerationClaimUnscheduled(storageCollectionId, claimId),
+      reconcileCommittedTx: (collectionId, tx, anchor) =>
+        this.reconcileCommittedTxUnscheduled(collectionId, tx, anchor),
       loadCollectionMetadata: (collectionId, context) =>
         this.loadCollectionMetadataUnscheduled(collectionId, context),
       scanRows: (collectionId, scanOptions, context) =>
@@ -2391,10 +2396,41 @@ export class SQLiteCorePersistenceAdapter implements PersistenceAdapter {
     )
   }
 
+  reconcileCommittedTx(
+    collectionId: string,
+    tx: PersistedTx,
+    anchor: CommittedTxAnchor,
+  ): Promise<ReconciledCommittedTx> {
+    return this.runRegular(() =>
+      this.reconcileCommittedTxUnscheduled(collectionId, tx, anchor),
+    )
+  }
+
   private async applyCommittedTxUnscheduled(
     collectionId: string,
     tx: PersistedTx,
   ): Promise<void> {
+    await this.applyCommittedTxInternal(collectionId, tx)
+  }
+
+  private reconcileCommittedTxUnscheduled(
+    collectionId: string,
+    tx: PersistedTx,
+    anchor: CommittedTxAnchor,
+  ): Promise<ReconciledCommittedTx> {
+    if (!isValidCommittedTxAnchor(anchor)) {
+      throw new Error(
+        `Cannot reconcile a committed transaction without a valid durable anchor`,
+      )
+    }
+    return this.applyCommittedTxInternal(collectionId, tx, anchor)
+  }
+
+  private async applyCommittedTxInternal(
+    collectionId: string,
+    tx: PersistedTx,
+    anchor?: CommittedTxAnchor,
+  ): Promise<ReconciledCommittedTx> {
     await this.assertCacheGenerationReadClaim(
       this.driver,
       collectionId,
@@ -2407,22 +2443,24 @@ export class SQLiteCorePersistenceAdapter implements PersistenceAdapter {
     const collectionTableSql = quoteIdentifier(tableMapping.tableName)
     const tombstoneTableSql = quoteIdentifier(tableMapping.tombstoneTableName)
 
-    await this.runInTransaction(async (transactionDriver) => {
+    return this.runInTransaction(async (transactionDriver) => {
       await this.assertCacheGenerationReadClaim(
         transactionDriver,
         collectionId,
         tx.cacheGenerationClaimId,
       )
-
       const versionRows = await transactionDriver.query<{
         latest_row_version: number
         key_set_evidence_available: number
         schema_version: number
         already_applied: number
+        reset_epoch: number | null
       }>(
         `SELECT
            latest_row_version,
            key_set_evidence_available,
+           (SELECT reset_epoch FROM collection_reset_epoch
+            WHERE collection_id = ? LIMIT 1) AS reset_epoch,
            (
              SELECT schema_version
              FROM collection_registry
@@ -2437,7 +2475,14 @@ export class SQLiteCorePersistenceAdapter implements PersistenceAdapter {
          FROM collection_version
          WHERE collection_id = ?
          LIMIT 1`,
-        [collectionId, collectionId, tx.term, tx.seq, collectionId],
+        [
+          collectionId,
+          collectionId,
+          collectionId,
+          tx.term,
+          tx.seq,
+          collectionId,
+        ],
       )
       const version = versionRows[0]
 
@@ -2454,8 +2499,47 @@ export class SQLiteCorePersistenceAdapter implements PersistenceAdapter {
         )
       }
 
+      if (anchor) {
+        const sameResetEpoch = (version.reset_epoch ?? 0) === anchor.resetEpoch
+        const matching = await transactionDriver.query<{
+          term: number
+          seq: number
+          row_version: number
+        }>(
+          `SELECT term, seq, row_version FROM applied_tx
+           WHERE collection_id = ? AND tx_id = ? LIMIT 2`,
+          [collectionId, tx.txId],
+        )
+        if (matching.length > 1) return { kind: `unknown` }
+        if (matching[0]) {
+          if (
+            matching[0].row_version <= anchor.latestRowVersion ||
+            !sameResetEpoch
+          ) {
+            return { kind: `unknown` }
+          }
+          return {
+            kind: `already-applied`,
+            committed: {
+              term: matching[0].term,
+              seq: matching[0].seq,
+              rowVersion: matching[0].row_version,
+            },
+            latestRowVersion: version.latest_row_version,
+          }
+        }
+        // A different durable write may have superseded this source row or
+        // its opaque cursor. Absence alone cannot authorize late application.
+        if (
+          version.latest_row_version !== anchor.latestRowVersion ||
+          !sameResetEpoch
+        ) {
+          return { kind: `unknown` }
+        }
+      }
+
       if (version.already_applied === 1) {
-        return
+        return { kind: `unknown` }
       }
 
       const currentRowVersion = version.latest_row_version
@@ -2765,6 +2849,15 @@ export class SQLiteCorePersistenceAdapter implements PersistenceAdapter {
       )
 
       await this.pruneAppliedTxRows(collectionId, transactionDriver)
+      return {
+        kind: `applied-now`,
+        committed: {
+          term: tx.term,
+          seq: tx.seq,
+          rowVersion: nextRowVersion,
+        },
+        latestRowVersion: nextRowVersion,
+      }
     })
   }
 
@@ -3041,6 +3134,64 @@ export class SQLiteCorePersistenceAdapter implements PersistenceAdapter {
           `DROP INDEX IF EXISTS ${quoteIdentifier(indexName)}`,
         )
       }
+    })
+  }
+
+  reserveLeadershipTerm(
+    collectionId: string,
+    observedTerm: number,
+    ctx?: { cacheGenerationClaimId?: string },
+  ): Promise<{
+    latestTerm: number
+    latestSeq: number
+    latestRowVersion: number
+  }> {
+    // Election may run while hydration waits for its first writer route.
+    return this.reserveLeadershipTermUnscheduled(
+      collectionId,
+      observedTerm,
+      ctx,
+    )
+  }
+
+  private async reserveLeadershipTermUnscheduled(
+    collectionId: string,
+    observedTerm: number,
+    ctx?: { cacheGenerationClaimId?: string },
+  ): Promise<{
+    latestTerm: number
+    latestSeq: number
+    latestRowVersion: number
+  }> {
+    await this.assertCacheGenerationReadClaim(
+      this.driver,
+      collectionId,
+      ctx?.cacheGenerationClaimId,
+    )
+    await this.ensureCollectionReady(collectionId, ctx?.cacheGenerationClaimId)
+    return this.runInTransaction(async (transactionDriver) => {
+      await this.assertCacheGenerationReadClaim(
+        transactionDriver,
+        collectionId,
+        ctx?.cacheGenerationClaimId,
+      )
+      await this.assertCurrentSchemaVersion(
+        collectionId,
+        transactionDriver,
+        `reserve a leadership term`,
+      )
+      await transactionDriver.run(
+        `INSERT INTO leader_term (collection_id, latest_term)
+         VALUES (?, ? + 1)
+         ON CONFLICT(collection_id) DO UPDATE SET
+           latest_term = MAX(leader_term.latest_term, ?) + 1`,
+        [collectionId, observedTerm, observedTerm],
+      )
+      const [position, latestRowVersion] = await Promise.all([
+        this.readStreamPosition(collectionId, transactionDriver),
+        this.readLatestRowVersion(collectionId, transactionDriver),
+      ])
+      return { ...position, latestRowVersion }
     })
   }
 
@@ -3599,18 +3750,25 @@ export class SQLiteCorePersistenceAdapter implements PersistenceAdapter {
     if (!registration) {
       const tableName = createPersistedTableName(collectionId, `c`)
       const tombstoneTableName = createPersistedTableName(collectionId, `t`)
-      await this.driver.run(
-        `INSERT INTO collection_registry (
-           collection_id,
-           table_name,
-           tombstone_table_name,
-           schema_version,
-           updated_at
-         )
-         VALUES (?, ?, ?, ?, CAST(strftime('%s', 'now') AS INTEGER))
-         ON CONFLICT DO NOTHING`,
-        [collectionId, tableName, tombstoneTableName, this.schemaVersion],
-      )
+      await this.runInTransaction(async (transactionDriver) => {
+        await this.assertCacheGenerationReadClaim(
+          transactionDriver,
+          collectionId,
+          cacheGenerationClaimId,
+        )
+        await transactionDriver.run(
+          `INSERT INTO collection_registry (
+             collection_id,
+             table_name,
+             tombstone_table_name,
+             schema_version,
+             updated_at
+           )
+           VALUES (?, ?, ?, ?, CAST(strftime('%s', 'now') AS INTEGER))
+           ON CONFLICT DO NOTHING`,
+          [collectionId, tableName, tombstoneTableName, this.schemaVersion],
+        )
+      })
 
       registration = await this.loadCollectionRegistration(collectionId)
       if (!registration) {
@@ -3629,6 +3787,7 @@ export class SQLiteCorePersistenceAdapter implements PersistenceAdapter {
         this.schemaVersion,
         tableName,
         tombstoneTableName,
+        cacheGenerationClaimId,
       )
     }
 
@@ -3790,6 +3949,7 @@ export class SQLiteCorePersistenceAdapter implements PersistenceAdapter {
     nextSchemaVersion: number,
     tableName: string,
     tombstoneTableName: string,
+    cacheGenerationClaimId?: string,
   ): Promise<void> {
     if (this.schemaMismatchPolicy === `sync-absent-error`) {
       throw new InvalidPersistedCollectionConfigError(
@@ -3802,6 +3962,11 @@ export class SQLiteCorePersistenceAdapter implements PersistenceAdapter {
     const tombstoneTableSql = quoteIdentifier(tombstoneTableName)
 
     await this.runInTransaction(async (transactionDriver) => {
+      await this.assertCacheGenerationReadClaim(
+        transactionDriver,
+        collectionId,
+        cacheGenerationClaimId,
+      )
       const currentSchemaRows = await transactionDriver.query<{
         schema_version: number
       }>(
@@ -3974,6 +4139,10 @@ export class SQLiteCorePersistenceAdapter implements PersistenceAdapter {
          applied_at INTEGER NOT NULL,
          PRIMARY KEY (collection_id, term, seq)
        )`,
+    )
+    await this.driver.exec(
+      `CREATE INDEX IF NOT EXISTS idx_applied_tx_collection_tx_id
+       ON applied_tx (collection_id, tx_id)`,
     )
     try {
       await this.driver.exec(

@@ -1,5 +1,5 @@
 /**
- * # Does real-adapter restart preserve the sync-run start boundary?
+ * # Which lifecycle promises hold with the real SQLite adapter?
  *
  * A stale lifecycle may keep its already-admitted hydrate pending before its
  * SQLite row read, but it must not retain the wrapper mutex that gates startup
@@ -8,19 +8,29 @@
  * released. This file uses the real core adapter because recording adapters
  * do not expose its public hydration-scope method and therefore select a
  * different startup branch.
+ *
+ * A rejected local mutation also drops its optimistic row at settlement.
+ * The real adapter must not store that row; accepted source writes on its key
+ * must still reach the live Collection and survive a new Collection and adapter
+ * over the same SQLite file. This receiving witness checks the real SQLite
+ * boundary for the controlled persisted oracle. One history reopens after
+ * refusal, before any later source write. Another applies later same-key
+ * source writes before reopening. Neither history restarts an OS process.
  */
 import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { expect, it } from 'vitest'
+import { expect, it, vi } from 'vitest'
 import fc from 'fast-check'
-import { createCollection } from '@tanstack/db'
+import { createCollection, whenSyncAccepted } from '@tanstack/db'
 import {
   SQLITE_DRIVER_SHARED_LOGICAL_SCHEDULING_KEY,
   createSQLiteCorePersistenceAdapter,
   persistedCollectionOptions,
 } from '../src'
 import { SqliteCliDriver } from './sqlite-core-adapter-oracle.test'
+import { cleanupTestActions } from './test-cleanup'
+import type { SyncConfig } from '@tanstack/db'
 import type { PersistenceAdapter, SQLiteDriver } from '../src'
 
 type Deferred = {
@@ -290,3 +300,196 @@ it(`preserves generated restart order across real-adapter scheduler capabilities
     { seed: 1868, numRuns: 6, endOnFailure: true },
   )
 }, 15_000)
+
+// A source delete committed while the rejected insert persists may be durable
+// before it is visible. Settlement drops the optimistic row and publishes that
+// delete. Reopen before later source writes must omit the refused row. On the
+// second history, a later source insert, delete, reinsert, and update change
+// both live and durable rows.
+it.each([
+  `reopens before later source writes`,
+  `applies later same-key source writes`,
+] as const)(
+  `drops a refused insert and %s with real SQLite`,
+  async (history) => {
+    type Row = { id: string; title: string }
+    const directory = mkdtempSync(join(tmpdir(), `persisted-real-refusal-`))
+    const databasePath = join(directory, `state.sqlite`)
+    const id = `real-refused-insert`
+    const createAdapter = () =>
+      createSQLiteCorePersistenceAdapter({
+        driver: new SqliteCliDriver(databasePath),
+        schemaVersion: 1,
+      })
+    const adapter = createAdapter()
+    const applyCommittedTx = vi.spyOn(adapter, `applyCommittedTx`)
+    const adapterRowWrites = () =>
+      applyCommittedTx.mock.calls.flatMap(
+        ([, transaction]) => transaction.mutations,
+      )
+    const refused = new Error(`outbound save refused`)
+    const handlerEntered = createDeferred()
+    let rejectOutbound!: (error: Error) => void
+    const outbound = new Promise<void>((_resolve, reject) => {
+      rejectOutbound = reject
+    })
+    let source!: Parameters<SyncConfig<Row, string>[`sync`]>[0]
+    const collection = createCollection(
+      persistedCollectionOptions<Row, string>({
+        id,
+        getKey: (row) => row.id,
+        persistence: { adapter },
+        sync: {
+          sync: (params) => {
+            source = params
+            params.markReady()
+          },
+        },
+        onInsert: async () => {
+          handlerEntered.resolve()
+          await outbound
+        },
+      }),
+    )
+    let transaction: ReturnType<typeof collection.insert> | undefined
+    let heldDelete: true | Promise<void> | undefined
+    let reopened: typeof collection | undefined
+    let collectionCleanedUp = false
+    let reopenedCleanedUp = false
+    let hasPrimaryFailure = false
+
+    try {
+      await collection.stateWhenReady()
+      transaction = collection.insert({ id: `local`, title: `optimistic` })
+      await reachCheckpoint(handlerEntered.promise, `refused handler entered`)
+      expect(await adapter.loadSubset(id, {})).toEqual([])
+      expect(adapterRowWrites()).toEqual([])
+      source.begin()
+      source.write({ type: `delete`, key: `local` })
+      heldDelete = source.commit()
+      await reachCheckpoint(
+        Promise.resolve(whenSyncAccepted(heldDelete)).then(() => undefined),
+        `same-key delete durable before local failure`,
+      )
+      // The source delete is the only adapter row write through refusal.
+      expect(adapterRowWrites()).toEqual([
+        expect.objectContaining({ type: `delete`, key: `local` }),
+      ])
+      expect(collection.get(`local`)?.title).toBe(`optimistic`)
+      expect(await adapter.loadSubset(id, {})).toEqual([])
+
+      rejectOutbound(refused)
+      await expect(transaction.isPersisted.promise).rejects.toBe(refused)
+      await Promise.resolve(heldDelete)
+      expect(transaction.state).toBe(`failed`)
+      expect(collection.has(`local`)).toBe(false)
+      expect(collection.base.has(`local`)).toBe(false)
+      expect(await adapter.loadSubset(id, {})).toEqual([])
+      expect(adapterRowWrites()).toEqual([
+        expect.objectContaining({ type: `delete`, key: `local` }),
+      ])
+
+      if (history === `applies later same-key source writes`) {
+        source.begin()
+        source.write({
+          type: `insert`,
+          value: { id: `local`, title: `first source row` },
+        })
+        await Promise.resolve(source.commit())
+        expect(collection.get(`local`)?.title).toBe(`first source row`)
+        expect(
+          (await adapter.loadSubset(id, {})).map(({ value }) => value),
+        ).toEqual([{ id: `local`, title: `first source row` }])
+
+        source.begin()
+        source.write({ type: `delete`, key: `local` })
+        await Promise.resolve(source.commit())
+        expect(collection.has(`local`)).toBe(false)
+        expect(await adapter.loadSubset(id, {})).toEqual([])
+
+        source.begin()
+        source.write({
+          type: `insert`,
+          value: { id: `local`, title: `later source row` },
+        })
+        await Promise.resolve(source.commit())
+        expect(collection.get(`local`)?.title).toBe(`later source row`)
+        expect(collection.get(`local`)?.$origin).toBe(`remote`)
+        expect(collection.base.get(`local`)?.title).toBe(`later source row`)
+        expect(
+          (await adapter.loadSubset(id, {})).map(({ value }) => value),
+        ).toEqual([{ id: `local`, title: `later source row` }])
+
+        source.begin()
+        source.write({
+          type: `update`,
+          value: { id: `local`, title: `updated source row` },
+        })
+        await Promise.resolve(source.commit())
+        expect(adapterRowWrites()).toContainEqual(
+          expect.objectContaining({ type: `update`, key: `local` }),
+        )
+        expect(collection.get(`local`)?.title).toBe(`updated source row`)
+        expect(collection.base.get(`local`)?.title).toBe(`updated source row`)
+        expect(
+          (await adapter.loadSubset(id, {})).map(({ value }) => value),
+        ).toEqual([{ id: `local`, title: `updated source row` }])
+      }
+
+      await collection.cleanup()
+      collectionCleanedUp = true
+      const reopenedAdapter = createAdapter()
+      reopened = createCollection(
+        persistedCollectionOptions<Row, string>({
+          id,
+          getKey: (row) => row.id,
+          persistence: { adapter: reopenedAdapter },
+          sync: { sync: ({ markReady }) => markReady() },
+        }),
+      )
+      await reopened.stateWhenReady()
+      if (history === `reopens before later source writes`) {
+        expect(reopened.has(`local`)).toBe(false)
+        expect(await reopenedAdapter.loadSubset(id, {})).toEqual([])
+      } else {
+        expect(reopened.get(`local`)?.title).toBe(`updated source row`)
+        expect(
+          (await reopenedAdapter.loadSubset(id, {})).map(({ value }) => value),
+        ).toEqual([{ id: `local`, title: `updated source row` }])
+      }
+    } catch (error) {
+      hasPrimaryFailure = true
+      throw error
+    } finally {
+      if (transaction) rejectOutbound(refused)
+      await cleanupTestActions(
+        [
+          () => transaction?.isPersisted.promise.catch(() => undefined),
+          () =>
+            heldDelete === undefined
+              ? undefined
+              : Promise.resolve(heldDelete).catch(() => undefined),
+          async () => {
+            if (reopened) {
+              await reopened.cleanup()
+              reopenedCleanedUp = true
+            }
+          },
+          async () => {
+            if (!collectionCleanedUp) {
+              await collection.cleanup()
+              collectionCleanedUp = true
+            }
+          },
+          () => applyCommittedTx.mockRestore(),
+          () => {
+            if (collectionCleanedUp && (!reopened || reopenedCleanedUp))
+              rmSync(directory, { recursive: true, force: true })
+          },
+        ],
+        hasPrimaryFailure,
+        `Real SQLite witness`,
+      )
+    }
+  },
+)

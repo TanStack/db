@@ -10,6 +10,7 @@ import {
   getStableValueHash,
 } from './query/ir-stable-identity.js'
 import { getStringCollationIdentity } from './query/runtime-reference-identity.js'
+import { codedMessage, devBuild } from './error-message.js'
 import type { Collection, CollectionImpl } from './collection/index.js'
 import type { CollectionOptionsIdentity } from './collection-options.js'
 import type { CollectionOptions, DbClient } from './client.js'
@@ -178,7 +179,11 @@ function poolConfig(
 
 export function resolveLiveQueryValue(
   value: unknown,
-  { gcTime, pool = true }: { gcTime?: number; pool?: boolean } = {},
+  {
+    gcTime,
+    pool = true,
+    startSync = true,
+  }: { gcTime?: number; pool?: boolean; startSync?: boolean } = {},
 ): Collection<any, any, any> | null {
   if (value === undefined || value === null) return null
   if (isCollection(value)) {
@@ -188,17 +193,19 @@ export function resolveLiveQueryValue(
   if (value instanceof BaseQueryBuilder) {
     return (
       (pool ? createPooledLiveQuery(value, { gcTime }) : undefined) ??
-      createLiveQueryCollection({ query: value, startSync: true, gcTime })
+      createLiveQueryCollection({ query: value, startSync, gcTime })
     )
   }
   if (typeof value === `object`) {
     const config = value as LiveQueryCollectionConfig<any>
     return (
       (pool ? poolConfig(config, gcTime) : undefined) ??
-      createLiveQueryCollection({ startSync: true, gcTime, ...config })
+      createLiveQueryCollection({ startSync, gcTime, ...config })
     )
   }
   throw new Error(
-    `A live query must be a QueryBuilder, LiveQueryCollectionConfig, Collection, undefined, or null. Got: ${typeof value}`,
+    devBuild() && process.env.NODE_ENV !== `production`
+      ? `A live query must be a QueryBuilder, LiveQueryCollectionConfig, Collection, undefined, or null. Got: ${typeof value}`
+      : codedMessage(102, { type: typeof value }),
   )
 }

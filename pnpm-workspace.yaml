@@ -1,13 +1,21 @@
 cleanupUnusedCatalogs: true
 linkWorkspacePackages: true
 preferWorkspacePackages: true
-blockExoticSubdeps: false
+blockExoticSubdeps: true
+trustPolicy: 'no-downgrade'
+trustPolicyExclude:
+  # Babel, ESLint React, and Istanbul still require semver 6, whose last release lacks provenance.
+  - 'semver@6.3.1'
 
 packages:
   - packages/**
   - examples/**/*
 
 overrides:
+  # Chokidar 4.0.2 and 4.0.3 fail the trust policy; 4.0.1 satisfies v4 consumers.
+  'chokidar@^4.0.0': '4.0.1'
+  # TrailBase accepts 13.0.0, which retains trusted publishing evidence.
+  'trailbase>uuid': '13.0.0'
   metro: '0.82.5'
   metro-babel-transformer: '0.82.5'
   metro-cache: '0.82.5'

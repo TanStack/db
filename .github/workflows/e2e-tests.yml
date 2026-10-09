@@ -21,13 +21,6 @@ jobs:
         group: [browser, desktop, cloud-mobile]
     runs-on: ubuntu-latest
     timeout-minutes: 35
-    env:
-      # Since 2026-10-01 Docker Hub rejects anonymous pulls of
-      # electricsql/electric (401 "authentication required"). The Docker
-      # services and the suites that need Electric are skipped until the
-      # image can be pulled again. Set this back to 'true' then.
-      ELECTRIC_E2E: 'false'
-
     steps:
       - name: Checkout code
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
@@ -49,7 +42,7 @@ jobs:
         run: pnpm install --frozen-lockfile
 
       - name: Start Docker services
-        if: matrix.group == 'browser' && env.ELECTRIC_E2E == 'true'
+        if: matrix.group == 'browser'
         run: |
           cd packages/db-collection-e2e/docker
           docker compose up -d
@@ -63,7 +56,7 @@ jobs:
           --filter '@tanstack/react-router-with-db...'
           --filter '@tanstack/electric-db-collection...'
           --filter '@tanstack/query-db-collection...'
-          --filter '@tanstack/indexeddb-db-collection...'
+          --filter '@tanstack/db...'
           build
 
       - name: Build desktop dependencies
@@ -83,7 +76,7 @@ jobs:
           build
 
       - name: Run Electric E2E tests
-        if: matrix.group == 'browser' && env.ELECTRIC_E2E == 'true'
+        if: matrix.group == 'browser'
         run: |
           cd packages/electric-db-collection
           pnpm test:e2e
@@ -111,22 +104,24 @@ jobs:
 
       - name: Install IndexedDB oracle browsers
         if: matrix.group == 'browser'
-        working-directory: packages/indexeddb-db-collection
+        working-directory: packages/db
         run: pnpm exec playwright install --with-deps chromium firefox webkit
         env:
           PLAYWRIGHT_SKIP_BROWSER_GC: '1'
 
       - name: Run IndexedDB native cross-tab oracles
         if: matrix.group == 'browser'
-        working-directory: packages/indexeddb-db-collection
-        run: pnpm test:browser
+        working-directory: packages/db
+        run: pnpm test:indexed-db:browser
 
       - name: Upload IndexedDB oracle evidence
         if: always() && matrix.group == 'browser'
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: indexeddb-oracle-evidence
-          path: packages/indexeddb-db-collection/test-results/
+          path: |
+            packages/db/test-results/indexed-db/
+            packages/db/test-results/oracles/
           retention-days: 7
 
       - name: Run Browser SQLite OPFS fairness E2E tests
@@ -136,7 +131,7 @@ jobs:
           pnpm test:opfs-fairness
 
       - name: Run Browser SQLite OPFS with live Electric E2E tests
-        if: matrix.group == 'browser' && env.ELECTRIC_E2E == 'true'
+        if: matrix.group == 'browser'
         run: |
           cd packages/browser-db-sqlite-persistence
           pnpm test:opfs-electric
@@ -213,7 +208,7 @@ jobs:
           TANSTACK_DB_REQUIRE_MOBILE_RUNTIME_LANE: ${{ vars.TANSTACK_DB_REQUIRE_MOBILE_RUNTIME_LANE }}
 
       - name: Stop Docker services
-        if: always() && matrix.group == 'browser' && env.ELECTRIC_E2E == 'true'
+        if: always() && matrix.group == 'browser'
         run: |
           cd packages/db-collection-e2e/docker
           docker compose down -v

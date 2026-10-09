@@ -29,6 +29,13 @@ import {
 
 type Todo = { id: string; title: string; completed: boolean }
 
+class HttpError extends Error {
+  constructor(readonly status: number) {
+    super(`HTTP ${status}`)
+    this.name = 'HttpError'
+  }
+}
+
 const executor = startOfflineExecutor({
   collections: { todos },
   mutationFns: {
@@ -48,7 +55,11 @@ const executor = startOfflineExecutor({
       if (response.status === 422) {
         throw new NonRetriableError('The server rejected this todo')
       }
-      if (!response.ok) throw new Error('Could not save the todo')
+      // This todo API treats these responses as permanent.
+      if ([404, 405, 409, 410].includes(response.status)) {
+        throw new NonRetriableError(`Todo request rejected: ${response.status}`)
+      }
+      if (!response.ok) throw new HttpError(response.status)
 
       // Wait for a server read or sync observation here if your app needs it.
     },
@@ -77,14 +88,54 @@ void transaction.when('settled').catch((error) => console.error(error))
 `onMutate` must be synchronous. It applies the optimistic change before the executor writes the outbox entry. If that write fails, the transaction fails. A visible optimistic change alone does not prove durable storage.
 
 When `isOfflineEnabled` is true, the executor calls the named `mutationFn` after it records the transaction. A temporary error leaves the entry available for retry. `NonRetriableError` marks a permanent failure and rolls back optimistic state.
+The todo examples assume 404, 405, 409, 410, and 422 are permanent for their
+server. Change that classification to match your server contract. Responses
+such as 408 and 429 can be recoverable.
 
-If an outbox phase write or deletion fails after `mutationFn` returns, the
-affected transaction rejects with the storage error and the executor stops
-processing queued work. If `mutationFn` failed permanently, its caller keeps
-that provider error while the executor batch reports the storage error. Restart
-with a fresh executor after storage recovers. A durable phase marker prevents
-another provider call; if the marker write failed, the provider may be called
-again.
+Set `shouldRetry(error, retryCount)` on the executor config to change the
+retry decision after a named mutation function rejects. Return `true` to retry,
+`false` to stop, or `undefined` to keep the default decision. For example, the
+hook can return `true` for a recoverable 401 and `undefined` for other errors:
+
+```ts
+shouldRetry: (error) =>
+  error instanceof HttpError && error.status === 401 ? true : undefined,
+```
+
+`fetch` does not reject on an HTTP error response. The named mutation function
+above throws an `HttpError` that carries the numeric status. Retry a 401 only
+when the app can refresh its credentials between attempts.
+The hook receives the named mutation function's `Error` and a retry count of
+`0` on the first failure. The same `Error` instance is passed through; a
+rejection with a non-`Error` value is converted to an `Error` and may lose
+custom fields.
+The hook is synchronous and shared by all named mutation functions. An async
+hook returns a Promise, which fails its outbox row. Put function-specific
+context on the thrown error when retry rules differ between functions.
+`NonRetriableError` always stops without calling the hook. Retry delays and
+configured jitter remain unchanged. A retried offline transaction keeps its
+FIFO position. If the hook throws or returns another value, the executor
+records a terminal rejection, removes only that outbox row, and rejects its
+`when('settled')` promise with the hook failure. Once deletion is acknowledged,
+queued transactions continue in creation order. New commits may join the queue
+during cleanup, but cannot run ahead of the failed row's deletion. A fresh
+executor does not replay the failed row. The named mutation function error is
+logged; the hook failure is the caller-facing and stored error. Stored errors
+retain `name`, `message`, and `stack`, but a restart does not restore an
+arbitrary error subclass or its custom fields. If writing the terminal marker or
+deleting the row fails, the caller still rejects with the hook failure while
+the executor stops with the storage error and retains queued work. A saved
+marker prevents a provider call on restart; an unmarked row can replay.
+
+If an outbox phase write or deletion fails after `mutationFn` settles, the
+executor stops processing queued work, and its batch promise rejects with the
+storage error. The affected transaction's `when('settled')` promise also rejects
+with the storage error after a successful mutation function, with the named
+mutation function error after a terminal provider failure, or with the hook
+error after a retry decision failure. After storage recovers,
+restart the offline executor over the retained outbox. A durable phase marker
+prevents another named mutation function call. If the marker write failed,
+that function may be called again.
 
 The executor sends a stable `idempotencyKey` with each attempt. A server can receive an attempt more than once, especially after a restart or leadership change. Make the server treat repeated keys as one logical mutation.
 
@@ -179,7 +230,11 @@ The counts describe local work. An outbox entry can include a retry count, next 
 
 `beforeRetry` can remove entries during replay. `onUnknownMutationFn` reports an entry whose registered function is missing. Keep mutation function names stable across releases, or define a migration for stored entries.
 
-The executor also exposes `removeFromOutbox(id)` and `clearOutbox()`. Use these only when the application decides to discard pending writes. Call `dispose()` when the executor's owner ends.
+The executor also exposes `removeFromOutbox(id)` and `clearOutbox()`. Use these
+only when the application decides to discard pending writes. An acknowledged
+removal does not cancel a running named mutation function. If that call later
+fails, its waiting promises reject with the named mutation function error and
+the removed row is not retried. Call `dispose()` when the executor's owner ends.
 
 ## Use SQLite persistence with the outbox
 
@@ -213,6 +268,13 @@ import { AsyncStorageAdapter } from './AsyncStorageAdapter'
 
 type Todo = { id: string; title: string; completed: boolean }
 const apiUrl = 'https://api.example.com/todos' // Replace with your server URL.
+
+class HttpError extends Error {
+  constructor(readonly status: number) {
+    super(`HTTP ${status}`)
+    this.name = 'HttpError'
+  }
+}
 
 const database = open({ name: 'todos.sqlite', location: 'default' })
 const persistence = createReactNativeSQLitePersistence({ database })
@@ -256,7 +318,11 @@ const executor = startOfflineExecutor({
       if (response.status === 422) {
         throw new NonRetriableError('The server rejected this todo')
       }
-      if (!response.ok) throw new Error('Could not save the todo')
+      // This todo API treats these responses as permanent.
+      if ([404, 405, 409, 410].includes(response.status)) {
+        throw new NonRetriableError(`Todo request rejected: ${response.status}`)
+      }
+      if (!response.ok) throw new HttpError(response.status)
       await todos.utils.refetch()
     },
   },

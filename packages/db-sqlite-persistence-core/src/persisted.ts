@@ -6,6 +6,7 @@ import {
   SYNC_PERSISTENCE_VERSION,
   SyncTransactionAbortedError,
   compileSingleRowExpression,
+  equalPersistedSnapshotValues,
   getLoadSubsetDemandKey,
   safeRandomUUID,
   toBooleanPredicate,
@@ -15,6 +16,7 @@ import {
 } from '@tanstack/db'
 import {
   DuplicateRemoteSubsetOwnerError,
+  IndeterminateCommitError,
   InvalidPersistedCollectionConfigError,
   InvalidPersistedCollectionCoordinatorError,
   InvalidPersistedStorageKeyEncodingError,
@@ -115,6 +117,7 @@ export type TxCommitted = {
 } & (
   | {
       requiresFullReload: true
+      reconciliationReload?: true
     }
   | {
       requiresFullReload: false
@@ -237,6 +240,38 @@ export type ApplyCommittedTxResponse =
       sourceCode?: string | number
       path?: string | ReadonlyArray<string | number>
     }
+
+/** The durable version read before a source transaction enters coordination. */
+export type CommittedTxAnchor = {
+  latestRowVersion: number
+  resetEpoch: number
+}
+
+export type ReconcileCommittedTxResponse =
+  | {
+      type: `rpc:reconcileCommittedTx:res`
+      rpcId: string
+      ok: true
+      alreadyApplied: boolean
+      committed: { term: number; seq: number; rowVersion: number }
+    }
+  | {
+      type: `rpc:reconcileCommittedTx:res`
+      rpcId: string
+      ok: false
+      code: `NOT_LEADER` | `UNDETERMINED` | `PERSISTENCE_ERROR`
+      error: string
+      sourceCode?: string | number
+      path?: string | ReadonlyArray<string | number>
+    }
+
+export type ReconciledCommittedTx =
+  | {
+      kind: `already-applied` | `applied-now`
+      committed: { term: number; seq: number; rowVersion: number }
+      latestRowVersion: number
+    }
+  | { kind: `unknown` }
 
 export type PullSinceRequest = {
   type: `rpc:pullSince:req`
@@ -446,6 +481,12 @@ export interface PersistenceAdapter {
     claimId: string,
   ) => Promise<number | undefined>
   getCacheGenerationNow?: () => number
+  /** Atomically certify or apply one source transaction after a lost response. */
+  reconcileCommittedTx?: (
+    collectionId: string,
+    tx: PersistedTx,
+    anchor: CommittedTxAnchor,
+  ) => Promise<ReconciledCommittedTx>
   loadCollectionMetadata?: (
     collectionId: string,
     ctx?: { cacheGenerationClaimId?: string },
@@ -468,6 +509,16 @@ export interface PersistenceAdapter {
   ) => Promise<void>
   getStreamPosition?: (
     collectionId: string,
+    ctx?: { cacheGenerationClaimId?: string },
+  ) => Promise<{
+    latestTerm: number
+    latestSeq: number
+    latestRowVersion: number
+  }>
+  /** Reserve a new durable election term before announcing Browser leadership. */
+  reserveLeadershipTerm?: (
+    collectionId: string,
+    observedTerm: number,
     ctx?: { cacheGenerationClaimId?: string },
   ) => Promise<{
     latestTerm: number
@@ -596,6 +647,13 @@ export interface PersistedCollectionCoordinator {
     tx: PersistedTx,
     scopedAdapter?: HydrationPersistenceAdapter,
   ) => Promise<ApplyCommittedTxResponse>
+  /** Available only when the elected adapter can certify the durable outcome. */
+  reconcileCommittedTx?: (
+    collectionId: string,
+    tx: PersistedTx,
+    anchor: CommittedTxAnchor,
+    scopedAdapter?: HydrationPersistenceAdapter,
+  ) => Promise<ReconcileCommittedTxResponse>
   /** The scoped adapter is leader-local and is never serialized to a follower. */
   pullSince?: (
     collectionId: string,
@@ -1288,7 +1346,10 @@ function isTxCommittedPayload(payload: unknown): payload is TxCommitted {
   }
 
   if (payload.requiresFullReload) {
-    return true
+    return (
+      payload.reconciliationReload === undefined ||
+      payload.reconciliationReload === true
+    )
   }
 
   return (
@@ -1357,6 +1418,7 @@ class PersistedCollectionRuntime<
   private readonly queuedTxCommitted: Array<{
     txCommitted: TxCommitted
     lifecycleGeneration: number
+    storageCollectionId: string
   }> = []
   private readonly requestIds = new WeakMap<LoadSubsetOptions, string>()
   private readonly hydratedDemands = new Set<string | undefined>()
@@ -1413,6 +1475,12 @@ class PersistedCollectionRuntime<
   private latestTerm = 0
   private latestSeq = 0
   private latestRowVersion = 0
+  // A metadata-only resume snapshot can advance latestRowVersion without
+  // publishing rows. Gap checks must use the last publicly applied version.
+  private publicRowVersion = 0
+  // A reset does not label later tx notifications with their reset epoch.
+  // Old-term payloads must be checked against durable rows even after a new term.
+  private resetTermFence: number | undefined
   private localTerm = 1
   private localSeq = 0
   private localRowVersion = 0
@@ -2175,6 +2243,8 @@ class PersistedCollectionRuntime<
           this.latestTerm = 0
           this.latestSeq = 0
           this.latestRowVersion = 0
+          this.publicRowVersion = 0
+          this.resetTermFence = undefined
           this.localTerm = 1
           this.localSeq = 0
           this.localRowVersion = 0
@@ -2924,6 +2994,8 @@ class PersistedCollectionRuntime<
     this.recoverQueuedAfterLocalLoadFailure = false
     this.persistedReadiness?.set({ status: `loading` })
     this.startupSettled = false
+    this.publicRowVersion = 0
+    this.resetTermFence = undefined
     this.hydratedDemands.clear()
     this.startupMetadataPromise = null
     this.startPromise = null
@@ -3017,6 +3089,7 @@ class PersistedCollectionRuntime<
     adapter: HydrationPersistenceAdapter,
   ): Promise<boolean> {
     let rowsLoaded = false
+    let boundRowVersion: number | undefined
     let replayFailure: { reason: unknown } | undefined
     const resetSequence = this.resetSequence
     this.hydrationSequence++
@@ -3046,6 +3119,7 @@ class PersistedCollectionRuntime<
             return true
           if (resetSequence !== this.resetSequence) return true
           bindResumeSnapshot = () => this.bindResumeSnapshotEvidence(snapshot)
+          boundRowVersion = snapshot.latestRowVersion
         } else {
           rows = await this.loadSubsetRowsUnsafe(options, adapter)
         }
@@ -3075,6 +3149,12 @@ class PersistedCollectionRuntime<
           }
           const applied = this.applyRowsToCollection(rows)
           await whenSyncAccepted(applied)
+          if (boundRowVersion !== undefined) {
+            this.publicRowVersion = Math.max(
+              this.publicRowVersion,
+              boundRowVersion,
+            )
+          }
         }
       } finally {
         if (
@@ -3324,10 +3404,14 @@ class PersistedCollectionRuntime<
     const expected = this.persistedResumeGeneration
     return (
       expected !== undefined &&
-      expected.latestTerm === generation.latestTerm &&
-      expected.latestSeq === generation.latestSeq &&
       expected.latestRowVersion === generation.latestRowVersion &&
-      expected.resetEpoch === generation.resetEpoch
+      expected.resetEpoch === generation.resetEpoch &&
+      ((expected.latestTerm === generation.latestTerm &&
+        expected.latestSeq === generation.latestSeq) ||
+        // A no-write election reserves a new term at sequence zero. It does
+        // not change the persisted rows or the source resume cursor.
+        (generation.latestTerm > expected.latestTerm &&
+          generation.latestSeq === 0))
     )
   }
 
@@ -3408,6 +3492,37 @@ class PersistedCollectionRuntime<
 
       return this.syncControls.commit?.() ?? true
     })
+  }
+
+  private matchesCollectionSnapshot(
+    rows: Map<TKey, { value: T; metadata?: unknown }>,
+    collectionMetadata: Array<{ key: string; value: unknown }>,
+  ): boolean {
+    if (!this.collection || !this.syncControls.metadata) return false
+    const base = this.collection.base
+    if (base.size !== rows.size) return false
+    for (const [key, row] of rows) {
+      if (
+        !base.has(key) ||
+        !equalPersistedSnapshotValues(base.get(key), row.value) ||
+        !equalPersistedSnapshotValues(
+          this.syncControls.metadata.row.get(key),
+          row.metadata,
+        )
+      ) {
+        return false
+      }
+    }
+    const currentMetadata = this.syncControls.metadata.collection.list()
+    if (currentMetadata.length !== collectionMetadata.length) return false
+    const expectedMetadata = new Map(
+      collectionMetadata.map(({ key, value }) => [key, value]),
+    )
+    return currentMetadata.every(
+      ({ key, value }) =>
+        expectedMetadata.has(key) &&
+        equalPersistedSnapshotValues(expectedMetadata.get(key), value),
+    )
   }
 
   private async flushQueuedHydrationTransactionsUnsafe(
@@ -3574,16 +3689,60 @@ class PersistedCollectionRuntime<
       return
     }
 
+    const anchor = this.persistedResumeGeneration && {
+      latestRowVersion: this.latestRowVersion,
+      resetEpoch: this.persistedResumeGeneration.resetEpoch,
+    }
     const streamPosition = this.nextLocalStreamPosition()
     const tx = this.createPersistedTxFromOperations(transaction, streamPosition)
-    const response = await this.persistence.coordinator.requestApplyCommittedTx(
-      this.storageCollectionId,
-      tx,
-      // A hydration-scoped adapter is already inside the shared scheduler.
-      // Ordinary source commits pass no scoped adapter so the coordinator
-      // enters that scheduler before taking the database-wide writer lock.
-      scopedAdapter,
-    )
+    const storageCollectionId = this.storageCollectionId
+    let response: ApplyCommittedTxResponse
+    try {
+      response = await this.persistence.coordinator.requestApplyCommittedTx(
+        storageCollectionId,
+        tx,
+        // A hydration-scoped adapter is already inside the shared scheduler.
+        // Ordinary source commits enter it before taking the writer lock.
+        scopedAdapter,
+      )
+    } catch (error) {
+      if (
+        !(error instanceof IndeterminateCommitError) ||
+        !anchor ||
+        !this.persistence.coordinator.reconcileCommittedTx
+      ) {
+        throw error
+      }
+      let reconciled: ReconcileCommittedTxResponse
+      try {
+        reconciled = await this.persistence.coordinator.reconcileCommittedTx(
+          storageCollectionId,
+          tx,
+          anchor,
+          scopedAdapter,
+        )
+      } catch (reconcileError) {
+        if (reconcileError instanceof PersistedCollectionDurabilityError) {
+          throw reconcileError
+        }
+        throw error
+      }
+      if (!reconciled.ok) {
+        if (reconciled.code === `PERSISTENCE_ERROR`) {
+          throw new PersistedCollectionDurabilityError(
+            `Failed to reconcile collection "${this.collectionId}": ${reconciled.error}`,
+            {
+              cause: reconciled,
+              code: reconciled.sourceCode ?? reconciled.code,
+              path: reconciled.path,
+            },
+          )
+        }
+        throw error
+      }
+      this.recordDurableSourceCommit(transaction, reconciled.committed)
+      return
+    }
     if (!response.ok) {
       if (response.code === `PERSISTENCE_ERROR`) {
         const error = new PersistedCollectionDurabilityError(
@@ -3600,12 +3759,22 @@ class PersistedCollectionRuntime<
         `failed to apply external sync transaction through coordinator: ${response.error}`,
       )
     }
+    this.recordDurableSourceCommit(transaction, {
+      term: response.term,
+      seq: response.seq,
+      rowVersion: response.latestRowVersion,
+    })
+  }
+
+  private recordDurableSourceCommit(
+    transaction: BufferedSyncTransaction<T, TKey>,
+    position: { term: number; seq: number; rowVersion: number },
+  ): void {
     if (transaction.lifecycleGeneration !== this.lifecycleGeneration) return
-    this.observeStreamPosition(
-      response.term,
-      response.seq,
-      response.latestRowVersion,
-    )
+    this.observeStreamPosition(position.term, position.seq, position.rowVersion)
+    if (position.rowVersion === this.publicRowVersion + 1) {
+      this.publicRowVersion = position.rowVersion
+    }
     if (
       transaction.expectedResumeGenerationOwner ===
         this.resumeGenerationOwner &&
@@ -3613,9 +3782,9 @@ class PersistedCollectionRuntime<
     ) {
       this.persistedResumeGeneration = {
         ...this.persistedResumeGeneration,
-        latestTerm: response.term,
-        latestSeq: response.seq,
-        latestRowVersion: response.latestRowVersion,
+        latestTerm: position.term,
+        latestSeq: position.seq,
+        latestRowVersion: position.rowVersion,
       }
     }
   }
@@ -4134,12 +4303,16 @@ class PersistedCollectionRuntime<
         this.queuedTxCommitted.push({
           txCommitted: payload,
           lifecycleGeneration,
+          storageCollectionId: message.collectionId,
         })
         return
       }
 
       void this.applyMutex
-        .run(() => this.processCommittedTxUnsafe(payload, lifecycleGeneration))
+        .run(() => {
+          if (message.collectionId !== this.storageCollectionId) return
+          return this.processCommittedTxUnsafe(payload, lifecycleGeneration)
+        })
         .catch((error) => {
           this.markTerminalFailure(error, lifecycleGeneration)
         })
@@ -4154,9 +4327,20 @@ class PersistedCollectionRuntime<
     if (isCollectionResetPayload(payload)) {
       void this.applyMutex
         .run(async () => {
-          await this.runInHydrationScope((adapter) =>
-            this.truncateAndReloadUnsafe(adapter, lifecycleGeneration),
-          )
+          if (message.collectionId !== this.storageCollectionId) return
+          await this.runInHydrationScope(async (adapter) => {
+            await this.truncateAndReloadUnsafe(adapter, lifecycleGeneration)
+            await this.rebaseDurableStreamFromSnapshotUnsafe(
+              adapter,
+              lifecycleGeneration,
+            )
+            if (lifecycleGeneration === this.lifecycleGeneration) {
+              // Reloaded rows and the later position-only read are separate
+              // cuts. Zero is the conservative public version in the new epoch.
+              this.publicRowVersion = 0
+              this.resetTermFence = this.latestTerm
+            }
+          })
           if (lifecycleGeneration === this.lifecycleGeneration) {
             await this.flushQueuedTxCommittedUnsafe()
           }
@@ -4173,6 +4357,7 @@ class PersistedCollectionRuntime<
       if (!queued) {
         continue
       }
+      if (queued.storageCollectionId !== this.storageCollectionId) continue
       await this.processCommittedTxUnsafe(
         queued.txCommitted,
         queued.lifecycleGeneration,
@@ -4189,34 +4374,58 @@ class PersistedCollectionRuntime<
       this.scheduleCacheClaimRecovery(lifecycleGeneration)
       return
     }
-    if (txCommitted.term < this.latestTerm) {
+    if (this.resetTermFence !== undefined) {
+      if (txCommitted.term <= this.resetTermFence) {
+        // This payload could have been committed before the schema reset.
+        // The current durable snapshot is the only safe row authority.
+        await this.runInHydrationScope((adapter) =>
+          this.reloadActiveSubsetsUnsafe(adapter),
+        )
+        return
+      }
+    }
+    // An exact-ID reconciliation can discover a commit whose original
+    // notification was lost. A peer may already be at this stream position
+    // without having loaded that commit's rows.
+    if (txCommitted.requiresFullReload && txCommitted.reconciliationReload) {
+      await this.invalidateFromCommittedTxUnsafe(
+        txCommitted,
+        this.persistence.adapter,
+      )
+      if (lifecycleGeneration === this.lifecycleGeneration) {
+        this.observeStreamPosition(
+          txCommitted.term,
+          txCommitted.seq,
+          txCommitted.latestRowVersion,
+        )
+        this.publicRowVersion = Math.max(
+          this.publicRowVersion,
+          txCommitted.latestRowVersion,
+        )
+        await this.flushQueuedTxCommittedUnsafe()
+      }
       return
     }
-
-    if (
-      txCommitted.term === this.latestTerm &&
-      txCommitted.seq <= this.latestSeq
-    ) {
-      return
-    }
-
+    if (txCommitted.latestRowVersion <= this.publicRowVersion) return
+    const observedButUnpublished =
+      txCommitted.term < this.latestTerm ||
+      (txCommitted.term === this.latestTerm &&
+        txCommitted.seq <= this.latestSeq)
     const hasGapInCurrentTerm =
       txCommitted.term === this.latestTerm &&
       txCommitted.seq > this.latestSeq + 1
     const hasGapAcrossTerms =
       txCommitted.term > this.latestTerm && txCommitted.seq > 1
-    const hasGap = hasGapInCurrentTerm || hasGapAcrossTerms
+    const hasGap =
+      observedButUnpublished ||
+      txCommitted.latestRowVersion > this.publicRowVersion + 1 ||
+      hasGapInCurrentTerm ||
+      hasGapAcrossTerms
 
     if (hasGap) {
       if (!(await this.recoverFromSeqGapUnsafe(lifecycleGeneration))) return
       if (lifecycleGeneration !== this.lifecycleGeneration) return
-      if (
-        txCommitted.term < this.latestTerm ||
-        (txCommitted.term === this.latestTerm &&
-          txCommitted.seq <= this.latestSeq)
-      ) {
-        return
-      }
+      if (txCommitted.latestRowVersion <= this.publicRowVersion) return
     }
 
     this.observeStreamPosition(
@@ -4230,8 +4439,32 @@ class PersistedCollectionRuntime<
       this.persistence.adapter,
     )
     if (lifecycleGeneration === this.lifecycleGeneration) {
+      this.publicRowVersion = Math.max(
+        this.publicRowVersion,
+        txCommitted.latestRowVersion,
+      )
       await this.flushQueuedTxCommittedUnsafe()
     }
+  }
+
+  private async rebaseDurableStreamFromSnapshotUnsafe(
+    adapter: HydrationPersistenceAdapter,
+    lifecycleGeneration: number,
+  ): Promise<void> {
+    if (lifecycleGeneration !== this.lifecycleGeneration) return
+    const snapshot = await adapter.loadResumeSnapshot(this.collectionId, {
+      includeRows: false,
+    })
+    if (lifecycleGeneration !== this.lifecycleGeneration) return
+    // The reset epoch can restart row versions at zero. Keep the term/seq
+    // watermark to fence old notifications, but rebase version counters.
+    this.latestRowVersion = snapshot.latestRowVersion
+    this.localRowVersion = snapshot.latestRowVersion
+    this.observeStreamPosition(
+      snapshot.latestTerm,
+      snapshot.latestSeq,
+      snapshot.latestRowVersion,
+    )
   }
 
   private async recoverFromSeqGapUnsafe(
@@ -4243,7 +4476,7 @@ class PersistedCollectionRuntime<
       try {
         pullResponse = await this.persistence.coordinator.pullSince(
           this.storageCollectionId,
-          this.latestRowVersion,
+          this.publicRowVersion,
           undefined,
           this.cacheGenerationClaim?.claimId,
         )
@@ -4276,12 +4509,20 @@ class PersistedCollectionRuntime<
             await this.runInHydrationScope((adapter) =>
               this.reloadActiveSubsetsUnsafe(adapter),
             )
+            this.publicRowVersion = Math.max(
+              this.publicRowVersion,
+              pullResponse.latestRowVersion,
+            )
             return true
           }
           const deltas = pullResponse.deltas
           if (!deltas) {
             await this.runInHydrationScope((adapter) =>
               this.reloadActiveSubsetsUnsafe(adapter),
+            )
+            this.publicRowVersion = Math.max(
+              this.publicRowVersion,
+              pullResponse.latestRowVersion,
             )
             return true
           }
@@ -4308,14 +4549,24 @@ class PersistedCollectionRuntime<
               if (lifecycleGeneration !== this.lifecycleGeneration) return
             }
           })
+          this.publicRowVersion = Math.max(
+            this.publicRowVersion,
+            pullResponse.latestRowVersion,
+          )
           return true
         }
       }
     }
 
     if (lifecycleGeneration !== this.lifecycleGeneration) return false
+    // A gap is not a schema reset. Replace the durable snapshot in one
+    // publication so readers never see an empty intermediate Collection.
     await this.runInHydrationScope((adapter) =>
-      this.truncateAndReloadUnsafe(adapter, lifecycleGeneration),
+      this.reloadActiveSubsetsUnsafe(adapter),
+    )
+    this.publicRowVersion = Math.max(
+      this.publicRowVersion,
+      this.latestRowVersion,
     )
 
     if (this.mode === `sync-present`) {
@@ -4405,14 +4656,15 @@ class PersistedCollectionRuntime<
       this.refreshScopedSubsets()
       return
     }
-    const reloadActiveSubsets = () =>
+    const reloadActiveSubsets = (skipUnchangedReplace = false) =>
       this.runInHydrationScope(
-        (scopedAdapter) => this.reloadActiveSubsetsUnsafe(scopedAdapter),
+        (scopedAdapter) =>
+          this.reloadActiveSubsetsUnsafe(scopedAdapter, skipUnchangedReplace),
         adapter,
       )
 
     if (txCommitted.requiresFullReload) {
-      await reloadActiveSubsets()
+      await reloadActiveSubsets(txCommitted.reconciliationReload === true)
       return
     }
 
@@ -4496,6 +4748,7 @@ class PersistedCollectionRuntime<
 
   private async reloadActiveSubsetsUnsafe(
     adapter: HydrationPersistenceAdapter,
+    skipUnchangedReplace = false,
   ): Promise<void> {
     if (this.scopedRecovery) {
       this.refreshScopedSubsets()
@@ -4561,15 +4814,35 @@ class PersistedCollectionRuntime<
         hydrationContext.suppliedRowKeys.add(key)
       }
 
-      const applied = this.replaceCollectionSnapshot(
-        Array.from(mergedRows.entries()).map(([key, row]) => ({
-          key,
-          value: row.value,
-          metadata: row.metadata,
-        })),
-        collectionMetadata,
-      )
-      await whenSyncAccepted(applied)
+      if (
+        skipUnchangedReplace &&
+        this.matchesCollectionSnapshot(mergedRows, collectionMetadata)
+      ) {
+        // A full replacement would also clear metadata for missing rows.
+        // Clear only those entries so equal public rows do not republish.
+        const orphanKeys =
+          this.collection?._syncedRowMetadataKeysOutsideBase() ?? []
+        if (orphanKeys.length > 0) {
+          const applied = this.withInternalApply(() => {
+            this.syncControls.begin?.()
+            for (const key of orphanKeys) {
+              this.syncControls.metadata?.row.delete(key)
+            }
+            return this.syncControls.commit?.() ?? true
+          })
+          await whenSyncAccepted(applied)
+        }
+      } else {
+        const applied = this.replaceCollectionSnapshot(
+          Array.from(mergedRows.entries()).map(([key, row]) => ({
+            key,
+            value: row.value,
+            metadata: row.metadata,
+          })),
+          collectionMetadata,
+        )
+        await whenSyncAccepted(applied)
+      }
     } finally {
       if (
         this.activeHydrationContext === hydrationContext &&

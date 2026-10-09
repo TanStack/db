@@ -21,11 +21,36 @@ export * from './live-query-options'
 export * from './live-query-window-controller'
 export * from './local-only'
 export * from './local-storage'
+export {
+  createIndexedDB,
+  indexedDBCollectionOptions,
+  DatabaseRequiredError,
+  ObjectStoreNotFoundError,
+  NameRequiredError,
+  GetKeyRequiredError,
+  type CreateIndexedDBOptions,
+  type IndexedDBInstance,
+  type IndexedDBCollectionConfig,
+  type IndexedDBCollectionUtils,
+  type DatabaseInfo,
+} from './indexed-db'
+export {
+  openDatabase,
+  createObjectStore,
+  executeTransaction,
+  getAll,
+  getAllKeys,
+  getByKey,
+  put,
+  deleteByKey,
+  clear,
+  deleteDatabase,
+} from './indexed-db-wrapper'
 export * from './errors'
 /** @internal Unstable protocol for persistence-aware collection adapters. */
 export * from './sync-persistence'
 export * from './sync-receipt'
-export { deepEquals } from './utils'
+export { deepEquals, equalPersistedSnapshotValues } from './utils'
 /** @internal Used by first-party collection adapters. */
 export { warnOnce, resetWarnings } from './utils'
 export * from './paced-mutations'

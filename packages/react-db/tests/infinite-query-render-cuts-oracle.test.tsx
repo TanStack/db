@@ -6,13 +6,13 @@
  * discarded. The shared infinite-query suite cannot express that cut, because
  * Vue's setup is its commit. These laws belong to the React driver:
  *
- * - For an on-demand source, the hook does what useLiveQuery does under the
- *   same history: it starts the source during render, so a render that never
- *   commits acquires it as often as useLiveQuery would, and a StrictMode double
- *   render requests the first window once and commits the same first value.
- *   This holds for a query callback and a supplied collection, with the source
- *   read directly or through a live-query Collection. useLiveQuery is the
- *   reference by decision: the two hooks must behave the same.
+ * - A live-query Collection starts no provider work before it has a
+ *   subscriber or a preload. A render that never commits therefore starts no
+ *   acquisition attempt on an on-demand source, whether a query callback or a
+ *   supplied collection reads it, directly or through a live-query Collection.
+ *   A StrictMode double render requests the first window once, after commit,
+ *   and its first commit is a loading, unpublished window. The hook matches
+ *   useLiveQuery under the same history in every case.
  * - When GC has reclaimed an abandoned render's collection, the retry's first
  *   commit is the ready first page, after a fresh mount and after a mounted
  *   component's suspended update.
@@ -212,13 +212,14 @@ describe(`on-demand sources match useLiveQuery`, () => {
     { form: `query` as const, wrapped: true },
     { form: `supplied` as const, wrapped: true },
   ])(
-    `acquires as useLiveQuery does for a render that never commits (%o)`,
+    `starts no acquisition attempt for a render that never commits, as useLiveQuery does (%o)`,
     async ({ form, wrapped }) => {
       const reference = await acquisitionsForAbandonedRender(
         `live`,
         form,
         wrapped,
       )
+      expect(reference).toBe(0)
       expect(
         await acquisitionsForAbandonedRender(`infinite`, form, wrapped),
       ).toBe(reference)
@@ -227,12 +228,10 @@ describe(`on-demand sources match useLiveQuery`, () => {
 
   it(`requests the first window and commits the first value as useLiveQuery does across a StrictMode double render`, async () => {
     const reference = await firstWindowLoadsForStrictMount(`live`)
-    expect(reference.firstCommit).toEqual({
-      status: `ready`,
-      ids: [`1`, `2`],
-    })
+    // No provider work before commit: the on-demand window is unpublished.
+    expect(reference.firstCommit).toEqual({ status: `loading`, ids: [] })
     // React 19 keeps refs across the double render, so both hooks request the
-    // first window once. React 18 does not; see the coverage map.
+    // first window once, after commit. React 18 does not; see the coverage map.
     expect(reference.loads).toBe(1)
     expect(await firstWindowLoadsForStrictMount(`infinite`)).toEqual(reference)
   })

@@ -1,3 +1,11 @@
+/**
+ * @vitest-environment node
+ *
+ * The binary group-value cases compare a Buffer with a Uint8Array. Under
+ * jsdom a Node Buffer is not an instance of jsdom's Uint8Array, so it would
+ * take the generic object tag and the Buffer-before-Uint8Array law would go
+ * unchecked. Node keeps both in one realm.
+ */
 import { beforeEach, describe, expect, test } from 'vitest'
 import { Temporal } from 'temporal-polyfill'
 import { createLiveQueryCollection } from '../../src/query/index.js'
@@ -229,6 +237,7 @@ const equalityEquivalentGroupValues: Array<
   [`a Date and its timestamp`, () => [new Date(0), 0]],
   [`an invalid Date and NaN`, () => [new Date(Number.NaN), Number.NaN]],
   [`signed zero`, () => [-0, 0]],
+  [`two Date instances with the same time`, () => [new Date(0), new Date(0)]],
   [
     `binary values with the same bytes`,
     () => [Buffer.from([1, 2, 3]), new Uint8Array([1, 2, 3])],
@@ -256,6 +265,44 @@ const equalityEquivalentGroupValues: Array<
     },
   ],
 ]
+
+/**
+ * Which member supplies a group's projected value when several members are
+ * equal under query equality but differ exactly?
+ *
+ * Law: the member with the smallest exact value. Any primitive other than -0
+ * comes first, then -0, then objects (a Date, a binary array, or a Temporal
+ * value). Among objects, the type tag decides (`Buffer` before `Date` before
+ * `Uint8Array`). Among objects of one type with the same content, the member
+ * with the smallest row key supplies the instance. The choice does not depend
+ * on the order in which rows arrived.
+ *
+ * Law: the projected value is an instance that a currently positive member
+ * holds. After a member is deleted, its instance is never projected, even
+ * when a remaining member holds an equal instance.
+ *
+ * Before this law, the member with the smallest row key supplied the value.
+ * That choice made every member's contribution distinct, so each change
+ * re-read the whole group.
+ */
+function exactRank(value: unknown): [number, string] {
+  // Any primitive other than -0 comes first, then -0, then objects ordered by
+  // type tag. Object.prototype.toString reads the tag without production code.
+  if (Object.is(value, -0)) return [1, ``]
+  if (value === null || typeof value !== `object`) return [0, ``]
+  if (Buffer.isBuffer(value)) return [2, `Buffer`]
+  return [2, Object.prototype.toString.call(value).slice(8, -1)]
+}
+
+function smallestExact(values: ReadonlyArray<unknown>): unknown {
+  return values.reduce((best, value) => {
+    const [kind, sub] = exactRank(value)
+    const [bestKind, bestSub] = exactRank(best)
+    return kind < bestKind || (kind === bestKind && sub < bestSub)
+      ? value
+      : best
+  })
+}
 
 function representativeSignature(value: unknown): string {
   if (value instanceof Date) return `date`
@@ -345,10 +392,24 @@ function createGroupByTests(autoIndex: `off` | `eager`): void {
     test.each(equalityEquivalentGroupValues)(
       `groups %s by query equality`,
       (_name, createValues) => {
-        const [left, right] = createValues()
+        for (const reversed of [false, true]) {
+          checkEqualityGroup(createValues, reversed)
+        }
+      },
+    )
+
+    function checkEqualityGroup(
+      createValues: () => readonly [unknown, unknown],
+      reversed: boolean,
+    ): void {
+      {
+        // Both arrival orders: the projected value must not depend on which
+        // member arrived first or which has the smaller row key.
+        const [first, second] = createValues()
+        const [left, right] = reversed ? [second, first] : [first, second]
         const valuesCollection = createCollection(
           mockSyncCollectionOptions<{ id: number; value: unknown }>({
-            id: `equality-group-values-${autoIndex}`,
+            id: `equality-group-values-${autoIndex}-${reversed}`,
             getKey: (row) => row.id,
             initialData: [
               { id: 1, value: left },
@@ -373,15 +434,21 @@ function createGroupByTests(autoIndex: `off` | `eager`): void {
         const expectSingleGroup = (
           expectedCount: number,
           representative: unknown,
+          members: ReadonlyArray<unknown>,
         ) => {
           expect(summary.toArray).toHaveLength(1)
           expect(summary.toArray[0]?.count).toBe(expectedCount)
-          expect(representativeSignature(summary.toArray[0]?.value)).toBe(
+          const projected = summary.toArray[0]?.value
+          expect(representativeSignature(projected)).toBe(
             representativeSignature(representative),
+          )
+          // The projected instance belongs to a positive member.
+          expect(members.some((member) => Object.is(member, projected))).toBe(
+            true,
           )
         }
 
-        expectSingleGroup(2, left)
+        expectSingleGroup(2, smallestExact([left, right]), [left, right])
 
         valuesCollection.utils.begin()
         valuesCollection.utils.write({
@@ -389,7 +456,7 @@ function createGroupByTests(autoIndex: `off` | `eager`): void {
           value: { id: 1, value: left },
         })
         valuesCollection.utils.commit()
-        expectSingleGroup(1, right)
+        expectSingleGroup(1, right, [right])
 
         valuesCollection.utils.begin()
         valuesCollection.utils.write({
@@ -397,7 +464,172 @@ function createGroupByTests(autoIndex: `off` | `eager`): void {
           value: { id: 1, value: left },
         })
         valuesCollection.utils.commit()
-        expectSingleGroup(2, left)
+        expectSingleGroup(2, smallestExact([left, right]), [left, right])
+      }
+    }
+
+    test.each([
+      [`signed zero`, () => [0, -0] as const],
+      [`Date instances with the same time`, () => [new Date(0), new Date(0)]],
+    ])(
+      `min and max return a value a remaining member holds for %s`,
+      (_name, createValues) => {
+        const [left, right] = createValues()
+        const valuesCollection = createCollection(
+          mockSyncCollectionOptions<{ id: number; group: number; value: any }>({
+            id: `minmax-exact-${autoIndex}-${_name}`,
+            getKey: (row) => row.id,
+            initialData: [
+              { id: 1, group: 1, value: left },
+              { id: 2, group: 1, value: right },
+            ],
+            autoIndex,
+          }),
+        )
+        const summary = createLiveQueryCollection({
+          startSync: true,
+          query: (q) =>
+            q
+              .from({ row: valuesCollection })
+              .groupBy(({ row }) => row.group)
+              .select(({ row }) => ({
+                group: row.group,
+                low: min(row.value),
+                high: max(row.value),
+              })),
+        })
+        valuesCollection.utils.begin()
+        valuesCollection.utils.write({
+          type: `delete`,
+          value: { id: 1, group: 1, value: left },
+        })
+        valuesCollection.utils.commit()
+        // Only `right` remains, so both aggregates must return it exactly.
+        expect(Object.is(summary.toArray[0]?.low, right)).toBe(true)
+        expect(Object.is(summary.toArray[0]?.high, right)).toBe(true)
+      },
+    )
+
+    // Law: after any delete, min and max equal the min and max of the
+    // remaining members' values. The model computes them from the remaining
+    // source rows, so it does not depend on how contributions are keyed. Each
+    // aggregate is checked alone and with the other, over the same or a
+    // different argument, and over a stored or rebuilt argument. A rebuilt
+    // argument is a new instance on every evaluation, as an inline subquery's
+    // `fn.select` produces, so a retraction cannot rely on instance identity.
+    const minMaxShapes = [
+      [`min alone`, { low: `a` }],
+      [`max alone`, { high: `a` }],
+      [`min and max of one argument`, { low: `a`, high: `a` }],
+      [`min and max of different arguments`, { low: `a`, high: `b` }],
+    ] as const
+    const minMaxValues = [
+      [`signed zero`, [0, -0, 0], [-0, 0, 0], (v: number) => v],
+      [`Dates`, [0, 5000, 0], [5000, 0, 2000], (v: number) => new Date(v)],
+    ] as const
+    const minMaxCases = minMaxShapes.flatMap(([shape, select]) =>
+      minMaxValues.flatMap(([kind, aValues, bValues, toValue]) =>
+        [false, true].map(
+          (rebuilt) =>
+            [
+              `${shape}, ${kind}, ${rebuilt ? `rebuilt` : `stored`} argument`,
+              select,
+              aValues,
+              bValues,
+              toValue,
+              rebuilt,
+            ] as const,
+        ),
+      ),
+    )
+    test.each(minMaxCases)(
+      `min and max equal the remaining members' values: %s`,
+      (_name, select, aValues, bValues, toValue, rebuilt) => {
+        type Row = {
+          id: number
+          group: number
+          a: number | Date
+          b: number | Date
+        }
+        // A stored argument holds the final values in the source rows. A
+        // rebuilt argument holds numbers, and the subquery builds the value.
+        const rows: Array<Row> = aValues.map((a, i) => ({
+          id: i + 1,
+          group: 1,
+          a: rebuilt ? a : toValue(a),
+          b: rebuilt ? bValues[i]! : toValue(bValues[i]!),
+        }))
+        const valueOf = (raw: number | Date): number | Date =>
+          rebuilt ? toValue(raw as number) : raw
+        const source = createCollection(
+          mockSyncCollectionOptions<Row>({
+            id: `minmax-remaining-${autoIndex}-${_name}`,
+            getKey: (row) => row.id,
+            initialData: rows,
+            autoIndex,
+          }),
+        )
+        const summary = createLiveQueryCollection({
+          startSync: true,
+          query: (q) => {
+            const input = q.from({ r: source }).fn.select(({ r }) => ({
+              id: r.id,
+              group: r.group,
+              a: valueOf(r.a),
+              b: valueOf(r.b),
+            }))
+            return q
+              .from({ row: input })
+              .groupBy(({ row }) => row.group)
+              .select(({ row }) => ({
+                group: row.group,
+                ...(`low` in select ? { low: min(row[select.low]) } : {}),
+                ...(`high` in select ? { high: max(row[select.high]) } : {}),
+              }))
+          },
+        })
+        // Content of a value under query equality: a Date by its time, -0 as 0.
+        const content = (value: unknown) =>
+          value instanceof Date ? value.getTime() : (value as number) + 0
+        // The exact identity a remaining member supplies: content plus the
+        // sign of zero. Two rebuilt Dates with one time are the same value.
+        const exact = (value: unknown) =>
+          value instanceof Date
+            ? `Date(${value.getTime()})`
+            : Object.is(value, -0)
+              ? `-0`
+              : String(value)
+        const check = (remaining: Array<Row>) => {
+          const actual = summary.toArray[0] as unknown as Record<
+            string,
+            unknown
+          >
+          const expectOne = (
+            alias: `low` | `high`,
+            field: `a` | `b`,
+            sign: 1 | -1,
+          ) => {
+            const values = remaining.map((row) => valueOf(row[field]))
+            const best = values
+              .map(content)
+              .reduce((l, r) => (sign * (r - l) < 0 ? r : l))
+            // Any remaining member tied for the extreme may supply it.
+            const allowed = values
+              .filter((value) => content(value) === best)
+              .map(exact)
+            expect(allowed).toContain(exact(actual[alias]))
+          }
+          if (`low` in select) expectOne(`low`, select.low, 1)
+          if (`high` in select) expectOne(`high`, select.high, -1)
+        }
+        check(rows)
+        // Delete each member but the last, one at a time.
+        for (let i = 0; i < rows.length - 1; i++) {
+          source.utils.begin()
+          source.utils.write({ type: `delete`, value: rows[i]! })
+          source.utils.commit()
+          check(rows.slice(i + 1))
+        }
       },
     )
 
@@ -2456,4 +2688,54 @@ function createGroupByTests(autoIndex: `off` | `eager`): void {
 describe(`Query GROUP BY Execution`, () => {
   createGroupByTests(`off`)
   createGroupByTests(`eager`)
+})
+
+/**
+ * Law: among members whose group values are equal in content, the projected
+ * instance does not depend on the order in which rows arrived. The member
+ * with the smallest row key supplies it, so it is also always a current
+ * member's instance.
+ */
+describe(`group value among equal instances`, () => {
+  for (const order of [
+    [1, 2],
+    [2, 1],
+  ] as const) {
+    test(`projects the smallest row key's instance when rows arrive as ${order.join(`, `)}`, async () => {
+      const instances = new Map([
+        [1, new Date(0)],
+        [2, new Date(0)],
+      ])
+      const source = createCollection(
+        mockSyncCollectionOptions<{ id: number; v: Date }>({
+          id: `equal-instances-${order.join(``)}-${Math.random()}`,
+          getKey: (row) => row.id,
+          initialData: [],
+        }),
+      )
+      const grouped = createLiveQueryCollection((q) =>
+        q
+          .from({ row: source })
+          .groupBy(({ row }) => row.v)
+          .select(({ row }) => ({ v: row.v })),
+      )
+      const write = (type: `insert` | `delete`, id: number) => {
+        source.utils.begin()
+        source.utils.write({ type, value: { id, v: instances.get(id)! } })
+        source.utils.commit()
+      }
+      try {
+        await grouped.preload()
+        for (const id of order) write(`insert`, id)
+        expect((grouped.toArray[0] as { v: Date }).v).toBe(instances.get(1))
+        write(`delete`, 1)
+        expect((grouped.toArray[0] as { v: Date }).v).toBe(instances.get(2))
+        write(`insert`, 1)
+        expect((grouped.toArray[0] as { v: Date }).v).toBe(instances.get(1))
+      } finally {
+        await grouped.cleanup()
+        await source.cleanup()
+      }
+    })
+  }
 })

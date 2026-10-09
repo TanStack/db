@@ -887,6 +887,205 @@ describe(`SQLite resume snapshots`, () => {
     }
   })
 
+  // A claim moved to a new physical generation no longer authorizes schema
+  // reset in the old one. The other run's live claim retains its old rows and
+  // metadata even when the stale run entered registration while its claim was
+  // valid. This authored two-run history pauses the real adapter's registry
+  // lookup, moves only one claim, then compares the remaining run's durable
+  // schema, row, transaction ID, and reset epoch after the stale read rejects.
+  it(`preserves a warm generation when a stale registration would reset its schema`, async () => {
+    const database = new DatabaseSync(`:memory:`)
+    let primaryFailure: unknown
+    const driver = createDriver(database)
+    const registrationEntered = deferred()
+    const releaseRegistration = deferred()
+    let holdRegistration = false
+    const gatedDriver: SQLiteDriver = {
+      ...driver,
+      query: async (sql, params) => {
+        if (
+          holdRegistration &&
+          sql.includes(`SELECT table_name,`) &&
+          sql.includes(`FROM collection_registry`)
+        ) {
+          holdRegistration = false
+          registrationEntered.resolve()
+          await releaseRegistration.promise
+        }
+        return driver.query(sql, params)
+      },
+    }
+    const writer = new SQLiteCorePersistenceAdapter({
+      driver,
+      schemaVersion: 1,
+    })
+    const staleReader = new SQLiteCorePersistenceAdapter({
+      driver: gatedDriver,
+      schemaVersion: 2,
+      schemaMismatchPolicy: `sync-present-reset`,
+    })
+    let read: ReturnType<typeof staleReader.loadResumeSnapshot> | undefined
+    try {
+      const logicalId = `stale-schema-reset`
+      const moving = await writer.claimCacheGeneration(logicalId)
+      const warm = await writer.claimCacheGeneration(logicalId)
+      const oldId = moving.storageCollectionId
+      const oldTable = createPersistedTableName(oldId, `c`)
+      await writer.applyCommittedTx(oldId, {
+        txId: `warm-row`,
+        term: 1,
+        seq: 1,
+        rowVersion: 1,
+        cacheGenerationClaimId: moving.claimId,
+        mutations: [{ type: `insert`, key: `row`, value: { id: `row` } }],
+      })
+
+      holdRegistration = true
+      read = staleReader.loadResumeSnapshot(oldId, {
+        cacheGenerationClaimId: moving.claimId,
+      })
+      void read.catch(() => undefined)
+      await reachCheckpoint(
+        registrationEntered.promise,
+        `stale registry lookup`,
+      )
+      const current = await writer.rotateCacheGeneration(
+        logicalId,
+        moving.claimId,
+      )
+      expect(current.storageCollectionId).not.toBe(oldId)
+      releaseRegistration.resolve()
+      await expect(read).rejects.toThrow(`Persisted cache claim`)
+
+      expect(
+        database
+          .prepare(
+            `SELECT schema_version FROM collection_registry WHERE collection_id = ?`,
+          )
+          .get(oldId),
+      ).toEqual({ schema_version: 1 })
+      expect(database.prepare(`SELECT key FROM "${oldTable}"`).all()).toEqual([
+        { key: encodePersistedStorageKey(`row`) },
+      ])
+      expect(
+        database
+          .prepare(`SELECT tx_id FROM applied_tx WHERE collection_id = ?`)
+          .all(oldId),
+      ).toEqual([{ tx_id: `warm-row` }])
+      expect(
+        database
+          .prepare(
+            `SELECT reset_epoch FROM collection_reset_epoch WHERE collection_id = ?`,
+          )
+          .get(oldId),
+      ).toEqual({ reset_epoch: 0 })
+      expect(
+        (
+          await writer.loadResumeSnapshot(oldId, {
+            cacheGenerationClaimId: warm.claimId,
+          })
+        ).rows.map(({ key }) => key),
+      ).toEqual([`row`])
+    } catch (error) {
+      primaryFailure = error
+      throw error
+    } finally {
+      releaseRegistration.resolve()
+      await Promise.allSettled([read])
+      closeDatabasePreservingPrimary(database, primaryFailure)
+    }
+  })
+
+  // A fresh rotated generation can contain resume metadata before its first
+  // table registration. If one claim moves during that first lookup, the
+  // former claimant cannot choose the old generation's schema. Otherwise the
+  // remaining run's next read treats the unauthorized schema as a mismatch
+  // and deletes its resume metadata. The model retains that metadata through
+  // the stale rejection and the warm run's subsequent read.
+  it(`preserves a warm generation's resume metadata across stale first registration`, async () => {
+    const database = new DatabaseSync(`:memory:`)
+    let primaryFailure: unknown
+    const driver = createDriver(database)
+    const registrationEntered = deferred()
+    const releaseRegistration = deferred()
+    let holdRegistration = false
+    const gatedDriver: SQLiteDriver = {
+      ...driver,
+      query: async (sql, params) => {
+        if (
+          holdRegistration &&
+          sql.includes(`SELECT table_name,`) &&
+          sql.includes(`FROM collection_registry`)
+        ) {
+          holdRegistration = false
+          registrationEntered.resolve()
+          await releaseRegistration.promise
+        }
+        return driver.query(sql, params)
+      },
+    }
+    const writer = new SQLiteCorePersistenceAdapter({
+      driver,
+      schemaVersion: 1,
+    })
+    const staleReader = new SQLiteCorePersistenceAdapter({
+      driver: gatedDriver,
+      schemaVersion: 2,
+      schemaMismatchPolicy: `sync-present-reset`,
+    })
+    let read: ReturnType<typeof staleReader.loadResumeSnapshot> | undefined
+    try {
+      const logicalId = `stale-first-registration`
+      const first = await writer.claimCacheGeneration(logicalId)
+      const moving = await writer.rotateCacheGeneration(
+        logicalId,
+        first.claimId,
+        { key: `resume`, value: `must-survive` },
+      )
+      const warm = await writer.claimCacheGeneration(logicalId)
+      const oldId = moving.storageCollectionId
+
+      holdRegistration = true
+      read = staleReader.loadResumeSnapshot(oldId, {
+        cacheGenerationClaimId: moving.claimId,
+      })
+      void read.catch(() => undefined)
+      await reachCheckpoint(
+        registrationEntered.promise,
+        `first registry lookup`,
+      )
+      const current = await writer.rotateCacheGeneration(
+        logicalId,
+        moving.claimId,
+      )
+      expect(current.storageCollectionId).not.toBe(oldId)
+      releaseRegistration.resolve()
+      await expect(read).rejects.toThrow(`Persisted cache claim`)
+
+      expect(
+        database
+          .prepare(
+            `SELECT schema_version FROM collection_registry WHERE collection_id = ?`,
+          )
+          .get(oldId),
+      ).toBeUndefined()
+      expect(
+        (
+          await writer.loadResumeSnapshot(oldId, {
+            cacheGenerationClaimId: warm.claimId,
+          })
+        ).collectionMetadata,
+      ).toEqual([{ key: `resume`, value: `must-survive` }])
+    } catch (error) {
+      primaryFailure = error
+      throw error
+    } finally {
+      releaseRegistration.resolve()
+      await Promise.allSettled([read])
+      closeDatabasePreservingPrimary(database, primaryFailure)
+    }
+  })
+
   // A paused run cannot keep retired bytes forever. In the model, a claim is
   // usable only before its expiry cut; a new run collects an expired retired
   // generation without touching the current head. The old run may then make

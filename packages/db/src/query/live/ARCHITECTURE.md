@@ -225,10 +225,30 @@ identity and opaque public group keys keep their own runtime scope because
 equivalent query plans and retained public keys must survive graph replacement.
 For grouping, the equality token is the D2 group key. The group retains a raw
 value from a currently positive contributor only as the projected
-representative. The representative is chosen by stable source-row identity, so
-restoring the same source state restores the same value regardless of update
-history. D2 sees only safe exact-value identity for that representative, not
-the raw value itself. A separate public group key preserves primitive keys and
+representative. The representative is the contributor with the smallest exact
+value: another primitive before -0, and every primitive before an object.
+Objects are ordered by an explicit type tag (`Buffer`, `Date`, a Temporal type,
+then `Uint8Array`). Contributors of one tag are equal in content, so the
+contributor with the smallest row key supplies the instance; the choice does not
+depend on update history, and a deleted contributor's instance is never
+projected. Equal primitives share a representative key and consolidate. D2
+consolidates contributions whose hashes match, and its hash treats -0 as 0 and
+equal Dates as one value. Each contribution therefore carries the exact identity
+of every value a contributor can supply: the representative key, and the exact
+input of every min or max, taken from the value that the min or max compares.
+A primitive input is keyed by its exact value and an object input by its
+contributor's row key, because a rebuilt argument is a new instance at each
+evaluation and its retraction must still cancel its insert. A sum, avg, or count adds coerced numbers, so merging its equal inputs cannot
+change its result. Contributions merge only when those identities are equal, so
+a merged contribution supplies only a value that a positive contributor holds.
+A correlated include's route representative carries the correlation key and
+parent context instances. Members that read the correlation key from their own
+row hold distinct instances when the key is an object, such as a Date or a
+binary array, so those members do not consolidate. A count, sum, or avg over
+consolidated contributions updates without re-reading the group; a min or max
+over distinct primitive values keeps one contribution per distinct exact input,
+and a min or max over objects keeps one contribution per contributor. D2 sees only
+safe exact-value identity for a representative, not the raw value itself. A separate public group key preserves primitive keys and
 serializes opaque equality identity; graph-local identity tokens never cross
 the Collection boundary. Compiler group fields use a query-local namespace
 disjoint from every selected alias. Direct correlated joins canonicalize both
@@ -571,9 +591,18 @@ without re-emitting every parent, and moving a route changes the parent field to
 the destination bucket's facade. A facade is never retargeted to another
 bucket. The D2 join retains inactive bucket rows and emits their current
 snapshot when the bucket becomes active; the facade adapter does not buffer
-discarded deltas. The adapter retains a facade only while at least one parent
-route uses its bucket. When the last route leaves, it retracts the facade's rows
-and drops its strong reference. An external holder may keep that empty
+discarded deltas. It keeps only the deltas a flush consumed until that flush
+publishes: if the root commit fails, the adapter restores them, so the next
+successful flush publishes each pending child change exactly once. The adapter retains a facade only while at least one parent
+route uses its bucket. When the last route leaves, it deletes through sync every
+key the facade still shows and drops its strong reference. The graph has
+already retracted the bucket's rows, but a facade is a Collection: a user
+transaction can show an optimistic row in it, and a sync commit can be held
+behind a persisting transaction. Retirement is therefore a legal write to a
+non-empty facade, not an invariant violation. It is a facade write of the
+flush, so a failed flush restores it. A restore deletes every key the flush
+wrote, including a write that a persisting transaction still holds, so the held
+write cannot land after the rollback. An external holder may keep the retired
 Collection alive, but a later active interval gets a new facade. Inline modes
 do not create child Collections.
 
@@ -912,8 +941,9 @@ repair (an eager source, an index, one order term, no joined filter) returns
 literal `true`, the
 repair settles synchronously,
 so its tie and refill steps finish inside the same graph run and a window move
-that consumes the repair still publishes once. A full-source request, initial
-or repair, keeps its asynchronous settlement. The
+that consumes the repair still publishes once. A full-source repair keeps its
+asynchronous settlement. An initial full-source load follows the initial
+synchronous cut described under initial readiness. The
 ordered graph's top-K operator owns the local result window. Provider transfer
 remains bounded by `orderBy` and `limit`; local delivery cardinality is a
 separate observation.
@@ -1189,16 +1219,42 @@ has no child demand, but its root demand must still settle. Later readiness
 transitions follow the existing Collection contract until an executable test
 defines another public behavior.
 
-An ordinary initial ordered request also has a synchronous observation cut.
-When every acquisition needed for its completed initial window returns literal
-`true` after its establishing applied receipts are visible, core drains the
-remaining synchronous ordered continuations and graph work before the
-initiating call stack returns. The live-query Collection rows and initial-query
-readiness are observable at that cut. A Promise result keeps that acquisition
-asynchronous. This cut does not apply to explicit window moves, full-source
-requests, repair other than a bounded prefix repair, truncate
-replay, or framework render timing, and it proves neither source exhaustion
-nor broader source coverage.
+**Deferred acquisition:** a live-query Collection reads local memory and
+starts no provider work on its own. Until it has a subscriber or a preload in
+its current sync run, its own subscriptions to source Collections defer
+acquisition: they start no idle source Collection's sync run and no
+acquisition attempt. Their demand stays active and reads the rows the source
+Collections already hold. A framework render or `startSync: true` may start the
+live-query Collection's sync run; that is not a subscriber. An ordered window
+over an on-demand source Collection stays unpublished until its acquisitions
+settle, by atomic window publication; an unordered query publishes the rows its
+source Collections hold as a partial result. Without a subscriber or preload,
+the live-query Collection is ready only when it needs no provider work: every
+source Collection is eager and already started, or is a live-query Collection
+whose acquisitions settled. The first subscriber or preload resumes deferred
+acquisition. A deferring subscriber may start an inner live-query Collection,
+which reads local memory, but not a base source Collection, so the rule is
+transitive. Cleanup ends the sync run, and a restarted live-query Collection
+defers again. A preload answered by a `DbClient` stream still counts. A pooled
+live query applies the same rule to its partition's source subscription: a
+view built during a render defers it until a view has a subscriber or a
+preload.
+
+An initial ordered load also has a synchronous observation cut. The initial
+load is an ordinary ordered request or, for a plan that requires the full
+source, its first filtered full-source request. The cut holds when the first
+subscriber or preload starts the live-query Collection's sync run, or when its
+source Collections are eager. A sync run that started earlier resumes deferred
+on-demand acquisition through the subscription's restart path, which settles
+asynchronously. When every acquisition needed for its completed initial window
+returns literal `true` after its establishing applied receipts are visible,
+core drains the remaining synchronous ordered continuations and graph work
+before the initiating call stack returns. The live-query Collection rows and
+initial-query readiness are observable at that cut. A Promise result keeps that
+acquisition asynchronous. This cut does not apply to explicit window moves, a
+later full-source fallback, repair other than a bounded prefix repair, truncate
+replay, or framework render timing, and it proves neither source exhaustion nor
+broader source coverage.
 
 If any source subscriber adds input to the graph during a synchronous ordered
 continuation, core returns to graph work before deciding whether that ordered
@@ -1271,6 +1327,17 @@ Installed state, synchronous reads, change-event payloads, and downstream
 queries must all observe the same fully materialized commit. The facade adapter
 may defer event delivery across its Collection transactions, but it must not
 defer state or index installation. Routing and identity remain inside D2.
+
+A failed flush is atomic. If a facade write or the root commit fails, every
+facade the flush wrote returns to its rows, order, and key mapping from before
+the flush, the facades it created are disposed, and no facade publishes an
+event or a layout revision. The child deltas that flush consumed stay pending
+with the builder's pending root rows, so the next successful flush publishes
+each of them exactly once. No graph output reaches the adapter between a flush
+and its rollback, because the flush runs inside the graph run; a rollback that
+finds new pending deltas is an invariant violation. It restores the facades and
+discards the deferred events first, so the facades keep delivering events, and
+then throws. A rollback after the adapter is cleaned up does nothing.
 
 ## External boundaries
 
@@ -1356,6 +1423,15 @@ create recursive Collection machinery.
     disposed. The source Collection keeps its prior status until adapter cleanup
     settles; only then does it publish `cleaned-up` and settle its cleanup
     promise.
+15. **Deferred acquisition:** a live-query Collection or pooled live query
+    starts no source Collection's sync run and no acquisition attempt until it
+    has a subscriber that asks for data, or a preload in its current sync run;
+    before that it reads only rows its sources already hold. A subscriber that
+    survives cleanup still asks for data. Another consumer starting a source,
+    or a source truncate, resumes nothing. A read that waits for readiness
+    counts as a preload. A deferring live query keeps its sources from
+    garbage collection but is not counted in their `subscriberCount` or
+    `subscribers:change`, which adapters read as a request for live data.
 
 ## Glossary
 
@@ -1389,28 +1465,29 @@ keep the meanings defined there.
 
 ## Executable contracts
 
-| Contract                                                                            | Test suite                                                                                                                      |
-| ----------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------- |
-| State equivalence, route lifecycle, transition history, and batch partition         | `packages/db/tests/query/includes-oracle.property.test.ts`                                                                      |
-| Joined multiplicity, alias identity, and null-key normalization                     | `packages/db/tests/query/includes-query-shape-oracle.test.ts`                                                                   |
-| Alias reuse across sibling scopes and `SourceId` preservation                       | `packages/db/tests/query/includes-oracle.property.test.ts` (sibling scopes), `packages/db/tests/query/validate-aliases.test.ts` |
-| Demand, cancellation, and progressive timing                                        | `packages/db/tests/query/includes-temporal-oracle.test.ts`                                                                      |
-| Optimistic confirmation, rollback, and later reactivity                             | `packages/db/tests/query/includes-optimistic-oracle.property.test.ts`                                                           |
-| Coherent layered publication                                                        | `packages/db/tests/query/includes-publication-oracle.test.ts`                                                                   |
-| Collection facades, event coherence, and route activation                           | `packages/db/tests/query/includes-collection-oracle.property.test.ts`                                                           |
-| Correlated physical work                                                            | `packages/db/tests/query/includes-work-counter-oracle.test.ts`                                                                  |
-| Constructed and retained facades in a nested Collection tree                        | `packages/db/tests/query/includes-space-oracle.test.ts`                                                                         |
-| Route-context discovery and transport across recursive and join boundaries          | `packages/db/tests/query/includes-context-transport-oracle.test.ts`                                                             |
-| Functional projection input boundaries, timing, and output preservation             | `packages/db/tests/query/includes-functional-projection-oracle.test.ts`                                                         |
-| Functional input rejection and inline alternatives                                  | `packages/db/tests/query/includes-functional-input-boundary.test.ts`                                                            |
-| Public-container descriptors and reference-key matches across internal query stages | `packages/db/tests/query/public-container-copy.test.ts`                                                                         |
-| Cross-formulation equivalence and reference-sensitive route identity                | `packages/db/tests/query/includes-cross-formulation-oracle.property.test.ts`                                                    |
-| Query-db ownership                                                                  | `packages/query-db-collection/tests/ownership-lifecycle.oracle.test.ts`                                                         |
-| Failed replay retention, peer isolation, and explicit consumer-only recovery        | `packages/db/tests/query/replay-failure-boundary.test.ts`                                                                       |
-| Replay lease balance, reference-counted peers, and failed-start recovery            | `packages/db/tests/replay-adapter-ownership.test.ts`                                                                            |
-| Reachable nested shape                                                              | `packages/query-db-collection/tests/includes-work-counter-oracle.test.ts`                                                       |
-| Cleanup-start invalidation, settlement, and restart admission                       | `packages/db/tests/collection-cleanup-restart-oracle.test.ts`                                                                   |
-| Pooled live queries match their live-query Collection, including cleanup            | `packages/db/tests/query/pooled-live-query-oracle.property.test.ts`                                                             |
+| Contract                                                                                | Test suite                                                                                                                      |
+| --------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------- |
+| State equivalence, route lifecycle, transition history, and batch partition             | `packages/db/tests/query/includes-oracle.property.test.ts`                                                                      |
+| Joined multiplicity, alias identity, and null-key normalization                         | `packages/db/tests/query/includes-query-shape-oracle.test.ts`                                                                   |
+| Alias reuse across sibling scopes and `SourceId` preservation                           | `packages/db/tests/query/includes-oracle.property.test.ts` (sibling scopes), `packages/db/tests/query/validate-aliases.test.ts` |
+| Demand, cancellation, and progressive timing                                            | `packages/db/tests/query/includes-temporal-oracle.test.ts`                                                                      |
+| Optimistic confirmation, rollback, and later reactivity                                 | `packages/db/tests/query/includes-optimistic-oracle.property.test.ts`                                                           |
+| Coherent layered publication                                                            | `packages/db/tests/query/includes-publication-oracle.test.ts`                                                                   |
+| Collection facades, event coherence, and route activation                               | `packages/db/tests/query/includes-collection-oracle.property.test.ts`                                                           |
+| Correlated physical work                                                                | `packages/db/tests/query/includes-work-counter-oracle.test.ts`                                                                  |
+| Constructed and retained facades in a nested Collection tree                            | `packages/db/tests/query/includes-space-oracle.test.ts`                                                                         |
+| Route-context discovery and transport across recursive and join boundaries              | `packages/db/tests/query/includes-context-transport-oracle.test.ts`                                                             |
+| Functional projection input boundaries, timing, and output preservation                 | `packages/db/tests/query/includes-functional-projection-oracle.test.ts`                                                         |
+| Functional input rejection and inline alternatives                                      | `packages/db/tests/query/includes-functional-input-boundary.test.ts`                                                            |
+| Public-container descriptors and reference-key matches across internal query stages     | `packages/db/tests/query/public-container-copy.test.ts`                                                                         |
+| Cross-formulation equivalence and reference-sensitive route identity                    | `packages/db/tests/query/includes-cross-formulation-oracle.property.test.ts`                                                    |
+| Query-db ownership                                                                      | `packages/query-db-collection/tests/ownership-lifecycle.oracle.test.ts`                                                         |
+| Failed replay retention, peer isolation, and explicit consumer-only recovery            | `packages/db/tests/query/replay-failure-boundary.test.ts`                                                                       |
+| Replay lease balance, reference-counted peers, and failed-start recovery                | `packages/db/tests/replay-adapter-ownership.test.ts`                                                                            |
+| Reachable nested shape                                                                  | `packages/query-db-collection/tests/includes-work-counter-oracle.test.ts`                                                       |
+| Cleanup-start invalidation, settlement, and restart admission                           | `packages/db/tests/collection-cleanup-restart-oracle.test.ts`                                                                   |
+| Pooled live queries match their live-query Collection, including cleanup                | `packages/db/tests/query/pooled-live-query-oracle.property.test.ts`                                                             |
+| Deferred acquisition before a subscriber or preload, readiness, and the synchronous cut | `packages/db/tests/live-query-deferred-acquisition-oracle.test.ts`                                                              |
 
 Each oracle identifies the first divergent checkpoint and compares either the
 whole result or one exact structural difference. Correlated-materialization

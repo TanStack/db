@@ -1,7 +1,7 @@
 # SQLite Temporal persistence reproduction
 
 Issue: [#2034](https://github.com/TanStack/db/issues/2034).
-Owner: [SQLite typed-value oracle](../../../packages/db-sqlite-persistence-core/tests/sqlite-temporal-value-oracle.test.ts).
+Owner: [SQLite typed-value oracle](https://github.com/TanStack/db/blob/main/packages/db-sqlite-persistence-core/tests/sqlite-temporal-value-oracle.test.ts).
 
 ## Revision and scope
 

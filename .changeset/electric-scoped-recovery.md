@@ -13,4 +13,4 @@
 '@tanstack/cloudflare-durable-objects-db-sqlite-persistence': patch
 ---
 
-Recover persisted on-demand Electric and Query collections after cache claim loss by rotating their SQLite cache and reloading active subsets. Fence retired provider work and expired claims, preserve warm runs on their claimed cache generation, and forward claim lifetime options through SQLite host factories. Forward managed cache operations and claim checks through Electron IPC protocol v3.
+Recover persisted on-demand Electric and Query collections after cache claim loss by rotating their SQLite cache and reloading active subsets. Fence retired provider work and expired claims, preserve warm runs on their claimed cache generation, and forward claim lifetime options through SQLite host factories. Forward managed cache operations and claim checks through Electron IPC protocol v5.

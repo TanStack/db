@@ -13,6 +13,15 @@ import type { Collection } from '@tanstack/db'
 import type { Message } from '@electric-sql/client'
 import type { StandardSchemaV1 } from '@standard-schema/spec'
 
+// A live query starts no provider work for its sources until it has a
+// subscriber or a preload, so tests of the requests it sends subscribe it.
+function subscribed<
+  T extends { subscribeChanges: (callback: () => void) => unknown },
+>(liveQuery: T): T {
+  liveQuery.subscribeChanges(() => {})
+  return liveQuery
+}
+
 // Sample user type for tests
 type User = {
   id: number
@@ -538,22 +547,24 @@ describe.each([
       expect(mockRequestSnapshot).toHaveBeenCalledTimes(0)
 
       // Create first live query with limit of 2
-      const limitedLiveQuery = createLiveQueryCollection({
-        id: `limited-users-live-query`,
-        startSync: true,
-        query: (q) =>
-          q
-            .from({ user: testElectricCollection })
-            .where(({ user }) => eq(user.active, true))
-            .select(({ user }) => ({
-              id: user.id,
-              name: user.name,
-              active: user.active,
-              age: user.age,
-            }))
-            .orderBy(({ user }) => user.age, `asc`)
-            .limit(2),
-      })
+      const limitedLiveQuery = subscribed(
+        createLiveQueryCollection({
+          id: `limited-users-live-query`,
+          startSync: true,
+          query: (q) =>
+            q
+              .from({ user: testElectricCollection })
+              .where(({ user }) => eq(user.active, true))
+              .select(({ user }) => ({
+                id: user.id,
+                name: user.name,
+                active: user.active,
+                age: user.age,
+              }))
+              .orderBy(({ user }) => user.age, `asc`)
+              .limit(2),
+        }),
+      )
 
       // Wait for async subset loading to complete
       await new Promise((resolve) => setTimeout(resolve, 0))
@@ -616,21 +627,23 @@ describe.each([
       }))
 
       // Create second live query with higher limit of 6
-      const expandedLiveQuery = createLiveQueryCollection({
-        id: `expanded-users-live-query`,
-        startSync: true,
-        query: (q) =>
-          q
-            .from({ user: testElectricCollection })
-            .where(({ user }) => eq(user.active, true))
-            .select(({ user }) => ({
-              id: user.id,
-              name: user.name,
-              active: user.active,
-            }))
-            .orderBy(({ user }) => user.age, `asc`)
-            .limit(6),
-      })
+      const expandedLiveQuery = subscribed(
+        createLiveQueryCollection({
+          id: `expanded-users-live-query`,
+          startSync: true,
+          query: (q) =>
+            q
+              .from({ user: testElectricCollection })
+              .where(({ user }) => eq(user.active, true))
+              .select(({ user }) => ({
+                id: user.id,
+                name: user.name,
+                active: user.active,
+              }))
+              .orderBy(({ user }) => user.age, `asc`)
+              .limit(6),
+        }),
+      )
 
       // Wait for the live query to process
       await new Promise((resolve) => setTimeout(resolve, 0))
@@ -746,16 +759,18 @@ describe(`Electric Collection with Live Query - syncMode integration`, () => {
     })
 
     // Create live query with limit that exceeds available data
-    const liveQuery = createLiveQueryCollection({
-      id: `on-demand-live-query`,
-      startSync: true,
-      query: (q) =>
-        q
-          .from({ user: electricCollection })
-          .where(({ user }) => eq(user.active, true))
-          .orderBy(({ user }) => user.age, `asc`)
-          .limit(5),
-    })
+    const liveQuery = subscribed(
+      createLiveQueryCollection({
+        id: `on-demand-live-query`,
+        startSync: true,
+        query: (q) =>
+          q
+            .from({ user: electricCollection })
+            .where(({ user }) => eq(user.active, true))
+            .orderBy(({ user }) => user.age, `asc`)
+            .limit(5),
+      }),
+    )
 
     // Wait for the live query to process
     await new Promise((resolve) => setTimeout(resolve, 0))
@@ -784,16 +799,18 @@ describe(`Electric Collection with Live Query - syncMode integration`, () => {
       })),
     })
 
-    const liveQuery = createLiveQueryCollection({
-      id: `offset-live-query`,
-      startSync: true,
-      query: (q) =>
-        q
-          .from({ user: electricCollection })
-          .orderBy(({ user }) => user.id, `asc`)
-          .limit(2)
-          .offset(2),
-    })
+    const liveQuery = subscribed(
+      createLiveQueryCollection({
+        id: `offset-live-query`,
+        startSync: true,
+        query: (q) =>
+          q
+            .from({ user: electricCollection })
+            .orderBy(({ user }) => user.id, `asc`)
+            .limit(2)
+            .offset(2),
+      }),
+    )
 
     await vi.waitFor(() => expect(liveQuery.status).toBe(`ready`))
 
@@ -842,15 +859,17 @@ describe(`Electric Collection with Live Query - syncMode integration`, () => {
     })
 
     // Create live query that needs more data
-    createLiveQueryCollection({
-      id: `progressive-live-query`,
-      startSync: true,
-      query: (q) =>
-        q
-          .from({ user: electricCollection })
-          .orderBy(({ user }) => user.id, `asc`)
-          .limit(3),
-    })
+    subscribed(
+      createLiveQueryCollection({
+        id: `progressive-live-query`,
+        startSync: true,
+        query: (q) =>
+          q
+            .from({ user: electricCollection })
+            .orderBy(({ user }) => user.id, `asc`)
+            .limit(3),
+      }),
+    )
 
     // Wait for the live query to process
     await new Promise((resolve) => setTimeout(resolve, 0))
@@ -920,15 +939,17 @@ describe(`Electric Collection with Live Query - syncMode integration`, () => {
     })
 
     // Create live query with limit of 3
-    createLiveQueryCollection({
-      id: `expanding-live-query`,
-      startSync: true,
-      query: (q) =>
-        q
-          .from({ user: electricCollection })
-          .orderBy(({ user }) => user.age, `asc`)
-          .limit(3),
-    })
+    subscribed(
+      createLiveQueryCollection({
+        id: `expanding-live-query`,
+        startSync: true,
+        query: (q) =>
+          q
+            .from({ user: electricCollection })
+            .orderBy(({ user }) => user.age, `asc`)
+            .limit(3),
+      }),
+    )
 
     await new Promise((resolve) => setTimeout(resolve, 0))
 
@@ -952,16 +973,18 @@ describe(`Electric Collection with Live Query - syncMode integration`, () => {
     expect(electricCollection.size).toBe(0)
 
     // Create filtered live query
-    createLiveQueryCollection({
-      id: `filtered-live-query`,
-      startSync: true,
-      query: (q) =>
-        q
-          .from({ user: electricCollection })
-          .where(({ user }) => eq(user.active, true))
-          .orderBy(({ user }) => user.name, `desc`)
-          .limit(10),
-    })
+    subscribed(
+      createLiveQueryCollection({
+        id: `filtered-live-query`,
+        startSync: true,
+        query: (q) =>
+          q
+            .from({ user: electricCollection })
+            .where(({ user }) => eq(user.active, true))
+            .orderBy(({ user }) => user.name, `desc`)
+            .limit(10),
+      }),
+    )
 
     await new Promise((resolve) => setTimeout(resolve, 0))
 
@@ -983,16 +1006,18 @@ describe(`Electric Collection with Live Query - syncMode integration`, () => {
     expect(electricCollection.status).toBe(`loading`) // Still syncing in progressive mode
 
     // Create live query with complex WHERE clause
-    createLiveQueryCollection({
-      id: `complex-filter-live-query`,
-      startSync: true,
-      query: (q) =>
-        q
-          .from({ user: electricCollection })
-          .where(({ user }) => gt(user.age, 20))
-          .orderBy(({ user }) => user.age, `asc`)
-          .limit(5),
-    })
+    subscribed(
+      createLiveQueryCollection({
+        id: `complex-filter-live-query`,
+        startSync: true,
+        query: (q) =>
+          q
+            .from({ user: electricCollection })
+            .where(({ user }) => gt(user.age, 20))
+            .orderBy(({ user }) => user.age, `asc`)
+            .limit(5),
+      }),
+    )
 
     await new Promise((resolve) => setTimeout(resolve, 0))
 
@@ -1070,35 +1095,41 @@ describe(`Electric Collection - loadSubset deduplication`, () => {
 
     // Each live query owns its own abort signal, so canceling one cannot cancel
     // transport work still needed by a peer.
-    createLiveQueryCollection({
-      startSync: true,
-      query: (q) =>
-        q
-          .from({ user: electricCollection })
-          .where(({ user }) => eq(user.active, true))
-          .orderBy(({ user }) => user.age, `asc`)
-          .limit(10),
-    })
+    subscribed(
+      createLiveQueryCollection({
+        startSync: true,
+        query: (q) =>
+          q
+            .from({ user: electricCollection })
+            .where(({ user }) => eq(user.active, true))
+            .orderBy(({ user }) => user.age, `asc`)
+            .limit(10),
+      }),
+    )
 
-    createLiveQueryCollection({
-      startSync: true,
-      query: (q) =>
-        q
-          .from({ user: electricCollection })
-          .where(({ user }) => eq(user.active, true))
-          .orderBy(({ user }) => user.age, `asc`)
-          .limit(10),
-    })
+    subscribed(
+      createLiveQueryCollection({
+        startSync: true,
+        query: (q) =>
+          q
+            .from({ user: electricCollection })
+            .where(({ user }) => eq(user.active, true))
+            .orderBy(({ user }) => user.age, `asc`)
+            .limit(10),
+      }),
+    )
 
-    createLiveQueryCollection({
-      startSync: true,
-      query: (q) =>
-        q
-          .from({ user: electricCollection })
-          .where(({ user }) => eq(user.active, true))
-          .orderBy(({ user }) => user.age, `asc`)
-          .limit(10),
-    })
+    subscribed(
+      createLiveQueryCollection({
+        startSync: true,
+        query: (q) =>
+          q
+            .from({ user: electricCollection })
+            .where(({ user }) => eq(user.active, true))
+            .orderBy(({ user }) => user.age, `asc`)
+            .limit(10),
+      }),
+    )
 
     await new Promise((resolve) => setTimeout(resolve, 0))
 
@@ -1120,15 +1151,17 @@ describe(`Electric Collection - loadSubset deduplication`, () => {
     expect(electricCollection.status).toBe(`ready`)
 
     // Create a live query with limit 20
-    createLiveQueryCollection({
-      startSync: true,
-      query: (q) =>
-        q
-          .from({ user: electricCollection })
-          .where(({ user }) => gt(user.age, 10))
-          .orderBy(({ user }) => user.age, `asc`)
-          .limit(20),
-    })
+    subscribed(
+      createLiveQueryCollection({
+        startSync: true,
+        query: (q) =>
+          q
+            .from({ user: electricCollection })
+            .where(({ user }) => gt(user.age, 10))
+            .orderBy(({ user }) => user.age, `asc`)
+            .limit(20),
+      }),
+    )
 
     await new Promise((resolve) => setTimeout(resolve, 0))
 
@@ -1136,15 +1169,17 @@ describe(`Electric Collection - loadSubset deduplication`, () => {
 
     // A smaller limit is a distinct exact demand. A requested wider window does
     // not prove that its rows were applied or that the source was exhausted.
-    createLiveQueryCollection({
-      startSync: true,
-      query: (q) =>
-        q
-          .from({ user: electricCollection })
-          .where(({ user }) => gt(user.age, 10)) // Same where clause
-          .orderBy(({ user }) => user.age, `asc`)
-          .limit(10), // Smaller limit
-    })
+    subscribed(
+      createLiveQueryCollection({
+        startSync: true,
+        query: (q) =>
+          q
+            .from({ user: electricCollection })
+            .where(({ user }) => gt(user.age, 10)) // Same where clause
+            .orderBy(({ user }) => user.age, `asc`)
+            .limit(10), // Smaller limit
+      }),
+    )
 
     await new Promise((resolve) => setTimeout(resolve, 0))
 
@@ -1161,15 +1196,17 @@ describe(`Electric Collection - loadSubset deduplication`, () => {
     expect(electricCollection.status).toBe(`ready`)
 
     // Create a live query with a broader predicate
-    createLiveQueryCollection({
-      startSync: true,
-      query: (q) =>
-        q
-          .from({ user: electricCollection })
-          .where(({ user }) => gt(user.age, 10))
-          .orderBy(({ user }) => user.age, `asc`)
-          .limit(20),
-    })
+    subscribed(
+      createLiveQueryCollection({
+        startSync: true,
+        query: (q) =>
+          q
+            .from({ user: electricCollection })
+            .where(({ user }) => gt(user.age, 10))
+            .orderBy(({ user }) => user.age, `asc`)
+            .limit(20),
+      }),
+    )
 
     await new Promise((resolve) => setTimeout(resolve, 0))
 
@@ -1178,15 +1215,17 @@ describe(`Electric Collection - loadSubset deduplication`, () => {
     // Create a live query with a DIFFERENT where clause (even if more restrictive)
     // This should NOT be deduped because for limited queries, where clauses must be EQUAL.
     // The top 10 of "age > 20" might include rows outside the top 20 of "age > 10".
-    createLiveQueryCollection({
-      startSync: true,
-      query: (q) =>
-        q
-          .from({ user: electricCollection })
-          .where(({ user }) => gt(user.age, 20)) // Different where clause
-          .orderBy(({ user }) => user.age, `asc`)
-          .limit(10),
-    })
+    subscribed(
+      createLiveQueryCollection({
+        startSync: true,
+        query: (q) =>
+          q
+            .from({ user: electricCollection })
+            .where(({ user }) => gt(user.age, 20)) // Different where clause
+            .orderBy(({ user }) => user.age, `asc`)
+            .limit(10),
+      }),
+    )
 
     await new Promise((resolve) => setTimeout(resolve, 0))
 
@@ -1201,15 +1240,17 @@ describe(`Electric Collection - loadSubset deduplication`, () => {
     expect(electricCollection.status).toBe(`ready`)
 
     // Create a live query with a narrower predicate
-    createLiveQueryCollection({
-      startSync: true,
-      query: (q) =>
-        q
-          .from({ user: electricCollection })
-          .where(({ user }) => gt(user.age, 30))
-          .orderBy(({ user }) => user.age, `asc`)
-          .limit(10),
-    })
+    subscribed(
+      createLiveQueryCollection({
+        startSync: true,
+        query: (q) =>
+          q
+            .from({ user: electricCollection })
+            .where(({ user }) => gt(user.age, 30))
+            .orderBy(({ user }) => user.age, `asc`)
+            .limit(10),
+      }),
+    )
 
     await new Promise((resolve) => setTimeout(resolve, 0))
 
@@ -1217,15 +1258,17 @@ describe(`Electric Collection - loadSubset deduplication`, () => {
 
     // Create a live query with a broader predicate (age > 20 is NOT subset of age > 30)
     // This should NOT be deduped - should trigger another requestSnapshot
-    createLiveQueryCollection({
-      startSync: true,
-      query: (q) =>
-        q
-          .from({ user: electricCollection })
-          .where(({ user }) => gt(user.age, 20))
-          .orderBy(({ user }) => user.age, `asc`)
-          .limit(10),
-    })
+    subscribed(
+      createLiveQueryCollection({
+        startSync: true,
+        query: (q) =>
+          q
+            .from({ user: electricCollection })
+            .where(({ user }) => gt(user.age, 20))
+            .orderBy(({ user }) => user.age, `asc`)
+            .limit(10),
+      }),
+    )
 
     await new Promise((resolve) => setTimeout(resolve, 0))
 
@@ -1240,15 +1283,17 @@ describe(`Electric Collection - loadSubset deduplication`, () => {
     expect(electricCollection.status).toBe(`ready`)
 
     // Create a live query
-    createLiveQueryCollection({
-      startSync: true,
-      query: (q) =>
-        q
-          .from({ user: electricCollection })
-          .where(({ user }) => eq(user.active, true))
-          .orderBy(({ user }) => user.age, `asc`)
-          .limit(10),
-    })
+    subscribed(
+      createLiveQueryCollection({
+        startSync: true,
+        query: (q) =>
+          q
+            .from({ user: electricCollection })
+            .where(({ user }) => eq(user.active, true))
+            .orderBy(({ user }) => user.age, `asc`)
+            .limit(10),
+      }),
+    )
 
     await new Promise((resolve) => setTimeout(resolve, 0))
 
@@ -1278,15 +1323,17 @@ describe(`Electric Collection - loadSubset deduplication`, () => {
     // This should NOT be deduped because the reset cleared the deduplication state,
     // but it WILL be deduped because the existing live query just made the same request
     // So creating a different query to ensure we test the reset
-    createLiveQueryCollection({
-      startSync: true,
-      query: (q) =>
-        q
-          .from({ user: electricCollection })
-          .where(({ user }) => eq(user.active, false))
-          .orderBy(({ user }) => user.age, `asc`)
-          .limit(10),
-    })
+    subscribed(
+      createLiveQueryCollection({
+        startSync: true,
+        query: (q) =>
+          q
+            .from({ user: electricCollection })
+            .where(({ user }) => eq(user.active, false))
+            .orderBy(({ user }) => user.age, `asc`)
+            .limit(10),
+      }),
+    )
 
     await new Promise((resolve) => setTimeout(resolve, 0))
 
@@ -1302,28 +1349,32 @@ describe(`Electric Collection - loadSubset deduplication`, () => {
     expect(electricCollection.status).toBe(`ready`)
 
     // Create a live query without limit (unlimited)
-    createLiveQueryCollection({
-      startSync: true,
-      query: (q) =>
-        q
-          .from({ user: electricCollection })
-          .where(({ user }) => eq(user.active, true))
-          .orderBy(({ user }) => user.age, `asc`),
-    })
+    subscribed(
+      createLiveQueryCollection({
+        startSync: true,
+        query: (q) =>
+          q
+            .from({ user: electricCollection })
+            .where(({ user }) => eq(user.active, true))
+            .orderBy(({ user }) => user.age, `asc`),
+      }),
+    )
 
     await new Promise((resolve) => setTimeout(resolve, 0))
 
     expect(mockRequestSnapshot).toHaveBeenCalledTimes(1)
 
     // Order remains part of exact demand identity even without a limit.
-    createLiveQueryCollection({
-      startSync: true,
-      query: (q) =>
-        q
-          .from({ user: electricCollection })
-          .where(({ user }) => eq(user.active, true))
-          .orderBy(({ user }) => user.name, `desc`),
-    })
+    subscribed(
+      createLiveQueryCollection({
+        startSync: true,
+        query: (q) =>
+          q
+            .from({ user: electricCollection })
+            .where(({ user }) => eq(user.active, true))
+            .orderBy(({ user }) => user.name, `desc`),
+      }),
+    )
 
     await new Promise((resolve) => setTimeout(resolve, 0))
 
@@ -1340,13 +1391,15 @@ describe(`Electric Collection - loadSubset deduplication`, () => {
     expect(electricCollection.status).toBe(`ready`)
 
     // Create first unlimited query (age > 30)
-    createLiveQueryCollection({
-      startSync: true,
-      query: (q) =>
-        q
-          .from({ user: electricCollection })
-          .where(({ user }) => gt(user.age, 30)),
-    })
+    subscribed(
+      createLiveQueryCollection({
+        startSync: true,
+        query: (q) =>
+          q
+            .from({ user: electricCollection })
+            .where(({ user }) => gt(user.age, 30)),
+      }),
+    )
 
     await new Promise((resolve) => setTimeout(resolve, 0))
 
@@ -1354,13 +1407,15 @@ describe(`Electric Collection - loadSubset deduplication`, () => {
 
     // Create second unlimited query (age < 20) - different range
     // This should trigger a new request
-    createLiveQueryCollection({
-      startSync: true,
-      query: (q) =>
-        q
-          .from({ user: electricCollection })
-          .where(({ user }) => lt(user.age, 20)),
-    })
+    subscribed(
+      createLiveQueryCollection({
+        startSync: true,
+        query: (q) =>
+          q
+            .from({ user: electricCollection })
+            .where(({ user }) => lt(user.age, 20)),
+      }),
+    )
 
     await new Promise((resolve) => setTimeout(resolve, 0))
 
@@ -1368,13 +1423,15 @@ describe(`Electric Collection - loadSubset deduplication`, () => {
 
     // A broader requested predicate does not prove applied coverage for this
     // distinct exact predicate.
-    createLiveQueryCollection({
-      startSync: true,
-      query: (q) =>
-        q
-          .from({ user: electricCollection })
-          .where(({ user }) => gt(user.age, 35)),
-    })
+    subscribed(
+      createLiveQueryCollection({
+        startSync: true,
+        query: (q) =>
+          q
+            .from({ user: electricCollection })
+            .where(({ user }) => gt(user.age, 35)),
+      }),
+    )
 
     await new Promise((resolve) => setTimeout(resolve, 0))
 

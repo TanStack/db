@@ -9,6 +9,7 @@ import {
 } from '../utils/browser-polyfills'
 import { runAllCallbacks } from '../utils/callbacks'
 import { createDeferred } from '../deferred'
+import { codedMessage, devBuild } from '../error-message'
 import { CleanupQueue } from './cleanup-queue'
 import type { IdleCallbackDeadline } from '../utils/browser-polyfills'
 import type { StandardSchemaV1 } from '@standard-schema/spec'
@@ -125,7 +126,9 @@ export class CollectionLifecycleManager<
       // Instead, use markReady to transition to ready triggering the necessary events
       // and side effects.
       throw new CollectionStateError(
-        `You can't directly call "setStatus('ready'). You must use markReady instead.`,
+        devBuild() && process.env.NODE_ENV !== `production`
+          ? `You can't directly call "setStatus('ready'). You must use markReady instead.`
+          : codedMessage(208),
       )
     }
     this.validateStatusTransition(this.status, newStatus)
@@ -247,7 +250,9 @@ export class CollectionLifecycleManager<
   public assertCanStartSync(): void {
     if (this.cleaningUp) {
       throw new CollectionStateError(
-        `Cannot start collection "${this.id}" during cleanup. Restart after cleanup() completes.`,
+        devBuild() && process.env.NODE_ENV !== `production`
+          ? `Cannot start collection "${this.id}" during cleanup. Restart after cleanup() completes.`
+          : codedMessage(209, { id: this.id }),
       )
     }
     // A synchronously finished retirement retains its public promise until
@@ -437,9 +442,13 @@ export class CollectionLifecycleManager<
                   ? failures[0]
                   : new AggregateError(
                       failures,
-                      syncFailure
-                        ? `Adapter cleanup and local teardown both failed`
-                        : `Multiple local teardown steps failed`,
+                      devBuild() && process.env.NODE_ENV !== `production`
+                        ? syncFailure
+                          ? `Adapter cleanup and local teardown both failed`
+                          : `Multiple local teardown steps failed`
+                        : codedMessage(173, {
+                            syncFailure: syncFailure !== undefined,
+                          }),
                       { cause: failures[0] },
                     ),
             }

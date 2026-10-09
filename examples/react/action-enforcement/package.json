@@ -12,8 +12,8 @@
   },
   "dependencies": {
     "@tanstack/query-core": "^5.90.20",
-    "@tanstack/query-db-collection": "^1.4.0",
-    "@tanstack/react-db": "^0.5.5",
+    "@tanstack/query-db-collection": "^1.4.2",
+    "@tanstack/react-db": "^0.5.7",
     "react": "^19.2.4",
     "react-dom": "^19.2.4"
   },

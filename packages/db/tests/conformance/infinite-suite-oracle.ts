@@ -92,6 +92,41 @@ function expectReadyObservationsMatchSource(
   }
 }
 
+/**
+ * A live-query Collection sends no on-demand request until it has a
+ * subscriber or a preload. A framework that publishes a value before its hook
+ * subscribes (a React render, Svelte construction) therefore shows a value
+ * with no rows first; one whose first value follows the subscription (Vue
+ * setup) shows the ready first page. Both are legal. Any other first value,
+ * such as an error, an idle value, or one holding rows before it is ready, is
+ * not.
+ */
+function expectFirstOnDemandValue(
+  handle: InfiniteQueryHandle,
+  firstPage: Array<string>,
+  where: string,
+  // `loading` when the hook started the collection before subscribing;
+  // `idle` for a supplied window the hook adjusts before starting it.
+  notReady: `loading` | `idle` = `loading`,
+): void {
+  const first = handle.observations()[0]
+  if (first?.status === `ready`) {
+    expect(first, `${where}: a ready first value`).toEqual({
+      status: `ready`,
+      ids: firstPage,
+      pages: [firstPage],
+      hasNextPage: true,
+    })
+  } else {
+    expect(first, `${where}: a first value before the request`).toEqual({
+      status: notReady,
+      ids: [],
+      pages: [[]],
+      hasNextPage: false,
+    })
+  }
+}
+
 function rows(count: number, prefix = ``): Array<InfiniteRow> {
   return Array.from({ length: count }, (_, index) => ({
     id: `${prefix}${index + 1}`,
@@ -641,15 +676,10 @@ export function runInfiniteQuerySuite(rawDriver: InfiniteQueryDriver): void {
         )
         await handle.flush()
 
-        // One mount requests its first peek-ahead window exactly once, and a
-        // source that answers synchronously makes the first value ready.
+        // One mount requests its first peek-ahead window exactly once, after
+        // the hook subscribes.
         expect(source.calls.filter((call) => call.limit === 4)).toHaveLength(1)
-        expect(handle.observations()[0]).toEqual({
-          status: `ready`,
-          ids: [`1`, `2`, `3`],
-          pages: [[`1`, `2`, `3`]],
-          hasNextPage: true,
-        })
+        expectFirstOnDemandValue(handle, [`1`, `2`, `3`], `on-demand-paging`)
         expectPageRows(handle.current(), rows(8).slice(0, 3), 3)
         expect(handle.current().data.map((row) => row.id)).toEqual([
           `1`,
@@ -706,17 +736,61 @@ export function runInfiniteQuerySuite(rawDriver: InfiniteQueryDriver): void {
           ).toHaveLength(1)
           expectPageRows(handle.current(), rows(8).slice(0, 3), 3)
           expectReadyObservationsMatchSource(handle, rows(8), 3)
-          if (declared === 4) {
-            // The exact window starts in render, so its first value is ready.
-            expect(handle.observations()[0], `${where}: first value`).toEqual({
-              status: `ready`,
-              ids: [`1`, `2`, `3`],
-              pages: [[`1`, `2`, `3`]],
-              hasNextPage: true,
-            })
-          }
+          expectFirstOnDemandValue(
+            handle,
+            [`1`, `2`, `3`],
+            where,
+            declared === 4 ? `loading` : `idle`,
+          )
           handle.unmount()
         }
+      },
+    )
+
+    scenario(
+      `preloaded-collection-first-paint`,
+      `publishes a preloaded on-demand collection's first page on the first paint without another request`,
+      async () => {
+        // The documented route-loader pattern: define one limited live query,
+        // await its preload, then render the same collection. The preload is
+        // the demand, so its rows are stored when it returns, and the hook's
+        // first value is the ready first page in every framework. Mounting
+        // asks the source for nothing more.
+        const source = driver.makeOnDemandSource(rows(8))
+        const collection = driver.makePrecreated((q) =>
+          q
+            .from({ items: source.collection })
+            .orderBy(({ items }: any) => items.rank, `desc`)
+            .limit(4),
+        ).collection
+        // A preload that does not count as demand never settles; bound the
+        // wait so that failure reaches an assertion instead of the timeout.
+        const preloaded = await Promise.race([
+          collection.preload().then(() => true),
+          new Promise<boolean>((resolve) =>
+            setTimeout(() => resolve(false), 200),
+          ),
+        ])
+        expect(preloaded, `the preload settles`).toBe(true)
+        const requestsBeforeMount = source.calls.length
+        expect(
+          source.calls.filter((call) => call.limit === 4),
+          `the preload requested the first window once`,
+        ).toHaveLength(1)
+
+        const handle = driver.mountCollection(collection, { pageSize: 3 })
+        await handle.flush()
+
+        expect(handle.observations()[0]).toEqual({
+          status: `ready`,
+          ids: [`1`, `2`, `3`],
+          pages: [[`1`, `2`, `3`]],
+          hasNextPage: true,
+        })
+        expect(source.calls.length, `mounting requested nothing more`).toBe(
+          requestsBeforeMount,
+        )
+        expectReadyObservationsMatchSource(handle, rows(8), 3)
       },
     )
 
@@ -1542,7 +1616,7 @@ export function runInfiniteQuerySuite(rawDriver: InfiniteQueryDriver): void {
     )
 
     it(`registers every distinct scenario without whole-test waivers`, () => {
-      expect(registry.size).toBe(37)
+      expect(registry.size).toBe(38)
     })
   })
 }
