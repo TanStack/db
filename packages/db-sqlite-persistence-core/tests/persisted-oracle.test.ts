@@ -36,6 +36,7 @@ import {
   validateRemoteSubsetOptions,
 } from '../src'
 import { Temporal } from './temporal-value-oracle'
+import { cleanupTestActions } from './test-cleanup'
 import type {
   CollectionReset,
   PersistedCollectionCoordinator,
@@ -618,28 +619,17 @@ async function cleanupPersistedOracle(
   actions: Array<() => void | Promise<unknown>>,
   hasPrimaryFailure: boolean,
 ): Promise<void> {
-  const failures: Array<unknown> = []
-  for (const [index, action] of actions.entries()) {
-    try {
-      await atPersistedOracleCheckpoint(
+  await cleanupTestActions(
+    actions,
+    hasPrimaryFailure,
+    `Persisted oracle`,
+    (action, index) =>
+      atPersistedOracleCheckpoint(
         Promise.resolve().then(action),
         `cleanup stage ${index}`,
         250,
-      )
-    } catch (error) {
-      failures.push(error)
-    }
-  }
-  if (failures.length > 0) {
-    if (hasPrimaryFailure) {
-      console.warn(
-        `Persisted oracle cleanup failed after the primary failure:`,
-        failures,
-      )
-    } else {
-      throw new AggregateError(failures, `Persisted oracle cleanup failed`)
-    }
-  }
+      ),
+  )
 }
 
 it.each([false, true])(
@@ -10236,6 +10226,256 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
       )
     }
   })
+
+  // The core optimistic-history law drops a refused insert at settlement;
+  // accepted source transactions remain authoritative. The independent
+  // single-row source reference state starts empty. Each accepted source turn
+  // changes only its named key.
+  // Cross first-turn insert/delete with commitment before/after refusal, then
+  // apply the opposite turn. Compare at mutation settlement and each receipt,
+  // before a later source turn can hide a ghost.
+  // A failed transaction contributes no lasting local attribution. A source
+  // row that survives its rejection has remote public origin at publication,
+  // whether the source turn was accepted before or after the rejection.
+  const refusalHistories = ([`before`, `after`] as const).flatMap((timing) =>
+    ([`delete`, `insert`] as const).map((firstWrite) => ({
+      timing,
+      firstWrite,
+    })),
+  )
+  it.each(refusalHistories)(
+    `drops a refused insert and applies source turns on its key: %j`,
+    async ({ timing, firstWrite }) => {
+      const adapter = createRecordingAdapter()
+      const refused = new Error(`outbound save refused`)
+      const outbound = createEventGate()
+      const handlerEntered = createEventGate()
+      let sourceParams!: TodoSyncParams
+      const collection = createCollection(
+        persistedCollectionOptions<Todo, string>({
+          id: `refused-insert-source-${timing}-${firstWrite}`,
+          getKey: (row) => row.id,
+          sync: {
+            sync: (params) => {
+              sourceParams = params
+              params.markReady()
+            },
+          },
+          persistence: { adapter },
+          onInsert: async () => {
+            handlerEntered.resolve()
+            await outbound.promise
+          },
+        }),
+      )
+      let transaction: ReturnType<typeof collection.insert> | undefined
+      let firstReceipt: true | Promise<void> | undefined
+      let secondReceipt: true | Promise<void> | undefined
+      let expectedSource: Todo | undefined
+      let hasPrimaryFailure = false
+      const sourceRow: Todo = { id: `local`, title: `source row` }
+      const laterRow: Todo = { id: `local`, title: `later source row` }
+
+      // A source turn is an authoritative edit. This tiny model uses no
+      // persisted-wrapper or Collection state to predict the next row.
+      const checkSource = (checkpoint: string) => {
+        const live = collection.get(`local`)
+        expect(
+          {
+            live: stripVirtualProps(live),
+            base: collection.base.get(`local`),
+            durable: adapter.rows.get(`local`),
+          },
+          checkpoint,
+        ).toEqual({
+          live: expectedSource,
+          base: expectedSource,
+          durable: expectedSource,
+        })
+        if (expectedSource) expect(live?.$origin, checkpoint).toBe(`remote`)
+      }
+      const writeSource = (type: `insert` | `delete`, row = sourceRow) => {
+        sourceParams.begin()
+        if (type === `insert`) sourceParams.write({ type, value: row })
+        else sourceParams.write({ type, key: `local` })
+        return sourceParams.commit()
+      }
+
+      try {
+        await atPersistedOracleCheckpoint(
+          collection.stateWhenReady(),
+          `refused insert collection ready`,
+        )
+        transaction = collection.insert({ id: `local`, title: `optimistic` })
+        await atPersistedOracleCheckpoint(
+          handlerEntered.promise,
+          `refused insert handler entered`,
+        )
+        expect(collection.get(`local`)?.title).toBe(`optimistic`)
+        expect(collection.base.has(`local`)).toBe(false)
+        expect(adapter.rows.has(`local`)).toBe(false)
+
+        if (timing === `before`) {
+          firstReceipt = writeSource(firstWrite)
+          expectedSource = firstWrite === `insert` ? sourceRow : undefined
+          await atPersistedOracleCheckpoint(
+            Promise.resolve(whenSyncAccepted(firstReceipt)).then(
+              () => undefined,
+            ),
+            `source turn durable before refusal`,
+          )
+          expect(collection.get(`local`)?.title).toBe(`optimistic`)
+          expect(adapter.rows.get(`local`)).toEqual(expectedSource)
+          // Durability accepts the source turn. Its receipt still waits for
+          // the refused mutation to settle and release core publication.
+          const receiptState = observeSettlement(
+            Promise.resolve(firstReceipt).then(() => undefined),
+          )
+          await flushAsyncWork()
+          expect(receiptState.read()).toEqual({ status: `pending` })
+        }
+
+        outbound.reject(refused)
+        await expect(transaction.isPersisted.promise).rejects.toBe(refused)
+        expect(transaction.state).toBe(`failed`)
+        checkSource(`after refused mutation settled`)
+        if (firstReceipt !== undefined) {
+          await Promise.resolve(firstReceipt)
+          checkSource(`after held source receipt`)
+        }
+
+        if (timing === `after`) {
+          firstReceipt = writeSource(firstWrite)
+          expectedSource = firstWrite === `insert` ? sourceRow : undefined
+          await atPersistedOracleCheckpoint(
+            Promise.resolve(firstReceipt).then(() => undefined),
+            `first post-failure source turn applied`,
+          )
+          checkSource(`after first source receipt`)
+        }
+
+        const secondWrite = firstWrite === `insert` ? `delete` : `insert`
+        secondReceipt = writeSource(secondWrite, laterRow)
+        expectedSource = secondWrite === `insert` ? laterRow : undefined
+        await atPersistedOracleCheckpoint(
+          Promise.resolve(secondReceipt).then(() => undefined),
+          `second post-failure source turn applied`,
+        )
+        checkSource(`after second source receipt`)
+      } catch (error) {
+        hasPrimaryFailure = true
+        throw error
+      } finally {
+        if (transaction) outbound.reject(refused)
+        await cleanupPersistedOracle(
+          [
+            () => transaction?.isPersisted.promise.catch(() => undefined),
+            () =>
+              firstReceipt === undefined
+                ? undefined
+                : Promise.resolve(firstReceipt).catch(() => undefined),
+            () =>
+              secondReceipt === undefined
+                ? undefined
+                : Promise.resolve(secondReceipt).catch(() => undefined),
+            () => collection.cleanup(),
+          ],
+          hasPrimaryFailure,
+        )
+      }
+    },
+  )
+
+  // The synced wrapper forwards accepted source transactions to core without
+  // a client identity. Under the key-and-timing rule, the first same-key turn
+  // consumes a successful mutation's local attribution. A second accepted
+  // turn replaces it with remote attribution. The independent source order
+  // predicts the final row; compare it when the mutation and receipts settle.
+  it.each([1, 2] as const)(
+    `attributes only the first of %i persisted same-key source turns locally`,
+    async (sourceTurns) => {
+      const adapter = createRecordingAdapter()
+      const handlerEntered = createEventGate()
+      const releaseHandler = createEventGate()
+      let source!: TodoSyncParams
+      const collection = createCollection(
+        persistedCollectionOptions<Todo, string>({
+          id: `persisted-origin-${sourceTurns}`,
+          getKey: (row) => row.id,
+          sync: {
+            sync: (params) => {
+              source = params
+              params.markReady()
+            },
+          },
+          persistence: { adapter },
+          onInsert: async () => {
+            handlerEntered.resolve()
+            await releaseHandler.promise
+          },
+        }),
+      )
+      let transaction: ReturnType<typeof collection.insert> | undefined
+      const receipts: Array<true | Promise<void>> = []
+      let hasPrimaryFailure = false
+
+      try {
+        await atPersistedOracleCheckpoint(
+          collection.stateWhenReady(),
+          `persisted origin collection ready`,
+        )
+        transaction = collection.insert({ id: `local`, title: `optimistic` })
+        await atPersistedOracleCheckpoint(
+          handlerEntered.promise,
+          `persisted origin handler entered`,
+        )
+        for (let turn = 1; turn <= sourceTurns; turn++) {
+          source.begin()
+          source.write({
+            type: turn === 1 ? `insert` : `update`,
+            value: { id: `local`, title: `source ${turn}` },
+          })
+          const receipt = source.commit()
+          receipts.push(receipt)
+          await atPersistedOracleCheckpoint(
+            Promise.resolve(whenSyncAccepted(receipt)).then(() => undefined),
+            `source turn ${turn} accepted`,
+          )
+        }
+        expect(collection.get(`local`)?.title).toBe(`optimistic`)
+
+        releaseHandler.resolve()
+        await atPersistedOracleCheckpoint(
+          transaction.isPersisted.promise.then(() => undefined),
+          `successful persisted origin mutation settled`,
+        )
+        await Promise.all(receipts.map((receipt) => Promise.resolve(receipt)))
+        const row = { id: `local`, title: `source ${sourceTurns}` }
+        expect(stripVirtualProps(collection.get(`local`))).toEqual(row)
+        expect(collection.get(`local`)?.$origin).toBe(
+          sourceTurns === 1 ? `local` : `remote`,
+        )
+        expect(collection.base.get(`local`)).toEqual(row)
+        expect(adapter.rows.get(`local`)).toEqual(row)
+      } catch (error) {
+        hasPrimaryFailure = true
+        throw error
+      } finally {
+        releaseHandler.resolve()
+        await cleanupPersistedOracle(
+          [
+            () => transaction?.isPersisted.promise.catch(() => undefined),
+            ...receipts.map(
+              (receipt) => () =>
+                Promise.resolve(receipt).catch(() => undefined),
+            ),
+            () => collection.cleanup(),
+          ],
+          hasPrimaryFailure,
+        )
+      }
+    },
+  )
 
   // A source commit made while a local mutation persists is accepted and
   // durably stored. Its rows stay hidden until that mutation settles.
