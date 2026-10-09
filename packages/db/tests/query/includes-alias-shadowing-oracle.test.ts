@@ -935,6 +935,292 @@ describe(`captured alias scope oracle`, () => {
 })
 
 /**
+ * ARCHITECTURE.md §Identity and law 1 requires an outer source filter to stay
+ * with that source's lexical binding. Renaming a child source cannot change
+ * the rows admitted by its on-demand provider.
+ * The model below reads plain parent and child maps; it has no aliases or
+ * provider predicates. The grammar crosses a QueryRef join and a direct
+ * include, shadowed and renamed child aliases, eager and on-demand sources,
+ * and child IDs that either agree or disagree with the outer filter literal.
+ * The public comparison is made after preload, before cleanup can change rows.
+ */
+describe(`outer filters stay with their source under alias shadowing`, () => {
+  type Parent = { id: number; linkId: number }
+  type Child = { id: number; linkId: number }
+  type PlacementForm = `join` | `include`
+
+  const model = (
+    form: PlacementForm,
+    parents: ReadonlyMap<number, Parent>,
+    children: ReadonlyMap<number, Child>,
+  ) =>
+    [...parents.values()]
+      .filter((parent) => parent.id === 1)
+      .map((parent) =>
+        form === `join`
+          ? { id: parent.id, joinedId: children.get(parent.linkId)?.id }
+          : {
+              id: parent.id,
+              children: [...children.values()]
+                .filter((child) => child.linkId === parent.id)
+                .map((child) => child.id),
+            },
+      )
+
+  for (const form of [`join`, `include`] as const) {
+    for (const mode of [`eager`, `onDemand`] as const) {
+      for (const childId of [1, 2] as const) {
+        test(`${form}, ${mode}, child ID ${childId}: projected rows follow source roles`, async () => {
+          const parentRow = { id: 1, linkId: childId }
+          const childRow = { id: childId, linkId: 1 }
+          const expected = model(
+            form,
+            new Map([[parentRow.id, parentRow]]),
+            new Map([[childRow.id, childRow]]),
+          )
+          const cases = ([`u`, `v`] as const).map((alias) => {
+            const parents = createScopedSource(
+              `outer-filter-parent-${form}-${mode}-${childId}-${alias}`,
+              [parentRow],
+              mode,
+            )
+            const children = createScopedSource(
+              `outer-filter-child-${form}-${mode}-${childId}-${alias}`,
+              [childRow],
+              mode,
+            )
+            children.collection.createIndex((child) => child.id, {
+              indexType: BasicIndex,
+            })
+            const childQuery = new Query()
+              .from({ [alias]: children.collection })
+              .select((context: Context) => ({
+                id: (context[alias] as Child).id,
+                linkId: (context[alias] as Child).linkId,
+              }))
+            const root = new Query()
+              .from({ u: parents.collection })
+              .where(({ u }) => eq(u.id, 1))
+            const live =
+              form === `join`
+                ? createLiveQueryCollection({
+                    query: root
+                      .leftJoin({ w: childQuery }, ({ u, w }) =>
+                        eq(u.linkId, w.id),
+                      )
+                      .select(({ u, w }) => ({ id: u.id, joinedId: w.id })),
+                  })
+                : createLiveQueryCollection({
+                    query: root.select(({ u: parent }) => ({
+                      id: parent.id,
+                      children: toArray(
+                        new Query()
+                          .from({ [alias]: children.collection })
+                          .where((context: Context) =>
+                            eq((context[alias] as Child).linkId, parent.id),
+                          )
+                          .select((context: Context) => ({
+                            id: (context[alias] as Child).id,
+                          })),
+                      ),
+                    })),
+                  })
+            return {
+              alias,
+              parents,
+              children,
+              live,
+            }
+          })
+
+          await withHistoryCleanup(
+            async () => {
+              for (const entry of cases) {
+                await entry.live.preload()
+                const rows = [...entry.live.toArray].map((row) =>
+                  form === `join`
+                    ? {
+                        id: row.id,
+                        joinedId: (row as { joinedId?: number }).joinedId,
+                      }
+                    : {
+                        id: row.id,
+                        children: (
+                          row as { children: Array<{ id: number }> }
+                        ).children.map((child) => child.id),
+                      },
+                )
+                expect(rows, `${entry.alias}: public rows`).toEqual(expected)
+                if (mode === `onDemand`) {
+                  expect(
+                    entry.children.collection.toArray.map((child) => child.id),
+                    `${entry.alias}: child provider admission`,
+                  ).toEqual([childId])
+                }
+              }
+            },
+            () =>
+              cases.flatMap((entry) => [
+                () => entry.live.cleanup(),
+                () => entry.parents.collection.cleanup(),
+                () => entry.children.collection.cleanup(),
+              ]),
+          )
+        })
+      }
+    }
+  }
+})
+
+/**
+ * ARCHITECTURE.md §Identity and law 1 requires a projected parent field to
+ * remain parent-dependent through a child QueryRef.
+ * The model includes a child when its parent has rank A, regardless of the
+ * child's own rank. Changing the child's alias is semantically inert. The
+ * history checks initial publication, a child-rank change, and a parent-rank
+ * change through the public include result; on-demand source rows additionally
+ * show whether a pushed provider predicate incorrectly excludes the child.
+ */
+describe(`captured projections keep their binding during predicate pushdown`, () => {
+  type Parent = { id: number; rank: string }
+  type Child = { id: number; parentId: number; rank: string }
+  type Anchor = { id: number }
+
+  const model = (
+    parents: ReadonlyMap<number, Parent>,
+    children: ReadonlyMap<number, Child>,
+    anchors: ReadonlyMap<number, Anchor>,
+  ) =>
+    [...parents.values()].map((parent) => ({
+      id: parent.id,
+      matches:
+        parent.rank === `A`
+          ? [...children.values()]
+              .filter(
+                (child) =>
+                  child.parentId === parent.id && anchors.has(child.id),
+              )
+              .map((child) => child.id)
+          : [],
+    }))
+
+  for (const mode of [`eager`, `onDemand`] as const) {
+    test(`${mode}: parent rank controls the child result under both child aliases`, async () => {
+      const parentRow = { id: 1, rank: `A` }
+      const childRow = { id: 10, parentId: 1, rank: `Z` }
+      const anchorRow = { id: 10 }
+      const parentsModel = new Map([[parentRow.id, parentRow]])
+      const childrenModel = new Map([[childRow.id, childRow]])
+      const anchorsModel = new Map([[anchorRow.id, anchorRow]])
+      const cases = ([`p`, `c`] as const).map((alias) => {
+        const parents = createScopedSource(
+          `projected-parent-${mode}-${alias}`,
+          [parentRow],
+          mode,
+        )
+        const children = createScopedSource(
+          `projected-child-${mode}-${alias}`,
+          [childRow],
+          mode,
+        )
+        const anchors = createScopedSource(
+          `projected-anchor-${mode}-${alias}`,
+          [anchorRow],
+          mode,
+        )
+        children.collection.createIndex((child) => child.id, {
+          indexType: BasicIndex,
+        })
+        anchors.collection.createIndex((anchor) => anchor.id, {
+          indexType: BasicIndex,
+        })
+        const query = new Query()
+          .from({ p: parents.collection })
+          .select(({ p: parent }) => {
+            const inner = new Query()
+              .from({ [alias]: children.collection })
+              .select((context: Context) => {
+                const child = context[alias] as Child
+                return {
+                  id: child.id,
+                  parentId: child.parentId,
+                  rank: parent.rank,
+                }
+              })
+            return {
+              id: parent.id,
+              matches: toArray(
+                new Query()
+                  .from({ q: inner })
+                  .innerJoin({ a: anchors.collection }, ({ q, a }) =>
+                    eq(q.id, a.id),
+                  )
+                  .where(({ q }) => eq(q.parentId, parent.id))
+                  .where(({ q }) => eq(q.rank, `A`))
+                  .select(({ q }) => ({ id: q.id })),
+              ),
+            }
+          })
+        return {
+          alias,
+          parents,
+          children,
+          anchors,
+          live: createLiveQueryCollection({ query }),
+        }
+      })
+
+      const check = (checkpoint: string) => {
+        const expected = model(parentsModel, childrenModel, anchorsModel)
+        for (const entry of cases) {
+          expect(
+            entry.live.toArray.map(({ id, matches }) => ({
+              id,
+              matches: matches.map((match) => match.id),
+            })),
+            `${checkpoint}: ${entry.alias} public rows`,
+          ).toEqual(expected)
+        }
+      }
+
+      await withHistoryCleanup(
+        async () => {
+          for (const entry of cases) await entry.live.preload()
+          check(`initial`)
+          if (mode === `onDemand`) {
+            for (const entry of cases) {
+              expect(
+                entry.children.collection.toArray.map((child) => child.id),
+                `${entry.alias}: initial child provider admission`,
+              ).toEqual([10])
+            }
+          }
+
+          const changedChild = { ...childRow, rank: `A` }
+          childrenModel.set(changedChild.id, changedChild)
+          for (const entry of cases) entry.children.put(changedChild)
+          await flushPromises()
+          check(`child rank changed`)
+
+          const changedParent = { ...parentRow, rank: `Z` }
+          parentsModel.set(changedParent.id, changedParent)
+          for (const entry of cases) entry.parents.put(changedParent)
+          await flushPromises()
+          check(`parent rank changed`)
+        },
+        () =>
+          cases.flatMap((entry) => [
+            () => entry.live.cleanup(),
+            () => entry.parents.collection.cleanup(),
+            () => entry.children.collection.cleanup(),
+            () => entry.anchors.collection.cleanup(),
+          ]),
+      )
+    })
+  }
+})
+
+/**
  * # Group keys keep lexical bindings when paths have the same spelling
  *
  * ARCHITECTURE.md §Identity and law 1 allow an include child to shadow its

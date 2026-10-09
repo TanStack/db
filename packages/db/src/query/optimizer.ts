@@ -1196,6 +1196,7 @@ function referencesAliasWithRemappedSelect(
   const hasSpreadProjection = Object.keys(select).some((key) =>
     key.startsWith(`__SPREAD_SENTINEL__`),
   )
+  const localBindings = getLocalBindingIds(subquery)
 
   for (const ref of refs) {
     const path = ref.path
@@ -1213,6 +1214,15 @@ function referencesAliasWithRemappedSelect(
 
     // Non-PropRef projections are computed values; cannot push down.
     if (!(projected instanceof PropRef)) {
+      return true
+    }
+
+    // A selected ancestor field depends on the parent route. Moving its
+    // predicate into this source would read a same-named child field instead.
+    if (
+      projected.bindingId !== undefined &&
+      !localBindings.has(projected.bindingId)
+    ) {
       return true
     }
 

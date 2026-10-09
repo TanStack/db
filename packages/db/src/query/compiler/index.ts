@@ -404,7 +404,12 @@ export function compileQuery(
   validateQueryStructure(rawQuery)
 
   // Optimize the query before compilation
-  const { optimizedQuery, sourceWhereClauses } = optimizeQuery(rawQuery)
+  const { optimizedQuery, sourceWhereClauses: aliasWhereClauses } =
+    optimizeQuery(rawQuery)
+  const sourceWhereClauses = keyWhereClausesBySource(
+    rawQuery,
+    aliasWhereClauses,
+  )
   // Use a mutable binding so we can shallow-clone select before includes mutation
   let query = optimizedQuery
 
@@ -1115,12 +1120,6 @@ export function compileQuery(
     )
   }
 
-  const keyedSourceWhereClauses = keyWhereClausesBySource(
-    rawSources,
-    sourceWhereClauses,
-    aliasRemapping,
-  )
-
   // Process the DISTINCT clause if it exists
   if (query.distinct) {
     pipeline = pipeline.pipe(distinct(([_key, row]) => row.$selected))
@@ -1218,7 +1217,7 @@ export function compileQuery(
     collectionId: mainCollectionId,
     pipeline: resultPipeline,
     valueIdentity,
-    sourceWhereClauses: keyedSourceWhereClauses,
+    sourceWhereClauses,
     aliasToCollectionId,
     aliasRemapping,
     includes: includesResults.length > 0 ? includesResults : undefined,
@@ -1236,22 +1235,20 @@ function isInlineInclude(include: IncludesCompilationResult): boolean {
 }
 
 function keyWhereClausesBySource(
-  sources: Array<CollectionRef>,
+  query: QueryIR,
   clauses: Map<string, BasicExpression<boolean>>,
-  aliasRemapping: Record<string, string>,
 ): Map<string, BasicExpression<boolean>> {
-  const sourceIds = new Set(sources.map(({ sourceId }) => sourceId))
+  const localSources = [
+    ...getFromSources(query.from),
+    ...(query.join?.map(({ from }) => from) ?? []),
+  ].filter((source): source is CollectionRef => source.type === `collectionRef`)
+  const localSourceByAlias = new Map(
+    localSources.map((source) => [source.alias, source]),
+  )
   const result = new Map<string, BasicExpression<boolean>>()
   for (const [key, clause] of clauses) {
-    if (sourceIds.has(key)) {
-      result.set(key, clause)
-      continue
-    }
-
-    const alias = aliasRemapping[key] ?? key
-    for (const source of sources) {
-      if (source.alias === alias) result.set(source.sourceId, clause)
-    }
+    const source = localSourceByAlias.get(key)
+    if (source) result.set(source.sourceId, clause)
   }
   return result
 }
