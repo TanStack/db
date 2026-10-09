@@ -339,6 +339,8 @@ export function processGroupBy(
   aggregateCollectionId?: string,
   mainSource?: string,
   sanitizeCallbackRows = false,
+  // Both compiler call sites pass the query's own aliases. Without them, a
+  // single group cannot reject a source field.
   sourceAliases: ReadonlySet<string> = new Set(),
 ): NamespacedAndKeyedStream {
   const fields = createInternalGroupFields(groupByClause.length, selectClause)
@@ -371,15 +373,25 @@ export function processGroupBy(
     ? undefined
     : validateAndCreateMapping(groupByClause, selectClause)
   // A single group has one value for a literal or a parent field, which is
-  // constant within a route. A field of the query's own sources has none.
-  const singleGroupValues: Record<string, (row: NamespacedRow) => unknown> = {}
+  // constant within a route. A field of the query's own sources has none,
+  // also outside the aggregates of a wrapped expression. A spread has none
+  // either: a route's parent context holds only the parent fields the query
+  // names.
+  let singleGroupFields:
+    ((row: NamespacedRow) => Record<string, any>) | undefined
   if (singleGroup && selectClause) {
+    const fieldsOnly: Select = {}
     for (const [alias, expr] of Object.entries(selectClause)) {
-      if (expr.type === `agg` || containsAggregate(expr)) continue
-      if (refersToSource(expr, sourceAliases))
-        throw new NonAggregateExpressionNotInGroupByError(alias)
-      singleGroupValues[alias] = compileGroupedSelectValue(expr)
+      if (lacksGroupValue(alias, expr, sourceAliases))
+        throw new NonAggregateExpressionNotInGroupByError(
+          alias.startsWith(SPREAD_SENTINEL)
+            ? `...${alias.slice(SPREAD_SENTINEL.length).split(`__`)[0]}`
+            : alias,
+        )
+      if (expr.type !== `agg` && !containsAggregate(expr))
+        fieldsOnly[alias] = expr
     }
+    singleGroupFields = compileGroupedSelectObject(fieldsOnly)
   }
 
   // Pre-compile groupBy expressions
@@ -505,7 +517,12 @@ export function processGroupBy(
       // Start with the existing $selected from early SELECT processing
       const selectResults = (aggregatedRow as any).$selected || {}
       const finalResults: Record<string, any> = singleGroup
-        ? { ...selectResults }
+        ? {
+            ...selectResults,
+            ...singleGroupFields?.(
+              getGroupEvaluationRow(aggregatedRow, fields),
+            ),
+          }
         : {}
 
       if (selectClause) {
@@ -513,10 +530,6 @@ export function processGroupBy(
         for (const [alias, expr] of Object.entries(selectClause)) {
           if (expr.type === `agg`) {
             finalResults[alias] = aggregatedRow[alias]
-          } else if (singleGroupValues[alias]) {
-            finalResults[alias] = singleGroupValues[alias](
-              getGroupEvaluationRow(aggregatedRow, fields),
-            )
           } else if (!singleGroup && !wrappedAggExprs[alias]) {
             // Use cached mapping to get the corresponding __key_X for non-aggregates
             const groupIndex = mapping?.get(alias)
@@ -640,14 +653,38 @@ export function processGroupBy(
   return pipeline
 }
 
-/** Whether a select value reads a field of one of `sources`. */
-function refersToSource(value: unknown, sources: ReadonlySet<string>): boolean {
-  if (value === null || typeof value !== `object`) return false
-  const node = value as { type?: unknown; path?: Array<string> }
-  if (node.type === `ref`) return sources.has(node.path![0]!)
-  // A literal holds no refs; a nested include is compiled separately.
-  if (node.type === `val` || node.type === `includesSubquery`) return false
-  return Object.values(value).some((child) => refersToSource(child, sources))
+const SPREAD_SENTINEL = `__SPREAD_SENTINEL__`
+
+/**
+ * Whether a select value has no single value for an aggregate's group: it
+ * spreads a row, or reads a field of one of `sources` outside an aggregate.
+ * It walks only select and expression nodes.
+ */
+function lacksGroupValue(
+  key: string,
+  value: unknown,
+  sources: ReadonlySet<string>,
+): boolean {
+  if (key.startsWith(SPREAD_SENTINEL)) return true
+  if (isConditionalSelect(value))
+    return (
+      value.branches.some(
+        (branch) =>
+          lacksGroupValue(``, branch.condition, sources) ||
+          lacksGroupValue(``, branch.value, sources),
+      ) || lacksGroupValue(``, value.defaultValue, sources)
+    )
+  if (isExpressionLike(value)) {
+    const node = value as BasicExpression
+    if (node.type === `ref`) return sources.has(node.path[0]!)
+    if (node.type === `func`)
+      return node.args.some((arg) => lacksGroupValue(``, arg, sources))
+    return false
+  }
+  if (!isNestedSelectObject(value)) return false
+  return Object.entries(value).some(([childKey, child]) =>
+    lacksGroupValue(childKey, child, sources),
+  )
 }
 
 /**

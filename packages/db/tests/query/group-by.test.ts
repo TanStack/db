@@ -2827,4 +2827,69 @@ describe(`non-aggregate fields of an aggregate without groupBy`, () => {
       ),
     ).toThrow(NonAggregateExpressionNotInGroupByError)
   })
+
+  // A source field read outside the aggregates of a wrapped, conditional,
+  // nested or spread select value has no single value either.
+  test(`a source field outside an aggregate throws in every select shape`, () => {
+    const { comments } = setup(`shapes`)
+    const shapes = [
+      (c: any) => ({ ...c, n: count(c.id) }),
+      (c: any) => ({ w: add(count(c.id), c.id) }),
+      (c: any) => ({ z: caseWhen(eq(c.k, `a`), count(c.id), 0) }),
+      (c: any) => ({ meta: { n: count(c.id), k: c.k } }),
+    ]
+    for (const shape of shapes) {
+      expect(() =>
+        createLiveQueryCollection((q) =>
+          q.from({ c: comments }).select(({ c }) => shape(c)),
+        ),
+      ).toThrow(NonAggregateExpressionNotInGroupByError)
+    }
+  })
+
+  // A parent field follows the parent's current row. A spread names no field,
+  // so it throws beside an aggregate, for a parent as for a source.
+  test(`an include follows parent updates and rejects a parent spread`, async () => {
+    const { issues, comments } = setup(`spread`)
+    const query = createLiveQueryCollection((q) =>
+      q.from({ issue: issues }).select(({ issue }) => ({
+        id: issue.id,
+        kids: toArray(
+          q
+            .from({ c: comments })
+            .where(({ c }) => eq(c.k, issue.k))
+            .select(({ c }) => ({ px: issue.x, n: count(c.id) })),
+        ),
+      })),
+    )
+    await query.preload()
+    const kids = () =>
+      query.toArray.map((row) => ({
+        id: row.id,
+        kids: row.kids.map(stripVirtualProps),
+      }))
+    expect(kids()).toEqual([
+      { id: 1, kids: [{ px: 3, n: 2 }] },
+      { id: 2, kids: [{ px: 4, n: 1 }] },
+    ])
+    issues.utils.begin()
+    issues.utils.write({ type: `update`, value: { id: 1, k: `a`, x: 7 } })
+    issues.utils.commit()
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    expect(kids()[0]).toEqual({ id: 1, kids: [{ px: 7, n: 2 }] })
+    await query.cleanup()
+    expect(() =>
+      createLiveQueryCollection((q) =>
+        q.from({ issue: issues }).select(({ issue }) => ({
+          id: issue.id,
+          kids: toArray(
+            q
+              .from({ c: comments })
+              .where(({ c }) => eq(c.k, issue.k))
+              .select(({ c }) => ({ ...issue, n: count(c.id) })),
+          ),
+        })),
+      ),
+    ).toThrow(NonAggregateExpressionNotInGroupByError)
+  })
 })

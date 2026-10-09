@@ -1039,6 +1039,7 @@ export function compileQuery(
       mainCollectionId,
       groupByMainSource,
       sourceCarriesInternalRouteState || includesRoutingFns.length > 0,
+      new Set(collectScopeAliases(query)),
     )
   } else if (selectHasAggregates) {
     // SELECT contains aggregates but no GROUP BY: implicit single-group aggregation
