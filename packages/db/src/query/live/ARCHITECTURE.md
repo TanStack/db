@@ -591,9 +591,18 @@ without re-emitting every parent, and moving a route changes the parent field to
 the destination bucket's facade. A facade is never retargeted to another
 bucket. The D2 join retains inactive bucket rows and emits their current
 snapshot when the bucket becomes active; the facade adapter does not buffer
-discarded deltas. The adapter retains a facade only while at least one parent
-route uses its bucket. When the last route leaves, it retracts the facade's rows
-and drops its strong reference. An external holder may keep that empty
+discarded deltas. It keeps only the deltas a flush consumed until that flush
+publishes: if the root commit fails, the adapter restores them, so the next
+successful flush publishes each pending child change exactly once. The adapter retains a facade only while at least one parent
+route uses its bucket. When the last route leaves, it deletes through sync every
+key the facade still shows and drops its strong reference. The graph has
+already retracted the bucket's rows, but a facade is a Collection: a user
+transaction can show an optimistic row in it, and a sync commit can be held
+behind a persisting transaction. Retirement is therefore a legal write to a
+non-empty facade, not an invariant violation. It is a facade write of the
+flush, so a failed flush restores it. A restore deletes every key the flush
+wrote, including a write that a persisting transaction still holds, so the held
+write cannot land after the rollback. An external holder may keep the retired
 Collection alive, but a later active interval gets a new facade. Inline modes
 do not create child Collections.
 
@@ -1318,6 +1327,17 @@ Installed state, synchronous reads, change-event payloads, and downstream
 queries must all observe the same fully materialized commit. The facade adapter
 may defer event delivery across its Collection transactions, but it must not
 defer state or index installation. Routing and identity remain inside D2.
+
+A failed flush is atomic. If a facade write or the root commit fails, every
+facade the flush wrote returns to its rows, order, and key mapping from before
+the flush, the facades it created are disposed, and no facade publishes an
+event or a layout revision. The child deltas that flush consumed stay pending
+with the builder's pending root rows, so the next successful flush publishes
+each of them exactly once. No graph output reaches the adapter between a flush
+and its rollback, because the flush runs inside the graph run; a rollback that
+finds new pending deltas is an invariant violation. It restores the facades and
+discards the deferred events first, so the facades keep delivering events, and
+then throws. A rollback after the adapter is cleaned up does nothing.
 
 ## External boundaries
 

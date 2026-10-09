@@ -2359,3 +2359,13 @@ Development builds show this message, with `${...}` replaced by values:
 ```text
 [LocalStorageCollection] Error refreshing a same-tab peer for storage key "${key}":
 ```
+
+<a id="error-235"></a>
+
+## Error 235: `query/live/bucket-facade-adapter.ts`
+
+Development builds show this message, with `${...}` replaced by values:
+
+```text
+Bucket facade received graph output between a flush and its rollback
+```

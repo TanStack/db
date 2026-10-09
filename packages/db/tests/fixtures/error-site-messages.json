@@ -865,5 +865,12 @@
       "[LocalStorageCollection] Error refreshing a same-tab peer for storage key \""
     ],
     "kind": "warning"
+  },
+  "235": {
+    "file": "query/live/bucket-facade-adapter.ts",
+    "template": "Bucket facade received graph output between a flush and its rollback",
+    "literals": [
+      "Bucket facade received graph output between a flush and its rollback"
+    ]
   }
 }
