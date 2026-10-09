@@ -2369,3 +2369,13 @@ Development builds show this message, with `${...}` replaced by values:
 ```text
 Bucket facade received graph output between a flush and its rollback
 ```
+
+<a id="error-236"></a>
+
+## Error 236: `query/live/bucket-facade-adapter.ts`
+
+Development builds show this message, with `${...}` replaced by values:
+
+```text
+Bucket facade retired with rows the graph did not retract
+```

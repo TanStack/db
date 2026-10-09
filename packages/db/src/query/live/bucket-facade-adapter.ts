@@ -397,11 +397,21 @@ export class BucketFacadeAdapter {
     const byBucket = this.entries.get(edgeId)
     const entry = byBucket?.get(bucketKey)
     if (!entry) return
+    // The graph retracts every row it sent before it retires a bucket, and
+    // the adapter deletes a row from `currentOrder` when it applies that
+    // retraction, even while a persisting transaction holds the write. A row
+    // left there is a contradictory graph signal.
+    if (entry.currentOrder.size > 0) {
+      throw new Error(
+        devBuild() && process.env.NODE_ENV !== `production`
+          ? `Bucket facade retired with rows the graph did not retract`
+          : codedMessage(236),
+      )
+    }
 
-    // The graph retracts a bucket's rows when it retires it, but the facade
-    // can still show rows it never sent: an optimistic row from a pending
-    // transaction, or a sync commit held behind a persisting one. Retract
-    // whatever it still holds.
+    // The facade can still show rows the graph never sent: an optimistic row
+    // from a pending transaction, or a sync commit held behind a persisting
+    // one. Retract whatever it still holds.
     const sync = entry.sync
     const keys = [...entry.collection.keys()]
     if (sync && keys.length > 0) {

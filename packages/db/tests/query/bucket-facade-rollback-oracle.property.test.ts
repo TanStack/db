@@ -103,7 +103,10 @@ import type { BucketRow } from '../../src/query/live/materialized-pipeline.js'
  *   (the `local` step field) and the oracle requires the flush to keep them
  *   visible while the facade is held. Retirement retracts every key the facade
  *   still shows through an ordinary facade write, so a failed flush restores
- *   it. Synced rows left at retirement have pinned witnesses only. Held
+ *   it. A row the graph sent and never retracted is a contradictory graph
+ *   signal, so retiring its bucket throws and the flush restores the facade.
+ *   That case has a pinned witness only; the grammar retires only after the
+ *   graph's retractions, including under a hold, and must not throw. Held
  *   commits are in the grammar (the `hold` step field), with one hold per
  *   step that settles before the comparison. A hold that stays open across
  *   several flushes is not generated.
@@ -1279,12 +1282,10 @@ describe(`bucket facade rollback`, () => {
     )
   })
 
-  // The graph retracts a bucket's rows before it retires the bucket, so synced
-  // rows left at retirement are a contradictory graph signal. The adapter
-  // retracts every key the facade still shows, as it does for optimistic and
-  // held rows, so the facade's synced state empties instead of failing the
-  // flush.
-  it(`retracts a retired facade's remaining synced rows`, async () => {
+  // The graph retracts a bucket's rows before it retires the bucket, so a
+  // row the graph sent and never retracted is a contradictory graph signal.
+  // The flush throws and restores the facade, as for any failed flush.
+  it(`throws when a retired bucket still has rows the graph sent`, async () => {
     const driver = new Driver()
     await withCleanup(
       () => {
@@ -1295,8 +1296,11 @@ describe(`bucket facade rollback`, () => {
         driver.adapter.flush().publish()
         const facade = driver.entry(`b0`)!.collection
         driver.retireWithoutRetractions(`b0`)
-        driver.adapter.flush().publish()
-        expect(facade.toArray).toEqual([])
+        expect(() => driver.adapter.flush()).toThrow(
+          `Bucket facade retired with rows the graph did not retract`,
+        )
+        expect(driver.entry(`b0`)?.collection).toBe(facade)
+        expect(facade.toArray.map(stripVirtualProps)).toEqual([{ id: 1, v: 1 }])
       },
       () => driver.cleanup(),
     )
@@ -1313,7 +1317,7 @@ describe(`bucket facade rollback`, () => {
         ])
         driver.adapter.flush().publish()
         const facade = driver.entry(`b0`)!.collection
-        driver.retireWithoutRetractions(`b0`)
+        driver.send([{ type: `retire`, bucket: `b0` }])
         const publication = driver.adapter.flush()
         publication.prepare()
         publication.rollback()
