@@ -309,17 +309,11 @@ function validateAndCreateMapping(
       continue
     }
 
-    // Non-aggregate expression must be in GROUP BY
+    // A group key maps to its group value; the caller checks the rest.
     const groupIndex = groupByClause.findIndex((groupExpr) =>
       expressionsEqual(expr, groupExpr),
     )
-
-    if (groupIndex === -1) {
-      throw new NonAggregateExpressionNotInGroupByError(alias)
-    }
-
-    // Cache the mapping
-    selectToGroupByIndex.set(alias, groupIndex)
+    if (groupIndex !== -1) selectToGroupByIndex.set(alias, groupIndex)
   }
 
   return selectToGroupByIndex
@@ -371,26 +365,27 @@ export function processGroupBy(
   const mapping = singleGroup
     ? undefined
     : validateAndCreateMapping(groupByClause, selectClause)
-  // A single group has one value for a literal or a parent field, which is
-  // constant within a route. A field of the query's own sources has none,
-  // also outside the aggregates of a wrapped expression. A spread has none
-  // either: a route's parent context holds only the parent fields the query
-  // names.
-  let singleGroupFields:
-    ((row: NamespacedRow) => Record<string, any>) | undefined
-  if (singleGroup && selectClause) {
+  // A non-aggregate select value that is not a group key has a value for the
+  // group only when it is constant within it: a literal, or a parent field,
+  // which the route fixes. A field of the query's own sources has none, and
+  // neither does a spread: a route's parent context holds only the parent
+  // fields the query names. The parts of a wrapped aggregate outside its
+  // aggregates follow the same rule; a group key has one value per group.
+  let constantFields: ((row: NamespacedRow) => Record<string, any>) | undefined
+  if (selectClause) {
     const fieldsOnly: Select = {}
     for (const [alias, expr] of Object.entries(selectClause)) {
-      if (lacksGroupValue(alias, expr, sourceAliases))
+      if (mapping?.has(alias)) continue
+      const aggregated = expr.type === `agg` || containsAggregate(expr)
+      if (lacksGroupValue(alias, expr, sourceAliases, groupByClause))
         throw new NonAggregateExpressionNotInGroupByError(
           alias.startsWith(SPREAD_SENTINEL)
             ? `...${alias.slice(SPREAD_SENTINEL.length).split(`__`)[0]}`
             : alias,
         )
-      if (expr.type !== `agg` && !containsAggregate(expr))
-        fieldsOnly[alias] = expr
+      if (!aggregated) fieldsOnly[alias] = expr
     }
-    singleGroupFields = compileGroupedSelectObject(fieldsOnly)
+    constantFields = compileGroupedSelectObject(fieldsOnly)
   }
 
   // Pre-compile groupBy expressions
@@ -515,14 +510,10 @@ export function processGroupBy(
     map(([, aggregatedRow]) => {
       // Start with the existing $selected from early SELECT processing
       const selectResults = (aggregatedRow as any).$selected || {}
-      const finalResults: Record<string, any> = singleGroup
-        ? {
-            ...selectResults,
-            ...singleGroupFields?.(
-              getGroupEvaluationRow(aggregatedRow, fields),
-            ),
-          }
-        : {}
+      const finalResults: Record<string, any> = {
+        ...(singleGroup ? selectResults : {}),
+        ...constantFields?.(getGroupEvaluationRow(aggregatedRow, fields)),
+      }
 
       if (selectClause) {
         // First pass: populate group keys, plain aggregates, and synthetic aliases
@@ -531,14 +522,11 @@ export function processGroupBy(
             finalResults[alias] = aggregatedRow[alias]
           } else if (!singleGroup && !wrappedAggExprs[alias]) {
             // Use cached mapping to get the corresponding __key_X for non-aggregates
+            // A constant field is already set; a group key reads its value.
             const groupIndex = mapping?.get(alias)
-            if (groupIndex !== undefined) {
+            if (groupIndex !== undefined)
               finalResults[alias] =
                 aggregatedRow[fields.groupValues[groupIndex]!]
-            } else {
-              // Fallback to original SELECT results
-              finalResults[alias] = selectResults[alias]
-            }
           }
         }
         evaluateWrappedAggregates(
@@ -663,26 +651,31 @@ function lacksGroupValue(
   key: string,
   value: unknown,
   sources: ReadonlySet<string>,
+  groupKeys: GroupBy,
 ): boolean {
   if (key.startsWith(SPREAD_SENTINEL)) return true
+  if (groupKeys.some((groupKey) => expressionsEqual(value, groupKey)))
+    return false
   if (isConditionalSelect(value))
     return (
       value.branches.some(
         (branch) =>
-          lacksGroupValue(``, branch.condition, sources) ||
-          lacksGroupValue(``, branch.value, sources),
-      ) || lacksGroupValue(``, value.defaultValue, sources)
+          lacksGroupValue(``, branch.condition, sources, groupKeys) ||
+          lacksGroupValue(``, branch.value, sources, groupKeys),
+      ) || lacksGroupValue(``, value.defaultValue, sources, groupKeys)
     )
   if (isExpressionLike(value)) {
     const node = value as BasicExpression
     if (node.type === `ref`) return sources.has(node.path[0]!)
     if (node.type === `func`)
-      return node.args.some((arg) => lacksGroupValue(``, arg, sources))
+      return node.args.some((arg) =>
+        lacksGroupValue(``, arg, sources, groupKeys),
+      )
     return false
   }
   if (!isNestedSelectObject(value)) return false
   return Object.entries(value).some(([childKey, child]) =>
-    lacksGroupValue(childKey, child, sources),
+    lacksGroupValue(childKey, child, sources, groupKeys),
   )
 }
 

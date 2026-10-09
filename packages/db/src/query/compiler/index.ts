@@ -25,6 +25,7 @@ import {
   FnSelectWithGroupByError,
   HavingRequiresGroupByError,
   LimitOffsetRequireOrderByError,
+  NonAggregateExpressionNotInGroupByError,
   QueryCompilationError,
   UnsupportedFnSelectResultError,
   UnsupportedFromTypeError,
@@ -711,6 +712,10 @@ export function compileQuery(
   }
   if (query.select) {
     const includesEntries = extractIncludesFromSelect(query.select)
+    // A nested include has one Collection per row, not one value per group,
+    // so it cannot sit beside an aggregate.
+    if (includesEntries.length > 0 && containsAggregate(query.select))
+      throw new NonAggregateExpressionNotInGroupByError(includesEntries[0]!.key)
     if (includesEntries.length > 0) {
       query = { ...query, select: { ...query.select } }
     }

@@ -79,7 +79,7 @@ const staticOracleProperties = [
   `live-query-observer.wholesale-history`,
   `live-query-observer.retained-snapshot`,
   `bucket-facade.rollback-history`,
-  `single-group.select-shapes`,
+  `aggregate.select-shapes`,
   `evaluators.in`,
   `transaction-ownership.settlement-release`,
   `includes-collection.layout-swap`,

@@ -16,24 +16,27 @@ import { mockSyncCollectionOptions, stripVirtualProps } from '../utils.js'
 import { oraclePropertyOptions, oracleRuns } from '../oracle-config.js'
 
 /**
- * # What does an aggregate without `groupBy` publish beside its aggregates?
+ * # What does an aggregate query publish beside its aggregates?
  *
- * An aggregate query without `groupBy` has one group: all source rows at the
- * top level, or one group for each parent route inside an include. A select
- * value has a value for that group only when every part of it outside an
- * aggregate is constant within the group:
+ * An aggregate query has one row per group. Without `groupBy` there is one
+ * group: all source rows at the top level, or one group for each parent route
+ * inside an include. With `groupBy(c.k)` there is one group per key, within
+ * each route. A select value has a value for its group only when every part
+ * of it outside an aggregate is constant within the group:
  *
  * - a literal;
- * - inside an include, a field of the parent row, which the route supplies.
+ * - a group key (`c.k` in a grouped query);
+ * - inside an include, a field of the parent row, which the route fixes.
  *
- * A field of the query's own source outside an aggregate has no single value,
- * so the query throws `NonAggregateExpressionNotInGroupByError` when it
- * compiles, as it does with `groupBy`. That holds wherever the field appears:
- * directly, inside a function, in a conditional's condition or branch, or in
- * a nested object. A spread throws as well: the parent context of a route holds
- * only the parent fields the query names, and a source spread has no single
- * value. Authority: maintainer decision (2026-10-09) to reject, not drop,
- * such fields; `ARCHITECTURE.md` states the law.
+ * Any other field of the query's own source outside an aggregate has no single
+ * value, so the query throws `NonAggregateExpressionNotInGroupByError` when it
+ * compiles. That holds wherever the field appears: directly, inside a
+ * function, in a conditional's condition or branch, or in a nested object. A
+ * spread throws as well, because a route's parent context holds only the
+ * parent fields the query names, and so does a nested include, which has one
+ * Collection per row. Authority: maintainer decisions (2026-10-09) that such
+ * queries throw rather than drop fields, and that literals and parent fields
+ * are accepted with `groupBy` too; `ARCHITECTURE.md` states the law.
  *
  * The model evaluates a select shape over plain rows: each aggregate over the
  * group's source rows, each parent field from the parent's current row, each
@@ -51,17 +54,21 @@ import { oraclePropertyOptions, oracleRuns } from '../oracle-config.js'
  * updates and deletes. After each step the driver compares the published rows
  * with the model, or that compilation threw when the model says it must.
  *
- * Limits: one parent field (`x`) and one source field (`v`); numbers only; no
- * `groupBy` (the grouped path keeps its own validation); no nested include
- * beside the aggregate (the compiler replaces it before this check).
+ * Each history also chooses whether both queries group by `c.k`, and a shape
+ * may hold a nested include. Group order is not part of the law, so rows are
+ * compared in a fixed order.
+ *
+ * Limits: one parent field (`x`), one source field (`v`) and one group key
+ * (`k`); numbers only.
  */
 
-const PROPERTY = `single-group.select-shapes`
+const PROPERTY = `aggregate.select-shapes`
 
 type Part =
   | { k: `lit`; n: number }
   | { k: `parent` }
   | { k: `source` }
+  | { k: `key` }
   | { k: `agg`; fn: `count` | `sum` | `max` }
   | { k: `add`; a: Part; b: Part }
   | { k: `case`; cond: Part; lit: number; a: Part; b: Part }
@@ -70,6 +77,8 @@ type Part =
 type Shape = {
   fields: Record<string, Part>
   spread?: `source` | `parent`
+  /** A nested include beside the aggregate. */
+  include?: boolean
 }
 
 type Issue = { id: number; k: string; x: number }
@@ -92,26 +101,35 @@ function hasAggregate(part: Part): boolean {
   }
 }
 
-/** A source field outside an aggregate has no value for the group. */
-function readsSourceOutsideAggregate(part: Part): boolean {
+/**
+ * A source field outside an aggregate has no value for the group, unless it
+ * is the group key of a grouped query.
+ */
+function readsSourceOutsideAggregate(part: Part, grouped: boolean): boolean {
+  const reads = (child: Part) => readsSourceOutsideAggregate(child, grouped)
   switch (part.k) {
     case `source`:
       return true
+    case `key`:
+      return !grouped
     case `add`:
-      return [part.a, part.b].some(readsSourceOutsideAggregate)
+      return [part.a, part.b].some(reads)
     case `case`:
-      return [part.cond, part.a, part.b].some(readsSourceOutsideAggregate)
+      return [part.cond, part.a, part.b].some(reads)
     case `nested`:
-      return Object.values(part.fields).some(readsSourceOutsideAggregate)
+      return Object.values(part.fields).some(reads)
     default:
       return false
   }
 }
 
-function modelThrows(shape: Shape): boolean {
+function modelThrows(shape: Shape, grouped: boolean): boolean {
   return (
     shape.spread !== undefined ||
-    Object.values(shape.fields).some(readsSourceOutsideAggregate)
+    shape.include === true ||
+    Object.values(shape.fields).some((part) =>
+      readsSourceOutsideAggregate(part, grouped),
+    )
   )
 }
 
@@ -127,6 +145,8 @@ function evaluate(
       return parent!.x
     case `source`:
       throw new Error(`unreachable: the model throws first`)
+    case `key`:
+      return rows[0]!.k
     case `agg`:
       if (part.fn === `count`) return rows.length
       if (part.fn === `sum`) return rows.reduce((t, r) => t + r.v, 0)
@@ -150,20 +170,39 @@ function evaluate(
   }
 }
 
+/** One published row per group; a grouped query groups by `k`. */
 function modelGroup(
   shape: Shape,
   rows: ReadonlyArray<Comment>,
   parent: Issue | undefined,
+  grouped: boolean,
 ): Array<Record<string, unknown>> {
-  if (rows.length === 0) return []
-  return [
-    Object.fromEntries(
-      Object.entries(shape.fields).map(([key, part]) => [
-        key,
-        evaluate(part, rows, parent),
-      ]),
+  const groups = grouped
+    ? [...new Set(rows.map((row) => row.k))].map((k) =>
+        rows.filter((row) => row.k === k),
+      )
+    : rows.length === 0
+      ? []
+      : [rows]
+  return sortRows(
+    groups.map((group) =>
+      Object.fromEntries(
+        Object.entries(shape.fields).map(([key, part]) => [
+          key,
+          evaluate(part, group, parent),
+        ]),
+      ),
     ),
-  ]
+  )
+}
+
+/** Group order is not part of the law. */
+function sortRows(
+  rows: Array<Record<string, unknown>>,
+): Array<Record<string, unknown>> {
+  return [...rows].sort((a, b) =>
+    JSON.stringify(a) < JSON.stringify(b) ? -1 : 1,
+  )
 }
 
 // --- Grammar ---------------------------------------------------------------
@@ -174,6 +213,7 @@ const leaf = (include: boolean): fc.Arbitrary<Part> =>
     literal.map((n): Part => ({ k: `lit`, n })),
     ...(include ? [fc.constant<Part>({ k: `parent` })] : []),
     fc.constant<Part>({ k: `source` }),
+    fc.constant<Part>({ k: `key` }),
     fc
       .constantFrom(`count` as const, `sum` as const, `max` as const)
       .map((fn): Part => ({ k: `agg`, fn })),
@@ -241,6 +281,7 @@ const shape = (include: boolean): fc.Arbitrary<Shape> =>
         ),
         { nil: undefined, freq: 5 },
       ),
+      include: fc.boolean().map((b) => (b ? true : undefined)),
     })
     .filter((s) => Object.values(s.fields).some(hasAggregate))
 
@@ -275,6 +316,8 @@ function build(p: Part, c: any, issue: any): any {
       return issue.x
     case `source`:
       return c.v
+    case `key`:
+      return c.k
     case `agg`:
       return p.fn === `count`
         ? count(c.id)
@@ -299,10 +342,23 @@ function build(p: Part, c: any, issue: any): any {
   }
 }
 
-function buildSelect(s: Shape, c: any, issue: any): Record<string, any> {
-  const fields = Object.fromEntries(
+function buildSelect(
+  s: Shape,
+  c: any,
+  issue: any,
+  q: any,
+  issueSource: any,
+): Record<string, any> {
+  const fields: Record<string, any> = Object.fromEntries(
     Object.entries(s.fields).map(([key, p]) => [key, build(p, c, issue)]),
   )
+  if (s.include)
+    fields.nestedKids = toArray(
+      q
+        .from({ i: issueSource })
+        .where(({ i }: any) => eq(i.k, c.k))
+        .select(({ i }: any) => ({ id: i.id })),
+    )
   if (s.spread === `source`) return { ...c, ...fields }
   if (s.spread === `parent`) return { ...issue, ...fields }
   return fields
@@ -311,6 +367,7 @@ function buildSelect(s: Shape, c: any, issue: any): Record<string, any> {
 async function runHistory(
   top: Shape,
   nested: Shape,
+  grouped: boolean,
   steps: ReadonlyArray<Step>,
 ): Promise<void> {
   const suffix = Math.random().toString(36).slice(2)
@@ -348,11 +405,14 @@ async function runHistory(
       return { ok: false, error }
     }
   }
+  // A grouped query groups by `c.k`; its select may read that group key.
+  const group = (query: any) =>
+    grouped ? query.groupBy(({ c }: any) => c.k) : query
   const topQuery = compile(() =>
     createLiveQueryCollection((q) =>
-      q
-        .from({ c: commentSource })
-        .select(({ c }) => buildSelect(top, c, undefined)),
+      group(q.from({ c: commentSource })).select(({ c }: any) =>
+        buildSelect(top, c, undefined, q, issueSource),
+      ),
     ),
   )
   const includeQuery = compile(() =>
@@ -360,10 +420,11 @@ async function runHistory(
       q.from({ issue: issueSource }).select(({ issue }) => ({
         id: issue.id,
         kids: toArray(
-          q
-            .from({ c: commentSource })
-            .where(({ c }) => eq(c.k, issue.k))
-            .select(({ c }) => buildSelect(nested, c, issue)),
+          group(
+            q.from({ c: commentSource }).where(({ c }) => eq(c.k, issue.k)),
+          ).select(({ c }: any) =>
+            buildSelect(nested, c, issue, q, issueSource),
+          ),
         ),
       })),
     ),
@@ -373,7 +434,7 @@ async function runHistory(
     [`top`, topQuery, top],
     [`include`, includeQuery, nested],
   ] as const) {
-    if (modelThrows(s)) {
+    if (modelThrows(s, grouped)) {
       expect(result.ok, `${label} compile throws`).toBe(false)
       if (!result.ok)
         expect(result.error, `${label} error class`).toBeInstanceOf(
@@ -389,21 +450,26 @@ async function runHistory(
     const check = (label: string) => {
       if (topQuery.ok) {
         expect(
-          topQuery.value.toArray.map((row: any) => stripVirtualProps(row)),
+          sortRows(
+            topQuery.value.toArray.map((row: any) => stripVirtualProps(row)),
+          ),
           `${label}: top-level rows`,
-        ).toEqual(modelGroup(top, comments, undefined))
+        ).toEqual(modelGroup(top, comments, undefined, grouped))
       }
       if (includeQuery.ok) {
         for (const issue of issues) {
           const row = includeQuery.value.get(issue.id) as any
           expect(
-            (row?.kids ?? []).map((kid: any) => stripVirtualProps(kid)),
+            sortRows(
+              (row?.kids ?? []).map((kid: any) => stripVirtualProps(kid)),
+            ),
             `${label}: kids of issue ${issue.id}`,
           ).toEqual(
             modelGroup(
               nested,
               comments.filter((comment) => comment.k === issue.k),
               issue,
+              grouped,
             ),
           )
         }
@@ -452,15 +518,16 @@ async function runHistory(
 const history = fc.tuple(
   shape(false),
   shape(true),
+  fc.boolean(),
   fc.array(step, { maxLength: 6 }),
 )
 
-describe(`single-group select shapes`, () => {
+describe(`aggregate select shapes`, () => {
   it(`match the model across generated shapes (fixed campaign)`, async () => {
     // A repeatable baseline. Seed 2094 is arbitrary.
     await fc.assert(
-      fc.asyncProperty(history, ([top, nested, steps]) =>
-        runHistory(top, nested, steps),
+      fc.asyncProperty(history, ([top, nested, grouped, steps]) =>
+        runHistory(top, nested, grouped, steps),
       ),
       { numRuns: oracleRuns(120), seed: 2094 },
     )
@@ -468,8 +535,8 @@ describe(`single-group select shapes`, () => {
 
   it(`match the model across generated shapes (random or replayed)`, async () => {
     await fc.assert(
-      fc.asyncProperty(history, ([top, nested, steps]) =>
-        runHistory(top, nested, steps),
+      fc.asyncProperty(history, ([top, nested, grouped, steps]) =>
+        runHistory(top, nested, grouped, steps),
       ),
       oraclePropertyOptions(120, PROPERTY),
     )

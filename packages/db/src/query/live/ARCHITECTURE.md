@@ -266,17 +266,17 @@ Compiler group fields use a query-local namespace disjoint from every selected
 alias. Direct correlated joins canonicalize both sides before the first D2 join;
 normalizing only the later group key is too late.
 
-An aggregate without `groupBy` has one group, or one group for each route
-inside an include. Each non-aggregate select value must have one value for
-that group: a literal, or a parent field that the route's parent context
-supplies. A field of the query's own sources has none, also when it appears
-outside the aggregates of a wrapped, conditional or nested select value, so
-the query throws, as it does with `groupBy`. A spread throws too, because a
-parent context holds only the parent fields the query names. Recorded limits:
-a nested include beside such an aggregate is compiled to `null` before this
-check; and parents that are equal under query equality but differ exactly,
-such as `x: 0` and `x: -0`, share a route, so a parent field can show the
-other parent's exact value, which is equal under query equality.
+An aggregate query has one row per group: one group without `groupBy`, or one
+per group key, within each route inside an include. Each select value must
+have one value for its group outside its aggregates: a literal, a group key,
+or a parent field that the route's parent context supplies. Any other field of
+the query's own sources has none, wherever it appears, so the query throws
+`NonAggregateExpressionNotInGroupByError`. A spread throws too, because a
+parent context holds only the parent fields the query names, and so does a
+nested include, which has one Collection per row. Recorded limit: parents that
+are equal under query equality but differ exactly, such as `x: 0` and `x: -0`,
+share a route, so a parent field can show the other parent's exact value,
+which is equal under query equality.
 
 ### Route-context transport
 
