@@ -82,9 +82,9 @@ import type {
  * remains permanent without consulting the hook. The existing default policy
  * still supplies retry delay with the configured jitter setting. This oracle
  * checks the default delay path with jitter disabled, not jitter math. The
- * exported default currently treats a 401 message as terminal and an ordinary
- * transient error as retryable. These are preservation controls, while the hook
- * rule is the chosen new law.
+ * exported default terminates AbortError and messages containing 400, 401,
+ * 403, or 422; an ordinary network error or a 404 message retries. These are
+ * preservation controls, while the hook rule is the chosen new law.
  * At the durable decision checkpoint, a retry retains the offline transaction
  * at the FIFO head, the public Collection's optimistic state, and both caller
  * promises. The outer optimistic transaction remains pending during retry.
@@ -549,29 +549,51 @@ it.each([
   },
 )
 
-const retryDecisionCases = [
-  { errorKind: `auth`, hook: `retry` },
-  { errorKind: `auth`, hook: `defer` },
-  { errorKind: `auth`, hook: `absent` },
-  { errorKind: `ordinary`, hook: `terminal` },
-  { errorKind: `ordinary`, hook: `defer` },
-  { errorKind: `ordinary`, hook: `absent` },
-  { errorKind: `permanent`, hook: `retry` },
+const retryErrorKinds = [
+  `auth`,
+  `ordinary`,
+  `abort`,
+  `bad-request`,
+  `forbidden`,
+  `unprocessable`,
+  `not-found`,
+  `permanent`,
 ] as const
+const retryHookAnswers = [`retry`, `terminal`, `defer`, `absent`] as const
+const retryDecisionCases = retryErrorKinds.flatMap((errorKind) =>
+  retryHookAnswers.map((hook) => ({ errorKind, hook })),
+)
 
 type RetryDecisionCase = (typeof retryDecisionCases)[number]
+type RetryErrorKind = (typeof retryErrorKinds)[number]
 const retryDecisionExamples: Array<[RetryDecisionCase, number]> = [
   ...retryDecisionCases.map((scenario): [RetryDecisionCase, number] => [
     scenario,
     1,
   ]),
-  [retryDecisionCases[0], 3],
+  [{ errorKind: `auth`, hook: `retry` }, 3],
 ]
+// fast-check counts examples against numRuns. Reserve a run for every fixed
+// cell, then use the configured budget for generated peer-count combinations.
+const retryDecisionRuns =
+  retryDecisionExamples.length + retryDecisionOracle.runs
 
 // This table is the contract model, not a copy of the executor. The permanent
 // error has no configurable decision. Otherwise an explicit hook answer wins;
-// delegation uses the two established default controls in this grammar. A
-// retained FIFO head permits no peer call, while removal permits the first one.
+// delegation uses the established default classifications below. This table
+// comes from the exported default's documented behavior, not its classifier.
+// A retained FIFO head permits no peer call; removal permits the first one.
+const defaultRetryDecision: Record<RetryErrorKind, boolean> = {
+  auth: false,
+  ordinary: true,
+  abort: false,
+  'bad-request': false,
+  forbidden: false,
+  unprocessable: false,
+  'not-found': true,
+  permanent: false,
+}
+
 function expectedRetryDecision(
   scenario: RetryDecisionCase,
   headId: string,
@@ -581,7 +603,8 @@ function expectedRetryDecision(
   const retry =
     scenario.errorKind !== `permanent` &&
     (scenario.hook === `retry` ||
-      (scenario.hook !== `terminal` && scenario.errorKind === `ordinary`))
+      ((scenario.hook === `defer` || scenario.hook === `absent`) &&
+        defaultRetryDecision[scenario.errorKind]))
   const peerRows = peerIds.map((_id, index) => `peer-${index}`)
   return {
     retry,
@@ -597,15 +620,31 @@ function expectedRetryDecision(
   }
 }
 
-// Legal histories have one failed FIFO head and 1–3 admitted peers. The seven
-// pinned cases cross override, delegation, omission, and permanent failure;
-// peer count varies independently. Removing auth retry loses the motivating
-// override; removing ordinary terminal loses the opposite decision; removing
-// defer or absent conflates two ways to retain default behavior for both error
-// classes; removing the permanent case permits an explicit permanent failure
-// to retry. One peer is the marginal FIFO witness, while three detect loss of
-// a later admitted peer.
-// A second failure and hook contract breach have separate witnesses below.
+function retryDecisionProviderError(kind: RetryErrorKind): Error {
+  if (kind === `permanent`) return new NonRetriableError(`validation rejected`)
+  const messages: Record<Exclude<RetryErrorKind, `permanent`>, string> = {
+    auth: `HTTP 401 Unauthorized`,
+    ordinary: `temporary connection failure`,
+    abort: `request aborted`,
+    'bad-request': `HTTP 400 Bad Request`,
+    forbidden: `HTTP 403 Forbidden`,
+    unprocessable: `HTTP 422 Unprocessable`,
+    'not-found': `HTTP 404 Not Found`,
+  }
+  const error = new Error(messages[kind])
+  if (kind === `abort`) error.name = `AbortError`
+  return error
+}
+
+// Legal histories have one failed FIFO head and 1–3 admitted peers. Every
+// listed error kind crosses explicit retry, explicit terminal, delegation, and
+// absence. The fixed examples reconstruct all 32 cells; the generated campaign
+// varies peer count. Auth and ordinary cross both explicit answers, so treating
+// false as delegation or ignoring true changes the durable decision cut. Abort
+// and four status classes preserve default boundaries, while 404 is the nearby
+// default-retry control. Permanent failure bypasses every hook answer. One peer
+// is the marginal FIFO witness; three detect loss of a later admitted peer.
+// A second failure and malformed hook result have separate witnesses below.
 // Duplicate IDs and storage failures belong to other settlement grammars here.
 it.each(oracleSeeds(20261008, retryDecisionOracle))(
   `refines an optional retry decision at the durable FIFO checkpoint (seed %s)`,
@@ -615,14 +654,7 @@ it.each(oracleSeeds(20261008, retryDecisionOracle))(
         fc.constantFrom(...retryDecisionCases),
         fc.integer({ min: 1, max: 3 }),
         async (scenario, peerCount) => {
-          const providerError =
-            scenario.errorKind === `permanent`
-              ? new NonRetriableError(`validation rejected`)
-              : new Error(
-                  scenario.errorKind === `auth`
-                    ? `HTTP 401 Unauthorized`
-                    : `temporary connection failure`,
-                )
+          const providerError = retryDecisionProviderError(scenario.errorKind)
           const firstEntered = gate()
           const releaseFirst = gate()
           const firstPeerEntered = gate()
@@ -635,6 +667,7 @@ it.each(oracleSeeds(20261008, retryDecisionOracle))(
           const calls: Array<string> = []
           const hookCalls: Array<{ error: Error; retryCount: number }> = []
           let headAttempts = 0
+          let storedDecision: `retry` | `terminal` | undefined
           class DecisionStorage extends FakeStorageAdapter {
             override async set(key: string, value: string): Promise<void> {
               await super.set(key, value)
@@ -645,13 +678,18 @@ it.each(oracleSeeds(20261008, retryDecisionOracle))(
               if (
                 key === `tx:${headId}` &&
                 (JSON.parse(value) as { retryCount: number }).retryCount === 1
-              )
+              ) {
+                storedDecision = `retry`
                 decisionStored.resolve()
+              }
             }
 
             override async delete(key: string): Promise<void> {
               await super.delete(key)
-              if (key === `tx:${headId}`) decisionStored.resolve()
+              if (key === `tx:${headId}`) {
+                storedDecision = `terminal`
+                decisionStored.resolve()
+              }
             }
           }
           const shouldRetry: NonNullable<OfflineConfig['shouldRetry']> = (
@@ -772,6 +810,7 @@ it.each(oracleSeeds(20261008, retryDecisionOracle))(
               peerIds,
               providerError,
             )
+            expect(storedDecision).toBe(expected.retry ? `retry` : `terminal`)
             if (!expected.retry)
               await atOracleCheckpoint(
                 firstPeerEntered.promise,
@@ -856,6 +895,7 @@ it.each(oracleSeeds(20261008, retryDecisionOracle))(
       ),
       {
         ...oracleOptions(retryDecisionOracle, seed),
+        numRuns: retryDecisionRuns,
         examples: retryDecisionExamples,
       },
     )
@@ -1097,14 +1137,30 @@ it.each([`terminal`, `defer`] as const)(
 // executor's internal batch promise. The provider error is a 401, so ignoring
 // the hook would reject with the provider error. A fresh executor over the same
 // storage must skip the failed row and process only newly admitted work.
-it.each([`throw`, `invalid`] as const)(
+it.each([`throw`, `null`, `zero`, `promise`] as const)(
   `rejects public commit when shouldRetry fails (%s)`,
   async (failureKind) => {
     const providerError = new Error(`HTTP 401 Unauthorized`)
     const hookError = new Error(`retry decision unavailable`)
     const providerEntered = gate()
     const releaseProvider = gate()
+    const terminalMarkerStored = gate()
+    const retryRecordStored = gate()
     let hookCalls = 0
+    let transactionId = ``
+    class DecisionStorage extends FakeStorageAdapter {
+      override async set(key: string, value: string): Promise<void> {
+        await super.set(key, value)
+        if (key !== `tx:${transactionId}`) return
+        const record = JSON.parse(value) as {
+          outboxPhase?: string
+          retryCount: number
+        }
+        if (record.outboxPhase === `rejection-pending`)
+          terminalMarkerStored.resolve()
+        if (record.retryCount === 1) retryRecordStored.resolve()
+      }
+    }
     const config = {
       jitter: false,
       shouldRetry: (
@@ -1113,10 +1169,15 @@ it.each([`throw`, `invalid`] as const)(
       ): boolean | undefined => {
         hookCalls++
         if (failureKind === `throw`) throw hookError
-        return null as unknown as boolean | undefined
+        if (failureKind === `null`)
+          return null as unknown as boolean | undefined
+        if (failureKind === `zero`) return 0 as unknown as boolean | undefined
+        // An async hook returns a Promise. The synchronous contract rejects it
+        // as a decision value rather than awaiting a possible retry answer.
+        return Promise.resolve(true) as unknown as boolean | undefined
       },
     }
-    const storage = new FakeStorageAdapter()
+    const storage = new DecisionStorage()
     const env = createTestOfflineEnvironment({
       storage,
       config,
@@ -1128,7 +1189,6 @@ it.each([`throw`, `invalid`] as const)(
     })
     const warning = vi.spyOn(console, `warn`).mockImplementation(() => {})
     let restarted: ReturnType<typeof createTestOfflineEnvironment> | undefined
-    let transactionId = ``
     let commitStatus: unknown = `pending`
     let hasPrimaryFailure = false
     try {
@@ -1158,6 +1218,16 @@ it.each([`throw`, `invalid`] as const)(
       const [admitted] = await env.executor.peekOutbox()
       expect(admitted?.retryCount).toBe(0)
       releaseProvider.resolve()
+      // The first durable decision must be terminal. A mistaken implementation
+      // that awaits a Promise answer stores a retry record instead of a marker.
+      const storedDecision = await atOracleCheckpoint(
+        Promise.race([
+          terminalMarkerStored.promise.then(() => `terminal` as const),
+          retryRecordStored.promise.then(() => `retry` as const),
+        ]),
+        `invalid decision recorded`,
+      )
+      expect(storedDecision).toBe(`terminal`)
       await atOracleCheckpoint(
         observedCommit,
         `invalid decision settled caller`,
@@ -1165,7 +1235,7 @@ it.each([`throw`, `invalid`] as const)(
 
       if (failureKind === `throw`) expect(commitStatus).toBe(hookError)
       else {
-        expect(commitStatus).toBeInstanceOf(Error)
+        expect(commitStatus).toBeInstanceOf(TypeError)
         expect(commitStatus).not.toBe(providerError)
       }
       expect(hookCalls).toBe(1)

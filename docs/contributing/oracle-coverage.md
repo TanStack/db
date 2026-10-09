@@ -1204,9 +1204,13 @@ for this oracle repair. Keep these scenarios and decisions with that owner:
   preserves the RED/GREEN and checker-calibration evidence.
 - **A10 R5/R9:** manual removal/clear outside the active-provider witnesses and
   broader restored optimistic lifetimes remain open. The settlement owner checks
-  the optional retry decision across 401, ordinary, and permanent errors;
-  explicit, delegated, and absent answers; FIFO peers; a later failure; and
-  rejection of public `commit()` for throwing or invalid hooks. A hook fault
+  the optional retry decision across AbortError, ordinary network, 400/401/403/
+  422/404 message, and permanent errors. Each kind crosses true, false,
+  undefined, and absent hook answers with 1–3 FIFO peers. The fixed examples
+  each receive a campaign run before generated cases. A later failure checks
+  the current retry count. Public `commit()` witnesses cover thrown, null, zero,
+  and Promise hook results; the first stored decision distinguishes terminal
+  rejection from a retry record. A hook fault
   records a terminal rejection for only the failed row. The executor removes
   that row, rejects its caller with the hook failure, and continues queued work
   after acknowledged deletion. The public admission witness holds the terminal
