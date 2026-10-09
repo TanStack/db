@@ -188,7 +188,7 @@ export class BucketFacadeAdapter {
           throw new Error(
             devBuild() && process.env.NODE_ENV !== `production`
               ? `Bucket facade received graph output between a flush and its rollback`
-              : codedMessage(233),
+              : codedMessage(235),
           )
         }
         this.pending = pending

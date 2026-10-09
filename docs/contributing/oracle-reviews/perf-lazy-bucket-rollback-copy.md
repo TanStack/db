@@ -248,7 +248,7 @@ Reviewed head `bf6caffb1`. The review had nine findings. The evidence for each o
 | --- | --- | --- |
 | 1. Successful flushes do not check events | Confirmed | Law 1 now checks events on each successful flush. The subscriber starts from the facade's current rows (`includeInitialState`). Its events name only rows that a pending operation touched, at most once each. A replay of the events on the previous rows gives the shown rows. |
 | 2. `ARCHITECTURE.md` says the adapter buffers no deltas | Confirmed | The adapter paragraph and "Coherent publication" state the retention law and the rollback invariant. |
-| 3. `rollback()` can overwrite new pending deltas | Confirmed as an unchecked invariant | `rollback()` throws (code 233) when graph output arrived after the flush. The flush runs inside the graph run, so this cannot occur in a legal history. A pinned witness covers it. |
+| 3. `rollback()` can overwrite new pending deltas | Confirmed as an unchecked invariant | `rollback()` throws (code 235) when graph output arrived after the flush. The flush runs inside the graph run, so this cannot occur in a legal history. A pinned witness covers it. |
 | 4. Per-flush bookkeeping copy | Accepted design | The maintainer decision is recorded below. |
 | 5. Per-flush `write` closure | Confirmed | Removed. The copy, the deferral and the write are at the one write site. |
 | 6. The retire write branch is unreachable | Confirmed, then refuted in the third review | The branch was removed, and a retire that found rows threw (code 231). A probe that threw on that branch ran the full `@tanstack/db` suite (11,267 tests) and reached it zero times. The third review showed that the probe measured a blind spot shared by every suite, not the contract. The branch is restored. |
@@ -302,7 +302,7 @@ architecture text says so and explains why a non-empty retirement is legal.
 | 10. Misplaced comments | Confirmed | Moved. |
 
 On merge, `main` (#2074) had taken codes 230–232, so the rollback invariant is
-now code 233.
+now code 235. (#2080 holds 233 and 234.)
 
 Mutants, against the rollback oracle, the includes oracle and the adapter
 tests:
