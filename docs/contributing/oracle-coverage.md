@@ -719,7 +719,11 @@ on resume offset, handle, and shape ID. It supplies the SDK handoff for this one
 after-durable history.
 
 The wrapper's controlled term jump and the real OPFS cold-successor election
-are separate evidence cells. A single real-host history combining a missed
+are separate evidence cells. An exact-ID acknowledgment after an unrelated peer
+write, followed by wrapper resume-evidence binding, remains with the persisted
+wrapper owner; that receiving witness must distinguish the original committed
+position from the later durable position and check the fail-closed generation.
+A single real-host history combining a missed
 original notice, an empty reserved term, and a passive follower's later public
 rows remains with the Chromium/OPFS owner. The controlled nested-prototype
 replacement reaches source and mounted live-query cuts; real SQLite

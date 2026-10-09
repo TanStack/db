@@ -440,3 +440,111 @@ This is a positive recommendation for targeted documentation review. This
 review does not establish product-law review depth. The final loss audit is two
 raw items = one `fixed-now` + one `refuted` as a required process action. No
 item remains open or deferred.
+
+
+## Follow-up: medium-effort review at b4a46a4fe
+
+The user supplied ten code-reading findings against
+`b4a46a4fe5d3b08edfa4084dc7a46299857f6c60`; the review reported no
+executed checks. The executable repair is
+`d6e2493b17b3f023b30ddef0482bae88f9f674ee`. The earlier review records
+above remain evidence for their named commits. This addendum accounts for each
+new claim and the oracle attack that followed the repair.
+
+### Laws, experiments, and inference
+
+| Law and authority | What the earlier oracle proved | Decisive experiment and inference | Enforcement at d6e2493b1 |
+| --- | --- | --- | --- |
+| **One durable term per election; passive followers retain the newer route** (M01, M02). The Browser coordinator's Web Lock and routing contract requires a successor's identity to order after its predecessor, even after a no-write term. | The old controlled history protected the new lock holder from a delayed former-owner heartbeat. It had no passive C after B's heartbeat, and its stub did not persist an empty election. | A/B/C histories were RED at C's route after the delayed A heartbeat. A temporary `Math.max(memory, durable) + 1` repair passed when B had heard A, but failed for a cold B. The downstream RPC timeout in the review was not inevitable in the controlled probe. | Browser histories reach known and cold successors, compare C's route after both notices, and check later routed work. The SQLite adapter reserves a term inside a transaction before announcement; its real SQLite owner sees two empty elections with distinct durable terms. Six Chromium/OPFS leader-close histories, including a cold successor, passed on the repair. A combined real-host missed-notice, empty-election, passive-row history remains with the Chromium/OPFS owner. |
+| **Only the elected local owner may allocate the next stream position** (M03). The ordinary apply guard and fail-fast invariant rule are the authority. | Normal apply checked both `isLeader` and `leaderId`; reconcile checked only `isLeader`. No legal trace was found that gives a Web Lock holder the contradictory identity. | A controlled contradictory-state witness rejects reconciliation before adapter entry. This is an invariant gap, not a demonstrated public route failure. | One `nextPersistedTxIfLeader` function now performs the identity, term, disposal, and Collection-state checks and position allocation for both paths. The Browser coordinator oracle passes after the extraction. |
+| **An exact ID acknowledges its original committed position, while later durable writes can invalidate owned resume evidence** (M04). The core README defines the original-position receipt and fail-closed anchor. | SQLite already reports committed version 1 and latest version 2 for an earlier ID followed by a peer write. A separate wrapper witness rejects a resume generation advanced outside its owner. | The review correctly saw the old position but inferred a stale-resume bug from it. Returning the peer's later position as X's commit would misattribute that write. No same-path RED supports that proposed change. | The original committed position stays. A composed exact-ID, peer-write, wrapper-binding witness remains with the persisted wrapper owner in the coverage map. |
+| **A settled reconciliation reload publishes durable row shape** (M09). The glossary's persisted-snapshot equality is the skip condition. | The wrapper covered sparse slots and enumerable array properties, but omitted equal-keyed nested class versus plain record. Ordinary `deepEquals` can equate those shapes. | A source write followed by a controlled durable plain-record reload was RED at the public nested prototype; a prototype-sensitive mutant passed. The repaired wrapper case checks both source and mounted live-query rows. | `equalPersistedSnapshotValues` distinguishes nested prototypes and preserves the existing array, Map, and Set shape rules. The newly introduced `deepEqualsStrict` root export is replaced. A real SQLite serialization and wrapper publication witness remains with the Node SQLite receiving owner. |
+| **A reset starts a new row-version series; a position-only read does not publish rows** (oracle attack after M09). The SQLite schema-reset contract and publicly applied row-version distinction are the authority. | The wrapper had no history joining reset, delayed pre-reset notice, and a new post-reset commit. Its position watermark could falsely certify rows loaded before a later metadata read. | The lower-version and old-notice histories were RED on the first repair. Two reviewers then found both delayed-notice orders and a commit between reset reload and position read. A temporary no-fence mutant failed both notice orders; a mutant that set the public version from the metadata read failed at the missing public row. These were assertion failures at the intended cuts. | Three reset witnesses cover lower version, both notice orders, and the between-reads race. The wrapper rebases the durable version, keeps an old-term fence, and conservatively starts the new public version at zero. Its full oracle passes. The controlled reset premise is separately shown by real SQLite; a combined real-adapter wrapper reset and notice remains with the persisted SQLite receiving owner. |
+
+The model, history, path, and observation boundaries are explicit in those
+owners. The term model keeps durable term state because a later cold election
+distinguishes two histories with the same caller memory. The reset checks keep
+durable position and publicly applied position distinct because the next
+notification can distinguish them. The controlled Browser channel supplies
+notice ordering; the real coordinator supplies route transitions. The wrapper
+adapter supplies held read cuts; the real wrapper supplies Collection and live
+query publication. These bounded histories establish their asserted cuts, not
+all browser schedules or arbitrary reset interleavings.
+
+### Lossless finding ledger
+
+| ID | Original claim and proposed action | Technical verdict and evidence | PR action and durable value |
+| --- | --- | --- | --- |
+| M01 | Followers accept a closed leader's late equal-term heartbeat, reroute to A, then RPCs time out and source/subset work can fail. | Confirmed route defect at passive C; claimed downstream timeout is conditional. A/B/C controlled RED, later repaired route and real OPFS host GREEN. | `fixed-now`. Passive-route law in Browser coordinator and OPFS owner. |
+| M02 | Election overwrites a heartbeat-learned term from SQLite and reuses T; use `Math.max` and remove the leader-only special case. | Confirmed reuse. The proposed memory-only maximum failed the cold-successor RED. | `fixed-now`. Reserve each election in the durable `leader_term` ledger. Browser/Electron require the capability; Electron IPC uses protocol v4. |
+| M03 | Reconcile omits the local `leaderId` guard and duplicates next-position logic. | Guard mismatch and duplication confirmed; legal user-visible contradiction unproved. Invariant witness reaches adapter-entry cut. | `fixed-now`. Shared guard and next-position function rejects contradictory state before write. |
+| M04 | Already-applied reports X's old version instead of the latest peer version, allegedly corrupting resume generation. | Old-position report is real and required by the README's exact-ID receipt. Existing SQLite and wrapper evidence supports fail-closed ownership; composed wrapper witness remains. | `accepted-design`. Preserve original ID identity; coverage map owns the joined witness. |
+| M05 | Reconcile and normal source-success branches duplicate lifecycle, stream-position, and resume-generation bookkeeping. | Confirmed from source; no divergent public behavior was shown. | `fixed-now`. Both paths call `recordDurableSourceCommit`; wrapper oracle pins the receipt and row cuts. |
+| M06 | Nested three-by-three retry loops can hold the apply mutex for about 90 seconds; cap attempts. | A controlled transport seam reached nine sends only when each outer round first lost two answers and then returned NOT_LEADER. Pure transport failure stopped after three sends. A proposed three-send cap failed the legal lost-answer/later-route witness, which requires a fourth send. No 90-second host latency or contract limit was established. | `accepted-design`. Keep the bounded existing reroute policy required for exact-ID liveness. Its possible work cost remains recorded; a latency budget or measured host violation would reopen optimization. |
+| M07 | Exact `tx_id` lookup scans retained per-Collection rows because the primary key orders by term/seq; add a composite index. | Confirmed by real SQLite plan: the old plan sought only `collection_id`; the new plan seeks both predicates. No elapsed-time claim is made. | `fixed-now`. Add `idx_applied_tx_collection_tx_id` and a plan assertion in the SQLite adapter owner. |
+| M08 | An older tab ignores the new reload marker because BroadcastChannel remains protocol v1; rolling deploy may leave stale public rows. | Cross-version mechanism is real. The Browser same-run recovery contract explicitly assumes the same protocol version; a version bump alone cannot make old code reload. | `accepted-design`. Keep the same-version boundary. A future cross-version guarantee needs negotiation or forced refresh and its own receiving oracle. |
+| M09 | Newly exported `deepEqualsStrict` is misleading: class/plain values can compare equal and Map/Set ordering is significant, so reload may retain stale shape. | Confirmed for nested class/plain public rows. Map/Set order is conservative inequality, not the stale-row cause. Controlled source/live RED and repaired GREEN. | `fixed-now`. Use the qualified persisted-snapshot comparator and remove that new export name. |
+| M10 | Every exact-ID reconciliation reloads and compares active rows, even after the original notification. | Work cost confirmed; the review overstated its frequency as every leadership handoff. A missed original notice makes a same-position reload necessary under the current contract. | `accepted-design`. Retain the correctness tradeoff. Any shortcut needs independent already-published evidence and must pass the missed-notice OPFS receiver. |
+
+The four accepted designs preserve observations or limits already in the
+README, glossary, and coverage map. None is a deferred in-scope repair. The
+remaining receiving cells have named owners above; no reachable counterexample
+to the repaired laws was left known at this head.
+
+### Oracle-guide audit for the follow-up
+
+- ORC-001 to ORC-003: the README, glossary, and opening oracle prose state the
+  laws and bounds; independent durable-term, authored-row, and value-shape
+  ledgers sit beside their grammars, production drivers, public observations,
+  and checkpoints. No production comparator computes the expected prototype.
+- ORC-004 and ORC-007: this follow-up adds fixed, controlled histories, not a
+  new important generated property. Existing generated campaigns and replay
+  interfaces are unchanged.
+- ORC-005 and ORC-006: the Browser coordinator, real SQLite adapter, persisted
+  wrapper, and Chromium host run production paths. The original route and
+  nested-shape RED checks and the reset fence/public-version mutants fail at
+  public comparisons. Setup and timeout failures are not counted as kills.
+- ORC-008 and ORC-009: the durable-term ledger retains state distinguishable
+  by a cold successor; durable and publicly applied positions remain separate.
+  New cross-subsystem terms appear in the glossary.
+- ORC-010: controlled gates release in cleanup; the wrapper and host preserve
+  primary failure separately from cleanup diagnostics.
+- ORC-011 and ORC-014: real SQLite supplies the durable no-write reservation
+  and version-zero reset premises; Chromium supplies the Web Lock/OPFS election.
+  The joined real-adapter reset/publication and nested-serialization receiving
+  cells remain explicitly open with their owners in the coverage map.
+- ORC-012 and ORC-013: this revision-bound record states outcomes and
+  non-applicable generated triggers, original and neighboring histories,
+  hostile wrong designs, and remaining cells. Known/cold successors and both
+  reset notice orders distinguish the reusable boundaries.
+
+### Verification and reviewer assessment
+
+On `d6e2493b1`, the persisted wrapper oracle passed 662 tests with one
+existing todo. Its six focused reset tests passed separately. Both reset
+mutants failed the intended public-row assertions and were restored. The
+Browser coordinator oracle passed 164 tests after the shared guard extraction.
+Earlier on the same repair, the DB utils oracle passed 132 tests, Browser
+coordinator suites 320, Electron suites 128, Node SQLite adapter contract 36,
+and all six real Chromium/OPFS leader-close histories. Four affected packages
+typechecked. Changed files passed Prettier and `git diff --check`; ESLint had
+zero errors and 52 warnings in test fixtures. Vitest's optional package
+typecheck emitted workspace `rootDir` source errors when run alongside tests;
+standalone package TypeScript checks passed. The tests above ran with that
+Vitest typecheck disabled. The production source diff at the executable commit
+is 330 added and 102 deleted lines; tests and contract documentation are
+reported separately in the commit diff.
+
+The reviewer had high discovery value: passive routing, the missing index,
+shared bookkeeping, and nested public shape were all useful findings.
+Proposed fixes were less reliable: memory-only term maximum missed the cold
+successor, and the retry cap sacrificed a legal reroute. The resume-generation
+and 90-second claims exceeded the evidence. Recommend hiring for code review,
+with adversarial history checks before treating a proposed mechanism as the
+cure.
+
+Final accounting: ten raw findings = six `fixed-now` (M01, M02, M03, M05,
+M07, M09) plus four `accepted-design` (M04, M06, M08, M10). Zero items were
+dropped, deferred, or left as confirmed-open. Accounting and authorized repairs
+are complete at the named executable commit; the bounded receiving gaps above
+remain in the coverage map.
