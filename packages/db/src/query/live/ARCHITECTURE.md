@@ -225,10 +225,30 @@ identity and opaque public group keys keep their own runtime scope because
 equivalent query plans and retained public keys must survive graph replacement.
 For grouping, the equality token is the D2 group key. The group retains a raw
 value from a currently positive contributor only as the projected
-representative. The representative is chosen by stable source-row identity, so
-restoring the same source state restores the same value regardless of update
-history. D2 sees only safe exact-value identity for that representative, not
-the raw value itself. A separate public group key preserves primitive keys and
+representative. The representative is the contributor with the smallest exact
+value: another primitive before -0, and every primitive before an object.
+Objects are ordered by an explicit type tag (`Buffer`, `Date`, a Temporal type,
+then `Uint8Array`). Contributors of one tag are equal in content, so the
+contributor with the smallest row key supplies the instance; the choice does not
+depend on update history, and a deleted contributor's instance is never
+projected. Equal primitives share a representative key and consolidate. D2
+consolidates contributions whose hashes match, and its hash treats -0 as 0 and
+equal Dates as one value. Each contribution therefore carries the exact identity
+of every value a contributor can supply: the representative key, and the exact
+input of every min or max, taken from the value that the min or max compares.
+A primitive input is keyed by its exact value and an object input by its
+contributor's row key, because a rebuilt argument is a new instance at each
+evaluation and its retraction must still cancel its insert. A sum, avg, or count adds coerced numbers, so merging its equal inputs cannot
+change its result. Contributions merge only when those identities are equal, so
+a merged contribution supplies only a value that a positive contributor holds.
+A correlated include's route representative carries the correlation key and
+parent context instances. Members that read the correlation key from their own
+row hold distinct instances when the key is an object, such as a Date or a
+binary array, so those members do not consolidate. A count, sum, or avg over
+consolidated contributions updates without re-reading the group; a min or max
+over distinct primitive values keeps one contribution per distinct exact input,
+and a min or max over objects keeps one contribution per contributor. D2 sees only
+safe exact-value identity for a representative, not the raw value itself. A separate public group key preserves primitive keys and
 serializes opaque equality identity; graph-local identity tokens never cross
 the Collection boundary. Compiler group fields use a query-local namespace
 disjoint from every selected alias. Direct correlated joins canonicalize both

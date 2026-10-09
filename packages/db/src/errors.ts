@@ -485,6 +485,16 @@ export class TransactionAlreadyCompletedRollbackError extends TransactionError {
   }
 }
 
+export class DuplicateTransactionIdError extends TransactionError {
+  constructor(id: string) {
+    super(
+      devBuild() && process.env.NODE_ENV !== `production`
+        ? `A Collection already tracks an unsettled transaction with id "${id}". Give each transaction a unique id.`
+        : codedMessage(233, { id }),
+    )
+  }
+}
+
 export class TransactionNotPendingCommitError extends TransactionError {
   constructor() {
     super(
