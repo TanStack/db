@@ -333,15 +333,14 @@ export function processGroupBy(
   pipeline: NamespacedAndKeyedStream,
   groupByClause: GroupBy,
   valueIdentity: ValueIdentity,
+  /** The query's own source aliases; a single group rejects their fields. */
+  sourceAliases: ReadonlySet<string>,
   havingClauses?: Array<Having>,
   selectClause?: Select,
   fnHavingClauses?: Array<(row: any) => any>,
   aggregateCollectionId?: string,
   mainSource?: string,
   sanitizeCallbackRows = false,
-  // Both compiler call sites pass the query's own aliases. Without them, a
-  // single group cannot reject a source field.
-  sourceAliases: ReadonlySet<string> = new Set(),
 ): NamespacedAndKeyedStream {
   const fields = createInternalGroupFields(groupByClause.length, selectClause)
   const virtualAggregates: Record<string, any> = {

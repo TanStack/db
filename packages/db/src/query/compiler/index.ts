@@ -1033,13 +1033,13 @@ export function compileQuery(
       pipeline,
       query.groupBy,
       valueIdentity,
+      new Set(collectScopeAliases(query)),
       query.having,
       query.select,
       query.fnHaving,
       mainCollectionId,
       groupByMainSource,
       sourceCarriesInternalRouteState || includesRoutingFns.length > 0,
-      new Set(collectScopeAliases(query)),
     )
   } else if (selectHasAggregates) {
     // SELECT contains aggregates but no GROUP BY: implicit single-group aggregation
@@ -1047,13 +1047,13 @@ export function compileQuery(
       pipeline,
       [], // Empty group by means single group
       valueIdentity,
+      new Set(collectScopeAliases(query)),
       query.having,
       query.select,
       query.fnHaving,
       mainCollectionId,
       groupByMainSource,
       sourceCarriesInternalRouteState || includesRoutingFns.length > 0,
-      new Set(collectScopeAliases(query)),
     )
   }
 
