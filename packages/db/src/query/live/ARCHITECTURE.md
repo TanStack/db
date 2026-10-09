@@ -225,10 +225,30 @@ identity and opaque public group keys keep their own runtime scope because
 equivalent query plans and retained public keys must survive graph replacement.
 For grouping, the equality token is the D2 group key. The group retains a raw
 value from a currently positive contributor only as the projected
-representative. The representative is chosen by stable source-row identity, so
-restoring the same source state restores the same value regardless of update
-history. D2 sees only safe exact-value identity for that representative, not
-the raw value itself. A separate public group key preserves primitive keys and
+representative. The representative is the contributor with the smallest exact
+value: another primitive before -0, and every primitive before an object.
+Objects are ordered by an explicit type tag (`Buffer`, `Date`, a Temporal type,
+then `Uint8Array`). Contributors of one tag are equal in content, so the
+contributor with the smallest row key supplies the instance; the choice does not
+depend on update history, and a deleted contributor's instance is never
+projected. Equal primitives share a representative key and consolidate. D2
+consolidates contributions whose hashes match, and its hash treats -0 as 0 and
+equal Dates as one value. Each contribution therefore carries the exact identity
+of every value a contributor can supply: the representative key, and the exact
+input of every min or max, taken from the value that the min or max compares.
+A primitive input is keyed by its exact value and an object input by its
+contributor's row key, because a rebuilt argument is a new instance at each
+evaluation and its retraction must still cancel its insert. A sum, avg, or count adds coerced numbers, so merging its equal inputs cannot
+change its result. Contributions merge only when those identities are equal, so
+a merged contribution supplies only a value that a positive contributor holds.
+A correlated include's route representative carries the correlation key and
+parent context instances. Members that read the correlation key from their own
+row hold distinct instances when the key is an object, such as a Date or a
+binary array, so those members do not consolidate. A count, sum, or avg over
+consolidated contributions updates without re-reading the group; a min or max
+over distinct primitive values keeps one contribution per distinct exact input,
+and a min or max over objects keeps one contribution per contributor. D2 sees only
+safe exact-value identity for a representative, not the raw value itself. A separate public group key preserves primitive keys and
 serializes opaque equality identity; graph-local identity tokens never cross
 the Collection boundary. Compiler group fields use a query-local namespace
 disjoint from every selected alias. Direct correlated joins canonicalize both
@@ -571,9 +591,18 @@ without re-emitting every parent, and moving a route changes the parent field to
 the destination bucket's facade. A facade is never retargeted to another
 bucket. The D2 join retains inactive bucket rows and emits their current
 snapshot when the bucket becomes active; the facade adapter does not buffer
-discarded deltas. The adapter retains a facade only while at least one parent
-route uses its bucket. When the last route leaves, it retracts the facade's rows
-and drops its strong reference. An external holder may keep that empty
+discarded deltas. It keeps only the deltas a flush consumed until that flush
+publishes: if the root commit fails, the adapter restores them, so the next
+successful flush publishes each pending child change exactly once. The adapter retains a facade only while at least one parent
+route uses its bucket. When the last route leaves, it deletes through sync every
+key the facade still shows and drops its strong reference. The graph has
+already retracted the bucket's rows, but a facade is a Collection: a user
+transaction can show an optimistic row in it, and a sync commit can be held
+behind a persisting transaction. Retirement is therefore a legal write to a
+non-empty facade, not an invariant violation. It is a facade write of the
+flush, so a failed flush restores it. A restore deletes every key the flush
+wrote, including a write that a persisting transaction still holds, so the held
+write cannot land after the rollback. An external holder may keep the retired
 Collection alive, but a later active interval gets a new facade. Inline modes
 do not create child Collections.
 
@@ -1298,6 +1327,17 @@ Installed state, synchronous reads, change-event payloads, and downstream
 queries must all observe the same fully materialized commit. The facade adapter
 may defer event delivery across its Collection transactions, but it must not
 defer state or index installation. Routing and identity remain inside D2.
+
+A failed flush is atomic. If a facade write or the root commit fails, every
+facade the flush wrote returns to its rows, order, and key mapping from before
+the flush, the facades it created are disposed, and no facade publishes an
+event or a layout revision. The child deltas that flush consumed stay pending
+with the builder's pending root rows, so the next successful flush publishes
+each of them exactly once. No graph output reaches the adapter between a flush
+and its rollback, because the flush runs inside the graph run; a rollback that
+finds new pending deltas is an invariant violation. It restores the facades and
+discards the deferred events first, so the facades keep delivering events, and
+then throws. A rollback after the adapter is cleaned up does nothing.
 
 ## External boundaries
 

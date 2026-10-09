@@ -970,6 +970,16 @@ Development builds show the full message. For example:
 IndexedDB collection requires a "getKey" configuration option. This function extracts the unique key from each item.
 ```
 
+<a id="error-233"></a>
+
+## Error 233: `DuplicateTransactionIdError`
+
+Development builds show the full message. For example:
+
+```text
+A Collection already tracks an unsettled transaction with id "tx-1". Give each transaction a unique id.
+```
+
 ## Other errors and log messages
 
 These are plain `Error`, `TypeError`, `RangeError`, or
@@ -2350,16 +2360,6 @@ Development builds show this message, with `${...}` replaced by values:
 [LocalStorageCollection] Error refreshing a same-tab peer for storage key "${key}":
 ```
 
-<a id="error-233"></a>
-
-## Error 233: `query/builder/query-ir.ts`
-
-Development builds show this message, with `${...}` replaced by values:
-
-```text
-Query must resolve to a QueryBuilder; received ${received}.
-```
-
 <a id="error-234"></a>
 
 ## Error 234: `client.ts`
@@ -2368,4 +2368,24 @@ Development builds show this message, with `${...}` replaced by values:
 
 ```text
 DbClient cannot reuse live query "${queryHash}" with different source Collections. Use the same Collection objects or a distinct query key.
+```
+
+<a id="error-235"></a>
+
+## Error 235: `query/live/bucket-facade-adapter.ts`
+
+Development builds show this message, with `${...}` replaced by values:
+
+```text
+Bucket facade received graph output between a flush and its rollback
+```
+
+<a id="error-236"></a>
+
+## Error 236: `query/builder/query-ir.ts`
+
+Development builds show this message, with `${...}` replaced by values:
+
+```text
+Query must resolve to a QueryBuilder; received ${received}.
 ```

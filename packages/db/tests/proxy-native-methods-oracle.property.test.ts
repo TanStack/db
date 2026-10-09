@@ -404,6 +404,12 @@ describe(`typed-array methods behave like native typed arrays`, () => {
     for (const write of [false, true]) expectTypedCall([3, 1, 2], m, 1, write)
   })
 
+  // A mutator counts as a change without a revert check, even when the
+  // result equals the original under draft equality (-0 equals 0).
+  it(`reversing [-0, 0] is a change although the result is draft-equal`, () => {
+    expectTypedCall([-0, 0], `reverse`, 0, false)
+  })
+
   for (const { name, seed } of campaigns) {
     it(`matches native typed arrays across generated rows (${name})`, () => {
       fc.assert(

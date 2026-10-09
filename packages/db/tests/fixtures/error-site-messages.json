@@ -866,11 +866,6 @@
     ],
     "kind": "warning"
   },
-  "233": {
-    "file": "query/builder/query-ir.ts",
-    "template": "Query must resolve to a QueryBuilder; received ${received}.",
-    "literals": ["Query must resolve to a QueryBuilder; received "]
-  },
   "234": {
     "file": "client.ts",
     "template": "DbClient cannot reuse live query \"${queryHash}\" with different source Collections. Use the same Collection objects or a distinct query key.",
@@ -878,5 +873,17 @@
       "DbClient cannot reuse live query \"",
       "\" with different source Collections. Use the same Collection objects or a distinct query key."
     ]
+  },
+  "235": {
+    "file": "query/live/bucket-facade-adapter.ts",
+    "template": "Bucket facade received graph output between a flush and its rollback",
+    "literals": [
+      "Bucket facade received graph output between a flush and its rollback"
+    ]
+  },
+  "236": {
+    "file": "query/builder/query-ir.ts",
+    "template": "Query must resolve to a QueryBuilder; received ${received}.",
+    "literals": ["Query must resolve to a QueryBuilder; received "]
   }
 }
