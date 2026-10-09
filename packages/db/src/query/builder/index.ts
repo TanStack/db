@@ -1497,7 +1497,7 @@ function buildIncludesSubquery(
     throw new Error(
       devBuild() && process.env.NODE_ENV !== `production`
         ? `Includes subquery for "${fieldName}" reuses a source binding from an ancestor query. Start the child with new Query().from(...).`
-        : codedMessage(230, { fieldName }),
+        : codedMessage(233, { fieldName }),
     )
   }
   const childQuery = cloneQueryForPlacement(sourceQuery)
