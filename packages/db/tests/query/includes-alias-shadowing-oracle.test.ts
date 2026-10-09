@@ -2312,3 +2312,293 @@ describe(`lexical bindings through recursive joins and selections`, () => {
     }
   })
 })
+
+/**
+ * ARCHITECTURE.md §Identity promises that a source in a nested query keeps its
+ * identity when its alias matches an outer join. A captured outer row also
+ * remains outer when the child selects its fields or spreads the whole row.
+ * Renaming the child alias therefore cannot change the public relation.
+ *
+ * This grammar crosses a child FROM or JOIN, field or whole-row capture,
+ * shadowed or renamed spelling, and eager or on-demand child sources. Its
+ * history moves a detail, changes the captured assignment, and moves that
+ * assignment between managers. The fixture keeps at most one outer joined row and one child row
+ * per anchor, so their default public keys remain unambiguous. It checks rows
+ * and, in on-demand mode, source requests after each committed write. It does
+ * not cover RIGHT or FULL joins, arbitrary join trees, or provider scheduling
+ * outside this controlled finite source.
+ */
+describe(`nested source placement preserves captured outer rows`, () => {
+  type Manager = { id: number; name: string }
+  type Assignment = { id: number; managerId: number; ownerTag: string }
+  type Detail = { id: number; managerId: number; label: string }
+  type Capture = `fields` | `spread`
+
+  const initialManagers: Array<Manager> = [
+    { id: 1, name: `ONE` },
+    { id: 2, name: `TWO` },
+  ]
+  const initialAssignments: Array<Assignment> = [
+    { id: 101, managerId: 1, ownerTag: `OUTER` },
+  ]
+  const initialDetails: Array<Detail> = [
+    { id: 201, managerId: 1, label: `A` },
+    { id: 202, managerId: 2, label: `B` },
+  ]
+
+  /**
+   * Model: plain source roles determine a joined assignment and each
+   * manager's details. The child placement and aliases do not enter this
+   * computation. A later detail spread replaces its assignment's `id` only;
+   * fields with different names retain their source values.
+   */
+  const model = (
+    managers: ReadonlyMap<number, Manager>,
+    assignments: ReadonlyMap<number, Assignment>,
+    details: ReadonlyMap<number, Detail>,
+    capture: Capture,
+  ) =>
+    [...managers.values()]
+      .flatMap((manager) => {
+        const matching = [...assignments.values()].filter(
+          (assignment) => assignment.managerId === manager.id,
+        )
+        return matching.map((assignment) => ({
+          managerId: manager.id,
+          managerName: manager.name,
+          assignmentId: assignment.id,
+          details: [...details.values()]
+            .filter((detail) => detail.managerId === manager.id)
+            .map((detail) =>
+              capture === `fields`
+                ? {
+                    outerAssignmentId: assignment.id,
+                    detailId: detail.id,
+                    label: detail.label,
+                  }
+                : {
+                    id: detail.id,
+                    managerId: detail.managerId,
+                    ownerTag: assignment.ownerTag,
+                    label: detail.label,
+                  },
+            )
+            .sort((a, b) => (a.detailId ?? a.id) - (b.detailId ?? b.id)),
+        }))
+      })
+      .sort((a, b) => a.managerId - b.managerId)
+
+  for (const placement of [`from`, `join`] as const) {
+    for (const capture of [`fields`, `spread`] as const) {
+      for (const mode of [`eager`, `onDemand`] as const) {
+        test(`${placement}, ${capture}, ${mode}: shadowing and renaming agree at every write cut`, async () => {
+          const managersModel = new Map(
+            initialManagers.map((row) => [row.id, row]),
+          )
+          const assignmentsModel = new Map(
+            initialAssignments.map((row) => [row.id, row]),
+          )
+          const detailsModel = new Map(
+            initialDetails.map((row) => [row.id, row]),
+          )
+          const cases = ([`user`, `detail`] as const).map((alias) => {
+            const managers = createScopedSource(
+              `placement-managers-${placement}-${capture}-${mode}-${alias}`,
+              initialManagers,
+              `eager`,
+            )
+            const assignments = createScopedSource(
+              `placement-assignments-${placement}-${capture}-${mode}-${alias}`,
+              initialAssignments,
+              mode,
+            )
+            const details = createScopedSource(
+              `placement-details-${placement}-${capture}-${mode}-${alias}`,
+              initialDetails,
+              mode,
+            )
+            const anchors = createScopedSource(
+              `placement-anchors-${placement}-${capture}-${mode}-${alias}`,
+              initialManagers.map(({ id }) => ({ id })),
+              `eager`,
+            )
+            managers.collection.createIndex((row) => row.id, {
+              indexType: BasicIndex,
+            })
+            assignments.collection.createIndex((row) => row.managerId, {
+              indexType: BasicIndex,
+            })
+            details.collection.createIndex((row) => row.managerId, {
+              indexType: BasicIndex,
+            })
+            anchors.collection.createIndex((row) => row.id, {
+              indexType: BasicIndex,
+            })
+            const live = createLiveQueryCollection({
+              query: new Query()
+                .from({ manager: managers.collection })
+                .innerJoin(
+                  { user: assignments.collection },
+                  ({ manager, user }) => eq(manager.id, user.managerId),
+                )
+                .select(({ manager, user }) => {
+                  const project = (context: Context) => {
+                    const detail = context[alias] as Detail
+                    return capture === `fields`
+                      ? {
+                          outerAssignmentId: user.id,
+                          detailId: detail.id,
+                          label: detail.label,
+                        }
+                      : { ...user, ...detail }
+                  }
+                  const child =
+                    placement === `from`
+                      ? new Query()
+                          .from({ [alias]: details.collection })
+                          .where((context: Context) =>
+                            eq(
+                              (context[alias] as Detail).managerId,
+                              manager.id,
+                            ),
+                          )
+                          .select(project)
+                      : new Query()
+                          .from({ anchor: anchors.collection })
+                          .innerJoin(
+                            { [alias]: details.collection },
+                            (context: Context) =>
+                              eq(
+                                (context[alias] as Detail).managerId,
+                                (context.anchor as { id: number }).id,
+                              ),
+                          )
+                          .where((context: Context) =>
+                            eq(
+                              (context.anchor as { id: number }).id,
+                              manager.id,
+                            ),
+                          )
+                          .select(project)
+                  return {
+                    managerId: manager.id,
+                    managerName: manager.name,
+                    assignmentId: user.id,
+                    details: toArray(child),
+                  }
+                }),
+            })
+            return { alias, managers, assignments, details, anchors, live }
+          })
+
+          const observe = (live: (typeof cases)[number][`live`]) =>
+            live.toArray
+              .map((row) => ({
+                managerId: row.managerId,
+                managerName: row.managerName,
+                assignmentId: row.assignmentId,
+                details: (row.details as Array<Record<string, unknown>>)
+                  .map((detail) =>
+                    capture === `fields`
+                      ? {
+                          outerAssignmentId: detail.outerAssignmentId as number,
+                          detailId: detail.detailId as number,
+                          label: detail.label as string,
+                        }
+                      : {
+                          id: detail.id as number,
+                          managerId: detail.managerId as number,
+                          ownerTag: detail.ownerTag as string,
+                          label: detail.label as string,
+                        },
+                  )
+                  .sort((a, b) => (a.detailId ?? a.id) - (b.detailId ?? b.id)),
+              }))
+              .sort((a, b) => a.managerId - b.managerId)
+
+          await withHistoryCleanup(
+            async () => {
+              for (const entry of cases) await entry.live.preload()
+              const check = (cut: string) => {
+                const expected = model(
+                  managersModel,
+                  assignmentsModel,
+                  detailsModel,
+                  capture,
+                )
+                for (const entry of cases) {
+                  expect(
+                    observe(entry.live),
+                    `${entry.alias} at ${cut}`,
+                  ).toEqual(expected)
+                }
+                if (mode === `onDemand`) {
+                  for (const source of [`assignments`, `details`] as const) {
+                    expect(cases[0]![source].requests.length).toBeGreaterThan(0)
+                    expect(
+                      [...cases[0]![source].requests].sort(),
+                      `${source} requests at ${cut}`,
+                    ).toEqual([...cases[1]![source].requests].sort())
+                  }
+                }
+              }
+              check(`initial publication`)
+
+              detailsModel.delete(201)
+              for (const entry of cases) entry.details.remove(201)
+              await flushPromises()
+              check(`detail removal`)
+
+              const movedDetail = { id: 202, managerId: 1, label: `B2` }
+              detailsModel.set(movedDetail.id, movedDetail)
+              for (const entry of cases) entry.details.put(movedDetail)
+              await flushPromises()
+              check(`detail moves between managers`)
+
+              const changedAssignment = {
+                id: 101,
+                managerId: 1,
+                ownerTag: `OUTER2`,
+              }
+              assignmentsModel.set(changedAssignment.id, changedAssignment)
+              for (const entry of cases)
+                entry.assignments.put(changedAssignment)
+              await flushPromises()
+              check(`captured assignment changes`)
+
+              const movedAssignment = {
+                id: 101,
+                managerId: 2,
+                ownerTag: `OUTER2`,
+              }
+              assignmentsModel.set(movedAssignment.id, movedAssignment)
+              for (const entry of cases) entry.assignments.put(movedAssignment)
+              await flushPromises()
+              check(`outer joined row moves`)
+
+              const returnedDetail = { id: 202, managerId: 2, label: `B3` }
+              detailsModel.set(returnedDetail.id, returnedDetail)
+              for (const entry of cases) entry.details.put(returnedDetail)
+              await flushPromises()
+              check(`detail follows moved assignment`)
+
+              const renamedManager = { id: 2, name: `TWO2` }
+              managersModel.set(renamedManager.id, renamedManager)
+              for (const entry of cases) entry.managers.put(renamedManager)
+              await flushPromises()
+              check(`captured outer row changes`)
+            },
+            () =>
+              cases.flatMap((entry) => [
+                () => entry.live.cleanup(),
+                () => entry.managers.collection.cleanup(),
+                () => entry.assignments.collection.cleanup(),
+                () => entry.details.collection.cleanup(),
+                () => entry.anchors.collection.cleanup(),
+              ]),
+          )
+        })
+      }
+    }
+  }
+})

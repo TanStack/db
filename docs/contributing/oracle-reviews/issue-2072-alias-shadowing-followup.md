@@ -244,3 +244,30 @@ This checks those two source placements at construction. The traversal also
 handles union-from and joined QueryRef sources; no new public-row or temporal
 witness is claimed for them. The broader alias-scope gaps remain in the
 coverage map.
+
+## Nested source placement and captured joined rows
+
+The starting semantic head is `a4bab56793c72fc02d45bbd8dbd453632cdb041c`.
+ARCHITECTURE.md §Identity requires a nested source's identity to survive an
+alias collision with an outer joined source. The primary alias oracle now
+crosses nested FROM or JOIN placement, field or whole-row capture of the outer
+joined `user`, shadowed `user` or renamed `detail` in the child, and eager or
+on-demand child acquisition. A plain-Map source-role model predicts exact
+public rows at initial publication, child deletion and movement, outer joined
+row update and movement, and parent update. On-demand cases compare the two
+namings' nonempty source-request sets at every cut. The fixture keeps default
+public keys unambiguous; repeated contributors for one key are a separate
+materialization contract.
+
+The eight cases pass on the starting semantic head. A temporary mutant that
+disabled projected binding lookup in `compiler/evaluators.ts` failed all eight
+at the **initial public-row assertion**: a captured outer assignment ID `101`
+was read from the child detail as `201`. This is an assertion failure after
+successful setup, not a runtime or cleanup failure. The mutant was restored;
+the log is `/tmp/pr2079-projected-binding-mutant.log` on the authoring host.
+An alias-only mutation in `compiler/lazy-targets.ts` survived this matrix.
+The matrix therefore proves captured-row lookup sensitivity, while indexed
+lazy-target identity remains with the earlier self-join witness and needs
+broader topologies before claiming full coverage. These controlled sources do
+not prove real-provider scheduling, cancellation, RIGHT/FULL joins, arbitrary
+join trees, or temporal demand.
