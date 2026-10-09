@@ -8,7 +8,10 @@ import {
 } from '../../src/query/index.js'
 import { getQueryIR } from '../../src/query/builder/query-ir.js'
 import { getQueryIdentity } from '../../src/query/ir-stable-identity.js'
+import { optimizeQuery } from '../../src/query/optimizer.js'
+import { BasicIndex } from '../../src/indexes/basic-index.js'
 import { withHistoryCleanup } from '../optimistic-history-oracle.js'
+import { flushPromises } from '../utils.js'
 import { createScopedSource } from './includes-scope-identity-oracle.js'
 
 /**
@@ -398,21 +401,24 @@ describe(`captured alias scope oracle`, () => {
         expect(() =>
           base.select(({ n: parent }) => ({
             id: parent.id,
-            children: toArray(
+            children:
               placement === `direct`
-                ? base
-                    .where(({ n: child }) => eq(child.parentId, parent.id))
-                    .select(({ n: child }) => ({ id: child.id }))
-                : new Query()
-                    .from({
-                      inner: base.select(({ n }) => ({
-                        id: n.id,
-                        parentId: n.parentId,
-                      })),
-                    })
-                    .where(({ inner }) => eq(inner.parentId, parent.id))
-                    .select(({ inner }) => ({ id: inner.id })),
-            ),
+                ? toArray(
+                    base
+                      .where(({ n: child }) => eq(child.parentId, parent.id))
+                      .select(({ n: child }) => ({ id: child.id })),
+                  )
+                : toArray(
+                    new Query()
+                      .from({
+                        inner: base.select(({ n }) => ({
+                          id: n.id,
+                          parentId: n.parentId,
+                        })),
+                      })
+                      .where(({ inner }) => eq(inner.parentId, parent.id))
+                      .select(({ inner }) => ({ id: inner.id })),
+                  ),
           })),
         ).toThrow(/new Query\(\)/)
       } finally {
@@ -926,4 +932,438 @@ describe(`captured alias scope oracle`, () => {
       }
     }
   }
+})
+
+/**
+ * # Group keys keep lexical bindings when paths have the same spelling
+ *
+ * ARCHITECTURE.md §Identity and law 1 allow an include child to shadow its
+ * parent alias. Both scopes may have a `rank` field. Grouping by the captured
+ * parent rank and local child rank must then project each value from its own
+ * source. Renaming the child alias cannot change an explicitly selected row.
+ *
+ * The finite grammar crosses shadowed/renamed child aliases and both group-key
+ * orders. The history starts with duplicate and distinct child ranks, then
+ * changes a child rank and a parent rank. The model below counts plain child
+ * rows by rank for each parent; it does not inspect IR or reuse grouping code.
+ * The driver uses public Query, live Collection, and source writes. At each
+ * checkpoint it compares every projected group value and count. Other
+ * aggregate expressions and recursive source placements remain outside this
+ * cell.
+ */
+describe(`same-path group keys across alias scopes`, () => {
+  type RankParent = { id: number; rank: string }
+  type RankChild = { id: number; parentId: number; rank: string }
+
+  const initialParents: Array<RankParent> = [
+    { id: 1, rank: `parent-A` },
+    { id: 2, rank: `parent-B` },
+  ]
+  const initialChildren: Array<RankChild> = [
+    { id: 10, parentId: 1, rank: `child-X` },
+    { id: 11, parentId: 1, rank: `child-Y` },
+    { id: 12, parentId: 2, rank: `child-Z` },
+    { id: 13, parentId: 1, rank: `child-X` },
+  ]
+
+  // Model: one group per distinct child rank under each parent. The parent
+  // rank is constant for that parent but remains a separate selected value.
+  const modelRowsForRanks = (
+    parents: ReadonlyMap<number, RankParent>,
+    children: ReadonlyMap<number, RankChild>,
+  ) =>
+    [...parents.values()]
+      .map((parent) => {
+        const counts = new Map<string, number>()
+        for (const child of children.values()) {
+          if (child.parentId !== parent.id) continue
+          counts.set(child.rank, (counts.get(child.rank) ?? 0) + 1)
+        }
+        return {
+          id: parent.id,
+          groups: [...counts]
+            .map(([childRank, total]) => ({
+              parentRank: parent.rank,
+              childRank,
+              total,
+            }))
+            .sort((a, b) => a.childRank.localeCompare(b.childRank)),
+        }
+      })
+      .sort((a, b) => a.id - b.id)
+
+  for (const alias of [`parent`, `child`] as const) {
+    for (const order of [`parentFirst`, `childFirst`] as const) {
+      test(`group values retain ${alias} child binding with ${order} keys`, async () => {
+        const parentRows = new Map(initialParents.map((row) => [row.id, row]))
+        const childRows = new Map(initialChildren.map((row) => [row.id, row]))
+        const parents = createScopedSource(
+          `rank-parents`,
+          initialParents,
+          `eager`,
+        )
+        const children = createScopedSource(
+          `rank-children`,
+          initialChildren,
+          `eager`,
+        )
+        const childAt = (context: Context) => context[alias] as RankChild
+        const live = createLiveQueryCollection({
+          query: new Query()
+            .from({ parent: parents.collection })
+            .select(({ parent }) => ({
+              id: parent.id,
+              groups: toArray(
+                new Query()
+                  .from({ [alias]: children.collection })
+                  .where((context: Context) =>
+                    eq(childAt(context).parentId, parent.id),
+                  )
+                  .groupBy((context: Context) =>
+                    order === `parentFirst`
+                      ? [parent.rank, childAt(context).rank]
+                      : [childAt(context).rank, parent.rank],
+                  )
+                  .select((context: Context) => ({
+                    parentRank: parent.rank,
+                    childRank: childAt(context).rank,
+                    total: count(childAt(context).id),
+                  })),
+              ),
+            })),
+        })
+
+        // Observation: order between groups is unspecified, while each
+        // selected value and group multiplicity is part of the public row.
+        const check = (checkpoint: string) => {
+          const observed = live.toArray
+            .map(({ id, groups }) => ({
+              id,
+              groups: groups
+                .map(({ parentRank, childRank, total }) => ({
+                  parentRank,
+                  childRank,
+                  total,
+                }))
+                .sort((a, b) => a.childRank.localeCompare(b.childRank)),
+            }))
+            .sort((a, b) => a.id - b.id)
+          expect(observed, checkpoint).toEqual(
+            modelRowsForRanks(parentRows, childRows),
+          )
+        }
+
+        await withHistoryCleanup(
+          async () => {
+            await live.preload()
+            check(`after preload`)
+            const changedChild = { id: 11, parentId: 1, rank: `child-X` }
+            childRows.set(changedChild.id, changedChild)
+            children.put(changedChild)
+            await flushPromises()
+            check(`after child rank change`)
+            const changedParent = { id: 1, rank: `parent-A2` }
+            parentRows.set(changedParent.id, changedParent)
+            parents.put(changedParent)
+            await flushPromises()
+            check(`after parent rank change`)
+          },
+          () => [
+            () => live.cleanup(),
+            () => parents.collection.cleanup(),
+            () => children.collection.cleanup(),
+          ],
+        )
+      })
+    }
+  }
+})
+
+/**
+ * # A redundant wrapper does not change alpha-normalized identity
+ *
+ * ARCHITECTURE.md §Identity makes aliases lexical names and says an explicit
+ * projection can erase their spelling from query identity. The model is a
+ * plain source-row projection: both queries below select the same `id` and
+ * `label` values. The grammar renames both source declarations in a pure
+ * wrapper together and changes one source row after preload. The public driver
+ * checks those rows at both checkpoints, then compares the two optimized IR
+ * identities. An optimizer that collapses the wrapper but leaves a reference
+ * bound to its vanished outer declaration fails the identity comparison.
+ * This cell does not assert that every semantically equivalent query shape
+ * has the same identity.
+ */
+test(`optimized redundant wrappers erase alias spelling`, async () => {
+  const initial = { id: 1, label: `first` }
+  const source = createScopedSource(`wrapper-alpha`, [initial], `eager`)
+  const model = new Map([[initial.id, initial]])
+  const named = new Query()
+    .from({ n: new Query().from({ n: source.collection }) })
+    .select(({ n }) => ({ id: n.id, label: n.label }))
+  const renamed = new Query()
+    .from({ x: new Query().from({ x: source.collection }) })
+    .select(({ x }) => ({ id: x.id, label: x.label }))
+  const namedIR = getQueryIR(named)
+  const renamedIR = getQueryIR(renamed)
+  const namedLive = createLiveQueryCollection({ query: named })
+  const renamedLive = createLiveQueryCollection({ query: renamed })
+
+  // Observation: the rows establish the same public meaning before the
+  // identity assertion; the model reads only its own plain Map.
+  const checkRows = (checkpoint: string) => {
+    const expected = [...model.values()]
+      .map(({ id, label }) => ({ id, label }))
+      .sort((a, b) => a.id - b.id)
+    for (const live of [namedLive, renamedLive]) {
+      expect(
+        live.toArray
+          .map(({ id, label }) => ({ id, label }))
+          .sort((a, b) => a.id - b.id),
+        checkpoint,
+      ).toEqual(expected)
+    }
+  }
+
+  await withHistoryCleanup(
+    async () => {
+      await Promise.all([namedLive.preload(), renamedLive.preload()])
+      checkRows(`after preload`)
+      const changed = { id: 1, label: `second` }
+      model.set(changed.id, changed)
+      source.put(changed)
+      await flushPromises()
+      checkRows(`after source change`)
+      expect(getQueryIdentity(namedIR)).toBe(getQueryIdentity(renamedIR))
+      expect(getQueryIdentity(optimizeQuery(namedIR).optimizedQuery)).toBe(
+        getQueryIdentity(optimizeQuery(renamedIR).optimizedQuery),
+      )
+    },
+    () => [
+      () => namedLive.cleanup(),
+      () => renamedLive.cleanup(),
+      () => source.collection.cleanup(),
+    ],
+  )
+})
+
+/**
+ * # An include's alias cannot broaden a lazy join's source request
+ *
+ * ARCHITECTURE.md law 1 makes accepted alias renaming unobservable in explicit
+ * results. Its physical-work law also excludes unrelated source rows when an
+ * exact indexed join key is available. A nested include belongs to a child
+ * scope, so changing only its alias cannot turn a keyed user request into a
+ * full-source request.
+ *
+ * The finite history moves one eager anchor from user 1 to user 2, then
+ * changes user 2. The plain model joins current anchor and user Maps by ID.
+ * Separately, the work model tracks newly demanded user IDs at each checkpoint.
+ * The driver runs shadowed and distinct include aliases with direct and
+ * wrapped child sources against finite on-demand providers. The wrapper
+ * challenges both the child's collection map and its alias remapping. The
+ * observation compares public rows and independently interprets each recorded
+ * provider WHERE over both finite user rows. This cell does not claim arbitrary
+ * join predicates, include materialization through joined QueryRefs, or all
+ * provider scheduling cuts.
+ */
+describe(`lazy join demand across nested alias scopes`, () => {
+  type Anchor = { id: number; userId: number }
+  type User = { id: number; name: string }
+  type Post = { id: number; userId: number }
+  type PostAlias = `u` | `post`
+  type PostPlacement = `direct` | `wrapped`
+
+  const initialAnchor: Anchor = { id: 1, userId: 1 }
+  const initialUsers: Array<User> = [
+    { id: 1, name: `one` },
+    { id: 2, name: `two` },
+  ]
+  const initialPosts: Array<Post> = [
+    { id: 10, userId: 1 },
+    { id: 20, userId: 2 },
+  ]
+
+  const record = (value: unknown): Record<string, unknown> => {
+    if (value === null || typeof value !== `object` || Array.isArray(value)) {
+      throw new Error(`Unexpected provider predicate value`)
+    }
+    return value as Record<string, unknown>
+  }
+
+  // Model for the provider boundary: interpret the small public predicate
+  // vocabulary over finite user IDs. A null WHERE matches every user and is
+  // therefore observable as extra work, even if the final joined row is right.
+  const requestValue = (node: unknown, user: User): unknown => {
+    const expression = record(node)
+    if (expression.type === `val`) return expression.value
+    if (
+      expression.type === `ref` &&
+      Array.isArray(expression.path) &&
+      expression.path.length === 1 &&
+      expression.path[0] === `id`
+    ) {
+      return user.id
+    }
+    throw new Error(`Unexpected provider value expression`)
+  }
+
+  const requestMatches = (node: unknown, user: User): boolean => {
+    if (node === null) return true
+    const expression = record(node)
+    if (expression.type !== `func` || !Array.isArray(expression.args)) {
+      throw new Error(`Unexpected provider predicate`)
+    }
+    const args = expression.args
+    if (expression.name === `and`) {
+      return args.every((arg) => requestMatches(arg, user))
+    }
+    if (expression.name === `or`) {
+      return args.some((arg) => requestMatches(arg, user))
+    }
+    if (args.length !== 2) throw new Error(`Unexpected predicate arity`)
+    const left = requestValue(args[0], user)
+    const right = requestValue(args[1], user)
+    if (expression.name === `eq`) return left === right
+    if (expression.name === `in` && Array.isArray(right)) {
+      return right.includes(left)
+    }
+    throw new Error(`Unexpected provider predicate operator`)
+  }
+
+  const modelJoinedRows = (
+    anchors: ReadonlyMap<number, Anchor>,
+    users: ReadonlyMap<number, User>,
+  ) =>
+    [...anchors.values()]
+      .map((anchor) => {
+        const user = users.get(anchor.userId)
+        return {
+          anchorId: anchor.id,
+          userId: user?.id,
+          name: user?.name,
+        }
+      })
+      .sort((a, b) => a.anchorId - b.anchorId)
+
+  const buildCase = (postAlias: PostAlias, placement: PostPlacement) => {
+    const anchors = createScopedSource(
+      `lazy-alias-anchors-${postAlias}-${placement}`,
+      [initialAnchor],
+      `eager`,
+    )
+    const users = createScopedSource(
+      `lazy-alias-users-${postAlias}-${placement}`,
+      initialUsers,
+      `onDemand`,
+    )
+    const posts = createScopedSource(
+      `lazy-alias-posts-${postAlias}-${placement}`,
+      initialPosts,
+      `eager`,
+    )
+    users.collection.createIndex((user) => user.id, { indexType: BasicIndex })
+    posts.collection.createIndex((post) => post.userId, {
+      indexType: BasicIndex,
+    })
+    const postSource =
+      placement === `direct`
+        ? posts.collection
+        : new Query().from({ postSource: posts.collection })
+    const inner = new Query()
+      .from({ u: users.collection })
+      .select(({ u: user }) => ({
+        ...user,
+        posts: toArray(
+          new Query()
+            .from({ [postAlias]: postSource })
+            .where((context: Context) =>
+              eq((context[postAlias] as Post).userId, user.id),
+            )
+            .select((context: Context) => ({
+              id: (context[postAlias] as Post).id,
+            })),
+        ),
+      }))
+    const live = createLiveQueryCollection({
+      query: new Query()
+        .from({ a: anchors.collection })
+        .leftJoin({ w: inner }, ({ a, w }) => eq(a.userId, w.id))
+        .select(({ a, w }) => ({
+          anchorId: a.id,
+          userId: w.id,
+          name: w.name,
+        })),
+    })
+    return { anchors, users, posts, live, requestCount: 0 }
+  }
+
+  test(`direct and wrapped shadowed includes preserve keyed user demand through writes`, async () => {
+    const anchors = new Map([[initialAnchor.id, initialAnchor]])
+    const users = new Map(initialUsers.map((user) => [user.id, user]))
+    // In this one-way history, a key requested at an earlier checkpoint is
+    // already covered. Only a newly reached anchor can add an uncovered key.
+    const covered = new Set<number>()
+    const cases = [
+      buildCase(`post`, `direct`),
+      buildCase(`u`, `direct`),
+      buildCase(`post`, `wrapped`),
+      buildCase(`u`, `wrapped`),
+    ]
+
+    // Refinement checkpoint: each new request may cover only newly demanded
+    // user rows. Compare rows against plain recomputation as a separate law.
+    const check = (checkpoint: string) => {
+      const expectedRows = modelJoinedRows(anchors, users)
+      const newlyDemanded = [
+        ...new Set([...anchors.values()].map((anchor) => anchor.userId)),
+      ]
+        .filter((id) => !covered.has(id))
+        .sort((a, b) => a - b)
+      for (const id of newlyDemanded) covered.add(id)
+
+      for (const entry of cases) {
+        const rows = entry.live.toArray
+          .map(({ anchorId, userId, name }) => ({ anchorId, userId, name }))
+          .sort((a, b) => a.anchorId - b.anchorId)
+        expect(rows, `${checkpoint}: public rows`).toEqual(expectedRows)
+        const newRequests = entry.users.requests.slice(entry.requestCount)
+        const requestedIds = new Set<number>()
+        for (const request of newRequests) {
+          const where = JSON.parse(request) as unknown
+          for (const user of initialUsers) {
+            if (requestMatches(where, user)) requestedIds.add(user.id)
+          }
+        }
+        expect(
+          [...requestedIds].sort((a, b) => a - b),
+          `${checkpoint}: provider work for ${entry.users.collection.id}`,
+        ).toEqual(newlyDemanded)
+        entry.requestCount = entry.users.requests.length
+      }
+    }
+
+    await withHistoryCleanup(
+      async () => {
+        await Promise.all(cases.map((entry) => entry.live.preload()))
+        check(`after preload`)
+        const moved = { id: 1, userId: 2 }
+        anchors.set(moved.id, moved)
+        for (const entry of cases) entry.anchors.put(moved)
+        await flushPromises()
+        check(`after anchor movement`)
+        const changed = { id: 2, name: `two-updated` }
+        users.set(changed.id, changed)
+        for (const entry of cases) entry.users.put(changed)
+        await flushPromises()
+        check(`after user change`)
+      },
+      () =>
+        cases.flatMap((entry) => [
+          () => entry.live.cleanup(),
+          () => entry.anchors.collection.cleanup(),
+          () => entry.users.collection.cleanup(),
+          () => entry.posts.collection.cleanup(),
+        ]),
+    )
+  })
 })

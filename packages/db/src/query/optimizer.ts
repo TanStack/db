@@ -495,7 +495,11 @@ function removeRedundantFromClause(from: From): From {
     // Return the inner query's FROM clause with this alias
     const innerFrom = removeRedundantFromClause(processedQuery.from)
     if (innerFrom.type === `collectionRef`) {
-      return innerFrom
+      // A user-declared wrapper has its own lexical binding. Collapsing it
+      // would leave outer references pointing at a binding no longer present.
+      return innerFrom.bindingId === from.bindingId
+        ? innerFrom
+        : new QueryRefClass(processedQuery, from.alias, from.bindingId)
     } else if (innerFrom.type === `queryRef`) {
       return new QueryRefClass(innerFrom.query, from.alias, from.bindingId)
     }

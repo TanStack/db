@@ -329,7 +329,9 @@ export interface CompilationResult {
   sourceWhereClauses: Map<string, BasicExpression<boolean>>
 
   /**
-   * Maps each source alias to its collection ID. Enables per-alias subscriptions for self-joins.
+   * Maps FROM and JOIN source aliases to collection IDs within this compiled
+   * query. Includes keep their own alias maps in their child results.
+   * Enables per-alias subscriptions for self-joins.
    * Example: `{ employee: 'employees-col-id', manager: 'employees-col-id' }`
    */
   aliasToCollectionId: Record<string, string>
@@ -856,9 +858,9 @@ export function compileQuery(
         subquery.childCorrelationField,
       )
 
-      // Merge child's alias metadata into parent's
-      Object.assign(aliasToCollectionId, childResult.aliasToCollectionId)
-      Object.assign(aliasRemapping, childResult.aliasRemapping)
+      // Each include retains its own compilation result and lexical aliases.
+      // Copying them into this scope would let a child shadow a source used by
+      // the enclosing query's lazy join.
       for (const [alias, whereClause] of childResult.sourceWhereClauses) {
         sourceWhereClauses.set(alias, whereClause)
       }

@@ -94,3 +94,76 @@ the stated API rule; the other evidence gaps above remain open.
 At `1f588f53f`, the 51-cell alias-shadowing oracle, 268-cell generated scope
 oracle, alias validation tests, and production error-message oracle all passed
 (346 tests total, no type errors). Lint and whitespace checks passed too.
+
+## Bounded group, identity, and lazy-demand follow-up
+
+This audit starts from PR head `eda70b96cba65be5e843fbd0a73db4f500f719c0`.
+The established laws are ARCHITECTURE.md §Identity and laws 1 and 12: a
+captured reference keeps its lexical source, explicit projected results are
+invariant under legal alias renaming, and an applicable index excludes
+irrelevant source rows from physical work. These are consequences of the
+approved alias-scope design; the oracle does not introduce a new API rule.
+
+Three bounded cells were added to the existing alias-scope owner:
+
+- **Same-path group keys.** A child shadows `parent` and both have `rank`.
+  The independent model counts plain child rows by rank for each parent.
+  Four cases cross shadowed/renamed aliases with both group-key orders. The
+  public-row comparison runs after preload, a child-rank change, and a
+  parent-rank change. Removing the binding-ID comparison from group expression
+  equality makes both shadowed cases fail at the first public-row assertion:
+  `childRank` reads the parent's value. Renamed controls pass.
+- **Optimized identity.** Two pure wrappers differ only in the lexical name
+  of their source. A plain Map predicts identical explicitly projected rows
+  after preload and after a source change. Their raw identities agree, but the
+  old optimizer collapsed a distinct outer binding and left its refs dangling;
+  the optimized identities then differed by alias spelling. Restoring that
+  collapse makes the new identity assertion fail after the public-row checks.
+  The repair retains a user-declared wrapper when its binding differs from the
+  inner source. The older optimizer fixture now gives its synthetic internal
+  wrappers the same binding ID, so it still proves that safe wrappers collapse.
+- **Lazy joined QueryRef.** A finite on-demand user source is joined to an
+  anchor, while an include inside that joined QueryRef shadows or renames the
+  user's alias. Direct and wrapped include sources cross both names. A plain
+  Map predicts public rows, and a separate finite interpreter evaluates each
+  provider WHERE over both user IDs. The checks run after preload, an anchor
+  move, and a user update. Restoring the child's `aliasToCollectionId` merge
+  makes the shadowed direct case ask for `[1, 2]` when the model permits only
+  `[1]`, at the first provider-work assertion. A child compilation result
+  already owns its aliases, so the repair does not merge child alias or
+  remapping records into the enclosing scope. Source-keyed WHERE clauses
+  still propagate. The wrapped cases challenge a child remapping as well.
+
+Oracle guide audit for these cells: ORC-001 names the architecture authority
+and explicit limits in each opening comment. ORC-002 uses plain Map/count
+models, a metamorphic alpha-renaming relation, and a small provider-predicate
+interpreter rather than compiler decisions. ORC-003 keeps law, model, bounded
+history, public production driver, observation, and checkpoint beside their
+code. ORC-004 and ORC-007 do not apply: these are finite enumerations, not new
+generated properties; the existing broader scope campaigns remain unchanged.
+ORC-005 observes complete selected group values and counts, public wrapper
+rows, and both public rows and provider requests for the lazy case. ORC-006 is
+demonstrated by the three intended-checkpoint failures above; none is a setup
+or timeout failure. ORC-008 applies only to the lazy model's covered-ID set:
+the anchor's later move distinguishes an already covered user from a newly
+reached user. ORC-009 maps model parent, child, anchor, and user roles to
+Collection sources; lexical aliases and binding IDs are production concepts,
+not model state. ORC-010 uses `withHistoryCleanup` to retain the primary
+failure while releasing the live queries and sources. ORC-011 has no named
+shared semantic fault requiring a second formulation; public-row models and
+alias-renamed controls also constrain the lazy interpreter. This record and
+the updated coverage map provide ORC-012 evidence. ORC-013 is witnessed by
+the shadowed/renamed cases and by `[1]` versus an unrestricted `[1, 2]`
+request with an applicable index. ORC-014 makes no real-provider claim: the
+request witness uses a controlled finite adapter.
+
+With the candidate repairs, all 98 DB query suites pass (4,079 tests),
+including the generated scope oracle's fixed and random campaigns. The DB
+TypeScript, ESLint, and Prettier checks pass with the worktree's pinned
+dependencies linked.
+This is bounded evidence, not alias-scope closure. Other aggregate and
+ordering expressions, other optimizer rewrites, RIGHT/FULL joins, broader
+lazy-target paths, cancellation, and real-provider request handling retain
+the owners and limits in the coverage map. The no-includes metadata lookup
+count remains an unquantified performance observation; no throughput law or
+repair is claimed for it.

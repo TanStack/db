@@ -941,19 +941,24 @@ describe(`Query Optimizer`, () => {
       }
     })
 
-    test(`should remove redundant subqueries after optimization`, () => {
-      // Create a query with redundant subqueries that become empty after optimization
+    test(`collapses internal wrappers that share the source binding`, () => {
+      // Internal optimizer wrappers retain the source's lexical binding.
+      // User-declared wrappers have separate bindings and are not redundant
+      // when references outside the wrapper still name them.
+      const source = new CollectionRef(mockCollection, `u`)
       const queryWithRedundantSubqueries: QueryIR = {
         from: new QueryRef(
           {
             from: new QueryRef(
               {
-                from: new CollectionRef(mockCollection, `u`),
+                from: source,
               },
               `u`,
+              source.bindingId,
             ),
           },
           `u`,
+          source.bindingId,
         ),
         join: [
           {

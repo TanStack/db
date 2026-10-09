@@ -564,7 +564,8 @@ function expressionsEqual(expr1: any, expr2: any): boolean {
 
   switch (expr1.type) {
     case `ref`:
-      // Compare paths as arrays
+      // Identical paths in different lexical scopes name different values.
+      if (expr1.bindingId !== expr2.bindingId) return false
       if (!expr1.path || !expr2.path) return false
       if (expr1.path.length !== expr2.path.length) return false
       return expr1.path.every(
