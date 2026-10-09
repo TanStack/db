@@ -2226,6 +2226,10 @@ comparison. Native coordinator emission, multi-tab or OPFS scheduling, and a
 composed SQLite-to-wrapper startup rejection remain unproved before the whole
 cache-eviction class can be closed.
 
+The [cache-generation oracle audit](oracle-reviews/issue-2069-cache-generation-oracle-audit-53ded62d8.md)
+records the generated grammar controls, killed mutants, direct replays, and
+the remaining handoff limits for code commit `53ded62d8ef70ccd63b75d0e6dbc0a964f14b17c`.
+
 [Issue #2056 evaluation](oracle-reviews/issue-2056-full-mode-recovery.md) records
 the original RED and candidate comparisons on head
 `f43a16522c990134ae993235a312d2d5e433dc8a`. The later scoped design
