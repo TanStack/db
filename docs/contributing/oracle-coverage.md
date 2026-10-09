@@ -728,11 +728,15 @@ on resume offset, handle, and shape ID. It supplies the SDK handoff for this one
 after-durable history.
 
 The wrapper's controlled term jump and the real OPFS cold-successor election
-are separate evidence cells. An exact-ID acknowledgment after an unrelated peer
-write, followed by wrapper resume-evidence binding, remains with the persisted
-wrapper owner; that receiving witness must distinguish the original committed
-position from the later durable position and check the fail-closed generation.
-A single real-host history combining a missed
+are separate evidence cells. The persisted wrapper now has a controlled
+same-key peer-write continuation:
+X is durable at version 1, Y advances storage to version 2, exact-ID
+reconciliation acknowledges X's original position, the source receipt fulfills,
+and the wrapper's owned resume evidence fails closed against version 2. A
+temporary latest-position response makes that evidence assertion fail. The
+real SQLite exact-ID decision and this wrapper receiving history still have
+separate drivers; one real-adapter wrapper join remains with the persisted
+SQLite receiving owner. A single real-host history combining a missed
 original notice, an empty reserved term, and a passive follower's later public
 rows remains with the Chromium/OPFS owner. The controlled nested-prototype
 replacement reaches source and mounted live-query cuts; real SQLite
@@ -741,6 +745,17 @@ the Node SQLite receiving owner. The reset continuation uses a controlled
 snapshot with the same version-zero premise that the real SQLite adapter's
 schema-reset oracle proves. A combined real-adapter wrapper reset and later
 notification remains with the persisted SQLite receiving owner.
+
+A bounded TLA+ design grammar and exact TLC receipts live in
+`review-evidence/issue-2085-tla/`. It explores one X, one same-key peer Y,
+one reset, delayed/lost notices, position-only observation, and ledger pruning;
+it checks the reference laws and kills wrong-design mutants but does not
+execute a production path. A separate challenge shows that an old commit
+notice can publish an old row after durable reset *before* a passive peer
+receives any reset signal. The built-in coordinator has no reset sender, so
+this is an unresolved proposed cross-tab reset law, not a confirmed current
+receiving failure. A future sender needs a Browser/OPFS witness for that
+pre-signal order.
 
 This bounded owner assumes tabs run the same protocol version and one `txId`
 identifies one immutable payload. The Electric receiver does not cover

@@ -939,6 +939,117 @@ it.each([false, true])(
   },
 )
 
+// The design grammar's X-then-Y history joins two previously separate facts:
+// exact-ID reconciliation acknowledges X at version 1 after a same-key peer
+// write advances durable storage to version 2, and resume certification must
+// fail closed when the wrapper's owned generation is not the latest durable
+// generation. The controlled coordinator supplies the two durable writes and
+// the original-position response. The real persisted wrapper owns the source
+// receipt, public row, and resume-evidence checkpoint. SQLite separately owns
+// the atomic exact-ID proof; this test does not emulate its SQL decision.
+it(`keeps the original receipt position after a peer write and fails closed on resume evidence`, async () => {
+  const collectionId = `reconciled-peer-resume-generation`
+  const adapter = createRecordingAdapter()
+  const coordinator = createCoordinatorHarness()
+  const error = new IndeterminateCommitError({
+    collectionId,
+    requestType: `rpc:applyCommittedTx:req`,
+    previousLeaderId: `retired`,
+    previousTerm: 1,
+    currentLeaderId: `replacement`,
+    currentTerm: 2,
+    cause: new Error(`lost response`),
+  })
+  let source!: TodoSyncParams
+  let capability: SyncMetadataApi<string>[`persistence`] | undefined
+  let originalTx: PersistedTx | undefined
+  let syncRuns = 0
+
+  coordinator.requestApplyCommittedTx = async (id, tx) => {
+    originalTx = { ...tx, term: 1, seq: 1, rowVersion: 1 }
+    await adapter.applyCommittedTx(id, originalTx)
+    const peerTx: PersistedTx = {
+      ...tx,
+      txId: `peer-after-original`,
+      term: 2,
+      seq: 1,
+      rowVersion: 2,
+      mutations: [
+        {
+          type: `update`,
+          key: `shared`,
+          value: { id: `shared`, title: `peer` },
+        },
+      ],
+      rowMetadataMutations: [],
+      collectionMetadataMutations: [
+        { type: `set`, key: `cursor`, value: `peer` },
+      ],
+    }
+    await adapter.applyCommittedTx(id, peerTx)
+    throw error
+  }
+  coordinator.reconcileCommittedTx = (id, tx, anchor) => {
+    expect(id).toBe(collectionId)
+    expect(tx.txId).toBe(originalTx?.txId)
+    expect(anchor).toEqual({ latestRowVersion: 0, resetEpoch: 0 })
+    return Promise.resolve({
+      type: `rpc:reconcileCommittedTx:res`,
+      rpcId: `exact-after-peer`,
+      ok: true,
+      alreadyApplied: true,
+      committed: { term: 1, seq: 1, rowVersion: 1 },
+    })
+  }
+
+  const collection = createCollection(
+    persistedCollectionOptions<Todo, string>({
+      id: collectionId,
+      syncMode: `on-demand`,
+      getKey: (item) => item.id,
+      sync: {
+        sync: (params) => {
+          source = params
+          capability = params.metadata?.persistence
+          syncRuns++
+          params.markReady()
+        },
+      },
+      persistence: { adapter, coordinator },
+    }),
+  )
+
+  try {
+    collection.startSyncImmediate()
+    await vi.waitFor(() => expect(capability).toBeDefined())
+    source.begin()
+    capability?.resumeSnapshot.expectCurrentCommit()
+    source.write({
+      type: `insert`,
+      value: { id: `shared`, title: `source` },
+    })
+    source.metadata?.collection.set(`cursor`, `source`)
+    await atPersistedOracleCheckpoint(
+      Promise.resolve(source.commit()),
+      `exact-ID source receipt after peer write`,
+    )
+
+    expect(syncRuns).toBe(1)
+    expect(adapter.applyCommittedTxCalls).toHaveLength(2)
+    expect(collection.get(`shared`)?.title).toBe(`source`)
+    expect(adapter.rows.get(`shared`)?.title).toBe(`peer`)
+    expect(adapter.collectionMetadata.get(`cursor`)).toBe(`peer`)
+
+    await capability?.resumeSnapshot.certify()
+    expect(adapter.loadResumeSnapshotCalls.at(-1)?.includeRows).toBe(false)
+    expect(capability?.resumeSnapshot.getKeySetEvidence()).toEqual({
+      status: `incompatible`,
+    })
+  } finally {
+    await collection.cleanup()
+  }
+})
+
 // Reconciliation after a lost answer can arrive even when a peer already
 // published the original tx:committed. A duplicate proof must not turn an
 // unchanged durable snapshot into a second public change batch. This owner

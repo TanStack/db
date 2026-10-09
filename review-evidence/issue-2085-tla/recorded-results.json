@@ -1,0 +1,491 @@
+{
+  "jar_sha256": "936a262061c914694dfd669a543be24573c45d5aa0ff20a8b96b23d01e050e88",
+  "checks_sha256": "c37af894e04f8d46c4ffb32612fd989126fc145fb556d737bec1d076b5f9c5c5",
+  "results": [
+    {
+      "name": "route-safe",
+      "scenario": "route",
+      "fault": "none",
+      "expected": "pass",
+      "matched": true,
+      "exit_code": 0,
+      "seconds": 0.934,
+      "counts": ["11", "8", "0"],
+      "trace_actions": [],
+      "model_sha256": "13d308ad731e46687deebf879f415cd05550037f987179abc3b64eac81a6a7e0",
+      "config_sha256": "423dc667f157bca1250b91e51436c502c387ea3b3bc041bc322d28dd998359e7"
+    },
+    {
+      "name": "exact-safe",
+      "scenario": "exact",
+      "fault": "none",
+      "expected": "pass",
+      "matched": true,
+      "exit_code": 0,
+      "seconds": 1.183,
+      "counts": ["10144", "2866", "0"],
+      "trace_actions": [],
+      "model_sha256": "13d308ad731e46687deebf879f415cd05550037f987179abc3b64eac81a6a7e0",
+      "config_sha256": "d207c0ad43d67c76593803cee86200ccce479a0e69771af72e5b4aa07ec8a3e6"
+    },
+    {
+      "name": "reset-safe",
+      "scenario": "reset",
+      "fault": "none",
+      "expected": "pass",
+      "matched": true,
+      "exit_code": 0,
+      "seconds": 1.56,
+      "counts": ["81284", "22746", "0"],
+      "trace_actions": [],
+      "model_sha256": "13d308ad731e46687deebf879f415cd05550037f987179abc3b64eac81a6a7e0",
+      "config_sha256": "46e1d1140962bf8fa14c6cad521f25c6e33e481a92e1cec9c5916d41bef602c0"
+    },
+    {
+      "name": "route-fair",
+      "scenario": "route",
+      "fault": "none",
+      "expected": "pass",
+      "matched": true,
+      "exit_code": 0,
+      "seconds": 0.82,
+      "counts": ["11", "8", "0"],
+      "trace_actions": [],
+      "model_sha256": "13d308ad731e46687deebf879f415cd05550037f987179abc3b64eac81a6a7e0",
+      "config_sha256": "bfedec4e04341e59f0b283e7c330f6b730c32b87789801660ec1d00ba604ad57"
+    },
+    {
+      "name": "exact-fair",
+      "scenario": "exact",
+      "fault": "none",
+      "expected": "pass",
+      "matched": true,
+      "exit_code": 0,
+      "seconds": 1.809,
+      "counts": ["10144", "2866", "0"],
+      "trace_actions": [],
+      "model_sha256": "13d308ad731e46687deebf879f415cd05550037f987179abc3b64eac81a6a7e0",
+      "config_sha256": "cbd31c37d8a64ef190342296a76bc020a0aa279bfb6e915a75bd68ee1f6531a6"
+    },
+    {
+      "name": "reset-fair",
+      "scenario": "reset",
+      "fault": "none",
+      "expected": "pass",
+      "matched": true,
+      "exit_code": 0,
+      "seconds": 8.741,
+      "counts": ["81284", "22746", "0"],
+      "trace_actions": [],
+      "model_sha256": "13d308ad731e46687deebf879f415cd05550037f987179abc3b64eac81a6a7e0",
+      "config_sha256": "a2ec418beee916f4be5dcae3d8057aad66f4073cb02be61a684f460d30a3c115"
+    },
+    {
+      "name": "route-reuse-term",
+      "scenario": "route",
+      "fault": "reuseTerm",
+      "expected": "DurableTermUnique",
+      "matched": true,
+      "exit_code": 12,
+      "seconds": 0.755,
+      "counts": ["4", "4", "1"],
+      "trace_actions": [
+        "Initial predicate",
+        "CloseA line 83, col 3 to line 86, col 72 of module LeaderCloseDesign",
+        "ElectB line 89, col 3 to line 94, col 46 of module LeaderCloseDesign"
+      ],
+      "model_sha256": "13d308ad731e46687deebf879f415cd05550037f987179abc3b64eac81a6a7e0",
+      "config_sha256": "4692e096ebcf6f8b60faf8b5da807082d1c04373939c78b1ca5148bd56ab1cf4"
+    },
+    {
+      "name": "route-reuse-term-public",
+      "scenario": "route",
+      "fault": "reuseTerm",
+      "expected": "SuccessorRouteStable",
+      "matched": true,
+      "exit_code": 12,
+      "seconds": 0.725,
+      "counts": ["11", "9", "1"],
+      "trace_actions": [
+        "Initial predicate",
+        "CloseA line 83, col 3 to line 86, col 72 of module LeaderCloseDesign",
+        "ElectB line 89, col 3 to line 94, col 46 of module LeaderCloseDesign",
+        "Next line 261, col 6 to line 261, col 37 of module LeaderCloseDesign",
+        "Next line 261, col 6 to line 261, col 37 of module LeaderCloseDesign"
+      ],
+      "model_sha256": "13d308ad731e46687deebf879f415cd05550037f987179abc3b64eac81a6a7e0",
+      "config_sha256": "b1a88e55b2f2c6619304a58b4fb7100fcf9631cac896b77c10852254921e7ba1"
+    },
+    {
+      "name": "route-accept-old",
+      "scenario": "route",
+      "fault": "acceptOldBeat",
+      "expected": "SuccessorRouteStable",
+      "matched": true,
+      "exit_code": 12,
+      "seconds": 0.695,
+      "counts": ["11", "9", "1"],
+      "trace_actions": [
+        "Initial predicate",
+        "CloseA line 83, col 3 to line 86, col 72 of module LeaderCloseDesign",
+        "ElectB line 89, col 3 to line 94, col 46 of module LeaderCloseDesign",
+        "Next line 261, col 6 to line 261, col 37 of module LeaderCloseDesign",
+        "Next line 261, col 6 to line 261, col 37 of module LeaderCloseDesign"
+      ],
+      "model_sha256": "13d308ad731e46687deebf879f415cd05550037f987179abc3b64eac81a6a7e0",
+      "config_sha256": "107892e04f4a354496665ed4ea57468048c508e6a6264204041968e725e44825"
+    },
+    {
+      "name": "exact-ignore-anchor",
+      "scenario": "exact",
+      "fault": "ignoreAnchor",
+      "expected": "AbsentApplyNeedsAnchor",
+      "matched": true,
+      "exit_code": 12,
+      "seconds": 0.651,
+      "counts": ["118", "64", "31"],
+      "trace_actions": [
+        "Initial predicate",
+        "SendX line 60, col 3 to line 65, col 51 of module LeaderCloseDesign",
+        "CloseA line 83, col 3 to line 86, col 72 of module LeaderCloseDesign",
+        "ElectB line 89, col 3 to line 94, col 46 of module LeaderCloseDesign",
+        "PeerWrite line 118, col 3 to line 127, col 54 of module LeaderCloseDesign",
+        "Reconcile line 143, col 3 to line 183, col 26 of module LeaderCloseDesign"
+      ],
+      "model_sha256": "13d308ad731e46687deebf879f415cd05550037f987179abc3b64eac81a6a7e0",
+      "config_sha256": "27ea08f67c2e48b7909b347447c4cc686d9a2018aa40c043fa16a5ba880270a2"
+    },
+    {
+      "name": "reset-ignore-epoch",
+      "scenario": "reset",
+      "fault": "ignoreEpoch",
+      "expected": "AbsentApplyNeedsAnchor",
+      "matched": true,
+      "exit_code": 12,
+      "seconds": 0.789,
+      "counts": ["128", "72", "38"],
+      "trace_actions": [
+        "Initial predicate",
+        "SendX line 60, col 3 to line 65, col 51 of module LeaderCloseDesign",
+        "CloseA line 83, col 3 to line 86, col 72 of module LeaderCloseDesign",
+        "ElectB line 89, col 3 to line 94, col 46 of module LeaderCloseDesign",
+        "Reset line 130, col 3 to line 138, col 45 of module LeaderCloseDesign",
+        "Reconcile line 143, col 3 to line 183, col 26 of module LeaderCloseDesign"
+      ],
+      "model_sha256": "13d308ad731e46687deebf879f415cd05550037f987179abc3b64eac81a6a7e0",
+      "config_sha256": "682920f350dc5a3c2b2198facc1a0d63fa8861cdbe2627f774dd84c824e266f4"
+    },
+    {
+      "name": "exact-anchor-first",
+      "scenario": "exact",
+      "fault": "anchorFirst",
+      "expected": "PresentIdAcknowledged",
+      "matched": true,
+      "exit_code": 12,
+      "seconds": 0.761,
+      "counts": ["56", "39", "23"],
+      "trace_actions": [
+        "Initial predicate",
+        "SendX line 60, col 3 to line 65, col 51 of module LeaderCloseDesign",
+        "OriginalApply line 68, col 3 to line 80, col 54 of module LeaderCloseDesign",
+        "CloseA line 83, col 3 to line 86, col 72 of module LeaderCloseDesign",
+        "ElectB line 89, col 3 to line 94, col 46 of module LeaderCloseDesign",
+        "Reconcile line 143, col 3 to line 183, col 26 of module LeaderCloseDesign"
+      ],
+      "model_sha256": "13d308ad731e46687deebf879f415cd05550037f987179abc3b64eac81a6a7e0",
+      "config_sha256": "c2d645071d163b81671d95e4d0d5e473acb0bd192ba8b111b28c59c696b39dd4"
+    },
+    {
+      "name": "reset-retain-ledger",
+      "scenario": "reset",
+      "fault": "retainStaleLedger",
+      "expected": "AlreadyAppliedSameEpoch",
+      "matched": true,
+      "exit_code": 12,
+      "seconds": 0.755,
+      "counts": ["175", "110", "70"],
+      "trace_actions": [
+        "Initial predicate",
+        "SendX line 60, col 3 to line 65, col 51 of module LeaderCloseDesign",
+        "OriginalApply line 68, col 3 to line 80, col 54 of module LeaderCloseDesign",
+        "CloseA line 83, col 3 to line 86, col 72 of module LeaderCloseDesign",
+        "ElectB line 89, col 3 to line 94, col 46 of module LeaderCloseDesign",
+        "Reset line 130, col 3 to line 138, col 45 of module LeaderCloseDesign",
+        "Reconcile line 143, col 3 to line 183, col 26 of module LeaderCloseDesign"
+      ],
+      "model_sha256": "13d308ad731e46687deebf879f415cd05550037f987179abc3b64eac81a6a7e0",
+      "config_sha256": "edade1a2ae3bcaad5fc6fe94890e0775a485c7560f0dbc7491345dff42d5480c"
+    },
+    {
+      "name": "exact-latest-receipt",
+      "scenario": "exact",
+      "fault": "latestReceipt",
+      "expected": "OriginalPositionReceipt",
+      "matched": true,
+      "exit_code": 12,
+      "seconds": 0.75,
+      "counts": ["152", "91", "53"],
+      "trace_actions": [
+        "Initial predicate",
+        "SendX line 60, col 3 to line 65, col 51 of module LeaderCloseDesign",
+        "OriginalApply line 68, col 3 to line 80, col 54 of module LeaderCloseDesign",
+        "CloseA line 83, col 3 to line 86, col 72 of module LeaderCloseDesign",
+        "ElectB line 89, col 3 to line 94, col 46 of module LeaderCloseDesign",
+        "PeerWrite line 118, col 3 to line 127, col 54 of module LeaderCloseDesign",
+        "Reconcile line 143, col 3 to line 183, col 26 of module LeaderCloseDesign"
+      ],
+      "model_sha256": "13d308ad731e46687deebf879f415cd05550037f987179abc3b64eac81a6a7e0",
+      "config_sha256": "a6b0770e7a5ffa051b20d698d3ae6164cc12b5b826e4cef76febc9a483bf82d5"
+    },
+    {
+      "name": "exact-drop-equal-reload",
+      "scenario": "exact",
+      "fault": "dropEqualReload",
+      "expected": "CertifiedDelivery",
+      "matched": true,
+      "exit_code": 12,
+      "seconds": 0.771,
+      "counts": ["264", "139", "72"],
+      "trace_actions": [
+        "Initial predicate",
+        "SendX line 60, col 3 to line 65, col 51 of module LeaderCloseDesign",
+        "CloseA line 83, col 3 to line 86, col 72 of module LeaderCloseDesign",
+        "ElectB line 89, col 3 to line 94, col 46 of module LeaderCloseDesign",
+        "Reconcile line 143, col 3 to line 183, col 26 of module LeaderCloseDesign",
+        "ObservePosition line 107, col 3 to line 115, col 44 of module LeaderCloseDesign",
+        "Next line 264, col 6 to line 264, col 41 of module LeaderCloseDesign"
+      ],
+      "model_sha256": "13d308ad731e46687deebf879f415cd05550037f987179abc3b64eac81a6a7e0",
+      "config_sha256": "db1f67d4158bf82ea860c5db87a938a0bd6b39cc0bfeff5ea2b44f9e59b636c3"
+    },
+    {
+      "name": "reset-trust-stale",
+      "scenario": "reset",
+      "fault": "trustStaleNotice",
+      "expected": "CertifiedDelivery",
+      "matched": true,
+      "exit_code": 12,
+      "seconds": 0.703,
+      "counts": ["589", "338", "226"],
+      "trace_actions": [
+        "Initial predicate",
+        "SendX line 60, col 3 to line 65, col 51 of module LeaderCloseDesign",
+        "OriginalApply line 68, col 3 to line 80, col 54 of module LeaderCloseDesign",
+        "CloseA line 83, col 3 to line 86, col 72 of module LeaderCloseDesign",
+        "ElectB line 89, col 3 to line 94, col 46 of module LeaderCloseDesign",
+        "Reset line 130, col 3 to line 138, col 45 of module LeaderCloseDesign",
+        "Next line 264, col 6 to line 264, col 41 of module LeaderCloseDesign",
+        "Next line 264, col 6 to line 264, col 41 of module LeaderCloseDesign"
+      ],
+      "model_sha256": "13d308ad731e46687deebf879f415cd05550037f987179abc3b64eac81a6a7e0",
+      "config_sha256": "5f1887ec51c5da8f201c0ee98b47fdea51afcfcce3b63ba11849a8508538a483"
+    },
+    {
+      "name": "exact-publish-position",
+      "scenario": "exact",
+      "fault": "publishOnObserve",
+      "expected": "PositionReadIsNotPublication",
+      "matched": true,
+      "exit_code": 12,
+      "seconds": 0.7,
+      "counts": ["10", "9", "4"],
+      "trace_actions": [
+        "Initial predicate",
+        "SendX line 60, col 3 to line 65, col 51 of module LeaderCloseDesign",
+        "OriginalApply line 68, col 3 to line 80, col 54 of module LeaderCloseDesign",
+        "ObservePosition line 107, col 3 to line 115, col 44 of module LeaderCloseDesign"
+      ],
+      "model_sha256": "13d308ad731e46687deebf879f415cd05550037f987179abc3b64eac81a6a7e0",
+      "config_sha256": "48bc71ed1e6a851fc971fd06e2134a8cc3fd030037e9b1e3a33f2df176d47bd2"
+    },
+    {
+      "name": "exact-duplicate-reload-event",
+      "scenario": "exact",
+      "fault": "duplicateReloadEvent",
+      "expected": "NoDuplicateEvents",
+      "matched": true,
+      "exit_code": 12,
+      "seconds": 0.775,
+      "counts": ["486", "248", "146"],
+      "trace_actions": [
+        "Initial predicate",
+        "SendX line 60, col 3 to line 65, col 51 of module LeaderCloseDesign",
+        "OriginalApply line 68, col 3 to line 80, col 54 of module LeaderCloseDesign",
+        "CloseA line 83, col 3 to line 86, col 72 of module LeaderCloseDesign",
+        "ElectB line 89, col 3 to line 94, col 46 of module LeaderCloseDesign",
+        "Reconcile line 143, col 3 to line 183, col 26 of module LeaderCloseDesign",
+        "Next line 264, col 6 to line 264, col 41 of module LeaderCloseDesign",
+        "Next line 264, col 6 to line 264, col 41 of module LeaderCloseDesign"
+      ],
+      "model_sha256": "13d308ad731e46687deebf879f415cd05550037f987179abc3b64eac81a6a7e0",
+      "config_sha256": "2e65f2d6b3d015ac5bd268402094382c72d25de8f12196cf80294b184c909b42"
+    },
+    {
+      "name": "exact-no-reconcile-notice",
+      "scenario": "exact",
+      "fault": "noReconcileNotice",
+      "expected": "CertifiedReloadIssued",
+      "matched": true,
+      "exit_code": 12,
+      "seconds": 0.754,
+      "counts": ["49", "33", "19"],
+      "trace_actions": [
+        "Initial predicate",
+        "SendX line 60, col 3 to line 65, col 51 of module LeaderCloseDesign",
+        "CloseA line 83, col 3 to line 86, col 72 of module LeaderCloseDesign",
+        "ElectB line 89, col 3 to line 94, col 46 of module LeaderCloseDesign",
+        "Reconcile line 143, col 3 to line 183, col 26 of module LeaderCloseDesign"
+      ],
+      "model_sha256": "13d308ad731e46687deebf879f415cd05550037f987179abc3b64eac81a6a7e0",
+      "config_sha256": "b7b952ff02e2739a4d85f0359e73d08b81ba9df808e9578011e785a6065c602d"
+    },
+    {
+      "name": "witness-exact-after-peer",
+      "scenario": "exact",
+      "fault": "none",
+      "expected": "NoExactAfterPeerWitness",
+      "matched": true,
+      "exit_code": 12,
+      "seconds": 0.772,
+      "counts": ["152", "91", "53"],
+      "trace_actions": [
+        "Initial predicate",
+        "SendX line 60, col 3 to line 65, col 51 of module LeaderCloseDesign",
+        "OriginalApply line 68, col 3 to line 80, col 54 of module LeaderCloseDesign",
+        "CloseA line 83, col 3 to line 86, col 72 of module LeaderCloseDesign",
+        "ElectB line 89, col 3 to line 94, col 46 of module LeaderCloseDesign",
+        "PeerWrite line 118, col 3 to line 127, col 54 of module LeaderCloseDesign",
+        "Reconcile line 143, col 3 to line 183, col 26 of module LeaderCloseDesign"
+      ],
+      "model_sha256": "13d308ad731e46687deebf879f415cd05550037f987179abc3b64eac81a6a7e0",
+      "config_sha256": "7b68c2ba63738cf1eaeef3d69e975675d1648fc8dc9fd164987b037935ed7a99"
+    },
+    {
+      "name": "witness-absent-peer-conflict",
+      "scenario": "exact",
+      "fault": "none",
+      "expected": "NoAbsentPeerConflictWitness",
+      "matched": true,
+      "exit_code": 12,
+      "seconds": 0.651,
+      "counts": ["118", "64", "31"],
+      "trace_actions": [
+        "Initial predicate",
+        "SendX line 60, col 3 to line 65, col 51 of module LeaderCloseDesign",
+        "CloseA line 83, col 3 to line 86, col 72 of module LeaderCloseDesign",
+        "ElectB line 89, col 3 to line 94, col 46 of module LeaderCloseDesign",
+        "PeerWrite line 118, col 3 to line 127, col 54 of module LeaderCloseDesign",
+        "Reconcile line 143, col 3 to line 183, col 26 of module LeaderCloseDesign"
+      ],
+      "model_sha256": "13d308ad731e46687deebf879f415cd05550037f987179abc3b64eac81a6a7e0",
+      "config_sha256": "12c26fb0d35b037afb8fa35add5b7acf05b3ccb0b150479d0433555b874aef81"
+    },
+    {
+      "name": "witness-missed-equal-notice",
+      "scenario": "exact",
+      "fault": "none",
+      "expected": "NoMissedEqualNoticeWitness",
+      "matched": true,
+      "exit_code": 12,
+      "seconds": 0.739,
+      "counts": ["398", "211", "122"],
+      "trace_actions": [
+        "Initial predicate",
+        "SendX line 60, col 3 to line 65, col 51 of module LeaderCloseDesign",
+        "OriginalApply line 68, col 3 to line 80, col 54 of module LeaderCloseDesign",
+        "CloseA line 83, col 3 to line 86, col 72 of module LeaderCloseDesign",
+        "ElectB line 89, col 3 to line 94, col 46 of module LeaderCloseDesign",
+        "ObservePosition line 107, col 3 to line 115, col 44 of module LeaderCloseDesign",
+        "Next line 265, col 6 to line 265, col 46 of module LeaderCloseDesign",
+        "Reconcile line 143, col 3 to line 183, col 26 of module LeaderCloseDesign"
+      ],
+      "model_sha256": "13d308ad731e46687deebf879f415cd05550037f987179abc3b64eac81a6a7e0",
+      "config_sha256": "7c2265232f899c62f8d0dba623d4f14fddf235bc19cee9aa1ff754f6a1747dcb"
+    },
+    {
+      "name": "witness-reset-old-notice",
+      "scenario": "reset",
+      "fault": "none",
+      "expected": "NoResetOldNoticeWitness",
+      "matched": true,
+      "exit_code": 12,
+      "seconds": 0.724,
+      "counts": ["176", "111", "71"],
+      "trace_actions": [
+        "Initial predicate",
+        "SendX line 60, col 3 to line 65, col 51 of module LeaderCloseDesign",
+        "OriginalApply line 68, col 3 to line 80, col 54 of module LeaderCloseDesign",
+        "CloseA line 83, col 3 to line 86, col 72 of module LeaderCloseDesign",
+        "ElectB line 89, col 3 to line 94, col 46 of module LeaderCloseDesign",
+        "Reset line 130, col 3 to line 138, col 45 of module LeaderCloseDesign",
+        "Next line 264, col 6 to line 264, col 41 of module LeaderCloseDesign"
+      ],
+      "model_sha256": "13d308ad731e46687deebf879f415cd05550037f987179abc3b64eac81a6a7e0",
+      "config_sha256": "0d8f8a5dcd46812555eac2790095dda9946da00a3e4c96d9564dbbb674c3f2b9"
+    },
+    {
+      "name": "witness-lost-notice-recovery",
+      "scenario": "exact",
+      "fault": "none",
+      "expected": "NoLostNoticeRecoveryWitness",
+      "matched": true,
+      "exit_code": 12,
+      "seconds": 0.689,
+      "counts": ["507", "255", "150"],
+      "trace_actions": [
+        "Initial predicate",
+        "SendX line 60, col 3 to line 65, col 51 of module LeaderCloseDesign",
+        "OriginalApply line 68, col 3 to line 80, col 54 of module LeaderCloseDesign",
+        "CloseA line 83, col 3 to line 86, col 72 of module LeaderCloseDesign",
+        "ElectB line 89, col 3 to line 94, col 46 of module LeaderCloseDesign",
+        "Next line 265, col 6 to line 265, col 46 of module LeaderCloseDesign",
+        "Reconcile line 143, col 3 to line 183, col 26 of module LeaderCloseDesign",
+        "Next line 264, col 6 to line 264, col 41 of module LeaderCloseDesign"
+      ],
+      "model_sha256": "13d308ad731e46687deebf879f415cd05550037f987179abc3b64eac81a6a7e0",
+      "config_sha256": "88892dcba0fe71810090c358615769463309afd25a3b17c9d8cccd03206fa457"
+    },
+    {
+      "name": "witness-pruned-unknown",
+      "scenario": "exact",
+      "fault": "none",
+      "expected": "NoPrunedUnknownWitness",
+      "matched": true,
+      "exit_code": 12,
+      "seconds": 0.679,
+      "counts": ["160", "95", "56"],
+      "trace_actions": [
+        "Initial predicate",
+        "SendX line 60, col 3 to line 65, col 51 of module LeaderCloseDesign",
+        "OriginalApply line 68, col 3 to line 80, col 54 of module LeaderCloseDesign",
+        "CloseA line 83, col 3 to line 86, col 72 of module LeaderCloseDesign",
+        "ElectB line 89, col 3 to line 94, col 46 of module LeaderCloseDesign",
+        "PruneX line 188, col 3 to line 189, col 63 of module LeaderCloseDesign",
+        "Reconcile line 143, col 3 to line 183, col 26 of module LeaderCloseDesign"
+      ],
+      "model_sha256": "13d308ad731e46687deebf879f415cd05550037f987179abc3b64eac81a6a7e0",
+      "config_sha256": "cb56e66836a9e39c92364a1ae447f47eccccc9f469cb96c7e3508bf773363589"
+    },
+    {
+      "name": "challenge-pre-signal-reset",
+      "scenario": "reset",
+      "fault": "none",
+      "expected": "NoOldEpochBeforeResetSignal",
+      "matched": true,
+      "exit_code": 12,
+      "seconds": 0.671,
+      "counts": ["175", "110", "70"],
+      "trace_actions": [
+        "Initial predicate",
+        "SendX line 60, col 3 to line 65, col 51 of module LeaderCloseDesign",
+        "OriginalApply line 68, col 3 to line 80, col 54 of module LeaderCloseDesign",
+        "CloseA line 83, col 3 to line 86, col 72 of module LeaderCloseDesign",
+        "ElectB line 89, col 3 to line 94, col 46 of module LeaderCloseDesign",
+        "Reset line 130, col 3 to line 138, col 45 of module LeaderCloseDesign",
+        "Next line 264, col 6 to line 264, col 41 of module LeaderCloseDesign"
+      ],
+      "model_sha256": "13d308ad731e46687deebf879f415cd05550037f987179abc3b64eac81a6a7e0",
+      "config_sha256": "123bd0759a6ace8e845155310392ff91167fc734b22cd9db254e0a64237ff1d4"
+    }
+  ]
+}

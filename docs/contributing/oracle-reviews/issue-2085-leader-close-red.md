@@ -613,3 +613,66 @@ review work with explicit protocol-history and oracle calibration before
 accepting proposed fixes. The accounting is complete at the reviewed head;
 the executable repair is complete for the bounded laws above, with real-host
 receiving limits retained in the coverage map.
+
+## Design grammar and TLC addendum (2026-10-09)
+
+The new bounded model, runner, case inventory, and exact TLC receipts are in
+`review-evidence/issue-2085-tla/`. This is a design experiment, not a
+TypeScript/SQLite refinement check. The model abstracts one source transaction
+X, one same-key peer write Y, A/B leadership, passive C, one reset, optional
+exact-ID pruning, lost and reordered notices, position-only observation, and
+receipt settlement. The README states legal actions, exclusions, fairness, and
+public checkpoints; the mapping names each production boundary.
+
+### Laws and rival predictions
+
+| Law and authority | Rival prediction | TLC and receiving result |
+| --- | --- | --- |
+| Every election reserves a greater durable term before announcing B. Coordinator README and glossary. | Reuse term 1 after a no-write A term; C accepts B then A's delayed equal-term heartbeat. | `DurableTermUnique` fails at election. With that law omitted, `SuccessorRouteStable` fails at C's route. The existing Browser and OPFS owners supply production election evidence. |
+| A present exact X acknowledges X's original committed position even after Y; an absent X needs the unchanged row version and reset epoch. Coordinator README. | Check anchor before ID, report Y's position as X's, apply absent X after Y, or ignore reset epoch. | `PresentIdAcknowledged`, `OriginalPositionReceipt`, and `AbsentApplyNeedsAnchor` each reject the respective fault at the intended cut. Real SQLite already owns the exact-ID decision. |
+| A pruned X cannot become a replay authorization. SQLite retention and anchor contract. | Treat absent/pruned X as safe merely because ID lookup missed. | A reachability control finds X applied, pruned, then unknown; the anchor fault is rejected. The model has no pruning age or capacity clock. |
+| A reconciliation reload repairs missed rows despite an equal observed position, and a position-only read cannot publish rows. Coordinator contract and glossary. | Drop equal-position reload or publish observed durable rows from metadata alone. | `CertifiedDelivery` and `PositionReadIsNotPublication` reject the faults. The persisted wrapper and OPFS owners supply separate production receiving witnesses. |
+| After a reset signal, an old-epoch notice cannot republish old rows. Controlled wrapper reset contract. | Trust the delayed old payload. | `CertifiedDelivery` rejects the fault. The model's reset-known premise matches the existing controlled wrapper histories. |
+
+TLC exhausted 8 route, 2,866 exact-ID, and 22,746 reset states with no safety
+error. The same graphs passed the explicitly fair local-progress properties.
+Thirteen wrong-design cases failed at their named invariant, and six negated
+reachability controls found the intended lawful histories. The runner rejects
+a different invariant or a TLC/tool error as a mutant kill.
+
+Two control repairs mattered. A first lost-notice witness marked X lost after
+C had already reloaded; the retained witness records loss at reconciliation
+and then a later reload. Pruning initially allowed A to apply the same
+original request twice; the grammar now excludes that illegal history. Neither
+was a production defect.
+
+### Wrapper receiving witness
+
+The persisted wrapper oracle now composes X's version-1 exact-ID
+acknowledgment with a same-key Y at durable version 2, then runs owned resume
+certification. Its source receipt fulfills in one sync run; public X and
+durable Y/cursor are both observed; the later snapshot makes key-set evidence
+`incompatible`. A temporary collaborator mutant that reported Y's position
+as X's made that last assertion fail: it returned `consistent` evidence.
+The mutation was restored. This covers the wrapper boundary with a controlled
+coordinator. A real SQLite adapter plus wrapper in one receiving path remains
+open; the adapter's exact-ID result is separately checked against SQLite.
+
+### Candidate law outside the established cut
+
+A separate TLC challenge deliberately asserts that no old row can be
+published after durable reset *before* C has received a reset signal. It
+fails in seven states: A commits X; B reserves term 2 and resets to empty
+epoch 1; C receives A's version-1 notice before B's reset signal and
+publishes X while durable rows are empty. The signal and commit messages
+come from different owners and may be reordered. C has no new-epoch
+knowledge at that cut. The built-in coordinator currently has no
+`collection:reset` sender, so this is an unresolved proposed cross-tab reset
+law, not a confirmed PR #2088 product regression. A future sender must define
+the pre-signal public guarantee and add a real Browser/OPFS receiving witness.
+
+The model is exhaustive only within its stated small grammar. One real host
+join of missed notice, empty election, and passive public rows remains open.
+Cross-version peers, concurrent source transactions, multiple Collections,
+provider cursor semantics, physical crash durability, and Electron IPC reply
+loss remain outside this TLC claim.
