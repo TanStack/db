@@ -327,13 +327,16 @@ export class BucketFacadeAdapter {
       ])) {
         if (!restoredKeys.has(key)) sync.write({ type: `delete`, key })
       }
+      // The record after the failed writes, held ones included, says whether
+      // a row still exists: the flush may have deleted it.
+      const written = new Set(entry.rows.keys())
       entry.rows.clear()
       for (const row of rows) {
         entry.rows.set(row.key, row)
         entry.keys.set(row.value, row.key)
         if (row.order !== undefined) entry.order.set(row.value, row.order)
         sync.write({
-          type: synced.has(row.key) ? `update` : `insert`,
+          type: written.has(row.key) ? `update` : `insert`,
           value: row.value,
         })
       }

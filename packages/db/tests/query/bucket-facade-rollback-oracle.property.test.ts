@@ -1550,4 +1550,32 @@ describe(`bucket facade rollback`, () => {
       },
     ])
   })
+
+  // Pinned replay of a CI failure: a rollback restores a row that an earlier
+  // flush wrote behind a still-persisting transaction. The restore must write
+  // it as an update, because the held insert lands first.
+  it(`restores a held row after a rolled-back update`, async () => {
+    await runHistory([
+      {
+        choices: [{ kind: 0, bucket: 3, id: 0, v: 0, rank: 0 }],
+        outcome: `publish`,
+        throwPick: 0,
+      },
+      {
+        choices: [
+          { kind: 0, bucket: 3, id: 5, v: 0, rank: 0 },
+          { kind: 0, bucket: 0, id: 0, v: 0, rank: 0 },
+        ],
+        outcome: `publish`,
+        throwPick: 0,
+        hold: 3,
+        holdFor: 1,
+      },
+      {
+        choices: [{ kind: 0, bucket: 3, id: 5, v: 1, rank: 0 }],
+        outcome: `rollback`,
+        throwPick: 0,
+      },
+    ])
+  })
 })
