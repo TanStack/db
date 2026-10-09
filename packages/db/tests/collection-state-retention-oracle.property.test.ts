@@ -2912,6 +2912,42 @@ fcTest.prop(
     await runOptimisticHistory(initial, steps)
   },
 )
+// An aborted open batch never applies, so the source's own rows must return
+// to their state before it. A later partial update then omits `c` again, and
+// the Collection keeps the held `c`. Shrunk from seed -526998278.
+it(`merges a partial update after an aborted source delete`, async () => {
+  const counts = await runOptimisticHistory(
+    [{ id: 1, a: 0, b: 0, c: 0 }],
+    [
+      {
+        type: `open`,
+        batch: {
+          type: `sync`,
+          rows: [],
+          deletes: [1],
+          truncate: false,
+          copies: 1,
+        },
+      },
+      { type: `close`, commit: false },
+      {
+        type: `sync`,
+        rows: [{ id: 1, a: 0, b: 0, c: -1 }],
+        deletes: [],
+        truncate: false,
+        copies: 1,
+        partial: true,
+      },
+    ],
+    undefined,
+    { partialUpdates: true },
+  )
+  expect(counts).toMatchObject({
+    openBatches: 1,
+    abortedBatches: 1,
+    distinguishingPartialUpdates: 1,
+  })
+})
 fcTest.prop([partialHistory], { numRuns: oracleRuns(100), seed: 86104 })(
   `matches partial-update histories with a fixed seed`,
   async ({ initial, steps }) => {
