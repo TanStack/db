@@ -172,9 +172,22 @@ semantics.
 After a mutating RPC transport failure, replay is allowed only while the
 requester can prove the same non-null leader id and term still own the route.
 If either value was unknown for the first attempt, or either value changes,
-the request rejects with `IndeterminateCommitError` and requires application
-reconciliation. Coordinators never retry an indeterminate mutation against an
+the direct request rejects with `IndeterminateCommitError` and requires
+application reconciliation. Coordinators never retry that mutation against an
 unknown or replacement leader.
+
+A source sync transaction has a separate exact-ID reconciliation path. The
+persisted wrapper holds its applied receipt while an elected coordinator and
+SQLite adapter check the transaction under the writer lock. An existing ID
+acknowledges the original durable position. An absent ID permits one application
+only if the durable row version and reset epoch equal the wrapper's pre-send
+snapshot; another durable write may carry newer row values or an opaque source
+cursor and cannot be overwritten safely. On a certified result the wrapper
+fulfills the receipt in the same sync run and the coordinator invalidates peers,
+including a peer that missed the original notification. An uncertified result
+retains `IndeterminateCommitError` and terminal source failure. Custom adapters
+and coordinators without this optional operation keep that terminal behavior.
+One generated `txId` identifies one immutable source transaction payload.
 
 `SingleProcessCoordinator` also implements the complete route. It is always
 leader and has no cross-process transport, but it applies the transaction to
@@ -293,6 +306,13 @@ row-bearing snapshot.
   the saved resume baseline unsafe.
 - `unknown`: the adapter has no authoritative pre-migration key set and does
   not claim completeness.
+
+A no-write election can reserve a greater durable term and reset its sequence
+to zero without changing persisted rows or the source resume cursor. The
+persisted wrapper keeps an already certified resume baseline across that
+transition only when the atomic snapshot has the same row version and reset
+epoch. A committed write or schema reset requires fresh certification and
+cannot inherit the earlier baseline merely because the key set still matches.
 
 The method is required because the versioned `metadata.persistence` capability
 always carries hydration, durable row scanning, certification, evidence, and

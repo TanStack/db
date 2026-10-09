@@ -1506,7 +1506,7 @@ function buildIncludesSubquery(
     throw new Error(
       devBuild() && process.env.NODE_ENV !== `production`
         ? `Includes subquery for "${fieldName}" reuses an ancestor's source declaration. Use new Query().from({ alias: collection }) in the child instead of passing the ancestor builder to from().`
-        : codedMessage(233, { fieldName }),
+        : codedMessage(236, { fieldName }),
     )
   }
   const childQuery = cloneQueryForPlacement(sourceQuery)

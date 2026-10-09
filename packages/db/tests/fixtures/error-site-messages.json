@@ -866,7 +866,14 @@
     ],
     "kind": "warning"
   },
-  "233": {
+  "235": {
+    "file": "query/live/bucket-facade-adapter.ts",
+    "template": "Bucket facade received graph output between a flush and its rollback",
+    "literals": [
+      "Bucket facade received graph output between a flush and its rollback"
+    ]
+  },
+  "236": {
     "file": "query/builder/index.ts",
     "template": "Includes subquery for \"${fieldName}\" reuses an ancestor's source declaration. Use new Query().from({ alias: collection }) in the child instead of passing the ancestor builder to from().",
     "literals": [

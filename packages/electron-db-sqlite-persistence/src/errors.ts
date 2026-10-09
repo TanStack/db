@@ -4,12 +4,12 @@ import type {
 } from './protocol'
 
 type ElectronPersistenceErrorOptions = {
-  code?: string
+  code?: string | number
   cause?: unknown
 }
 
 export class ElectronPersistenceError extends Error {
-  readonly code: string | undefined
+  readonly code: string | number | undefined
 
   constructor(message: string, options?: ElectronPersistenceErrorOptions) {
     super(message, { cause: options?.cause })

@@ -165,6 +165,7 @@ interface OfflineConfig {
   storage?: StorageAdapter // Custom storage (default: auto-detect)
   maxConcurrency?: number // Parallel execution limit
   jitter?: boolean // Add jitter to retry delays
+  shouldRetry?: (error: Error, retryCount: number) => boolean | undefined // Override retry decision
   beforeRetry?: (txs) => txs // Transform/filter before retry
   onUnknownMutationFn?: (name, tx) => void // Handle orphaned transactions
   onLeadershipChange?: (isLeader) => void // Leadership state callback
@@ -206,7 +207,55 @@ const executor = startOfflineExecutor({
 })
 ```
 
-Throwing `NonRetriableError` stops retry and removes the transaction from the outbox. Use for permanent failures (validation errors, conflicts, 4xx responses).
+Throwing `NonRetriableError` stops retry and removes the transaction from the outbox. Use it for failures known to be permanent under the server contract, such as validation errors or a 409 that means an unrecoverable duplicate. A recoverable 401 can instead reach `shouldRetry`.
+
+### Retry decisions
+
+Set `shouldRetry` to override the default decision for a named mutation function
+error. The hook receives the named mutation function's `Error` and retry count
+(`0` on the first failure). The same `Error` instance is passed through; a
+non-`Error` rejection is converted to an `Error` and may lose custom fields.
+Return `true` to retry, `false` to stop, or `undefined` to use the
+default decision. For example, return `true` for a recoverable 401 and
+`undefined` otherwise. `NonRetriableError` always stops without calling the
+hook. The default backoff and configured jitter still determine retry timing.
+The hook is synchronous and shared by all named mutation functions. An async
+hook returns a Promise, which fails its outbox row. Put function-specific
+context on the thrown error when retry rules differ between functions.
+If the hook throws or returns another value, the executor records a terminal
+rejection for that row, removes it from the outbox, and rejects its waiting
+promises with the hook failure. Other queued rows continue after the failed
+row's deletion is acknowledged. New commits may join the queue during cleanup,
+but cannot run ahead of that deletion. A fresh executor does not replay the
+failed row. The named mutation function error is logged; the hook failure is
+the caller-facing and stored error. Stored errors retain `name`, `message`, and
+`stack`, but a restart does not restore an arbitrary error subclass or its
+custom fields.
+If marker storage or deletion fails, the caller still receives the hook error
+while the executor stops with the storage error and retains queued work. A
+saved terminal marker skips the named mutation function after restart; an
+unmarked row can replay.
+To decide from an HTTP status, throw an error carrying `response.status` in
+the named mutation function and inspect its numeric status in `shouldRetry`.
+
+```ts
+class HttpError extends Error {
+  constructor(readonly status: number) {
+    super(`HTTP ${status}`)
+    this.name = 'HttpError'
+  }
+}
+
+function throwOnHttpFailure(response: Response): void {
+  if (!response.ok) throw new HttpError(response.status)
+}
+
+const retryOnRecoverable401 = (error: Error): boolean | undefined =>
+  error instanceof HttpError && error.status === 401 ? true : undefined
+```
+
+Call `throwOnHttpFailure(response)` in the named mutation function and pass
+`shouldRetry: retryOnRecoverable401` in the executor config.
 
 ### Idempotency keys
 
@@ -339,18 +388,37 @@ mutationFns: {
 Correct:
 
 ```ts
+class HttpError extends Error {
+  constructor(readonly status: number) {
+    super(`HTTP ${status}`)
+    this.name = 'HttpError'
+  }
+}
+
 mutationFns: {
   createTodo: async ({ transaction }) => {
     const res = await fetch('/api/todos', { ... })
-    if (res.status >= 400 && res.status < 500) {
-      throw new NonRetriableError(`Client error: ${res.status}`)
+    if (res.status === 422) {
+      throw new NonRetriableError('Invalid todo')
     }
-    if (!res.ok) throw new Error('Server error')
+    if (res.status === 409) {
+      throw new NonRetriableError('Duplicate detected')
+    }
+    // This todo API also treats these responses as permanent.
+    if ([404, 405, 410].includes(res.status)) {
+      throw new NonRetriableError(`Todo endpoint rejected: ${res.status}`)
+    }
+    if (!res.ok) throw new HttpError(res.status)
   },
 }
 ```
 
-Without distinguishing retriable from permanent errors, 4xx responses (validation, auth, not found) will retry forever until max retries, wasting resources and filling logs.
+Classify failures according to whether the app can recover. The default policy
+stops when an error message contains 400, 401, 403, or 422; it can retry other
+errors indefinitely. This example marks 404, 405, and 410 as permanent for the
+todo API while leaving 408 and 429 available for retry. Use `shouldRetry` when
+a 401 can recover after credentials refresh, and use `NonRetriableError` for
+known permanent failures.
 
 See also: db-core/mutations-optimistic/SKILL.md — for the underlying mutation primitives.
 
