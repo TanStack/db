@@ -5717,6 +5717,10 @@ describeUnlessQueuedPresenceReplay(`Electric adapter laws`, () => {
       ).rejects.toMatchObject({ name: `AbortError` })
       const second = trace.collection._sync.loadSubset({ limit: 1 })
       expect(second).not.toBe(true)
+      await expect(Promise.resolve(second)).rejects.toMatchObject({
+        name: `AbortError`,
+      })
+      expect(mockStream.requestSnapshot).toHaveBeenCalledOnce()
     }, [
       () => snapshot.resolve(),
       () => persistence.resolve(),
