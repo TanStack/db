@@ -103,6 +103,7 @@ function deferred() {
 async function reachCheckpoint(
   promise: Promise<void>,
   checkpoint: string,
+  timeoutMs = 1_000,
 ): Promise<void> {
   let timer: ReturnType<typeof setTimeout> | undefined
   try {
@@ -111,7 +112,7 @@ async function reachCheckpoint(
       new Promise<never>((_, reject) => {
         timer = setTimeout(
           () => reject(new Error(`Did not reach checkpoint: ${checkpoint}`)),
-          1_000,
+          timeoutMs,
         )
       }),
     ])
@@ -1058,6 +1059,254 @@ describe(`SQLite resume snapshots`, () => {
       throw error
     } finally {
       closeDatabasePreservingPrimary(database, primaryFailure)
+    }
+  })
+
+  // Scoped recovery may start rotation while this run still owns the current
+  // cache, then its claim may expire before SQLite decides ownership.
+  // The independent rule uses authority at the rotation transaction: the
+  // recovering run gets private empty storage, while a live peer and future
+  // claimants retain the original head. This history holds the real adapter's
+  // rotation before its transaction, then crosses expiry. After a fresh subset
+  // load settles, public rows and both claimed SQLite snapshots must match
+  // those two independent storage routes. An empty source subset cannot make
+  // the recovering run's old cached row authoritative again. The
+  // controlled source supplies the recovery decision; provider classification
+  // of malformed metadata is a separate receiving obligation.
+  it(`keeps a warm peer's cache when scoped recovery crosses claim expiry`, async () => {
+    type Row = { id: string; title: string }
+    const database = new DatabaseSync(`:memory:`)
+    const logicalId = `resume-loss-then-expiry`
+    let now = Date.now()
+    const adapter = new SQLiteCorePersistenceAdapter({
+      driver: createDriver(database),
+      cacheGenerationClaimTtlMs: 10_000,
+      now: () => now,
+    })
+    const rotationEntered = deferred()
+    const releaseRotation = deferred()
+    const rotate = adapter.rotateCacheGeneration.bind(adapter)
+    adapter.rotateCacheGeneration = async (...args) => {
+      rotationEntered.resolve()
+      await releaseRotation.promise
+      return rotate(...args)
+    }
+    const oldRow: Row = { id: `old`, title: `Warm cached row` }
+    const freshRow: Row = { id: `fresh`, title: `Fresh source row` }
+    const warmResume = {
+      kind: `resume`,
+      requiresTagState: false,
+      offset: `10_0`,
+      handle: `warm-handle`,
+      shapeId: `warm-shape`,
+      updatedAt: 1,
+    }
+    const resetMarker = { kind: `reset`, updatedAt: 2 }
+    let recoveringSource: Parameters<SyncConfig<Row, string>[`sync`]>[0]
+    let freshDemand = false
+    const recoveringStarted = deferred()
+    const warmStarted = deferred()
+    const createPeer = (recovering: boolean) =>
+      createCollection(
+        persistedCollectionOptions<Row, string>({
+          id: logicalId,
+          syncMode: `on-demand`,
+          getKey: (row) => row.id,
+          sync: {
+            sync: (source) => {
+              if (recovering) recoveringSource = source
+              source.markReady()
+              if (recovering) recoveringStarted.resolve()
+              else warmStarted.resolve()
+              return {
+                restartAfterScopedRecovery: () => {},
+                loadSubset: async () => {
+                  if (recovering && freshDemand) {
+                    source.begin()
+                    source.write({ type: `insert`, value: freshRow })
+                    await source.commit()
+                  }
+                },
+              }
+            },
+          },
+          persistence: { adapter },
+        }),
+      )
+    let recovering: Collection<Row, string> | undefined
+    let warm: Collection<Row, string> | undefined
+    let recovery: Promise<void> | undefined
+    let laterClaimId: string | undefined
+    let primaryFailure: unknown
+    try {
+      const seed = await adapter.claimCacheGeneration(logicalId)
+      await adapter.applyCommittedTx(seed.storageCollectionId, {
+        txId: `old-source-row`,
+        term: 1,
+        seq: 1,
+        rowVersion: 1,
+        cacheGenerationClaimId: seed.claimId,
+        mutations: [{ type: `insert`, key: oldRow.id, value: oldRow }],
+        collectionMetadataMutations: [
+          { type: `set`, key: `electric:resume`, value: warmResume },
+        ],
+      })
+      await adapter.releaseCacheGenerationClaim(seed.claimId)
+
+      recovering = createPeer(true)
+      recovering.startSyncImmediate()
+      await reachCheckpoint(
+        recoveringStarted.promise,
+        `recovering source start`,
+      )
+      const initialClaim = database
+        .prepare(
+          `SELECT claim_id, physical_id, expires_at_ms
+           FROM cache_generation_claim WHERE logical_id = ?`,
+        )
+        .get(logicalId) as {
+        claim_id: string
+        physical_id: string
+        expires_at_ms: number
+      }
+      warm = createPeer(false)
+      warm.startSyncImmediate()
+      await reachCheckpoint(warmStarted.promise, `warm source start`)
+      await warm._sync.loadSubset({})
+      expect(warm.get(oldRow.id)).toMatchObject(oldRow)
+      const warmClaim = database
+        .prepare(
+          `SELECT claim_id, physical_id FROM cache_generation_claim
+           WHERE logical_id = ? AND claim_id <> ?`,
+        )
+        .get(logicalId, initialClaim.claim_id) as {
+        claim_id: string
+        physical_id: string
+      }
+      expect(warmClaim.physical_id).toBe(initialClaim.physical_id)
+
+      now += 9_000
+      const warmExpiresAt = await adapter.renewCacheGenerationClaim(
+        warmClaim.physical_id,
+        warmClaim.claim_id,
+      )
+      expect(warmExpiresAt).toBeGreaterThan(initialClaim.expires_at_ms)
+      recovery = recoveringSource!.metadata!.persistence!.startScopedRecovery!({
+        key: `electric:resume`,
+        value: resetMarker,
+      })
+      void recovery.catch(() => undefined)
+      await reachCheckpoint(rotationEntered.promise, `held cache rotation`)
+      now += 2_000
+      expect(now).toBeGreaterThan(initialClaim.expires_at_ms)
+      expect(now).toBeLessThan(warmExpiresAt!)
+      releaseRotation.resolve()
+      await reachCheckpoint(recovery, `private scoped recovery`)
+
+      const recoveringClaim = database
+        .prepare(
+          `SELECT physical_id FROM cache_generation_claim WHERE claim_id = ?`,
+        )
+        .get(initialClaim.claim_id) as { physical_id: string }
+      const head = database
+        .prepare(
+          `SELECT physical_id FROM cache_generation
+           WHERE logical_id = ? AND retired = 0`,
+        )
+        .get(logicalId) as { physical_id: string }
+      expect(recoveringClaim.physical_id).not.toBe(initialClaim.physical_id)
+      expect(head.physical_id).toBe(initialClaim.physical_id)
+
+      await recovering._sync.loadSubset({})
+      expect(Array.from(recovering.values())).toEqual([])
+      expect(
+        (
+          await adapter.loadResumeSnapshot(recoveringClaim.physical_id, {
+            cacheGenerationClaimId: initialClaim.claim_id,
+          })
+        ).rows,
+      ).toEqual([])
+
+      freshDemand = true
+      await recovering._sync.loadSubset({})
+      const laterClaim = await adapter.claimCacheGeneration(logicalId)
+      laterClaimId = laterClaim.claimId
+      expect(laterClaim.storageCollectionId).toBe(initialClaim.physical_id)
+      expect(Array.from(recovering.values(), ({ id }) => id)).toEqual([
+        freshRow.id,
+      ])
+      expect(Array.from(warm.values(), ({ id }) => id)).toEqual([oldRow.id])
+      const privateSnapshot = await adapter.loadResumeSnapshot(
+        recoveringClaim.physical_id,
+        { cacheGenerationClaimId: initialClaim.claim_id },
+      )
+      const warmSnapshot = await adapter.loadResumeSnapshot(
+        warmClaim.physical_id,
+        { cacheGenerationClaimId: warmClaim.claim_id },
+      )
+      expect(privateSnapshot.rows.map(({ key }) => key)).toEqual([freshRow.id])
+      expect(privateSnapshot.collectionMetadata).toEqual([
+        { key: `electric:resume`, value: resetMarker },
+      ])
+      expect(warmSnapshot.rows.map(({ key }) => key)).toEqual([oldRow.id])
+      expect(warmSnapshot.collectionMetadata).toEqual([
+        { key: `electric:resume`, value: warmResume },
+      ])
+    } catch (error) {
+      primaryFailure = error
+      throw error
+    } finally {
+      releaseRotation.resolve()
+      const cleanupFailures: Array<unknown> = []
+      const cleanupTimeoutMs = primaryFailure === undefined ? 1_000 : 200
+      if (recovery) {
+        try {
+          await reachCheckpoint(recovery, `recovery cleanup`, cleanupTimeoutMs)
+        } catch (error) {
+          cleanupFailures.push(error)
+        }
+      }
+      for (const release of [
+        () => recovering?.cleanup(),
+        () => warm?.cleanup(),
+        () =>
+          laterClaimId
+            ? adapter.releaseCacheGenerationClaim(laterClaimId)
+            : undefined,
+      ]) {
+        try {
+          const settling = release()
+          if (settling) {
+            await reachCheckpoint(settling, `peer cleanup`, cleanupTimeoutMs)
+          }
+        } catch (error) {
+          cleanupFailures.push(error)
+        }
+      }
+      const failure =
+        primaryFailure === undefined
+          ? undefined
+          : primaryFailure instanceof Error
+            ? primaryFailure
+            : new Error(`Peer recovery oracle failed`, {
+                cause: primaryFailure,
+              })
+      if (failure && cleanupFailures.length > 0) {
+        Object.defineProperty(failure, `cleanupFailures`, {
+          value: cleanupFailures,
+          enumerable: true,
+        })
+      }
+      closeDatabasePreservingPrimary(
+        database,
+        failure ??
+          (cleanupFailures.length > 0
+            ? new AggregateError(
+                cleanupFailures,
+                `Peer recovery cleanup failed`,
+              )
+            : undefined),
+      )
     }
   })
 

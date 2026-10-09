@@ -1765,6 +1765,27 @@ without managed generations; its unknown and missing on-demand evidence cases
 now require full-log replacement. The scoped reset settlement owner uses an
 abstract managed claim for that one applied-receipt law; the SQLite owner
 checks physical generation separation.
+The [bounded cache-authority design grammar](../../review-evidence/cache-authority-tla/README.md)
+also checks incompatible resume evidence followed by claim expiry. SQLite's
+transaction-time claim test makes that rotation private. The SQLite receiving
+owner now holds the real adapter's rotation after a controlled source starts
+scoped recovery, expires that run's claim while a peer remains live, then
+checks the peer's public and durable rows and unchanged resume metadata, an
+empty then fresh subset in the private generation, its reset marker, the
+recovering claim's storage ID, and a later claim of the unchanged head. A
+mutant that uses the expired claim's remembered storage ID advances the head
+and fails at that comparison. The controlled source supplies the recovery
+decision; the Electric owner still needs a receiving history in which its own
+invalid-resume classification reaches this same held expiry cut. The
+persistence owner also needs an intermediate receiving checkpoint between
+storage rotation and public truncate, where a demand or old callback may
+arrive. The grammar combines those actions and cannot establish that gap.
+It does not model physical garbage collection.
+The separate [receipt-settlement grammar](../../review-evidence/cache-receipt-tla/README.md)
+checks the accepted-versus-visible distinction during scoped recovery with a
+persisting optimistic transaction. It is bounded model evidence; the
+optimistic-history and Electric owners remain the production checks for those
+receipt laws.
 The installed-SDK delivery owner now holds an old HTTP subset response across
 managed rotation and observes fresh demand settlement, public rows, and the
 new cache's durable rows after that old response arrives. Its adapter is a
