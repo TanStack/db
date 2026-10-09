@@ -580,7 +580,9 @@ already retracted the bucket's rows, but a facade is a Collection: a user
 transaction can show an optimistic row in it, and a sync commit can be held
 behind a persisting transaction. Retirement is therefore a legal write to a
 non-empty facade, not an invariant violation. It is a facade write of the
-flush, so a failed flush restores it. An external holder may keep the retired
+flush, so a failed flush restores it. A restore deletes every key the flush
+wrote, including a write that a persisting transaction still holds, so the held
+write cannot land after the rollback. An external holder may keep the retired
 Collection alive, but a later active interval gets a new facade. Inline modes
 do not create child Collections.
 

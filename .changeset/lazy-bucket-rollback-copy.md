@@ -6,4 +6,6 @@ Copy an include bucket's rows for rollback only when a flush writes that bucket.
 
 Fix a lost child update after a failed live-query commit. When the parent row commit of a live query with included child collections failed, the child collection changes from that flush were dropped, although the parent changes stayed pending. The next write then published the parent but left the child collection showing its old rows. The changes now stay pending, and the next flush publishes them once.
 
+A failed flush also restores a child collection that a persisting transaction holds. Before, a row that the failed flush added appeared when the transaction settled, before any retry. One child collection's throwing subscriber no longer stops the other child collections from publishing, and a failed restore still lets each child collection publish later flushes.
+
 A rollback now throws when graph output reached the child collections between a flush and its rollback, because restoring the flush would lose that output. This does not happen in a valid query. The rollback still restores the child collections and keeps them delivering events. A rollback after the live query is cleaned up does nothing.

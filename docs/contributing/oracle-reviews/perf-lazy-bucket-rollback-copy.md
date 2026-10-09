@@ -302,7 +302,7 @@ architecture text says so and explains why a non-empty retirement is legal.
 | 10. Misplaced comments | Confirmed | Moved. |
 
 On merge, `main` (#2074) had taken codes 230–232, so the rollback invariant is
-now code 235. (#2080 holds 233 and 234.)
+now code 235. (#2080 holds 233; it later dropped 234.)
 
 Mutants, against the rollback oracle, the includes oracle and the adapter
 tests:
@@ -321,3 +321,50 @@ tests:
 witnesses only. The second is a contradictory graph signal. Disposal between a
 flush and its rollback is pinned, not generated.
 
+## Follow-up: fourth medium code review (2026-10-09)
+
+Reviewed head `c69662d3b`. The review had ten findings. Each was checked with
+an executable probe on that head before any change.
+
+**Falsified law.** Flush atomicity: after a failed flush, every facade shows
+its rows from before the flush until the next successful flush. A persisting
+user transaction on a facade holds its sync commits. The failed flush's insert
+of a new key is then not in the stored rows, so `restore()` sent no delete for
+it. When the transaction settled, the row appeared and published an insert
+event, before any retry. `main` has the same restore loop. Updates, deletes and
+retirement under a hold were already restored.
+
+**Why the oracle missed it.** The grammar's optimistic rows came from a
+transaction that stays pending, which does not hold sync commits. Held commits
+had pinned witnesses only, and the held-commit witness did not check the
+facade after the transaction settled. The new `hold` step field holds one
+shown facade's commits during a flush and settles before the comparison.
+
+RED on `c69662d3b`: both campaigns fail at `step 1 (rollback): rows of b0`
+(fixed seed) and `step 2 (throwNew): rows of b0` (random seed). GREEN after
+the fix.
+
+| Finding | Verdict | Change |
+| --- | --- | --- |
+| 1. Rollback misses held sync commits | Confirmed, narrower than stated | The leak is a transient before the retry; a retry writes the key again or deletes it. `restore()` now also deletes every key the flush wrote. |
+| 2. Retirement misses held rows | Refuted on legal histories | The graph retracts every row it sent, including held ones, and those deletes are held in order. A probe of retire under a hold, settled after publish, ends empty. Rows the graph never retracted are finding 7. |
+| 3. The code-235 error masks the root error and drops deltas | Accepted | It fires only on an invariant violation, which fails loud by design (AGENTS.md fail-fast). Precise errors for such failures are not required (maintainer decision, 2026-10-09). |
+| 4. Abort is not exception-safe | Confirmed | One `abort()` restores, then discards every deferral in a `finally`. Pinned witness: a restore whose commit throws, then a later flush publishes. |
+| 5. Readiness survives rollback | Confirmed state, low reach | A facade that `resolve()` created before its bucket activates stays ready and empty after a failed flush. In the builder, only an old `previousValue` can create such a facade. Open design question. |
+| 6. One throwing subscriber stops other facades | Confirmed | `publish()` publishes every facade, then rethrows the first error. Pinned witness. |
+| 7. Leftover synced rows at retirement are retracted silently | Open design question | Already on the maintainer's decision list. |
+| 8. Every flush copies the bookkeeping maps | Accepted limit, plus a fix | The per-flush copy is a recorded limit. A flush with no facade changes now returns before it copies anything. Pinned work witness. |
+| 9. The abort sequence is duplicated | Confirmed | Merged into `abort()`, as in finding 4. |
+| 10. Restore deletes by visible keys | Confirmed | Under a hold, the delete of the transaction's optimistic key published a layout revision after a failed flush. `restore()` now reads the stored rows. |
+
+| Mutant | Result |
+| --- | --- |
+| Restore ignores the keys the flush wrote | Both campaigns fail |
+| `abort()` without `finally` | Restore-throws witness fails |
+| `publish()` stops at the first throwing facade | Subscriber witness fails |
+| Snapshot on every flush | Work witness fails |
+| Restore deletes by visible keys | Both campaigns fail (layout revision after rollback) |
+| Restore picks insert or update by visible rows | Survives: no generated history deletes a synced row optimistically |
+
+**Limits.** One hold per step, settled before the comparison. A hold that
+stays open across several flushes is not generated.
