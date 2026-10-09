@@ -37,7 +37,11 @@ import type {
  * folded map of provider-applied rows. Its `localRows` field represents public
  * Collection rows from optimistic state, not durable outbox entries.
  * Generated histories use 2–5 transactions, 1–3 rows each, shared or disjoint
- * keys, and success or permanent failure at each position. Pinned examples
+ * keys, and success or permanent failure at each position. Each transaction
+ * either commits manually or auto-commits after its `mutate()` callback; an
+ * auto-commit has no `commit()` caller, so its `isPersisted` is the commit
+ * receipt. No failure, manual or auto-committed, may escape as an unhandled
+ * process rejection. Pinned examples
  * reconstruct all-success, middle-failure, all-failure, and alternating
  * outcomes. Shared keys distinguish sibling rollback from disjoint-key
  * survival. Width distinguishes complete optimistic state for several rows
@@ -193,8 +197,10 @@ it.each(oracleSeeds(20260913, settlementOracle))(
           sharedKeys: fc.boolean(),
           width: fc.integer({ min: 1, max: 3 }),
           outcomes: fc.array(fc.boolean(), { minLength: 2, maxLength: 5 }),
+          // A transaction may commit itself after its mutate() callback.
+          autoCommits: fc.array(fc.boolean(), { maxLength: 5 }),
         }),
-        async ({ sharedKeys, width, outcomes }) => {
+        async ({ sharedKeys, width, outcomes, autoCommits }) => {
           const succeeds = outcomes
           const failures = succeeds.map(
             (_value, index) => new NonRetriableError(`failed-${index}`),
@@ -312,19 +318,25 @@ it.each(oracleSeeds(20260913, settlementOracle))(
             ).toEqual(ids.slice(completed))
           }
           let hasPrimaryFailure = false
+          // No failure, manual or auto-committed, escapes as an unhandled
+          // process rejection.
+          const unhandled: Array<unknown> = []
+          const onUnhandled = (reason: unknown) => unhandled.push(reason)
+          process.on(`unhandledRejection`, onUnhandled)
           try {
             await env.waitForLeader()
             for (let index = 0; index < succeeds.length; index++) {
+              const autoCommit = autoCommits[index] ?? false
               const tx = env.executor.createOfflineTransaction({
                 mutationFnName: env.mutationFnName,
-                autoCommit: false,
+                autoCommit,
               })
               ids.push(tx.id)
               observe(
                 `wait-${index}`,
                 env.executor.waitForTransactionCompletion(tx.id),
               )
-              tx.mutate(() => {
+              const transaction = tx.mutate(() => {
                 for (const row of expectedRows[index]!) {
                   if (sharedKeys && index > 0) {
                     env.collection.update(row.id, (draft) => {
@@ -334,7 +346,12 @@ it.each(oracleSeeds(20260913, settlementOracle))(
                   } else env.collection.insert(row)
                 }
               })
-              observe(`commit-${index}`, tx.commit())
+              // An auto-commit has no commit() caller; its receipt is
+              // isPersisted, which settles like a manual commit's.
+              observe(
+                `commit-${index}`,
+                autoCommit ? transaction.isPersisted.promise : tx.commit(),
+              )
               if (index === 0)
                 await atOracleCheckpoint(
                   entered[0]!.promise,
@@ -362,10 +379,13 @@ it.each(oracleSeeds(20260913, settlementOracle))(
                   expectedServer.set(row.id, row)
               await assertState(index + 1)
             }
+            await turn()
+            expect(unhandled, `unhandled rejections`).toEqual([])
           } catch (error) {
             hasPrimaryFailure = true
             throw error
           } finally {
+            process.off(`unhandledRejection`, onUnhandled)
             for (const item of release) item.resolve()
             await cleanupOfflineOracle(
               [
@@ -381,10 +401,46 @@ it.each(oracleSeeds(20260913, settlementOracle))(
       {
         ...oracleOptions(settlementOracle, seed),
         examples: [
-          [{ sharedKeys: true, width: 1, outcomes: [true, true] }],
-          [{ sharedKeys: false, width: 2, outcomes: [true, false, true] }],
-          [{ sharedKeys: true, width: 2, outcomes: [false, false, false] }],
-          [{ sharedKeys: true, width: 1, outcomes: [false, true, false] }],
+          [
+            {
+              sharedKeys: true,
+              width: 1,
+              outcomes: [true, true],
+              autoCommits: [],
+            },
+          ],
+          [
+            {
+              sharedKeys: false,
+              width: 2,
+              outcomes: [true, false, true],
+              autoCommits: [],
+            },
+          ],
+          [
+            {
+              sharedKeys: true,
+              width: 2,
+              outcomes: [false, false, false],
+              autoCommits: [],
+            },
+          ],
+          [
+            {
+              sharedKeys: true,
+              width: 1,
+              outcomes: [false, true, false],
+              autoCommits: [],
+            },
+          ],
+          [
+            {
+              sharedKeys: true,
+              width: 1,
+              outcomes: [false, true, false],
+              autoCommits: [true, false, true],
+            },
+          ],
         ],
       },
     )
