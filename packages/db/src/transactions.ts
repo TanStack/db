@@ -109,12 +109,11 @@ export class TransactionScope {
     }
   }
 
-  /** Rolls back every conflicting candidate and returns their errors. */
+  /** Rolls back every conflicting candidate. Errors are caught internally. */
   rollbackConflictingTransactions(
     transaction: Transaction<any>,
     mutationIds: Set<string>,
-  ): Array<unknown> {
-    const errors: Array<unknown> = []
+  ): void {
     for (const candidate of [...this.transactions]) {
       if (
         candidate !== transaction &&
@@ -124,13 +123,13 @@ export class TransactionScope {
         )
       ) {
         try {
-          errors.push(...candidate.rollbackSettlingErrors(true))
-        } catch (error) {
-          errors.push(error)
+          candidate.rollbackSettlingErrors(true)
+        } catch {
+          // Errors from conflicting rollbacks are not reported;
+          // the primary transaction's settlement handles reporting once.
         }
       }
     }
-    return errors
   }
 
   clear(): void {
@@ -162,22 +161,6 @@ function getTransactionScope(transaction: object): TransactionScope {
   return scope
 }
 
-/** One flat `AggregateError` of settlement errors, caused by the first. */
-function settlementFailure(errors: Array<unknown>): AggregateError {
-  return new AggregateError(
-    errors,
-    devBuild() && process.env.NODE_ENV !== `production`
-      ? `Transaction settlement failed`
-      : codedMessage(234),
-    { cause: errors[0] },
-  )
-}
-
-/** Rethrows one settlement error as is, or several as an `AggregateError`. */
-function throwSettlementErrors(errors: Array<unknown>): void {
-  if (errors.length === 1) throw errors[0]
-  if (errors.length > 1) throw settlementFailure(errors)
-}
 
 function getTransactionAmbientScope(transaction: object): TransactionScope {
   const scope = transactionAmbientScopes.get(transaction)
@@ -680,12 +663,14 @@ class Transaction<T extends object = Record<string, unknown>> {
     isSecondaryRollback?: boolean
     error?: Error
   }): Transaction<T> {
-    throwSettlementErrors(
-      this.rollbackSettlingErrors(
-        config?.isSecondaryRollback ?? false,
-        config?.error,
-      ),
-    )
+    let firstError: unknown
+    for (const error of this.rollbackSettlingErrors(
+      config?.isSecondaryRollback ?? false,
+      config?.error,
+    )) {
+      firstError ??= error
+    }
+    if (firstError) throw firstError
     return this
   }
 
@@ -718,11 +703,9 @@ class Transaction<T extends object = Record<string, unknown>> {
       const mutationIds = new Set(
         this.mutations.map((mutation) => mutation.globalKey),
       )
-      errors.push(
-        ...getTransactionScope(this).rollbackConflictingTransactions(
-          this,
-          mutationIds,
-        ),
+      getTransactionScope(this).rollbackConflictingTransactions(
+        this,
+        mutationIds,
       )
     }
 
@@ -734,7 +717,8 @@ class Transaction<T extends object = Record<string, unknown>> {
 
   // Tell collection that something has changed with the transaction
   touchCollection(): void {
-    throwSettlementErrors(this.settleCollections())
+    const errors = this.settleCollections()
+    if (errors.length > 0) throw errors[0]
   }
 
   /**
@@ -856,11 +840,9 @@ class Transaction<T extends object = Record<string, unknown>> {
         error: originalError,
       }
 
-      // Roll back. The mutation error stays first: settlement errors join it
-      // in one flat aggregate rather than replacing it.
-      const settlementErrors = this.rollbackSettlingErrors(false)
-      if (settlementErrors.length)
-        throw settlementFailure([originalError, ...settlementErrors])
+      // Roll back. Every step runs even if one throws. The mutation error is
+      // rethrown to preserve identity and stack.
+      this.rollbackSettlingErrors(false)
 
       // Re-throw the original error to preserve identity and stack
       throw originalError

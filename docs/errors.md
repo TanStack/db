@@ -2360,12 +2360,3 @@ Development builds show this message, with `${...}` replaced by values:
 [LocalStorageCollection] Error refreshing a same-tab peer for storage key "${key}":
 ```
 
-<a id="error-234"></a>
-
-## Error 234: `transactions.ts`
-
-Development builds show this message, with `${...}` replaced by values:
-
-```text
-Transaction settlement failed
-```

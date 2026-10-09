@@ -866,9 +866,4 @@
     ],
     "kind": "warning"
   },
-  "234": {
-    "file": "transactions.ts",
-    "template": "Transaction settlement failed",
-    "literals": ["Transaction settlement failed"]
-  }
 }
