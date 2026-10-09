@@ -100,6 +100,12 @@ import type { CollectionConfig, SyncConfig } from '../src/types.js'
  * source row, so the held `c` remains. The model applies the same merge to its
  * base. Other histories use `full` mode and always write whole rows.
  *
+ * A settled transaction leaves the Collection's tracked transactions, whether
+ * it succeeded or failed. Every per-mutation pass walks them, so the
+ * Collection tracks exactly its unsettled transactions. A completed row that a
+ * queued sync transaction still holds lives in the held-row layer, which the
+ * transaction does not need to stay tracked for.
+ *
  * `runOptimisticHistory` gives the same edit, delete, settle, and sync history
  * to this model and a real Collection. After every step it compares rows,
  * metadata, immutable handler payloads, promise outcomes, the rows visible
@@ -961,6 +967,24 @@ export async function runOptimisticHistory(
           sorted([...downstream.values()].map(plain)),
           `${label}: downstream`,
         ).toEqual(expected.map(plain))
+        // Every per-mutation pass walks the tracked transactions, so the
+        // Collection tracks exactly its unsettled transactions. A held row
+        // outlives its completed transaction in the held-row layer, not here.
+        // Compare identities, so a pass that removes the wrong transaction
+        // cannot keep the count right.
+        const unsettled = operations
+          .filter(
+            (_, index) =>
+              model.transactions[index]?.state === `pending` ||
+              model.transactions[index]?.state === `persisting`,
+          )
+          .map((operation) => operation.tx)
+        const tracked = [...collection._state.transactions.values()]
+        expect(
+          tracked.length === unsettled.length &&
+            unsettled.every((transaction) => tracked.includes(transaction)),
+          `${label}: tracked transactions are the unsettled ones, by identity`,
+        ).toBe(true)
       }
       const initialFrame = publications.at(-1)
       check(`initial`)

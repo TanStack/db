@@ -1,4 +1,4 @@
-import { createTransaction } from '@tanstack/db'
+import { DuplicateTransactionIdError, createTransaction } from '@tanstack/db'
 import { OutboxTransactionNotFoundError } from '../outbox/OutboxManager'
 import { DefaultRetryPolicy } from '../retry/RetryPolicy'
 import { NonRetriableError } from '../types'
@@ -462,25 +462,19 @@ export class TransactionExecutor {
 
         restorationTx.applyMutations(offlineTx.mutations)
 
-        // Register with each affected collection's state manager
-        const touchedCollections = new Set<string>()
-        for (const mutation of offlineTx.mutations) {
-          // Defensive check for corrupted deserialized data
-          // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
-          if (!mutation.collection) {
-            continue
+        // Register with each affected Collection. If one cannot track it, roll
+        // it back, so no Collection keeps a restoration nothing will settle.
+        try {
+          // The serializer resolves every mutation's Collection or throws.
+          for (const mutation of offlineTx.mutations) {
+            if (mutation.collection._state.trackTransaction(restorationTx))
+              mutation.collection._state.recomputeOptimisticState(true)
           }
-          const collectionId = mutation.collection.id
-          if (touchedCollections.has(collectionId)) {
-            continue
-          }
-          touchedCollections.add(collectionId)
-
-          mutation.collection._state.transactions.set(
-            restorationTx.id,
-            restorationTx,
-          )
-          mutation.collection._state.recomputeOptimisticState(true)
+        } catch (error) {
+          // A secondary rollback settles only this restoration; it must not
+          // roll back the user's live transactions on the same keys.
+          restorationTx.rollback({ isSecondaryRollback: true })
+          throw error
         }
 
         this.offlineExecutor.registerRestorationTransaction(
@@ -488,6 +482,8 @@ export class TransactionExecutor {
           restorationTx,
         )
       } catch (error) {
+        // A live transaction with this id already shows these mutations.
+        if (error instanceof DuplicateTransactionIdError) continue
         console.warn(
           `Failed to restore optimistic state for transaction ${offlineTx.id}:`,
           error,

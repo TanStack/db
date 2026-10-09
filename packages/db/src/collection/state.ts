@@ -2,6 +2,7 @@ import { deepEquals } from '../utils'
 import { SortedMap } from '../SortedMap'
 import { enrichRowWithVirtualProps } from '../virtual-props.js'
 import {
+  DuplicateTransactionIdError,
   SyncQueueInvariantError,
   SyncTransactionAbortedError,
 } from '../errors.js'
@@ -666,13 +667,35 @@ export class CollectionStateManager<
   }
 
   /**
+   * Tracks `transaction`. Returns `false` when this Collection already tracks
+   * it. A different unsettled transaction with the same id is a contract
+   * violation: ids are unique.
+   */
+  public trackTransaction(transaction: Transaction<any>): boolean {
+    const tracked = this.transactions.get(transaction.id)
+    if (tracked === transaction) return false
+    if (tracked && tracked.state !== `completed` && tracked.state !== `failed`)
+      throw new DuplicateTransactionIdError(transaction.id)
+    this.transactions.set(transaction.id, transaction)
+    transaction.collections.add(this.collection)
+    return true
+  }
+
+  /**
    * Overlay still-active optimistic mutations on the current layers and
    * record their keys as pending local changes for $origin tracking.
+   *
+   * A settled transaction leaves `transactions` here, by its own entry. A
+   * recompute calls this after it records held rows, and a sync commit calls
+   * it after it skips those recomputes.
    */
   private overlayActiveTransactions(): void {
-    for (const transaction of this.transactions.values()) {
-      if (transaction.state === `completed` || transaction.state === `failed`)
+    const settled: Array<string> = []
+    for (const [id, transaction] of this.transactions) {
+      if (transaction.state === `completed` || transaction.state === `failed`) {
+        settled.push(id)
         continue
+      }
       for (const mutation of transaction.mutations) {
         if (!this.isThisCollection(mutation.collection)) continue
         this.pendingLocalChanges.add(mutation.key)
@@ -686,6 +709,7 @@ export class CollectionStateManager<
         }
       }
     }
+    for (const id of settled) this.transactions.delete(id)
   }
 
   /**
@@ -1480,29 +1504,6 @@ export class CollectionStateManager<
       // no longer suppressed by a sync transaction that will never publish.
       this.recomputeOptimisticState(false)
     }
-  }
-
-  /**
-   * Schedule cleanup of a transaction when it completes
-   */
-  public scheduleTransactionCleanup(transaction: Transaction<any>): void {
-    // Only schedule cleanup for transactions that aren't already completed
-    if (transaction.state === `completed`) {
-      this.transactions.delete(transaction.id)
-      return
-    }
-
-    // Schedule cleanup when the transaction completes
-    transaction.isPersisted.promise
-      .then(() => {
-        // Transaction completed successfully, remove it immediately
-        this.transactions.delete(transaction.id)
-      })
-      .catch(() => {
-        // Transaction failed, but we want to keep failed transactions for reference
-        // so don't remove it.
-        // Rollback already triggers state recomputation via touchCollection().
-      })
   }
 
   /**
