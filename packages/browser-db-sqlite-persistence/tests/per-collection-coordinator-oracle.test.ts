@@ -2250,6 +2250,276 @@ describe(`persisted cache generation routing oracle`, () => {
       ],
     ])
   })
+
+  // Two sync runs can claim one physical cache generation at different clock
+  // cuts. The independent claim rule lets the later warm peer keep that
+  // generation when only the earlier run expires. A commit notification sent
+  // to the expired run before its renewal timer cannot authorize its old row;
+  // its active demand must refetch into private storage. The warm peer keeps
+  // its public row, source ownership, and exact SQLite row at the settled cut.
+  // This receiver crosses the Browser coordinator wire and real wa-sqlite;
+  // the durable peer write is real, but the notice delivery order is controlled
+  // rather than native multi-tab scheduling or coordinator emission.
+  it(`keeps a warm Browser peer while an expired run reloads after a notification`, async () => {
+    type Row = { id: string; title: string }
+    const directory = mkdtempSync(join(tmpdir(), `db-warm-peer-claim-`))
+    const database = createWASQLiteTestDatabase({
+      filename: join(directory, `warm-peer.sqlite`),
+    })
+    const expiredCoordinator = createCoordinator(
+      `warm-peer-claim`,
+      createRecordingAdapter({ id: `expired-bootstrap` }),
+    )
+    const warmCoordinator = createCoordinator(
+      `warm-peer-claim`,
+      createRecordingAdapter({ id: `warm-bootstrap` }),
+    )
+    let hostNow = Date.now() + 86_400_000
+    const makePersistence = (coordinator: BrowserCollectionCoordinator) =>
+      createBrowserWASQLitePersistence({
+        database,
+        coordinator,
+        cacheGenerationClaimTtlMs: 10_000,
+        now: () => hostNow,
+      })
+    const expiredPersistence = makePersistence(expiredCoordinator)
+    const warmPersistence = makePersistence(warmCoordinator)
+    const logicalId = `warm-peer-claim-collection`
+    const expiredAdapter = expiredPersistence.resolvePersistenceForCollection!({
+      collectionId: logicalId,
+      mode: `sync-present`,
+    }).adapter
+    const rotate = expiredAdapter.rotateCacheGeneration!.bind(expiredAdapter)
+    const rotations: Array<{ storageCollectionId: string; claimId: string }> =
+      []
+    expiredAdapter.rotateCacheGeneration = async (...args) => {
+      const next = await rotate(...args)
+      rotations.push(next)
+      return next
+    }
+    const old = { id: `old`, title: `Warm source row` }
+    const fresh = { id: `fresh`, title: `Expired run's fresh row` }
+    let source!: Parameters<SyncConfig<Row, string>[`sync`]>[0]
+    let expiredCollection: Collection<Row, string> | undefined
+    let warmCollection: Collection<Row, string> | undefined
+    const expiredLoads: Array<boolean | undefined> = []
+    let expiredRefetchSettled = false
+    const warmLoads: Array<number | undefined> = []
+
+    await withFailurePreservingCleanup(async () => {
+      expiredCollection = createCollection(
+        persistedCollectionOptions<Row, string>({
+          id: logicalId,
+          syncMode: `on-demand`,
+          getKey: (row) => row.id,
+          sync: {
+            sync: (params) => {
+              source = params
+              params.markReady()
+              return {
+                restartAfterScopedRecovery: () => {},
+                loadSubset: async (options) => {
+                  expiredLoads.push(options.refetch)
+                  if (options.refetch) {
+                    source.begin()
+                    source.write({ type: `insert`, value: fresh })
+                    await whenSyncAccepted(source.commit())
+                    expiredRefetchSettled = true
+                  }
+                },
+              }
+            },
+          },
+          persistence: expiredPersistence,
+        }),
+      )
+      expiredCollection.startSyncImmediate()
+      await expiredCollection.stateWhenReady()
+      source.begin()
+      source.write({ type: `insert`, value: old })
+      await whenSyncAccepted(source.commit())
+      await expiredCollection._sync.loadSubset({ limit: 1 })
+      expect(expiredCollection.get(old.id)).toMatchObject(old)
+
+      const headRows = await database.execute<{ physical_id: string }>(
+        `SELECT physical_id FROM cache_generation
+         WHERE logical_id = ? AND retired = 0`,
+        [logicalId],
+      )
+      const sharedStorageId = headRows[0]?.physical_id
+      if (!sharedStorageId) throw new Error(`missing shared cache generation`)
+      const firstClaims = await database.execute<{
+        claim_id: string
+        expires_at_ms: number
+      }>(
+        `SELECT claim_id, expires_at_ms FROM cache_generation_claim
+         WHERE physical_id = ?`,
+        [sharedStorageId],
+      )
+      expect(firstClaims).toHaveLength(1)
+      const firstClaim = firstClaims[0]!
+
+      hostNow += 5_000
+      warmCollection = createCollection(
+        persistedCollectionOptions<Row, string>({
+          id: logicalId,
+          syncMode: `on-demand`,
+          getKey: (row) => row.id,
+          sync: {
+            sync: (params) => {
+              params.markReady()
+              return {
+                restartAfterScopedRecovery: () => {},
+                loadSubset: (options) => {
+                  warmLoads.push(options.limit)
+                  return Promise.resolve()
+                },
+              }
+            },
+          },
+          persistence: warmPersistence,
+        }),
+      )
+      warmCollection.startSyncImmediate()
+      await warmCollection.stateWhenReady()
+      let warmLoadSettled = false
+      const warmLoad = Promise.resolve(
+        warmCollection._sync.loadSubset({ limit: 1 }),
+      ).finally(() => {
+        warmLoadSettled = true
+      })
+      void warmLoad.catch(() => undefined)
+      await waitFor(() => warmLoadSettled, `warm peer subset settlement`)
+      await warmLoad
+      expect(warmCollection.get(old.id)).toMatchObject(old)
+      const sharedClaims = await database.execute<{
+        claim_id: string
+        expires_at_ms: number
+      }>(
+        `SELECT claim_id, expires_at_ms FROM cache_generation_claim
+         WHERE physical_id = ? ORDER BY expires_at_ms`,
+        [sharedStorageId],
+      )
+      expect(sharedClaims).toHaveLength(2)
+      expect(sharedClaims[0]).toEqual(firstClaim)
+      const warmClaim = sharedClaims[1]!
+      expect(warmClaim.claim_id).not.toBe(firstClaim.claim_id)
+      expect(warmClaim.expires_at_ms).toBeGreaterThan(firstClaim.expires_at_ms)
+
+      // The controlled notice below describes a committed SQLite transaction.
+      // Read its position, apply the peer write under the warm claim, then use
+      // those exact values in the delivered envelope.
+      const warmAdapter = warmPersistence.resolvePersistenceForCollection!({
+        collectionId: logicalId,
+        mode: `sync-present`,
+      }).adapter
+      const beforePeerWrite = await warmAdapter.loadResumeSnapshot(
+        sharedStorageId,
+        { cacheGenerationClaimId: warmClaim.claim_id },
+      )
+      const peerTerm = beforePeerWrite.latestTerm
+      const peerSeq = beforePeerWrite.latestSeq + 1
+      const peerRowVersion = beforePeerWrite.latestRowVersion + 1
+      const peerTxId = `notice-after-one-claim-expires`
+      await warmAdapter.applyCommittedTx(sharedStorageId, {
+        txId: peerTxId,
+        term: peerTerm,
+        seq: peerSeq,
+        rowVersion: peerRowVersion,
+        cacheGenerationClaimId: warmClaim.claim_id,
+        mutations: [{ type: `update`, key: old.id, value: old }],
+      })
+      const afterPeerWrite = await warmAdapter.loadResumeSnapshot(
+        sharedStorageId,
+        { cacheGenerationClaimId: warmClaim.claim_id },
+      )
+      expect(afterPeerWrite.latestRowVersion).toBe(peerRowVersion)
+      expect(afterPeerWrite.rows.map(({ value }) => value)).toEqual([old])
+
+      hostNow += 5_001
+      warmCoordinator.publish(sharedStorageId, {
+        v: 1,
+        dbName: `warm-peer-claim`,
+        collectionId: sharedStorageId,
+        senderId: warmCoordinator.getNodeId(),
+        ts: Date.now(),
+        payload: {
+          type: `tx:committed`,
+          term: peerTerm,
+          seq: peerSeq,
+          txId: peerTxId,
+          latestRowVersion: peerRowVersion,
+          requiresFullReload: false,
+          changedRows: [{ key: old.id, value: old }],
+          deletedKeys: [],
+        },
+      })
+      expect(
+        ControlledBroadcastChannel.deliverWhere(
+          (data) =>
+            envelopeCollection(data) === sharedStorageId &&
+            payloadType(data) === `tx:committed` &&
+            (data as { payload?: { txId?: string } }).payload?.txId ===
+              peerTxId,
+        ),
+      ).toBe(true)
+      await waitFor(
+        () => expiredLoads.includes(true) && expiredRefetchSettled,
+        `expired run's settled source refetch`,
+      )
+      await waitFor(
+        () => expiredCollection?.get(fresh.id)?.title === fresh.title,
+        `fresh public row after source refetch`,
+      )
+      expect(expiredCollection.get(old.id)).toBeUndefined()
+      expect(expiredCollection.get(fresh.id)).toMatchObject(fresh)
+      expect(warmCollection.get(old.id)).toMatchObject(old)
+      expect(warmCollection.get(fresh.id)).toBeUndefined()
+      const warmLoadsBeforeNextDemand = warmLoads.length
+      const expiredLoadsBeforeWarmDemand = [...expiredLoads]
+      await warmCollection._sync.loadSubset({ limit: 2 })
+      expect(warmLoads.slice(warmLoadsBeforeNextDemand)).toEqual([2])
+      expect(expiredLoads).toEqual(expiredLoadsBeforeWarmDemand)
+      expect(rotations).toHaveLength(1)
+      const privateClaim = rotations[0]!
+      expect(privateClaim.storageCollectionId).not.toBe(sharedStorageId)
+
+      const currentHead = await database.execute<{ physical_id: string }>(
+        `SELECT physical_id FROM cache_generation
+         WHERE logical_id = ? AND retired = 0`,
+        [logicalId],
+      )
+      expect(currentHead).toEqual([{ physical_id: sharedStorageId }])
+      const warmClaims = await database.execute<{ claim_id: string }>(
+        `SELECT claim_id FROM cache_generation_claim
+         WHERE physical_id = ? AND expires_at_ms > ?`,
+        [sharedStorageId, hostNow],
+      )
+      expect(warmClaims).toEqual([{ claim_id: warmClaim.claim_id }])
+      const durable = await warmAdapter.loadResumeSnapshot(sharedStorageId, {
+        cacheGenerationClaimId: warmClaim.claim_id,
+      })
+      expect(durable.rows.map(({ value }) => value)).toEqual([old])
+      const privateRows = await expiredAdapter.loadResumeSnapshot(
+        privateClaim.storageCollectionId,
+        { cacheGenerationClaimId: privateClaim.claimId },
+      )
+      expect(privateRows.rows.map(({ value }) => value)).toEqual([fresh])
+    }, [
+      [
+        `expired Collection`,
+        () => expiredCollection?.cleanup() ?? Promise.resolve(),
+      ],
+      [`warm Collection`, () => warmCollection?.cleanup() ?? Promise.resolve()],
+      [`expired coordinator`, () => disposeCoordinator(expiredCoordinator)],
+      [`warm coordinator`, () => disposeCoordinator(warmCoordinator)],
+      [`real SQLite database`, () => Promise.resolve(database.close?.())],
+      [
+        `real SQLite directory`,
+        () => rmSync(directory, { recursive: true, force: true }),
+      ],
+    ])
+  })
 })
 
 describe(`remote subset ownership lease oracle`, () => {

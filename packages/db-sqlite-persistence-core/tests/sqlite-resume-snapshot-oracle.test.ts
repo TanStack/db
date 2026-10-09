@@ -221,6 +221,9 @@ async function observeCachedSchemaState(
  * a new baseline; concurrent schema migration may advance but never downgrade or
  * repeat the observed generation. These laws refine the shared persistence and
  * schema-mismatch contracts exercised by sqlite-core-adapter-oracle.test.ts.
+ * A managed cache claim must still be live inside the read transaction before
+ * any generation-specific durable access. A claim expires at its expiry time;
+ * a later-acquired live peer claim does not inherit the earlier claim's expiry.
  *
  * `CachedSchemaState` is the independent projection: complete rows and metadata,
  * transaction position, schema/reset lineage, and expected keys. The history
@@ -250,6 +253,7 @@ async function observeCachedSchemaState(
  *
  * Known omissions: this narrow fixture supplies the same-connection
  * concurrency seam that the serialized copy-on-commit CLI harness cannot. It
+ * uses a controlled clock and one shared real SQLite connection for claim races.
  * does not claim native host execution or judge whether a consumer such as
  * Electric may use the certified cursor; those remain separate driver-contract
  * and Electric recovery owners. The work bound is a driver-call measure in
@@ -1730,6 +1734,244 @@ describe(`SQLite resume snapshots`, () => {
       closeDatabasePreservingPrimary(database, primaryFailure)
     }
   })
+
+  // A resume snapshot may pass its preliminary claim check and then wait to
+  // enter SQLite's read transaction. The independent claim rule compares the
+  // transaction's clock cut with that claim's expiry: a live claim reads its
+  // requested rows and metadata; an expired claim rejects without a snapshot.
+  // A later-acquired peer claim remains live in both histories and must keep
+  // the same durable rows and metadata. The grammar varies zero-to-three rows
+  // to distinguish empty from partial snapshots, and row inclusion to expose
+  // unwanted row reads. Peer acquisition time varies an independent expiry;
+  // the peer stays live throughout this bounded grammar. The read clock cut
+  // distinguishes live, exactly expired, and later reads for the first claim.
+  // Both claims address one physical ID. A peer acquired after the read, or
+  // expired before its own read, is not a legal history here. The six fixed
+  // histories reconstruct both row-inclusion options at exact expiry.
+  // Holding the real transaction before its claim query makes the second
+  // check, rather than the wrapper's later publication guard, the checkpoint.
+  type ManagedClaimReadHistory = {
+    elapsedMs: number
+    includeRows: boolean
+    peerDelayMs: number
+    rowCount: number
+  }
+  const assertManagedClaimReadHistory = async ({
+    elapsedMs,
+    includeRows,
+    peerDelayMs,
+    rowCount,
+  }: ManagedClaimReadHistory): Promise<void> => {
+    // The independent model uses half-open claim intervals. The peer's
+    // interval starts later, so the first claim may expire while it stays live.
+    const startAtMs = 1_000
+    const claimTtlMs = 100
+    const firstExpiresAtMs = startAtMs + claimTtlMs
+    const peerClaimsAtMs = startAtMs + peerDelayMs
+    const peerExpiresAtMs = peerClaimsAtMs + claimTtlMs
+    const readAtMs = firstExpiresAtMs + elapsedMs
+    const firstClaimCanRead = readAtMs < firstExpiresAtMs
+    expect(peerClaimsAtMs).toBeLessThan(firstExpiresAtMs)
+    expect(readAtMs).toBeGreaterThanOrEqual(peerClaimsAtMs)
+    expect(readAtMs).toBeLessThan(peerExpiresAtMs)
+    const rows = Array.from({ length: rowCount }, (_, index) => ({
+      id: `retained-${index}`,
+      title: `Warm peer row ${index}`,
+    }))
+    const expectedFirstRows = includeRows ? rows : []
+
+    const database = new DatabaseSync(`:memory:`)
+    let primaryFailure: unknown
+    let now = startAtMs
+    const baseDriver = createDriver(database)
+    const transactionEntered = deferred()
+    const releaseTransaction = deferred()
+    let holdTransaction = false
+    let observeHeldRead = false
+    let metadataReads = 0
+    let rowReads = 0
+    const heldStatements: Array<{
+      type: `query` | `run` | `exec`
+      sql: string
+      params?: ReadonlyArray<unknown>
+    }> = []
+    let rowTable = ``
+    let observedStorageId = ``
+    const driver: SQLiteDriver = {
+      ...baseDriver,
+      transaction: (operation) =>
+        baseDriver.transaction(async (transactionDriver) => {
+          if (holdTransaction) {
+            holdTransaction = false
+            transactionEntered.resolve()
+            await releaseTransaction.promise
+          }
+          return operation({
+            ...transactionDriver,
+            query: (sql, params) => {
+              if (observeHeldRead) {
+                heldStatements.push({ type: `query`, sql, params })
+                if (sql.includes(`FROM collection_metadata`)) metadataReads++
+                if (sql.includes(rowTable)) rowReads++
+              }
+              return transactionDriver.query(sql, params)
+            },
+            run: (sql, params) => {
+              if (observeHeldRead) {
+                heldStatements.push({ type: `run`, sql, params })
+              }
+              return transactionDriver.run(sql, params)
+            },
+            exec: (sql) => {
+              if (observeHeldRead) heldStatements.push({ type: `exec`, sql })
+              return transactionDriver.exec(sql)
+            },
+          })
+        }),
+    }
+    const adapter = new SQLiteCorePersistenceAdapter({
+      driver,
+      cacheGenerationClaimTtlMs: claimTtlMs,
+      now: () => now,
+    })
+    let read: ReturnType<typeof adapter.loadResumeSnapshot> | undefined
+    try {
+      const logicalId = `held-resume-second-check`
+      const first = await adapter.claimCacheGeneration(logicalId)
+      const storageId = first.storageCollectionId
+      observedStorageId = storageId
+      // The model does not use the adapter's returned expiry to decide whether
+      // this read is legal.
+      expect(first.expiresAtMs).toBe(firstExpiresAtMs)
+      rowTable = createPersistedTableName(storageId, `c`)
+      const resume = { offset: `warm-peer-offset` }
+      await adapter.applyCommittedTx(storageId, {
+        txId: `seed`,
+        term: 1,
+        seq: 1,
+        rowVersion: 1,
+        cacheGenerationClaimId: first.claimId,
+        mutations: rows.map((row) => ({
+          type: `insert` as const,
+          key: row.id,
+          value: row,
+        })),
+        collectionMetadataMutations: [
+          { type: `set`, key: `resume`, value: resume },
+        ],
+      })
+      now = peerClaimsAtMs
+      const warm = await adapter.claimCacheGeneration(logicalId)
+      expect(warm.storageCollectionId).toBe(storageId)
+      expect(warm.claimId).not.toBe(first.claimId)
+      expect(warm.expiresAtMs).toBe(peerExpiresAtMs)
+
+      holdTransaction = true
+      observeHeldRead = true
+      read = adapter.loadResumeSnapshot(storageId, {
+        includeRows,
+        cacheGenerationClaimId: first.claimId,
+      })
+      void read.catch(() => undefined)
+      await reachCheckpoint(
+        transactionEntered.promise,
+        `resume transaction before its claim check`,
+      )
+      now = readAtMs
+      releaseTransaction.resolve()
+      const generationStatements = () =>
+        heldStatements.filter(
+          ({ sql, params }) =>
+            sql.includes(rowTable) ||
+            sql.includes(observedStorageId) ||
+            params?.includes(observedStorageId),
+        )
+      if (!firstClaimCanRead) {
+        await expect(read).rejects.toThrow(
+          `Persisted cache claim is no longer active`,
+        )
+        expect(generationStatements()).toHaveLength(1)
+        expect(generationStatements()[0]).toMatchObject({ type: `query` })
+        expect(generationStatements()[0]?.sql).toContain(
+          `cache_generation_claim`,
+        )
+        expect(metadataReads).toBe(0)
+        expect(rowReads).toBe(0)
+      } else {
+        const snapshot = await read
+        expect(generationStatements()[0]).toMatchObject({ type: `query` })
+        expect(generationStatements()[0]?.sql).toContain(
+          `cache_generation_claim`,
+        )
+        expect(snapshot.rows.map(({ value }) => value)).toEqual(
+          expectedFirstRows,
+        )
+        expect(snapshot.collectionMetadata).toEqual([
+          { key: `resume`, value: resume },
+        ])
+        expect(metadataReads).toBeGreaterThan(0)
+        if (includeRows) {
+          expect(rowReads).toBeGreaterThan(0)
+        } else {
+          expect(rowReads).toBe(0)
+        }
+      }
+      observeHeldRead = false
+      const peerSnapshot = await adapter.loadResumeSnapshot(storageId, {
+        cacheGenerationClaimId: warm.claimId,
+      })
+      expect(peerSnapshot.rows.map(({ value }) => value)).toEqual(rows)
+      expect(peerSnapshot.collectionMetadata).toEqual([
+        { key: `resume`, value: resume },
+      ])
+    } catch (error) {
+      primaryFailure = error
+      throw error
+    } finally {
+      releaseTransaction.resolve()
+      await Promise.allSettled([read])
+      closeDatabasePreservingPrimary(database, primaryFailure)
+    }
+  }
+
+  it.each([
+    { clockCut: `before expiry`, elapsedMs: -1, includeRows: false },
+    { clockCut: `before expiry`, elapsedMs: -1, includeRows: true },
+    { clockCut: `at expiry`, elapsedMs: 0, includeRows: false },
+    { clockCut: `at expiry`, elapsedMs: 0, includeRows: true },
+    { clockCut: `after expiry`, elapsedMs: 1, includeRows: false },
+    { clockCut: `after expiry`, elapsedMs: 1, includeRows: true },
+  ])(
+    `checks a cache claim $clockCut inside a resume transaction with includeRows=$includeRows`,
+    ({ elapsedMs, includeRows }) =>
+      assertManagedClaimReadHistory({
+        elapsedMs,
+        includeRows,
+        peerDelayMs: 50,
+        rowCount: 1,
+      }),
+  )
+
+  const managedClaimReadHistory = fc.record({
+    elapsedMs: fc.constantFrom(-9, -1, 0, 1, 9),
+    includeRows: fc.boolean(),
+    peerDelayMs: fc.integer({ min: 10, max: 80 }),
+    rowCount: fc.integer({ min: 0, max: 3 }),
+  })
+  fcTest.prop([managedClaimReadHistory], {
+    seed: 2056,
+    numRuns: oracleRuns(30),
+  })(
+    `checks generated managed-claim read histories (fixed)`,
+    assertManagedClaimReadHistory,
+  )
+  fcTest.prop(
+    [managedClaimReadHistory],
+    oraclePropertyOptions(30, `sqlite-resume.managed-claim-read`),
+  )(
+    `checks generated managed-claim read histories (random or replayed)`,
+    assertManagedClaimReadHistory,
+  )
 
   // Startup metadata belongs to the cache claim that admitted its SQLite
   // snapshot. If that claim expires while the snapshot is in flight, the

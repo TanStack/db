@@ -2042,16 +2042,27 @@ owner accepts a valid eager Collection ID with the internal cache prefix and
 rejects late managed registration that tries to recreate collected storage
 after the first claim check.
 The persisted owner also keeps a subset demand through rotation from an old
-row version 10 to a new version 1 and requires the new peer notice to reacquire
-source evidence. Two held-rotation histories deliver an old physical cache's
-commit or reset before rotation binds, then require that queued callback to
-leave the new cache untouched and its next peer notice effective. These use a
-controlled in-process coordinator; native multi-tab delivery remains unproved.
+row version 10 to a new version 1 and requires the new peer notice to request
+source reacquisition. Four held-rotation histories cross old row versions 1 and 10
+with an old physical cache's commit or reset before rotation binds. The new
+notice has row version 3 or 1, so the old notice can have a lower or higher
+version. A fixed and random bounded grammar also varies absent, commit, and
+reset old notices, both row versions, and absent or present new notices. The
+queued old callback cannot add a source request; the new notice must request
+source reacquisition. These use a controlled in-process coordinator whose recording
+adapter shares row storage across physical IDs. Exact durable row isolation,
+arbitrary interleavings, and native multi-tab delivery remain separate checks.
 The persisted owner also rejects a startup resume read after its claim expires,
 including two successive claim losses, then enters the source only after a live
-read under the replacement claim. A live-claim read error stays terminal. This
-is a controlled adapter second-check witness; the real-SQLite startup case
-holds after the claim check and does not yet exercise this rejection schedule.
+read under the replacement claim. A live-claim read error stays terminal. The
+real-SQLite owner now holds a resume transaction before its second claim check.
+Its fixed and generated histories cross clock cuts before, at, and after expiry;
+row inclusion; zero-to-three rows; and a later peer-claim time. An expired
+read makes no generation-specific durable access beyond claim validation; the live peer retains exact rows
+and metadata. Removing the transaction-local check and moving it after payload
+access fail at separate comparisons. The wrapper's response to that rejection
+remains a controlled adapter history, not a composed SQLite startup receiving
+history.
 The persisted owner holds resume certification across claim expiry: an old
 answer or a second claim-check rejection starts private recovery, while a
 live-claim I/O failure remains terminal. It also holds initial scoped rotation
@@ -2204,10 +2215,16 @@ claim isolates but does not reclaim legacy storage. The present tests do not
 establish native multi-tab or OPFS receiving, release retry after a timed-out
 old-leader RPC, full retired-metadata collection, or claimless direct-adapter
 access to a physical ID after its catalog row is collected. The Browser owner
-also needs one combined receiving history in which two runs share a generation,
-only one claim expires before its renewal timer, and the warm peer retains its
-exact row and source lease while the expired run reloads. Those cuts
-need receiving witnesses before the whole cache-eviction class can be closed.
+now has a combined receiving history over real wa-sqlite and the controlled
+Browser coordinator wire. Two runs hold distinct claims on one generation;
+only the earlier claim expires before its renewal timer. A real durable peer
+write precedes a matching, manually delivered notice. The expired run reloads
+into private storage while the warm peer retains its exact public and durable
+row, live claim, and source ownership for another demand. The current head
+remains unchanged. An always-rotate-head mutant failed at the head-ID
+comparison. Native coordinator emission, multi-tab or OPFS scheduling, and a
+composed SQLite-to-wrapper startup rejection remain unproved before the whole
+cache-eviction class can be closed.
 
 [Issue #2056 evaluation](oracle-reviews/issue-2056-full-mode-recovery.md) records
 the original RED and candidate comparisons on head

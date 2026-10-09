@@ -34,6 +34,8 @@ const staticOracleProperties = [
   `electric.sdk-dnf-membership`,
   `electric-recovery.publication-stream-convergence`,
   `sqlite-resume.startup-generation`,
+  `sqlite-resume.managed-claim-read`,
+  `persistence.generation-notice`,
   `sqlite-ordinary.write-history`,
   `sqlite-ordinary.independent-work`,
   `collection-sync.reentrant-drain`,

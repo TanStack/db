@@ -140,7 +140,8 @@ type TodoSyncParams = Parameters<SyncConfig<Todo, string>[`sync`]>[0]
 const requestedOracleReplayProperty = readOracleRunConfig().replayProperty
 const describeUnlessOracleReplay =
   requestedOracleReplayProperty === undefined ||
-  requestedOracleReplayProperty === `persistence.retained-demand`
+  requestedOracleReplayProperty === `persistence.retained-demand` ||
+  requestedOracleReplayProperty === `persistence.generation-notice`
     ? describe
     : describe.skip
 
@@ -21746,106 +21747,122 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
    * it. A peer may deliver an old-generation commit or reset while rotation holds the
    * wrapper's apply mutex; processing begins only after the new generation
    * binds. The model discards that old version at the generation boundary,
-   * then requires the next new-generation notice to reacquire the active
-   * subset. The preceding no-old-notice history is the control. This driver
-   * holds rotation, sends the old notice before the physical ID changes, and
-   * checks the source request count after each notice has crossed the mutex.
+   * then requires the next new-generation notice to request reacquisition of
+   * the active subset. The old generation may have a lower or higher row version than
+   * the new notice, so physical identity rather than version order decides
+   * authority. The history grammar varies an absent, commit, or reset old
+   * notice; row versions on both sides; and an absent or present new notice.
+   * No old notice and no new notice are work-count controls. This driver holds
+   * rotation, queues any old notice before the physical ID changes, and checks
+   * source requests after the old callback has crossed the apply mutex.
    */
-  it.each([`commit`, `reset`] as const)(
-    `does not let a queued retired-generation %s affect a new-generation peer notice`,
-    async (notice) => {
-      const adapter = createRecordingAdapter([
-        { id: `retired`, title: `Retired cache row` },
-      ])
-      const coordinator = createCoordinatorHarness()
-      const logicalId = `queued-peer-rotation`
-      const oldStorageId = `queued-peer-old-storage`
-      const newStorageId = `queued-peer-new-storage`
-      const rotationEntered = createEventGate()
-      const releaseRotation = createEventGate()
-      const remoteEnsures: Array<string> = []
-      let wrongGenerationReads = 0
-      const originalLoadResumeSnapshot = adapter.loadResumeSnapshot
-      adapter.loadResumeSnapshot = async (id, context) => {
-        if (id === logicalId) {
-          wrongGenerationReads++
-          throw new Error(`Retired reset must not read the logical cache ID`)
-        }
-        const snapshot = await originalLoadResumeSnapshot(id, context)
-        return {
-          ...snapshot,
-          latestTerm: id === oldStorageId ? 1 : 0,
-          latestSeq: id === oldStorageId ? 10 : 0,
-          latestRowVersion: id === oldStorageId ? 10 : 0,
-        }
+  type GenerationNoticeHistory = {
+    retiredNotice: `none` | `commit` | `reset`
+    retiredRowVersion: 1 | 10
+    newRowVersion: 1 | 3
+    newNotice: boolean
+  }
+  const assertGenerationNoticeHistory = async ({
+    retiredNotice,
+    retiredRowVersion,
+    newRowVersion,
+    newNotice,
+  }: GenerationNoticeHistory): Promise<void> => {
+    const adapter = createRecordingAdapter([
+      { id: `retired`, title: `Retired cache row` },
+    ])
+    const coordinator = createCoordinatorHarness()
+    const logicalId = `queued-peer-rotation`
+    const oldStorageId = `queued-peer-old-storage`
+    const newStorageId = `queued-peer-new-storage`
+    const rotationEntered = createEventGate()
+    const releaseRotation = createEventGate()
+    const remoteEnsures: Array<string> = []
+    let wrongGenerationReads = 0
+    const originalLoadResumeSnapshot = adapter.loadResumeSnapshot
+    adapter.loadResumeSnapshot = async (id, context) => {
+      if (id === logicalId) {
+        wrongGenerationReads++
+        throw new Error(`Retired reset must not read the logical cache ID`)
       }
-      adapter.claimCacheGeneration = async () => ({
-        storageCollectionId: oldStorageId,
+      const snapshot = await originalLoadResumeSnapshot(id, context)
+      return {
+        ...snapshot,
+        latestTerm: id === oldStorageId ? 1 : 0,
+        latestSeq: id === oldStorageId ? retiredRowVersion : 0,
+        latestRowVersion: id === oldStorageId ? retiredRowVersion : 0,
+      }
+    }
+    adapter.claimCacheGeneration = async () => ({
+      storageCollectionId: oldStorageId,
+      claimId: `queued-peer-claim`,
+      expiresAtMs: Date.now() + 60_000,
+    })
+    adapter.renewCacheGenerationClaim = async () => Date.now() + 60_000
+    adapter.rotateCacheGeneration = async () => {
+      rotationEntered.resolve()
+      await releaseRotation.promise
+      return {
+        storageCollectionId: newStorageId,
         claimId: `queued-peer-claim`,
         expiresAtMs: Date.now() + 60_000,
-      })
-      adapter.renewCacheGenerationClaim = async () => Date.now() + 60_000
-      adapter.rotateCacheGeneration = async () => {
-        rotationEntered.resolve()
-        await releaseRotation.promise
-        return {
-          storageCollectionId: newStorageId,
-          claimId: `queued-peer-claim`,
-          expiresAtMs: Date.now() + 60_000,
-        }
       }
-      adapter.releaseCacheGenerationClaim = async () => {}
-      coordinator.requestEnsureRemoteSubset = async (id) => {
-        remoteEnsures.push(id)
-      }
+    }
+    adapter.releaseCacheGenerationClaim = async () => {}
+    coordinator.requestEnsureRemoteSubset = async (id) => {
+      remoteEnsures.push(id)
+    }
 
-      let source!: TodoSyncParams
-      const collection = createCollection(
-        persistedCollectionOptions<Todo, string>({
-          id: logicalId,
-          syncMode: `on-demand`,
-          getKey: (row) => row.id,
-          sync: {
-            sync: (params) => {
-              source = params
-              params.markReady()
-              return {
-                restartAfterScopedRecovery: async (cacheRotated) => {
-                  await cacheRotated
-                },
-                loadSubset: async () => {},
-                unloadSubset: async () => {},
-              }
-            },
+    let source!: TodoSyncParams
+    const collection = createCollection(
+      persistedCollectionOptions<Todo, string>({
+        id: logicalId,
+        syncMode: `on-demand`,
+        getKey: (row) => row.id,
+        sync: {
+          sync: (params) => {
+            source = params
+            params.markReady()
+            return {
+              restartAfterScopedRecovery: async (cacheRotated) => {
+                await cacheRotated
+              },
+              loadSubset: async () => {},
+              unloadSubset: async () => {},
+            }
           },
-          persistence: { adapter, coordinator },
-        }),
-      )
-      let recovery: Promise<void> | undefined
-      try {
-        collection.startSyncImmediate()
-        await collection.stateWhenReady()
-        await source.metadata!.persistence!.hydrateBaseline()
-        expect(collection.get(`retired`)?.title).toBe(`Retired cache row`)
+        },
+        persistence: { adapter, coordinator },
+      }),
+    )
+    let recovery: Promise<void> | undefined
+    let hasPrimaryFailure = false
+    try {
+      collection.startSyncImmediate()
+      await collection.stateWhenReady()
+      await source.metadata!.persistence!.hydrateBaseline()
+      expect(collection.get(`retired`)?.title).toBe(`Retired cache row`)
 
-        const persistence = source.metadata?.persistence
-        if (!persistence?.startScopedRecovery) {
-          throw new Error(`Expected scoped recovery capability`)
-        }
-        recovery = persistence.startScopedRecovery()
-        await atPersistedOracleCheckpoint(
-          rotationEntered.promise,
-          `old physical cache rotation entered`,
-        )
-        // This notice belongs to the still-subscribed old physical cache.
+      const persistence = source.metadata?.persistence
+      if (!persistence?.startScopedRecovery) {
+        throw new Error(`Expected scoped recovery capability`)
+      }
+      recovery = persistence.startScopedRecovery()
+      void recovery.catch(() => undefined)
+      await atPersistedOracleCheckpoint(
+        rotationEntered.promise,
+        `old physical cache rotation entered`,
+      )
+      // A queued old notice belongs to the still-subscribed old physical ID.
+      if (retiredNotice !== `none`) {
         coordinator.emit(
-          notice === `commit`
+          retiredNotice === `commit`
             ? {
                 type: `tx:committed`,
                 term: 1,
-                seq: 11,
+                seq: retiredRowVersion + 1,
                 txId: `retired-generation-peer-row`,
-                latestRowVersion: 11,
+                latestRowVersion: retiredRowVersion + 1,
                 requiresFullReload: false,
                 changedRows: [
                   {
@@ -21859,24 +21876,28 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
           `peer`,
           oldStorageId,
         )
-        releaseRotation.resolve()
-        await atPersistedOracleCheckpoint(recovery, `cache rotation settled`)
-        // This scan enters the same apply mutex behind the old notice. Its
-        // settlement is the checkpoint at which that notice can no longer
-        // change the new generation's row-version observation.
-        await persistence.scanPersistedRows()
-        expect(wrongGenerationReads).toBe(0)
-        expect(collection.status).toBe(`ready`)
-        expect(collection.get(`retired`)).toBeUndefined()
-        const ensuresAfterOldNotice = remoteEnsures.length
+      }
+      releaseRotation.resolve()
+      await atPersistedOracleCheckpoint(recovery, `cache rotation settled`)
+      // This scan enters the same apply mutex behind the old notice. Its
+      // settlement is the checkpoint at which that notice can no longer
+      // change the new generation's row-version observation.
+      await persistence.scanPersistedRows()
+      expect(wrongGenerationReads).toBe(0)
+      expect(collection.status).toBe(`ready`)
+      expect(collection.get(`retired`)).toBeUndefined()
+      // Rotation reacquires this active subset once. The queued old notice
+      // must not add another source request against the replacement cache.
+      expect(remoteEnsures).toEqual([newStorageId])
 
+      if (newNotice) {
         coordinator.emit(
           {
             type: `tx:committed`,
             term: 1,
-            seq: 1,
+            seq: newRowVersion,
             txId: `new-generation-peer-row`,
-            latestRowVersion: 1,
+            latestRowVersion: newRowVersion,
             requiresFullReload: false,
             changedRows: [
               {
@@ -21890,18 +21911,70 @@ describeUnlessOracleReplay(`persistedCollectionOptions`, () => {
           newStorageId,
         )
         await atPersistedOracleCheckpoint(
-          vi.waitFor(() =>
-            expect(remoteEnsures).toHaveLength(ensuresAfterOldNotice + 1),
-          ),
+          vi.waitFor(() => expect(remoteEnsures.length).toBeGreaterThan(1)),
           `new-generation source reacquisition after an old notice`,
         )
         expect(remoteEnsures.at(-1)).toBe(newStorageId)
-      } finally {
-        releaseRotation.resolve()
-        await recovery?.catch(() => undefined)
-        await collection.cleanup()
+      } else {
+        await persistence.scanPersistedRows()
+        expect(remoteEnsures).toEqual([newStorageId])
       }
-    },
+    } catch (error) {
+      hasPrimaryFailure = true
+      throw error
+    } finally {
+      releaseRotation.resolve()
+      await cleanupPersistedOracle(
+        [() => recovery, () => collection.cleanup()],
+        hasPrimaryFailure,
+      )
+    }
+  }
+
+  it.each([
+    { retiredNotice: `commit`, retiredRowVersion: 1, newRowVersion: 3 },
+    { retiredNotice: `reset`, retiredRowVersion: 1, newRowVersion: 3 },
+    { retiredNotice: `commit`, retiredRowVersion: 10, newRowVersion: 1 },
+    { retiredNotice: `reset`, retiredRowVersion: 10, newRowVersion: 1 },
+  ] as const)(
+    `does not let a queued retired-generation $retiredNotice at row version $retiredRowVersion affect a new-generation peer notice`,
+    ({ retiredNotice, retiredRowVersion, newRowVersion }) =>
+      assertGenerationNoticeHistory({
+        retiredNotice,
+        retiredRowVersion,
+        newRowVersion,
+        newNotice: true,
+      }),
+  )
+
+  const generationNoticeHistory = fc.record({
+    retiredNotice: fc.constantFrom<GenerationNoticeHistory[`retiredNotice`]>(
+      `none`,
+      `commit`,
+      `reset`,
+    ),
+    retiredRowVersion: fc.constantFrom<
+      GenerationNoticeHistory[`retiredRowVersion`]
+    >(1, 10),
+    newRowVersion: fc.constantFrom<GenerationNoticeHistory[`newRowVersion`]>(
+      1,
+      3,
+    ),
+    newNotice: fc.boolean(),
+  })
+  fcTest.prop([generationNoticeHistory], {
+    seed: 2069,
+    numRuns: oracleRuns(24),
+  })(
+    `checks generated cache-generation notice histories (fixed)`,
+    assertGenerationNoticeHistory,
+  )
+  fcTest.prop(
+    [generationNoticeHistory],
+    oraclePropertyOptions(24, `persistence.generation-notice`),
+  )(
+    `checks generated cache-generation notice histories (random or replayed)`,
+    assertGenerationNoticeHistory,
   )
 
   // A cached read may start under a live claim, then return after a paused
