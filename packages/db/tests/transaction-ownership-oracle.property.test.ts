@@ -45,13 +45,14 @@ import type { Transaction } from '../src/transactions.js'
  *   transaction.
  * - A failed `mutate()` callback undoes its writes, but the Collection that
  *   took one still tracked the transaction.
- * - A direct write (`collection.update` outside a transaction) runs in its own
- *   transaction, which settles within its step: its handler resolves at once
- *   and writes no sync row, so afterwards it shows nothing and no Collection
- *   tracks it. A subscriber that throws while the write is admitted makes the
- *   write fail: the call rethrows that error, the write's transaction rolls
- *   back without rolling back other transactions, and no Collection keeps
- *   it. So a direct write never changes the model.
+ * - A direct write (`insert`, `update` or `delete` outside a transaction) runs
+ *   in its own transaction, which settles within its step: its handler
+ *   resolves at once and writes no sync row, so afterwards it shows nothing
+ *   and no Collection tracks it. A subscriber that throws while the write is
+ *   admitted makes the write fail: the call rethrows that error, the write's
+ *   transaction rolls back without rolling back other transactions, and no
+ *   Collection keeps it. Either way the write's own transaction has settled,
+ *   with its `isPersisted`. So a direct write never changes the model.
  * - Error shape: a settling call that ran no throwing subscriber reports no
  *   subscriber error. Otherwise it throws one of the subscriber errors, as
  *   is. The contract does not say which one, because these failures are rare
@@ -65,8 +66,9 @@ import type { Transaction } from '../src/transactions.js'
  * (a pair that merges away), commit, settle a commit as success or failure,
  * roll back, roll back from a `truncate` listener during a sync commit, and
  * run a `mutate()` callback that writes and then throws. A direct write
- * updates a key outside any transaction, optionally with a throwing
- * subscriber on its Collection. A settling step may
+ * inserts key 3, or updates or deletes key 1 or 2, outside any transaction,
+ * optionally with a throwing subscriber on its Collection. The driver
+ * captures the transaction each direct write creates. A settling step may
  * install a throwing subscriber on one Collection or on both. It stays
  * installed until promises flush, because a commit settles in a later
  * microtask, and it must have run whenever the model predicts that the step
@@ -118,6 +120,7 @@ type Step =
     }
   | {
       type: `direct`
+      op: `insert` | `update` | `delete`
       on: CollectionName
       key: Key
       value: number
@@ -266,6 +269,11 @@ const step: fc.Arbitrary<Step> = fc.oneof(
     weight: 2,
     arbitrary: fc.record({
       type: fc.constant(`direct` as const),
+      op: fc.constantFrom(
+        `insert` as const,
+        `update` as const,
+        `delete` as const,
+      ),
       on: name,
       key: fc.constantFrom<Key>(1, 2),
       value: fc.integer({ min: 1, max: 9 }),
@@ -334,7 +342,12 @@ async function makeCollection(id: string) {
   }>({ id, getKey: (row) => row.id, startSync: true })
   // A direct write's handler resolves at once, so its transaction settles
   // within the step instead of waiting for a sync commit.
-  const collection = createCollection({ ...options, onUpdate: async () => {} })
+  const collection = createCollection({
+    ...options,
+    onInsert: async () => {},
+    onUpdate: async () => {},
+    onDelete: async () => {},
+  })
   const writeBase = () => {
     options.utils.write({ type: `insert`, value: { id: 1, v: 0 } })
     options.utils.write({ type: `insert`, value: { id: 2, v: 0 } })
@@ -439,6 +452,7 @@ async function runHistory(steps: ReadonlyArray<Step>): Promise<void> {
         )
       }
       expect(collection.has(9), `${label}: ${on} merged-away row`).toBe(false)
+      expect(collection.has(3), `${label}: ${on} direct insert`).toBe(false)
     }
     for (const [index, entry] of driven.entries()) {
       const settled = !model.unsettled(model.transactions[index]!)
@@ -482,18 +496,74 @@ async function runHistory(steps: ReadonlyArray<Step>): Promise<void> {
           reuse === undefined ? undefined : model.transactions[reuse]!.id,
         )
       } else if (current.type === `direct`) {
-        // An update that leaves the visible row unchanged writes nothing.
-        if (model.row(current.on, current.key) === current.value) continue
+        // A direct update that leaves the visible row unchanged writes nothing.
+        if (
+          current.op === `update` &&
+          model.row(current.on, current.key) === current.value
+        )
+          continue
+        const { collection } = collections[current.on]
+        const created: Array<Transaction<any>> = []
+        const manager = (
+          collection as unknown as {
+            _mutations: { createTransaction: (...args: Array<any>) => any }
+          }
+        )._mutations
+        const createTransactionFor = manager.createTransaction
+        manager.createTransaction = (...args) => {
+          const tx = createTransactionFor.apply(manager, args)
+          created.push(tx)
+          return tx
+        }
+        const settled = new Set<Transaction<any>>()
         const { result, raised } = await withThrowingSubscribers(
           label,
           current.throws ? current.on : undefined,
-          () =>
-            collections[current.on].collection.update(current.key, (draft) => {
-              draft.v = current.value
-            }),
+          () => {
+            try {
+              if (current.op === `insert`)
+                collection.insert({ id: 3, v: current.value })
+              else if (current.op === `delete`) collection.delete(current.key)
+              else
+                collection.update(current.key, (draft) => {
+                  draft.v = current.value
+                })
+            } finally {
+              manager.createTransaction = createTransactionFor
+              for (const tx of created)
+                tx.isPersisted.promise.then(
+                  () => settled.add(tx),
+                  () => settled.add(tx),
+                )
+            }
+          },
           () => {},
         )
-        expectErrorShape(`${label} direct write`, result, raised)
+        // The throwing subscriber must reach the admission of an insert or an
+        // update, so the write fails rather than passing unnoticed. A
+        // subscriber is not told of a delete of a row it was never sent, so
+        // a delete's throwing subscriber runs only when the settled delete
+        // shows the row again, and the write itself succeeds.
+        if (current.throws && current.op !== `delete`) {
+          expect(
+            raised.length,
+            `${label}: throwing subscriber ran`,
+          ).toBeGreaterThan(0)
+          expect(result.ok, `${label}: direct write rejected`).toBe(false)
+        }
+        if (current.throws && current.op === `delete`)
+          expect(result.ok, `${label}: direct delete succeeds`).toBe(true)
+        else expectErrorShape(`${label} direct write`, result, raised)
+        expect(created.length, `${label}: one direct transaction`).toBe(1)
+        for (const tx of created) {
+          expect(
+            tx.state === `completed` || tx.state === `failed`,
+            `${label}: direct transaction settled`,
+          ).toBe(true)
+          expect(settled.has(tx), `${label}: direct isPersisted settled`).toBe(
+            true,
+          )
+        }
       } else {
         const states: ReadonlyArray<ModelState> =
           current.type === `edit` ||

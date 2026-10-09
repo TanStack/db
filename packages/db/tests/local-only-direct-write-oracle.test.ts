@@ -138,6 +138,43 @@ describe(`local-only direct writes`, () => {
     expect(orders.get(1)?.value).toBe(`a`)
   })
 
+  // The direct write stores its rows when it publishes them, so a throwing
+  // subscriber cannot undo the write. The call rethrows, and the transaction
+  // still completes instead of staying pending.
+  it(`completes a direct write whose subscriber throws`, async () => {
+    const orders = createOrders()
+    const created: Array<{
+      state: string
+      isPersisted: { promise: Promise<unknown> }
+    }> = []
+    const manager = (
+      orders as unknown as {
+        _mutations: { createTransaction: (...args: Array<any>) => any }
+      }
+    )._mutations
+    const createTransactionFor = manager.createTransaction
+    manager.createTransaction = (...args) => {
+      const transaction = createTransactionFor.apply(manager, args)
+      created.push(transaction)
+      return transaction
+    }
+    const failure = new Error(`subscriber failed`)
+    const subscription = orders.subscribeChanges(() => {
+      throw failure
+    })
+    expect(() => orders.insert({ id: 2, value: `b` })).toThrow(failure)
+    subscription.unsubscribe()
+    manager.createTransaction = createTransactionFor
+
+    expect(orders.get(2)?.value).toBe(`b`)
+    expect(created.map((transaction) => transaction.state)).toEqual([
+      `completed`,
+    ])
+    await expect(created[0]!.isPersisted.promise).resolves.toBe(created[0])
+    // The next direct write still takes the direct path.
+    expect(orders.insert({ id: 3, value: `c` }).state).toBe(`completed`)
+  })
+
   it(`runs the user's handler for that operation type`, async () => {
     let calls = 0
     const orders = createOrders({

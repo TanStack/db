@@ -219,9 +219,14 @@ export class CollectionMutationsManager<
       mutationFn: () => Promise.resolve(),
     })
     transaction.applyMutations(mutations)
-    direct.write(mutations)
-    transaction.setState(`completed`)
-    transaction.isPersisted.resolve(transaction)
+    // The rows are stored when `write` publishes, so a throwing subscriber
+    // cannot undo them; the transaction still settles.
+    try {
+      direct.write(mutations)
+    } finally {
+      transaction.setState(`completed`)
+      transaction.isPersisted.resolve(transaction)
+    }
     return transaction
   }
 
@@ -277,7 +282,10 @@ export class CollectionMutationsManager<
       // A subscriber threw before the handler could run. Roll back only this
       // write, so no Collection keeps a transaction that nothing will settle.
       try {
-        transaction.rollback({ isSecondaryRollback: true })
+        transaction.rollback({
+          isSecondaryRollback: true,
+          error: error instanceof Error ? error : undefined,
+        })
       } catch {
         // The admission error is the reported cause.
       }
