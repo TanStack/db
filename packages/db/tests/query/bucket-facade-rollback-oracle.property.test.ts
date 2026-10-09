@@ -92,7 +92,10 @@ import type { BucketRow } from '../../src/query/live/materialized-pipeline.js'
  * revision. For a facade that existed before a successful flush, it replays
  * the flush's events on the facade's previous rows and checks which rows the
  * events name. After a failed flush it checks that every facade the flush
- * created reports `status === 'cleaned-up'`.
+ * created reports `status === 'cleaned-up'`. Every facade the model shows
+ * must report `status === 'ready'`, and every change message a facade
+ * delivers must be valid for its subscriber: an insert names an absent key,
+ * and an update or delete names a present one.
  * The work counter wraps the iteration, `forEach`, `get` and `has` methods of
  * each facade's stored rows during the flush and records which facades the
  * flush read. A pinned case covers nested facades across two edges: the child
@@ -471,9 +474,20 @@ class Driver {
       const facade = entry.collection
       if (!this.events.has(facade)) {
         this.events.set(facade, 0)
+        const seen = new Set<number>()
         facade.subscribeChanges(
           (messages) => {
             this.events.set(facade, (this.events.get(facade) ?? 0) + 1)
+            // Change-message protocol: an insert names a key this subscriber
+            // does not have, and an update or delete names one it has.
+            for (const message of messages) {
+              if (seen.has(message.key) === (message.type === `insert`))
+                this.protocolViolations.push(
+                  `${facade.id}: ${message.type} of ${message.key} while ${seen.has(message.key) ? `present` : `absent`}`,
+                )
+              if (message.type === `delete`) seen.delete(message.key)
+              else seen.add(message.key)
+            }
             const changes = this.changes.get(facade) ?? []
             changes.push(...messages)
             this.changes.set(facade, changes)
@@ -590,6 +604,10 @@ class Driver {
   }
 
   check(model: Model, label: string): void {
+    expect(
+      this.protocolViolations,
+      `${label}: change-message protocol`,
+    ).toEqual([])
     // The adapter holds exactly the facades the model shows: a failed flush
     // removes the facades it created, and a retired bucket has no facade.
     expect(
@@ -602,6 +620,9 @@ class Driver {
       if (!rows) continue
       expect(facade, `${label}: facade ${bucket}`).toBeDefined()
       if (this.cleaned.has(facade!)) continue
+      // A facade the model shows has been made ready by the flush that
+      // created it.
+      expect(facade!.status, `${label}: status of ${bucket}`).toBe(`ready`)
       // An optimistic row overlays a graph row with the same id, so neither is
       // compared by value.
       const local = this.local(facade!)
@@ -624,6 +645,9 @@ class Driver {
       }
     }
   }
+
+  /** Change messages that were invalid for the subscriber that got them. */
+  readonly protocolViolations: Array<string> = []
 
   /** Facades that a holder cleaned up; their rows are not compared. */
   readonly cleaned = new WeakSet<object>()
